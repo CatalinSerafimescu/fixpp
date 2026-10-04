@@ -121,6 +121,18 @@ TEST(CapiInboundFrameDispositionsQ30, GarbledFrameCountRefusals) {
     EXPECT_EQ(out, 0U) << "*out is written 0 before the handle is checked";
 }
 
+// After fixpp_engine_start, until the engine builds the session for a connection: an
+// acceptor with no peer has started and bound, and no session exists yet.
+TEST(CapiInboundFrameDispositionsQ30, GarbledFrameCountIsZeroAfterStartUntilTheSessionIsBuilt) {
+    CInitiator a{0, 30, {}, record_receive, nullptr, FIXPP_ROLE_ACCEPTOR};
+    ASSERT_TRUE(a.start()) << "setup";
+    ASSERT_NE(a.bound_port(), 0U) << "setup";
+    EXPECT_EQ(lookup(a), nullptr) << "precondition: no session is built before a connection";
+    std::uint64_t out = 77;
+    EXPECT_EQ(fixpp_session_garbled_frame_count(a.session, &out), FIXPP_ERR_OK);
+    EXPECT_EQ(out, 0U) << "0 after start, before the session exists";
+}
+
 // ── Q-1's C arm: the count after a garble, through C and C++ ────────────────
 
 TEST(CapiInboundFrameDispositionsQ1, TheCountReadsOneAfterAGarble) {

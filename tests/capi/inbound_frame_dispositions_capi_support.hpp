@@ -101,6 +101,20 @@ inline std::string frame44(std::string const& body) {
     return full + "10=" + csbuf + "\x01";
 }
 
+// A frame around `body` whose BeginString(8) value is `begin_string` and whose
+// BodyLength(9) value is `body_length` (the true length unless the cell says otherwise),
+// with the CheckSum(10) of the bytes before it.
+inline std::string frame_raw(std::string_view begin_string, std::string_view body_length,
+                             std::string const& body) {
+    std::string full =
+        "8=" + std::string{begin_string} + "\x01" + "9=" + std::string{body_length} + "\x01" + body;
+    unsigned int cs = 0;
+    for (unsigned char c : full) cs += c;
+    char csbuf[4];
+    std::snprintf(csbuf, sizeof(csbuf), "%03u", cs & 0xFFU);
+    return full + "10=" + csbuf + "\x01";
+}
+
 // The standard header fields after MsgType(35), from the peer to the engine.
 inline std::string peer_header(std::uint32_t seq) {
     return fix_fields({{34, std::to_string(seq)},
@@ -218,6 +232,27 @@ public:
             return false;
         }
         return !aec;
+    }
+
+    // Connects to an acceptor engine on 127.0.0.1:`port`, instead of accepting. The
+    // listener is closed.
+    [[nodiscard]] bool connect(std::uint16_t port, std::chrono::milliseconds budget = kStepBudget) {
+        std::error_code ec;
+        listener_.close(ec);
+        bool done = false;
+        std::error_code cec;
+        sock_.async_connect({asio::ip::make_address("127.0.0.1"), port}, [&](std::error_code e) {
+            done = true;
+            cec = e;
+        });
+        run_until(std::chrono::steady_clock::now() + budget);
+        if (!done) {
+            sock_.close(ec);
+            ioc_.restart();
+            ioc_.run();
+            return false;
+        }
+        return !cec;
     }
 
     // The next whole frame the engine sent, or nullopt at `until`, EOF or an error.
@@ -395,9 +430,10 @@ inline std::string order_payload(std::string_view cl_ord_id) {
     return "35=D\x01" + order_fields(cl_ord_id);
 }
 
-// One C-ABI initiator engine over dictionaries/FIX44.xml, its session opened and its
-// callbacks registered, connecting to 127.0.0.1:`port`. `configure` runs on the
-// session config before fixpp_session_open. `recv` replaces the recording receive
+// One C-ABI engine over dictionaries/FIX44.xml, its session opened and its callbacks
+// registered: an initiator connecting to 127.0.0.1:`port` (the default), or with `role`
+// an acceptor bound to 127.0.0.1:`port` (0 for an ephemeral port, see bound_port()). `configure`
+// runs on the session config before fixpp_session_open. `recv` replaces the recording receive
 // callback; its userdata is `recv_userdata`, or the Recorder when that is null.
 struct CInitiator {
     fixpp_dict_t* dict = nullptr;
@@ -409,7 +445,8 @@ struct CInitiator {
 
     CInitiator(std::uint16_t port, std::uint32_t heartbeat_s,
                std::function<void(fixpp_session_config_t*)> const& configure = {},
-               fixpp_recv_cb recv = record_receive, void* recv_userdata = nullptr) {
+               fixpp_recv_cb recv = record_receive, void* recv_userdata = nullptr,
+               fixpp_session_role role = FIXPP_ROLE_INITIATOR) {
         if (fixpp_dict_load_from_xml(FIXPP_DICT_DIR "/FIX44.xml", &dict) != FIXPP_ERR_OK) {
             ADD_FAILURE() << "fixpp_dict_load_from_xml(FIX44.xml) failed";
             return;
@@ -435,11 +472,12 @@ struct CInitiator {
         bool ok =
             fixpp_session_config_set_comp_ids(sc, kEngineCompId, kPeerCompId) == FIXPP_ERR_OK &&
             fixpp_session_config_set_begin_string(sc, "FIX.4.4") == FIXPP_ERR_OK &&
-            fixpp_session_config_set_role(sc, FIXPP_ROLE_INITIATOR) == FIXPP_ERR_OK &&
+            fixpp_session_config_set_role(sc, role) == FIXPP_ERR_OK &&
             fixpp_session_config_set_heartbeat_seconds(sc, heartbeat_s) == FIXPP_ERR_OK &&
             fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
                                               nullptr) == FIXPP_ERR_OK &&
-            fixpp_session_config_set_reset_on_logon(sc, true) == FIXPP_ERR_OK &&
+            fixpp_session_config_set_reset_on_logon(sc, role == FIXPP_ROLE_INITIATOR) ==
+                FIXPP_ERR_OK &&
             fixpp_session_config_set_reset_seqnum_policy(
                 sc, FIXPP_RESET_SEQNUM_BILATERAL_LENIENT) == FIXPP_ERR_OK &&
             fixpp_session_config_set_dictionary(sc, dict) == FIXPP_ERR_OK &&
@@ -466,6 +504,19 @@ struct CInitiator {
     }
 
     [[nodiscard]] bool start() { return opened && fixpp_engine_start(engine) == FIXPP_ERR_OK; }
+
+    // An acceptor's bound port, polled until nonzero or the budget elapses (0 then).
+    [[nodiscard]] std::uint16_t bound_port(std::chrono::milliseconds budget = kStepBudget) {
+        auto const until = std::chrono::steady_clock::now() + budget;
+        for (;;) {
+            std::uint16_t p = 0;
+            if (fixpp_session_acceptor_bound_endpoint(session, &p) == FIXPP_ERR_OK && p != 0) {
+                return p;
+            }
+            if (std::chrono::steady_clock::now() >= until) return 0;
+            std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        }
+    }
 
     [[nodiscard]] bool established() {
         bool est = false;

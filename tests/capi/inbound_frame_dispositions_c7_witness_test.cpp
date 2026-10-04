@@ -31,6 +31,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -219,12 +221,14 @@ TEST(CapiC7Witness, Row5_ASlowPeerIsClosedAtTheDeadline) {
 
 // ── Row 6: liveness refreshes on more frames ────────────────────────────────
 //
-// HeartBtInt is 1 s. For several intervals the peer sends only Heartbeats below the
-// expected MsgSeqNum (too low, tolerated for a Heartbeat) and answers no TestRequest.
-// The liveness loop sends a TestRequest after an interval without a refresh and ends
-// the session after one more (run_liveness_loop, src/session/session.cpp); every
-// one of these Heartbeats refreshes, so neither happens.
-TEST(CapiC7Witness, Row6_LivenessOnlyTrafficKeepsTheSessionUp) {
+// HeartBtInt is 1 s. For several intervals the peer sends only frames of one class that
+// takes an early return in the session's arm, and answers no TestRequest. The liveness
+// loop sends a TestRequest after an interval without a refresh and ends the session
+// after one more (run_liveness_loop, src/session/session.cpp); every one of these frames
+// refreshes, so neither happens. `traffic(seq)` builds the class's frame; `advances`
+// says whether it takes a MsgSeqNum (then the next frame carries the next one).
+void row6_cell(std::function<std::string(std::uint32_t)> const& traffic, bool advances,
+               std::string_view row_id) {
     constexpr std::uint32_t kShortHeartBtInt = 1;
     constexpr std::chrono::milliseconds kInterval{kShortHeartBtInt * 1000};
     constexpr std::chrono::milliseconds kTraffic = 4 * kInterval;
@@ -233,16 +237,243 @@ TEST(CapiC7Witness, Row6_LivenessOnlyTrafficKeepsTheSessionUp) {
     CInitiator c{peer.port(), kShortHeartBtInt};
     ASSERT_TRUE(establish(c, peer, kShortHeartBtInt)) << "setup";
 
+    std::uint32_t seq = 2;
     auto const until = std::chrono::steady_clock::now() + kTraffic;
     bool written = true;
     while (written && std::chrono::steady_clock::now() < until) {
-        written = peer.write(heartbeat(1));
+        written = peer.write(traffic(seq));
+        if (advances) ++seq;
         std::this_thread::sleep_for(kEvery);
     }
-    bool const fenced = written && peer.write(order(2, "ROW6")) && peer.fence(3, "R6");
+    bool const fenced = written && peer.write(order(seq, row_id)) && peer.fence(seq + 1U, "R6");
     EXPECT_TRUE(written);
     EXPECT_TRUE(fenced) << "the session answers a TestRequest after the liveness-only traffic";
-    expect_kept_up(observe(c, peer, "ROW6"));
+    expect_kept_up(observe(c, peer, row_id));
+}
+
+// Heartbeats below the expected MsgSeqNum (too low, tolerated for a Heartbeat).
+TEST(CapiC7Witness, Row6_LivenessOnlyTrafficKeepsTheSessionUp) {
+    row6_cell([](std::uint32_t) { return heartbeat(1); }, false, "ROW6");
+}
+
+// Orders below the expected MsgSeqNum carrying PossDupFlag(43)=Y (too low, ignored).
+TEST(CapiC7Witness, Row6_TooLowPossDupTrafficKeepsTheSessionUp) {
+    row6_cell(
+        [](std::uint32_t) {
+            std::string const ts = utc_now_sending_time();
+            return frame44("35=D\x01" +
+                           fix_fields({{34, "1"},
+                                       {43, "Y"},
+                                       {49, kPeerCompId},
+                                       {52, ts},
+                                       {56, kEngineCompId},
+                                       {122, ts}}) +
+                           order_fields("DUP6"));
+        },
+        false, "ROW6D");
+}
+
+// In-sequence session Rejects(35=3).
+TEST(CapiC7Witness, Row6_InboundRejectTrafficKeepsTheSessionUp) {
+    row6_cell(
+        [](std::uint32_t seq) {
+            return frame44("35=3\x01" + peer_header(seq) + fix_fields({{45, "1"}, {58, "x"}}));
+        },
+        true, "ROW6R");
+}
+
+// In-sequence SequenceReset-GapFills, each to the next number.
+TEST(CapiC7Witness, Row6_GapFillTrafficKeepsTheSessionUp) {
+    row6_cell(
+        [](std::uint32_t seq) {
+            return frame44("35=4\x01" + peer_header(seq) +
+                           fix_fields({{123, "Y"}, {36, std::to_string(seq + 1U)}}));
+        },
+        true, "ROW6G");
+}
+
+// ── Row 1: the other garble shapes, and a garble before Active ──────────────
+//
+// `garbled` stands in for the peer's MsgSeqNum 2; a well-formed order with the same
+// number follows it in one write, then a fence. The garble is disregarded, so the order
+// is delivered and the session carries on.
+void row1_cell(std::string const& garbled, std::string_view row_id) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(establish(c, peer, kHeartBtIntSeconds)) << "setup";
+    ASSERT_FALSE(garbled.empty()) << "setup";
+    bool const fenced = peer.write(garbled + order(2, row_id)) && peer.fence(3, "R1x");
+    EXPECT_TRUE(fenced) << "the session answers a TestRequest after the garble";
+    Observed const o = observe(c, peer, row_id);
+    expect_kept_up(o);
+    EXPECT_FALSE(c.rec.received_id("BAD")) << "the garbled frame reached the receive callback";
+}
+
+std::string bad_order_body() { return "35=D\x01" + peer_header(2) + order_fields("BAD"); }
+
+TEST(CapiC7Witness, Row1_AWrongCheckSumIsDisregarded) {
+    std::string f = order(2, "BAD");
+    auto const at = f.rfind("10=");
+    std::string garbled;
+    if (at != std::string::npos) {
+        int const sum = std::stoi(f.substr(at + 3, 3));
+        char wrong[4];
+        std::snprintf(wrong, sizeof(wrong), "%03d", (sum + 1) % 256);
+        garbled = f.replace(at + 3, 3, wrong, 3);
+    }
+    row1_cell(garbled, "ROW1C");
+}
+
+// A BodyLength(9) short of the body, so CheckSum(10) is not where it points.
+TEST(CapiC7Witness, Row1_AWrongBodyLengthIsDisregarded) {
+    std::string const body = bad_order_body();
+    row1_cell(frame_raw("FIX.4.4", std::to_string(body.size() - 5U), body), "ROW1B");
+}
+
+// A BeginString(8) value longer than every supported one: it was framed and handled
+// as a BeginString mismatch.
+TEST(CapiC7Witness, Row1_ABeginStringOverItsCapIsDisregarded) {
+    std::string const body = bad_order_body();
+    row1_cell(frame_raw("FIX.4.4.LONGER.THAN.ANY.SUPPORTED", std::to_string(body.size()), body),
+              "ROW1S");
+}
+
+// A BodyLength(9) whose digit run, zero-padded, is longer than the digit cap: it was
+// framed and processed. The disregarded frame consumes no MsgSeqNum, so the fence
+// carries the number it carried, and the receive callback is the discriminator.
+TEST(CapiC7Witness, Row1_ABodyLengthDigitRunOverItsCapIsDisregarded) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(establish(c, peer, kHeartBtIntSeconds)) << "setup";
+    std::string const body = "35=D\x01" + peer_header(2) + order_fields("ROW1D");
+    std::string const length = std::to_string(body.size());
+    std::string const padded = std::string(20U - length.size(), '0') + length;
+    bool const fenced = peer.write(frame_raw("FIX.4.4", padded, body)) && peer.fence(2, "R1D");
+    EXPECT_TRUE(fenced) << "the session answers a TestRequest carrying the disregarded number";
+    Observed const o = observe(c, peer, "ROW1D");
+    EXPECT_TRUE(o.established);
+    EXPECT_EQ(o.send_rc, FIXPP_ERR_OK);
+    EXPECT_EQ(o.to_app, 1);
+    EXPECT_FALSE(o.received) << "the receive callback is not invoked for the disregarded frame";
+    EXPECT_EQ(o.close_rc, FIXPP_ERR_OK);
+}
+
+// Before Active: junk ahead of the Logon reply, which then establishes the session.
+TEST(CapiC7Witness, Row1_AGarbleBeforeTheLogonReplyIsDisregarded) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(c.start() && peer.accept() && peer.read_logon()) << "setup";
+    ASSERT_TRUE(peer.write("GARBLE" + logon_reply(kHeartBtIntSeconds)));
+    bool const est = c.wait_established();
+    bool const fenced = est && peer.write(order(2, "ROW1L")) && peer.fence(3, "R1L");
+    EXPECT_TRUE(est) << "the Logon reply after the garble establishes the session";
+    EXPECT_TRUE(fenced);
+    expect_kept_up(observe(c, peer, "ROW1L"));
+}
+
+// ── Row 2: the other 35-not-third Logon shapes ──────────────────────────────
+
+// A well-formed Logon reply whose third field is not MsgType(35), alone: it was
+// accepted; now nothing establishes the session.
+TEST(CapiC7Witness, Row2_AWellFormed35NotThirdLogonReplyDoesNotEstablish) {
+    constexpr std::chrono::milliseconds kSettle{1000};  // well below the default T
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(c.start() && peer.accept() && peer.read_logon()) << "setup";
+    ASSERT_TRUE(peer.write(
+        frame44(fix_fields({{34, "1"}, {35, "A"}}) +
+                fix_fields({{49, kPeerCompId}, {52, utc_now_sending_time()}, {56, kEngineCompId}}) +
+                fix_fields({{98, "0"}, {108, std::to_string(kHeartBtIntSeconds)}, {141, "Y"}}))));
+    EXPECT_FALSE(c.wait_established(kSettle)) << "the 35-not-third Logon reply established it";
+    Observed const o = observe(c, peer, "none");
+    EXPECT_FALSE(o.established);
+    EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(o.to_app, 0);
+    EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE) << "the session never established";
+}
+
+// A 35-not-third Logon reply with 091's malformed Length+Data count (RawDataLength(95)
+// counting past its RawData(96)), then a well-formed one: the first was refused.
+TEST(CapiC7Witness, Row2_A35NotThirdLogonWithAMalformedCountIsDisregarded) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(c.start() && peer.accept() && peer.read_logon()) << "setup";
+    std::string const bad_logon =
+        frame44(fix_fields({{34, "1"}, {35, "A"}}) +
+                fix_fields({{49, kPeerCompId}, {52, utc_now_sending_time()}, {56, kEngineCompId}}) +
+                fix_fields({{95, "2"}, {96, "x"}}) +
+                fix_fields({{98, "0"}, {108, std::to_string(kHeartBtIntSeconds)}, {141, "Y"}}));
+    ASSERT_TRUE(peer.write(bad_logon + logon_reply(kHeartBtIntSeconds)));
+    bool const est = c.wait_established();
+    bool const fenced = est && peer.write(order(2, "ROW2C")) && peer.fence(3, "R2C");
+    EXPECT_TRUE(est) << "the well-formed Logon reply establishes the session";
+    EXPECT_TRUE(fenced);
+    expect_kept_up(observe(c, peer, "ROW2C"));
+}
+
+// ── Row 3: a frame over the limit ends the connection at its header ─────────
+//
+// The peer writes only the header of a frame whose BodyLength(9) is over the 64 KiB
+// limit. The connection is closed without the body; the bound sits far below the
+// heartbeat interval and the establishment timeout, the other ways it can close.
+constexpr std::chrono::milliseconds kOverLimitBound{2000};
+
+std::string over_limit_header() {
+    return "8=FIX.4.4\x01"
+           "9=70000\x01"
+           "35=0\x01"
+           "34=2\x01";
+}
+
+TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInActiveEndsTheConnection) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(establish(c, peer, kHeartBtIntSeconds)) << "setup";
+    auto const t0 = std::chrono::steady_clock::now();
+    bool const closed = peer.write(over_limit_header()) && peer.wait_eof(t0 + kOverLimitBound);
+    EXPECT_TRUE(closed) << "the connection stayed open after an over-limit BodyLength";
+    Observed const o = observe(c, peer, "none");
+    EXPECT_FALSE(o.established);
+    EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(o.to_app, 0);
+    EXPECT_EQ(o.close_rc, FIXPP_ERR_OK) << "established once";
+}
+
+TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthBeforeActiveEndsTheConnection) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(c.start() && peer.accept() && peer.read_logon()) << "setup";
+    auto const t0 = std::chrono::steady_clock::now();
+    bool const closed = peer.write(over_limit_header()) && peer.wait_eof(t0 + kOverLimitBound);
+    EXPECT_TRUE(closed) << "the connection stayed open after an over-limit BodyLength";
+    Observed const o = observe(c, peer, "none");
+    EXPECT_FALSE(o.established);
+    EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
+}
+
+// ── Row 5: an acceptor whose Logon was refused is closed at the deadline ────
+//
+// The C-ABI engine is the acceptor; the peer connects and sends a Logon without
+// HeartBtInt(108), which the session refuses, leaving it in Disconnected with its
+// transport open. The connection is closed at T, the default timeout.
+TEST(CapiC7Witness, Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline) {
+    constexpr std::chrono::milliseconds kDefaultT{10000};  // SessionConfig's default T
+    constexpr std::chrono::milliseconds kLate = kDefaultT + 2000ms;
+    RawAcceptor peer;
+    CInitiator a{0, kHeartBtIntSeconds, {}, record_receive, nullptr, FIXPP_ROLE_ACCEPTOR};
+    ASSERT_TRUE(a.start()) << "setup";
+    std::uint16_t const port = a.bound_port();
+    ASSERT_NE(port, 0U) << "setup";
+    ASSERT_TRUE(peer.connect(port)) << "setup";
+    auto const t0 = std::chrono::steady_clock::now();
+    ASSERT_TRUE(peer.write(frame44("35=A\x01" + peer_header(1) + fix_fields({{98, "0"}}))));
+    bool const closed = peer.wait_eof(t0 + kLate);
+    EXPECT_TRUE(closed) << "the refused session's connection stayed open past T";
+    Observed const o = observe(a, peer, "none");
+    EXPECT_FALSE(o.established);
+    EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
 }
 
 }  // namespace
