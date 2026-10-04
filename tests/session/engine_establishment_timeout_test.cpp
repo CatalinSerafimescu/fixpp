@@ -536,9 +536,10 @@ TEST(EstablishmentTimeoutQ35, DefaultIsTenSecondsAndASilentPeerIsClosedAtTenSeco
 //
 // A TOML document sets logon_timeout_ms, and the SessionConfig load_toml_config
 // returns for it drives the initiator. It is completed only with what the loader
-// leaves to the host (the executor, data-model E-3 of 044) and the rig's plumbing
-// (the endpoint it listens on and the initial transport_send). Still open at
-// T - 1 ms; closed at T.
+// leaves to the host (include/fixpp/config/config_bundle.hpp: the executor, and the
+// session's dictionary, taken from the bundle's [dictionary]) and with the rig's
+// plumbing (the endpoint it listens on and the initial transport_send). Still open
+// at T - 1 ms; closed at T.
 TEST(EstablishmentTimeoutQ16, TomlLoadedSession_ClosedAtTheLoadedTNotBefore) {
     constexpr auto kT = 1500ms;
     auto const path =
@@ -577,9 +578,11 @@ TEST(EstablishmentTimeoutQ16, TomlLoadedSession_ClosedAtTheLoadedTNotBefore) {
     }
     ASSERT_TRUE(loaded.has_value()) << "the TOML document did not load:" << diagnostics;
     ASSERT_EQ(loaded->sessions.size(), 1U);
+    ASSERT_EQ(loaded->engine.dictionaries.size(), 1U);
     SessionConfig cfg = loaded->sessions[0].config;
     EXPECT_EQ(cfg.logon_timeout_ms, static_cast<std::uint32_t>(kT.count()));
     cfg.executor_override = rig.ioc.get_executor();
+    cfg.dictionary = loaded->engine.dictionaries.front();
     cfg.transport_send = [](std::span<const std::byte>) {};
 
     bool const up = rig.start(std::move(cfg)) && rig.run_until([&] {
@@ -604,9 +607,12 @@ TEST(EstablishmentTimeoutQ16, TomlLoadedSession_ClosedAtTheLoadedTNotBefore) {
         });
         after = snapshot(rig);
     }
+    auto const reached = rig.state();
+    std::size_t const peer_bytes = rig.peer.received.size();
     rig.stop();
 
-    ASSERT_TRUE(up) << "the TOML-loaded initiator did not reach LogonSent";
+    ASSERT_TRUE(up) << "the TOML-loaded initiator did not reach LogonSent: state "
+                    << static_cast<int>(reached) << ", " << peer_bytes << " bytes at the peer";
     EXPECT_FALSE(before.read_ended) << "closed before T";
     EXPECT_EQ(before.timeouts, 0U);
     EXPECT_TRUE(closed) << "not closed at T";

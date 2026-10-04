@@ -314,6 +314,31 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
         }
     }
 
+    // ── logon_timeout_ms (bare integer in TOML; 093, data-model E-7) ──────────
+    // An integer with 0 < v <= UINT32_MAX. Unlike logout_disconnect_timeout_ms
+    // above, zero is refused, and a present value of another type is refused with
+    // malformed_value rather than ignored.
+
+    if (const auto* n = merged.get("logon_timeout_ms"); n != nullptr) {
+        if (!n->is_integer()) {
+            acc.add(LoadDiagnostic{
+                .key_path = kp(key_prefix, "logon_timeout_ms"),
+                .reason = reason_class::malformed_value,
+                .location = loc_for_key(raw_session, "logon_timeout_ms"),
+                .message = "logon_timeout_ms must be an integer number of milliseconds",
+            });
+        } else if (auto v = n->as_integer()->get(); v > 0 && std::cmp_less_equal(v, UINT32_MAX)) {
+            out.logon_timeout_ms = static_cast<std::uint32_t>(v);
+        } else {
+            acc.add(LoadDiagnostic{
+                .key_path = kp(key_prefix, "logon_timeout_ms"),
+                .reason = reason_class::out_of_range,
+                .location = loc_for_key(raw_session, "logon_timeout_ms"),
+                .message = "logon_timeout_ms must be in [1, 4294967295]",
+            });
+        }
+    }
+
     // ── Bool knobs ────────────────────────────────────────────────────────────
 
     if (const auto* n = merged.get("reset_on_logon"); n && n->is_boolean()) {

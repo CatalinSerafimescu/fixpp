@@ -165,6 +165,19 @@ fixpp_error_t fixpp_session_config_set_heartbeat_seconds(fixpp_session_config_t*
     return FIXPP_ERR_OK;
 }
 
+fixpp_error_t fixpp_session_config_set_logon_timeout_ms(fixpp_session_config_t* cfg, uint32_t ms) {
+    if (cfg == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    // 093-inbound-frame-dispositions (data-model E-7): zero is refused here, as
+    // Engine::register_session and Session::open() refuse it.
+    if (ms == 0) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+    cfg->cfg.logon_timeout_ms = ms;
+    return FIXPP_ERR_OK;
+}
+
 fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t* cfg,
                                                 fixpp_security_kind kind, const char* cert,
                                                 const char* key) {

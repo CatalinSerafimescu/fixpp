@@ -190,6 +190,26 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_tcp_endpoint(
     fixpp_session_config_t* cfg, const char* host, uint16_t port);
 
+/**
+ * fixpp_session_config_set_logon_timeout_ms — set the establishment timeout
+ * (C-ABI 1.11; 093, fixpp#514).
+ *
+ * Writes SessionConfig::logon_timeout_ms: how long, in milliseconds, a
+ * connection may take to log on. The deadline is measured from the accept on an
+ * acceptor, and from the end of the connect, with the Logon sent, on an
+ * initiator. A connection not logged on by then is closed, including one whose
+ * Logon was refused. The default is 10000.
+ *
+ * Return codes:
+ *   FIXPP_ERR_OK                  -- stored
+ *   FIXPP_ERR_NULL_HANDLE         -- cfg is NULL
+ *   FIXPP_ERR_CAPI_CONFIG_INVALID -- ms is 0; nothing is stored
+ *
+ * Reentrancy: single-thread.
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_logon_timeout_ms(
+    fixpp_session_config_t* cfg, uint32_t ms);
+
 /** Destroy a session-config builder. NULL-safe; never-throws. Do NOT call after
  *  the builder was consumed by a successful fixpp_session_open.
  *  Reentrancy: single-thread. */
@@ -324,6 +344,33 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_is_established(fixpp_session_t* ses
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_session_t* session,
                                                                       uint16_t* port_out);
+
+/**
+ * fixpp_session_garbled_frame_count — read the session's garbled-frame count
+ * (C-ABI 1.11; 093, fixpp#514).
+ *
+ * Writes *out = the number of garbled inbound regions the session has
+ * disregarded: frames the Framer finds garbled, and frames whose third field is
+ * not MsgType(35). The count only grows. Before the session exists (before
+ * fixpp_engine_start, and after it until the engine has built the session for a
+ * connection) *out is 0 and the call returns FIXPP_ERR_OK. On an acceptor, the
+ * garbles of a connection that never yields a session are not counted. The value
+ * is not ordered with the rest of the session's state: a caller that needs it to
+ * reflect a given frame synchronises through the session's traffic.
+ *
+ * Return codes:
+ *   FIXPP_ERR_OK             -- *out written
+ *   FIXPP_ERR_NULL_HANDLE    -- out is NULL (nothing written), or session is
+ *                               NULL (*out written 0)
+ *   FIXPP_ERR_INVALID_HANDLE -- the handle was closed, or its engine destroyed
+ *                               (*out written 0)
+ *
+ * Reentrancy: thread-safe. A scoped Engine::lookup lease, released before
+ * return. THUNK: steady-state — an escaping exception is an invariant violation
+ * → fatal log + abort, NOT translated to a code.
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_session_t* session,
+                                                                 uint64_t* out);
 
 /**
  * fixpp_session_send — send an application-message payload (= Engine::send).
