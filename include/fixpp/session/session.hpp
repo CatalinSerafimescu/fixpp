@@ -1215,7 +1215,39 @@ private:
     // non-idempotent I/O (full atomic-rename + fdatasync + dir-fsync per call).
     // [contracts/reset-knobs.md C5.1; plan.md Gate A note (e)]
     // Additive POD; no new include [const §XV.9].
+    // 093-inbound-frame-dispositions (contract C-6) supersedes fixpp#518's in-unit
+    // teardown_reset_done_ stops inside the 141=Y reset units: the unit sets the
+    // manager before its one store operation, and close() waits for that operation, so
+    // the flag is only close()'s single-fire latch.
     bool teardown_reset_done_ = false;
+
+    // 093-inbound-frame-dispositions (data-model E-10; contract C-6) — the 141=Y reset
+    // unit. run_reset_unit_ is its steps 3 and 4: the manager set (reset_to_one, then
+    // both counters to the targets), stopping at the first error without returning
+    // from the arm, then, only if that succeeded, the store's one reset_to. The arm
+    // brackets it with the cancellation shield and restore (steps 2 and 5).
+    struct reset_unit_result {
+        fixpp::core::expected_t<void> manager;
+        fixpp::core::expected_t<void> store;
+    };
+    [[nodiscard]] asio::awaitable<reset_unit_result> run_reset_unit_(seqnum_t next_in,
+                                                                     seqnum_t next_out) noexcept;
+    // Set across the unit's reset_to await and cleared after it, error paths included.
+    // Session strand only, as teardown_reset_done_.
+    bool reset_unit_in_flight_ = false;
+    // The unit's completion signal: set by close() while it waits for an in-flight
+    // unit, called by the unit when it clears reset_unit_in_flight_. Session strand only.
+    std::function<void()> reset_unit_wake_;
+
+    // 093-inbound-frame-dispositions (data-model E-13; contract C-6) — the engine-stop
+    // flag: Engine::stop()'s step 1 sets it on the session strand, through
+    // session_engine_access, before it emits its cancellation. logon_arm_superseded
+    // reads it, so every later predicate check on this strand stops a Logon arm.
+    // Written and read only on the session strand.
+    // Placement condition: as garbled_frames_; a Session reused for a second connection
+    // would need it reset when the transport is installed.
+    bool engine_stop_requested_ = false;
+    void note_engine_stop_() noexcept { engine_stop_requested_ = true; }
 
     // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
     // 043 T012 (D-4/E-6) — Session-owned resolved transport factory.

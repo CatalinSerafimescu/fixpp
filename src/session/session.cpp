@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <asio/any_io_executor.hpp>
+#include <asio/as_tuple.hpp>
 #include <asio/async_result.hpp>  // NOLINT(misc-include-cleaner) — IWYU: async_initiate via use_awaitable
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
@@ -74,6 +75,7 @@
 
 #include "inbound_limit.hpp"       // 093 E-2: L, the carry and the parse buffer
 #include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
+#include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
 #include "scan_frame_header.hpp"   // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
 // only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
@@ -1015,6 +1017,31 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_outbound_advance
     co_return fixpp::core::expected_t<void>{};
 }
 
+// 093-inbound-frame-dispositions (data-model E-10; contract C-6 steps 3 and 4) — the
+// 141=Y reset unit's body. The caller holds the cancellation shield. Each manager
+// setter takes the seqnum mutex, which grants inline on its uncontended fast path
+// (L-518-1's condition), so nothing here suspends before the store's reset_to. The
+// first manager error stops the set and is returned; the store is then not touched.
+// Otherwise the store's one reset_to runs with reset_unit_in_flight_ set, and the unit
+// signals close() when it clears it.
+asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t next_in,
+                                                                     seqnum_t next_out) noexcept {
+    reset_unit_result r{};
+    r.manager = co_await seqnum_mgr_.reset_to_one();
+    if (r.manager) r.manager = co_await seqnum_mgr_.set_next_inbound(next_in);
+    if (r.manager) r.manager = co_await seqnum_mgr_.set_next_outbound(next_out);
+    if (!r.manager || store_ == nullptr) {
+        co_return r;
+    }
+    reset_unit_in_flight_ = true;
+    r.store = co_await store_->reset_to(next_in, next_out);
+    reset_unit_in_flight_ = false;
+    if (reset_unit_wake_) {
+        reset_unit_wake_();
+    }
+    co_return r;
+}
+
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
 // Two call sites: open() (per-session-direct, AT open) and drive_reconnect()
 // (engine lazy-connect, POST-connect). The build/seqnum/store-emit sequence and
@@ -1919,6 +1946,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     if (!teardown_reset_done_ &&
         ((logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect)) {
         teardown_reset_done_ = true;
+        // 093 (contract C-6 "close()"; data-model E-10; plan OD-1): a 141=Y reset unit's
+        // store operation is in flight, so wait for it, or this reset could land before
+        // the unit's and be overwritten. Event-driven: the unit's completion signal
+        // raced against await_deadline on effective_clock_, which re-arms on a
+        // clock-wide cancel_sleeps() sweep, bounded by logon_timeout_ms. On expiry,
+        // record it and proceed.
+        if (reset_unit_in_flight_ && effective_clock_) {
+            using namespace asio::experimental::awaitable_operators;
+            asio::steady_timer unit_done{co_await asio::this_coro::executor,
+                                         asio::steady_timer::time_point::max()};
+            reset_unit_wake_ = [&unit_done] { unit_done.cancel(); };
+            auto const bound = effective_clock_->steady_now() +
+                               std::chrono::milliseconds{cfg_.logon_timeout_ms};
+            auto const which = co_await (
+                unit_done.async_wait(asio::as_tuple(asio::use_awaitable)) ||
+                detail::await_deadline(*effective_clock_, bound));
+            reset_unit_wake_ = nullptr;
+            if (which.index() == 1) {
+                emit_event(session_event_close_reset_wait_expired{});
+            }
+        }
         auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::logged);
         (void)rst_r;  // I-07 logged-then-proceed: store failure does not abort close.
     }
@@ -2695,7 +2743,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     // Disconnected before it gets there.
     // `never_opened` is not a close.
     static constexpr auto logon_arm_superseded = [](Session const& s, fsm_state expected) noexcept {
-        return s.state_ == lifecycle::closing || s.fsm_state_ != expected;
+        // 093 (data-model E-13; contract C-6): Engine::stop()'s step 1 has run on this
+        // strand, as well as fixpp#518's close() and FSM conditions.
+        return s.state_ == lifecycle::closing || s.engine_stop_requested_ ||
+               s.fsm_state_ != expected;
     };
     // 093-inbound-frame-dispositions (FR-013, contract C-2) supersedes 070's S-030
     // check here, which disconnected an Active session whose inbound frame exceeded
@@ -3225,48 +3276,39 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                             : 30;  // D-8 default 30 s
 
                 if (peer_sent_reset && !cfg_.reset_on_logon) {
-                    // 030 T010 (FR-010): fatal-when-persistent so the FR-005 persist-to-2
-                    // below only runs after a known-good reset. A swallowed (logged) store
-                    // reset failure on a persistent store would let persist-to-2 advance a
-                    // stale store → store > manager (029 over-persist loss). Non-persistent
-                    // stays logged (the reset cannot meaningfully fail). Amends 024 I-07.
-                    auto rst_r = co_await reset_seqnums_to_one_durable(
-                        store_is_persistent_ ? reset_disposition::fatal
-                                             : reset_disposition::logged);
-                    if (!rst_r) {
+                    // 093 (contract C-6; spec FR-041; fixpp#524) supersedes 030 T010/T011's
+                    // reset, then restore, then persist, and fixpp#518's in-unit
+                    // teardown_reset_done_ stop: the 141=Y reset unit. Step 1, the targets
+                    // (research R-6): next-in 2 when the reset Logon was consumed (a
+                    // surviving net-advance, 030 T011), else 1; next-out 1, because the
+                    // reply has not been sent. They go to every store, volatile ones
+                    // included (plan OD-9).
+                    const seqnum_t unit_in = logon_inbound_advanced ? seqnum_min + 1 : seqnum_min;
+                    const seqnum_t unit_out = seqnum_min;
+                    // Step 2: the shield, on the awaitable thread, before the manager set.
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::disable_cancellation{});
+                    // Steps 3 and 4. No return path, so the restore below always runs.
+                    auto const unit = co_await run_reset_unit_(unit_in, unit_out);
+                    // Step 5: the restore. A cancellation emitted during the unit is not
+                    // replayed: the state is fresh.
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation{});
+                    // Step 6: the existing dispositions. A manager error is fatal; a store
+                    // error is fatal when the store is persistent (030 T010, FR-010) and
+                    // logged otherwise (024 I-07).
+                    if (!unit.manager) {
                         record_state_transition_(fsm_state::Disconnected);
-                        co_return std::unexpected(rst_r.error());
+                        co_return std::unexpected(unit.manager.error());
                     }
-                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
-                    // unit stops here only once close()'s teardown reset has been issued, so
-                    // the restore below cannot land after it. Otherwise the unit completes,
-                    // keeping the consumed Logon's advance, and the check after it stops
-                    // the arm.
-                    if (teardown_reset_done_) {
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-                    // 030 T011 (FR-001/005/007): the consumed seq-1 reset Logon is a
-                    // surviving net-advance (check_inbound advanced 1->2 before this reset
-                    // rewound it). Restore next-expected-inbound to seqnum_min+1 (=2) in the
-                    // manager AND write it through to the store → store == manager == 2
-                    // (INV-H1 holds with equality; QuickFIX reset-then-increment parity).
-                    // Outbound reply stays seq 1 (independent counter). Guarded on the reset
-                    // Logon actually consumed (logon_inbound_advanced). manager-first,
-                    // store-second so a persist failure yields store < manager (safe under-
-                    // persist), never store > manager.
-                    if (logon_inbound_advanced) {
-                        auto si_r = co_await seqnum_mgr_.set_next_inbound(seqnum_min + 1);
-                        if (!si_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(si_r.error());
-                        }
-                        // store 1->2 (no-op if non-persistent, INV-H4).
-                        auto p_r = co_await persist_inbound_advance_();
-                        if (!p_r) co_return std::unexpected(p_r.error());
+                    if (!unit.store && store_is_persistent_) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(unit.store.error());
                     }
                 }
-                // fixpp#518: a close() may have run while the inbound restore or persist
-                // yielded.
+                // Step 7 (093 contract C-6) and fixpp#518: a close() may have begun, or
+                // Engine::stop()'s step 1 reached this strand, while the unit's store
+                // operation yielded.
                 if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -4765,76 +4807,43 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // reset_before_send := (n_pre_outbound == seqnum_min+1) means fixpp's own
                     // Logon consumed the first post-reset seq (seq=1). [032 contract C1]
                     const seqnum_t n_pre_outbound = seqnum_mgr_.peek_outbound();
-                    // RC#C-1 (gate-b/r2): reset live counters + store before event.
-                    // FR-017:150: mutual reset → both sides advance to 1.
-                    // FR-018: event fires AFTER post-reset state is consistent.
-                    // [[feedback_half_restructure_symmetric_api]]: symmetric to acceptor arm.
-                    // 030 T015 (FR-010): consolidate the hand-rolled reset_to_one() + swallowed
-                    // store reset onto the shared reset_seqnums_to_one_durable() helper with the
-                    // fatal-when-persistent disposition (symmetric to the acceptor arm) so the
-                    // FR-005 persist-to-2 below only runs after a known-good reset. Amends 024
-                    // I-07 for the persistent received-141 sub-case.
-                    auto rst_r = co_await reset_seqnums_to_one_durable(
-                        store_is_persistent_ ? reset_disposition::fatal
-                                             : reset_disposition::logged);
-                    if (!rst_r) {
+                    // 093 (contract C-6; spec FR-041; fixpp#524) supersedes RC#C-1's and
+                    // 030 T015/T016's reset, then inbound restore, then 032 T010(c)'s
+                    // outbound restore, and fixpp#518's in-unit teardown_reset_done_ stops:
+                    // the 141=Y reset unit. Step 1, the targets (research R-6): next-in 2
+                    // when the reset-ack Logon was consumed (logon_inbound_advanced_init),
+                    // else 1; next-out 2 only when fixpp sent 141=Y and its Logon consumed
+                    // the first post-reset number (032 C1: the latch AND reset_before_send),
+                    // else 1. They go to every store, volatile ones included (plan OD-9).
+                    const seqnum_t unit_in =
+                        logon_inbound_advanced_init ? seqnum_min + 1 : seqnum_min;
+                    const seqnum_t unit_out =
+                        own_logon_sent_reset_flag && n_pre_outbound == seqnum_min + 1
+                            ? seqnum_min + 1
+                            : seqnum_min;
+                    // Step 2: the shield, on the awaitable thread, before the manager set.
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::disable_cancellation{});
+                    // Steps 3 and 4. No return path, so the restore below always runs.
+                    auto const unit = co_await run_reset_unit_(unit_in, unit_out);
+                    // Step 5: the restore. A cancellation emitted during the unit is not
+                    // replayed: the state is fresh.
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation{});
+                    // Step 6: the existing dispositions. A manager error is fatal; a store
+                    // error is fatal when the store is persistent (030 T015, FR-010) and
+                    // logged otherwise (024 I-07).
+                    if (!unit.manager) {
                         record_state_transition_(fsm_state::Disconnected);
-                        co_return std::unexpected(rst_r.error());
+                        co_return std::unexpected(unit.manager.error());
                     }
-                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
-                    // unit stops here only once close()'s teardown reset has been issued, so
-                    // the restores below cannot land after it. Otherwise the unit completes,
-                    // keeping the consumed Logon's advance, and the check after it stops
-                    // the arm.
-                    if (teardown_reset_done_) {
-                        co_return fixpp::core::expected_t<void>{};
+                    if (!unit.store && store_is_persistent_) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(unit.store.error());
                     }
-                    // 030 T016 (FR-001/005/007/009): the consumed seq-1 reset-ack Logon is a
-                    // surviving net-advance (check_inbound advanced 1->2 before this reset
-                    // rewound it) — identical clobber to the acceptor arm. Restore
-                    // next-expected-inbound to seqnum_min+1 (=2) in the manager AND write it
-                    // through to the store → store == manager == 2. Guarded on the ack Logon
-                    // consumed (logon_inbound_advanced_init — NOT the acceptor's
-                    // logon_inbound_advanced). manager-first, store-second (safe under-persist
-                    // on failure). No reply Logon on this arm (789 is acceptor-reply-specific).
-                    if (logon_inbound_advanced_init) {
-                        auto si_r = co_await seqnum_mgr_.set_next_inbound(seqnum_min + 1);
-                        if (!si_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(si_r.error());
-                        }
-                        // store 1->2 (no-op if non-persistent, INV-H4).
-                        auto p_r = co_await persist_inbound_advance_();
-                        if (!p_r) co_return std::unexpected(p_r.error());
-                    }
-                    // fixpp#518: a close() may have run while the inbound restore or persist
-                    // yielded. The outbound restore is skipped only once close()'s teardown
-                    // reset has been issued, so it cannot land after it. Otherwise it
-                    // completes, and the check after it stops the arm.
-                    if (teardown_reset_done_) {
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-                    // 032 T010(c): outbound restore — symmetric twin of the 030 inbound restore.
-                    // Guarded on BOTH: latch (fixpp sent 141=Y) AND reset_before_send (fixpp's
-                    // Logon consumed seq=1 post-reset). The two conjuncts are REQUIRED:
-                    //   - latch alone: bilateral_strict-at-N has latch=true but n_pre=N+1>2;
-                    //     reset is NOT before-send → restore would be wrong.
-                    //   - reset_before_send alone: peer-spontaneous-at-seq-1 has n_pre=1+1=2
-                    //     but latch=false → restore would incorrectly advance to 2.
-                    // manager-first, store-second; fatal-when-persistent (030 disposition).
-                    // [032 contract C1/Mechanism A, FR-001/FR-003/FR-007, INV-H1]
-                    if (own_logon_sent_reset_flag && n_pre_outbound == seqnum_min + 1) {
-                        auto so_r = co_await seqnum_mgr_.set_next_outbound(seqnum_min + 1);
-                        if (!so_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(so_r.error());
-                        }
-                        // store 1->2 (no-op if non-persistent, INV-H4).
-                        auto po_r = co_await persist_outbound_advance_();
-                        if (!po_r) co_return std::unexpected(po_r.error());
-                    }
-                    // fixpp#518: a close() may have run while the outbound restore or
-                    // persist yielded.
+                    // Step 7 (093 contract C-6) and fixpp#518: a close() may have begun,
+                    // or Engine::stop()'s step 1 reached this strand, while the unit's
+                    // store operation yielded.
                     if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
                         co_return fixpp::core::expected_t<void>{};
                     }

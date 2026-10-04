@@ -1403,11 +1403,21 @@ asio::awaitable<void> Engine::stop() {
             // Same awaited-co_spawn pattern as steps 2/4; the role loop is suspended on
             // I/O so the session strand is free to run the emit (no deadlock).
             // [gate-b/r5 P1: dangling-&entry UAF fix — Codex 2nd-opinion]
+            //
+            // 093 (data-model E-13; contract C-6; plan OD-15): before the emit, on the
+            // session strand, set the Session's engine-stop flag, which Logon arms test
+            // (logon_arm_superseded). entry.session is read here, on the control strand
+            // that publish_entry writes it on. A null session has nothing to set: both
+            // role loops publish it before any frame is delivered, and a publish refused
+            // because stop began delivers none (re-derive by reading what follows the
+            // publish_entry calls in run_accept_loop and run_connect_loop).
             for (auto& [id, entry] : registry_) {
                 if (entry.session_strand.has_value()) {
+                    std::shared_ptr<Session> sess = entry.session;
                     co_await asio::co_spawn(
                         *entry.session_strand,
-                        [&entry]() -> asio::awaitable<void> {
+                        [&entry, sess]() -> asio::awaitable<void> {
+                            if (sess) session_engine_access::note_engine_stop(*sess);
                             entry.session_cancel.emit(asio::cancellation_type::total);
                             co_return;
                         },
