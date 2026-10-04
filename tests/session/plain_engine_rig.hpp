@@ -182,6 +182,9 @@ public:
     std::unique_ptr<asio::ip::tcp::acceptor> listener;  // initiator role only
     // BeginString(8) of the session cfg() builds and of every frame msg() builds.
     std::string begin_string = "FIX.4.2";
+    // The engine's application dictionaries (EngineConfig::dictionaries), set before
+    // start(); a FIXT session's DefaultApplVerID must name one of them.
+    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> engine_dictionaries;
 
     explicit Rig(std::shared_ptr<fixpp::session::Application> application = nullptr)
         : app{std::move(application)} {
@@ -246,6 +249,7 @@ public:
         ec.executor = ioc.get_executor();
         ec.clock = clock;
         ec.application = app;
+        ec.dictionaries = engine_dictionaries;
         engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ec));
         id = fixpp::session::SessionId::from_config(c);
         if (!engine->register_session(std::move(c)).has_value()) return false;

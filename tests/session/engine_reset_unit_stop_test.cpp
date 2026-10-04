@@ -44,6 +44,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -62,8 +63,10 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
 #include <future>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>
@@ -73,6 +76,7 @@
 #include "plain_engine_rig.hpp"
 #include "support/hooked_store.hpp"
 #include "support/session_test_access.hpp"
+#include "support/validation_test_dictionary.hpp"
 #include "support/temp_dir.hpp"
 
 namespace fixpp::session::test {
@@ -691,6 +695,314 @@ TEST(Od25, EngineStopDuringA789ReplaysReadFiresNoGapFill) {
     auto const ring = sess->fsm_visit_history();
     EXPECT_EQ(std::count(ring.begin(), ring.end(), fsm_state::Active), 0)
         << "the session reached Active";
+}
+
+
+// ── 093 plan OD-26: the other suspension-then-effect windows in the Logon arms ─────
+//
+// Each wire site passes the arm into store_then_emit, and each Disconnected written
+// after a store suspension goes through one member that tests the predicate first. A
+// cell holds the store operation at its site, posts close(graceful) there, and the
+// operation is released once the close has begun. Two observables:
+//   - the site's frame on the peer's capture: close(graceful) writes nothing to the
+//     socket before its flush returns, and its flush is held (below), so a frame written
+//     after the close began is on the capture;
+//   - the FSM state when close()'s flush returns: the HookedStore's flush yields until
+//     the arm has had its turns (Hooks::flush_until), then records the state. A
+//     Disconnected written by the arm shows there; close() writes its own after the
+//     flush.
+// Each cell has a control with no hold and no close, in which the frame does appear.
+
+struct Od26Case {
+    session_role role = session_role::acceptor;
+    // Adjusts the session config, and builds the peer's Logon (or Logon-ack).
+    std::function<void(SessionConfig&, plain_rig::Rig&)> configure;
+    std::function<std::string(plain_rig::Rig&)> peer_logon;
+    // The held operation: the n-th outbound store() (1-based; an initiator's own Logon
+    // is the first), the first outbound next_seqnum(_, false), or the first inbound
+    // next_seqnum(_, true). fail: it returns store_io_failure once released.
+    int hold_store = 0;
+    bool hold_first_outbound_read = false;
+    bool hold_inbound_persist = false;
+    bool fail = false;
+    bool close = true;  // false: the control, no hold and no close
+};
+
+struct Od26Outcome {
+    bool settled = false;
+    bool close_returned = false;
+    bool hold_timed_out = false;
+    bool flush_hold_timed_out = false;
+    std::string wire;
+    std::optional<fsm_state> state_at_flush_end;
+    std::optional<fsm_state> state_at_settle;
+};
+
+Od26Outcome run_od26(Od26Case const& c) {
+    Od26Outcome out;
+    auto const app = std::make_shared<Od25App>();
+    plain_rig::Rig rig{app};
+    auto cfg = rig.cfg(c.role);
+    if (c.configure) c.configure(cfg, rig);
+
+    std::shared_ptr<Session> held;
+    bool close_returned = false;
+    auto post_close = [&] {
+        held = rig.session();
+        if (!held) return;
+        asio::any_io_executor ex = held->executor().underlying();
+        asio::post(ex, [&, ex] {
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    app->close_began = true;
+                    (void)co_await held->close(close_mode::graceful);
+                    close_returned = true;
+                },
+                asio::detached);
+        });
+    };
+
+    auto factory = std::make_shared<HookedStoreFactory>();
+    int stores = 0;
+    bool read_held = false;
+    int flush_polls = 0;
+    if (c.close) {
+        factory->hooks.on_outbound_store = [&] {
+            ++stores;
+            if (stores != c.hold_store) return false;
+            post_close();
+            return true;
+        };
+        factory->hooks.on_outbound_read = [&] {
+            if (!c.hold_first_outbound_read || read_held) return false;
+            read_held = true;
+            post_close();
+            return true;
+        };
+        if (c.hold_inbound_persist) factory->hooks.on_inbound_persist = post_close;
+        factory->hooks.release_when = [&] { return app->close_began; };
+        factory->hooks.fail_held = c.fail;
+        factory->hooks.flush_until = [&] {
+            if (held) out.state_at_flush_end = held->state();
+            return ++flush_polls >= 32;
+        };
+    }
+    auto const log = factory->log;
+    cfg.store_factory = std::move(factory);
+
+    if (!rig.start(cfg)) return out;
+    if (c.role == session_role::acceptor) {
+        if (!rig.connect_peer()) return out;
+    } else if (!rig.run_until([&] {
+                   return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
+                          rig.state() == fsm_state::LogonSent;
+               })) {
+        return out;
+    }
+    rig.peer.send(c.peer_logon(rig));
+    out.settled = rig.run_until([&] {
+        if (c.close) return close_returned;
+        // The control: the session settled, or a Reject or Logout reached the peer (a
+        // validation Reject leaves the session where it was).
+        auto const st = rig.state();
+        return st == fsm_state::Active || st == fsm_state::Disconnected ||
+               !plain_rig::frames_of_type(rig.peer.received, "3").empty() ||
+               !plain_rig::frames_of_type(rig.peer.received, "5").empty();
+    });
+    rig.settle();
+
+    out.close_returned = close_returned;
+    out.hold_timed_out = log->hold_timed_out;
+    out.flush_hold_timed_out = log->flush_hold_timed_out;
+    out.wire = rig.peer.received;
+    out.state_at_settle = rig.state();
+    held.reset();
+    rig.stop();
+    return out;
+}
+
+// The site's frame in `wire`, by MsgType and one field's value prefix.
+struct FrameMatch {
+    std::string_view type;
+    std::string_view tag;
+    std::string_view value;
+};
+
+// Runs the control (the frame is written) and the close cell (it is not, and nothing
+// wrote Disconnected before close()'s flush returned, the arm's state then being
+// `arm_state`).
+void run_od26_site(Od26Case c, FrameMatch m, fsm_state arm_state) {
+    c.close = false;
+    auto const control = run_od26(c);
+    ASSERT_TRUE(control.settled);
+    EXPECT_EQ(wire_count(control.wire, m.type, m.tag, m.value), 1U)
+        << "control: the site's frame is on the wire";
+
+    c.close = true;
+    auto const o = run_od26(c);
+    ASSERT_TRUE(o.settled);
+    EXPECT_TRUE(o.close_returned);
+    EXPECT_FALSE(o.hold_timed_out) << "the held operation was released by its bound";
+    EXPECT_FALSE(o.flush_hold_timed_out);
+    EXPECT_EQ(wire_count(o.wire, m.type, m.tag, m.value), 0U)
+        << "the site's frame was written after close() began";
+    EXPECT_EQ(o.state_at_flush_end, std::optional{arm_state})
+        << "a state was written before close()'s flush returned";
+}
+
+std::string stale_logon(plain_rig::Rig& rig, std::string_view extra = {}) {
+    return plain_rig::message(rig.begin_string, "A", 1, "TW", "ISLD", "20000101-00:00:00.000",
+                              std::string{"98=0\x01" "108=30\x01"} + std::string{extra});
+}
+
+std::string logon_with(plain_rig::Rig& rig, std::string_view extra) {
+    return rig.msg("A", 1, std::string{"98=0\x01" "108=30\x01"} + std::string{extra});
+}
+
+// refuse_logon_with_logout_, from each arm: a production-posture session refuses a peer
+// whose Logon carries TestMessageIndicator(464)=Y.
+TEST(Od26, CloseDuringTheAcceptorsPostureRefusalWritesNoLogout) {
+    run_od26_site({.role = session_role::acceptor,
+                   .configure = [](SessionConfig& cfg,
+                                   plain_rig::Rig&) { cfg.posture = session_posture::production; },
+                   .peer_logon = [](plain_rig::Rig& rig) { return logon_with(rig, "464=Y\x01"); },
+                   .hold_store = 1},
+                  {"5", "58", "TestMessageIndicator posture mismatch"}, fsm_state::NotConnected);
+}
+
+TEST(Od26, CloseDuringTheInitiatorsPostureRefusalWritesNoLogout) {
+    run_od26_site({.role = session_role::initiator,
+                   .configure = [](SessionConfig& cfg,
+                                   plain_rig::Rig&) { cfg.posture = session_posture::production; },
+                   .peer_logon = [](plain_rig::Rig& rig) { return logon_with(rig, "464=Y\x01"); },
+                   .hold_store = 2},
+                  {"5", "58", "TestMessageIndicator posture mismatch"}, fsm_state::LogonSent);
+}
+
+// The acceptor's SendingTime(52) Reject: a stale SendingTime on the Logon.
+TEST(Od26, CloseDuringTheAcceptorsSendingTimeRejectWritesNoReject) {
+    run_od26_site({.role = session_role::acceptor,
+                   .peer_logon = [](plain_rig::Rig& rig) { return stale_logon(rig); },
+                   .hold_store = 1},
+                  {"3", "371", "52"}, fsm_state::NotConnected);
+}
+
+// The initiator's SendingTime(52) Logout: a stale SendingTime on the Logon-ack.
+TEST(Od26, CloseDuringTheInitiatorsSendingTimeLogoutWritesNoLogout) {
+    run_od26_site({.role = session_role::initiator,
+                   .peer_logon = [](plain_rig::Rig& rig) { return stale_logon(rig); },
+                   .hold_store = 2},
+                  {"5", "58", "SendingTime(52)"}, fsm_state::LogonSent);
+}
+
+// The validation test dictionary loaded as FIX 4.4, with DefaultApplVerID(1137) declared
+// on the Logon: a FIXT.1.1 session's dictionary, and the engine's one application
+// version.
+std::shared_ptr<const fixpp::dict::Dictionary> fix44_dictionary_with_1137() {
+    std::string xml{fixpp::test_support::kValidationTestFix42Xml};
+    auto replace_once = [&xml](std::string_view from, std::string_view to) {
+        auto const pos = xml.find(from);
+        if (pos == std::string::npos) {
+            ADD_FAILURE() << "fix44_dictionary_with_1137: text not found: " << from;
+            return;
+        }
+        xml.replace(pos, from.size(), to);
+    };
+    replace_once(R"(<fix major="4" minor="2">)", R"(<fix major="4" minor="4">)");
+    replace_once(R"(<field number="108" name="HeartBtInt"    required="Y"/>)",
+                 R"(<field number="108" name="HeartBtInt"    required="Y"/>)"
+                 R"(<field number="1137" name="DefaultApplVerID" required="N"/>)");
+    replace_once(R"(<field number="112" name="TestReqID"    type="STRING"/>)",
+                 R"(<field number="112" name="TestReqID"    type="STRING"/>)"
+                 R"(<field number="1137" name="DefaultApplVerID" type="STRING"/>)");
+    constexpr std::size_t kBufSize = 128U * 1024U;
+    // Destroyed in reverse order: the dictionary, then its resource, then the buffer.
+    struct Owned {
+        std::unique_ptr<std::array<std::byte, kBufSize>> buf;
+        std::unique_ptr<std::pmr::monotonic_buffer_resource> mr;
+        std::unique_ptr<const fixpp::dict::Dictionary> dict;
+    };
+    auto owned = std::make_shared<Owned>();
+    owned->buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    owned->mr = std::make_unique<std::pmr::monotonic_buffer_resource>(owned->buf->data(),
+                                                                      owned->buf->size());
+    owned->dict = std::make_unique<const fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load_from_string(xml, owned->mr.get()));
+    return std::shared_ptr<const fixpp::dict::Dictionary>{owned, owned->dict.get()};
+}
+
+// The acceptor's DefaultApplVerID(1137) Reject: a FIXT session, a Logon without 1137.
+TEST(Od26, CloseDuringTheAcceptors1137RejectWritesNoReject) {
+    run_od26_site({.role = session_role::acceptor,
+                   .configure =
+                       [](SessionConfig& cfg, plain_rig::Rig& rig) {
+                           auto const dict = fix44_dictionary_with_1137();
+                           rig.engine_dictionaries = {dict};
+                           cfg.dictionary = dict;
+                           cfg.begin_string = "FIXT.1.1";
+                           cfg.default_appl_ver_id = fixpp::dict::application_version::v44;
+                       },
+                   .peer_logon =
+                       [](plain_rig::Rig& rig) {
+                           return plain_rig::message("FIXT.1.1", "A", 1, "TW", "ISLD",
+                                                     rig.sending_time(),
+                                                     "98=0\x01" "108=30\x01");
+                       },
+                   .hold_store = 1},
+                  {"3", "371", "1137"}, fsm_state::NotConnected);
+}
+
+// emit_session_reject_ on each arm's validate path: a Logon without HeartBtInt(108),
+// which the validation test dictionary requires.
+void validating(SessionConfig& cfg, plain_rig::Rig& /*rig*/) {
+    cfg.dictionary = fixpp::test_support::make_validation_test_dictionary();
+    cfg.validate_inbound_messages = true;
+}
+std::string logon_without_108(plain_rig::Rig& rig) { return rig.msg("A", 1, "98=0\x01"); }
+
+TEST(Od26, CloseDuringTheAcceptorsValidationRejectWritesNoReject) {
+    run_od26_site({.role = session_role::acceptor,
+                   .configure = validating,
+                   .peer_logon = logon_without_108,
+                   .hold_store = 1},
+                  {"3", "371", "108"}, fsm_state::NotConnected);
+}
+
+TEST(Od26, CloseDuringTheInitiatorsValidationRejectWritesNoReject) {
+    run_od26_site({.role = session_role::initiator,
+                   .configure = validating,
+                   .peer_logon = logon_without_108,
+                   .hold_store = 2},
+                  {"3", "371", "108"}, fsm_state::LogonSent);
+}
+
+// The member, on a read failure: the acceptor's hydrating outbound read fails after
+// close() began. Nothing writes Disconnected before close() does.
+TEST(Od26, CloseDuringAFailingHydrateReadWritesNoState) {
+    Od26Case c{.role = session_role::acceptor,
+               .peer_logon = [](plain_rig::Rig& rig) { return rig.logon(); },
+               .hold_first_outbound_read = true,
+               .fail = true};
+    auto const o = run_od26(c);
+    ASSERT_TRUE(o.settled);
+    EXPECT_FALSE(o.hold_timed_out);
+    EXPECT_EQ(o.state_at_flush_end, std::optional{fsm_state::NotConnected})
+        << "a state was written before close()'s flush returned";
+}
+
+// The member, on a write failure: the acceptor's inbound persist after Active fails
+// after close() began.
+TEST(Od26, CloseDuringAFailingInboundPersistWritesNoState) {
+    Od26Case c{.role = session_role::acceptor,
+               .peer_logon = [](plain_rig::Rig& rig) { return rig.logon(); },
+               .hold_inbound_persist = true,
+               .fail = true};
+    auto const o = run_od26(c);
+    ASSERT_TRUE(o.settled);
+    EXPECT_FALSE(o.hold_timed_out);
+    EXPECT_EQ(o.state_at_flush_end, std::optional{fsm_state::Active})
+        << "a state was written before close()'s flush returned";
 }
 
 }  // namespace

@@ -98,6 +98,10 @@ public:
         // hold_until_close_reset does (release_when, else a reset after close() began).
         std::function<bool()> on_outbound_read;
         std::function<bool()> on_outbound_store;
+        // A held operation (any of the above that holds) returns store_io_failure once
+        // released, in place of its result, as a store whose I/O failed while the session
+        // was suspended on it.
+        bool fail_held = false;
         // reset_to_mode::contended's lock; the cell holds it while the unit waits.
         fixpp::sync::async_mutex* reset_to_lock = nullptr;
         // When set, close(graceful)'s flush yields the strand until this returns true,
@@ -251,7 +255,10 @@ private:
         fixpp::session::direction_t dir, bool hold) {
         auto r = co_await inner_->next_seqnum(dir, true);
         log_->record(dir == fixpp::session::direction_t::inbound ? "in+1" : "out+1");
-        if (hold) co_await hold_until_close_reset();
+        if (hold) {
+            co_await hold_until_close_reset();
+            if (hooks_.fail_held) co_return std::unexpected(fixpp::core::error::store_io_failure);
+        }
         co_return r;
     }
     asio::awaitable<fixpp::core::expected_t<void>> logged_reset_to(fixpp::session::seqnum_t next_in,
@@ -280,6 +287,7 @@ private:
         fixpp::session::direction_t dir) {
         auto r = co_await inner_->next_seqnum(dir, false);
         co_await hold_until_close_reset();
+        if (hooks_.fail_held) co_return std::unexpected(fixpp::core::error::store_io_failure);
         co_return r;
     }
     asio::awaitable<fixpp::core::expected_t<void>> held_store(fixpp::session::seqnum_t seq,
@@ -287,6 +295,7 @@ private:
                                                               fixpp::session::direction_t dir) {
         auto r = co_await inner_->store(seq, frame, dir);
         co_await hold_until_close_reset();
+        if (hooks_.fail_held) co_return std::unexpected(fixpp::core::error::store_io_failure);
         co_return r;
     }
     asio::awaitable<fixpp::core::expected_t<void>> logged_reset(bool hold) {
