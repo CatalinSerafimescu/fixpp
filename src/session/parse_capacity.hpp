@@ -33,9 +33,11 @@ inline constexpr std::size_t kContainerSlack = 16;
 }
 
 // The overlay slots a table of n entries assigns: the same rule as the private
-// OffsetTable::overlay_cap_for (src/wire/offset_table.cpp), which this must equal. Re-check
-// it against that function whenever either changes; Q-11's dense frame of exactly L
-// fails its parse if this budgets fewer slots than the table assigns.
+// OffsetTable::overlay_cap_for (src/wire/offset_table.cpp), which this must equal. If it
+// budgeted fewer, the callback headroom would shrink by the difference unnoticed until
+// the difference exceeded it. InboundFrameDispositionsQ11.
+// TheBufferBudgetsTheOverlayTheTableAssigns compares the two at the default limit and
+// at each end of the advertised range.
 [[nodiscard]] constexpr std::size_t inbound_overlay_cap_for(std::size_t n) noexcept {
     std::size_t const want = ((n * 5U) / 4U) + 1U;
     std::size_t cap = 8U;

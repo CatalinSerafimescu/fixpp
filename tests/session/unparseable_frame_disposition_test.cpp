@@ -2519,6 +2519,22 @@ TEST(UnparseableFrameDisposition, Q15_ShrunkParseBuffer_LateCloseOrRecordedSpill
     EXPECT_GT(session_test_access::parse_spills(*c.sess), 0U) << "and records the spill";
 }
 
+// The spill witness can report a spill: the parse's refused (null lane) or forwarded
+// (MSVC debug) draw past the shrunk buffer is counted. This is the positive control for
+// every "nothing spilled" assertion (Q-11's, the arena-fit probes').
+TEST(UnparseableFrameDisposition, Q15_ShrunkParseBuffer_TheSpillWitnessCountsTheDraw) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::uint64_t const before = session_test_access::parse_spills(*c.sess);
+    session_test_access::shrink_parse_buffer(*c.sess, 256);
+    c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields)));
+    EXPECT_EQ(before, 0U) << "nothing spilled before the shrink";
+    EXPECT_GT(session_test_access::parse_spills(*c.sess), 0U) << "the draw past the buffer";
+}
+
 // ── ScriptedPeer_* (tasks.md T041; spec SC-007; quickstart §2 "Scripted peer") ──
 //
 // An in-process peer drives an Active fixpp initiator (NextNumIn 2 after the peer's

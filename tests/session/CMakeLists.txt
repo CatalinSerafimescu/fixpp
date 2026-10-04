@@ -2235,6 +2235,8 @@ target_compile_definitions(session_inbound_frame_dispositions PRIVATE
   # Q-33 (T060) parses a FIX 4.4 NewOrderSingle with a repeating group:
   # support/fix44_dictionary.hpp loads the real FIX44.xml.
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+target_include_directories(session_inbound_frame_dispositions PRIVATE
+  "${CMAKE_SOURCE_DIR}/src")  # session/parse_capacity.hpp: N(L) and B(L)'s overlay term
 set_tests_properties(session_inbound_frame_dispositions PROPERTIES LABELS "093;session")
 
 # ── 093-inbound-frame-dispositions — the establishment deadline (User Story 2) ──

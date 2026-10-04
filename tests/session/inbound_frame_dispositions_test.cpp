@@ -47,6 +47,8 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <functional>
 #include <memory>
 #include <memory_resource>
@@ -59,7 +61,9 @@
 #include <vector>
 
 #include "plain_engine_rig.hpp"
+#include "session/parse_capacity.hpp"  // 093 E-2: N(L) and the overlay term
 #include "support/fix44_dictionary.hpp"
+#include "support/frame_view_factory.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -1408,6 +1412,54 @@ TEST(InboundFrameDispositionsQ11, DenseFrameOfExactlyTheFloorLimitIsDelivered) {
 }
 TEST(InboundFrameDispositionsQ11, DenseFrameOfExactlyTheCeilingLimitIsDelivered) {
     run_q11(262144U, 262144U);
+}
+
+// B(L)'s overlay term equals what the offset table assigns for N(L) entries: the table's
+// overlay rule is private (OffsetTable::overlay_cap_for), and parse_capacity.hpp
+// restates it. Parsed at the wire level over a logging resource, a frame of exactly
+// N(L) fields draws one overlay block, the one request that is neither a whole number
+// of 12-byte entries nor a 16-byte proxy; its size must be the restated term's.
+class RequestLog final : public std::pmr::memory_resource {
+public:
+    std::vector<std::size_t> sizes;
+
+private:
+    void* do_allocate(std::size_t bytes, std::size_t align) override {
+        sizes.push_back(bytes);
+        return std::pmr::new_delete_resource()->allocate(bytes, align);
+    }
+    void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
+        std::pmr::new_delete_resource()->deallocate(p, bytes, align);
+    }
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& o) const noexcept override {
+        return this == &o;
+    }
+};
+
+TEST(InboundFrameDispositionsQ11, TheBufferBudgetsTheOverlayTheTableAssigns) {
+    for (std::uint32_t const limit : {4096U, 65536U, 262144U}) {
+        SCOPED_TRACE(limit);
+        std::size_t const n = detail::inbound_entry_cap_for(limit);
+        // 8, 9, 35, 10 and n - 4 "1=" fields: n fields.
+        std::string body = "35=D\x01";
+        for (std::size_t i = 0; i + 4U < n; ++i) body += "1=\x01";
+        std::string const f = plain_rig::frame("FIX.4.2", body);
+        auto const bytes = plain_rig::to_bytes(f);
+        auto const fv = fixpp::wire::test::make_frame_view(bytes);
+        ASSERT_TRUE(fv.has_value());
+        RequestLog log;
+        fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{};
+        auto const mv =
+            parser.parse(*fv, &log, fixpp::wire::OffsetTable::Config{.max_offset_entries = n}, n);
+        ASSERT_TRUE(mv.has_value());
+        ASSERT_EQ(mv->offsets().size(), n);
+        std::vector<std::size_t> overlay;
+        for (std::size_t const b : log.sizes) {
+            if (b % sizeof(fixpp::wire::OffsetTable::entry) != 0U && b != 16U) overlay.push_back(b);
+        }
+        ASSERT_EQ(overlay.size(), 1U) << "one overlay block";
+        EXPECT_EQ(overlay[0], sizeof(std::uint32_t) * detail::inbound_overlay_cap_for(n));
+    }
 }
 
 // ── SC-007's measurement (T054): what open() draws from each arena ──────────
