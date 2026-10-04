@@ -1429,7 +1429,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     std::pmr::memory_resource* const carry_arena =
         cfg_.framer_carry_arena ? cfg_.framer_carry_arena : std::pmr::new_delete_resource();
     owned_block carry_block{carry_arena, detail::inbound_carry_block_bytes(inbound_limit_)};
-    owned_block parse_block{session_arena_, detail::inbound_parse_buffer_bytes(inbound_limit_)};
+    owned_block parse_block{session_arena_, detail::parse_capacity::buffer_bytes(inbound_limit_)};
     if (!carry_block || !parse_block) {
         co_return std::unexpected(error::out_of_memory);
     }
@@ -1572,7 +1572,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     carry_.emplace(std::size_t{inbound_limit_} + detail::kReadPumpReadSize, &*carry_resource_);
     inbound_parse_block_ = parse_block.release();
     inbound_parse_buf_ = inbound_parse_block_;
-    inbound_entry_cap_ = detail::inbound_entry_cap_for(inbound_limit_);
+    inbound_entry_cap_ = detail::parse_capacity::entry_cap_for(inbound_limit_);
 
     state_ = lifecycle::open;
 

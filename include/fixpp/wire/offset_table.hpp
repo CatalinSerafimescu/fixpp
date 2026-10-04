@@ -23,6 +23,10 @@
 #include "framer.hpp"
 #include "view.hpp"  // group_slice (mr-backed group instance slices)
 
+namespace fixpp::session::detail {
+struct parse_capacity;  // src/session/parse_capacity.hpp (093), a friend below
+}  // namespace fixpp::session::detail
+
 namespace fixpp::wire {
 
 inline constexpr std::size_t default_max_offset_entries = 4096;  // occ space
@@ -569,6 +573,11 @@ private:
     // `TypedReadSplitAgreement.MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices`,
     // with no friend and no hook.
     friend struct offset_table_test_access;
+    // 093-inbound-frame-dispositions (data-model E-2): the session sizes its parse buffer
+    // B(L) from overlay_cap_for itself rather than from a copy of its rule, so the budget
+    // follows the table if the rule changes. A production friend, unconditional, defined
+    // in src/session/parse_capacity.hpp (not installed).
+    friend struct ::fixpp::session::detail::parse_capacity;
 };
 
 }  // namespace fixpp::wire

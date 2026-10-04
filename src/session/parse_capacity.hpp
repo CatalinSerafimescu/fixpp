@@ -26,27 +26,6 @@ namespace detail {
 // call.
 inline constexpr std::size_t kContainerSlack = 16;
 
-// N(L): the most fields a frame of L bytes holds at the densest layout, three bytes a
-// field ("1=<SOH>"), plus one. It is the entry cap of every inbound parse.
-[[nodiscard]] constexpr std::size_t inbound_entry_cap_for(std::uint32_t limit) noexcept {
-    return std::size_t{limit} / 3U + 1U;
-}
-
-// The overlay slots a table of n entries assigns: the same rule as the private
-// OffsetTable::overlay_cap_for (src/wire/offset_table.cpp), which this must equal. If it
-// budgeted fewer, the callback headroom would shrink by the difference unnoticed until
-// the difference exceeded it. InboundFrameDispositionsQ11.
-// TheBufferBudgetsTheOverlayTheTableAssigns compares the two at the default limit and
-// at each end of the advertised range.
-[[nodiscard]] constexpr std::size_t inbound_overlay_cap_for(std::size_t n) noexcept {
-    std::size_t const want = ((n * 5U) / 4U) + 1U;
-    std::size_t cap = 8U;
-    while (cap < want) {
-        cap <<= 1U;
-    }
-    return cap;
-}
-
 // The pmr containers one inbound parse constructs over the parse buffer, each drawing a
 // kContainerSlack proxy on MSVC debug. Recipe (research R-3): count the std::pmr::vector
 // members MessageView<Index> and OffsetTable construct from the parse resource, times one
@@ -71,14 +50,30 @@ inline constexpr std::size_t kAlignPad =
 // every L, since the room after a parse here is at least this term.
 inline constexpr std::size_t kCallbackReadHeadroom = 16384;
 
-// B(L), the per-session parse buffer (data-model E-2): N(L) entries, the overlay for
-// N(L), and the three named terms plus the container slack.
-[[nodiscard]] constexpr std::size_t inbound_parse_buffer_bytes(std::uint32_t limit) noexcept {
-    std::size_t const n = inbound_entry_cap_for(limit);
-    return sizeof(fixpp::wire::OffsetTable::entry) * n +
-           sizeof(std::uint32_t) * inbound_overlay_cap_for(n) + kAlignPad + kCallbackReadHeadroom +
-           kParseContainers * (kContainerSlack + kProxyAlignPad);
-}
+// The capacities every inbound parse runs under, from the session's inbound limit L.
+// A struct so OffsetTable can befriend it: the overlay term calls the table's own
+// private overlay_cap_for, so B(L) budgets whatever overlay the table assigns.
+struct parse_capacity {
+    // N(L): the most fields a frame of L bytes holds at the densest layout, three bytes
+    // a field ("1=<SOH>"), plus one. It is the entry cap of every inbound parse.
+    [[nodiscard]] static constexpr std::size_t entry_cap_for(std::uint32_t limit) noexcept {
+        return std::size_t{limit} / 3U + 1U;
+    }
+
+    // The overlay slots a table of n entries assigns.
+    [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept {
+        return fixpp::wire::OffsetTable::overlay_cap_for(n);
+    }
+
+    // B(L), the per-session parse buffer (data-model E-2): N(L) entries, the overlay for
+    // N(L), and the three named terms plus the container slack.
+    [[nodiscard]] static std::size_t buffer_bytes(std::uint32_t limit) noexcept {
+        std::size_t const n = entry_cap_for(limit);
+        return sizeof(fixpp::wire::OffsetTable::entry) * n +
+               sizeof(std::uint32_t) * overlay_cap_for(n) + kAlignPad + kCallbackReadHeadroom +
+               kParseContainers * (kContainerSlack + kProxyAlignPad);
+    }
+};
 
 }  // namespace detail
 

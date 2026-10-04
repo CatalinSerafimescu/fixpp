@@ -194,14 +194,14 @@ using fixpp::wire::pmr_carry_buffer;
 // while building it before main aborts the binary, which fails the run.
 constexpr std::uint32_t kLimit = fixpp::session::kDefaultInboundLimit;
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp)
-std::vector<std::byte> g_parse_buffer(fixpp::session::detail::inbound_parse_buffer_bytes(kLimit));
+std::vector<std::byte> g_parse_buffer(fixpp::session::detail::parse_capacity::buffer_bytes(kLimit));
 
 // The parse's entry cap and reserve, as validate_inbound_() passes them.
 fixpp::wire::OffsetTable::Config parse_config() {
-    return {.max_offset_entries = fixpp::session::detail::inbound_entry_cap_for(kLimit)};
+    return {.max_offset_entries = fixpp::session::detail::parse_capacity::entry_cap_for(kLimit)};
 }
 std::size_t parse_reserve(std::size_t frame_size) {
-    return std::min(fixpp::session::detail::inbound_entry_cap_for(kLimit), frame_size / 3U + 1U);
+    return std::min(fixpp::session::detail::parse_capacity::entry_cap_for(kLimit), frame_size / 3U + 1U);
 }
 
 // Arena sizes matching validate_inbound_() in session.cpp.

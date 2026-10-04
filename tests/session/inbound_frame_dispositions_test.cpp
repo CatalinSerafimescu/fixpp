@@ -1413,10 +1413,10 @@ TEST(InboundFrameDispositionsQ11, DenseFrameOfExactlyTheCeilingLimitIsDelivered)
 }
 
 // B(L)'s overlay term equals what the offset table assigns for N(L) entries: the table's
-// overlay rule is private (OffsetTable::overlay_cap_for), and parse_capacity.hpp
-// restates it. Parsed at the wire level over a logging resource, a frame of exactly
+// overlay rule is private (OffsetTable::overlay_cap_for), and parse_capacity reads it
+// as a friend. Parsed at the wire level over a logging resource, a frame of exactly
 // N(L) fields draws one overlay block, the one request that is neither a whole number
-// of 12-byte entries nor a 16-byte proxy; its size must be the restated term's.
+// of 12-byte entries nor a 16-byte proxy; its size must be the budgeted term's.
 class RequestLog final : public std::pmr::memory_resource {
 public:
     std::vector<std::size_t> sizes;
@@ -1437,7 +1437,7 @@ private:
 TEST(InboundFrameDispositionsQ11, TheBufferBudgetsTheOverlayTheTableAssigns) {
     for (std::uint32_t const limit : {4096U, 65536U, 262144U}) {
         SCOPED_TRACE(limit);
-        std::size_t const n = detail::inbound_entry_cap_for(limit);
+        std::size_t const n = detail::parse_capacity::entry_cap_for(limit);
         // 8, 9, 35, 10 and n - 4 "1=" fields: n fields.
         std::string body = "35=D\x01";
         for (std::size_t i = 0; i + 4U < n; ++i) body += "1=\x01";
@@ -1456,7 +1456,7 @@ TEST(InboundFrameDispositionsQ11, TheBufferBudgetsTheOverlayTheTableAssigns) {
             if (b % sizeof(fixpp::wire::OffsetTable::entry) != 0U && b != 16U) overlay.push_back(b);
         }
         ASSERT_EQ(overlay.size(), 1U) << "one overlay block";
-        EXPECT_EQ(overlay[0], sizeof(std::uint32_t) * detail::inbound_overlay_cap_for(n));
+        EXPECT_EQ(overlay[0], sizeof(std::uint32_t) * detail::parse_capacity::overlay_cap_for(n));
     }
 }
 

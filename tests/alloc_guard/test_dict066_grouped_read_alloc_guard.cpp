@@ -151,7 +151,7 @@ constexpr std::uint32_t kLimit = fixpp::session::kDefaultInboundLimit;
 
 // A bad_alloc while building it before main aborts the binary, which fails the run.
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp)
-std::vector<std::byte> g_parse_buffer(fixpp::session::detail::inbound_parse_buffer_bytes(kLimit));
+std::vector<std::byte> g_parse_buffer(fixpp::session::detail::parse_capacity::buffer_bytes(kLimit));
 
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(s.data), s.len};
@@ -182,7 +182,7 @@ bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> co
     if (!feed_r.has_value() || feed_r->empty()) return false;
 
     auto run = [&](Parser<access_mode::Index>& parser) {
-        std::size_t const cap = fixpp::session::detail::inbound_entry_cap_for(kLimit);
+        std::size_t const cap = fixpp::session::detail::parse_capacity::entry_cap_for(kLimit);
         auto mv_r = parser.parse(out[0], &pa_mr,
                                  fixpp::wire::OffsetTable::Config{.max_offset_entries = cap},
                                  std::min(cap, raw.size() / 3U + 1U));
