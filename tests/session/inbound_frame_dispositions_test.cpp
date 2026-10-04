@@ -1346,9 +1346,9 @@ std::size_t soh_count(std::string_view f) {
 }
 
 // A plaintext acceptor with a FromAppProbe, its 383 set to `advertised` (unset when
-// nullopt), started and logged on.
+// nullopt), started and logged on. No logger: no cell using it reads a record, and the
+// Q-33 death-test child then starts no logger thread after the fork.
 struct LargeCell {
-    LogCapture log;
     std::shared_ptr<FromAppProbe> app = std::make_shared<FromAppProbe>();
     plain_rig::Rig rig{app};
     bool up = false;
@@ -1358,8 +1358,6 @@ struct LargeCell {
                        std::string begin_string = "FIX.4.2") {
         rig.begin_string = std::move(begin_string);
         auto cfg = rig.cfg();
-        cfg.logger_override = log.logger;
-        cfg.initial_trace_context = known_trace();
         cfg.advertised_max_message_size = advertised;
         if (dict) cfg.dictionary = std::move(dict);
         up = rig.start(std::move(cfg)) && rig.to_active();
