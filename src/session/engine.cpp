@@ -419,9 +419,7 @@ using fixpp::session::detail::read_first_frame_bounded;
 //   on_inbound_frame error → close session terminal, stop pump (FR-012).
 //   total-cancel (stop()) → async_read_some returns transport_read_cancelled
 //                           → error arm fires, close is a no-op on already-
-//                           closing session, pump unwinds cleanly. During the
-//                           deadline race, a cancellation the deadline arm absorbed
-//                           takes the same arm: a fresh read would not see it.
+//                           closing session, pump unwinds cleanly.
 //   establishment deadline → note_establishment_timeout, close session terminal,
 //                           stop pump (093, C-4).
 //
@@ -532,11 +530,6 @@ asio::awaitable<void> run_read_pump(
             auto outcome =
                 co_await (transport.async_read_some(read_span) ||
                           fixpp::session::detail::await_deadline(clock, *establish_deadline));
-            if ((co_await asio::this_coro::cancellation_state).cancelled() !=
-                asio::cancellation_type::none) {
-                co_await stop_pump();
-                co_return;
-            }
             if (outcome.index() == 1) {
                 continue;
             }
