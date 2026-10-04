@@ -16,7 +16,6 @@ namespace fixpp::session::detail {
 
 // The read pump's per-read buffer size R (data-model E-2). The carry open() allocates
 // holds the session's limit L plus one read of this size (src/session/inbound_limit.hpp).
-// It matches the default max_read_window_bytes on Transport::Config.
 inline constexpr std::size_t kReadPumpReadSize = 4096;
 
 // The Config both inbound Framers run (contract C-1): resync on; the frame limit is the
