@@ -1377,7 +1377,7 @@ surfaces exist and are witnessed.
   that describes changed behaviour with
   `grep -rlnE "L-004-4|B-005-7|#51[456]\b|#52[34]\b|garbled|kInboundParseArena|logon_timeout|reset_to" brain/components`,
   and rewrite (not append to) each stale passage. `python3 tools/check_brain.py gate` passes.
-- [ ] T108 Via `phase-implementer`, header comments naming 093 where a decision is superseded, those not
+- [X] T108 Via `phase-implementer`, header comments naming 093 where a decision is superseded, those not
   already written by T035, T037, T064 and T085: `L-004-4`'s wontfix, 092's D-8, #518's in-unit stops,
   070's exemption. Re-derive the sites with
   `git grep -nE "L-004-4|D-8|teardown_reset_done_|wire_framing_resync|pre-establishment|kInboundParseArena" -- src include tests`.
