@@ -508,3 +508,13 @@ delta carry the same BREAKING list.
   `fixpp_session_close` returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`. The error code is not carried,
   because `Session::open()` runs in the engine's role loops, which return on error, not on
   `fixpp_session_open`'s path (plan OD-27).
+- **L-19.** These C-7 clauses are witnessed through C++ only, not through the C API (Phase 8; the evidence file
+  has the clause-by-clause table). The rule "a C-ABI effect witnessed only through C++ is unwitnessed" applies to
+  them, so they are disclosed rather than claimed:
+  - row 1: a garble in LogoutSent (reaching it from C needs `fixpp_session_close(graceful)`, which blocks the
+    caller until the Logout exchange ends);
+  - row 1: a garble in Disconnected (no C-observable effect beyond the counter);
+  - row 6's liveness classes that are a single frame or sit behind a configuration the C ABI cannot set: one
+    too-high frame, a Reset-mode SequenceReset, the validate Reject (validation cannot be enabled through C),
+    and the knob-off path;
+  - the Python getter's `uint64_t` mapping on the installed-wheel and Windows lanes, which only CI runs.

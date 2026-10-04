@@ -1191,7 +1191,7 @@ durable counters at FR-041's table (#524).
 tokens, one MINOR bump, and BREAKING per declaration. It closes the C/Python/TOML arms of US1 and US2
 and every C-7 row 1–6 C witness.
 
-- [ ] T090 [P] Via `phase-implementer`, the new `tests/capi/inbound_frame_dispositions_capi_test.cpp`,
+- [X] T090 [P] Via `phase-implementer`, the new `tests/capi/inbound_frame_dispositions_capi_test.cpp`,
   registered in `tests/capi/CMakeLists.txt` as ctest `capi_inbound_frame_dispositions`, labels
   `"capi;093"`:
   - Q-30: `fixpp_session_config_set_logon_timeout_ms` refuses a null handle and zero; 
@@ -1212,7 +1212,7 @@ and every C-7 row 1–6 C witness.
     reads never decrease and the last equals the count. It runs on `linux-clang-tsan` (T118), where a
     race report fails it.
   RED: the symbols do not exist.
-- [ ] T091 Via `phase-implementer`, Q-33's C arms in `tests/capi/inbound_frame_dispositions_capi_test.cpp`:
+- [X] T091 Via `phase-implementer`, Q-33's C arms in `tests/capi/inbound_frame_dispositions_capi_test.cpp`:
   inside a C callback over a dense frame at headroom exhaustion, `fixpp_group_get_nested_group` returns
   `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` and `fixpp_msg_get_group` returns `FIXPP_ERR_TYPE_MISMATCH`; the
   session stays Active. These are the null-upstream lanes' assertions; the cell branches on T060's
@@ -1220,26 +1220,26 @@ and every C-7 row 1–6 C witness.
   `FIXPP_ERR_OK`, the spill witness records the spill (read as T054's no-spill assertion reads it),
   and the session stays Active (quickstart Q-33). T113 runs that branch. Regression guards pinning
   today's reports (L-5).
-- [ ] T092 [P] Via `phase-implementer`, Python RED in the new
+- [X] T092 [P] Via `phase-implementer`, Python RED in the new
   `bindings/python/tests/test_093_inbound_frame_dispositions.py`: the setter (zero raises the typed
   exception), the getter returning an int, and Q-16's Python arm; both wheel lanes (LP64 and Windows
   `uint64_t`). Q-16's Python arm uses T090's band and its derivation: T = 500 ms set through the
   binding, a peer that never answers the Logon, the close at an elapsed time ≥ T (from a stamp taken
   before the engine starts) and < 5 s (half the 10 s default).
-- [ ] T093 [P] Via `phase-implementer`, Q-31 and Q-16's TOML arm: `logon_timeout_ms` accepted as a bare
+- [X] T093 [P] Via `phase-implementer`, Q-31 and Q-16's TOML arm: `logon_timeout_ms` accepted as a bare
   integer in `tests/config/test_load_happy_path.cpp` with `tests/config/fixtures/happy_full.toml`; zero,
   a negative value, a value above `UINT32_MAX` and a non-integer each refused with a diagnostic in
   `tests/config/test_load_negative_battery.cpp`; a TOML-loaded session honours T. RED: the key is
   unrecognised.
-- [ ] T094 [P] Via `phase-implementer`, `tests/capi/version_test.cpp`'s exact-version cell and
+- [X] T094 [P] Via `phase-implementer`, `tests/capi/version_test.cpp`'s exact-version cell and
   `CompositeMacroValue` set to T003's new MINOR. RED against the current MINOR.
-- [ ] T095 Re-run T003's two checks immediately before T099's commit; a release or a branch claiming the
+- [X] T095 Re-run T003's two checks immediately before T099's commit; a release or a branch claiming the
   same MINOR stops the bump.
-- [ ] T096 Via `phase-implementer`, the setter in `include/fix/c_api/session.h` and `src/capi/config.cpp`,
+- [X] T096 Via `phase-implementer`, the setter in `include/fix/c_api/session.h` and `src/capi/config.cpp`,
   following `fixpp_session_config_set_heartbeat_seconds`: "`fixpp_session_config_set_logon_timeout_ms(fixpp_session_config_t*,
   uint32_t ms)`"; null handle → `FIXPP_ERR_NULL_HANDLE`, zero → `FIXPP_ERR_CAPI_CONFIG_INVALID`;
   reentrancy token "single-thread".
-- [ ] T097 Via `phase-implementer`, the getter in `include/fix/c_api/session.h` and `src/capi/session.cpp`:
+- [X] T097 Via `phase-implementer`, the getter in `include/fix/c_api/session.h` and `src/capi/session.cpp`:
   "`fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_session_t*, uint64_t* out)`". Its
   refusal order follows `fixpp_session_is_established` (the out-parameter checked for null, `*out`
   written 0, then `check_session`); its read follows `fixpp_session_close`'s scoped
@@ -1247,7 +1247,7 @@ and every C-7 row 1–6 C witness.
   handle's slot and takes no lookup, so it is not the pattern for the read). A null lookup leaves 0
   written; reentrancy token "thread-safe".
   T090 GREEN.
-- [ ] T098 Via `phase-implementer`, Python and TOML:
+- [X] T098 Via `phase-implementer`, Python and TOML:
   - `bindings/python/fixpp.i`: a `%apply … *OUTPUT { uint64_t* … }` for the getter's out-parameter,
     and a row in the "PY-002 GIL-DISCIPLINE AUDIT TABLE" (locate with `git grep -n "GIL-DISCIPLINE
     AUDIT TABLE" -- bindings/python`), and the matching entry in `bindings/python/tests/_gil_staging.py`
@@ -1260,14 +1260,14 @@ and every C-7 row 1–6 C witness.
     zero and ignores a non-integer without a diagnostic, so neither its range check nor its type
     handling is copied.
   T092 and T093 GREEN.
-- [ ] T099 Via `phase-implementer`, the version (C-7 "Version"): `FIXPP_C_ABI_VERSION_MINOR` +1 in
+- [X] T099 Via `phase-implementer`, the version (C-7 "Version"): `FIXPP_C_ABI_VERSION_MINOR` +1 in
   `include/fix/c_api/version.h`, with a history entry naming 093 as contract C-7 "Version" states it:
   headed BREAKING, rows 1–6 in one summary line each pointing to their declarations, rows 7–8 as
   additions, and an effect detailed only where no declaration carries it. Update every in-repo
   consumer of the old value: `git grep -ln "VERSION_MINOR" -- . ':!specs'` plus the encoded forms of the
   old value that the recipe in `specs/092-garbled-frame-reject/tasks.md` (its version-bump task) greps for, each hit classified in the evidence file. T094 GREEN.
   Mutant in a scratch copy: MINOR back to the old value → `version_test` RED.
-- [ ] T100 Via `phase-implementer`, BREAKING per declaration (C-7, `[const §X.7]`). Re-derive the
+- [X] T100 Via `phase-implementer`, BREAKING per declaration (C-7, `[const §X.7]`). Re-derive the
   observer set from `version.h`'s 1.10 entry and the 1.10 sites with `grep -n "C-ABI 1.10"
   include/fix/c_api/session.h`.
   - Rows 1–6: a BREAKING clause naming the new MINOR and 093 on each observer's doc block in
@@ -1281,11 +1281,11 @@ and every C-7 row 1–6 C witness.
   - Leave the bullet beginning "on an established session, a faulty frame whose fault comes before its
     MsgSeqNum(34)" unchanged (it stays true).
   Never run a formatter on `include/fix/c_api/*.h`.
-- [ ] T101 Via `phase-implementer`, the gates: the two symbols in `tests/abi/golden/fixpp_capi_symbols.txt`
+- [X] T101 Via `phase-implementer`, the gates: the two symbols in `tests/abi/golden/fixpp_capi_symbols.txt`
   (sorted); `tools/capi_freeze.sha256` re-pinned for `session.h` and `version.h` with
   `tools/check_capi_freeze.sh`; `tools/check_capi_reentrancy.sh` passes with one token per doc block;
   the `nm` audit shows no C++ symbol leaks through the C ABI (`[const §X.2]`).
-- [ ] T102 Via `phase-implementer`, Q-37 in its own source file, `tests/capi/inbound_frame_dispositions_c7_witness_test.cpp`,
+- [X] T102 Via `phase-implementer`, Q-37 in its own source file, `tests/capi/inbound_frame_dispositions_c7_witness_test.cpp`,
   linked into `capi_inbound_frame_dispositions` (so it can be copied alone into the base tree): for
   each C-7 row 1–6 trigger (row 1 a garbled frame in Active; row 2 a 35-not-third frame in Active and a
   35-not-third Logon; row 3 a frame of 64 KiB split at the carry edge; row 4 a dense frame of 64 KiB;
@@ -1302,15 +1302,29 @@ and every C-7 row 1–6 C witness.
     any paired timing, re-`cmp` the base and candidate bench `.text` sections, as T005 did, and rebuild the base if they
     differ for any reason other than the change under test.
 
-- [ ] T103 Run every C-ABI and Python cell: T090–T094 and T102 GREEN; `pytest bindings/python/tests/` on
+- [X] T103 Run every C-ABI and Python cell: T090–T094 and T102 GREEN; `pytest bindings/python/tests/` on
   both `-py` lanes; `capi_*` ctest unfiltered.
-- [ ] T104 Confirm the arms this phase closes for US1 (Q-1 C arm) and US2 (Q-16 C, Python, TOML arms)
+- [X] T104 Confirm the arms this phase closes for US1 (Q-1 C arm) and US2 (Q-16 C, Python, TOML arms)
   are GREEN, and record them against their stories in the evidence file.
 
 **Checkpoint**: the C-ABI MINOR is declared with BREAKING on every observer; C, Python and TOML
 surfaces exist and are witnessed.
 
 ---
+
+**Phase 8 as landed (2026-10-04; `890a02ee` tests RED; `e217088e`; `ce05c7af` MINOR 11; `48c8ff88`; `c1f004ce`; `9749d005`;
+`48b3096e` L-18 witness; `6ff13595` ci-pins; `7935a41b` the 1.9 amendment; `da3bc2f6` C-ABI cells):**
+- C-ABI 1.11, declared BREAKING. Golden 74 → 76. The `session.h` and `version.h` freeze hashes are re-pinned. The
+  1.10 text (T100) and the 1.9 text are amended in place, at every site.
+- OD-27:
+  - the Python import-surface golden, and a wheel twin with its README row;
+  - L-18 is measured through C;
+  - QuickFIX `LogonTimeout` is `Mapped` (GapRowCount 11 → 10).
+- The pump-census site in `test_race_cancel_during_resume.cpp` was migrated to the census's guarded shape (the pin stays
+  empty), not added as a row. All 30 `ci-script-pins` steps pass.
+- 14 new C-ABI cells (13 RED on base). The C-7 clauses with no C cell are disclosed as C-8 L-19.
+- Only the wheel lanes run these: the installed import-surface golden, the wheel twin, and the Windows `uint64_t`
+  typemap.
 
 ## Phase 9: Polish and cross-cutting (P8 docs, then P9)
 
@@ -1349,6 +1363,8 @@ surfaces exist and are witnessed.
   - **Carried from Phase 8 (OD-27):** add a B&L row for C-8 L-18 (open()'s OOM has no C carrier). Re-derive
     L-1's "closes when the carry overflows": OD-23 makes carry overflow unreachable in the pump, so L-1 must state
     what actually ends a stalled too-large-but-≤-L BodyLength.
+
+  - **Carried from Phase 8:** add a B&L row for C-8 L-19 (the C-7 clauses witnessed through C++ only).
 
 - [ ] T106 [P] `spec/coverage-index.md`: rewrite the §4.5.2 row's sentence that says byte-level framing
   failures stay session-fatal (L-004-4, `FramerFailureClosesEstablishedSession_*`), naming 093's
