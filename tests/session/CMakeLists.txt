@@ -621,6 +621,9 @@ add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 # install_store_offload_exit_probe seams (file_store.hpp).
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 
+# fixpp#536 (B28) — reproduction: one session's close vs another session's liveness on a shared clock.
+add_threading_test(session_536_shared_clock_liveness test_536_shared_clock_liveness.cpp)
+
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
 # branch's polarity — see the file header for the documented scope limits.
