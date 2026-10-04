@@ -60,6 +60,11 @@ struct session_test_access {
         return s.inbound_limit_;
     }
 
+    // The capacity of the carry open() allocated: L plus one read (093, data-model E-2).
+    [[nodiscard]] static std::size_t carry_capacity(Session const& s) noexcept {
+        return s.carry_->capacity();
+    }
+
     // The size of the per-session parse buffer open() allocated (093, data-model E-2).
     [[nodiscard]] static std::size_t parse_buffer_bytes(Session const& s) noexcept {
         return s.inbound_parse_buf_.size();

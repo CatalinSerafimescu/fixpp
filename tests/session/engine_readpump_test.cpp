@@ -85,7 +85,6 @@
 
 #include "engine_loopback_harness.hpp"
 #include "plain_engine_rig.hpp"
-#include "session/session_engine_access.hpp"  // 093: L and the carry open() allocated
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
 
@@ -513,7 +512,7 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     auto st = acc->state();
     const auto next_inbound = static_cast<int>(
         fixpp::session::session_test_access::seqnum_mgr(*acc).next_inbound_unsafe());
-    std::size_t const limit = fixpp::session::session_engine_access::inbound_limit(*acc);
+    std::size_t const limit = fixpp::session::session_test_access::inbound_limit(*acc);
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
@@ -1092,15 +1091,15 @@ struct ResyncCell {
         up = rig.start(std::move(cfg)) && rig.to_active();
     }
 
-    // The session's inbound limit L and its carry's capacity, through the engine seam
-    // the pump reads them from (093, data-model E-2, E-11); 0 without a session.
+    // The session's inbound limit L and its carry's capacity (093, data-model E-2); 0
+    // without a session.
     [[nodiscard]] std::size_t limit() const {
         auto const s = rig.session();
-        return s ? fixpp::session::session_engine_access::inbound_limit(*s) : 0U;
+        return s ? fixpp::session::session_test_access::inbound_limit(*s) : 0U;
     }
     [[nodiscard]] std::size_t carry_capacity() const {
         auto const s = rig.session();
-        return s ? fixpp::session::session_engine_access::carry(*s).capacity() : 0U;
+        return s ? fixpp::session::session_test_access::carry_capacity(*s) : 0U;
     }
 
     [[nodiscard]] std::uint32_t next_in() const {
