@@ -661,6 +661,15 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
 
 ## R-9: Items Gate A round 1 settled, and what P3 and P6 measure
 
+> **Erratum (2026-10-04, plan.md OD-25).** The bullets below assume the in-place disable shields the store
+> operation, and that the base unit is interrupted by total cancellation at its next `co_await`. Both are false
+> at this code base: `async_mutex::async_lock()` resets the thread's state to terminal-only after every
+> acquisition, and re-enables total during a contended wait. On the base, an uncontended unit is NOT
+> interrupted by stop's total emit after its first lock. Q-26's durable-counter RED on base is not expected;
+> its effect assertions (through the missing flag) are. The rejected alternative below, an empty-slot
+> `co_spawn` of the store await, is now the mechanism. Its stated costs were the flag, which exists anyway,
+> and one frame per 141=Y unit, which is pre-Active and outside FR-052.
+
 - **Total cancellation and the reset unit.** Settled by design (contract C-6); cells measure it.
   - **What reaches the unit first.** `Engine::start` spawns both role loops bound to
     `entry.session_cancel`'s slot, and each resets to `enable_total_cancellation`. The pump and

@@ -213,8 +213,8 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
     `pmr_carry_buffer` over that resource, so the constructor's reserve cannot fail and no public
     declaration changes. The block includes `kContainerSlack` for MSVC debug's container proxy
     (data-model E-2).
-- **OD-14: the reset unit's cancellation shield is a disable on the awaitable thread with an explicit
-  restore**, not a helper coroutine with its own disable (added at Gate A round 1; contract C-6;
+- **OD-14 (SUPERSEDED by OD-25, 2026-10-04): the reset unit's cancellation shield is a disable on the
+  awaitable thread with an explicit restore**, not a helper coroutine with its own disable (added at Gate A round 1; contract C-6;
   research R-9). The cost is L-12: `Engine::stop()` waits for the unit's store operation.
   - Alternative (rationale replaced at Gate A round 2, G93-A-04): `co_spawn` the store await on the
     session strand, completing through a token bound to an empty cancellation slot. Its pending
@@ -339,6 +339,32 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
     byte budget itself (T069/T070, and one Q-15 arm, on null-upstream lanes, branching on
     `arena_upstream()` as T060 does).
 
+- **OD-25: the reset unit's store operation runs on an empty cancellation slot; the 789 path and the
+  reply Logon check the engine-stop predicate** (added at implementation, Phase 7, 2026-10-04, from an
+  orchestrator-commissioned Codex review and an Opus triage of the reset-unit slice;
+  `research/reviews/codex_093_p7_reset_unit_review.md`, `opus_093_p7_reset_unit_triage.md`). It supersedes
+  OD-14.
+  - **Why.** OD-14's premise was false. `async_mutex::async_lock()` resets the thread's cancellation state to
+    terminal-only after every acquisition, and enables total during a contended wait. The step-2 disable
+    therefore shielded nothing: a deleting mutant stayed GREEN on every Q-26 cell. A store operation queued
+    behind a held writer lock could be cancelled by stop's total emit, leaving the no-teardown durable row
+    wrong. In production that holder is synthetic, because each connection gets its own Session and store, but
+    the mechanism is real for any store.
+  - **What.** Only `store_->reset_to(in, out)` is `co_spawn`ed on the strand, with
+    `bind_cancellation_slot(cancellation_slot{}, use_awaitable)`. The whole unit is not spawned:
+    `co_spawn`'s entry dispatch would make the manager set's no-suspension property depend on the launch path.
+    The step-2 disable is removed; the step-5 restore stays. FR-041 and C-6 were amended accordingly.
+  - **The 789 path.** `honor_peer_next_expected_` and `replay_outbound_range_` take the arm's expected state
+    (optional; the Active ResendRequest caller passes none). After every suspension they test
+    `logon_arm_superseded` before the next effect, and return a distinct `superseded` outcome (an enum
+    replaces the `expected_t<bool>`). The reply Logon's `store_then_emit` tests the predicate after its store
+    await, before the transport write.
+  - Alternatives:
+    - Codex's `async_mutex` mode that respects the caller's policy. Rejected: asio's `cancellation_state`
+      exposes no filter getter, user and default-body stores would not get it, and it changes a core
+      primitive.
+    - Disclose the store-cancellation window instead. Rejected: the fix is local to `run_reset_unit_`, and
+      it makes FR-041's guarantee hold by construction.
 ## What changes for whom
 
 | Who | What changes | Declared where |

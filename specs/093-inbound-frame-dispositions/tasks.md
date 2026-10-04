@@ -1143,8 +1143,11 @@ durable counters at FR-041's table (#524).
   `reset_on_disconnect` nor `reset_on_logout` (after a Logout) holds.
 - [ ] T088 [US5] T075–T083 GREEN. FR-042: build every `MessageStore` subclass T012 found under
   `-Werror` unchanged, and record the population. US5 mutants in a scratch copy: delete `close()`'s wait
-  → Q-25 RED; delete the shield → Q-26 durable counters RED, shown on the default-body `HookedStore`
-  cell and the `FileStore` cell (SC-006 names those two); drop the engine-stop flag from
+  → Q-25 RED; drop the empty-slot binding of the store operation (OD-25, which replaced "delete the shield")
+  → the OD-25 witness cells' no-teardown rows RED: the contended-`async_mutex` `HookedStore` cell and the
+  `FileStore` cell with its writer lock pre-held (SC-006 names those two store kinds); teardown rows cannot
+  discriminate and are not in the expectation; the 789-path and reply-Logon predicate checks (OD-25) each
+  have a stop-during-suspension cell, and deleting each check makes its cell RED; drop the engine-stop flag from
   `logon_arm_superseded` → Q-26 per-role effect assertions RED; make `reset_to`'s override non-atomic
   (reset, then advance) → Q-29 RED; accept any target → Q-28 RED; expire without recording → Q-27 RED;
   make `close()`'s wait a one-shot sleep without `await_deadline`'s re-arm → Q-27's re-arm arm RED;

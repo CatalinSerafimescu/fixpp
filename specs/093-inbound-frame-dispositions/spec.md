@@ -601,12 +601,14 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     observe the intermediate state.
   - Article XIV §2 counts pure virtuals (at most 5), and the interface keeps its four.
 - **FR-041**: The 141=Y reset unit MUST, in both roles (contract C-6):
-  - shield itself from cancellation before it sets anything, because `Engine::stop()`'s cancellation
-    reaches the unit before any `close()` does;
+  - be unreachable by cancellation from start to end, because `Engine::stop()`'s cancellation
+    reaches the unit before any `close()` does. Steps up to the store operation have no suspension, and
+    the store operation runs on an empty cancellation slot, so no emission can reach it (plan.md
+    OD-25, amended at implementation 2026-10-04; it replaces the in-place disable of OD-14);
   - set the `SeqnumManager` to its targets, with no suspension in between, under L-518-1's
     uncontended-grant condition, which closes `L-518-1`'s drain residual;
   - then issue one `reset_to(in, out)` with the true targets, on persistent and volatile stores alike;
-  - then restore the pump's cancellation state and run the existing superseded check, which also tests a
+  - then restore the pump's cancellation state (dropping any cancellation recorded while the unit ran) and run the existing superseded check, which also tests a
     session-side engine-stop flag that `Engine::stop()` sets before it emits cancellation (contract
     C-6). So after `Engine::stop()`'s step 1 has run on the session's strand, the arm emits no event,
     calls no `toAdmin` or `onLogon`, writes nothing, and does not reach Active. Effects the arm ran on

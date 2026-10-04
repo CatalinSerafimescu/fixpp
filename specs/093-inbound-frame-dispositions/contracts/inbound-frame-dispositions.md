@@ -274,6 +274,24 @@ the close happens.
 
 ## C-6: The 141=Y reset unit, `close()` and `Engine::stop()` (FR-040 to FR-042)
 
+> **Erratum (2026-10-04, plan.md OD-25; it supersedes the shield mechanism below).** The in-place disable at
+> step 2 does not shield the store operation. `fixpp::sync::async_mutex::async_lock()` resets the awaitable
+> thread's cancellation state to terminal-only after every acquisition, and enables total cancellation during
+> a contended wait (`include/fixpp/core/sync/async_mutex.hpp`). `Engine::stop()` emits only total. So:
+> - after the unit's first seqnum-manager lock, the disable has already been replaced;
+> - a store operation that waits on a contended lock can be cancelled, whatever the disable says.
+>
+> The unit therefore runs **only `store_->reset_to(in, out)` through `co_spawn` with a token bound to an
+> empty cancellation slot**. The spawned thread has no parent slot, so no emission reaches any operation the
+> store runs, for every store kind. Steps up to the store operation stay inline with no suspension (L-518-1's
+> uncontended grant). The step-2 disable is removed. The step-5 restore stays, because it drops any
+> cancellation recorded on the arm's thread while the unit ran. The engine-stop flag (OD-15) is unchanged.
+> Where the text below says "the shield", read "the empty-slot store operation".
+>
+> Every suspension in a Logon arm is followed by the predicate before the next effect. **That includes the
+> suspensions inside `honor_peer_next_expected_` and `replay_outbound_range_` (the 789 path), and the store
+> await inside the reply Logon's `store_then_emit` before its transport write** (OD-25).
+
 **Store operation.** `MessageStore::reset_to(next_in, next_out)` has the precondition `next_in,
 next_out ∈ {1, 2}`. Any other value is refused with `session_invalid_argument` and changes nothing. The
 default body is `reset()` and then one `next_seqnum(dir, true)` for each target that is 2.
