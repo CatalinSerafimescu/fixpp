@@ -161,18 +161,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
                          dict_hooks hooks) noexcept
-    :
-#ifndef NDEBUG
-      gen_{frame.token()},
-#endif
-      cfg_{cfg},
-      hooks_{hooks},
-      entries_(mr),
-      overlay_(mr),
-      group_index_(mr),
-      nested_cache_(mr) {
-    build(frame);
-}
+    : OffsetTable(frame, mr, cfg, hooks, 0) {}
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
                          dict_hooks hooks, std::size_t reserve_entries) noexcept

@@ -146,19 +146,12 @@ public:
     }
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
+    // Delegates to the reserving construction with no reserve, which seeds the same
+    // root group_context as the sibling ctor above (Gate B PR#176 r1 root cause #1).
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
                 dict_hooks hooks) noexcept
         requires(Mode == access_mode::Index)
-        : View{frame.bytes().data(), frame.bytes().size(),
-               frame.token()},  // [2b §6.4] thread real pool token
-          table_{frame, mr, cfg, hooks},
-          mr_{mr},
-          hooks_{hooks},
-          unk_items_{mr} {
-        // See the sibling ctor above — same root group_context seed, same
-        // rationale (Gate B PR#176 r1 root cause #1).
-        table_.set_group_context(group_context{.msg_type = msg_type()});
-    }
+        : MessageView{reserve_tag{}, frame, mr, cfg, hooks, 0} {}
 
 private:
     // 093-inbound-frame-dispositions (data-model E-3): the reserving construction,
@@ -885,16 +878,11 @@ public:
                                                         OffsetTable::Config cfg) noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         // 083 T057 (C-8.1) / fixpp#426: the cap-tunable overload threads
-        // `hooks_` too. Omitting it here would silently take C-8.4's
-        // dict-FREE fallback (wire-derived `entries_[first].tag`) on a
-        // dictionary-backed parse — the missed construction site T057 warns
+        // `hooks_` too, through the reserve overload below. Omitting it there would
+        // silently take C-8.4's dict-FREE fallback (wire-derived `entries_[first].tag`)
+        // on a dictionary-backed parse — the missed construction site T057 warns
         // about, one API surface over.
-        MessageView<Mode> mv{frame, mr, cfg, hooks_};
-        mv.dict_owner_ = owner_;  // fixpp#495: nullptr unless built on the owned route
-        if (auto s = mv.offsets().build_status(); !s) {
-            return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
-        }
-        return mv;
+        return parse(frame, mr, cfg, 0);
     }
 
 // 093-inbound-frame-dispositions (data-model E-3): as above, and the offset table's
