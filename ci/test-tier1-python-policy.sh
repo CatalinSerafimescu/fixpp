@@ -329,6 +329,18 @@ mallocnesia_guards = {
 }
 mallocnesia_sentinel = any(
     "allocation gates actually ran" in (s.get("name") or "") for s in linux_job["steps"])
+# ...and what the gate steps and their sentinel DO (fixpp#543, the #530 treatment below):
+# each gate step's key set and command, and the sentinel's whole step object. Lists per
+# id, not a dict, so a duplicated id reads as two entries instead of collapsing to one.
+mallocnesia_step_keys = {
+    k: [sorted(str(x) for x in s.keys()) for s in linux_job["steps"] if s.get("id") == k]
+    for k in ("mallocnesia_population", "mallocnesia_gates")}
+mallocnesia_step_runs = {
+    k: [s.get("run") for s in linux_job["steps"] if s.get("id") == k]
+    for k in ("mallocnesia_population", "mallocnesia_gates")}
+mallocnesia_sentinel_steps = [
+    json.loads(json.dumps(s, default=str))
+    for s in linux_job["steps"] if "allocation gates actually ran" in (s.get("name") or "")]
 # fixpp#530: the ODR census step, guarded by the same kind of string, and its sentinel.
 odr_census_guard = [s.get("if") for s in linux_job["steps"] if s.get("id") == "odr_hooks_census"]
 odr_census_sentinel = any(
@@ -547,6 +559,9 @@ out = {
     "linux_step_count": linux_step_count,
     "mallocnesia_guards": mallocnesia_guards,
     "mallocnesia_sentinel": mallocnesia_sentinel,
+    "mallocnesia_step_keys": mallocnesia_step_keys,
+    "mallocnesia_step_runs": mallocnesia_step_runs,
+    "mallocnesia_sentinel_steps": mallocnesia_sentinel_steps,
     "odr_census_guard": odr_census_guard,
     "odr_census_sentinel": odr_census_sentinel,
     "odr_census_sentinel_steps": odr_census_sentinel_steps,
@@ -1053,6 +1068,53 @@ $got"
   done
   [ "$(echo "$json" | jq -r '.mallocnesia_sentinel')" = "true" ] \
     || fail "$case_id: the #448 outcome sentinel step is gone. Without it, both gate steps can be skipped by a mistyped preset and nothing reads their outcome — a green job is not evidence a step ran."
+  # fixpp#543 — what the #448 gate steps and their sentinel DO, pinned as the #530 ones below
+  # are: exactly one step per id with the pinned key set and command, and the sentinel's key
+  # set, if: and whole run: body, spelled out here rather than read from the workflow.
+  for k in mallocnesia_population mallocnesia_gates; do
+    g="$(echo "$json" | jq -c --arg k "$k" '.mallocnesia_step_keys[$k]')"
+    [ "$g" = '[["id","if","name","run"]]' ] \
+      || fail "$case_id: the #448 gate step (id $k) has keys $g, expected exactly one step with [\"id\",\"if\",\"name\",\"run\"]. A key such as continue-on-error turns a red gate into a green step, and the sentinel reads only that outcome."
+  done
+  local want_population_run
+  want_population_run="$(cat <<'POPULATION'
+python3 tools/check_mallocnesia_population.py \
+  --build-dir build/${{ matrix.preset }} --min-gates 20
+POPULATION
+)"
+  g="$(echo "$json" | jq -r '.mallocnesia_step_runs.mallocnesia_population | length')"
+  [ "$g" = 1 ] && [ "$(echo "$json" | jq -r '.mallocnesia_step_runs.mallocnesia_population[0]')" = "$want_population_run" ] \
+    || fail "$case_id: the #448 gate step (id mallocnesia_population) runs $(echo "$json" | jq -c '.mallocnesia_step_runs.mallocnesia_population'), expected exactly one step running the pinned population check. A lower --min-gates floor, or a command that does not run the check, succeeds while gates vanish."
+  g="$(echo "$json" | jq -c '.mallocnesia_step_runs.mallocnesia_gates')"
+  [ "$g" = '["ctest --preset ${{ matrix.preset }} -L mallocnesia --no-tests=error --output-on-failure"]' ] \
+    || fail "$case_id: the #448 gate step (id mallocnesia_gates) runs $g, expected exactly one step running the pinned ctest selection. Without --no-tests=error an empty selection exits 0, and a command that runs no gate succeeds."
+  g="$(echo "$json" | jq -c '[.mallocnesia_sentinel_steps[] | keys]')"
+  [ "$g" = '[["if","name","run"]]' ] \
+    || fail "$case_id: the #448 outcome sentinel has keys $g, expected exactly one step with [\"if\",\"name\",\"run\"]."
+  g="$(echo "$json" | jq -r '.mallocnesia_sentinel_steps[0].if')"
+  [ "$g" = "always()" ] \
+    || fail "$case_id: the #448 outcome sentinel has if: '$g', expected 'always()'. Narrowed, it is skipped after a failed step and reads nothing."
+  local want_mallocnesia_sentinel_run
+  want_mallocnesia_sentinel_run="$(cat <<'SENTINEL'
+set -euo pipefail
+pop="${{ steps.mallocnesia_population.outcome }}"
+gates="${{ steps.mallocnesia_gates.outcome }}"
+echo "preset=${{ matrix.preset }} population=${pop:-<unset>} gates=${gates:-<unset>}"
+if [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
+  if [ "$pop" != "success" ] || [ "$gates" != "success" ]; then
+    echo "::error::the allocation gates did not run to success on linux-clang-release (population=$pop gates=$gates)."
+    exit 1
+  fi
+elif [ "$pop" != "skipped" ] || [ "$gates" != "skipped" ]; then
+  echo "::error::the allocation gates ran on ${{ matrix.preset }}; they are wired to"
+  echo "::error::linux-clang-release only (population=$pop gates=$gates)."
+  exit 1
+fi
+SENTINEL
+)"
+  g="$(echo "$json" | jq -r '.mallocnesia_sentinel_steps[0].run')"
+  [ "$g" = "$want_mallocnesia_sentinel_run" ] \
+    || fail "$case_id: the #448 outcome sentinel's run: body differs from the pinned text. It is what fails the release leg when either gate step did not succeed and any other leg when either ran; change both together, deliberately."
   # fixpp#530 — the ODR census step: exactly one, under the same predicate, plus its sentinel.
   g="$(echo "$json" | jq -c '.odr_census_guard')"
   [ "$g" = "[\"$want_guard\"]" ] \
@@ -1871,7 +1933,10 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=101  # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
+MUTANTS_DECLARED=110  # M116 M117 (the #448 gate steps' key sets, fixpp#543) + M118 M119 (their
+                     # pinned run: commands) + M120 (the #448 sentinel's existence pin) +
+                     # M121 M122 (its pinned body) + M123 M124 (its if: and key set) +
+                     # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
                      # fixpp#530) + M115 (the #530 census step's run: command) + M108 (the #530 ODR census step guard pin) + M109 (the #530
                      # ODR census sentinel's existence pin) + M110 M111 (the #530 sentinel's
                      # pinned body) + M112 (the #530 census step's key set) + M113 M114 (the
@@ -2581,6 +2646,113 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: python3 ci/odr-hooks-census.py --build-dir build/${{ matrix.preset }}\n"
 new = "        run: \"true\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # ── fixpp#543: the #448 gate steps and their sentinel, as M109-M115 do for #530 ──
+  #
+  # M116 / M117: continue-on-error on each gate step. Its guard is unchanged, and a red
+  # gate becomes a green step whose outcome the sentinel reads as success.
+  mutate_workflow M116 "continue-on-error added to the #448 population step" "#448 gate step \\(id mallocnesia_population\\) has keys" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        id: mallocnesia_population\n"
+new = "        id: mallocnesia_population\n        continue-on-error: true\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+  mutate_workflow M117 "continue-on-error added to the #448 gates step" "#448 gate step \\(id mallocnesia_gates\\) has keys" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        id: mallocnesia_gates\n"
+new = "        id: mallocnesia_gates\n        continue-on-error: true\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M118: the population floor lowered. Every set rule in the checker holds with ONE gate,
+  # so the step still succeeds while the population shrinks.
+  mutate_workflow M118 "the #448 population step floor lowered to 1" "#448 gate step \\(id mallocnesia_population\\) runs" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            --build-dir build/${{ matrix.preset }} --min-gates 20\n"
+new = "            --build-dir build/${{ matrix.preset }} --min-gates 1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M119: --no-tests=error dropped from the gates step, so an empty selection exits 0.
+  mutate_workflow M119 "--no-tests=error dropped from the #448 gates step" "#448 gate step \\(id mallocnesia_gates\\) runs" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: ctest --preset ${{ matrix.preset }} -L mallocnesia --no-tests=error --output-on-failure\n"
+new = "        run: ctest --preset ${{ matrix.preset }} -L mallocnesia --output-on-failure\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M120: the sentinel renamed, so the #448 existence check has a mutant of its own.
+  # What it pins is the NAME; M121 to M124 break the rest of the step.
+  mutate_workflow M120 "the #448 outcome sentinel step is renamed" "#448 outcome sentinel step is gone" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: \"Assert the allocation gates actually ran (#448)\"\n"
+new = "      - name: \"Assert the allocation gate outcomes (#448)\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M121: the sentinel keeps its name and its if:, and its body becomes `true`, so it
+  # reads no outcome at all.
+  mutate_workflow M121 "the #448 outcome sentinel body replaced by true" "#448 outcome sentinel.s run: body differs" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().split("\n")
+head = "      - name: \"Assert the allocation gates actually ran (#448)\""
+i = lines.index(head)
+assert lines[i + 1] == "        if: always()" and lines[i + 2] == "        run: |", lines[i:i + 3]
+j = i + 3
+while j < len(lines) and lines[j].startswith("          "):
+    j += 1
+open(dst, "w").write("\n".join(lines[:i + 2] + ["        run: \"true\""] + lines[j:]))
+'
+
+  # M122: the release branch keeps both comparisons and gains a clause that accepts a
+  # SKIPPED gates step, the outcome a mistyped guard produces.
+  mutate_workflow M122 "the #448 outcome sentinel accepts skipped gates on the release leg" "#448 outcome sentinel.s run: body differs" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            if [ \"$pop\" != \"success\" ] || [ \"$gates\" != \"success\" ]; then\n"
+new = "            if [ \"$pop\" != \"success\" ] || [ \"$gates\" != \"success\" ] && [ \"$gates\" != \"skipped\" ]; then\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M123: the sentinel's if: narrowed, so it no longer runs after a failed step.
+  mutate_workflow M123 "the #448 outcome sentinel if: narrowed to success()" "#448 outcome sentinel has if:" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: \"Assert the allocation gates actually ran (#448)\"\n        if: always()\n"
+new = "      - name: \"Assert the allocation gates actually ran (#448)\"\n        if: success()\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M124: continue-on-error on the sentinel, so its own failure leaves the job green.
+  mutate_workflow M124 "continue-on-error added to the #448 outcome sentinel" "#448 outcome sentinel has keys" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: \"Assert the allocation gates actually ran (#448)\"\n        if: always()\n"
+new = old + "        continue-on-error: true\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
