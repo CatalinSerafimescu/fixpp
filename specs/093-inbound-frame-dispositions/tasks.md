@@ -971,7 +971,7 @@ HeartBtInt draws no TestRequest.
 - [ ] T071 [US4] Via `phase-implementer`, Q-20 on the mock clock with `run_liveness_cell` in
   `tests/session/unparseable_frame_disposition_test.cpp` (second home
   `tests/session/heartbeat_testrequest_test.cpp`, APPEND label `093`), one cell per SC-005 class: one
-  too-high frame (a second may be fatal, fixpp#537); a Reset-mode SequenceReset; a GapFill; the
+  too-high frame (exactly one: a second non-PossDup, non-Heartbeat too-high frame is fatal, fixpp#537, reproduced in B28); a Reset-mode SequenceReset; a GapFill; the
   validate and PossDup Rejects (#423 sites); a too-low Heartbeat and a too-low PossDup frame; the
   knob-off path; an inbound Reject(35=3). No TestRequest within the interval of that frame. RED: a
   TestRequest is sent.
