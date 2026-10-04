@@ -147,7 +147,7 @@ public:
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
     // Delegates to the reserving construction with no reserve, which seeds the same
-    // root group_context as the sibling ctor above (Gate B PR#176 r1 root cause #1).
+    // root group_context as the sibling ctor above, for the reason given there.
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
                 dict_hooks hooks) noexcept
         requires(Mode == access_mode::Index)
