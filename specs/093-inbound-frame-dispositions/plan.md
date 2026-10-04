@@ -186,6 +186,11 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   - The counter stays on the Session. Gate A departures, below, say why `SessionEntry` was not chosen.
 - **OD-9: `reset_to` gets the true targets on volatile stores too.** This may fix #538, which is
   unconfirmed, as a side effect, so #538's reproduction runs on this branch and on its base.
+  - **Result (T089, 2026-10-04): it does not.** #538 reproduces on the T005 base and is still RED at 093's head,
+    with the same outcome on both: one GapFill and no replay. The no-141 control is GREEN on both. A lead from
+    reading the code only: `MemoryStore::retrieve` indexes entries by `seq - 1`, so a store that resumes at 2
+    cannot replay. That is the store's data structure, not `reset_to`'s targets. #538 stays open in B28, and
+    no closing keyword in this PR names it.
 - **OD-10: the parse reserve is a per-call argument**, a public C++ addition, not an `OffsetTable::Config`
   field (research R-3). Revised at Gate A round 2 (G93-A-05): `OffsetTable::build` is private, so the
   reserve goes through a new `Parser::parse` overload, a private tagged `MessageView` constructor and a

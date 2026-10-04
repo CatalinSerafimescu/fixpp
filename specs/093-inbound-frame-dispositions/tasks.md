@@ -1037,26 +1037,26 @@ durable counters at FR-041's table (#524).
 
 ### #523 (P5): tests first
 
-- [ ] T075 [US5] Via `phase-implementer`, after T074a, Q-22 per role in
+- [X] T075 [US5] Via `phase-implementer`, after T074a, Q-22 per role in
   `tests/session/test_session_plaintext_roundtrip.cpp` (`LogonCloseDuringSuspension`, `HookedStore`,
   `CaseRig`; APPEND label `093`): the Logon and a dictionary-invalid second frame coalesced in one
   write, `validate_inbound_messages = true`, a graceful close during the hydrate or the peer-reset
   yield; no `toAdmin`, Reject or state write after close began (`expect_no_admin_after_close`). The
   flush's post sequence is replaced by a bounded hold. The LogoutSent confirmation cell stays green
   (regression guard). RED: the Reject reaches `toAdmin`.
-- [ ] T076 [P] [US5] Via `phase-implementer`, Q-9 in `tests/session/inbound_frame_dispositions_test.cpp`:
+- [X] T076 [P] [US5] Via `phase-implementer`, Q-9 in `tests/session/inbound_frame_dispositions_test.cpp`:
   a 35-not-third frame after `close()` began, in NotConnected and in LogonSent, is counted and
   evented, with no other effect. RED: it is processed.
-- [ ] T077 [US5] Via `phase-implementer`, C-2 step 2 in the NotConnected and LogonSent arms of
+- [X] T077 [US5] Via `phase-implementer`, C-2 step 2 in the NotConnected and LogonSent arms of
   `src/session/session.cpp`, right after the scan and step 1: `if (state_ == lifecycle::closing &&
   (fsm_state_ == NotConnected || fsm_state_ == LogonSent)) return success;`. LogonReceived, Active
   and LogoutSent are unchanged. T075 and T076 GREEN.
-- [ ] T078 [US5] #523 mutants in a scratch copy: delete the guard → Q-22 RED; put it before step 1 →
+- [X] T078 [US5] #523 mutants in a scratch copy: delete the guard → Q-22 RED; put it before step 1 →
   Q-9 RED. Record under `## Mutants`.
 
 ### #524 (P6): tests first
 
-- [ ] T079 [US5] Via `phase-implementer`, Q-28 and Q-29:
+- [X] T079 [US5] Via `phase-implementer`, Q-28 and Q-29:
   - Q-28: `reset_to` with a target outside {1, 2} is refused with `session_invalid_argument` and no
     effect, for the default body (a test-local non-overriding store), in
     `tests/session/test_memory_store_round_trip.cpp` for `MemoryStore`, and in
@@ -1064,7 +1064,7 @@ durable counters at FR-041's table (#524).
   - Q-29 in `tests/session/test_file_store_crash_survival.cpp`: fault injection between the temp write
     and the rename, then a restart, sees the old or the new counters, never a partial (1, 1).
   RED: does not compile (no `reset_to`).
-- [ ] T080 [US5] Via `phase-implementer`, Q-23 and Q-24 per role in
+- [X] T080 [US5] Via `phase-implementer`, Q-23 and Q-24 per role in
   `tests/session/test_session_plaintext_roundtrip.cpp`:
   - Q-23, no teardown reset: `close()` drains inside the unit; the durable state equals the unit's
     targets; the peer's next Logon at 34=2 without 141=Y is accepted with 789 tolerance off. RED:
@@ -1074,14 +1074,14 @@ durable counters at FR-041's table (#524).
   - `HookedStore` in forward mode (T074a) forwards `reset_to` to its inner store and fires its hooks
     there, with a cell that fails when the forwarding is removed (quickstart §2). Q-23 and Q-24 use
     forward mode.
-- [ ] T081 [US5] Via `phase-implementer`, Q-25 and Q-27 in the same file: Q-25, a non-overriding
+- [X] T081 [US5] Via `phase-implementer`, Q-25 and Q-27 in the same file: Q-25, a non-overriding
   (default-body) store, `HookedStore` in default-body mode (T074a), with and without a teardown reset
   meets the table (mutant in T088); Q-27, the
   `close()` wait expiring records `session_event_close_reset_wait_expired` and `close()` completes,
   and for `FileStore` (1, 1) still holds after expiry (the FIFO writer-lock condition measured, not
   assumed); and Q-27's re-arm arm, a clock-wide `cancel_sleeps()` from another session during the
   wait records no expiry event before `effective_clock_` reaches the bound.
-- [ ] T082 [US5] Via `phase-implementer`, after T074a, Q-26 in a new
+- [X] T082 [US5] Via `phase-implementer`, after T074a, Q-26 in a new
   `tests/session/engine_reset_unit_stop_test.cpp`, executable `engine_reset_unit_stop_test`, registered
   standalone beside `engine_lifecycle_test` in `tests/session/CMakeLists.txt` as ctest
   `engine_reset_unit_stop`, labels `"093;session"`: `Engine::stop()` begins during the unit, for
@@ -1091,12 +1091,12 @@ durable counters at FR-041's table (#524).
   `onLogon` and no Active transition is observed after stop's step 1 has run on the session's strand
   (the application double's callback log and the event ring). RED: the unit is interrupted, leaving
   the pre-unit state (default body and `FileStore`).
-- [ ] T083 [US5] Via `phase-implementer`, re-derive the `*StoreEndsAtTeardownReset` and
+- [X] T083 [US5] Via `phase-implementer`, re-derive the `*StoreEndsAtTeardownReset` and
   `close_from_*_persist` cells (T012) for the new unit shape, each classified in the evidence file.
 
 ### #524 (P6): implementation
 
-- [ ] T084 [US5] Via `phase-implementer`, `MessageStore::reset_to` (E-9) in
+- [X] T084 [US5] Via `phase-implementer`, `MessageStore::reset_to` (E-9) in
   `include/fixpp/session/message_store.hpp`: "`virtual asio::awaitable<core::expected_t<void>>
   reset_to(seqnum_t next_in, seqnum_t next_out) noexcept;`", non-pure; precondition `next_in, next_out
   ∈ {1, 2}`, else `session_invalid_argument` with no effect; default body `co_await reset()`, then
@@ -1128,7 +1128,11 @@ durable counters at FR-041's table (#524).
     other `co_await` (`grep -n "logon_arm_superseded\|co_await" src/session/session.cpp`, read against
     the unit's span). A condition that fails stops the task: C-6's one-interleaving-point argument, and
     the cells that hold the store at step 4 (Q-23, Q-26), no longer cover the unit.
-- [ ] T086 [US5] Via `phase-implementer`, the engine-stop flag (E-13, OD-15): `bool
+  - **Reopened by plan OD-25 (2026-10-04):** landed at `492f9470` to the pre-OD-25 text (the step-2 disable). It
+    must be re-implemented: the empty-slot store operation, the stop-aware 789 helpers and reply Logon, and the
+    witness cells.
+
+- [X] T086 [US5] Via `phase-implementer`, the engine-stop flag (E-13, OD-15): `bool
   engine_stop_requested_` on the Session, written and read on its strand; `note_engine_stop_()` on
   `src/session/session_engine_access.hpp`; `Engine::stop()`'s step 1 (`src/session/engine.cpp`) reads
   `entry.session` on the control strand and sets the flag inside its existing `co_spawn`, before the
@@ -1136,7 +1140,7 @@ durable counters at FR-041's table (#524).
   `state_ == closing`, the flag and the FSM state. Re-derive the predicate's sites against each Logon
   arm's `co_await` sites (T012's command) and record that every suspension is followed by the
   predicate before the next effect.
-- [ ] T087 [US5] Via `phase-implementer`, `close()`'s wait (OD-1): only when it is about to issue its
+- [X] T087 [US5] Via `phase-implementer`, `close()`'s wait (OD-1): only when it is about to issue its
   teardown reset and `reset_unit_in_flight_` is set, await the completion signal raced against
   `await_deadline(*effective_clock_, now + logon_timeout_ms)`; on expiry record the appended
   `session_event_close_reset_wait_expired { }` and proceed. No wait and no teardown reset when neither
@@ -1152,7 +1156,7 @@ durable counters at FR-041's table (#524).
   (reset, then advance) → Q-29 RED; accept any target → Q-28 RED; expire without recording → Q-27 RED;
   make `close()`'s wait a one-shot sleep without `await_deadline`'s re-arm → Q-27's re-arm arm RED;
   remove `HookedStore`'s forwarding in forward mode → its cell RED. Record under `## Mutants`.
-- [ ] T089 [US5] fixpp#538's reproduction (OD-9), on this head and on the T005 base worktree. Record both
+- [X] T089 [US5] fixpp#538's reproduction (OD-9), on this head and on the T005 base worktree. Record both
   outputs. No closing keyword names #538 whatever the result; report it to the owner.
 
 **Checkpoint**: US5 complete; FR-030 landed before FR-041.
