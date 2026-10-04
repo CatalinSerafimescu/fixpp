@@ -54,6 +54,10 @@ struct StoreLog {
     int resets_issued_after_close_began = 0;
     // A held operation waited out its bound without such a reset().
     bool hold_timed_out = false;
+    // close(graceful)'s flush calls begun.
+    int flushes_begun = 0;
+    // A flush held by Hooks::flush_until waited out its bound.
+    bool flush_hold_timed_out = false;
 
     void record(std::string op) { writes.push_back({std::move(op), close_began && close_began()}); }
 };
@@ -74,6 +78,10 @@ public:
         // with close()'s teardown reset already issued. Bounded by kHoldBound; past it
         // the log's hold_timed_out is set and the operation returns.
         bool hold_until_close_reset = false;
+        // When set, close(graceful)'s flush yields the strand until this returns true,
+        // in place of its fixed post sequence. Bounded by kHoldBound; past it the log's
+        // flush_hold_timed_out is set and the flush returns.
+        std::function<bool()> flush_until;
     };
 
     HookedStore(fixpp::session::seqnum_t outbound_next, Hooks hooks, std::shared_ptr<StoreLog> log)
@@ -131,10 +139,24 @@ public:
 
     // close(graceful) awaits this before it writes Disconnected. It yields the strand
     // a few times, as FileStore's flush does, so the session's other work can run
-    // while close() is already under way.
+    // while close() is already under way; with Hooks::flush_until set, it yields until
+    // that returns true or kHoldBound passes.
     asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
+        ++log_->flushes_begun;
+        auto ex = co_await asio::this_coro::executor;
+        if (hooks_.flush_until) {
+            const auto deadline = std::chrono::steady_clock::now() + kHoldBound;
+            while (!hooks_.flush_until()) {
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    log_->flush_hold_timed_out = true;
+                    break;
+                }
+                co_await asio::post(ex, asio::use_awaitable);
+            }
+            co_return fixpp::core::expected_t<void>{};
+        }
         for (int i = 0; i < 8; ++i) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+            co_await asio::post(ex, asio::use_awaitable);
         }
         co_return fixpp::core::expected_t<void>{};
     }

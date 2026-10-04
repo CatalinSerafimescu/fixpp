@@ -64,6 +64,7 @@
 #include "session/parse_capacity.hpp"  // 093 E-2: N(L) and the overlay term
 #include "support/fix44_dictionary.hpp"
 #include "support/frame_view_factory.hpp"
+#include "support/hooked_store.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -1046,6 +1047,61 @@ TEST(InboundFrameDispositionsQ8, Disconnected_MsgTypeNotThird_IsNotScannedOrCoun
     EXPECT_TRUE(o.events.empty());
     EXPECT_TRUE(f.log.garble_records().empty());
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
+}
+
+// ── Q-9 (tasks.md T076; contract C-2 steps 1 and 2; spec FR-030) ──────────────
+//
+// close(graceful) from NotConnected or LogonSent yields only in its store flush, so the
+// session's store is a HookedStore whose flush holds until the cell releases it. While
+// close() is under way, a Heartbeat whose third field is not 35 reaches the arm: step 1
+// counts, events and logs it as a garble (not an arm effect, so a closing session still
+// accounts it), and nothing else happens: no frame is sent and the state is unchanged.
+// Then the flush is released and close() ends the session.
+void run_q9(session_role role, fsm_state expected, std::string_view row) {
+    DirectFixture f;
+    auto const factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    auto release = std::make_shared<bool>(false);
+    factory->hooks.flush_until = [release] { return *release; };
+    auto const log = factory->log;
+    auto cfg = f.cfg(role);
+    cfg.store_factory = factory;
+    Session s{f.engine, cfg};
+    ASSERT_TRUE(f.open(s));
+    ASSERT_EQ(s.state(), expected) << row;
+
+    auto close_fut = asio::co_spawn(f.ioc, s.close(close_mode::graceful), asio::use_future);
+    bool const flushing = fixpp::test_support::pump_until(
+        f.ioc, [&] { return log->flushes_begun == 1; }, std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 2,
+        fixpp::test_support::kPumpSlice, "Q9/flush");
+    EXPECT_TRUE(flushing) << row << ": close(graceful) never reached its store flush";
+    auto const bad = not_third("0", 1);
+    if (flushing) {
+        EXPECT_TRUE(f.feed(s, bad)) << row;
+        EXPECT_EQ(s.state(), expected) << row << ": the frame must not move the state";
+        EXPECT_TRUE(f.sent.empty()) << row << ": the frame must draw nothing";
+    }
+
+    *release = true;
+    if (!fixpp::test_support::pump_until_ready(f.ioc, close_fut, fixpp::test_support::kPumpBudget,
+                                               "Q9/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "Q9/close");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "Q9/close";
+        return;
+    }
+    EXPECT_TRUE(close_fut.get().has_value()) << row << ": close()";
+    EXPECT_FALSE(log->flush_hold_timed_out) << row << ": the flush hold waited out its bound";
+    EXPECT_EQ(s.state(), fsm_state::Disconnected) << row;
+    if (flushing) {
+        expect_step1_garble(f, s, bad, row);
+    }
+}
+
+TEST(InboundFrameDispositionsQ9, NotConnected_MsgTypeNotThirdAfterCloseBeganIsOnlyCounted) {
+    run_q9(session_role::acceptor, fsm_state::NotConnected, "NotConnected");
+}
+
+TEST(InboundFrameDispositionsQ9, LogonSent_MsgTypeNotThirdAfterCloseBeganIsOnlyCounted) {
+    run_q9(session_role::initiator, fsm_state::LogonSent, "LogonSent");
 }
 
 // ── Q-8 through the pump: Framer garbles before Active, and in Disconnected ──

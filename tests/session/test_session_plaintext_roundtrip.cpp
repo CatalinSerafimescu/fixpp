@@ -68,6 +68,7 @@
 #include "support/hooked_store.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/validation_test_dictionary.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
@@ -208,7 +209,8 @@ std::atomic<bool> g_first_byte_captured{false};
 // kInitiatorHold), then closes.
 asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t acceptor_port,
                                           std::string sender, std::string target,
-                                          std::string logon_extra = {}) {
+                                          std::string logon_extra = {},
+                                          std::vector<std::byte> trailing = {}) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         asio::ip::tcp::socket sock{ioc};
@@ -230,6 +232,8 @@ asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t accept
             g_first_byte_captured.store(true, std::memory_order_release);
         }
 
+        // Frames coalesced behind the Logon go out in the same write.
+        logon.insert(logon.end(), trailing.begin(), trailing.end());
         co_await asio::async_write(sock, asio::buffer(logon.data(), logon.size()),
                                    asio::redirect_error(asio::use_awaitable, ec));
 
@@ -636,6 +640,8 @@ struct CloseDuringLogonApp final : sess::Application {
         std::optional<sess::fsm_state> state_at_close_return;
         int on_logon = 0;
         std::vector<std::string> to_admin_after_close_started;
+        // The number of states in the session's state ring when the posted close began.
+        std::optional<std::size_t> ring_at_close_start;
         // The clock's parked sleeps when close()'s own Logout reached toAdmin.
         std::optional<std::size_t> inflight_at_close_logout;
     };
@@ -661,6 +667,7 @@ struct CloseDuringLogonApp final : sess::Application {
                 ex,
                 [this]() -> asio::awaitable<void> {
                     seen.close_started = true;
+                    seen.ring_at_close_start = held->fsm_visit_history().size();
                     auto r = co_await held->close(*mode);
                     seen.close_ok = r.has_value();
                     seen.state_at_close_return = held->state();
@@ -708,6 +715,14 @@ struct LogonCloseCase {
     bool close_from_on_logon = false;
     bool hold_until_close_reset = false;  // see HookedStore::Hooks
     bool cancel_sleeps_before_stop = true;
+    // Inbound validation on, over the validation test dictionary.
+    bool validate = false;
+    // Frames the peer writes in the same write as its Logon (or Logon-ack).
+    std::vector<std::byte> trailing;
+    // close(graceful)'s store flush holds until the session has counted a garbled frame
+    // (HookedStore::Hooks::flush_until), so a trailing frame that follows the frames under
+    // test, and is garbled, shows the pump delivered them while close() was under way.
+    bool flush_hold_until_garble = false;
 };
 
 struct LogonCloseOutcome {
@@ -727,6 +742,8 @@ struct LogonCloseOutcome {
     std::shared_ptr<StoreLog> store_log;
     std::optional<sess::seqnum_t> store_next_inbound;
     std::optional<sess::seqnum_t> store_next_outbound;
+    // The session's garbled_frame_count() at settle.
+    std::uint64_t garbled = 0;
 };
 
 // Space-separated; an FSM state prints as its enum value.
@@ -791,6 +808,35 @@ asio::awaitable<void> run_raw_logon_acceptor(asio::io_context& ioc, asio::ip::tc
     }
 }
 
+// The validation test dictionary with ResetSeqNumFlag(141) declared on the Logon, so a
+// Logon carrying 141=Y validates and only the frames a cell makes invalid are rejected.
+std::shared_ptr<const fixpp::dict::Dictionary> make_validation_dictionary_with_141() {
+    std::string xml{fixpp::test_support::kValidationTestFix42Xml};
+    auto insert_after = [&xml](std::string_view anchor, std::string_view text) {
+        auto const at = xml.find(anchor);
+        if (at == std::string::npos) return false;
+        xml.insert(at + anchor.size(), text);
+        return true;
+    };
+    if (!insert_after(R"(<field number="108" name="HeartBtInt"    required="Y"/>)",
+                      R"(<field number="141" name="ResetSeqNumFlag" required="N"/>)") ||
+        !insert_after(R"(<field number="112" name="TestReqID"    type="STRING"/>)",
+                      R"(<field number="141" name="ResetSeqNumFlag" type="BOOLEAN"/>)")) {
+        return nullptr;
+    }
+    constexpr std::size_t kBufSize = 128U * 1024U;
+    auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
+    auto* raw_dict = new fixpp::dict::Dictionary{fixpp::dict::XmlLoader{}.load_from_string(xml, mr)};
+    auto* raw_buf = buf.release();
+    return std::shared_ptr<const fixpp::dict::Dictionary>{
+        raw_dict, [mr, raw_buf](const fixpp::dict::Dictionary* p) {
+            delete p;
+            delete mr;
+            delete raw_buf;
+        }};
+}
+
 // The io_context, clock, application and Engine one cell runs on.
 struct CaseRig {
     asio::io_context ioc;
@@ -819,7 +865,9 @@ struct CaseRig {
         cfg.executor_override = ioc.get_executor();
         cfg.security_profile =
             sess::SecurityProfile{sess::SecurityProfile::kind::insecure_plain_tcp};
-        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = c.validate ? make_validation_dictionary_with_141()
+                                    : fixpp::test_support::make_minimal_dictionary();
+        cfg.validate_inbound_messages = c.validate;
         cfg.reset_seqnum_policy_field = sess::reset_seqnum_policy::bilateral_lenient;
         cfg.heartbeat_interval = std::chrono::seconds{30};
         cfg.logout_disconnect_timeout_ms = 500;
@@ -842,6 +890,11 @@ struct CaseRig {
                 factory->hooks.on_outbound_persist = [a = app] { a->post_close(); };
             }
             factory->hooks.hold_until_close_reset = c.hold_until_close_reset;
+            if (c.flush_hold_until_garble) {
+                factory->hooks.flush_until = [a = app] {
+                    return a->held && a->held->garbled_frame_count() >= 1U;
+                };
+            }
             store_log = factory->log;
             cfg.store_factory = std::move(factory);
         }
@@ -882,6 +935,7 @@ struct CaseRig {
             out.reset_event = std::ranges::any_of(app->held->recent_events(), [](auto const& ev) {
                 return std::holds_alternative<sess::session_event_sequence_numbers_reset>(ev);
             });
+            out.garbled = app->held->garbled_frame_count();
         }
 
         if (c.cancel_sleeps_before_stop) {
@@ -947,7 +1001,7 @@ LogonCloseOutcome run_acceptor_case(LogonCloseCase const& c) {
     if (out.bound) {
         asio::co_spawn(rig.ioc,
                        run_plain_initiator(rig.ioc, port, "PLAIN-INITIATOR", "PLAIN-ACCEPTOR",
-                                           c.peer_logon_extra),
+                                           c.peer_logon_extra, c.trailing),
                        asio::detached);
     }
     rig.settle_capture_and_stop(c, out);
@@ -966,12 +1020,11 @@ LogonCloseOutcome run_initiator_case(LogonCloseCase const& c) {
                            c)) {
         return out;
     }
-    asio::co_spawn(
-        rig.ioc,
-        run_raw_logon_acceptor(rig.ioc, peer,
-                               make_plain_logon_frame("FIX.4.2", "PLAIN-ACCEPTOR",
-                                                      "PLAIN-INITIATOR", c.peer_logon_extra)),
-        asio::detached);
+    auto reply =
+        make_plain_logon_frame("FIX.4.2", "PLAIN-ACCEPTOR", "PLAIN-INITIATOR", c.peer_logon_extra);
+    reply.insert(reply.end(), c.trailing.begin(), c.trailing.end());
+    asio::co_spawn(rig.ioc, run_raw_logon_acceptor(rig.ioc, peer, std::move(reply)),
+                   asio::detached);
     if (!rig.engine.start().has_value()) return out;
     rig.settle_capture_and_stop(c, out);
     return out;
@@ -998,6 +1051,51 @@ void expect_close_owns_teardown(LogonCloseOutcome const& o) {
 void expect_no_admin_after_close(LogonCloseOutcome const& o) {
     EXPECT_TRUE(o.seen.to_admin_after_close_started.empty())
         << "admin frames after close() began: " << joined(o.seen.to_admin_after_close_started);
+}
+
+// Every state written after the posted close began is close()'s Disconnected.
+void expect_no_state_but_disconnected_after_close(LogonCloseOutcome const& o) {
+    ASSERT_TRUE(o.seen.ring_at_close_start.has_value()) << "the posted close never ran";
+    ASSERT_LE(*o.seen.ring_at_close_start, o.ring.size()) << "ring=" << joined(o.ring);
+    for (std::size_t i = *o.seen.ring_at_close_start; i < o.ring.size(); ++i) {
+        EXPECT_EQ(o.ring[i], sess::fsm_state::Disconnected)
+            << "a state other than Disconnected written after close() began; ring="
+            << joined(o.ring) << " (close began at " << *o.seen.ring_at_close_start << ")";
+    }
+}
+
+// Two frames the peer coalesces behind its Logon (or Logon-ack), from `sender` to
+// `target`: a NewOrderSingle at 34=2 that the validation test dictionary rejects (no
+// ClOrdID(11)), then a Heartbeat at 34=3 whose third field is not MsgType(35), which the
+// arm disregards as garbled and counts whatever the state.
+std::vector<std::byte> invalid_then_garbled(std::string_view sender, std::string_view target) {
+    auto field = [](int tag, std::string_view v) {
+        return std::to_string(tag) + "=" + std::string(v) + "\x01";
+    };
+    auto const ts = utc_now_fix_timestamp();
+    auto invalid = make_fix_frame("FIX.4.2", field(35, "D") + field(34, "2") + field(49, sender) +
+                                                 field(52, ts) + field(56, target) +
+                                                 field(54, "1") + field(60, ts));
+    auto const garbled =
+        make_fix_frame("FIX.4.2", field(34, "3") + field(35, "0") + field(49, sender) +
+                                      field(52, ts) + field(56, target));
+    invalid.insert(invalid.end(), garbled.begin(), garbled.end());
+    return invalid;
+}
+
+// #523 (093 quickstart Q-22): the frames coalesced behind the Logon reach the arm while
+// close() is under way, and the arm acts on none of them. The garbled one is counted
+// (the positive control: the pump delivered them before the flush released), the
+// invalid one draws no Reject, no admin frame reaches toAdmin and no state other than
+// close()'s Disconnected is written after close() began.
+void expect_coalesced_frames_inert(LogonCloseOutcome const& o) {
+    ASSERT_TRUE(o.store_log);
+    EXPECT_EQ(o.store_log->flushes_begun, 1) << "close(graceful)'s flush";
+    EXPECT_FALSE(o.store_log->flush_hold_timed_out)
+        << "the garbled trailing frame was not counted within the flush hold's bound";
+    EXPECT_EQ(o.garbled, 1U) << "garbled_frame_count(): the trailing 35-not-third frame";
+    expect_no_admin_after_close(o);
+    expect_no_state_but_disconnected_after_close(o);
 }
 
 // close(graceful) from LogonReceived runs its own phase-1 Logout.
@@ -1248,6 +1346,27 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseFromOnLogonStartsNoLiveness) {
     expect_close_from_on_logon_starts_no_liveness(o);
 }
 
+// #523 (093 tasks.md T075; quickstart Q-22; contract C-2 step 2): validation is on, and
+// the peer writes a dictionary-invalid NewOrderSingle and a garbled Heartbeat in the
+// same write as its Logon. close(graceful) is posted from the store's first hydrate
+// read, and its store flush holds until the garbled Heartbeat is counted, so the invalid
+// frame reaches the NotConnected arm while close() is under way. The arm acts on it in
+// no way: no Reject, no admin frame to toAdmin, no state but close()'s Disconnected.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrateActsOnNoCoalescedFrame) {
+    auto o = run_acceptor_case(
+        {.mode = sess::close_mode::graceful,
+         .arm_on = "",
+         .store_outbound_next = 1,
+         .close_from_hydrate = true,
+         .validate = true,
+         .trailing = invalid_then_garbled("PLAIN-INITIATOR", "PLAIN-ACCEPTOR"),
+         .flush_hold_until_garble = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_coalesced_frames_inert(o);
+}
+
 // Initiator control: no close. Asserts the initiator reaches Active with no
 // Disconnected in the ring and one onLogon.
 TEST(LogonCloseDuringSuspension, InitiatorControlNoCloseReachesActive) {
@@ -1280,6 +1399,29 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFram
     expect_no_admin_after_close(o);
     EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min + 1})
         << "store writes: " << store_writes(o);
+}
+
+// #523 (093 tasks.md T075; quickstart Q-22; contract C-2 step 2): validation is on, and
+// the peer writes a dictionary-invalid NewOrderSingle and a garbled Heartbeat in the
+// same write as its Logon-ack, which carries 141=Y. close(graceful) is posted from the
+// arm's peer reset(), and its store flush holds until the garbled Heartbeat is counted,
+// so the invalid frame reaches the LogonSent arm while close() is under way. The arm
+// acts on it in no way: no Reject, no admin frame to toAdmin, no state but close()'s
+// Disconnected.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetActsOnNoCoalescedFrame) {
+    auto o = run_initiator_case(
+        {.mode = sess::close_mode::graceful,
+         .arm_on = "",
+         .peer_logon_extra = "141=Y\x01",
+         .store_outbound_next = 1,
+         .close_from_reset = true,
+         .validate = true,
+         .trailing = invalid_then_garbled("PLAIN-ACCEPTOR", "PLAIN-INITIATOR"),
+         .flush_hold_until_garble = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_coalesced_frames_inert(o);
 }
 
 // Initiator: reset_on_logon is set, so the initiator's own Logon carries 141=Y at
