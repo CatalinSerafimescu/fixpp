@@ -18,7 +18,7 @@ were re-derived at Gate A round 1. C-1 W-2, C-3 I-5, C-4, C-6, C-7 and C-8 were 
 | Bytes at the candidate | Framer outcome | Pump action |
 |---|---|---|
 | a well-formed frame of ≤ L bytes | frame | deliver to `on_inbound_frame` |
-| a BodyLength over L, or a frame length over L (both known before the CheckSum is read) | `wire_frame_too_large` | **close** (`close(terminal)`), with an event and a log |
+| a BodyLength over L, or a frame length over L (both known before the CheckSum is read) | `wire_frame_too_large` | **close** (`close(terminal)`), with a log record carrying the kind and L (no `SessionEvent`: E-5 adds none for it; plan OD-24) |
 | carry overflow | `wire_frame_too_large` | **close**, as above |
 | not `8=` at a frame boundary (leading junk) | garble, kind `wire_framing_resync` | counted in the feed's summary; search resumes |
 | a BeginString value longer than the BeginString cap (W-2), with no SOH, at any candidate (a frame boundary included) | garble, kind `wire_framing_resync` | as above |

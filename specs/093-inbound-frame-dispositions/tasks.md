@@ -769,7 +769,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 - [ ] T055 [US3] Via `phase-implementer`, Q-6 through the pump and the FR-013 reversal:
   - in `tests/session/inbound_frame_dispositions_test.cpp` and `tests/session/engine_readpump_test.cpp`:
     a frame of L+1, one of L+1 with a bad CheckSum, and an over-L BodyLength at a resync candidate each
-    close terminally with an event and a log, with no guard or handler reached (no callback, no Reject,
+    close terminally with a log record (no `SessionEvent`; plan OD-24), with no guard or handler reached (no callback, no Reject,
     NextNumIn unchanged), in Active and in every pre-Active state, with a configured 383; RED: before
     Active such a frame is exempt today and in Active it only writes Disconnected with the transport
     open; the bad-CheckSum variant's RED is the reorder mutant (T019);

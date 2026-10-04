@@ -324,6 +324,20 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
     because its header is capped and an over-L BodyLength is refused before the CheckSum (OD-4), and one
     read adds ≤ R. The L-1 pin that named carry overflow is re-based as a Q-6 over-L cell. The Framer's
     own carry-overflow branch stays and is covered at Framer level.
+- **OD-24: an over-L close records no `SessionEvent`, and the late-site cells lower the entry cap**
+  (added at implementation, Phase 5, 2026-10-04).
+  - Contract C-1's over-L row said "with an event and a log", but E-5 adds no alternative for it, and
+    `Session::close(terminal)` emits none. Its observables are the terminal close (Disconnected, not open,
+    transport closed) and the new log record carrying the kind and L. Alternative: a new public
+    `session_event_frame_too_large`. Rejected: a public API addition Gate A did not review, and a
+    duplicate of the close the application already observes.
+  - The `LateSite_*` cells and Q-15 trigger their late close with a lower entry cap, through
+    `session_test_access::lower_inbound_entry_cap`. The session stores N(L) as a member beside the
+    parse buffer's span. This keeps those cells lane-independent, as the base's entry-cap trigger was.
+    A bytes-only shrink (`session_test_access::shrink_parse_buffer`) fails the parse only where the
+    spill witness is null; MSVC debug forwards to the heap. So it is used only where a cell needs the
+    byte budget itself (T069/T070, and one Q-15 arm, on null-upstream lanes, branching on
+    `arena_upstream()` as T060 does).
 
 ## What changes for whom
 
