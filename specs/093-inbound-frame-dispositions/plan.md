@@ -370,6 +370,25 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
       primitive.
     - Disclose the store-cancellation window instead. Rejected: the fix is local to `run_reset_unit_`, and
       it makes FR-041's guarantee hold by construction.
+- **OD-26: OD-25 extends to every suspension-then-effect window in the Logon arms, and the separate
+  awaitable thread is what makes the store operation stop-immune** (added at implementation, Phase 7,
+  2026-10-04).
+  - **The binding.** The empty-slot binding stays, as FR-041's by-construction guarantee against any
+    emission kind. In production, immunity to stop's total emit comes from running `reset_to` on its own
+    awaitable thread: its slot forwards only through the arm's filter, which is terminal-only after the
+    manager set's first lock. So a "drop the binding" mutant may survive; it is recorded as priced. The
+    discriminating mutant is "run `reset_to` inline".
+  - **The windows.** Re-deriving N1 over callees found suspension-then-effect windows that OD-25 did not
+    name. All are inside FR-041/FR-030's promise, so they are fixed, not disclosed:
+    - wire effects: `refuse_logon_with_logout_`, the acceptor's SendingTime and 1137 Rejects, the
+      initiator's SendingTime Logout, and `emit_session_reject_`'s validate path. Each passes the arm into
+      `store_then_emit`, and each distinct site has its own cell, because a forgotten argument is the defect
+      to fear;
+    - error-path Disconnected writes after a store suspension. These go through one member that checks
+      the predicate first, witnessed by a read-failure cell and a write-failure cell, with a grep census in
+      the evidence file showing that every such write in the arms goes through it.
+  - Alternative: disclose the error-path writes as an L-row. Rejected: the guarantee is a MUST and one
+    helper covers them.
 ## What changes for whom
 
 | Who | What changes | Declared where |
