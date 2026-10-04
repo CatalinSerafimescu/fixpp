@@ -2279,6 +2279,21 @@ set_tests_properties(session_inbound_frame_dispositions PROPERTIES LABELS "093;s
 # transport double, which is the timer and coroutine class §VII.8 keeps out of a bucket.
 add_threading_test(session_engine_establishment_timeout engine_establishment_timeout_test.cpp)
 set_tests_properties(session_engine_establishment_timeout PROPERTIES LABELS "093;session")
+# Q-16's TOML arm (tasks.md T093) loads a TOML document with load_toml_config and drives
+# the SessionConfig it returns; a timer cell, so it lives here rather than in the
+# config_044_tests bucket. The loader links fixpp_tls PRIVATE, whose OpenSSL does not
+# propagate to a test executable (the resolution at the top of this file). The loader
+# requires a [dictionary]; FIXPP_DICT_DATA_DIR locates the one the document names.
+target_link_libraries(session_engine_establishment_timeout PRIVATE
+  fixpp::config_toml
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+)
+target_compile_definitions(session_engine_establishment_timeout PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE

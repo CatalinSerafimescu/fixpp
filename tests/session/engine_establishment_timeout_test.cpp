@@ -28,6 +28,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -44,12 +46,15 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fstream>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -525,6 +530,87 @@ TEST(EstablishmentTimeoutQ35, DefaultIsTenSecondsAndASilentPeerIsClosedAtTenSeco
     EXPECT_FALSE(before.read_ended) << "closed before 10 s";
     EXPECT_EQ(before.timeouts, 0U);
     EXPECT_TRUE(closed) << "not closed at 10 s";
+}
+
+// ── Q-16's TOML arm (data-model E-7; tasks.md T093) ─────────────────────────
+//
+// A TOML document sets logon_timeout_ms, and the SessionConfig load_toml_config
+// returns for it drives the initiator. It is completed only with what the loader
+// leaves to the host (the executor, data-model E-3 of 044) and the rig's plumbing
+// (the endpoint it listens on and the initial transport_send). Still open at
+// T - 1 ms; closed at T.
+TEST(EstablishmentTimeoutQ16, TomlLoadedSession_ClosedAtTheLoadedTNotBefore) {
+    constexpr auto kT = 1500ms;
+    auto const path =
+        std::filesystem::temp_directory_path() /
+        ("fixpp_093_logon_timeout_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".toml");
+    {
+        std::ofstream out{path};
+        out << "[clock]\nkind = \"system\"\n"
+               "[store]\nkind = \"memory\"\n"
+               "[dictionary]\nkind = \"path\"\npath = \"" FIXPP_DICT_DATA_DIR
+               "/FIX42.xml\"\n"
+               "[[session]]\n"
+               "sender_comp_id = \"ISLD\"\n"
+               "target_comp_id = \"TW\"\n"
+               "begin_string = \"FIX.4.2\"\n"
+               "role = \"initiator\"\n"
+               "heartbeat_interval = \"30s\"\n"
+               "reset_seqnum_policy = \"bilateral_lenient\"\n"
+               "logon_timeout_ms = "
+            << kT.count()
+            << "\n"
+               "[session.transport]\nkind = \"plaintext\"\nhost = \"127.0.0.1\"\nport = 1\n"
+               "[session.security_profile]\nkind = \"insecure_plain_tcp\"\n";
+    }
+    pr::Rig rig;
+    fixpp::config::LoadOptions opts;
+    opts.engine_executor = rig.ioc.get_executor();
+    auto loaded = fixpp::config::load_toml_config(path, opts);
+    std::error_code rm_ec;
+    std::filesystem::remove(path, rm_ec);
+    std::string diagnostics;
+    if (!loaded) {
+        for (auto const& d : loaded.error())
+            diagnostics += " [" + d.key_path + ": " + d.message + "]";
+    }
+    ASSERT_TRUE(loaded.has_value()) << "the TOML document did not load:" << diagnostics;
+    ASSERT_EQ(loaded->sessions.size(), 1U);
+    SessionConfig cfg = loaded->sessions[0].config;
+    EXPECT_EQ(cfg.logon_timeout_ms, static_cast<std::uint32_t>(kT.count()));
+    cfg.executor_override = rig.ioc.get_executor();
+    cfg.transport_send = [](std::span<const std::byte>) {};
+
+    bool const up = rig.start(std::move(cfg)) && rig.run_until([&] {
+        return !pr::frames_of_type(rig.peer.received, "A").empty() &&
+               rig.state() == fsm_state::LogonSent;
+    });
+    Snapshot before;
+    Snapshot after;
+    bool closed = false;
+    if (up) {
+        // KIND D (ci/mock-clock-staging-sweep.sh): the deadline is a stored anchor
+        // predating the advance; nothing must fire at T - 1 ms.
+        rig.clock->advance(kT - 1ms);
+        rig.settle();
+        before = snapshot(rig);
+        // KIND D (ci/mock-clock-staging-sweep.sh): the deadline is a stored anchor
+        // predating the advance, so a late arm fires at once.
+        rig.clock->advance(1ms);
+        closed = rig.run_until([&] {
+            auto const o = snapshot(rig);
+            return o.read_ended && o.timeouts == 1U;
+        });
+        after = snapshot(rig);
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up) << "the TOML-loaded initiator did not reach LogonSent";
+    EXPECT_FALSE(before.read_ended) << "closed before T";
+    EXPECT_EQ(before.timeouts, 0U);
+    EXPECT_TRUE(closed) << "not closed at T";
+    EXPECT_EQ(after.timeouts, 1U);
 }
 
 // ── Q-18: the deadline's clock ──────────────────────────────────────────────

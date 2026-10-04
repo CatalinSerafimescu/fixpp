@@ -613,3 +613,25 @@ add_test(NAME capi_dict066_clone_membership_copy_oom
   COMMAND capi_dict066_clone_membership_copy_oom_test)
 set_tests_properties(capi_dict066_clone_membership_copy_oom PROPERTIES
   LABELS "066;us1;capi")
+
+# 093-inbound-frame-dispositions (contract C-7; tasks.md T090, T091, T102): the C-ABI
+# surface 093 adds (the logon-timeout setter, the garbled-frame getter), Q-33's C group
+# getters at headroom exhaustion, and Q-37's witnesses for C-7 rows 1 to 6. Standalone,
+# not a grouped bucket ([const §VII.8]): every cell runs a live engine with its worker
+# thread and real-time timers, and one runs a second reader thread for the getter's
+# "thread-safe" token. The witness file and the support header name no 093 symbol, so
+# they compile against the merge-base tree (T102). FIXPP_DICT_DIR locates FIX44.xml.
+add_executable(capi_inbound_frame_dispositions_test
+  inbound_frame_dispositions_capi_test.cpp
+  inbound_frame_dispositions_c7_witness_test.cpp)
+target_link_libraries(capi_inbound_frame_dispositions_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_inbound_frame_dispositions_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_inbound_frame_dispositions_test PRIVATE
+  "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_dispositions_test)
+set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 300)

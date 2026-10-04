@@ -60,6 +60,7 @@ heartbeat_interval        = "30s"     # SessionConfig default: nullopt
 test_request_threshold    = "15000ms" # nullopt
 sending_time_threshold    = "5000ms"  # nullopt
 logout_disconnect_timeout_ms = 5000   # default 2000
+logon_timeout_ms             = 7000   # default 10000 (093, data-model E-7)
 
 # Bool knobs — INVERTED from struct defaults where possible
 reset_on_logon               = true   # default false
