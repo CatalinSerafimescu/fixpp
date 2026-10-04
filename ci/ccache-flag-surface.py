@@ -9,8 +9,13 @@ Run from the library root. Prints a normalized text; ci/ccache-cache-key.sh
 (`ccache_flag_digest`) hashes it into the tag. Exits non-zero, printing why on
 stderr, when any input cannot be read or parsed. A partial surface would be a
 STABLE WRONG key that restore and seed agree on, so there is no fallback.
-`--list-inputs` prints the files every lane's extract reads (the per-lane
-preset and Conan profile are not in it), so a harness can copy exactly those.
+`--list-inputs` prints the files the CMake surface can be built from, the
+unpruned union over all lanes, plus the wheel's inputs (the per-lane preset
+and Conan profile are not in it), so a harness can copy exactly those. It is
+NOT every file an extract reads: the #513 prune also lists, through git, and
+parses every tracked CMakeLists.txt and *.cmake to find writes, and a file
+there that cannot be listed or parsed turns pruning off rather than failing
+the extract (over-rotation only, and silent).
 
 ── WHY A NORMALIZED EXTRACT, NOT THE FILES' BYTES ─────────────────────────────
 
@@ -22,7 +27,8 @@ only the commands that can change a compile command line are kept:
 
   * CMake — the root CMakeLists.txt, every cmake/*.cmake (the root-scope
     modules), and every CMakeLists.txt an `add_subdirectory()` reaches from the
-    root, followed whatever `if()` encloses it. Kept: flag commands
+    root, followed whatever `if()` encloses it EXCEPT the pruned bodies below
+    (#513). Kept: flag commands
     (FLAG_COMMANDS), `set`/`unset`/`string`/`list` of a flag variable
     (FLAG_VAR), property commands naming a flag property, `option()` as name +
     default (its docstring is dropped), `include()`, top-level `return()`, and
@@ -39,6 +45,20 @@ only the commands that can change a compile command line are kept:
     on to a fixpoint, so a default set in one file and handed to a flag
     command in another rotates the tag. A `set(... CACHE <type> <docstring>)`
     drops its docstring, as `option()` does.
+    PRUNE (#513): the first-branch body of an `if(<VAR>)` whose head is
+    exactly one bare name is not searched for `add_subdirectory()` when VAR's
+    value for the lane is a known CMake-false constant, so a subtree the lane
+    never configures (the wheel's tests/) does not rotate its tag. The value is
+    the resolved preset's cacheVariables (host) or pyproject's
+    [tool.scikit-build.cmake.define] (wheel), else the default of VAR's one
+    option(). VAR is unknown, and the body searched, when any tracked
+    CMakeLists.txt or *.cmake names VAR as a bare argument of any command
+    other than an if/elseif/while head, message() or that one option() (so a
+    second option() counts); when the wheel's other pyproject keys or its
+    CIBW_ENVIRONMENT mention VAR; and in a function or macro body. "Tracked"
+    is `git ls-files`, so a build tree's generated *.cmake cannot make restore
+    and seed disagree; outside a git work tree nothing is pruned.
+    `--list-inputs` is the unpruned union.
   * host lanes — the preset's cacheVariables and environment resolved through
     `inherits`, and conan/profiles/<preset> with comments dropped (its
     `tools.build:cxxflags` reach every first-party TU via the toolchain).
@@ -57,7 +77,10 @@ value computed by another command, or inside a function that is not itself
 kept), a CMake file reached other than through `include()` of cmake/*.cmake or
 an `add_subdirectory()` in a CMakeLists.txt (one in a cmake/*.cmake module is
 not followed), `-D`/environment passed by a workflow step other than the
-wheel's `CIBW_ENVIRONMENT`, and header CONTENT.
+wheel's `CIBW_ENVIRONMENT` (so a lane that turns on, by `-D`, a subtree its
+preset leaves OFF builds a subtree its tag is not keyed on), a write to VAR
+through a computed name (`set(${name} ...)`, cmake_parse_arguments), and
+header CONTENT.
 A trailing comment on a cibw-before-all.sh command line is hashed as part of
 that line, which only over-rotates. When a floored lane breaches on a HIT,
 check whether its cause lies in one of those; if it does, widen the surface
@@ -65,8 +88,10 @@ here rather than dropping GHCR tags by hand.
 """
 
 import json
+import os
 import posixpath
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -90,6 +115,10 @@ CLOSERS = set(OPENERS.values())
 BRANCHES = {"elseif", "else"}
 VAR_REF = re.compile(r"\$\{([^${}]+)\}")
 BARE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# CMake's false constants (if() docs), compared upper-cased; "*-NOTFOUND" too.
+CMAKE_FALSE = {"", "0", "OFF", "NO", "FALSE", "N", "IGNORE", "NOTFOUND"}
+# Commands naming VAR without writing it, for the #513 write scan.
+NON_WRITERS = {"if", "elseif", "else", "endif", "while", "endwhile", "message"}
 CIBW_BEFORE_ALL = "bindings/python/cibw-before-all.sh"
 WHEEL_WORKFLOW = ".github/workflows/tier1.yml"
 PYPROJECT = "bindings/python/pyproject.toml"
@@ -294,9 +323,32 @@ def read_text(path):
         raise SurfaceError(f"{path}: not UTF-8 ({e.reason} at byte {e.start})") from None
 
 
-def cmake_files():
+def subdir_calls(items, pruned, in_fn=False):
+    """The add_subdirectory() commands in `items`, skipping the first-branch
+    body of every if() head `pruned` accepts (#513). Never inside a function
+    or macro body, where VAR may be a parameter or a local."""
+    for it in items:
+        if isinstance(it, dict):
+            head = it["head"]
+            fn = in_fn or head[0] in ("function", "macro")
+            if head[0] == "if" and not fn and pruned(head):
+                body, skipping = [], True
+                for sub in it["items"]:
+                    if skipping and not isinstance(sub, dict) and sub[0] == "__branch__":
+                        skipping = False
+                    if not skipping:
+                        body.append(sub)
+                yield from subdir_calls(body, pruned, fn)
+            else:
+                yield from subdir_calls(it["items"], pruned, fn)
+        elif it[0] == "add_subdirectory":
+            yield it
+
+
+def cmake_files(pruned=lambda head: False):
     """[(path, tree)]: the root CMakeLists.txt, cmake/*.cmake, then every
-    CMakeLists.txt reached through add_subdirectory() from the root.
+    CMakeLists.txt reached through add_subdirectory() from the root, outside
+    the if() bodies `pruned` accepts (none by default: the union).
 
     add_subdirectory() is FOLLOWED rather than the tree globbed: a glob would
     also see a build directory's _deps/, which exists when seed runs and not
@@ -313,9 +365,7 @@ def cmake_files():
         i += 1
         if path != "CMakeLists.txt" and not path.endswith("/CMakeLists.txt"):
             continue  # a cmake/*.cmake module is include()d, not a directory
-        for name, args in flat_commands(tree):
-            if name != "add_subdirectory":
-                continue
+        for name, args in subdir_calls(tree, pruned):
             if not args:
                 raise SurfaceError(f"{path}: add_subdirectory() with no directory")
             sub = args[0].strip('"')
@@ -421,9 +471,89 @@ def cmake_surface(trees):
         closure |= refs
 
 
+# ── the #513 prune: which if(<VAR>) bodies a lane provably does not configure ─
+
+def tracked_cmake_commands():
+    """{path: [commands]} for every tracked CMakeLists.txt and *.cmake under the
+    cwd, or None when that cannot be listed or a file cannot be parsed (then
+    nothing is pruned). From `git ls-files`, never a walk, for the reason
+    cmake_files() gives."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")}
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z", "--", "CMakeLists.txt", "*/CMakeLists.txt", "*.cmake"],
+            capture_output=True, check=True, env=env).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    cmds = {}
+    for path in sorted(p for p in out.decode("utf-8", "surrogateescape").split("\0") if p):
+        try:
+            cmds[path] = parse_cmake(read_text(path), path)
+        except SurfaceError:
+            return None
+    return cmds
+
+
+def cmake_value_false(value):
+    """True when `value` (a preset or pyproject value) is a CMake-false
+    constant; False for a true one AND for anything that is not a constant."""
+    if isinstance(value, dict):
+        value = value.get("value")
+    if isinstance(value, bool):
+        return not value
+    if not isinstance(value, str) or "$" in value:
+        return False
+    v = value.strip().upper()
+    return v in CMAKE_FALSE or v.endswith("-NOTFOUND")
+
+
+def lane_pruner(lane_values, mentions):
+    """The `pruned` predicate for cmake_files(): accepts an if() head that is
+    one bare name VAR known CMake-false for the lane. `lane_values` is what the
+    lane sets ({VAR: value}, a None value meaning unset); `mentions` is text in
+    which any occurrence of VAR makes it unknown."""
+    tracked = tracked_cmake_commands()
+    if tracked is None:
+        return lambda head: False
+    cache = {}
+
+    def known_false(var):
+        if var in mentions:
+            return False
+        options, written = [], False
+        for path, cmds in tracked.items():
+            for name, args in cmds:
+                if name in NON_WRITERS or var not in (a.strip('"') for a in args):
+                    continue
+                if name == "option" and args and args[0] == var:
+                    options.append(args)
+                else:
+                    written = True
+        if written or len(options) > 1:
+            return False
+        if lane_values.get(var) is not None:
+            return cmake_value_false(lane_values[var])
+        if not options:
+            return False
+        opt = options[0]
+        default = opt[2].strip('"') if len(opt) >= 3 else "OFF"
+        return cmake_value_false(default)
+
+    def pruned(head):
+        args = head[1]
+        if len(args) != 1 or not BARE_NAME.fullmatch(args[0]):
+            return False
+        if args[0] not in cache:
+            cache[args[0]] = known_false(args[0])
+        return cache[args[0]]
+    return pruned
+
+
 # ── non-CMake inputs ─────────────────────────────────────────────────────────
 
-def resolved_preset(preset):
+def preset_cache(preset):
+    """The preset's cacheVariables and environment, resolved through inherits."""
     try:
         data = json.loads(Path("CMakePresets.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
@@ -449,7 +579,11 @@ def resolved_preset(preset):
         env.update(p.get("environment") or {})
         return cache, env
 
-    cache, env = resolve(preset, frozenset())
+    return resolve(preset, frozenset())
+
+
+def resolved_preset(preset):
+    cache, env = preset_cache(preset)
     return [
         "preset.cacheVariables " + json.dumps(cache, sort_keys=True),
         "preset.environment " + json.dumps(env, sort_keys=True),
@@ -472,14 +606,34 @@ def conan_profile(preset):
     return lines
 
 
-def wheel_pyproject():
+def pyproject_tool():
     import tomllib
     path = PYPROJECT
     try:
         cfg = tomllib.loads(read_text(path))
     except ValueError as e:
         raise SurfaceError(f"{path}: {e}") from None
-    tool = cfg.get("tool", {})
+    return cfg.get("tool", {})
+
+
+def wheel_prune_inputs():
+    """(lane values, mentions) for the wheel lane's lane_pruner: the values
+    are [tool.scikit-build.cmake.define]; every other scikit-build key (args,
+    overrides, ...), every cibuildwheel key (config-settings, environment, the
+    linux table) and the step's CIBW_ENVIRONMENT are text in which a mention of
+    VAR makes it unknown."""
+    tool = pyproject_tool()
+    skb = json.loads(json.dumps(tool.get("scikit-build", {}), default=str))
+    define = skb.get("cmake", {}).pop("define", None) or {}
+    mentions = "\n".join([
+        json.dumps(skb, sort_keys=True),
+        json.dumps(tool.get("cibuildwheel", {}), sort_keys=True, default=str),
+    ] + wheel_cibw_environment())
+    return define, mentions
+
+
+def wheel_pyproject():
+    tool = pyproject_tool()
     skb = tool.get("scikit-build", {})
     cmake = skb.get("cmake", {})
     cibw = tool.get("cibuildwheel", {})
@@ -548,11 +702,16 @@ def main(argv):
               file=sys.stderr)
         return 2
     try:
-        trees = cmake_files()
         if listing:
+            trees = cmake_files()
             lines = [p for p, _ in trees] + [PYPROJECT, CIBW_BEFORE_ALL, WHEEL_WORKFLOW]
         else:
             kind, name = argv[1], argv[2]
+            if kind == "host":
+                pruned = lane_pruner(preset_cache(name)[0], "")
+            else:
+                pruned = lane_pruner(*wheel_prune_inputs())
+            trees = cmake_files(pruned)
             lines = cmake_surface(trees)
             if kind == "host":
                 lines += resolved_preset(name) + conan_profile(name)
