@@ -7,7 +7,12 @@
 # (possibly shipped) feature. The pin now records the git branch it was written
 # on, and get_feature_paths trusts it only on that branch, or when it names an
 # existing specs/<branch> itself; otherwise it is ignored in favour of specs/<branch>
-# (with a NOTE) when that bundle exists, and refused when it does not. After a
+# (with a NOTE) when that bundle exists, and refused when it does not.
+# fixpp#499: a branch NAME outlives the branch (delete it, re-create it from a
+# base that merged the pin), so the pin also records "pinned_at", the commit HEAD
+# named when it was written, and trusting it by branch name additionally needs
+# that commit to still identify the branch (_pin_identity_ok). A pin without
+# "pinned_at" keeps the name-only rule. After a
 # refresh, run test-feature-pin.sh (beside this file) — it goes RED if the
 # patch was dropped. Nothing runs it automatically.
 
@@ -167,10 +172,61 @@ _git_current_branch() {
     return 0
 }
 
+# git at repo_root with the repo-selection variables dropped, as in
+# _git_current_branch, so a leaked GIT_DIR cannot answer for another repo.
+_git_at() {
+    local root="$1"; shift
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR git -C "$root" "$@"
+}
+
+# The full id of the commit HEAD names at repo_root, or empty (unborn branch, not
+# a git tree, git failure).
+_git_head_commit() {
+    _git_at "$1" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null || true
+}
+
+# _pin_identity_ok <repo_root> <pinned_at> <branch> (fixpp#499): succeeds when
+# pinned_at still identifies the branch checked out at repo_root, i.e.
+#   * it is a full commit id that HEAD names or that lies on HEAD's first-parent
+#     history (merging the base INTO the branch keeps it there), and
+#   * when HEAD has moved past it, the commit that follows it on that history is
+#     not reachable from main or origin/main (unless <branch> is that branch).
+# A branch of the same name re-created from a base that carries the pin fails:
+# after a merge commit or a squash the pinned commit is either off its
+# first-parent history or followed there by a base commit. So does a rebase of
+# the branch onto a newer base, and a fast-forward of a branch that has no
+# commit of its own; both are false refusals, which fail closed, and the
+# refusal names the re-pin that clears them. A pinned commit missing from a
+# shallow clone also fails.
+_pin_identity_ok() {
+    local root="$1" at="$2" branch="$3" head succ base
+    [[ "$at" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || return 1
+    head=$(_git_head_commit "$root")
+    [[ -n "$head" ]] || return 1
+    _git_at "$root" rev-parse -q --verify "${at}^{commit}" >/dev/null 2>&1 || return 1
+    [[ "$head" == "$at" ]] && return 0
+    # The first-parent walk from HEAD stopping at the pinned commit's ancestry:
+    # its last commit is the one following the pinned commit when that commit is
+    # on the walk, and then that commit is its first parent.
+    succ=$(_git_at "$root" rev-list --first-parent "$head" "^$at" 2>/dev/null | tail -n 1)
+    [[ -n "$succ" ]] || return 1
+    [[ "$(_git_at "$root" rev-parse -q --verify "${succ}^1" 2>/dev/null)" == "$at" ]] || return 1
+    for base in main origin/main; do
+        [[ "$base" == "$branch" || "$base" == "origin/$branch" ]] && continue
+        [[ "$base" == main ]] && base=refs/heads/main || base=refs/remotes/origin/main
+        _git_at "$root" rev-parse -q --verify "$base" >/dev/null 2>&1 || continue
+        _git_at "$root" merge-base --is-ancestor "$succ" "$base" 2>/dev/null && return 1
+    done
+    return 0
+}
+
 # Persist a feature_directory value to .specify/feature.json, together with the
 # git branch it was pinned on (fixpp#490; omitted when detached, not in git, or
-# when git cannot read the branch, e.g. dubious ownership).
-# Writes only when the file is missing or either value differs from what's stored.
+# when git cannot read the branch, e.g. dubious ownership) and, with the branch,
+# the commit HEAD names (fixpp#499 "pinned_at"; omitted on an unborn branch).
+# Writes only when the file is missing, the directory or branch differs from
+# what's stored, or the stored pinned_at is missing or no longer identifies the
+# branch; a valid pinned_at is kept, so HEAD moving does not rewrite the file.
 # Accepts the raw (possibly relative) path — callers should pass the original
 # user-supplied value, not the normalized absolute path.
 _persist_feature_json() {
@@ -187,12 +243,20 @@ _persist_feature_json() {
     branch_value=$(_git_current_branch "$repo_root")
     [[ "$branch_value" == HEAD || "$branch_value" == '?' ]] && branch_value=''
 
+    local pinned_at=''
+    [[ -n "$branch_value" ]] && pinned_at=$(_git_head_commit "$repo_root")
+
     # Read current values (if any) and skip write when unchanged
-    local current_val current_branch_val
+    local current_val current_branch_val current_at
     current_val=$(read_feature_json_feature_directory "$repo_root")
     current_branch_val=$(_read_feature_json_key "$repo_root" branch)
+    current_at=$(_read_feature_json_key "$repo_root" pinned_at)
     if [[ "$current_val" == "$feature_dir_value" && "$current_branch_val" == "$branch_value" ]]; then
-        return 0
+        if [[ -z "$pinned_at" ]]; then
+            [[ -z "$current_at" ]] && return 0
+        elif [[ -n "$current_at" ]] && _pin_identity_ok "$repo_root" "$current_at" "$branch_value"; then
+            return 0
+        fi
     fi
 
     # Ensure .specify/ directory exists
@@ -200,8 +264,12 @@ _persist_feature_json() {
 
     # Write feature.json — prefer jq for safe JSON, fall back to printf
     if command -v jq >/dev/null 2>&1; then
-        jq -cn --arg fd "$feature_dir_value" --arg br "$branch_value" \
-            '{feature_directory:$fd} + (if $br == "" then {} else {branch:$br} end)' > "$fj"
+        jq -cn --arg fd "$feature_dir_value" --arg br "$branch_value" --arg at "$pinned_at" \
+            '{feature_directory:$fd} + (if $br == "" then {} else {branch:$br} end)
+             + (if $at == "" then {} else {pinned_at:$at} end)' > "$fj"
+    elif [[ -n "$pinned_at" ]]; then
+        printf '{"feature_directory":"%s","branch":"%s","pinned_at":"%s"}\n' \
+            "$(json_escape "$feature_dir_value")" "$(json_escape "$branch_value")" "$pinned_at" > "$fj"
     elif [[ -n "$branch_value" ]]; then
         printf '{"feature_directory":"%s","branch":"%s"}\n' \
             "$(json_escape "$feature_dir_value")" "$(json_escape "$branch_value")" > "$fj"
@@ -232,7 +300,8 @@ get_feature_paths() {
     # Resolve feature directory.  Priority:
     #   1. SPECIFY_FEATURE_DIRECTORY env var (explicit override)
     #   2. .specify/feature.json "feature_directory" key (persisted by specify
-    #      command) — in a git tree only if it is pinned on the current branch,
+    #      command) — in a git tree only if it is pinned on the current branch
+    #      (and its "pinned_at", when recorded, still identifies it; fixpp#499),
     #      or names specs/<current branch> itself and that bundle exists (fixpp#490)
     #   3. specs/<current branch>, when that bundle exists (fixpp#490)
     #   4. Error — no feature context available
@@ -275,15 +344,24 @@ get_feature_paths() {
         # exists (fixpp#496 Gate B r3). Otherwise it is inherited, and resolving
         # through it would target an unrelated feature.
         # Identity is the whole path, never its basename (fixpp#496 Gate B r2).
-        local pin_fd pin_branch pin_dir branch_bundle="$repo_root/specs/$git_branch"
+        local pin_fd pin_branch pin_at pin_dir branch_bundle="$repo_root/specs/$git_branch"
         pin_fd=$(read_feature_json_feature_directory "$repo_root")
         pin_branch=$(_read_feature_json_key "$repo_root" branch)
+        pin_at=$(_read_feature_json_key "$repo_root" pinned_at)
         pin_dir="${pin_fd%/}"
         [[ -n "$pin_dir" && "$pin_dir" != /* ]] && pin_dir="$repo_root/${pin_dir#./}"
         if [[ -n "$pin_fd" && ( "$pin_branch" == "$git_branch" ||
                 ( "$pin_dir" == "$branch_bundle" && -d "$branch_bundle" ) ) ]]; then
             if [[ -d "$branch_bundle" && "$pin_dir" != "$branch_bundle" ]]; then
                 echo "ERROR: .specify/feature.json pins '$pin_fd' for branch '$git_branch', but that branch also has its own bundle 'specs/$git_branch'. Set SPECIFY_FEATURE_DIRECTORY to the one you mean (fixpp#490)." >&2
+                return 1
+            fi
+            # fixpp#499: trusted by branch NAME (it does not name this branch's
+            # own existing bundle), so a recorded pinned_at must still identify
+            # this branch. A pin without one keeps the name-only rule.
+            if [[ -n "$pin_at" && ! ( "$pin_dir" == "$branch_bundle" && -d "$branch_bundle" ) ]] \
+                    && ! _pin_identity_ok "$repo_root" "$pin_at" "$git_branch"; then
+                echo "ERROR: .specify/feature.json pins '$pin_fd' for branch '$git_branch' at commit '$pin_at', and that commit does not identify this branch: it is not on this branch's own history, as when a branch of the same name is re-created from a base that carries the pin, or the branch was rebased. If '$pin_fd' is this branch's feature, re-pin it here: SPECIFY_FEATURE_DIRECTORY='$pin_fd' .specify/scripts/bash/check-prerequisites.sh --json (fixpp#490, fixpp#499)." >&2
                 return 1
             fi
             feature_dir="$pin_dir"

@@ -7,7 +7,12 @@
 # the tracked .specify/feature.json pin must not resolve an unrelated branch's
 # feature. A pin is trusted only on the branch it records, or when it names an
 # existing specs/<branch> itself — its identity is the whole normalized path, never its
-# basename. Runs the repo's own common.sh + check-prerequisites.sh inside a
+# basename. A pin trusted by branch NAME must also still be identified by its
+# recorded "pinned_at" commit, so a re-created branch of the same name does not
+# inherit a merged pin (fixpp#499, arms 17-20). Every arm runs three times: with
+# jq, with only jq removed (the python3 reader), and with both removed (the
+# grep/sed reader and the printf writer).
+# Runs the repo's own common.sh + check-prerequisites.sh inside a
 # throwaway git repo, so the real pin and working tree are never touched.
 # NOT wired into CI (a .specify/-only change runs no matrix, by choice): run it
 # by hand after any Spec-Kit refresh — a refresh that drops the patch goes RED.
@@ -49,6 +54,22 @@ for i in "${!path_dirs[@]}"; do
         d="$f_dir"
     fi
     nojq="${nojq:+${nojq}:}${d}"
+done
+# A PATH with only jq removed, so the python3 reader runs (fixpp#499): with jq
+# gone it is the first parser tried, and the nojq PATH above removes it too.
+pyonly=''
+for i in "${!path_dirs[@]}"; do
+    d="${path_dirs[$i]}"
+    if [[ -e "$d/jq" ]]; then
+        f_dir="${tmp}/pyonly${i}"
+        mkdir -p "$f_dir"
+        for f in "$d"/*; do
+            [[ "${f##*/}" == jq ]] && continue
+            ln -s "$f" "${f_dir}/${f##*/}" 2>/dev/null || true
+        done
+        d="$f_dir"
+    fi
+    pyonly="${pyonly:+${pyonly}:}${d}"
 done
 
 fails=0
@@ -129,10 +150,14 @@ git -C "$unborn" init -q -b 092-unborn
 git -C "$unborn" config user.name t
 git -C "$unborn" config user.email t@t
 
-for mode in default nojq; do
-    P="$PATH"; [[ "$mode" == nojq ]] && P="$nojq"
+for mode in default nojq pyonly; do
+    P="$PATH"; [[ "$mode" == nojq ]] && P="$nojq"; [[ "$mode" == pyonly ]] && P="$pyonly"
     if [[ "$mode" == nojq ]] && PATH="$P" bash -c 'command -v jq || command -v python3' >/dev/null 2>&1; then
         fail "[$mode] jq or python3 still reachable"; continue
+    fi
+    if [[ "$mode" == pyonly ]] && { PATH="$P" bash -c 'command -v jq' >/dev/null 2>&1 \
+            || ! PATH="$P" bash -c 'command -v python3' >/dev/null 2>&1; }; then
+        fail "[$mode] jq still reachable, or python3 not reachable"; continue
     fi
 
     # 1. Bundle-less branch + legacy pin to a shipped feature -> must refuse.
@@ -347,6 +372,148 @@ for mode in default nojq; do
     else
         fail "[$mode] this-branch pin to a not-yet-created directory: ${out:-}"
     fi
+
+    # --- fixpp#499: a pin trusted by branch NAME must not survive into a
+    #     re-created branch of that name. Each arm builds its own repo, because
+    #     these arms commit the pin and merge it, which the shared $work repo's
+    #     uncommitted-pin arms above must not see. The branch is 094-reuse and
+    #     the pinned bundle specs/090-bundle, so only the branch-name rule can
+    #     honour the pin; specs/094-reuse never exists.
+    reuse="${tmp}/reuse-${mode}"
+    rr() { git -C "$reuse" "$@"; }
+    new_reuse_repo() {
+        rm -rf "$reuse"
+        mkdir -p "${reuse}/.specify/scripts/bash" "${reuse}/specs/090-bundle"
+        cp "${scripts}/common.sh" "${scripts}/check-prerequisites.sh" "${reuse}/.specify/scripts/bash/"
+        : > "${reuse}/specs/090-bundle/spec.md"
+        rr init -q -b main
+        rr config user.name t
+        rr config user.email t@t
+        rr add -A
+        rr commit -q -m root
+    }
+    # Persist a pin the way a Spec-Kit command does: SPECIFY_FEATURE_DIRECTORY
+    # through get_feature_paths without --no-persist.
+    persist_reuse() {
+        (cd "$reuse" && env -u SPECIFY_FEATURE -u SPECIFY_INIT_DIR PATH="$P" \
+            SPECIFY_FEATURE_DIRECTORY="$1" \
+            bash -c 'source .specify/scripts/bash/common.sh && get_feature_paths >/dev/null')
+    }
+    commit_in_reuse() {  # $1 = file to touch, $2 = message
+        printf '%s\n' "$2" >> "${reuse}/$1"
+        rr add -A
+        rr commit -q -m "$2"
+    }
+    honoured_reuse() {  # $1 = arm
+        local out
+        if out="$(resolve_in "$reuse" "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${reuse}/specs/090-bundle" ]]; then
+            pass "[$mode] $1"
+        else
+            fail "[$mode] $1: ${out:-}"
+        fi
+    }
+    refused_reuse() {  # $1 = arm; the refusal must be the identity refusal
+        local out
+        if out="$(resolve_in "$reuse" "$P")"; then
+            fail "[$mode] $1 resolved: $(field FEATURE_DIR "$out")"
+        elif grep -qF 'does not identify this branch' <<< "$out" \
+                && grep -qF 'fixpp#490' <<< "$out" \
+                && grep -qF "SPECIFY_FEATURE_DIRECTORY='specs/090-bundle'" <<< "$out"; then
+            pass "[$mode] $1 refused"
+        else
+            fail "[$mode] $1 failed for the wrong reason: ${out}"
+        fi
+    }
+
+    # 17. RED shape (the issue's): pin on 094-reuse, merge it, delete the
+    #     branch, re-create it from main without specs/094-reuse -> refuse.
+    #     Both pin shapes (pinned before the branch has a commit of its own, as
+    #     /speckit-specify does right after `git switch -c`; and pinned after
+    #     one), under both a merge commit and a squash.
+    for shape in pin-first pin-after-commit; do
+        for how in no-ff squash; do
+            new_reuse_repo
+            rr switch -q -c 094-reuse main
+            [[ "$shape" == pin-after-commit ]] && commit_in_reuse work.txt "own work"
+            if ! persist_reuse specs/090-bundle; then
+                fail "[$mode] arm 17 ($shape, $how): persisting the pin failed"; continue
+            fi
+            honoured_reuse "pin honoured on its own branch before commit ($shape)"
+            rr add -A
+            rr commit -q -m pin
+            honoured_reuse "pin honoured on its own branch after commit ($shape, $how)"
+            rr switch -q main
+            if [[ "$how" == no-ff ]]; then
+                rr merge -q --no-ff -m merge 094-reuse
+            else
+                rr merge -q --squash 094-reuse >/dev/null
+                rr commit -q -m squash
+            fi
+            rr branch -q -D 094-reuse
+            rr switch -q -c 094-reuse main
+            if [[ -e "${reuse}/specs/094-reuse" ]] || ! grep -qF '"branch":"094-reuse"' "${reuse}/.specify/feature.json"; then
+                fail "[$mode] arm 17 precondition ($shape, $how): specs/094-reuse exists or the merged pin is not for 094-reuse"
+                continue
+            fi
+            refused_reuse "re-created branch inheriting a merged pin ($shape, $how)"
+        done
+    done
+
+    # 18. Must honour: main advances and is MERGED into the branch, as this
+    #     repo routinely does; and the branch keeps working after it.
+    new_reuse_repo
+    rr switch -q -c 094-reuse main
+    persist_reuse specs/090-bundle || fail "[$mode] arm 18: persisting the pin failed"
+    rr add -A
+    rr commit -q -m pin
+    commit_in_reuse work.txt "own work"
+    rr switch -q main
+    commit_in_reuse base.txt "main moves on"
+    rr switch -q 094-reuse
+    rr merge -q --no-ff -m "merge main" main
+    honoured_reuse "pin honoured after main is merged into its branch"
+    commit_in_reuse work.txt "more work"
+    honoured_reuse "pin honoured after further work on its branch"
+    # Re-persisting the same, still-valid pin keeps it byte-for-byte: HEAD
+    # moving is not a reason to rewrite the tracked file.
+    before="$(cksum < "${reuse}/.specify/feature.json")"
+    persist_reuse specs/090-bundle || fail "[$mode] arm 18: re-persisting the pin failed"
+    [[ "$(cksum < "${reuse}/.specify/feature.json")" == "$before" ]] \
+        && pass "[$mode] re-persisting a still-valid pin left feature.json untouched" \
+        || fail "[$mode] re-persisting a still-valid pin rewrote feature.json: $(cat "${reuse}/.specify/feature.json")"
+    # A rewrite left uncommitted would stop arm 19's branch switches under set -e.
+    rr checkout -q -- .specify/feature.json
+
+    # 19. Disclosed false refusal: rebasing the branch onto a newer main moves
+    #     it off the commit the pin recorded, so the pin is refused (fail
+    #     closed) with the re-pin remedy; following that remedy restores it.
+    rr switch -q main
+    commit_in_reuse base.txt "main moves again"
+    rr switch -q 094-reuse
+    rr rebase -q main >/dev/null 2>&1 || { rr rebase --abort >/dev/null 2>&1 || true; }
+    if ! rr merge-base --is-ancestor main 094-reuse; then
+        fail "[$mode] arm 19 precondition: the rebase onto main did not complete"
+    else
+        refused_reuse "pin refused after its branch is rebased"
+        # The remedy exactly as the refusal spells it. Its exit status is not
+        # the point (the bundle has no plan.md); the re-pin it leaves is.
+        (cd "$reuse" && env -u SPECIFY_FEATURE -u SPECIFY_INIT_DIR PATH="$P" \
+            SPECIFY_FEATURE_DIRECTORY='specs/090-bundle' \
+            .specify/scripts/bash/check-prerequisites.sh --json >/dev/null 2>&1) || true
+        honoured_reuse "pin honoured again after the re-pin the refusal names"
+    fi
+
+    # 20. Disclosed false refusal: a pin written before the branch has a
+    #     commit of its own, then the branch fast-forwarded to a newer main,
+    #     is refused too (its pinned commit is now followed by a main commit).
+    new_reuse_repo
+    rr switch -q -c 094-reuse main
+    persist_reuse specs/090-bundle || fail "[$mode] arm 20: persisting the pin failed"
+    rr switch -q main
+    commit_in_reuse base.txt "main moves on"
+    rr switch -q 094-reuse
+    rr merge -q --ff-only main
+    refused_reuse "uncommitted pin refused after its branch is fast-forwarded"
 done
 
 if (( fails )); then
