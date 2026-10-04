@@ -30,6 +30,11 @@ were re-derived at Gate A round 1. C-1 W-2, C-3 I-5, C-4, C-6, C-7 and C-8 were 
 "Structurally complete" means that `8=`, `9=<digits>`, `10=` at the counted offset, three digits and a
 trailing SOH are all present.
 
+In the pump, the carry-overflow row is unreachable once the carry is L + R (plan OD-23). A pending
+candidate is at most L bytes, because its header is capped and an over-L BodyLength is refused before the
+CheckSum, and one read adds at most R. The row stands for the Framer's own contract, where Framer-level
+cells drive it.
+
 The close rows apply at every candidate, including one the resync search found. An over-L BodyLength
 inside a garbled region therefore closes; it is not disregarded (FR-013 prevails over FR-001). In the
 pump, no guard or handler reads any field of a frame refused this way. The Framer itself reads only

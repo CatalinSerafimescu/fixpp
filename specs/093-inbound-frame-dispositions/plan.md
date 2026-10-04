@@ -305,7 +305,25 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   - that count ≤ the base's, measured on the merge-base with the same rig.
   A mutant adding one `operator new` on the Active read path must go RED. Alternatives: assert zero only
   over a sub-window (rejected: no clean seam), or drop the count (rejected: it loses the regression
-  guard). The base's per-read allocations are pre-existing, outside 093, and filed as a follow-up.
+  guard). The base's per-read allocations are pre-existing, outside 093, and filed as fixpp#544 (B15).
+- **OD-23: B(L)'s constants, `open()`'s allocation error, and the pump's carry overflow** (added at
+  implementation, Phase 5, 2026-10-04).
+  - `kContainerSlack` is per container (16 bytes, research R-3); the carry block holds one container.
+    B(L)'s slack term is `kParseContainers × (kContainerSlack + kProxyPad)`. `kParseContainers` = 10:
+    the five pmr containers a `MessageView<Index>` constructs (OffsetTable's four vectors plus
+    `unk_items_`), times one plus the single move `Parser::parse` makes on return. MSVC's vector move
+    constructor allocates a proxy too. `kProxyPad` = 7, the padding after a 1-aligned request.
+    `kAlignPad` = 6: (alignof(entry) − 1) + (alignof(uint32_t) − 1).
+  - `kCallbackReadHeadroom` = 16384, the base's whole inbound arena, so E-2's sizing condition holds for
+    every frame at every L by construction. Alternative: the derived minimum of about 7.8 KiB, set by a
+    sparse frame at L = 4096. Rejected: it saves about 8 KiB per session at the cost of a derivation that
+    rots whenever the parse layout changes.
+  - A `bad_alloc` for the carry block or B(L) in `open()` returns `core::error::out_of_memory`, not
+    `invalid_session_config`, because the configuration is valid.
+  - In the pump, carry overflow is unreachable once the carry is L + R. A pending candidate is ≤ L,
+    because its header is capped and an over-L BodyLength is refused before the CheckSum (OD-4), and one
+    read adds ≤ R. The L-1 pin that named carry overflow is re-based as a Q-6 over-L cell. The Framer's
+    own carry-overflow branch stays and is covered at Framer level.
 
 ## What changes for whom
 

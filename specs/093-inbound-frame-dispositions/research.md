@@ -333,6 +333,9 @@ comment.
   - **Consequence for B(L) (Phase 5):** B(L)'s slack term must count every pmr container one parse
     constructs, at 16 bytes each plus up to 7 bytes of padding after a 1-aligned request, not one proxy.
     The B(L) task derives that count from the parse path at its head.
+  - **Derived (Phase 5, 2026-10-04; plan OD-23):** `kParseContainers` = 10, `kProxyPad` = 7,
+    `kAlignPad` = 6, `kCallbackReadHeadroom` = 16384. The MSVC sandbox proxy count is to be measured equal
+    to 10 in T061/T069. The worked totals are re-derived from T061's measured peaks.
 - The session's `OffsetTable::Config::max_offset_entries = N(L)`.
 - Admin and outbound parses stay on their stack arrays, and 093 does not change them. Their size is
   **not** derived from what they parse (G93-O-11). Derived, Gate A round 1: `Session::send` builds the
