@@ -1039,9 +1039,12 @@ void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexce
 // reset_unit_in_flight_ set, and the unit signals close() when it clears it.
 // Plan OD-25 (supersedes OD-14's in-place shield, which an async_mutex grant replaces):
 // only the reset_to is co_spawned, on this strand, completing through a token bound to
-// an empty cancellation slot. The spawned thread has no parent slot, so no emission
-// reaches any lock or I/O the store waits on, for any MessageStore. The manager set
-// stays inline, so co_spawn's launch path cannot add a suspension before the store.
+// an empty cancellation slot. Plan OD-26 names the two parts: running reset_to on its
+// own awaitable thread is what keeps Engine::stop()'s total emission out, because a
+// child thread's slot forwards only through the arm's filter, which is terminal-only
+// once the manager set has taken its first lock; the empty slot extends that to every
+// emission kind and any parent filter. The manager set stays inline, so co_spawn's
+// launch path cannot add a suspension before the store.
 asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t next_in,
                                                                      seqnum_t next_out) noexcept {
     reset_unit_result r{};
