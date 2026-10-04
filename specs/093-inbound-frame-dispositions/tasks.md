@@ -1110,7 +1110,7 @@ durable counters at FR-041's table (#524).
   or append a counter record before the rename), in the POSIX and Windows temp branches, Region 3 and
   the `operation_aborted` catch. `HookedStore` (`tests/support/hooked_store.hpp`) gains T074a's two
   `reset_to` modes, forward and default-body, chosen per store at construction. T079 GREEN.
-- [ ] T085 [US5] Via `phase-implementer`, the unit (C-6 steps 1–7), both roles, in
+- [X] T085 [US5] Via `phase-implementer`, the unit (C-6 steps 1–7), both roles, in
   `src/session/session.cpp`: targets per research R-6; `co_await
   this_coro::reset_cancellation_state(disable_cancellation{})`; the manager set (`reset_to_one()`,
   `set_next_inbound(in)`, `set_next_outbound(out)`), capturing the first error without returning;
@@ -1145,10 +1145,11 @@ durable counters at FR-041's table (#524).
   `await_deadline(*effective_clock_, now + logon_timeout_ms)`; on expiry record the appended
   `session_event_close_reset_wait_expired { }` and proceed. No wait and no teardown reset when neither
   `reset_on_disconnect` nor `reset_on_logout` (after a Logout) holds.
-- [ ] T088 [US5] T075–T083 GREEN. FR-042: build every `MessageStore` subclass T012 found under
+- [X] T088 [US5] T075–T083 GREEN. FR-042: build every `MessageStore` subclass T012 found under
   `-Werror` unchanged, and record the population. US5 mutants in a scratch copy: delete `close()`'s wait
-  → Q-25 RED; drop the empty-slot binding of the store operation (OD-25, which replaced "delete the shield")
-  → the OD-25 witness cells' no-teardown rows RED: the contended-`async_mutex` `HookedStore` cell and the
+  → Q-25 RED; **run `reset_to` inline on the arm's thread, with no `co_spawn`** (M2b; OD-26: the separate
+  awaitable thread is what keeps stop's total emit out; dropping only the empty-slot binding (M2a) stays
+  GREEN and is a priced survivor) → the OD-25 witness cells' no-teardown rows RED: the contended-`async_mutex` `HookedStore` cell and the
   `FileStore` cell with its writer lock pre-held (SC-006 names those two store kinds); teardown rows cannot
   discriminate and are not in the expectation; the 789-path and reply-Logon predicate checks (OD-25) each
   have a stop-during-suspension cell, and deleting each check makes its cell RED; drop the engine-stop flag from
@@ -1162,6 +1163,27 @@ durable counters at FR-041's table (#524).
 **Checkpoint**: US5 complete; FR-030 landed before FR-041.
 
 ---
+
+**Phase 7 as landed (2026-10-04; #523 `de23adbb`/`e045c0ba`; #524 `cfd67189`, `5be10190`, `b155510d`, `492f9470`,
+`2cc8bb7c`; OD-25 `2dfcc7f4` tests RED / `f4ef8914`; OD-26 `a49dd67a` tests RED / `802543ee`; `c8717801`):**
+- The reset unit `co_spawn`s only `reset_to`, on an empty cancellation slot (OD-25). Stop-immunity comes from the
+  separate awaitable thread; the slot extends it to every emission kind (OD-26). M2a (drop the binding) is a
+  priced survivor; M2b (inline) is RED.
+- Every suspension-then-effect window in the Logon arms checks the member `logon_arm_superseded_` before its effect.
+  This covers the 789 helpers (outcome enums), `store_then_emit` with an arm, and the member
+  `disconnect_unless_superseded_` at every Disconnected write after a store suspension (OD-26; census in the
+  evidence file).
+- The `async_mutex` pin is `SeamRaceCancelDuringResume.Od25_GrantLeavesTheCallersFilterTerminalOnly`; its entry
+  `sync_race_cancel_during_resume` joins the manifest.
+- **Gaps, stated:**
+  - These member sites are covered by the census only, with no cell of their own:
+    - the initiator's `persist_inbound_advance_` caller;
+    - the `reset_on_logon` failure write;
+    - step 6 in both arms;
+    - `emit_session_reject_`'s failed-emit write;
+    - the reply's failed-emit write.
+  - The FileStore writer-lock witness is initiator-only, because the acceptor reads the store before its unit.
+  - TSan has not run on the new `co_spawn` (T120).
 
 ## Phase 8: Public surface and versioning (P7; C-7)
 
@@ -1317,6 +1339,13 @@ surfaces exist and are witnessed.
     LogonReceived half becomes by design (FR-050).
   Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check_bl_delta.py` and
   `check_bl_citations.py`, and record the delta in the evidence file.
+  - **Carried from Phase 7, for `L-518-1`:**
+    - its #524 drain-residual bullet is closed by the reset unit;
+    - its #523 "frames with the Logon" bullet changed status in Phase 7;
+    - its "awaits without a guard" bullet narrows to the seqnum-mutex awaits only, per OD-26's census.
+    Re-derive each from the code before rewriting the row. **#538 stays open:** it is a B28 issue that 093
+    does not fix (plan OD-9's result).
+
 - [ ] T106 [P] `spec/coverage-index.md`: rewrite the §4.5.2 row's sentence that says byte-level framing
   failures stay session-fatal (L-004-4, `FramerFailureClosesEstablishedSession_*`), naming 093's
   witnesses; re-derive any other stale row with

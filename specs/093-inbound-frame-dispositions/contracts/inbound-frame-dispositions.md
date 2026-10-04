@@ -283,7 +283,10 @@ the close happens.
 >
 > The unit therefore runs **only `store_->reset_to(in, out)` through `co_spawn` with a token bound to an
 > empty cancellation slot**. The spawned thread has no parent slot, so no emission reaches any operation the
-> store runs, for every store kind. Steps up to the store operation stay inline with no suspension (L-518-1's
+> store runs, for every store kind.
+> *Refined by OD-26:* immunity to stop's total emit comes from the separate awaitable thread (its slot forwards
+> only through the arm's filter, which is terminal-only after the first lock). The empty slot extends it to every
+> emission kind. Mutant M2a (drop the binding) is GREEN; M2b (inline) is RED. Steps up to the store operation stay inline with no suspension (L-518-1's
 > uncontended grant). The step-2 disable is removed. The step-5 restore stays, because it drops any
 > cancellation recorded on the arm's thread while the unit ran. The engine-stop flag (OD-15) is unchanged.
 > Where the text below says "the shield", read "the empty-slot store operation".

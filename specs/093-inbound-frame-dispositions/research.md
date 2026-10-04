@@ -669,6 +669,8 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
 > its effect assertions (through the missing flag) are. The rejected alternative below, an empty-slot
 > `co_spawn` of the store await, is now the mechanism. Its stated costs were the flag, which exists anyway,
 > and one frame per 141=Y unit, which is pre-Active and outside FR-052.
+> *Refined by OD-26:* stop-immunity comes from the separate awaitable thread; the empty slot extends it to every
+> emission kind (M2a GREEN, M2b RED).
 
 - **Total cancellation and the reset unit.** Settled by design (contract C-6); cells measure it.
   - **What reaches the unit first.** `Engine::start` spawns both role loops bound to
