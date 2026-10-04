@@ -372,6 +372,24 @@ comment.
     "k·L" is quoted anywhere.
   - B&L states the formula and these two totals, re-derived with the measured constants (SC-007).
   - The pre-Gate-A "about 6·L" left out the carry and was wrong (G93-A-10).
+- **Measured (Phase 5, 2026-10-04, at `cdb55f62`..`500a3c8d`; the evidence file, `## Measurements`, Phase 5):**
+  - The MSVC debug proxy count for one inbound parse plus its move is **10**, equal to `kParseContainers`.
+    Linux alignment padding measures 0; the structural `kAlignPad` of 6 stands.
+  - What `open()` draws (carry + B(L)): **479,492 B at L = 65536** (69,648 + 409,844) and **1,855,748 B
+    at L = 262144** (266,256 + 1,589,492). Each is 16,636 B above the Gate A totals above: the headroom
+    16,384, plus 10 × (16 + 7) container slack, the pad 6 and the carry's slack 16. These are the
+    totals B&L states (SC-007).
+  - E-2's sizing condition holds at every L sampled. The minimum margin is 9,916 B at L = 4096 and
+    144,316 B at 65536. Positive control: with headroom 0, 46 frames violate it, with a maximum deficit of
+    6,468 B, so about 6.3 KiB is the minimum headroom needed against the 16,384 provided.
+  - Stack (T068, base → head): `validate_inbound_` 18,424 → 2,168 B; each of the 7 inbound
+    `parse_and_dispatch_` instantiations 17,960 → 1,656 B. The 3 stack-overload instantiations went
+    17,960 → 18,024 B (+64 = `sizeof(Framer)` 24 → 88, from Phase 2).
+  - `src/session/parse_capacity.hpp` carries a copy of the private `OffsetTable::overlay_cap_for`.
+    `Q11.TheBufferBudgetsTheOverlayTheTableAssigns` pins it by **equality** with the overlay block the
+    table actually allocates, at L = 4096, 65536 and 262144, and the "one doubling short" mutant is RED
+    on it. The orchestrator accepted this pin in place of a friend declaration: an equality check
+    against the authority catches drift in both directions.
 - **Admission bound.** The acceptor's loop serves one registry entry and builds a Session only after a
   first frame whose CompIDs match. The reservation is therefore at most one carry plus B(L) per
   registered session with a live or establishing connection, which is an operator-sized quantity

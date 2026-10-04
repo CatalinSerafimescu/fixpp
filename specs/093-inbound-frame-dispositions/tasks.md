@@ -734,7 +734,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 
 ### Tests for User Story 3 (write first)
 
-- [ ] T054 [US3] Via `phase-implementer`, Q-11 in `tests/session/inbound_frame_dispositions_test.cpp`
+- [X] T054 [US3] Via `phase-implementer`, Q-11 in `tests/session/inbound_frame_dispositions_test.cpp`
   (shared with T055, T055a, T056 and T060, so not [P]): a dense frame of exactly L at the densest
   layout (`1=<SOH>`), at L = 65536 and at a configured 383 at the floor and at the ceiling, through the
   session: parsed and delivered to `fromApp`, peak ≤ B(L) measured with
@@ -745,7 +745,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
     L = 256 KiB, with the SHA, under `## Measurements`, once T024 and T063 have landed (T067). T105's
     B&L totals cite these measured figures beside the formula; a figure that disagrees with the formula
     is a finding, not a rounding.
-- [ ] T055a [US3] Via `phase-implementer`, the FR-013 group's L and carry cells, deferred from Phase 2
+- [X] T055a [US3] Via `phase-implementer`, the FR-013 group's L and carry cells, deferred from Phase 2
   so that phase changes nothing on the wire. Written RED with T055, before T024, T022a and T064:
   - in `tests/session/inbound_frame_dispositions_test.cpp`, Q-13 (the 383 half): an advertised
     MaxMessageSize below 4096 or above 262144 is refused by `Engine::register_session` and by
@@ -766,7 +766,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   - **Carried from Phase 3:** the L-1 pins read `detail::kReadPumpCarryCapacity`
     (`src/session/read_pump.hpp`). When the carry moves to `open()`, switch them to the seam.
 
-- [ ] T055 [US3] Via `phase-implementer`, Q-6 through the pump and the FR-013 reversal:
+- [X] T055 [US3] Via `phase-implementer`, Q-6 through the pump and the FR-013 reversal:
   - in `tests/session/inbound_frame_dispositions_test.cpp` and `tests/session/engine_readpump_test.cpp`:
     a frame of L+1, one of L+1 with a bad CheckSum, and an over-L BodyLength at a resync candidate each
     close terminally with a log record (no `SessionEvent`; plan OD-24), with no guard or handler reached (no callback, no Reject,
@@ -796,19 +796,19 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
     Their two fault shapes join the pump's Q-6 set: an Active over-L frame carrying a malformed tag or a
     Length/Data mismatch closes at framing, with no Reject, no callback and no `SessionEvent` (OD-24).
 
-- [ ] T056 [US3] Via `phase-implementer`, Q-14 (session-arena half) in
+- [X] T056 [US3] Via `phase-implementer`, Q-14 (session-arena half) in
   `tests/session/inbound_frame_dispositions_test.cpp`: `open()` with a session arena too small for
   B(L) returns an `open()` error. RED: accepted today, because no B(L) is allocated.
-- [ ] T057 [P] [US3] Via `phase-implementer`, Q-15 and the re-based late-site cells in
+- [X] T057 [P] [US3] Via `phase-implementer`, Q-15 and the re-based late-site cells in
   `tests/session/unparseable_frame_disposition_test.cpp`: a new `session_test_access` accessor shrinks
   the parse buffer after `open()`, so the 092 late close fires on an admitted frame (C-3 I-4); the
   `LateSite_*_Closes` cells move onto that shrink (their old trigger is gone, R-3). Q-15's mutant is in
   T070.
-- [ ] T058 [P] [US3] Via `phase-implementer`, Q-32 in `tests/wire/unknown_fields_test.cpp` (bucket
+- [X] T058 [P] [US3] Via `phase-implementer`, Q-32 in `tests/wire/unknown_fields_test.cpp` (bucket
   `wire_pure_tests`, one ctest entry, whose `093` label T015 already appended): T008's setup under `EXPECT_EXIT(..., ExitedWithCode(0), ...)`;
   `unknown_fields()` returns an empty view and a second call returns the same empty view. RED on base
   if T008 terminated; otherwise a regression guard (mutant in T070).
-- [ ] T059 [P] [US3] Via `phase-implementer`, the reserve overload cells in
+- [X] T059 [P] [US3] Via `phase-implementer`, the reserve overload cells in
   `tests/wire/offset_table_test.cpp` (bucket `wire_pure_tests`): the new `Parser::parse(frame, mr,
   OffsetTable::Config, std::size_t reserve_entries)` and `OffsetTable` constructor overloads reserve
   up front (a tracking resource sees one entries allocation), a clone and a reify do not copy the
@@ -820,7 +820,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   debug the container proxy draws from the same resource at construction (`kContainerSlack`'s reason),
   so a resource too small for it fails outside `build`'s catch and measures the proxy, not the
   reserve. Show with the tracking resource that the failed request is the reserve's. RED: does not compile.
-- [ ] T060 [US3] Via `phase-implementer`, Q-33 C++ arms in
+- [X] T060 [US3] Via `phase-implementer`, Q-33 C++ arms in
   `tests/session/inbound_frame_dispositions_test.cpp`: lazy reads at headroom exhaustion inside a
   callback over a dense frame: `group_slices()` gives an empty span and `unknown_fields()` an empty
   view; the session stays Active and processes the next frame. The assertions branch at runtime on the
@@ -845,7 +845,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 
 ### Implementation for User Story 3
 
-- [ ] T061 [US3] Via `phase-implementer`, derive and record the constants (data-model E-2), in a
+- [X] T061 [US3] Via `phase-implementer`, derive and record the constants (data-model E-2), in a
   scratch measurement in a scratch copy made with `git archive HEAD | tar -x -C <scratch>`:
   `kAlignPad` (the alignment of the entry and overlay blocks inside one monotonic resource) and
   `kCallbackReadHeadroom`. Check `kCallbackReadHeadroom`'s sizing condition verbatim: "for every frame
@@ -853,7 +853,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   the base's stack arena leaves after the same parse", at L = 64 KiB and at the OD-2 floor. Record the
   values, the measurement and the condition's result in `research.md` R-3 and under `## Constants`.
   Where the condition fails, record it for L-17 (T105).
-- [ ] T062 [US3] Via `phase-implementer`, the reserve threading (E-3) in `include/fixpp/wire/parser.hpp`,
+- [X] T062 [US3] Via `phase-implementer`, the reserve threading (E-3) in `include/fixpp/wire/parser.hpp`,
   `include/fixpp/wire/offset_table.hpp` and `src/wire/offset_table.cpp`: a public overload
   `Parser::parse(frame, mr, OffsetTable::Config cfg, std::size_t reserve_entries)`; a private,
   tag-dispatched `MessageView` constructor carrying the reserve; a public `OffsetTable` constructor
@@ -861,7 +861,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   not store it; clones and reifies do not copy it. `build` clamps the reserve to
   `cfg.max_offset_entries`, and a reserve the resource cannot serve takes `build`'s existing
   `bad_alloc` catch to `out_of_memory` (data-model E-3). T059 GREEN.
-- [ ] T063 [US3] Via `phase-implementer`, the per-session parse buffer (E-2) in
+- [X] T063 [US3] Via `phase-implementer`, the per-session parse buffer (E-2) in
   `include/fixpp/session/session.hpp` and `src/session/session.cpp`:
   - "With N(L) = ⌊L/3⌋ + 1": "B(L) = 12·N(L) + 4·`overlay_cap_for`(N(L)) + `kAlignPad` +
     `kCallbackReadHeadroom` + `kContainerSlack`", each constant named with T014/T061's value and its
@@ -881,7 +881,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
     is missing, or no cell can trip it, add a death-test cell in
     `tests/session/inbound_frame_dispositions_test.cpp` that re-enters an inbound parse from a
     callback and dies, written RED first.
-- [ ] T024 [US3] Via `phase-implementer`, the FR-013 group's first part: the carry allocated at `open()`
+- [X] T024 [US3] Via `phase-implementer`, the FR-013 group's first part: the carry allocated at `open()`
   (E-2, OD-13), as data-model E-2 states it:
   1. "inside a `try`, allocate one block of L + the read size + `kContainerSlack` from
      `cfg_.framer_carry_arena` (else `new_delete_resource()`). A `bad_alloc` is an `open()` error";
@@ -897,13 +897,13 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   - **Carried from Phase 3:** the L-1 pins read `detail::kReadPumpCarryCapacity`
     (`src/session/read_pump.hpp`). When the carry moves to `open()`, switch them to the seam.
 
-- [ ] T022a [US3] Via `phase-implementer`, the FR-013 group's second part: `Engine::register_session`
+- [X] T022a [US3] Via `phase-implementer`, the FR-013 group's second part: `Engine::register_session`
   (`src/session/engine.cpp`) and `Session::open()` (`src/session/session.cpp`) refuse an advertised 383
   under 4096 or over 262144 with `invalid_session_config`. Both bounds move here together: they are one
   check, and Q-13's 383 half covers both. Every test T012 found configuring 383 outside
   [4096, 262144] moves to a value inside it, each classified in the evidence file; `test_070`'s size
   cells are T055's. T055a's Q-13 383 cells GREEN.
-- [ ] T064 [US3] Via `phase-implementer`, the FR-013 group's third part, in one commit group with T024
+- [X] T064 [US3] Via `phase-implementer`, the FR-013 group's third part, in one commit group with T024
   and T022a, with T055 and T055a already RED:
   - the pump's Framer and the first-frame Framer run `max_frame_bytes = L` (the pump reads it through
     the seam; the accept loop computes `inbound_limit_for` from the registry entry's `SessionConfig`),
@@ -916,11 +916,11 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
     event and no log (FR-013, L-6);
   - the Active-only advertised-MaxMessageSize check above the state switch is deleted (C-2); header
     comment naming 093 superseding 070's pre-establishment exemption.
-- [ ] T065 [US3] Via `phase-implementer`, FR-015 after T008 is recorded: in
+- [X] T065 [US3] Via `phase-implementer`, FR-015 after T008 is recorded: in
   `MessageView::unknown_fields()` (`include/fixpp/wire/parser.hpp`), keep `noexcept`; on `bad_alloc`
   clear `unk_items_`, keep the built flag set so later calls return the same empty view, and return an
   empty view.
-- [ ] T066 [US3] Via `phase-implementer`, the pinned tests R-3 names, and every member of T012's
+- [X] T066 [US3] Via `phase-implementer`, the pinned tests R-3 names, and every member of T012's
   `kInboundParseArena` / `default_max_offset_entries` population, each classified in the evidence file
   into one of three classes:
   - **a mirror of the session's private 16 KiB inbound arena**, which T063 deletes: re-based on the
@@ -937,20 +937,20 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   - **a session cell sized against the default entry cap** (`kLateFillerFields` in
     `tests/session/unparseable_frame_disposition_test.cpp`): re-based by T057 onto the shrink.
   And `engine_readpump_test.cpp`'s oversize body still exceeds L (re-checked, not assumed).
-- [ ] T067 [US3] T054–T060 and T055a GREEN; `ctest -L '^093$'`, which includes T044's
+- [X] T067 [US3] T054–T060 and T055a GREEN; `ctest -L '^093$'`, which includes T044's
   `alloc_guard_093_pump_active_read` (the parse-buffer change must keep Q-19 at zero); full `session`,
   `wire`, `capi` and `alloc_guard` suites unfiltered on `linux-clang-debug`. Then T054's `open()` block
   measurement.
-- [ ] T068 [US3] FR-012's stack bound: build the inbound parse sites with `-fstack-usage` on the T005
+- [X] T068 [US3] FR-012's stack bound: build the inbound parse sites with `-fstack-usage` on the T005
   base worktree and on this head, and show no function in T012's late-site population grows its stack
   frame. Record both outputs under `## Measurements`.
-- [ ] T069 [US3] On the MSVC debug sandbox (T006's lock): Q-11 (dense L, peak ≤ B(L)), Q-14 (both
+- [X] T069 [US3] On the MSVC debug sandbox (T006's lock): Q-11 (dense L, peak ≤ B(L)), Q-14 (both
   halves: the carry half must hold where the container proxy draws on T024's block) and the spill
   witness, which on MSVC debug forwards and records; at the design point it
   records nothing. Before believing "records nothing", show it records a spill on this lane: feed a
   frame denser than B(L)'s design point through T057's `session_test_access` shrink accessor. Also run
   T060's forwarding-lane branch of Q-33 (T091's C branch runs in T113). Record under `## MSVC`.
-- [ ] T070 [US3] US3 instruments and mutants, each in a scratch copy: the spill witness records a spill
+- [X] T070 [US3] US3 instruments and mutants, each in a scratch copy: the spill witness records a spill
   when a frame denser than B(L)'s design point is fed through the test-access shrink; restore the
   16 KiB arena and the default entry cap → Q-11 RED; delete the capacity derivation (B(L) back to a
   fixed size) → Q-11 RED with the late close firing (FR-014); delete the late close → Q-15 RED; remove
@@ -959,6 +959,18 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 **Checkpoint**: US3 complete. The C arms of Q-33 and Q-37 rows 3–4 close in Phase 8.
 
 ---
+
+**Phase 5 as landed (2026-10-04; `ac0e75b2` tests RED, `cdb55f62` production, `9b70b86f`, `14df17c8`,
+`0051b7b6`, `ef0d5ba8`, `500a3c8d`):**
+- The constants and the measurements are in research R-3 (plan OD-23, OD-24).
+- `src/session/parse_capacity.hpp` holds N(L) and B(L). It is split from `inbound_limit.hpp`, so the
+  dict066 alloc guard does not pull asio. Its `overlay_cap_for` copy is pinned by equality (R-3).
+- `kInboundParseArena` is renamed `kSendParseArena`; the two outbound toApp sites keep it.
+- Q-11 shows the peak through the spill witness plus a buffer-size assertion; Q-15's positive control is
+  what makes Q-11's "nothing spilled" able to report a spill.
+- I-3 is a regression guard, skipped under `NDEBUG`.
+- Q-12 samples every 509 bytes plus every one of the last 64.
+- MSVC debug (T069) found two of this phase's own cells wrong; both were fixed in `ef0d5ba8`.
 
 ## Phase 6: User Story 4: every good inbound frame proves the peer is alive (Priority: P2)
 
@@ -1382,6 +1394,11 @@ surfaces exist and are witnessed.
     L-13's pre-Active count (T051) restated;
   - the fuzz targets of T111.
   The §7 full build needs an owner ASK.
+  - **Carried from Phase 5:** the fork-based cells have not run on `linux-clang-asan` or `linux-clang-tsan`.
+    They are Q-14's engine `EXPECT_EXIT`, Q-33's `EXPECT_EXIT`, the I-3 `EXPECT_DEATH` and Q-32's `EXPECT_EXIT`
+    in `unknown_fields_test.cpp`. TSan's `die_after_fork` is the open risk; this run must show them on both
+    lanes.
+
 - [ ] T121 File the follow-ups spec.md "Out of scope" marks "to file" (the admin and outbound parse
   arenas, contract L-14; a lazy `open()` failure being silent in the role loops), with the owner's
   approval, each labelled from `gh label list`, placed in the parent's `phases/phase-4/issue-batches.md`.
