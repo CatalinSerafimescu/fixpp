@@ -600,7 +600,7 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
 
 ### Tests for User Story 2 (write first)
 
-- [ ] T041 [US2] Via `phase-implementer`, the new `tests/session/engine_establishment_timeout_test.cpp`,
+- [X] T041 [US2] Via `phase-implementer`, the new `tests/session/engine_establishment_timeout_test.cpp`,
   registered `add_threading_test(session_engine_establishment_timeout ...)`, labels `"093;session"`,
   standalone (engine, mock clock, timers). Mock-clock cells drive `engine_cfg.clock`. Not [P]: T045
   writes the same file.
@@ -615,11 +615,11 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
     T. RED: never closed (the valid-frame stream).
   - Q-35: `SessionConfig{}` reads `logon_timeout_ms == 10000`, and a silent peer in phase (b) is
     closed at 10 s on the mock clock. RED: the field does not exist.
-- [ ] T042 [P] [US2] Via `phase-implementer`, Q-13 (timeout half) in
+- [X] T042 [P] [US2] Via `phase-implementer`, Q-13 (timeout half) in
   `tests/session/inbound_frame_dispositions_test.cpp`: `logon_timeout_ms == 0` is refused by
   `Engine::register_session` and by `Session::open()` with `invalid_session_config`. RED: the field does
   not exist.
-- [ ] T043 [US2] Via `phase-implementer`, Q-17 (phase a) in
+- [X] T043 [US2] Via `phase-implementer`, Q-17 (phase a) in
   `tests/session/engine_firstframe_test.cpp` and `tests/session/first_frame_total_cancel_tls_test.cpp`
   (ctests `engine_firstframe` and `session_first_frame_total_cancel_tls`, APPEND label `093` on each).
   The `min(5 s, T)` and byte-budget cells (the first bullet) run on a **plaintext acceptor**: an entry
@@ -646,7 +646,7 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
   - **Carried from Phase 3 (T036):** no Phase 3 cell shows that the first-frame budget counts the
     bytes a garble discards. This task's Q-17 cells must show it.
 
-- [ ] T044 [P] [US2] Via `phase-implementer`, Q-19 in a new standalone target
+- [X] T044 [P] [US2] Via `phase-implementer`, Q-19 in a new standalone target
   `tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp` (it replaces global `operator new`,
   `[const §VII.8]`), executable `test_093_pump_active_read_alloc_guard`, registered in
   `tests/alloc_guard/CMakeLists.txt` as ctest `alloc_guard_093_pump_active_read` with labels
@@ -655,7 +655,7 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
   first shown to count a known allocation in the same binary (the `planted_alloc_witness.cpp`
   pattern); then the real pump is driven past Active and the count per Active read after a warm-up
   read is zero. A regression witness, not claimed to catch a never-disarmed race.
-- [ ] T045 [US2] Via `phase-implementer`, Q-18 and Q-36 in
+- [X] T045 [US2] Via `phase-implementer`, Q-18 and Q-36 in
   `tests/session/engine_establishment_timeout_test.cpp`:
   - Q-18: a clock-wide `cancel_sleeps()` from another session during phase (b) does not end the wait
     early; with `clock_override` set to a second mock clock, advancing only the override does not
@@ -665,11 +665,11 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
 
 ### Implementation for User Story 2
 
-- [ ] T046 [US2] Via `phase-implementer`, `std::uint32_t logon_timeout_ms{10000};` in
+- [X] T046 [US2] Via `phase-implementer`, `std::uint32_t logon_timeout_ms{10000};` in
   `include/fixpp/session/session_config.hpp`, beside `logout_disconnect_timeout_ms` (copy neither that
   field's validation claim nor its comment). Zero is refused by `Engine::register_session` and by
   `Session::open()` with `invalid_session_config`. T042 and T041's Q-35 field half GREEN.
-- [ ] T047 [US2] Via `phase-implementer`, append `session_event_establishment_timeout { }` to
+- [X] T047 [US2] Via `phase-implementer`, append `session_event_establishment_timeout { }` to
   `include/fixpp/session/session_event.hpp`; add the dedicated `reached_active_` latch, set
   unconditionally in `record_state_transition_` on the first entry to Active, **before** its
   `engine_.application == nullptr` early return (E-6; `onLogon_fired_` cannot serve); add
@@ -678,7 +678,7 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
   The record is a `FIXPP_SLOG` with the session's `trace_context` (`[const §XIII.3]`), through the
   logger T034 resolves at `open()`, and carries T (data-model E-12). It needs no rate bound: expiry closes the connection, so it fires
   at most once per connection.
-- [ ] T048 [US2] Via `phase-implementer`, the phase (b) deadline in `run_read_pump`
+- [X] T048 [US2] Via `phase-implementer`, the phase (b) deadline in `run_read_pump`
   (`src/session/engine.cpp`): `run_read_pump(..., std::optional<steady_time_point> establish_deadline)`;
   acceptor: accept time + `logon_timeout`; initiator: the time `drive_reconnect` returns +
   `logon_timeout`. While `!has_reached_active()`, test `steady_now() >= deadline` on
@@ -687,18 +687,18 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
   clock-wide sweep, #536). On expiry call `note_establishment_timeout_()`, then `stop_pump()` →
   `close(terminal)`. After the first Active, reads are plain. The deadline ignores
   `cfg.clock_override`.
-- [ ] T049 [US2] Via `phase-implementer`, phase (a) in `run_accept_loop`: compute `deadline − now` after
+- [X] T049 [US2] Via `phase-implementer`, phase (a) in `run_accept_loop`: compute `deadline − now` after
   the TLS handshake; when it is not positive, close the transport without calling
   `read_first_frame_bounded`; otherwise pass `min(5 s, deadline − now)` as that function's relative
   deadline. The function's own conversion is unchanged.
-- [ ] T050 [US2] T041–T045 GREEN.
-- [ ] T051 [US2] Via `phase-implementer`, in a scratch copy made with `git archive HEAD | tar -x -C
+- [X] T050 [US2] T041–T045 GREEN.
+- [X] T051 [US2] Via `phase-implementer`, in a scratch copy made with `git archive HEAD | tar -x -C
   <scratch>` (the measurement is not committed), measure the pre-Active allocation (L-13, FR-052):
   with T044's global counter around the pump's pre-Active reads, shown first to count a known allocation, record the count per read and
   after warm-up under `## Measurements`. It is disclosed, not asserted.
-- [ ] T052 [US2] Re-derive E-4/E-6/E-13's placement condition at this head (T012's commands) and
+- [X] T052 [US2] Re-derive E-4/E-6/E-13's placement condition at this head (T012's commands) and
   record that both role loops still `co_return` after one connection.
-- [ ] T053 [US2] US2 mutants, each in a scratch copy: delete the loop-head test, keeping only the race
+- [X] T053 [US2] US2 mutants, each in a scratch copy: delete the loop-head test, keeping only the race
   → Q-16 readable-across-T RED; delete the post-handshake remaining-time check, so the first-frame read
   is issued on its 5 s bound → Q-17 late TLS handshake RED (observed by the peer: a Logon reply
   arrives); measure the deadline on `effective_clock_` → Q-18 RED; drop the re-arm → Q-18 RED;
@@ -708,6 +708,21 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
 **Checkpoint**: US2 complete in C++. The C setter, Python and TOML arms of Q-16 close in Phase 8.
 
 ---
+
+**Phase 4 as landed (2026-10-04; `84e40459` tests RED, `6732d595` production, `103b63db`, `70bf41fc`, `077bb01b`):**
+- T044 / Q-19 is a differential (plan OD-22). `kBaseActiveReadAllocs` = 5, measured on the base. The
+  pre-existing cost is filed as fixpp#544 (batch B15).
+- `run_read_pump` takes a `Clock&`. The first-frame read's deadline is rounded up to whole milliseconds.
+  Readable-across-T cells are initiator-only, because the acceptor has no transport seam.
+  `EngineLoopbackHarness::build` takes an acceptor-config callback, so the TLS positive control can admit
+  its client.
+- T048 as landed has no post-race `cancelled()` branch. It was deleted because nothing observable differs:
+  both shipped transports wake a pending read on close.
+- Two cells added by orchestrator ruling:
+  - `EstablishmentTimeoutQ18.AClockWideSweepNeitherCancelsNorReissuesTheBlockedRead` is the witness for
+    the re-arm; `no_rearm` is RED on it. `ScriptedStream` gains a hold-open mode and read counters.
+  - `EstablishmentTimeoutQ16.InitialBytesDrain_NoCoalescedFrameIsDeliveredOnceTheDeadlineHasPassed`
+    covers the `initial_bytes` drain's before-delivery test.
 
 ## Phase 5: User Story 3: a large well-formed message is never lost (Priority: P1)
 
