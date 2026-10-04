@@ -767,9 +767,7 @@ TEST(InboundFrameDispositionsQ5, LogRecordsReconcileWithTheCounterRegionByRegion
     // Three structurally complete frames with a wrong CheckSum, back to back: each is
     // one region, and the byte after each is a search position that finds the next.
     auto const wrong = [&](std::uint32_t seq) {
-        return with_trailer(c.rig.heartbeat(seq), [](std::string const& d) {
-            return "10=" + std::string{d == "000" ? "001" : "000"} + "\x01";
-        });
+        return plain_rig::with_wrong_checksum(c.rig.heartbeat(seq));
     };
     ok = ok && c.rig.deliver(wrong(2) + wrong(2) + wrong(2) + c.rig.heartbeat(2)) &&
          c.rig.run_until([&] {
@@ -1697,12 +1695,9 @@ std::string over_l_bytes(plain_rig::Rig const& rig, OverL k, std::uint32_t seq) 
     switch (k) {
         case OverL::frame:
             return rig.msg_of_size("D", seq, {}, kQ6Limit + 1U, "58", false);
-        case OverL::bad_checksum: {
-            std::string f = rig.msg_of_size("D", seq, {}, kQ6Limit + 1U, "58", false);
-            auto const at = f.rfind("10=") + 3;
-            f.replace(at, 3, f.substr(at, 3) == "000" ? "001" : "000");
-            return f;
-        }
+        case OverL::bad_checksum:
+            return plain_rig::with_wrong_checksum(
+                rig.msg_of_size("D", seq, {}, kQ6Limit + 1U, "58", false));
         case OverL::body_length_at_candidate:
             return junk() + "8=" + rig.begin_string + "\x01" +
                    "9=" + std::to_string(kQ6Limit + 1U) + "\x01" + "35=0\x01";

@@ -745,10 +745,7 @@ FirstFrameObservation observe_first_frame(pr::Rig& rig) {
 // A wrong-CheckSum Heartbeat: structurally complete, so it is one garbled region
 // through its own end, and the byte after it is a search position.
 std::string wrong_checksum_heartbeat(pr::Rig const& rig, std::uint32_t seq) {
-    std::string f = rig.heartbeat(seq);
-    auto const at = f.rfind("10=") + 3;
-    f.replace(at, 3, f.substr(at, 3) == "000" ? "001" : "000");
-    return f;
+    return pr::with_wrong_checksum(rig.heartbeat(seq));
 }
 
 }  // namespace

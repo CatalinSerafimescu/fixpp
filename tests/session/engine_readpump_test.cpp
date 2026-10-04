@@ -1243,9 +1243,7 @@ TEST(EngineReadPumpResync, Q3_WrongCheckSumFrameIsDiscardedWholeWithTheFrameInIt
     ResyncCell c;
     std::string outer;
     if (c.up) {
-        outer = c.rig.msg("0", 3, "58=" + c.rig.heartbeat(3));
-        auto const at = outer.rfind("10=") + 3;
-        outer.replace(at, 3, outer.substr(at, 3) == "000" ? "001" : "000");
+        outer = pr::with_wrong_checksum(c.rig.msg("0", 3, "58=" + c.rig.heartbeat(3)));
     }
     bool const d = c.up && c.rig.deliver(c.rig.heartbeat(2) + outer + c.rig.heartbeat(3));
     bool const processed = d && c.wait_next_in(4);

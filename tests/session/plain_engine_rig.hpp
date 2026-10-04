@@ -69,6 +69,14 @@ inline std::string checksum_of(std::string_view s) {
     return std::string{buf.data(), 3};
 }
 
+// `f` with its CheckSum(10) value replaced by one that does not match: "000", or "001"
+// where the frame's own is "000".
+inline std::string with_wrong_checksum(std::string f) {
+    auto const at = f.rfind("10=") + 3;
+    f.replace(at, 3, f.substr(at, 3) == "000" ? "001" : "000");
+    return f;
+}
+
 // "8=<bs>|9=<len>|<body>10=<NNN>|", with BodyLength and CheckSum computed.
 inline std::string frame(std::string_view begin_string, std::string_view body) {
     std::string head = "8=" + std::string{begin_string} + "\x01" +
