@@ -15,6 +15,12 @@
 // CompID-validation sub-cases are split into test_file_store_compid_validation.cpp
 // per T014 wording.
 //
+// Q-28 and Q-29 (093-inbound-frame-dispositions tasks.md T079; contract C-6; data-model
+// E-9): FileStore::reset_to refuses a target outside {1, 2} with no effect, durable
+// included; and a fault in its offloaded sequence leaves a restart reading the old or
+// the new counters, never a partial (1, 1). The section comment above
+// Q28_TargetsOutsideOneTwoAreRefusedWithNoEffect states each cell.
+//
 // TDD: linker-RED until T023/T024/T026 ship FileStore + FileStoreFactory.
 #include <gtest/gtest.h>
 #ifdef _WIN32
@@ -34,6 +40,8 @@
 #include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fstream>
+#include <memory>
+#include <utility>
 #ifdef _WIN32
 #include <string>
 #include <vector>
@@ -306,6 +314,193 @@ TEST(FileStoreCrashSurvival, CommitBatchedReturnsSuccess) {
     EXPECT_LE(visitor.entries().size(), static_cast<std::size_t>(kFrames));
 
     minted.value() = nullptr;
+    fixpp::store_test::remove_store_dir(dir);
+}
+
+// ── Q-28 and Q-29 (093 tasks.md T079): FileStore::reset_to ────────────────────
+//
+// Each cell advances a store past both targets (five frames stored outbound, the
+// inbound counter incremented three times: NextNumIn 4, NextNumOut 6), so "no effect"
+// and "old counters" are observable. A restart is a fresh FileStore over the same
+// directory after the first is destroyed; it reads the last counter record.
+//
+// Q-29 has two fault points, because they discriminate different failures:
+//   - before the rename: the reset's temp log is written and closed, then the
+//     operation fails; the rename, the single commit point, never happens, so a
+//     restart reads the old counters;
+//   - at the first counter-record write after a reset's rename has committed: an
+//     override that is one operation writes nothing after its rename, so a restart
+//     reads the new counters; an override that resets and then advances commits
+//     (1, 1) at the rename, and its advance then fails, which is the partial state
+//     the cell refuses.
+// A positive control shows the second fault fires on a reset() followed by an advance.
+
+using fixpp::session::seqnum_t;
+
+struct DurableCounters {
+    seqnum_t in = 0;
+    seqnum_t out = 0;
+    bool operator==(DurableCounters const&) const = default;
+};
+
+std::unique_ptr<fixpp::session::MessageStore> open_store(const fs::path& dir,
+                                                         asio::thread_pool& pool) {
+    FileStoreFactory factory{make_file_config(dir, pool.get_executor())};
+    auto minted =
+        factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
+    if (!minted) return nullptr;
+    return std::move(*minted);
+}
+
+template <class F>
+auto run_on(asio::thread_pool& pool, F f) {
+    return asio::co_spawn(pool.get_executor(), std::move(f), asio::use_future).get();
+}
+
+DurableCounters read_counters(fixpp::session::MessageStore& store, asio::thread_pool& pool) {
+    return run_on(pool, [&]() -> asio::awaitable<DurableCounters> {
+        auto in = co_await store.next_seqnum(direction_t::inbound, false);
+        auto out = co_await store.next_seqnum(direction_t::outbound, false);
+        co_return DurableCounters{in.value_or(0), out.value_or(0)};
+    });
+}
+
+// A fresh store over `dir`, then advanced to NextNumIn 4, NextNumOut 6.
+std::unique_ptr<fixpp::session::MessageStore> open_advanced(const fs::path& dir,
+                                                            asio::thread_pool& pool) {
+    auto store = open_store(dir, pool);
+    if (!store) return nullptr;
+    run_on(pool, [&]() -> asio::awaitable<void> {
+        for (auto const& step : make_store_script(5, direction_t::outbound)) {
+            auto r = co_await store->store(step.seq, std::span<const std::byte>(step.frame_bytes),
+                                           step.dir);
+            EXPECT_TRUE(r.has_value()) << "setup store of seq " << step.seq;
+        }
+        for (int i = 0; i < 3; ++i) {
+            auto r = co_await store->next_seqnum(direction_t::inbound, true);
+            EXPECT_TRUE(r.has_value()) << "setup inbound advance";
+        }
+    });
+    return store;
+}
+
+constexpr DurableCounters kAdvanced{4, 6};
+
+// Destroys `store`, then reads the counters a restart over `dir` sees.
+DurableCounters restart_counters(std::unique_ptr<fixpp::session::MessageStore>& store,
+                                 const fs::path& dir, asio::thread_pool& pool) {
+    store.reset();
+    auto reopened = open_store(dir, pool);
+    if (!reopened) {
+        ADD_FAILURE() << "restart: re-open failed";
+        return {};
+    }
+    return read_counters(*reopened, pool);
+}
+
+TEST(FileStoreResetTo, Q28_TargetsOutsideOneTwoAreRefusedWithNoEffect) {
+    asio::thread_pool pool{2};
+    constexpr std::pair<seqnum_t, seqnum_t> kRefused[] = {{0, 1}, {3, 1}, {1, 0}, {1, 3},
+                                                          {2, 3}, {3, 2}, {0, 0}, {4, 6}};
+    for (auto const& [in, out] : kRefused) {
+        auto dir = unique_store_dir("reset_to_refused");
+        auto store = open_advanced(dir, pool);
+        ASSERT_NE(store, nullptr);
+        ASSERT_EQ(read_counters(*store, pool), kAdvanced) << "setup";
+        auto r = run_on(pool, [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+            co_return co_await store->reset_to(in, out);
+        });
+        EXPECT_FALSE(r.has_value()) << "reset_to(" << in << ", " << out << ") must be refused";
+        if (!r.has_value()) {
+            EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_argument)
+                << "reset_to(" << in << ", " << out << ")";
+        }
+        EXPECT_EQ(read_counters(*store, pool), kAdvanced)
+            << "reset_to(" << in << ", " << out << ") changed the counters";
+        EXPECT_EQ(restart_counters(store, dir, pool), kAdvanced)
+            << "reset_to(" << in << ", " << out << ") changed the durable counters";
+        fixpp::store_test::remove_store_dir(dir);
+    }
+}
+
+TEST(FileStoreResetTo, Q28_AnAcceptedPairIsDurable) {
+    asio::thread_pool pool{2};
+    constexpr std::pair<seqnum_t, seqnum_t> kAccepted[] = {{1, 1}, {1, 2}, {2, 1}, {2, 2}};
+    for (auto const& [in, out] : kAccepted) {
+        auto dir = unique_store_dir("reset_to_accepted");
+        auto store = open_advanced(dir, pool);
+        ASSERT_NE(store, nullptr);
+        auto r = run_on(pool, [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+            co_return co_await store->reset_to(in, out);
+        });
+        EXPECT_TRUE(r.has_value()) << "reset_to(" << in << ", " << out << ")";
+        DurableCounters const want{in, out};
+        EXPECT_EQ(read_counters(*store, pool), want) << "reset_to(" << in << ", " << out << ")";
+        EXPECT_EQ(restart_counters(store, dir, pool), want)
+            << "durable after reset_to(" << in << ", " << out << ")";
+        fixpp::store_test::remove_store_dir(dir);
+    }
+}
+
+TEST(FileStoreResetTo, Q29_AFaultBeforeTheRenameLeavesTheOldCounters) {
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("reset_to_fault_before_rename");
+    auto store = open_advanced(dir, pool);
+    ASSERT_NE(store, nullptr);
+    (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
+    fixpp::session::arm_force_reset_fail_before_rename_once();
+    auto r = run_on(pool, [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+        co_return co_await store->reset_to(2, 2);
+    });
+    EXPECT_EQ(fixpp::session::read_and_reset_reset_atomicity_fault_count(), 1)
+        << "the fault before the rename must fire";
+    EXPECT_FALSE(r.has_value()) << "reset_to must report the failed operation";
+    EXPECT_EQ(restart_counters(store, dir, pool), kAdvanced)
+        << "a fault before the rename must leave the old counters";
+    fixpp::store_test::remove_store_dir(dir);
+}
+
+TEST(FileStoreResetTo, Q29_AFaultAfterTheRenameCommitsNoPartialState) {
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("reset_to_fault_after_commit");
+    auto store = open_advanced(dir, pool);
+    ASSERT_NE(store, nullptr);
+    (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
+    fixpp::session::arm_fail_counter_write_after_reset_commit();
+    auto r = run_on(pool, [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+        co_return co_await store->reset_to(2, 2);
+    });
+    fixpp::session::disarm_fail_counter_write_after_reset_commit();
+    auto const after = restart_counters(store, dir, pool);
+    DurableCounters const want{2, 2};
+    EXPECT_TRUE(after == kAdvanced || after == want)
+        << "a restart read NextNumIn " << after.in << ", NextNumOut " << after.out
+        << ": neither the old (4, 6) nor the new (2, 2)";
+    EXPECT_TRUE(r.has_value() == (after == want))
+        << "reset_to's result must match what a restart reads";
+    fixpp::store_test::remove_store_dir(dir);
+}
+
+// Positive control for the fault after the rename: reset() then an inbound advance
+// (the shape the previous cell refuses) does reach it, and the advance fails.
+TEST(FileStoreResetTo, Q29_Control_TheFaultAfterTheRenameFiresOnAResetThenAnAdvance) {
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("reset_to_fault_control");
+    auto store = open_advanced(dir, pool);
+    ASSERT_NE(store, nullptr);
+    (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
+    fixpp::session::arm_fail_counter_write_after_reset_commit();
+    auto const [reset_ok, advance_ok] = run_on(pool, [&]() -> asio::awaitable<std::pair<bool, bool>> {
+        auto rr = co_await store->reset();
+        auto ar = co_await store->next_seqnum(direction_t::inbound, true);
+        co_return std::pair{rr.has_value(), ar.has_value()};
+    });
+    fixpp::session::disarm_fail_counter_write_after_reset_commit();
+    EXPECT_TRUE(reset_ok);
+    EXPECT_FALSE(advance_ok) << "the first counter write after the reset's rename must fail";
+    EXPECT_EQ(fixpp::session::read_and_reset_reset_atomicity_fault_count(), 1);
+    EXPECT_EQ(restart_counters(store, dir, pool), (DurableCounters{1, 1}))
+        << "the reset committed, the advance did not";
     fixpp::store_test::remove_store_dir(dir);
 }
 

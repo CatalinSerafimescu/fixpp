@@ -278,6 +278,10 @@ fixpp_add_store_test(store_file_crash_survival SOURCES
   test_file_store_crash_survival.cpp
   _fixtures_/test_double_fsm.cpp
 )
+# 093-inbound-frame-dispositions (tasks.md T079, Q-29): FIXPP_TEST_HOOKS declares
+# FileStore's namespace-scope reset fault seams (file_store.hpp); no class member is
+# gated on it.
+target_compile_definitions(store_file_crash_survival PRIVATE FIXPP_TEST_HOOKS)
 # 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, so it
 # composes with any LABELS setter placed above it.
 set_property(TEST store_file_crash_survival APPEND PROPERTY LABELS 093)
