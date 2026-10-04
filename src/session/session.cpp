@@ -2716,6 +2716,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 note_garbles_(header_out_of_order_garble(frame));
                 co_return fixpp::core::expected_t<void>{};
             }
+            // 093 (contract C-2 step 2; spec FR-030; fixpp#523): once close() has begun,
+            // this arm acts on nothing more. Garbled-frame accounting above is a
+            // transport observation, not an arm effect, so it still runs (plan OD-7).
+            if (state_ == lifecycle::closing && (fsm_state_ == fsm_state::NotConnected ||
+                                                 fsm_state_ == fsm_state::LogonSent)) {
+                co_return fixpp::core::expected_t<void>{};
+            }
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state::NotConnected);
             }
@@ -4573,6 +4580,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
             if (!hdr.msg_type_is_third) {
                 note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
+            // 093 (contract C-2 step 2; spec FR-030; fixpp#523): once close() has begun,
+            // this arm acts on nothing more. Garbled-frame accounting above is a
+            // transport observation, not an arm effect, so it still runs (plan OD-7).
+            if (state_ == lifecycle::closing && (fsm_state_ == fsm_state::NotConnected ||
+                                                 fsm_state_ == fsm_state::LogonSent)) {
                 co_return fixpp::core::expected_t<void>{};
             }
             // 092 (contract C-2 D-2): a reply the scan could not read is refused.
