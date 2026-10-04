@@ -1324,6 +1324,21 @@ surfaces exist and are witnessed.
 
 ### `/simplify` (P9, before any final measurement)
 
+- [ ] T108a **Merge `origin/main` into the branch before `/simplify`** (owner, 2026-10-04: three PRs are expected
+  to merge to `main` before 093's code is complete). Use a **merge, not a rebase**: the evidence file, this file
+  and plan.md cite this branch's commit SHAs, including the RED quotes, and a rebase would orphan every one of
+  them. The PR is squashed at merge anyway.
+  - `git fetch origin`, then list what arrived with `git log --oneline <merge-base>..origin/main`. For each
+    merged PR, grep its changed files against this branch's (`git diff --name-only <merge-base>...HEAD`) and
+    record the overlap.
+  - `git merge origin/main` via `phase-implementer` (conflicts in code are its to resolve). Record the new
+    merge-base under `## Base`. RED claims already recorded stay against `91be8661`. Any task that measures
+    against "the base" after this point uses the new merge-base and says so.
+  - Re-run on the merged head: the full `-k 0` debug build and the whole suite unfiltered; `-L '^093$'`; T011's
+    manifest gate; the ODR census; `ci-script-pins`; the comment-claim lint; `codegraph sync`. If a merged PR
+    touches a population T012 recorded (Framer callers, late parse sites, `MessageStore` subclasses,
+    `SessionEvent` visits, the C-ABI MINOR), re-derive that population and extend the affected cells.
+  - If a merged PR claims the C-ABI MINOR 11, stop: T003/T095's MINOR is taken, so re-plan the bump.
 - [ ] T109 Run `/simplify` over the branch diff (`[const §XVI.7]`); fixes go through
   `phase-implementer`. Every later check runs on the post-simplify head. Re-check T105–T108's claims
   against the post-simplify code.
