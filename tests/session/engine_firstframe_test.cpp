@@ -1280,3 +1280,91 @@ TEST(EngineFirstFramePhaseATls, Q17_HandshakeEndingBeforeT_TheLogonIsReadAndAnsw
     EXPECT_TRUE(reply) << "no Logon reply: the probe cannot see one, so the cell above "
                           "proves nothing";
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 093-inbound-frame-dispositions — Q-6 on the acceptor's first frame (contract C-1,
+// FR-013, L-6). The first-frame read's Framer runs at the registered session's limit
+// L, so a first frame over L is refused there: the transport closes, and no Session
+// exists, so nothing is recorded (observed as lookup() null and no Logon reply). The
+// cells run at a configured 383 of 4096, the one L at which "over L" is not also "over
+// the 4096-byte budget": the budget admits a frame of exactly budget + 1 bytes when it
+// is complete (the frame-found return wins). On the rig's mock engine clock, which no
+// cell advances, the first-frame deadline cannot end a read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+constexpr std::uint32_t kFirstFrameLimit = 4096;
+
+struct FirstFrameRefusal {
+    bool up = false;
+    bool closed = false;
+    bool answered = false;
+    bool has_session = false;
+};
+
+FirstFrameRefusal first_frame_over_l(std::string (*bytes)(pr::Rig const&)) {
+    pr::Rig rig;
+    auto cfg = rig.cfg();
+    cfg.advertised_max_message_size = kFirstFrameLimit;
+    FirstFrameRefusal o;
+    o.up = rig.start(std::move(cfg)) && rig.connect_peer();
+    std::string const b = o.up ? bytes(rig) : std::string{};
+    o.up = o.up && !b.empty();
+    if (o.up) rig.peer.send(b);
+    o.closed = o.up && rig.run_until([&] { return rig.peer.read_ended; });
+    o.answered = !pr::frames_of_type(rig.peer.received, "A").empty();
+    o.has_session = rig.session() != nullptr;
+    rig.stop();
+    return o;
+}
+
+}  // namespace
+
+// A complete Logon of L + 1 bytes. Base RED: the base's first-frame Framer admits it
+// (its limit is the Framer default), so the session is established.
+TEST(EngineFirstFrameOverL, Q6_ALogonOfLPlusOneIsRefusedWithNoSession) {
+    auto const o = first_frame_over_l([](pr::Rig const& rig) {
+        return rig.msg_of_size("A", 1,
+                               "98=0\x01"
+                               "108=30\x01",
+                               kFirstFrameLimit + 1U, "58", false);
+    });
+    ASSERT_TRUE(o.up) << "setup";
+    EXPECT_TRUE(o.closed) << "the connection is closed";
+    EXPECT_FALSE(o.answered) << "no Logon reply";
+    EXPECT_FALSE(o.has_session) << "no Session is built";
+}
+
+// Only a header whose BodyLength is over L: refused once the BodyLength is read,
+// before any body byte. Base RED: the base reads on, waiting for the body, and nothing
+// on the unadvanced mock clock ends the read.
+TEST(EngineFirstFrameOverL, Q6_AnOverLBodyLengthIsRefusedAtTheHeader) {
+    auto const o = first_frame_over_l([](pr::Rig const& rig) {
+        return "8=" + rig.begin_string + "\x01" + "9=" + std::to_string(kFirstFrameLimit + 1U) +
+               "\x01" + "35=A\x01";
+    });
+    ASSERT_TRUE(o.up) << "setup";
+    EXPECT_TRUE(o.closed) << "the connection is closed without waiting for the body";
+    EXPECT_FALSE(o.has_session) << "no Session is built";
+}
+
+// Control: a Logon of exactly L bytes establishes the session.
+TEST(EngineFirstFrameOverL, Q6_Control_ALogonOfExactlyLEstablishes) {
+    pr::Rig rig;
+    auto cfg = rig.cfg();
+    cfg.advertised_max_message_size = kFirstFrameLimit;
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    std::string const logon = up ? rig.msg_of_size("A", 1,
+                                                   "98=0\x01"
+                                                   "108=30\x01",
+                                                   kFirstFrameLimit, "58", false)
+                                 : std::string{};
+    bool const d = !logon.empty() && rig.deliver(logon);
+    bool const active =
+        d && rig.run_until([&] { return rig.state() == fixpp::session::fsm_state::Active; });
+    rig.stop();
+
+    ASSERT_TRUE(up && d) << "setup";
+    EXPECT_TRUE(active) << "a first frame of exactly L is admitted";
+}

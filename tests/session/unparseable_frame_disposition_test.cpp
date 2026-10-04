@@ -66,7 +66,8 @@
 //
 // LateSite_* (tasks.md T038; contract C-6; spec FR-016, SC-008): one cell per late
 // inbound parse site, each with a frame the header scan finds fault-free but the parse
-// cannot index. The session closes terminally, sends no Reject and does not invoke the
+// cannot index, through an entry cap lowered by session_test_access (093). The session
+// closes terminally, sends no Reject and does not invoke the
 // parse target's receive callback; the durable NextNumIn a reconnect resumes from is
 // pinned per site (contract C-5 L-6). The section comment above LateKnobs states each
 // cell.
@@ -127,6 +128,7 @@
 #include <deque>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
@@ -158,6 +160,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/reify_test_frame.hpp"
+#include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
@@ -2152,11 +2155,17 @@ TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWithout372_L
 // command, `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp`,
 // and classify each call by the provenance of the bytes it parses.
 //
-// The trigger is a real frame the header scan finds fault-free, carrying more fields
-// than fixpp::wire::default_max_offset_entries. Parser<Index>::parse fails on it on every
-// lane: the parse arena is exhausted where its upstream is null, and the offset-table
-// cap is exceeded where it is not. So no cell needs a platform guard, and none asserts
-// which error the parse returned. The filler is distinct user-defined tags.
+// 093-inbound-frame-dispositions (contract C-3 I-4, research R-3) re-bases the trigger.
+// The session's parse capacity is derived from its inbound limit L, so every admitted
+// frame parses and a late parse failure is unreachable from the wire. The cells reach
+// the defence through session_test_access instead: after open(), the session's inbound
+// entry cap is lowered to fixpp::wire::default_max_offset_entries, and the trigger is a
+// real frame the header scan finds fault-free, within L, carrying more fields than
+// that cap. Parser<Index>::parse then fails on it with wire_offset_table_full on every
+// lane, the spill witness's upstream notwithstanding, so no cell needs a platform
+// guard, and none asserts which error the parse returned. The filler is distinct
+// user-defined tags. LateSite_Control_UnloweredCap_* shows the same frame is delivered
+// when the cap is left as open() derived it.
 //
 // Each cell asserts the C-6 disposition: a terminal close (is_open() false: the
 // Disconnected transitions that are not a close leave it true), no Reject(35=3), and
@@ -2307,6 +2316,7 @@ void expect_late_close(LateCell& c, std::vector<std::byte> const& frame, Target 
                        seqnum_t durable_after, std::string_view row) {
     int const admin_before = c.app->from_admin;
     int const app_before = c.app->from_app;
+    session_test_access::lower_inbound_entry_cap(*c.sess, fixpp::wire::default_max_offset_entries);
     c.fix.feed(*c.sess, frame);
 
     // The verdict, captured before release() closes a session left open.
@@ -2492,6 +2502,51 @@ TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_ValidateGate_Par
     EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";
     EXPECT_EQ(c.app->from_app, app_before) << "control: a rejected message is not delivered";
+}
+
+// The LateSite_* frame with the session's entry cap as open() derived it from L: it is
+// admitted, so it parses, and the message is delivered and consumed. This is why the
+// cells above lower the cap: 093 left the wire no way to reach the late close.
+TEST(UnparseableFrameDisposition, LateSite_Control_UnloweredCap_FromApp_DeliveredAndConsumed) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kLateFillerFields)));
+    EXPECT_TRUE(c.sess->is_open()) << "the session stays open";
+    EXPECT_EQ(c.sess->state(), fsm_state::Active);
+    EXPECT_EQ(c.app->from_app, app_before + 1) << "fromApp is invoked";
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty()) << "nothing is sent";
+    EXPECT_EQ(c.durable_next_inbound(), 3U) << "the message is consumed durably";
+}
+
+// ── Q-15 (T057; contract C-3 I-4): the late close through a shrunk buffer ───
+//
+// session_test_access shortens the session's parse buffer after open(), so an admitted
+// frame's parse draws past it. Where the spill witness's upstream is null, that draw
+// is refused, the parse fails and 092's late close fires: the C-6 disposition. Where
+// it forwards (MSVC debug), the draw is served from the heap and recorded, and the
+// frame is delivered. The branch is the library's own condition.
+TEST(UnparseableFrameDisposition, Q15_ShrunkParseBuffer_LateCloseOrRecordedSpill) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    // Room for a handful of entries, far less than the frame's fields need.
+    session_test_access::shrink_parse_buffer(*c.sess, 256);
+    auto const frame = make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields));
+    if (fixpp::detail::arena_upstream() == std::pmr::null_memory_resource()) {
+        expect_late_close(c, frame, Target::from_app, 2, "shrunk parse buffer");
+        return;
+    }
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, frame);
+    EXPECT_TRUE(c.sess->is_open()) << "the forwarding lane delivers from the heap";
+    EXPECT_EQ(c.app->from_app, app_before + 1);
+    EXPECT_GT(session_test_access::parse_spills(*c.sess), 0U) << "and records the spill";
 }
 
 // ── ScriptedPeer_* (tasks.md T041; spec SC-007; quickstart §2 "Scripted peer") ──

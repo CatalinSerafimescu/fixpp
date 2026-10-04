@@ -59,6 +59,32 @@ struct session_test_access {
     [[nodiscard]] static std::uint32_t inbound_limit(Session const& s) noexcept {
         return s.inbound_limit_;
     }
+
+    // The size of the per-session parse buffer open() allocated (093, data-model E-2).
+    [[nodiscard]] static std::size_t parse_buffer_bytes(Session const& s) noexcept {
+        return s.inbound_parse_buf_.size();
+    }
+
+    // How many requests the parse buffer's spill witness has seen: every allocation an
+    // inbound parse, or a lazy read inside a callback, made past the buffer (093,
+    // contract C-3 I-2).
+    [[nodiscard]] static std::uint64_t parse_spills(Session const& s) noexcept {
+        return s.parse_spill_witness_.spills();
+    }
+
+    // Shortens the parse buffer to its first `bytes` (093, contract C-3 I-4): an
+    // admitted frame's parse then draws past it, which reaches the spill witness. The
+    // defence cells use it after open(); `bytes` must not exceed the current size.
+    static void shrink_parse_buffer(Session& s, std::size_t bytes) noexcept {
+        s.inbound_parse_buf_ = s.inbound_parse_buf_.first(bytes);
+    }
+
+    // Lowers the entry cap every inbound parse runs under (093, data-model E-2): a
+    // frame with more fields than `n` then fails its parse with wire_offset_table_full
+    // on every lane. The defence cells use it after open().
+    static void lower_inbound_entry_cap(Session& s, std::size_t n) noexcept {
+        s.inbound_entry_cap_ = n;
+    }
 };
 
 }  // namespace fixpp::session

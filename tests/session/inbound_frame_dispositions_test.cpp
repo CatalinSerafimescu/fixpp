@@ -23,14 +23,17 @@
 #include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/log/level.hpp>
@@ -48,6 +51,7 @@
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -55,6 +59,7 @@
 #include <vector>
 
 #include "plain_engine_rig.hpp"
+#include "support/fix44_dictionary.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -121,6 +126,68 @@ TEST_F(InboundFrameDispositions, Q13_InboundLimitFollowsAnAdvertisedMaxMessageSi
         Session sess(engine, make_acceptor_cfg(advertised));
         ASSERT_TRUE(open_sync(sess).has_value());
         EXPECT_EQ(session_test_access::inbound_limit(sess), advertised);
+    }
+}
+
+// ── Q-13, the 383 half (T055a; FR-010, plan OD-2) ───────────────────────────
+//
+// An advertised MaxMessageSize(383) below 4096 or above 262144 is refused with
+// invalid_session_config by Engine::register_session and by Session::open(); the two
+// ends of the range are accepted, so each refusal is keyed on its own bound.
+
+TEST_F(InboundFrameDispositions, Q13_MaxMessageSizeOutsideTheRangeIsRefusedByRegisterSession) {
+    fixpp::core::EngineConfig ec;
+    ec.executor = ioc.get_executor();
+    ec.clock = clock;
+    fixpp::session::Engine eng{ioc.get_executor(), std::move(ec)};
+
+    struct Row {
+        std::uint32_t advertised;
+        bool accepted;
+        std::string comp;  // a distinct SenderCompID per row, so no row is a duplicate
+    };
+    std::vector<Row> const rows{{4095U, false, "R4095"},
+                                {262145U, false, "R262145"},
+                                {4096U, true, "R4096"},
+                                {262144U, true, "R262144"}};
+    std::vector<fixpp::core::expected_t<void>> results;
+    for (auto const& row : rows) {
+        auto cfg = make_acceptor_cfg(row.advertised);
+        cfg.sender_comp_id = row.comp;
+        results.push_back(eng.register_session(cfg));
+    }
+
+    auto stop_fut = asio::co_spawn(ioc, eng.stop(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "InboundFrameDispositions::Q13_MaxMessageSize register")) {
+        return;
+    }
+    stop_fut.get();
+
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        SCOPED_TRACE(rows[i].advertised);
+        if (rows[i].accepted) {
+            EXPECT_TRUE(results[i].has_value()) << "register_session refused an in-range 383";
+        } else {
+            ASSERT_FALSE(results[i].has_value()) << "register_session accepted an out-of-range 383";
+            EXPECT_EQ(results[i].error(), fixpp::core::error::invalid_session_config);
+        }
+    }
+}
+
+TEST_F(InboundFrameDispositions, Q13_MaxMessageSizeOutsideTheRangeIsRefusedByOpen) {
+    for (std::uint32_t const advertised : {4095U, 262145U}) {
+        SCOPED_TRACE(advertised);
+        Session refused(engine, make_acceptor_cfg(advertised));
+        auto const r = open_sync(refused);
+        ASSERT_FALSE(r.has_value()) << "open() accepted an out-of-range 383";
+        EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
+        EXPECT_FALSE(refused.is_open()) << "a refused open() left the session open";
+    }
+    for (std::uint32_t const advertised : {4096U, 262144U}) {
+        SCOPED_TRACE(advertised);
+        Session accepted(engine, make_acceptor_cfg(advertised));
+        EXPECT_TRUE(open_sync(accepted).has_value()) << "open() refused an in-range 383";
     }
 }
 
@@ -1187,6 +1254,627 @@ TEST(InboundFrameDispositionsQ10, AConfiguredLongBeginStringFramesAndProcessesIt
     EXPECT_TRUE(active) << "the session reaches Active on its own BeginString";
     EXPECT_TRUE(processed) << "and processes its own frames";
     EXPECT_EQ(o.count, 0U) << "its own frames are not garbles";
+}
+
+// ── US3 (T054–T060): a large well-formed message is never lost ──────────────
+//
+// The session's inbound limit L, the carry and the per-session parse buffer B(L) that
+// open() allocates (data-model E-2; contract C-1, C-3). Each figure an assertion
+// compares against is spelled out here from the bundle's formula, not read from the
+// session: a change to the formula or to a constant must be written here too.
+
+// The pump's read size R (data-model E-2), as the carry block's term.
+constexpr std::size_t kReadSize = 4096;
+// MSVC debug's container proxy, per pmr container (research R-3, T014).
+constexpr std::size_t kContainerSlack = 16;
+
+// The carry block open() draws from SessionConfig::framer_carry_arena.
+constexpr std::size_t expected_carry_block(std::uint32_t limit) {
+    return std::size_t{limit} + kReadSize + kContainerSlack;
+}
+
+// B(L) = 12·N(L) + 4·overlay_cap_for(N(L)) + kAlignPad + kCallbackReadHeadroom + the
+// container slack, with N(L) = ⌊L/3⌋ + 1 (data-model E-2). overlay_cap_for is the next
+// power of two at or above 1.25·n + 1, at least 8 (src/wire/offset_table.cpp). The
+// slack term counts every pmr container one parse constructs (research R-3), each a
+// proxy plus its alignment padding.
+std::size_t expected_parse_buffer(std::uint32_t limit) {
+    std::size_t const n = std::size_t{limit} / 3U + 1U;
+    std::size_t cap = 8;
+    while (cap < (n * 5U) / 4U + 1U) cap <<= 1U;
+    constexpr std::size_t kAlignPad = 6;
+    constexpr std::size_t kCallbackReadHeadroom = 16384;
+    constexpr std::size_t kParseContainers = 10;
+    constexpr std::size_t kProxyPad = 7;
+    return 12U * n + 4U * cap + kAlignPad + kCallbackReadHeadroom +
+           kParseContainers * (kContainerSlack + kProxyPad);
+}
+
+// A memory resource that forwards to new_delete until a budget is spent, then refuses
+// with bad_alloc, and counts what it served.
+class BudgetResource final : public std::pmr::memory_resource {
+public:
+    std::size_t budget = static_cast<std::size_t>(-1);
+    std::size_t served = 0;
+
+private:
+    void* do_allocate(std::size_t bytes, std::size_t align) override {
+        if (bytes > budget - served) throw std::bad_alloc{};
+        void* p = std::pmr::new_delete_resource()->allocate(bytes, align);
+        served += bytes;
+        return p;
+    }
+    void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
+        std::pmr::new_delete_resource()->deallocate(p, bytes, align);
+    }
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& o) const noexcept override {
+        return this == &o;
+    }
+};
+
+// An Application that counts the receive callbacks and keeps the field count of the
+// last fromApp view; `on_app` runs inside fromApp on the view, for lazy reads.
+class FromAppProbe final : public Application {
+public:
+    int from_app = 0;
+    int from_admin = 0;
+    std::size_t last_fields = 0;
+    std::function<void(fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const&)> on_app;
+
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const SessionId& /*id*/) override {
+        ++from_admin;
+        return {};
+    }
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const SessionId& /*id*/) override {
+        ++from_app;
+        last_fields = msg.offsets().size();
+        if (on_app) on_app(msg);
+        return {};
+    }
+};
+
+std::size_t soh_count(std::string_view f) {
+    return static_cast<std::size_t>(std::ranges::count(f, '\x01'));
+}
+
+// A plaintext acceptor with a FromAppProbe, its 383 set to `advertised` (unset when
+// nullopt), started and logged on.
+struct LargeCell {
+    LogCapture log;
+    std::shared_ptr<FromAppProbe> app = std::make_shared<FromAppProbe>();
+    plain_rig::Rig rig{app};
+    bool up = false;
+
+    explicit LargeCell(std::optional<std::uint32_t> advertised,
+                       std::shared_ptr<const fixpp::dict::Dictionary> dict = nullptr,
+                       std::string begin_string = "FIX.4.2") {
+        rig.begin_string = std::move(begin_string);
+        auto cfg = rig.cfg();
+        cfg.logger_override = log.logger;
+        cfg.initial_trace_context = known_trace();
+        cfg.advertised_max_message_size = advertised;
+        if (dict) cfg.dictionary = std::move(dict);
+        up = rig.start(std::move(cfg)) && rig.to_active();
+    }
+
+    [[nodiscard]] std::uint32_t next_in() const {
+        auto const s = rig.session();
+        return s ? next_inbound(*s) : 0U;
+    }
+};
+
+// ── Q-11 (T054): a dense frame of exactly L parses, is delivered, and fits B(L) ──
+//
+// The densest layout, "1=<SOH>" fields, filling a NewOrderSingle to exactly L bytes,
+// at the unset default and at a configured 383 at each end of its range. The frame is
+// delivered to fromApp with every field indexed, nothing spilled past the parse buffer
+// (the spill witness, contract C-3 I-2), and the buffer is B(L). A spill would be a
+// parse failure where the witness's upstream is null and a recorded spill where it is
+// not, so "delivered and not spilled" is "the parse's peak fits B(L)" on every lane.
+// Base RED: the parse fails at the 16 KiB stack arena or the entry cap (T007).
+void run_q11(std::optional<std::uint32_t> advertised, std::uint32_t limit) {
+    LargeCell c{advertised};
+    std::string const f = c.up ? c.rig.msg_of_size("D", 2, {}, limit, "1", true) : std::string{};
+    bool const built = !f.empty();
+    bool const d = built && c.rig.deliver(f);
+    bool const delivered = d && c.rig.run_until([&] { return c.app->from_app == 1; });
+    bool const processed = delivered && c.rig.deliver(c.rig.heartbeat(3)) &&
+                           c.rig.run_until([&] { return c.next_in() == 4U; });
+    auto const s = c.rig.session();
+    std::size_t const buffer = s ? session_test_access::parse_buffer_bytes(*s) : 0U;
+    std::uint64_t const spills = s ? session_test_access::parse_spills(*s) : ~std::uint64_t{0};
+    auto const st = c.rig.state();
+    std::size_t const fields = c.app->last_fields;
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && built && d) << "setup";
+    EXPECT_TRUE(delivered) << "the dense frame of exactly L reaches fromApp";
+    EXPECT_EQ(fields, soh_count(f)) << "every field is indexed";
+    EXPECT_TRUE(processed) << "the session processes the next frame";
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_EQ(spills, 0U) << "nothing spilled past the parse buffer";
+    EXPECT_EQ(buffer, expected_parse_buffer(limit)) << "the parse buffer is B(L)";
+}
+
+TEST(InboundFrameDispositionsQ11, DenseFrameOfExactlyTheDefaultLimitIsDelivered) {
+    run_q11(std::nullopt, 65536U);
+}
+TEST(InboundFrameDispositionsQ11, DenseFrameOfExactlyTheFloorLimitIsDelivered) {
+    run_q11(4096U, 4096U);
+}
+TEST(InboundFrameDispositionsQ11, DenseFrameOfExactlyTheCeilingLimitIsDelivered) {
+    run_q11(262144U, 262144U);
+}
+
+// ── SC-007's measurement (T054): what open() draws from each arena ──────────
+//
+// framer_carry_arena serves the carry block, and the session arena serves B(L), both
+// once at open(). Each arena is a BudgetResource with no budget, read before and after
+// open(). The figures are recorded as test properties for the evidence file.
+void run_open_draws(std::optional<std::uint32_t> advertised, std::uint32_t limit) {
+    DirectFixture f;
+    BudgetResource carry_arena;
+    BudgetResource session_arena;
+    auto cfg = f.cfg(session_role::acceptor);
+    cfg.advertised_max_message_size = advertised;
+    cfg.framer_carry_arena = &carry_arena;
+    cfg.session_arena = &session_arena;
+    Session s{f.engine, cfg};
+    std::size_t const carry_before = carry_arena.served;
+    std::size_t const session_before = session_arena.served;
+    ASSERT_TRUE(f.open(s));
+    ASSERT_TRUE(s.is_open());
+    std::size_t const carry_drawn = carry_arena.served - carry_before;
+    std::size_t const session_drawn = session_arena.served - session_before;
+    ::testing::Test::RecordProperty("carry_arena_bytes_at_open", std::to_string(carry_drawn));
+    ::testing::Test::RecordProperty("session_arena_bytes_at_open", std::to_string(session_drawn));
+    EXPECT_EQ(carry_drawn, expected_carry_block(limit)) << "the carry block";
+    EXPECT_EQ(session_drawn, expected_parse_buffer(limit)) << "B(L)";
+}
+
+TEST(InboundFrameDispositionsSc007, OpenDrawsTheCarryAndBOfLAtTheDefaultLimit) {
+    run_open_draws(std::nullopt, 65536U);
+}
+TEST(InboundFrameDispositionsSc007, OpenDrawsTheCarryAndBOfLAtTheCeilingLimit) {
+    run_open_draws(262144U, 262144U);
+}
+
+// ── Q-14 (T055a, the carry half; T056, the session-arena half) ──────────────
+//
+// open() with an arena one byte short of what it must allocate returns an open()
+// error and leaves the session never-opened; the exact amount opens. Base RED: open()
+// draws nothing from either arena (the carry is built by the pump, and no B(L)
+// exists), so it succeeds.
+enum class Arena : std::uint8_t { carry, session };
+
+void run_short_arena(Arena which, std::uint32_t limit, std::optional<std::uint32_t> advertised) {
+    std::size_t const need =
+        which == Arena::carry ? expected_carry_block(limit) : expected_parse_buffer(limit);
+    for (std::size_t const budget : {need - 1U, need}) {
+        SCOPED_TRACE(budget);
+        DirectFixture f;
+        BudgetResource arena;
+        auto cfg = f.cfg(session_role::acceptor);
+        cfg.advertised_max_message_size = advertised;
+        (which == Arena::carry ? cfg.framer_carry_arena : cfg.session_arena) = &arena;
+        Session s{f.engine, cfg};
+        arena.budget = arena.served + budget;  // what construction drew stays drawn
+        auto fut = asio::co_spawn(f.ioc, s.open(), asio::use_future);
+        ASSERT_TRUE(fixpp::test_support::pump_until_ready(f.ioc, fut, "Q14::open"));
+        auto const r = fut.get();
+        if (budget < need) {
+            ASSERT_FALSE(r.has_value()) << "open() succeeded over a short arena";
+            EXPECT_EQ(r.error(), fixpp::core::error::out_of_memory);
+            EXPECT_FALSE(s.is_open()) << "a failed open() left the session open";
+        } else {
+            EXPECT_TRUE(r.has_value()) << "open() failed over an arena of exactly its need";
+        }
+    }
+}
+
+TEST(InboundFrameDispositionsQ14, CarryArenaOneByteShortIsAnOpenError) {
+    run_short_arena(Arena::carry, 65536U, std::nullopt);
+}
+TEST(InboundFrameDispositionsQ14, CarryArenaOneByteShortIsAnOpenErrorAtAConfiguredLimit) {
+    run_short_arena(Arena::carry, 4096U, 4096U);
+}
+TEST(InboundFrameDispositionsQ14, SessionArenaOneByteShortIsAnOpenError) {
+    run_short_arena(Arena::session, 65536U, std::nullopt);
+}
+TEST(InboundFrameDispositionsQ14, SessionArenaOneByteShortIsAnOpenErrorAtAConfiguredLimit) {
+    run_short_arena(Arena::session, 4096U, 4096U);
+}
+
+// Through the engine: an acceptor registered with a carry arena too small for its
+// carry is refused at open(), so the peer's Logon is never answered and the connection
+// closes. Run under EXPECT_EXIT, so that a pump terminating on the undersized arena is
+// a recorded failure, not a crashed binary. Exit codes: 0 = refused and closed with no
+// Logon reply; 1 = the session was published or answered the Logon; 2 = setup failed;
+// 3 = the connection stayed open.
+[[noreturn]] void short_carry_arena_through_the_engine() {
+    BudgetResource arena;
+    arena.budget = expected_carry_block(65536U) - 1U;
+    plain_rig::Rig rig;
+    auto cfg = rig.cfg();
+    cfg.framer_carry_arena = &arena;
+    if (!rig.start(std::move(cfg)) || !rig.connect_peer()) std::exit(2);
+    rig.peer.send(rig.logon());
+    bool const ended = rig.run_until([&] { return rig.peer.read_ended; });
+    bool const answered = !plain_rig::frames_of_type(rig.peer.received, "A").empty();
+    bool const published = rig.session() != nullptr;
+    rig.stop();
+    if (answered || published) std::exit(1);
+    std::exit(ended ? 0 : 3);
+}
+
+TEST(InboundFrameDispositionsQ14, ThroughTheEngineAShortCarryArenaRefusesTheConnection) {
+    EXPECT_EXIT(short_carry_arena_through_the_engine(), ::testing::ExitedWithCode(0), "");
+}
+
+// ── Q-6 (T055): a frame over L closes, with no guard or handler reached ─────
+//
+// A configured 383 of 4096, so L = 4096. Each over-L shape closes the session
+// terminally: the transport is closed, the state is Disconnected, and one record
+// carries the failure kind and L. No callback runs, no Reject is sent and NextNumIn
+// does not move. Run in Active and in each state the pump reads in before Active:
+// NotConnected (an acceptor whose first frame was disregarded), LogonSent (an
+// initiator) and Disconnected with the transport open (an acceptor whose first frame
+// was refused). The record's format is spelled out here.
+constexpr char kOverLimitRecordFormat[] =
+    "inbound frame over the limit closed the session: kind={} limit={}";
+constexpr std::uint32_t kQ6Limit = 4096;
+
+enum class OverL : std::uint8_t { frame, bad_checksum, body_length_at_candidate };
+
+std::string_view over_l_name(OverL k) {
+    switch (k) {
+        case OverL::frame:
+            return "a frame of L+1";
+        case OverL::bad_checksum:
+            return "a frame of L+1 with a bad CheckSum";
+        case OverL::body_length_at_candidate:
+            return "an over-L BodyLength at a resync candidate";
+    }
+    return "?";
+}
+
+// The over-L bytes the peer sends, framed as `rig` frames them.
+std::string over_l_bytes(plain_rig::Rig const& rig, OverL k, std::uint32_t seq) {
+    switch (k) {
+        case OverL::frame:
+            return rig.msg_of_size("D", seq, {}, kQ6Limit + 1U, "58", false);
+        case OverL::bad_checksum: {
+            std::string f = rig.msg_of_size("D", seq, {}, kQ6Limit + 1U, "58", false);
+            auto const at = f.rfind("10=") + 3;
+            f.replace(at, 3, f.substr(at, 3) == "000" ? "001" : "000");
+            return f;
+        }
+        case OverL::body_length_at_candidate:
+            return junk() + "8=" + rig.begin_string + "\x01" +
+                   "9=" + std::to_string(kQ6Limit + 1U) + "\x01" + "35=0\x01";
+    }
+    return {};
+}
+
+std::vector<fixpp::log::Record> over_limit_records(LogCapture& log) {
+    (void)log.logger->shutdown();
+    std::vector<fixpp::log::Record> out;
+    for (auto const& r : log.sink->records()) {
+        if (r.format_id == FIXPP_FORMAT_ID(kOverLimitRecordFormat)) out.push_back(r);
+    }
+    return out;
+}
+
+enum class Q6State : std::uint8_t { active, not_connected, logon_sent, disconnected };
+
+std::string_view q6_state_name(Q6State s) {
+    switch (s) {
+        case Q6State::active:
+            return "Active";
+        case Q6State::not_connected:
+            return "NotConnected";
+        case Q6State::logon_sent:
+            return "LogonSent";
+        case Q6State::disconnected:
+            return "Disconnected";
+    }
+    return "?";
+}
+
+void run_q6(Q6State at, OverL kind) {
+    std::string const row = std::string{q6_state_name(at)} + ", " + std::string{over_l_name(kind)};
+    LogCapture log;
+    auto app = std::make_shared<FromAppProbe>();
+    plain_rig::Rig rig{app};
+    auto cfg =
+        rig.cfg(at == Q6State::logon_sent ? session_role::initiator : session_role::acceptor);
+    cfg.logger_override = log.logger;
+    cfg.initial_trace_context = known_trace();
+    cfg.advertised_max_message_size = kQ6Limit;
+    bool reached = rig.start(std::move(cfg));
+    fsm_state want{};
+    switch (at) {
+        case Q6State::active:
+            reached = reached && rig.to_active();
+            want = fsm_state::Active;
+            break;
+        case Q6State::not_connected:
+            // A first frame whose third field is not 35: disregarded, the pump runs.
+            reached = reached && rig.connect_peer() &&
+                      rig.deliver(plain_rig::frame(rig.begin_string,
+                                                   "49=TW\x01"
+                                                   "35=A\x01"
+                                                   "34=1\x01"
+                                                   "52=" +
+                                                       rig.sending_time() +
+                                                       "\x01"
+                                                       "56=ISLD\x01" +
+                                                       std::string{kLogonFields})) &&
+                      rig.run_until([&] { return rig.session() != nullptr; });
+            want = fsm_state::NotConnected;
+            break;
+        case Q6State::logon_sent:
+            reached = reached && rig.run_until([&] {
+                return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
+                       rig.state() == fsm_state::LogonSent;
+            });
+            want = fsm_state::LogonSent;
+            break;
+        case Q6State::disconnected:
+            // A first frame that is not a Logon: refused into Disconnected, the pump runs.
+            reached = reached && rig.connect_peer() && rig.deliver(rig.heartbeat(1)) &&
+                      rig.run_until([&] { return rig.state() == fsm_state::Disconnected; });
+            want = fsm_state::Disconnected;
+            break;
+    }
+    auto const s = rig.session();
+    auto const state_before = rig.state();
+    std::uint32_t const next_before = s ? next_inbound(*s) : 0U;
+    int const app_before = app->from_app;
+    int const admin_before = app->from_admin;
+    std::size_t const rejects_before = plain_rig::frames_of_type(rig.peer.received, "3").size();
+    bool const open_before = !rig.peer.read_ended;
+
+    std::string const bytes = reached ? over_l_bytes(rig, kind, next_before) : std::string{};
+    bool const sent = !bytes.empty() && rig.deliver(bytes);
+    bool const closed = sent && rig.run_until([&] { return rig.peer.read_ended; });
+    auto const state_after = rig.state();
+    bool const is_open_after = s && s->is_open();
+    std::uint32_t const next_after = s ? next_inbound(*s) : 0U;
+    int const app_calls = app->from_app - app_before;
+    int const admin_calls = app->from_admin - admin_before;
+    std::size_t const rejects =
+        plain_rig::frames_of_type(rig.peer.received, "3").size() - rejects_before;
+    rig.stop();
+    auto const records = over_limit_records(log);
+
+    ASSERT_TRUE(reached && s && open_before && sent) << row << ": setup";
+    ASSERT_EQ(state_before, want) << row << ": the state the cell runs in";
+    EXPECT_TRUE(closed) << row << ": the transport closes";
+    EXPECT_EQ(state_after, fsm_state::Disconnected) << row;
+    EXPECT_FALSE(is_open_after) << row << ": a terminal close, not only a Disconnected state";
+    EXPECT_EQ(app_calls, 0) << row << ": no fromApp";
+    EXPECT_EQ(admin_calls, 0) << row << ": no fromAdmin";
+    EXPECT_EQ(rejects, 0U) << row << ": no Reject";
+    EXPECT_EQ(next_after, next_before) << row << ": NextNumIn unchanged";
+    ASSERT_EQ(records.size(), 1U) << row << ": one over-limit record";
+    ASSERT_EQ(records[0].arg_count, 2U) << row;
+    EXPECT_EQ(records[0].args[0].u64,
+              static_cast<std::uint64_t>(fixpp::core::error::wire_frame_too_large))
+        << row << ": the record's kind";
+    EXPECT_EQ(records[0].args[1].u64, kQ6Limit) << row << ": the record's L";
+    auto const tc = known_trace();
+    EXPECT_EQ(records[0].trace_id,
+              (reinterpret_cast<std::array<std::uint8_t, 16> const&>(tc.trace_id)))
+        << row << ": the record carries the session's trace_id";
+}
+
+TEST(InboundFrameDispositionsQ6, Active_FrameOfLPlusOneCloses) {
+    run_q6(Q6State::active, OverL::frame);
+}
+TEST(InboundFrameDispositionsQ6, Active_FrameOfLPlusOneWithABadCheckSumCloses) {
+    run_q6(Q6State::active, OverL::bad_checksum);
+}
+TEST(InboundFrameDispositionsQ6, Active_OverLBodyLengthAtAResyncCandidateCloses) {
+    run_q6(Q6State::active, OverL::body_length_at_candidate);
+}
+TEST(InboundFrameDispositionsQ6, NotConnected_FrameOfLPlusOneCloses) {
+    run_q6(Q6State::not_connected, OverL::frame);
+}
+TEST(InboundFrameDispositionsQ6, NotConnected_FrameOfLPlusOneWithABadCheckSumCloses) {
+    run_q6(Q6State::not_connected, OverL::bad_checksum);
+}
+TEST(InboundFrameDispositionsQ6, NotConnected_OverLBodyLengthAtAResyncCandidateCloses) {
+    run_q6(Q6State::not_connected, OverL::body_length_at_candidate);
+}
+TEST(InboundFrameDispositionsQ6, LogonSent_FrameOfLPlusOneCloses) {
+    run_q6(Q6State::logon_sent, OverL::frame);
+}
+TEST(InboundFrameDispositionsQ6, LogonSent_FrameOfLPlusOneWithABadCheckSumCloses) {
+    run_q6(Q6State::logon_sent, OverL::bad_checksum);
+}
+TEST(InboundFrameDispositionsQ6, LogonSent_OverLBodyLengthAtAResyncCandidateCloses) {
+    run_q6(Q6State::logon_sent, OverL::body_length_at_candidate);
+}
+TEST(InboundFrameDispositionsQ6, Disconnected_FrameOfLPlusOneCloses) {
+    run_q6(Q6State::disconnected, OverL::frame);
+}
+TEST(InboundFrameDispositionsQ6, Disconnected_FrameOfLPlusOneWithABadCheckSumCloses) {
+    run_q6(Q6State::disconnected, OverL::bad_checksum);
+}
+TEST(InboundFrameDispositionsQ6, Disconnected_OverLBodyLengthAtAResyncCandidateCloses) {
+    run_q6(Q6State::disconnected, OverL::body_length_at_candidate);
+}
+
+// Control: a frame of exactly L, in Active with the same 383, is delivered.
+TEST(InboundFrameDispositionsQ6, Control_FrameOfExactlyLIsDelivered) {
+    LargeCell c{kQ6Limit};
+    std::string const f =
+        c.up ? c.rig.msg_of_size("D", 2, {}, kQ6Limit, "58", false) : std::string{};
+    bool const d = !f.empty() && c.rig.deliver(f);
+    bool const delivered = d && c.rig.run_until([&] { return c.app->from_app == 1; });
+    bool const read_ended = c.rig.peer.read_ended;
+    auto const st = c.rig.state();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d) << "setup";
+    EXPECT_TRUE(delivered);
+    EXPECT_FALSE(read_ended);
+    EXPECT_EQ(st, fsm_state::Active);
+}
+
+// ── Q-33 (T060): lazy reads at headroom exhaustion inside a callback ────────
+//
+// A FIX 4.4 NewOrderSingle of exactly L = 65536 bytes: a NoPartyIDs(453) group whose
+// slices outgrow the callback headroom, then "2=<SOH>" fields (tag 2 is not a
+// NewOrderSingle field, so each is an unknown field) to fill the frame and the
+// overlay. Inside fromApp the callback reads group_slices(453), then unknown_fields().
+// The assertions branch at runtime on the library's own condition, the parse arena's
+// upstream (fixpp::detail::arena_upstream()); no arm is skipped:
+//   - null upstream: each read reports its exhaustion (an empty span, an empty view);
+//   - forwarding upstream (MSVC debug): each read succeeds and the spill is recorded.
+// Either way the session stays Active and processes the next frame. The C arms are
+// T091's (Phase 8); the C cursor shells are L-17 (fixpp#541).
+//
+// The frame's density is chosen for B(L): on the base, whose callback reads draw on a
+// 16 KiB stack arena, the frame does not parse at all, so the base run uses a scratch
+// variant sized for that arena.
+constexpr std::size_t kQ33PartyInstances = 2000;
+
+std::string q33_party_group() {
+    std::string g = "453=" + std::to_string(kQ33PartyInstances) + "\x01";
+    for (std::size_t i = 0; i < kQ33PartyInstances; ++i) {
+        g += "448=P\x01"
+             "447=D\x01"
+             "452=1\x01";
+    }
+    return g;
+}
+
+// The Q-33 frame, a FIX 4.4 NewOrderSingle of exactly `size` bytes.
+std::string q33_frame(plain_rig::Rig const& rig, std::uint32_t seq, std::size_t size) {
+    return rig.msg_of_size("D", seq,
+                           "11=ORD1\x01"
+                           "21=1\x01"
+                           "55=X\x01"
+                           "54=1\x01"
+                           "60=20240101-00:00:00.000\x01"
+                           "40=1\x01" +
+                               q33_party_group(),
+                           size, "2", true);
+}
+
+bool q33_null_upstream() {
+    return fixpp::detail::arena_upstream() == std::pmr::null_memory_resource();
+}
+
+// Delivers the Q-33 frame to a FIX 4.4 acceptor whose fromApp runs `read`, then a
+// Heartbeat, and reports what the cell asserts on.
+struct Q33Run {
+    bool up = false;
+    bool delivered = false;
+    bool next = false;
+    fsm_state state{};
+    std::uint64_t spills = 0;
+};
+
+template <class Read>
+Q33Run run_q33(Read read) {
+    Q33Run r;
+    LargeCell c{std::nullopt, fixpp::test_support::make_fix44_dictionary(), "FIX.4.4"};
+    c.app->on_app = read;
+    std::string const f = c.up ? q33_frame(c.rig, 2, 65536U) : std::string{};
+    bool const d = !f.empty() && c.rig.deliver(f);
+    r.up = c.up && d;
+    r.delivered = d && c.rig.run_until([&] { return c.app->from_app == 1; });
+    r.next = r.delivered && c.rig.deliver(c.rig.heartbeat(3)) &&
+             c.rig.run_until([&] { return c.next_in() == 4U; });
+    auto const s = c.rig.session();
+    r.spills = s ? session_test_access::parse_spills(*s) : 0U;
+    r.state = c.rig.state();
+    c.rig.stop();
+    return r;
+}
+
+// group_slices(): an empty span where the upstream is null; on the forwarding lane the
+// read succeeds and the spill is recorded. A regression guard on the base, pinning
+// today's report.
+TEST(InboundFrameDispositionsQ33, GroupSlicesAtHeadroomExhaustion) {
+    std::size_t slices = ~std::size_t{0};
+    auto const r = run_q33([&](auto const& mv) { slices = mv.offsets().group_slices(453).size(); });
+    ASSERT_TRUE(r.up) << "setup";
+    ASSERT_TRUE(r.delivered) << "the frame reaches fromApp";
+    EXPECT_TRUE(r.next) << "the session processes the next frame";
+    EXPECT_EQ(r.state, fsm_state::Active);
+    if (q33_null_upstream()) {
+        EXPECT_EQ(slices, 0U) << "group_slices() reports exhaustion as an empty span";
+    } else {
+        EXPECT_EQ(slices, kQ33PartyInstances) << "the read succeeds from the heap";
+        EXPECT_GT(r.spills, 0U) << "and the spill witness records the spill";
+    }
+}
+
+// unknown_fields(), after group_slices() has spent what it could, under EXPECT_EXIT:
+// a terminate (fixpp#540) is a recorded failure of this cell, not a crashed binary.
+// Exit codes: 0 = the lane's expected outcome; 1 = the unknown-field view was not the
+// lane's; 2 = the session did not carry on; 3 = setup failed; 4 = no spill recorded on
+// the forwarding lane.
+[[noreturn]] void unknown_fields_at_headroom_exhaustion() {
+    std::size_t unknown = ~std::size_t{0};
+    auto const r = run_q33([&](auto const& mv) {
+        (void)mv.offsets().group_slices(453);
+        std::size_t n = 0;
+        auto const uf = mv.unknown_fields();
+        for (auto it = uf.begin(); !(it == uf.end()); ++it) ++n;
+        unknown = n;
+    });
+    if (!r.up || !r.delivered) std::exit(3);
+    if (!r.next || r.state != fsm_state::Active) std::exit(2);
+    if (q33_null_upstream()) std::exit(unknown == 0U ? 0 : 1);
+    if (unknown == 0U) std::exit(1);
+    std::exit(r.spills > 0U ? 0 : 4);
+}
+
+TEST(InboundFrameDispositionsQ33, UnknownFieldsAtHeadroomExhaustion) {
+    EXPECT_EXIT(unknown_fields_at_headroom_exhaustion(), ::testing::ExitedWithCode(0), "");
+}
+
+// ── C-3 I-3 (T063): an inbound parse never nests inside another ─────────────
+//
+// One parse buffer per session is safe because no inbound parse runs inside another:
+// callbacks are synchronous, and callback_dispatch_scope asserts that no second
+// callback enters while one runs. A fromApp that starts the session's inbound path
+// again on the running executor (co_spawn dispatches inline there) re-enters
+// parse_and_dispatch_ and trips that assertion. The nested frame is the next expected
+// one, so it is in sequence and reaches the parse. Debug builds only: NDEBUG compiles
+// the assertion out.
+#ifndef NDEBUG
+// Exit codes: 2 = setup failed; 0 = the nested parse did not trip the assertion.
+[[noreturn]] void reenter_an_inbound_parse_from_from_app() {
+    DirectFixture f;
+    auto app = std::make_shared<FromAppProbe>();
+    f.engine.application = app;
+    Session s(f.engine, f.cfg(session_role::acceptor));
+    if (!f.open(s) || !f.feed(s, direct_msg("A", 1, kLogonFields))) std::exit(2);
+    auto const nested = plain_rig::to_bytes(direct_msg("D", 3));
+    app->on_app = [&](auto const& /*mv*/) {
+        asio::co_spawn(f.ioc, s.on_inbound_frame(nested), asio::detached);
+    };
+    (void)f.feed(s, direct_msg("D", 2));
+    std::exit(0);
+}
+#endif
+
+TEST(InboundFrameDispositionsI3, AnInboundParseReenteredFromACallbackDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "callback_dispatch_scope's assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(reenter_an_inbound_parse_from_from_app(), "concurrent session callback entry");
+#endif
 }
 
 }  // namespace

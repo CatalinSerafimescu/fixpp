@@ -85,7 +85,7 @@
 
 #include "engine_loopback_harness.hpp"
 #include "plain_engine_rig.hpp"
-#include "session/read_pump.hpp"  // 093 T027: kReadPumpCarryCapacity, the pump's carry
+#include "session/session_engine_access.hpp"  // 093: L and the carry open() allocated
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
 
@@ -475,9 +475,10 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
     ASSERT_NE(port, 0U) << "acceptor listener did not bind";
 
-    // Build an oversized frame: body is >64 KiB of repeated 'X'.
-    // This clearly exceeds kReadPumpCarryCapacity (64 KiB), so the framer
-    // will return wire_frame_too_large before any frame bytes reach on_inbound_frame.
+    // Build an oversized frame: a body of repeated 'X' longer than the session's
+    // inbound limit L (no 383 is configured, so L is the default; 093 data-model E-2),
+    // so the framer returns wire_frame_too_large before any frame bytes reach
+    // on_inbound_frame. The cell checks the body against L once the session exists.
     constexpr std::size_t kOversizeBody = 128 * 1024;  // 128 KiB
     std::vector<std::vector<std::byte>> oversize_frames;
     {
@@ -512,6 +513,7 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     auto st = acc->state();
     const auto next_inbound = static_cast<int>(
         fixpp::session::session_test_access::seqnum_mgr(*acc).next_inbound_unsafe());
+    std::size_t const limit = fixpp::session::session_engine_access::inbound_limit(*acc);
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
@@ -519,6 +521,8 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
         return;
     }
     stop_fut.get();
+
+    EXPECT_GT(kOversizeBody, limit) << "the oversized body must exceed the session's L";
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the oversized
     // frame and called close(terminal), driving the FSM to Disconnected.
@@ -1082,7 +1086,22 @@ struct ResyncCell {
     pr::Rig rig;
     bool up = false;
 
-    ResyncCell() { up = rig.start(rig.cfg()) && rig.to_active(); }
+    explicit ResyncCell(std::optional<std::uint32_t> advertised = std::nullopt) {
+        auto cfg = rig.cfg();
+        cfg.advertised_max_message_size = advertised;
+        up = rig.start(std::move(cfg)) && rig.to_active();
+    }
+
+    // The session's inbound limit L and its carry's capacity, through the engine seam
+    // the pump reads them from (093, data-model E-2, E-11); 0 without a session.
+    [[nodiscard]] std::size_t limit() const {
+        auto const s = rig.session();
+        return s ? fixpp::session::session_engine_access::inbound_limit(*s) : 0U;
+    }
+    [[nodiscard]] std::size_t carry_capacity() const {
+        auto const s = rig.session();
+        return s ? fixpp::session::session_engine_access::carry(*s).capacity() : 0U;
+    }
 
     [[nodiscard]] std::uint32_t next_in() const {
         auto const s = rig.session();
@@ -1197,9 +1216,9 @@ TEST(EngineReadPumpResync, Q2_TruncatedFrame_EverySplitPoint) {
 // with the session up, and the frame after it is processed.
 TEST(EngineReadPumpResync, Q2_GarbageOnlyStreamIsConsumedWithTheSessionUp) {
     ResyncCell c;
-    constexpr std::size_t kGarbage = 2U * fixpp::session::detail::kReadPumpCarryCapacity;
+    std::size_t const kGarbage = 2U * c.carry_capacity();
     constexpr std::size_t kChunk = 4096;
-    bool ok = c.up;
+    bool ok = c.up && kGarbage != 0U;
     for (std::size_t sent = 0; ok && sent < kGarbage; sent += kChunk) {
         ok = c.write_part(std::string(kChunk, 'Q'));
     }
@@ -1265,26 +1284,27 @@ TEST(EngineReadPumpResync, Q3_AFrameEmbeddedAfterAMalformedCandidateIsDeliveredA
     EXPECT_EQ(n, 1U) << "the malformed candidate is one garbled region";
 }
 
-// The L-1 pin. A BodyLength too large for its frame, but within the Framer's limit and
-// the carry, stalls the pump until the counted bytes arrive: the Heartbeat(34=3) the
-// count swallows is not processed meanwhile. When they arrive, `10=` is not at the
+// The L-1 pin. A BodyLength too large for its frame, but within the session's limit L
+// and its carry, stalls the pump until the counted bytes arrive: the Heartbeat(34=3)
+// the count swallows is not processed meanwhile. When they arrive, `10=` is not at the
 // counted offset, so the candidate is disregarded and framing resumes inside it, at
 // Heartbeat(34=3). The filler after Heartbeat(3) then opens a second region at that
-// frame boundary, and Heartbeat(4) follows it. The sizes are taken from the limit and
-// the carry in force at this head, never from a literal: T055a re-asserts the pin
-// against L and the carry allocated at open().
+// frame boundary, and Heartbeat(4) follows it. The sizes are read from L and the carry
+// open() allocated, through the engine seam the pump reads them from, never from a
+// literal. The carry holds L plus one read (data-model E-2), spelled out here.
 TEST(EngineReadPumpResync, L1_ATooLargeBodyLengthWithinTheLimitStallsThenIsDisregarded) {
-    constexpr std::size_t kCarry = fixpp::session::detail::kReadPumpCarryCapacity;
-    constexpr std::size_t kBodyLength = kCarry / 2U;
-    static_assert(kBodyLength < fixpp::wire::default_max_frame_bytes);
     ResyncCell c;
+    std::size_t const limit = c.limit();
+    std::size_t const carry = c.carry_capacity();
+    std::size_t const kBodyLength = limit / 2U;
     std::string const candidate =
         "8=FIX.4.2\x01"
         "9=" +
         std::to_string(kBodyLength) +
         "\x01"
         "35=0\x01";
-    bool const d1 = c.up && c.rig.deliver(c.rig.heartbeat(2) + candidate + c.rig.heartbeat(3));
+    bool const d1 = c.up && kBodyLength != 0U &&
+                    c.rig.deliver(c.rig.heartbeat(2) + candidate + c.rig.heartbeat(3));
     bool const hb2 = d1 && c.wait_next_in(3);
     c.rig.settle();
     auto const stalled_next = c.next_in();
@@ -1296,6 +1316,7 @@ TEST(EngineReadPumpResync, L1_ATooLargeBodyLengthWithinTheLimitStallsThenIsDisre
     c.rig.stop();
 
     ASSERT_TRUE(c.up && d1 && hb2 && d2) << "setup";
+    EXPECT_EQ(carry, limit + 4096U) << "the carry holds L plus one read";
     EXPECT_EQ(stalled_next, 3U) << "the stall holds Heartbeat(3) until the counted bytes arrive";
     EXPECT_EQ(stalled_garbles, 0U) << "nothing is decided while the candidate is partial";
     EXPECT_TRUE(resumed) << "framing resumes once the counted bytes arrive";
@@ -1303,27 +1324,94 @@ TEST(EngineReadPumpResync, L1_ATooLargeBodyLengthWithinTheLimitStallsThenIsDisre
     EXPECT_EQ(n, 2U) << "the candidate, and the filler at the boundary after Heartbeat(3)";
 }
 
-// The L-1 pin's other half, a regression guard (the strict Framer overflows the same
-// carry): a BodyLength whose frame does not fit the carry overflows it as the bytes
-// arrive, and that closes.
-TEST(EngineReadPumpResync, L1_ATooLargeBodyLengthThatOverflowsTheCarryCloses) {
-    constexpr std::size_t kCarry = fixpp::session::detail::kReadPumpCarryCapacity;
-    static_assert(kCarry < fixpp::wire::default_max_frame_bytes);
+// The L-1 pin's other half, re-based by 093 (Q-6): the carry holds L plus one read,
+// and a candidate whose BodyLength makes its frame longer than L is refused as soon as
+// the BodyLength is read, so a carry overflow cannot happen in the pump. A BodyLength
+// of L closes the session and the connection, without waiting for the body.
+TEST(EngineReadPumpResync, L1_AnOverLBodyLengthClosesAtItsHeader) {
     ResyncCell c;
+    std::size_t const limit = c.limit();
     std::string const candidate =
         "8=FIX.4.2\x01"
         "9=" +
-        std::to_string(kCarry) +
+        std::to_string(limit) +
         "\x01"
         "35=0\x01";
-    bool const d1 = c.up && c.rig.deliver(c.rig.heartbeat(2) + candidate);
+    bool const d1 = c.up && limit != 0U && c.rig.deliver(c.rig.heartbeat(2) + candidate);
     bool const hb2 = d1 && c.wait_next_in(3);
-    c.rig.peer.send(std::string(kCarry, 'Z'));
     bool const closed = hb2 && c.rig.run_until([&] {
         return c.rig.state() == fsm_state::Disconnected && c.rig.peer.read_ended;
     });
     c.rig.stop();
 
     ASSERT_TRUE(c.up && d1 && hb2) << "setup";
-    EXPECT_TRUE(closed) << "a carry overflow closes the session and the connection";
+    EXPECT_TRUE(closed) << "an over-L BodyLength closes the session and the connection";
+}
+
+// ── Q-12 (T055a): a frame of exactly L, split near the carry's edge ─────────
+//
+// A Heartbeat padded with one Text(58) field to exactly L = 65536 bytes (few fields,
+// so the base's parse holds it), then Heartbeat(next). Each split writes the first k
+// bytes, waits until the pump has read them, then writes the rest with the next
+// Heartbeat, which loopback delivers as one read when it fits one. The pump then holds
+// k bytes and must take 65536 - k + the Heartbeat in one feed: a carry of exactly L
+// overflows there, a carry of L plus one read does not. The splits run from the first
+// at which the rest and the Heartbeat fit one read to the frame's last byte, in steps,
+// and every split of the last 64 bytes. Base RED: the base's 64 KiB carry overflows
+// and the session closes.
+TEST(EngineReadPumpResync, Q12_AFrameOfExactlyLSplitNearTheCarryEdgeIsDelivered) {
+    ResyncCell c;
+    constexpr std::size_t kLimit = 65536;
+    constexpr std::size_t kRead = 4096;
+    std::size_t const hb_size = c.up ? c.rig.heartbeat(100).size() : 0U;
+    std::vector<std::size_t> splits;
+    for (std::size_t k = kLimit + hb_size - kRead; k < kLimit - 64U; k += 509U) splits.push_back(k);
+    for (std::size_t k = kLimit - 64U; k < kLimit; ++k) splits.push_back(k);
+
+    std::uint32_t seq = 2;
+    std::optional<std::size_t> first_lost;
+    bool ok = c.up;
+    for (std::size_t const k : splits) {
+        if (!ok) break;
+        std::string const f = c.rig.msg_of_size("0", seq, {}, kLimit, "58", false);
+        std::string const next = c.rig.heartbeat(seq + 1U);
+        ok = !f.empty() && c.write_part(f.substr(0, k)) &&
+             c.rig.run_until([&] { return c.rig.peer.all_written(); });
+        c.rig.settle(std::chrono::milliseconds{5});
+        ok = ok && c.write_part(f.substr(k) + next);
+        bool const delivered = ok && c.wait_next_in(seq + 2U);
+        if (!delivered && !first_lost) first_lost = k;
+        ok = ok && delivered;
+        seq += 2U;
+    }
+    auto const st = c.rig.state();
+    bool const read_ended = c.rig.peer.read_ended;
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up) << "setup";
+    EXPECT_EQ(first_lost, std::nullopt) << "a split lost the frame of exactly L";
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_FALSE(read_ended);
+}
+
+// ── InboundAtLimitAccepted (T055; moved from test_070_max_message_size_test) ──
+//
+// Re-based through the pump: a configured 383 inside [4096, 262144] and a Heartbeat
+// padded to exactly that many bytes, fed through the Framer, is delivered and the
+// session stays Active.
+TEST(EngineReadPumpResync, InboundAtLimitAccepted) {
+    constexpr std::uint32_t kAdvertised = 5000;
+    ResyncCell c{kAdvertised};
+    std::string const f =
+        c.up ? c.rig.msg_of_size("0", 2, {}, kAdvertised, "58", false) : std::string{};
+    bool const d = !f.empty() && c.rig.deliver(f);
+    bool const delivered = d && c.wait_next_in(3);
+    auto const st = c.rig.state();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d) << "setup";
+    EXPECT_EQ(f.size(), kAdvertised);
+    EXPECT_TRUE(delivered) << "a frame of exactly the advertised size is delivered";
+    EXPECT_EQ(st, fsm_state::Active);
 }

@@ -303,6 +303,46 @@ public:
     }
     [[nodiscard]] std::string heartbeat(std::uint32_t seq) const { return msg("0", seq); }
 
+    // msg(msg_type, seq, prefix + filler) of exactly `size` bytes, or "" when no filler
+    // reaches it. Dense: the filler is `<tag>=<SOH>` fields, the densest layout for a
+    // one-digit tag, plus at most one longer `<tag>=x…<SOH>` for the remainder. Not
+    // dense: the filler is one `<tag>=x…<SOH>` field.
+    [[nodiscard]] std::string msg_of_size(std::string_view msg_type, std::uint32_t seq,
+                                          std::string_view prefix, std::size_t size,
+                                          std::string_view tag, bool dense) const {
+        std::string const m0 = msg(msg_type, seq, prefix);
+        std::size_t const body0 = std::stoul(field_value(m0, "9"));
+        std::size_t const head = 3 + begin_string.size();  // "8=<bs><SOH>"
+        constexpr std::size_t kTrailer = 7;                // "10=NNN<SOH>"
+        std::size_t body = 0;
+        for (std::size_t digits = 1; digits <= 7 && body == 0; ++digits) {
+            if (size < head + 3 + digits + kTrailer) break;
+            std::size_t const b = size - head - (3 + digits) - kTrailer;
+            if (std::to_string(b).size() == digits) body = b;
+        }
+        if (body < body0) return {};
+        std::size_t const fill = body - body0;
+        std::size_t const unit = tag.size() + 2;  // "<tag>=<SOH>"
+        std::string const empty_field = std::string{tag} + "=\x01";
+        auto long_field = [&](std::size_t bytes) {
+            return std::string{tag} + "=" + std::string(bytes - unit, 'x') + "\x01";
+        };
+        std::string filler;
+        if (fill != 0U && !dense) {
+            if (fill < unit) return {};
+            filler = long_field(fill);
+        } else if (fill != 0U) {
+            std::size_t const n = fill / unit;
+            std::size_t const rem = fill % unit;
+            if (n == 0) return {};
+            filler.reserve(fill);
+            for (std::size_t i = 0; i + (rem != 0U ? 1U : 0U) < n; ++i) filler += empty_field;
+            if (rem != 0U) filler += long_field(unit + rem);
+        }
+        std::string m = msg(msg_type, seq, std::string{prefix} + filler);
+        return m.size() == size ? m : std::string{};
+    }
+
     template <class Pred>
     [[nodiscard]] bool run_until(Pred pred,
                                  std::chrono::steady_clock::duration budget = kPumpBudget) {
