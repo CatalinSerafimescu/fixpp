@@ -150,6 +150,8 @@ TEST(CapiC7Witness, Row2_A35NotThirdLogonIsDisregarded) {
 // one feed.
 TEST(CapiC7Witness, Row3_AFrameOfLSplitAtTheCarryEdgeIsAdmitted) {
     constexpr std::size_t kL = kDefaultLimit;
+    // Any tail from one byte up to a read less the order: the rest and the order then
+    // arrive as one read, which a carry of exactly L cannot take beside the bytes it holds.
     constexpr std::size_t kTail = 16;
     RawAcceptor peer;
     CInitiator c{peer.port(), kHeartBtIntSeconds};

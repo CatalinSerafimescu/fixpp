@@ -1362,6 +1362,8 @@ TEST(EngineReadPumpResync, Q12_AFrameOfExactlyLSplitNearTheCarryEdgeIsDelivered)
     constexpr std::size_t kRead = 4096;
     std::size_t const hb_size = c.up ? c.rig.heartbeat(100).size() : 0U;
     std::vector<std::size_t> splits;
+    // The step only thins the sample, since every split in the range is a case. Keep it
+    // below kRead, so each read-sized window of the range still holds a split.
     for (std::size_t k = kLimit + hb_size - kRead; k < kLimit - 64U; k += 509U) splits.push_back(k);
     for (std::size_t k = kLimit - 64U; k < kLimit; ++k) splits.push_back(k);
 
