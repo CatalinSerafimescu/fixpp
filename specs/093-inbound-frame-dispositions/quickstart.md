@@ -101,7 +101,11 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
   - restore the old liveness writer → Q-20;
   - delete the FR-030 guard → Q-22;
   - delete `close()`'s wait → Q-25;
-  - delete the unit's cancellation shield → Q-26 (durable counters);
+  - run the unit's `reset_to` inline on the arm's thread, with no `co_spawn` (M2b; plan OD-25, OD-26) →
+    Q-26 (durable counters: the no-teardown rows of the contended `HookedStore` and of the `FileStore`
+    whose writer lock is pre-held, tasks.md T088);
+  - drop only the `reset_to` co_spawn's empty-slot binding (M2a): a priced survivor (OD-26), because the
+    separate awaitable thread already keeps stop's total emission out;
   - drop the engine-stop flag from `logon_arm_superseded` → Q-26 (the per-role effect assertions);
   - make `reset_to`'s override non-atomic (reset, then advance) → Q-29;
   - never disarm the deadline race → Q-36;
@@ -132,7 +136,7 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 - `HookedStore` forwards `reset_to` and fires its hooks there. Show it with a cell that fails when the
   forwarding is removed. That is its forward mode (Q-23, Q-24). Its default-body mode calls the base
   `MessageStore::reset_to`, so the default body runs over its own `reset()` and `next_seqnum()`: Q-25
-  and Q-26 use that mode, and the delete-the-shield mutant is run against it.
+  and Q-26 use that mode.
 
 ## 3. Regression and cost
 

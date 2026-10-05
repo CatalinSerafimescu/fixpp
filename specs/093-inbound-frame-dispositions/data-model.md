@@ -75,12 +75,14 @@ Engine seam and private, `Session`.
   `session_arena_` (research R-3) and released at destruction. It is `mutable`, because
   `validate_inbound_` is `const`.
 - With N(L) = ⌊L/3⌋ + 1, the most fields a frame of L bytes can hold plus one:
-  B(L) = 12·N(L) + 4·`overlay_cap_for`(N(L)) + `kAlignPad` + `kCallbackReadHeadroom` +
-  `kContainerSlack`.
+  B(L) = `sizeof(OffsetTable::entry)`·N(L) + `sizeof(std::uint32_t)`·`overlay_cap_for`(N(L)) +
+  `kAlignPad` + `kCallbackReadHeadroom` + `kParseContainers`·(`kContainerSlack` + `kProxyAlignPad`),
+  as `parse_capacity::buffer_bytes` (`src/session/parse_capacity.hpp`) computes it (plan.md OD-23).
   - `kAlignPad` covers aligning the entry and overlay blocks inside one monotonic resource.
-  - The three constants are named, and their values are a measurement recorded in `research.md`, not
-    written into a comment.
-  - `kContainerSlack` covers MSVC-debug container proxies. A per-lane cell measures the peak with
+  - Each constant is named, and its value is a measurement or derivation recorded in `research.md`, not
+    written into a comment. Plan.md OD-23 and research R-3 call `kProxyAlignPad` `kProxyPad`.
+  - The last term covers MSVC-debug container proxies: each pmr container one parse constructs draws a
+    `kContainerSlack` proxy, plus up to `kProxyAlignPad` of padding after a 1-aligned request. A per-lane cell measures the peak with
     `pmr_allocation_tracking_resource` and asserts peak ≤ B(L).
   - **`kCallbackReadHeadroom`'s sizing condition.** Each parse reserves its entries up front (below),
     where the base grows them inside its stack parse arena (the `monotonic_buffer_resource` in
@@ -250,7 +252,8 @@ Private, `Session`.
 - `close()` awaits that signal raced against `await_deadline(*effective_clock_, now + logon_timeout_ms)`,
   and only when it is about to issue its teardown reset with the flag set (C-6). On expiry it records
   E-5's `session_event_close_reset_wait_expired` and proceeds.
-- The unit runs under C-6's cancellation shield, so no cancellation interrupts the await. The flag's
+- The unit's store operation runs on an empty cancellation slot (C-6; plan OD-25, OD-26), so no
+  cancellation interrupts the await. The flag's
   exit paths are the store's own results.
 
 ## E-11: `session_engine_access`
@@ -304,8 +307,9 @@ Private `Session` state, set through the engine seam.
   `Engine::stop()`'s step 1 has run on the session's strand (C-6). The flag is written and read on one
   strand, so a non-atomic `bool` is correct, and the ordering is strand order, not real time. It holds
   on the condition that every suspension in a Logon arm is followed by the predicate before the next
-  effect. Re-derive the sites with `grep -n logon_arm_superseded src/session/session.cpp`, against the
-  arm's `co_await` sites.
+  effect. Re-derive the sites with `grep -n logon_arm_superseded src/session/session.cpp`, and the
+  condition transitively: every `Session` coroutine an arm awaits is read down to its effects (contract
+  C-6; the evidence file's "`logon_arm_superseded_` sites, transitively"; plan OD-26).
 - E-4's placement condition applies: a `Session` reused for a second connection would need the flag
   reset when the transport is installed.
 - **Why a null session is safe to skip** (a condition, read at `00c1f720`). Both role loops publish

@@ -1482,10 +1482,16 @@ surfaces exist and are witnessed.
   On `-tsan`, confirm by name that `engine_reset_unit_stop` (T082) and `capi_inbound_frame_dispositions`
   (T090's cross-thread getter cell) ran: their cross-strand and cross-thread interleavings are what
   the TSan lane is for.
-- [ ] T119 Via the `checklist-auditor`, re-disposition any checklist item whose subject changed during
+- [X] T119 Via the `checklist-auditor`, re-disposition any checklist item whose subject changed during
   implementation: derive the population by a complement grep over
   `specs/093-inbound-frame-dispositions/checklists/*.md` for every FR, C-row, OD and invariant id the
   evidence file records a deviation against.
+
+  - **T119 as landed:**
+    - The population was derived from the evidence file and OD-9, OD-14 and OD-20…OD-28: 98 items in the population, 66 in the complement left unchanged.
+    - Six items re-opened, each on spec text the evidence refutes. Ten docs-only spec edits plus R-6's erratum pointer closed them as SPEC-FIXED.
+    - Each checklist ends with a "T119 re-disposition" table.
+    - `/speckit-analyze` was re-run after the edits.
 
 ### Verify and records (P9)
 

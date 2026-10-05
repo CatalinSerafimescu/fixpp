@@ -60,8 +60,8 @@ the framing fields that give the frame's length.
   counted again. The carry retains only the trailing bytes that are a proper prefix of `8=FIX`, at most
   four. The frames produced and the regions counted therefore do not depend on how the stream is
   segmented. The per-call summaries do, and so do the events built from them (FR-002, FR-003).
-- **Ordering.** A call that has produced a frame stops before resolving a later garble and leaves it
-  for the next call. Garbles reported by a call therefore precede every frame the same call produces.
+- **Ordering.** A call that has produced a frame stops before resolving a later garble, or a later
+  `wire_frame_too_large` outcome (plan.md OD-20), and leaves it for the next call. Garbles reported by a call therefore precede every frame the same call produces.
 - **Reporting.** Each call resets and then fills one `garble_summary` (E-1): the number of garbled
   regions it opened, the first one's kind, and the bytes it discarded. Bytes discarded while
   continuing a region opened by an earlier call add to `discarded` with `regions == 0`.
@@ -262,7 +262,7 @@ the close happens.
   Disconnected whose transport is still open (#534's pre-Active half).
 - **Allocation.** The race may allocate before the first Active. Whether it does, and how much, is
   measured in the verify record, not asserted here (L-13). After the first Active the pump reads
-  without the race, and that is FR-052's zero-allocation scope.
+  without the race, and that is FR-052's no-new-allocation scope (plan.md OD-22).
 - **Zero refusal.** `logon_timeout_ms` defaults to 10000. Zero is refused by `register_session`, by
   `open()`, by the TOML loader and by the C setter.
 
@@ -337,8 +337,12 @@ This runs on every store, volatile ones included (OD-9).
   sequence (the emit, step 2's transport close, the join, then `close()`) handles that session. The
   guarantee is strand-ordered, not real-time: no flag read by the arm without mutual exclusion against
   `stop()` can give more (OD-15). It holds on the condition that every suspension in a Logon arm is
-  followed by the predicate before the next effect (#518's discipline); re-derive it by reading the
-  arm's `co_await` sites against `grep -n logon_arm_superseded src/session/session.cpp`.
+  followed by the predicate before the next effect (#518's discipline). Re-derive it transitively, not
+  from the arm's own `co_await`s: read each Logon arm and every `Session` coroutine it awaits, down to
+  their effects, and classify each suspension by what follows it (the evidence file's recipe,
+  "`logon_arm_superseded_` sites, transitively"; plan OD-26 and its Disconnected-write census). A read
+  of the arm's `co_await` sites against `grep -n logon_arm_superseded src/session/session.cpp` alone
+  cannot see a suspension inside an awaited coroutine.
   `Engine::stop()`'s step 1 reads each
   entry's `session` on the control strand, where step 1 runs. Inside the `co_spawn` it already posts
   to the session strand, and before the `emit`, it sets the Session's `engine_stop_requested_` through
@@ -348,7 +352,7 @@ This runs on every store, volatile ones included (OD-9).
   `state_ == closing`, the new flag, and the FSM state. So once the flag is set, the check in step 7 stops the arm before any
   event, callback, write or Active transition, and every other site of the predicate stops it too.
   Re-derive the sites with `grep -n logon_arm_superseded src/session/session.cpp`. The flag is only read
-  inside the predicate, so it adds no return path between steps 2 and 5, and the restore still always
+  inside the predicate, so it adds no return path between steps 3 and 5, and the restore still always
   runs.
 - The pump learns of `Engine::stop()` through stop's step 2, which closes the transport, so its next
   read fails. It learns of `close()` through step 7's check.
@@ -376,12 +380,12 @@ This runs on every store, volatile ones included (OD-9).
 
 **"Any point of the unit" reduces to one interleaving point, on three conditions.** `close()` and
 stop's step-1 handler run on the session strand, so they can begin inside the unit only where the
-unit suspends. The conditions: step 2's and step 5's `reset_cancellation_state` complete without
-suspending (re-derive in asio's `impl/awaitable.hpp`); step 3 grants inline (L-518-1's condition,
-above); and steps 5 to 7 hold no other `co_await` (re-derive with `grep -n
-"logon_arm_superseded\|co_await" src/session/session.cpp`). Then the one point is step 4's store
-await, which is where the cells hold the store (quickstart Q-23, Q-26). A `close()` or stop that
-begins before step 2 meets the arm's earlier `logon_arm_superseded` check, on the #518 condition
+unit suspends. The conditions (step 2 is removed, plan OD-25): step 5's `reset_cancellation_state`
+completes without suspending (re-derive in asio's `impl/awaitable.hpp`); step 3 grants inline
+(L-518-1's condition, above); and steps 5 to 7 hold no other `co_await` (re-derive with `grep -n
+"logon_arm_superseded\|co_await" src/session/session.cpp`). Then the one point is step 4's await of
+the `co_spawn`ed `reset_to` (`Session::run_reset_unit_`), which is where the cells hold the store
+(quickstart Q-23, Q-26). A `close()` or stop that begins before step 3 meets the arm's earlier `logon_arm_superseded` check, on the #518 condition
 above, so the unit is not entered and the table above does not apply.
 
 `MemoryStore` meets the FIFO condition (a leading post, then its mutex). For `FileStore` the condition
@@ -395,9 +399,13 @@ but a crash inside its default body can leave the intermediate state (L-3).
 **BREAKING placement rule (`[const §X.7]`).** A C-ABI behaviour change is marked BREAKING in the doc
 block of each C declaration through which it is observed. `version.h`'s history block is headed
 BREAKING and points to those declarations, and details an effect only where no declaration carries it. Where a change falsifies a sentence 092 put in a C-ABI 1.10 clause, that
-sentence is amended in place and the amendment is marked with the new MINOR. The amended 1.10
-bullets are named below by their opening text, not by line number. Re-derive their sites with
-`grep -n "C-ABI 1.10" include/fix/c_api/session.h`.
+sentence is amended in place and the amendment is marked with the new MINOR. The same holds for a
+sentence any earlier MINOR put there: 091's 1.9 FR-020 sentence (a Logon with a malformed Length+Data
+count "is now refused") is amended in place, because a Logon whose third field is not MsgType(35) is
+now disregarded before it is interpreted (C-2 step 1). The amended 1.10
+bullets are named below by their opening text, not by line number. Re-derive the sites of every
+earlier MINOR's sentences with `grep -n "C-ABI 1\.[0-9]" include/fix/c_api/session.h`, and read each
+earlier MINOR's history entry in `include/fix/c_api/version.h`.
 
 **The observer set.** `version.h`'s 1.10 history entry names the calls whose result depends on the
 session being logged on: `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`,
@@ -434,7 +442,7 @@ why", and "Golden / freeze".
 | 14 | Engine access seam | `friend struct session_engine_access;` in `session.hpp`, defined under `src/session/`, never installed. It carries what data-model E-11 lists: `inbound_limit()`, `has_reached_active()`, `note_garbles_()` (the summary intake), `note_establishment_timeout_()`, `note_engine_stop_()` (the engine-stop flag's setter) and the borrowed carry | — | — | — | — | additive. The Session's underscore hooks stay private | none | build |
 | 15 | Arena requirements | `SessionConfig::framer_carry_arena` must hold L + one read + `kContainerSlack`. The Session's arena must hold B(L) per `Session`, and the engine builds one `Session` per connection. Both are allocated at `open()`, and a failure is an `open()` error, not a `std::terminate`. The carry's path needs no public change: `open()` allocates the block inside a `try`, builds a `monotonic_buffer_resource` over it whose upstream is the spill witness, and builds `pmr_carry_buffer` over that resource, so the `noexcept` constructor's reserve is served from the block (E-2) | — | — | — | B row (cost formula) | behaviour, C++ only | none | `open()` with a bounded arena |
 | 16 | #523: a closing session's NotConnected and LogonSent arms act on nothing | — | — | — | — | B row | **Not BREAKING**, following B-518-1's owner ruling ("the old outcomes were the defect"), of which #523 and #524 are the follow-ups | none | #523 cells |
-| 17 | #524: the reset unit is one store operation, shielded, and stopped by the engine-stop flag after `Engine::stop()`'s step 1 has run on the session's strand | — | — | — | — | `L-518-1` updated | **Not BREAKING**, on the same ruling | none | #524 cells |
+| 17 | #524: the reset unit is one store operation, run on an empty cancellation slot (plan OD-25, OD-26), and stopped by the engine-stop flag after `Engine::stop()`'s step 1 has run on the session's strand | — | — | — | — | `L-518-1` updated | **Not BREAKING**, on the same ruling | none | #524 cells |
 | 18 | `MessageView::unknown_fields()` returns an empty view on arena exhaustion instead of reaching `std::terminate` (fixpp#540) | `MessageView::unknown_fields()` (body only; still `noexcept`) | — (the C ABI does not expose it) | — | — | L-5 | behaviour, C++ only | none | Q-32 |
 
 **Version.** One MINOR bump. Its `version.h` history entry is headed BREAKING, as 1.10's is, names
@@ -484,19 +492,19 @@ delta carry the same BREAKING list.
 - **L-11.** Garble logging is rate-bounded (FR-003) to one record per `max(HeartBtInt, 1 s)`. Within an
   interval, garbles after the first are counted in the next record and not logged one by one. If the
   logger's queue is full, its `drop_newest` policy drops records; the counter stays exact.
-- **L-12.** `Engine::stop()` waits for an in-flight reset unit's store operation, which is shielded
-  from cancellation. A store operation that never completes hangs `stop()`, as `close()`'s teardown
+- **L-12.** `Engine::stop()` waits for an in-flight reset unit's store operation, which no cancellation
+  reaches: it runs on an empty cancellation slot (plan OD-25, OD-26). A store operation that never completes hangs `stop()`, as `close()`'s teardown
   reset already does.
 - **L-13.** Before the first Active, the deadline race may allocate. Whether it does, and how much, is
-  measured in the verify record (FR-052's zero-allocation scope starts at the first Active).
+  measured in the verify record (FR-052's no-new-allocation scope starts at the first Active).
 - **L-14.** The admin and outbound parse sites' stack arena is not derived (C-3 I-6). This is
   pre-existing and filed as a follow-up.
 - **L-15.** A frame lying inside a structurally complete frame whose CheckSum value is wrong is
   discarded with it. ResendRequest recovers it.
 - **L-16.** The resync search after a garble looks for `8=FIX`. A session configured with a BeginString
   that does not begin with `FIX` frames its frames at a frame boundary as today, but after a garble it
-  finds no next frame start, so it discards every later byte until the establishment deadline, the
-  liveness loop, or the carry ends it. No supported profile has such a BeginString.
+  finds no next frame start, so it discards every later byte until the establishment deadline or the
+  liveness loop ends it. No supported profile has such a BeginString.
 - **L-17.** The C cursor shells that `fixpp_msg_get_group` and `fixpp_group_get_nested_group` allocate
   from the parse arena have no catch, so exhausting the headroom there lets a `bad_alloc` escape the C
   function. Neither function is `noexcept`. Where the unwind reaches the callback guard, the session

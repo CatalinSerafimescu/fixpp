@@ -511,6 +511,8 @@ calling `operator new`. The verify record measures it (L-13).
 
 ## R-6: A closing session, and the atomic reset unit (#523, #524; FR-030, FR-040 to FR-042)
 
+> **Erratum (2026-10-05, plan.md OD-28).** The `closing`-only guard in the Decision below is superseded by plan OD-28; see contract C-2 row 2.
+
 **#523.**
 - `close()` sets `state_ = closing`.
 - A terminal close writes Disconnected before it first suspends. A graceful close from NotConnected or

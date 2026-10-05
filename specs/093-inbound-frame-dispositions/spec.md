@@ -356,11 +356,12 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 
 - **A garbled BodyLength that is too large but under L.** The Framer waits for bytes that belong to later
   frames. The stall lasts until enough bytes arrive for the count to be checked, and then that frame is
-  disregarded and framing resumes at the next frame start, provided the carry (L plus one read) holds the
-  bytes until then. Otherwise the carry overflows and the session closes. Before Active, the
-  establishment timeout bounds the wait. In Active, the peer's TestRequest reply is trapped behind the
-  stall, so the liveness loop takes the FSM to Disconnected. The transport stays open until the peer
-  closes it or the carry overflows (fixpp#534). Disclosed exactly that way (contract L-1).
+  disregarded and framing resumes at the next frame start. The carry (L plus one read) always holds those
+  bytes, because a pending candidate is at most L, so a carry overflow cannot end the stall in the pump
+  (plan.md OD-23). Before Active, the establishment timeout bounds the wait. In Active, the peer's
+  TestRequest reply is trapped behind the stall, so the liveness loop takes the FSM to Disconnected. The
+  transport stays open until the peer closes it, a later over-L BodyLength closes it, or `close()` /
+  `Engine::stop()` runs (fixpp#534). Disclosed exactly that way (contract L-1).
 - **A garbled BodyLength over L**, or a frame over L, including at a candidate the resync search found.
   Refused at framing with a loud close (R-2). It is not disregarded, because the bytes cannot be
   bounded.
@@ -389,8 +390,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   without that fallback: the parse of a frame of at most L fits B(L), and the spill witness records
   nothing for it (quickstart Q-11). Only a lazy read in a callback past `kCallbackReadHeadroom` may
   spill there, and the spill is recorded (FR-011).
-- **A custom `MessageStore` subclass** that does not override the new operation. The unit's shield and
-  `close()`'s wait give it FR-041's outcomes, unless the wait expires. A crash in the middle of its
+- **A custom `MessageStore` subclass** that does not override the new operation. The unit's empty-slot
+  store operation (plan.md OD-25) and `close()`'s wait give it FR-041's outcomes, unless the wait expires. A crash in the middle of its
   default body, or an expired wait, can leave the intermediate state (disclosed in B&L).
 - **A fault-free 35-not-third frame under strict validation.** It is disregarded (TC 2t). The validator's
   Step 0 is the only producer of 373=14, and it checks exactly this shape, so it becomes unreachable from
@@ -630,7 +631,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - The in-unit `teardown_reset_done_` stops become dead and are removed. The flag remains as `close()`'s
     single-fire latch.
 - **FR-042**: An existing C++ `MessageStore` subclass MUST compile without changes. The existing
-  test-local subclasses, built with `-Werror`, are the witness. With the shield and `close()`'s wait it
+  test-local subclasses, built with `-Werror`, are the witness. With the empty-slot store operation and `close()`'s wait it
   gets FR-041's outcomes too. Its crash atomicity is not guaranteed, and neither is the (1, 1) outcome
   after an expired wait (disclosed in B&L).
 
@@ -640,7 +641,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - move `L-004-4` to the closed file;
   - narrow `B-005-7`;
   - add B rows for FR-001 to FR-041;
-  - add L rows for the residuals, contract C-8 L-1 to L-17:
+  - add L rows for the residuals, one per contract C-8 L-row:
     - the BodyLength stall, in which the FSM reaches Disconnected while the transport stays open;
     - the failure kind reported where the §4.5.2 criterion is meant;
     - the custom-store crash atomicity;
@@ -652,12 +653,14 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     - event-ring eviction;
     - 383 settable from C++ only;
     - rate-bounded garble logging;
-    - `Engine::stop()` waiting on a shielded unit;
+    - `Engine::stop()` waiting on the unit's store operation, which no cancellation reaches;
     - the pre-Active deadline race's allocations, as measured;
     - the underived admin and outbound parse arenas;
     - a frame inside a wrong-CheckSum frame's extent;
     - no resync for a configured BeginString that does not begin with `FIX`;
     - the C cursor shells' uncaught allocation;
+    - `open()`'s allocation error, which the C ABI does not carry;
+    - the C-7 clauses witnessed through C++ only;
   - add a B row for the per-session cost: the formula, the 64 KiB and 256 KiB worked totals, and the
     admission bound (one carry plus B(L) per registered session with a live or establishing
     connection, research R-3);
@@ -674,7 +677,9 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   behaviour changes BREAKING (`[const §X.7]`, following 091 and 092). BREAKING is marked in the doc
   block of each C declaration through which a change is observed. `version.h`'s history entry is
   headed BREAKING with a one-line pointer per change, and details an effect only where no declaration
-  carries it. The 1.10 sentences 093 falsifies are amended in place. Contract C-7's matrix
+  carries it. The sentences of earlier MINORs that 093 falsifies are amended in place: the 1.10
+  sentences, and 091's 1.9 FR-020 sentence on a Logon with a malformed Length+Data count (re-derive with
+  contract C-7's grep). Contract C-7's matrix
   names each declaration and each amended bullet. The BREAKING changes:
   - a garbled frame no longer ends the session, and two shapes that were framed are now garbled: a
     BeginString over its cap and a BodyLength digit run over its cap;
@@ -712,7 +717,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 - **Inbound limit L**: one per session, derived at open. It sizes the Framer limit, the carry, the parse
   index and the offset-table entry cap.
 - **Reset-unit-in-flight flag**: per session. It is set across the unit's single store await, which
-  is shielded from cancellation. `close()` waits on its completion signal with a bound before a
+  no cancellation reaches, because it runs on an empty cancellation slot (plan.md OD-25). `close()` waits on its completion signal with a bound before a
   teardown reset.
 - **Engine-stop flag**: per session. `Engine::stop()` sets it on the session strand before it emits
   cancellation, and the Logon arms' superseded check reads it.
@@ -791,8 +796,9 @@ the rebase onto `origin/main` (`00c1f720` at spec time). Every RED claim is run 
   - `Engine::stop()` cells begin during the unit, for `MemoryStore`, `FileStore` and a default-body
     store, with and without a teardown reset. Each shows FR-041's table, and per role shows no
     `toAdmin`, no reset event, no `onLogon` and no Active transition after `Engine::stop()`'s step 1
-    has run on the session's strand. Deleting the
-    shield turns the default-body and `FileStore` cells RED. Dropping the engine-stop flag from the
+    has run on the session's strand. Running the unit's `reset_to` inline, with no `co_spawn`, turns
+    the no-teardown cells of the contended store and of the `FileStore` with its writer lock held RED
+    (plan.md OD-25, OD-26; tasks.md T088's M2b). Dropping the engine-stop flag from the
     superseded check turns the per-role effect assertions RED.
 - **SC-007**: The per-session memory added by FR-010 and FR-012, the carry plus B(L), is measured and
   stated in the B&L row as a formula in L, with worked totals at 64 KiB and 256 KiB. Steady-state inbound
