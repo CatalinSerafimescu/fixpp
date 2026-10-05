@@ -5,10 +5,11 @@ batch B22) | **Branch**: `093-inbound-frame-dispositions`
 
 **Input**: `specs/093-inbound-frame-dispositions/`:
 - spec.md (FR-001…FR-053, SC-001…SC-008, User Stories 1–5);
-- plan.md (implementation phases P0–P9, OD-1…OD-19);
+- plan.md (implementation phases P0–P9, orchestrator decisions OD-1 onward, see plan.md);
 - research.md (R-1…R-10);
 - data-model.md (E-1…E-13);
-- contracts/inbound-frame-dispositions.md (C-1…C-8, W-1…W-4, I-1…I-6, C-7 rows, L-1…L-17);
+- contracts/inbound-frame-dispositions.md (C-1…C-8, W-1…W-4, I-1…I-6, C-7 rows, L-rows from L-1 onward, see
+  contract C-8);
 - quickstart.md (§0 baselines, §1 cells Q-1…Q-37, §2 instruments and mutants, §3 regression and cost,
   §4 traceability).
 
@@ -66,8 +67,8 @@ production edit starts before T002.
   old-behaviour pins) is re-run at the implementation head (T012). A listed member is a lead; a member
   the command adds is a planned edit.
 - **Comments record a procedure, never a result.** No counts, offsets, line numbers, sizes or pasted
-  output in a comment. The measured or derived constants (`kBodyLengthDigitCap`, `kAlignPad`,
-  `kCallbackReadHeadroom`, `kContainerSlack`, and the counted-work bound's constant, T017a) carry their
+  output in a comment. The measured or derived constants (`kBodyLengthDigitCap`, B(L)'s constants as
+  data-model E-2's formula names them, and the counted-work bound's constant, T017a) carry their
   recipe in a comment and their value only in code and in `research.md`. Where a comment supersedes a decision, name the new one in a header
   comment ("093 …").
 - **Evidence file.** `.specify/decisions/093-inbound-frame-dispositions-evidence.md` holds owner build
@@ -462,6 +463,8 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
     the limit and carry in force at the head it runs on (read from the named constants or the seam,
     never a literal), so it is GREEN at T038 against the local carry. T055a re-asserts it against L
     and the carry allocated at `open()`.
+  - **As landed: superseded by plan OD-23.** Carry overflow is unreachable in the pump once the carry
+    is L + R, so the L-1 pin's carry-overflow half is re-based as a Q-6 over-L cell.
 - [X] T028 [US1] Via `phase-implementer`, Q-5 in `tests/session/inbound_frame_dispositions_test.cpp`,
   on the mock clock: a region split across reads counts once; a summary with `regions == 0` emits no
   event; garbles before a frame in one feed are evented before that frame's effects; at most one log
@@ -765,6 +768,8 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
     succeeding) is shown by a base-compilable scratch variant, run as T026's is.
   - **Carried from Phase 3:** the L-1 pins read `detail::kReadPumpCarryCapacity`
     (`src/session/read_pump.hpp`). When the carry moves to `open()`, switch them to the seam.
+  - **As landed: superseded by plan OD-23** for T027's L-1 pin: carry overflow is unreachable in the
+    pump, so the pin is re-based as a Q-6 over-L cell rather than re-asserted against the carry.
 
 - [X] T055 [US3] Via `phase-implementer`, Q-6 through the pump and the FR-013 reversal:
   - in `tests/session/inbound_frame_dispositions_test.cpp` and `tests/session/engine_readpump_test.cpp`:
@@ -804,6 +809,9 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   the parse buffer after `open()`, so the 092 late close fires on an admitted frame (C-3 I-4); the
   `LateSite_*_Closes` cells move onto that shrink (their old trigger is gone, R-3). Q-15's mutant is in
   T070.
+  - **As landed: superseded by plan OD-24.** The `LateSite_*` cells lower the session's entry cap
+    (`session_test_access::lower_inbound_entry_cap`), which is lane-independent. Q-15 shrinks the
+    buffer's bytes (`session_test_access::shrink_parse_buffer`), branching on `arena_upstream()`.
 - [X] T058 [P] [US3] Via `phase-implementer`, Q-32 in `tests/wire/unknown_fields_test.cpp` (bucket
   `wire_pure_tests`, one ctest entry, whose `093` label T015 already appended): T008's setup under `EXPECT_EXIT(..., ExitedWithCode(0), ...)`;
   `unknown_fields()` returns an empty view and a second call returns the same empty view. RED on base
@@ -881,6 +889,9 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
     is missing, or no cell can trip it, add a death-test cell in
     `tests/session/inbound_frame_dispositions_test.cpp` that re-enters an inbound parse from a
     callback and dies, written RED first.
+  - **As landed: superseded by plan OD-23.** B(L)'s last term is
+    `kParseContainers`·(`kContainerSlack` + `kProxyAlignPad`), not one `kContainerSlack`; data-model
+    E-2 states the formula as `parse_capacity::buffer_bytes` computes it.
 - [X] T024 [US3] Via `phase-implementer`, the FR-013 group's first part: the carry allocated at `open()`
   (E-2, OD-13), as data-model E-2 states it:
   1. "inside a `try`, allocate one block of L + the read size + `kContainerSlack` from
@@ -916,6 +927,8 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
     event and no log (FR-013, L-6);
   - the Active-only advertised-MaxMessageSize check above the state switch is deleted (C-2); header
     comment naming 093 superseding 070's pre-establishment exemption.
+  - **As landed: superseded by plan OD-24.** The over-L close records no `SessionEvent`:
+    `close(terminal)` emits none. Its observables are the terminal close and the log record.
 - [X] T065 [US3] Via `phase-implementer`, FR-015 after T008 is recorded: in
   `MessageView::unknown_fields()` (`include/fixpp/wire/parser.hpp`), keep `noexcept`; on `bad_alloc`
   clear `unk_items_`, keep the built flag set so later calls return the same empty view, and return an
@@ -935,7 +948,8 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   - **a wire-level user of `default_max_offset_entries`**, a constant 093 does not change (the session
     passes N(L) through `OffsetTable::Config`): no change, recorded as such;
   - **a session cell sized against the default entry cap** (`kLateFillerFields` in
-    `tests/session/unparseable_frame_disposition_test.cpp`): re-based by T057 onto the shrink.
+    `tests/session/unparseable_frame_disposition_test.cpp`): re-based by T057 onto the shrink. As
+    landed (plan OD-24), the late-site cells lower the entry cap instead (T057).
   And `engine_readpump_test.cpp`'s oversize body still exceeds L (re-checked, not assumed).
 - [X] T067 [US3] T054–T060 and T055a GREEN; `ctest -L '^093$'`, which includes T044's
   `alloc_guard_093_pump_active_read` (the parse-buffer change must keep Q-19 at zero); full `session`,
@@ -1034,6 +1048,8 @@ durable counters at FR-041's table (#524).
   - **default-body mode**: its override calls the base `MessageStore::reset_to`, so the default body
     runs over `HookedStore`'s own `reset()` and `next_seqnum()` and their hooks. Q-25 (T081) and Q-26
     (T082) use this mode; T088's delete-the-shield mutant is run against it.
+  - **As landed: superseded by plan OD-25.** The shield is gone, and with it that mutant. T088's M2a
+    and M2b replace it (quickstart §2).
 
 ### #523 (P5): tests first
 
@@ -1051,8 +1067,14 @@ durable counters at FR-041's table (#524).
   `src/session/session.cpp`, right after the scan and step 1: `if (state_ == lifecycle::closing &&
   (fsm_state_ == NotConnected || fsm_state_ == LogonSent)) return success;`. LogonReceived, Active
   and LogoutSent are unchanged. T075 and T076 GREEN.
+  - **As landed: superseded by plan OD-28.** Step 2 in both arms is the arm's own
+    `logon_arm_superseded_(state)` (`closing`, the engine-stop flag, or a moved FSM state), with step 1
+    still first. RED `26cdf96f` (the `InboundFrameDispositionsQ9Stop.*` cells, Q-9's stop arm), GREEN
+    `e8afcde4`.
 - [X] T078 [US5] #523 mutants in a scratch copy: delete the guard → Q-22 RED; put it before step 1 →
   Q-9 RED. Record under `## Mutants`.
+  - **As landed (plan OD-28):** one more mutant per arm, step 2 back to `closing` only → that arm's
+    Q-9 stop cells RED. Recorded in the evidence file's OD-28 section and re-run in T110.
 
 ### #524 (P6): tests first
 
@@ -1091,6 +1113,10 @@ durable counters at FR-041's table (#524).
   `onLogon` and no Active transition is observed after stop's step 1 has run on the session's strand
   (the application double's callback log and the event ring). RED: the unit is interrupted, leaving
   the pre-unit state (default body and `FileStore`).
+  - **As landed: superseded by research R-9's erratum (plan OD-25).** No durable-counter RED is
+    expected on the base: its unit is not interrupted by stop's total emit after the first lock. The
+    effect assertions are what go RED there. On the durable rows, M2b (run `reset_to` inline)
+    discriminates the contended no-teardown rows.
 - [X] T083 [US5] Via `phase-implementer`, re-derive the `*StoreEndsAtTeardownReset` and
   `close_from_*_persist` cells (T012) for the new unit shape, each classified in the evidence file.
 
@@ -1740,7 +1766,7 @@ behaviour exists. One PR carries all of it.
 | C-1 W-1, W-2 (both caps), W-3, W-4; the bound and its condition | T013, T015, T017, T017a (the constant), T018, T018a (cost), T019, T020 |
 | C-1 every other Framer caller unchanged | T016, T017 |
 | C-2 step 1 (35-not-third, every state but Disconnected) | T026, T029, T032, T037 |
-| C-2 step 2 (closing, NotConnected/LogonSent) | T075, T076, T077 |
+| C-2 step 2 (the arm's superseded predicate, plan OD-28; NotConnected/LogonSent) | T075, T076, T077 (as landed: OD-28), T078 |
 | C-2 step 3 (092's rows except D-8) | T032, T037 |
 | C-2 step 4 (refresh, then the existing arm) | T071, T073 |
 | C-2 Disconnected ignores every frame | T029, T110 (its mutant) |
@@ -1758,7 +1784,7 @@ behaviour exists. One PR carries all of it.
 | C-4 allocation | T044, T051 |
 | C-5 one per-frame writer; garbled and faulty never write | T071, T072, T073 |
 | C-6 store operation | T079, T084 |
-| C-6 the unit (steps 1–7) and the shield | T074a, T080, T082, T085, T088 |
+| C-6 the unit (steps 1–7) and its empty-slot store operation (plan OD-25, OD-26; it superseded the shield) | T074a, T080, T082, T085, T088 |
 | C-6 "any point of the unit": its three conditions | T085 (re-derived under `## Populations`) |
 | C-6 engine-stop flag | T082, T086 |
 | C-6 `close()`'s wait and the outcome table | T080, T081, T087 |

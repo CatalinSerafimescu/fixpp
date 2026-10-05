@@ -41,11 +41,14 @@ This bundle makes five changes to fixpp's inbound path, on one shared review sur
    L-17, fixpp#541), and `unknown_fields()` gains the catch that #540 asks for, after its reproduction.
 3. **#516: liveness refreshes on every frame that is neither garbled nor faulty.** It happens at one
    point, right after the fault checks.
-4. **#523: a closing session's NotConnected and LogonSent arms act on nothing.**
+4. **#523: a closing session's NotConnected and LogonSent arms act on nothing.** Their guard is the
+   arm's superseded predicate, so it also covers `Engine::stop()`'s engine-stop flag (OD-28).
 5. **#524: the 141=Y reset is one store operation.** `MessageStore::reset_to` is a new non-pure virtual,
    which `MemoryStore` and `FileStore` override atomically.
-   - The unit shields itself from cancellation, because `Engine::stop()` reaches it before `close()`
-     does.
+   - The unit runs only its store operation, `reset_to`, through a `co_spawn` on the session strand
+     whose token is bound to an empty cancellation slot (OD-25, OD-26). A store's lock wait inside
+     `reset_to` would otherwise be cancellable by `Engine::stop()`'s total emit, which reaches the unit
+     before `close()` does. The arm restores its cancellation state after the unit.
    - It sets the manager first, with no yield.
    - A session-side engine-stop flag, which `Engine::stop()` sets before it emits, stops the arm after
      the unit, so no callback, event, write or Active transition follows `Engine::stop()`'s step 1 on
@@ -78,15 +81,17 @@ sandbox).
 It is expected to improve slightly, since each frame drops one or two 16 KiB stack memsets.
 
 **Constraints**:
-- `[const §VIII.5]`: no heap between parse and callback, and no per-frame allocation.
+- `[const §VIII.5]`: no heap between parse and callback. Once the session has first reached Active,
+  no **new** per-frame allocation (FR-052): the pump's per-read allocations that the base already makes
+  are pre-existing, tracked as fixpp#544 (OD-22).
 - Per-session memory rises to the carry (L + 4 KiB) plus B(L), stated as a formula with worked totals
   (owner ruling; research R-3 has the derived totals).
 
 **Scale/Scope**: about 10 source files and about 15 test files. Research R-8 lists the cells that flip.
 
 **Unknowns**: none open after Gate A round 2. R-9's items are settled by design and witnessed by
-cells. Four design values are measured or derived at implementation, not chosen here: `kAlignPad`,
-`kCallbackReadHeadroom` and `kContainerSlack` (data-model E-2), and `kBodyLengthDigitCap` (research
+cells. The design values are measured or derived at implementation, not chosen here: B(L)'s
+constants, each named in data-model E-2's formula (OD-23), and `kBodyLengthDigitCap` (research
 R-2's recipe). #540's reproduction is run first and decides SC-008's branch.
 
 ## Constitution Check
@@ -104,7 +109,7 @@ R-2's recipe). #540's reproduction is run first and decides SC-008's branch.
 | IX sanitizers / coverage | per-line coverage assessment | The `/speckit-verify` matrix. The resync, deadline and reset_to branches are covered by the cells |
 | X §4 append-only enums | `core::error` | No new error code: criterion 3 reuses `wire_header_out_of_order`, and `reset_to` reuses `session_invalid_argument`. `SessionEvent` alternatives are appended |
 | X §7 ABI | C-ABI changes versioned | **MINOR bump; BREAKING on each affected declaration**: every BREAKING row is marked on the five observers `version.h`'s 1.10 entry names; `version.h`'s history entry is headed BREAKING with a one-line pointer per row, and details an effect only where no declaration carries it. The 1.10 sentences 093 falsifies are amended in place (FR-051, contract C-7). `gh release list --exclude-drafts` must be empty at implementation. The C++ additions are source-compatible; `MessageStore`'s vtable changes, which needs a rebuild |
-| XI concurrency | strand discipline, cancellation | The deadline race uses `await_deadline`, whose re-arm handles a clock-wide sweep (#536). The reset unit shields itself, and restores the pump's state explicitly, because asio's cancellation state is per awaitable thread (research R-9). `close()`'s wait is event-driven, with no poll. No new detached coroutine |
+| XI concurrency | strand discipline, cancellation | The deadline race uses `await_deadline`, whose re-arm handles a clock-wide sweep (#536). The reset unit `co_spawn`s only `reset_to` on the session strand, awaited through a token bound to an empty cancellation slot, so no cancellation emission reaches the store operation (OD-25, OD-26). The arm's step-5 restore stays: it drops any cancellation recorded on the arm's thread while the unit ran (contract C-6 erratum). `close()`'s wait is event-driven, with no poll. No new detached coroutine. **§6 (HALO-first, PMR fallback per-awaiter), an interpretation, not a measurement:** that spawn takes its frame from asio's awaitable-frame recycler, not from a PMR resource, once per 141=Y Logon, before Active and off the hot path (research R-9's erratum puts it outside FR-052's scope). §6's per-awaiter rule is read as applying to fixpp's own hot-path awaiters. The existing liveness-loop `co_spawn`s and `Engine::stop()`'s step-1 `co_spawn` already depend on that reading. It is consistent with §XV.1's scope note, which defines the hot path as the per-message in-memory path (parse → validate → dispatch, `MemoryStore`); this frame is one per 141=Y Logon, not per message on that path. §XV.1's FileStore-offload exemption is a different case and is not relied on |
 | XII security | fail closed | An oversize frame closes before its CheckSum is read. Garbled bytes are never acted on. A disregard before Active is bounded by the timeout, which is a loop-head check, so a peer that keeps the socket readable cannot outrun it. Both header scans are capped over encoded bytes, so zero padding cannot amplify the rescan. The BeginString cap takes the configured length, which is bounded per role on every path where the pump runs over peer bytes, not by L: on the initiator by the Logon buffer (`Session::kMaxMaskableLogonBytes`), on the acceptor by the first-frame budget (`kFirstFrameMaxBytes`) with `SessionId` equality (contract C-1, The bound; OD-16) |
 | XIV §2 | at most 5 pure virtuals per pluggable interface | `MessageStore` keeps 4; `reset_to` is non-pure |
 | XIII §2–3 logging | async logger; `trace_context` in every record | The first session log site uses `FIXPP_SLOG` with the session's `trace_context`, and its format strings are registered in `src/log/format_registry.cpp`. Garble records are rate-bounded to one per `max(HeartBtInt, 1 s)`, so a HeartBtInt of 0 still bounds them, and the logger's default `drop_newest` policy keeps a full queue from blocking the strand (OD-5) |
@@ -314,10 +319,10 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
 - **OD-23: B(L)'s constants, `open()`'s allocation error, and the pump's carry overflow** (added at
   implementation, Phase 5, 2026-10-04).
   - `kContainerSlack` is per container (16 bytes, research R-3); the carry block holds one container.
-    B(L)'s slack term is `kParseContainers × (kContainerSlack + kProxyPad)`. `kParseContainers` = 10:
+    B(L)'s slack term is `kParseContainers × (kContainerSlack + kProxyAlignPad)`. `kParseContainers` = 10:
     the five pmr containers a `MessageView<Index>` constructs (OffsetTable's four vectors plus
     `unk_items_`), times one plus the single move `Parser::parse` makes on return. MSVC's vector move
-    constructor allocates a proxy too. `kProxyPad` = 7, the padding after a 1-aligned request.
+    constructor allocates a proxy too. `kProxyAlignPad` = 7, the padding after a 1-aligned request.
     `kAlignPad` = 6: (alignof(entry) − 1) + (alignof(uint32_t) − 1).
   - `kCallbackReadHeadroom` = 16384, the base's whole inbound arena, so E-2's sizing condition holds for
     every frame at every L by construction. Alternative: the derived minimum of about 7.8 KiB, set by a
@@ -343,6 +348,9 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
     spill witness is null; MSVC debug forwards to the heap. So it is used only where a cell needs the
     byte budget itself (T069/T070, and one Q-15 arm, on null-upstream lanes, branching on
     `arena_upstream()` as T060 does).
+  - **As landed:** the `LateSite_*` cells trigger through `lower_inbound_entry_cap`, via
+    `expect_late_close`; the `Q15_*` cells trigger through `shrink_parse_buffer`, with a late close on
+    null-upstream lanes and a recorded spill on MSVC debug.
 
 - **OD-25: the reset unit's store operation runs on an empty cancellation slot; the 789 path and the
   reply Logon check the engine-stop predicate** (added at implementation, Phase 7, 2026-10-04, from an
@@ -455,7 +463,7 @@ src/wire/offset_table.cpp
 include/fixpp/wire/parser.hpp          # Parser::parse reserve overload, private tagged MessageView ctor; unknown_fields() catch (FR-015)
 include/fixpp/session/session.hpp      # L, carry block + resource + carry, parse span, counter, garbled_frame_count(), reached_active_, reset_unit_in_flight_, engine_stop_requested_, friend session_engine_access
 src/session/session_engine_access.hpp  # the engine seam (not installed)
-src/session/session.cpp                # open() validation + allocation; C-2 steps 1, 2, 4; liveness writer; reset unit + shield; superseded predicate + stop flag; close() wait; logger resolution
+src/session/session.cpp                # open() validation + allocation; C-2 steps 1, 2, 4; liveness writer; reset unit (empty-slot `reset_to`, OD-25); superseded predicate + stop flag; close() wait; logger resolution
 include/fixpp/session/session_config.hpp  # logon_timeout_ms
 include/fixpp/session/session_event.hpp   # three alternatives
 include/fixpp/session/message_store.hpp   # reset_to (non-pure, {1,2}); header count comments become conditions
@@ -469,7 +477,7 @@ src/config/toml_config_loader.cpp, src/config/scalar_mappers.cpp   # logon_timeo
 include/fix/c_api/session.h, src/capi/config.cpp, src/capi/session.cpp, include/fix/c_api/version.h
 tests/abi/golden/fixpp_capi_symbols.txt, tools/capi_freeze.sha256
 bindings/python/fixpp.i                   # %apply for the getter, GIL table row
-tests/support/session_test_access.hpp     # buffer-shrink accessor (FR-014)
+tests/support/session_test_access.hpp     # FR-014's late-close triggers: entry-cap lowering and buffer shrink (OD-24)
 tests/support/…                           # counted-work seam for the Framer (quickstart §2)
 tests/session/…, tests/wire/…, tests/capi/…, tests/fuzz/fuzz_wire_framer.cpp, bindings/python/tests/…
 spec/behaviors-and-limitations.md (+ -closed.md), brain/components/{session,inbound-message-path,wire,message-store-quiescence}.md, brain/log.md
@@ -531,7 +539,8 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
 - **P5: #523** (C-2 step 2). It lands before P6, because FR-041 depends on it on the initiator.
 - **P6: #524** (C-6):
   - `reset_to` with its precondition, and both overrides with crash-injection cells;
-  - the unit's shield and manager-first rewrite;
+  - the unit's manager-first rewrite, with its store operation `co_spawn`ed on an empty cancellation
+    slot (OD-25, superseding OD-14's shield);
   - the engine-stop flag, set in `Engine::stop()`'s step 1 and tested by `logon_arm_superseded`, with its
     sites re-derived after the change;
   - `reset_unit_in_flight_`, the completion signal and `close()`'s event-driven wait;
@@ -557,11 +566,17 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
 
 - **VIII §5** holds only if B(L) truly bounds the parse. The spill witness and the per-lane peak cell make
   that measurable, not assumed. FR-052's Active scope is witnessed by Q-19.
-- **XI**: `close()`'s wait is bounded and event-driven, so it cannot add a hang. The unit's shield means
-  `Engine::stop()` can wait on a store operation, which is disclosed as L-12 and is no worse than
-  `close()`'s unbounded teardown reset. The engine-stop flag keeps the shield from letting an arm run
-  its callbacks after `Engine::stop()`'s step 1 has run on the session's strand. The deadline race runs only before the first Active, and expiry does not
-  depend on its completion order.
+- **XI**: `close()`'s wait is bounded and event-driven, so it cannot add a hang. The unit's store
+  operation runs on an empty cancellation slot (OD-25, OD-26), so `Engine::stop()` can wait on it,
+  which is disclosed as L-12 and is no worse than `close()`'s unbounded teardown reset. The engine-stop
+  flag keeps an arm from running its callbacks after `Engine::stop()`'s step 1 has run on the session's
+  strand. The deadline race runs only before the first Active, and expiry does not depend on its
+  completion order.
+  - §6 holds on the interpretation the Constitution Check's XI row records: the spawned `reset_to`'s
+    frame comes from asio's recycler, once per 141=Y Logon and off the hot path, outside FR-052's
+    scope (research R-9's erratum). §6's per-awaiter rule is read as applying to fixpp's own hot-path
+    awaiters, the reading the liveness-loop `co_spawn`s and `Engine::stop()`'s step-1 `co_spawn`
+    already depend on.
 - **X §7**: C-7's matrix places BREAKING per declaration, names the amended 1.10 bullets, and records why
   #523 and #524 are not BREAKING.
 - **XII**: in resync mode the reorder means no over-L frame takes the disregard path. The Framer's work
@@ -579,7 +594,7 @@ Re-check result: **PASS.**
 | Five issues in one bundle | They share the read pump, `on_inbound_frame`'s arms and the reset unit. #514 needs #515's L for its limit, and #524 needs #523's guard on the initiator | Separate PRs would review the same arms five times and land in a forced order anyway |
 | The Framer's resync rules (`searching_`, `8=FIX`, W-1 to W-4) | FR-002 must not depend on segmentation, must not lose the frame after junk or truncation, and must stay linear under hostile input | `8=` after an SOH loses the frame after a region not ending in SOH. `8=` anywhere matches tag suffixes. A re-feed per garble, and compaction on every feed or on every non-empty feed, are quadratic under hostile segmentation (research R-2) |
 | `close()`'s bounded wait | The owner ruling makes custom stores safe without breaking them | (a) disclosing the residual was rejected; (c) an "unsupported" error code touches the C-ABI error map |
-| The reset unit's cancellation shield | `Engine::stop()` cancels the unit before `close()` runs, leaving the pre-unit state, which is #524's own symptom | Narrowing the outcome table to graceful closes would leave the headline guarantee false on the common shutdown path |
+| The reset unit's empty-slot store operation (OD-25, superseding OD-14's shield) | A store's lock wait inside `reset_to` is cancellable by `Engine::stop()`'s total emit, which reaches the unit before `close()` runs, and a cancelled store operation leaves the durable no-teardown row wrong | Narrowing the outcome table to graceful closes would leave the headline guarantee false on the common shutdown path |
 
 ## Gate A
 

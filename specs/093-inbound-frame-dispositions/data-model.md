@@ -80,7 +80,7 @@ Engine seam and private, `Session`.
   as `parse_capacity::buffer_bytes` (`src/session/parse_capacity.hpp`) computes it (plan.md OD-23).
   - `kAlignPad` covers aligning the entry and overlay blocks inside one monotonic resource.
   - Each constant is named, and its value is a measurement or derivation recorded in `research.md`, not
-    written into a comment. Plan.md OD-23 and research R-3 call `kProxyAlignPad` `kProxyPad`.
+    written into a comment.
   - The last term covers MSVC-debug container proxies: each pmr container one parse constructs draws a
     `kContainerSlack` proxy, plus up to `kProxyAlignPad` of padding after a 1-aligned request. A per-lane cell measures the peak with
     `pmr_allocation_tracking_resource` and asserts peak ≤ B(L).

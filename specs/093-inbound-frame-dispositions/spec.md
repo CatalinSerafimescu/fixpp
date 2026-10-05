@@ -703,7 +703,9 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - The race's disarm at the first Active is witnessed by behaviour: a session with no application
     reaches Active before T, idles past T, and stays Active (quickstart Q-36).
   - A regression cell drives the real pump past Active under a global `operator new` counter, shown
-    first to count a known allocation, and asserts zero per Active read after a warm-up read (Q-19).
+    first to count a known allocation. After a warm-up read it asserts the same count on every Active
+    read, at most the base's measured with the same rig (Q-19, a differential per plan.md OD-22). The
+    base's per-read allocations are pre-existing and tracked as fixpp#544.
     It is not claimed to catch a race that is never disarmed, because asio's recycling allocator can
     serve the race's state without calling `operator new`.
 - **FR-053**: Test access to private state MUST go through `tests/support/*_test_access` (B21). Nothing

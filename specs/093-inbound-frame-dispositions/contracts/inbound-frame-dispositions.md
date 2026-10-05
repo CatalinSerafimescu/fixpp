@@ -169,7 +169,10 @@ with the flag on (plan.md OD-4).
 - **I-3.** No inbound parse nests inside another. Callbacks are synchronous, and the callback scope
   asserts it.
 - **I-4.** 092's late-parse close (`close_on_late_parse_failure_`) stays as a defence. Its reachability
-  is shown only by a cell that shrinks the buffer through `session_test_access`.
+  is shown only through `session_test_access` (plan OD-24): the `LateSite_*` cells lower the session's
+  entry cap (`lower_inbound_entry_cap`), which fails the parse on every lane; Q-15 shrinks the buffer's
+  bytes (`shrink_parse_buffer`), which fails the parse only where the spill witness is null, and on
+  MSVC debug records the spill instead.
 - **I-5.** Lazy reads inside a callback draw on `kCallbackReadHeadroom`, in the same span. Exhausting
   it in a read that reports a status (every row below except the C cursor shells) never ends the
   session. The C cursor shells are the exception: an exhaustion there ends the session, or the
@@ -250,7 +253,8 @@ the close happens.
   A store operation that never completes hangs the session in any state, as it does today.
 - **Sleep cancellation.** The race uses `await_deadline`, which re-arms when a clock-wide
   `cancel_sleeps()` wakes it early.
-- **`Engine::stop()` during phase (b), with no reset unit in flight.** Nothing is shielded. Stop's
+- **`Engine::stop()` during phase (b), with no reset unit in flight.** Nothing runs on an empty
+  cancellation slot (only the unit's store operation does, C-6). Stop's
   step 1 cancels the pump, which is bound to the session's slot, and its step 2 closes the transport,
   so the pump's read ends and the pump closes the session as it does today on a failed read. The
   deadline adds nothing to that path: `session_event_establishment_timeout` is recorded only if a

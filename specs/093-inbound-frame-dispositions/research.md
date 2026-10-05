@@ -306,9 +306,11 @@ comment.
   `Framer{.max_frame_bytes = L, .resync_on_garble = true}` over the carry that `open()` allocated,
   sized L + the read size. The first-frame read builds the same Framer config over its own carry, so
   a first frame over L is refused there too (G93-O-06).
-- With N(L) = ⌊L/3⌋ + 1, the parse buffer is B(L) = 12·N(L) + 4·`overlay_cap_for`(N(L)) + `kAlignPad`
-  + `kCallbackReadHeadroom` + `kContainerSlack`. The last three cover alignment, callback reads and the
-  MSVC-debug container proxies. It is allocated once in `open()` from `session_arena_`.
+- With N(L) = ⌊L/3⌋ + 1, the parse buffer is B(L) = `sizeof(OffsetTable::entry)`·N(L) +
+  `sizeof(std::uint32_t)`·`overlay_cap_for`(N(L)) + `kAlignPad` + `kCallbackReadHeadroom` +
+  `kParseContainers`·(`kContainerSlack` + `kProxyAlignPad`), as data-model E-2 states it (plan OD-23).
+  `kAlignPad` covers alignment, `kCallbackReadHeadroom` callback reads, and the last term the MSVC-debug
+  container proxies with their padding. It is allocated once in `open()` from `session_arena_`.
   - N(L) is the count the reserve can reach at `frame.size() = L`. The pre-Gate-A formula over ⌊L/3⌋
     was one entry short (G93-A-09).
   - `bad_alloc`, for the buffer and for the carry, is mapped to an `open()` error.
@@ -333,7 +335,7 @@ comment.
   - **Consequence for B(L) (Phase 5):** B(L)'s slack term must count every pmr container one parse
     constructs, at 16 bytes each plus up to 7 bytes of padding after a 1-aligned request, not one proxy.
     The B(L) task derives that count from the parse path at its head.
-  - **Derived (Phase 5, 2026-10-04; plan OD-23):** `kParseContainers` = 10, `kProxyPad` = 7,
+  - **Derived (Phase 5, 2026-10-04; plan OD-23):** `kParseContainers` = 10, `kProxyAlignPad` = 7,
     `kAlignPad` = 6, `kCallbackReadHeadroom` = 16384. The MSVC sandbox proxy count is to be measured equal
     to 10 in T061/T069. The worked totals are re-derived from T061's measured peaks.
 - The session's `OffsetTable::Config::max_offset_entries = N(L)`.
@@ -400,7 +402,8 @@ comment.
 
 **Tests that flip or rot.**
 - The ten `LateSite_*_Closes` cells lose their trigger. FR-014's defence cell replaces them: it shrinks
-  the buffer through `session_test_access` after `open()`.
+  the buffer through `session_test_access` after `open()`. As landed (plan OD-24), the late-site cells
+  stay, re-based on a lowered entry cap (`lower_inbound_entry_cap`), and the shrink is Q-15's.
 - `test_066_arena_fit_test` keeps private copies of 8192 and 16384. Delete it or re-base it.
 - `test_070_max_message_size_test`'s pre-establishment exemption reverses (FR-013).
 - `engine_readpump_test`'s 128 KiB oversize body still exceeds L.
@@ -477,9 +480,9 @@ per connection, in two phases.
   Assumption that the bounded first read is unchanged. Phase (a)'s stricter bounds already satisfy
   the ruling's "bounded by the timeout".
 
-**Cost.** One parallel group per blocked read, before the first Active only. FR-052's zero-allocation
-scope starts at the first Active. Whether the group allocates is not assumed: asio draws its state from
-a per-thread recycling allocator (`asio::detail::recycling_allocator` with the parallel-group tag, in
+**Cost.** One parallel group per blocked read, before the first Active only. FR-052's scope (no new
+allocation per frame) starts at the first Active. Whether the group allocates is not assumed: asio
+draws its state from a per-thread recycling allocator (`asio::detail::recycling_allocator` with the parallel-group tag, in
 the Conan-cached asio's `experimental/impl/parallel_group.hpp`), which can serve a block without
 calling `operator new`. The verify record measures it (L-13).
 
@@ -512,6 +515,10 @@ calling `operator new`. The verify record measures it (L-13).
 ## R-6: A closing session, and the atomic reset unit (#523, #524; FR-030, FR-040 to FR-042)
 
 > **Erratum (2026-10-05, plan.md OD-28).** The `closing`-only guard in the Decision below is superseded by plan OD-28; see contract C-2 row 2.
+>
+> **Erratum (2026-10-05, plan.md OD-25, OD-26).** In the #524 Decision below, step 2's in-place disable is removed, and step 4's
+> store operation is not an inline `co_await store_->reset_to`: only `reset_to` is `co_spawn`ed on the session strand,
+> through a token bound to an empty cancellation slot. Step 5's restore stays. See contract C-6's erratum.
 
 **#523.**
 - `close()` sets `state_ = closing`.
@@ -673,6 +680,7 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
 > and one frame per 141=Y unit, which is pre-Active and outside FR-052.
 > *Refined by OD-26:* stop-immunity comes from the separate awaitable thread; the empty slot extends it to every
 > emission kind (M2a GREEN, M2b RED).
+> *Refined by OD-22:* Q-19 below is a differential against the base, not a zero.
 
 - **Total cancellation and the reset unit.** Settled by design (contract C-6); cells measure it.
   - **What reaches the unit first.** `Engine::start` spawns both role loops bound to
@@ -720,7 +728,7 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
     default-body `HookedStore`, with and without a teardown reset. A mutant that drops the shield is
     RED on the default-body and `FileStore` cells.
 - **The pre-Active deadline race may allocate** (revised at Gate A round 2, G93-O2-01).
-  - It runs only until the first Active, and FR-052's zero-allocation scope starts there. The read-path
+  - It runs only until the first Active, and FR-052's no-new-allocation scope starts there. The read-path
     allocation guard cannot see the pump, because it measures `async_read_some` + `feed` directly.
   - **No pmr counter can see it.** asio's parallel-group state goes through
     `asio::detail::recycling_allocator` with the parallel-group tag, and its arms' frames through the
@@ -732,8 +740,9 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
     each read's block from the previous read's, so the count after warm-up may be 0 even with the race.
   - **Cells.** The disarm is witnessed by behaviour: a session with no application reaches Active
     before T, idles past T, and stays Active (quickstart Q-36), which a never-disarm mutant turns RED.
-    Q-19 drives the real pump past Active under the global counter and asserts zero per Active read
-    after a warm-up read, as a regression witness only.
+    Q-19 drives the real pump past Active under the global counter and asserts, after a warm-up read,
+    the same count on every Active read, at most the base's (`kBaseActiveReadAllocs`), as a regression
+    witness only (plan OD-22; the base's per-read allocations are fixpp#544).
   - The shape is the one `read_first_frame_bounded` already ships (088's `operator||` join, which
     replaced a timer handler that outlived its frame).
 
