@@ -18,7 +18,6 @@
 #include <fstream>
 #include <iterator>
 #include <memory_resource>
-#include <new>
 #include <string>
 #include <string_view>
 #include <vector>
