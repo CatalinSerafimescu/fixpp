@@ -827,9 +827,9 @@ the rebase onto `origin/main` (`00c1f720` at spec time). Every RED claim is run 
 - The size limit of the acceptor's bounded first-frame read.
 - A lazy `open()` failure inside the role loops is silent, and on the acceptor it ends the accept loop
   for good. That already applies to a null dictionary. 093 moves its two new refusals to
-  `register_session`, and the general case is a follow-up to file.
+  `register_session`, and the general case is a follow-up. Filed as fixpp#550 (batch B31).
 - The admin and outbound parse sites' stack arenas are not derived from what they parse, so a dense
-  outbound body can skip its send callback (contract C-3 I-6, L-14). To file.
+  outbound body can skip its send callback (contract C-3 I-6, L-14). Filed as fixpp#549 (batch B31).
 - The C cursor shells that the two group getters allocate from the parse arena have no catch (contract
   L-17). Unconfirmed, found by code reading at Gate A round 2. Filed as fixpp#541 (batch B28), with a
   reproduce-first item; not in 093's scope (plan.md OD-19).
