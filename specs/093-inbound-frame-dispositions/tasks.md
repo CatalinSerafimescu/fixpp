@@ -1470,7 +1470,7 @@ surfaces exist and are witnessed.
     - **Bench:** every case is within budget, and the head is faster on all of them.
     - **Base worktree:** kept until close-out, in case a Gate B fix needs the pairing re-run.
     - The evidence file holds the figures, under `## Fuzz` and `## Bench baseline`.
-- [ ] T113 The MSVC sandbox (T006's lock): rsync the post-simplify head; on MSVC debug and msvc-asan run
+- [X] T113 The MSVC sandbox (T006's lock): rsync the post-simplify head; on MSVC debug and msvc-asan run
   the `093` label, the dense-L, spill and getter-typemap cells (quickstart §3), the Python wheel
   getter, and Q-33's forwarding-lane branch on MSVC debug (T060's C++ and T091's C cells: each lazy
   read past the headroom succeeds, the spill is recorded, the session stays Active; on a lane where
@@ -1478,6 +1478,14 @@ surfaces exist and are witnessed.
   copy rsynced to the sandbox: the spill witness forwards without recording → the forwarding-lane
   branch's spill assertion RED on MSVC debug. Record it under `## Mutants` too. Calibrate each new standalone target's TIMEOUT from the slowest lane with headroom. Record
   under `## MSVC`.
+
+  - **T113 as landed (snapshot `425a0d0d`):**
+    - **MSVC debug:** the `093` label 23/23, the §3 cells, and Q-33's forwarding branch, proven by mutant (md5 recorded).
+    - **msvc-asan (asan deps restored from CI's cache into a separate CONAN_HOME):** 19/23. Four binaries hang in Bitdefender ATC's thread-start hook before any fixpp frame runs, so they are CI-only until the host excludes the sandbox.
+    - **C-7 witness:** 5/5 runs pass. Its fixed sleeps are carried to Gate B.
+    - **Timeout:** raise `capi_inbound_frame_dispositions` (3.5× margin on asan).
+    - **Python getter:** CI-only.
+    - Full record in the evidence file's `## MSVC` section.
 
 ### Static analysis, claims, citations, pins
 
