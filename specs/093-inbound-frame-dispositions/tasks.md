@@ -1561,6 +1561,7 @@ surfaces exist and are witnessed.
     in `unknown_fields_test.cpp`. TSan's `die_after_fork` is the open risk; this run must show them on both
     lanes.
 
+  - **T120 checkpoint (2026-10-05):** partly run. What is done, what is left, and how to resume are in the evidence file's "T120 `/speckit-verify`: IN PROGRESS" section.
 - [X] T121 File the follow-ups spec.md "Out of scope" marks "to file" (the admin and outbound parse
   arenas, contract L-14; a lazy `open()` failure being silent in the role loops), with the owner's
   approval, each labelled from `gh label list`, placed in the parent's `phases/phase-4/issue-batches.md`.
