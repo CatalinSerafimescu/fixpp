@@ -1520,13 +1520,18 @@ surfaces exist and are witnessed.
     - **The ODR census can fail:** a `Session` member gated on `FIXPP_TEST_HOOKS` in a scratch copy gives rc 1 with a DIVERGENCE naming it. The unmutated scratch and the real tree give rc 0.
     - **The namespace-scope `FIXPP_TEST_HOOKS` seams 093 added in `file_store.hpp`'s existing block are free functions, not accessors.** FR-053 and the census cover class members, and `*_test_access` friends are unconditional. The census's informational list of namespace-scope differences is not an inventory.
     - F23's recipe is fixed in `945375cf`.
-- [ ] T118 T011's label gate passes (the labelled set equals the manifest, every entry registered);
+- [X] T118 T011's label gate passes (the labelled set equals the manifest, every entry registered);
   `ctest --test-dir build/linux-clang-debug -L '^093$' --output-on-failure` all GREEN; the whole ctest
   suite unfiltered on `linux-clang-debug`, `-asan`, `-ubsan`, `-tsan` and `-release`, one preset at a
   time under the 16 GiB cap, passing except the tests T012's populations list as intentionally updated.
   On `-tsan`, confirm by name that `engine_reset_unit_stop` (T082) and `capi_inbound_frame_dispositions`
   (T090's cross-thread getter cell) ran: their cross-strand and cross-thread interleavings are what
   the TSan lane is for.
+  - **T118 as landed (`d0b4034b`):**
+    - release 421/422; the one failure is `compile_time_bench`'s flat ceiling, fixpp#209's flake, which is just as tight on the base.
+    - asan 421/421, ubsan 393/393, tsan 393/393, with no unexpected sanitizer report.
+    - `engine_reset_unit_stop` and `capi_inbound_frame_dispositions` passed on tsan.
+    - The fork cells pass on asan and tsan, with no `die_after_fork`.
 - [X] T119 Via the `checklist-auditor`, re-disposition any checklist item whose subject changed during
   implementation: derive the population by a complement grep over
   `specs/093-inbound-frame-dispositions/checklists/*.md` for every FR, C-row, OD and invariant id the
