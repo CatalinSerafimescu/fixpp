@@ -151,10 +151,10 @@ TEST_F(InboundFrameDispositions, Q13_MaxMessageSizeOutsideTheRangeIsRefusedByReg
         bool accepted;
         std::string comp;  // a distinct SenderCompID per row, so no row is a duplicate
     };
-    std::vector<Row> const rows{{4095U, false, "R4095"},
-                                {262145U, false, "R262145"},
-                                {4096U, true, "R4096"},
-                                {262144U, true, "R262144"}};
+    std::vector<Row> const rows{{.advertised = 4095U, .accepted = false, .comp = "R4095"},
+                                {.advertised = 262145U, .accepted = false, .comp = "R262145"},
+                                {.advertised = 4096U, .accepted = true, .comp = "R4096"},
+                                {.advertised = 262144U, .accepted = true, .comp = "R262144"}};
     std::vector<fixpp::core::expected_t<void>> results;
     for (auto const& row : rows) {
         auto cfg = make_acceptor_cfg(row.advertised);
@@ -443,7 +443,7 @@ void run_q1(Q1Row const& row) {
     } else {
         EXPECT_TRUE(resends.empty()) << row.name << ": no number is lost, so no ResendRequest";
     }
-    expect_one_garble(garbles, records, {row.kind, garbled.size()}, row.name);
+    expect_one_garble(garbles, records, {.kind = row.kind, .bytes = garbled.size()}, row.name);
 }
 
 // A Heartbeat at 34=3 as text, for a row to corrupt.
@@ -459,14 +459,14 @@ std::string with_trailer(std::string s, F f) {
 }
 
 TEST(InboundFrameDispositionsTc, TC002_2d_LeadingJunkBeforeAGoodFrame_DisregardedAndContinues) {
-    run_q1({"TC002_2d",
-            [](plain_rig::Rig const&) { return std::string{"GARBLED-LEADING-BYTES\x01"}; }, false,
-            fixpp::core::error::wire_framing_resync, true});
+    run_q1({.name = "TC002_2d",
+            .garbled = [](plain_rig::Rig const&) { return std::string{"GARBLED-LEADING-BYTES\x01"}; }, .numbered = false,
+            .kind = fixpp::core::error::wire_framing_resync, .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC002_2m_BodyLengthWrong_DisregardedAndContinues) {
-    run_q1({"TC002_2m",
-            [](plain_rig::Rig const& rig) {
+    run_q1({.name = "TC002_2m",
+            .garbled = [](plain_rig::Rig const& rig) {
                 // 9=<n> rewritten as 9=<n - 5>: `10=` is then not at the counted offset.
                 std::string s = hb3(rig);
                 auto const at = s.find(
@@ -477,12 +477,12 @@ TEST(InboundFrameDispositionsTc, TC002_2m_BodyLengthWrong_DisregardedAndContinue
                 s.replace(at, end - at, std::to_string(std::stoi(s.substr(at, end - at)) - 5));
                 return s;
             },
-            true, fixpp::core::error::wire_invalid_body_length, true});
+            .numbered = true, .kind = fixpp::core::error::wire_invalid_body_length, .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC002_2t_MsgTypeNotThird_DisregardedAndContinues) {
-    run_q1({"TC002_2t",
-            [](plain_rig::Rig const& rig) {
+    run_q1({.name = "TC002_2t",
+            .garbled = [](plain_rig::Rig const& rig) {
                 return plain_rig::frame("FIX.4.2",
                                         "49=TW\x01"
                                         "35=0\x01"
@@ -492,34 +492,34 @@ TEST(InboundFrameDispositionsTc, TC002_2t_MsgTypeNotThird_DisregardedAndContinue
                                             "\x01"
                                             "56=ISLD\x01");
             },
-            true, fixpp::core::error::wire_header_out_of_order, false});
+            .numbered = true, .kind = fixpp::core::error::wire_header_out_of_order, .framer_detects = false});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3b_CheckSumWrong_DisregardedAndContinues) {
-    run_q1({"TC003_3b",
-            [](plain_rig::Rig const& rig) {
+    run_q1({.name = "TC003_3b",
+            .garbled = [](plain_rig::Rig const& rig) {
                 return with_trailer(hb3(rig), [](std::string const& d) {
                     std::array<char, 4> wrong{};
                     std::snprintf(wrong.data(), wrong.size(), "%03d", (std::stoi(d) + 1) % 256);
                     return "10=" + std::string{wrong.data(), 3} + "\x01";
                 });
             },
-            true, fixpp::core::error::wire_checksum_mismatch, true});
+            .numbered = true, .kind = fixpp::core::error::wire_checksum_mismatch, .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc,
      TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues) {
     // A BeginString value longer than the cap, with no SOH (contract C-1 W-2).
-    run_q1({"TC003_3c",
-            [](plain_rig::Rig const&) { return std::string{"8=FIXGARBLEDBEGINSTRING"}; }, false,
-            fixpp::core::error::wire_framing_resync, true});
+    run_q1({.name = "TC003_3c",
+            .garbled = [](plain_rig::Rig const&) { return std::string{"8=FIXGARBLEDBEGINSTRING"}; }, .numbered = false,
+            .kind = fixpp::core::error::wire_framing_resync, .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotLast_DisregardedAndContinues) {
     // A field follows CheckSum and BodyLength counts it, so `10=` is not where the count
     // says: reported as a BodyLength failure (contract L-2).
-    run_q1({"TC003_3e_not_last",
-            [](plain_rig::Rig const& rig) {
+    run_q1({.name = "TC003_3e_not_last",
+            .garbled = [](plain_rig::Rig const& rig) {
                 std::string const inner =
                     "35=0\x01"
                     "34=3\x01"
@@ -534,24 +534,24 @@ TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotLast_DisregardedAndContinue
                        "9=" +
                        std::to_string(inner.size()) + "\x01" + inner;
             },
-            true, fixpp::core::error::wire_invalid_body_length, true});
+            .numbered = true, .kind = fixpp::core::error::wire_invalid_body_length, .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotThreeDigits_DisregardedAndContinues) {
-    run_q1({"TC003_3e_not_three_digits",
-            [](plain_rig::Rig const& rig) {
+    run_q1({.name = "TC003_3e_not_three_digits",
+            .garbled = [](plain_rig::Rig const& rig) {
                 return with_trailer(
                     hb3(rig), [](std::string const& d) { return "10=" + d.substr(1) + "\x01"; });
             },
-            true, fixpp::core::error::wire_checksum_mismatch, true});
+            .numbered = true, .kind = fixpp::core::error::wire_checksum_mismatch, .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotSohTerminated_DisregardedAndContinues) {
-    run_q1({"TC003_3e_not_soh_terminated",
-            [](plain_rig::Rig const& rig) {
+    run_q1({.name = "TC003_3e_not_soh_terminated",
+            .garbled = [](plain_rig::Rig const& rig) {
                 return with_trailer(hb3(rig), [](std::string const& d) { return "10=" + d + "X"; });
             },
-            true, fixpp::core::error::wire_checksum_mismatch, true});
+            .numbered = true, .kind = fixpp::core::error::wire_checksum_mismatch, .framer_detects = true});
 }
 
 // ── Q-5 (T028): accounting across feeds, ordering, the log rate, the ring ────
@@ -620,7 +620,7 @@ TEST(InboundFrameDispositionsQ5, RegionSplitAcrossReadsCountsOnceAndTheContinuin
     ASSERT_TRUE(active && d1 && d2) << "setup";
     EXPECT_TRUE(processed) << "the good frame after the split region must be processed";
     EXPECT_EQ(st, fsm_state::Active);
-    expect_one_garble(o, records, {fixpp::core::error::wire_framing_resync, first.size()},
+    expect_one_garble(o, records, {.kind = fixpp::core::error::wire_framing_resync, .bytes = first.size()},
                       "split region");
 }
 
@@ -688,6 +688,7 @@ bool garble_then_heartbeat_continuing(PumpCell& c, std::uint32_t seq) {
 // The suppressed count each garble record carries, in record order.
 std::vector<std::uint64_t> suppressed_counts(std::vector<fixpp::log::Record> const& records) {
     std::vector<std::uint64_t> out;
+    out.reserve(records.size());
     for (auto const& r : records) out.push_back(r.arg_count == 3U ? r.args[2].u64 : ~0ULL);
     return out;
 }
@@ -924,7 +925,7 @@ void expect_step1_garble(DirectFixture& f, Session const& s, std::string const& 
                          std::string_view row) {
     auto const o = observe_garbles(s);
     expect_one_garble(o, garble_records(f.log),
-                      {fixpp::core::error::wire_header_out_of_order, frame.size()}, row);
+                      {.kind = fixpp::core::error::wire_header_out_of_order, .bytes = frame.size()}, row);
 }
 
 TEST(InboundFrameDispositionsQ8, NotConnected_MsgTypeNotThird_DisregardedAndTheLogonThenProcessed) {
@@ -991,7 +992,7 @@ TEST(InboundFrameDispositionsQ8, LogoutSent_MsgTypeNotThird_CountedAndNotTakenAs
     (void)close_fut.get();
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
     expect_one_garble(o, garble_records(f.log),
-                      {fixpp::core::error::wire_header_out_of_order, bad.size()}, "LogoutSent");
+                      {.kind = fixpp::core::error::wire_header_out_of_order, .bytes = bad.size()}, "LogoutSent");
 }
 
 // Disconnected ignores every frame without a scan (C-2): a 35-not-third frame there is
@@ -1265,7 +1266,7 @@ TEST(InboundFrameDispositionsQ8Pump, Disconnected_FramerGarbleIsCountedWhileTheP
 
     ASSERT_TRUE(connected && d1 && refused && d2) << "setup";
     EXPECT_FALSE(read_ended) << "a garble does not close the transport";
-    expect_one_garble(o, records, {fixpp::core::error::wire_framing_resync, junk().size()},
+    expect_one_garble(o, records, {.kind = fixpp::core::error::wire_framing_resync, .bytes = junk().size()},
                       "Disconnected");
 }
 
@@ -1326,7 +1327,7 @@ TEST(InboundFrameDispositionsQ10, LongerThanTheCapInActive_IsAGarbleDisregardedA
         << "the value must exceed the default cap";
     EXPECT_EQ(st, fsm_state::Active) << "a garble does not end the session";
     EXPECT_TRUE(processed) << "the good frame after it is processed";
-    expect_one_garble(o, records, {fixpp::core::error::wire_framing_resync, garbled.size()},
+    expect_one_garble(o, records, {.kind = fixpp::core::error::wire_framing_resync, .bytes = garbled.size()},
                       "BeginString longer than the cap");
 }
 
@@ -1372,9 +1373,9 @@ constexpr std::size_t expected_carry_block(std::uint32_t limit) {
 // slack term counts every pmr container one parse constructs (research R-3), each a
 // proxy plus its alignment padding.
 std::size_t expected_parse_buffer(std::uint32_t limit) {
-    std::size_t const n = std::size_t{limit} / 3U + 1U;
+    std::size_t const n = (std::size_t{limit} / 3U) + 1U;
     std::size_t cap = 8;
-    while (cap < (n * 5U) / 4U + 1U) cap <<= 1U;
+    while (cap < ((n * 5U) / 4U) + 1U) cap <<= 1U;
     // Each block's alignment minus one, worked by hand:
     // (alignof(OffsetTable::entry) - 1) + (alignof(std::uint32_t) - 1).
     constexpr std::size_t kAlignPad = 6;
@@ -1382,8 +1383,8 @@ std::size_t expected_parse_buffer(std::uint32_t limit) {
     constexpr std::size_t kParseContainers = 10;
     // A proxy is pointer-aligned: alignof(void*) - 1, worked by hand.
     constexpr std::size_t kProxyPad = 7;
-    return 12U * n + 4U * cap + kAlignPad + kCallbackReadHeadroom +
-           kParseContainers * (kContainerSlack + kProxyPad);
+    return (12U * n) + (4U * cap) + kAlignPad + kCallbackReadHeadroom +
+           (kParseContainers * (kContainerSlack + kProxyPad));
 }
 
 // A memory resource that forwards to new_delete until a budget is spent, then refuses
@@ -1643,6 +1644,8 @@ TEST(InboundFrameDispositionsQ14, SessionArenaOneByteShortIsAnOpenErrorAtAConfig
     plain_rig::Rig rig;
     auto cfg = rig.cfg();
     cfg.framer_carry_arena = &arena;
+    // std::exit reports this death-test child's verdict as its exit code.
+    // NOLINTBEGIN(concurrency-mt-unsafe)
     if (!rig.start(std::move(cfg)) || !rig.connect_peer()) std::exit(2);
     rig.peer.send(rig.logon());
     bool const ended = rig.run_until([&] { return rig.peer.read_ended; });
@@ -1651,6 +1654,7 @@ TEST(InboundFrameDispositionsQ14, SessionArenaOneByteShortIsAnOpenErrorAtAConfig
     rig.stop();
     if (answered || published) std::exit(1);
     std::exit(ended ? 0 : 3);
+    // NOLINTEND(concurrency-mt-unsafe)
 }
 
 TEST(InboundFrameDispositionsQ14, ThroughTheEngineAShortCarryArenaRefusesTheConnection) {
@@ -1994,11 +1998,14 @@ TEST(InboundFrameDispositionsQ33, GroupSlicesAtHeadroomExhaustion) {
         for (auto it = uf.begin(); !(it == uf.end()); ++it) ++n;
         unknown = n;
     });
+    // std::exit reports this death-test child's verdict as its exit code.
+    // NOLINTBEGIN(concurrency-mt-unsafe)
     if (!r.up || !r.delivered) std::exit(3);
     if (!r.next || r.state != fsm_state::Active) std::exit(2);
     if (q33_null_upstream()) std::exit(unknown == 0U ? 0 : 1);
     if (unknown == 0U) std::exit(1);
     std::exit(r.spills > 0U ? 0 : 4);
+    // NOLINTEND(concurrency-mt-unsafe)
 }
 
 TEST(InboundFrameDispositionsQ33, UnknownFieldsAtHeadroomExhaustion) {
@@ -2021,6 +2028,8 @@ TEST(InboundFrameDispositionsQ33, UnknownFieldsAtHeadroomExhaustion) {
     auto app = std::make_shared<FromAppProbe>();
     f.engine.application = app;
     Session s(f.engine, f.cfg(session_role::acceptor));
+    // std::exit reports this death-test child's verdict as its exit code.
+    // NOLINTBEGIN(concurrency-mt-unsafe)
     if (!f.open(s) || !f.feed(s, direct_msg("A", 1, kLogonFields))) std::exit(2);
     auto const nested = plain_rig::to_bytes(direct_msg("D", 3));
     app->on_app = [&](auto const& /*mv*/) {
@@ -2028,6 +2037,7 @@ TEST(InboundFrameDispositionsQ33, UnknownFieldsAtHeadroomExhaustion) {
     };
     (void)f.feed(s, direct_msg("D", 2));
     std::exit(0);
+    // NOLINTEND(concurrency-mt-unsafe)
 }
 #endif
 

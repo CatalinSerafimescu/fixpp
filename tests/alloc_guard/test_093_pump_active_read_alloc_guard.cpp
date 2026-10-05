@@ -46,7 +46,7 @@
 // ── Sanitizer-detection guard (tests/alloc_guard/test_validate_gate_alloc_guard.cpp) ──
 // ASan, TSan and MSan own operator new/delete; a TU-local replacement conflicts with
 // theirs, so under them the counter is compiled out and the count arms skip.
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
     __has_feature(memory_sanitizer)
 #define FIXPP_SANITIZER_REPLACES_NEW 1
@@ -64,9 +64,14 @@
 
 // Counts global operator new calls while armed. Constant-initialised, so safe to read
 // from operator new during other TUs' dynamic initialisation.
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables) — the counter's state
 static std::atomic<std::size_t> g_new_count{0};
 static std::atomic<bool> g_arming{false};
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
+// The replacement obtains and releases raw storage with malloc/free by design: it is the
+// interceptor the counter needs, and it must not re-enter operator new.
+// NOLINTBEGIN(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,hicpp-no-malloc)
 // NOLINTNEXTLINE(cert-dcl58-cpp) — replacing global operator new/delete is intentional
 void* operator new(std::size_t n) {
     if (g_arming.load(std::memory_order_relaxed)) {
@@ -95,6 +100,7 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 // NOLINTNEXTLINE(cert-dcl58-cpp)
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+// NOLINTEND(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,hicpp-no-malloc)
 
 namespace {
 void arm() noexcept {
@@ -137,8 +143,11 @@ TEST(PumpActiveReadAllocGuard, TheCounterCountsAKnownAllocation) {
     GTEST_SKIP() << "operator-new replacement disabled under sanitizers";
 #else
     arm();
+    // A raw new/delete pair on purpose: the known operator new the counter must see.
+    // NOLINTBEGIN(cppcoreguidelines-owning-memory)
     int* volatile p = new int(7);
     delete p;
+    // NOLINTEND(cppcoreguidelines-owning-memory)
     std::size_t const n = disarm();
     EXPECT_GE(n, 1U) << "the armed counter did not see a known operator new";
 #endif

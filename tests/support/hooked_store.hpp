@@ -71,7 +71,9 @@ struct StoreLog {
     // A flush held by Hooks::flush_until waited out its bound.
     bool flush_hold_timed_out = false;
 
-    void record(std::string op) { writes.push_back({std::move(op), close_began && close_began()}); }
+    void record(std::string op) {
+        writes.push_back({.op = std::move(op), .after_close_began = close_began && close_began()});
+    }
 };
 
 // A MemoryStore that reports itself persistent, so the session hydrates from it and
@@ -299,7 +301,7 @@ private:
         co_return r;
     }
     asio::awaitable<fixpp::core::expected_t<void>> logged_reset(bool hold) {
-        auto r = co_await inner_->reset();
+        auto r = co_await (*inner_).reset();
         log_->record("reset");
         if (hold) co_await hold_until_close_reset();
         co_return r;

@@ -844,6 +844,9 @@ std::shared_ptr<const fixpp::dict::Dictionary> make_validation_dictionary_with_1
     }
     constexpr std::size_t kBufSize = 128U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    // The shared_ptr's deleter owns the dictionary, its resource and its buffer, and
+    // releases them in that order.
+    // NOLINTBEGIN(cppcoreguidelines-owning-memory)
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     auto* raw_dict = new fixpp::dict::Dictionary{fixpp::dict::XmlLoader{}.load_from_string(xml, mr)};
     auto* raw_buf = buf.release();
@@ -853,6 +856,7 @@ std::shared_ptr<const fixpp::dict::Dictionary> make_validation_dictionary_with_1
             delete mr;
             delete raw_buf;
         }};
+    // NOLINTEND(cppcoreguidelines-owning-memory)
 }
 
 // The io_context, clock, application and Engine one cell runs on.
@@ -1081,12 +1085,15 @@ void expect_no_admin_after_close(LogonCloseOutcome const& o) {
 // Every state written after the posted close began is close()'s Disconnected.
 void expect_no_state_but_disconnected_after_close(LogonCloseOutcome const& o) {
     ASSERT_TRUE(o.seen.ring_at_close_start.has_value()) << "the posted close never ran";
+    // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     ASSERT_LE(*o.seen.ring_at_close_start, o.ring.size()) << "ring=" << joined(o.ring);
     for (std::size_t i = *o.seen.ring_at_close_start; i < o.ring.size(); ++i) {
         EXPECT_EQ(o.ring[i], sess::fsm_state::Disconnected)
             << "a state other than Disconnected written after close() began; ring="
             << joined(o.ring) << " (close began at " << *o.seen.ring_at_close_start << ")";
     }
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // Two frames the peer coalesces behind its Logon (or Logon-ack), from `sender` to

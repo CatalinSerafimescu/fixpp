@@ -781,7 +781,6 @@ TEST(EngineFirstFrameResync, Q34_KRegionsBeforeTheLogonAreHandedOverAsOneSummary
     bool const up = rig.start(rig.cfg()) && rig.connect_peer();
     std::string a;
     std::string b;
-    std::string tail;
     bool ok = up;
     if (ok) {
         a = wrong_checksum_heartbeat(rig, 7);
@@ -868,6 +867,8 @@ TEST(EngineFirstFrameResync, Q10_LongerThanTheCapIsAGarbleAndTheLogonAfterItEsta
 namespace {
 
 // Bytes a resync Framer discards whole: no "8=" anywhere, so it holds none of them.
+// Parentheses, not braces: std::string{n, 'X'} would be a two-character string.
+// NOLINTNEXTLINE(modernize-return-braced-init-list)
 std::string discardable(std::size_t n) { return std::string(n, 'X'); }
 
 struct PhaseAObservation {

@@ -300,7 +300,10 @@ TEST(FramerResync, Q2_GarbageNotEndingInSohBetweenGoodFrames) {
         SCOPED_TRACE(limit);
         std::string const g1 = heartbeat(1);
         std::string const g2 = heartbeat(2);
-        run_result const r = run_every_segmentation(g1 + "XYZ" + g2, {.limit = limit});
+        std::string input = g1;
+        input += "XYZ";
+        input += g2;
+        run_result const r = run_every_segmentation(input, {.limit = limit});
         EXPECT_EQ(r.frames, (std::vector<std::string>{g1, g2}));
         EXPECT_EQ(r.regions, 1U);
         EXPECT_EQ(r.discarded, 3U);

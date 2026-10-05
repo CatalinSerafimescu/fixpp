@@ -210,7 +210,7 @@ public:
         if (stream_->on_read) stream_->on_read(idx);
         Frame const& chunk = stream_->chunks[idx];
         assert(chunk.size() <= buf.size() && "a chunk must fit one read");
-        std::copy(chunk.begin(), chunk.end(), buf.begin());
+        std::ranges::copy(chunk, buf.begin());
         co_return chunk.size();
     }
 

@@ -361,7 +361,7 @@ DurableCounters read_counters(fixpp::session::MessageStore& store, asio::thread_
     return run_on(pool, [&]() -> asio::awaitable<DurableCounters> {
         auto in = co_await store.next_seqnum(direction_t::inbound, false);
         auto out = co_await store.next_seqnum(direction_t::outbound, false);
-        co_return DurableCounters{in.value_or(0), out.value_or(0)};
+        co_return DurableCounters{.in = in.value_or(0), .out = out.value_or(0)};
     });
 }
 
@@ -384,12 +384,12 @@ std::unique_ptr<fixpp::session::MessageStore> open_advanced(const fs::path& dir,
     return store;
 }
 
-constexpr DurableCounters kAdvanced{4, 6};
+constexpr DurableCounters kAdvanced{.in = 4, .out = 6};
 
 // Destroys `store`, then reads the counters a restart over `dir` sees.
 DurableCounters restart_counters(std::unique_ptr<fixpp::session::MessageStore>& store,
                                  const fs::path& dir, asio::thread_pool& pool) {
-    store.reset();
+    store = nullptr;
     auto reopened = open_store(dir, pool);
     if (!reopened) {
         ADD_FAILURE() << "restart: re-open failed";
@@ -434,7 +434,7 @@ TEST(FileStoreResetTo, Q28_AnAcceptedPairIsDurable) {
             co_return co_await store->reset_to(in, out);
         });
         EXPECT_TRUE(r.has_value()) << "reset_to(" << in << ", " << out << ")";
-        DurableCounters const want{in, out};
+        DurableCounters const want{.in = in, .out = out};
         EXPECT_EQ(read_counters(*store, pool), want) << "reset_to(" << in << ", " << out << ")";
         EXPECT_EQ(restart_counters(store, dir, pool), want)
             << "durable after reset_to(" << in << ", " << out << ")";
@@ -472,7 +472,7 @@ TEST(FileStoreResetTo, Q29_AFaultAfterTheRenameCommitsNoPartialState) {
     });
     fixpp::session::disarm_fail_counter_write_after_reset_commit();
     auto const after = restart_counters(store, dir, pool);
-    DurableCounters const want{2, 2};
+    DurableCounters const want{.in = 2, .out = 2};
     EXPECT_TRUE(after == kAdvanced || after == want)
         << "a restart read NextNumIn " << after.in << ", NextNumOut " << after.out
         << ": neither the old (4, 6) nor the new (2, 2)";
@@ -491,7 +491,7 @@ TEST(FileStoreResetTo, Q29_Control_TheFaultAfterTheRenameFiresOnAResetThenAnAdva
     (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
     fixpp::session::arm_fail_counter_write_after_reset_commit();
     auto const [reset_ok, advance_ok] = run_on(pool, [&]() -> asio::awaitable<std::pair<bool, bool>> {
-        auto rr = co_await store->reset();
+        auto rr = co_await (*store).reset();
         auto ar = co_await store->next_seqnum(direction_t::inbound, true);
         co_return std::pair{rr.has_value(), ar.has_value()};
     });

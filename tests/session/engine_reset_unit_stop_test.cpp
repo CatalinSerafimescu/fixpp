@@ -333,7 +333,7 @@ std::vector<Q26Param> q26_params() {
                                  StoreKind::contended, StoreKind::file_held}) {
             if (store == StoreKind::file_held && role == session_role::acceptor) continue;
             for (bool const teardown : {false, true}) {
-                out.push_back({store, teardown, role});
+                out.push_back({.store = store, .teardown = teardown, .role = role});
             }
         }
     }
@@ -516,6 +516,8 @@ std::size_t wire_count(std::string const& wire, std::string_view type, std::stri
 // The states a close(graceful) begun in LogonReceived writes: phase 1's LogoutSent, then
 // Disconnected. A Disconnected the arm writes first makes phase 1 skip, so the arm's write
 // shows as the missing LogoutSent.
+// A bad_alloc while building it before main aborts the binary, which fails the run.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp)
 std::vector<fsm_state> const kCloseWrites{fsm_state::LogoutSent, fsm_state::Disconnected};
 
 // What every close cell asserts: the close ran and returned, its hold was released by
@@ -868,7 +870,7 @@ TEST(Od26, CloseDuringTheAcceptorsPostureRefusalWritesNoLogout) {
                                    plain_rig::Rig&) { cfg.posture = session_posture::production; },
                    .peer_logon = [](plain_rig::Rig& rig) { return logon_with(rig, "464=Y\x01"); },
                    .hold_store = 1},
-                  {"5", "58", "TestMessageIndicator posture mismatch"}, fsm_state::NotConnected);
+                  {.type = "5", .tag = "58", .value = "TestMessageIndicator posture mismatch"}, fsm_state::NotConnected);
 }
 
 TEST(Od26, CloseDuringTheInitiatorsPostureRefusalWritesNoLogout) {
@@ -877,7 +879,7 @@ TEST(Od26, CloseDuringTheInitiatorsPostureRefusalWritesNoLogout) {
                                    plain_rig::Rig&) { cfg.posture = session_posture::production; },
                    .peer_logon = [](plain_rig::Rig& rig) { return logon_with(rig, "464=Y\x01"); },
                    .hold_store = 2},
-                  {"5", "58", "TestMessageIndicator posture mismatch"}, fsm_state::LogonSent);
+                  {.type = "5", .tag = "58", .value = "TestMessageIndicator posture mismatch"}, fsm_state::LogonSent);
 }
 
 // The acceptor's SendingTime(52) Reject: a stale SendingTime on the Logon.
@@ -885,7 +887,7 @@ TEST(Od26, CloseDuringTheAcceptorsSendingTimeRejectWritesNoReject) {
     run_od26_site({.role = session_role::acceptor,
                    .peer_logon = [](plain_rig::Rig& rig) { return stale_logon(rig); },
                    .hold_store = 1},
-                  {"3", "371", "52"}, fsm_state::NotConnected);
+                  {.type = "3", .tag = "371", .value = "52"}, fsm_state::NotConnected);
 }
 
 // The initiator's SendingTime(52) Logout: a stale SendingTime on the Logon-ack.
@@ -893,7 +895,7 @@ TEST(Od26, CloseDuringTheInitiatorsSendingTimeLogoutWritesNoLogout) {
     run_od26_site({.role = session_role::initiator,
                    .peer_logon = [](plain_rig::Rig& rig) { return stale_logon(rig); },
                    .hold_store = 2},
-                  {"5", "58", "SendingTime(52)"}, fsm_state::LogonSent);
+                  {.type = "5", .tag = "58", .value = "SendingTime(52)"}, fsm_state::LogonSent);
 }
 
 // The validation test dictionary loaded as FIX 4.4, with DefaultApplVerID(1137) declared
@@ -950,7 +952,7 @@ TEST(Od26, CloseDuringTheAcceptors1137RejectWritesNoReject) {
                                                      "98=0\x01" "108=30\x01");
                        },
                    .hold_store = 1},
-                  {"3", "371", "1137"}, fsm_state::NotConnected);
+                  {.type = "3", .tag = "371", .value = "1137"}, fsm_state::NotConnected);
 }
 
 // emit_session_reject_ on each arm's validate path: a Logon without HeartBtInt(108),
@@ -966,7 +968,7 @@ TEST(Od26, CloseDuringTheAcceptorsValidationRejectWritesNoReject) {
                    .configure = validating,
                    .peer_logon = logon_without_108,
                    .hold_store = 1},
-                  {"3", "371", "108"}, fsm_state::NotConnected);
+                  {.type = "3", .tag = "371", .value = "108"}, fsm_state::NotConnected);
 }
 
 TEST(Od26, CloseDuringTheInitiatorsValidationRejectWritesNoReject) {
@@ -974,7 +976,7 @@ TEST(Od26, CloseDuringTheInitiatorsValidationRejectWritesNoReject) {
                    .configure = validating,
                    .peer_logon = logon_without_108,
                    .hold_store = 2},
-                  {"3", "371", "108"}, fsm_state::LogonSent);
+                  {.type = "3", .tag = "371", .value = "108"}, fsm_state::LogonSent);
 }
 
 // The member, on a read failure: the acceptor's hydrating outbound read fails after

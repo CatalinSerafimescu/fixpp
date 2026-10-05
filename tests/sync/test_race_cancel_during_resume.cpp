@@ -386,6 +386,8 @@ TEST(SeamRaceCancelDuringResume, Od25_GrantLeavesTheCallersFilterTerminalOnly) {
         ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::ready);
         fut.get();
         ASSERT_TRUE(wait_ec.has_value());
+        // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
         if (type == asio::cancellation_type::total) {
             EXPECT_FALSE(*wait_ec) << "a total emission after the grant cancelled the next await: "
                                    << wait_ec->message();
@@ -393,6 +395,7 @@ TEST(SeamRaceCancelDuringResume, Od25_GrantLeavesTheCallersFilterTerminalOnly) {
             EXPECT_EQ(*wait_ec, asio::error::operation_aborted)
                 << "a terminal emission after the grant did not cancel the next await";
         }
+        // NOLINTEND(bugprone-unchecked-optional-access)
     }
 }
 

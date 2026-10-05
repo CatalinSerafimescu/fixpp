@@ -1026,7 +1026,7 @@ public:
 
 private:
     void* do_allocate(std::size_t bytes, std::size_t align) override {
-        log.push_back({bytes, align, false});
+        log.push_back({.bytes = bytes, .align = align, .served = false});
         void* p = upstream_->allocate(bytes, align);
         log.back().served = true;
         return p;

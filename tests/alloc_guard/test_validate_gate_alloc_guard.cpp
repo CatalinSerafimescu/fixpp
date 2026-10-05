@@ -192,7 +192,7 @@ using fixpp::wire::pmr_carry_buffer;
 // The parse buffer validate_inbound_() parses over (093, data-model E-2). A bad_alloc
 // while building it before main aborts the binary, which fails the run.
 constexpr std::uint32_t kLimit = fixpp::session::kDefaultInboundLimit;
-// NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp)
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp,cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<std::byte> g_parse_buffer(fixpp::session::detail::parse_capacity::buffer_bytes(kLimit));
 
 // The parse's entry cap and reserve, as validate_inbound_() passes them.

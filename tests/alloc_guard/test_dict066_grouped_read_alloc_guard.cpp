@@ -149,7 +149,7 @@ using fixpp::wire::pmr_carry_buffer;
 constexpr std::uint32_t kLimit = fixpp::session::kDefaultInboundLimit;
 
 // A bad_alloc while building it before main aborts the binary, which fails the run.
-// NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp)
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp,cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<std::byte> g_parse_buffer(fixpp::session::detail::parse_capacity::buffer_bytes(kLimit));
 
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {

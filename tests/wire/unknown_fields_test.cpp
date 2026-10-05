@@ -221,7 +221,7 @@ struct BoundedParse {
     std::vector<std::byte> block;
     fixpp::test_support::pmr_allocation_tracking_resource upstream;
     std::pmr::monotonic_buffer_resource mr;
-    Parser<access_mode::Index> parser{};  // dict-free: every non-framing tag is unknown
+    Parser<access_mode::Index> parser;  // dict-free: every non-framing tag is unknown
     fixpp::core::expected_t<fixpp::wire::MessageView<access_mode::Index>> mv;
 
     BoundedParse(fixpp::wire::frame_view const& fv, std::size_t size,
@@ -283,9 +283,12 @@ TEST(WireUnknownFieldsQ32, ExhaustedArenaReturnsTheSameEmptyViewAndTheProcessLiv
         {
             auto const first = p.mv->unknown_fields();
             auto const second = p.mv->unknown_fields();
+            // std::exit reports this death-test child's verdict as its exit code.
+            // NOLINTBEGIN(concurrency-mt-unsafe)
             if (!first.empty()) std::exit(1);
             if (!second.empty() || !(first.begin() == second.begin())) std::exit(2);
             std::exit(0);
+            // NOLINTEND(concurrency-mt-unsafe)
         },
         ::testing::ExitedWithCode(0), "");
 }

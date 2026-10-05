@@ -273,7 +273,7 @@ struct ScriptRun {
     bool up = false;
     bool ended = false;
     std::vector<fixpp::core::steady_time_point> issued;  // the clock at each read's issue
-    fixpp::core::steady_time_point deadline{};
+    fixpp::core::steady_time_point deadline;
     std::size_t reads_served = 0;
     bool closed = false;
     fsm_state state = fsm_state::NotConnected;
@@ -316,9 +316,8 @@ ScriptRun run_script(std::vector<std::string> const& chunks_text) {
 void expect_closed_at_the_first_loop_head_after_t(ScriptRun const& r) {
     ASSERT_TRUE(r.up);
     EXPECT_TRUE(r.ended) << "the transport was never closed";
-    EXPECT_TRUE(std::none_of(r.issued.begin(), r.issued.end(), [&](auto t) {
-        return t >= r.deadline;
-    })) << "a read was issued at or after T";
+    EXPECT_TRUE(std::ranges::none_of(r.issued, [&](auto t) { return t >= r.deadline; }))
+        << "a read was issued at or after T";
     EXPECT_EQ(r.reads_served, 3U) << "the reads issued before T, and no other";
     EXPECT_EQ(r.timeouts, 1U) << "closed by the deadline, not by the script's EOF";
     EXPECT_EQ(r.state, fsm_state::Disconnected);

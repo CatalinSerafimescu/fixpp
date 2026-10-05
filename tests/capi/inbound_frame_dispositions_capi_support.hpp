@@ -21,6 +21,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/buffer.hpp>
 #include <asio/io_context.hpp>
@@ -178,7 +179,7 @@ inline std::string frame44_of_size(std::string const& head, std::size_t size,
         if (body_len < head.size() + empty_field) return {};
         std::size_t const fill = body_len - head.size();
         std::size_t const n = pad == Pad::dense ? fill / empty_field : 1U;
-        std::size_t const rem = fill - n * empty_field;
+        std::size_t const rem = fill - (n * empty_field);
         std::string body = head;
         body.reserve(body_len);
         for (std::size_t i = 0; i + 1 < n; ++i) {
@@ -331,7 +332,7 @@ public:
     // True if the frame holds the whole field `tag=value` (between SOHs).
     static bool has_field(std::string_view frame, std::string_view tag_eq_value) {
         std::string const needle = "\x01" + std::string{tag_eq_value} + "\x01";
-        return frame.find(needle) != std::string_view::npos;
+        return frame.contains(needle);
     }
 
 private:
@@ -409,10 +410,7 @@ struct Recorder {
 
     bool received_id(std::string_view id) {
         std::scoped_lock const lock{mu};
-        for (auto const& r : received) {
-            if (r == id) return true;
-        }
-        return false;
+        return std::ranges::any_of(received, [&](auto const& r) { return r == id; });
     }
 };
 
@@ -511,6 +509,9 @@ struct CInitiator {
         if (dict != nullptr) fixpp_dict_destroy(dict);
     }
 
+    // These calls act on the engine and session the handle members point to, so they are
+    // non-const although they write no member.
+    // NOLINTBEGIN(readability-make-member-function-const)
     [[nodiscard]] bool start() { return opened && fixpp_engine_start(engine) == FIXPP_ERR_OK; }
 
     // An acceptor's bound port, polled until nonzero or the budget elapses (0 then).
@@ -551,6 +552,7 @@ struct CInitiator {
         EXPECT_TRUE(wait_for_acceptor_drained(engine, id)) << "the session never drained";
         return fixpp_session_close(session);
     }
+    // NOLINTEND(readability-make-member-function-const)
 };
 
 // Starts `c`, accepts its connection, reads its Logon and answers it.

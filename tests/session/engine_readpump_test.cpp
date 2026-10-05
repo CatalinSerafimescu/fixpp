@@ -988,7 +988,7 @@ void run_framer_garble_cell(std::vector<std::byte> const& garbled, fixpp::core::
             asio::detached);
         auto const deadline = std::chrono::steady_clock::now() + kGarbleBudget;
         while (!fc.terminal_read.has_value() && std::chrono::steady_clock::now() < deadline &&
-               !(fc.sent_garble_and_follow_up && fc.acc && next_inbound_of(*fc.acc) == 3)) {
+               (!fc.sent_garble_and_follow_up || !fc.acc || next_inbound_of(*fc.acc) != 3)) {
             ioc.run_for(20ms);
             ioc.restart();
         }

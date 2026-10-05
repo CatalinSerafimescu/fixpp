@@ -1549,8 +1549,11 @@ TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
     auto const cfg = rig.cfg();
     ASSERT_TRUE(cfg.heartbeat_interval.has_value())
         << "precondition: the config carries a heartbeat interval";
+    // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     auto const interval =
         std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     auto const garble_at = interval / 3;
     ASSERT_TRUE(rig.start(cfg));
     ASSERT_TRUE(rig.to_active());

@@ -116,6 +116,8 @@ static void BM_Framer_Feed_NoCarry_Resync(benchmark::State& state) {
     cfg.max_begin_string_bytes =
         std::max(cfg.max_begin_string_bytes, std::string_view{"FIX.4.4"}.size());
     Framer framer{cfg};
+    // `_` is the google-benchmark loop idiom: the loop runs for the iteration, not the value.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (auto _ : state) {
         carry.clear();
         auto r = framer.feed(std::span<const std::byte>{kFrameBytes.data(), kFrameBytes.size()},

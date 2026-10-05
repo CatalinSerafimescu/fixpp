@@ -641,6 +641,8 @@ TEST(ReadFirstFrameBounded, T1) {
             << " ms, read " << kReadLatency.count() << " ms, deadline " << kDeadline.count()
             << " ms), so this is NOT the arm-gap starvation of run 34074957982.";
         if (result->has_value()) {
+            // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             EXPECT_EQ((*result)->len, kLogonLen)
                 << "T1 (SC-005/SC-006): the admitted frame's exact length.";
         }
