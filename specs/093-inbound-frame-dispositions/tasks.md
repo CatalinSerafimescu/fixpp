@@ -1416,10 +1416,11 @@ surfaces exist and are witnessed.
 
 ### Mutation, fuzz, bench, MSVC
 
-- [ ] T110 Re-run quickstart §2's whole mutant list at the post-simplify head, each in a scratch copy
+- [X] T110 Re-run quickstart §2's whole mutant list at the post-simplify head, each in a scratch copy
   (T019, T029, T039, T053, T070, T074, T078, T088, T099; T113's witness mutant on the sandbox), with a
   clean-revert `git diff` each. A mutant whose
   cell stays green is a finding, not a pass. Consolidated table under `## Mutants`.
+  - **As landed (at `31a60f1d`):** 91 rows, 90 RED. M2a is the priced survivor, and its reason is measured by an added M2a+R19 row. The table, drivers and logs are in the parent repo's `093-inbound-frame-dispositions-tools/t110/`. The fatal ASSERT after `start()` that R11 exposed is fixed in `684edf2b`.
 - [ ] T111 Fuzz (`[const §VII.7]`): build `linux-clang-asan` with `FIXPP_BUILD_FUZZ=ON`; run
   `fuzz_wire_framer` (T020's resync arm, counted-work bound asserted per input) and
   `fuzz_transport_read_path` for ≥ 600 s each, after re-showing T020's planted trap fires. Record the
@@ -1452,16 +1453,21 @@ surfaces exist and are witnessed.
     (`if(CMAKE_SYSTEM_NAME STREQUAL "Linux")`; its base count is a Linux measurement). On MSVC, T011's
     manifest gate must expect it absent, and must not report it missing.
 
-- [ ] T114 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file under
+- [X] T114 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file under
   `src/` and `include/`, `tools/` included where changed. Never format `specs/` or
   `include/fix/c_api/*.h`. Findings on changed lines go to `phase-implementer`.
-- [ ] T115 `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
+- [X] T115 `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
   --root <tree> --base origin/main`, `<tree>` the absolute path of the owning tree. Read every hit, and
   the claims the script cannot see: the format strings in `src/log/format_registry.cpp`, the
   `version.h` history, the BREAKING clauses, the constants' recipe comments. A claim recording a result
   is deleted, not replaced.
-- [ ] T116 `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`; a hit on the
+- [X] T116 `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`; a hit on the
   checker's own fixture strings takes the `# citation-ok` pragma.
+  - **T114–T116 as landed:**
+    - The report is in the parent repo, at `research/reviews/opus_093_t114_t116_static.md`.
+    - The fixes are `8ec17048` (comments), `ec0f50a8` (production clang-tidy), `42ae7395` (test and bench clang-tidy), `b04de5d4` (IWYU), `f839f8ec` (clang-format) and `a3f5fe8a` (the re-derive recipe).
+    - clang-tidy is 0 on 093 lines and clang-format is 0. cppcheck is 0, with the 23 gtest TUs unparseable on the base too.
+    - The comment lint is rc 0, and `--shift-audit` is rc 0 with 0 GATED.
 - [ ] T117 Run every `ci-script-pins` step locally, driven from `.github/workflows/tier1.yml`'s YAML (read
   the job's steps with a YAML parser and run each `run:` block as Actions would), including B25's ODR
   census step (FR-053: no class member gated on `FIXPP_TEST_HOOKS`; `framer_test_access` and every new
