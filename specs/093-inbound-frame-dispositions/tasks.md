@@ -1505,10 +1505,15 @@ surfaces exist and are witnessed.
     in `unknown_fields_test.cpp`. TSan's `die_after_fork` is the open risk; this run must show them on both
     lanes.
 
-- [ ] T121 File the follow-ups spec.md "Out of scope" marks "to file" (the admin and outbound parse
+- [X] T121 File the follow-ups spec.md "Out of scope" marks "to file" (the admin and outbound parse
   arenas, contract L-14; a lazy `open()` failure being silent in the role loops), with the owner's
   approval, each labelled from `gh label list`, placed in the parent's `phases/phase-4/issue-batches.md`.
   Record the numbers in the evidence file and in the B&L rows that cite them.
+  - **As landed:**
+    - Filed **#549**, the outbound and admin arenas (L-093-14), and **#550**, the silent `open()` failure, which ends the accept loop. Both are in batch B31.
+    - Also filed **#551**: the deferred `/simplify` items P-3, P-4 and P-5's second half, in batch B32 (`priority: low`).
+    - Each issue is labelled from `gh label list`.
+    - The owner's approval was taken from the blanket grant to run every phase autonomously (2026-10-03).
 - [ ] T122 Via `phase-implementer`, the `CLAUDE-history.md` entry (Article XIX), newest first: the feature,
   the PR, the closing issues, the owner rulings R-1…R-4, the C-ABI MINOR BREAKING list, #540's outcome
   (T008), #538's (T089), and the follow-ups (#534–#537, #541, T121's issues). `CLAUDE.md`'s "Last merged
