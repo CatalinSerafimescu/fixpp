@@ -1447,12 +1447,12 @@ surfaces exist and are witnessed.
   clean-revert `git diff` each. A mutant whose
   cell stays green is a finding, not a pass. Consolidated table under `## Mutants`.
   - **As landed (at `31a60f1d`):** 91 rows, 90 RED. M2a is the priced survivor, and its reason is measured by an added M2a+R19 row. The table, drivers and logs are in the parent repo's `093-inbound-frame-dispositions-tools/t110/`. The fatal ASSERT after `start()` that R11 exposed is fixed in `684edf2b`.
-- [ ] T111 Fuzz (`[const §VII.7]`): build `linux-clang-asan` with `FIXPP_BUILD_FUZZ=ON`; run
+- [X] T111 Fuzz (`[const §VII.7]`): build `linux-clang-asan` with `FIXPP_BUILD_FUZZ=ON`; run
   `fuzz_wire_framer` (T020's resync arm, counted-work bound asserted per input) and
   `fuzz_transport_read_path` for ≥ 600 s each, after re-showing T020's planted trap fires. Record the
   commands, the corpus and the result under `## Fuzz`, name both targets to `/speckit-verify`, and
   state the #508 caveat (no coverage feedback from library code).
-- [ ] T112 Re-run T005's paired A-B-A-B against the post-simplify head, same base worktree and
+- [X] T112 Re-run T005's paired A-B-A-B against the post-simplify head, same base worktree and
   procedure: `on_inbound_frame_bench` validation off and on, and two `framer_bench` pairings, both
   against the base's `BM_Framer_Feed_NoCarry` (default `Config`):
   - the head's `BM_Framer_Feed_NoCarry`: the strict path and the always-compiled counters (T017);
@@ -1464,6 +1464,12 @@ surfaces exist and are witnessed.
     any paired timing, re-`cmp` the base and candidate bench `.text` sections, as T005 did, and rebuild the base if they
     differ for any reason other than the change under test.
 
+  - **T111 and T112 as landed (2026-10-05):**
+    - **Fuzz:** T020's trap was re-shown first. Then 600 s per target, with no crash, artifact or `runtime error:`.
+    - **#508:** the caveat no longer holds. #508 is closed, and library code gives the fuzzer coverage feedback.
+    - **Bench:** every case is within budget, and the head is faster on all of them.
+    - **Base worktree:** kept until close-out, in case a Gate B fix needs the pairing re-run.
+    - The evidence file holds the figures, under `## Fuzz` and `## Bench baseline`.
 - [ ] T113 The MSVC sandbox (T006's lock): rsync the post-simplify head; on MSVC debug and msvc-asan run
   the `093` label, the dense-L, spill and getter-typemap cells (quickstart §3), the Python wheel
   getter, and Q-33's forwarding-lane branch on MSVC debug (T060's C++ and T091's C cells: each lazy
