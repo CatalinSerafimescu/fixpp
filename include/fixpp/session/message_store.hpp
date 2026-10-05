@@ -4,7 +4,7 @@
 //
 // fixpp::session::MessageStore — a pure-virtual plugin interface ([const §XIV.1]
 // row 5). Every pure virtual counts against [const §XIV.2]'s cap of five; re-derive
-// the count with `grep -c "= 0;" include/fixpp/session/message_store.hpp`.
+// the count with `grep -cE '^[^/]*\)[^;]*= 0;' include/fixpp/session/message_store.hpp`.
 // 093-inbound-frame-dispositions adds reset_to (data-model E-9), a non-pure virtual
 // with a default body, so it is not counted.
 //
