@@ -43,6 +43,8 @@ struct session_engine_access {
     // The carry open() allocated (data-model E-2, plan OD-13): L plus one read. The read
     // pump borrows it for the connection. Session strand.
     [[nodiscard]] static fixpp::wire::pmr_carry_buffer& carry(Session& s) noexcept {
+        // Precondition: open() succeeded, so carry_ holds a value.
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         return *s.carry_;
     }
 

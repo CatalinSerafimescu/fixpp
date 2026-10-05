@@ -62,6 +62,8 @@ struct session_test_access {
 
     // The capacity of the carry open() allocated: L plus one read (093, data-model E-2).
     [[nodiscard]] static std::size_t carry_capacity(Session const& s) noexcept {
+        // Precondition: open() succeeded, so carry_ holds a value.
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         return s.carry_->capacity();
     }
 

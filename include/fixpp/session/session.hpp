@@ -741,7 +741,7 @@ private:
     // summaries since the last record (plan OD-21).
     std::shared_ptr<fixpp::log::Logger> logger_;
     bool garble_logged_ = false;
-    fixpp::core::steady_time_point garble_log_next_{};
+    fixpp::core::steady_time_point garble_log_next_;
     std::uint64_t garbles_unlogged_ = 0;
 
     // note_garbles_ — 093 (data-model E-4, E-12): accounts one summary of disregarded

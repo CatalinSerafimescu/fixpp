@@ -59,14 +59,14 @@ struct parse_capacity {
     // N(L): the most fields a frame of L bytes holds at the densest layout, three bytes
     // a field ("1=<SOH>"), plus one. It is the entry cap of every inbound parse.
     [[nodiscard]] static constexpr std::size_t entry_cap_for(std::uint32_t limit) noexcept {
-        return std::size_t{limit} / 3U + 1U;
+        return (std::size_t{limit} / 3U) + 1U;
     }
 
     // The entries one parse reserves up front: the same densest-layout count over the
     // frame's own bytes, at most the parse's entry cap.
     [[nodiscard]] static constexpr std::size_t reserve_for(std::size_t entry_cap,
                                                            std::size_t frame_bytes) noexcept {
-        return std::min(entry_cap, frame_bytes / 3U + 1U);
+        return std::min(entry_cap, (frame_bytes / 3U) + 1U);
     }
 
     // The overlay slots a table of n entries assigns.
@@ -78,9 +78,9 @@ struct parse_capacity {
     // N(L), and the three named terms plus the container slack.
     [[nodiscard]] static std::size_t buffer_bytes(std::uint32_t limit) noexcept {
         std::size_t const n = entry_cap_for(limit);
-        return sizeof(fixpp::wire::OffsetTable::entry) * n +
-               sizeof(std::uint32_t) * overlay_cap_for(n) + kAlignPad + kCallbackReadHeadroom +
-               kParseContainers * (kContainerSlack + kProxyAlignPad);
+        return (sizeof(fixpp::wire::OffsetTable::entry) * n) +
+               (sizeof(std::uint32_t) * overlay_cap_for(n)) + kAlignPad + kCallbackReadHeadroom +
+               (kParseContainers * (kContainerSlack + kProxyAlignPad));
     }
 };
 

@@ -40,8 +40,8 @@ class retrieve_visitor;  // forward-decl; full type in retrieve_visitor.hpp
 namespace detail {
 // reset_to's precondition (093-inbound-frame-dispositions, data-model E-9): next_in and
 // next_out are each 1 or 2.
-[[nodiscard]] inline constexpr bool reset_to_targets_valid(seqnum_t next_in,
-                                                           seqnum_t next_out) noexcept {
+[[nodiscard]] constexpr bool reset_to_targets_valid(seqnum_t next_in,
+                                                    seqnum_t next_out) noexcept {
     auto const ok = [](seqnum_t v) { return v == seqnum_min || v == seqnum_min + 1; };
     return ok(next_in) && ok(next_out);
 }

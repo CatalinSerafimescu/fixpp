@@ -543,9 +543,12 @@ asio::awaitable<void> run_read_pump(
         fixpp::core::expected_t<std::size_t> read_r{};
         if (establishing()) {
             // The race only wakes a blocked read (C-4); the loop head decides expiry.
+            // establishing() is true only when establish_deadline holds a value.
+            // NOLINTBEGIN(bugprone-unchecked-optional-access)
             auto outcome =
                 co_await (transport.async_read_some(read_span) ||
                           fixpp::session::detail::await_deadline(clock, *establish_deadline));
+            // NOLINTEND(bugprone-unchecked-optional-access)
             if (outcome.index() == 1) {
                 continue;
             }
