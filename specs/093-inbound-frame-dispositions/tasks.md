@@ -1500,13 +1500,18 @@ surfaces exist and are witnessed.
     - The fixes are `8ec17048` (comments), `ec0f50a8` (production clang-tidy), `42ae7395` (test and bench clang-tidy), `b04de5d4` (IWYU), `f839f8ec` (clang-format) and `a3f5fe8a` (the re-derive recipe).
     - clang-tidy is 0 on 093 lines and clang-format is 0. cppcheck is 0, with the 23 gtest TUs unparseable on the base too.
     - The comment lint is rc 0, and `--shift-audit` is rc 0 with 0 GATED.
-- [ ] T117 Run every `ci-script-pins` step locally, driven from `.github/workflows/tier1.yml`'s YAML (read
+- [X] T117 Run every `ci-script-pins` step locally, driven from `.github/workflows/tier1.yml`'s YAML (read
   the job's steps with a YAML parser and run each `run:` block as Actions would), including B25's ODR
   census step (FR-053: no class member gated on `FIXPP_TEST_HOOKS`; `framer_test_access` and every new
   accessor unconditional). Every step must run and pass; read `.steps[]`-equivalent output, not a
   summary. Before trusting the census's pass, show it can fail: via `phase-implementer`, in a scratch copy, gate one member of
   a 093-touched class on `FIXPP_TEST_HOOKS` and show the step reports it, or re-run the census's own
   self-test if B25 ships one.
+  - **T117 as landed (at `945375cf`):**
+    - Every `run:` step of `ci-script-pins` was read from tier1.yml with PyYAML and run as `bash -e`. All pass.
+    - **The ODR census can fail:** a `Session` member gated on `FIXPP_TEST_HOOKS` in a scratch copy gives rc 1 with a DIVERGENCE naming it. The unmutated scratch and the real tree give rc 0.
+    - **The namespace-scope `FIXPP_TEST_HOOKS` seams 093 added in `file_store.hpp`'s existing block are free functions, not accessors.** FR-053 and the census cover class members, and `*_test_access` friends are unconditional. The census's informational list of namespace-scope differences is not an inventory.
+    - F23's recipe is fixed in `945375cf`.
 - [ ] T118 T011's label gate passes (the labelled set equals the manifest, every entry registered);
   `ctest --test-dir build/linux-clang-debug -L '^093$' --output-on-failure` all GREEN; the whole ctest
   suite unfiltered on `linux-clang-debug`, `-asan`, `-ubsan`, `-tsan` and `-release`, one preset at a
