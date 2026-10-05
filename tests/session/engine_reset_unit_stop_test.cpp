@@ -76,8 +76,8 @@
 #include "plain_engine_rig.hpp"
 #include "support/hooked_store.hpp"
 #include "support/session_test_access.hpp"
-#include "support/validation_test_dictionary.hpp"
 #include "support/temp_dir.hpp"
+#include "support/validation_test_dictionary.hpp"
 
 namespace fixpp::session::test {
 namespace {
@@ -116,8 +116,8 @@ std::string param_name(::testing::TestParamInfo<Q26Param> const& info) {
                               : p.store == StoreKind::default_body ? "DefaultBody"
                               : p.store == StoreKind::contended    ? "ContendedLock"
                                                                    : "FileStoreWriterLockHeld";
-    return std::string{p.role == session_role::acceptor ? "Acceptor" : "Initiator"} + "_" +
-           store + (p.teardown ? "_TeardownReset" : "_NoTeardownReset");
+    return std::string{p.role == session_role::acceptor ? "Acceptor" : "Initiator"} + "_" + store +
+           (p.teardown ? "_TeardownReset" : "_NoTeardownReset");
 }
 
 class Q26 : public ::testing::TestWithParam<Q26Param> {};
@@ -216,7 +216,10 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
             << "the cell's lock";
     }
 
-    std::string const logon_141 = "98=0\x01" "108=30\x01" "141=Y\x01";
+    std::string const logon_141 =
+        "98=0\x01"
+        "108=30\x01"
+        "141=Y\x01";
     if (p.role == session_role::acceptor) {
         ASSERT_TRUE(rig.connect_peer());
     } else {
@@ -372,15 +375,14 @@ public:
 
 // An application frame from the session ("ISLD") at `seq`, as the store would hold it.
 std::string stored_app_frame(plain_rig::Rig const& rig, seqnum_t seq, std::string_view extra) {
-    return plain_rig::message(rig.begin_string, "D", seq, "ISLD", "TW", rig.sending_time(),
-                              extra);
+    return plain_rig::message(rig.begin_string, "D", seq, "ISLD", "TW", rig.sending_time(), extra);
 }
 
 // A MemoryStore with `frames` stored outbound, in order from 1. MemoryStore's store()
 // takes only its next number and advances the counter past it.
 std::shared_ptr<MemoryStore> seeded_store(std::vector<std::pair<seqnum_t, std::string>> frames) {
-    auto inner = std::make_shared<MemoryStore>(
-        MemoryStore::Config{.policy = capacity_policy::unbounded});
+    auto inner =
+        std::make_shared<MemoryStore>(MemoryStore::Config{.policy = capacity_policy::unbounded});
     asio::io_context seed;
     asio::co_spawn(
         seed,
@@ -471,7 +473,10 @@ Od25Outcome run_od25_acceptor(Od25Case const& c) {
     cfg.store_factory = std::move(factory);
 
     if (!rig.start(cfg) || !rig.connect_peer()) return out;
-    rig.peer.send(rig.msg("A", 1, "98=0\x01" "108=30\x01" + c.logon_extra));
+    rig.peer.send(rig.msg("A", 1,
+                          "98=0\x01"
+                          "108=30\x01" +
+                              c.logon_extra));
     out.settled = rig.run_until([&] {
         if (c.close) return close_returned;
         auto const st = rig.state();
@@ -593,9 +598,10 @@ TEST(Od25, CloseDuringA789ReplaysReadWritesNoStateForAFailedReplay) {
     auto const o = run_od25_acceptor(replay_case(frames_rig, big, true));
     expect_close_cell(o);
     ASSERT_LE(o.ring_at_close, o.ring.size());
-    std::vector<fsm_state> const after_close(o.ring.begin() + static_cast<std::ptrdiff_t>(o.ring_at_close),
-                                             o.ring.end());
-    EXPECT_EQ(after_close, kCloseWrites) << "states written after close() began; ring=" << ring_text(o.ring);
+    std::vector<fsm_state> const after_close(
+        o.ring.begin() + static_cast<std::ptrdiff_t>(o.ring_at_close), o.ring.end());
+    EXPECT_EQ(after_close, kCloseWrites)
+        << "states written after close() began; ring=" << ring_text(o.ring);
 }
 
 // The 789 Logout branches (X==0, X>N): the Logout's store is held. After close() began,
@@ -614,9 +620,10 @@ void run_logout_branch_cell(std::string const& logon_789, std::string_view text)
     EXPECT_EQ(wire_count(o.wire, "5", "58", text), 0U)
         << "the 789 Logout was written after close() began";
     ASSERT_LE(o.ring_at_close, o.ring.size());
-    std::vector<fsm_state> const after_close(o.ring.begin() + static_cast<std::ptrdiff_t>(o.ring_at_close),
-                                             o.ring.end());
-    EXPECT_EQ(after_close, kCloseWrites) << "states written after close() began; ring=" << ring_text(o.ring);
+    std::vector<fsm_state> const after_close(
+        o.ring.begin() + static_cast<std::ptrdiff_t>(o.ring_at_close), o.ring.end());
+    EXPECT_EQ(after_close, kCloseWrites)
+        << "states written after close() began; ring=" << ring_text(o.ring);
 }
 
 TEST(Od25, CloseDuringTheInvalid789LogoutsStoreWritesNoLogoutAndNoState) {
@@ -678,7 +685,11 @@ TEST(Od25, EngineStopDuringA789ReplaysReadFiresNoGapFill) {
         return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
                rig.state() == fsm_state::LogonSent;
     })) << "the initiator's Logon";
-    rig.peer.send(rig.msg("A", 1, "98=0\x01" "108=30\x01" "141=Y\x01" "789=1\x01"));
+    rig.peer.send(rig.msg("A", 1,
+                          "98=0\x01"
+                          "108=30\x01"
+                          "141=Y\x01"
+                          "789=1\x01"));
     ASSERT_TRUE(rig.run_until([&] { return read_held; })) << "the replay's read";
     std::size_t const wire_at_hold = rig.peer.received.size();
 
@@ -698,7 +709,6 @@ TEST(Od25, EngineStopDuringA789ReplaysReadFiresNoGapFill) {
     EXPECT_EQ(std::count(ring.begin(), ring.end(), fsm_state::Active), 0)
         << "the session reached Active";
 }
-
 
 // ── 093 plan OD-26: the other suspension-then-effect windows in the Logon arms ─────
 //
@@ -855,11 +865,16 @@ void run_od26_site(Od26Case c, FrameMatch m, fsm_state arm_state) {
 
 std::string stale_logon(plain_rig::Rig& rig, std::string_view extra = {}) {
     return plain_rig::message(rig.begin_string, "A", 1, "TW", "ISLD", "20000101-00:00:00.000",
-                              std::string{"98=0\x01" "108=30\x01"} + std::string{extra});
+                              std::string{"98=0\x01"
+                                          "108=30\x01"} +
+                                  std::string{extra});
 }
 
 std::string logon_with(plain_rig::Rig& rig, std::string_view extra) {
-    return rig.msg("A", 1, std::string{"98=0\x01" "108=30\x01"} + std::string{extra});
+    return rig.msg("A", 1,
+                   std::string{"98=0\x01"
+                               "108=30\x01"} +
+                       std::string{extra});
 }
 
 // refuse_logon_with_logout_, from each arm: a production-posture session refuses a peer
@@ -870,7 +885,8 @@ TEST(Od26, CloseDuringTheAcceptorsPostureRefusalWritesNoLogout) {
                                    plain_rig::Rig&) { cfg.posture = session_posture::production; },
                    .peer_logon = [](plain_rig::Rig& rig) { return logon_with(rig, "464=Y\x01"); },
                    .hold_store = 1},
-                  {.type = "5", .tag = "58", .value = "TestMessageIndicator posture mismatch"}, fsm_state::NotConnected);
+                  {.type = "5", .tag = "58", .value = "TestMessageIndicator posture mismatch"},
+                  fsm_state::NotConnected);
 }
 
 TEST(Od26, CloseDuringTheInitiatorsPostureRefusalWritesNoLogout) {
@@ -879,7 +895,8 @@ TEST(Od26, CloseDuringTheInitiatorsPostureRefusalWritesNoLogout) {
                                    plain_rig::Rig&) { cfg.posture = session_posture::production; },
                    .peer_logon = [](plain_rig::Rig& rig) { return logon_with(rig, "464=Y\x01"); },
                    .hold_store = 2},
-                  {.type = "5", .tag = "58", .value = "TestMessageIndicator posture mismatch"}, fsm_state::LogonSent);
+                  {.type = "5", .tag = "58", .value = "TestMessageIndicator posture mismatch"},
+                  fsm_state::LogonSent);
 }
 
 // The acceptor's SendingTime(52) Reject: a stale SendingTime on the Logon.
@@ -949,7 +966,8 @@ TEST(Od26, CloseDuringTheAcceptors1137RejectWritesNoReject) {
                        [](plain_rig::Rig& rig) {
                            return plain_rig::message("FIXT.1.1", "A", 1, "TW", "ISLD",
                                                      rig.sending_time(),
-                                                     "98=0\x01" "108=30\x01");
+                                                     "98=0\x01"
+                                                     "108=30\x01");
                        },
                    .hold_store = 1},
                   {.type = "3", .tag = "371", .value = "1137"}, fsm_state::NotConnected);

@@ -225,7 +225,7 @@ struct SessionConfig {
     std::optional<std::chrono::milliseconds> sending_time_threshold;  // value owned by 005
     RejectPolicy reject_policy{};                                     // owned by 005
 
-    std::pmr::memory_resource* message_arena = nullptr;       // null → engine default
+    std::pmr::memory_resource* message_arena = nullptr;  // null → engine default
     // 093-inbound-frame-dispositions (data-model E-2, contract C-7 row 15): open()
     // allocates the read pump's carry from framer_carry_arena (null → new_delete), L plus
     // one read plus a container proxy's slack, and the per-session parse buffer B(L) from

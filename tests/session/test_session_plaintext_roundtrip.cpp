@@ -169,13 +169,13 @@ std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string co
 // Build a valid FIX Logon frame. EncryptMethod(98)=0 (plaintext-safe per FR-009).
 // `extra` is appended after HeartBtInt(108): whole fields, each SOH-terminated.
 std::vector<std::byte> make_plain_logon_frame(std::string_view begin_str, std::string_view sender,
-                                              std::string_view target,
-                                              std::string_view extra = {}, int seq = 1) {
+                                              std::string_view target, std::string_view extra = {},
+                                              int seq = 1) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
     std::string body;
-    body += field(35, "A");  // MsgType = Logon
+    body += field(35, "A");                  // MsgType = Logon
     body += field(34, std::to_string(seq));  // MsgSeqNum
     body += field(49, sender);
     body += field(52, utc_now_fix_timestamp());  // SendingTime (038 guard)
@@ -848,7 +848,8 @@ std::shared_ptr<const fixpp::dict::Dictionary> make_validation_dictionary_with_1
     // releases them in that order.
     // NOLINTBEGIN(cppcoreguidelines-owning-memory)
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
-    auto* raw_dict = new fixpp::dict::Dictionary{fixpp::dict::XmlLoader{}.load_from_string(xml, mr)};
+    auto* raw_dict =
+        new fixpp::dict::Dictionary{fixpp::dict::XmlLoader{}.load_from_string(xml, mr)};
     auto* raw_buf = buf.release();
     return std::shared_ptr<const fixpp::dict::Dictionary>{
         raw_dict, [mr, raw_buf](const fixpp::dict::Dictionary* p) {
@@ -1390,14 +1391,14 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseFromOnLogonStartsNoLiveness) {
 // frame reaches the NotConnected arm while close() is under way. The arm acts on it in
 // no way: no Reject, no admin frame to toAdmin, no state but close()'s Disconnected.
 TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrateActsOnNoCoalescedFrame) {
-    auto o = run_acceptor_case(
-        {.mode = sess::close_mode::graceful,
-         .arm_on = "",
-         .store_outbound_next = 1,
-         .close_from_hydrate = true,
-         .validate = true,
-         .trailing = invalid_then_garbled("PLAIN-INITIATOR", "PLAIN-ACCEPTOR"),
-         .flush_hold_until_garble = true});
+    auto o =
+        run_acceptor_case({.mode = sess::close_mode::graceful,
+                           .arm_on = "",
+                           .store_outbound_next = 1,
+                           .close_from_hydrate = true,
+                           .validate = true,
+                           .trailing = invalid_then_garbled("PLAIN-INITIATOR", "PLAIN-ACCEPTOR"),
+                           .flush_hold_until_garble = true});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1446,15 +1447,15 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFram
 // acts on it in no way: no Reject, no admin frame to toAdmin, no state but close()'s
 // Disconnected.
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetActsOnNoCoalescedFrame) {
-    auto o = run_initiator_case(
-        {.mode = sess::close_mode::graceful,
-         .arm_on = "",
-         .peer_logon_extra = "141=Y\x01",
-         .store_outbound_next = 1,
-         .close_from_reset = true,
-         .validate = true,
-         .trailing = invalid_then_garbled("PLAIN-ACCEPTOR", "PLAIN-INITIATOR"),
-         .flush_hold_until_garble = true});
+    auto o =
+        run_initiator_case({.mode = sess::close_mode::graceful,
+                            .arm_on = "",
+                            .peer_logon_extra = "141=Y\x01",
+                            .store_outbound_next = 1,
+                            .close_from_reset = true,
+                            .validate = true,
+                            .trailing = invalid_then_garbled("PLAIN-ACCEPTOR", "PLAIN-INITIATOR"),
+                            .flush_hold_until_garble = true});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1696,7 +1697,8 @@ void run_q25(sess::session_role role, bool teardown) {
 TEST(LogonCloseDuringSuspension, Q23_AcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q23(sess::session_role::acceptor);
 }
-TEST(LogonCloseDuringSuspension, Q23_InitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+TEST(LogonCloseDuringSuspension,
+     Q23_InitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
     run_q23(sess::session_role::initiator);
 }
 TEST(LogonCloseDuringSuspension, Q24_AcceptorTeardownResetLeavesOneOne) {
@@ -1723,8 +1725,8 @@ TEST(LogonCloseDuringSuspension, Q25_InitiatorDefaultBodyWithoutTeardownResetLea
 // the same call is the store's own reset() and next_seqnum(). The log tells them apart,
 // so this cell fails if forward mode stops forwarding.
 TEST(HookedStoreResetTo, ForwardModeForwardsToTheInnerStoreAndFiresItsHook) {
-    for (auto const mode :
-         {fixpp::test_support::reset_to_mode::forward, fixpp::test_support::reset_to_mode::default_body}) {
+    for (auto const mode : {fixpp::test_support::reset_to_mode::forward,
+                            fixpp::test_support::reset_to_mode::default_body}) {
         auto log = std::make_shared<StoreLog>();
         bool hook_fired = false;
         HookedStore::Hooks hooks;
@@ -1754,9 +1756,9 @@ TEST(HookedStoreResetTo, ForwardModeForwardsToTheInnerStoreAndFiresItsHook) {
         EXPECT_EQ(out, std::optional{kUnitOut}) << name;
         std::vector<std::string> ops;
         for (auto const& w : log->writes) ops.push_back(w.op);
-        std::vector<std::string> const want_ops =
-            forward ? std::vector<std::string>{"reset_to 2 1"}
-                    : std::vector<std::string>{"reset", "in+1"};
+        std::vector<std::string> const want_ops = forward
+                                                      ? std::vector<std::string>{"reset_to 2 1"}
+                                                      : std::vector<std::string>{"reset", "in+1"};
         EXPECT_EQ(ops, want_ops) << name << ": the store operations the call made";
     }
 }
@@ -1941,9 +1943,9 @@ TEST(LogonCloseDuringSuspension, Q27_TheWaitExpiresIsRecordedAndFileStoreStillEn
             drain_ready_q27(r.ioc);
             EXPECT_TRUE(has_wait_expired_event(s))
                 << "session_event_close_reset_wait_expired at the bound";
-            EXPECT_TRUE(r.run_both_until(
-                [&] { return run.close.wait_for(0s) == std::future_status::ready; }))
-                << "close() did not complete after the wait expired";
+            EXPECT_TRUE(r.run_both_until([&] {
+                return run.close.wait_for(0s) == std::future_status::ready;
+            })) << "close() did not complete after the wait expired";
         }
         q27_finish(r, run);
         if (run.close.valid() && run.close.wait_for(0s) == std::future_status::ready) {

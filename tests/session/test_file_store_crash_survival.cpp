@@ -490,11 +490,12 @@ TEST(FileStoreResetTo, Q29_Control_TheFaultAfterTheRenameFiresOnAResetThenAnAdva
     ASSERT_NE(store, nullptr);
     (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
     fixpp::session::arm_fail_counter_write_after_reset_commit();
-    auto const [reset_ok, advance_ok] = run_on(pool, [&]() -> asio::awaitable<std::pair<bool, bool>> {
-        auto rr = co_await (*store).reset();
-        auto ar = co_await store->next_seqnum(direction_t::inbound, true);
-        co_return std::pair{rr.has_value(), ar.has_value()};
-    });
+    auto const [reset_ok, advance_ok] =
+        run_on(pool, [&]() -> asio::awaitable<std::pair<bool, bool>> {
+            auto rr = co_await (*store).reset();
+            auto ar = co_await store->next_seqnum(direction_t::inbound, true);
+            co_return std::pair{rr.has_value(), ar.has_value()};
+        });
     fixpp::session::disarm_fail_counter_write_after_reset_commit();
     EXPECT_TRUE(reset_ok);
     EXPECT_FALSE(advance_ok) << "the first counter write after the reset's rename must fail";

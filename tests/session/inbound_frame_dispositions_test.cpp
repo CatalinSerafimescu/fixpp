@@ -59,7 +59,7 @@
 #include <vector>
 
 #include "plain_engine_rig.hpp"
-#include "session/parse_capacity.hpp"  // 093 E-2: N(L) and the overlay term
+#include "session/parse_capacity.hpp"         // 093 E-2: N(L) and the overlay term
 #include "session/session_engine_access.hpp"  // 093 E-13: the engine-stop flag (Q-9 stop)
 #include "support/fix44_dictionary.hpp"
 #include "support/frame_view_factory.hpp"
@@ -459,99 +459,124 @@ std::string with_trailer(std::string s, F f) {
 }
 
 TEST(InboundFrameDispositionsTc, TC002_2d_LeadingJunkBeforeAGoodFrame_DisregardedAndContinues) {
-    run_q1({.name = "TC002_2d",
-            .garbled = [](plain_rig::Rig const&) { return std::string{"GARBLED-LEADING-BYTES\x01"}; }, .numbered = false,
-            .kind = fixpp::core::error::wire_framing_resync, .framer_detects = true});
+    run_q1(
+        {.name = "TC002_2d",
+         .garbled = [](plain_rig::Rig const&) { return std::string{"GARBLED-LEADING-BYTES\x01"}; },
+         .numbered = false,
+         .kind = fixpp::core::error::wire_framing_resync,
+         .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC002_2m_BodyLengthWrong_DisregardedAndContinues) {
     run_q1({.name = "TC002_2m",
-            .garbled = [](plain_rig::Rig const& rig) {
-                // 9=<n> rewritten as 9=<n - 5>: `10=` is then not at the counted offset.
-                std::string s = hb3(rig);
-                auto const at = s.find(
-                                    "\x01"
-                                    "9=") +
-                                3;
-                auto const end = s.find('\x01', at);
-                s.replace(at, end - at, std::to_string(std::stoi(s.substr(at, end - at)) - 5));
-                return s;
-            },
-            .numbered = true, .kind = fixpp::core::error::wire_invalid_body_length, .framer_detects = true});
+            .garbled =
+                [](plain_rig::Rig const& rig) {
+                    // 9=<n> rewritten as 9=<n - 5>: `10=` is then not at the counted offset.
+                    std::string s = hb3(rig);
+                    auto const at = s.find(
+                                        "\x01"
+                                        "9=") +
+                                    3;
+                    auto const end = s.find('\x01', at);
+                    s.replace(at, end - at, std::to_string(std::stoi(s.substr(at, end - at)) - 5));
+                    return s;
+                },
+            .numbered = true,
+            .kind = fixpp::core::error::wire_invalid_body_length,
+            .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC002_2t_MsgTypeNotThird_DisregardedAndContinues) {
     run_q1({.name = "TC002_2t",
-            .garbled = [](plain_rig::Rig const& rig) {
-                return plain_rig::frame("FIX.4.2",
-                                        "49=TW\x01"
-                                        "35=0\x01"
-                                        "34=3\x01"
-                                        "52=" +
-                                            rig.sending_time() +
-                                            "\x01"
-                                            "56=ISLD\x01");
-            },
-            .numbered = true, .kind = fixpp::core::error::wire_header_out_of_order, .framer_detects = false});
+            .garbled =
+                [](plain_rig::Rig const& rig) {
+                    return plain_rig::frame("FIX.4.2",
+                                            "49=TW\x01"
+                                            "35=0\x01"
+                                            "34=3\x01"
+                                            "52=" +
+                                                rig.sending_time() +
+                                                "\x01"
+                                                "56=ISLD\x01");
+                },
+            .numbered = true,
+            .kind = fixpp::core::error::wire_header_out_of_order,
+            .framer_detects = false});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3b_CheckSumWrong_DisregardedAndContinues) {
     run_q1({.name = "TC003_3b",
-            .garbled = [](plain_rig::Rig const& rig) {
-                return with_trailer(hb3(rig), [](std::string const& d) {
-                    std::array<char, 4> wrong{};
-                    std::snprintf(wrong.data(), wrong.size(), "%03d", (std::stoi(d) + 1) % 256);
-                    return "10=" + std::string{wrong.data(), 3} + "\x01";
-                });
-            },
-            .numbered = true, .kind = fixpp::core::error::wire_checksum_mismatch, .framer_detects = true});
+            .garbled =
+                [](plain_rig::Rig const& rig) {
+                    return with_trailer(hb3(rig), [](std::string const& d) {
+                        std::array<char, 4> wrong{};
+                        std::snprintf(wrong.data(), wrong.size(), "%03d", (std::stoi(d) + 1) % 256);
+                        return "10=" + std::string{wrong.data(), 3} + "\x01";
+                    });
+                },
+            .numbered = true,
+            .kind = fixpp::core::error::wire_checksum_mismatch,
+            .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc,
      TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues) {
     // A BeginString value longer than the cap, with no SOH (contract C-1 W-2).
     run_q1({.name = "TC003_3c",
-            .garbled = [](plain_rig::Rig const&) { return std::string{"8=FIXGARBLEDBEGINSTRING"}; }, .numbered = false,
-            .kind = fixpp::core::error::wire_framing_resync, .framer_detects = true});
+            .garbled = [](plain_rig::Rig const&) { return std::string{"8=FIXGARBLEDBEGINSTRING"}; },
+            .numbered = false,
+            .kind = fixpp::core::error::wire_framing_resync,
+            .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotLast_DisregardedAndContinues) {
     // A field follows CheckSum and BodyLength counts it, so `10=` is not where the count
     // says: reported as a BodyLength failure (contract L-2).
     run_q1({.name = "TC003_3e_not_last",
-            .garbled = [](plain_rig::Rig const& rig) {
-                std::string const inner =
-                    "35=0\x01"
-                    "34=3\x01"
-                    "49=TW\x01"
-                    "52=" +
-                    rig.sending_time() +
-                    "\x01"
-                    "56=ISLD\x01"
-                    "10=000\x01"
-                    "58=TRAILING\x01";
-                return "8=FIX.4.2\x01"
-                       "9=" +
-                       std::to_string(inner.size()) + "\x01" + inner;
-            },
-            .numbered = true, .kind = fixpp::core::error::wire_invalid_body_length, .framer_detects = true});
+            .garbled =
+                [](plain_rig::Rig const& rig) {
+                    std::string const inner =
+                        "35=0\x01"
+                        "34=3\x01"
+                        "49=TW\x01"
+                        "52=" +
+                        rig.sending_time() +
+                        "\x01"
+                        "56=ISLD\x01"
+                        "10=000\x01"
+                        "58=TRAILING\x01";
+                    return "8=FIX.4.2\x01"
+                           "9=" +
+                           std::to_string(inner.size()) + "\x01" + inner;
+                },
+            .numbered = true,
+            .kind = fixpp::core::error::wire_invalid_body_length,
+            .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotThreeDigits_DisregardedAndContinues) {
     run_q1({.name = "TC003_3e_not_three_digits",
-            .garbled = [](plain_rig::Rig const& rig) {
-                return with_trailer(
-                    hb3(rig), [](std::string const& d) { return "10=" + d.substr(1) + "\x01"; });
-            },
-            .numbered = true, .kind = fixpp::core::error::wire_checksum_mismatch, .framer_detects = true});
+            .garbled =
+                [](plain_rig::Rig const& rig) {
+                    return with_trailer(hb3(rig), [](std::string const& d) {
+                        return "10=" + d.substr(1) + "\x01";
+                    });
+                },
+            .numbered = true,
+            .kind = fixpp::core::error::wire_checksum_mismatch,
+            .framer_detects = true});
 }
 
 TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotSohTerminated_DisregardedAndContinues) {
     run_q1({.name = "TC003_3e_not_soh_terminated",
-            .garbled = [](plain_rig::Rig const& rig) {
-                return with_trailer(hb3(rig), [](std::string const& d) { return "10=" + d + "X"; });
-            },
-            .numbered = true, .kind = fixpp::core::error::wire_checksum_mismatch, .framer_detects = true});
+            .garbled =
+                [](plain_rig::Rig const& rig) {
+                    return with_trailer(hb3(rig),
+                                        [](std::string const& d) { return "10=" + d + "X"; });
+                },
+            .numbered = true,
+            .kind = fixpp::core::error::wire_checksum_mismatch,
+            .framer_detects = true});
 }
 
 // ── Q-5 (T028): accounting across feeds, ordering, the log rate, the ring ────
@@ -620,7 +645,8 @@ TEST(InboundFrameDispositionsQ5, RegionSplitAcrossReadsCountsOnceAndTheContinuin
     ASSERT_TRUE(active && d1 && d2) << "setup";
     EXPECT_TRUE(processed) << "the good frame after the split region must be processed";
     EXPECT_EQ(st, fsm_state::Active);
-    expect_one_garble(o, records, {.kind = fixpp::core::error::wire_framing_resync, .bytes = first.size()},
+    expect_one_garble(o, records,
+                      {.kind = fixpp::core::error::wire_framing_resync, .bytes = first.size()},
                       "split region");
 }
 
@@ -925,7 +951,8 @@ void expect_step1_garble(DirectFixture& f, Session const& s, std::string const& 
                          std::string_view row) {
     auto const o = observe_garbles(s);
     expect_one_garble(o, garble_records(f.log),
-                      {.kind = fixpp::core::error::wire_header_out_of_order, .bytes = frame.size()}, row);
+                      {.kind = fixpp::core::error::wire_header_out_of_order, .bytes = frame.size()},
+                      row);
 }
 
 TEST(InboundFrameDispositionsQ8, NotConnected_MsgTypeNotThird_DisregardedAndTheLogonThenProcessed) {
@@ -992,7 +1019,8 @@ TEST(InboundFrameDispositionsQ8, LogoutSent_MsgTypeNotThird_CountedAndNotTakenAs
     (void)close_fut.get();
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
     expect_one_garble(o, garble_records(f.log),
-                      {.kind = fixpp::core::error::wire_header_out_of_order, .bytes = bad.size()}, "LogoutSent");
+                      {.kind = fixpp::core::error::wire_header_out_of_order, .bytes = bad.size()},
+                      "LogoutSent");
 }
 
 // Disconnected ignores every frame without a scan (C-2): a 35-not-third frame there is
@@ -1035,7 +1063,8 @@ void run_q9(session_role role, fsm_state expected, std::string_view row) {
 
     auto close_fut = asio::co_spawn(f.ioc, s.close(close_mode::graceful), asio::use_future);
     bool const flushing = fixpp::test_support::pump_until(
-        f.ioc, [&] { return log->flushes_begun == 1; }, std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 2,
+        f.ioc, [&] { return log->flushes_begun == 1; },
+        std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 2,
         fixpp::test_support::kPumpSlice, "Q9/flush");
     EXPECT_TRUE(flushing) << row << ": close(graceful) never reached its store flush";
     auto const bad = not_third("0", 1);
@@ -1098,7 +1127,8 @@ TEST(InboundFrameDispositionsQ9Stop, NotConnected_NonLogonAfterStopStep1_NoState
     EXPECT_TRUE(f.sent.empty()) << "the frame must draw nothing";
 }
 
-TEST(InboundFrameDispositionsQ9Stop, NotConnected_LogonAfterStopStep1_PeerMaxMessageSizeNotRecorded) {
+TEST(InboundFrameDispositionsQ9Stop,
+     NotConnected_LogonAfterStopStep1_PeerMaxMessageSizeNotRecorded) {
     DirectFixture f;
     Session s{f.engine, f.cfg(session_role::acceptor)};
     ASSERT_TRUE(f.open(s));
@@ -1266,7 +1296,8 @@ TEST(InboundFrameDispositionsQ8Pump, Disconnected_FramerGarbleIsCountedWhileTheP
 
     ASSERT_TRUE(connected && d1 && refused && d2) << "setup";
     EXPECT_FALSE(read_ended) << "a garble does not close the transport";
-    expect_one_garble(o, records, {.kind = fixpp::core::error::wire_framing_resync, .bytes = junk().size()},
+    expect_one_garble(o, records,
+                      {.kind = fixpp::core::error::wire_framing_resync, .bytes = junk().size()},
                       "Disconnected");
 }
 
@@ -1327,7 +1358,8 @@ TEST(InboundFrameDispositionsQ10, LongerThanTheCapInActive_IsAGarbleDisregardedA
         << "the value must exceed the default cap";
     EXPECT_EQ(st, fsm_state::Active) << "a garble does not end the session";
     EXPECT_TRUE(processed) << "the good frame after it is processed";
-    expect_one_garble(o, records, {.kind = fixpp::core::error::wire_framing_resync, .bytes = garbled.size()},
+    expect_one_garble(o, records,
+                      {.kind = fixpp::core::error::wire_framing_resync, .bytes = garbled.size()},
                       "BeginString longer than the cap");
 }
 

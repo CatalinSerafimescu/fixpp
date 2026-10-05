@@ -73,10 +73,10 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
-#include "inbound_limit.hpp"       // 093 E-2: L, the carry and the parse buffer
-#include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
+#include "inbound_limit.hpp"             // 093 E-2: L, the carry and the parse buffer
+#include "msgtype_classifier.hpp"        // 019 T006: is_admin_msgtype (session-internal)
 #include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
-#include "scan_frame_header.hpp"   // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
+#include "scan_frame_header.hpp"  // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
 // only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
 // session → wire is ALLOWED per [arch §5.3] / check_layers.py.
@@ -1967,11 +1967,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
             asio::steady_timer unit_done{co_await asio::this_coro::executor,
                                          asio::steady_timer::time_point::max()};
             reset_unit_wake_ = [&unit_done] { unit_done.cancel(); };
-            auto const bound = effective_clock_->steady_now() +
-                               std::chrono::milliseconds{cfg_.logon_timeout_ms};
-            auto const which = co_await (
-                unit_done.async_wait(asio::as_tuple(asio::use_awaitable)) ||
-                detail::await_deadline(*effective_clock_, bound));
+            auto const bound =
+                effective_clock_->steady_now() + std::chrono::milliseconds{cfg_.logon_timeout_ms};
+            auto const which =
+                co_await (unit_done.async_wait(asio::as_tuple(asio::use_awaitable)) ||
+                          detail::await_deadline(*effective_clock_, bound));
             reset_unit_wake_ = nullptr;
             if (which.index() == 1) {
                 emit_event(session_event_close_reset_wait_expired{});
@@ -2796,10 +2796,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return co_await close_on_late_parse_failure_();
                     }
                     if (v.outcome == validate_outcome::reject) {
-                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
-                                                                hdr.msg_type, v.reject.reason,
-                                                                v.reject.ref_tag_id, /*text=*/{},
-                                                                fsm_state::NotConnected);
+                        co_return co_await emit_session_reject_(
+                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
+                            v.reject.ref_tag_id, /*text=*/{}, fsm_state::NotConnected);
                     }
                 }
             }
@@ -2990,8 +2989,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
                             }
-                            auto emit_r = co_await store_then_emit(rj_seq, *rj_r,
-                                                                   fsm_state::NotConnected);
+                            auto emit_r =
+                                co_await store_then_emit(rj_seq, *rj_r, fsm_state::NotConnected);
                             (void)emit_r;  // I-07: store-side errors logged-then-proceed
                         }
                         // Fail-closed: Disconnected whether rj_r succeeded or not
@@ -4665,10 +4664,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return co_await close_on_late_parse_failure_();
                     }
                     if (v.outcome == validate_outcome::reject) {
-                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
-                                                                hdr.msg_type, v.reject.reason,
-                                                                v.reject.ref_tag_id, /*text=*/{},
-                                                                fsm_state::LogonSent);
+                        co_return co_await emit_session_reject_(
+                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
+                            v.reject.ref_tag_id, /*text=*/{}, fsm_state::LogonSent);
                     }
                 }
             }
@@ -5819,8 +5817,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 // [gate-b/r1-green: RC#A removes next_outbound_seq_ - 1U arithmetic;
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
-    seqnum_t stamped_seq, std::span<const std::byte> frame,
-    std::optional<fsm_state> arm) noexcept {
+    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm) noexcept {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.

@@ -228,8 +228,8 @@ public:
         fixpp::session::retrieve_visitor& visitor) noexcept override {
         return inner.retrieve(begin, end, dir, visitor);
     }
-    asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(direction_t dir,
-                                                                   bool increment) noexcept override {
+    asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
         return inner.next_seqnum(dir, increment);
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
@@ -261,8 +261,8 @@ asio::awaitable<Counters> read_counters(fixpp::session::MessageStore& store) {
 // Stores five frames outbound and advances the inbound counter to 4.
 asio::awaitable<void> advance(fixpp::session::MessageStore& store) {
     for (auto const& step : make_store_script(5, direction_t::outbound)) {
-        auto r = co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                      step.dir);
+        auto r =
+            co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
         EXPECT_TRUE(r.has_value()) << "setup store of seq " << step.seq;
     }
     for (int i = 0; i < 3; ++i) {
@@ -290,17 +290,17 @@ void run_q28(MakeStore make, const char* which) {
                 EXPECT_EQ(before.out, 6U) << which << " setup";
                 EXPECT_EQ(before.outbound_frames, 5U) << which << " setup";
                 auto r = co_await store->reset_to(in, out);
-                EXPECT_FALSE(r.has_value()) << which << ": reset_to(" << in << ", " << out
-                                            << ") must be refused";
+                EXPECT_FALSE(r.has_value())
+                    << which << ": reset_to(" << in << ", " << out << ") must be refused";
                 if (!r.has_value()) {
                     EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_argument)
                         << which << ": reset_to(" << in << ", " << out << ")";
                 }
                 auto const after = co_await read_counters(*store);
-                EXPECT_EQ(after.in, before.in) << which << ": reset_to(" << in << ", " << out
-                                               << ") moved NextNumIn";
-                EXPECT_EQ(after.out, before.out) << which << ": reset_to(" << in << ", " << out
-                                                 << ") moved NextNumOut";
+                EXPECT_EQ(after.in, before.in)
+                    << which << ": reset_to(" << in << ", " << out << ") moved NextNumIn";
+                EXPECT_EQ(after.out, before.out)
+                    << which << ": reset_to(" << in << ", " << out << ") moved NextNumOut";
                 EXPECT_EQ(after.outbound_frames, before.outbound_frames)
                     << which << ": reset_to(" << in << ", " << out << ") cleared frames";
             }
@@ -310,10 +310,10 @@ void run_q28(MakeStore make, const char* which) {
                 auto r = co_await store->reset_to(in, out);
                 EXPECT_TRUE(r.has_value()) << which << ": reset_to(" << in << ", " << out << ")";
                 auto const after = co_await read_counters(*store);
-                EXPECT_EQ(after.in, in) << which << ": NextNumIn after reset_to(" << in << ", "
-                                        << out << ")";
-                EXPECT_EQ(after.out, out) << which << ": NextNumOut after reset_to(" << in << ", "
-                                          << out << ")";
+                EXPECT_EQ(after.in, in)
+                    << which << ": NextNumIn after reset_to(" << in << ", " << out << ")";
+                EXPECT_EQ(after.out, out)
+                    << which << ": NextNumOut after reset_to(" << in << ", " << out << ")";
                 EXPECT_EQ(after.outbound_frames, 0U)
                     << which << ": frames after reset_to(" << in << ", " << out << ")";
             }

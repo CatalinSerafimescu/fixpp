@@ -1488,7 +1488,11 @@ private:
     //
     // The presence guard (cfg_.enable_next_expected_msg_seq_num && present_789)
     // remains at each call site so the knob-off / tag-absent no-op stays visible.
-    enum class logon_789_outcome : std::uint8_t { in_sync_continue, ended_disconnected, superseded };
+    enum class logon_789_outcome : std::uint8_t {
+        in_sync_continue,
+        ended_disconnected,
+        superseded
+    };
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<logon_789_outcome>>
     honor_peer_next_expected_(std::string_view raw_789, bool present_789,
                               fixpp::session::seqnum_t next_outbound_ref, fsm_state arm) noexcept;

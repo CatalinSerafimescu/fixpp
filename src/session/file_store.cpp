@@ -1664,8 +1664,7 @@ namespace {
 // counters the fresh log starts at as parameters. reset() passes (1, 1); reset_to passes
 // its targets. The rename is the single commit point for the cleared log and both
 // counters, so a crash or a fault at any step leaves the old log or the new one.
-asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& impl,
-                                                              seqnum_t next_in,
+asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& impl, seqnum_t next_in,
                                                               seqnum_t next_out) noexcept {
     // Capture the session executor for the leading pump-break post below (035: no
     // offload rebind hop remains — nested co_spawn resumes on this executor).
@@ -1936,7 +1935,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             impl.inbound_index.clear();
             impl.outbound_index.clear();
             impl.write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
-                                                         record_disk_size(kCounterPayloadSize));
+                                                       record_disk_size(kCounterPayloadSize));
             impl.next_inbound = next_in;
             impl.next_outbound = next_out;
             co_return fixpp::core::expected_t<void>{};  // durable success (C3)
@@ -1984,7 +1983,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     impl.inbound_index.clear();
     impl.outbound_index.clear();
     impl.write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
-                                                 record_disk_size(kCounterPayloadSize));
+                                               record_disk_size(kCounterPayloadSize));
     impl.next_inbound = next_in;
     impl.next_outbound = next_out;
 

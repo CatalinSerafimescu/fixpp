@@ -161,6 +161,7 @@
 #include <utility>
 #include <vector>
 
+#include "plain_engine_rig.hpp"
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -169,7 +170,6 @@
 #include "support/temp_dir.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
-#include "plain_engine_rig.hpp"
 
 using namespace std::chrono_literals;
 
@@ -1665,17 +1665,15 @@ void run_refresh_cell(RefreshCase const& rc, std::string_view row) {
     drain_ready(fix.ioc);
     EXPECT_EQ(fix.sent_of_type("1").size(), 1U)
         << row << ": a TestRequest must be sent at the interval counted from the class frame";
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << row << ": state at the class frame's interval";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << row << ": state at the class frame's interval";
 }
 
 // One too-high frame (NextNumIn 2, MsgSeqNum 5). Exactly one: a second non-PossDup,
 // non-Heartbeat too-high frame ends the session (fixpp#537).
 TEST(UnparseableFrameDisposition, Refresh_TooHigh_NoTestRequestAtLogonInterval) {
-    run_refresh_cell({.frame = make_raw_frame("D", 5, kOrderFields),
-                      .drawn = {"2"},
-                      .next_in_after = 2},
-                     "too-high");
+    run_refresh_cell(
+        {.frame = make_raw_frame("D", 5, kOrderFields), .drawn = {"2"}, .next_in_after = 2},
+        "too-high");
 }
 
 TEST(UnparseableFrameDisposition, Refresh_ResetModeSequenceReset_NoTestRequestAtLogonInterval) {
@@ -1710,11 +1708,11 @@ TEST(UnparseableFrameDisposition, Refresh_PossDupRejectNo122_NoTestRequestAtLogo
 
 // The PossDup Reject for an OrigSendingTime(122) that does not parse.
 TEST(UnparseableFrameDisposition, Refresh_PossDupRejectBad122_NoTestRequestAtLogonInterval) {
-    run_refresh_cell(
-        {.frame = make_raw_frame("D", 2, std::string{"43=Y\x01"} + "122=GARBAGE\x01" + kOrderFields),
-         .drawn = {"3"},
-         .next_in_after = 3},
-        "PossDup Reject (122 unparseable)");
+    run_refresh_cell({.frame = make_raw_frame(
+                          "D", 2, std::string{"43=Y\x01"} + "122=GARBAGE\x01" + kOrderFields),
+                      .drawn = {"3"},
+                      .next_in_after = 3},
+                     "PossDup Reject (122 unparseable)");
 }
 
 TEST(UnparseableFrameDisposition, Refresh_TooLowHeartbeat_NoTestRequestAtLogonInterval) {
@@ -1722,9 +1720,9 @@ TEST(UnparseableFrameDisposition, Refresh_TooLowHeartbeat_NoTestRequestAtLogonIn
 }
 
 TEST(UnparseableFrameDisposition, Refresh_TooLowPossDup_NoTestRequestAtLogonInterval) {
-    run_refresh_cell({.frame = make_raw_frame("D", 1, kPossDupFields + kOrderFields),
-                      .next_in_after = 2},
-                     "too-low PossDup");
+    run_refresh_cell(
+        {.frame = make_raw_frame("D", 1, kPossDupFields + kOrderFields), .next_in_after = 2},
+        "too-low PossDup");
 }
 
 // The knob-off path: validate_sequence_numbers = false delivers a too-high frame

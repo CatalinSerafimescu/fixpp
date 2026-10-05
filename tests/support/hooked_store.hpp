@@ -163,15 +163,15 @@ public:
             // the next read's leading post.
             return ready(fixpp::session::seqnum_min);
         }
-        if (!increment && dir == fixpp::session::direction_t::outbound &&
-            hooks_.on_outbound_read && hooks_.on_outbound_read()) {
+        if (!increment && dir == fixpp::session::direction_t::outbound && hooks_.on_outbound_read &&
+            hooks_.on_outbound_read()) {
             return held_read(dir);
         }
         if (!increment) return inner_->next_seqnum(dir, false);
         // The close a hook posts runs at the increment's leading post.
-        const bool hooked = fire(dir == fixpp::session::direction_t::inbound
-                                     ? hooks_.on_inbound_persist
-                                     : hooks_.on_outbound_persist);
+        const bool hooked =
+            fire(dir == fixpp::session::direction_t::inbound ? hooks_.on_inbound_persist
+                                                             : hooks_.on_outbound_persist);
         return logged_increment(dir, hooked && holds());
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
@@ -263,9 +263,8 @@ private:
         }
         co_return r;
     }
-    asio::awaitable<fixpp::core::expected_t<void>> logged_reset_to(fixpp::session::seqnum_t next_in,
-                                                                   fixpp::session::seqnum_t next_out,
-                                                                   bool hold) {
+    asio::awaitable<fixpp::core::expected_t<void>> logged_reset_to(
+        fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out, bool hold) {
         auto r = co_await inner_->reset_to(next_in, next_out);
         log_->record("reset_to " + std::to_string(next_in) + " " + std::to_string(next_out));
         if (hold) co_await hold_until_close_reset();
