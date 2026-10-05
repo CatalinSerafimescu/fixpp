@@ -4,8 +4,7 @@
 // N(L) every inbound parse runs under, derived from the session's inbound limit L
 // (093-inbound-frame-dispositions, data-model E-2, research R-3). Kept apart from
 // inbound_limit.hpp so a wire-level test can size a buffer the session's way without
-// the session's configuration headers. Private: not installed (no install() rule names
-// src/).
+// the session's configuration headers. Private: not installed.
 
 #include <algorithm>
 #include <cstddef>
@@ -47,8 +46,10 @@ inline constexpr std::size_t kAlignPad =
 // The room the buffer keeps for lazy reads inside a callback (contract C-3 I-5). Its
 // sizing condition (data-model E-2): for every frame the base delivers, B(L) minus that
 // frame's up-front reserve and its parse leaves at least the room the base's stack
-// parse arena leaves after the same parse. The base arena's whole size meets it at
-// every L, since the room after a parse here is at least this term.
+// parse arena leaves after the same parse. This term is set to that arena's size, so
+// the room after a parse here is at least the base arena's whole size and the condition
+// holds at every L. Re-derive the base size from kInboundParseArena in
+// src/session/session.cpp at the merge base (data-model E-2 names the arena).
 inline constexpr std::size_t kCallbackReadHeadroom = 16384;
 
 // The capacities every inbound parse runs under, from the session's inbound limit L.

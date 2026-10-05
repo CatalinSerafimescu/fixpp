@@ -755,11 +755,12 @@ TEST(InboundFrameDispositionsQ5, HeartBtIntZeroStillBoundsTheLogToOneRecordPerSe
 // The suppressed count's unit is the garbled region, the counter's unit (plan OD-21):
 // a record carries the regions counted since the previous record that no record named,
 // i.e. every region of each rate-suppressed summary and the triggering summary's own
-// regions after its first. So the sum over records of (1 + suppressed) equals
-// garbled_frame_count() when the last record is written. Here: a summary of three
-// regions is logged (2 unnamed); then, inside the interval, a region opened by one
-// feed (suppressed) and continued by the next (regions == 0: nothing added, nothing
-// written), and one more suppressed region; then a record at the interval.
+// regions after its first. So, when the logger drops no record, the sum over records
+// of (1 + suppressed) equals garbled_frame_count() when the last record is written.
+// Here: a summary of three regions is logged (2 unnamed); then, inside the interval, a
+// region opened by one feed (suppressed) and continued by the next (regions == 0:
+// nothing added, nothing written), and one more suppressed region; then a record at
+// the interval.
 TEST(InboundFrameDispositionsQ5, LogRecordsReconcileWithTheCounterRegionByRegion) {
     using namespace std::chrono_literals;
     PumpCell c;

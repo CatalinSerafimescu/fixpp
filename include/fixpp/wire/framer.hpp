@@ -194,9 +194,10 @@ public:
     // garble of kind wire_invalid_body_length. Recipe (research R-2): the larger of
     // the longest such run in the repo's FIX-TC fixtures and interop goldens (a `9=`
     // after every SOH spelling they use, with a seeded positive control first) and
-    // the decimal width of the largest L (262144) plus an allowance for a writer that
-    // zero-pads to the width of a 32-bit length; it must stay within three times that
-    // width. The value and the search are recorded in research R-2.
+    // the decimal width of the largest L (kMaxAdvertisedMaxMessageSize, in
+    // src/session/inbound_limit.hpp) plus an allowance for a writer that zero-pads to
+    // the width of a 32-bit length; it must stay within three times that width. The
+    // value and the search are recorded in research R-2.
     static constexpr std::size_t kBodyLengthDigitCap = 10;
 
     // The shape oracle writes `explicit Framer(Config c = {})`; a `= {}`

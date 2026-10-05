@@ -364,12 +364,13 @@ void Session::emit_event(SessionEvent ev) noexcept {
 // (its kind) and that summary's discarded bytes, and carries the number of regions
 // counted since the previous record that no record named: every region of each
 // rate-suppressed summary, plus the triggering summary's other regions (plan OD-21).
-// So the sum over records of (1 + that number) equals garbled_frame_count() when the
-// last record is written. HeartBtInt is the configured heartbeat_interval, or
-// kDefaultHeartBtInt when it is unset, as run_liveness_loop resolves it; a
-// HeartBtInt of 0 is legal, and the 1 s floor still bounds the rate. The logger's
-// overflow policy decides what a full queue does; its default, drop_newest, drops the
-// record without blocking the strand, and the count stays exact.
+// So, when the logger drops no record, the sum over records of (1 + that number)
+// equals garbled_frame_count() when the last record is written. HeartBtInt is the
+// configured heartbeat_interval, or kDefaultHeartBtInt when it is unset, as
+// run_liveness_loop resolves it; a HeartBtInt of 0 is legal, and the 1 s floor still
+// bounds the rate. The logger's overflow policy decides what a full queue does; its
+// default, drop_newest, drops the record without blocking the strand, and the count
+// stays exact.
 void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
     if (g.regions == 0U) {
         return;
@@ -2787,7 +2788,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // check_inbound — C-3 invariant). [041 T014; data-model E-4; SC-005]
             // Buffer: the gate parses over the session's parse buffer B(L), as dispatch
             // does, so it never under-parses relative to dispatch (093, data-model E-2).
-            // [simplify-triage FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     auto const v = validate_inbound_(frame, hdr);
@@ -3506,7 +3506,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // A frame the scan cannot read never reaches this gate.
             // No-reject-loop: 35=3 and 35=5 exempt (FR-004), for a well-formed frame
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
-            // Buffer: the session's parse buffer B(L), as dispatch (093). [FIX-1/FIX-2]
+            // Buffer: the session's parse buffer B(L), as dispatch (093).
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     auto const v = validate_inbound_(frame, hdr);
@@ -4655,7 +4655,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // superseded by 092 contract C-2 (fixpp#507; research R-13; the owner
             // ruling of 2026-09-27 revising row 4). claim-ok: the date names the ruling
             // C-2 refuses such a frame above (D-2).
-            // Buffer: the session's parse buffer B(L), as dispatch (093). [FIX-1/FIX-2]
+            // Buffer: the session's parse buffer B(L), as dispatch (093).
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {

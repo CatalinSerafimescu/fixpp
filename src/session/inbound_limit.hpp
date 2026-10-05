@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // src/session/inbound_limit.hpp — the session's one inbound limit L, and the carry
 // derived from it (093-inbound-frame-dispositions, data-model E-2, research R-3); the
-// parse buffer's sizing is in parse_capacity.hpp. Private: not installed (no install()
-// rule names src/).
+// parse buffer's sizing is in parse_capacity.hpp. Private: not installed.
 //
 // L is the largest inbound frame a session admits. It is computed from the
 // SessionConfig alone, so the accept loop can compute it before a Session exists,
