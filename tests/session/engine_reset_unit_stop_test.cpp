@@ -172,7 +172,6 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
         return s != nullptr && session_test_access::reset_unit_in_flight(*s);
     };
 
-    ASSERT_TRUE(rig.start(c));
     // Runs the engine, and the FileStore's executor while `run_fio` holds, until `ready`.
     auto run_until = [&](auto ready, auto run_fio) {
         auto const deadline = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
@@ -188,6 +187,34 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
         return true;
     };
     auto fio_until_unit = [&] { return p.store != StoreKind::file_held && !unit_in_flight(); };
+
+    // The FileStore row's competing store(), issued below.
+    bool competitor_began = false;
+    bool competitor_done = false;
+    // A setup step missed after start() created the engine: fails the cell, then stops the
+    // engine on this cell's stop path (the FileStore's executor runs once step 1 has), so
+    // ~Engine's stopped() precondition holds and the binary's later cells still run. A
+    // competing store() is let finish before its store is destroyed.
+    auto fail_and_stop = [&](std::string_view what) {
+        ADD_FAILURE() << what;
+        auto fut = asio::co_spawn(rig.ioc, rig.engine->stop(), asio::use_future);
+        if (!run_until(
+                [&] { return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready; },
+                [&] { return !file_backed || stop_step1_ran(); })) {
+            fixpp::test_support::cancel_and_drain_or_report(rig.ioc, *rig.clock,
+                                                            "Q26::fail_and_stop");
+            return;
+        }
+        fut.get();
+        if (!run_until([&] { return !competitor_began || competitor_done; }, [] { return true; })) {
+            ADD_FAILURE() << "the competing store()";
+        }
+    };
+
+    if (!rig.start(c)) {
+        fail_and_stop("the rig did not start");
+        return;
+    }
 
     // The contended row: the cell holds the lock until stop()'s step 1 has run.
     bool lock_held = false;
@@ -212,8 +239,10 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
                 lock_released = true;
             },
             asio::detached);
-        ASSERT_TRUE(run_until([&] { return lock_held; }, [] { return false; }))
-            << "the cell's lock";
+        if (!run_until([&] { return lock_held; }, [] { return false; })) {
+            fail_and_stop("the cell's lock");
+            return;
+        }
     }
 
     std::string const logon_141 =
@@ -221,25 +250,32 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
         "108=30\x01"
         "141=Y\x01";
     if (p.role == session_role::acceptor) {
-        ASSERT_TRUE(rig.connect_peer());
-    } else {
-        ASSERT_TRUE(run_until(
-            [&] {
-                return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
-                       rig.state() == fsm_state::LogonSent;
-            },
-            [] { return true; }))
-            << "the initiator's Logon";
+        if (!rig.connect_peer()) {
+            fail_and_stop("rig.connect_peer()");
+            return;
+        }
+    } else if (!run_until(
+                   [&] {
+                       return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
+                              rig.state() == fsm_state::LogonSent;
+                   },
+                   [] { return true; })) {
+        fail_and_stop("the initiator's Logon");
+        return;
     }
     // The FileStore row: a store() the cell issues on the session's strand takes the
     // writer lock and parks in its file I/O, which does not run until the flag is set.
-    bool competitor_began = false;
-    bool competitor_done = false;
     if (p.store == StoreKind::file_held) {
         auto* s = session();
-        ASSERT_NE(s, nullptr);
+        if (s == nullptr) {
+            fail_and_stop("session() is null");
+            return;
+        }
         auto* store = session_test_access::store(*s);
-        ASSERT_NE(store, nullptr);
+        if (store == nullptr) {
+            fail_and_stop("the session's store is null");
+            return;
+        }
         std::string const competing = rig.msg("0", 2);
         asio::co_spawn(
             s->executor().underlying(),
@@ -252,19 +288,35 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
             },
             asio::detached);
         rig.settle();
-        ASSERT_TRUE(competitor_began);
-        ASSERT_FALSE(competitor_done) << "the competing store() did not park in its file I/O";
+        if (!competitor_began) {
+            fail_and_stop("competitor_began");
+            return;
+        }
+        if (competitor_done) {
+            fail_and_stop("the competing store() did not park in its file I/O");
+            return;
+        }
     }
     rig.peer.send(rig.msg("A", 1, logon_141));
-    ASSERT_TRUE(run_until(unit_in_flight, fio_until_unit)) << "the unit's store operation";
-    ASSERT_NE(session(), nullptr);
+    if (!run_until(unit_in_flight, fio_until_unit)) {
+        fail_and_stop("the unit's store operation");
+        return;
+    }
+    if (session() == nullptr) {
+        fail_and_stop("session() is null");
+        return;
+    }
     int const to_admin_at_unit = app->to_admin;
 
     auto stop_fut = asio::co_spawn(rig.ioc, rig.engine->stop(), asio::use_future);
     bool const stopped = run_until(
         [&] { return stop_fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready; },
         [&] { return !file_backed || stop_step1_ran(); });
-    ASSERT_TRUE(stopped) << "Engine::stop() did not complete";
+    if (!stopped) {
+        fixpp::test_support::cancel_and_drain_or_report(rig.ioc, *rig.clock, "Q26::stop");
+        ADD_FAILURE() << "Engine::stop() did not complete";
+        return;
+    }
     stop_fut.get();
     if (p.store == StoreKind::file_held) {
         // The competing store() must finish before its store is destroyed.
@@ -502,6 +554,14 @@ Od25Outcome run_od25_acceptor(Od25Case const& c) {
     return out;
 }
 
+// A setup step missed after the rig created its engine: fails the cell, then stops the
+// engine on the rig's own stop path, so ~Engine's stopped() precondition holds and the
+// binary's later cells still run.
+void fail_and_stop(plain_rig::Rig& rig, std::string_view what) {
+    ADD_FAILURE() << what;
+    rig.stop();
+}
+
 std::string ring_text(std::vector<fsm_state> const& ring) {
     std::string t;
     for (auto const st : ring) t += std::to_string(static_cast<int>(st)) + " ";
@@ -680,23 +740,38 @@ TEST(Od25, EngineStopDuringA789ReplaysReadFiresNoGapFill) {
     factory->hooks.release_when = stop_step1_ran;
     cfg.store_factory = std::move(factory);
 
-    ASSERT_TRUE(rig.start(cfg));
-    ASSERT_TRUE(rig.run_until([&] {
-        return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
-               rig.state() == fsm_state::LogonSent;
-    })) << "the initiator's Logon";
+    // Each setup miss below goes through fail_and_stop, not a fatal ASSERT.
+    if (!rig.start(cfg)) {
+        fail_and_stop(rig, "the rig did not start");
+        return;
+    }
+    if (!rig.run_until([&] {
+            return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
+                   rig.state() == fsm_state::LogonSent;
+        })) {
+        fail_and_stop(rig, "the initiator's Logon");
+        return;
+    }
     rig.peer.send(rig.msg("A", 1,
                           "98=0\x01"
                           "108=30\x01"
                           "141=Y\x01"
                           "789=1\x01"));
-    ASSERT_TRUE(rig.run_until([&] { return read_held; })) << "the replay's read";
+    if (!rig.run_until([&] { return read_held; })) {
+        fail_and_stop(rig, "the replay's read");
+        return;
+    }
     std::size_t const wire_at_hold = rig.peer.received.size();
 
     auto stop_fut = asio::co_spawn(rig.ioc, rig.engine->stop(), asio::use_future);
     bool const stopped = rig.run_until(
         [&] { return stop_fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready; });
-    ASSERT_TRUE(stopped) << "Engine::stop() did not complete";
+    if (!stopped) {
+        fixpp::test_support::cancel_and_drain_or_report(rig.ioc, *rig.clock,
+                                                        "Od25::EngineStop stop");
+        ADD_FAILURE() << "Engine::stop() did not complete";
+        return;
+    }
     stop_fut.get();
     ASSERT_NE(sess, nullptr);
 
