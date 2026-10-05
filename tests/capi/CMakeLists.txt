@@ -634,4 +634,10 @@ target_include_directories(capi_inbound_frame_dispositions_test PRIVATE
 target_compile_definitions(capi_inbound_frame_dispositions_test PRIVATE
   "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_dispositions_test)
-set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 300)
+# TIMEOUT is explicit and sized as slowest lane x headroom: the live engine and its
+# real-time timers make the cost lane-dependent, so keep TIMEOUT at roughly 6x the
+# slowest lane. Re-derive by timing
+# `ctest --test-dir build/<preset> -R '^capi_inbound_frame_dispositions$'` on every
+# lane /speckit-verify runs and on MSVC debug and msvc-asan (re-measure on msvc-asan,
+# under the same -j the lane uses), and size from the slowest.
+set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 600)
