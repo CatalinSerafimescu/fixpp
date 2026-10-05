@@ -1483,7 +1483,7 @@ surfaces exist and are witnessed.
     - **MSVC debug:** the `093` label 23/23, the §3 cells, and Q-33's forwarding branch, proven by mutant (md5 recorded).
     - **msvc-asan (asan deps restored from CI's cache into a separate CONAN_HOME):** 19/23. Four binaries hang in Bitdefender ATC's thread-start hook before any fixpp frame runs, so they are CI-only until the host excludes the sandbox.
     - **C-7 witness:** 5/5 runs pass. Its fixed sleeps are carried to Gate B.
-    - **Timeout:** raise `capi_inbound_frame_dispositions` (3.5× margin on asan).
+    - **Timeout:** `capi_inbound_frame_dispositions` was raised from a 3.5× margin on asan to the ~6× rule in `cf938117`. The recipe is in its CMake comment.
     - **Python getter:** CI-only.
     - Full record in the evidence file's `## MSVC` section.
 
