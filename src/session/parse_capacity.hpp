@@ -48,8 +48,9 @@ inline constexpr std::size_t kAlignPad =
 // frame's up-front reserve and its parse leaves at least the room the base's stack
 // parse arena leaves after the same parse. This term is set to that arena's size, so
 // the room after a parse here is at least the base arena's whole size and the condition
-// holds at every L. Re-derive the base size from kInboundParseArena in
-// src/session/session.cpp at the merge base (data-model E-2 names the arena).
+// holds at every L. Re-derive the base size with
+// `git log -S kInboundParseArena -- src/session/session.cpp`: the newest commit it lists
+// removed the arena, and that commit's parent defines it (data-model E-2 names the arena).
 inline constexpr std::size_t kCallbackReadHeadroom = 16384;
 
 // The capacities every inbound parse runs under, from the session's inbound limit L.
