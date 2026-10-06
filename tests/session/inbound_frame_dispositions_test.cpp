@@ -510,7 +510,8 @@ TEST(InboundFrameDispositionsTc, TC003_3b_CheckSumWrong_DisregardedAndContinues)
                 [](plain_rig::Rig const& rig) {
                     return with_trailer(hb3(rig), [](std::string const& d) {
                         std::array<char, 4> wrong{};
-                        std::snprintf(wrong.data(), wrong.size(), "%03d", (std::stoi(d) + 1) % 256);
+                        std::snprintf(wrong.data(), wrong.size(), "%03u",
+                                      (static_cast<unsigned>(std::stoi(d)) + 1U) % 256U);
                         return "10=" + std::string{wrong.data(), 3} + "\x01";
                     });
                 },

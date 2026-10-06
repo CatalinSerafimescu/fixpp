@@ -1565,9 +1565,9 @@ TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
     std::string garbled = rig.heartbeat(2);
     auto const cs = garbled.rfind("10=");
     ASSERT_NE(cs, std::string::npos);
-    auto const sum = std::stoi(garbled.substr(cs + 3, 3));
+    auto const sum = static_cast<unsigned>(std::stoi(garbled.substr(cs + 3, 3)));
     std::array<char, 4> wrong{};
-    std::snprintf(wrong.data(), wrong.size(), "%03d", (sum + 1) % 256);
+    std::snprintf(wrong.data(), wrong.size(), "%03u", (sum + 1U) % 256U);
     garbled.replace(cs + 3, 3, wrong.data(), 3);
     EXPECT_TRUE(rig.deliver(garbled)) << "the peer's write of the garbled frame";
     EXPECT_TRUE(rig.run_until([&] {

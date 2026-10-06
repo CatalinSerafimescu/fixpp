@@ -312,9 +312,9 @@ TEST(CapiC7Witness, Row1_AWrongCheckSumIsDisregarded) {
     auto const at = f.rfind("10=");
     std::string garbled;
     if (at != std::string::npos) {
-        int const sum = std::stoi(f.substr(at + 3, 3));
+        auto const sum = static_cast<unsigned>(std::stoi(f.substr(at + 3, 3)));
         char wrong[4];
-        std::snprintf(wrong, sizeof(wrong), "%03d", (sum + 1) % 256);
+        std::snprintf(wrong, sizeof(wrong), "%03u", (sum + 1U) % 256U);
         garbled = f.replace(at + 3, 3, wrong, 3);
     }
     row1_cell(garbled, "ROW1C");
