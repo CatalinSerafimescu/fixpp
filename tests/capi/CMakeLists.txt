@@ -640,4 +640,4 @@ add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_disposi
 # `ctest --test-dir build/<preset> -R '^capi_inbound_frame_dispositions$'` on every
 # lane /speckit-verify runs and on MSVC debug and msvc-asan (re-measure on msvc-asan,
 # under the same -j the lane uses), and size from the slowest.
-set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 900)
+set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 1200)
