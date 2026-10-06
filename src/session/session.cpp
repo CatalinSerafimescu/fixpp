@@ -1776,11 +1776,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     if (state_ == lifecycle::never_opened || state_ == lifecycle::closed_drained) {
         co_return std::unexpected(error::session_already_closed);
     }
-    // already-closing (in-flight) → the SAME in-flight result, NO error, NO
-    // side effects: await the first call's shared slot, then mirror it. (The
-    // 2d-owned property the seam asserts; the scripted double drives the
-    // interleave deterministically — [2d §6.5]'s "Idempotency" bullet.)
+    // already-closing (in-flight) → the SAME in-flight result, NO error: await the
+    // first call's shared slot, then mirror it.
+    // OD-29 (093 — terminal close escalates a graceful one), narrowing [2d §4.7] and
+    // [2d §6.5]'s "Idempotency" bullets: the join has no side effects unless a
+    // terminal close arrives while a graceful one is in flight. Then it ends the
+    // graceful close's grace wait, or keeps its phase 1 from starting, so the
+    // transport closes now; both callers still get the in-flight result.
     if (state_ == lifecycle::closing) {
+        if (mode == close_mode::terminal) {
+            close_escalated_ = true;
+            if (close_grace_wake_) close_grace_wake_();
+        }
         auto shared = close_result_;
         while (!shared || !shared->has_value()) {
             co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
@@ -1839,15 +1846,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         // [feedback_asio_cospawn_total_cancellation_default]: we use the root
         // slot for the child; the run_logout_phase1 coroutine resets to
         // enable_total_cancellation internally.
-        if (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived) {
+        // OD-29: a terminal close that arrived during the flush hooks above has set
+        // close_escalated_, and phase 1 does not start.
+        if (!close_escalated_ &&
+            (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived)) {
             using namespace asio::experimental::awaitable_operators;
 
             auto ex = co_await asio::this_coro::executor;
             asio::steady_timer close_grace{ex};
             close_grace.expires_after(std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms});
 
-            auto phase1_or_timeout =
-                co_await (run_logout_phase1() || close_grace.async_wait(asio::use_awaitable));
+            // OD-29: an escalating terminal close cancels close_grace. The wait completes
+            // through as_tuple, so a cancel counts as the timer's completion and takes the
+            // force-close arm below; through use_awaitable it would throw, which `||`
+            // counts as a failure, and the join would keep waiting on phase 1.
+            close_grace_wake_ = [&close_grace] { close_grace.cancel(); };
+            auto phase1_or_timeout = co_await (
+                run_logout_phase1() || close_grace.async_wait(asio::as_tuple(asio::use_awaitable)));
+            close_grace_wake_ = nullptr;
             if (phase1_or_timeout.index() == 0) {
                 auto phase1_r = std::get<0>(std::move(phase1_or_timeout));
                 (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)

@@ -161,8 +161,15 @@ public:
 
     // Two-phase close ([2d §4.7] close() declaration frozen shape). Idempotent
     // THREE-STATE model (I-10): already-closing → SAME in-flight awaitable,
-    // no error, no side effects; never-opened / already-closed(drained) →
-    // error::session_already_closed; no side effects in any case. graceful
+    // no error; never-opened / already-closed(drained) →
+    // error::session_already_closed, with no side effects.
+    // OD-29 (093 — terminal close escalates a graceful one): the already-closing
+    // join has no side effects unless a terminal close arrives while a graceful
+    // one is in flight. Then the terminal close ends the graceful close's grace
+    // wait, or keeps its phase 1 (the Logout exchange) from starting, so the
+    // transport closes now; both callers get the in-flight result. A graceful
+    // close on a closing session, and close()'s wait for a reset unit, are
+    // unchanged. graceful
     // runs the engine-internal FileStore::flush_for_session_close() hook
     // once in phase 1 (after the last in-flight store(...) resumes, before
     // the Logout async_write); terminal skips phase 1 entirely (hook NOT
@@ -1242,6 +1249,13 @@ private:
     // The unit's completion signal: set by close() while it waits for an in-flight
     // unit, called by the unit when it clears reset_unit_in_flight_. Session strand only.
     std::function<void()> reset_unit_wake_;
+
+    // OD-29 (093 — terminal close escalates a graceful one). A close(terminal) made
+    // while a close(graceful) is in flight sets the latch, which close(graceful) reads
+    // before its phase 1 starts, and calls the wake, which is non-null only while phase
+    // 1 races its grace timer and ends that wait. Session strand only.
+    bool close_escalated_ = false;
+    std::function<void()> close_grace_wake_;
 
     // 093-inbound-frame-dispositions (data-model E-13; contract C-6) — the engine-stop
     // flag: Engine::stop()'s step 1 sets it on the session strand, through
