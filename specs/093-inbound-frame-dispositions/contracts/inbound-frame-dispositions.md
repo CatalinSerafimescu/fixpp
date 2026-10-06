@@ -528,13 +528,20 @@ delta carry the same BREAKING list.
   `fixpp_session_close` returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`. The error code is not carried,
   because `Session::open()` runs in the engine's role loops, which return on error, not on
   `fixpp_session_open`'s path (plan OD-27).
-- **L-19.** These C-7 clauses are witnessed through C++ only, not through the C API (Phase 8; the evidence file
-  has the clause-by-clause table). The rule "a C-ABI effect witnessed only through C++ is unwitnessed" applies to
-  them, so they are disclosed rather than claimed:
-  - row 1: a garble in LogoutSent. From C, a session is in LogoutSent only while `fixpp_session_close(graceful)`
-    blocks its caller, so a C cell must make that call from a helper thread and drive the peer meanwhile, as
-    `CapiC7Witness.Row3_AnOverLimitBodyLengthInLogoutSentEndsTheBlockingClose` does for an over-limit frame
-    (plan OD-29); the garble cell is not driven that way;
+- **L-19.** These C-7 clauses are witnessed through C++ only, not through the C API. Re-derive the list: run
+  `capi_inbound_frame_dispositions_test --gtest_list_tests --gtest_filter='CapiC7Witness.*:CapiInboundFrameDispositions*'`,
+  build the C-7 row × role × state matrix of the C cells it lists, and diff that matrix's complement against
+  this list. The rule "a C-ABI effect witnessed only through C++ is unwitnessed" applies to them, so they are
+  disclosed rather than claimed:
+  - row 1: a garble in LogoutSent; row 2: the count of a frame in LogoutSent whose third field is not MsgType(35)
+    (092's D-9 frames of that shape, disregarded and counted). From C, a session is in LogoutSent only while
+    `fixpp_session_close(graceful)` blocks its caller, so a C cell must make that call from a helper thread and
+    drive the peer meanwhile, as `CapiC7Witness.Row3_AnOverLimitBodyLengthInLogoutSentEndsTheBlockingClose` does
+    for an over-limit frame (plan OD-29); neither the garble cell nor the getter cell is driven that way. For the
+    count, a C cell must also poll the getter from a further thread while that call blocks: the close invalidates
+    the handle when it returns, after which `fixpp_session_garbled_frame_count` returns `FIXPP_ERR_INVALID_HANDLE`,
+    and the disregarded frame draws no reply the reader could synchronise on, since the LogoutSent arm answers no
+    inbound frame and the getter's value is not ordered with the rest of the session's state;
   - row 1: a garble in Disconnected (no C-observable effect beyond the counter);
   - row 6's liveness classes that are a single frame or sit behind a configuration the C ABI cannot set: one
     too-high frame, a Reset-mode SequenceReset, the validate Reject (validation cannot be enabled through C),

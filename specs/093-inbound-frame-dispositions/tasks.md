@@ -1604,7 +1604,8 @@ surfaces exist and are witnessed.
   unowned backlog rows of which 093 witnesses only some sub-cases (2d, 2m, 2t; 3b, 3c, 3e): do not flip
   them to `done`; name 093's witnesses in their notes, by gtest name: T026's `TC002_2d_*`,
   `TC002_2m_*`, `TC002_2t_*`, `TC003_3b_*`, `TC003_3c_*` and `TC003_3e_*` cells (names re-derived with
-  `grep -n "TEST.*TC00[23]_" tests/session/inbound_frame_dispositions_test.cpp`), and the pointer T026
+  `grep -nE "TC00[23]_[0-9][a-z]_[A-Z]" tests/session/inbound_frame_dispositions_test.cpp`, which matches
+  the name itself, so a cell whose `TEST(` head wraps onto a second line is still found), and the pointer T026
   adds to the session TC corpus (`tests/session/conformance/CMakeLists.txt`). The same names go in
   `spec/coverage-index.md`'s FIX-TC scenario 2 and 3 rows. Any row 093 does own flips to `done` with
   this PR as evidence. The matching `spec/coverage-index.md` entry is T106's §4.5.2 row, plus any row
@@ -1612,7 +1613,7 @@ surfaces exist and are witnessed.
   - **As landed:**
     - 093 owns no OFFICIAL row, so nothing flips to `done`. The ownership grep above re-derives that; its output goes in the verify record's `## Completeness`.
     - TC-002 and TC-003 stay `backlog`. Their last column names 093's witnesses by gtest name and the pointer in `tests/session/conformance/CMakeLists.txt`; the same names are in `spec/coverage-index.md`'s FIX-TC scenario 2 and 3 rows.
-    - The witness grep above misses `TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues`, whose `TEST(` head wraps. Use `grep -nE "TC00[23]_[0-9][a-z]_[A-Z]" tests/session/inbound_frame_dispositions_test.cpp`, which matches the name line.
+    - The witness grep is `grep -nE "TC00[23]_[0-9][a-z]_[A-Z]" tests/session/inbound_frame_dispositions_test.cpp`. `TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues`'s `TEST(` head wraps, so a grep that needs `TEST` and the name on one line misses it; this one matches the name line.
     - T106's §4.5.2 row is present and its names resolve; it now also names `FramerResync.C1_*`. The §4.3.6 row now names `InboundFrameDispositionsQ6.CoalescedAfterTheLogon_OverLBodyLengthInTheInitialBytesCloses` and `FramerResync.W1_ConsecutiveSplitReadsCompactTheCarryAndDeliverEveryFrame`. The `FramerResync.CarryOverflow*` cells witness C-1's carry-overflow row, which no row 093 changed covers, so they are not placed.
 - [ ] T125a **Gate scope, then open the PR.** T121, T122 and T125 add commits after T115–T117 ran, so
   re-run T115, T116 and T117 at the final branch head as the last action before the first push (a gate
