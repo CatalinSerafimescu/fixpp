@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // tests/capi/inbound_frame_dispositions_capi_support.hpp — 093-inbound-frame-dispositions
-// (contract C-7): a C-ABI initiator engine over the bundled FIX 4.4 dictionary, facing a
-// raw TCP acceptor peer that writes hand-built frames.
+// (contract C-7): a C-ABI engine over the bundled FIX 4.4 dictionary, an initiator or an
+// acceptor, facing a raw TCP peer that accepts its connection or connects to it, and
+// writes hand-built frames.
 //
 // Shared by inbound_frame_dispositions_capi_test.cpp (T090, T091) and
 // inbound_frame_dispositions_c7_witness_test.cpp (T102). It names no symbol 093 adds,

@@ -4,9 +4,10 @@
 // quickstart Q-37 (tasks.md T102): the C-ABI witnesses for contract C-7 rows 1 to 6,
 // driven through the C ABI.
 //
-// For each row's trigger, a C-ABI initiator engine faces a raw TCP acceptor peer
-// (inbound_frame_dispositions_capi_support.hpp), and the cell asserts afterwards,
-// through C:
+// For each row's trigger, a C-ABI engine faces a raw TCP peer
+// (inbound_frame_dispositions_capi_support.hpp): an initiator engine whose connection
+// the peer accepts, or an acceptor engine the peer connects to. The cell asserts
+// afterwards, through C:
 //   - fixpp_session_is_established;
 //   - the result of fixpp_session_send, and whether the toApp callback registered with
 //     fixpp_session_register_send_callback fired for it;
@@ -22,10 +23,10 @@
 //
 // Which observers discriminate depends on the trigger's state. fixpp_session_close
 // returns FIXPP_ERR_OK for any session that was established once, so for a trigger
-// in Active (rows 1, 2's frame, 3, 4, 6) it reads the same whether the session
-// carried on or ended; it discriminates the pre-Active triggers (row 2's Logon, row 5).
-// Row 2's frame in Active is processed or disregarded with the session up either way,
-// so the receive callback is its discriminator.
+// in Active it reads the same whether the session carried on or ended; it
+// discriminates only a trigger that comes before the session's first establishment.
+// A frame in Active that is processed or disregarded with the session up either way
+// is discriminated by the receive callback.
 
 #include <gtest/gtest.h>
 
@@ -78,6 +79,54 @@ void expect_kept_up(Observed const& o) {
     EXPECT_EQ(o.to_app, 1) << "the toApp callback for that send";
     EXPECT_TRUE(o.received) << "the receive callback for the row's message";
     EXPECT_EQ(o.close_rc, FIXPP_ERR_OK) << "fixpp_session_close";
+}
+
+// ── The acceptor rig ────────────────────────────────────────────────────────
+//
+// A C-ABI acceptor engine (as in Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline)
+// and a peer that connects to it. Every cell on it writes the session's first bytes
+// itself, so the first-frame read sees them.
+
+// An acceptor engine over the same configuration as the initiator rows.
+struct CAcceptor : CInitiator {
+    CAcceptor()
+        : CInitiator{0, kHeartBtIntSeconds, {}, record_receive, nullptr, FIXPP_ROLE_ACCEPTOR} {}
+};
+
+// Starts `a` and connects `peer` to its bound port.
+bool start_and_connect(CAcceptor& a, RawAcceptor& peer) {
+    if (!a.start()) return false;
+    std::uint16_t const port = a.bound_port();
+    return port != 0 && peer.connect(port);
+}
+
+// The peer's Logon to the acceptor, MsgSeqNum 1, with `fields` between the header and
+// the session-level fields.
+std::string peer_logon(std::string const& fields = {}) {
+    return frame44("35=A\x01" + peer_header(1) + fields +
+                   fix_fields({{98, "0"}, {108, std::to_string(kHeartBtIntSeconds)}}));
+}
+
+// A Logon whose third field is not MsgType(35), with `fields` between the header and
+// the session-level fields.
+std::string peer_logon_35_not_third(std::string const& fields = {}) {
+    return frame44(
+        fix_fields({{34, "1"}, {35, "A"}}) +
+        fix_fields({{49, kPeerCompId}, {52, utc_now_sending_time()}, {56, kEngineCompId}}) +
+        fields + fix_fields({{98, "0"}, {108, std::to_string(kHeartBtIntSeconds)}}));
+}
+
+// After the peer's first write: the acceptor's Logon reply reaches the peer and the
+// session establishes, then an order and a fence are processed.
+void expect_acceptor_established_then_kept_up(CAcceptor& a, RawAcceptor& peer,
+                                              std::string_view row_id) {
+    bool const answered = peer.read_logon();
+    bool const est = answered && a.wait_established();
+    bool const fenced = est && peer.write(order(2, row_id)) && peer.fence(3, "RA");
+    EXPECT_TRUE(answered) << "the acceptor answers with its Logon";
+    EXPECT_TRUE(est) << "the well-formed Logon establishes the session";
+    EXPECT_TRUE(fenced);
+    expect_kept_up(observe(a, peer, row_id));
 }
 
 // ── Row 1: a Framer-detected garbled frame in Active is disregarded ──────────
@@ -469,6 +518,103 @@ TEST(CapiC7Witness, Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline) {
     EXPECT_FALSE(o.established);
     EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
     EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
+}
+
+// ── Rows 1 to 3 on the acceptor's first frame ───────────────────────────────
+
+// Row 1: junk ahead of the peer's Logon, in the acceptor's first read.
+TEST(CapiC7Witness, Row1_AGarbleBeforeTheAcceptorsLogonIsDisregarded) {
+    RawAcceptor peer;
+    CAcceptor a;
+    ASSERT_TRUE(start_and_connect(a, peer)) << "setup";
+    ASSERT_TRUE(peer.write("GARBLE" + peer_logon()));
+    expect_acceptor_established_then_kept_up(a, peer, "ROW1A");
+}
+
+// Row 2: a Logon whose third field is not MsgType(35) and which carries a malformed
+// tag, then a well-formed Logon, in one write.
+TEST(CapiC7Witness, Row2_AnAcceptorDisregardsA35NotThirdLogon) {
+    RawAcceptor peer;
+    CAcceptor a;
+    ASSERT_TRUE(start_and_connect(a, peer)) << "setup";
+    ASSERT_TRUE(peer.write(peer_logon_35_not_third("9x9=1\x01") + peer_logon()));
+    expect_acceptor_established_then_kept_up(a, peer, "ROW2A");
+}
+
+// Row 2: the same with 091's malformed Length+Data count (RawDataLength(95) counting
+// past its RawData(96)) in place of the malformed tag.
+TEST(CapiC7Witness, Row2_AnAcceptorDisregardsA35NotThirdLogonWithAMalformedCount) {
+    RawAcceptor peer;
+    CAcceptor a;
+    ASSERT_TRUE(start_and_connect(a, peer)) << "setup";
+    ASSERT_TRUE(
+        peer.write(peer_logon_35_not_third(fix_fields({{95, "2"}, {96, "x"}})) + peer_logon()));
+    expect_acceptor_established_then_kept_up(a, peer, "ROW2AC");
+}
+
+// Row 2: a well-formed Logon whose third field is not MsgType(35), alone: nothing
+// establishes the session.
+TEST(CapiC7Witness, Row2_AnAcceptorsWellFormed35NotThirdLogonDoesNotEstablish) {
+    constexpr std::chrono::milliseconds kSettle{1000};  // well below the default T
+    RawAcceptor peer;
+    CAcceptor a;
+    ASSERT_TRUE(start_and_connect(a, peer)) << "setup";
+    ASSERT_TRUE(peer.write(peer_logon_35_not_third()));
+    EXPECT_FALSE(a.wait_established(kSettle)) << "the 35-not-third Logon established it";
+    Observed const o = observe(a, peer, "none");
+    EXPECT_FALSE(o.established);
+    EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(o.to_app, 0);
+    EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE) << "the session never established";
+}
+
+// Row 3: the acceptor's first frame announces a BodyLength(9) over the 64 KiB limit; the
+// peer writes only its header. kOverLimitBound sits below the acceptor's first-frame read
+// deadline, so a reader that waits for the body instead closes outside it.
+TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInTheAcceptorsFirstFrameEndsTheConnection) {
+    RawAcceptor peer;
+    CAcceptor a;
+    ASSERT_TRUE(start_and_connect(a, peer)) << "setup";
+    auto const t0 = std::chrono::steady_clock::now();
+    bool const closed = peer.write(
+                            "8=FIX.4.4\x01"
+                            "9=70000\x01"
+                            "35=A\x01"
+                            "34=1\x01") &&
+                        peer.wait_eof(t0 + kOverLimitBound);
+    EXPECT_TRUE(closed) << "the connection stayed open after an over-limit BodyLength";
+    // A connection refused at its first frame builds no session, so there is no drain to
+    // wait for: the handle is closed directly once the peer has gone.
+    EXPECT_FALSE(a.established());
+    int const before = a.rec.to_app.load();
+    EXPECT_EQ(a.send_order("SENT"), FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(a.rec.to_app.load() - before, 0);
+    peer.disconnect();
+    EXPECT_EQ(fixpp_session_close(a.session), FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
+}
+
+// ── Row 6: the two PossDup Reject classes ───────────────────────────────────
+//
+// In-sequence orders carrying PossDupFlag(43)=Y whose OrigSendingTime(122) is absent or
+// does not parse: each draws a session Reject and takes its MsgSeqNum. One cell per
+// class, so a class that does not refresh is not covered by the other's refreshes.
+std::string possdup_order(std::uint32_t seq, std::string const& orig_sending_time) {
+    return frame44("35=D\x01" +
+                   fix_fields({{34, std::to_string(seq)},
+                               {43, "Y"},
+                               {49, kPeerCompId},
+                               {52, utc_now_sending_time()},
+                               {56, kEngineCompId}}) +
+                   orig_sending_time + order_fields("DUPR"));
+}
+
+TEST(CapiC7Witness, Row6_PossDupRejectNo122TrafficKeepsTheSessionUp) {
+    row6_cell([](std::uint32_t seq) { return possdup_order(seq, {}); }, true, "ROW6N");
+}
+
+TEST(CapiC7Witness, Row6_PossDupRejectBad122TrafficKeepsTheSessionUp) {
+    row6_cell([](std::uint32_t seq) { return possdup_order(seq, fix_fields({{122, "GARBAGE"}})); },
+              true, "ROW6B");
 }
 
 }  // namespace
