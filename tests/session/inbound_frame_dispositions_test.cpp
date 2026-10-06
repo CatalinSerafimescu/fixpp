@@ -54,8 +54,10 @@
 #include <memory_resource>
 #include <new>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -2113,13 +2115,14 @@ TEST(InboundFrameDispositionsQ6, DuringTheGracefulClosesFlush_OverLClosesWithNoL
 
 // ── OD-29: the escalation's other clauses (plan OD-29; contract C-6's close() note) ──
 //
-// Each cell starts from an acceptor in Active and a close(graceful) the cell makes, whose
-// Logout the peer does not answer at first, so the close waits in phase 1 (LogoutSent).
-// Phase 1 ends at the peer's Logout reply, at the mock-clock logout timeout (which no
-// cell advances before its verdicts), or at the graceful close's grace timer, which runs
-// on real time for logout_disconnect_timeout_ms from the close(graceful) call. Every
-// bound below is a fraction of that timeout counted from that call, so a close that only
-// the grace timer brings lands outside it.
+// Each cell makes a close(graceful) on an acceptor, from Active unless the cell says
+// otherwise, whose Logout the peer does not answer at first, so the close waits in
+// phase 1 (LogoutSent), or is held in its store flush before phase 1 where the cell says
+// so. Phase 1 ends at the peer's Logout reply, at the mock-clock logout timeout (which no
+// cell's mock-clock advance reaches before its verdicts), or at the graceful close's
+// grace timer, which runs on real time for logout_disconnect_timeout_ms from the
+// close(graceful) call. Every bound below is a fraction of that timeout counted from
+// that call, so a close that only the grace timer brings lands outside it.
 constexpr std::uint32_t kOd29LogoutTimeoutMs = 4000;
 constexpr std::uint32_t kOd29Fraction = 4;
 
@@ -2390,6 +2393,210 @@ TEST(InboundFrameDispositionsOd29, AnEscalatedCloseStillWaitsForTheResetUnit) {
     EXPECT_EQ(resets_after, 1) << "one teardown reset, after the unit";
     EXPECT_TRUE(terminal->ok()) << "the terminal call's result";
     EXPECT_TRUE(graceful->ok()) << "the graceful call's result";
+}
+
+// The other terminal closes OD-29 names: the read pump's peer-EOF, read-error and
+// establishment-deadline closes, and a callback throw's close. Each must end the
+// graceful close at once rather than leave it to its grace timer.
+
+// The peer ends its side of the connection (a FIN, so the read pump sees EOF) once it has
+// read the Logout of the graceful close waiting in LogoutSent. The pump's terminal close
+// escalates the graceful one: its call returns ok, the session is Disconnected and closes
+// its end of the transport, within the bound. The peer only shuts down its sending side,
+// so its read stays open and its end observes the session's close.
+TEST(InboundFrameDispositionsOd29, APeerEofInLogoutSentEndsTheGracefulCloseAtOnce) {
+    Od29Cell c;
+    bool const logout_read =
+        c.reached && c.rig.run_until([&] { return c.logouts() == 1U; }, c.left(c.bound));
+    std::error_code ec;
+    if (logout_read) c.rig.peer.sock.shutdown(asio::ip::tcp::socket::shutdown_send, ec);
+    bool const eof_sent = logout_read && !ec;
+    bool const returned =
+        eof_sent && c.rig.run_until([&] { return c.graceful->done; }, c.left(c.bound));
+    auto const state_after = c.s ? c.s->state() : fsm_state::NotConnected;
+    bool const closed =
+        returned && c.rig.run_until([&] { return c.rig.peer.read_ended; }, c.left(c.bound));
+    c.finish();
+
+    ASSERT_TRUE(c.reached && eof_sent) << "setup";
+    EXPECT_TRUE(returned) << "the graceful close's call returns within the bound";
+    EXPECT_TRUE(c.graceful->ok()) << "the graceful close's result";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
+    EXPECT_TRUE(closed) << "the session closes its end of the transport within the bound";
+}
+
+// The same, with a read error in place of EOF: the peer resets the connection (SO_LINGER
+// of zero, then close, which sends an RST), so the pump's read fails with an error other
+// than EOF.
+TEST(InboundFrameDispositionsOd29, AReadErrorInLogoutSentEndsTheGracefulCloseAtOnce) {
+    Od29Cell c;
+    bool const logout_read =
+        c.reached && c.rig.run_until([&] { return c.logouts() == 1U; }, c.left(c.bound));
+    std::error_code ec;
+    if (logout_read) {
+        c.rig.peer.sock.set_option(asio::socket_base::linger(true, 0), ec);
+        if (!ec) c.rig.peer.sock.close(ec);
+    }
+    bool const reset_sent = logout_read && !ec;
+    bool const returned =
+        reset_sent && c.rig.run_until([&] { return c.graceful->done; }, c.left(c.bound));
+    auto const state_after = c.s ? c.s->state() : fsm_state::NotConnected;
+    c.finish();
+
+    ASSERT_TRUE(c.reached && reset_sent) << "setup";
+    EXPECT_TRUE(returned) << "the graceful close's call returns within the bound";
+    EXPECT_TRUE(c.graceful->ok()) << "the graceful close's result";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
+}
+
+// The establishment deadline during a graceful close from LogonReceived. The acceptor's
+// first Logon carries ResetSeqNumFlag(141)=Y and a HookedStore holds the reset unit's
+// store operation, so the session is in LogonReceived and the read pump has not started.
+// The cell's close(graceful) runs phase 1 from there and waits in LogoutSent. Once the
+// unit is released the Logon arm returns, superseded by the close, and the pump starts
+// before the session's first Active, so the deadline applies to it; the graceful close
+// still waits. The deadline and the logout timeout both run on the mock clock, which the
+// cell advances past the deadline and short of the logout timeout. The graceful call then
+// returns ok and the transport closes within the bound. The establishment-timeout event,
+// which only the pump's deadline expiry emits, marks that expiry as the terminal close.
+TEST(InboundFrameDispositionsOd29,
+     TheEstablishmentDeadlineEndsAGracefulCloseFromLogonReceivedAtOnce) {
+    constexpr std::uint32_t kEstablishmentTimeoutMs = kOd29LogoutTimeoutMs / kOd29Fraction;
+    static_assert(kEstablishmentTimeoutMs + 1U < kOd29LogoutTimeoutMs,
+                  "the mock-clock advance must stay short of the logout timeout");
+    auto const factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    auto const held = std::make_shared<bool>(false);
+    auto const release = std::make_shared<bool>(false);
+    factory->hooks.on_reset = [held] { *held = true; };
+    factory->hooks.release_when = [release] { return *release; };
+    auto const store_log = factory->log;
+    auto const step = std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 4;
+    std::chrono::milliseconds const bound{kOd29LogoutTimeoutMs / kOd29Fraction};
+
+    plain_rig::Rig rig;
+    auto cfg = rig.cfg(session_role::acceptor);
+    cfg.logout_disconnect_timeout_ms = kOd29LogoutTimeoutMs;
+    cfg.logon_timeout_ms = kEstablishmentTimeoutMs;
+    cfg.store_factory = factory;
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    if (up) {
+        rig.peer.send(rig.msg("A", 1,
+                              "98=0\x01"
+                              "108=30\x01"
+                              "141=Y\x01"));
+    }
+    bool const holding = up && rig.run_until([&] { return *held; }, step);
+    auto const s = holding ? rig.session() : nullptr;
+    auto const state_in_unit = s ? s->state() : fsm_state::NotConnected;
+    auto close_called = std::chrono::steady_clock::now();
+    std::shared_ptr<CloseCall> graceful;
+    bool logout_sent = false;
+    if (s) {
+        close_called = std::chrono::steady_clock::now();
+        graceful = spawn_close(s, close_mode::graceful);
+        logout_sent = rig.run_until([&] { return s->state() == fsm_state::LogoutSent; }, step);
+    }
+    if (logout_sent) {
+        *release = true;
+        rig.settle();
+    }
+    bool const waiting_before_deadline = logout_sent && !graceful->done &&
+                                         s->state() == fsm_state::LogoutSent &&
+                                         !rig.peer.read_ended;
+    if (logout_sent) rig.clock->advance(std::chrono::milliseconds{kEstablishmentTimeoutMs + 1U});
+    auto const left = [&] {
+        auto const l = close_called + bound - std::chrono::steady_clock::now();
+        return l > std::chrono::steady_clock::duration::zero()
+                   ? l
+                   : std::chrono::steady_clock::duration::zero();
+    };
+    bool const returned = logout_sent && rig.run_until([&] { return graceful->done; }, left());
+    auto const state_after = s ? s->state() : fsm_state::NotConnected;
+    bool const closed = returned && rig.run_until([&] { return rig.peer.read_ended; }, left());
+    bool expired = false;
+    if (s) {
+        for (auto const& ev : s->recent_events()) {
+            expired = expired || std::holds_alternative<session_event_establishment_timeout>(ev);
+        }
+    }
+    bool const hold_timed_out = store_log->hold_timed_out;
+    if (graceful && !graceful->done) {
+        rig.clock->advance(std::chrono::milliseconds{kOd29LogoutTimeoutMs + 1U});
+        (void)rig.run_until([&] { return graceful->done; });
+    }
+    rig.stop();
+
+    ASSERT_TRUE(holding && s && logout_sent) << "setup";
+    EXPECT_EQ(state_in_unit, fsm_state::LogonReceived) << "the unit runs in LogonReceived";
+    EXPECT_FALSE(hold_timed_out) << "the unit was released by the cell, not by its bound";
+    EXPECT_TRUE(waiting_before_deadline)
+        << "the graceful close still waits in LogoutSent before the deadline";
+    EXPECT_TRUE(returned) << "the graceful close's call returns within the bound";
+    EXPECT_TRUE(graceful->ok()) << "the graceful close's result";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
+    EXPECT_TRUE(closed) << "the transport closes within the bound";
+    EXPECT_TRUE(expired) << "the establishment deadline expired in the pump";
+}
+
+// A callback throw during the graceful close's store flush, before its phase 1. A
+// HookedStore holds close(graceful)'s flush with the session still in Active, and an
+// order arrives during the hold whose fromApp throws. The throw's terminal close must
+// keep phase 1 from starting: once the flush is released no Logout is sent, and the
+// graceful call returns ok, the transport closes and the session is Disconnected, within
+// the bound.
+TEST(InboundFrameDispositionsOd29, ACallbackThrowDuringTheGracefulClosesFlushEscalates) {
+    auto const app = std::make_shared<FromAppProbe>();
+    auto const factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    auto const release = std::make_shared<bool>(false);
+    factory->hooks.flush_until = [release] { return *release; };
+    auto const store_log = factory->log;
+    auto const hold_budget = std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 2;
+    std::chrono::milliseconds const bound{kOd29LogoutTimeoutMs / kOd29Fraction};
+
+    plain_rig::Rig rig{app};
+    auto cfg = rig.cfg(session_role::acceptor);
+    cfg.logout_disconnect_timeout_ms = kOd29LogoutTimeoutMs;
+    cfg.store_factory = factory;
+    bool const up = rig.start(std::move(cfg)) && rig.to_active();
+    auto const s = up ? rig.session() : nullptr;
+    auto const close_called = std::chrono::steady_clock::now();
+    auto const graceful = s ? spawn_close(s, close_mode::graceful) : nullptr;
+    bool const flushing =
+        graceful && rig.run_until([&] { return store_log->flushes_begun == 1; }, hold_budget);
+    auto const state_in_flush = rig.state();
+    if (flushing) {
+        app->on_app = [](auto const& /*mv*/) { throw std::runtime_error{"fromApp throws"}; };
+    }
+    bool const sent = flushing && rig.deliver(rig.msg("D", 2));
+    bool const threw = sent && rig.run_until([&] { return app->from_app == 1; }, hold_budget);
+    bool const returned_in_hold = graceful && graceful->done;
+    *release = true;
+    auto const left = [&] {
+        auto const l = close_called + bound - std::chrono::steady_clock::now();
+        return l > std::chrono::steady_clock::duration::zero()
+                   ? l
+                   : std::chrono::steady_clock::duration::zero();
+    };
+    bool const returned = threw && rig.run_until([&] { return graceful->done; }, left());
+    bool const closed = returned && rig.run_until([&] { return rig.peer.read_ended; }, left());
+    auto const state_after = rig.state();
+    std::size_t const logouts = plain_rig::frames_of_type(rig.peer.received, "5").size();
+    bool const hold_timed_out = store_log->flush_hold_timed_out;
+    if (graceful && !graceful->done) {
+        rig.clock->advance(std::chrono::milliseconds{kOd29LogoutTimeoutMs + 1U});
+        (void)rig.run_until([&] { return graceful->done; });
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up && s && flushing && sent && threw) << "setup";
+    EXPECT_EQ(state_in_flush, fsm_state::Active) << "the flush holds before phase 1";
+    EXPECT_FALSE(returned_in_hold) << "the graceful close returned while its flush was held";
+    EXPECT_FALSE(hold_timed_out) << "the flush was released by the cell, not by its bound";
+    EXPECT_EQ(logouts, 0U) << "phase 1 did not start: no Logout is sent";
+    EXPECT_TRUE(returned) << "the graceful close's call returns within the bound";
+    EXPECT_TRUE(graceful->ok()) << "the graceful close's result";
+    EXPECT_TRUE(closed) << "the transport closes within the bound";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
 }
 
 // The same close when the over-L BodyLength arrives in the acceptor's first read,
