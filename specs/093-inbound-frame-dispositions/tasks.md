@@ -1575,8 +1575,12 @@ surfaces exist and are witnessed.
   the PR, the closing issues, the owner rulings R-1…R-4, the C-ABI MINOR BREAKING list, #540's outcome
   (T008), #538's (T089), and the follow-ups (#534–#537, #541, T121's issues). `CLAUDE.md`'s "Last merged
   FEATURE" pointer changes only at merge.
+  - **Waiver rationale (open at T125a's push):** the `CLAUDE-history.md` entry names the PR number, which
+    exists only after the PR opens. It is done at PR open, before `/gate-b`, as 091 and 092 did.
 - [ ] T123 Release the MSVC sandbox lock taken in T006 (close-out row 18), after T113 and T120 have run
   their MSVC legs. Record the release.
+  - **Waiver rationale (open at T125a's push):** the MSVC lock release and the close-out cleanup are kept
+    until Gate B converges, because a Gate B fix may need the sandbox. They are done at close-out.
 - [ ] T124 Draft the PR description (it is opened in T125a, after the last commit):
   - the `[const §X.7]` BREAKING declaration (C-7 rows 1–6), matching the B&L delta, and why #523/#524 are
     not BREAKING (B-518-1's ruling). Before opening, compare the three carriers row by row: for each
