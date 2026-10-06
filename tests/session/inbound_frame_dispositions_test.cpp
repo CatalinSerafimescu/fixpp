@@ -1898,6 +1898,55 @@ TEST(InboundFrameDispositionsQ6, Disconnected_OverLBodyLengthAtAResyncCandidateC
     run_q6(Q6State::disconnected, OverL::body_length_at_candidate);
 }
 
+// The same close when the over-L BodyLength arrives in the acceptor's first read,
+// coalesced after the Logon in one write. The first-frame read returns at the Logon,
+// so the over-L header is surplus, which the engine hands to run_read_pump as its
+// initial bytes; the pump's drain of those bytes, before its first socket read, is
+// what refuses it. The read loop's refusal of the same bytes gives the same record,
+// so this cell's own coverage run must take the initial-bytes drain's feed-error
+// branch; when it does not, the write was split and the read loop refused the bytes.
+TEST(InboundFrameDispositionsQ6, CoalescedAfterTheLogon_OverLBodyLengthInTheInitialBytesCloses) {
+    LogCapture log;
+    auto app = std::make_shared<FromAppProbe>();
+    plain_rig::Rig rig{app};
+    auto cfg = rig.cfg(session_role::acceptor);
+    cfg.logger_override = log.logger;
+    cfg.initial_trace_context = known_trace();
+    cfg.advertised_max_message_size = kQ6Limit;
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    std::string const over_l = "8=" + rig.begin_string + "\x01" +
+                               "9=" + std::to_string(kQ6Limit + 1U) + "\x01" + "35=0\x01";
+    bool const sent = up && rig.deliver(rig.logon() + over_l);
+    bool const closed = sent && rig.run_until([&] { return rig.peer.read_ended; });
+    auto const s = rig.session();
+    auto const state_after = rig.state();
+    bool const is_open_after = s && s->is_open();
+    bool reached_active = false;
+    if (s) {
+        for (fsm_state const v : s->fsm_visit_history()) {
+            reached_active = reached_active || v == fsm_state::Active;
+        }
+    }
+    bool const logon_answered = !plain_rig::frames_of_type(rig.peer.received, "A").empty();
+    int const app_calls = app->from_app;
+    rig.stop();
+    auto const records = over_limit_records(log);
+
+    ASSERT_TRUE(up && sent && s) << "setup";
+    EXPECT_TRUE(reached_active && logon_answered)
+        << "the Logon ahead of the over-L bytes was framed and processed";
+    EXPECT_TRUE(closed) << "the transport closes";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
+    EXPECT_FALSE(is_open_after) << "a terminal close, not only a Disconnected state";
+    EXPECT_EQ(app_calls, 0) << "no fromApp";
+    ASSERT_EQ(records.size(), 1U) << "one over-limit record";
+    ASSERT_EQ(records[0].arg_count, 2U);
+    EXPECT_EQ(records[0].args[0].u64,
+              static_cast<std::uint64_t>(fixpp::core::error::wire_frame_too_large))
+        << "the record's kind";
+    EXPECT_EQ(records[0].args[1].u64, kQ6Limit) << "the record's L";
+}
+
 // The two scan-fault shapes 092 Rejects in Active, carried by a frame over L: the frame
 // is refused at framing, so no Reject is sent and no callback runs. These replace
 // unparseable_frame_disposition_test.cpp's MaxMessageSize_OversizedFaulty_* controls,
