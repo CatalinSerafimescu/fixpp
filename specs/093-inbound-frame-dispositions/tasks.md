@@ -1545,7 +1545,7 @@ surfaces exist and are witnessed.
 
 ### Verify and records (P9)
 
-- [ ] T120 Run `/speckit-verify` (mandatory after `/speckit-implement`, `[const §XVII.8]`). It writes
+- [X] T120 Run `/speckit-verify` (mandatory after `/speckit-implement`, `[const §XVII.8]`). It writes
   `.specify/decisions/093-inbound-frame-dispositions-verify.md`, citing the evidence file:
   - the full preset matrix and the MSVC leg (T113);
   - coverage on `linux-clang-coverage`, `.profraw` purged first: every changed line of `git diff
@@ -1561,7 +1561,15 @@ surfaces exist and are witnessed.
     in `unknown_fields_test.cpp`. TSan's `die_after_fork` is the open risk; this run must show them on both
     lanes.
 
-  - **T120 checkpoint (2026-10-05):** partly run. What is done, what is left, and how to resume are in the evidence file's "T120 `/speckit-verify`: IN PROGRESS" section.
+  - **As landed:**
+    - The verify record is `decisions/speckit/093-inbound-frame-dispositions-verify.md` (reached as
+      `.specify/decisions/` from this tree).
+    - Every Linux lane passed at the final head: a targeted run after the OD-29 change, and a full
+      `ctest` on `linux-clang-debug` after it.
+    - MSVC debug and msvc-asan each ran the `093` label 23/23.
+    - Coverage was dispositioned line by line. The 13 escalated coverage sites were closed by test-only
+      cells.
+    - The gcc-only `-Werror=format-truncation` in the test TUs was fixed.
 - [X] T121 File the follow-ups spec.md "Out of scope" marks "to file" (the admin and outbound parse
   arenas, contract L-14; a lazy `open()` failure being silent in the role loops), with the owner's
   approval, each labelled from `gh label list`, placed in the parent's `phases/phase-4/issue-batches.md`.
@@ -1581,7 +1589,7 @@ surfaces exist and are witnessed.
   their MSVC legs. Record the release.
   - **Waiver rationale (open at T125a's push):** the MSVC lock release and the close-out cleanup are kept
     until Gate B converges, because a Gate B fix may need the sandbox. They are done at close-out.
-- [ ] T124 Draft the PR description (it is opened in T125a, after the last commit):
+- [X] T124 Draft the PR description (it is opened in T125a, after the last commit):
   - the `[const §X.7]` BREAKING declaration (C-7 rows 1–6), matching the B&L delta, and why #523/#524 are
     not BREAKING (B-518-1's ruling). Before opening, compare the three carriers row by row: for each
     of C-7 rows 1–6, the body's BREAKING list, the B&L delta (`git diff origin/main --
@@ -1598,6 +1606,8 @@ surfaces exist and are witnessed.
     (add `|540` to the exclusion only on the terminate branch), which must print nothing. Positive
     control first: seed `Closes #538` into a scratch copy of the body and show the grep hits it. After
     opening (T125a), `closingIssuesReferences` is exactly the intended set.
+  - **As landed:** the body is drafted, the three-carrier table is in the evidence file, and the
+    closing-keyword grep passes with its positive control.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
