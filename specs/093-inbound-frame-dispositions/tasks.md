@@ -1597,7 +1597,7 @@ surfaces exist and are witnessed.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
-- [ ] T125 **Catalogue close-out.** Determine ownership by
+- [X] T125 **Catalogue close-out.** Determine ownership by
   `grep -nE "093-inbound-frame-dispositions|#51[456]\b|#52[34]\b|#540\b" spec/feature-catalogue.md`
   and by reading the TC-002 (2a–2t) and TC-003 (3a–3e) rows. If 093 owns no OFFICIAL row, record that
   disposition with the grep output in the verify record's `## Completeness`. TC-002 and TC-003 are
@@ -1609,6 +1609,11 @@ surfaces exist and are witnessed.
   `spec/coverage-index.md`'s FIX-TC scenario 2 and 3 rows. Any row 093 does own flips to `done` with
   this PR as evidence. The matching `spec/coverage-index.md` entry is T106's §4.5.2 row, plus any row
   the ownership grep adds.
+  - **As landed:**
+    - 093 owns no OFFICIAL row, so nothing flips to `done`. The ownership grep above re-derives that; its output goes in the verify record's `## Completeness`.
+    - TC-002 and TC-003 stay `backlog`. Their last column names 093's witnesses by gtest name and the pointer in `tests/session/conformance/CMakeLists.txt`; the same names are in `spec/coverage-index.md`'s FIX-TC scenario 2 and 3 rows.
+    - The witness grep above misses `TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues`, whose `TEST(` head wraps. Use `grep -nE "TC00[23]_[0-9][a-z]_[A-Z]" tests/session/inbound_frame_dispositions_test.cpp`, which matches the name line.
+    - T106's §4.5.2 row is present and its names resolve; it now also names `FramerResync.C1_*`. The §4.3.6 row now names `InboundFrameDispositionsQ6.CoalescedAfterTheLogon_OverLBodyLengthInTheInitialBytesCloses` and `FramerResync.W1_ConsecutiveSplitReadsCompactTheCarryAndDeliverEveryFrame`. The `FramerResync.CarryOverflow*` cells witness C-1's carry-overflow row, which no row 093 changed covers, so they are not placed.
 - [ ] T125a **Gate scope, then open the PR.** T121, T122 and T125 add commits after T115–T117 ran, so
   re-run T115, T116 and T117 at the final branch head as the last action before the first push (a gate
   result covers only the commits that existed when it ran). Commit the `tasks.md` ticks through T125
