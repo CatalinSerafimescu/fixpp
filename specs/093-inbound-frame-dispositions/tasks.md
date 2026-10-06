@@ -1579,12 +1579,18 @@ surfaces exist and are witnessed.
     - Also filed **#551**: the deferred `/simplify` items P-3, P-4 and P-5's second half, in batch B32 (`priority: low`).
     - Each issue is labelled from `gh label list`.
     - The owner's approval was taken from the blanket grant to run every phase autonomously (2026-10-03).
-- [ ] T122 Via `phase-implementer`, the `CLAUDE-history.md` entry (Article XIX), newest first: the feature,
+- [X] T122 Via `phase-implementer`, the `CLAUDE-history.md` entry (Article XIX), newest first: the feature,
   the PR, the closing issues, the owner rulings R-1…R-4, the C-ABI MINOR BREAKING list, #540's outcome
   (T008), #538's (T089), and the follow-ups (#534–#537, #541, T121's issues). `CLAUDE.md`'s "Last merged
   FEATURE" pointer changes only at merge.
   - **Waiver rationale (open at T125a's push):** the `CLAUDE-history.md` entry names the PR number, which
     exists only after the PR opens. It is done at PR open, before `/gate-b`, as 091 and 092 did.
+  - **As landed:** the entry is the newest in `CLAUDE-history.md`, in 092's as-opened form ("PR #554,
+    open", Gate B pending). It names the closing set (#514, #515, #516, #523, #524, and #540 on T008's
+    terminate branch), R-1…R-4, the owner rulings of 2026-10-06 (W-2; S8 and S11 waived; S12 priced; S7
+    fixed by OD-29; N6), the C-ABI 1.11 BREAKING list (C-7 rows 1–6), #538's T089 outcome (it stays
+    open), the follow-ups #534–#537, #541, #549, #550, #551 and #553, and the verify verdict. `CLAUDE.md`'s
+    "Last merged FEATURE" pointer is unchanged.
 - [ ] T123 Release the MSVC sandbox lock taken in T006 (close-out row 18), after T113 and T120 have run
   their MSVC legs. Record the release.
   - **Waiver rationale (open at T125a's push):** the MSVC lock release and the close-out cleanup are kept
@@ -1629,7 +1635,7 @@ surfaces exist and are witnessed.
     - TC-002 and TC-003 stay `backlog`. Their last column names 093's witnesses by gtest name and the pointer in `tests/session/conformance/CMakeLists.txt`; the same names are in `spec/coverage-index.md`'s FIX-TC scenario 2 and 3 rows.
     - The witness grep is `grep -nE "TC00[23]_[0-9][a-z]_[A-Z]" tests/session/inbound_frame_dispositions_test.cpp`. `TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues`'s `TEST(` head wraps, so a grep that needs `TEST` and the name on one line misses it; this one matches the name line.
     - T106's §4.5.2 row is present and its names resolve; it now also names `FramerResync.C1_*`. The §4.3.6 row now names `InboundFrameDispositionsQ6.CoalescedAfterTheLogon_OverLBodyLengthInTheInitialBytesCloses` and `FramerResync.W1_ConsecutiveSplitReadsCompactTheCarryAndDeliverEveryFrame`. The `FramerResync.CarryOverflow*` cells witness C-1's carry-overflow row, which no row 093 changed covers, so they are not placed.
-- [ ] T125a **Gate scope, then open the PR.** T121, T122 and T125 add commits after T115–T117 ran, so
+- [X] T125a **Gate scope, then open the PR.** T121, T122 and T125 add commits after T115–T117 ran, so
   re-run T115, T116 and T117 at the final branch head as the last action before the first push (a gate
   result covers only the commits that existed when it ran). Commit the `tasks.md` ticks through T125
   first, so the head the gates ran on is the head that is pushed. Then push and open the PR with T124's body, and
@@ -1637,7 +1643,16 @@ surfaces exist and are witnessed.
   into the parent repo, so it adds no library commit. **Recorded deviation:** this task deliberately
   sits between the two mandatory close-out tasks T125 and T126. T126 stays the FINAL task, so Gate B
   pre-flight 4d (which reads T126's `## Completeness`) is unaffected.
-- [ ] T126 **Feature-completeness audit (the FINAL task).** Assert against the final branch head:
+  - **As landed:**
+    - T115, T116 and T117 were re-run at `9e3d2a0b`, the head PR #554 was opened at. T115: the
+      comment-claim lint, 0 findings. T116: `--shift-audit` GATE PASSED, 0 GATED. T117: all 30
+      `ci-script-pins` `run:` steps pass, and the ODR census reports 0 divergences on
+      `linux-clang-release` and `linux-gcc-release`.
+    - T117's first run caught a missing KIND comment on the S13 cell's cleanup advance, fixed in
+      `9e3d2a0b`; the gates above ran after that fix.
+    - PR #554 was then opened. Its `closingIssuesReferences` is exactly #514, #515, #516, #523, #524 and
+      #540.
+- [X] T126 **Feature-completeness audit (the FINAL task).** Assert against the final branch head:
   - (i) every `tasks.md` row through T125 is `[X]` or carries an explicit waiver rationale (committed
     before T125a's push); T125a's and T126's own completion is evidenced in the verify record, and their
     ticks land with the next commit the PR takes;
@@ -1648,6 +1663,9 @@ surfaces exist and are witnessed.
   Record the verdict (100 % or fully waived) in
   `.specify/decisions/093-inbound-frame-dispositions-verify.md` `## Completeness`. `/gate-b` pre-flight
   4d hard-blocks without it.
+  - **As landed:** the verdict is in the verify record's `## Completeness`, subsection "Closure at the
+    final head `5803af8d`": 100 % with recorded waivers (S8 and S11 owner-waived, S12 priced). The
+    section's opening "NOT 100 %" verdict is the earlier audit at `992a891d`, which that subsection closes.
 
 ---
 
