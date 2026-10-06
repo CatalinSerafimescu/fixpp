@@ -761,4 +761,51 @@ TEST(FramerResync, Q10_ANonFixBeginStringIsFramedAtABoundaryButNotFoundAfterAGar
     EXPECT_EQ(after_garble.discarded, 3U + non_fix.size());
 }
 
+// ── W-1: compaction under consecutive split reads ───────────────────────────
+
+// A frame of exactly `len` bytes (a two-digit BodyLength) whose MsgSeqNum is `seq`,
+// so every frame of a stream is distinct and a reordered, lost or repeated delivery
+// shows in the comparison.
+[[nodiscard]] std::string numbered_frame_of_length(unsigned seq, std::size_t len) {
+    std::string seq_digits = std::to_string(seq);
+    seq_digits.insert(0, 6U - seq_digits.size(), '0');
+    std::string const fixed = std::string("35=0") + soh + "34=" + seq_digits + soh + "58=";
+    // "8=FIX.4.4" SOH, "9=" two digits SOH, and the seven trailer bytes.
+    std::size_t const body = len - 22U;
+    std::string f = make_frame(fixed + std::string(body - fixed.size() - 1U, 'x') + soh);
+    EXPECT_EQ(f.size(), len);
+    return f;
+}
+
+TEST(FramerResync, W1_ConsecutiveSplitReadsCompactTheCarryAndDeliverEveryFrame) {
+    // C-1 W-1 at the pump's shape: L at the session's floor, a carry of L + R, reads
+    // of R cut from back-to-back frames whose length does not divide R, each read
+    // drained with carry-only feeds. A read ends on a frame boundary, which empties
+    // the carry, only when the bytes received so far are a multiple of the frame
+    // length; until then the consumed prefix of earlier reads stays in the carry, and
+    // the read that would not fit beside it is where W-1 erases it. Without that
+    // erase the append overflows the carry and the feed fails wire_frame_too_large.
+    constexpr std::size_t kL = 4096;
+    constexpr std::size_t kFrameLen = 113;
+    static_assert(kReadSize % kFrameLen != 0U, "reads must end mid-frame");
+    // The first compaction comes within L / R + 2 split reads; feed many times that.
+    constexpr std::size_t kReads = 16U * ((kL / kReadSize) + 2U);
+
+    std::vector<std::string> sent;
+    std::string stream;
+    unsigned seq = 1;
+    while (stream.size() < kReads * kReadSize) {
+        sent.push_back(numbered_frame_of_length(seq++, kFrameLen));
+        stream += sent.back();
+    }
+
+    run_result const r = run(stream, reads_of(stream.size(), kReadSize), {.limit = kL});
+    expect_run_invariants(r, "reads of R");
+    EXPECT_EQ(r.failure, std::nullopt) << "a feed failed: the carry was not compacted";
+    EXPECT_EQ(r.regions, 0U);
+    EXPECT_EQ(r.frames.size(), sent.size());
+    EXPECT_TRUE(r.frames == sent) << "every frame, in order and byte for byte";
+    EXPECT_EQ(r.pending_after, 0U);
+}
+
 }  // namespace
