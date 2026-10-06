@@ -2850,6 +2850,39 @@ TEST(PersistentSeqnumHydrate, T014_W5_OutboundPersistFail_Fatal) {
            "fatal-when-persistent]";
 }
 
+// The inbound twin of T014_W5: the default reset_to body's inbound write fails.
+// FaultStore does not override reset_to, so MessageStore's default body runs: reset(),
+// then next_seqnum(inbound, true) for the inbound target 2 (the reset-ack Logon was
+// consumed), then next_seqnum(outbound, true) for the outbound target 2. The inbound
+// write is the first inbound write the session issues, so fail_on_nth_write=1 fails
+// exactly it. The body must stop there and return the error, which the unit takes as
+// fatal on a persistent store.
+TEST(PersistentSeqnumHydrate, T014_W5_InboundPersistFailInTheDefaultResetToBody_Fatal) {
+    auto factory = std::make_shared<FaultStoreFactory>(
+        /*seeded_inbound=*/1, /*seeded_outbound=*/1,
+        /*fail_on_nth_call=*/0, /*fail_on_nth_write=*/1,
+        /*fail_on_nth_outbound_write=*/0);
+    auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "precondition: initiator must be LogonSent after open()";
+
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(store->write_count, 0) << "precondition: no inbound write before the Logon-ack";
+    ASSERT_EQ(store->outbound_write_count, 0)
+        << "precondition: no outbound write before the Logon-ack";
+
+    fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
+
+    EXPECT_EQ(store->write_count, 1) << "the default body issued its inbound write, once";
+    EXPECT_EQ(store->outbound_write_count, 0)
+        << "the default body stops at the inbound write's error: the outbound target is 2, "
+           "so a body that went on would have issued the outbound write";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "a failed inbound write in the reset unit's reset_to on a persistent store is fatal";
+}
+
 TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
     // W6: no failure injection. After Active, assert INV-H1:
     //   durable_outbound == manager.next_outbound (equality at 2)
