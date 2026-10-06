@@ -24,7 +24,10 @@
 //     the cell issued holds, its file I/O parked until the flag is set. The acceptor arm
 //     reads the store before its unit, so a FileStore competitor issued before the Logon
 //     would hold that read instead.
-// Each runs with and without a teardown reset (reset_on_disconnect).
+// Each runs with and without a teardown reset (reset_on_disconnect). The initiator's two
+// FileStore rows also run with reset_on_logon, so its own Logon carries 141=Y and the
+// unit's next-out target is 2. Those rows only: a HookedStore's hook and hold fire at
+// its first reset(), which reset_on_logon issues before the Logon.
 //
 // Which rows test that no cancellation reaches the unit's store operation: only the
 // contended rows without a teardown reset. Elsewhere the store operation waits on no
@@ -34,8 +37,8 @@
 //
 // Asserted after stop() completes:
 //   - the durable counters meet contract C-6's table: the unit's targets (next-in 2,
-//     the Logon being consumed; next-out 1, the session sending no 141=Y) without a
-//     teardown reset, (1, 1) with one;
+//     the Logon being consumed; next-out 1 when the session sent no 141=Y, 2 when the
+//     initiator's own Logon carried it) without a teardown reset, (1, 1) with one;
 //   - per role, nothing the arm does after the unit happened: no admin frame reached
 //     toAdmin after the unit began, no session_event_sequence_numbers_reset is in the
 //     event ring, onLogon never fired and no Active is in the state ring.
@@ -107,6 +110,7 @@ struct Q26Param {
     StoreKind store;
     bool teardown;
     session_role role;
+    bool own_reset = false;  // reset_on_logon: the initiator's own Logon carries 141=Y
 };
 
 std::string param_name(::testing::TestParamInfo<Q26Param> const& info) {
@@ -117,7 +121,7 @@ std::string param_name(::testing::TestParamInfo<Q26Param> const& info) {
                               : p.store == StoreKind::contended    ? "ContendedLock"
                                                                    : "FileStoreWriterLockHeld";
     return std::string{p.role == session_role::acceptor ? "Acceptor" : "Initiator"} + "_" + store +
-           (p.teardown ? "_TeardownReset" : "_NoTeardownReset");
+           (p.own_reset ? "_OwnReset" : "") + (p.teardown ? "_TeardownReset" : "_NoTeardownReset");
 }
 
 class Q26 : public ::testing::TestWithParam<Q26Param> {};
@@ -145,6 +149,7 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
 
     auto c = rig.cfg(p.role);
     c.reset_on_disconnect = p.teardown;
+    c.reset_on_logon = p.own_reset;
     std::shared_ptr<StoreLog> log;
     bool hooked_op_began = false;
     FileStore::Config file_cfg;
@@ -372,8 +377,9 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
         EXPECT_FALSE(log->hold_timed_out)
             << "the unit's store operation was released by its bound, not by stop()'s step 1";
     }
+    seqnum_t const unit_out = p.own_reset ? seqnum_t{seqnum_min + 1} : seqnum_min;
     auto const want = p.teardown ? std::pair{seqnum_min, seqnum_min}
-                                 : std::pair{seqnum_t{seqnum_min + 1}, seqnum_min};
+                                 : std::pair{seqnum_t{seqnum_min + 1}, unit_out};
     EXPECT_EQ(durable, std::optional{want})
         << "durable (next-in, next-out); want the unit's targets without a teardown reset, "
            "(1, 1) with one";
@@ -390,6 +396,14 @@ std::vector<Q26Param> q26_params() {
             for (bool const teardown : {false, true}) {
                 out.push_back({.store = store, .teardown = teardown, .role = role});
             }
+        }
+    }
+    for (auto const store : {StoreKind::file, StoreKind::file_held}) {
+        for (bool const teardown : {false, true}) {
+            out.push_back({.store = store,
+                           .teardown = teardown,
+                           .role = session_role::initiator,
+                           .own_reset = true});
         }
     }
     return out;

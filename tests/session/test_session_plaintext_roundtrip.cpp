@@ -1859,6 +1859,12 @@ struct Q27Rig {
         fixpp::core::steady_time_point{}, ioc.get_executor());
     fixpp::core::EngineConfig engine;
     std::filesystem::path dir = fixpp::test_support::unique_temp_dir("q27");
+    // The session's role, and whether close() issues a teardown reset
+    // (reset_on_disconnect).
+    sess::session_role role = sess::session_role::acceptor;
+    bool teardown = true;
+    // MsgType(35) of every frame the session sent.
+    std::shared_ptr<std::vector<std::string>> sent = std::make_shared<std::vector<std::string>>();
 
     Q27Rig() {
         engine.clock = clock;
@@ -1883,14 +1889,22 @@ struct Q27Rig {
         c.sender_comp_id = "ISLD";
         c.target_comp_id = "TW";
         c.begin_string = "FIX.4.2";
-        c.role = sess::session_role::acceptor;
+        c.role = role;
         c.heartbeat_interval = std::chrono::seconds{30};
         c.security_profile = fixpp::test_support::make_minimal_security_profile();
         c.dictionary = fixpp::test_support::make_minimal_dictionary();
         c.executor_override = ioc.get_executor();
         c.reset_seqnum_policy_field = sess::reset_seqnum_policy::bilateral_lenient;
-        c.transport_send = [](std::span<const std::byte>) {};
-        c.reset_on_disconnect = true;
+        c.transport_send = [out = sent](std::span<const std::byte> frame) {
+            std::string_view const f{reinterpret_cast<char const*>(frame.data()), frame.size()};
+            auto const at = f.find(
+                "\x01"
+                "35=");
+            if (at == std::string_view::npos) return;
+            auto const end = f.find('\x01', at + 4);
+            out->emplace_back(f.substr(at + 4, end == std::string_view::npos ? 0 : end - at - 4));
+        };
+        c.reset_on_disconnect = teardown;
         c.logon_timeout_ms = kQ27Bound;
         c.store_factory = std::make_shared<sess::FileStoreFactory>(store_config());
         return c;
@@ -2037,6 +2051,122 @@ TEST(LogonCloseDuringSuspension, Q27_AClockWideSweepDuringTheWaitDoesNotEndIt) {
         }
         q27_finish(r, run);
     }
+}
+
+// ── Q-23 and Q-24 over a FileStore (contract C-6's outcome table, "every store") ──
+//
+// Q27Rig's FileStore holds the unit's reset_to, with its writer lock taken, while the
+// cell does not run the file-I/O executor; close(terminal) begins there. The clock never
+// moves, so close()'s bounded wait cannot expire:
+//   - Q-23, no teardown reset: close() issues no teardown reset, so it does not wait for
+//     the unit and returns while the unit is held; a restart reads the unit's targets,
+//     and a second session over the directory accepts the peer's next Logon at 34=2
+//     without 141=Y: Active, with no ResendRequest;
+//   - Q-24, a teardown reset: close() waits for the unit, then resets; a restart reads
+//     (1, 1). close() cannot return while the unit holds the writer lock with or without
+//     that wait, since its teardown reset queues on the lock, so the cell asserts the
+//     counters and not the wait.
+// The initiator's own Logon carries no 141=Y, so the unit's targets are (2, 1) in both
+// roles.
+namespace {
+
+// The frame that answers the session's Logon, or opens the acceptor's: MsgSeqNum
+// `seq`, without 141=Y.
+std::vector<std::byte> q2324_logon(int seq) {
+    return make_fix_frame("FIX.4.2",
+                          "35=A\x01"
+                          "34=" +
+                              std::to_string(seq) +
+                              "\x01"
+                              "49=TW\x01"
+                              "52=20240101-00:00:00.000\x01"
+                              "56=ISLD\x01"
+                              "98=0\x01"
+                              "108=30\x01");
+}
+
+void run_q2324_file_store(sess::session_role role, bool teardown) {
+    Q27Rig r;
+    r.role = role;
+    r.teardown = teardown;
+    {
+        sess::Session s{r.engine, r.cfg()};
+        auto open = asio::co_spawn(r.ioc, s.open(), asio::use_future);
+        ASSERT_TRUE(r.run_both_until([&] {
+            return open.wait_for(0s) == std::future_status::ready;
+        })) << "open()";
+        ASSERT_TRUE(open.get().has_value()) << "open()";
+        auto const logon = q27_logon_141();
+        auto feed = asio::co_spawn(r.ioc, s.on_inbound_frame(logon), asio::use_future);
+        drain_ready_q27(r.ioc);
+        bool const held = feed.wait_for(0s) != std::future_status::ready &&
+                          sess::session_test_access::reset_unit_in_flight(s);
+        auto close = asio::co_spawn(r.ioc, s.close(sess::close_mode::terminal), asio::use_future);
+        drain_ready_q27(r.ioc);
+        bool const close_returned_while_held = close.wait_for(0s) == std::future_status::ready &&
+                                               sess::session_test_access::reset_unit_in_flight(s);
+        bool const done = r.run_both_until([&] {
+            return close.wait_for(0s) == std::future_status::ready &&
+                   feed.wait_for(0s) == std::future_status::ready;
+        });
+        if (!done) {
+            // Let the unit and close() finish, so nothing outlives the rig.
+            r.clock->advance(std::chrono::milliseconds{kQ27Bound});
+            (void)r.run_both_until([&] {
+                return close.wait_for(0s) == std::future_status::ready &&
+                       feed.wait_for(0s) == std::future_status::ready;
+            });
+        }
+        ASSERT_TRUE(held) << "the unit's store operation was not held in the FileStore";
+        ASSERT_TRUE(done) << "close() or the Logon never completed";
+        EXPECT_TRUE(close.get().has_value()) << "close()";
+        EXPECT_FALSE(has_wait_expired_event(s)) << "the wait expired, though the clock never moved";
+        if (!teardown) {
+            EXPECT_TRUE(close_returned_while_held)
+                << "close() waited for the unit, though it issues no teardown reset";
+        }
+    }
+    auto const want =
+        teardown ? std::pair{sess::seqnum_min, sess::seqnum_min} : std::pair{kUnitIn, kUnitOut};
+    EXPECT_EQ(r.restart_counters(), want)
+        << "the counters a restart reads; want the unit's targets without a teardown reset, "
+           "(1, 1) with one";
+    if (teardown) return;
+
+    // The peer's next Logon at 34=2, without 141=Y, over the directory the first left.
+    r.sent->clear();
+    sess::Session s2{r.engine, r.cfg()};
+    auto open = asio::co_spawn(r.ioc, s2.open(), asio::use_future);
+    ASSERT_TRUE(r.run_both_until([&] { return open.wait_for(0s) == std::future_status::ready; }))
+        << "open()";
+    ASSERT_TRUE(open.get().has_value()) << "open()";
+    auto const next_logon = q2324_logon(2);
+    auto feed = asio::co_spawn(r.ioc, s2.on_inbound_frame(next_logon), asio::use_future);
+    EXPECT_TRUE(r.run_both_until([&] { return feed.wait_for(0s) == std::future_status::ready; }))
+        << "the next Logon";
+    EXPECT_EQ(s2.state(), sess::fsm_state::Active) << "the next Logon at 34=2 was not accepted";
+    EXPECT_EQ(std::ranges::count(*r.sent, std::string{"2"}), 0)
+        << "a ResendRequest answered the Logon at 34=2; frames sent: " << joined(*r.sent);
+    auto close = asio::co_spawn(r.ioc, s2.close(sess::close_mode::terminal), asio::use_future);
+    EXPECT_TRUE(r.run_both_until([&] { return close.wait_for(0s) == std::future_status::ready; }))
+        << "the second session's close()";
+}
+
+}  // namespace
+
+TEST(LogonCloseDuringSuspension,
+     Q23_FileStoreAcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+    run_q2324_file_store(sess::session_role::acceptor, /*teardown=*/false);
+}
+TEST(LogonCloseDuringSuspension,
+     Q23_FileStoreInitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+    run_q2324_file_store(sess::session_role::initiator, /*teardown=*/false);
+}
+TEST(LogonCloseDuringSuspension, Q24_FileStoreAcceptorTeardownResetLeavesOneOne) {
+    run_q2324_file_store(sess::session_role::acceptor, /*teardown=*/true);
+}
+TEST(LogonCloseDuringSuspension, Q24_FileStoreInitiatorTeardownResetLeavesOneOne) {
+    run_q2324_file_store(sess::session_role::initiator, /*teardown=*/true);
 }
 
 #if defined(__clang__) || defined(__GNUC__)
