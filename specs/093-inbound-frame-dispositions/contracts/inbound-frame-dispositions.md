@@ -543,6 +543,9 @@ delta carry the same BREAKING list.
     and the disregarded frame draws no reply the reader could synchronise on, since the LogoutSent arm answers no
     inbound frame and the getter's value is not ordered with the rest of the session's state;
   - row 1: a garble in Disconnected (no C-observable effect beyond the counter);
+  - row 2: "in both validation modes", its half with validation on (`validate_inbound_messages=true`). Validation
+    cannot be enabled through the C API, the same condition as row 6's validate Reject, so the C cells run with
+    validation off;
   - row 6's liveness classes that are a single frame or sit behind a configuration the C ABI cannot set: one
     too-high frame, a Reset-mode SequenceReset, the validate Reject (validation cannot be enabled through C),
     and the knob-off path;
