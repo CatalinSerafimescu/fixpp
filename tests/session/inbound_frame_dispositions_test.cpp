@@ -1709,7 +1709,10 @@ TEST(InboundFrameDispositionsQ14, ThroughTheEngineAShortCarryArenaRefusesTheConn
 // does not move and no SessionEvent is emitted (plan OD-24). Run in Active and in each
 // state the pump reads in before Active: NotConnected (an acceptor whose first frame
 // was disregarded), LogonSent (an initiator) and Disconnected with the transport open
-// (an acceptor whose first frame was refused). The record's format is spelled out here.
+// (an acceptor whose first frame was refused). Also in LogoutSent, entered by
+// close(graceful) from Active with the peer never answering the Logout: there the close
+// must come well before the graceful close's grace timer could end LogoutSent, and the
+// graceful close's own caller completes with it. The record's format is spelled out here.
 constexpr char kOverLimitRecordFormat[] =
     "inbound frame over the limit closed the session: kind={} limit={}";
 constexpr std::uint32_t kQ6Limit = 4096;
@@ -1764,7 +1767,7 @@ std::vector<fixpp::log::Record> over_limit_records(LogCapture& log) {
     return log.records_of(FIXPP_FORMAT_ID(kOverLimitRecordFormat));
 }
 
-enum class Q6State : std::uint8_t { active, not_connected, logon_sent, disconnected };
+enum class Q6State : std::uint8_t { active, not_connected, logon_sent, disconnected, logout_sent };
 
 std::string_view q6_state_name(Q6State s) {
     switch (s) {
@@ -1776,12 +1779,33 @@ std::string_view q6_state_name(Q6State s) {
             return "LogonSent";
         case Q6State::disconnected:
             return "Disconnected";
+        case Q6State::logout_sent:
+            return "LogoutSent";
     }
     return "?";
 }
 
-void run_q6(Q6State at, OverL kind) {
-    std::string const row = std::string{q6_state_name(at)} + ", " + std::string{over_l_name(kind)};
+// LogoutSent's logout_disconnect_timeout_ms: far above the pump budget, so neither the
+// real close_grace timer nor the mock-clock logout timeout (never advanced before the
+// over-L bytes) can end LogoutSent inside the cell.
+constexpr std::uint32_t kQ6LogoutTimeoutMs = 20000;
+
+// In LogoutSent, the close must come within this fraction of the logout timeout,
+// counted from the close(graceful) call, which arms the grace timer: a close that only
+// the grace timer brings lands at the full timeout, outside the bound.
+constexpr std::uint32_t kQ6PromptFraction = 4;
+
+// The caller of close(graceful) in LogoutSent: whether its close() returned, and what.
+struct GracefulCloseCaller {
+    bool done = false;
+    fixpp::core::expected_t<void> result;
+};
+
+void run_q6(Q6State at, OverL kind, std::uint32_t logout_timeout_ms = kQ6LogoutTimeoutMs) {
+    std::string const row = std::string{q6_state_name(at)} + ", " + std::string{over_l_name(kind)} +
+                            (at == Q6State::logout_sent
+                                 ? ", logout timeout " + std::to_string(logout_timeout_ms) + " ms"
+                                 : std::string{});
     LogCapture log;
     auto app = std::make_shared<FromAppProbe>();
     plain_rig::Rig rig{app};
@@ -1790,6 +1814,10 @@ void run_q6(Q6State at, OverL kind) {
     cfg.logger_override = log.logger;
     cfg.initial_trace_context = known_trace();
     cfg.advertised_max_message_size = kQ6Limit;
+    if (at == Q6State::logout_sent) cfg.logout_disconnect_timeout_ms = logout_timeout_ms;
+    std::chrono::milliseconds const prompt{logout_timeout_ms / kQ6PromptFraction};
+    auto const graceful = std::make_shared<GracefulCloseCaller>();
+    std::chrono::steady_clock::time_point close_called{};
     bool reached = rig.start(std::move(cfg));
     fsm_state want{};
     switch (at) {
@@ -1828,6 +1856,23 @@ void run_q6(Q6State at, OverL kind) {
                       rig.run_until([&] { return rig.state() == fsm_state::Disconnected; });
             want = fsm_state::Disconnected;
             break;
+        case Q6State::logout_sent:
+            // close(graceful) from Active sends its Logout; the peer never answers it.
+            reached = reached && rig.to_active();
+            if (auto const p = reached ? rig.session() : nullptr) {
+                close_called = std::chrono::steady_clock::now();
+                asio::co_spawn(
+                    p->executor().underlying(),
+                    [p, graceful]() -> asio::awaitable<void> {
+                        graceful->result = co_await p->close(close_mode::graceful);
+                        graceful->done = true;
+                    },
+                    asio::detached);
+                reached =
+                    rig.run_until([&] { return p->state() == fsm_state::LogoutSent; }, prompt);
+            }
+            want = fsm_state::LogoutSent;
+            break;
     }
     auto const s = rig.session();
     auto const state_before = rig.state();
@@ -1840,7 +1885,21 @@ void run_q6(Q6State at, OverL kind) {
 
     std::string const bytes = reached ? over_l_bytes(rig, kind, next_before) : std::string{};
     bool const sent = !bytes.empty() && rig.deliver(bytes);
-    bool const closed = sent && rig.run_until([&] { return rig.peer.read_ended; });
+    // In LogoutSent the close, and the graceful caller's completion, must come before
+    // close_called + prompt; elsewhere within the pump budget.
+    auto const until_prompt = [&] {
+        auto const left = close_called + prompt - std::chrono::steady_clock::now();
+        return left > std::chrono::steady_clock::duration::zero()
+                   ? left
+                   : std::chrono::steady_clock::duration::zero();
+    };
+    bool const closed =
+        sent && (at == Q6State::logout_sent
+                     ? rig.run_until([&] { return rig.peer.read_ended; }, until_prompt())
+                     : rig.run_until([&] { return rig.peer.read_ended; }));
+    bool const graceful_returned = closed && at == Q6State::logout_sent &&
+                                   rig.run_until([&] { return graceful->done; }, until_prompt());
+    bool const graceful_ok = graceful_returned && graceful->result.has_value();
     auto const state_after = rig.state();
     bool const is_open_after = s && s->is_open();
     std::uint32_t const next_after = s ? next_inbound(*s) : 0U;
@@ -1856,6 +1915,19 @@ void run_q6(Q6State at, OverL kind) {
         new_events_are_garbles.push_back(
             std::holds_alternative<session_event_garbled_frame>(s->recent_events()[i]));
     }
+    // Below the pump budget, the cell also waits for a close the grace timer brings, so
+    // a close past the bound shows here as closed-but-late rather than as no close.
+    bool const closed_by_the_timeout =
+        at == Q6State::logout_sent && sent &&
+        std::chrono::milliseconds{logout_timeout_ms} < fixpp::test_support::kPumpBudget &&
+        (closed || rig.run_until([&] { return rig.peer.read_ended; },
+                                 std::chrono::milliseconds{logout_timeout_ms} * 2));
+    // If the over-L bytes did not end LogoutSent, the mock-clock logout timeout does, so
+    // Engine::stop() does not wait on the graceful close. Read after every verdict above.
+    if (at == Q6State::logout_sent && s && !closed) {
+        rig.clock->advance(std::chrono::milliseconds{logout_timeout_ms + 1U});
+        (void)rig.run_until([&] { return s->state() == fsm_state::Disconnected; });
+    }
     rig.stop();
     auto const records = over_limit_records(log);
 
@@ -1864,6 +1936,15 @@ void run_q6(Q6State at, OverL kind) {
     // The ring holds kSessionEventRingCapacity events; below it, a new event is appended.
     ASSERT_LT(events_after, kSessionEventRingCapacity) << row << ": precondition";
     EXPECT_TRUE(closed) << row << ": the transport closes";
+    if (at == Q6State::logout_sent) {
+        EXPECT_TRUE(graceful_returned)
+            << row << ": the graceful close's caller completes within the same bound";
+        EXPECT_TRUE(graceful_ok) << row << ": the graceful close's caller gets ok";
+        if (std::chrono::milliseconds{logout_timeout_ms} < fixpp::test_support::kPumpBudget) {
+            EXPECT_TRUE(closed_by_the_timeout)
+                << row << ": the transport closes at the latest when the grace timer fires";
+        }
+    }
     EXPECT_EQ(state_after, fsm_state::Disconnected) << row;
     EXPECT_FALSE(is_open_after) << row << ": a terminal close, not only a Disconnected state";
     EXPECT_EQ(app_calls, 0) << row << ": no fromApp";
@@ -1924,6 +2005,25 @@ TEST(InboundFrameDispositionsQ6, Disconnected_FrameOfLPlusOneWithABadCheckSumClo
 }
 TEST(InboundFrameDispositionsQ6, Disconnected_OverLBodyLengthAtAResyncCandidateCloses) {
     run_q6(Q6State::disconnected, OverL::body_length_at_candidate);
+}
+TEST(InboundFrameDispositionsQ6, LogoutSent_FrameOfLPlusOneCloses) {
+    run_q6(Q6State::logout_sent, OverL::frame);
+}
+TEST(InboundFrameDispositionsQ6, LogoutSent_FrameOfLPlusOneWithABadCheckSumCloses) {
+    run_q6(Q6State::logout_sent, OverL::bad_checksum);
+}
+TEST(InboundFrameDispositionsQ6, LogoutSent_OverLBodyLengthAtAResyncCandidateCloses) {
+    run_q6(Q6State::logout_sent, OverL::body_length_at_candidate);
+}
+// At the default logout timeout the grace timer fires inside the pump budget, so a
+// wait on the pump budget alone would pass on a close the timer brings. The bound,
+// derived from the timeout, still rejects that close, which the cell reports as late.
+TEST(InboundFrameDispositionsQ6, LogoutSent_AtTheDefaultLogoutTimeout_FrameOfLPlusOneCloses) {
+    std::uint32_t const timeout_ms = SessionConfig{}.logout_disconnect_timeout_ms;
+    // Precondition: at or above the pump budget, the late-close check is skipped and
+    // this cell repeats the cells above.
+    ASSERT_LT(std::chrono::milliseconds{timeout_ms}, fixpp::test_support::kPumpBudget);
+    run_q6(Q6State::logout_sent, OverL::frame, timeout_ms);
 }
 
 // The same close when the over-L BodyLength arrives in the acceptor's first read,

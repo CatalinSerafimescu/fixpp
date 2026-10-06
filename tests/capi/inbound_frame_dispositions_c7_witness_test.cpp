@@ -30,6 +30,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -495,6 +496,46 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthBeforeActiveEndsTheConnection) {
     EXPECT_FALSE(o.established);
     EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
     EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
+}
+
+// In LogoutSent: fixpp_session_close sends the Logout and blocks its caller until the
+// close completes, so a helper thread makes the call and the peer never answers the
+// Logout. The C ABI cannot set the logout timeout, so the session runs the default,
+// spelled out here: a close that only the grace timer brings lands at it. The bound is
+// a quarter of it, counted from the call. The cell then waits past the bound as well,
+// so a late close reads as late rather than as none.
+constexpr std::chrono::milliseconds kDefaultLogoutTimeout{2000};
+
+TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInLogoutSentEndsTheBlockingClose) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), kHeartBtIntSeconds};
+    ASSERT_TRUE(establish(c, peer, kHeartBtIntSeconds)) << "setup";
+    auto const bound = kDefaultLogoutTimeout / 4;
+    std::atomic<bool> returned{false};
+    fixpp_error_t close_rc = FIXPP_ERR_OK;
+    auto const t0 = std::chrono::steady_clock::now();
+    std::thread closer{[&] {
+        close_rc = fixpp_session_close(c.session);
+        returned.store(true, std::memory_order_release);
+    }};
+    bool const logout =
+        peer.read_until([](std::string const& f) { return RawAcceptor::has_field(f, "35=5"); },
+                        bound)
+            .has_value();
+    bool const closed = logout && peer.write(over_limit_header()) && peer.wait_eof(t0 + bound);
+    while (!returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < t0 + bound) {
+        std::this_thread::sleep_for(2ms);
+    }
+    bool const returned_in_bound = returned.load(std::memory_order_acquire);
+    bool const closed_at_all = closed || (logout && peer.wait_eof(t0 + 2 * kDefaultLogoutTimeout));
+    closer.join();
+    EXPECT_TRUE(logout) << "the engine's Logout";
+    EXPECT_TRUE(closed) << "the connection ends within a quarter of the logout timeout";
+    EXPECT_TRUE(returned_in_bound)
+        << "fixpp_session_close returns within a quarter of the logout timeout";
+    EXPECT_TRUE(closed_at_all) << "the connection ends at the latest at the logout timeout";
+    EXPECT_EQ(close_rc, FIXPP_ERR_OK) << "established once";
 }
 
 // ── Row 5: an acceptor whose Logon was refused is closed at the deadline ────
