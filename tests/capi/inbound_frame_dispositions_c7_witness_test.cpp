@@ -634,6 +634,35 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInTheAcceptorsFirstFrameEndsTheCon
     EXPECT_EQ(fixpp_session_close(a.session), FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
 }
 
+// Row 3 in Disconnected: the rig of Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline,
+// whose refused Logon leaves the session in Disconnected with its transport open, until
+// the establishment deadline T closes it. C cannot see the refusal land, so the peer
+// waits a settle, during which the connection must stay open, then writes the header of
+// a frame over the limit in a write of its own. Both windows count from before the
+// connect, so from no later than the deadline's arming, and together they end before T:
+// the deadline close cannot satisfy the cell.
+TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthInDisconnectedEndsTheConnection) {
+    constexpr std::chrono::milliseconds kSettle = kDefaultLogonTimeout / 5;
+    constexpr std::chrono::milliseconds kBound = kDefaultLogonTimeout / 5;
+    static_assert(kSettle + kBound < kDefaultLogonTimeout,
+                  "the bound must end before the deadline that would otherwise close it");
+    RawAcceptor peer;
+    CAcceptor a;
+    auto const t0 = std::chrono::steady_clock::now();
+    ASSERT_TRUE(start_and_connect(a, peer)) << "setup";
+    ASSERT_TRUE(peer.write(frame44("35=A\x01" + peer_header(1) + fix_fields({{98, "0"}}))));
+    bool const closed_early = peer.wait_eof(t0 + kSettle);
+    bool const closed =
+        !closed_early && peer.write(over_limit_header()) && peer.wait_eof(t0 + kSettle + kBound);
+    EXPECT_FALSE(closed_early) << "the connection closed before the over-limit header";
+    EXPECT_TRUE(closed) << "the connection stayed open after an over-limit BodyLength";
+    Observed const o = observe(a, peer, "none");
+    EXPECT_FALSE(o.established);
+    EXPECT_EQ(o.send_rc, FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(o.to_app, 0);
+    EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE) << "the session never established";
+}
+
 // ── Row 6: the two PossDup Reject classes ───────────────────────────────────
 //
 // In-sequence orders carrying PossDupFlag(43)=Y whose OrigSendingTime(122) is absent or
