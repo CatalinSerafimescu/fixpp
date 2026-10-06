@@ -530,8 +530,9 @@ delta carry the same BREAKING list.
   `fixpp_session_open`'s path (plan OD-27).
 - **L-19.** These C-7 clauses are witnessed through C++ only, not through the C API. Re-derive the list: run
   `capi_inbound_frame_dispositions_test --gtest_list_tests --gtest_filter='CapiC7Witness.*:CapiInboundFrameDispositions*'`,
-  build the C-7 row × role × state matrix of the C cells it lists, and diff that matrix's complement against
-  this list. The rule "a C-ABI effect witnessed only through C++ is unwitnessed" applies to them, so they are
+  build the C-7 row × role × state × configuration matrix of the C cells it lists, where configuration covers
+  the session knobs the C API cannot set, such as `validate_inbound_messages`, so every C cell sits at each such
+  knob's default, and diff that matrix's complement against this list. The rule "a C-ABI effect witnessed only through C++ is unwitnessed" applies to them, so they are
   disclosed rather than claimed:
   - row 1: a garble in LogoutSent; row 2: the count of a frame in LogoutSent whose third field is not MsgType(35)
     (092's D-9 frames of that shape, disregarded and counted). From C, a session is in LogoutSent only while
