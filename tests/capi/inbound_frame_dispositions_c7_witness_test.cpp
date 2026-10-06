@@ -591,7 +591,7 @@ TEST(CapiC7Witness, Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline) {
     EXPECT_EQ(o.close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
 }
 
-// ── Rows 1 to 3 on the acceptor's first frame ───────────────────────────────
+// ── Rows 1 to 3 on the acceptor's first frame, and row 3 in Disconnected ────
 
 // Row 1: junk ahead of the peer's Logon, in the acceptor's first read.
 TEST(CapiC7Witness, Row1_AGarbleBeforeTheAcceptorsLogonIsDisregarded) {
@@ -717,7 +717,7 @@ TEST(CapiC7Witness, Row6_PossDupRejectBad122TrafficKeepsTheSessionUp) {
               true, "ROW6B");
 }
 
-// ── Rows 1, 3 and 5 on an acceptor in NotConnected ──────────────────────────
+// ── Rows 1, 2, 3 and 5 on an acceptor in NotConnected ───────────────────────
 //
 // The peer's first frame is a Logon whose third field is not MsgType(35). Its CompIDs
 // match, so the acceptor builds the session and delivers the frame, which the session
@@ -825,7 +825,7 @@ TEST(CapiC7Witness, Row2_AnAcceptorInNotConnectedDisregardsA35NotThirdLogon) {
     expect_acceptor_established_then_kept_up(a, peer, "ROW2N");
 }
 
-// ── Rows 1 to 4 and 6 on an acceptor in Active ──────────────────────────────
+// ── Rows 1 to 4 and 6 on an acceptor in Active, and row 3 in LogoutSent ─────
 
 // Row 1: junk before a frame start (TC 2d), then an order.
 TEST(CapiC7Witness, Row1_AGarbledFrameInAnAcceptorsActiveIsDisregarded) {
