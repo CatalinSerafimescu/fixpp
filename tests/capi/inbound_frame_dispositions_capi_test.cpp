@@ -8,7 +8,8 @@
 // (inbound_frame_dispositions_capi_support.hpp). The cells:
 //   - Q-30: fixpp_session_config_set_logon_timeout_ms refuses a null handle and zero;
 //     fixpp_session_garbled_frame_count refuses a null handle and a null `out`, writes
-//     0 before the session exists, and reads the count after a garble (Q-1's C arm);
+//     0 before the session exists, and reads the count after a garble (Q-1's C arm)
+//     and after a frame whose third field is not MsgType(35);
 //   - the getter's "thread-safe" token: another thread reads the count while the
 //     session counts garbles on its strand. TSan is what fails it on a race, so it
 //     carries weight on linux-clang-tsan;
@@ -148,6 +149,25 @@ TEST(CapiInboundFrameDispositionsQ1, TheCountReadsOneAfterAGarble) {
     auto const s = lookup(c);
     ASSERT_NE(s, nullptr);
     EXPECT_EQ(s->garbled_frame_count(), 1U) << "through C++";
+    EXPECT_TRUE(c.established()) << "the session carried on";
+}
+
+// After a Heartbeat whose third field is not MsgType(35), in Active. The disregarded frame
+// takes no MsgSeqNum, so the fence carries the number it carried.
+TEST(CapiInboundFrameDispositionsQ1, TheCountReadsOneAfterA35NotThirdFrameInActive) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), 30};
+    ASSERT_TRUE(establish(c, peer, 30)) << "setup";
+
+    std::string const not_third =
+        frame44(fix_fields({{34, "2"}, {35, "0"}}) +
+                fix_fields({{49, kPeerCompId}, {52, utc_now_sending_time()}, {56, kEngineCompId}}));
+    ASSERT_TRUE(peer.write(not_third));
+    ASSERT_TRUE(peer.fence(2, "Q1N")) << "the session answers the TestRequest after the frame";
+
+    std::uint64_t after = 0;
+    EXPECT_EQ(fixpp_session_garbled_frame_count(c.session, &after), FIXPP_ERR_OK);
+    EXPECT_EQ(after, 1U) << "through C";
     EXPECT_TRUE(c.established()) << "the session carried on";
 }
 
