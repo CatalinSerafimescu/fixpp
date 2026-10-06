@@ -808,4 +808,126 @@ TEST(FramerResync, W1_ConsecutiveSplitReadsCompactTheCarryAndDeliverEveryFrame) 
     EXPECT_EQ(r.pending_after, 0U);
 }
 
+// ── C-1 garble kinds at a frame boundary ────────────────────────────────────
+
+// `shape` at a frame boundary is one garbled region of `kind`, discarded whole, and
+// the frame after it is delivered. Each shape holds no "8=FIX" after its first byte,
+// so the search after the garble finds only that frame.
+void expect_one_garble_then_the_next_frame(std::string const& shape, error kind) {
+    SCOPED_TRACE(shape);
+    ASSERT_EQ(shape.find("8=FIX", 1), std::string::npos);
+    std::string const g1 = heartbeat(1);
+    run_result const r = run_every_segmentation(shape + g1);
+    EXPECT_EQ(r.frames, (std::vector<std::string>{g1}));
+    EXPECT_EQ(r.regions, 1U);
+    EXPECT_EQ(r.discarded, shape.size());
+    EXPECT_EQ(r.kinds, (std::vector<error>{kind}));
+    EXPECT_EQ(r.failure, std::nullopt);
+}
+
+// C-1's "not 8= at a frame boundary" row: an "8" whose next byte is not "=".
+TEST(FramerResync, C1_EightNotFollowedByEqualsAtABoundaryIsAFramingGarble) {
+    expect_one_garble_then_the_next_frame("8X", error::wire_framing_resync);
+}
+
+// C-1's "a bad, missing or non-digit 9" row: the field after BeginString is not "9=",
+// once with no "9" and once with a "9" whose next byte is not "=".
+TEST(FramerResync, C1_NoBodyLengthTagAfterTheBeginStringIsABodyLengthGarble) {
+    expect_one_garble_then_the_next_frame(std::string("8=FIX.4.4") + soh + "35=0" + soh,
+                                          error::wire_invalid_body_length);
+    expect_one_garble_then_the_next_frame(std::string("8=FIX.4.4") + soh + "9X" + soh,
+                                          error::wire_invalid_body_length);
+}
+
+// The same row: an empty BodyLength, and a BodyLength of 0.
+TEST(FramerResync, C1_EmptyOrZeroBodyLengthIsABodyLengthGarble) {
+    expect_one_garble_then_the_next_frame(std::string("8=FIX.4.4") + soh + "9=" + soh,
+                                          error::wire_invalid_body_length);
+    expect_one_garble_then_the_next_frame(std::string("8=FIX.4.4") + soh + "9=0" + soh,
+                                          error::wire_invalid_body_length);
+}
+
+// C-1's "10= not at the counted offset" row: the counted offset holds a "1" whose
+// next byte is not "0".
+TEST(FramerResync, C1_OneNotFollowedByZeroAtTheCountedOffsetIsABodyLengthGarble) {
+    std::string const head = candidate_header(5);
+    std::string const shape = head + "35=0" + soh + "11=123" + soh;
+    ASSERT_EQ(shape.substr(counted_offset(head.size(), 5), 2U), "11");
+    expect_one_garble_then_the_next_frame(shape, error::wire_invalid_body_length);
+}
+
+// The same row, read as "CheckSum not a field of its own": "10=" sits at the counted
+// offset, but the byte before it is not the SOH that ends the body.
+TEST(FramerResync, C1_NoSohBeforeTheCountedCheckSumIsABodyLengthGarble) {
+    std::string const head = candidate_header(4);
+    std::string const shape = head + "35=0" + "10=123" + soh;
+    ASSERT_EQ(shape.substr(counted_offset(head.size(), 4), 3U), "10=");
+    expect_one_garble_then_the_next_frame(shape, error::wire_invalid_body_length);
+}
+
+// ── carry overflow in resync mode (C-1's carry-overflow row) ────────────────
+
+// The Framer's own contract, which the pump's carry of L + R never reaches: a carry
+// too small for the bytes to keep refuses the feed with wire_frame_too_large. The
+// carry and the pending count are then emptied, as fail_too_large in
+// src/wire/framer.cpp does (and the strict path's twin, framer_error_path_test.cpp).
+TEST(FramerResync, CarryOverflowAppendingAReadToAPendingCandidateIsTooLarge) {
+    Framer framer{Framer::Config{.max_frame_bytes = kSmallL, .resync_on_garble = true}};
+    pmr_carry_buffer carry{16, std::pmr::new_delete_resource()};
+    std::vector<frame_view> out(1);
+    std::string const first = std::string("8=FIX.4.4") + soh;
+    std::string const second = std::string("9=50") + soh + "35=0" + soh;
+
+    auto const r1 =
+        framer.feed(std::as_bytes(std::span<const char>{first.data(), first.size()}), carry, out);
+    ASSERT_TRUE(r1.has_value());
+    ASSERT_TRUE(r1->empty());
+    // Everything in the carry is pending, so no consumed prefix can be erased to make
+    // room: the append itself must fail.
+    ASSERT_EQ(framer.pending_bytes(), first.size());
+    ASSERT_EQ(carry.size(), first.size());
+    ASSERT_GT(carry.size() + second.size(), carry.capacity());
+
+    auto const r2 =
+        framer.feed(std::as_bytes(std::span<const char>{second.data(), second.size()}), carry, out);
+    ASSERT_FALSE(r2.has_value());
+    EXPECT_EQ(r2.error(), error::wire_frame_too_large);
+    EXPECT_TRUE(carry.empty());
+    EXPECT_EQ(framer.pending_bytes(), 0U);
+}
+
+TEST(FramerResync, CarryOverflowKeepingAPartialCandidateInAnEmptyCarryIsTooLarge) {
+    Framer framer{Framer::Config{.max_frame_bytes = kSmallL, .resync_on_garble = true}};
+    pmr_carry_buffer carry{8, std::pmr::new_delete_resource()};
+    std::vector<frame_view> out(1);
+    std::string const partial = std::string("8=FIX.4.4") + soh + "9=50" + soh + "35=0" + soh;
+    ASSERT_GT(partial.size(), carry.capacity());
+
+    auto const r = framer.feed(std::as_bytes(std::span<const char>{partial.data(), partial.size()}),
+                               carry, out);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::wire_frame_too_large);
+    EXPECT_TRUE(carry.empty());
+    EXPECT_EQ(framer.pending_bytes(), 0U);
+}
+
+// ── the BodyLength digit guard below a limit of 9 ───────────────────────────
+
+// Framer::Config states no floor for max_frame_bytes. Below 9 a single BodyLength
+// digit can exceed it, and the digit guard refuses it as over L before the
+// accumulation could wrap. The input ends at that digit, so no later check (another
+// digit, the SOH, the frame length) can refuse it instead.
+TEST(FramerResync, ABodyLengthDigitOverALimitBelowNineIsTooLarge) {
+    constexpr std::size_t kTinyL = 5;
+    Framer framer{Framer::Config{.max_frame_bytes = kTinyL, .resync_on_garble = true}};
+    pmr_carry_buffer carry{kTinyL + kReadSize, std::pmr::new_delete_resource()};
+    std::vector<frame_view> out(1);
+    std::string const head = std::string("8=FIX.4.4") + soh + "9=7";
+
+    auto const r =
+        framer.feed(std::as_bytes(std::span<const char>{head.data(), head.size()}), carry, out);
+    ASSERT_FALSE(r.has_value()) << "the digit over L was not refused";
+    EXPECT_EQ(r.error(), error::wire_frame_too_large);
+}
+
 }  // namespace
