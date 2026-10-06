@@ -2111,6 +2111,10 @@ void run_q2324_file_store(sess::session_role role, bool teardown) {
         });
         if (!done) {
             // Let the unit and close() finish, so nothing outlives the rig.
+            // KIND G (ci/mock-clock-staging-sweep.sh): this advance runs only when `done` is
+            // false, and the ASSERT_TRUE(done) below then returns before any read of the
+            // wait-expired event or the restart counters, so nothing the cell asserts depends
+            // on it.
             r.clock->advance(std::chrono::milliseconds{kQ27Bound});
             (void)r.run_both_until([&] {
                 return close.wait_for(0s) == std::future_status::ready &&
