@@ -374,6 +374,11 @@ This runs on every store, volatile ones included (OD-9).
   can no longer strand the restore.
 - `teardown_reset_done_` keeps only its role as `close()`'s single-fire latch. The in-unit
   `teardown_reset_done_` stops are removed.
+- *Note (2026-10-06, plan OD-29):* a `close(terminal)` that arrives while a `close(graceful)` is in flight
+  escalates it: it ends the graceful close's grace wait, or keeps its phase 1 from starting, so the
+  transport closes at once, and both callers get the in-flight result. This narrows `[2d §4.7]`'s and
+  `[2d §6.5]`'s "Idempotency" bullets. The wait above is unchanged: an escalated close still runs it before
+  its teardown reset. A graceful close on a closing session still joins with no side effect.
 
 **Outcomes, for both roles, when `close()` or `Engine::stop()` begins at any point of the unit:**
 
@@ -526,8 +531,10 @@ delta carry the same BREAKING list.
 - **L-19.** These C-7 clauses are witnessed through C++ only, not through the C API (Phase 8; the evidence file
   has the clause-by-clause table). The rule "a C-ABI effect witnessed only through C++ is unwitnessed" applies to
   them, so they are disclosed rather than claimed:
-  - row 1: a garble in LogoutSent (reaching it from C needs `fixpp_session_close(graceful)`, which blocks the
-    caller until the Logout exchange ends);
+  - row 1: a garble in LogoutSent. From C, a session is in LogoutSent only while `fixpp_session_close(graceful)`
+    blocks its caller, so a C cell must make that call from a helper thread and drive the peer meanwhile, as
+    `CapiC7Witness.Row3_AnOverLimitBodyLengthInLogoutSentEndsTheBlockingClose` does for an over-limit frame
+    (plan OD-29); the garble cell is not driven that way;
   - row 1: a garble in Disconnected (no C-observable effect beyond the counter);
   - row 6's liveness classes that are a single frame or sit behind a configuration the C ABI cannot set: one
     too-high frame, a Reset-mode SequenceReset, the validate Reject (validation cannot be enabled through C),

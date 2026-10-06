@@ -420,6 +420,40 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   - **What.** Step 2 in both arms is the arm's own `logon_arm_superseded_(state)`: `closing`, or the
     engine-stop flag, or a moved FSM state (false at the arm's entry). Step 1's garble accounting still runs
     first. FR-030 and contract C-2's row 2 were amended accordingly.
+- **OD-29: a terminal close escalates an in-flight graceful close** (added at implementation, 2026-10-06,
+  from T126 shortfall S7; owner ruling 2026-10-06: fix in 093, and supersede the 2d text for this case only).
+  - **Why.** FR-013's every-state close did not hold in LogoutSent entered through `close(graceful)`. The
+    pump's over-L close calls `close(terminal)`, which took `close()`'s already-closing branch and joined the
+    graceful close. The transport stayed open until the graceful close's real-time `close_grace` timer fired
+    at `logout_disconnect_timeout_ms`, and the pump, suspended in that join, read no further frame, the
+    peer's Logout reply included.
+  - **What.** A `close(terminal)` that finds a `close(graceful)` in flight sets a latch
+    (`close_escalated_`) and ends the graceful close's grace wait: it cancels `close_grace`, whose wait
+    completes through `as_tuple`, so the existing force-close arm closes the transport and phase 1 is
+    cancelled. When the graceful close has not yet started phase 1 (it is in its store flush), the latch
+    keeps phase 1 from starting, so no Logout is sent. Both callers get the in-flight result, which is
+    unchanged; no outcome code is added. Every terminal close escalates, not only the over-L one: the
+    pump's EOF, read-error, `on_inbound_frame`-error and establishment-deadline closes; `Engine::stop()`,
+    through its transport close and its own `close(terminal)`; and the Active arm's callback-throw and
+    late-parse-failure closes, which can run before LogoutSent while phase 1 is suspended.
+  - **Unchanged.** A graceful close on a closing session still joins with no side effect. `close()`'s wait
+    for a reset unit (OD-1) is untouched, and an escalated close still runs it. A terminal close that
+    arrives after phase 1 has resolved joins as before.
+  - **Supersedes** `[2d §4.7]`'s and `[2d §6.5]`'s "Idempotency" bullets and §4.7's code-block comment, for
+    terminal-on-graceful only; each carries a dated erratum pointing here. The `session.hpp` close()
+    comment and the comment above `Session::close`'s closing branch name OD-29.
+  - **C ABI.** `fixpp_session_close` requests graceful only, so it never escalates; an internal terminal
+    close can end it sooner, with its result unchanged. No BREAKING carrier is added: `session.h`'s 1.11
+    clause already states that a frame over the limit ends the connection in every state. B-093-5 and the
+    PR body carry the sentence.
+  - **Rejected.** Keeping the join and disclosing S7 as a limitation with a follow-up issue: FR-013 says
+    every state, and a pump suspended in the join cannot read the peer's Logout reply either.
+  - **Witnesses.** `InboundFrameDispositionsQ6.LogoutSent_*` (one arm at the default logout timeout, whose
+    bound rejects a close that only the grace timer brings),
+    `InboundFrameDispositionsQ6.DuringTheGracefulClosesFlush_OverLClosesWithNoLogout` (the latch), and
+    `CapiC7Witness.Row3_AnOverLimitBodyLengthInLogoutSentEndsTheBlockingClose`. To check they can fail, in a
+    scratch copy delete the escalation block in `Session::close`'s closing branch (the LogoutSent cells
+    must fail) or the `!close_escalated_` test (the latch cell must fail).
 ## What changes for whom
 
 | Who | What changes | Declared where |
