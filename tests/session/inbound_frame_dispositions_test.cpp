@@ -2026,6 +2026,90 @@ TEST(InboundFrameDispositionsQ6, LogoutSent_AtTheDefaultLogoutTimeout_FrameOfLPl
     run_q6(Q6State::logout_sent, OverL::frame, timeout_ms);
 }
 
+// The over-L close while close(graceful) from Active is still in its store flush, before
+// its phase 1 (the Logout exchange) starts (plan OD-29's latch). A HookedStore holds the
+// flush until the cell releases it. The terminal close must keep phase 1 from starting:
+// no Logout is sent, and once the flush is released the close comes within the prompt
+// bound, counted from the release, with the graceful caller completing with ok. The
+// over-L shape is the resync-candidate one: its junk is counted in the same feed that
+// refuses the frame, so a garbled-frame count of one marks that the pump has made its
+// terminal close while the flush still holds.
+TEST(InboundFrameDispositionsQ6, DuringTheGracefulClosesFlush_OverLClosesWithNoLogout) {
+    LogCapture log;
+    auto app = std::make_shared<FromAppProbe>();
+    plain_rig::Rig rig{app};
+    auto cfg = rig.cfg(session_role::acceptor);
+    cfg.logger_override = log.logger;
+    cfg.initial_trace_context = known_trace();
+    cfg.advertised_max_message_size = kQ6Limit;
+    cfg.logout_disconnect_timeout_ms = kQ6LogoutTimeoutMs;
+    auto const factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    auto const release = std::make_shared<bool>(false);
+    factory->hooks.flush_until = [release] { return *release; };
+    auto const store_log = factory->log;
+    cfg.store_factory = factory;
+    std::chrono::milliseconds const prompt{kQ6LogoutTimeoutMs / kQ6PromptFraction};
+    auto const hold_budget = std::chrono::milliseconds{fixpp::test_support::kHoldBound} / 2;
+    auto const graceful = std::make_shared<GracefulCloseCaller>();
+
+    bool const reached = rig.start(std::move(cfg)) && rig.to_active();
+    auto const s = reached ? rig.session() : nullptr;
+    bool flushing = false;
+    if (s) {
+        asio::co_spawn(
+            s->executor().underlying(),
+            [s, graceful]() -> asio::awaitable<void> {
+                graceful->result = co_await s->close(close_mode::graceful);
+                graceful->done = true;
+            },
+            asio::detached);
+        flushing = rig.run_until([&] { return store_log->flushes_begun == 1; }, hold_budget);
+    }
+    std::string const bytes =
+        flushing ? over_l_bytes(rig, OverL::body_length_at_candidate, next_inbound(*s))
+                 : std::string{};
+    bool const sent = !bytes.empty() && rig.deliver(bytes);
+    bool const refused_while_flushing =
+        sent && rig.run_until([&] { return s->garbled_frame_count() == 1U; }, hold_budget);
+
+    auto const released_at = std::chrono::steady_clock::now();
+    *release = true;
+    auto const until_prompt = [&] {
+        auto const left = released_at + prompt - std::chrono::steady_clock::now();
+        return left > std::chrono::steady_clock::duration::zero()
+                   ? left
+                   : std::chrono::steady_clock::duration::zero();
+    };
+    bool const closed = refused_while_flushing &&
+                        rig.run_until([&] { return rig.peer.read_ended; }, until_prompt());
+    bool const graceful_returned =
+        closed && rig.run_until([&] { return graceful->done; }, until_prompt());
+    bool const graceful_ok = graceful_returned && graceful->result.has_value();
+    auto const state_after = rig.state();
+    std::size_t const logouts = plain_rig::frames_of_type(rig.peer.received, "5").size();
+    bool const hold_timed_out = store_log->flush_hold_timed_out;
+    // If the close did not come, the mock-clock logout timeout ends the graceful close, so
+    // Engine::stop() does not wait on it. Read after every verdict above.
+    if (s && !closed) {
+        rig.clock->advance(std::chrono::milliseconds{kQ6LogoutTimeoutMs + 1U});
+        (void)rig.run_until([&] { return s->state() == fsm_state::Disconnected; });
+    }
+    rig.stop();
+    auto const records = over_limit_records(log);
+
+    ASSERT_TRUE(reached && s && flushing && sent) << "setup";
+    ASSERT_TRUE(refused_while_flushing)
+        << "the pump refused the over-L frame while close(graceful) held in its flush";
+    EXPECT_FALSE(hold_timed_out) << "the flush was released by the cell, not by its bound";
+    EXPECT_EQ(logouts, 0U) << "phase 1 did not start: no Logout is sent";
+    EXPECT_TRUE(closed) << "the transport closes within the bound after the flush";
+    EXPECT_TRUE(graceful_returned) << "the graceful close's caller completes within the bound";
+    EXPECT_TRUE(graceful_ok) << "the graceful close's caller gets ok";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
+    ASSERT_EQ(records.size(), 1U) << "one over-limit record";
+    EXPECT_EQ(records[0].args[1].u64, kQ6Limit) << "the record's L";
+}
+
 // The same close when the over-L BodyLength arrives in the acceptor's first read,
 // coalesced after the Logon in one write. The first-frame read returns at the Logon,
 // so the over-L header is surplus, which the engine hands to run_read_pump as its
