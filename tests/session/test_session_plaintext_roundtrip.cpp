@@ -72,6 +72,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 #include "support/validation_test_dictionary.hpp"
 
@@ -651,6 +652,13 @@ struct CloseDuringLogonApp final : sess::Application {
         std::optional<std::size_t> ring_at_close_start;
         // The clock's parked sleeps when close()'s own Logout reached toAdmin.
         std::optional<std::size_t> inflight_at_close_logout;
+        // fromApp and fromAdmin calls made after the posted close began.
+        int from_app_after_close_started = 0;
+        int from_admin_after_close_started = 0;
+        // The session's NextNumIn and the size of its event ring when the posted close
+        // began.
+        std::optional<sess::seqnum_t> next_in_at_close_start;
+        std::optional<std::size_t> events_at_close_start;
     };
 
     sess::Engine* engine = nullptr;
@@ -675,6 +683,9 @@ struct CloseDuringLogonApp final : sess::Application {
                 [this]() -> asio::awaitable<void> {
                     seen.close_started = true;
                     seen.ring_at_close_start = held->fsm_visit_history().size();
+                    seen.next_in_at_close_start =
+                        sess::session_test_access::seqnum_mgr(*held).next_inbound_unsafe();
+                    seen.events_at_close_start = held->recent_events().size();
                     auto r = co_await held->close(*mode);
                     seen.close_ok = r.has_value();
                     seen.state_at_close_return = held->state();
@@ -700,6 +711,20 @@ struct CloseDuringLogonApp final : sess::Application {
     void onLogon(const sess::SessionId& /*sid*/) override {
         ++seen.on_logon;
         if (close_on_logon && !armed) post_close();
+    }
+
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const sess::SessionId& /*sid*/) override {
+        if (seen.close_started) ++seen.from_admin_after_close_started;
+        return {};
+    }
+
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const sess::SessionId& /*sid*/) override {
+        if (seen.close_started) ++seen.from_app_after_close_started;
+        return {};
     }
 };
 
@@ -762,6 +787,11 @@ struct LogonCloseOutcome {
     std::optional<sess::seqnum_t> store_next_outbound;
     // The session's garbled_frame_count() at settle.
     std::uint64_t garbled = 0;
+    // The session's NextNumIn at settle.
+    std::optional<sess::seqnum_t> next_in_after_settle;
+    // The event ring at settle, in emission order while it has not wrapped: for each
+    // event, whether it is a session_event_garbled_frame.
+    std::vector<bool> events_are_garbles;
 };
 
 // Space-separated; an FSM state prints as its enum value.
@@ -966,6 +996,12 @@ struct CaseRig {
                 return std::holds_alternative<sess::session_event_sequence_numbers_reset>(ev);
             });
             out.garbled = app->held->garbled_frame_count();
+            out.next_in_after_settle =
+                sess::session_test_access::seqnum_mgr(*app->held).next_inbound_unsafe();
+            for (auto const& ev : app->held->recent_events()) {
+                out.events_are_garbles.push_back(
+                    std::holds_alternative<sess::session_event_garbled_frame>(ev));
+            }
         }
 
         if (c.cancel_sleeps_before_stop) {
@@ -1119,8 +1155,10 @@ std::vector<std::byte> invalid_then_garbled(std::string_view sender, std::string
 // #523 (093 quickstart Q-22): the frames coalesced behind the Logon reach the arm while
 // close() is under way, and the arm acts on none of them. The garbled one is counted
 // (the positive control: the pump delivered them before the flush released), the
-// invalid one draws no Reject, no admin frame reaches toAdmin and no state other than
-// close()'s Disconnected is written after close() began.
+// invalid one draws no Reject, no admin frame reaches toAdmin, no state other than
+// close()'s Disconnected is written after close() began, no fromApp or fromAdmin runs,
+// NextNumIn keeps the value it had when close() began, and every event emitted after
+// that is a garbled-frame event (FR-030 carves garbled-frame accounting out).
 void expect_coalesced_frames_inert(LogonCloseOutcome const& o) {
     ASSERT_TRUE(o.store_log);
     EXPECT_EQ(o.store_log->flushes_begun, 1) << "close(graceful)'s flush";
@@ -1129,6 +1167,22 @@ void expect_coalesced_frames_inert(LogonCloseOutcome const& o) {
     EXPECT_EQ(o.garbled, 1U) << "garbled_frame_count(): the trailing 35-not-third frame";
     expect_no_admin_after_close(o);
     expect_no_state_but_disconnected_after_close(o);
+    EXPECT_EQ(o.seen.from_app_after_close_started, 0) << "fromApp after close() began";
+    EXPECT_EQ(o.seen.from_admin_after_close_started, 0) << "fromAdmin after close() began";
+    ASSERT_TRUE(o.seen.next_in_at_close_start.has_value()) << "the posted close never ran";
+    EXPECT_EQ(o.next_in_after_settle, o.seen.next_in_at_close_start)
+        << "NextNumIn moved after close() began";
+    ASSERT_TRUE(o.seen.events_at_close_start.has_value()) << "the posted close never ran";
+    // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    ASSERT_LT(o.events_are_garbles.size(), sess::kSessionEventRingCapacity)
+        << "the event ring wrapped, so its physical order is not emission order";
+    ASSERT_LE(*o.seen.events_at_close_start, o.events_are_garbles.size());
+    for (std::size_t i = *o.seen.events_at_close_start; i < o.events_are_garbles.size(); ++i) {
+        EXPECT_TRUE(o.events_are_garbles[i])
+            << "event " << i << " after close() began is not a garbled-frame event";
+    }
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // close(graceful) from LogonReceived runs its own phase-1 Logout.

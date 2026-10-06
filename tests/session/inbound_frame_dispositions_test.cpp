@@ -1318,6 +1318,10 @@ TEST(InboundFrameDispositionsQ10, WithinCapMismatchInActive_DisconnectsWithoutAL
                                                               c.rig.sending_time()));
     bool const ended =
         d && c.rig.run_until([&] { return c.rig.state() == fsm_state::Disconnected; });
+    // A close that follows the transition runs on this io_context; the settle lets it
+    // reach the peer before the read is checked.
+    c.rig.settle(std::chrono::milliseconds{200});
+    bool const read_ended = c.rig.peer.read_ended;
     auto const after = c.rig.peer.received.substr(before);
     auto const o = c.observe();
     c.rig.stop();
@@ -1326,6 +1330,9 @@ TEST(InboundFrameDispositionsQ10, WithinCapMismatchInActive_DisconnectsWithoutAL
     EXPECT_TRUE(ended) << "a well-framed BeginString mismatch ends the session, as today";
     EXPECT_TRUE(plain_rig::frames_of_type(after, "5").empty()) << "no Logout is sent";
     EXPECT_EQ(o.count, 0U) << "a mismatch within the cap is not a garble";
+    // Today's Active handling writes Disconnected and leaves the transport open: entering
+    // Disconnected does not close it. fixpp#534 may change that, and this assertion with it.
+    EXPECT_FALSE(read_ended) << "the transport stays open";
 }
 
 TEST(InboundFrameDispositionsQ10, WithinCapMismatchBeforeActive_Refused) {
@@ -1698,11 +1705,11 @@ TEST(InboundFrameDispositionsQ14, ThroughTheEngineAShortCarryArenaRefusesTheConn
 //
 // A configured 383 of 4096, so L = 4096. Each over-L shape closes the session
 // terminally: the transport is closed, the state is Disconnected, and one record
-// carries the failure kind and L. No callback runs, no Reject is sent and NextNumIn
-// does not move. Run in Active and in each state the pump reads in before Active:
-// NotConnected (an acceptor whose first frame was disregarded), LogonSent (an
-// initiator) and Disconnected with the transport open (an acceptor whose first frame
-// was refused). The record's format is spelled out here.
+// carries the failure kind and L. No callback runs, no Reject is sent, NextNumIn
+// does not move and no SessionEvent is emitted (plan OD-24). Run in Active and in each
+// state the pump reads in before Active: NotConnected (an acceptor whose first frame
+// was disregarded), LogonSent (an initiator) and Disconnected with the transport open
+// (an acceptor whose first frame was refused). The record's format is spelled out here.
 constexpr char kOverLimitRecordFormat[] =
     "inbound frame over the limit closed the session: kind={} limit={}";
 constexpr std::uint32_t kQ6Limit = 4096;
@@ -1802,7 +1809,10 @@ void run_q6(Q6State at, OverL kind) {
                                                        "\x01"
                                                        "56=ISLD\x01" +
                                                        std::string{kLogonFields})) &&
-                      rig.run_until([&] { return rig.session() != nullptr; });
+                      rig.run_until([&] {
+                          auto const p = rig.session();
+                          return p != nullptr && p->garbled_frame_count() == 1U;
+                      });
             want = fsm_state::NotConnected;
             break;
         case Q6State::logon_sent:
@@ -1826,6 +1836,7 @@ void run_q6(Q6State at, OverL kind) {
     int const admin_before = app->from_admin;
     std::size_t const rejects_before = plain_rig::frames_of_type(rig.peer.received, "3").size();
     bool const open_before = !rig.peer.read_ended;
+    std::size_t const events_before = s ? s->recent_events().size() : 0U;
 
     std::string const bytes = reached ? over_l_bytes(rig, kind, next_before) : std::string{};
     bool const sent = !bytes.empty() && rig.deliver(bytes);
@@ -1837,11 +1848,21 @@ void run_q6(Q6State at, OverL kind) {
     int const admin_calls = app->from_admin - admin_before;
     std::size_t const rejects =
         plain_rig::frames_of_type(rig.peer.received, "3").size() - rejects_before;
+    // For each event emitted after the snapshot, whether it is a garbled-frame event; in
+    // emission order while the ring has not wrapped.
+    std::vector<bool> new_events_are_garbles;
+    std::size_t const events_after = s ? s->recent_events().size() : 0U;
+    for (std::size_t i = events_before; s && i < events_after; ++i) {
+        new_events_are_garbles.push_back(
+            std::holds_alternative<session_event_garbled_frame>(s->recent_events()[i]));
+    }
     rig.stop();
     auto const records = over_limit_records(log);
 
     ASSERT_TRUE(reached && s && open_before && sent) << row << ": setup";
     ASSERT_EQ(state_before, want) << row << ": the state the cell runs in";
+    // The ring holds kSessionEventRingCapacity events; below it, a new event is appended.
+    ASSERT_LT(events_after, kSessionEventRingCapacity) << row << ": precondition";
     EXPECT_TRUE(closed) << row << ": the transport closes";
     EXPECT_EQ(state_after, fsm_state::Disconnected) << row;
     EXPECT_FALSE(is_open_after) << row << ": a terminal close, not only a Disconnected state";
@@ -1849,6 +1870,12 @@ void run_q6(Q6State at, OverL kind) {
     EXPECT_EQ(admin_calls, 0) << row << ": no fromAdmin";
     EXPECT_EQ(rejects, 0U) << row << ": no Reject";
     EXPECT_EQ(next_after, next_before) << row << ": NextNumIn unchanged";
+    // The resync-candidate shape opens with junk, a garble the pump accounts, with its
+    // event, in the feed that refuses the over-L header. The over-L close adds no event.
+    std::vector<bool> const want_new_events =
+        kind == OverL::body_length_at_candidate ? std::vector<bool>{true} : std::vector<bool>{};
+    EXPECT_EQ(new_events_are_garbles, want_new_events)
+        << row << ": no SessionEvent but the junk's garbled-frame event";
     ASSERT_EQ(records.size(), 1U) << row << ": one over-limit record";
     ASSERT_EQ(records[0].arg_count, 2U) << row;
     EXPECT_EQ(records[0].args[0].u64,
@@ -1929,6 +1956,7 @@ TEST(InboundFrameDispositionsQ6, CoalescedAfterTheLogon_OverLBodyLengthInTheInit
     }
     bool const logon_answered = !plain_rig::frames_of_type(rig.peer.received, "A").empty();
     int const app_calls = app->from_app;
+    std::size_t const events = s ? s->recent_events().size() : 0U;
     rig.stop();
     auto const records = over_limit_records(log);
 
@@ -1939,6 +1967,11 @@ TEST(InboundFrameDispositionsQ6, CoalescedAfterTheLogon_OverLBodyLengthInTheInit
     EXPECT_EQ(state_after, fsm_state::Disconnected);
     EXPECT_FALSE(is_open_after) << "a terminal close, not only a Disconnected state";
     EXPECT_EQ(app_calls, 0) << "no fromApp";
+    // The session is built by the same write, so there is no event ring to take before the
+    // over-L bytes. A plain-TCP Logon without ResetSeqNumFlag(141) emits no SessionEvent
+    // (re-derive the emitters with `grep -n "emit_event(" src/session/session.cpp`), so any
+    // event in the ring is the over-L close's.
+    EXPECT_EQ(events, 0U) << "no SessionEvent";
     ASSERT_EQ(records.size(), 1U) << "one over-limit record";
     ASSERT_EQ(records[0].arg_count, 2U);
     EXPECT_EQ(records[0].args[0].u64,
