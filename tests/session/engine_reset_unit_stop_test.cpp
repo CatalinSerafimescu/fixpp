@@ -1100,5 +1100,85 @@ TEST(Od26, CloseDuringAFailingInboundPersistWritesNoState) {
         << "a state was written before close()'s flush returned";
 }
 
+// The member, on the hydrate after both reads succeeded: the acceptor's hydrating
+// outbound read is held until close() has returned, so close()'s drain of the seqnum
+// mutex has run, and is then released with its value. SeqnumManager::hydrate fails on
+// the drained mutex, and ensure_hydrated_ stops the arm through
+// disconnect_unless_superseded_. close() wrote Disconnected itself, so a second write
+// of the same state is visible only in the FSM visit history: nothing may be appended
+// to it once close() has returned.
+// Precondition: no teardown reset (reset_on_logout and reset_on_disconnect off). With
+// one, close()'s store reset could queue behind the held read, and the hydrate would
+// run before the drain.
+TEST(Od26, CloseDrainingTheSeqnumMutexBeforeTheHydrateWritesNoState) {
+    auto const app = std::make_shared<Od25App>();
+    plain_rig::Rig rig{app};
+    auto cfg = rig.cfg(session_role::acceptor);
+    ASSERT_FALSE(cfg.reset_on_logout);
+    ASSERT_FALSE(cfg.reset_on_disconnect);
+
+    std::shared_ptr<Session> held;
+    bool read_held = false;
+    bool released = false;
+    bool close_returned = false;
+    std::vector<fsm_state> history_at_close;
+    auto factory = std::make_shared<HookedStoreFactory>();
+    factory->hooks.on_outbound_read = [&] {
+        if (read_held) return false;
+        read_held = true;
+        held = rig.session();
+        if (!held) return true;
+        asio::any_io_executor ex = held->executor().underlying();
+        asio::post(ex, [&, ex] {
+            asio::co_spawn(
+                ex,
+                [&]() -> asio::awaitable<void> {
+                    app->close_began = true;
+                    (void)co_await held->close(close_mode::graceful);
+                    auto const h = held->fsm_visit_history();
+                    history_at_close.assign(h.begin(), h.end());
+                    close_returned = true;
+                },
+                asio::detached);
+        });
+        return true;
+    };
+    // Releases the held read, with its value, only once close() has returned.
+    factory->hooks.release_when = [&] {
+        released = released || close_returned;
+        return close_returned;
+    };
+    auto const log = factory->log;
+    cfg.store_factory = std::move(factory);
+
+    bool const up = rig.start(cfg) && rig.connect_peer();
+    if (up) rig.peer.send(rig.logon());
+    bool const closed = up && rig.run_until([&] { return close_returned; });
+    bool const resumed = closed && rig.run_until([&] { return released; });
+    rig.settle();
+    std::vector<fsm_state> history_after;
+    if (held) {
+        auto const h = held->fsm_visit_history();
+        history_after.assign(h.begin(), h.end());
+    }
+    bool const logon_answered = !plain_rig::frames_of_type(rig.peer.received, "A").empty();
+    auto const state_after = rig.state();
+    bool const hold_timed_out = log->hold_timed_out;
+    held.reset();
+    rig.stop();
+
+    ASSERT_TRUE(up && read_held) << "setup: the hydrating outbound read was held";
+    ASSERT_TRUE(closed) << "close() returned";
+    ASSERT_TRUE(resumed) << "the read was released after close() returned";
+    // The release condition is close() having returned, so the read completes before
+    // that only through its bound, which sets hold_timed_out.
+    EXPECT_FALSE(hold_timed_out)
+        << "the read completed through its bound, not after close() returned while it was held";
+    EXPECT_EQ(history_after, history_at_close)
+        << "the Logon arm wrote a state after close() had returned";
+    EXPECT_FALSE(logon_answered) << "the Logon arm stopped: no Logon was sent";
+    EXPECT_EQ(state_after, fsm_state::Disconnected);
+}
+
 }  // namespace
 }  // namespace fixpp::session::test
