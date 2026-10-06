@@ -1870,8 +1870,9 @@ void run_q6(Q6State at, OverL kind) {
     EXPECT_EQ(admin_calls, 0) << row << ": no fromAdmin";
     EXPECT_EQ(rejects, 0U) << row << ": no Reject";
     EXPECT_EQ(next_after, next_before) << row << ": NextNumIn unchanged";
-    // The resync-candidate shape opens with junk, a garble the pump accounts, with its
-    // event, in the feed that refuses the over-L header. The over-L close adds no event.
+    // The resync-candidate shape opens with junk: one garbled region, which the pump
+    // accounts with one garbled-frame event however the reads split it. The over-L close
+    // adds no event.
     std::vector<bool> const want_new_events =
         kind == OverL::body_length_at_candidate ? std::vector<bool>{true} : std::vector<bool>{};
     EXPECT_EQ(new_events_are_garbles, want_new_events)
