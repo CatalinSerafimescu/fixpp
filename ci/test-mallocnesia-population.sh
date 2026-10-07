@@ -186,6 +186,31 @@ else
   echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
 fi
 
+# ── T9: the raw-preload scanner's only exemption is a comment line (#497) ─────
+# A raw preload inside `if(FALSE)` was once exempt, for disabled companions kept as
+# restore targets. Those are deleted, and so is the exemption: T9a must be REPORTED.
+# T9b is its positive control, so T9a cannot pass by the scanner reporting everything.
+W="$TMP/iffalse/tests/x"; mkdir -p "$W" "$TMP/iffalse/tools"
+printf 'if(FALSE)\n  set_property(TEST t APPEND PROPERTY ENVIRONMENT "LD_PRELOAD=/x.so")\nendif()\n' > "$W/CMakeLists.txt"
+cp "$RAW" "$TMP/iffalse/tools/c.py"
+out="$(cd "$TMP/iffalse" && python3 tools/c.py 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q "tests/x/CMakeLists.txt:2"; then
+  echo "ok    T9a a raw preload inside if(FALSE) is REPORTED (no disabled-block exemption)"
+  pass=$((pass+1))
+else
+  echo "FAIL  T9a rc=$rc (want 1 naming tests/x/CMakeLists.txt:2)"; echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
+fi
+
+C="$TMP/comment/tests/x"; mkdir -p "$C" "$TMP/comment/tools"
+printf '# set_property(TEST t APPEND PROPERTY ENVIRONMENT "LD_PRELOAD=/x.so")\nadd_test(NAME t COMMAND true)\n' > "$C/CMakeLists.txt"
+cp "$RAW" "$TMP/comment/tools/c.py"
+out="$(cd "$TMP/comment" && python3 tools/c.py 2>&1)"; rc=$?
+if [ "$rc" = 0 ]; then
+  echo "ok    T9b a commented-out raw preload stays exempt"; pass=$((pass+1))
+else
+  echo "FAIL  T9b rc=$rc (want 0)"; echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
+fi
+
 echo
 echo "test-mallocnesia-population: $pass passed, $fail failed"
 [ "$fail" = 0 ]

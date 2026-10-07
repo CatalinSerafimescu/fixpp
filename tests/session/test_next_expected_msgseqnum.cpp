@@ -1640,9 +1640,10 @@ TEST(Reset, AcceptorReplyReceived141_Advertises2) {
 // all fixture setup (buffers, stack data) done OUTSIDE the guarded window.
 //
 // The proactive resend reuses replay_outbound_range_ (the single-implementation
-// store-walk body extracted by T005). Its no-heap property is inherited from the
-// existing recovery alloc-guard witness in tests/perf/
-// (perf_session_recovery_alloc_guard / perf_session_recovery_alloc_guard_mallocnesia).
+// store-walk body extracted by T005). Its global-heap property is NOT checked: the
+// recovery alloc-guard in tests/perf/ (perf_session_recovery_alloc_guard) checks only
+// its PMR half, because an Active session's inbound path allocates (L-497-1;
+// fixpp#544).
 //
 // The _mallocnesia ctest variant (CMakeLists.txt) runs this binary under
 // LD_PRELOAD with tools/check_alloc.py so any global-heap escape aborts.

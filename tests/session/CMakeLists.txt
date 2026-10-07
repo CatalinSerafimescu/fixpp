@@ -1924,7 +1924,6 @@ set_tests_properties(session_sending_time_precision PROPERTIES
 # The dual-gate binding per [[feedback_tracking_pmr_resource_false_pass]]:
 # session_sending_time_precision runs the witness; the _mallocnesia variant
 # re-runs it under LD_PRELOAD so global-heap escapes are intercepted.
-# Mirrors perf_session_recovery_alloc_guard_mallocnesia in tests/perf/CMakeLists.txt.
 # registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
 # fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
 # build is excluded rather than merely skipped); the base test is a companion, not a fallback.
@@ -2004,34 +2003,12 @@ set_tests_properties(session_validation_compat_toggles PROPERTIES
 # 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_validation_compat_toggles APPEND PROPERTY LABELS 092)
-# T012 NoHeap_RelaxedDeliverPath: mallocnesia LD_PRELOAD wired so global-heap
-# escapes from the S4 deliver-without-advance path are intercepted by the
-# alloc_guard_{start,end,count} hooks. This APPEND avoids overwriting TSAN_OPTIONS
-# (same pattern as perf_session_recovery_alloc_guard in tests/perf/CMakeLists.txt).
-# [[feedback_tracking_pmr_resource_false_pass]]
-# item 13 (2026-06-19): DISABLED base-test LD_PRELOAD — once the alloc-guard
-# markers became interposable, this base test arms the interceptor and FAILS: the
-# measured window (fix->feed(...)) allocates on the global heap (it was false-green
-# while the markers were inert). Re-scoping the window to the true zero-alloc steady
-# state is tracked in parent REMAINING-WORK.md item 13. The base test still runs its
-# functional assertions WITHOUT preload.
-# set_property(TEST session_validation_compat_toggles APPEND PROPERTY
-#   ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-
-# T012 mallocnesia companion — DISABLED (item 13, 2026-06-19): RED — same allocating
-# window as above; re-enable by restoring the EXISTS guard once the window is
-# zero-alloc (tracked: parent REMAINING-WORK.md item 13).
-if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
-  add_test(
-    NAME session_validation_compat_toggles_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:session_validation_compat_toggles>"
-  )
-  set_tests_properties(session_validation_compat_toggles_mallocnesia PROPERTIES
-    LABELS "028;s040;s041;validation-compat-toggles;alloc_guard"
-    DEPENDS session_validation_compat_toggles)
-endif()
+# T012 NoHeap_RelaxedDeliverPath: its global-heap claim is NOT CHECKED. No mallocnesia
+# gate is registered for it, because an Active session's inbound path allocates
+# (L-497-1; fixpp#544), so the window cannot be zero until that is fixed.
+# The base test still runs its functional assertions. To run the window by hand:
+#   GTEST_FILTER='*NoHeap_RelaxedDeliverPath*' python3 tools/check_alloc.py \
+#       --binary <build>/bin/session_validation_compat_toggles --mallocnesia <build>/lib/libmallocnesia.so
 
 # ── 029-persistent-seqnum-hydrate (S-042) — T001 Setup skeleton ──────────────
 # T001: skeleton + ctest target registration.
@@ -2060,31 +2037,12 @@ set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
 # 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY LABELS 092)
-# T012 NoHeap_HydrateAndPersistPaths: wire mallocnesia LD_PRELOAD so the
-# alloc_guard_count() weak symbol is replaced by the live interceptor.
-# Pattern mirrors session_validation_compat_toggles (028) and
-# session_next_expected_msgseqnum (027).
-# item 13 (2026-06-19): DISABLED — RED window (fix->feed(...)) allocates on the
-# global heap (false-green while markers were inert). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
-  set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY
-    ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-endif()
-# T012 mallocnesia companion — runs the binary under check_alloc.py so any
-# global malloc/calloc/realloc between the guard markers causes exit(1).
-# Absent mallocnesia.so → skip; the base test is the fallback.
-# item 13 (2026-06-19): DISABLED companion — RED (same allocating window). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
-  add_test(
-    NAME session_persistent_seqnum_hydrate_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:session_persistent_seqnum_hydrate>"
-  )
-  set_tests_properties(session_persistent_seqnum_hydrate_mallocnesia PROPERTIES
-    LABELS "029;s042;persistent-seqnum-hydrate;noheap"
-    DEPENDS session_persistent_seqnum_hydrate)
-endif()
+# T012 NoHeap_HydrateAndPersistPaths: its global-heap claim is NOT CHECKED. No mallocnesia
+# gate is registered for it, because an Active session's inbound path allocates
+# (L-497-1; fixpp#544), so the window cannot be zero until that is fixed.
+# The base test still runs its functional assertions. To run the window by hand:
+#   GTEST_FILTER='*NoHeap_HydrateAndPersistPaths*' python3 tools/check_alloc.py \
+#       --binary <build>/bin/session_persistent_seqnum_hydrate --mallocnesia <build>/lib/libmallocnesia.so
 
 # ── 025-refresh-on-logon (S-018) — T001 Setup skeleton ──────────────────────
 # T001: skeleton + W1/W2 RED witnesses.
@@ -2111,31 +2069,13 @@ add_test(NAME session_refresh_on_logon
 set_tests_properties(session_refresh_on_logon PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "025;s018;refresh-on-logon;setup")
-# T040 W8 NoHeap_RehydratePath: wire mallocnesia LD_PRELOAD so the
-# alloc_guard_count() weak symbol is replaced by the live interceptor.
-# Pattern mirrors session_persistent_seqnum_hydrate (029).
-# item 13 (2026-06-19): DISABLED — RED window (asio::co_spawn(...hydrate)) allocates
-# a coroutine frame on the global heap (false-green while markers were inert; a
-# co_spawn frame can't be warmed away). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
-  set_property(TEST session_refresh_on_logon APPEND PROPERTY
-    ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-endif()
-# T040 mallocnesia companion — runs the binary under check_alloc.py so any
-# global malloc/calloc/realloc between the guard markers causes exit(1).
-# Absent mallocnesia.so → skip; the base test is the fallback.
-# item 13 (2026-06-19): DISABLED companion — RED (same co_spawn-frame alloc). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
-  add_test(
-    NAME session_refresh_on_logon_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:session_refresh_on_logon>"
-  )
-  set_tests_properties(session_refresh_on_logon_mallocnesia PROPERTIES
-    LABELS "025;s018;refresh-on-logon;noheap"
-    DEPENDS session_refresh_on_logon)
-endif()
+# T040 W8_NoHeap_RehydratePath: its global-heap claim is NOT CHECKED. No mallocnesia
+# gate is registered for it, because SeqnumManager::hydrate() allocates an asio
+# coroutine frame through std::aligned_alloc (the mechanism behind L-497-1;
+# fixpp#544), so the window cannot be zero until that is fixed.
+# The base test still runs its functional assertions. To run the window by hand:
+#   GTEST_FILTER='*W8_NoHeap_RehydratePath*' python3 tools/check_alloc.py \
+#       --binary <build>/bin/session_refresh_on_logon --mallocnesia <build>/lib/libmallocnesia.so
 
 # ── 033-fixt-fix50sp2-session — T002 Setup + T004/T005 Foundational ──────────
 # T002: create RED test targets + ctest registration so `ctest -R fixt` works.

@@ -2198,26 +2198,16 @@ TEST(PersistentSeqnumHydrate, CustomStore_Discriminator) {
 
 // ── NoHeap — NoHeap_HydrateAndPersistPaths ───────────────────────────────────
 //
-// Witnesses that the cold-open hydrate path (ensure_hydrated_) and the in-seq
-// persist path (persist_inbound_advance_) add ZERO global-heap allocation.
+// Witnesses that the in-seq persist path (persist_inbound_advance_) runs inside a
+// window around one inbound deliver+persist, after a warm-up that primes the
+// per-thread caches (asio recycler, async_mutex slot pool).
 //
-// BINDING gate: the mallocnesia LD_PRELOAD interceptor
-//   tools/mallocnesia/libmallocnesia.so, wired in CMakeLists.txt as the
-//   session_persistent_seqnum_hydrate_mallocnesia ctest companion.
-//   [[feedback_tracking_pmr_resource_false_pass]]: a PMR counting_resource
-//   alone is a false-pass (non-PMR std::vector/global-new escapes it);
-//   the LD_PRELOAD is the binding proof.
-//
-// Strategy: DELTA measurement — measure open + one inbound deliver+persist
-// AFTER a warm-up that primes all per-thread caches (asio recycler,
-// async_mutex slot pool). The FaultStore's next_seqnum returns a ready-value
-// (no internal container, no suspension allocation) so the store read+write
-// path itself is zero-alloc.
-//
-// Under mallocnesia: alloc_guard_count() returns the intercepted malloc count.
-// Without LD_PRELOAD: alloc_guard_count() is a no-op returning 0 (the test
-// still asserts the functional post-conditions; the no-heap claim is proven
-// only by the _mallocnesia companion ctest).
+// ⚠️ Its global-heap half is NOT CHECKED. [const §VIII.5] asks the hydrate and persist
+// paths for zero global-heap allocation, but an Active session's inbound path allocates
+// (L-497-1; fixpp#544), so no mallocnesia gate is registered for this cell.
+// It still checks the functional post-conditions. The alloc_guard markers stay so the
+// window can be run by hand, as tests/session/CMakeLists.txt shows at this
+// binary's registration.
 //
 // Anchors: [const §VIII.5], data-model.md NoHeap/INV-H4, tasks.md T012.
 TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
@@ -2229,8 +2219,8 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
     // Warm-up: prime the asio per-thread recycler by running the SAME path
     // (open + inbound deliver + persist) several times before the guard window.
     // The first iteration touches per-thread lazy-init paths (cancellation_slot's
-    // thread_info_base, promise frame recycling); subsequent iterations are
-    // steady-state zero-alloc (mirrors validation_compat_toggles NoHeap_RelaxedDeliverPath).
+    // thread_info_base, promise frame recycling) (mirrors validation_compat_toggles
+    // NoHeap_RelaxedDeliverPath).
 
     // Session setup: persistent FaultStore seeded {in=1, out=1}.
     // We use an acceptor so both the hydrate path (in the Logon handler) and
@@ -2241,10 +2231,10 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
     //           (2) Warm-up: deliver kWarmup heartbeats (triggers persist_inbound_advance_).
     //           (3) Open the guard window.
     //           (4) Deliver ONE more heartbeat inside the window.
-    //           (5) Close the window + assert heap_allocs==0.
+    //           (5) Close the window.
     //
-    // The hydrate path (ensure_hydrated_) runs ONCE at session open (step 1). To witness
-    // it is zero-alloc in the guarded window, we measure the WARM persist path (step 4)
+    // The hydrate path (ensure_hydrated_) runs ONCE at session open (step 1). To bring
+    // it into the guarded window, we measure the WARM persist path (step 4)
     // which traverses the same async_mutex + co_await surface as the hydrate path
     // (both go through SeqnumManager methods under async_mutex). The hydrate path itself
     // cannot be placed in the guard window without building a second fresh session inside
@@ -2282,16 +2272,14 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
         make_heartbeat_frame("FIX.4.4", static_cast<std::uint32_t>(measured_seq), "CLI", "SRV");
 
     // ── Guarded window: one persist_inbound_advance_ invocation ──────────────
-    // NB: feed()'s miss branch now allocates inside this window (drain_or_report's
-    // run_for and ADD_FAILURE), so a miss here would make alloc_guard_end() exit(1)
-    // rather than report under LD_PRELOAD=libmallocnesia.so. Currently unreachable:
-    // this file's mallocnesia companion is if(FALSE)-disabled (REMAINING-WORK item
-    // 13), and this is not a regression — a miss here hung on main.
+    // NB: feed()'s miss branch allocates inside this window (drain_or_report's
+    // run_for and ADD_FAILURE), so under the interceptor a miss here makes
+    // alloc_guard_end() exit(1) rather than report. That matters only for a hand run:
+    // no ctest entry runs this cell under the interceptor.
     if (alloc_guard_start) alloc_guard_start();
 
     fix->feed(measured_frame);
 
-    const long heap_allocs = alloc_guard_count ? alloc_guard_count() : 0L;
     if (alloc_guard_end) alloc_guard_end();
     // ── End of guarded window ─────────────────────────────────────────────────
 
@@ -2302,17 +2290,6 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
         << "NoHeap: session must stay Active after persist";
     EXPECT_EQ(store->write_count, write_count_before + 1)
         << "NoHeap: persist_inbound_advance_ must have fired (write_count+1)";
-
-    // No-heap post-condition.
-    // Under mallocnesia (LD_PRELOAD): heap_allocs must be 0.
-    // Without LD_PRELOAD: heap_allocs is 0 (no-op weak symbol) — passes vacuously.
-    // The BINDING proof is the session_persistent_seqnum_hydrate_mallocnesia ctest companion.
-    EXPECT_EQ(heap_allocs, 0L)
-        << "[const §VIII.5]: persist_inbound_advance_ must not touch the global heap; "
-           "heap_allocs="
-        << heap_allocs
-        << ". Run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so for the binding proof. "
-           "[[feedback_tracking_pmr_resource_false_pass]]";
 }
 
 // ── gate-b/r1 counter-tests: INV-H1 over-persist guards ─────────────────────

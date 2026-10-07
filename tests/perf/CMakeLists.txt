@@ -6,12 +6,11 @@
 #   ctest --test-dir build/<preset> -R '^perf_'
 # Registrations are added red-first per TDD ([const §VII.3]) as each seam lands.
 #
-# The mallocnesia interceptor is at tools/mallocnesia/libmallocnesia.so
-# (reference_mallocnesia_path). The harness LD_PRELOADs it at test runtime.
+# A window here is checked under the mallocnesia interceptor only when it is registered
+# through fixpp_add_mallocnesia_test() (cmake/FixppMallocnesia.cmake); the windows that
+# are not say so at their registration below.
 # fixpp_session transitively brings fixpp_core + asio.
 # Uses fixpp_add_store_test from cmake/fixpp_store_test.cmake (included at root).
-# NOTE: LD_PRELOAD wiring for mallocnesia is deferred to D-17 /gate-a re-touch;
-#       this helper does NOT set LD_PRELOAD (see cmake/fixpp_store_test.cmake).
 find_package(GTest CONFIG REQUIRED)
 
 # perf_socket_option_defaults links fixpp_transport, whose TLS impl
@@ -52,20 +51,13 @@ endif()
 
 # ── 008-message-store seam registrations ────────────────────────────────────
 # T050 — seam 14: MemoryStore alloc-guard (SC-007 / FR-027 / [const §VIII.5])
-# Run with:
-#   LD_PRELOAD=tools/mallocnesia/libmallocnesia.so \
-#       build/linux-clang-debug/tests/perf/perf_store_alloc_guard \
-#       --gtest_filter='*Mallocnesia*'
+# ⚠️ Its global-heap claim is NOT CHECKED: no mallocnesia gate is registered for it,
+# because the steady-state store() window allocates (asio coroutine frames through
+# std::aligned_alloc; mechanism: fixpp#544). The base test still
+# runs its counting_resource and functional assertions. To run the window by hand:
+#   GTEST_FILTER='*Mallocnesia*' python3 tools/check_alloc.py \
+#       --binary <build>/bin/perf_store_alloc_guard --mallocnesia <build>/lib/libmallocnesia.so
 fixpp_add_store_test(perf_store_alloc_guard SOURCES test_store_alloc_guard.cpp)
-# D-17 /gate-a re-touch: wire mallocnesia LD_PRELOAD so SC-007 actually fires.
-# Uses APPEND so the TSAN_OPTIONS already set by fixpp_add_store_test is preserved.
-# MALLOCNESIA_MAX_ALLOCS is intentionally unset → default g_max = 0 strict gate.
-# item 13 (2026-06-19): DISABLED base-test LD_PRELOAD — once the markers became
-# interposable this base test FAILS: the steady-state store() window allocates on
-# the global heap (3 allocs; false-green while markers were inert). Re-scoping the
-# window is tracked in parent REMAINING-WORK.md item 13. Base test still runs WITHOUT preload.
-# set_property(TEST perf_store_alloc_guard APPEND PROPERTY
-#     ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
 
 # ── Phase 3a tests (wired by T029): ──────────────────────────────────────────
 
@@ -120,9 +112,12 @@ set_tests_properties(perf_socket_option_defaults PROPERTIES
   LABELS "transport;012;us1;us3;fr029")
 
 # T020 — 013-session-reconnect-binding Phase 3 (RED) — session recovery alloc-guard.
-# Dual-gate: counting_resource (in-band PMR) + mallocnesia LD_PRELOAD (global heap).
 # CTest name: perf_session_recovery_alloc_guard
-# Run with: LD_PRELOAD=tools/mallocnesia/libmallocnesia.so <binary>
+# ⚠️ Only the counting_resource (in-band PMR) half is checked. The global-heap half has
+# no mallocnesia gate: an Active session's inbound path allocates (L-497-1;
+# fixpp#544), so its windows cannot be zero until that is fixed. To run it by hand:
+#   python3 tools/check_alloc.py --binary <build>/bin/perf_session_recovery_alloc_guard \
+#       --mallocnesia <build>/lib/libmallocnesia.so
 add_executable(perf_session_recovery_alloc_guard
   test_session_recovery_alloc_guard.cpp)
 target_link_libraries(perf_session_recovery_alloc_guard PRIVATE
@@ -137,26 +132,3 @@ add_test(NAME perf_session_recovery_alloc_guard
 set_tests_properties(perf_session_recovery_alloc_guard PROPERTIES
   LABELS "session;013;us1;perf;alloc_guard"
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
-# item 13 (2026-06-19): DISABLED base-test LD_PRELOAD — RED: the recovery window
-# (loop of make_heartbeat(...) + feed(...)) allocates on the global heap (message
-# construction in-window; false-green while markers were inert). Tracked: REMAINING-WORK item 13.
-# set_property(TEST perf_session_recovery_alloc_guard APPEND PROPERTY
-#   ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-
-# T020 DUAL gate companion: mallocnesia interception gate.
-# Runs the same binary through check_alloc.py (LD_PRELOAD interception of global
-# malloc) to confirm zero global-heap allocations on the recovery alloc-guard path.
-# Precedent: tls_handshake_alloc_guard_mallocnesia (tests/tls/CMakeLists.txt's mallocnesia gate).
-# [[feedback_tracking_pmr_resource_false_pass]] REQUIRES both gates.
-# item 13 (2026-06-19): DISABLED companion — RED (same allocating recovery window). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
-    add_test(
-        NAME perf_session_recovery_alloc_guard_mallocnesia
-        COMMAND
-            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:perf_session_recovery_alloc_guard>"
-    )
-    set_tests_properties(perf_session_recovery_alloc_guard_mallocnesia PROPERTIES
-        LABELS "session;013;us1;perf;alloc_guard"
-        DEPENDS perf_session_recovery_alloc_guard)
-endif()

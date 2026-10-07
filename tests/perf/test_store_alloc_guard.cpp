@@ -6,38 +6,25 @@
 //
 // Anchor: SC-007 / FR-027 / [const §VIII.5] / reference_mallocnesia_path.
 //
-// Test 1 (MemoryStore):
-// Drives 10⁴ messages through a MemoryStore session-shaped harness and asserts
-// ZERO global-heap new/delete/malloc calls between alloc_guard_start() and
-// alloc_guard_end() (the steady-state store() loop under bounded policy).
+// Test 1 (MemoryStore): drives 10⁴ messages through a MemoryStore session-shaped
+// harness, the steady-state store() loop under bounded policy, inside an
+// alloc_guard window.
 //
-// Test 2 (FileStore::retrieve() — N4 gate):
-// Stores N frames into a FileStore backed by a counting_resource, then calls
-// retrieve() and verifies that (a) ZERO global-heap allocations occur (gate via
-// mallocnesia LD_PRELOAD at ctest level) and (b) all snapshot + frame-read
-// allocations are routed through the store_resource (counting_resource count
-// increases, but no global-heap escapes).
+// Test 2 (FileStore::retrieve() — N4 gate): stores N frames into a FileStore backed by
+// a counting_resource, then calls retrieve() inside an alloc_guard window and checks
+// that the snapshot + frame-read allocations are routed through the store_resource.
 //
-// mallocnesia (tools/mallocnesia/libmallocnesia.so) provides the interceptor
-// via LD_PRELOAD; the weak symbols below are replaced by the shared library at
-// load time. Without LD_PRELOAD the test still executes (counting is a no-op)
-// so it can be run under regular ctest without the preload.
+// ⚠️ The global-heap half of both is NOT CHECKED. SC-007 / FR-027 ask these windows for
+// zero global-heap allocation, but the store paths run asio coroutines whose frames are
+// allocated through std::aligned_alloc (mechanism: fixpp#544), so no
+// mallocnesia gate is registered for this binary. The alloc_guard markers stay so the
+// windows can be run by hand, as tests/perf/CMakeLists.txt shows at this binary's
+// registration.
 //
 // Warm-up rationale (Erratum E-4 / feedback_asio_cancellation_slot_no_allocator_hook):
 // asio's per-thread cancellation recycler may do one global alloc on the FIRST
 // slot assignment per thread. We run WARMUP_ITER store() calls BEFORE the
-// guard window to prime the recycler. The measured window (inside the guard)
-// is steady-state and expected to be ZERO global-heap allocations.
-//
-// check_alloc.py post-link symbol scan:
-//   python3 tools/check_alloc.py \
-//       --binary build/linux-clang-debug/tests/perf/perf_store_alloc_guard \
-//       --module fixpp::session::MemoryStore::store
-//
-// Run with mallocnesia:
-//   LD_PRELOAD=tools/mallocnesia/libmallocnesia.so \
-//       build/linux-clang-debug/tests/perf/perf_store_alloc_guard \
-//       --gtest_filter='*Mallocnesia*'
+// guard window to prime the recycler.
 
 #include <gtest/gtest.h>
 
@@ -62,10 +49,8 @@
 #include <utility>
 #include <vector>
 
-// mallocnesia replaces these weak no-ops with its interceptor scope markers.
-// Without LD_PRELOAD they remain no-ops and the test exercises the logic
-// without the alloc counting (so it passes trivially — the mallocnesia run
-// is the real gate).
+// mallocnesia replaces these weak no-ops with its interceptor scope markers when it
+// is preloaded; no ctest entry preloads it for this binary (see the file header).
 #include "support/alloc_guard_markers.hpp"
 #include "support/temp_dir.hpp"  // replaced a local copy of this helper (#404).
 // NOT byte-identical, and the difference is on disk: the local one prefixed
@@ -161,15 +146,15 @@ public:
 //   4. Call alloc_guard_start().
 //   5. Drive kMeasuredIter store() calls in a BATCH coroutine — a single
 //      co_spawn drives all kMeasuredIter store() calls so the coroutine
-//      infrastructure is warm. Under bounded policy and after warm-up, store()
-//      must make ZERO global-heap allocations (FR-007 / I-10).
+//      infrastructure is warm. (FR-007 / I-10 ask store() for zero global-heap
+//      allocations here; NOT CHECKED, see the file header.)
 //   6. Call alloc_guard_end() — mallocnesia exits(1) if count > 0.
 //
 TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
     // ── Construction (outside guard window) ──────────────────────────────────
 
     // Use bounded policy so the slab is pre-allocated at ctor; store() must
-    // then perform ZERO global-heap allocations (FR-007 / I-10 / SC-007).
+    // need no further slab allocation (FR-007 / I-10 / SC-007).
     // Capacity: warm-up (20) + measured (10,000) + margin (200) iterations,
     // all outbound. max_frame_bytes = 1024 → slab = 10220 × 1 KiB ≈ 10 MiB,
     // well within the 1 GiB engine cap ([2e §1.2]).
@@ -266,13 +251,12 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
 // and the frame-read scratch (retrieve_scratch_) must be routed through the
 // cfg.store_resource (counting_resource here) rather than global new/delete.
 //
-// Gate structure (two layers — must BOTH pass):
+// Gate structure (two layers; only Layer 1 is checked):
 //   Layer 1 — counting_resource: all allocations that DO occur during retrieve()
 //             must go through cfg.store_resource (count increases, but they're
 //             PMR-routed). This is verified by EXPECT_GE(after, baseline).
-//   Layer 2 — mallocnesia LD_PRELOAD (at ctest level): any global-heap escape
-//             from retrieve() causes exit(1) inside alloc_guard_end(). Without
-//             LD_PRELOAD, alloc_guard_start/end are no-ops (test still runs).
+//   Layer 2 — the global-heap half: NOT CHECKED (see the file header). Under a
+//             hand run with the interceptor, an escape exits(1) in alloc_guard_end().
 //
 // Warm-up: one retrieve() run outside the guard window to prime asio's per-thread
 // cancellation recycler (same rationale as store steady-state test above).
