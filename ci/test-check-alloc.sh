@@ -139,6 +139,49 @@ check "T9c the positive control on a shadowed binary names the MARKERS, not the 
   "guard markers did NOT run" -- \
   python3 "$CHECK" --binary "$TMP/shadowed" --mallocnesia "$TMP/libmn.so" --expect-violation
 
+# ── T10: libc's allocator API is COUNTED, entry point by entry point (#497) ─────
+# An aligned allocation — including an over-aligned C++ `new`, which the C++ runtime
+# serves through one of these — must not pass a gate. One arm per hooked entry point
+# (the rule for which are hooked is in tools/mallocnesia/mallocnesia.c's header), each
+# asserting the interceptor names THAT function: a stray malloc elsewhere in the window
+# must not satisfy the memalign arm.
+#
+# reallocarray is deliberately NOT hooked: glibc serves it through the hooked realloc,
+# and its arm is what notices if a libc stops doing so. strdup is outside the allocator
+# API; its arm stands for the functions that allocate as a side effect.
+cat > "$TMP/entry.c" <<'EOF'
+#define _GNU_SOURCE
+#include <malloc.h>
+#include <stdlib.h>
+#include <string.h>
+__attribute__((weak)) void alloc_guard_start(void);
+__attribute__((weak)) void alloc_guard_end(void);
+int main(void){
+  const char *w = getenv("ENTRY_FN"); if (!w) return 2;
+  void *pre = malloc(8);   /* realloc'd INSIDE the window, allocated outside it */
+  void *volatile p = 0; void *q = 0;
+  if(alloc_guard_start) alloc_guard_start();
+  if      (!strcmp(w, "aligned_alloc"))  p = aligned_alloc(64, 64);
+  else if (!strcmp(w, "posix_memalign")) { if (posix_memalign(&q, 64, 64) == 0) p = q; }
+  else if (!strcmp(w, "memalign"))       p = memalign(64, 64);
+  else if (!strcmp(w, "valloc"))         p = valloc(64);
+  else if (!strcmp(w, "pvalloc"))        p = pvalloc(64);
+  else if (!strcmp(w, "reallocarray"))   p = reallocarray(pre, 512, 8);
+  else if (!strcmp(w, "strdup"))         p = strdup("planted");
+  else return 2;
+  if(alloc_guard_end) alloc_guard_end(); return 0; }
+EOF
+"$CC" -O1 -w -o "$TMP/entry" "$TMP/entry.c"
+
+for fn_want in aligned_alloc:aligned_alloc posix_memalign:posix_memalign \
+               memalign:memalign valloc:valloc pvalloc:pvalloc \
+               reallocarray:realloc strdup:malloc; do
+  fn="${fn_want%%:*}"; want="${fn_want#*:}"
+  check "T10 $fn inside the window is counted as $want" 1 \
+    "intercepted $want(" -- \
+    env ENTRY_FN="$fn" python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so"
+done
+
 echo
 echo "test-check-alloc: $pass passed, $fail failed"
 [ "$fail" = 0 ]

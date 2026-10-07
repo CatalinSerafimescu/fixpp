@@ -135,7 +135,7 @@ target_include_directories(test_validate_gate_alloc_guard PRIVATE
 set_target_properties(test_validate_gate_alloc_guard PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-# ── fixpp#448: the POSITIVE CONTROL for the entire mallocnesia population ─────
+# ── fixpp#448: the malloc POSITIVE CONTROL for the mallocnesia population ─────
 # Eighteen gates reporting "no allocations detected" cannot tell a clean tree from a
 # dead interceptor. This one allocates on purpose and must be CAUGHT; if interception
 # silently stops, this is the entry that reddens. Registered on the same lane and in
@@ -150,6 +150,28 @@ fixpp_add_mallocnesia_test(
   TARGET planted_alloc_witness
   EXPECT_VIOLATION
   LABELS "alloc_guard;positive-control;448")
+
+# fixpp#497: one control per hooked entry point other than malloc, plus an over-aligned
+# `new`. The control above plants a malloc, so it vouches for the malloc hook only. Each entry
+# below plants through the entry point its PLANTED_ENTRY names, so a hook that stops
+# counting reddens the entry naming it. tools/check_mallocnesia_population.py declares
+# each control by name. Built only where the gates register: memalign, valloc and
+# pvalloc are glibc functions.
+if(FIXPP_MALLOCNESIA_SUPPORTED)
+  add_executable(planted_entry_witness planted_entry_witness.cpp)
+  target_include_directories(planted_entry_witness PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+  set_target_properties(planted_entry_witness PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  foreach(_plant IN ITEMS aligned_new calloc realloc aligned_alloc posix_memalign memalign
+                          valloc pvalloc)
+    fixpp_add_mallocnesia_test(
+      NAME alloc_guard_${_plant}_positive_control_mallocnesia
+      TARGET planted_entry_witness
+      EXPECT_VIOLATION
+      LABELS "alloc_guard;positive-control;497"
+      ENVIRONMENT "PLANTED_ENTRY=${_plant}")
+  endforeach()
+endif()
 
 add_test(NAME alloc_guard_validate_gate COMMAND test_validate_gate_alloc_guard)
 set_tests_properties(alloc_guard_validate_gate PROPERTIES
@@ -274,8 +296,8 @@ endif()
 # operator-new counter (the plain test) plus mallocnesia. The owned cell is the
 # gate; the borrowed cell is its EXPECT_VIOLATION control (the table copy on the
 # global heap), each selected by GTEST_FILTER. Neither name carries
-# `positive_control`: tools/check_mallocnesia_population.py requires exactly one
-# such label member, and alloc_guard_positive_control_mallocnesia is it.
+# `positive_control`: tools/check_mallocnesia_population.py rejects any label member
+# with that in its name unless its POSITIVE_CONTROLS declares it.
 add_executable(test_reify_owned_alloc_guard test_reify_owned_alloc_guard.cpp)
 target_link_libraries(test_reify_owned_alloc_guard PRIVATE
   fixpp_dictionary

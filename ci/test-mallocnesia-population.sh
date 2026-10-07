@@ -56,11 +56,27 @@ while IFS= read -r _e; do EXTRAS+=("${_e}:mallocnesia"); done < <(
   python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import check_mallocnesia_population as m; print("\n".join(m.DECLARED_EXTRAS))' "$REPO/tools")
 [ "${#EXTRAS[@]}" -gt 0 ] || { echo "FAIL: could not read DECLARED_EXTRAS from the checker"; exit 1; }
 
-# The checker also requires exactly one positive control in the label. Every fixture that
-# is meant to reach the LATER rules needs one, or it fails on this rule first and the arm
-# stops discriminating what it was written for. T4/T5 deliberately omit it — they assert
-# the vacuity rules, which fire before this one matters.
-CONTROL="alloc_guard_positive_control_mallocnesia:mallocnesia"
+# The checker also requires every DECLARED positive control in the label. Every fixture
+# that is meant to reach the LATER rules needs them, or it fails on this rule first and
+# the arm stops discriminating what it was written for. T4/T5 deliberately omit them —
+# they assert the vacuity rules, which fire before this one matters.
+#
+# ⚠️ SPELLED OUT, not derived from the checker (unlike EXTRAS above). The T7 arms assert
+# that each control's absence is reported BY NAME; reading the names from the checker
+# would let a control dropped from its declaration vanish from these arms too.
+CONTROL_NAMES=(
+  alloc_guard_positive_control_mallocnesia
+  alloc_guard_aligned_new_positive_control_mallocnesia
+  alloc_guard_calloc_positive_control_mallocnesia
+  alloc_guard_realloc_positive_control_mallocnesia
+  alloc_guard_aligned_alloc_positive_control_mallocnesia
+  alloc_guard_posix_memalign_positive_control_mallocnesia
+  alloc_guard_memalign_positive_control_mallocnesia
+  alloc_guard_valloc_positive_control_mallocnesia
+  alloc_guard_pvalloc_positive_control_mallocnesia
+)
+CONTROLS=()
+for _c in "${CONTROL_NAMES[@]}"; do CONTROLS+=("$_c:mallocnesia"); done
 
 # T0 — THE REAL TREE. Without this the suite proves only that the checker can say no.
 # Skipped (not failed) when no configured build is present, e.g. on a buildless lane.
@@ -73,15 +89,15 @@ fi
 
 check "T1 a gate missing the label is REPORTED, not tolerated" 1 \
   "do NOT carry the \`mallocnesia\` label" \
-  "$(mk t1 "$CONTROL" "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
+  "$(mk t1 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
 
 check "T2 an UNDECLARED label member fails (the label cannot become a catch-all)" 1 \
   "nor are declared in DECLARED_EXTRAS" \
-  "$(mk t2 "$CONTROL" "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t2 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
 
 check "T3 a STALE declared row fails (a declaration describing nothing)" 1 \
   "no longer carries the label" \
-  "$(mk t3 "$CONTROL" "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
+  "$(mk t3 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
 
 # ⚠️ THE ONE THAT MATTERS. Zero registered gates makes every set comparison trivially
 # true, and `ctest -L mallocnesia --no-tests=error` still exits 0 when ANY label member
@@ -97,23 +113,29 @@ check "T5 ZERO labelled tests is RED (a CI step that would run nothing)" 1 \
 
 check "T6 the happy case passes (the checker is not simply always-RED)" 0 \
   "named gate(s), all labelled" \
-  "$(mk t6 "$CONTROL" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t6 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
 
-# ── T7: the POSITIVE CONTROL's own membership. Codex r1 P2: the floor counts NAMES,
-# and a name is cheap — a decoy satisfies it while a real gate is deleted. The control
-# is the one member whose absence means nobody is checking that interception works, so
-# it is asserted by identity rather than left to arithmetic.
-check "T7a a missing positive control is REJECTED (the floor cannot see this)" 1 \
-  "expected exactly ONE positive control" \
-  "$(mk t7a "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+# ── T7: the POSITIVE CONTROLS' own membership. The floor counts NAMES,
+# and a name is cheap — a decoy satisfies it while a real gate is deleted. A control is
+# a member whose absence means nobody is checking that interception of its entry point
+# works, so each is asserted by identity rather than left to arithmetic.
+# One arm per control, each with every OTHER control present: no control's presence
+# may cover for another's absence, since each vouches for a different entry point.
+for _missing in "${CONTROL_NAMES[@]}"; do
+  _others=()
+  for _c in "${CONTROL_NAMES[@]}"; do [ "$_c" = "$_missing" ] || _others+=("$_c:mallocnesia"); done
+  check "T7a a missing control is rejected BY NAME: $_missing" 1 \
+    "MISSING from the \`mallocnesia\` label: $_missing" \
+    "$(mk "t7a-$_missing" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${_others[@]}" "${EXTRAS[@]}")"
+done
 
-check "T7b TWO positive controls are rejected (ambiguous: which one vouches?)" 1 \
-  "expected exactly ONE positive control" \
-  "$(mk t7b "a_mallocnesia:mallocnesia" "$CONTROL" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+check "T7b an UNDECLARED positive control is rejected (nobody would notice losing it)" 1 \
+  "UNDECLARED positive control(s) in the \`mallocnesia\` label: x_positive_control_mallocnesia" \
+  "$(mk t7b "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
 
 # ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
-out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "$CONTROL" "${EXTRAS[@]}")" --min-gates 5 2>&1)"; rc=$?
-if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 5"; then
+out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 50"; then
   echo "ok    T7c the --min-gates floor fires when the population SHRINKS"; pass=$((pass+1))
 else
   echo "FAIL  T7c floor did not fire: rc=$rc"; echo "$out" | sed 's/^/      /' | head -2; fail=$((fail+1))

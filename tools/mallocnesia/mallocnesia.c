@@ -1,8 +1,29 @@
 /* tools/mallocnesia/mallocnesia.c
  *
  * LD_PRELOAD interceptor for the allocation discipline gate (seam #6).
- * Counts malloc/calloc/realloc calls between alloc_guard_start() and
- * alloc_guard_end() and exits 1 if the count exceeds MALLOCNESIA_MAX_ALLOCS.
+ * Counts calls to libc's heap-allocating entry points between alloc_guard_start()
+ * and alloc_guard_end() and exits 1 if the count exceeds MALLOCNESIA_MAX_ALLOCS.
+ *
+ * WHICH ENTRY POINTS (fixpp#497). The population is libc's allocator API: the exported
+ * functions whose result is new heap memory handed to the caller (malloc.h, stdlib.h).
+ * Each is hooked here unless one of these holds for it:
+ *   - libc serves it through a function hooked here, so it is already counted;
+ *   - no installed header declares it, so ordinary code cannot call it
+ *     (`grep -rn <name> /usr/include`);
+ *   - it returns no new memory.
+ * To re-derive the set for a libc, list its exports (`nm -D --defined-only <libc.so>`)
+ * and decide each against the rule. Every hooked function, and every one left unhooked
+ * on the first ground, needs an arm in ci/test-check-alloc.sh's T10, which calls it in a
+ * window and requires the interceptor to name the function that counted it: the first
+ * ground is a fact about one libc's internals, and the arm is what notices when it
+ * stops holding. Every hooked function also needs a positive control in the gate
+ * population (tests/alloc_guard/planted_entry_witness.cpp, declared in
+ * tools/check_mallocnesia_population.py): this file is built without coverage
+ * instrumentation, so those controls are what show each hook runs on a CI lane.
+ * Functions OUTSIDE the API that allocate as a side effect (strdup,
+ * asprintf, ...) are counted through whichever hook they reach; T10's strdup arm is a
+ * representative of that class, not a census of it. The aligned hooks matter to C++:
+ * an over-aligned `new` reaches libc through one of them, not through malloc.
  *
  * Build:  it is a CMake target — `cmake --build <dir> --target mallocnesia` builds it,
  *         and an ordinary build of the test tree builds it anyway. The artifact lands at
@@ -22,8 +43,10 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,14 +56,24 @@ typedef void *(*malloc_fn)(size_t);
 typedef void  (*free_fn)(void *);
 typedef void *(*calloc_fn)(size_t, size_t);
 typedef void *(*realloc_fn)(void *, size_t);
+typedef void *(*aligned_fn)(size_t, size_t);   /* aligned_alloc, memalign */
+typedef int   (*posix_memalign_fn)(void **, size_t, size_t);
+typedef void *(*page_fn)(size_t);              /* valloc, pvalloc */
 
 static malloc_fn  real_malloc;
 static free_fn    real_free;
 static calloc_fn  real_calloc;
 static realloc_fn real_realloc;
+static aligned_fn        real_aligned_alloc;
+static aligned_fn        real_memalign;
+static posix_memalign_fn real_posix_memalign;
+static page_fn           real_valloc;
+static page_fn           real_pvalloc;
 
-/* dlsym calls calloc internally before real_calloc is resolved.
- * Serve those early calls from a static buffer to break the cycle. */
+/* If dlsym allocates (through calloc) while resolve_fns() is running, real_calloc is
+ * not yet resolved and resolving it again would recurse; such a call is served from
+ * this static buffer instead. Whether any libc's dlsym does so is a property of that
+ * libc, so the route is kept, and runs only under that condition. */
 static char   bootstrap[8192];
 static size_t bootstrap_pos;
 static int    bootstrap_done;  /* set to 1 after dlsym calls complete */
@@ -52,12 +85,52 @@ static long         g_max;     /* from MALLOCNESIA_MAX_ALLOCS env var */
 /* Per-thread flag to avoid re-entering our hook from fprintf inside the hook */
 static __thread int g_in_hook;
 
+/* POSIX guarantees that a dlsym() result converts to a function pointer; ISO C does
+ * not, and gcc -Wpedantic rejects the cast. So the bits are copied instead (the POSIX
+ * dlsym() example writes through a `void **` alias for the same reason). */
+#define RESOLVE(var, name)                                   \
+    do {                                                     \
+        void *sym_ = dlsym(RTLD_NEXT, name);                 \
+        memcpy(&(var), &sym_, sizeof(var));                  \
+    } while (0)
+
 static void resolve_fns(void) {
-    real_malloc  = (malloc_fn) dlsym(RTLD_NEXT, "malloc");
-    real_calloc  = (calloc_fn) dlsym(RTLD_NEXT, "calloc");
-    real_realloc = (realloc_fn)dlsym(RTLD_NEXT, "realloc");
-    real_free    = (free_fn)   dlsym(RTLD_NEXT, "free");
+    RESOLVE(real_malloc,         "malloc");
+    RESOLVE(real_calloc,         "calloc");
+    RESOLVE(real_realloc,        "realloc");
+    RESOLVE(real_free,           "free");
+    RESOLVE(real_aligned_alloc,  "aligned_alloc");
+    RESOLVE(real_memalign,       "memalign");
+    RESOLVE(real_posix_memalign, "posix_memalign");
+    RESOLVE(real_valloc,         "valloc");
+    RESOLVE(real_pvalloc,        "pvalloc");
     bootstrap_done = 1;
+}
+
+/* The aligned hooks' share of the calloc bootstrap below, under the same condition: a
+ * call that arrives before resolve_fns() has finished must not call resolve_fns()
+ * again, so it is served from the static buffer, aligned as asked. free() already
+ * ignores pointers into that buffer. */
+static void *bootstrap_aligned(size_t align, size_t size) {
+    if (align == 0 || (align & (align - 1)) != 0) return NULL;
+    uintptr_t base  = (uintptr_t)bootstrap;
+    uintptr_t start = (base + bootstrap_pos + align - 1) & ~(uintptr_t)(align - 1);
+    if (start - base > sizeof(bootstrap) || size > sizeof(bootstrap) - (start - base))
+        return NULL;
+    bootstrap_pos = (size_t)(start - base) + size;
+    return (void *)start;
+}
+
+/* One count, one line on stderr naming the function: ci/test-check-alloc.sh reads the
+ * name back, so a window's allocation is attributed to the entry point that made it. */
+static void count_aligned(const char *fn, size_t align, size_t size) {
+    if (atomic_load(&g_active) && !g_in_hook) {
+        g_in_hook = 1;
+        long n = atomic_fetch_add(&g_count, 1) + 1;
+        fprintf(stderr, "[mallocnesia] intercepted %s(%zu, %zu) — call #%ld\n",
+                fn, align, size, n);
+        g_in_hook = 0;
+    }
 }
 
 /* fixpp#448: PROOF OF INTERCEPTION.
@@ -182,4 +255,42 @@ void *realloc(void *ptr, size_t size) {
         g_in_hook = 0;
     }
     return real_realloc(ptr, size);
+}
+
+/* --- Aligned and page-aligned hooks (fixpp#497) --- */
+
+void *aligned_alloc(size_t align, size_t size) {
+    if (!bootstrap_done) return bootstrap_aligned(align, size);
+    count_aligned("aligned_alloc", align, size);
+    return real_aligned_alloc(align, size);
+}
+
+void *memalign(size_t align, size_t size) {
+    if (!bootstrap_done) return bootstrap_aligned(align, size);
+    count_aligned("memalign", align, size);
+    return real_memalign(align, size);
+}
+
+int posix_memalign(void **memptr, size_t align, size_t size) {
+    if (!bootstrap_done) {
+        void *p = bootstrap_aligned(align, size);
+        if (!p) return ENOMEM;
+        *memptr = p;
+        return 0;
+    }
+    count_aligned("posix_memalign", align, size);
+    return real_posix_memalign(memptr, align, size);
+}
+
+/* valloc/pvalloc take no alignment argument; the page size is the alignment. */
+void *valloc(size_t size) {
+    if (!bootstrap_done) return bootstrap_aligned((size_t)sysconf(_SC_PAGESIZE), size);
+    count_aligned("valloc", (size_t)sysconf(_SC_PAGESIZE), size);
+    return real_valloc(size);
+}
+
+void *pvalloc(size_t size) {
+    if (!bootstrap_done) return bootstrap_aligned((size_t)sysconf(_SC_PAGESIZE), size);
+    count_aligned("pvalloc", (size_t)sysconf(_SC_PAGESIZE), size);
+    return real_pvalloc(size);
 }
