@@ -1610,7 +1610,6 @@ TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent) {
     const auto& diags = result.error();
 
     // Find the password diagnostic.
-    using RC = fixpp::config::reason_class;
     auto it = std::ranges::find_if(diags, [](const fixpp::config::LoadDiagnostic& d) {
         return d.key_path == "session[0].password";
     });

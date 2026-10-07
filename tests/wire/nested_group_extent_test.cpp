@@ -12,13 +12,12 @@
 // group_member_fn_t copy, make_raw_frame, Parser<Index>{dict}).
 //
 // RED-proof (T019, recorded in the 063 Phase-4 phase-implementer report):
-//   git checkout 88ad2763~1 -- src/wire/offset_table.cpp \
-//       include/fixpp/wire/offset_table.hpp
-//   cmake --build build/linux-clang-debug -j2 && \
-//       ctest --test-dir build/linux-clang-debug -R wire_nested_group_extent_test \
-//       --output-on-failure
-//   git checkout 88ad2763 -- src/wire/offset_table.cpp \
-//       include/fixpp/wire/offset_table.hpp
+// clang-format off
+//   git checkout 88ad2763~1 -- src/wire/offset_table.cpp include/fixpp/wire/offset_table.hpp  # claim-ok: recipe input commit
+//   cmake --build build/linux-clang-debug -j2 &&
+//       ctest --test-dir build/linux-clang-debug -R wire_nested_group_extent_test --output-on-failure
+//   git checkout 88ad2763 -- src/wire/offset_table.cpp include/fixpp/wire/offset_table.hpp  # claim-ok: recipe input commit
+// clang-format on
 // reverts to the pre-063 flat `seen_in_instance` walk, under which
 // MultiEntryNestedExtentGuard fails (the outer extent truncates at the 2nd
 // nested entry).

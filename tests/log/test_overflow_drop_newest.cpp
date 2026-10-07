@@ -315,7 +315,7 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain) {
     //   read_sequence_ advances AFTER emit() returns.
 
     // Check drop_count before unblocking the drain.
-    auto const drops_before_resume = logger->drop_count();
+    [[maybe_unused]] auto const drops_before_resume = logger->drop_count();
 
     // Unblock the drain.
     exact_sink_raw->may_proceed.store(true, std::memory_order_release);

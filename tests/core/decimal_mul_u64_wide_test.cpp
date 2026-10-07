@@ -50,7 +50,7 @@ namespace {
 // src/core/decimal.cpp's mul_u64_wide.
 inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b, std::uint64_t* hi) noexcept {
 #if defined(__SIZEOF_INT128__) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
-    unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
+    __extension__ unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
     *hi = static_cast<std::uint64_t>(p >> 64);
     return static_cast<std::uint64_t>(p);
 #elif defined(_MSC_VER) && defined(_M_X64) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
@@ -121,7 +121,7 @@ struct WideProduct {
 WideProduct golden_wide_mul(std::uint64_t a, std::uint64_t b) {
     WideProduct r;
 #if defined(__SIZEOF_INT128__)
-    unsigned __int128 g = static_cast<unsigned __int128>(a) * b;
+    __extension__ unsigned __int128 g = static_cast<unsigned __int128>(a) * b;
     r.hi = static_cast<std::uint64_t>(g >> 64);
     r.lo = static_cast<std::uint64_t>(g);
 #elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))

@@ -72,7 +72,7 @@ std::vector<std::byte> frame_from_body(std::string_view begin_string, const std:
 }
 
 // Does any captured frame contain a literal needle (e.g., "7=2\x01")?
-bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
+[[maybe_unused]] bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
     for (const auto& f : cap.frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
         if (wire.contains(std::string(needle))) {

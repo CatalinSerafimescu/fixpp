@@ -30,14 +30,14 @@
 // is steady-state and expected to be ZERO global-heap allocations.
 //
 // check_alloc.py post-link symbol scan:
-//   python3 tools/check_alloc.py \
-//       --binary build/linux-clang-debug/tests/perf/perf_store_alloc_guard \
-//       --module fixpp::session::MemoryStore::store
+// clang-format off
+//   python3 tools/check_alloc.py --binary build/linux-clang-debug/tests/perf/perf_store_alloc_guard --module fixpp::session::MemoryStore::store
+// clang-format on
 //
 // Run with mallocnesia:
-//   LD_PRELOAD=tools/mallocnesia/libmallocnesia.so \
-//       build/linux-clang-debug/tests/perf/perf_store_alloc_guard \
-//       --gtest_filter='*Mallocnesia*'
+// clang-format off
+//   LD_PRELOAD=tools/mallocnesia/libmallocnesia.so build/linux-clang-debug/tests/perf/perf_store_alloc_guard --gtest_filter='*Mallocnesia*'
+// clang-format on
 
 #include <gtest/gtest.h>
 

@@ -21,8 +21,9 @@
 // [[feedback_asio_cancellation_slot_no_allocator_hook]]).
 //
 // Run:
-//   LD_PRELOAD=tools/mallocnesia/libmallocnesia.so \
-//       build/linux-clang-debug/tests/perf/perf_transport_read_alloc_guard
+// clang-format off
+//   LD_PRELOAD=tools/mallocnesia/libmallocnesia.so build/linux-clang-debug/tests/perf/perf_transport_read_alloc_guard
+// clang-format on
 //
 // Phase 3a — DISABLED tests require asio_tls_transport (T026).
 // The mallocnesia weak-symbol stubs + counting_resource harness compile NOW.

@@ -107,10 +107,20 @@ void* operator new[](std::size_t size) {
     return p;
 }
 
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new;
+// it cannot see that the replacement operator new above allocates with
+// std::malloc, so the matching std::free below is flagged although it is correct.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #endif  // !FIXPP_SANITIZER_REPLACES_NEW
 
 namespace {

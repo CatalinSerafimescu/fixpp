@@ -120,7 +120,7 @@ TEST(SeamRaceCancelPreDrain, ThreeWaitersOneRacingCancel) {
         // unlock via guard dtor.
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         if (r.has_value()) {
@@ -203,7 +203,7 @@ TEST(SeamRaceCancelPreDrain, StressSimultaneousCancelAndDrain) {
         // unlock.
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         if (r.has_value()) {
@@ -279,7 +279,7 @@ TEST(SeamRaceCancelPreDrain, MutexFreeAfterRace) {
         co_await yield_n(N);
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         (void)r;

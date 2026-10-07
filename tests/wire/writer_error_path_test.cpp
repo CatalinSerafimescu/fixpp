@@ -47,8 +47,6 @@ namespace {
 using fixpp::core::error;
 using fixpp::wire::Writer;
 
-constexpr char soh = '\x01';
-
 // Helper: bytes of a string literal.
 std::vector<std::byte> bv(std::string_view s) {
     std::vector<std::byte> out(s.size());

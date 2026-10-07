@@ -86,9 +86,6 @@ Certificate make_valid_ecdsa_cert(std::chrono::system_clock::time_point now) {
     return cert;
 }
 
-// Const storage buffer for DER (test lifetime).
-std::array<std::byte, 512> g_der_buf{};
-
 }  // namespace
 
 // ── 1: tls_cert_load_failed (slot 78) ────────────────────────────────────────

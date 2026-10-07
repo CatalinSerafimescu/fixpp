@@ -167,7 +167,7 @@ TEST(SeamResidualCancelGraceful, CancelBeforeHolderReleasesRaceWithDrain) {
         // unlock here.
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         if (r.has_value()) {
@@ -222,7 +222,7 @@ TEST(SeamResidualCancelGraceful, MutexFreeAfterAllResidualsCancelled) {
         // unlock.
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         if (!r.has_value()) aborted.fetch_add(1, std::memory_order_acq_rel);

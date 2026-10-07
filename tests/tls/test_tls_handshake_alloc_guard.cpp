@@ -15,8 +15,9 @@
 //   - Pinset::snapshot()   — acquire-load only.
 //
 // Run manually with mallocnesia:
-//   python3 tools/check_alloc.py \
-//       --binary build/linux-clang-debug/bin/test_tls_handshake_alloc_guard
+// clang-format off
+//   python3 tools/check_alloc.py --binary build/linux-clang-debug/bin/test_tls_handshake_alloc_guard
+// clang-format on
 //
 // mallocnesia replaces the weak alloc_guard_{start,end} symbols with its
 // interceptor scope markers. Under normal CTest the weak no-ops fire —

@@ -6,8 +6,7 @@
 // new/delete/malloc on the 005-specific hot paths (SC-009 / I-7 / FR-015).
 //
 // Run under mallocnesia via tools/check_alloc.py:
-//   python3 tools/check_alloc.py \
-//       --binary build/linux-clang-debug/bin/test_session_alloc_guard
+//   python3 tools/check_alloc.py --binary build/linux-clang-debug/bin/test_session_alloc_guard
 //
 // Coverage scope — the THREE 005-owned hot paths from data-model.md / plan.md
 // "Constraints" §1 (inbound-dispatch / timer-fire / seqnum) decompose as:

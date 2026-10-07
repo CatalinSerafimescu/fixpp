@@ -176,23 +176,30 @@ TEST(LoadHappyPath, T011_FieldForFieldEquivalence) {
 
     // ── Credentials ──────────────────────────────────────────────────────────
     EXPECT_TRUE(cfg.username.has_value());
-    if (cfg.username.has_value()) EXPECT_EQ(*cfg.username, "user42");
+    if (cfg.username.has_value()) {
+        EXPECT_EQ(*cfg.username, "user42");
+    }
 
     EXPECT_TRUE(cfg.password.has_value());
-    if (cfg.password.has_value()) EXPECT_EQ(*cfg.password, "s3cr3t");
+    if (cfg.password.has_value()) {
+        EXPECT_EQ(*cfg.password, "s3cr3t");
+    }
 
     // ── Timing / thresholds ───────────────────────────────────────────────────
     EXPECT_TRUE(cfg.heartbeat_interval.has_value());
-    if (cfg.heartbeat_interval.has_value())
+    if (cfg.heartbeat_interval.has_value()) {
         EXPECT_EQ(*cfg.heartbeat_interval, std::chrono::seconds{30});
+    }
 
     EXPECT_TRUE(cfg.test_request_threshold.has_value());
-    if (cfg.test_request_threshold.has_value())
+    if (cfg.test_request_threshold.has_value()) {
         EXPECT_EQ(*cfg.test_request_threshold, std::chrono::milliseconds{15000});
+    }
 
     EXPECT_TRUE(cfg.sending_time_threshold.has_value());
-    if (cfg.sending_time_threshold.has_value())
+    if (cfg.sending_time_threshold.has_value()) {
         EXPECT_EQ(*cfg.sending_time_threshold, std::chrono::milliseconds{5000});
+    }
 
     EXPECT_EQ(cfg.logout_disconnect_timeout_ms, std::uint32_t{5000});  // default 2000
 

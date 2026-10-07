@@ -201,7 +201,7 @@ TEST(SeamRaceMultiCancel, ThirtyTwoWaitersLargeList) {
         co_await yield_n(N * 2);
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         if (r.has_value()) {
@@ -278,7 +278,7 @@ TEST(SeamRaceMultiCancel, NewAcquireSucceedsAfterAllCancelled) {
         co_await yield_n(N * 2);
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         (void)r;

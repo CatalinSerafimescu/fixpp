@@ -64,7 +64,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
     return out;
 }
 
-std::vector<std::byte> make_checked_frame(std::string_view body) {
+[[maybe_unused]] std::vector<std::byte> make_checked_frame(std::string_view body) {
     std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
                       std::string(body);
     unsigned sum = 0;
@@ -1223,19 +1223,14 @@ TEST(MessageRead, NullOutPointerAllAccessors) {
     EXPECT_EQ(fixpp_msg_get_bytes(h.ptr(), 49, nullptr, &len), FIXPP_ERR_NULL_HANDLE);
     EXPECT_EQ(fixpp_msg_get_bytes(h.ptr(), 49, &bp, nullptr), FIXPP_ERR_NULL_HANDLE);
 
-    int64_t iv = 0;
     EXPECT_EQ(fixpp_msg_get_int(h.ptr(), 34, nullptr), FIXPP_ERR_NULL_HANDLE);
 
-    double dv = 0.0;
     EXPECT_EQ(fixpp_msg_get_double(h.ptr(), 44, nullptr), FIXPP_ERR_NULL_HANDLE);
 
-    fixpp_decimal_t dec{};
     EXPECT_EQ(fixpp_msg_get_decimal(h.ptr(), 44, nullptr), FIXPP_ERR_NULL_HANDLE);
 
-    bool present = false;
     EXPECT_EQ(fixpp_msg_has_tag(h.ptr(), 49, nullptr), FIXPP_ERR_NULL_HANDLE);
 
-    fixpp_resolved_msg_version_t ver{};
     EXPECT_EQ(fixpp_msg_version(h.ptr(), nullptr), FIXPP_ERR_NULL_HANDLE);
 
     const char* sv = nullptr;
@@ -1256,8 +1251,6 @@ TEST(MessageRead, GroupNullHandleAllAccessors) {
     size_t svlen = 0;
     EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, &sv, &svlen), FIXPP_ERR_NULL_HANDLE);
 
-    const uint8_t* bv = nullptr;
-    size_t blen = 0;
     // v_out and len_out null checks for string
     EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, nullptr, &svlen),
               FIXPP_ERR_NULL_HANDLE);

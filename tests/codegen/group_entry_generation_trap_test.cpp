@@ -55,7 +55,7 @@
 namespace {
 
 // Build a well-formed FIX frame: "8=FIX.4.4<SOH> 9=<len><SOH> <body> 10=<chk><SOH>"
-std::vector<std::byte> make_frame(std::string_view body) {
+[[maybe_unused]] std::vector<std::byte> make_frame(std::string_view body) {
     std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
                       std::string(body);
     unsigned sum = 0;
@@ -73,7 +73,7 @@ std::vector<std::byte> make_frame(std::string_view body) {
 // Same hand-built MassQuote group membership as
 // tests/codegen/nested_group_read_test.cpp's make_correct_massquote_dict(),
 // trimmed to what this witness needs (no Legs(555) descent required).
-fixpp::dict::table_view make_massquote_dict() {
+[[maybe_unused]] fixpp::dict::table_view make_massquote_dict() {
     fixpp::dict::table_view_builder b;
     b.add_group_member(296, 302)      // QuoteSetID
         .add_group_member(296, 295)   // NoQuoteEntries (nested group's own count field)
