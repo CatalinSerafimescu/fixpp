@@ -1632,8 +1632,8 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
 namespace {
 // The one narrow-to-wide conversion for a store path. open_log and the reset worker
 // both take their wide paths from it, so a reset renames onto the file the store
-// opened (093 Gate B, fixpp#554). A byte-wise widening does not decode a byte >= 0x80
-// the way std::filesystem::path does, so it named a different file.
+// opened (093 Gate B, fixpp#554). A byte-wise widening decodes a byte >= 0x80
+// differently from std::filesystem::path, and so names a different file.
 std::wstring store_wide_path(const std::string& narrow) {
     return std::filesystem::path(narrow).wstring();
 }

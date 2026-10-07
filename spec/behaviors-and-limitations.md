@@ -1456,17 +1456,16 @@ the correct deliberate-divergence statement matching `specs/035-filestore-io-off
 the current store until process restart.** During `reset()` (and `reset_to()`, which runs the same
 body), the live log is atomically replaced by a fresh log via `rename(tmp, live)`. If any step after
 the rename fails — the parent-directory `open()` or `fsync()` (POSIX), the `FlushFileBuffers` on
-the renamed file (Windows), or the `open()`/`try_lock()` of the newly-named file (e.g., fd-limit exhaustion, an I/O error, a permission race) — the old fd
-names a now-unlinked inode; to avoid writing frames that would vanish on restart, the store **fails
+the renamed file (Windows), or the `open()`/`try_lock()` of the newly-named file (e.g., fd-limit
+exhaustion, an I/O error, a permission race) — the old fd names a now-unlinked inode; to avoid writing frames that would vanish on restart, the store **fails
 closed**: the reset returns `store_io_failure`, the store releases the stale fd, sets
 `open_ok = false`, and all further ops (`store`/`next_seqnum`/`retrieve`/`reset`/`reset_to`) return
 `store_io_failure`. The only recovery is to **restart the process**: on restart,
 `FileStoreFactory::make()` reopens the live log, which after a clean process exit is the fresh one;
 if the directory sync did not complete and the OS also crashed, it may be the old one, and either is
 a coherent log. Operators with aggressive fd-limit settings who observe `store_io_failure` after a
-session reset should check `RLIMIT_NOFILE`. *(035 R#A.1; FR-010; 093 FR-040 (fixpp#554 widened the
-scope from the reopen/lock to every step after the rename); the post-rename poison branch of
-`reset_store_to` in `src/session/file_store.cpp`; witnesses
+session reset should check `RLIMIT_NOFILE`. *(035 R#A.1; FR-010; 093 FR-040; the post-rename
+poison branch of `reset_store_to` in `src/session/file_store.cpp`; witnesses
 `FileStoreCancellationTest.Reset_PostRenameReopenFail_PoisonsStore_NoSilentLossAfterRestart`,
 `FileStoreResetTo.Q29_ADirectoryOpenFaultAfterTheRenamePoisonsTheStore`,
 `FileStoreResetTo.Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore`,
