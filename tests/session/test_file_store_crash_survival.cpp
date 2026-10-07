@@ -41,6 +41,7 @@
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fstream>
 #include <memory>
+#include <string_view>
 #include <utility>
 #include <vector>
 #ifdef _WIN32
@@ -344,10 +345,11 @@ struct DurableCounters {
 };
 
 std::unique_ptr<fixpp::session::MessageStore> open_store(const fs::path& dir,
-                                                         asio::thread_pool& pool) {
+                                                         asio::thread_pool& pool,
+                                                         std::string_view sender = "SENDER",
+                                                         std::string_view target = "TARGET") {
     FileStoreFactory factory{make_file_config(dir, pool.get_executor())};
-    auto minted =
-        factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
+    auto minted = factory.make(sender, target, nullptr, 1024 * 1024 * 1024, pool.get_executor());
     if (!minted) return nullptr;
     return std::move(*minted);
 }
@@ -367,8 +369,10 @@ DurableCounters read_counters(fixpp::session::MessageStore& store, asio::thread_
 
 // A fresh store over `dir`, then advanced to NextNumIn 4, NextNumOut 6.
 std::unique_ptr<fixpp::session::MessageStore> open_advanced(const fs::path& dir,
-                                                            asio::thread_pool& pool) {
-    auto store = open_store(dir, pool);
+                                                            asio::thread_pool& pool,
+                                                            std::string_view sender = "SENDER",
+                                                            std::string_view target = "TARGET") {
+    auto store = open_store(dir, pool, sender, target);
     if (!store) return nullptr;
     run_on(pool, [&]() -> asio::awaitable<void> {
         for (auto const& step : make_store_script(5, direction_t::outbound)) {
@@ -631,5 +635,58 @@ TEST(FileStoreResetTo, Q29_Control_AResetToWithNoFaultLeavesTheStoreWritable) {
     reopened = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
+
+#ifdef _WIN32
+// ── One store path conversion on Windows (093 Gate B, fixpp#554) ─────────────
+//
+// The reset must rename onto the file the factory opened when the store path holds a
+// byte >= 0x80, and leave no second log beside it. The CompID's "\xC3\xA9" is valid
+// in a single-byte code page and in UTF-8, so the factory can open it under either.
+constexpr std::string_view kNonAsciiSender = "SENDER\xC3\xA9";
+
+// Advances a store over `store_dir` with the non-ASCII CompID, runs reset_to(2, 1),
+// and checks a restart reads the targets from the only log in `store_dir`.
+// `cleanup_dir` is removed at the end.
+void expect_reset_to_reaches_the_opened_log(const fs::path& store_dir,
+                                            const fs::path& cleanup_dir) {
+    asio::thread_pool pool{2};
+    auto store = open_advanced(store_dir, pool, kNonAsciiSender);
+    ASSERT_NE(store, nullptr) << "a CompID with a byte >= 0x80 must open";
+    ASSERT_EQ(read_counters(*store, pool), kAdvanced) << "setup";
+    auto r = run_on(pool, [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+        co_return co_await store->reset_to(2, 1);
+    });
+    EXPECT_TRUE(r.has_value()) << "reset_to(2, 1)";
+    store = nullptr;
+
+    auto reopened = open_store(store_dir, pool, kNonAsciiSender);
+    ASSERT_NE(reopened, nullptr) << "restart: re-open failed";
+    EXPECT_EQ(read_counters(*reopened, pool), (DurableCounters{.in = 2, .out = 1}))
+        << "a restart must read the reset's targets from the log the factory opens";
+    reopened = nullptr;
+
+    std::size_t logs = 0;
+    std::size_t tmps = 0;
+    for (auto const& entry : fs::directory_iterator(store_dir)) {
+        if (entry.path().extension() == L".log") ++logs;
+        if (entry.path().extension() == L".tmp") ++tmps;
+    }
+    EXPECT_EQ(logs, 1u) << "the reset must not leave a second log beside the store's";
+    EXPECT_EQ(tmps, 0u) << "the reset must not leave its temp log behind";
+    fixpp::store_test::remove_store_dir(cleanup_dir);
+}
+
+TEST(FileStoreResetTo, Q29_ANonAsciiCompIdResetsTheLogTheFactoryOpened) {
+    auto dir = unique_store_dir("reset_to_non_ascii_compid");
+    expect_reset_to_reaches_the_opened_log(dir, dir);
+}
+
+TEST(FileStoreResetTo, Q29_ANonAsciiDirectoryResetsTheLogTheFactoryOpened) {
+    auto base = unique_store_dir("reset_to_non_ascii_dir");
+    auto const dir = base / fs::path(L"store_\u00E9");
+    fs::create_directories(dir);
+    expect_reset_to_reaches_the_opened_log(dir, base);
+}
+#endif  // _WIN32
 
 }  // namespace

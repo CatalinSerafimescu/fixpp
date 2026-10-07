@@ -1630,6 +1630,14 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
 
 #ifdef _WIN32
 namespace {
+// The one narrow-to-wide conversion for a store path. open_log and the reset worker
+// both take their wide paths from it, so a reset renames onto the file the store
+// opened (093 Gate B, fixpp#554). A byte-wise widening does not decode a byte >= 0x80
+// the way std::filesystem::path does, so it named a different file.
+std::wstring store_wide_path(const std::string& narrow) {
+    return std::filesystem::path(narrow).wstring();
+}
+
 // Atomic replace-over-open-file via POSIX-semantics rename (Win10 1607+ /
 // Server 2016+). MoveFileEx(REPLACE_EXISTING) FAILS when the destination still
 // has a live handle: even with FILE_SHARE_DELETE the delete is only marked
@@ -1893,8 +1901,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
 #else
                 // ── Windows atomic-rename path ────────────────────────────────────
                 const std::string tmp_path = path + ".reset.tmp";
-                std::wstring wide_tmp(tmp_path.begin(), tmp_path.end());
-                std::wstring wide_live(path.begin(), path.end());
+                const std::wstring wide_tmp = store_wide_path(tmp_path);
+                const std::wstring wide_live = store_wide_path(path);
 
                 OsFile tmp_file;
                 if (!tmp_file.open_wronly_creat(wide_tmp.c_str())) {
@@ -2135,11 +2143,10 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_clos
 // ── FileStore::open_log() — internal open called from FileStoreFactory::make() ─
 
 bool FileStore::open_log(const std::string& log_path) noexcept {
-    // Win32 OsFile::open takes a wide path (CreateFileW); convert via
-    // std::filesystem::path. The other Win32 open callers (in the #else branch of
-    // the reset logic) already pass wide strings; this common caller did not.
+    // Win32 OsFile::open takes a wide path (CreateFileW); convert through
+    // store_wide_path, the conversion the reset worker also uses.
 #ifdef _WIN32
-    if (!impl_->file.open(std::filesystem::path(log_path).wstring().c_str())) return false;
+    if (!impl_->file.open(store_wide_path(log_path).c_str())) return false;
 #else
     if (!impl_->file.open(log_path.c_str())) return false;
 #endif
