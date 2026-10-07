@@ -41,7 +41,7 @@ struct alignas(2 * __STDCPP_DEFAULT_NEW_ALIGNMENT__) over_aligned {
     std::byte bytes[2 * __STDCPP_DEFAULT_NEW_ALIGNMENT__];
 };
 static_assert(alignof(over_aligned) > __STDCPP_DEFAULT_NEW_ALIGNMENT__,
-              "must select the align_val_t overload of operator new");
+              "aligned_new must stand for an over-aligned type");
 
 enum class plant {
     aligned_new,
@@ -78,9 +78,11 @@ bool select(const char* name, plant& out) {
     return false;
 }
 
-// Every pointer escapes through a volatile object, so no compiler may elide the
-// allocation: an elided one would leave the window empty, and the control would pass
-// while proving nothing.
+// Every plant is a direct call to the allocation function, and its pointer escapes
+// through a volatile object. A new-expression would not do for aligned_new: the
+// standard lets an implementation omit the allocation a new-expression makes, whatever
+// happens to the pointer, so the plant calls `::operator new` itself. An omitted
+// allocation would leave the window empty, and the wrapper would fail the control.
 //
 // The raw allocation calls ARE the plant, so the ownership/RAII checks are off here, and
 // so is concurrency-mt-unsafe (it lists valloc; this binary has one thread).
@@ -88,8 +90,9 @@ bool select(const char* name, plant& out) {
 void plant_one(plant which, void* before_window) {
     switch (which) {
         case plant::aligned_new: {
-            over_aligned* volatile p = new over_aligned;
-            delete p;
+            constexpr std::align_val_t align{alignof(over_aligned)};
+            void* volatile p = ::operator new(sizeof(over_aligned), align);
+            ::operator delete(p, align);
             break;
         }
         case plant::calloc: {
