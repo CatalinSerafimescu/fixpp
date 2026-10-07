@@ -213,6 +213,11 @@ set_target_properties(fixpp_py PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
+# #481: the only TU this target compiles is SWIG's generated wrapper — code
+# this project does not author, so a warning in it is not fixable at the site.
+set_property(TARGET fixpp_py PROPERTY
+  FIXPP_COMMON_FLAGS_EXEMPT "SWIG-generated wrapper: its only TU is third-party-generated code (#481)")
+
 # ── T006 / D-4 / LAY-1 — FLAT install layout ────────────────────────────────
 # Ship _fixpp.so + fixpp.py + fixpp_oo.py + fixpp_dict_data.py + the _fixpp_data
 # package at the site-packages ROOT (flat top-level modules), fixing the latent

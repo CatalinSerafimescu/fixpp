@@ -16,10 +16,6 @@
 # is a host-build-tool-only declaration-order re-walk of the same file, never
 # reaching the shipped runtime surface. fixpp_dictionary's own pugixml link is
 # PRIVATE and does NOT propagate transitively, so this tool needs its own.
-#
-# Exceptions are ENABLED here (XmlLoader::load throws on bad XML — [arch §5.3]);
-# cmake/Helpers.cmake's fixpp_apply_common_flags (-fno-exceptions) is
-# deliberately NOT applied to this host tool.
 
 add_executable(fixpp-codegen
   main.cpp
@@ -50,10 +46,6 @@ target_link_libraries(fixpp-codegen PRIVATE fixpp::dictionary)
 # installed, zero ABI surface.
 find_package(pugixml CONFIG REQUIRED)
 target_link_libraries(fixpp-codegen PRIVATE pugixml::pugixml)
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(fixpp-codegen PRIVATE -Wall -Wextra -Wpedantic)
-endif()
 
 # Build-only: explicitly excluded from install() (the top-level install()
 # ships include/ only; this target is never an install component).
