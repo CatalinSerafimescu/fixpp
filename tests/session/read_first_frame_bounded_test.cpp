@@ -1440,3 +1440,113 @@ TEST(DeadlineAfter, H7_ASumOneNanosecondPastMaxSaturatesAtMax) {
     auto const now = steady_time_point::max() - u32_max_ms() + std::chrono::nanoseconds{1};
     EXPECT_EQ(deadline_after(now, u32_max_ms()), steady_time_point::max());
 }
+
+TEST(DeadlineAfter, H8_NegativeMinPlusCoarseSecondsIsReturnedExactly) {
+    std::chrono::seconds const d{10'000'000'000};
+    EXPECT_EQ(deadline_after(steady_time_point::min(), d),
+              steady_time_point{std::chrono::nanoseconds{776'627'963'145'224'192}});
+}
+
+TEST(DeadlineAfter, H9_NegativeMinPlusLargestFittingSecondsIsReturnedExactly) {
+    std::chrono::seconds const d{18'446'744'073};
+    EXPECT_EQ(deadline_after(steady_time_point::min(), d),
+              steady_time_point{std::chrono::nanoseconds{9'223'372'036'145'224'192}});
+}
+
+TEST(DeadlineAfter, H10_NegativeMinPlusOverflowingSecondsSaturates) {
+    std::chrono::seconds const d{18'446'744'074};
+    EXPECT_EQ(deadline_after(steady_time_point::min(), d), steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H11_ExactMaxBoundaryAndNeighbors) {
+    std::chrono::seconds const d{10'000'000'000};
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-776'627'963'145'224'193}},
+                             d),
+              steady_time_point::max());
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-776'627'963'145'224'194}},
+                             d),
+              steady_time_point::max() - std::chrono::nanoseconds{1});
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-776'627'963'145'224'192}},
+                             d),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H12_NonExtremeNegativePlusCoarseSecondsIsReturnedExactly) {
+    std::chrono::seconds const d{9'223'372'037};
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-500'000'000}}, d),
+              steady_time_point{std::chrono::nanoseconds{9'223'372'036'500'000'000}});
+}
+
+TEST(DeadlineAfter, H13_NegativeMinPlusMillisecondsBoundary) {
+    EXPECT_EQ(deadline_after(steady_time_point::min(),
+                             std::chrono::milliseconds{18'446'744'073'709}),
+              steady_time_point{std::chrono::nanoseconds{9'223'372'036'854'224'192}});
+    EXPECT_EQ(deadline_after(steady_time_point::min(),
+                             std::chrono::milliseconds{18'446'744'073'710}),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H14_NegativeMinPlusNanosecondsMaxIsReturnedExactly) {
+    EXPECT_EQ(deadline_after(steady_time_point::min(), std::chrono::nanoseconds::max()),
+              steady_time_point{std::chrono::nanoseconds{-1}});
+}
+
+TEST(DurationUntil, U1_PositiveDifferenceIsExact) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point{}, steady_time_point{} + std::chrono::milliseconds{5}),
+              std::chrono::milliseconds{5});
+}
+
+TEST(DurationUntil, U2_EqualInstantsReturnZero) {
+    auto const now = steady_time_point{std::chrono::nanoseconds{7}};
+    EXPECT_EQ(fixpp::session::detail::duration_until(now, now), steady_time_point::duration::zero());
+}
+
+TEST(DurationUntil, U3_PassedDeadlineReturnsZero) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point{std::chrono::nanoseconds{6}},
+                  steady_time_point{std::chrono::nanoseconds{5}}),
+              steady_time_point::duration::zero());
+}
+
+TEST(DurationUntil, U4_FullClockSpanSaturates) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point::min(),
+                                                     steady_time_point::max()),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U5_MinToMinusOneIsExactMax) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point::min(), steady_time_point{std::chrono::nanoseconds{-1}}),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U6_MinToEpochSaturates) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point::min(),
+                                                     steady_time_point{}),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U7_MinusOneToMaxSaturates) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point{std::chrono::nanoseconds{-1}}, steady_time_point::max()),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U8_EpochToMaxIsExactMax) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point{}, steady_time_point::max()),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U9_MaxToMinReturnsZero) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point::max(),
+                                                     steady_time_point::min()),
+              steady_time_point::duration::zero());
+}
+
+TEST(DurationUntil, U10_PassedSaturatedShapeReturnsZero) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point::max(), deadline_after(steady_time_point::min(),
+                                                           std::chrono::seconds{10})),
+              steady_time_point::duration::zero());
+}

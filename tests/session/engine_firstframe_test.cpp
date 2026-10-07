@@ -83,6 +83,7 @@
 
 #include "engine_loopback_harness.hpp"
 #include "plain_engine_rig.hpp"
+#include "support/scripted_clock.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_test_access.hpp"
 
@@ -1021,6 +1022,43 @@ TEST(EngineFirstFramePhaseA, NearClockMax_SilentPeerReadEndsAtMaxNotBefore) {
     EXPECT_FALSE(before.read_ended) << "the first-frame read ended before max()";
     EXPECT_TRUE(closed) << "the first-frame read did not end at max()";
     EXPECT_FALSE(after.has_session) << "no Session exists, so nothing is recorded (L-6)";
+}
+
+TEST(EngineFirstFramePhaseA, PassedEstablishmentDeadlineClosesBeforeFirstFrameRead) {
+    pr::Rig rig;
+    auto scripted = std::make_shared<fixpp::test_support::scripted_clock>(rig.clock);
+    rig.engine_clock_override = scripted;
+    bool const up = rig.start(rig.cfg());
+    scripted->arm(fixpp::core::steady_time_point::min(),
+                  fixpp::core::steady_time_point::max());
+    bool const connected = up && rig.connect_peer();
+    bool const closed = connected && rig.run_until([&] { return rig.peer.read_ended; });
+    auto const observation = observe_phase_a(rig);
+    auto const sleeps = scripted->sleeps_observed();
+    rig.stop();
+
+    ASSERT_TRUE(up && connected) << "setup";
+    EXPECT_TRUE(closed) << "a passed establishment deadline closes the accepted transport";
+    EXPECT_EQ(sleeps, 0U) << "no first-frame read deadline is armed after the deadline";
+    EXPECT_FALSE(observation.has_session);
+}
+
+TEST(EngineFirstFramePhaseA, PositiveEstablishmentTimeLeftArmsFirstFrameRead) {
+    pr::Rig rig;
+    auto scripted = std::make_shared<fixpp::test_support::scripted_clock>(rig.clock);
+    rig.engine_clock_override = scripted;
+    bool const up = rig.start(rig.cfg());
+    scripted->arm(fixpp::core::steady_time_point{},
+                  fixpp::core::steady_time_point{} + std::chrono::milliseconds{1});
+    bool const connected = up && rig.connect_peer();
+    bool const armed = connected && rig.run_until([&] { return scripted->sleeps_observed() == 1U; });
+    auto const observation = observe_phase_a(rig);
+    rig.stop();
+
+    ASSERT_TRUE(up && connected) << "setup";
+    EXPECT_TRUE(armed) << "the first-frame read deadline is observable";
+    EXPECT_FALSE(observation.read_ended) << "the read remains pending before teardown";
+    EXPECT_FALSE(observation.has_session);
 }
 
 // ── Q-17 on TLS: T below the 1500 ms handshake bound ────────────────────────

@@ -27,6 +27,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until; steady_time_point
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
@@ -203,22 +204,12 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
 
 // 093-inbound-frame-dispositions (contract C-4, C-6; data-model E-6, E-10): the
 // absolute instant `d` after `now`, or steady_time_point::max() when that instant is
-// not representable. Clock::steady_now() states no range, so an embedder's Clock may
-// return a time point near max(), and a configured duration can be too large for the
-// time point's units on its own (heartbeat_interval is in seconds). A plain `now + d`
-// is then signed overflow, which is undefined behaviour.
+// not representable. The bound is checked before converting `d` to the time point's
+// units, because that conversion can overflow by itself. Precondition: d >= 0.
 //
-// The bound is checked in `d`'s own units BEFORE any conversion, because converting
-// a large `d` to nanoseconds overflows by itself. The headroom is max() - now, cast
-// down (floored) to `d`'s units, so the check is exact for a non-negative `now`. For
-// a negative `now` that subtraction would overflow, so the headroom is the time
-// point's whole duration range instead; a sum that is representable only because
-// `now` is negative then saturates too, which is later than the exact instant,
-// never earlier.
-//
-// The static_asserts make both casts unable to overflow: Rep is a signed integer at
-// least as wide as the time point's, and Period is no finer than the time point's.
-// Precondition: d >= 0.
+// The static_asserts keep the unsigned magnitude calculation in range: Rep is a
+// signed integer at least as wide as the time point's, Period is an integral multiple
+// of the time point's period, and the multiplier fits in the unsigned accumulator.
 //
 // Other absolute deadlines in the session do not use this yet; see fixpp#555.
 template <class Rep, class Period>
@@ -226,18 +217,48 @@ template <class Rep, class Period>
     fixpp::core::steady_time_point now, std::chrono::duration<Rep, Period> d) noexcept {
     using time_point = fixpp::core::steady_time_point;
     using duration = std::chrono::duration<Rep, Period>;
+    using time_duration = typename time_point::duration;
+    using scale = std::ratio_divide<Period, typename time_duration::period>;
     static_assert(std::is_integral_v<Rep> && std::is_signed_v<Rep>);
     static_assert(std::numeric_limits<Rep>::digits >=
                   std::numeric_limits<typename time_point::rep>::digits);
-    static_assert(std::ratio_greater_equal_v<Period, typename time_point::period>);
+    static_assert(scale::den == 1);
+    static_assert(sizeof(Rep) <= sizeof(std::uint64_t));
+    static_assert(scale::num <= std::numeric_limits<std::uint64_t>::max());
     assert(d >= duration::zero());
-    auto const headroom = now.time_since_epoch() >= time_point::duration::zero()
-                              ? time_point::max() - now
-                              : time_point::duration::max();
-    if (d > std::chrono::duration_cast<duration>(headroom)) {
+    auto const headroom =
+        static_cast<std::uint64_t>(time_point::max().time_since_epoch().count()) -
+        static_cast<std::uint64_t>(now.time_since_epoch().count());
+    auto const units = static_cast<std::uint64_t>(d.count());
+    constexpr auto multiplier = static_cast<std::uint64_t>(scale::num);
+    if (units > headroom / multiplier) {
         return time_point::max();
     }
-    return now + std::chrono::duration_cast<typename time_point::duration>(d);
+    auto const result = static_cast<std::uint64_t>(now.time_since_epoch().count()) +
+                        units * multiplier;
+    return time_point{time_duration{static_cast<typename time_point::rep>(result)}};
+}
+
+// The non-negative time left until `deadline`: zero once `now` has reached or
+// passed it, exact when the mathematical difference fits the clock duration, and
+// saturated otherwise.
+[[nodiscard]] constexpr fixpp::core::steady_time_point::duration duration_until(
+    fixpp::core::steady_time_point now, fixpp::core::steady_time_point deadline) noexcept {
+    using time_point = fixpp::core::steady_time_point;
+    using duration = time_point::duration;
+    using rep = typename duration::rep;
+    static_assert(sizeof(rep) <= sizeof(std::uint64_t));
+    static_assert(std::is_signed_v<rep>);
+
+    if (now >= deadline) {
+        return duration::zero();
+    }
+    auto const diff = static_cast<std::uint64_t>(deadline.time_since_epoch().count()) -
+                      static_cast<std::uint64_t>(now.time_since_epoch().count());
+    if (diff > static_cast<std::uint64_t>(duration::max().count())) {
+        return duration::max();
+    }
+    return duration{static_cast<rep>(diff)};
 }
 
 // 093-inbound-frame-dispositions (data-model E-4, E-6): what a successful

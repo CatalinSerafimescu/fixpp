@@ -71,6 +71,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/scripted_clock.hpp"
 #include "support/session_test_access.hpp"
 
 namespace fixpp::session::test {
@@ -855,6 +856,45 @@ TEST(InboundFrameDispositionsQ5, HeartBtIntBeyondTheClockRange_TheLogIntervalSat
     EXPECT_EQ(st, fsm_state::LogonSent) << "the garbles are disregarded";
     EXPECT_EQ(suppressed_counts(records), (std::vector<std::uint64_t>{0U}))
         << "one record at the first garble; the second is inside the interval";
+}
+
+TEST(InboundFrameDispositionsQ5, NegativeClockCoarseHeartBtIntLogsAtExactInterval) {
+    constexpr std::chrono::seconds kHeartBtInt{10'000'000'000};
+    auto const exact_deadline =
+        fixpp::core::steady_time_point{std::chrono::nanoseconds{776'627'963'145'224'192}};
+    LogCapture log;
+    plain_rig::Rig rig;
+    auto session_clock = std::make_shared<fixpp::test_support::scripted_clock>(rig.clock);
+    auto cfg = rig.cfg(session_role::initiator);
+    cfg.logger_override = log.logger;
+    cfg.heartbeat_interval = kHeartBtInt;
+    cfg.clock_override = session_clock;
+    bool const up = rig.start(std::move(cfg));
+    bool const logon_sent = up && rig.run_until([&] {
+        return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
+               rig.state() == fsm_state::LogonSent;
+    });
+    auto garble = [&](std::uint64_t want) {
+        return rig.deliver(plain_rig::with_wrong_checksum(rig.heartbeat(1))) && rig.run_until([&] {
+            auto const s = rig.session();
+            return s && garbled_count(*s) == want;
+        });
+    };
+    session_clock->set(fixpp::core::steady_time_point::min());
+    bool const g1 = logon_sent && garble(1);
+    session_clock->set(exact_deadline - std::chrono::nanoseconds{1});
+    bool const g2 = g1 && garble(2);
+    session_clock->set(exact_deadline);
+    bool const g3 = g2 && garble(3);
+    auto const st = rig.state();
+    rig.stop();
+    auto const records = garble_records(log);
+
+    ASSERT_TRUE(up && logon_sent) << "setup";
+    ASSERT_TRUE(g1 && g2 && g3) << "each garble must be counted";
+    EXPECT_EQ(st, fsm_state::LogonSent) << "the garbles are disregarded";
+    EXPECT_EQ(suppressed_counts(records), (std::vector<std::uint64_t>{0U, 1U}))
+        << "the record at the exact interval carries the one suppressed garble";
 }
 
 // The suppressed count's unit is the garbled region, the counter's unit (plan OD-21):

@@ -183,6 +183,7 @@ class Rig {
 public:
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
+    std::shared_ptr<fixpp::core::Clock> engine_clock_override;
     std::shared_ptr<fixpp::session::Application> app;
     std::unique_ptr<fixpp::session::Engine> engine;
     fixpp::session::SessionId id;
@@ -258,7 +259,7 @@ public:
         }
         fixpp::core::EngineConfig ec;
         ec.executor = ioc.get_executor();
-        ec.clock = clock;
+        ec.clock = engine_clock_override ? engine_clock_override : clock;
         ec.application = app;
         ec.dictionaries = engine_dictionaries;
         engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ec));

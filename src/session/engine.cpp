@@ -910,8 +910,9 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // 093 (contract C-4, phase a): the establishment time left after the handshake,
         // which 093 does not shorten. None left: close without issuing the first-frame
         // read. Rounded up, so the read never ends before the deadline itself.
+        auto const establish_now = engine_cfg.clock->steady_now();
         auto const establish_left = std::chrono::ceil<std::chrono::milliseconds>(
-            establish_deadline - engine_cfg.clock->steady_now());
+            fixpp::session::detail::duration_until(establish_now, establish_deadline));
         if (establish_left <= std::chrono::milliseconds::zero()) {
             // Rejecting a pre-session connection: nothing consumes a close error.
             (void)transport->close();
