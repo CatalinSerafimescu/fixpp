@@ -330,6 +330,12 @@ public:
 
     [[nodiscard]] bool eof() const { return eof_; }
 
+    // When the read that returned EOF completed, stamped in its completion handler; empty
+    // before EOF is read.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> eof_at() const {
+        return eof_at_;
+    }
+
     // True if the frame holds the whole field `tag=value` (between SOHs).
     static bool has_field(std::string_view frame, std::string_view tag_eq_value) {
         std::string const needle = "\x01" + std::string{tag_eq_value} + "\x01";
@@ -354,6 +360,7 @@ private:
             done = true;
             rec = e;
             n = k;
+            if (e == asio::error::eof) eof_at_ = std::chrono::steady_clock::now();
         });
         run_until(until);
         if (!done) {
@@ -392,6 +399,7 @@ private:
     std::string buf_;
     bool listening_ = false;
     bool eof_ = false;
+    std::optional<std::chrono::steady_clock::time_point> eof_at_;
     bool failed_ = false;
 };
 

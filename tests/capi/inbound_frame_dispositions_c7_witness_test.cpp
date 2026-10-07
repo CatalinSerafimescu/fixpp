@@ -532,48 +532,55 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthBeforeActiveEndsTheConnection) {
 constexpr std::chrono::milliseconds kDefaultLogoutTimeout{2000};
 
 // `c` is established with `peer`; the peer writes `bytes` once it has read the Logout.
+// The helper thread stamps the band's origin immediately before its call and the time
+// the call returned immediately after it; the peer stamps EOF in the completion handler
+// of the read that returns it. The band is judged on those stamps: a late thread start
+// moves the origin with the call, and a descheduled stamping thread can only make a
+// completion stamp later, never earlier, so it cannot bring a late completion into the
+// band.
+// Waiting for the helper thread's start and for the Logout uses a setup budget under
+// the session's HeartBtInt, not the band.
 void logout_sent_cell(CInitiator& c, RawAcceptor& peer, std::string const& bytes) {
+    using clock = std::chrono::steady_clock;
     auto const bound = kDefaultLogoutTimeout / 4;
-    // The band's origin is stamped by the helper thread immediately before its call, and
-    // the cell waits for that stamp, so a late thread start does not spend the band. The
-    // wait is bounded by a budget under the session's HeartBtInt.
-    constexpr std::chrono::milliseconds kCloserStartBudget{10000};
+    constexpr std::chrono::milliseconds kSetupBudget{10000};
     std::atomic<bool> calling{false};
-    std::atomic<bool> returned{false};
     fixpp_error_t close_rc = FIXPP_ERR_OK;
-    std::chrono::steady_clock::time_point t0{};
+    clock::time_point t0{};
+    clock::time_point returned_at{};
     std::thread closer{[&] {
-        t0 = std::chrono::steady_clock::now();
+        t0 = clock::now();
         calling.store(true, std::memory_order_release);
         close_rc = fixpp_session_close(c.session);
-        returned.store(true, std::memory_order_release);
+        returned_at = clock::now();
     }};
-    auto const start_deadline = std::chrono::steady_clock::now() + kCloserStartBudget;
-    while (!calling.load(std::memory_order_acquire) &&
-           std::chrono::steady_clock::now() < start_deadline) {
+    auto const start_deadline = clock::now() + kSetupBudget;
+    while (!calling.load(std::memory_order_acquire) && clock::now() < start_deadline) {
         std::this_thread::sleep_for(1ms);
     }
     bool const closer_started = calling.load(std::memory_order_acquire);
     if (!closer_started) closer.join();
-    ASSERT_TRUE(closer_started) << "the closing thread made no call within "
-                                << kCloserStartBudget.count() << " ms";
+    ASSERT_TRUE(closer_started) << "the closing thread made no call within " << kSetupBudget.count()
+                                << " ms";
     bool const logout =
         peer.read_until([](std::string const& f) { return RawAcceptor::has_field(f, "35=5"); },
-                        bound)
+                        kSetupBudget)
             .has_value();
-    bool const closed = logout && peer.write(bytes) && peer.wait_eof(t0 + bound);
-    while (!returned.load(std::memory_order_acquire) &&
-           std::chrono::steady_clock::now() < t0 + bound) {
-        std::this_thread::sleep_for(2ms);
-    }
-    bool const returned_in_bound = returned.load(std::memory_order_acquire);
-    bool const closed_at_all = closed || (logout && peer.wait_eof(t0 + 2 * kDefaultLogoutTimeout));
+    bool const eof = logout && peer.write(bytes) && peer.wait_eof(t0 + 2 * kDefaultLogoutTimeout);
     closer.join();
+    auto const ms = [&](clock::time_point at) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(at - t0).count();
+    };
+    auto const eof_at = peer.eof_at();
+    bool const closed = eof && eof_at.has_value() && *eof_at < t0 + bound;
+    bool const returned_in_bound = returned_at < t0 + bound;
     EXPECT_TRUE(logout) << "the engine's Logout";
-    EXPECT_TRUE(closed) << "the connection ends within a quarter of the logout timeout";
+    EXPECT_TRUE(closed) << "the connection ends within a quarter of the logout timeout; EOF at "
+                        << (eof_at ? ms(*eof_at) : -1) << " ms";
     EXPECT_TRUE(returned_in_bound)
-        << "fixpp_session_close returns within a quarter of the logout timeout";
-    EXPECT_TRUE(closed_at_all) << "the connection ends at the latest at the logout timeout";
+        << "fixpp_session_close returns within a quarter of the logout timeout; returned at "
+        << ms(returned_at) << " ms";
+    EXPECT_TRUE(eof) << "the connection ends at the latest at the logout timeout";
     EXPECT_EQ(close_rc, FIXPP_ERR_OK) << "established once";
 }
 

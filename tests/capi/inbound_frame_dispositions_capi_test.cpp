@@ -177,20 +177,21 @@ TEST(CapiInboundFrameDispositionsQ1, TheCountReadsOneAfterA35NotThirdFrameInActi
 // garbles on its strand. The reads never decrease, and the last one, taken after the
 // fence has shown every garble counted, equals the count. The reader starts only once
 // the session is published, so it reads the live counter, and it is joined before the
-// engine is destroyed (the engine asserts no lookup lease is outstanding). The garbles
-// are written only after the reader has completed a read that is not its final one, so
-// its reads overlap the counting and `reads > 1` holds. That wait is bounded by a budget
-// under the session's HeartBtInt; on a miss the reader is stopped and joined before the
-// cell fails.
+// engine is destroyed (the engine asserts no lookup lease is outstanding). The cell
+// writes the first half of the garbles, then waits, up to a budget under the session's
+// HeartBtInt, for the reader to publish a non-final read strictly between 0 and the
+// garble count, and only then writes the rest. On a miss it stops and joins the reader
+// before it fails.
 TEST(CapiInboundFrameDispositionsQ30, TheCountIsReadFromAnotherThreadWhileTheSessionCounts) {
     constexpr std::uint32_t kGarbles = 20;
-    constexpr std::chrono::milliseconds kReaderStartBudget{10000};
+    constexpr std::uint32_t kFirstHalf = kGarbles / 2;
+    constexpr std::chrono::milliseconds kOverlapBudget{10000};
     RawAcceptor peer;
     CInitiator c{peer.port(), 30};
     ASSERT_TRUE(establish(c, peer, 30)) << "setup";
 
     std::atomic<bool> stop{false};
-    std::atomic<bool> read_once{false};
+    std::atomic<bool> saw_intermediate{false};
     bool calls_ok = true;
     bool monotonic = true;
     std::uint64_t last = 0;
@@ -208,25 +209,28 @@ TEST(CapiInboundFrameDispositionsQ30, TheCountIsReadFromAnotherThreadWhileTheSes
                 last = v;
                 return;
             }
-            read_once.store(true, std::memory_order_release);
+            if (v > 0U && v < kGarbles) saw_intermediate.store(true, std::memory_order_release);
         }
     });
 
-    auto const start_deadline = std::chrono::steady_clock::now() + kReaderStartBudget;
-    while (!read_once.load(std::memory_order_acquire) &&
-           std::chrono::steady_clock::now() < start_deadline) {
+    bool written = true;
+    for (std::uint32_t i = 0; i < kFirstHalf; ++i) {
+        written = written && peer.write("GARBLE" + heartbeat(2U + i));
+    }
+    auto const overlap_deadline = std::chrono::steady_clock::now() + kOverlapBudget;
+    while (written && !saw_intermediate.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < overlap_deadline) {
         std::this_thread::sleep_for(1ms);
     }
-    bool const reader_started = read_once.load(std::memory_order_acquire);
-    if (!reader_started) {
+    bool const overlapped = written && saw_intermediate.load(std::memory_order_acquire);
+    if (!overlapped) {
         stop.store(true, std::memory_order_release);
         reader.join();
     }
-    ASSERT_TRUE(reader_started) << "the reader completed no read within "
-                                << kReaderStartBudget.count() << " ms";
+    ASSERT_TRUE(overlapped) << "written=" << written << ": the reader published no count in (0, "
+                            << kGarbles << ") within " << kOverlapBudget.count() << " ms";
 
-    bool written = true;
-    for (std::uint32_t i = 0; i < kGarbles; ++i) {
+    for (std::uint32_t i = kFirstHalf; i < kGarbles; ++i) {
         written = written && peer.write("GARBLE" + heartbeat(2U + i));
     }
     bool const fenced = written && peer.fence(2U + kGarbles, "TS");
