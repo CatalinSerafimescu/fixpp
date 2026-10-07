@@ -6,6 +6,14 @@ status: stable
 
 # Log
 
+- **2026-10-07 — 093 Gate B (PR #554): the FileStore reset's commit boundary and deadline arithmetic
+  under an arbitrary `Clock`.** `components/message-store-quiescence.md` records why `rename_done` is
+  published at the rename rather than after the directory fsync (fixpp#548 describes the hole), why
+  the Windows rename outcome has three states and the one-liner `ok && flushed` was rejected, and why
+  open and reset share one wide-path conversion (`store_wide_path`), with the `FileStoreResetTo.Q29_*`
+  witnesses. `components/inbound-message-path.md` gains `deadline_after` and `duration_until`: why
+  helpers replaced site-by-site fixes, the re-derivation recipe, and the rejected `Clock` range
+  precondition, deferred to fixpp#555 as an owner question together with the older sites.
 - **2026-10-04 — 093-inbound-frame-dispositions (B22: fixpp#514, #515, #516, #523, #524, #540).**
   `components/inbound-message-path.md` gains the owner's rulings R-1, R-2 and R-4 and the pump-side
   orchestrator decisions with what each rejected (the deadline in the pump and decided at a loop head,

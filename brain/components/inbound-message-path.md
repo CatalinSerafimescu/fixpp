@@ -12,6 +12,8 @@ refs:
   - src/session/read_pump.hpp
   - src/session/inbound_limit.hpp
   - src/session/parse_capacity.hpp
+  - src/session/read_first_frame_bounded.hpp
+  - include/fixpp/core/clock.hpp
   - src/core/fix_time.cpp
   - src/session/sending_time.cpp
   - specs/015-runtime-engine/research.md
@@ -23,6 +25,7 @@ refs:
   - specs/093-inbound-frame-dispositions/research.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
+  - tests/session/read_first_frame_bounded_test.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/015-runtime-engine-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
@@ -279,3 +282,39 @@ its own fix after the parse fix: a representable time far from the clock can ove
 - **Adding a Reject for an out-of-range `52` on a PossDup Reject(35=3) or Logout(35=5).** That site
   already falls through for an unparseable `52`, so fixing it is a change to that rule, not part of
   #509. It is disclosed as `L-509-1`.
+
+## Deadline arithmetic under an arbitrary `Clock` (093 Gate B)
+
+`Clock::steady_now()` (`include/fixpp/core/clock.hpp`) promises monotonicity and nothing about range.
+An embedder's clock (`EngineConfig::clock`, or a session's `SessionConfig::clock_override`) may
+read negative or close to `steady_time_point::max()`, and two readings may lie further apart than
+`duration::max()`. A plain `now + d` or `deadline - now` is then signed overflow, which is UB. So
+the deadlines 093 added go through two helpers in `src/session/read_first_frame_bounded.hpp`:
+
+- **`detail::deadline_after(now, d)`**: exactly `now + d` when that instant is representable, else
+  `max()`, for any `d >= 0` its `static_assert`s admit. The headroom is checked before `d` is
+  converted to the time point's units, because the conversion can overflow by itself (a
+  `heartbeat_interval` in seconds, converted to nanoseconds). `max()` is the right saturation value
+  because the clock reaches it only at its end, so the deadline never fires early. As a
+  consequence, a `Clock`'s `sleep_until` may be handed `max()` (B&L `B-093-4`).
+- **`detail::duration_until(now, deadline)`**: total. It returns zero once `now` has reached the
+  deadline, the exact difference when that fits, and `duration::max()` otherwise. The acceptor's
+  time left after the handshake uses it on a single clock read.
+
+Witnesses: the `DeadlineAfter` and `DurationUntil` suites in
+`tests/session/read_first_frame_bounded_test.cpp`; the engine-level cells are listed in `B-093-4`.
+
+- **Why helpers, not site-by-site fixes.** A site-by-site fix covered the sums, and the review of
+  that fix found more members of the class: a difference, and the sum helper's own inexact branch
+  for a negative `now`. Closure came from enumerating every time-point and duration expression in
+  the PR's `src/` and `include/` diff, and following each saturated value to its sink
+  (`Clock::sleep_until` or an asio timer). That enumeration is the re-derivation recipe; rerun it
+  rather than trusting any list of sites.
+- **Rejected for this PR: a range precondition on `Clock`** (`steady_now()` non-negative, or two
+  readings at most `duration::max()` apart). It changes `clock.hpp`, a public contract ratified at
+  Gate A. It cannot be enforced inside a `const noexcept` virtual, so it would be a claim that rots.
+  And it does not cover the duration side: an oversized `heartbeat_interval` overflows even with
+  the real clock. It is deferred as an owner question on fixpp#555, for the older sites.
+- **Older sites are tracked in fixpp#555**: the session's graceful-logout wait and liveness loop
+  still form raw sums. Check the issue's state, and grep `src/session/session.cpp` for
+  `steady_now() +` and `+ heartbt_int`, before relying on either.
