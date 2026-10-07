@@ -6,6 +6,21 @@ status: stable
 
 # Log
 
+- **2026-10-07 — 093 Gate B (PR #554), two owner-approved classes.** `failure-classes.md` gains
+  **class 19**, *a commit marker published after the next fallible step reports a crossed boundary as
+  "nothing happened"*: publish the marker at the irreversible step, use a tri-state where the
+  platform splits done from durable, and witness one fault seam per later fallible call. Instance:
+  `rename_done` in `reset_store_to` (Gate B round 1, RC-1 and RC-2). Filed as a new class, not under
+  class 1's oracle-error form (its sibling): class 1 is a check or gate reporting clean, and this is a
+  production recovery path misrouted by an ordering. Not class 18 either: that is a report throwing
+  in a `noexcept` context. It also gains **class 20**, *a defect class fixed one site per review
+  round does not converge*: on the first finding, enumerate every member of the class in the change
+  mechanically, then route them all through one tested helper. Instance: deadline arithmetic under an
+  arbitrary `Clock` (Gate B rounds 2–4, `deadline_after` and `duration_until`). Filed as a new class,
+  not under class 13 or 14: those are instruments (a census keyed on names, a forbidden list over
+  free text), and this is a fixer scoping its repair to the cited site. Class 14 and class 9's
+  *reported symptom* bullet are named as siblings. Both are entries in the implementer's anti-pattern
+  library.
 - **2026-10-07 — 093 Gate B (PR #554): the FileStore reset's commit boundary and deadline arithmetic
   under an arbitrary `Clock`.** `components/message-store-quiescence.md` records why `rename_done` is
   published at the rename rather than after the directory fsync (fixpp#548 describes the hole), why
