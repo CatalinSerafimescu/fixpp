@@ -42,9 +42,9 @@
 #include <fstream>
 #include <memory>
 #include <utility>
+#include <vector>
 #ifdef _WIN32
 #include <string>
-#include <vector>
 #endif
 
 #include "_fixtures_/store_temp_dir.hpp"
@@ -502,6 +502,128 @@ TEST(FileStoreResetTo, Q29_Control_TheFaultAfterTheRenameFiresOnAResetThenAnAdva
     EXPECT_EQ(fixpp::session::read_and_reset_reset_atomicity_fault_count(), 1);
     EXPECT_EQ(restart_counters(store, dir, pool), (DurableCounters{1, 1}))
         << "the reset committed, the advance did not";
+    fixpp::store_test::remove_store_dir(dir);
+}
+
+// ── Faults after the rename (093 Gate B, fixpp#554) ──────────────────────────
+//
+// Once the rename has replaced the live log, the store's open file names the replaced
+// file, so any failure from there on (the parent-directory open or fsync, the reopen,
+// the lock) must poison the store: every later write returns store_io_failure until a
+// restart, and a restart reads the targets the rename committed. The in-process writes
+// are the clauses that discriminate. The restart clause holds whether or not the store
+// was poisoned, because a write to the replaced file never reaches the live name.
+
+using WriteResults = std::pair<fixpp::core::expected_t<void>, fixpp::core::expected_t<seqnum_t>>;
+
+// One outbound frame at the seq the store says comes next (1 when it cannot say), then
+// one inbound advance. Storing at the store's own next seq keeps store() from refusing
+// the frame for its order, so a refusal here is the store refusing writes.
+WriteResults write_after_reset(fixpp::session::MessageStore& store, asio::thread_pool& pool) {
+    return run_on(pool, [&]() -> asio::awaitable<WriteResults> {
+        auto next = co_await store.next_seqnum(direction_t::outbound, false);
+        seqnum_t const seq = next.value_or(1);
+        auto const frame = fixpp::store_test::make_test_frame(seq, direction_t::outbound);
+        auto sr =
+            co_await store.store(seq, std::span<const std::byte>(frame), direction_t::outbound);
+        auto ar = co_await store.next_seqnum(direction_t::inbound, true);
+        co_return WriteResults{std::move(sr), std::move(ar)};
+    });
+}
+
+std::vector<byte_collecting_visitor::entry> outbound_frames(fixpp::session::MessageStore& store,
+                                                            asio::thread_pool& pool) {
+    byte_collecting_visitor visitor;
+    run_on(pool, [&]() -> asio::awaitable<void> {
+        (void)co_await store.retrieve(1, 0, direction_t::outbound, visitor);
+    });
+    return visitor.entries();
+}
+
+#ifndef _WIN32
+// Arms `arm`, resets an advanced store (reset() when `via_reset`, else reset_to(want)),
+// and checks the post-rename poison described above.
+void expect_post_rename_fault_poisons(void (*arm)() noexcept, bool via_reset,
+                                      DurableCounters want) {
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("reset_to_post_rename_fault");
+    auto store = open_advanced(dir, pool);
+    ASSERT_NE(store, nullptr);
+    (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
+    arm();
+    auto r = run_on(pool, [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+        if (via_reset) co_return co_await (*store).reset();
+        co_return co_await store->reset_to(want.in, want.out);
+    });
+    EXPECT_EQ(fixpp::session::read_and_reset_reset_atomicity_fault_count(), 1)
+        << "the post-rename fault must fire";
+    ASSERT_FALSE(r.has_value()) << "the reset must report the post-rename fault";
+    EXPECT_EQ(r.error(), fixpp::core::error::store_io_failure);
+
+    auto const [stored, advanced] = write_after_reset(*store, pool);
+    EXPECT_FALSE(stored.has_value()) << "store() after a post-rename fault must fail closed";
+    if (!stored.has_value()) {
+        EXPECT_EQ(stored.error(), fixpp::core::error::store_io_failure);
+    }
+    EXPECT_FALSE(advanced.has_value())
+        << "next_seqnum(inbound, true) after a post-rename fault must fail closed";
+    if (!advanced.has_value()) {
+        EXPECT_EQ(advanced.error(), fixpp::core::error::store_io_failure);
+    }
+
+    store = nullptr;
+    auto reopened = open_store(dir, pool);
+    ASSERT_NE(reopened, nullptr) << "restart: re-open failed";
+    EXPECT_EQ(read_counters(*reopened, pool), want) << "a restart must read the committed targets";
+    EXPECT_TRUE(outbound_frames(*reopened, pool).empty())
+        << "no frame stored after the fault may survive a restart";
+    reopened = nullptr;
+    fixpp::store_test::remove_store_dir(dir);
+}
+
+TEST(FileStoreResetTo, Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore) {
+    expect_post_rename_fault_poisons(&fixpp::session::arm_force_reset_dir_fsync_fail_once,
+                                     /*via_reset=*/false, DurableCounters{.in = 2, .out = 1});
+}
+
+TEST(FileStoreResetTo, Q29_ADirectoryOpenFaultAfterTheRenamePoisonsTheStore) {
+    expect_post_rename_fault_poisons(&fixpp::session::arm_force_reset_dir_open_fail_once,
+                                     /*via_reset=*/false, DurableCounters{.in = 2, .out = 1});
+}
+
+TEST(FileStoreResetTo, Q29_ResetWithADirectoryFsyncFaultPoisonsTheStore) {
+    expect_post_rename_fault_poisons(&fixpp::session::arm_force_reset_dir_fsync_fail_once,
+                                     /*via_reset=*/true, DurableCounters{.in = 1, .out = 1});
+}
+#endif  // !_WIN32
+
+// Control for the cells above: with no fault armed, the same reset leaves the store
+// writable, and what it writes survives a restart.
+TEST(FileStoreResetTo, Q29_Control_AResetToWithNoFaultLeavesTheStoreWritable) {
+    asio::thread_pool pool{2};
+    auto dir = unique_store_dir("reset_to_no_fault_control");
+    auto store = open_advanced(dir, pool);
+    ASSERT_NE(store, nullptr);
+    (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
+    auto r = run_on(pool, [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
+        co_return co_await store->reset_to(2, 1);
+    });
+    ASSERT_TRUE(r.has_value()) << "reset_to(2, 1) with no fault armed";
+    EXPECT_EQ(fixpp::session::read_and_reset_reset_atomicity_fault_count(), 0);
+
+    auto const [stored, advanced] = write_after_reset(*store, pool);
+    EXPECT_TRUE(stored.has_value()) << "store() after a clean reset";
+    EXPECT_TRUE(advanced.has_value()) << "next_seqnum(inbound, true) after a clean reset";
+
+    store = nullptr;
+    auto reopened = open_store(dir, pool);
+    ASSERT_NE(reopened, nullptr) << "restart: re-open failed";
+    EXPECT_EQ(read_counters(*reopened, pool), (DurableCounters{.in = 3, .out = 2}))
+        << "the advance and the stored frame must survive a restart";
+    auto const frames = outbound_frames(*reopened, pool);
+    ASSERT_EQ(frames.size(), 1u) << "the frame stored after the reset must survive a restart";
+    EXPECT_EQ(frames.front().bytes, fixpp::store_test::make_test_frame(1, direction_t::outbound));
+    reopened = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 

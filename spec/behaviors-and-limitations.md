@@ -1452,17 +1452,25 @@ the correct deliberate-divergence statement matching `specs/035-filestore-io-off
 `tests/session/test_file_store_offload_thread.cpp` + `test_file_store_cancellation.cpp` +
 `test_file_store_concurrent_tsan.cpp`.)*
 
-**L-035-2 — Post-rename reopen/lock failure in `FileStore::reset()` poisons the current store until
-process restart.** During `reset()`, the live log is atomically replaced by a fresh log via
-`rename(tmp, live)`. If the subsequent `open()`/`try_lock()` of the newly-named file fails (e.g.,
-fd-limit exhaustion, permission race), the old fd names a now-unlinked inode; to avoid writing frames
-that would vanish on restart, the store **fails closed**: it releases the stale fd
-(`impl_->file = OsFile{}`), sets `open_ok = false`, and all further ops (`store`/`next_seqnum`/
-`retrieve`/`reset`) return `store_io_failure`. The only recovery is to **restart the process**: on
-restart, `FileStoreFactory::make()` reopens the now-fresh live log (the renamed file persists on
-disk). Operators with aggressive fd-limit settings who observe `store_io_failure` after a session
-reset should check `RLIMIT_NOFILE`. *(035 R#A.1; FR-010; `FileStore::reset()`'s post-rename reopen-fail path in `src/session/file_store.cpp`;
-witness `FileStoreCancellationTest.Reset_PostRenameReopenFail_PoisonsStore_NoSilentLossAfterRestart`.)*
+**L-035-2 — Any failure after the rename in `FileStore::reset()` or `FileStore::reset_to()` poisons
+the current store until process restart.** During `reset()` (and `reset_to()`, which runs the same
+body), the live log is atomically replaced by a fresh log via `rename(tmp, live)`. If any step after
+the rename fails — the parent-directory `open()` or `fsync()` (POSIX), or the `open()`/`try_lock()`
+of the newly-named file (e.g., fd-limit exhaustion, an I/O error, a permission race) — the old fd
+names a now-unlinked inode; to avoid writing frames that would vanish on restart, the store **fails
+closed**: the reset returns `store_io_failure`, the store releases the stale fd, sets
+`open_ok = false`, and all further ops (`store`/`next_seqnum`/`retrieve`/`reset`/`reset_to`) return
+`store_io_failure`. The only recovery is to **restart the process**: on restart,
+`FileStoreFactory::make()` reopens the live log, which after a clean process exit is the fresh one;
+if the directory sync did not complete and the OS also crashed, it may be the old one, and either is
+a coherent log. Operators with aggressive fd-limit settings who observe `store_io_failure` after a
+session reset should check `RLIMIT_NOFILE`. *(035 R#A.1; FR-010; 093 FR-040 (fixpp#554 widened the
+scope from the reopen/lock to every step after the rename); the post-rename poison branch of
+`reset_store_to` in `src/session/file_store.cpp`; witnesses
+`FileStoreCancellationTest.Reset_PostRenameReopenFail_PoisonsStore_NoSilentLossAfterRestart`,
+`FileStoreResetTo.Q29_ADirectoryOpenFaultAfterTheRenamePoisonsTheStore`,
+`FileStoreResetTo.Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore`,
+`FileStoreResetTo.Q29_ResetWithADirectoryFsyncFaultPoisonsTheStore`.)*
 
 **L-035-3 — A `FileStore` (or any `MessageStore`) used OUTSIDE `Engine`/`Session` ownership must be quiesced by the caller before destruction; there is no public drain to call, and getting it wrong is `std::terminate()`, not an error return.** The store holds an `async_mutex`, whose destructor fires `std::terminate()` if it still has a holder or waiters (B-006-2 — a hard precondition enforced in both debug and release). `MessageStore` deliberately exposes **no** public drain entry point, so the obligation is discharged by **quiescence, not by a call**: a store method only returns after its `file_io_executor` pool work completes, and `Engine::stop()` guarantees no store `co_await` is still in flight for **Session-owned** stores — its JOIN step yields until every role loop has exited (tracked by `outstanding_counter_`) *before* the step that clears the registry and so destroys the sessions and their stores. **That guarantee does not extend to a store a consumer constructs and drives directly**, outside `Engine` ownership: `stop()` neither sees nor can drain those awaitables. Such a caller MUST (1) `co_await` every `store`/`flush` call to completion, (2) then `pool.stop()` + `pool.join()`, (3) only then destroy the store. **Status: by-design boundary** — the quiescence contract is structural, and a public drain on the store interface is deliberately not offered. *(Contract stated on `FileStore::Config` in `include/fixpp/session/file_store.hpp`; the destructor precondition it depends on is `~MessageStore() noexcept(false)` in `include/fixpp/session/message_store.hpp` and B-006-2; the Session-owned guarantee is the JOIN-before-clear ordering in `Engine::stop()`, `src/session/engine.cpp`, whose `outstanding_counter_` publication was itself TOCTOU-hardened by a Gate B round-1 finding.)*
 

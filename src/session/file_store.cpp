@@ -151,6 +151,15 @@ static std::atomic<bool> g_force_reset_fail_before_rename{false};
 static std::atomic<int> g_fail_counter_write_after_reset_commit{0};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_reset_atomicity_fault_count{0};
+// 093 Gate B (fixpp#554): faults AFTER a reset's rename has replaced the live log.
+// Compiled unconditionally; declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
+// Each is consumed once and, when it fires, bumps g_reset_atomicity_fault_count.
+//   g_force_reset_dir_open_fail:  POSIX; the parent-directory open fails.
+//   g_force_reset_dir_fsync_fail: POSIX; the parent-directory fsync fails.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_force_reset_dir_open_fail{false};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_force_reset_dir_fsync_fail{false};
 // T004 probe counter — incremented each time g_force_store_pwrite_fail_once
 // actually fires (i.e. the injected failure took effect), so a test can
 // confirm the seam fired for the right reason rather than trust a bare RED.
@@ -425,6 +434,12 @@ void disarm_fail_counter_write_after_reset_commit() noexcept {
 }
 int read_and_reset_reset_atomicity_fault_count() noexcept {
     return g_reset_atomicity_fault_count.exchange(0, std::memory_order_acq_rel);
+}
+void arm_force_reset_dir_open_fail_once() noexcept {
+    g_force_reset_dir_open_fail.store(true, std::memory_order_relaxed);
+}
+void arm_force_reset_dir_fsync_fail_once() noexcept {
+    g_force_reset_dir_fsync_fail.store(true, std::memory_order_relaxed);
 }
 
 // ── Record kinds ──────────────────────────────────────────────────────────────
@@ -1714,8 +1729,9 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     //                  path, Region 3 moves from this slot. On operation_aborted,
     //                  the catch reads it: if result_file->valid() the lambda
     //                  completed durably and the catch commits (A.2).
-    //   rename_done  — shared_ptr<bool>. Set to true AFTER rename+dir-fsync succeed
-    //                  but BEFORE the reopen attempt. Region 3 reads this to
+    //   rename_done  — shared_ptr<bool>. Set to true as soon as the rename has
+    //                  replaced the live name, before any later step (directory
+    //                  durability, reopen, lock) can fail. Region 3 reads this to
     //                  distinguish pre-rename failure (old fd valid, keep it) from
     //                  post-rename failure (old fd now stale → poison) (A.1).
     //
@@ -1783,6 +1799,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                     ::unlink(tmp_path.c_str());
                     return false;
                 }
+                // The live name now names the fresh log and the store's open file names
+                // the replaced one, so from here every failure (directory open or fsync,
+                // reopen, lock) must take Region 3's poison branch, so the mark precedes
+                // the directory fsync (093 Gate B, fixpp#554).
+                *rename_done = true;
 
                 // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
                 {
@@ -1790,21 +1811,27 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                     const auto dir_fs_path = log_fs_path.parent_path();
                     const std::string dir_path =
                         dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
+                    // 093 Gate B (fixpp#554): the directory-open fault seam.
+                    if (g_force_reset_dir_open_fail.exchange(false, std::memory_order_relaxed)) {
+                        g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                        return false;
+                    }
                     const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
                     if (dir_fd < 0) {
                         return false;
                     }
-                    const int fsync_rc = ::fsync(dir_fd);
+                    int fsync_rc = ::fsync(dir_fd);
+                    // 093 Gate B (fixpp#554): the directory-fsync fault seam.
+                    if (g_force_reset_dir_fsync_fail.exchange(false, std::memory_order_relaxed)) {
+                        g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                        fsync_rc = -1;
+                    }
                     ::close(dir_fd);
                     if (fsync_rc != 0) {
                         return false;
                     }
                 }
 
-                // Rename + dir-fsync committed the fresh log. Mark this BEFORE the reopen
-                // so Region 3 / catch can distinguish post-rename failure (old fd stale)
-                // from pre-rename failure (old fd valid). [gate-b/r1 A.1/A.2]
-                *rename_done = true;
                 // 093 (tasks.md T079): a reset's rename has committed; an armed
                 // counter-write-after-reset-commit seam now fires at the next write.
                 {
@@ -1959,9 +1986,10 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     //   the stale snapshot on its next iteration (data-model §4 / I-03 / FR-006).
     if (!reset_ok) {
         if (*rename_done) {
-            // Post-rename reopen/lock failure: old fd names a dead inode (unlinked by
-            // rename); poison the store so no write reaches it. A later reset() will
-            // poison-check open_ok and return store_io_failure immediately.
+            // Any failure after the rename (directory durability, reopen, lock): the old
+            // fd names a dead inode (unlinked by rename); poison the store so no write
+            // reaches it. A later reset() will poison-check open_ok and return
+            // store_io_failure immediately.
             // The only recovery is to restart the process and let the factory re-open
             // the now-fresh live log. [gate-b/r1 A.1] [L-035-2]
             impl.file = OsFile{};  // close/release the stale (unlinked) fd
