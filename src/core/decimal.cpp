@@ -253,7 +253,7 @@ expected_t<std::size_t> decimal_traits<pod_decimal>::to_chars(pod_decimal const&
 static inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b,
                                          std::uint64_t* hi) noexcept {
 #if defined(__SIZEOF_INT128__) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
-    unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
+    __extension__ unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
     *hi = static_cast<std::uint64_t>(p >> 64);
     return static_cast<std::uint64_t>(p);
 #elif defined(_MSC_VER) && defined(_M_X64) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)

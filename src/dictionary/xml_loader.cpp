@@ -442,7 +442,8 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
             throw xml_parse_error("dict::xml_parse_error: duplicate <field number=\"" + num_s +
                                   "\">");
         }
-        GlobalFieldInfo info{.tag = tag, .name = name, .type = ft, .length_pair_data_tag = 0};
+        GlobalFieldInfo info{
+            .tag = tag, .name = name, .type = ft, .length_pair_data_tag = 0, .enum_codes = {}};
 
         // T012/T013 (FR-001/FR-017): parse <value enum="X" description="Y"/>
         // children into the enum-domain store. Duplicate `enum` values on one

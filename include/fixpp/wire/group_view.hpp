@@ -134,7 +134,7 @@ public:
         : View{instances.empty() ? nullptr : instances.front().data,
                instances.empty() ? 0 : instances.front().len, gen},
           instances_{instances},
-          base_ctx_{.gen = gen},
+          base_ctx_{.span = {}, .gen = gen},
           alloc_failed_{alloc_failed} {}
 
     // [2b §4.7] 062 T007: `base` carries everything a generated entry needs to

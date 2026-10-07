@@ -49,7 +49,7 @@ static_assert(std::is_base_of_v<View, field_view>,
               "field_view must be the real `: public View` shape (cutover)");
 static_assert(std::is_base_of_v<View, MessageView<access_mode::Index>>,
               "MessageView<Index> must be the real `: public View` shape");
-static_assert(static_cast<int>(access_mode::Index) >= 0,
+static_assert(std::is_enum_v<decltype(access_mode::Index)>,
               "access_mode::Index must remain a valid enumerator (003 binds "
               "MessageView<access_mode::Index>)");
 // NOLINTEND(misc-include-cleaner)

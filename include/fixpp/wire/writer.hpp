@@ -140,7 +140,7 @@ private:
     std::size_t bl_digit_pos_ = npos;
 
     // Scratch memory resource for group bookkeeping (group_writer state).
-    std::pmr::memory_resource* scratch_mr_ = nullptr;
+    [[maybe_unused]] std::pmr::memory_resource* scratch_mr_ = nullptr;
 
     // Track whether we've hit a buffer-full error during appends.
     bool overflow_ = false;
