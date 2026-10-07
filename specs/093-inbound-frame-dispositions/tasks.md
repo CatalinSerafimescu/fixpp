@@ -1591,10 +1591,13 @@ surfaces exist and are witnessed.
     fixed by OD-29; N6), the C-ABI 1.11 BREAKING list (C-7 rows 1–6), #538's T089 outcome (it stays
     open), the follow-ups #534–#537, #541, #549, #550, #551 and #553, and the verify verdict. `CLAUDE.md`'s
     "Last merged FEATURE" pointer is unchanged.
-- [ ] T123 Release the MSVC sandbox lock taken in T006 (close-out row 18), after T113 and T120 have run
+- [X] T123 Release the MSVC sandbox lock taken in T006 (close-out row 18), after T113 and T120 have run
   their MSVC legs. Record the release.
   - **Waiver rationale (open at T125a's push):** the MSVC lock release and the close-out cleanup are kept
-    until Gate B converges, because a Gate B fix may need the sandbox. They are done at close-out.
+    until Gate B converges, because a Gate B fix may need the sandbox. The lock was released after Gate B's
+    round-3 MSVC leg; `build/windows-msvc-asan` and `C:\temp\conan-asan-home` are kept by owner decision.
+  - **As landed:** the release is recorded in close-out row 18 of the Gate B record
+    (`decisions/speckit/093-inbound-frame-dispositions-gateb.md`, parent repo); PR #554 merged as squash `e84991bf`.
 - [X] T124 Draft the PR description (it is opened in T125a, after the last commit):
   - the `[const §X.7]` BREAKING declaration (C-7 rows 1–6), matching the B&L delta, and why #523/#524 are
     not BREAKING (B-518-1's ruling). Before opening, compare the three carriers row by row: for each
