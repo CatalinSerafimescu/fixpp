@@ -188,8 +188,8 @@ done
 # arm makes ONE entry point the process's first hooked call, from such a constructor,
 # and asks for more than the interceptor's static buffer holds: the hook must resolve
 # and forward, not serve the call from that buffer. The constructor stays pure C and
-# makes no other call first: a malloc (stdio's, libstdc++'s start-up) resolves every
-# hook, and the arm then measures nothing. `main` reads the constructor's verdict, which
+# its planted call comes first: a malloc ahead of it (stdio's, libstdc++'s start-up)
+# would resolve every hook, and the arm would then measure nothing. `main` reads the constructor's verdict, which
 # also keeps the library linked under --as-needed, and returns before the window when it
 # failed, so check_alloc.py refuses rather than reporting interception. The malloc arm
 # is the control: it shows the fixture itself works, so a failing arm names its hook.

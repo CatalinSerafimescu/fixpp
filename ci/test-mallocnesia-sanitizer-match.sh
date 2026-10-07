@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# ci/test-mallocnesia-sanitizer-match.sh — pin the flag match that keeps the allocation
-# gates off a sanitizer build (fixpp#497):
+# ci/test-mallocnesia-sanitizer-match.sh — pin the flag match that decides whether the
+# allocation gates register (fixpp#497):
 # fixpp_mallocnesia_flags_name_sanitizer() in cmake/FixppMallocnesiaSanitizerMatch.cmake.
 #
 # A sanitizer's allocator interposes ahead of the interceptor, so a gate registered on a
-# sanitizer build passes without measuring. The match deciding that is one regex, and an
-# edit to it is checked by nothing else: no configured tree on a CI lane carries a
-# sanitizer the guard would miss. So each cell is a flag string with the exact result it
-# must give, run under `cmake -P` against the real module, and each mutant below is a
-# copy of the module broken one way, asserted to fail the cell that names that break.
+# sanitizer build passes without measuring. The match deciding that is one regex, and a
+# configured tree exercises it only on the flags that tree carries. So each cell is a
+# flag string with the exact result it must give, run under `cmake -P` against the real
+# module, and each mutant below is a copy of the module broken one way, asserted to fail
+# the cell that names that break.
 #
 # Buildless: cmake in script mode only, no configured tree, no compiler.
 set -uo pipefail
@@ -64,7 +64,7 @@ else
 fi
 
 # ── mutants: a broken copy must fail the cells that name its break, and only those ──
-# Each replaces the module's regex, and nothing else, with a broken one.
+# A mutant is the module with its regex swapped for a broken one.
 REGEX='"-fsanitize=[^ ;>]*"'
 mutant() {  # mutant <id> <what> <want-failed-cells, space-separated> <replacement regex>
   local id="$1" what="$2" want="$3" copy="$TMP/$1.cmake" out rc got
