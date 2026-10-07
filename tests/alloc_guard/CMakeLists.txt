@@ -52,13 +52,14 @@ set_target_properties(sync_alloc_guard_test PROPERTIES
 )
 add_test(NAME alloc_guard_sync_embedded COMMAND sync_alloc_guard_test)
 
-# 007-threading-clock T051 (Seam 7 / [2d §9.7]): zero-global-heap between
-# parse and fromApp over a 10⁴-message corpus. All dynamic storage is from
-# PMR arenas (cancellable_dispatch node from session_arena; per-awaiter
-# promise frame from message_arena on PMR fallback). Same mallocnesia harness.
-# CTest NAME is deliberately NOT `threading_`-prefixed (driven by
-# tools/check_alloc.py under LD_PRELOAD, not swept by the ^threading_ ctest
-# selection — same convention as alloc_guard_sync_embedded above).
+# 007-threading-clock T051 (Seam 7 / [2d §9.7]) asks for zero global heap between
+# parse and fromApp over a 10⁴-message corpus. All dynamic storage is meant to come
+# from PMR arenas (cancellable_dispatch node from session_arena; per-awaiter
+# promise frame from message_arena on PMR fallback). No preload gate is registered
+# for this binary (see "DELIBERATELY NOT GATED" below), so its window's global-heap
+# half is unchecked and the cell checks its functional post-conditions only.
+# CTest NAME is deliberately NOT `threading_`-prefixed, so the ^threading_ ctest
+# selection does not sweep it (same convention as alloc_guard_sync_embedded above).
 add_executable(test_dispatch_alloc_guard test_dispatch_alloc_guard.cpp)
 target_link_libraries(test_dispatch_alloc_guard PRIVATE
   fixpp_session
@@ -73,9 +74,10 @@ set_target_properties(test_dispatch_alloc_guard PROPERTIES
 )
 add_test(NAME alloc_guard_dispatch COMMAND test_dispatch_alloc_guard)
 
-# 007-threading-clock T052 (Seam 18 / [2d §9.18]): zero-global-heap after the
-# first heartbeat cycle over 10⁴ cycles, BOTH threading modes; an idle session
-# that never sleeps allocates no slot (E12 / D-8 / N-P1-1). Same harness.
+# 007-threading-clock T052 (Seam 18 / [2d §9.18]) asks for zero global heap after
+# the first heartbeat cycle over 10⁴ cycles, BOTH threading modes; an idle session
+# that never sleeps allocates no slot (E12 / D-8 / N-P1-1). No preload gate is
+# registered ("DELIBERATELY NOT GATED" below): the global-heap half is unchecked.
 add_executable(test_clock_sleep_alloc_guard test_clock_sleep_alloc_guard.cpp)
 target_link_libraries(test_clock_sleep_alloc_guard PRIVATE
   fixpp_session
@@ -90,15 +92,15 @@ set_target_properties(test_clock_sleep_alloc_guard PROPERTIES
 )
 add_test(NAME alloc_guard_clock_sleep COMMAND test_clock_sleep_alloc_guard)
 
-# 005-session-establishment-fsm T059 (Seam #12 / SC-009 / I-7):
-# zero-global-heap on the 005-owned hot paths — SeqnumManager
+# 005-session-establishment-fsm T059 (Seam #12 / SC-009 / I-7) asks for zero
+# global heap on the 005-owned hot paths — SeqnumManager
 # (assign_outbound + check_inbound) and the admin builders
 # (build_heartbeat / build_test_request). The cancellable_dispatch + clock
-# sleep paths are covered upstream by 007's alloc-guards above; this binary
-# focuses on the 005-specific surface. Same mallocnesia harness.
-# CTest NAME deliberately NOT `session_`-prefixed (driven by tools/check_alloc.py
-# under LD_PRELOAD, not the ^session_ ctest selection — same convention as
-# alloc_guard_dispatch above).
+# sleep paths are 007's alloc-guards above; this binary focuses on the
+# 005-specific surface. No preload gate is registered ("DELIBERATELY NOT GATED"
+# below): the global-heap half is unchecked.
+# CTest NAME deliberately NOT `session_`-prefixed, so the ^session_ ctest
+# selection does not sweep it (same convention as alloc_guard_dispatch above).
 add_executable(test_session_alloc_guard test_session_alloc_guard.cpp)
 target_link_libraries(test_session_alloc_guard PRIVATE
   fixpp_session
