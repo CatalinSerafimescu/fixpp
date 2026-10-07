@@ -142,7 +142,7 @@ constexpr version_profile kProfileV44{.session = session_version::v44,
 // Parses the shared execution-report frame, either dict-backed (tv != nullptr)
 // or dict-free (tv == nullptr), and calls fixpp::dict::reify(). The parse
 // arena/frame outlive the reify() call (both are stack locals in the caller).
-fixpp::core::expected_t<owning_message_handle> reify_execution_report(
+[[maybe_unused]] fixpp::core::expected_t<owning_message_handle> reify_execution_report(
     std::vector<std::byte> const& frame_bytes, fixpp::dict::table_view const* tv,
     std::pmr::memory_resource* parse_mr, std::pmr::memory_resource* handle_mr) {
     fixpp::wire::pmr_carry_buffer carry{frame_bytes.size(), parse_mr};

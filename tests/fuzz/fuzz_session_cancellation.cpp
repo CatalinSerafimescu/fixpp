@@ -84,7 +84,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         auto& sig = sigs[static_cast<std::size_t>(i)];
         asio::co_spawn(
             ctx,
-            [&, i]() -> asio::awaitable<void> {
+            [&]() -> asio::awaitable<void> {
                 auto r = co_await cancellable_dispatch(se, sig.slot(), [] {});
                 // Every awaitable completes exactly once with a DEFINED
                 // outcome (value, dispatch_aborted, or the bounded-arena

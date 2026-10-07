@@ -15,8 +15,9 @@
 //
 // Reproduce:
 //   cmake --build build/linux-clang-release -j2 --target table_view_footprint_bench
-//   ./build/linux-clang-release/bench/dictionary/table_view_footprint_bench \
-//       --benchmark_repetitions=10 --benchmark_report_aggregates_only=true
+// clang-format off
+//   ./build/linux-clang-release/bench/dictionary/table_view_footprint_bench --benchmark_repetitions=10 --benchmark_report_aggregates_only=true
+// clang-format on
 //
 // Both `dictionary` objects are loaded ONCE outside the timed loop (XML parse cost
 // is excluded — see xml_loader_bench.cpp for that figure separately); only
