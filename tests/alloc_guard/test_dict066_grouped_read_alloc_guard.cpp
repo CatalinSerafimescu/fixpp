@@ -21,9 +21,10 @@
 // anything 066 changed. `Session::parse_and_dispatch_` itself
 // (src/session/session.cpp) is a plain `noexcept` function, NOT a coroutine — it
 // is called synchronously from inside the session's coroutines. This file
-// mirrors `parse_and_dispatch_`'s EXACT construction (stack array +
-// `monotonic_buffer_resource` with `fixpp::detail::arena_upstream()` as
-// upstream, `Parser<access_mode::Index>{tv}`) directly, honestly isolating
+// builds the inbound `parse_and_dispatch_` overload's shape (a
+// `monotonic_buffer_resource` over the session's parse buffer, upstream
+// `fixpp::detail::arena_upstream()`, `Parser<access_mode::Index>{tv}` with the
+// entry cap and reserve; 093 re-based it from a stack array) directly, isolating
 // what 066 actually changed (WHICH `table_view`/`Parser` feeds the root
 // `OffsetTable`) from the session/coroutine machinery around it (same
 // idiom as `tests/capi/recv_alloc_guard_test.cpp`'s synchronous trampoline
@@ -70,6 +71,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/dict/table_view.hpp>
@@ -79,6 +81,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 #include "support/fix44_dictionary.hpp"
@@ -86,6 +89,7 @@
 #include "support/msvc_debug_arena_skip.hpp"  // FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
+#include "session/parse_capacity.hpp"  // 093 E-2: B(L) and N(L), the session's formula
 #include "support/alloc_guard_markers.hpp"
 
 // ── (a) TU-local global operator-new counter ────────────────────────────
@@ -135,8 +139,18 @@ using fixpp::wire::Framer;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 
-// Mirrors src/session/session.cpp's `parse_and_dispatch_` arena construction exactly.
-constexpr std::size_t kInboundParseArena = 16384;
+// 093-inbound-frame-dispositions (data-model E-2) re-based this file's arena: the
+// session's inbound parse_and_dispatch_ overload parses over a per-session parse
+// buffer B(L), allocated once at open(), with the entry cap N(L) and an up-front
+// reserve. The buffer here is B(L) at the default L, from the session's own formula
+// (src/session/parse_capacity.hpp), allocated before main, so outside every counted
+// window, as open() allocates it before any frame. Its upstream is arena_upstream(),
+// where the session's spill witness forwards.
+constexpr std::uint32_t kLimit = fixpp::session::kDefaultInboundLimit;
+
+// A bad_alloc while building it before main aborts the binary, which fails the run.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp,cppcoreguidelines-avoid-non-const-global-variables)
+std::vector<std::byte> g_parse_buffer(fixpp::session::detail::parse_capacity::buffer_bytes(kLimit));
 
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(s.data), s.len};
@@ -146,7 +160,7 @@ bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
     return sv.contains(soh_needle);
 }
 
-// One parse+read pass, mirroring parse_and_dispatch_'s exact arena shape.
+// One parse+read pass, in the shape of the inbound parse_and_dispatch_ overload.
 // Returns true iff the frame parsed and the caller-supplied read callback's
 // own correctness assertions (via ADD_FAILURE inside `read`) all held.
 // `owner` null: the BORROWED route (`Parser{tv}`). Non-null: the OWNED route
@@ -155,8 +169,7 @@ bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
 template <class ReadFn>
 bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> const& raw,
                     ReadFn&& read, std::shared_ptr<const fixpp::dict::table_view> const* owner) {
-    std::array<std::byte, kInboundParseArena> pa_buf{};
-    std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
+    std::pmr::monotonic_buffer_resource pa_mr{g_parse_buffer.data(), g_parse_buffer.size(),
                                               ::fixpp::detail::arena_upstream()};
     std::array<std::byte, 512> carry_store{};
     std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(), carry_store.size(),
@@ -168,7 +181,10 @@ bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> co
     if (!feed_r.has_value() || feed_r->empty()) return false;
 
     auto run = [&](Parser<access_mode::Index>& parser) {
-        auto mv_r = parser.parse(out[0], &pa_mr);
+        std::size_t const cap = fixpp::session::detail::parse_capacity::entry_cap_for(kLimit);
+        auto mv_r = parser.parse(
+            out[0], &pa_mr, fixpp::wire::OffsetTable::Config{.max_offset_entries = cap},
+            fixpp::session::detail::parse_capacity::reserve_for(cap, raw.size()));
         if (!mv_r.has_value()) return false;
         read(*mv_r);
         return true;

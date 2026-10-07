@@ -308,6 +308,7 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
         "reset_on_disconnect",
         "refresh_on_logon",
         "logout_disconnect_timeout_ms",
+        "logon_timeout_ms",  // 093 (data-model E-7)
         "redeliver_poss_dup",
         "allow_pos_dup",
         "sending_time_precision",

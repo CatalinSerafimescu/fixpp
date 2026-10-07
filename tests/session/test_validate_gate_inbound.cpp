@@ -8,7 +8,8 @@
 // Contract C-2: given a session with validate_inbound_messages==true, in an
 // inbound-processing state (Active for most cells, NotConnected for Logon cell):
 //
-//  W1: header-out-of-order message       → Reject(35=3, 373=14)
+//  W1: MsgType(35) not the third field   → disregarded as garbled, no Reject
+//      (093-inbound-frame-dispositions FR-004 superseded this row's Reject(373=14))
 //  W2: undefined-tag message             → Reject(35=3, 373=2)
 //  W3: required-field-missing message    → Reject(35=3, 373=1)
 //  W4: type-nonconformant (Int field with non-numeric value) → Reject(35=3, 373=5)
@@ -283,14 +284,17 @@ struct ValidateGateFixture {
     }
 };
 
-// ── W1: header-out-of-order → reason=14 ──────────────────────────────────────
+// ── W1: MsgType(35) not the third field → disregarded, no Reject ────────────
 //
-// Feed a message where tag 35 (MsgType) appears AFTER another non-framing tag
-// (e.g. 49= appears before 35=). The validator's Step 0 checks that the first
-// non-framing entry in the offset table is tag 35 — anything else → wire_header_out_of_order.
+// 093-inbound-frame-dispositions (FR-004; contract C-2 step 1) superseded this
+// cell's Reject(373=14) pin. A frame whose third field is not 35 is garbled (FIX-SL
+// §4.5.2 criterion 3, FIX-TC 2020 2t) in both validation modes: the session's arm
+// disregards it before the validate gate runs, so the validator's Step 0 is no longer
+// reached from the session. NextNumIn is not incremented: a conformant Heartbeat at
+// the next number afterwards is too high and draws a ResendRequest.
 //
 // Build a frame manually where the body has 49= before 35= (swapping the field order).
-TEST(ValidateGateInbound, HeaderOutOfOrder_Reason14) {
+TEST(ValidateGateInbound, HeaderOutOfOrder_DisregardedUnderValidation) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
@@ -322,8 +326,14 @@ TEST(ValidateGateInbound, HeaderOutOfOrder_Reason14) {
 
     fix.feed(sess, frame);
 
-    EXPECT_TRUE(fix.has_reject_with_reason(14))
-        << "W1: header-out-of-order must produce Reject(373=14)";
+    EXPECT_FALSE(fix.has_any_reject()) << "W1: the out-of-order frame draws no Reject";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "W1: the session stays Active";
+    EXPECT_EQ(sess.garbled_frame_count(), 1U) << "W1: it is counted as one garbled frame";
+
+    fix.feed(sess, make_heartbeat_frame(3));
+    EXPECT_TRUE(fix.has_msg_type("2"))
+        << "W1: NextNumIn was not incremented, so Heartbeat(34=3) is a gap (ResendRequest)";
+    EXPECT_FALSE(fix.has_any_reject()) << "W1: the conformant Heartbeat draws no Reject";
 }
 
 // ── W2: undefined tag for msg type → reason=2 ────────────────────────────────
@@ -527,8 +537,12 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
 //
 // Regression witness for the FIX-1 bypass (simplify-triage round):
 // The validate gate used kAdminParseArena (8192 bytes) while the dispatch path
-// uses kInboundParseArena (16384 bytes). The OffsetTable parser allocates PMR-backed
+// used a 16384-byte stack arena. The OffsetTable parser allocates PMR-backed
 // pmr::vector<entry> (12 bytes/entry) from the arena with geometric reallocation.
+// 093-inbound-frame-dispositions (data-model E-2) supersedes both stack arenas: the
+// gate and dispatch parse over the session's parse buffer B(L), with the entries
+// reserved up front. The arithmetic below is FIX-1's record of the 8 KiB failure, which
+// the RED mutation at the end of this block reproduces.
 //
 // Arena exhaustion mechanics (sizeof(entry)==12; 2× growth from initial cap=1):
 //   Cumulative monotonic usage before the cap-256→512 step:
@@ -548,20 +562,20 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
 // Threshold-independent discrimination (part b):
 //   After the validate-Reject (which consumed seq=2, W7-proven), feed a conformant
 //   Heartbeat at the next seqnum=3.  A conformant message must be dispatched without
-//   Reject, proving: (1) the 16 KiB arena is sufficient for the validate path even
+//   Reject, proving: (1) the parse buffer is sufficient for the validate path even
 //   on conformant messages, (2) the Reject was triggered by the undefined tags, not
 //   by some universal large-message policy.  This assertion passes regardless of
 //   the exact PMR exhaustion threshold.
 //
 // RED on kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
 //   unexpected → validation SKIPPED → no Reject.
-// GREEN on kInboundParseArena gate: parse succeeds → validate fires → Reject(373=2)
+// On the session's parse buffer: parse succeeds → validate fires → Reject(373=2)
 //   for the first undefined tag; then conformant NOS at seq=2 dispatched, no Reject.
 //
 // RED-discrimination confirmation (required by brief):
-//   To confirm RED: temporarily set the gate arena to kAdminParseArena (8192) in
-//   validate_inbound_() and rebuild → W8 FAILS (no Reject).
-//   Restore kInboundParseArena → GREEN.
+//   To confirm RED: temporarily give validate_inbound_() a kAdminParseArena (8192)
+//   stack arena in place of the parse buffer and rebuild → W8 FAILS (no Reject).
+//   Restore the parse buffer → GREEN.
 TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
@@ -574,17 +588,9 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     // (11,54,60) + 280 undefined (9000-9279) = 290.  Needs cap-512 (next power of 2
     // above 256 that fits 290).
     //
-    // The count must land in the window (admin-arena capacity, inbound-arena
-    // capacity): high enough to EXHAUST the 8 KiB kAdminParseArena (so the RED
-    // mutation in the header comment fails), low enough to FIT the 16 KiB
-    // kInboundParseArena.  That window is allocator-dependent: kInboundParseArena
-    // is 2x kAdminParseArena, but MSVC's std::pmr grows vectors 1.5x (vs
-    // libstdc++/libc++ 2x), so a monotonic_buffer_resource retains more, shifting
-    // the inbound ceiling down.  MEASURED (windows-msvc-release sweep): the gate
-    // rejects up to 315 total fields and bypasses at >=320 on MSVC, vs >480 on
-    // libstdc++; the libstdc++ admin-arena floor is ~257.  290 (vs the original
-    // libstdc++-only 410) sits in the overlap with margin on both bounds: above
-    // the 257-field libstdc++ admin floor, below the 315-field MSVC inbound ceiling.
+    // The count must land in the window: high enough to EXHAUST the 8 KiB
+    // kAdminParseArena (so the RED mutation in the header comment fails), and within
+    // parse_capacity::entry_cap_for(L) so the inbound parse fits.
     std::string body;
     body += "11=ORD001\x01";
     body += "54=1\x01";
@@ -598,7 +604,7 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
 
     // On kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
     //   unexpected → validation SKIPPED → no Reject  [RED].
-    // On kInboundParseArena gate: parse succeeds → validate fires →
+    // On the session's parse buffer: parse succeeds → validate fires →
     //   first undefined tag (9000) detected → Reject(373=2)  [GREEN].
     EXPECT_TRUE(fix.has_reject_with_reason(2))
         << "W8a: high-field-count frame with undefined tags must be Rejected (373=2), "
@@ -609,7 +615,7 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     // The in-sequence validate-Reject consumed seq=2 (fixpp#423 / W7).  Feed a
     // conformant Heartbeat(35=0) at the next seq=3 to prove: (i) the session remains
     // Active, (ii) the conformant message is dispatched without a Reject, and (iii)
-    // the shared kInboundParseArena is sufficient for conformant messages.  A Heartbeat
+    // the shared parse buffer is sufficient for conformant messages.  A Heartbeat
     // is used (not NOS) because it is an admin message that routes through fromAdmin —
     // no Application is registered in this fixture, so a NOS would produce a Reject
     // (reason=3) for a different reason (no fromApp handler), masking the arena result.

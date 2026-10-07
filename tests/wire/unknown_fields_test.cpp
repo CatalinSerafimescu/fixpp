@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <memory_resource>
 #include <span>
@@ -27,6 +28,7 @@
 #include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
+#include "support/pmr_allocation_tracking_resource.hpp"
 
 namespace {
 
@@ -180,6 +182,115 @@ TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
     EXPECT_TRUE(has_35) << "tag 35 must appear as unknown with empty dict";
     EXPECT_TRUE(has_34) << "tag 34 must appear as unknown with empty dict";
     EXPECT_FALSE(has_framing) << "framing tags 8/9/10 must never appear as unknown";
+}
+
+// ── Q-32 (093-inbound-frame-dispositions, FR-015, fixpp#540) ─────────────────
+//
+// unknown_fields() is noexcept and pushes into a pmr vector over the view's parse
+// resource. Over a resource whose upstream is null_memory_resource, a list that does
+// not fit used to throw bad_alloc out of the noexcept body: std::terminate. The parse
+// resource here is a monotonic buffer over a heap block, its upstream set explicitly to
+// null (through a tracking resource), so the result does not depend on the lane's
+// arena_upstream(). The block is the smallest that lets the parse succeed with no
+// upstream request, found by a sweep, so the unknown-field list cannot fit.
+//
+// The calls run under EXPECT_EXIT(..., ExitedWithCode(0), ...): a terminate is a
+// recorded failure of this cell, not a crashed binary.
+
+namespace q32 {
+
+constexpr std::size_t kUnknownFields = 40;
+
+std::vector<std::byte> frame_with_unknown_fields() {
+    std::string body =
+        "35=D\x01"
+        "34=1\x01";
+    for (std::size_t i = 0; i < kUnknownFields; ++i) {
+        body += "5000=x\x01";
+    }
+    return make_raw_frame(body);
+}
+
+// A parse over a monotonic buffer of `size` bytes whose upstream is a tracking resource
+// over `final_upstream`: null_memory_resource for the cell, new_delete for the sizing
+// sweep. The sweep forwards because MSVC's debug STL draws container proxies from the
+// resource in the view's noexcept constructor, outside the parse's own catch, so a block
+// too small for them would terminate the sweep rather than fail the parse. Members are
+// declared in construction order.
+struct BoundedParse {
+    std::vector<std::byte> block;
+    fixpp::test_support::pmr_allocation_tracking_resource upstream;
+    std::pmr::monotonic_buffer_resource mr;
+    Parser<access_mode::Index> parser;  // dict-free: every non-framing tag is unknown
+    fixpp::core::expected_t<fixpp::wire::MessageView<access_mode::Index>> mv;
+
+    BoundedParse(fixpp::wire::frame_view const& fv, std::size_t size,
+                 std::pmr::memory_resource* final_upstream = std::pmr::null_memory_resource())
+        : block(size),
+          upstream{final_upstream},
+          mr{block.data(), block.size(), &upstream},
+          mv{parser.parse(fv, &mr)} {}
+
+    BoundedParse(BoundedParse const&) = delete;
+    BoundedParse& operator=(BoundedParse const&) = delete;
+    BoundedParse(BoundedParse&&) = delete;
+    BoundedParse& operator=(BoundedParse&&) = delete;
+    ~BoundedParse() = default;
+};
+
+// The smallest block, in steps of 8, over which the parse makes no upstream request;
+// 0 if none up to the sweep's end.
+std::size_t smallest_parse_only_block(fixpp::wire::frame_view const& fv) {
+    for (std::size_t size = 16; size <= 65536; size += 8) {
+        BoundedParse p{fv, size, std::pmr::new_delete_resource()};
+        if (p.mv.has_value() && p.upstream.allocate_calls() == 0U) return size;
+    }
+    return 0;
+}
+
+}  // namespace q32
+
+// Positive control: over a block large enough for the list, the same frame yields
+// every unknown field, so an empty view in the cell below is the exhaustion's.
+TEST(WireUnknownFieldsQ32, ControlTheListFitsAndHoldsEveryUnknownField) {
+    auto buf = q32::frame_with_unknown_fields();
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    q32::BoundedParse p{*fv, 65536};
+    ASSERT_TRUE(p.mv.has_value());
+    std::size_t n = 0;
+    auto const uf = p.mv->unknown_fields();
+    for (auto it = uf.begin(); !(it == uf.end()); ++it) ++n;
+    // 35, 34 and the 5000s: a dict-free view classifies every non-framing tag unknown.
+    EXPECT_EQ(n, q32::kUnknownFields + 2U);
+    EXPECT_EQ(p.upstream.allocate_calls(), 0U) << "the control's list fits in its block";
+}
+
+TEST(WireUnknownFieldsQ32, ExhaustedArenaReturnsTheSameEmptyViewAndTheProcessLives) {
+    auto buf = q32::frame_with_unknown_fields();
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::size_t const size = q32::smallest_parse_only_block(*fv);
+    ASSERT_NE(size, 0U) << "no block size lets the parse succeed without an upstream request";
+    q32::BoundedParse p{*fv, size};
+    ASSERT_TRUE(p.mv.has_value());
+    ASSERT_EQ(p.upstream.allocate_calls(), 0U) << "the parse itself fits in the block";
+
+    // Exit codes: 0 = both calls returned the same empty view; 1 = the first call
+    // returned a non-empty view (the list fitted, so nothing was exhausted);
+    // 2 = the second call differs from the first.
+    EXPECT_EXIT(
+        {
+            auto const first = p.mv->unknown_fields();
+            auto const second = p.mv->unknown_fields();
+            // std::exit reports this death-test child's verdict as its exit code.
+            // NOLINTBEGIN(concurrency-mt-unsafe)
+            if (!first.empty()) std::exit(1);
+            if (!second.empty() || !(first.begin() == second.begin())) std::exit(2);
+            std::exit(0);
+            // NOLINTEND(concurrency-mt-unsafe)
+        },
+        ::testing::ExitedWithCode(0), "");
 }
 
 }  // namespace

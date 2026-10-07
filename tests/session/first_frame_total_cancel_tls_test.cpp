@@ -94,22 +94,30 @@ namespace {
 
 using fixpp::core::error;
 using fixpp::core::expected_t;
+using fixpp::session::detail::first_frame_read;
 using fixpp::session::detail::read_first_frame_bounded;
 using fixpp::transport::TlsTransport;
 using fixpp::transport::Transport;
 using fixpp::transport::test::LoopbackTlsFixture;
 using namespace std::chrono_literals;
 
-std::string describe(expected_t<std::size_t> const& r) {
+// Leg A reads through read_first_frame_bounded, leg B reads the transport directly.
+std::string describe_value(first_frame_read const& r) {
+    return "{offset=" + std::to_string(r.offset) + ", len=" + std::to_string(r.len) + "}";
+}
+std::string describe_value(std::size_t n) { return std::to_string(n); }
+
+template <class T>
+std::string describe(expected_t<T> const& r) {
     if (!r.has_value())
         return std::string("error=") + std::string(fixpp::core::to_string(r.error()));
-    return "value=" + std::to_string(*r);
+    return "value=" + describe_value(*r);
 }
 
 // A cancellation-attributable outcome per D-6.10a's leg-A binding: one of the
 // two errors a genuinely-cancelled read/deadline can surface, and explicitly
 // none of the outcomes a socket-close (the watchdog's fallback) would produce.
-bool is_cancellation_attributable(expected_t<std::size_t> const& r) {
+bool is_cancellation_attributable(expected_t<first_frame_read> const& r) {
     if (r.has_value()) return false;
     return r.error() == error::transport_read_cancelled ||
            r.error() == error::transport_handshake_timeout;
@@ -196,8 +204,9 @@ void establish_pair(asio::io_context& ioc, LoopbackTlsFixture& fixture, Establis
 // Positive initiation barrier (D-6.13a): poll() until `entered_read` is set
 // AND a following poll() leaves `result` still unset — suspended inside the
 // read, not merely not-yet-run.
+template <class T>
 void confirm_suspended_in_read(asio::io_context& ioc, bool const& entered_read,
-                               std::optional<expected_t<std::size_t>> const& result) {
+                               std::optional<expected_t<T>> const& result) {
     for (int i = 0; i < 10'000 && !entered_read; ++i) ioc.poll();
     ASSERT_TRUE(entered_read) << "positive barrier: wrapper coroutine never reached the "
                               << "co_await of the subject read — vacuous cell (D-6.13a).";
@@ -229,7 +238,7 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
     // code.
     asio::cancellation_signal signal;
     bool entered_read = false;
-    std::optional<expected_t<std::size_t>> result;
+    std::optional<expected_t<first_frame_read>> result;
     std::exception_ptr thrown;
     std::vector<std::byte> buf;
     constexpr std::size_t kMaxBytes = 4096;

@@ -8,10 +8,14 @@
 // (Framer::feed body, carry handling, mandatory CheckSum/BodyLength verify)
 // is src/wire/framer.cpp — US3 / T040.
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/core/error.hpp>  // core::expected_t
 #include <memory_resource>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "view.hpp"
@@ -20,6 +24,42 @@ namespace fixpp::wire {
 
 inline constexpr std::size_t default_max_frame_bytes =
     std::size_t{256} * std::size_t{1024};  // 256 KiB
+
+namespace detail {
+
+// 093-inbound-frame-dispositions (contract C-1 W-2): the supported-profile list C-1
+// W-2 derives the resync-mode BeginString cap from. It holds the BeginString(8)
+// values of the supported profiles ([const §I.1]; FIX 5.0 to 5.0 SP2 travel under
+// FIXT.1.1), and the cap defaults to the longest of them.
+inline constexpr std::array<std::string_view, 6> supported_begin_strings{
+    "FIX.4.0", "FIX.4.1", "FIX.4.2", "FIX.4.3", "FIX.4.4", "FIXT.1.1"};
+
+[[nodiscard]] consteval std::size_t longest_supported_begin_string() {
+    std::size_t longest = 0;
+    for (std::string_view const s : supported_begin_strings) {
+        longest = std::max(longest, s.size());
+    }
+    return longest;
+}
+
+// After a garble the resync search looks for "8=FIX" (C-1, Frame start), which is
+// sound only while every supported profile begins with "FIX" (contract L-16).
+static_assert(std::ranges::all_of(supported_begin_strings,
+                                  [](std::string_view s) { return s.starts_with("FIX"); }),
+              "the resync search prefix 8=FIX must cover every supported profile");
+
+}  // namespace detail
+
+// 093 (data-model E-1): what one resync-mode Framer::feed call disregarded. `regions`
+// counts the garbled regions the call opened (a region continued from an earlier call
+// is not counted again); `first_kind` is the first opened region's kind and is
+// core::error{} when `regions == 0`; `discarded` counts every byte the call dropped,
+// those of a continued region included.
+struct garble_summary {
+    std::uint32_t regions = 0;
+    core::error first_kind{};
+    std::size_t discarded = 0;
+};
 
 // Backed by SessionConfig::framer_carry_arena (SESSION lifetime, NOT
 // per-message — carry spans messages). One allocation at construction from
@@ -138,7 +178,27 @@ public:
         std::size_t max_frame_bytes = default_max_frame_bytes;
         // CheckSum + BodyLength verification is MANDATORY and not
         // configurable ([2b §2]); no production bypass exists.
+
+        // 093 (contract C-1; data-model E-1): opt-in resync. Off, `feed` is the strict
+        // framer, unchanged: the first framing error fails the call. On, a framing
+        // error other than wire_frame_too_large opens or continues a garbled region,
+        // reported through last_garbles(), and framing resumes at the next "8=FIX".
+        bool resync_on_garble = false;
+        // Read only in resync mode: the longest BeginString value a candidate may
+        // carry before its SOH (C-1 W-2).
+        std::size_t max_begin_string_bytes = detail::longest_supported_begin_string();
     };
+
+    // Read only in resync mode: the longest BodyLength digit run, leading zeros
+    // included, that a candidate may carry (contract C-1 W-2). A longer run is a
+    // garble of kind wire_invalid_body_length. Recipe (research R-2): the larger of
+    // the longest such run in the repo's FIX-TC fixtures and interop goldens (a `9=`
+    // after every SOH spelling they use, with a seeded positive control first) and
+    // the decimal width of the largest L (kMaxAdvertisedMaxMessageSize, in
+    // src/session/inbound_limit.hpp) plus an allowance for a writer that zero-pads to
+    // the width of a 32-bit length; it must stay within three times that width. The
+    // value and the search are recorded in research R-2.
+    static constexpr std::size_t kBodyLengthDigitCap = 10;
 
     // The shape oracle writes `explicit Framer(Config c = {})`; a `= {}`
     // default arg on a nested struct with default member initializers is a
@@ -158,6 +218,17 @@ public:
 
     [[nodiscard]] std::size_t pending_bytes() const noexcept { return pending_; }
 
+    // 093 (data-model E-1): what the last `feed` disregarded. Every resync-mode feed
+    // resets it first; in strict mode it stays empty.
+    [[nodiscard]] garble_summary last_garbles() const noexcept { return garbles_; }
+
+    // fixpp#511 (B21): test-only access to private state goes through ONE named
+    // friend, defined in tests/support/framer_test_access.hpp (never installed). It
+    // reads the counted-work counters below. Unconditional on purpose: a member gated
+    // behind a test macro would make a test TU's Framer a different class from the
+    // library's, an ODR violation (ill-formed, no diagnostic required).
+    friend struct framer_test_access;
+
 #ifndef NDEBUG
     // Notify the generation-counter registry that the backing arena is being
     // recycled — bumps the pool's generation so any outstanding frame_view /
@@ -171,8 +242,24 @@ public:
 #endif
 
 private:
+    // The resync-mode body of `feed` (contract C-1), src/wire/framer.cpp.
+    [[nodiscard]] core::expected_t<std::span<frame_view>> feed_resync_(
+        std::span<const std::byte> incoming, pmr_carry_buffer& carry,
+        std::span<frame_view> out) noexcept;
+
     Config cfg_{};
     std::size_t pending_ = 0;
+    // 093 resync state (C-1, State across feeds): true while a garbled region is open
+    // across feeds. The carry then holds at most a trailing proper prefix of "8=FIX".
+    bool searching_ = false;
+    garble_summary garbles_{};
+    // 093 counted work (quickstart §2): bytes the resync path read, summed into a
+    // CheckSum, and moved (appended into or compacted within the carry), cumulative
+    // since construction. Incremented on the resync path only; strict mode leaves
+    // them at zero. Read by framer_test_access.
+    std::uint64_t work_read_ = 0;
+    std::uint64_t work_summed_ = 0;
+    std::uint64_t work_moved_ = 0;
 #ifndef NDEBUG
     // Non-zero pool ID for this framer's arena ([2b §6.4]).  Starts at 1 and
     // is unique per-Framer within a thread (session single-threaded per

@@ -22,6 +22,8 @@ refs:
   - specs/092-garbled-frame-reject/spec.md
   - specs/092-garbled-frame-reject/research.md
   - specs/092-garbled-frame-reject/plan.md
+  - specs/093-inbound-frame-dispositions/plan.md
+  - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
   - tools/check_layers.py
   - .github/workflows/abi-golden.yml
@@ -33,6 +35,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/091-data-field-bytes-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
 codegraph_entry: [fixpp_engine_t, fixpp_session_t, fixpp_msg_t, fixpp_strerror]
 constitution: ["§V.1", "§IV.2", "§X.1", "§X.4"]
 ---
@@ -245,6 +249,43 @@ effects have C cells is stated in `L-092-12`. 091 declared 1.9 the same way.
 
 Re-derive: `grep -n '1\.10' include/fix/c_api/*.h`, and re-run R-11's recipe at the head you are
 reading.
+
+⚠️ **Amended in place by 1.11 (093):** the 1.10 Logon sentence (a malformed-tag Logon "is now
+refused") and the 1.10 bullet on a frame the session "cannot parse for dispatch" are false for some
+frames since 093, and are amended at every site in `session.h`, marked 1.11. So is 1.9's FR-020
+sentence (a malformed Length+Data count), at its five sites and in `version.h`'s 1.9 entry.
+
+## C-ABI 1.11: how the session frames inbound bytes (093, fixpp#514, #515, #516)
+
+One MINOR bump, declared BREAKING (`[const §X.7]`), plus two additions:
+`fixpp_session_config_set_logon_timeout_ms` and `fixpp_session_garbled_frame_count`. The behaviour is
+on [`inbound-message-path`](./inbound-message-path.md) and B&L `B-093-14`; what follows is the half
+the headers do not state (contract C-7, plan OD-27).
+
+- **The observer set is derived from the 1.10 entry, not listed afresh.** A change that keeps a
+  session up that used to end, or ends one that used to stay up, changes the result of each call
+  1.10 names. So every BREAKING row is marked on each of them, unless a row writes a
+  result-based reason to leave one out. ⚠️ This differs from 1.10's carrier split above, where
+  `fixpp_session_close` carried only the Logon refusal.
+- **Amend in place, mark with the new MINOR.** Where 093 falsifies a sentence an earlier MINOR put in a
+  clause, the sentence is amended where it stands and marked 1.11, not deleted or contradicted in a
+  new clause. Contract C-7 named only the 1.10 text; the 1.9 FR-020 sentence was found falsified the
+  same way at implementation and amended too.
+- **What is not BREAKING.** The 383 range refusal and the zero-timeout refusal in C++ are not C-ABI
+  (C cannot set 383, and the C setter refuses zero itself). #523 and #524 follow B-518-1's owner
+  ruling that the old outcomes were the defect.
+- **No carrier for `open()`'s allocation failure** (OD-27). `Session::open()` runs in the engine's role
+  loops, not on `fixpp_session_open`'s path, so a C caller sees only a session never published
+  (`L-093-18`). Rejected: a carrier, which would be a C-ABI change outside C-7.
+- **C witnesses, clause by clause.** A C-ABI effect witnessed only through C++ is unwitnessed (the
+  091/092 lesson). Phase 8 added a C cell for every clause it could reach; the clauses that need a
+  state or a configuration C cannot produce are disclosed as `L-093-19`, not claimed. Rejected: a
+  test seam to reach them.
+- **Python:** the setter is picked up automatically; the getter needs a `uint64_t` OUTPUT typemap and
+  a GIL-table row, and the import-surface golden gains both names (OD-27). The `uint64_t` mapping
+  differs between LP64 and Windows, so it is witnessed only on the wheel lanes.
+
+Re-derive: `grep -n '1\.11' include/fix/c_api/*.h`.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 

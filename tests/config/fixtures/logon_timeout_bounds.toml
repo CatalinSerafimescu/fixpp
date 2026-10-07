@@ -1,0 +1,59 @@
+# logon_timeout_bounds.toml
+# 093-inbound-frame-dispositions (data-model E-7; quickstart Q-31): logon_timeout_ms at
+# the two ends of its accepted range, 1 and UINT32_MAX, one per session. The engine
+# scope and [default] are multisession_defaults.toml's.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# ── [default]: session-scope shared keys ─────────────────────────────────────
+#
+# Scalars here are inherited by every [[session]] unless overridden.
+# The sub-tables [default.transport] and [default.security_profile] are merged
+# one level deep into each session's transport / security_profile sub-table.
+
+[default]
+begin_string            = "FIX.4.4"
+role                    = "initiator"
+heartbeat_interval      = "30s"     # default value; session B overrides to 45s
+reset_on_logon          = true      # non-default (default false)
+check_comp_id           = false     # non-default (default true — inverted for discrimination)
+# reset_on_logout is intentionally ABSENT here — session B sets it (override-of-absent test)
+
+[default.transport]
+kind = "tls"
+# host and port are NOT shared — each initiator session provides its own endpoint
+
+[default.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id   = "CLIENT_LO"
+target_comp_id   = "SERVER_LO"
+logon_timeout_ms = 1
+
+[session.transport]
+host = "fix-lo.example.com"
+port = 4001
+
+[[session]]
+sender_comp_id   = "CLIENT_HI"
+target_comp_id   = "SERVER_HI"
+logon_timeout_ms = 4294967295
+
+[session.transport]
+host = "fix-hi.example.com"
+port = 4002

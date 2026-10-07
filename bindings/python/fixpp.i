@@ -376,6 +376,11 @@ def _raise_for_code(code):
  * (uint16_t resolves to unsigned short through stdint.i). */
 %apply bool *OUTPUT          { bool* out_established };
 %apply unsigned short *OUTPUT { uint16_t* port_out };
+/* 093 (C-7 row 8): fixpp_session_garbled_frame_count's uint64_t out-param -> a
+ * Python int. Applied as unsigned long long, which is 64 bits on both wheel
+ * lanes; the typemap's temporary takes the parameter's own type, so uint64_t
+ * being unsigned long (LP64) or unsigned long long (Windows) does not matter. */
+%apply unsigned long long *OUTPUT { uint64_t* out };
 
 /* ── T009: config const char* in-typemaps (NUL-terminated, reject inner NUL) ─
  * These are NUL-terminated C inputs (not ptr+len), borrowed for the call only
@@ -684,6 +689,7 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
  *   session_open                    | hold    | in-memory state mutation
  *   session_is_established          | hold    | poll
  *   acceptor_bound_endpoint         | hold    | registry read
+ *   session_garbled_frame_count     | hold    | scoped lookup lease + relaxed atomic load; no round-trip
  *   session_register_callback       | hold    | registry write + INCREF (fixpp_py_register_callback)
  *   all *_config_set_* setters      | hold    | in-memory
  *   dict_load_from_xml              | hold    | sync file/XML parse; CPU-bound, NO engine round-trip ->

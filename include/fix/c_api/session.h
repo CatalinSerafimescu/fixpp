@@ -190,6 +190,26 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_tcp_endpoint(
     fixpp_session_config_t* cfg, const char* host, uint16_t port);
 
+/**
+ * fixpp_session_config_set_logon_timeout_ms — set the establishment timeout
+ * (C-ABI 1.11; 093, fixpp#514).
+ *
+ * Writes SessionConfig::logon_timeout_ms: how long, in milliseconds, a
+ * connection may take to log on. The deadline runs from the accept on an
+ * acceptor, and from the end of the connect, with the Logon sent, on an
+ * initiator. A connection not logged on by then is closed, including one whose
+ * Logon was refused. The default is 10000.
+ *
+ * Return codes:
+ *   FIXPP_ERR_OK                  -- stored
+ *   FIXPP_ERR_NULL_HANDLE         -- cfg is NULL
+ *   FIXPP_ERR_CAPI_CONFIG_INVALID -- ms is 0; nothing is stored
+ *
+ * Reentrancy: single-thread.
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_logon_timeout_ms(
+    fixpp_session_config_t* cfg, uint32_t ms);
+
 /** Destroy a session-config builder. NULL-safe; never-throws. Do NOT call after
  *  the builder was consumed by a successful fixpp_session_open.
  *  Reentrancy: single-thread. */
@@ -230,7 +250,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * BREAKING (C-ABI 1.9; 091 FR-020): a Logon carrying a Length immediately
  * followed by its paired Data whose counted extent reaches or passes the end
  * of the whole framed message, or whose following byte is not SOH (standard
- * pairs included), which was accepted, is now refused, on either role. Once a
+ * pairs included), which was accepted, is now refused, on either role.
+ * Amended in C-ABI 1.11 (093): such a Logon whose third field is not
+ * MsgType(35) is disregarded before interpret_logon reads it, and is not
+ * refused. Once a
  * session whose Logon was refused that way has drained, close returns
  * FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI minor
  * (fixpp_engine_create), where it returned FIXPP_ERR_OK: that session never
@@ -238,13 +261,53 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *
  * BREAKING (C-ABI 1.10; 092, fixpp#507): a Logon carrying a malformed tag (a
  * non-digit tag byte, an empty tag, a tag above 65535, or a field with no '='
- * before its SOH), which was accepted, is now refused, on either role. Once a
+ * before its SOH), which was accepted, is now refused, on either role.
+ * Amended in C-ABI 1.11 (093): such a Logon whose third field is not
+ * MsgType(35) is disregarded instead, and is not refused. Once a
  * session whose Logon was refused that way has drained, close returns
  * FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI minor
  * (fixpp_engine_create), where it returned FIXPP_ERR_OK: that session never
  * established. For a session that established and that another 1.10 effect
  * then ends (see fixpp_session_is_established), close returns FIXPP_ERR_OK,
  * as for any session that was established at least once.
+ *
+ * BREAKING (C-ABI 1.11; 093, fixpp#514, #515, #516): the session frames and
+ * disposes of inbound bytes as follows, where it did otherwise. Most of these
+ * effects keep up, or let establish, a session that ended or did not
+ * establish; the establishment timeout, and a Logon disregarded where it was
+ * accepted, do the reverse:
+ *   - a frame the Framer finds garbled (a wrong BodyLength or CheckSum, bytes
+ *     before a frame start, or a BeginString or a BodyLength digit run longer
+ *     than its cap) is disregarded and counted
+ *     (fixpp_session_garbled_frame_count), in every state, where it ended the
+ *     session; the two over-cap shapes were framed before;
+ *   - a frame whose third field is not MsgType(35) is disregarded and counted
+ *     in every state but Disconnected, where it was processed; a Logon of
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
+ *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
+ *     admitted however the stream is split into reads, where some near that
+ *     size ended the session; a frame over the limit ends the connection, in
+ *     every state, as soon as its BodyLength(9) is read;
+ *   - a frame the session admits always parses for dispatch, where one dense
+ *     with fields could exhaust the parse buffer and end the session;
+ *   - a connection not logged on by the establishment timeout
+ *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
+ *     closed, including one whose Logon was refused, where it stayed open; a
+ *     peer that answers the Logon later than that no longer establishes;
+ *   - every frame that passes the fault and third-field checks counts as
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
+ *     SequenceReset, a Reject, among others); the TestRequest such traffic
+ *     drew is not sent, and a session that ended when it went unanswered
+ *     stays up.
+ * close returns FIXPP_ERR_OK for a session that was established at least once
+ * and FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI
+ * minor (fixpp_engine_create), for one that never was. So where one of these
+ * effects decides whether a session establishes (a Logon disregarded rather
+ * than accepted or refused, a garbled frame before the Logon reply, the
+ * establishment timeout), close's result changes with it; for a session
+ * established before the effect, close returns FIXPP_ERR_OK either way.
  *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
@@ -261,7 +324,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * BREAKING (C-ABI 1.9; 091 FR-020): a Logon carrying a Length immediately
  * followed by its paired Data whose counted extent reaches or passes the end
  * of the whole framed message, or whose following byte is not SOH (standard
- * pairs included), which was accepted, is now refused, on either role. For a
+ * pairs included), which was accepted, is now refused, on either role.
+ * Amended in C-ABI 1.11 (093): such a Logon whose third field is not
+ * MsgType(35) is disregarded before interpret_logon reads it, and is not
+ * refused. For a
  * session whose Logon was refused that way, *out_established stays false where
  * it became true.
  *
@@ -272,7 +338,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * a frame. Each effect below keeps a session from establishing, or ends it,
  * where it established or continued:
  *   - a Logon carrying a malformed tag, which was accepted, is refused, on
- *     either role;
+ *     either role (amended in C-ABI 1.11, 093: such a Logon whose third field
+ *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
@@ -293,7 +360,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
- *     continued, ends the session;
+ *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
+ *     session admits now always parses for dispatch, so this no longer
+ *     occurs);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -301,6 +370,40 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * For a session whose Logon is refused that way, *out_established stays false
  * where it became true; for a session any other of these effects ends, it
  * turns false where it stayed true.
+ *
+ * BREAKING (C-ABI 1.11; 093, fixpp#514, #515, #516): the session frames and
+ * disposes of inbound bytes as follows, where it did otherwise. Most of these
+ * effects keep up, or let establish, a session that ended or did not
+ * establish; the establishment timeout, and a Logon disregarded where it was
+ * accepted, do the reverse:
+ *   - a frame the Framer finds garbled (a wrong BodyLength or CheckSum, bytes
+ *     before a frame start, or a BeginString or a BodyLength digit run longer
+ *     than its cap) is disregarded and counted
+ *     (fixpp_session_garbled_frame_count), in every state, where it ended the
+ *     session; the two over-cap shapes were framed before;
+ *   - a frame whose third field is not MsgType(35) is disregarded and counted
+ *     in every state but Disconnected, where it was processed; a Logon of
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
+ *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
+ *     admitted however the stream is split into reads, where some near that
+ *     size ended the session; a frame over the limit ends the connection, in
+ *     every state, as soon as its BodyLength(9) is read;
+ *   - a frame the session admits always parses for dispatch, where one dense
+ *     with fields could exhaust the parse buffer and end the session;
+ *   - a connection not logged on by the establishment timeout
+ *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
+ *     closed, including one whose Logon was refused, where it stayed open; a
+ *     peer that answers the Logon later than that no longer establishes;
+ *   - every frame that passes the fault and third-field checks counts as
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
+ *     SequenceReset, a Reject, among others); the TestRequest such traffic
+ *     drew is not sent, and a session that ended when it went unanswered
+ *     stays up.
+ * Where one of these effects keeps a session up or lets it establish,
+ * *out_established is true where it was false; where one ends a session or
+ * keeps it from establishing, it is false where it was true.
  *
  * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
@@ -326,6 +429,33 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
                                                                       uint16_t* port_out);
 
 /**
+ * fixpp_session_garbled_frame_count — read the session's garbled-frame count
+ * (C-ABI 1.11; 093, fixpp#514).
+ *
+ * Writes *out = the number of garbled inbound regions the session has
+ * disregarded: frames the Framer finds garbled, and frames whose third field is
+ * not MsgType(35). The count only grows. Before the session exists (before
+ * fixpp_engine_start, and after it until the engine has built the session for a
+ * connection) *out is 0 and the call returns FIXPP_ERR_OK. On an acceptor, the
+ * garbles of a connection that never yields a session are not counted. The value
+ * is not ordered with the rest of the session's state: a caller that needs it to
+ * reflect a given frame synchronises through the session's traffic.
+ *
+ * Return codes:
+ *   FIXPP_ERR_OK             -- *out written
+ *   FIXPP_ERR_NULL_HANDLE    -- out is NULL (nothing written), or session is
+ *                               NULL (*out written 0)
+ *   FIXPP_ERR_INVALID_HANDLE -- the handle was closed, or its engine destroyed
+ *                               (*out written 0)
+ *
+ * Reentrancy: thread-safe. A scoped Engine::lookup lease, released before
+ * return. THUNK: steady-state — an escaping exception is an invariant violation
+ * → fatal log + abort, NOT translated to a code.
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_session_t* session,
+                                                                 uint64_t* out);
+
+/**
  * fixpp_session_send — send an application-message payload (= Engine::send).
  *
  * `frame`/`len` is an APPLICATION-MESSAGE PAYLOAD as a committed byte span (a
@@ -349,7 +479,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * carrying a Length immediately followed by its paired Data whose counted
  * extent reaches or passes the end of the whole framed message, or whose
  * following byte is not SOH (standard pairs included), which was accepted, is
- * now refused, on either role; a send on that session, issued after that
+ * now refused, on either role (amended in C-ABI 1.11, 093: such a Logon whose
+ * third field is not MsgType(35) is disregarded before interpret_logon reads
+ * it, and is not refused); a send on that session, issued after that
  * Logon, which returned FIXPP_ERR_OK, now returns
  * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
  * (fixpp_engine_create). For a send either change refuses, the
@@ -365,7 +497,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * a frame. Each effect below keeps a session from establishing, or ends it,
  * where it established or continued:
  *   - a Logon carrying a malformed tag, which was accepted, is refused, on
- *     either role;
+ *     either role (amended in C-ABI 1.11, 093: such a Logon whose third field
+ *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
@@ -386,7 +519,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
- *     continued, ends the session;
+ *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
+ *     session admits now always parses for dispatch, so this no longer
+ *     occurs);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -395,6 +530,42 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * that effect, which returned FIXPP_ERR_OK, now returns
  * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
  * (fixpp_engine_create).
+ *
+ * BREAKING (C-ABI 1.11; 093, fixpp#514, #515, #516): the session frames and
+ * disposes of inbound bytes as follows, where it did otherwise. Most of these
+ * effects keep up, or let establish, a session that ended or did not
+ * establish; the establishment timeout, and a Logon disregarded where it was
+ * accepted, do the reverse:
+ *   - a frame the Framer finds garbled (a wrong BodyLength or CheckSum, bytes
+ *     before a frame start, or a BeginString or a BodyLength digit run longer
+ *     than its cap) is disregarded and counted
+ *     (fixpp_session_garbled_frame_count), in every state, where it ended the
+ *     session; the two over-cap shapes were framed before;
+ *   - a frame whose third field is not MsgType(35) is disregarded and counted
+ *     in every state but Disconnected, where it was processed; a Logon of
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
+ *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
+ *     admitted however the stream is split into reads, where some near that
+ *     size ended the session; a frame over the limit ends the connection, in
+ *     every state, as soon as its BodyLength(9) is read;
+ *   - a frame the session admits always parses for dispatch, where one dense
+ *     with fields could exhaust the parse buffer and end the session;
+ *   - a connection not logged on by the establishment timeout
+ *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
+ *     closed, including one whose Logon was refused, where it stayed open; a
+ *     peer that answers the Logon later than that no longer establishes;
+ *   - every frame that passes the fault and third-field checks counts as
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
+ *     SequenceReset, a Reject, among others); the TestRequest such traffic
+ *     drew is not sent, and a session that ended when it went unanswered
+ *     stays up.
+ * Where one of these effects keeps a session up or lets it establish, a send on
+ * that session issued after the effect, which returned
+ * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ * (fixpp_engine_create), returns FIXPP_ERR_OK; where one ends a session or
+ * keeps it from establishing, the reverse.
  *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
@@ -428,7 +599,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * Also (091 FR-020), a Logon carrying a Length immediately followed
  * by its paired Data whose counted extent reaches or passes the end of the
  * whole framed message, or whose following byte is not SOH (standard pairs
- * included), which was accepted, is now refused, on either role; inbound
+ * included), which was accepted, is now refused, on either role (amended in
+ * C-ABI 1.11, 093: such a Logon whose third field is not MsgType(35) is
+ * disregarded before interpret_logon reads it, and is not refused); inbound
  * application messages on that session, delivered to `cb` before, are never
  * delivered.
  *
@@ -439,7 +612,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * a frame. Each effect below keeps a session from establishing, or ends it,
  * where it established or continued:
  *   - a Logon carrying a malformed tag, which was accepted, is refused, on
- *     either role;
+ *     either role (amended in C-ABI 1.11, 093: such a Logon whose third field
+ *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
@@ -460,7 +634,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
- *     continued, ends the session;
+ *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
+ *     session admits now always parses for dispatch, so this no longer
+ *     occurs);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -468,6 +644,42 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * On a session one of these effects refused or ended, `cb` is not invoked for
  * any inbound application message after that effect; under 092 FR-019 it is
  * not invoked for the message that ends the session either.
+ *
+ * BREAKING (C-ABI 1.11; 093, fixpp#514, #515, #516): the session frames and
+ * disposes of inbound bytes as follows, where it did otherwise. Most of these
+ * effects keep up, or let establish, a session that ended or did not
+ * establish; the establishment timeout, and a Logon disregarded where it was
+ * accepted, do the reverse:
+ *   - a frame the Framer finds garbled (a wrong BodyLength or CheckSum, bytes
+ *     before a frame start, or a BeginString or a BodyLength digit run longer
+ *     than its cap) is disregarded and counted
+ *     (fixpp_session_garbled_frame_count), in every state, where it ended the
+ *     session; the two over-cap shapes were framed before;
+ *   - a frame whose third field is not MsgType(35) is disregarded and counted
+ *     in every state but Disconnected, where it was processed; a Logon of
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
+ *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
+ *     admitted however the stream is split into reads, where some near that
+ *     size ended the session; a frame over the limit ends the connection, in
+ *     every state, as soon as its BodyLength(9) is read;
+ *   - a frame the session admits always parses for dispatch, where one dense
+ *     with fields could exhaust the parse buffer and end the session;
+ *   - a connection not logged on by the establishment timeout
+ *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
+ *     closed, including one whose Logon was refused, where it stayed open; a
+ *     peer that answers the Logon later than that no longer establishes;
+ *   - every frame that passes the fault and third-field checks counts as
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
+ *     SequenceReset, a Reject, among others); the TestRequest such traffic
+ *     drew is not sent, and a session that ended when it went unanswered
+ *     stays up.
+ * On a session one of these effects keeps up or lets establish, `cb` is invoked
+ * for the inbound application messages after the effect, where it was not; on
+ * one it ends or keeps from establishing, the reverse. `cb` is not invoked for
+ * a disregarded frame, so an application message whose third field is not
+ * MsgType(35), which was delivered to `cb`, is not.
  *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
@@ -495,8 +707,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * not invoked. Also (091 FR-020), a Logon carrying a Length immediately
  * followed by its paired Data whose counted extent reaches or passes the end
  * of the whole framed message, or whose following byte is not SOH (standard
- * pairs included), which was accepted, is now refused, on either role; on that
- * session `cb`, invoked before for each send, is never invoked.
+ * pairs included), which was accepted, is now refused, on either role
+ * (amended in C-ABI 1.11, 093: such a Logon whose third field is not
+ * MsgType(35) is disregarded before interpret_logon reads it, and is not
+ * refused); on that session `cb`, invoked before for each send, is never
+ * invoked.
  *
  * BREAKING (C-ABI 1.10; 092, fixpp#507): the session disposes of an inbound
  * frame whose header scan meets a malformed tag (a non-digit tag byte, an
@@ -505,7 +720,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * a frame. Each effect below keeps a session from establishing, or ends it,
  * where it established or continued:
  *   - a Logon carrying a malformed tag, which was accepted, is refused, on
- *     either role;
+ *     either role (amended in C-ABI 1.11, 093: such a Logon whose third field
+ *     is not MsgType(35) is disregarded instead, and is not refused);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
@@ -526,7 +742,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *   - on an established session, a frame the header scan finds fault-free but
  *     the session cannot parse for dispatch (one that exhausts the per-message
  *     parse arena, for example), which was dropped while the session
- *     continued, ends the session;
+ *     continued, ends the session (amended in C-ABI 1.11, 093: a frame the
+ *     session admits now always parses for dispatch, so this no longer
+ *     occurs);
  *   - an inbound message that would advance the expected inbound sequence
  *     number past its maximum (4294967295), where that number wrapped to 0 and
  *     the session continued, ends the session with no Reject and no Logout
@@ -534,6 +752,41 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * On a session one of these effects refused or ended, `cb` is not invoked for
  * a send issued after that effect: fixpp_session_send refuses that send at the
  * engine's Active check, before it reaches the toApp path.
+ *
+ * BREAKING (C-ABI 1.11; 093, fixpp#514, #515, #516): the session frames and
+ * disposes of inbound bytes as follows, where it did otherwise. Most of these
+ * effects keep up, or let establish, a session that ended or did not
+ * establish; the establishment timeout, and a Logon disregarded where it was
+ * accepted, do the reverse:
+ *   - a frame the Framer finds garbled (a wrong BodyLength or CheckSum, bytes
+ *     before a frame start, or a BeginString or a BodyLength digit run longer
+ *     than its cap) is disregarded and counted
+ *     (fixpp_session_garbled_frame_count), in every state, where it ended the
+ *     session; the two over-cap shapes were framed before;
+ *   - a frame whose third field is not MsgType(35) is disregarded and counted
+ *     in every state but Disconnected, where it was processed; a Logon of
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
+ *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
+ *     admitted however the stream is split into reads, where some near that
+ *     size ended the session; a frame over the limit ends the connection, in
+ *     every state, as soon as its BodyLength(9) is read;
+ *   - a frame the session admits always parses for dispatch, where one dense
+ *     with fields could exhaust the parse buffer and end the session;
+ *   - a connection not logged on by the establishment timeout
+ *     (fixpp_session_config_set_logon_timeout_ms; 10 s by default) is
+ *     closed, including one whose Logon was refused, where it stayed open; a
+ *     peer that answers the Logon later than that no longer establishes;
+ *   - every frame that passes the fault and third-field checks counts as
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
+ *     SequenceReset, a Reject, among others); the TestRequest such traffic
+ *     drew is not sent, and a session that ended when it went unanswered
+ *     stays up.
+ * On a session one of these effects keeps up or lets establish, `cb` is invoked
+ * for a send issued after the effect, where fixpp_session_send refused that
+ * send at the engine's Active check; on one it ends or keeps from
+ * establishing, the reverse.
  *
  * Reentrancy: single-thread. THUNK: construction-time. The installed callback
  * runs on the session strand (see fixpp_send_cb typedef; [contracts/toapp-callback.md]).

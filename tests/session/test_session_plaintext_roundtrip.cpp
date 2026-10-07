@@ -37,9 +37,12 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/system_clock_source.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/engine.hpp>
+#include <fixpp/session/file_store.hpp>
+#include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
@@ -55,6 +58,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -65,8 +69,13 @@
 #include <variant>
 #include <vector>
 
+#include "support/hooked_store.hpp"
 #include "support/minimal_dictionary.hpp"
+#include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
+#include "support/temp_dir.hpp"
+#include "support/validation_test_dictionary.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
@@ -123,9 +132,10 @@ constexpr auto kStopWindow = 2s;
 // would miss a state it can no longer observe.
 constexpr auto kInitiatorHold = kStateBudget + 1s;
 
-// Bound on a HookedStore hold. Below `kStateBudget`, so a hold that times out still
-// lets the cell settle and report `hold_timed_out` instead of a settle miss.
-constexpr auto kHoldBound = 1s;
+// A HookedStore hold (tests/support/hooked_store.hpp) is bounded below `kStateBudget`,
+// so a hold that times out still lets the cell settle and report `hold_timed_out`
+// instead of a settle miss.
+static_assert(fixpp::test_support::kHoldBound < kStateBudget);
 
 // Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
 // Required by the 038 acceptor first-Logon SendingTime(52) MaxLatency guard.
@@ -161,14 +171,14 @@ std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string co
 // Build a valid FIX Logon frame. EncryptMethod(98)=0 (plaintext-safe per FR-009).
 // `extra` is appended after HeartBtInt(108): whole fields, each SOH-terminated.
 std::vector<std::byte> make_plain_logon_frame(std::string_view begin_str, std::string_view sender,
-                                              std::string_view target,
-                                              std::string_view extra = {}) {
+                                              std::string_view target, std::string_view extra = {},
+                                              int seq = 1) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
     std::string body;
-    body += field(35, "A");  // MsgType = Logon
-    body += field(34, "1");  // MsgSeqNum
+    body += field(35, "A");                  // MsgType = Logon
+    body += field(34, std::to_string(seq));  // MsgSeqNum
     body += field(49, sender);
     body += field(52, utc_now_fix_timestamp());  // SendingTime (038 guard)
     body += field(56, target);
@@ -206,7 +216,8 @@ std::atomic<bool> g_first_byte_captured{false};
 // kInitiatorHold), then closes.
 asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t acceptor_port,
                                           std::string sender, std::string target,
-                                          std::string logon_extra = {}) {
+                                          std::string logon_extra = {},
+                                          std::vector<std::byte> trailing = {}, int logon_seq = 1) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         asio::ip::tcp::socket sock{ioc};
@@ -220,7 +231,7 @@ asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t accept
         if (ec) co_return;
 
         // Build and send a Logon frame.
-        auto logon = make_plain_logon_frame("FIX.4.2", sender, target, logon_extra);
+        auto logon = make_plain_logon_frame("FIX.4.2", sender, target, logon_extra, logon_seq);
 
         // Capture the first byte for the no-TLS assertion.
         if (!logon.empty()) {
@@ -228,6 +239,8 @@ asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t accept
             g_first_byte_captured.store(true, std::memory_order_release);
         }
 
+        // Frames coalesced behind the Logon go out in the same write.
+        logon.insert(logon.end(), trailing.begin(), trailing.end());
         co_await asio::async_write(sock, asio::buffer(logon.data(), logon.size()),
                                    asio::redirect_error(asio::use_awaitable, ec));
 
@@ -634,8 +647,19 @@ struct CloseDuringLogonApp final : sess::Application {
         std::optional<sess::fsm_state> state_at_close_return;
         int on_logon = 0;
         std::vector<std::string> to_admin_after_close_started;
+        // Every admin frame passed to toAdmin.
+        std::vector<std::string> to_admin_all;
+        // The number of states in the session's state ring when the posted close began.
+        std::optional<std::size_t> ring_at_close_start;
         // The clock's parked sleeps when close()'s own Logout reached toAdmin.
         std::optional<std::size_t> inflight_at_close_logout;
+        // fromApp and fromAdmin calls made after the posted close began.
+        int from_app_after_close_started = 0;
+        int from_admin_after_close_started = 0;
+        // The session's NextNumIn and the size of its event ring when the posted close
+        // began.
+        std::optional<sess::seqnum_t> next_in_at_close_start;
+        std::optional<std::size_t> events_at_close_start;
     };
 
     sess::Engine* engine = nullptr;
@@ -659,6 +683,10 @@ struct CloseDuringLogonApp final : sess::Application {
                 ex,
                 [this]() -> asio::awaitable<void> {
                     seen.close_started = true;
+                    seen.ring_at_close_start = held->fsm_visit_history().size();
+                    seen.next_in_at_close_start =
+                        sess::session_test_access::seqnum_mgr(*held).next_inbound_unsafe();
+                    seen.events_at_close_start = held->recent_events().size();
                     auto r = co_await held->close(*mode);
                     seen.close_ok = r.has_value();
                     seen.state_at_close_return = held->state();
@@ -669,6 +697,7 @@ struct CloseDuringLogonApp final : sess::Application {
 
     void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
                  const sess::SessionId& /*sid*/) override {
+        seen.to_admin_all.emplace_back(msg.msg_type());
         if (seen.close_started) {
             seen.to_admin_after_close_started.emplace_back(msg.msg_type());
             if (msg.msg_type() == "5" && !seen.inflight_at_close_logout && clock) {
@@ -684,168 +713,25 @@ struct CloseDuringLogonApp final : sess::Application {
         ++seen.on_logon;
         if (close_on_logon && !armed) post_close();
     }
+
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const sess::SessionId& /*sid*/) override {
+        if (seen.close_started) ++seen.from_admin_after_close_started;
+        return {};
+    }
+
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const sess::SessionId& /*sid*/) override {
+        if (seen.close_started) ++seen.from_app_after_close_started;
+        return {};
+    }
 };
 
-// The counter writes a HookedStore completed, and the MemoryStore behind it, which
-// outlives the session so a cell can read the final counters after stop().
-struct StoreLog {
-    struct Write {
-        std::string op;  // "reset", "in+1" or "out+1"
-        bool after_close_began = false;
-    };
-    std::function<bool()> close_began;
-    std::vector<Write> writes;  // in completion order
-    int stores_made = 0;
-    std::shared_ptr<sess::MemoryStore> inner;
-    // reset() calls issued while close_began() was true.
-    int resets_issued_after_close_began = 0;
-    // A held operation waited out its bound without such a reset().
-    bool hold_timed_out = false;
-
-    void record(std::string op) { writes.push_back({std::move(op), close_began && close_began()}); }
-};
-
-// A MemoryStore that reports itself persistent, so the session hydrates from it and
-// persists into it. Its outbound counter can start past 1, it can run a one-shot hook
-// at named store operations, it logs its counter writes into a StoreLog, and it has a
-// graceful-close flush. A hook stands in for a close() posted from another thread.
-class HookedStore final : public sess::MessageStore {
-public:
-    struct Hooks {
-        std::function<void()> on_hydrate;           // first inbound read
-        std::function<void()> on_reset;             // first reset()
-        std::function<void()> on_inbound_persist;   // first next_seqnum(inbound, true)
-        std::function<void()> on_outbound_persist;  // first next_seqnum(outbound, true)
-        // The operation whose hook fires completes, then does not return to the session
-        // until a reset() has been issued after close() began, so the session resumes
-        // with close()'s teardown reset already issued. Bounded by kHoldBound; past it
-        // the log's hold_timed_out is set and the operation returns.
-        bool hold_until_close_reset = false;
-    };
-
-    HookedStore(sess::seqnum_t outbound_next, Hooks hooks, std::shared_ptr<StoreLog> log)
-        : sess::MessageStore(flush_thunk_for<HookedStore>()),
-          inner_(std::make_shared<sess::MemoryStore>(
-              sess::MemoryStore::Config{.policy = sess::capacity_policy::unbounded})),
-          hooks_(std::move(hooks)),
-          log_(std::move(log)) {
-        log_->inner = inner_;
-        asio::io_context seed_ioc;
-        asio::co_spawn(
-            seed_ioc,
-            [this, outbound_next]() -> asio::awaitable<void> {
-                for (sess::seqnum_t s = 1; s < outbound_next; ++s) {
-                    (void)co_await inner_->next_seqnum(sess::direction_t::outbound, true);
-                }
-            },
-            asio::detached);
-        seed_ioc.run();
-    }
-
-    asio::awaitable<fixpp::core::expected_t<void>> store(sess::seqnum_t seq,
-                                                         std::span<const std::byte> frame,
-                                                         sess::direction_t dir) noexcept override {
-        return inner_->store(seq, frame, dir);
-    }
-    asio::awaitable<fixpp::core::expected_t<void>> retrieve(
-        sess::seqnum_t begin, sess::seqnum_t end, sess::direction_t dir,
-        sess::retrieve_visitor& visitor) noexcept override {
-        return inner_->retrieve(begin, end, dir, visitor);
-    }
-    asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> next_seqnum(
-        sess::direction_t dir, bool increment) noexcept override {
-        if (hooks_.on_hydrate && dir == sess::direction_t::inbound && !increment) {
-            fire(hooks_.on_hydrate);
-            // Answered without yielding, as a store holding the counter in memory may:
-            // nothing has been stored inbound yet. The close the hook posted then runs at
-            // the next read's leading post.
-            return ready(sess::seqnum_min);
-        }
-        if (!increment) return inner_->next_seqnum(dir, false);
-        // The close a hook posts runs at the increment's leading post.
-        const bool hooked = fire(dir == sess::direction_t::inbound ? hooks_.on_inbound_persist
-                                                                   : hooks_.on_outbound_persist);
-        return logged_increment(dir, hooked && hooks_.hold_until_close_reset);
-    }
-    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        if (log_->close_began && log_->close_began()) ++log_->resets_issued_after_close_began;
-        // The close the hook posts runs at the reset's leading post.
-        const bool hooked = fire(hooks_.on_reset);
-        return logged_reset(hooked && hooks_.hold_until_close_reset);
-    }
-
-    // close(graceful) awaits this before it writes Disconnected. It yields the strand
-    // a few times, as FileStore's flush does, so the session's other work can run
-    // while close() is already under way.
-    asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
-        for (int i = 0; i < 8; ++i) {
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        }
-        co_return fixpp::core::expected_t<void>{};
-    }
-
-private:
-    static asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> ready(sess::seqnum_t v) {
-        co_return v;
-    }
-    // True when a hook was set and has now run.
-    static bool fire(std::function<void()>& hook) {
-        if (!hook) return false;
-        auto h = std::move(hook);
-        hook = nullptr;
-        h();
-        return true;
-    }
-    // Yields the strand until a reset() is issued after close() began, or the bound
-    // passes.
-    asio::awaitable<void> hold_until_close_reset() {
-        auto ex = co_await asio::this_coro::executor;
-        const auto deadline = std::chrono::steady_clock::now() + kHoldBound;
-        while (log_->resets_issued_after_close_began == 0) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                log_->hold_timed_out = true;
-                co_return;
-            }
-            co_await asio::post(ex, asio::use_awaitable);
-        }
-    }
-    // Logged when the write completes, not when it is issued: the MemoryStore applies
-    // it only after its leading post and its mutex.
-    asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> logged_increment(sess::direction_t dir,
-                                                                              bool hold) {
-        auto r = co_await inner_->next_seqnum(dir, true);
-        log_->record(dir == sess::direction_t::inbound ? "in+1" : "out+1");
-        if (hold) co_await hold_until_close_reset();
-        co_return r;
-    }
-    asio::awaitable<fixpp::core::expected_t<void>> logged_reset(bool hold) {
-        auto r = co_await inner_->reset();
-        log_->record("reset");
-        if (hold) co_await hold_until_close_reset();
-        co_return r;
-    }
-
-    std::shared_ptr<sess::MemoryStore> inner_;
-    Hooks hooks_;
-    std::shared_ptr<StoreLog> log_;
-};
-
-class HookedStoreFactory final : public sess::MessageStoreFactory {
-public:
-    sess::seqnum_t outbound_next = 1;
-    HookedStore::Hooks hooks;  // moved into the first store made
-    std::shared_ptr<StoreLog> log = std::make_shared<StoreLog>();
-
-    [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
-    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>> make(
-        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
-        std::size_t /*max_store_memory_bytes*/,
-        asio::any_io_executor /*file_io_executor*/) noexcept override {
-        ++log->stores_made;
-        return fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>>{
-            std::make_unique<HookedStore>(outbound_next, std::move(hooks), log)};
-    }
-};
+using fixpp::test_support::HookedStore;
+using fixpp::test_support::HookedStoreFactory;
+using fixpp::test_support::StoreLog;
 
 struct LogonCloseCase {
     std::optional<sess::close_mode> mode;
@@ -863,6 +749,24 @@ struct LogonCloseCase {
     bool close_from_on_logon = false;
     bool hold_until_close_reset = false;  // see HookedStore::Hooks
     bool cancel_sleeps_before_stop = true;
+    // Inbound validation on, over the validation test dictionary.
+    bool validate = false;
+    // Frames the peer writes in the same write as its Logon (or Logon-ack).
+    std::vector<std::byte> trailing;
+    // close(graceful)'s store flush holds until the session has counted a garbled frame
+    // (HookedStore::Hooks::flush_until), so a trailing frame that follows the frames under
+    // test, and is garbled, shows the pump delivered them while close() was under way.
+    bool flush_hold_until_garble = false;
+    // #524 (093): the HookedStore's reset_to mode (tests/support/hooked_store.hpp).
+    fixpp::test_support::reset_to_mode store_mode = fixpp::test_support::reset_to_mode::forward;
+    // The hooked store operation holds until the posted close() has returned, or has
+    // begun (HookedStore::Hooks::release_when), in place of hold_until_close_reset.
+    bool hold_until_close_returned = false;
+    bool hold_until_close_began = false;
+    // A second connection over the store a first one left (its counters), with the
+    // peer's Logon (or Logon-ack) at this MsgSeqNum.
+    std::shared_ptr<StoreLog> reuse_store;
+    int peer_logon_seq = 1;
 };
 
 struct LogonCloseOutcome {
@@ -882,6 +786,13 @@ struct LogonCloseOutcome {
     std::shared_ptr<StoreLog> store_log;
     std::optional<sess::seqnum_t> store_next_inbound;
     std::optional<sess::seqnum_t> store_next_outbound;
+    // The session's garbled_frame_count() at settle.
+    std::uint64_t garbled = 0;
+    // The session's NextNumIn at settle.
+    std::optional<sess::seqnum_t> next_in_after_settle;
+    // The event ring at settle, in emission order while it has not wrapped: for each
+    // event, whether it is a session_event_garbled_frame.
+    std::vector<bool> events_are_garbles;
 };
 
 // Space-separated; an FSM state prints as its enum value.
@@ -946,6 +857,40 @@ asio::awaitable<void> run_raw_logon_acceptor(asio::io_context& ioc, asio::ip::tc
     }
 }
 
+// The validation test dictionary with ResetSeqNumFlag(141) declared on the Logon, so a
+// Logon carrying 141=Y validates and only the frames a cell makes invalid are rejected.
+std::shared_ptr<const fixpp::dict::Dictionary> make_validation_dictionary_with_141() {
+    std::string xml{fixpp::test_support::kValidationTestFix42Xml};
+    auto insert_after = [&xml](std::string_view anchor, std::string_view text) {
+        auto const at = xml.find(anchor);
+        if (at == std::string::npos) return false;
+        xml.insert(at + anchor.size(), text);
+        return true;
+    };
+    if (!insert_after(R"(<field number="108" name="HeartBtInt"    required="Y"/>)",
+                      R"(<field number="141" name="ResetSeqNumFlag" required="N"/>)") ||
+        !insert_after(R"(<field number="112" name="TestReqID"    type="STRING"/>)",
+                      R"(<field number="141" name="ResetSeqNumFlag" type="BOOLEAN"/>)")) {
+        return nullptr;
+    }
+    constexpr std::size_t kBufSize = 128U * 1024U;
+    auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    // The shared_ptr's deleter owns the dictionary, its resource and its buffer, and
+    // releases them in that order.
+    // NOLINTBEGIN(cppcoreguidelines-owning-memory)
+    auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
+    auto* raw_dict =
+        new fixpp::dict::Dictionary{fixpp::dict::XmlLoader{}.load_from_string(xml, mr)};
+    auto* raw_buf = buf.release();
+    return std::shared_ptr<const fixpp::dict::Dictionary>{
+        raw_dict, [mr, raw_buf](const fixpp::dict::Dictionary* p) {
+            delete p;
+            delete mr;
+            delete raw_buf;
+        }};
+    // NOLINTEND(cppcoreguidelines-owning-memory)
+}
+
 // The io_context, clock, application and Engine one cell runs on.
 struct CaseRig {
     asio::io_context ioc;
@@ -974,7 +919,9 @@ struct CaseRig {
         cfg.executor_override = ioc.get_executor();
         cfg.security_profile =
             sess::SecurityProfile{sess::SecurityProfile::kind::insecure_plain_tcp};
-        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = c.validate ? make_validation_dictionary_with_141()
+                                    : fixpp::test_support::make_minimal_dictionary();
+        cfg.validate_inbound_messages = c.validate;
         cfg.reset_seqnum_policy_field = sess::reset_seqnum_policy::bilateral_lenient;
         cfg.heartbeat_interval = std::chrono::seconds{30};
         cfg.logout_disconnect_timeout_ms = 500;
@@ -987,6 +934,8 @@ struct CaseRig {
         if (c.store_outbound_next != 0) {
             auto factory = std::make_shared<HookedStoreFactory>();
             factory->outbound_next = c.store_outbound_next;
+            factory->mode = c.store_mode;
+            if (c.reuse_store) factory->log = c.reuse_store;
             factory->log->close_began = [a = app] { return a->seen.close_started; };
             if (c.close_from_hydrate) factory->hooks.on_hydrate = [a = app] { a->post_close(); };
             if (c.close_from_reset) factory->hooks.on_reset = [a = app] { a->post_close(); };
@@ -997,6 +946,16 @@ struct CaseRig {
                 factory->hooks.on_outbound_persist = [a = app] { a->post_close(); };
             }
             factory->hooks.hold_until_close_reset = c.hold_until_close_reset;
+            if (c.hold_until_close_returned) {
+                factory->hooks.release_when = [a = app] { return a->seen.close_ok.has_value(); };
+            } else if (c.hold_until_close_began) {
+                factory->hooks.release_when = [a = app] { return a->seen.close_started; };
+            }
+            if (c.flush_hold_until_garble) {
+                factory->hooks.flush_until = [a = app] {
+                    return a->held && a->held->garbled_frame_count() >= 1U;
+                };
+            }
             store_log = factory->log;
             cfg.store_factory = std::move(factory);
         }
@@ -1037,6 +996,13 @@ struct CaseRig {
             out.reset_event = std::ranges::any_of(app->held->recent_events(), [](auto const& ev) {
                 return std::holds_alternative<sess::session_event_sequence_numbers_reset>(ev);
             });
+            out.garbled = app->held->garbled_frame_count();
+            out.next_in_after_settle =
+                sess::session_test_access::seqnum_mgr(*app->held).next_inbound_unsafe();
+            for (auto const& ev : app->held->recent_events()) {
+                out.events_are_garbles.push_back(
+                    std::holds_alternative<sess::session_event_garbled_frame>(ev));
+            }
         }
 
         if (c.cancel_sleeps_before_stop) {
@@ -1102,7 +1068,7 @@ LogonCloseOutcome run_acceptor_case(LogonCloseCase const& c) {
     if (out.bound) {
         asio::co_spawn(rig.ioc,
                        run_plain_initiator(rig.ioc, port, "PLAIN-INITIATOR", "PLAIN-ACCEPTOR",
-                                           c.peer_logon_extra),
+                                           c.peer_logon_extra, c.trailing, c.peer_logon_seq),
                        asio::detached);
     }
     rig.settle_capture_and_stop(c, out);
@@ -1121,12 +1087,11 @@ LogonCloseOutcome run_initiator_case(LogonCloseCase const& c) {
                            c)) {
         return out;
     }
-    asio::co_spawn(
-        rig.ioc,
-        run_raw_logon_acceptor(rig.ioc, peer,
-                               make_plain_logon_frame("FIX.4.2", "PLAIN-ACCEPTOR",
-                                                      "PLAIN-INITIATOR", c.peer_logon_extra)),
-        asio::detached);
+    auto reply = make_plain_logon_frame("FIX.4.2", "PLAIN-ACCEPTOR", "PLAIN-INITIATOR",
+                                        c.peer_logon_extra, c.peer_logon_seq);
+    reply.insert(reply.end(), c.trailing.begin(), c.trailing.end());
+    asio::co_spawn(rig.ioc, run_raw_logon_acceptor(rig.ioc, peer, std::move(reply)),
+                   asio::detached);
     if (!rig.engine.start().has_value()) return out;
     rig.settle_capture_and_stop(c, out);
     return out;
@@ -1153,6 +1118,72 @@ void expect_close_owns_teardown(LogonCloseOutcome const& o) {
 void expect_no_admin_after_close(LogonCloseOutcome const& o) {
     EXPECT_TRUE(o.seen.to_admin_after_close_started.empty())
         << "admin frames after close() began: " << joined(o.seen.to_admin_after_close_started);
+}
+
+// Every state written after the posted close began is close()'s Disconnected.
+void expect_no_state_but_disconnected_after_close(LogonCloseOutcome const& o) {
+    ASSERT_TRUE(o.seen.ring_at_close_start.has_value()) << "the posted close never ran";
+    // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    ASSERT_LE(*o.seen.ring_at_close_start, o.ring.size()) << "ring=" << joined(o.ring);
+    for (std::size_t i = *o.seen.ring_at_close_start; i < o.ring.size(); ++i) {
+        EXPECT_EQ(o.ring[i], sess::fsm_state::Disconnected)
+            << "a state other than Disconnected written after close() began; ring="
+            << joined(o.ring) << " (close began at " << *o.seen.ring_at_close_start << ")";
+    }
+    // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+// Two frames the peer coalesces behind its Logon (or Logon-ack), from `sender` to
+// `target`: a NewOrderSingle at 34=2 that the validation test dictionary rejects (no
+// ClOrdID(11)), then a Heartbeat at 34=3 whose third field is not MsgType(35), which the
+// arm disregards as garbled and counts whatever the state.
+std::vector<std::byte> invalid_then_garbled(std::string_view sender, std::string_view target) {
+    auto field = [](int tag, std::string_view v) {
+        return std::to_string(tag) + "=" + std::string(v) + "\x01";
+    };
+    auto const ts = utc_now_fix_timestamp();
+    auto invalid = make_fix_frame("FIX.4.2", field(35, "D") + field(34, "2") + field(49, sender) +
+                                                 field(52, ts) + field(56, target) +
+                                                 field(54, "1") + field(60, ts));
+    auto const garbled =
+        make_fix_frame("FIX.4.2", field(34, "3") + field(35, "0") + field(49, sender) +
+                                      field(52, ts) + field(56, target));
+    invalid.insert(invalid.end(), garbled.begin(), garbled.end());
+    return invalid;
+}
+
+// #523 (093 quickstart Q-22): the frames coalesced behind the Logon reach the arm while
+// close() is under way, and the arm acts on none of them. The garbled one is counted
+// (the positive control: the pump delivered them before the flush released), the
+// invalid one draws no Reject, no admin frame reaches toAdmin, no state other than
+// close()'s Disconnected is written after close() began, no fromApp or fromAdmin runs,
+// NextNumIn keeps the value it had when close() began, and every event emitted after
+// that is a garbled-frame event (FR-030 carves garbled-frame accounting out).
+void expect_coalesced_frames_inert(LogonCloseOutcome const& o) {
+    ASSERT_TRUE(o.store_log);
+    EXPECT_EQ(o.store_log->flushes_begun, 1) << "close(graceful)'s flush";
+    EXPECT_FALSE(o.store_log->flush_hold_timed_out)
+        << "the garbled trailing frame was not counted within the flush hold's bound";
+    EXPECT_EQ(o.garbled, 1U) << "garbled_frame_count(): the trailing 35-not-third frame";
+    expect_no_admin_after_close(o);
+    expect_no_state_but_disconnected_after_close(o);
+    EXPECT_EQ(o.seen.from_app_after_close_started, 0) << "fromApp after close() began";
+    EXPECT_EQ(o.seen.from_admin_after_close_started, 0) << "fromAdmin after close() began";
+    ASSERT_TRUE(o.seen.next_in_at_close_start.has_value()) << "the posted close never ran";
+    EXPECT_EQ(o.next_in_after_settle, o.seen.next_in_at_close_start)
+        << "NextNumIn moved after close() began";
+    ASSERT_TRUE(o.seen.events_at_close_start.has_value()) << "the posted close never ran";
+    // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    ASSERT_LT(o.events_are_garbles.size(), sess::kSessionEventRingCapacity)
+        << "the event ring wrapped, so its physical order is not emission order";
+    ASSERT_LE(*o.seen.events_at_close_start, o.events_are_garbles.size());
+    for (std::size_t i = *o.seen.events_at_close_start; i < o.events_are_garbles.size(); ++i) {
+        EXPECT_TRUE(o.events_are_garbles[i])
+            << "event " << i << " after close() began is not a garbled-frame event";
+    }
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // close(graceful) from LogonReceived runs its own phase-1 Logout.
@@ -1357,9 +1388,10 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetStoreEndsAtTeardown
     expect_store_ends_at_teardown_reset(o);
 }
 
-// The peer's Logon carries ResetSeqNumFlag(141)=Y, so the acceptor resets its store
-// after writing LogonReceived, then restores and persists its inbound counter.
-// close(graceful) is posted from that reset(); the store's flush keeps it under way
+// The peer's Logon carries ResetSeqNumFlag(141)=Y, so after writing LogonReceived the
+// acceptor runs its 141=Y reset unit (093 contract C-6, superseding 030 T010/T011's
+// reset, then restore, then persist). close(graceful) is posted from the unit's store
+// operation (the forward reset_to's on_reset hook); the store's flush keeps it under way
 // while the arm resumes, and no teardown reset is configured. Asserts the unit
 // completes, keeping the consumed Logon's advance, and no reply follows it.
 TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
@@ -1378,12 +1410,16 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
 
 // Same peer Logon; close(graceful) is posted from the inbound persist that follows the
 // 141=Y reset, so the arm resumes after its last counter write, before the reply.
+// 093 (tasks.md T083): the persist is part of the unit's store operation only in a
+// default-body store (MessageStore::reset_to's default body), so the store runs in that
+// mode.
 TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetPersistBuildsNoReply) {
     auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
                                 .arm_on = "",
                                 .peer_logon_extra = "141=Y\x01",
                                 .store_outbound_next = 1,
-                                .close_from_inbound_persist = true});
+                                .close_from_inbound_persist = true,
+                                .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1401,6 +1437,27 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseFromOnLogonStartsNoLiveness) {
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_from_on_logon_starts_no_liveness(o);
+}
+
+// #523 (093 tasks.md T075; quickstart Q-22; contract C-2 step 2): validation is on, and
+// the peer writes a dictionary-invalid NewOrderSingle and a garbled Heartbeat in the
+// same write as its Logon. close(graceful) is posted from the store's first hydrate
+// read, and its store flush holds until the garbled Heartbeat is counted, so the invalid
+// frame reaches the NotConnected arm while close() is under way. The arm acts on it in
+// no way: no Reject, no admin frame to toAdmin, no state but close()'s Disconnected.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrateActsOnNoCoalescedFrame) {
+    auto o =
+        run_acceptor_case({.mode = sess::close_mode::graceful,
+                           .arm_on = "",
+                           .store_outbound_next = 1,
+                           .close_from_hydrate = true,
+                           .validate = true,
+                           .trailing = invalid_then_garbled("PLAIN-INITIATOR", "PLAIN-ACCEPTOR"),
+                           .flush_hold_until_garble = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_coalesced_frames_inert(o);
 }
 
 // Initiator control: no close. Asserts the initiator reaches Active with no
@@ -1437,18 +1494,44 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFram
         << "store writes: " << store_writes(o);
 }
 
+// #523 (093 tasks.md T075; quickstart Q-22; contract C-2 step 2): validation is on, and
+// the peer writes a dictionary-invalid NewOrderSingle and a garbled Heartbeat in the
+// same write as its Logon-ack, which carries 141=Y. close(graceful) is posted from the
+// arm's peer reset(), and its store flush holds until the garbled Heartbeat is counted,
+// so the invalid frame reaches the LogonSent arm while close() is under way. The arm
+// acts on it in no way: no Reject, no admin frame to toAdmin, no state but close()'s
+// Disconnected.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetActsOnNoCoalescedFrame) {
+    auto o =
+        run_initiator_case({.mode = sess::close_mode::graceful,
+                            .arm_on = "",
+                            .peer_logon_extra = "141=Y\x01",
+                            .store_outbound_next = 1,
+                            .close_from_reset = true,
+                            .validate = true,
+                            .trailing = invalid_then_garbled("PLAIN-ACCEPTOR", "PLAIN-INITIATOR"),
+                            .flush_hold_until_garble = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_coalesced_frames_inert(o);
+}
+
 // Initiator: reset_on_logon is set, so the initiator's own Logon carries 141=Y at
 // seq 1, and the peer's Logon-ack carries 141=Y. After its reset the initiator
 // restores and persists its inbound counter, then its outbound one. close(graceful) is
 // posted from the inbound persist, and no teardown reset is configured. Asserts the
-// outbound restore completes too.
+// outbound restore completes too. 093 (tasks.md T083): the restores are the unit's
+// store operation's own writes only in a default-body store, so the store runs in that
+// mode.
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreCompletesOutboundRestore) {
     auto o = run_initiator_case({.mode = sess::close_mode::graceful,
                                  .arm_on = "",
                                  .peer_logon_extra = "141=Y\x01",
                                  .reset_on_logon = true,
                                  .store_outbound_next = 1,
-                                 .close_from_inbound_persist = true});
+                                 .close_from_inbound_persist = true,
+                                 .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1461,7 +1544,8 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreCompletesOutb
 
 // Same, and the peer's Logon-ack also carries a 789 above the initiator's next
 // outbound, which the 789 honour answers with a Logout. close(graceful) is posted from
-// the outbound persist, so the arm resumes after its last counter write.
+// the outbound persist, so the arm resumes after its last counter write. 093 (tasks.md
+// T083): a default-body store, as above.
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringOutboundRestoreBuildsNoHonourFrame) {
     auto o = run_initiator_case({.mode = sess::close_mode::graceful,
                                  .arm_on = "",
@@ -1470,7 +1554,8 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringOutboundRestoreBuildsNoHono
                                  .enable_789 = true,
                                  .reset_on_logon = true,
                                  .store_outbound_next = 1,
-                                 .close_from_outbound_persist = true});
+                                 .close_from_outbound_persist = true,
+                                 .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1499,6 +1584,10 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetStoreEndsAtTeardow
 // carries 141=Y. close(terminal) is posted from the inbound persist after the arm's
 // reset, and the store holds that persist's return until close()'s teardown reset has
 // been issued. Asserts the store ends at the teardown reset's post-state.
+// 093 (tasks.md T083; contract C-6): a default-body store, as above. close() now waits
+// for the unit's store operation before its teardown reset, so that reset is never
+// issued inside the unit: the hold waits out its bound, the unit completes (both
+// restores), and the teardown reset then leaves (1, 1).
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreStoreEndsAtTeardownReset) {
     auto o = run_initiator_case({.mode = sess::close_mode::terminal,
                                  .arm_on = "",
@@ -1507,11 +1596,20 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreStoreEndsAtTe
                                  .reset_on_disconnect = true,
                                  .store_outbound_next = 1,
                                  .close_from_inbound_persist = true,
-                                 .hold_until_close_reset = true});
+                                 .hold_until_close_reset = true,
+                                 .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
-    expect_store_ends_at_teardown_reset(o);
+    ASSERT_TRUE(o.store_log);
+    EXPECT_TRUE(o.store_log->hold_timed_out)
+        << "close() issued its teardown reset while the unit's persist was held";
+    EXPECT_GE(o.store_log->resets_issued_after_close_began, 1)
+        << "no teardown reset; store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min})
+        << "store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_outbound, std::optional{sess::seqnum_min})
+        << "store writes: " << store_writes(o);
 }
 
 // Initiator: the peer's Logon-ack carries 789=1, below the initiator's next outbound,
@@ -1539,6 +1637,586 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseFromOnLogonStartsNoLiveness) {
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_from_on_logon_starts_no_liveness(o);
 }
+// ── #524 (093 tasks.md T080, T081; quickstart Q-23 to Q-25; contract C-6) ──────
+//
+// The peer's Logon (acceptor) or Logon-ack (initiator) carries ResetSeqNumFlag(141)=Y,
+// so the arm runs its 141=Y reset unit, whose store operation is the HookedStore's
+// reset_to: in forward mode the inner MemoryStore's one-step reset_to, in default-body
+// mode MessageStore's default body over the store's own reset() and next_seqnum().
+// close(terminal) is posted from that operation's hook (on_reset), and the operation
+// holds as each cell states, so close() begins inside the unit. The durable counters are
+// the inner MemoryStore's, read after stop(). The unit's targets (research R-6): next-in
+// 2, because the Logon was consumed; next-out 1, because the session sent no 141=Y.
+namespace {
+
+constexpr sess::seqnum_t kUnitIn = sess::seqnum_min + 1;
+constexpr sess::seqnum_t kUnitOut = sess::seqnum_min;
+
+void expect_store_counters(LogonCloseOutcome const& o, sess::seqnum_t in, sess::seqnum_t out) {
+    EXPECT_EQ(o.store_next_inbound, std::optional{in}) << "store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_outbound, std::optional{out}) << "store writes: " << store_writes(o);
+}
+
+// The 141=Y peer case for `role`, the unit's store operation hooked.
+LogonCloseOutcome run_unit_case(sess::session_role role, LogonCloseCase c) {
+    c.mode = sess::close_mode::terminal;
+    c.arm_on = "";
+    c.peer_logon_extra = "141=Y\x01";
+    c.store_outbound_next = 1;
+    c.close_from_reset = true;
+    return role == sess::session_role::acceptor ? run_acceptor_case(c) : run_initiator_case(c);
+}
+
+// A second connection over the store `first` left, with no close: the peer's Logon (or
+// Logon-ack) at 34=2 without 141=Y.
+LogonCloseOutcome run_next_logon(sess::session_role role, LogonCloseOutcome const& first) {
+    LogonCloseCase c{.mode = std::nullopt, .arm_on = "", .store_outbound_next = 1};
+    c.reuse_store = first.store_log;
+    c.peer_logon_seq = 2;
+    return role == sess::session_role::acceptor ? run_acceptor_case(c) : run_initiator_case(c);
+}
+
+// Q-23: no teardown reset. close() returns while the unit's store operation is held, so
+// its seqnum drain runs inside the unit. The durable counters are the unit's targets,
+// and the peer's next Logon at 34=2 without 141=Y is accepted (789 off): Active, with no
+// ResendRequest.
+void run_q23(sess::session_role role) {
+    auto o = run_unit_case(role, {.hold_until_close_returned = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    ASSERT_TRUE(o.store_log);
+    EXPECT_FALSE(o.store_log->hold_timed_out)
+        << "close() did not return while the unit's store operation was held";
+    expect_store_counters(o, kUnitIn, kUnitOut);
+
+    auto next = run_next_logon(role, o);
+    ASSERT_TRUE(next.bound);
+    EXPECT_TRUE(next.settled) << "the next Logon at 34=2 did not reach Active; ring="
+                              << joined(next.ring);
+    EXPECT_EQ(next.state_after_settle, std::optional{sess::fsm_state::Active})
+        << "ring=" << joined(next.ring);
+    EXPECT_EQ(std::ranges::count(next.seen.to_admin_all, std::string{"2"}), 0)
+        << "a ResendRequest answered the Logon at 34=2; admin frames: "
+        << joined(next.seen.to_admin_all);
+}
+
+// Q-24: teardown reset (reset_on_disconnect). The unit's store operation holds until
+// close() has begun. The final durable state is (1, 1), and close()'s teardown reset
+// was issued.
+void run_q24(sess::session_role role) {
+    auto o = run_unit_case(role, {.reset_on_disconnect = true, .hold_until_close_began = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    ASSERT_TRUE(o.store_log);
+    EXPECT_FALSE(o.store_log->hold_timed_out) << "close() never began";
+    EXPECT_GE(o.store_log->resets_issued_after_close_began, 1)
+        << "no teardown reset; store writes: " << store_writes(o);
+    expect_store_counters(o, sess::seqnum_min, sess::seqnum_min);
+}
+
+// Q-25: a default-body store. With a teardown reset, the unit's reset() holds until a
+// reset() is issued after close() began: close() waits for the unit instead, so the
+// hold waits out its bound, the unit completes, and the teardown reset then leaves
+// (1, 1). Without one, the hold ends when close() returns, and the durable counters are
+// the unit's targets.
+void run_q25(sess::session_role role, bool teardown) {
+    LogonCloseCase c{.reset_on_disconnect = teardown,
+                     .store_mode = fixpp::test_support::reset_to_mode::default_body};
+    if (teardown) {
+        c.hold_until_close_reset = true;
+    } else {
+        c.hold_until_close_returned = true;
+    }
+    auto o = run_unit_case(role, c);
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    ASSERT_TRUE(o.store_log);
+    if (teardown) {
+        EXPECT_TRUE(o.store_log->hold_timed_out)
+            << "close() issued its teardown reset while the unit's reset() was held";
+        EXPECT_GE(o.store_log->resets_issued_after_close_began, 1)
+            << "no teardown reset; store writes: " << store_writes(o);
+        expect_store_counters(o, sess::seqnum_min, sess::seqnum_min);
+    } else {
+        EXPECT_FALSE(o.store_log->hold_timed_out)
+            << "close() did not return while the unit's reset() was held";
+        expect_store_counters(o, kUnitIn, kUnitOut);
+    }
+}
+
+}  // namespace
+
+TEST(LogonCloseDuringSuspension, Q23_AcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+    run_q23(sess::session_role::acceptor);
+}
+TEST(LogonCloseDuringSuspension,
+     Q23_InitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+    run_q23(sess::session_role::initiator);
+}
+TEST(LogonCloseDuringSuspension, Q24_AcceptorTeardownResetLeavesOneOne) {
+    run_q24(sess::session_role::acceptor);
+}
+TEST(LogonCloseDuringSuspension, Q24_InitiatorTeardownResetLeavesOneOne) {
+    run_q24(sess::session_role::initiator);
+}
+TEST(LogonCloseDuringSuspension, Q25_AcceptorDefaultBodyWithTeardownResetLeavesOneOne) {
+    run_q25(sess::session_role::acceptor, /*teardown=*/true);
+}
+TEST(LogonCloseDuringSuspension, Q25_InitiatorDefaultBodyWithTeardownResetLeavesOneOne) {
+    run_q25(sess::session_role::initiator, /*teardown=*/true);
+}
+TEST(LogonCloseDuringSuspension, Q25_AcceptorDefaultBodyWithoutTeardownResetLeavesTheTargets) {
+    run_q25(sess::session_role::acceptor, /*teardown=*/false);
+}
+TEST(LogonCloseDuringSuspension, Q25_InitiatorDefaultBodyWithoutTeardownResetLeavesTheTargets) {
+    run_q25(sess::session_role::initiator, /*teardown=*/false);
+}
+
+// HookedStore in forward mode (093 tasks.md T080; quickstart §2): reset_to reaches the
+// inner MemoryStore's reset_to and fires the on_reset hook there. In default-body mode
+// the same call is the store's own reset() and next_seqnum(). The log tells them apart,
+// so this cell fails if forward mode stops forwarding.
+TEST(HookedStoreResetTo, ForwardModeForwardsToTheInnerStoreAndFiresItsHook) {
+    for (auto const mode : {fixpp::test_support::reset_to_mode::forward,
+                            fixpp::test_support::reset_to_mode::default_body}) {
+        auto log = std::make_shared<StoreLog>();
+        bool hook_fired = false;
+        HookedStore::Hooks hooks;
+        hooks.on_reset = [&hook_fired] { hook_fired = true; };
+        HookedStore store{/*outbound_next=*/1, std::move(hooks), log, mode};
+        asio::io_context ioc;
+        std::optional<bool> ok;
+        std::optional<sess::seqnum_t> in;
+        std::optional<sess::seqnum_t> out;
+        asio::co_spawn(
+            ioc,
+            [&]() -> asio::awaitable<void> {
+                auto r = co_await store.reset_to(kUnitIn, kUnitOut);
+                ok = r.has_value();
+                auto i = co_await log->inner->next_seqnum(sess::direction_t::inbound, false);
+                auto o = co_await log->inner->next_seqnum(sess::direction_t::outbound, false);
+                if (i) in = *i;
+                if (o) out = *o;
+            },
+            asio::detached);
+        ioc.run();
+        bool const forward = mode == fixpp::test_support::reset_to_mode::forward;
+        char const* const name = forward ? "forward" : "default body";
+        EXPECT_EQ(ok, std::optional{true}) << name;
+        EXPECT_TRUE(hook_fired) << name << ": on_reset";
+        EXPECT_EQ(in, std::optional{kUnitIn}) << name;
+        EXPECT_EQ(out, std::optional{kUnitOut}) << name;
+        std::vector<std::string> ops;
+        for (auto const& w : log->writes) ops.push_back(w.op);
+        std::vector<std::string> const want_ops = forward
+                                                      ? std::vector<std::string>{"reset_to 2 1"}
+                                                      : std::vector<std::string>{"reset", "in+1"};
+        EXPECT_EQ(ops, want_ops) << name << ": the store operations the call made";
+    }
+}
+
+// ── Q-27 (093 tasks.md T081; contract C-6 "close()"; data-model E-10) ──────────
+//
+// close()'s bounded wait for an in-flight reset unit, on a mock clock. An acceptor
+// Session over a FileStore whose file-I/O executor is an io_context the cell runs only
+// when it chooses, so the unit's reset_to is held inside the store, with the store's
+// writer lock taken, for as long as the cell wants. reset_on_disconnect is set, so
+// close() is about to issue its teardown reset with the unit in flight and waits:
+// its completion signal raced against await_deadline on the session's clock, bounded by
+// logon_timeout_ms.
+//   - Expiry: once the clock reaches the bound, close() records
+//     session_event_close_reset_wait_expired and proceeds; its teardown reset queues on
+//     the FileStore's writer lock behind the unit, so a restart reads (1, 1).
+//   - Re-arm: a clock-wide cancel_sleeps() during the wait (close()'s own sweep comes
+//     before its teardown reset, so only another sweep reaches it) records no expiry,
+//     and close() is still waiting, until the clock reaches the bound.
+// Time moves only by the cell's advance; drain_ready runs what an advance made ready.
+namespace {
+
+void drain_ready_q27(asio::io_context& ioc) {
+    ioc.restart();
+    while (ioc.poll() > 0) {
+        ioc.restart();
+    }
+    ioc.restart();
+}
+
+bool has_wait_expired_event(sess::Session const& s) {
+    return std::ranges::any_of(s.recent_events(), [](auto const& ev) {
+        return std::holds_alternative<sess::session_event_close_reset_wait_expired>(ev);
+    });
+}
+
+constexpr std::uint32_t kQ27Bound = 1000;  // logon_timeout_ms
+
+struct Q27Rig {
+    asio::io_context ioc;
+    asio::io_context fio;  // the FileStore's file-I/O executor; run only by the cell
+    std::shared_ptr<fixpp::core::mock_clock> clock;
+    fixpp::core::EngineConfig engine;
+    std::filesystem::path dir = fixpp::test_support::unique_temp_dir("q27");
+    // The session's role, and whether close() issues a teardown reset
+    // (reset_on_disconnect).
+    sess::session_role role = sess::session_role::acceptor;
+    bool teardown = true;
+    // MsgType(35) of every frame the session sent.
+    std::shared_ptr<std::vector<std::string>> sent = std::make_shared<std::vector<std::string>>();
+
+    // `steady_seed` is the mock clock's initial steady_now(); the UTC side is seeded
+    // independently.
+    explicit Q27Rig(fixpp::core::steady_time_point steady_seed = {})
+        : clock{std::make_shared<fixpp::core::mock_clock>(
+              std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200},
+              steady_seed, ioc.get_executor())} {
+        engine.clock = clock;
+        engine.executor = ioc.get_executor();
+    }
+    ~Q27Rig() { (void)fixpp::test_support::try_remove_temp_dir(dir); }
+    Q27Rig(Q27Rig const&) = delete;
+    Q27Rig& operator=(Q27Rig const&) = delete;
+
+    sess::FileStore::Config store_config() {
+        sess::FileStore::Config c;
+        c.directory = dir;
+        c.sender_comp_id = "ISLD";
+        c.target_comp_id = "TW";
+        c.max_frame_bytes = 4096;
+        c.file_io_executor = fio.get_executor();
+        return c;
+    }
+
+    sess::SessionConfig cfg() {
+        sess::SessionConfig c;
+        c.sender_comp_id = "ISLD";
+        c.target_comp_id = "TW";
+        c.begin_string = "FIX.4.2";
+        c.role = role;
+        c.heartbeat_interval = std::chrono::seconds{30};
+        c.security_profile = fixpp::test_support::make_minimal_security_profile();
+        c.dictionary = fixpp::test_support::make_minimal_dictionary();
+        c.executor_override = ioc.get_executor();
+        c.reset_seqnum_policy_field = sess::reset_seqnum_policy::bilateral_lenient;
+        c.transport_send = [out = sent](std::span<const std::byte> frame) {
+            std::string_view const f{reinterpret_cast<char const*>(frame.data()), frame.size()};
+            auto const at = f.find(
+                "\x01"
+                "35=");
+            if (at == std::string_view::npos) return;
+            auto const end = f.find('\x01', at + 4);
+            out->emplace_back(f.substr(at + 4, end == std::string_view::npos ? 0 : end - at - 4));
+        };
+        c.reset_on_disconnect = teardown;
+        c.logon_timeout_ms = kQ27Bound;
+        c.store_factory = std::make_shared<sess::FileStoreFactory>(store_config());
+        return c;
+    }
+
+    // Runs both io_contexts until `ready` holds or neither has work left.
+    template <class Ready>
+    bool run_both_until(Ready ready) {
+        for (int i = 0; i < 100000 && !ready(); ++i) {
+            fio.restart();
+            std::size_t const n = fio.poll();
+            ioc.restart();
+            std::size_t const m = ioc.poll();
+            if (n == 0 && m == 0 && !ready()) return false;
+        }
+        return ready();
+    }
+
+    // The counters a restart over the store directory reads.
+    std::pair<sess::seqnum_t, sess::seqnum_t> restart_counters() {
+        sess::FileStoreFactory factory{store_config()};
+        auto minted = factory.make("ISLD", "TW", nullptr, 1024 * 1024 * 1024, fio.get_executor());
+        if (!minted) return {0, 0};
+        auto& store = **minted;
+        std::pair<sess::seqnum_t, sess::seqnum_t> out{0, 0};
+        auto fut = asio::co_spawn(
+            ioc,
+            [&]() -> asio::awaitable<void> {
+                auto in = co_await store.next_seqnum(sess::direction_t::inbound, false);
+                auto ob = co_await store.next_seqnum(sess::direction_t::outbound, false);
+                out = {in.value_or(0), ob.value_or(0)};
+            },
+            asio::use_future);
+        (void)run_both_until([&] { return fut.wait_for(0s) == std::future_status::ready; });
+        return out;
+    }
+};
+
+std::vector<std::byte> q27_logon_141() {
+    return make_fix_frame("FIX.4.2",
+                          "35=A\x01"
+                          "34=1\x01"
+                          "49=TW\x01"
+                          "52=20240101-00:00:00.000\x01"
+                          "56=ISLD\x01"
+                          "98=0\x01"
+                          "108=30\x01"
+                          "141=Y\x01");
+}
+
+// Opens the session, feeds the 141=Y Logon until the unit's reset_to is held in the
+// FileStore, then starts close(terminal) and runs until it waits for the unit.
+struct Q27Run {
+    std::future<fixpp::core::expected_t<void>> feed;
+    std::future<fixpp::core::expected_t<void>> close;
+};
+
+void q27_start(Q27Rig& r, sess::Session& s, Q27Run& run) {
+    auto open = asio::co_spawn(r.ioc, s.open(), asio::use_future);
+    ASSERT_TRUE(r.run_both_until([&] { return open.wait_for(0s) == std::future_status::ready; }))
+        << "open()";
+    ASSERT_TRUE(open.get().has_value()) << "open()";
+    auto const logon = q27_logon_141();
+    run.feed = asio::co_spawn(r.ioc, s.on_inbound_frame(logon), asio::use_future);
+    drain_ready_q27(r.ioc);
+    ASSERT_NE(run.feed.wait_for(0s), std::future_status::ready)
+        << "the Logon completed: the unit's store operation was not held in the FileStore";
+    run.close = asio::co_spawn(r.ioc, s.close(sess::close_mode::terminal), asio::use_future);
+    drain_ready_q27(r.ioc);
+    ASSERT_NE(run.close.wait_for(0s), std::future_status::ready)
+        << "close() completed with the unit in flight: it did not wait";
+}
+
+// After the cell: let the unit and close() finish, so nothing outlives the rig.
+void q27_finish(Q27Rig& r, Q27Run& run) {
+    if (!run.close.valid()) return;
+    r.clock->advance(std::chrono::milliseconds{kQ27Bound});
+    EXPECT_TRUE(r.run_both_until([&] {
+        return run.close.wait_for(0s) == std::future_status::ready &&
+               (!run.feed.valid() || run.feed.wait_for(0s) == std::future_status::ready);
+    })) << "close() or the Logon never completed";
+}
+
+}  // namespace
+
+TEST(LogonCloseDuringSuspension, Q27_TheWaitExpiresIsRecordedAndFileStoreStillEndsAtOneOne) {
+    Q27Rig r;
+    Q27Run run;
+    {
+        sess::Session s{r.engine, r.cfg()};
+        q27_start(r, s, run);
+        if (!::testing::Test::HasFatalFailure()) {
+            EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the clock moved";
+            // KIND D (ci/mock-clock-staging-sweep.sh): close()'s wait deadline is a stored
+            // anchor, taken when q27_start's drain left close() parked on it, so it predates
+            // the advance; nothing must fire at the bound minus 1 ms.
+            r.clock->advance(std::chrono::milliseconds{kQ27Bound - 1});
+            drain_ready_q27(r.ioc);
+            EXPECT_FALSE(has_wait_expired_event(s)) << "expired one millisecond before the bound";
+            EXPECT_NE(run.close.wait_for(0s), std::future_status::ready);
+            // KIND D (ci/mock-clock-staging-sweep.sh): the same stored anchor, so a late arm
+            // fires at once.
+            r.clock->advance(std::chrono::milliseconds{1});
+            drain_ready_q27(r.ioc);
+            EXPECT_TRUE(has_wait_expired_event(s))
+                << "session_event_close_reset_wait_expired at the bound";
+            EXPECT_TRUE(r.run_both_until([&] {
+                return run.close.wait_for(0s) == std::future_status::ready;
+            })) << "close() did not complete after the wait expired";
+        }
+        q27_finish(r, run);
+        if (run.close.valid() && run.close.wait_for(0s) == std::future_status::ready) {
+            EXPECT_TRUE(run.close.get().has_value()) << "close()";
+        }
+    }
+    EXPECT_EQ(r.restart_counters(), (std::pair{sess::seqnum_min, sess::seqnum_min}))
+        << "the teardown reset, queued behind the unit on the writer lock, must end at (1, 1)";
+}
+
+TEST(LogonCloseDuringSuspension, Q27_AClockWideSweepDuringTheWaitDoesNotEndIt) {
+    Q27Rig r;
+    Q27Run run;
+    {
+        sess::Session s{r.engine, r.cfg()};
+        q27_start(r, s, run);
+        if (!::testing::Test::HasFatalFailure()) {
+            r.clock->cancel_sleeps();
+            drain_ready_q27(r.ioc);
+            EXPECT_FALSE(has_wait_expired_event(s))
+                << "a clock-wide sweep ended close()'s wait as an expiry";
+            EXPECT_NE(run.close.wait_for(0s), std::future_status::ready)
+                << "a clock-wide sweep ended close()'s wait";
+            // KIND D (ci/mock-clock-staging-sweep.sh): the re-armed wait sleeps to the stored
+            // anchor taken before the sweep, so it predates the advance; nothing must fire
+            // at the bound minus 1 ms.
+            r.clock->advance(std::chrono::milliseconds{kQ27Bound - 1});
+            drain_ready_q27(r.ioc);
+            EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the bound after the sweep";
+            // KIND D (ci/mock-clock-staging-sweep.sh): the same stored anchor, so a late arm
+            // fires at once.
+            r.clock->advance(std::chrono::milliseconds{1});
+            drain_ready_q27(r.ioc);
+            EXPECT_TRUE(has_wait_expired_event(s)) << "the re-armed wait expires at the bound";
+        }
+        q27_finish(r, run);
+    }
+}
+
+// The bound near the clock's representation limit: logon_timeout_ms at its largest
+// accepted value, with the session clock seeded one hour short of
+// steady_time_point::max(). close()'s bound is not representable, so it saturates at
+// max(): the wait has not expired one millisecond before the step to max(), and expires
+// at max(). The close is terminal, so it crosses no logout bound; the hour is above
+// every other duration the cell crosses.
+TEST(LogonCloseDuringSuspension, Q27_TheBoundSaturatesAtTheClockMax) {
+    constexpr auto kHeadroom = std::chrono::hours{1};
+    auto const max = fixpp::core::steady_time_point::max();
+    Q27Rig r{max - kHeadroom};
+    Q27Run run;
+    {
+        auto cfg = r.cfg();
+        cfg.logon_timeout_ms = std::numeric_limits<std::uint32_t>::max();
+        sess::Session s{r.engine, cfg};
+        q27_start(r, s, run);
+        if (!::testing::Test::HasFatalFailure()) {
+            EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the clock moved";
+            // KIND C (ci/mock-clock-staging-sweep.sh): short of max(), nothing may fire;
+            // that is the oracle.
+            r.clock->advance(kHeadroom - std::chrono::milliseconds{1});
+            drain_ready_q27(r.ioc);
+            EXPECT_FALSE(has_wait_expired_event(s)) << "expired 1 ms short of max()";
+            EXPECT_NE(run.close.wait_for(0s), std::future_status::ready);
+            // KIND D (ci/mock-clock-staging-sweep.sh): close()'s wait deadline is a stored
+            // anchor predating the step, so a late arm fires at once.
+            r.clock->step_to(max);
+            drain_ready_q27(r.ioc);
+            EXPECT_TRUE(has_wait_expired_event(s)) << "the wait did not expire at max()";
+        }
+        // The clock is at max(): finish without advancing it further.
+        if (run.close.valid()) {
+            EXPECT_TRUE(r.run_both_until([&] {
+                return run.close.wait_for(0s) == std::future_status::ready &&
+                       (!run.feed.valid() || run.feed.wait_for(0s) == std::future_status::ready);
+            })) << "close() or the Logon never completed";
+        }
+    }
+}
+
+// ── Q-23 and Q-24 over a FileStore (contract C-6's outcome table, "every store") ──
+//
+// Q27Rig's FileStore holds the unit's reset_to, with its writer lock taken, while the
+// cell does not run the file-I/O executor; close(terminal) begins there. The clock never
+// moves, so close()'s bounded wait cannot expire:
+//   - Q-23, no teardown reset: close() issues no teardown reset, so it does not wait for
+//     the unit and returns while the unit is held; a restart reads the unit's targets,
+//     and a second session over the directory accepts the peer's next Logon at 34=2
+//     without 141=Y: Active, with no ResendRequest;
+//   - Q-24, a teardown reset: close() waits for the unit, then resets; a restart reads
+//     (1, 1). close() cannot return while the unit holds the writer lock with or without
+//     that wait, since its teardown reset queues on the lock, so the cell asserts the
+//     counters and not the wait.
+// The initiator's own Logon carries no 141=Y, so the unit's targets are (2, 1) in both
+// roles.
+namespace {
+
+// The frame that answers the session's Logon, or opens the acceptor's: MsgSeqNum
+// `seq`, without 141=Y.
+std::vector<std::byte> q2324_logon(int seq) {
+    return make_fix_frame("FIX.4.2",
+                          "35=A\x01"
+                          "34=" +
+                              std::to_string(seq) +
+                              "\x01"
+                              "49=TW\x01"
+                              "52=20240101-00:00:00.000\x01"
+                              "56=ISLD\x01"
+                              "98=0\x01"
+                              "108=30\x01");
+}
+
+void run_q2324_file_store(sess::session_role role, bool teardown) {
+    Q27Rig r;
+    r.role = role;
+    r.teardown = teardown;
+    {
+        sess::Session s{r.engine, r.cfg()};
+        auto open = asio::co_spawn(r.ioc, s.open(), asio::use_future);
+        ASSERT_TRUE(r.run_both_until([&] {
+            return open.wait_for(0s) == std::future_status::ready;
+        })) << "open()";
+        ASSERT_TRUE(open.get().has_value()) << "open()";
+        auto const logon = q27_logon_141();
+        auto feed = asio::co_spawn(r.ioc, s.on_inbound_frame(logon), asio::use_future);
+        drain_ready_q27(r.ioc);
+        bool const held = feed.wait_for(0s) != std::future_status::ready &&
+                          sess::session_test_access::reset_unit_in_flight(s);
+        auto close = asio::co_spawn(r.ioc, s.close(sess::close_mode::terminal), asio::use_future);
+        drain_ready_q27(r.ioc);
+        bool const close_returned_while_held = close.wait_for(0s) == std::future_status::ready &&
+                                               sess::session_test_access::reset_unit_in_flight(s);
+        bool const done = r.run_both_until([&] {
+            return close.wait_for(0s) == std::future_status::ready &&
+                   feed.wait_for(0s) == std::future_status::ready;
+        });
+        if (!done) {
+            // Let the unit and close() finish, so nothing outlives the rig.
+            // KIND G (ci/mock-clock-staging-sweep.sh): this advance runs only when `done` is
+            // false, and the ASSERT_TRUE(done) below then returns before any read of the
+            // wait-expired event or the restart counters, so nothing the cell asserts depends
+            // on it.
+            r.clock->advance(std::chrono::milliseconds{kQ27Bound});
+            (void)r.run_both_until([&] {
+                return close.wait_for(0s) == std::future_status::ready &&
+                       feed.wait_for(0s) == std::future_status::ready;
+            });
+        }
+        ASSERT_TRUE(held) << "the unit's store operation was not held in the FileStore";
+        ASSERT_TRUE(done) << "close() or the Logon never completed";
+        EXPECT_TRUE(close.get().has_value()) << "close()";
+        EXPECT_FALSE(has_wait_expired_event(s)) << "the wait expired, though the clock never moved";
+        if (!teardown) {
+            EXPECT_TRUE(close_returned_while_held)
+                << "close() waited for the unit, though it issues no teardown reset";
+        }
+    }
+    auto const want =
+        teardown ? std::pair{sess::seqnum_min, sess::seqnum_min} : std::pair{kUnitIn, kUnitOut};
+    EXPECT_EQ(r.restart_counters(), want)
+        << "the counters a restart reads; want the unit's targets without a teardown reset, "
+           "(1, 1) with one";
+    if (teardown) return;
+
+    // The peer's next Logon at 34=2, without 141=Y, over the directory the first left.
+    r.sent->clear();
+    sess::Session s2{r.engine, r.cfg()};
+    auto open = asio::co_spawn(r.ioc, s2.open(), asio::use_future);
+    ASSERT_TRUE(r.run_both_until([&] { return open.wait_for(0s) == std::future_status::ready; }))
+        << "open()";
+    ASSERT_TRUE(open.get().has_value()) << "open()";
+    auto const next_logon = q2324_logon(2);
+    auto feed = asio::co_spawn(r.ioc, s2.on_inbound_frame(next_logon), asio::use_future);
+    EXPECT_TRUE(r.run_both_until([&] { return feed.wait_for(0s) == std::future_status::ready; }))
+        << "the next Logon";
+    EXPECT_EQ(s2.state(), sess::fsm_state::Active) << "the next Logon at 34=2 was not accepted";
+    EXPECT_EQ(std::ranges::count(*r.sent, std::string{"2"}), 0)
+        << "a ResendRequest answered the Logon at 34=2; frames sent: " << joined(*r.sent);
+    auto close = asio::co_spawn(r.ioc, s2.close(sess::close_mode::terminal), asio::use_future);
+    EXPECT_TRUE(r.run_both_until([&] { return close.wait_for(0s) == std::future_status::ready; }))
+        << "the second session's close()";
+}
+
+}  // namespace
+
+TEST(LogonCloseDuringSuspension,
+     Q23_FileStoreAcceptorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+    run_q2324_file_store(sess::session_role::acceptor, /*teardown=*/false);
+}
+TEST(LogonCloseDuringSuspension,
+     Q23_FileStoreInitiatorCloseDrainsInsideTheUnitAndTheNextLogonAt2IsAccepted) {
+    run_q2324_file_store(sess::session_role::initiator, /*teardown=*/false);
+}
+TEST(LogonCloseDuringSuspension, Q24_FileStoreAcceptorTeardownResetLeavesOneOne) {
+    run_q2324_file_store(sess::session_role::acceptor, /*teardown=*/true);
+}
+TEST(LogonCloseDuringSuspension, Q24_FileStoreInitiatorTeardownResetLeavesOneOne) {
+    run_q2324_file_store(sess::session_role::initiator, /*teardown=*/true);
+}
+
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
 #endif

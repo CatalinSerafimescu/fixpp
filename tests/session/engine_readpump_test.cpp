@@ -27,10 +27,11 @@
 //      trivially on the stub (no pump = no keepalive either).  Documented
 //      GREEN-target; the load-bearing RED witness is case 1.
 //
-//   6-8. FramerFailureClosesEstablishedSession_* (092 FR-008, L-004-4): a frame
-//      the Framer rejects (bad CheckSum, too-small BodyLength, malformed
-//      BeginString prefix) ends an established session. See the section above
-//      the cells.
+//   6-8. FramerGarbleDisregardedInEstablishedSession_* (093 FR-001, contract C-1;
+//      they superseded 092's FramerFailureClosesEstablishedSession_* pins, and
+//      L-004-4 closes): a frame the Framer finds garbled (bad CheckSum, too-small
+//      BodyLength, malformed BeginString prefix) is disregarded, and the
+//      established session carries on. See the section above the cells.
 //
 // Anti-hang: every coroutine carries a self-deadline steady_timer.
 //            All ioc.run_for() calls are explicitly bounded.
@@ -73,6 +74,7 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fixpp/wire/framer.hpp>
+#include <functional>
 #include <future>
 #include <memory>
 #include <optional>
@@ -82,6 +84,7 @@
 #include <vector>
 
 #include "engine_loopback_harness.hpp"
+#include "plain_engine_rig.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
 
@@ -471,9 +474,10 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
     ASSERT_NE(port, 0U) << "acceptor listener did not bind";
 
-    // Build an oversized frame: body is >64 KiB of repeated 'X'.
-    // This clearly exceeds kReadPumpCarryCapacity (64 KiB), so the framer
-    // will return wire_frame_too_large before any frame bytes reach on_inbound_frame.
+    // Build an oversized frame: a body of repeated 'X' longer than the session's
+    // inbound limit L (no 383 is configured, so L is the default; 093 data-model E-2),
+    // so the framer returns wire_frame_too_large before any frame bytes reach
+    // on_inbound_frame. The cell checks the body against L once the session exists.
     constexpr std::size_t kOversizeBody = 128 * 1024;  // 128 KiB
     std::vector<std::vector<std::byte>> oversize_frames;
     {
@@ -508,6 +512,7 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     auto st = acc->state();
     const auto next_inbound = static_cast<int>(
         fixpp::session::session_test_access::seqnum_mgr(*acc).next_inbound_unsafe());
+    std::size_t const limit = fixpp::session::session_test_access::inbound_limit(*acc);
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
@@ -515,6 +520,8 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
         return;
     }
     stop_fut.get();
+
+    EXPECT_GT(kOversizeBody, limit) << "the oversized body must exceed the session's L";
 
     // STRENGTHENED GREEN assertion (T015): pump must have detected the oversized
     // frame and called close(terminal), driving the FSM to Disconnected.
@@ -794,68 +801,68 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cases 6-8 — 092 FR-008 (contract C-1 step 1; L-004-4): a §4.5.2 framing
-// failure the Framer detects ends an ESTABLISHED session. Its disregard is
-// fixpp#514; until then these cells pin the close.
+// Cases 6-8 — 093-inbound-frame-dispositions (FR-001; contract C-1). A §4.5.2
+// framing failure the Framer detects no longer ends an ESTABLISHED session: the
+// pump's Framer resyncs, the garbled frame is disregarded, and the session carries
+// on. These cells superseded 092's FramerFailureClosesEstablishedSession_* pins of
+// the close (L-004-4 closes).
 //
-// Each cell feeds one frame the Framer rejects, after the peer has read the
-// acceptor's Logon reply and the acceptor reports Active:
+// Each cell feeds one frame the Framer finds garbled, after the peer has read the
+// acceptor's Logon reply and the acceptor reports Active, and then a conformant
+// Heartbeat at the number the garbled frame carried:
 //   - a bad CheckSum (wire_checksum_mismatch);
 //   - a BodyLength too small, so `10=` is not where BodyLength puts it
 //     (wire_invalid_body_length);
 //   - a BeginString prefix whose first byte is not `8` (wire_framing_resync).
 // A well-formed wrong BeginString is not a cell: it passes the Framer and Guard 2
 // closes the session whatever the pump does. A too-large BodyLength is not a cell
-// either: the Framer waits for more bytes.
+// either: the Framer waits for more bytes (EngineReadPumpResync's L-1 pin).
 //
-// Each cell first feeds its bytes to a standalone Framer and checks the exact
-// error, so a cell cannot pass on a different Framer arm than the one it names.
+// Each cell first feeds its bytes to a standalone resync-mode Framer and checks the
+// region's kind, so a cell cannot pass on a different Framer arm than the one it names.
 //
 // Observations, all taken before Engine::stop():
-//   - the session state (Disconnected);
-//   - whether the peer's read ended, i.e. the acceptor closed the connection;
-//   - NextNumIn, which the faulty frame must not advance.
-// The client never closes its side, so the only other closer in the wait is the
-// liveness loop at heartbeat_interval (build_harness), far above kFaultCloseBudget.
-// A budget that reached it would let a pump that ignores the Framer error pass.
+//   - the session state (Active);
+//   - whether the peer's read ended, i.e. the acceptor closed the connection (it
+//     must not have);
+//   - NextNumIn: the garbled frame does not advance it, and the conformant Heartbeat
+//     at the same number does;
+//   - Session::garbled_frame_count(), which counts the one region.
 //
-// Mutant (run in a scratch copy): in src/session/engine.cpp's run_read_pump, make
-// the read loop's `if (!feed_r.has_value())` branch `break;` instead of stopping
-// the pump, so the pump reads on after a Framer error. Each of these cells must
-// then fail with a clean test failure (exit 1, not an abort).
+// Mutant (run in a scratch copy): in src/session/engine.cpp's run_read_pump, pass a
+// Framer::Config with resync_on_garble = false. Each of these cells must then fail
+// with a clean test failure (exit 1, not an abort).
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
 
-constexpr auto kFaultCloseBudget = 4s;
+constexpr auto kGarbleBudget = 4s;
 // Bound on the client's wait for the acceptor to report Active. It shares
-// kFaultCloseBudget with connect, handshake and the close itself, so it is a fraction
+// kGarbleBudget with connect, handshake and the rest of the cell, so it is a fraction
 // of it; heartbeat_interval (build_harness) is far above both.
-constexpr auto kActiveWaitBudget = kFaultCloseBudget / 4;
-static_assert(kActiveWaitBudget * 2 < kFaultCloseBudget,
-              "the Active wait must leave most of kFaultCloseBudget to the close");
+constexpr auto kActiveWaitBudget = kGarbleBudget / 4;
+static_assert(kActiveWaitBudget * 2 < kGarbleBudget,
+              "the Active wait must leave most of kGarbleBudget to the rest of the cell");
 constexpr auto kActivePollStep = 1ms;
-// Carry capacity for the standalone Framer probe; any size above one Heartbeat works.
-constexpr std::size_t kFramerProbeCarry = 64U * 1024U;
 
-struct FaultyFrameClient {
+struct GarbledFrameClient {
     std::unique_ptr<fixpp::transport::Transport> transport;
     std::shared_ptr<fixpp::session::Session> acc;  // leased once the Logon reply is read
-    std::optional<fsm_state> state_before_fault;
+    std::optional<fsm_state> state_before_garble;
     bool saw_logon_reply = false;
-    bool sent_fault = false;
+    bool sent_garble_and_follow_up = false;
     std::optional<fixpp::core::expected_t<std::size_t>> terminal_read;
 };
 
 // Logs on, reads until the acceptor's Logon reply, waits for the acceptor to leave
-// LogonReceived, sends `faulty`, then reads until the connection ends. It never
-// closes its own side.
-asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTlsFixture& fixture,
-                                              uint16_t acceptor_port,
-                                              fixpp::session::Engine& engine,
-                                              fixpp::session::SessionId acc_id,
-                                              std::vector<std::byte> faulty,
-                                              FaultyFrameClient& fc) {
+// LogonReceived, sends `garbled` then `follow_up` in one write, then reads until the
+// connection ends. It never closes its own side.
+asio::awaitable<void> run_client_garbled_frame(fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                               uint16_t acceptor_port,
+                                               fixpp::session::Engine& engine,
+                                               fixpp::session::SessionId acc_id,
+                                               std::vector<std::byte> garbled,
+                                               GarbledFrameClient& fc) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(fc.transport.get());
@@ -889,7 +896,7 @@ asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTl
         // The peer's read of the reply and the acceptor's resumption after its reply
         // write are separate completions on this io_context, and either may run first;
         // the acceptor enters Active only on the latter. Yield until it leaves
-        // LogonReceived, bounded, so the faulty frame meets an established session. A
+        // LogonReceived, bounded, so the garbled frame meets an established session. A
         // session still in LogonReceived at the bound is recorded as such and fails the
         // precondition check.
         if (fc.acc) {
@@ -900,12 +907,15 @@ asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTl
                 poll.expires_after(kActivePollStep);
                 co_await poll.async_wait(asio::use_awaitable);
             }
-            fc.state_before_fault = fc.acc->state();
+            fc.state_before_garble = fc.acc->state();
         }
 
-        auto f_r = co_await fc.transport->async_write(std::span<const std::byte>{faulty});
+        // The conformant Heartbeat at the number the garbled frame carried.
+        auto const follow_up = make_heartbeat_frame("FIX.4.2", 2, "INITIATOR", "ACCEPTOR");
+        garbled.insert(garbled.end(), follow_up.begin(), follow_up.end());
+        auto f_r = co_await fc.transport->async_write(std::span<const std::byte>{garbled});
         if (!f_r.has_value()) co_return;
-        fc.sent_fault = true;
+        fc.sent_garble_and_follow_up = true;
 
         for (;;) {
             auto r = co_await fc.transport->async_read_some(std::span<std::byte>{buf});
@@ -918,15 +928,19 @@ asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTl
     }
 }
 
-// The error a fresh Framer returns for `bytes`, or nullopt if it frames them.
-std::optional<fixpp::core::error> framer_error_for(std::vector<std::byte> const& bytes) {
-    fixpp::wire::pmr_carry_buffer carry{kFramerProbeCarry, std::pmr::new_delete_resource()};
+// What a resync-mode Framer makes of `bytes` followed by a conformant Heartbeat, fed
+// whole: the regions its first feed opened and the first one's kind.
+fixpp::wire::garble_summary resync_garbles_for(std::vector<std::byte> bytes) {
+    auto const hb = make_heartbeat_frame("FIX.4.2", 2, "INITIATOR", "ACCEPTOR");
+    bytes.insert(bytes.end(), hb.begin(), hb.end());
+    fixpp::wire::pmr_carry_buffer carry{bytes.size() + 1, std::pmr::new_delete_resource()};
     std::array<fixpp::wire::frame_view, 1> out{};
-    fixpp::wire::Framer framer;
-    auto r = framer.feed(std::span<const std::byte>{bytes}, carry,
-                         std::span<fixpp::wire::frame_view>{out});
-    if (r.has_value()) return std::nullopt;
-    return r.error();
+    fixpp::wire::Framer::Config c;
+    c.resync_on_garble = true;
+    fixpp::wire::Framer framer{c};
+    (void)framer.feed(std::span<const std::byte>{bytes}, carry,
+                      std::span<fixpp::wire::frame_view>{out});
+    return framer.last_garbles();
 }
 
 // A conformant Heartbeat at MsgSeqNum 2 as text, for the cells to corrupt.
@@ -942,10 +956,12 @@ std::vector<std::byte> to_bytes(std::string const& s) {
     return out;
 }
 
-void run_framer_failure_cell(std::vector<std::byte> const& faulty, fixpp::core::error expected,
-                             const char* label) {
-    // The bytes must trip the Framer arm the cell names.
-    EXPECT_EQ(framer_error_for(faulty), std::optional<fixpp::core::error>{expected})
+void run_framer_garble_cell(std::vector<std::byte> const& garbled, fixpp::core::error expected,
+                            const char* label) {
+    // The bytes must trip the Framer arm the cell names, as one region.
+    auto const probe = resync_garbles_for(garbled);
+    EXPECT_EQ(probe.regions, 1U) << label << ": the garbled frame must be one Framer region";
+    EXPECT_EQ(probe.first_kind, expected)
         << label << ": the frame does not trip the Framer arm this cell names";
 
     asio::io_context ioc;
@@ -958,18 +974,27 @@ void run_framer_failure_cell(std::vector<std::byte> const& faulty, fixpp::core::
     ioc.run_for(50ms);
     ioc.restart();
 
+    auto const next_inbound_of = [](fixpp::session::Session& s) {
+        return static_cast<int>(
+            fixpp::session::session_test_access::seqnum_mgr(s).next_inbound_unsafe());
+    };
+
     uint16_t const port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
-    FaultyFrameClient fc;
+    GarbledFrameClient fc;
     fc.transport = h->fixture->make_client(ioc.get_executor());
     if (port != 0U) {
         asio::co_spawn(
-            ioc, run_client_faulty_frame(*h->fixture, port, *h->engine, h->acc_id, faulty, fc),
+            ioc, run_client_garbled_frame(*h->fixture, port, *h->engine, h->acc_id, garbled, fc),
             asio::detached);
-        auto const deadline = std::chrono::steady_clock::now() + kFaultCloseBudget;
-        while (!fc.terminal_read.has_value() && std::chrono::steady_clock::now() < deadline) {
+        auto const deadline = std::chrono::steady_clock::now() + kGarbleBudget;
+        while (!fc.terminal_read.has_value() && std::chrono::steady_clock::now() < deadline &&
+               (!fc.sent_garble_and_follow_up || !fc.acc || next_inbound_of(*fc.acc) != 3)) {
             ioc.run_for(20ms);
             ioc.restart();
         }
+        // Whatever else the garble could cause is queued by now; let it run.
+        ioc.run_for(50ms);
+        ioc.restart();
     }
 
     // Snapshots, taken before stop() and before any fatal assertion.
@@ -977,10 +1002,9 @@ void run_framer_failure_cell(std::vector<std::byte> const& faulty, fixpp::core::
     std::optional<fsm_state> const state_after =
         fc.acc ? std::optional<fsm_state>{fc.acc->state()} : std::nullopt;
     std::optional<int> const next_inbound =
-        fc.acc
-            ? std::optional<int>{static_cast<int>(
-                  fixpp::session::session_test_access::seqnum_mgr(*fc.acc).next_inbound_unsafe())}
-            : std::nullopt;
+        fc.acc ? std::optional<int>{next_inbound_of(*fc.acc)} : std::nullopt;
+    std::optional<std::uint64_t> const garbles =
+        fc.acc ? std::optional<std::uint64_t>{fc.acc->garbled_frame_count()} : std::nullopt;
     fc.acc.reset();  // release the lease before the engine is destroyed
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
@@ -991,20 +1015,22 @@ void run_framer_failure_cell(std::vector<std::byte> const& faulty, fixpp::core::
 
     ASSERT_NE(port, 0U) << label << ": acceptor listener did not bind";
     ASSERT_TRUE(fc.saw_logon_reply) << label << ": the client never read the Logon reply";
-    ASSERT_TRUE(fc.sent_fault) << label << ": the faulty frame was never written";
-    EXPECT_EQ(fc.state_before_fault, std::optional<fsm_state>{fsm_state::Active})
-        << label << ": the session must be established when the faulty frame is sent";
-    EXPECT_EQ(state_after, std::optional<fsm_state>{fsm_state::Disconnected})
-        << label << ": FR-008 / L-004-4: a Framer failure must end an established session";
-    EXPECT_TRUE(peer_read_ended)
-        << label << ": the acceptor must close the connection after the Framer failure";
-    EXPECT_EQ(next_inbound, std::optional<int>{2})
-        << label << ": the faulty frame must not advance NextNumIn past the Logon's";
+    ASSERT_TRUE(fc.sent_garble_and_follow_up) << label << ": the garbled frame was never written";
+    EXPECT_EQ(fc.state_before_garble, std::optional<fsm_state>{fsm_state::Active})
+        << label << ": the session must be established when the garbled frame is sent";
+    EXPECT_EQ(state_after, std::optional<fsm_state>{fsm_state::Active})
+        << label << ": FR-001: a Framer garble must not end an established session";
+    EXPECT_FALSE(peer_read_ended) << label << ": the acceptor must keep the connection open";
+    EXPECT_EQ(next_inbound, std::optional<int>{3})
+        << label
+        << ": the garbled frame is disregarded and the conformant Heartbeat at the "
+           "same number is processed";
+    EXPECT_EQ(garbles, std::optional<std::uint64_t>{1U}) << label << ": one garbled region";
 }
 
 }  // namespace
 
-TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_BadCheckSum) {
+TEST(EngineReadPumpTest, FramerGarbleDisregardedInEstablishedSession_BadCheckSum) {
     std::string s = heartbeat_text();
     // The last field is `10=NNN<SOH>`; NNN + 1 (mod 256) is a CheckSum that does not match.
     auto const digits_at = s.size() - 4;
@@ -1012,11 +1038,11 @@ TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_BadCheckSum) {
     std::array<char, 4> wrong{};
     std::snprintf(wrong.data(), wrong.size(), "%03u", (cs + 1U) % 256U);
     s.replace(digits_at, 3, wrong.data(), 3);
-    run_framer_failure_cell(to_bytes(s), fixpp::core::error::wire_checksum_mismatch,
-                            "FramerFailureClosesEstablishedSession_BadCheckSum");
+    run_framer_garble_cell(to_bytes(s), fixpp::core::error::wire_checksum_mismatch,
+                           "FramerGarbleDisregardedInEstablishedSession_BadCheckSum");
 }
 
-TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_BodyLengthTooSmall) {
+TEST(EngineReadPumpTest, FramerGarbleDisregardedInEstablishedSession_BodyLengthTooSmall) {
     std::string s = heartbeat_text();
     // Rewrite 9=<n> as 9=<n - 5>: the Framer then looks for `10=` five bytes early.
     auto const len_at = s.find(
@@ -1026,13 +1052,365 @@ TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_BodyLengthTooSmal
     auto const len_end = s.find('\x01', len_at);
     int const body_len = std::stoi(s.substr(len_at, len_end - len_at));
     s.replace(len_at, len_end - len_at, std::to_string(body_len - 5));
-    run_framer_failure_cell(to_bytes(s), fixpp::core::error::wire_invalid_body_length,
-                            "FramerFailureClosesEstablishedSession_BodyLengthTooSmall");
+    run_framer_garble_cell(to_bytes(s), fixpp::core::error::wire_invalid_body_length,
+                           "FramerGarbleDisregardedInEstablishedSession_BodyLengthTooSmall");
 }
 
-TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_MalformedBeginStringPrefix) {
+TEST(EngineReadPumpTest, FramerGarbleDisregardedInEstablishedSession_MalformedBeginStringPrefix) {
     std::string s = heartbeat_text();
     s[0] = 'X';  // `X=FIX.4.2`: the first byte is not `8`
-    run_framer_failure_cell(to_bytes(s), fixpp::core::error::wire_framing_resync,
-                            "FramerFailureClosesEstablishedSession_MalformedBeginStringPrefix");
+    run_framer_garble_cell(
+        to_bytes(s), fixpp::core::error::wire_framing_resync,
+        "FramerGarbleDisregardedInEstablishedSession_MalformedBeginStringPrefix");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 093-inbound-frame-dispositions T027 — Q-2, Q-3 and the L-1 pin, through the pump
+// (contract C-1; FR-001, FR-002). The pump's Framer resyncs: a garbled region is
+// disregarded and framing resumes at the next "8=FIX", so the session carries on. Base
+// RED: the pump closes the session at the first garbled byte.
+//
+// These cells drive a plaintext acceptor on a mock engine clock (plain_engine_rig.hpp),
+// so none can skip for a missing TLS fixture. Every observation is taken before
+// Engine::stop() and none is fatal until stop() has returned: a fatal assertion between
+// start() and a completed stop() aborts in ~Engine instead of failing the cell.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+namespace pr = fixpp::test_support::plain_rig;
+
+// A plaintext acceptor, logged on and Active.
+struct ResyncCell {
+    pr::Rig rig;
+    bool up = false;
+
+    explicit ResyncCell(std::optional<std::uint32_t> advertised = std::nullopt) {
+        auto cfg = rig.cfg();
+        cfg.advertised_max_message_size = advertised;
+        up = rig.start(std::move(cfg)) && rig.to_active();
+    }
+
+    // The session's inbound limit L and its carry's capacity (093, data-model E-2); 0
+    // without a session.
+    [[nodiscard]] std::size_t limit() const {
+        auto const s = rig.session();
+        return s ? fixpp::session::session_test_access::inbound_limit(*s) : 0U;
+    }
+    [[nodiscard]] std::size_t carry_capacity() const {
+        auto const s = rig.session();
+        return s ? fixpp::session::session_test_access::carry_capacity(*s) : 0U;
+    }
+
+    [[nodiscard]] std::uint32_t next_in() const {
+        auto const s = rig.session();
+        return s ? static_cast<std::uint32_t>(
+                       fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe())
+                 : 0U;
+    }
+    [[nodiscard]] std::uint64_t garbles() const {
+        auto const s = rig.session();
+        return s ? s->garbled_frame_count() : 0U;
+    }
+    [[nodiscard]] bool wait_next_in(std::uint32_t n) {
+        return rig.run_until([&] { return next_in() == n; });
+    }
+    // Writes `part`, waits for the write, then gives the pump a short settle to read it.
+    // The settle is not a barrier: the next write may still coalesce into the same read.
+    [[nodiscard]] bool write_part(std::string part) {
+        rig.peer.send(std::move(part));
+        if (!rig.run_until([&] { return rig.peer.all_written(); })) return false;
+        rig.settle(std::chrono::milliseconds{2});
+        return true;
+    }
+};
+
+}  // namespace
+
+// Q-2: garbage that does not end in SOH, glued to the next frame's "8=FIX". Under an
+// SOH-anchored start rule the next frame would be lost with the garbage.
+TEST(EngineReadPumpResync, Q2_GarbageNotEndingInSohBetweenGoodFramesInOneWrite) {
+    ResyncCell c;
+    bool const d = c.up && c.rig.deliver(c.rig.heartbeat(2) + "XYZ" + c.rig.heartbeat(3));
+    bool const processed = d && c.wait_next_in(4);
+    auto const st = c.rig.state();
+    auto const n = c.garbles();
+    bool const read_ended = c.rig.peer.read_ended;
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d) << "setup";
+    EXPECT_TRUE(processed) << "both good frames are processed";
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_FALSE(read_ended) << "the connection stays open";
+    EXPECT_EQ(n, 1U) << "the garbage is one garbled region";
+}
+
+// Q-2: a truncated frame, then the same frame whole. The truncated candidate's
+// BodyLength runs into the whole frame, so `10=` is not at its counted offset; the
+// search then finds the whole frame from the candidate's second byte.
+TEST(EngineReadPumpResync, Q2_TruncatedFrameThenAGoodFrame) {
+    ResyncCell c;
+    std::string const hb3 = c.up ? c.rig.heartbeat(3) : std::string{};
+    bool const d = c.up && c.rig.deliver(c.rig.heartbeat(2) + hb3.substr(0, 30) + hb3);
+    bool const processed = d && c.wait_next_in(4);
+    auto const st = c.rig.state();
+    auto const n = c.garbles();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d) << "setup";
+    EXPECT_TRUE(processed) << "the whole frame after the truncated one is processed";
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_EQ(n, 1U) << "the truncated frame is one garbled region";
+}
+
+// Q-2, segmentation independence: each shape above, split into two writes at every byte
+// boundary, on one session. Each split is one more garbled region and one more good
+// frame, whatever the split point, and whether or not the two writes coalesce into one
+// read, so the cell holds either way. The deterministic per-boundary splits of the
+// Framer itself are its own cells (tests/wire/framer_resync_test.cpp).
+void run_every_split(std::function<std::string(pr::Rig const&, std::uint32_t)> const& shape,
+                     const char* name) {
+    ResyncCell c;
+    std::uint32_t seq = 2;
+    std::uint64_t splits = 0;
+    std::optional<std::size_t> first_bad_split;
+    bool ok = c.up;
+    for (std::size_t k = 1; ok; ++k) {
+        std::string const b = shape(c.rig, seq);
+        if (k >= b.size()) break;
+        ok = c.write_part(b.substr(0, k)) && c.write_part(b.substr(k)) && c.wait_next_in(seq + 1U);
+        ++splits;
+        if (ok && c.garbles() != splits && !first_bad_split) first_bad_split = k;
+        ++seq;
+    }
+    auto const st = c.rig.state();
+    auto const n = c.garbles();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up) << name << ": setup";
+    EXPECT_TRUE(ok) << name << ": a split left its good frame unprocessed (split " << splits << ")";
+    EXPECT_EQ(first_bad_split, std::nullopt)
+        << name << ": the garble count went wrong at this split";
+    EXPECT_EQ(n, splits) << name;
+    EXPECT_EQ(st, fsm_state::Active) << name;
+}
+
+TEST(EngineReadPumpResync, Q2_GarbageNotEndingInSoh_EverySplitPoint) {
+    run_every_split(
+        [](pr::Rig const& rig, std::uint32_t seq) { return "XYZ" + rig.heartbeat(seq); },
+        "garbage not ending in SOH");
+}
+
+TEST(EngineReadPumpResync, Q2_TruncatedFrame_EverySplitPoint) {
+    run_every_split(
+        [](pr::Rig const& rig, std::uint32_t seq) {
+            std::string const hb = rig.heartbeat(seq);
+            return hb.substr(0, 30) + hb;
+        },
+        "truncated frame");
+}
+
+// Q-2: a garbage-only stream, twice the pump's carry, holds no "8=FIX", so the search
+// keeps nothing of it: it is consumed in finite steps without overflowing the carry,
+// with the session up, and the frame after it is processed.
+TEST(EngineReadPumpResync, Q2_GarbageOnlyStreamIsConsumedWithTheSessionUp) {
+    ResyncCell c;
+    std::size_t const kGarbage = 2U * c.carry_capacity();
+    constexpr std::size_t kChunk = 4096;
+    bool ok = c.up && kGarbage != 0U;
+    for (std::size_t sent = 0; ok && sent < kGarbage; sent += kChunk) {
+        ok = c.write_part(std::string(kChunk, 'Q'));
+    }
+    bool const d = ok && c.rig.deliver(c.rig.heartbeat(2));
+    bool const processed = d && c.wait_next_in(3);
+    auto const st = c.rig.state();
+    auto const n = c.garbles();
+    bool const read_ended = c.rig.peer.read_ended;
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && ok && d) << "setup";
+    EXPECT_TRUE(processed) << "the frame after the garbage is processed";
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_FALSE(read_ended) << "the garbage does not close the connection";
+    EXPECT_EQ(n, 1U) << "one region, continued across every read";
+}
+
+// Q-3 (L-15): a structurally complete frame whose CheckSum is wrong is discarded through
+// its own end, with the well-formed Heartbeat(34=3) its body carries. Were the embedded
+// frame delivered, NextNumIn would reach 4 from it and the real Heartbeat(34=3) after
+// the outer frame would be too low and end the session.
+TEST(EngineReadPumpResync, Q3_WrongCheckSumFrameIsDiscardedWholeWithTheFrameInItsExtent) {
+    ResyncCell c;
+    std::string outer;
+    if (c.up) {
+        outer = pr::with_wrong_checksum(c.rig.msg("0", 3, "58=" + c.rig.heartbeat(3)));
+    }
+    bool const d = c.up && c.rig.deliver(c.rig.heartbeat(2) + outer + c.rig.heartbeat(3));
+    bool const processed = d && c.wait_next_in(4);
+    c.rig.settle();
+    auto const st = c.rig.state();
+    auto const n = c.garbles();
+    auto const next = c.next_in();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d) << "setup";
+    EXPECT_TRUE(processed) << "the Heartbeat after the outer frame is processed";
+    EXPECT_EQ(next, 4U) << "only Heartbeat(2) and the real Heartbeat(3) advanced NextNumIn";
+    EXPECT_EQ(st, fsm_state::Active) << "the embedded frame was not delivered";
+    EXPECT_EQ(n, 1U) << "the outer frame, with what it carries, is one garbled region";
+}
+
+// Q-3 (L-8): a well-formed frame lying after a malformed candidate's first byte is
+// found by the search and delivered, and the session's guards then process it as any
+// frame: here Heartbeat(34=3), in sequence.
+TEST(EngineReadPumpResync, Q3_AFrameEmbeddedAfterAMalformedCandidateIsDeliveredAndGuarded) {
+    ResyncCell c;
+    std::string const candidate =
+        "8=FIX.4.2\x01"
+        "9=5\x01"
+        "X";
+    bool const d = c.up && c.rig.deliver(c.rig.heartbeat(2) + candidate + c.rig.heartbeat(3));
+    bool const processed = d && c.wait_next_in(4);
+    auto const st = c.rig.state();
+    auto const n = c.garbles();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d) << "setup";
+    EXPECT_TRUE(processed) << "the embedded Heartbeat(3) is delivered and processed";
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_EQ(n, 1U) << "the malformed candidate is one garbled region";
+}
+
+// The L-1 pin. A BodyLength too large for its frame, but within the session's limit L
+// and its carry, stalls the pump until the counted bytes arrive: the Heartbeat(34=3)
+// the count swallows is not processed meanwhile. When they arrive, `10=` is not at the
+// counted offset, so the candidate is disregarded and framing resumes inside it, at
+// Heartbeat(34=3). The filler after Heartbeat(3) then opens a second region at that
+// frame boundary, and Heartbeat(4) follows it. The sizes are read from L and the carry
+// open() allocated, through the engine seam the pump reads them from, never from a
+// literal. The carry holds L plus one read (data-model E-2), spelled out here.
+TEST(EngineReadPumpResync, L1_ATooLargeBodyLengthWithinTheLimitStallsThenIsDisregarded) {
+    ResyncCell c;
+    std::size_t const limit = c.limit();
+    std::size_t const carry = c.carry_capacity();
+    std::size_t const kBodyLength = limit / 2U;
+    std::string const candidate =
+        "8=FIX.4.2\x01"
+        "9=" +
+        std::to_string(kBodyLength) +
+        "\x01"
+        "35=0\x01";
+    bool const d1 = c.up && kBodyLength != 0U &&
+                    c.rig.deliver(c.rig.heartbeat(2) + candidate + c.rig.heartbeat(3));
+    bool const hb2 = d1 && c.wait_next_in(3);
+    c.rig.settle();
+    auto const stalled_next = c.next_in();
+    auto const stalled_garbles = c.garbles();
+    bool const d2 = hb2 && c.rig.deliver(std::string(kBodyLength, 'Z') + c.rig.heartbeat(4));
+    bool const resumed = d2 && c.wait_next_in(5);
+    auto const st = c.rig.state();
+    auto const n = c.garbles();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d1 && hb2 && d2) << "setup";
+    EXPECT_EQ(carry, limit + 4096U) << "the carry holds L plus one read";
+    EXPECT_EQ(stalled_next, 3U) << "the stall holds Heartbeat(3) until the counted bytes arrive";
+    EXPECT_EQ(stalled_garbles, 0U) << "nothing is decided while the candidate is partial";
+    EXPECT_TRUE(resumed) << "framing resumes once the counted bytes arrive";
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_EQ(n, 2U) << "the candidate, and the filler at the boundary after Heartbeat(3)";
+}
+
+// The L-1 pin's other half, re-based by 093 (Q-6): the carry holds L plus one read,
+// and a candidate whose BodyLength makes its frame longer than L is refused as soon as
+// the BodyLength is read, so a carry overflow cannot happen in the pump. A BodyLength
+// of L closes the session and the connection, without waiting for the body.
+TEST(EngineReadPumpResync, L1_AnOverLBodyLengthClosesAtItsHeader) {
+    ResyncCell c;
+    std::size_t const limit = c.limit();
+    std::string const candidate =
+        "8=FIX.4.2\x01"
+        "9=" +
+        std::to_string(limit) +
+        "\x01"
+        "35=0\x01";
+    bool const d1 = c.up && limit != 0U && c.rig.deliver(c.rig.heartbeat(2) + candidate);
+    bool const hb2 = d1 && c.wait_next_in(3);
+    bool const closed = hb2 && c.rig.run_until([&] {
+        return c.rig.state() == fsm_state::Disconnected && c.rig.peer.read_ended;
+    });
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d1 && hb2) << "setup";
+    EXPECT_TRUE(closed) << "an over-L BodyLength closes the session and the connection";
+}
+
+// ── Q-12 (T055a): a frame of exactly L, split near the carry's edge ─────────
+//
+// A Heartbeat padded with one Text(58) field to exactly L = 65536 bytes (few fields,
+// so the base's parse holds it), then Heartbeat(next). Each split writes the first k
+// bytes, waits until the pump has read them, then writes the rest with the next
+// Heartbeat, which loopback delivers as one read when it fits one. The pump then holds
+// k bytes and must take 65536 - k + the Heartbeat in one feed: a carry of exactly L
+// overflows there, a carry of L plus one read does not. The splits run from the first
+// at which the rest and the Heartbeat fit one read to the frame's last byte, in steps,
+// and every split of the last 64 bytes. Base RED: the base's 64 KiB carry overflows
+// and the session closes.
+TEST(EngineReadPumpResync, Q12_AFrameOfExactlyLSplitNearTheCarryEdgeIsDelivered) {
+    ResyncCell c;
+    constexpr std::size_t kLimit = 65536;
+    constexpr std::size_t kRead = 4096;
+    std::size_t const hb_size = c.up ? c.rig.heartbeat(100).size() : 0U;
+    std::vector<std::size_t> splits;
+    // The step only thins the sample, since every split in the range is a case. Keep it
+    // below kRead, so each read-sized window of the range still holds a split.
+    for (std::size_t k = kLimit + hb_size - kRead; k < kLimit - 64U; k += 509U) splits.push_back(k);
+    for (std::size_t k = kLimit - 64U; k < kLimit; ++k) splits.push_back(k);
+
+    std::uint32_t seq = 2;
+    std::optional<std::size_t> first_lost;
+    bool ok = c.up;
+    for (std::size_t const k : splits) {
+        if (!ok) break;
+        std::string const f = c.rig.msg_of_size("0", seq, {}, kLimit, "58", false);
+        std::string const next = c.rig.heartbeat(seq + 1U);
+        ok = !f.empty() && c.write_part(f.substr(0, k)) &&
+             c.rig.run_until([&] { return c.rig.peer.all_written(); });
+        c.rig.settle(std::chrono::milliseconds{5});
+        ok = ok && c.write_part(f.substr(k) + next);
+        bool const delivered = ok && c.wait_next_in(seq + 2U);
+        if (!delivered && !first_lost) first_lost = k;
+        ok = ok && delivered;
+        seq += 2U;
+    }
+    auto const st = c.rig.state();
+    bool const read_ended = c.rig.peer.read_ended;
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up) << "setup";
+    EXPECT_EQ(first_lost, std::nullopt) << "a split lost the frame of exactly L";
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(st, fsm_state::Active);
+    EXPECT_FALSE(read_ended);
+}
+
+// ── InboundAtLimitAccepted (T055; moved from test_070_max_message_size_test) ──
+//
+// Re-based through the pump: a configured 383 inside [4096, 262144] and a Heartbeat
+// padded to exactly that many bytes, fed through the Framer, is delivered and the
+// session stays Active.
+TEST(EngineReadPumpResync, InboundAtLimitAccepted) {
+    constexpr std::uint32_t kAdvertised = 5000;
+    ResyncCell c{kAdvertised};
+    std::string const f =
+        c.up ? c.rig.msg_of_size("0", 2, {}, kAdvertised, "58", false) : std::string{};
+    bool const d = !f.empty() && c.rig.deliver(f);
+    bool const delivered = d && c.wait_next_in(3);
+    auto const st = c.rig.state();
+    c.rig.stop();
+
+    ASSERT_TRUE(c.up && d) << "setup";
+    EXPECT_EQ(f.size(), kAdvertised);
+    EXPECT_TRUE(delivered) << "a frame of exactly the advertised size is delivered";
+    EXPECT_EQ(st, fsm_state::Active);
 }

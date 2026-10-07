@@ -1,0 +1,35 @@
+# neg_logon_timeout_not_integer.toml
+# 093-inbound-frame-dispositions (data-model E-7; quickstart Q-31): a copy of
+# neg_out_of_range.toml with logon_timeout_ms given as a string, refused with
+# malformed_value at session[0].logon_timeout_ms.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id                = "CLIENT1"
+target_comp_id                = "SERVER1"
+begin_string                  = "FIX.4.4"
+role                          = "initiator"
+logon_timeout_ms              = "10s"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

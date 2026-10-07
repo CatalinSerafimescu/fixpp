@@ -80,7 +80,9 @@
  *  component/group-only pair or of a standard pair such as
  *  RawDataLength(95) and RawData(96) (so shipped dictionaries are affected
  *  too): a Logon of that shape that was accepted is now refused, on either
- *  role. The observers are every call whose result depends on the session
+ *  role. Amended in C-ABI 1.11 (093): such a Logon whose third field is not
+ *  MsgType(35) is disregarded before interpret_logon reads it (contract C-2
+ *  step 1), and is not refused. The observers are every call whose result depends on the session
  *  having logged on; each also carries its own note in session.h:
  *  fixpp_session_is_established stays false; fixpp_session_close, once the
  *  refused session has drained, returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE,
@@ -134,8 +136,33 @@
  *      MsgSeqNum(34) was read before the fault draws a session Reject on the
  *      wire; the receive callback is not invoked for it either way.
  *  No error code is added. */
+
+/*  1.11 (BREAKING, [const §X.7]; 093, fixpp#514, #515, #516): how the session
+ *  frames inbound bytes and which frames it acts on. The observers are the
+ *  five calls the 1.10 entry names: fixpp_session_is_established,
+ *  fixpp_session_close, fixpp_session_send, fixpp_session_register_callback
+ *  and fixpp_session_register_send_callback. Each carries every change below
+ *  in its 1.11 clause in session.h, where the 1.10 sentences 093 falsifies
+ *  are amended in place, marked 1.11. One line per change:
+ *    - a frame the Framer finds garbled is disregarded and counted, not
+ *      session-ending (the five observers);
+ *    - a frame whose third field is not MsgType(35) is disregarded, and a
+ *      Logon of that shape is not refused (the five observers; the amended
+ *      1.10 Logon sentence);
+ *    - a frame over the inbound limit closes the session in every state, and
+ *      one within it is admitted however the stream is split into reads (the
+ *      five observers);
+ *    - a frame the session admits always parses for dispatch (the five
+ *      observers; the amended 1.10 parse-failure bullet);
+ *    - a connection not logged on by the establishment timeout is closed (the
+ *      five observers);
+ *    - every frame that passes the fault and third-field checks counts as
+ *      inbound traffic for the heartbeat interval (the five observers).
+ *  Added: fixpp_session_config_set_logon_timeout_ms and
+ *  fixpp_session_garbled_frame_count (session.h).
+ *  No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 10 /* 1.10: unparseable inbound frames (fixpp#507) */
+#define FIXPP_C_ABI_VERSION_MINOR 11 /* 1.11: inbound frame dispositions (093) */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

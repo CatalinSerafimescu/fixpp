@@ -14,9 +14,9 @@
 //              cells only asserted state==Active, never the ResendRequest emit).
 //   gap #9     ResendRequest EndSeqNo > our last stored outbound → GapFill the
 //              clamped/unknown range, stays Active (QF parity: gap-fill, no error).
-//   gap #7/2t  Header fields out of canonical order (MsgType not first body
-//              field) → ACCEPTED, not Rejected. DIVERGENCE from QuickFIX (which
-//              Rejects 373=14). Documented as B-cov-1; see the findings report.
+//   gap #7/2t  MsgType(35) not the third field → disregarded as garbled, NextNumIn
+//              not incremented, no Reject (093-inbound-frame-dispositions FR-004,
+//              which superseded this row's earlier ACCEPTED pin).
 //   gap #3/15  Non-header body fields in arbitrary order → ACCEPTED. Same
 //              order-independent-parse divergence (B-cov-1).
 //
@@ -166,21 +166,24 @@ TEST_F(FixTcCoverageGaps, ResendRequestEndSeqNoBeyondLastOutbound_GapFills_Stays
         << "store-absent over-range GapFill must carry NewSeqNo=EndSeqNo+1 (101)";
 }
 
-// ── gap #7 / FIX-TC 2t — header fields out of canonical order → ACCEPTED ───────
+// ── gap #7 / FIX-TC 2t — MsgType(35) not the third field → DISREGARDED ────────
 //
-// DIVERGENCE (documented, B-cov-1). FIX-SL §4.5 mandates the first three fields
-// be 8=BeginString, 9=BodyLength, 35=MsgType. The framer enforces 8 then 9, but
-// the session/parser scans the remaining fields ORDER-INDEPENDENTLY, so a frame
-// where MsgType(35) is NOT the first body field is ACCEPTED — not Rejected.
-// QuickFIX would emit Reject(373=14). This cell pins fixpp's lenient behavior.
-TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotFirst_Accepted_DivergesFromQuickFix) {
+// 093-inbound-frame-dispositions (FR-004; contract C-2 step 1) superseded this
+// cell's earlier pin of the lenient acceptance. FIX-SL §4.5.2 criterion 3 and
+// FIX-TC 2020 2t make a frame whose first three fields are not 8, 9, 35 garbled:
+// it is ignored, NextNumIn is not incremented, and the session carries on. No
+// Reject is sent (QuickFIX/C++, J, Go and n all ignore it once logged on; research
+// R-1). B-005-7 narrows to the fields after the first three, which the session
+// still scans order-independently (the BodyFieldsArbitraryOrder cell below).
+TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotThird_Disregarded) {
     fixpp::session::Session s{engine, make_acceptor_cfg()};
     ASSERT_TRUE(drive_to_active(s));
     ASSERT_EQ(next_inbound(s), 2U);
+    const std::size_t before = capture.frames.size();
 
-    // A Heartbeat with MsgSeqNum(34) placed BEFORE MsgType(35) — header order violation.
+    // A Heartbeat with MsgSeqNum(34) placed BEFORE MsgType(35), so field 3 is 34.
     std::string body;
-    body += field(34, "2");  // 34 before 35 (canonical order is 35 first)
+    body += field(34, "2");
     body += field(35, "0");
     body += field(49, "TW");
     body += field(52, "20240101-00:00:00.000");
@@ -188,11 +191,10 @@ TEST_F(FixTcCoverageGaps, HeaderFieldsOutOfOrder_MsgTypeNotFirst_Accepted_Diverg
     (void)feed(s, frame_from_body("FIX.4.2", body));
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
-        << "DIVERGENCE: out-of-order header fields are accepted, session stays Active";
-    EXPECT_EQ(next_inbound(s), 3U)
-        << "the out-of-order Heartbeat is processed in-sequence (counter advances)";
-    EXPECT_EQ(capture.count_msg_type("3"), 0U)
-        << "DIVERGENCE: fixpp emits NO Reject for field-order violations (QF emits 373=14)";
+        << "the out-of-order frame is disregarded; the session stays Active";
+    EXPECT_EQ(next_inbound(s), 2U) << "TC 2t: NextNumIn is not incremented";
+    EXPECT_EQ(capture.frames.size(), before) << "the disregard sends nothing, no Reject";
+    EXPECT_EQ(s.garbled_frame_count(), 1U) << "it is counted as one garbled frame";
 }
 
 // ── gap #3 / FIX-TC 15 — non-header BODY fields in arbitrary order → ACCEPTED ──

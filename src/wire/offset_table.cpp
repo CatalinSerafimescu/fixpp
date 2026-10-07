@@ -3,6 +3,7 @@
 // robin-hood overlay + lazy group sub-index. All storage from the captured
 // per-message memory_resource; DoS caps enforced with bounded memory.
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>  // noexcept seed fallback entropy (W-P3-2)
 #include <cstddef>
@@ -160,6 +161,10 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
                          dict_hooks hooks) noexcept
+    : OffsetTable(frame, mr, cfg, hooks, 0) {}
+
+OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
+                         dict_hooks hooks, std::size_t reserve_entries) noexcept
     :
 #ifndef NDEBUG
       gen_{frame.token()},
@@ -170,16 +175,22 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       overlay_(mr),
       group_index_(mr),
       nested_cache_(mr) {
-    build(frame);
+    build(frame, reserve_entries);
 }
 
-void OffsetTable::build(frame_view const& frame) noexcept {
+void OffsetTable::build(frame_view const& frame, std::size_t reserve_entries) noexcept {
     // A noexcept build must NOT let a throwing `mr` (bad_alloc) escape — that
     // would std::terminate (004 T059 / Codex adversarial review: the reify
     // lazy view() rebuild made first-field-access an OOM kill-switch). On
     // allocation failure we degrade EXACTLY like the DoS-cap path below:
     // empty table, status_ = out_of_memory, find()/get<>() → field-absent.
     try {
+        // 093 (data-model E-3): the up-front reserve, clamped to the entry cap, since
+        // the table never holds more. Inside the try, so a reserve the resource cannot
+        // serve takes the bad_alloc arm below.
+        if (reserve_entries != 0U) {
+            entries_.reserve(std::min(reserve_entries, cfg_.max_offset_entries));
+        }
         auto buf = frame.bytes();
         frame_base_ = buf.data();
         seed_ = overlay_seed_storage().load(std::memory_order_relaxed);  // snapshot (W-P3-2)

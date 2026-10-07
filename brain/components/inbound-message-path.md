@@ -8,18 +8,31 @@ refs:
   - include/fixpp/session/session.hpp
   - src/session/session.cpp
   - src/session/scan_frame_header.hpp
+  - include/fixpp/wire/framer.hpp
+  - src/session/read_pump.hpp
+  - src/session/inbound_limit.hpp
+  - src/session/parse_capacity.hpp
+  - src/session/read_first_frame_bounded.hpp
+  - include/fixpp/core/clock.hpp
   - src/core/fix_time.cpp
   - src/session/sending_time.cpp
   - specs/015-runtime-engine/research.md
   - specs/092-garbled-frame-reject/spec.md
   - specs/092-garbled-frame-reject/research.md
   - specs/092-garbled-frame-reject/contracts/unparseable-frame-disposition.md
+  - specs/093-inbound-frame-dispositions/spec.md
+  - specs/093-inbound-frame-dispositions/plan.md
+  - specs/093-inbound-frame-dispositions/research.md
+  - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
+  - tests/session/read_first_frame_bounded_test.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/015-runtime-engine-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
-codegraph_entry: [run_read_pump, Framer, on_inbound_frame, Session, scan_frame_header, dispose_unparseable_]
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
+codegraph_entry: [run_read_pump, Framer, on_inbound_frame, Session, scan_frame_header, dispose_unparseable_, inbound_framer_config, note_garbles_, read_first_frame_bounded]
 constitution: ["§VIII.5", "§XI.2"]
 ---
 
@@ -58,9 +71,11 @@ edit, and it would read as authoritative while doing so.
 | Invariant | Why it exists | Enforced at |
 |---|---|---|
 | **No inbound queue. One frame is processed at a time** | backpressure is *structural*, not a policy — the pump does not read the next chunk until the session has consumed the current frame, so there is nothing to bound and nothing to drop | the pump `co_await`s `on_inbound_frame` before the next read (`run_read_pump`, `src/session/engine.cpp`) |
-| **The carry buffer is allocated once per session and never reallocated**; overflow is an error, not a growth | `[const §VIII.5]` zero-allocation between parse and `fromApp` | carry buffer construction in `run_read_pump`; overflow → `wire_frame_too_large` |
+| **The carry buffer is allocated once per session and never reallocated** | `[const §VIII.5]` zero-allocation between parse and `fromApp`. *(Since 093 the carry is allocated at `open()`, L plus one read, and the pump borrows it; before 093 the pump built a 64 KiB carry itself. A frame over L is refused at its BodyLength, so the carry cannot overflow in the pump: 093 plan OD-23)* | `Session::open()` allocates it; the pump reads it through `session_engine_access::carry` (`run_read_pump`) |
 | **Surplus bytes from the bounded first-frame read drain through the SAME framing path BEFORE the first socket read** | ⚠️ **this is a bug class, not a detail.** A peer may coalesce `Logon`‖next-frame in one segment; reading the socket first would silently drop the second frame | the `initial_bytes` drain block preceding the read loop (F-015-002) |
-| **Error or EOF closes the session terminally, and the close is idempotent** | `stop()` may already have closed it; a second close must be a no-op, not a fault | the pump's stop helper → `Session::close(terminal)`; `session_already_closed` is deliberately ignored |
+| **EOF, a read error, a frame over L, an `on_inbound_frame` error, or the establishment deadline closes the session terminally, and the close is idempotent** | `stop()` may already have closed it; a second close must be a no-op, not a fault. *(Before 093 every Framer error closed it too; since 093 a garbled frame is disregarded and only `wire_frame_too_large` ends the pump: see the 093 section below)* | the pump's stop helper → `Session::close(terminal)`; `session_already_closed` is deliberately ignored |
+| **A feed's garbles are accounted before any frame that feed produced is delivered** | a garble the Framer reports precedes every frame the same call produces (contract C-1 "Ordering"), so the count, the event and the log record never trail an effect of a later frame | the pump's `note_garbles` after every feed, in both drains (`run_read_pump`) |
+| **Until the first Active, expiry is decided at a loop head, never by a race** | asio does not order two ready completions, so a race that decided would let a peer that keeps the socket readable outrun the bound | the `expired()` tests before each read and before each frame's delivery in `run_read_pump`; the read is raced against `await_deadline` only so that it wakes |
 | **Total cancellation must be re-enabled explicitly** | `co_spawn` defaults to **terminal-only**, so `stop()`'s total-cancel is otherwise swallowed **silently** | `reset_cancellation_state(enable_total_cancellation())` as the coroutine's first step `[const §XI.2]` |
 
 ## What was rejected
@@ -98,6 +113,10 @@ with neither side told (#507, found by 091's T076).
 - A frame whose MsgSeqNum(34) was not read before the fault is disregarded (TC2020 17g). So is one
   whose third field is not MsgType(35), in LogonReceived/Active (§4.5.2 criterion 3).
 - Before Active the frame is refused like any non-Logon, and in LogoutSent it is disregarded.
+- ⚠️ **Superseded in part by 093** (fixpp#514): a frame whose third field is not MsgType(35) is now
+  disregarded in every state but Disconnected, faulty or not, by a check that runs before this
+  ruling's rows; so 092's D-8 is unreachable, and a pre-Active frame of that shape is no longer
+  refused. The rest of the ruling stands. See the 093 section below.
 - No field of a faulty frame is ever acted on, and no parse failure ever reads as "no reject".
 
 **Where the decision is taken.** It is one inline check in each state arm of `on_inbound_frame`,
@@ -108,10 +127,12 @@ ships. ⚠️ The invariant worth keeping is **decide before any handler reads a
 table is not reproduced here; read the contract.
 
 **A late parse failure closes the session** (owner ruling O-2). A parse that runs after the check,
-on a frame the scan found fault-free, can still fail for a resource reason. At every such inbound
+on a frame the scan found fault-free, could still fail for a resource reason. At every such inbound
 site the session closes terminally, through `close_on_late_parse_failure_`. There is no Reject and
-the callback is not invoked. Effects already taken at the site stand; moving the decision ahead
-of them is fixpp#515.
+the callback is not invoked. Effects already taken at the site stand. ⚠️ **Since 093 (fixpp#515)
+the failure is unreachable for an admitted frame**, because every inbound parse is sized for the
+densest frame of L bytes; the close stays as a defence (093 FR-014). #515 was settled by removing
+the failure, not by moving the decision ahead of the effects (B&L `L-092-6`).
 
 **NextNumIn never wraps** (FR-019). `SeqnumManager::check_inbound` refuses to advance from
 `seqnum_max` with `store_seqnum_overflow`, and every consuming caller then ends the session
@@ -127,7 +148,8 @@ inbound frames end an established session. No symbol or code changes. The carrie
 - **Ignore by default** (disregard every framed-but-unparseable frame). A deterministically
   malformed frame is resent identically on every ResendRequest, and fixpp has no resend-loop guard.
   That is the stall B-423-1 measured live against QuickFIX-cpp. The disregard rows that remain
-  (D-7, D-8) carry exactly that cost, disclosed as `L-092-1`.
+  (D-7, D-8) carry exactly that cost, disclosed as `L-092-1`. *(D-8 is now 093's third-field
+  disregard; the cost is the same, and 093's garbles carry it too, `L-093-7`.)*
 - **373 = 99 ("Other").** 99 is not a valid SessionRejectReason on FIX.4.2 (plan.md, the Gate A
   round 1 fixes; check the 373 enum in `dictionaries/FIX42.xml`). The fault kinds map to defined codes, 0 for a malformed tag and 5 for a
   Length+Data mismatch (research R-6). Gate A round 2 deleted the residual late-site Reject that once
@@ -148,8 +170,90 @@ inbound frames end an established session. No symbol or code changes. The carrie
   `L-092-12`.
 
 ⚠️ **Frozen records that now say the wrong thing**, flagged here and not edited: #423's ruling
-table, row 4 ("garbled … no Reject, no advance"). Row 1's "Ignore … Unchanged" also describes a
-disregard fixpp never did (`L-004-4`; fixpp#514).
+table, row 4 ("garbled … no Reject, no advance"). Row 1's "Ignore … Unchanged" described a
+disregard fixpp did not do until 093 shipped it (fixpp#514; `L-004-4` is now in the closed B&L
+file). 092's `spec.md`, contract C-2 (rows D-1/D-2 for a third field that is not 35, and D-8) and
+contract C-6's "a late parse can still fail" are point-in-time records of 092, superseded by 093's
+contract C-2 step 1 and C-3; they are not edited.
+
+## Garbled frames, one inbound limit, and a bounded establishment (093, fixpp#514, #515, #516)
+
+**The defects.** A frame the Framer could not frame ended the session, where FIX-SL 2020 §4.5.2 says
+"disregard" (#514). A well-formed frame could be lost to a parse arena nothing derived (16 KiB on the
+stack), or refused by the 64 KiB carry depending on how reads split it (#515). And a frame that took
+an early return in the Active arm did not count as inbound traffic, so a busy peer drew TestRequests
+(#516).
+
+**The owner's rulings** (spec.md Clarifications, 2026-10-02):
+- **R-1 (#516):** every inbound frame that is neither garbled nor faulty refreshes inbound liveness;
+  092's "a faulty frame does not refresh" stands.
+- **R-2 (#515):** a frame the read pump admits must always parse. One limit L, from the advertised
+  MaxMessageSize(383) or else 64 KiB, sizes the carry and the parse capacity, and a frame over it is
+  refused at framing with a loud close. The parse index moves to a per-session buffer allocated once.
+- **R-3 (#524):** a new `MessageStore` virtual with a default body; recorded on
+  [`session`](./session.md) and [`message-store-quiescence`](./message-store-quiescence.md).
+- **R-4 (#514):** an establishment timeout, `logon_timeout_ms`, with a C-ABI setter; on expiry the
+  transport is closed.
+- From specify and clarify: a frame whose third field is not MsgType(35) is disregarded in both
+  validation modes and every state (after research R-1 checked the specs and four QuickFIX engines);
+  a garbled frame before Logon is disregarded, bounded by the timeout; 10 s default and zero refused;
+  a C-ABI counter; 383 above 256 KiB refused.
+
+**Where the decisions are taken.** The Framer's opt-in resync is on [`wire`](./wire.md). On this
+path: the pump and the acceptor's first-frame read build their Framer from one config,
+`detail::inbound_framer_config` (`src/session/read_pump.hpp`); L comes from `inbound_limit_for`
+(`src/session/inbound_limit.hpp`) and the parse buffer from `parse_capacity`
+(`src/session/parse_capacity.hpp`); the third-field disregard is the first check in each arm of
+`on_inbound_frame` (contract C-2 step 1); the deadline is the `expired()` loop-head test in
+`run_read_pump`. Read contract C-1 to C-5 for the rules and B&L `B-093-*` / `L-093-*` for what
+ships. ⚠️ The invariant worth keeping: **the pump decides expiry at a loop head, and accounts a
+feed's garbles before it delivers that feed's frames.**
+
+### Orchestrator decisions, and what each rejected
+
+These are plan.md's ODs and research R-2 to R-4, R-9, open to review then and settled at Gate A:
+- **The deadline lives in the pump** (OD-6), with the acceptor's first-frame read as its phase (a).
+  Rejected: a detached Session timer, which needs a join counter and deadlocks `close()`'s join when
+  it calls `close()` while counted in `liveness_counter_`; arming per reconnect attempt (there is no
+  per-attempt Logon); one connection-scoped watchdog spanning TLS, the store and the Logon write
+  (a peer cannot hold those open, so it would test the store, not establishment); and uncharging
+  discarded bytes from the first-frame budget (it contradicts the unchanged bounded read).
+- **Expiry is a loop-head check, and the race only wakes a blocked read** (Gate A round 2).
+  Rejected: letting the race decide, because nothing orders two ready completions.
+- **On TLS, phase (a) lasts `max(T, the handshake bound)`.** Rejected: clamping the listener-wide
+  handshake bound per connection.
+- **Garbles are counted, evented and logged even after `close()` began** (OD-7): a transport
+  observation, not an arm effect, so the third-field disregard runs before FR-030's closing check.
+- **The first-frame garbles reach the Session as one summary** (OD-8). Rejected: a per-region record
+  list (about 1365 records per accept at 3 bytes a region) and the counter on `SessionEntry` (no
+  observable gain under one Session per entry per `start()`, and a reader path that survives
+  `registry_.clear()` would be new).
+- **The first production log site is `FIXPP_SLOG`, rate-bounded to `max(HeartBtInt, 1 s)`** (OD-5;
+  the 1 s floor because HeartBtInt 0 is legal). A record's suppressed count is in regions, the
+  counter's unit, so the log reconciles with `garbled_frame_count()` (OD-21). Rejected: counting
+  only suppressed summaries, which breaks the reconciliation for a logged summary of several
+  regions.
+- **One limit L for everything** (R-2's ruling), checked at `register_session` and at `open()`,
+  with a 4096 floor (OD-2: fail at configuration, not at every Logon). Rejected: no floor.
+- **070's pre-establishment exemption is reversed** (OD-3). Rejected: keeping it for frames over L
+  but within 64 KiB, at the cost of a second, larger buffer before Active.
+- **An over-L frame records a log line and no `SessionEvent`** (OD-24). Rejected: a new public
+  `session_event_frame_too_large`, unreviewed API that duplicates the close the application sees.
+- **The carry is allocated at `open()`, L plus one read** (OD-13). Rejected: carry = L, which makes a
+  frame of exactly L depend on segmentation; and building it in the pump, where an allocation
+  failure is a `std::terminate` inside a `noexcept` constructor rather than an `open()` error.
+- **The parse buffer is per session, allocated once** (R-2's ruling; research R-3). Rejected: a
+  per-thread buffer, lazy growth (it allocates on the inbound path), reserving from the header
+  scan's field count (no size gain, and two scanners that must agree forever), and a reserve held in
+  `OffsetTable::Config` (clones and reifies copy it into a `frame_len + 4096` arena).
+- **The deadline race may allocate before the first Active; it is measured, not asserted** (R-9,
+  L-093-13). No pmr counter can see it, because asio's recycling allocators do not draw on a pmr
+  resource; the instrument is a global `operator new` counter with a positive control.
+
+⚠️ **Spec drift, recorded and not edited:** contract C-8 L-1 says the stall "closes when the carry
+overflows", which plan OD-23 makes unreachable in the pump (`L-093-1` has the re-derivation), and
+spec FR-013 says an over-L close is recorded "with an event and a log", which OD-24 narrowed to a
+log record.
 
 ## A timestamp the time type cannot hold (fixpp#509)
 
@@ -178,3 +282,39 @@ its own fix after the parse fix: a representable time far from the clock can ove
 - **Adding a Reject for an out-of-range `52` on a PossDup Reject(35=3) or Logout(35=5).** That site
   already falls through for an unparseable `52`, so fixing it is a change to that rule, not part of
   #509. It is disclosed as `L-509-1`.
+
+## Deadline arithmetic under an arbitrary `Clock` (093 Gate B)
+
+`Clock::steady_now()` (`include/fixpp/core/clock.hpp`) promises monotonicity and nothing about range.
+An embedder's clock (`EngineConfig::clock`, or a session's `SessionConfig::clock_override`) may
+read negative or close to `steady_time_point::max()`, and two readings may lie further apart than
+`duration::max()`. A plain `now + d` or `deadline - now` is then signed overflow, which is UB. So
+the deadlines 093 added go through two helpers in `src/session/read_first_frame_bounded.hpp`:
+
+- **`detail::deadline_after(now, d)`**: exactly `now + d` when that instant is representable, else
+  `max()`, for any `d >= 0` its `static_assert`s admit. The headroom is checked before `d` is
+  converted to the time point's units, because the conversion can overflow by itself (a
+  `heartbeat_interval` in seconds, converted to nanoseconds). `max()` is the right saturation value
+  because the clock reaches it only at its end, so the deadline never fires early. As a
+  consequence, a `Clock`'s `sleep_until` may be handed `max()` (B&L `B-093-4`).
+- **`detail::duration_until(now, deadline)`**: total. It returns zero once `now` has reached the
+  deadline, the exact difference when that fits, and `duration::max()` otherwise. The acceptor's
+  time left after the handshake uses it on a single clock read.
+
+Witnesses: the `DeadlineAfter` and `DurationUntil` suites in
+`tests/session/read_first_frame_bounded_test.cpp`; the engine-level cells are listed in `B-093-4`.
+
+- **Why helpers, not site-by-site fixes.** A site-by-site fix covered the sums, and the review of
+  that fix found more members of the class: a difference, and the sum helper's own inexact branch
+  for a negative `now`. Closure came from enumerating every time-point and duration expression in
+  the PR's `src/` and `include/` diff, and following each saturated value to its sink
+  (`Clock::sleep_until` or an asio timer). That enumeration is the re-derivation recipe; rerun it
+  rather than trusting any list of sites.
+- **Rejected for this PR: a range precondition on `Clock`** (`steady_now()` non-negative, or two
+  readings at most `duration::max()` apart). It changes `clock.hpp`, a public contract ratified at
+  Gate A. It cannot be enforced inside a `const noexcept` virtual, so it would be a claim that rots.
+  And it does not cover the duration side: an oversized `heartbeat_interval` overflows even with
+  the real clock. It is deferred as an owner question on fixpp#555, for the older sites.
+- **Older sites are tracked in fixpp#555**: the session's graceful-logout wait and liveness loop
+  still form raw sums. Check the issue's state, and grep `src/session/session.cpp` for
+  `steady_now() +` and `+ heartbt_int`, before relying on either.

@@ -23,6 +23,10 @@
 #include "framer.hpp"
 #include "view.hpp"  // group_slice (mr-backed group instance slices)
 
+namespace fixpp::session::detail {
+struct parse_capacity;  // src/session/parse_capacity.hpp (093), a friend below
+}  // namespace fixpp::session::detail
+
 namespace fixpp::wire {
 
 inline constexpr std::size_t default_max_offset_entries = 4096;  // occ space
@@ -153,6 +157,16 @@ public:
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
                 dict_hooks hooks) noexcept;
+
+    // 093-inbound-frame-dispositions (data-model E-3): as above, and the entries are
+    // reserved once, up front, for `reserve_entries` fields (at most
+    // cfg.max_offset_entries) instead of growing. A per-call hint: the table does not
+    // store it, so a clone or reify that re-parses from config() reserves nothing. A
+    // reserve the resource cannot serve degrades like any other allocation failure in
+    // the build (build_status() = out_of_memory).
+    OffsetTable(frame_view const& frame [[clang::lifetimebound]],
+                std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
+                dict_hooks hooks, std::size_t reserve_entries) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
@@ -349,7 +363,9 @@ public:
 
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
-    void build(frame_view const& frame) noexcept;  // shared build impl (both ctors)
+    // Shared build impl (every ctor); `reserve_entries` is 0 except through the
+    // reserving ctor (093, data-model E-3).
+    void build(frame_view const& frame, std::size_t reserve_entries = 0) noexcept;
     void check_alive() const noexcept;
 
     // 062 T005: dict-aware sub-view-over-slice builder. Placement-constructs
@@ -557,6 +573,11 @@ private:
     // `TypedReadSplitAgreement.MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices`,
     // with no friend and no hook.
     friend struct offset_table_test_access;
+    // 093-inbound-frame-dispositions (data-model E-2): the session sizes its parse buffer
+    // B(L) from overlay_cap_for itself rather than from a copy of its rule, so the budget
+    // follows the table if the rule changes. A production friend, unconditional, defined
+    // in src/session/parse_capacity.hpp (not installed).
+    friend struct ::fixpp::session::detail::parse_capacity;
 };
 
 }  // namespace fixpp::wire

@@ -58,6 +58,7 @@ its in-tree source is its dict helper (`_dict_path` /
 | `test_pickle_ban.py` | as-is | — |
 | `test_reentrancy.py` | as-is | via `_oo_reentrancy_staging` / `oo_test_support` |
 | `test_callback_raise_watchdog.py` | as-is | via `_gil_staging` |
+| `test_093_inbound_frame_dispositions.py` | swap `_dict_path` | ✓ |
 | `test_subinterpreter.py` | **diverges** | n/a — locator-independent, but NOT as-is (see below) |
 | `oo_test_support.py` | swap `_dict_path` | ✓ — `dict_path()` delegates to `_wheeldict.resolve` |
 | `_gil_staging.py` | swap `_dict_path` | ✓ — `_gil_staging._dict_path` |

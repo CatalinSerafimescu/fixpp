@@ -988,4 +988,229 @@ TEST(WireOffsetTable, GroupSlicesKeepsWireDelimiterWhenDelimStoreAnswersZero) {
     }
 }
 
+// ── 093-inbound-frame-dispositions: the parse reserve (data-model E-3) ────────
+//
+// A new Parser::parse overload and a new OffsetTable constructor take a per-call
+// `reserve_entries`: the entries vector is reserved once, up front, instead of growing.
+// The table does not store it, so a copy re-parsed from config() (what a clone and a
+// reify do) reserves nothing, and every pre-existing overload reserves nothing.
+//
+// The instrument logs every request the parse makes of its resource. During a parse
+// (no lazy read) the only requests are the entries vector's, the overlay's and, on
+// MSVC debug, a 16-byte container proxy per pmr container. An entries request is a
+// whole number of 12-byte entries; an overlay request is 4 bytes times a power of two
+// and a proxy is 16 bytes, neither of which is a multiple of 12. So "size % 12 == 0"
+// selects exactly the entries requests.
+
+namespace reserve {
+
+struct Request {
+    std::size_t bytes;
+    std::size_t align;
+    bool served;
+};
+
+class LoggingResource final : public std::pmr::memory_resource {
+public:
+    explicit LoggingResource(std::pmr::memory_resource* upstream) noexcept : upstream_{upstream} {}
+    std::vector<Request> log;
+
+    [[nodiscard]] std::vector<std::size_t> entries_requests() const {
+        std::vector<std::size_t> out;
+        for (auto const& r : log) {
+            if (r.bytes % sizeof(OffsetTable::entry) == 0U) out.push_back(r.bytes);
+        }
+        return out;
+    }
+
+private:
+    void* do_allocate(std::size_t bytes, std::size_t align) override {
+        log.push_back({.bytes = bytes, .align = align, .served = false});
+        void* p = upstream_->allocate(bytes, align);
+        log.back().served = true;
+        return p;
+    }
+    void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
+        upstream_->deallocate(p, bytes, align);
+    }
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& o) const noexcept override {
+        return this == &o;
+    }
+    std::pmr::memory_resource* upstream_;
+};
+
+// A frame of 35, 34 and `n` × "1=x": n + 5 fields with 8, 9 and 10.
+std::vector<std::byte> frame_with(std::size_t n) {
+    std::string body =
+        "35=D\x01"
+        "34=1\x01";
+    for (std::size_t i = 0; i < n; ++i) body += "1=x\x01";
+    return make_raw_frame(body);
+}
+
+constexpr std::size_t kFieldsBeyondFiller = 5;  // 8, 9, 35, 34, 10
+constexpr std::size_t kEntry = sizeof(OffsetTable::entry);
+
+}  // namespace reserve
+
+TEST(WireOffsetTableReserve, ParserOverloadReservesTheEntriesOnceUpFront) {
+    auto buf = reserve::frame_with(100);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    reserve::LoggingResource log{&arena};
+    std::size_t const fields = 100 + reserve::kFieldsBeyondFiller;
+    std::size_t const want = fields + 7;  // above the field count: nothing regrows
+
+    fixpp::wire::Parser<access_mode::Index> parser{};
+    auto mv = parser.parse(*fv, &log, OffsetTable::Config{}, want);
+    ASSERT_TRUE(mv.has_value());
+    EXPECT_EQ(mv->offsets().size(), fields);
+    EXPECT_EQ(log.entries_requests(), std::vector<std::size_t>{want * reserve::kEntry})
+        << "one entries allocation, of exactly the reserve";
+}
+
+TEST(WireOffsetTableReserve, OffsetTableOverloadReservesTheEntriesOnceUpFront) {
+    auto buf = reserve::frame_with(100);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    reserve::LoggingResource log{&arena};
+    std::size_t const want = 100 + reserve::kFieldsBeyondFiller;  // exactly the field count
+
+    OffsetTable t{*fv, &log, OffsetTable::Config{}, dict_hooks::none(), want};
+    ASSERT_TRUE(t.build_status().has_value());
+    EXPECT_EQ(t.size(), want);
+    EXPECT_EQ(log.entries_requests(), std::vector<std::size_t>{want * reserve::kEntry});
+}
+
+// Every pre-existing overload grows from one entry, as before 093: its first entries
+// request is a single entry, and more than one entries request follows.
+TEST(WireOffsetTableReserve, EveryExistingOverloadReservesNothing) {
+    auto buf = reserve::frame_with(100);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    auto expect_grows = [](reserve::LoggingResource const& log, const char* overload) {
+        auto const e = log.entries_requests();
+        ASSERT_GT(e.size(), 1U) << overload << ": the entries grew from a single entry";
+        EXPECT_EQ(e.front(), reserve::kEntry) << overload << ": the first entries request";
+    };
+    fixpp::wire::Parser<access_mode::Index> parser{};
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        reserve::LoggingResource log{&arena};
+        auto mv = parser.parse(*fv, &log);
+        ASSERT_TRUE(mv.has_value());
+        expect_grows(log, "Parser::parse(frame, mr)");
+    }
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        reserve::LoggingResource log{&arena};
+        auto mv = parser.parse(*fv, &log, OffsetTable::Config{});
+        ASSERT_TRUE(mv.has_value());
+        expect_grows(log, "Parser::parse(frame, mr, cfg)");
+    }
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        reserve::LoggingResource log{&arena};
+        OffsetTable t{*fv, &log};
+        ASSERT_TRUE(t.build_status().has_value());
+        expect_grows(log, "OffsetTable(frame, mr)");
+    }
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        reserve::LoggingResource log{&arena};
+        OffsetTable t{*fv, &log, dict_hooks::none()};
+        ASSERT_TRUE(t.build_status().has_value());
+        expect_grows(log, "OffsetTable(frame, mr, hooks)");
+    }
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        reserve::LoggingResource log{&arena};
+        OffsetTable t{*fv, &log, OffsetTable::Config{}};
+        ASSERT_TRUE(t.build_status().has_value());
+        expect_grows(log, "OffsetTable(frame, mr, cfg)");
+    }
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        reserve::LoggingResource log{&arena};
+        OffsetTable t{*fv, &log, OffsetTable::Config{}, dict_hooks::none()};
+        ASSERT_TRUE(t.build_status().has_value());
+        expect_grows(log, "OffsetTable(frame, mr, cfg, hooks)");
+    }
+}
+
+// The reserve is not stored: config() carries only the caps, and a copy re-parsed from
+// it (the call a clone and a reify make: src/capi/message_write.cpp and
+// src/dictionary/reify.cpp parse with `view.offsets().config()`) grows from one entry.
+TEST(WireOffsetTableReserve, TheReserveIsNotStoredSoACopyReparsedFromConfigReservesNothing) {
+    static_assert(sizeof(OffsetTable::Config) == 2 * sizeof(std::size_t),
+                  "Config holds the two caps and nothing else; a reserve field would be copied "
+                  "into every clone and reify");
+    auto buf = reserve::frame_with(100);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    OffsetTable::Config const cfg{.max_offset_entries = 1000, .max_group_entries_per_instance = 77};
+    fixpp::wire::Parser<access_mode::Index> parser{};
+
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parser.parse(*fv, &arena, cfg, 500);
+    ASSERT_TRUE(mv.has_value());
+    auto const copied = mv->offsets().config();
+    EXPECT_EQ(copied.max_offset_entries, cfg.max_offset_entries);
+    EXPECT_EQ(copied.max_group_entries_per_instance, cfg.max_group_entries_per_instance);
+
+    std::pmr::monotonic_buffer_resource copy_arena;
+    reserve::LoggingResource log{&copy_arena};
+    auto copy = parser.parse(*fv, &log, copied);
+    ASSERT_TRUE(copy.has_value());
+    auto const e = log.entries_requests();
+    ASSERT_FALSE(e.empty());
+    EXPECT_EQ(e.front(), reserve::kEntry) << "the re-parse grows from one entry";
+}
+
+// E-3: a reserve above cfg.max_offset_entries reserves at most that many entries.
+TEST(WireOffsetTableReserve, AReserveAboveTheEntryCapIsClampedToTheCap) {
+    auto buf = reserve::frame_with(10);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    reserve::LoggingResource log{&arena};
+    OffsetTable::Config const cfg{.max_offset_entries = 50};
+
+    fixpp::wire::Parser<access_mode::Index> parser{};
+    auto mv = parser.parse(*fv, &log, cfg, 100000);
+    ASSERT_TRUE(mv.has_value());
+    EXPECT_EQ(log.entries_requests(), std::vector<std::size_t>{50 * reserve::kEntry});
+}
+
+// E-3: a reserve the resource cannot serve takes build's bad_alloc catch to
+// out_of_memory; nothing escapes. The resource is a monotonic buffer over a null
+// upstream, large enough for whatever the parse draws before the reserve (nothing on
+// most lanes; MSVC debug's container proxies, drawn at construction outside build's
+// catch) and too small for the reserve. The log shows the one refused request is the
+// reserve's; on MSVC debug the view's later container proxies are still served.
+TEST(WireOffsetTableReserve, AReserveTheResourceCannotServeReportsOutOfMemory) {
+    auto buf = reserve::frame_with(10);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    constexpr std::size_t kReserve = 1000;
+    std::vector<std::byte> block(512);
+    static_assert(kReserve * reserve::kEntry > 512);
+    std::pmr::monotonic_buffer_resource bounded{block.data(), block.size(),
+                                                std::pmr::null_memory_resource()};
+    reserve::LoggingResource log{&bounded};
+
+    fixpp::wire::Parser<access_mode::Index> parser{};
+    auto mv = parser.parse(*fv, &log, OffsetTable::Config{}, kReserve);
+    ASSERT_FALSE(mv.has_value());
+    EXPECT_EQ(mv.error(), error::out_of_memory);
+    std::vector<std::size_t> refused;
+    for (auto const& r : log.log) {
+        if (!r.served) refused.push_back(r.bytes);
+    }
+    EXPECT_EQ(refused, std::vector<std::size_t>{kReserve * reserve::kEntry})
+        << "exactly one request was refused, and it is the reserve";
+}
+
 }  // namespace

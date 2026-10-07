@@ -7,8 +7,18 @@ refs:
   - include/fixpp/session/message_store.hpp
   - include/fixpp/session/file_store.hpp
   - include/fixpp/session/memory_store.hpp
+  - src/session/file_store.cpp
   - src/session/engine.cpp
-codegraph_entry: [MessageStore, MemoryStore, FileStore, Engine]
+  - src/session/session.cpp
+  - specs/093-inbound-frame-dispositions/spec.md
+  - specs/093-inbound-frame-dispositions/plan.md
+  - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
+  - spec/behaviors-and-limitations.md
+  - tests/session/test_file_store_crash_survival.cpp
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
+codegraph_entry: [MessageStore, MemoryStore, FileStore, Engine, run_reset_unit_]
 constitution: ["§XV.4"]
 ---
 
@@ -57,6 +67,64 @@ the literal reading of *"callers must drain the mutex before destroying the stor
 That ordering is load-bearing and was itself hardened by a Gate B round-1 finding: `outstanding_counter_`
 must be published **before** any loop is spawned, or a late assignment observes it null, skips the
 join, and clears the registry while a spawned loop still holds `SessionEntry&` → use-after-free.
+
+## The 141=Y reset unit's store operation (093, fixpp#524) — still awaited, now not cancellable
+
+093 added `MessageStore::reset_to`, a non-pure virtual, and the session's 141=Y reset unit runs it as
+its one store operation. The unit `co_spawn`s **only** that call on the session strand, completing
+through a token bound to an empty cancellation slot, and **awaits** it (`run_reset_unit_` in
+`src/session/session.cpp`; contract C-6's erratum, plan OD-25, OD-26). So the quiescence argument
+above still holds for it: the store call is awaited, not detached, and the role loop that awaits it is
+what `Engine::stop()` joins. What changed is that no cancellation reaches it, so `stop()`'s join
+**waits for it**. A store operation that never completes hangs `stop()`, as `close()`'s teardown
+reset already did (B&L `L-093-12`). ⚠️ **Re-derive before relying on it:** check that the `co_spawn`
+in `run_reset_unit_` is `co_await`ed with `use_awaitable`, not `detached`.
+
+`close()` also waits, when it is about to issue its teardown reset and a unit is in flight, bounded by
+`logon_timeout_ms` (plan OD-1). That wait is about ordering the two resets, not about destruction.
+
+Rejected for this unit (plan OD-14, OD-25): an in-place `reset_cancellation_state(disable)` shield,
+which `async_mutex::async_lock()` silently replaces after its first acquisition; and a store-side
+`async_mutex` mode that respects the caller's cancellation policy, which would change a core primitive
+and not reach user or default-body stores. A default-body store keeps today's reset-then-advance
+sequence and has no crash atomicity (`L-093-3`).
+
+## The FileStore reset's commit boundary (093 Gate B)
+
+`FileStore::reset()` and `reset_to()` share one body, `reset_store_to` in `src/session/file_store.cpp`.
+Its pool worker writes the fresh log under a temporary name, renames it over the live log, makes
+that durable, and reopens. A shared `rename_done` flag tells Region 3 which side of the rename a
+failure fell on. Before the rename, the store keeps its open file. After it, that file names the
+replaced log, so every write to it would vanish on restart, and the store is poisoned
+(`open_ok = false`, B&L `L-035-2`).
+
+- **The flag is published at the namespace mutation, not after the directory fsync.** It marks the
+  moment the live name changes, not the moment the change is durable, so any later failure
+  (directory open or fsync, reopen, lock) poisons. Set after the directory block, a failed
+  directory open or fsync took the pre-rename branch and kept writing to the unlinked inode
+  (fixpp#548 describes that hole).
+- **On Windows the rename has three outcomes** (`rename_outcome`, returned by
+  `posix_rename_over_open`): not renamed, renamed but `FlushFileBuffers` failed, renamed and
+  flushed. Rejected: the one-liner `return ok && flushed`. It reports a flush failure as "not
+  renamed", which sends it down the pre-rename branch: the store keeps a handle to the file the
+  POSIX-semantics rename already replaced, the same orphan-write hole.
+- **Open and reset take their wide paths from one conversion, `store_wide_path`.** Two conversions
+  can name two different files: a byte-wise widening and `std::filesystem::path` decode a byte at or
+  above 0x80 differently, and a CompID may contain one. The reset then renames onto a file the
+  store never opened and still reports success.
+
+⚠️ **Re-derive before relying on it:** read `reset_store_to` and check that `*rename_done = true`
+directly follows the successful rename on both branches, before the directory open on POSIX and
+before the flush verdict on Windows; and that `store_wide_path` is the only narrow-to-wide
+conversion in `open_log` and the reset worker.
+
+Witnesses, in `tests/session/test_file_store_crash_survival.cpp`: POSIX
+`FileStoreResetTo.Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore`,
+`Q29_ADirectoryOpenFaultAfterTheRenamePoisonsTheStore` and
+`Q29_ResetWithADirectoryFsyncFaultPoisonsTheStore`; Windows
+`Q29_AFlushFaultAfterTheRenamePoisonsTheStore`, `Q29_ANonAsciiCompIdResetsTheLogTheFactoryOpened` and
+`Q29_ANonAsciiDirectoryResetsTheLogTheFactoryOpened`; and the control
+`Q29_Control_AResetToWithNoFaultLeavesTheStoreWritable` on both.
 
 ## The case Engine::stop() does NOT cover
 

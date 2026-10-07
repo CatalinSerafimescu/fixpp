@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <asio/any_io_executor.hpp>
+#include <asio/as_tuple.hpp>
 #include <asio/async_result.hpp>  // NOLINT(misc-include-cleaner) — IWYU: async_initiate via use_awaitable
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
@@ -41,6 +42,8 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/log/level.hpp>               // 093 E-12: log::cat::session
+#include <fixpp/log/logger.hpp>              // 093 E-12: FIXPP_SLOG, the garble record
 #include <fixpp/session/admin_messages.hpp>  // 005 US1: interpret_logon / T046: build_logout
 #include <fixpp/session/config_byte_floor.hpp>  // 090-capi-refusals (fixpp#452): contains_forbidden_config_byte (D-5b/FR-013)
 #include <fixpp/session/direction.hpp>  // 005 US4: direction_t (store outbound)
@@ -57,6 +60,7 @@
 #include <fixpp/session/session_event.hpp>  // 013 T036: SessionEvent variants
 #include <fixpp/session/session_fsm.hpp>    // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/transport/transport_factory.hpp>  // cfg_.transport_factory_override deref (reconnect_fsm.hpp now fwd-decls it per [const §XV.9])
+#include <fixpp/wire/framer.hpp>             // 093 E-1: garble_summary (note_garbles_)
 #include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
 #include <fixpp/wire/tag_scan.hpp>  // fixpp#421: accumulate_tag_digit (send + replay scanners)
 #include <fixpp/wire/writer.hpp>    // 013 FR-010: replay-frame re-serialization
@@ -69,8 +73,10 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
-#include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
-#include "scan_frame_header.hpp"   // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
+#include "inbound_limit.hpp"             // 093 E-2: L, the carry and the parse buffer
+#include "msgtype_classifier.hpp"        // 019 T006: is_admin_msgtype (session-internal)
+#include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
+#include "scan_frame_header.hpp"  // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
 // only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
 // session → wire is ALLOWED per [arch §5.3] / check_layers.py.
@@ -91,6 +97,7 @@
 #include <limits>
 #include <memory>
 #include <memory_resource>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -102,6 +109,40 @@
 namespace fixpp::session {
 
 namespace {
+// The HeartBtInt a session runs when heartbeat_interval is unset (D-8).
+constexpr std::chrono::seconds kDefaultHeartBtInt{30};
+
+// 093 (data-model E-2): one block from a memory resource, max_align_t-aligned, freed
+// at scope exit unless release()d. Its allocation is noexcept: a bad_alloc leaves it
+// empty, which open() reports as its error.
+class owned_block {
+public:
+    owned_block(std::pmr::memory_resource* mr, std::size_t bytes) noexcept : mr_{mr} {
+        try {
+            data_ = static_cast<std::byte*>(mr->allocate(bytes, alignof(std::max_align_t)));
+            size_ = bytes;
+        } catch (std::bad_alloc const&) {
+            data_ = nullptr;
+        }
+    }
+    owned_block(owned_block const&) = delete;
+    owned_block& operator=(owned_block const&) = delete;
+    owned_block(owned_block&&) = delete;
+    owned_block& operator=(owned_block&&) = delete;
+    ~owned_block() {
+        if (data_ != nullptr) mr_->deallocate(data_, size_, alignof(std::max_align_t));
+    }
+    explicit operator bool() const noexcept { return data_ != nullptr; }
+    [[nodiscard]] std::span<std::byte> release() noexcept {
+        return {std::exchange(data_, nullptr), size_};
+    }
+
+private:
+    std::pmr::memory_resource* mr_;
+    std::byte* data_ = nullptr;
+    std::size_t size_ = 0;
+};
+
 // [2d §4.5] never-null resolution chain: SessionConfig::session_arena ?:
 // EngineConfig::default_session_resource ?: std::pmr::get_default_resource().
 std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig& engine,
@@ -186,6 +227,32 @@ Session::~Session() {
     if (effective_clock_) {
         effective_clock_->forget_session(this);
     }
+    // 093 (data-model E-2): the carry, its resource and its block, in reverse order of
+    // construction, then the parse buffer. Both blocks are open()'s, absent before it.
+    carry_.reset();
+    carry_resource_.reset();
+    if (!carry_block_.empty()) {
+        carry_arena_->deallocate(carry_block_.data(), carry_block_.size(),
+                                 alignof(std::max_align_t));
+    }
+    if (!inbound_parse_block_.empty()) {
+        session_arena_->deallocate(inbound_parse_block_.data(), inbound_parse_block_.size(),
+                                   alignof(std::max_align_t));
+    }
+}
+
+// 093 (contract C-3 I-2): the spill witness counts, then forwards.
+void* Session::spill_witness::do_allocate(std::size_t bytes, std::size_t alignment) {
+    spills_.fetch_add(1U, std::memory_order_relaxed);
+    return ::fixpp::detail::arena_upstream()->allocate(bytes, alignment);
+}
+
+void Session::spill_witness::do_deallocate(void* p, std::size_t bytes, std::size_t alignment) {
+    ::fixpp::detail::arena_upstream()->deallocate(p, bytes, alignment);
+}
+
+bool Session::spill_witness::do_is_equal(std::pmr::memory_resource const& other) const noexcept {
+    return this == &other;
 }
 
 std::pmr::memory_resource* Session::session_arena() const noexcept {
@@ -226,6 +293,13 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         ++fsm_visit_count_;
     }
     fsm_state_ = new_state;
+
+    // 093 (data-model E-6): the establishment deadline's disarm. Set here, before the
+    // no-application return below, so a session with no application attached stops
+    // testing the deadline once Active too.
+    if (new_state == fsm_state::Active) {
+        reached_active_ = true;
+    }
 
     // ── 019 T016: lifecycle callbacks pinned to the Active↔!Active edge ───────
     // Fired here so ALL converging paths (graceful close / terminal close /
@@ -279,6 +353,80 @@ void Session::emit_event(SessionEvent ev) noexcept {
     }
 }
 
+// ── 093-inbound-frame-dispositions — garbled-frame accounting (data-model E-4,
+// E-12) ─────────────────────────────────────────────────────────────────────
+// A summary with regions == 0 only continued a region an earlier summary opened and
+// counted, so it adds nothing, emits nothing and logs nothing.
+// The log record is the session's first production log site (plan OD-5): FIXPP_SLOG
+// with the session's trace_context, its format string registered in
+// src/log/format_registry.cpp. At most one record per max(HeartBtInt, 1 s) on
+// effective_clock_. A record names the first region of the summary that triggered it
+// (its kind) and that summary's discarded bytes, and carries the number of regions
+// counted since the previous record that no record named: every region of each
+// rate-suppressed summary, plus the triggering summary's other regions (plan OD-21).
+// So, when the logger drops no record, the sum over records of (1 + that number)
+// equals garbled_frame_count() when the last record is written. HeartBtInt is the
+// configured heartbeat_interval, or kDefaultHeartBtInt when it is unset, as
+// run_liveness_loop resolves it; a HeartBtInt of 0 is legal, and the 1 s floor still
+// bounds the rate. The logger's overflow policy decides what a full queue does; its
+// default, drop_newest, drops the record without blocking the strand, and the count
+// stays exact.
+void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
+    if (g.regions == 0U) {
+        return;
+    }
+    garbled_frames_.fetch_add(g.regions, std::memory_order_relaxed);
+    auto const bytes = static_cast<std::uint32_t>(
+        std::min<std::size_t>(g.discarded, std::numeric_limits<std::uint32_t>::max()));
+    emit_event(session_event_garbled_frame{
+        .first_kind = g.first_kind, .frames = g.regions, .discarded_bytes = bytes});
+
+    auto const now =
+        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
+    if (garble_logged_ && now < garble_log_next_) {
+        garbles_unlogged_ += g.regions;
+        return;
+    }
+    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
+    // Saturates at steady_time_point::max() when not representable.
+    garble_log_next_ = detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
+    garble_logged_ = true;
+    std::uint64_t const unnamed = garbles_unlogged_ + (g.regions - 1U);
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "inbound garbled frame disregarded: kind={} discarded_bytes={} "
+               "suppressed_since_last={}",
+               fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(g.first_kind)),
+               fixpp::log::ArgValue::from_u64(g.discarded),
+               fixpp::log::ArgValue::from_u64(unnamed));
+    garbles_unlogged_ = 0;
+}
+
+// ── 093-inbound-frame-dispositions — the establishment timeout (contract C-4;
+// data-model E-5, E-12) ─────────────────────────────────────────────────────
+// The event, then one FIXPP_SLOG record carrying T, through the logger open() resolved
+// and with the session's trace_context; its format string is registered in
+// src/log/format_registry.cpp. No rate bound: the pump closes the connection right
+// after, so it is written at most once per connection.
+void Session::note_establishment_timeout_() noexcept {
+    emit_event(session_event_establishment_timeout{});
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "session not established within logon_timeout_ms={}",
+               fixpp::log::ArgValue::from_u64(cfg_.logon_timeout_ms));
+}
+
+// ── 093-inbound-frame-dispositions — a frame over L (FR-013; data-model E-12) ──
+// One FIXPP_SLOG record carrying the failure kind and L, through the logger open()
+// resolved and with the session's trace_context; its format string is registered in
+// src/log/format_registry.cpp. No rate bound: the pump closes the session right after,
+// so it is written at most once per connection.
+void Session::note_frame_too_large_() noexcept {
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "inbound frame over the limit closed the session: kind={} limit={}",
+               fixpp::log::ArgValue::from_u64(
+                   static_cast<std::uint64_t>(fixpp::core::error::wire_frame_too_large)),
+               fixpp::log::ArgValue::from_u64(inbound_limit_));
+}
+
 // ── parse_and_dispatch_ ───────────────────────────────────────────────────────
 //
 // Shared parse-and-callback ritual for the receive callbacks (fromAdmin/fromApp) over
@@ -287,11 +435,14 @@ void Session::emit_event(SessionEvent ev) noexcept {
 // `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp`, and read
 // each call's byte provenance (received from the peer, or built by fixpp).
 //
-// Arena sizing: two named constants document the intentional difference.
-//   kAdminParseArena  = 8192: admin messages (Heartbeat/Logon/TestRequest/…) have a
-//     bounded small field-set; 8 KiB is always sufficient.
-//   kInboundParseArena = 16384: inbound/app frames may carry arbitrary payload; 16 KiB
-//     provides headroom for larger messages without heap fallback.
+// Arena sizing for the stack overload: two named constants document the intentional
+// difference.
+//   kAdminParseArena: admin messages fixpp builds (Heartbeat/Logon/TestRequest/…).
+//   kSendParseArena: the outbound application frames fixpp builds (toApp).
+// 093-inbound-frame-dispositions (data-model E-2, contract C-3) supersedes the
+// 16 KiB inbound stack arena: every late inbound site calls the inbound_parse_t
+// overload, which parses over the session's parse buffer B(L). The admin and outbound
+// sites keep their stack arenas (C-3 I-6).
 //
 // On parse failure (Framer or Parser): returns dispatch_outcome::parse_failed and
 // the callback does not run. Every late inbound site (a call over bytes received
@@ -304,8 +455,8 @@ void Session::emit_event(SessionEvent ev) noexcept {
 // [019-app-callbacks T011/T013/T014/T016; 092 data-model E-3, contract C-6]
 
 namespace {
-constexpr std::size_t kAdminParseArena = 8192;     // admin frames: bounded small
-constexpr std::size_t kInboundParseArena = 16384;  // inbound/app: larger payloads
+constexpr std::size_t kAdminParseArena = 8192;  // admin frames: bounded small
+constexpr std::size_t kSendParseArena = 16384;  // outbound app frames: larger payloads
 }  // namespace
 
 template <class CB>
@@ -313,10 +464,10 @@ template <class CB>
     std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept {
     // Stack parse arena ([const §VIII.5] — no heap).
     // arena_bytes is caller-supplied so the size choice is explicit at each site.
-    std::array<std::byte, kInboundParseArena> pa_buf_storage{};
+    std::array<std::byte, kSendParseArena> pa_buf_storage{};
     // We always allocate the max stack size but hand the requested slice to the MBR.
     // Both constants fit; static_assert guards this.
-    static_assert(kAdminParseArena <= kInboundParseArena);
+    static_assert(kAdminParseArena <= kSendParseArena);
     std::pmr::monotonic_buffer_resource pa_mr{pa_buf_storage.data(), arena_bytes,
                                               ::fixpp::detail::arena_upstream()};
     std::array<std::byte, 512> carry_store{};
@@ -338,6 +489,45 @@ template <class CB>
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{
         fixpp::wire::detail::owned_route_key{}, inbound_tv_};
     auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
+    if (!mv_r) return dispatch_outcome::parse_failed;
+
+    const SessionId sid = SessionId::from_config(cfg_);
+    callback_dispatch_scope cs{*this};
+    auto result = invoke_callback_safe([&]() { return std::forward<CB>(cb)(*mv_r, sid); });
+    (void)cs;
+    if (!result) return std::unexpected(result.error());
+    return dispatch_outcome::dispatched;
+}
+
+// 093-inbound-frame-dispositions (data-model E-2, contract C-3 I-1..I-3): the late
+// inbound sites' overload. The parse runs over a fresh monotonic_buffer_resource on the
+// session's parse buffer, upstream the spill witness, so a draw past the buffer is
+// recorded (and refused where the witness's upstream is null). The entry cap is N(L),
+// and the entries are reserved up front for the most fields the frame can hold, which
+// B(L) budgets. One buffer serves every inbound parse because none nests inside
+// another: callbacks are synchronous, and callback_dispatch_scope asserts it.
+template <class CB>
+[[nodiscard]] fixpp::core::expected_t<Session::dispatch_outcome> Session::parse_and_dispatch_(
+    std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept {
+    std::pmr::monotonic_buffer_resource pa_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
+                                              &parse_spill_witness_};
+    std::array<std::byte, 512> carry_store{};
+    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(), carry_store.size(),
+                                                 ::fixpp::detail::arena_upstream()};
+    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+    fixpp::wire::Framer pd_framer;
+    std::array<fixpp::wire::frame_view, 1> pd_out{};
+    auto feed_r = pd_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{pd_out});
+    if (!feed_r || feed_r->empty()) return dispatch_outcome::parse_failed;
+
+    assert(inbound_tv_ != nullptr);
+    // fixpp#495: the OWNED route, as in the stack overload above.
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{
+        fixpp::wire::detail::owned_route_key{}, inbound_tv_};
+    auto mv_r =
+        pd_parser.parse((*feed_r)[0], &pa_mr,
+                        fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
+                        detail::parse_capacity::reserve_for(inbound_entry_cap_, frame.size()));
     if (!mv_r) return dispatch_outcome::parse_failed;
 
     const SessionId sid = SessionId::from_config(cfg_);
@@ -705,8 +895,8 @@ static std::optional<std::uint32_t> parse_u32_opt(std::string_view sv) noexcept 
 // when false (reset-Logon path), withhold the inbound seed so the reset arm owns
 // the post-state and check_inbound(1) is in-sequence (RC-1, C2.4, INV-H5).
 // [029 tasks T011; contracts C2.4/C2.6; data-model INV-H5; research RC-1/D-6]
-asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool apply_inbound_seed,
-                                                                         bool force) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
+    bool apply_inbound_seed, bool force, std::optional<fsm_state> arm) noexcept {
     // One-shot: already hydrated this session lifetime.
     // force=true (025 refresh_on_logon) bypasses the latch to re-read on each reconnect.
     if (hydrated_ && !force) {
@@ -731,13 +921,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool ap
     auto in_r = co_await store_->next_seqnum(direction_t::inbound, false);
     if (!in_r) {
         hydrating_ = false;
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(in_r.error());
     }
     auto out_r = co_await store_->next_seqnum(direction_t::outbound, false);
     if (!out_r) {
         hydrating_ = false;
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(out_r.error());
     }
 
@@ -750,7 +940,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool ap
     auto hydrate_r = co_await seqnum_mgr_.hydrate(seed_inbound, /*next_outbound=*/*out_r);
     if (!hydrate_r) {
         hydrating_ = false;
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(hydrate_r.error());
     }
 
@@ -765,13 +955,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool ap
 // Skips when store_is_persistent_==false (INV-H4 / C3.5).
 // Failure → Disconnected (D-3 / C3.3 / SC-006).
 // [029 tasks T010; contracts C3.0/C3.3/C3.5; data-model INV-H1/H2]
-asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_() noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_(
+    std::optional<fsm_state> arm) noexcept {
     if (!store_is_persistent_) {
         co_return fixpp::core::expected_t<void>{};
     }
     auto r = co_await store_->next_seqnum(direction_t::inbound, /*increment=*/true);
     if (!r) {
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
     co_return fixpp::core::expected_t<void>{};
@@ -815,21 +1006,51 @@ void Session::close_filled_resend_gap_() noexcept {
     }
 }
 
-// 032 T009 — durable outbound advance (C3 / FR-007).
-// Mirrors persist_inbound_advance_() for the 032 initiator outbound-restore path.
-// Skips when store_is_persistent_==false (INV-H4 / C3.5).
-// Failure → Disconnected (D-3 / C3.3 / fatal-when-persistent, 030 disposition).
-// [032 tasks T009; contracts C3/FR-007; data-model INV-H1]
-asio::awaitable<fixpp::core::expected_t<void>> Session::persist_outbound_advance_() noexcept {
-    if (!store_is_persistent_) {
-        co_return fixpp::core::expected_t<void>{};
+// fixpp#518 and 093 (data-model E-13; contract C-6): see session.hpp.
+bool Session::logon_arm_superseded_(fsm_state expected) const noexcept {
+    return state_ == lifecycle::closing || engine_stop_requested_ || fsm_state_ != expected;
+}
+
+// 093 plan OD-26: see session.hpp.
+void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexcept {
+    if (arm && logon_arm_superseded_(*arm)) {
+        return;
     }
-    auto r = co_await store_->next_seqnum(direction_t::outbound, /*increment=*/true);
-    if (!r) {
-        record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(fixpp::core::error::store_io_failure);
+    record_state_transition_(fsm_state::Disconnected);
+}
+
+// 093-inbound-frame-dispositions (data-model E-10; contract C-6, its steps 3 and 4) — the
+// 141=Y reset unit's body. Each manager setter takes the seqnum mutex, which grants
+// inline on its uncontended fast path (L-518-1's condition), so nothing here suspends
+// before the store's reset_to. The first manager error stops the set and is returned;
+// the store is then not touched. Otherwise the store's one reset_to runs with
+// reset_unit_in_flight_ set, and the unit signals close() when it clears it.
+// Plan OD-25 (supersedes OD-14's in-place shield, which an async_mutex grant replaces):
+// only the reset_to is co_spawned, on this strand, completing through a token bound to
+// an empty cancellation slot. Plan OD-26 names the two parts: running reset_to on its
+// own awaitable thread is what keeps Engine::stop()'s total emission out, because a
+// child thread's slot forwards only through the arm's filter, which is terminal-only
+// once the manager set has taken its first lock; the empty slot extends that to every
+// emission kind and any parent filter. The manager set stays inline, so co_spawn's
+// launch path cannot add a suspension before the store.
+asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t next_in,
+                                                                     seqnum_t next_out) noexcept {
+    reset_unit_result r{};
+    r.manager = co_await seqnum_mgr_.reset_to_one();
+    if (r.manager) r.manager = co_await seqnum_mgr_.set_next_inbound(next_in);
+    if (r.manager) r.manager = co_await seqnum_mgr_.set_next_outbound(next_out);
+    if (!r.manager || store_ == nullptr) {
+        co_return r;
     }
-    co_return fixpp::core::expected_t<void>{};
+    reset_unit_in_flight_ = true;
+    r.store = co_await asio::co_spawn(
+        co_await asio::this_coro::executor, store_->reset_to(next_in, next_out),
+        asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
+    reset_unit_in_flight_ = false;
+    if (reset_unit_wake_) {
+        reset_unit_wake_();
+    }
+    co_return r;
 }
 
 // 015 T016(d) — initiator Logon emission, extracted from open()'s initiator arm.
@@ -1223,6 +1444,34 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         }
     }
 
+    // 093-inbound-frame-dispositions (data-model E-7): a zero establishment timeout is
+    // refused, as Engine::register_session refuses it.
+    if (cfg_.logon_timeout_ms == 0) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
+    // 093-inbound-frame-dispositions (FR-010, plan OD-2): an advertised MaxMessageSize(383)
+    // outside its range is refused, as Engine::register_session refuses it.
+    if (!advertised_max_message_size_in_range(cfg_)) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
+    // 093-inbound-frame-dispositions (data-model E-2): the session's inbound limit L.
+    // Computed from the config alone, before the first observable mutation below.
+    inbound_limit_ = inbound_limit_for(cfg_);
+
+    // 093 (data-model E-2, plan OD-13): the carry block, from framer_carry_arena (else
+    // new_delete), and the parse buffer B(L), from the session arena, each allocated
+    // once here, before the first observable mutation below. A bad_alloc is an open()
+    // error. Each block frees itself unless the commit before `state_ = open` takes it.
+    std::pmr::memory_resource* const carry_arena =
+        cfg_.framer_carry_arena ? cfg_.framer_carry_arena : std::pmr::new_delete_resource();
+    owned_block carry_block{carry_arena, detail::inbound_carry_block_bytes(inbound_limit_)};
+    owned_block parse_block{session_arena_, detail::parse_capacity::buffer_bytes(inbound_limit_)};
+    if (!carry_block || !parse_block) {
+        co_return std::unexpected(error::out_of_memory);
+    }
+
     // ── Executor binding — the single executor_not_serialised enforcement
     // point (slot 48 / FR-009 / I-06): make_session_executor wraps
     // make_strand under per_session_strand, carries the bare attested
@@ -1261,6 +1510,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // validate_engine_config() at Engine::open — independent of per-session
     // overrides; Session::open only resolves.
     effective_clock_ = cfg_.clock_override ? cfg_.clock_override : engine_.clock;
+
+    // 093 (data-model E-12): the logger, resolved once here; may be null.
+    logger_ = cfg_.logger_override ? cfg_.logger_override : engine_.logger;
 
     // (3) T045: populate the session_local<trace_context> slot from
     // SessionConfig::initial_trace_context (FR-014). Stored in-domain at
@@ -1347,6 +1599,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // In practice this branch is unreachable in production (open() would
         // have returned invalid_session_config above).
     }
+
+    // 093 (data-model E-2): commit the blocks allocated above. Nothing below can fail:
+    // the monotonic resource covers exactly the carry block, and the carry's noexcept
+    // constructor reserves L plus one read, which the block serves (its container
+    // proxy, where the STL draws one, is the block's kContainerSlack).
+    carry_arena_ = carry_arena;
+    carry_block_ = carry_block.release();
+    carry_resource_.emplace(carry_block_.data(), carry_block_.size(), &parse_spill_witness_);
+    carry_.emplace(std::size_t{inbound_limit_} + detail::kReadPumpReadSize, &*carry_resource_);
+    inbound_parse_block_ = parse_block.release();
+    inbound_parse_buf_ = inbound_parse_block_;
+    inbound_entry_cap_ = detail::parse_capacity::entry_cap_for(inbound_limit_);
 
     state_ = lifecycle::open;
 
@@ -1513,11 +1777,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     if (state_ == lifecycle::never_opened || state_ == lifecycle::closed_drained) {
         co_return std::unexpected(error::session_already_closed);
     }
-    // already-closing (in-flight) → the SAME in-flight result, NO error, NO
-    // side effects: await the first call's shared slot, then mirror it. (The
-    // 2d-owned property the seam asserts; the scripted double drives the
-    // interleave deterministically — [2d §6.5]'s "Idempotency" bullet.)
+    // already-closing (in-flight) → the SAME in-flight result, NO error: await the
+    // first call's shared slot, then mirror it.
+    // OD-29 (093 — terminal close escalates a graceful one), narrowing [2d §4.7] and
+    // [2d §6.5]'s "Idempotency" bullets: the join has no side effects unless a
+    // terminal close arrives while a graceful one is in flight. Then it ends the
+    // graceful close's grace wait, or keeps its phase 1 from starting, so the
+    // transport closes now; both callers still get the in-flight result.
     if (state_ == lifecycle::closing) {
+        if (mode == close_mode::terminal) {
+            close_escalated_ = true;
+            if (close_grace_wake_) close_grace_wake_();
+        }
         auto shared = close_result_;
         while (!shared || !shared->has_value()) {
             co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
@@ -1576,15 +1847,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         // [feedback_asio_cospawn_total_cancellation_default]: we use the root
         // slot for the child; the run_logout_phase1 coroutine resets to
         // enable_total_cancellation internally.
-        if (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived) {
+        // OD-29: a terminal close that arrived during the flush hooks above has set
+        // close_escalated_, and phase 1 does not start.
+        if (!close_escalated_ &&
+            (fsm_state_ == fsm_state::Active || fsm_state_ == fsm_state::LogonReceived)) {
             using namespace asio::experimental::awaitable_operators;
 
             auto ex = co_await asio::this_coro::executor;
             asio::steady_timer close_grace{ex};
             close_grace.expires_after(std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms});
 
-            auto phase1_or_timeout =
-                co_await (run_logout_phase1() || close_grace.async_wait(asio::use_awaitable));
+            // OD-29: an escalating terminal close cancels close_grace. The wait completes
+            // through as_tuple, so a cancel counts as the timer's completion and takes the
+            // force-close arm below; through use_awaitable it would throw, which `||`
+            // counts as a failure, and the join would keep waiting on phase 1.
+            close_grace_wake_ = [&close_grace] { close_grace.cancel(); };
+            auto phase1_or_timeout = co_await (
+                run_logout_phase1() || close_grace.async_wait(asio::as_tuple(asio::use_awaitable)));
+            close_grace_wake_ = nullptr;
             if (phase1_or_timeout.index() == 0) {
                 auto phase1_r = std::get<0>(std::move(phase1_or_timeout));
                 (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)
@@ -1693,6 +1973,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     if (!teardown_reset_done_ &&
         ((logout_seen_ && cfg_.reset_on_logout) || cfg_.reset_on_disconnect)) {
         teardown_reset_done_ = true;
+        // 093 (contract C-6 "close()"; data-model E-10; plan OD-1): a 141=Y reset unit's
+        // store operation is in flight, so wait for it, or this reset could land before
+        // the unit's and be overwritten. Event-driven: the unit's completion signal
+        // raced against await_deadline on effective_clock_, which re-arms on a
+        // clock-wide cancel_sleeps() sweep, bounded by logon_timeout_ms. On expiry,
+        // record it and proceed.
+        if (reset_unit_in_flight_ && effective_clock_) {
+            using namespace asio::experimental::awaitable_operators;
+            asio::steady_timer unit_done{co_await asio::this_coro::executor,
+                                         asio::steady_timer::time_point::max()};
+            reset_unit_wake_ = [&unit_done] { unit_done.cancel(); };
+            // Saturates at steady_time_point::max() when not representable.
+            auto const bound = detail::deadline_after(
+                effective_clock_->steady_now(), std::chrono::milliseconds{cfg_.logon_timeout_ms});
+            auto const which =
+                co_await (unit_done.async_wait(asio::as_tuple(asio::use_awaitable)) ||
+                          detail::await_deadline(*effective_clock_, bound));
+            reset_unit_wake_ = nullptr;
+            if (which.index() == 1) {
+                emit_event(session_event_close_reset_wait_expired{});
+            }
+        }
         auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::logged);
         (void)rst_r;  // I-07 logged-then-proceed: store failure does not abort close.
     }
@@ -2102,7 +2404,7 @@ public:
 // at session.cpp (SendingTime-accuracy path). Defined after the file-local
 // stamp_sending_time helper so it is in scope. [FR-002; data-model D-F]
 asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout_(
-    std::string_view reason_text) noexcept {
+    std::string_view reason_text, fsm_state arm) noexcept {
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     // gate-b/r2 FQ-5: guard the clock deref — a clock-less direct-Session posture
@@ -2125,10 +2427,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
     }
-    record_state_transition_(fsm_state::Disconnected);
+    // 093 plan OD-26: the Logout's store and write are suspensions.
+    disconnect_unless_superseded_(arm);
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -2204,7 +2507,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // [041-validation-gate-wiring T010; data-model E-4; RC-C; FR-004]
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id,
-    std::string_view text) noexcept {
+    std::string_view text, std::optional<fsm_state> arm) noexcept {
     std::array<std::byte, 512> rj_buf{};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
@@ -2225,9 +2528,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
-        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+        auto emit_r = co_await store_then_emit(rj_seq, *rj_r, arm);
         if (!emit_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            disconnect_unless_superseded_(arm);
             co_return std::unexpected(emit_r.error());
         }
     }
@@ -2238,8 +2541,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //    validate_inbound_ (synchronous, no sub-coroutine frame)
 //
 // Extracted from the three verbatim validate-gate blocks (the NotConnected,
-// Active and LogonSent arms). Each block built the same kInboundParseArena
-// stack arena, re-framed, parsed, ran validator_->validate, and emitted a Reject.
+// Active and LogonSent arms). Each block built the same stack parse arena, re-framed,
+// parsed, ran validator_->validate, and emitted a Reject. 093 (data-model E-2) moved the
+// parse onto the session's parse buffer B(L), the one the dispatch sites use.
 // Now collapsed here; emit_session_reject_ is inlined at each call site so the
 // PASS path (returns validate_outcome::pass) is coroutine-frame-free and alloc-free.
 //
@@ -2260,9 +2564,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 Session::InboundValidation Session::validate_inbound_(
     std::span<const std::byte> frame,
     fixpp::session::detail::FrameHeader const& /*hdr*/) const noexcept {
-    std::array<std::byte, kInboundParseArena> vg_buf{};
-    std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
-                                              ::fixpp::detail::arena_upstream()};
+    // 093 (data-model E-2): over the session's parse buffer B(L), upstream the spill
+    // witness, as the inbound dispatch sites parse.
+    std::pmr::monotonic_buffer_resource vg_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
+                                              &parse_spill_witness_};
     std::array<std::byte, 512> vg_carry_store{};
     std::pmr::monotonic_buffer_resource vg_carry_mr{vg_carry_store.data(), vg_carry_store.size(),
                                                     ::fixpp::detail::arena_upstream()};
@@ -2286,7 +2591,10 @@ Session::InboundValidation Session::validate_inbound_(
     std::array<std::byte, 512> vg_scratch_buf{};
     std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
                                                       ::fixpp::detail::arena_upstream()};
-    auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
+    auto vg_mv_r =
+        vg_parser.parse((*vg_feed)[0], &vg_mr,
+                        fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
+                        detail::parse_capacity::reserve_for(inbound_entry_cap_, frame.size()));
     if (!vg_mv_r) {
         return {.outcome = validate_outcome::parse_failed};
     }
@@ -2330,15 +2638,32 @@ Session::InboundValidation Session::validate_inbound_(
     return {};
 }
 
+namespace {
+
+// 093-inbound-frame-dispositions (contract C-2 step 1): the summary for one frame
+// whose third field is not MsgType(35): one region of kind wire_header_out_of_order
+// covering the whole frame.
+fixpp::wire::garble_summary header_out_of_order_garble(std::span<const std::byte> frame) noexcept {
+    return {.regions = 1U,
+            .first_kind = fixpp::core::error::wire_header_out_of_order,
+            .discarded = frame.size()};
+}
+
+}  // namespace
+
 // ── 092-garbled-frame-reject (fixpp#507): dispose_unparseable_ ──────────────
 //
 // Contract C-2, rows evaluated top to bottom, for a frame whose header scan
 // recorded a fault. Reads only the fault record and the positional header
 // identification (C-3 I-1).
+// 093-inbound-frame-dispositions (contract C-2 step 1) supersedes 092's D-8: every
+// arm that scans disregards a frame whose third field is not 35, faulty or not,
+// before calling this disposer, so D-8, and D-1/D-2 for that shape, are unreachable
+// here and this disposer only sees a faulty frame whose field 3 is 35.
 //   D-1/D-2 (NotConnected, LogonSent): the Logon refusal, as when interpret_logon
 //     refuses: Disconnected, nothing sent.
 //   D-9 (LogoutSent): disregarded; not the Logout reply, so the logout timeout runs.
-//   D-8 (field 3 is not 35) and D-7 (34 not read): disregarded.
+//   D-7 (34 not read): disregarded.
 //   D-3 (a Logon): silent Disconnected; no Reject, no Logout.
 //   D-4 (a SequenceReset): Reject, no advance; NewSeqNo(36) never read.
 //   D-5/D-6 (any other type): consume_rejected_seqnum_ (fixpp#423's rule: it advances
@@ -2367,9 +2692,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
             co_return fixpp::core::expected_t<void>{};
     }
 
-    if (!hdr.msg_type_is_third) {  // D-8
-        co_return fixpp::core::expected_t<void>{};
-    }
     const seqnum_t ref_seq = parse_seqnum(hdr.fault_ref_seq_num);
     if (ref_seq == 0) {  // D-7: no 34 read before the fault
         co_return fixpp::core::expected_t<void>{};
@@ -2439,41 +2761,34 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // NOLINTNEXTLINE(readability-function-size,hicpp-function-size)
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     std::span<const std::byte> frame) noexcept {
-    // fixpp#518: true when a Logon arm must stop after a resume, because the session
-    // left the state the arm expects while the arm was suspended. The writer that
-    // matters is close(), which an application can post from a callback the arm fires
-    // (Engine::lookup() already returns the session) or from another thread, and which
-    // owns the teardown once it begins. The arm then returns success, as in the
-    // Disconnected row. `closing` is the signal because close() sets it before it can
-    // yield the strand, while a graceful close() leaves the FSM in the arm's state until
-    // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
-    // Disconnected before it gets there.
-    // `never_opened` is not a close.
-    static constexpr auto logon_arm_superseded = [](Session const& s, fsm_state expected) noexcept {
-        return s.state_ == lifecycle::closing || s.fsm_state_ != expected;
-    };
-    // 070-fix44-closeout S-030: negotiated MaxMessageSize(383) enforcement. Once
-    // established (Active), an inbound frame exceeding the size WE advertised is a
-    // negotiated-contract violation → disconnect (distinct from the absolute
-    // max_frame_bytes framer backstop, which stays in force and rejects larger
-    // frames upstream). Fires only post-establishment: the Logon that establishes
-    // the session arrives pre-Active, so it is never size-checked here (the peer
-    // has not yet seen our 383). Because the framer backstop guarantees
-    // frame.size() ≤ max_frame_bytes for every frame that reaches us,
-    // frame.size() > N is equivalent to frame.size() > min(N, max_frame_bytes) for
-    // all reachable frames. Opt-in: advertised_max unset ⇒ inert (FR-012).
-    // [FR-004/FR-005/FR-006; data-model D-F; contract C-4b]
-    if (fsm_state_ == fsm_state::Active && cfg_.advertised_max_message_size.has_value() &&
-        frame.size() > *cfg_.advertised_max_message_size) {
-        record_state_transition_(fsm_state::Disconnected);
-        co_return fixpp::core::expected_t<void>{};
-    }
+    // 093-inbound-frame-dispositions (FR-013, contract C-2) supersedes 070's S-030
+    // check here, which disconnected an Active session whose inbound frame exceeded
+    // the advertised MaxMessageSize(383) and exempted every frame before Active. The
+    // Framer now refuses a frame over L (the advertised 383 when set) in every state,
+    // below this function, and the read pump closes the session terminally.
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
             // 092 (data-model E-2, research R-3): the arm's one header scan, hoisted
             // here; later code in this arm reads `hdr` rather than scanning again.
             // A frame the scan could not read is refused (C-2 D-1).
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
+            // 093 (contract C-2 step 2; spec FR-030, FR-041; fixpp#523): once close() has
+            // begun, or Engine::stop()'s step 1 has set the engine-stop flag on this strand
+            // (data-model E-13), this arm acts on nothing more. The check is the arm's own
+            // predicate, so a frame delivered after stop's step 1 meets it before any
+            // effect. Garbled-frame accounting above is a transport observation, not an
+            // arm effect, so it still runs (plan OD-7).
+            if (logon_arm_superseded_(fsm_state::NotConnected)) {
+                co_return fixpp::core::expected_t<void>{};
+            }
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state::NotConnected);
             }
@@ -2489,8 +2804,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (092 contract C-2 D-1).
             // Seqnum is NOT advanced on validate failure (validate fires before
             // check_inbound — C-3 invariant). [041 T014; data-model E-4; SC-005]
-            // Arena: kInboundParseArena (16384) matches the dispatch arena so the gate
-            // never under-parses relative to dispatch. [simplify-triage FIX-1/FIX-2]
+            // Buffer: the gate parses over the session's parse buffer B(L), as dispatch
+            // does, so it never under-parses relative to dispatch (093, data-model E-2).
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     auto const v = validate_inbound_(frame, hdr);
@@ -2499,9 +2814,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return co_await close_on_late_parse_failure_();
                     }
                     if (v.outcome == validate_outcome::reject) {
-                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
-                                                                hdr.msg_type, v.reject.reason,
-                                                                v.reject.ref_tag_id);
+                        co_return co_await emit_session_reject_(
+                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
+                            v.reject.ref_tag_id, /*text=*/{}, fsm_state::NotConnected);
                     }
                 }
             }
@@ -2602,14 +2917,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.reset_seqnum_policy_field !=
                             fixpp::session::reset_seqnum_policy::bilateral_strict;
                     auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound,
-                                                         /*force=*/refresh_active);
+                                                         /*force=*/refresh_active,
+                                                         fsm_state::NotConnected);
                     if (!h_r) {
-                        // ensure_hydrated_ already transitioned to Disconnected (C2.3).
+                        // ensure_hydrated_ already transitioned to Disconnected (C2.3),
+                        // unless the arm was superseded during the read (093 OD-26).
                         co_return std::unexpected(h_r.error());
                     }
                 }
                 // fixpp#518: a close() may have run while hydrate yielded.
-                if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
+                if (logon_arm_superseded_(fsm_state::NotConnected)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
 
@@ -2627,7 +2944,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (cfg_.posture.has_value() &&
                     should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
                     co_return co_await refuse_logon_with_logout_(
-                        "TestMessageIndicator posture mismatch");
+                        "TestMessageIndicator posture mismatch", fsm_state::NotConnected);
                 }
 
                 // ── 038 T006: US1 — AcceptorLogon SendingTime(52) MaxLatency guard ──
@@ -2690,11 +3007,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
                             }
-                            auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                            auto emit_r =
+                                co_await store_then_emit(rj_seq, *rj_r, fsm_state::NotConnected);
                             (void)emit_r;  // I-07: store-side errors logged-then-proceed
                         }
-                        // Fail-closed: Disconnected whether rj_r succeeded or not.
-                        record_state_transition_(fsm_state::Disconnected);
+                        // Fail-closed: Disconnected whether rj_r succeeded or not
+                        // (093 plan OD-26: unless the arm was superseded meanwhile).
+                        disconnect_unless_superseded_(fsm_state::NotConnected);
                         co_return fixpp::core::expected_t<void>{};
                     }
                 }
@@ -2703,12 +3022,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Knob-driven → fatal: a store failure blocks Active (C2.6).
                     auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
                     if (!rst_r) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        disconnect_unless_superseded_(fsm_state::NotConnected);  // 093 OD-26
                         co_return std::unexpected(rst_r.error());
                     }
                 }
                 // fixpp#518: a close() may have run while the reset_on_logon reset yielded.
-                if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
+                if (logon_arm_superseded_(fsm_state::NotConnected)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
 
@@ -2911,10 +3230,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(fixpp::core::error::app_callback_threw);
                         }
-                        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                        auto emit_r =
+                            co_await store_then_emit(rj_seq, *rj_r, fsm_state::NotConnected);
                         (void)emit_r;  // I-07: store-side errors logged-then-proceed
                     }
-                    record_state_transition_(fsm_state::Disconnected);
+                    disconnect_unless_superseded_(fsm_state::NotConnected);  // 093 OD-26
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -2975,49 +3295,40 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                             : 30;  // D-8 default 30 s
 
                 if (peer_sent_reset && !cfg_.reset_on_logon) {
-                    // 030 T010 (FR-010): fatal-when-persistent so the FR-005 persist-to-2
-                    // below only runs after a known-good reset. A swallowed (logged) store
-                    // reset failure on a persistent store would let persist-to-2 advance a
-                    // stale store → store > manager (029 over-persist loss). Non-persistent
-                    // stays logged (the reset cannot meaningfully fail). Amends 024 I-07.
-                    auto rst_r = co_await reset_seqnums_to_one_durable(
-                        store_is_persistent_ ? reset_disposition::fatal
-                                             : reset_disposition::logged);
-                    if (!rst_r) {
-                        record_state_transition_(fsm_state::Disconnected);
-                        co_return std::unexpected(rst_r.error());
+                    // 093 (contract C-6; spec FR-041; fixpp#524) supersedes 030 T010/T011's
+                    // reset, then restore, then persist, and fixpp#518's in-unit
+                    // teardown_reset_done_ stop: the 141=Y reset unit. Step 1, the targets
+                    // (research R-6): next-in 2 when the reset Logon was consumed (a
+                    // surviving net-advance, 030 T011), else 1; next-out 1, because the
+                    // reply has not been sent. They go to every store, volatile ones
+                    // included (plan OD-9).
+                    const seqnum_t unit_in = logon_inbound_advanced ? seqnum_min + 1 : seqnum_min;
+                    const seqnum_t unit_out = seqnum_min;
+                    // Steps 3 and 4; plan OD-25 replaces step 2's shield with the store
+                    // operation's empty cancellation slot (run_reset_unit_). No return
+                    // path, so the restore below always runs.
+                    auto const unit = co_await run_reset_unit_(unit_in, unit_out);
+                    // Step 5: the restore. A cancellation recorded on this thread while
+                    // the unit ran is dropped: the state is fresh.
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation{});
+                    // Step 6: the existing dispositions. A manager error is fatal; a store
+                    // error is fatal when the store is persistent (030 T010, FR-010) and
+                    // logged otherwise (024 I-07).
+                    // Plan OD-26: each write follows the unit's store operation.
+                    if (!unit.manager) {
+                        disconnect_unless_superseded_(fsm_state::LogonReceived);
+                        co_return std::unexpected(unit.manager.error());
                     }
-                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
-                    // unit stops here only once close()'s teardown reset has been issued, so
-                    // the restore below cannot land after it. Otherwise the unit completes,
-                    // keeping the consumed Logon's advance, and the check after it stops
-                    // the arm.
-                    if (teardown_reset_done_) {
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-                    // 030 T011 (FR-001/005/007): the consumed seq-1 reset Logon is a
-                    // surviving net-advance (check_inbound advanced 1->2 before this reset
-                    // rewound it). Restore next-expected-inbound to seqnum_min+1 (=2) in the
-                    // manager AND write it through to the store → store == manager == 2
-                    // (INV-H1 holds with equality; QuickFIX reset-then-increment parity).
-                    // Outbound reply stays seq 1 (independent counter). Guarded on the reset
-                    // Logon actually consumed (logon_inbound_advanced). manager-first,
-                    // store-second so a persist failure yields store < manager (safe under-
-                    // persist), never store > manager.
-                    if (logon_inbound_advanced) {
-                        auto si_r = co_await seqnum_mgr_.set_next_inbound(seqnum_min + 1);
-                        if (!si_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(si_r.error());
-                        }
-                        // store 1->2 (no-op if non-persistent, INV-H4).
-                        auto p_r = co_await persist_inbound_advance_();
-                        if (!p_r) co_return std::unexpected(p_r.error());
+                    if (!unit.store && store_is_persistent_) {
+                        disconnect_unless_superseded_(fsm_state::LogonReceived);
+                        co_return std::unexpected(unit.store.error());
                     }
                 }
-                // fixpp#518: a close() may have run while the inbound restore or persist
-                // yielded.
-                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                // Step 7 (093 contract C-6) and fixpp#518: a close() may have begun, or
+                // Engine::stop()'s step 1 reached this strand, while the unit's store
+                // operation yielded.
+                if (logon_arm_superseded_(fsm_state::LogonReceived)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
 
@@ -3083,14 +3394,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
                 }
-                auto emit_r = co_await store_then_emit(reply_seq, *reply_logon);
+                // 093 plan OD-25: the store await is a suspension; store_then_emit
+                // tests the predicate after it, before the transmit.
+                auto emit_r =
+                    co_await store_then_emit(reply_seq, *reply_logon, fsm_state::LogonReceived);
                 if (!emit_r) {
-                    // Emit failed (transport error). RC#B: Disconnected, not Active.
-                    record_state_transition_(fsm_state::Disconnected);
+                    // Emit failed (transport error). RC#B: Disconnected, not Active
+                    // (093 plan OD-26: unless the arm was superseded during the emit).
+                    disconnect_unless_superseded_(fsm_state::LogonReceived);
                     co_return std::unexpected(emit_r.error());
                 }
                 // fixpp#518: a close() may have run during the reply write.
-                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                if (logon_arm_superseded_(fsm_state::LogonReceived)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -3101,14 +3416,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (cfg_.enable_next_expected_msg_seq_num && peer_789_present) {
                 // 031: compare against the PRE-reply outbound (n_pre_outbound), NOT the live
                 // post-reply peek_outbound() — the reply Logon already consumed a seq here.
-                auto h789 = co_await honor_peer_next_expected_(peer_789_raw, peer_789_present,
-                                                               n_pre_outbound);
+                auto h789 = co_await honor_peer_next_expected_(
+                    peer_789_raw, peer_789_present, n_pre_outbound, fsm_state::LogonReceived);
                 if (!h789) co_return std::unexpected(h789.error());
-                if (!*h789) co_return fixpp::core::expected_t<void>{};
+                if (*h789 != logon_789_outcome::in_sync_continue) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
             }
 
             // fixpp#518: a close() may have run during the 789 honour's writes.
-            if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+            if (logon_arm_superseded_(fsm_state::LogonReceived)) {
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -3138,13 +3455,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   All three false → normal in-seq Logon: persist fires → store==manager. ✓
             // [029 INV-H1; triage root-cause #1/#2; contracts C3.1; data-model §Persist matrix]
             if (logon_inbound_advanced && !peer_sent_reset && !cfg_.reset_on_logon) {
-                auto p_r = co_await persist_inbound_advance_();
+                auto p_r = co_await persist_inbound_advance_(fsm_state::Active);  // 093 OD-26
                 if (!p_r) co_return std::unexpected(p_r.error());
             }
 
             // fixpp#518: a close() may have run while the persist yielded, including one
             // posted from onLogon.
-            if (logon_arm_superseded(*this, fsm_state::Active)) {
+            if (logon_arm_superseded_(fsm_state::Active)) {
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -3169,11 +3486,31 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (5) message-type-for-state
 
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
             // 092 (contract C-1 step 3): a frame the scan could not read goes to C-2
-            // rows D-8 … D-6 and nothing below runs. The MaxMessageSize(383) guard
+            // rows D-7 … D-6 and nothing below runs. The MaxMessageSize(383) guard
             // above the state switch has already run (C-1 step 1b).
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state_);
+            }
+
+            // 093 (contract C-2 step 4, C-5; spec FR-020): the one per-frame inbound
+            // liveness writer. Every frame past the two checks above is neither garbled
+            // nor faulty and proves the peer is alive, so it refreshes before the validate
+            // gate and every early return below. It supersedes the Active-only writer
+            // that sat at the end of this arm. A refresh in LogonReceived is harmless: the
+            // liveness loop runs only in Active, and both roles seed the value on
+            // entering it. The null check matches open()'s seed: a session may run
+            // without a clock.
+            if (effective_clock_) {
+                last_inbound_steady_ = effective_clock_->steady_now();
             }
 
             // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
@@ -3186,7 +3523,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // A frame the scan cannot read never reaches this gate.
             // No-reject-loop: 35=3 and 35=5 exempt (FR-004), for a well-formed frame
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
-            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
+            // Buffer: the session's parse buffer B(L), as dispatch (093).
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     auto const v = validate_inbound_(frame, hdr);
@@ -3336,9 +3673,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // session Reject(35=3) per FR-005/D4.
                 // [019-app-callbacks T016; FR-004; research D3/D4]
                 if (engine_.application != nullptr) {
-                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     auto cb_r =
-                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     // 092 contract C-6: a late parse failure closes the session.
@@ -3686,7 +4023,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // at the 019 T011 in-sequence fromApp dispatch. No seqnum advance
                             // (INV-1).
                             auto cb_r = parse_and_dispatch_(
-                                frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                                     return engine_.application->fromApp(mv, sid);
                                 });
                             // 092 contract C-6: a late parse failure closes the session.
@@ -3718,7 +4055,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (engine_.application != nullptr) {
                             const bool admin = detail::is_admin_msgtype(hdr.msg_type);
                             auto cb_r = parse_and_dispatch_(
-                                frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                                     return admin ? engine_.application->fromAdmin(mv, sid)
                                                  : engine_.application->fromApp(mv, sid);
                                 });
@@ -3760,7 +4097,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!cfg_.validate_sequence_numbers) {
                     if (engine_.application != nullptr) {
                         auto cb_r = parse_and_dispatch_(
-                            frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                            frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                                 return engine_.application->fromAdmin(mv, sid);
                             });
                         // 092 contract C-6: a late parse failure closes the session.
@@ -3856,12 +4193,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // A fromAdmin reject here emits session Reject(35=3) per FR-005/D4
                 // but the session still disconnects (Logout has been confirmed).
                 if (engine_.application != nullptr) {
-                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning, so onLogout in record_state_transition_ below
                     // can acquire its own scope.
                     auto cb_r =
-                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     // 092 contract C-6: a late parse failure closes the session.
@@ -3943,15 +4280,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // T041 (US3): in the Active state, update liveness state and handle
-            // liveness-specific message types (Heartbeat / TestRequest).
+            // T041 (US3): in the Active state, handle liveness-specific message types
+            // (Heartbeat / TestRequest). Inbound liveness was refreshed at the top of
+            // this arm (093).
             if (fsm_state_ == fsm_state::Active) {
-                // Update last_inbound_steady_ — used by run_liveness_loop to
-                // detect inbound silence windows.
-                if (effective_clock_) {
-                    last_inbound_steady_ = effective_clock_->steady_now();
-                }
-
                 // ── 019 T011: fromAdmin dispatch for admin-typed messages ────
                 // Called here (top of Active-only handling) for ALL admin MsgTypes
                 // that reach this point after FSM + seqnum validation.
@@ -3961,12 +4293,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // Reject are dispatched here.
                 // [research D3/D4; FR-004; INV-6]
                 if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
-                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning, so onLogout in record_state_transition_ below
                     // can acquire its own scope.
                     auto cb_r =
-                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     // 092 contract C-6: a late parse failure closes the session.
@@ -4166,13 +4498,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // lets app messages fall through only if Application is registered).
                 // Admin messages are dispatched via fromAdmin at the top of the
                 // Active block and return early; they never reach here.
-                // FR-003; research D3/D4/D8; [const §VIII.5] (stack parse arena).
+                // FR-003; research D3/D4/D8; [const §VIII.5] (no heap: the parse buffer
+                // open() allocated, 093).
                 if (engine_.application != nullptr) {
-                    // kInboundParseArena: app frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
                     auto cb_r = parse_and_dispatch_(
-                        frame, kInboundParseArena,
+                        frame, inbound_parse_buffer,
                         [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
                     // 092 contract C-6: a late parse failure closes the session.
                     if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
@@ -4211,7 +4544,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             bool suppressed = false;
                             if (engine_.application != nullptr) {
                                 auto cb_r = parse_and_dispatch_(
-                                    *bmr_r, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                    *bmr_r, kSendParseArena, [&](auto& mv, auto& sid) {
                                         return engine_.application->toApp(mv, sid);
                                     });
                                 if (!cb_r) {
@@ -4262,6 +4595,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   all other inbound → (drained) — silently accepted, no FSM change
             //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
             // 092 (contract C-2 D-9): a frame the scan could not read is disregarded,
             // even one carrying 35=5, so it is never taken as the Logout reply.
             if (hdr.fault != fixpp::wire::field_fault::none) {
@@ -4300,6 +4641,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // The hdr is reused for the SendingTime/seqnum guards below.
             // [041-validation-gate-wiring T014; data-model guard-precedence C-2]
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
+            // 093 (contract C-2 step 2; spec FR-030, FR-041; fixpp#523): once close() has
+            // begun, or Engine::stop()'s step 1 has set the engine-stop flag on this strand
+            // (data-model E-13), this arm acts on nothing more. The check is the arm's own
+            // predicate, so a frame delivered after stop's step 1 meets it before any
+            // effect. Garbled-frame accounting above is a transport observation, not an
+            // arm effect, so it still runs (plan OD-7).
+            if (logon_arm_superseded_(fsm_state::LogonSent)) {
+                co_return fixpp::core::expected_t<void>{};
+            }
             // 092 (contract C-2 D-2): a reply the scan could not read is refused.
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state::LogonSent);
@@ -4314,7 +4672,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // superseded by 092 contract C-2 (fixpp#507; research R-13; the owner
             // ruling of 2026-09-27 revising row 4). claim-ok: the date names the ruling
             // C-2 refuses such a frame above (D-2).
-            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
+            // Buffer: the session's parse buffer B(L), as dispatch (093).
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
@@ -4324,9 +4682,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return co_await close_on_late_parse_failure_();
                     }
                     if (v.outcome == validate_outcome::reject) {
-                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
-                                                                hdr.msg_type, v.reject.reason,
-                                                                v.reject.ref_tag_id);
+                        co_return co_await emit_session_reject_(
+                            parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason,
+                            v.reject.ref_tag_id, /*text=*/{}, fsm_state::LogonSent);
                     }
                 }
             }
@@ -4350,7 +4708,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (cfg_.posture.has_value() &&
                 should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
                 co_return co_await refuse_logon_with_logout_(
-                    "TestMessageIndicator posture mismatch");
+                    "TestMessageIndicator posture mismatch", fsm_state::LogonSent);
             }
             // 070-fix44-closeout S-030 (FR-007): capture the peer's advertised
             // MaxMessageSize(383) from its inbound Logon-ack (observability only).
@@ -4406,10 +4764,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(fixpp::core::error::app_callback_threw);
                         }
-                        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                        auto emit_r =
+                            co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent);
                         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                     }
-                    record_state_transition_(fsm_state::Disconnected);
+                    disconnect_unless_superseded_(fsm_state::LogonSent);  // 093 OD-26
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -4476,77 +4835,44 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // reset_before_send := (n_pre_outbound == seqnum_min+1) means fixpp's own
                     // Logon consumed the first post-reset seq (seq=1). [032 contract C1]
                     const seqnum_t n_pre_outbound = seqnum_mgr_.peek_outbound();
-                    // RC#C-1 (gate-b/r2): reset live counters + store before event.
-                    // FR-017:150: mutual reset → both sides advance to 1.
-                    // FR-018: event fires AFTER post-reset state is consistent.
-                    // [[feedback_half_restructure_symmetric_api]]: symmetric to acceptor arm.
-                    // 030 T015 (FR-010): consolidate the hand-rolled reset_to_one() + swallowed
-                    // store reset onto the shared reset_seqnums_to_one_durable() helper with the
-                    // fatal-when-persistent disposition (symmetric to the acceptor arm) so the
-                    // FR-005 persist-to-2 below only runs after a known-good reset. Amends 024
-                    // I-07 for the persistent received-141 sub-case.
-                    auto rst_r = co_await reset_seqnums_to_one_durable(
-                        store_is_persistent_ ? reset_disposition::fatal
-                                             : reset_disposition::logged);
-                    if (!rst_r) {
-                        record_state_transition_(fsm_state::Disconnected);
-                        co_return std::unexpected(rst_r.error());
+                    // 093 (contract C-6; spec FR-041; fixpp#524) supersedes RC#C-1's and
+                    // 030 T015/T016's reset, then inbound restore, then 032 T010(c)'s
+                    // outbound restore, and fixpp#518's in-unit teardown_reset_done_ stops:
+                    // the 141=Y reset unit. Step 1, the targets (research R-6): next-in 2
+                    // when the reset-ack Logon was consumed (logon_inbound_advanced_init),
+                    // else 1; next-out 2 only when fixpp sent 141=Y and its Logon consumed
+                    // the first post-reset number (032 C1: the latch AND reset_before_send),
+                    // else 1. They go to every store, volatile ones included (plan OD-9).
+                    const seqnum_t unit_in =
+                        logon_inbound_advanced_init ? seqnum_min + 1 : seqnum_min;
+                    const seqnum_t unit_out =
+                        own_logon_sent_reset_flag && n_pre_outbound == seqnum_min + 1
+                            ? seqnum_min + 1
+                            : seqnum_min;
+                    // Steps 3 and 4; plan OD-25 replaces step 2's shield with the store
+                    // operation's empty cancellation slot (run_reset_unit_). No return
+                    // path, so the restore below always runs.
+                    auto const unit = co_await run_reset_unit_(unit_in, unit_out);
+                    // Step 5: the restore. A cancellation recorded on this thread while
+                    // the unit ran is dropped: the state is fresh.
+                    co_await asio::this_coro::reset_cancellation_state(
+                        asio::enable_total_cancellation{});
+                    // Step 6: the existing dispositions. A manager error is fatal; a store
+                    // error is fatal when the store is persistent (030 T015, FR-010) and
+                    // logged otherwise (024 I-07).
+                    // Plan OD-26: each write follows the unit's store operation.
+                    if (!unit.manager) {
+                        disconnect_unless_superseded_(fsm_state::LogonSent);
+                        co_return std::unexpected(unit.manager.error());
                     }
-                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
-                    // unit stops here only once close()'s teardown reset has been issued, so
-                    // the restores below cannot land after it. Otherwise the unit completes,
-                    // keeping the consumed Logon's advance, and the check after it stops
-                    // the arm.
-                    if (teardown_reset_done_) {
-                        co_return fixpp::core::expected_t<void>{};
+                    if (!unit.store && store_is_persistent_) {
+                        disconnect_unless_superseded_(fsm_state::LogonSent);
+                        co_return std::unexpected(unit.store.error());
                     }
-                    // 030 T016 (FR-001/005/007/009): the consumed seq-1 reset-ack Logon is a
-                    // surviving net-advance (check_inbound advanced 1->2 before this reset
-                    // rewound it) — identical clobber to the acceptor arm. Restore
-                    // next-expected-inbound to seqnum_min+1 (=2) in the manager AND write it
-                    // through to the store → store == manager == 2. Guarded on the ack Logon
-                    // consumed (logon_inbound_advanced_init — NOT the acceptor's
-                    // logon_inbound_advanced). manager-first, store-second (safe under-persist
-                    // on failure). No reply Logon on this arm (789 is acceptor-reply-specific).
-                    if (logon_inbound_advanced_init) {
-                        auto si_r = co_await seqnum_mgr_.set_next_inbound(seqnum_min + 1);
-                        if (!si_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(si_r.error());
-                        }
-                        // store 1->2 (no-op if non-persistent, INV-H4).
-                        auto p_r = co_await persist_inbound_advance_();
-                        if (!p_r) co_return std::unexpected(p_r.error());
-                    }
-                    // fixpp#518: a close() may have run while the inbound restore or persist
-                    // yielded. The outbound restore is skipped only once close()'s teardown
-                    // reset has been issued, so it cannot land after it. Otherwise it
-                    // completes, and the check after it stops the arm.
-                    if (teardown_reset_done_) {
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-                    // 032 T010(c): outbound restore — symmetric twin of the 030 inbound restore.
-                    // Guarded on BOTH: latch (fixpp sent 141=Y) AND reset_before_send (fixpp's
-                    // Logon consumed seq=1 post-reset). The two conjuncts are REQUIRED:
-                    //   - latch alone: bilateral_strict-at-N has latch=true but n_pre=N+1>2;
-                    //     reset is NOT before-send → restore would be wrong.
-                    //   - reset_before_send alone: peer-spontaneous-at-seq-1 has n_pre=1+1=2
-                    //     but latch=false → restore would incorrectly advance to 2.
-                    // manager-first, store-second; fatal-when-persistent (030 disposition).
-                    // [032 contract C1/Mechanism A, FR-001/FR-003/FR-007, INV-H1]
-                    if (own_logon_sent_reset_flag && n_pre_outbound == seqnum_min + 1) {
-                        auto so_r = co_await seqnum_mgr_.set_next_outbound(seqnum_min + 1);
-                        if (!so_r) {
-                            record_state_transition_(fsm_state::Disconnected);
-                            co_return std::unexpected(so_r.error());
-                        }
-                        // store 1->2 (no-op if non-persistent, INV-H4).
-                        auto po_r = co_await persist_outbound_advance_();
-                        if (!po_r) co_return std::unexpected(po_r.error());
-                    }
-                    // fixpp#518: a close() may have run while the outbound restore or
-                    // persist yielded.
-                    if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                    // Step 7 (093 contract C-6) and fixpp#518: a close() may have begun,
+                    // or Engine::stop()'s step 1 reached this strand, while the unit's
+                    // store operation yielded.
+                    if (logon_arm_superseded_(fsm_state::LogonSent)) {
                         co_return fixpp::core::expected_t<void>{};
                     }
                     // 032 T010(d): FR-018 mode mapping — use the latch alone (C4 gate).
@@ -4686,15 +5012,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // 031: the initiator emits NO reply Logon on this arm, so the comparison
                 // reference is the current peek_outbound() — byte-identical to 027 (the peer's
                 // reply 789 = target+1 already matches fixpp's post-own-Logon outbound). [FR-008]
-                auto h789 = co_await honor_peer_next_expected_(hdr.next_expected_msg_seq_num,
-                                                               hdr.next_expected_present,
-                                                               seqnum_mgr_.peek_outbound());
+                auto h789 = co_await honor_peer_next_expected_(
+                    hdr.next_expected_msg_seq_num, hdr.next_expected_present,
+                    seqnum_mgr_.peek_outbound(), fsm_state::LogonSent);
                 if (!h789) co_return std::unexpected(h789.error());
-                if (!*h789) co_return fixpp::core::expected_t<void>{};
+                if (*h789 != logon_789_outcome::in_sync_continue) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
             }
 
             // fixpp#518: a close() may have run during the 789 honour's writes.
-            if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+            if (logon_arm_superseded_(fsm_state::LogonSent)) {
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -4717,13 +5045,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   Both false → normal in-seq Logon-ack: persist fires → store==manager. ✓
             // [029 INV-H1; triage root-cause #1/#2; contracts C3.1]
             if (logon_inbound_advanced_init && !peer_ack_sent_reset_flag) {
-                auto p_r = co_await persist_inbound_advance_();
+                auto p_r = co_await persist_inbound_advance_(fsm_state::Active);  // 093 OD-26
                 if (!p_r) co_return std::unexpected(p_r.error());
             }
 
             // fixpp#518: a close() may have run while the persist yielded, including one
             // posted from onLogon.
-            if (logon_arm_superseded(*this, fsm_state::Active)) {
+            if (logon_arm_superseded_(fsm_state::Active)) {
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -5225,7 +5553,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
     if (engine_.application != nullptr) {
         std::span<const std::byte> built_frame{buf.data(), pos};
-        auto cb_r = parse_and_dispatch_(built_frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+        auto cb_r = parse_and_dispatch_(built_frame, kSendParseArena, [&](auto& mv, auto& sid) {
             return engine_.application->toApp(mv, sid);
         });
         if (!cb_r) {
@@ -5319,7 +5647,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     } live_dec_guard{live_ctr};
 
     // Resolve HeartBtInt from config (D-8 default: 30s; 0 = disabled).
-    std::chrono::seconds heartbt_int{30};
+    std::chrono::seconds heartbt_int = kDefaultHeartBtInt;
     if (cfg_.heartbeat_interval.has_value()) {
         heartbt_int = *cfg_.heartbeat_interval;
     }
@@ -5507,7 +5835,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 // [gate-b/r1-green: RC#A removes next_outbound_seq_ - 1U arithmetic;
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
-    seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept {
+    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm) noexcept {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
@@ -5611,6 +5939,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             //  feedback_mirror_existing_failclosed_disposition]
             co_return std::unexpected(*fatal_err);
         }
+    }
+
+    // 093 plan OD-25: a Logon arm's caller passes its expected state. The store await
+    // above may have yielded the strand; a close() or Engine::stop()'s step 1 that ran
+    // there stops the transmit. The caller's own predicate check follows.
+    if (arm && logon_arm_superseded_(*arm)) {
+        co_return fixpp::core::expected_t<void>{};
     }
 
     // Step 2: transmit (ONLY after store completes — I-3).
@@ -5846,8 +6181,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 //   unexpected(app_callback_threw)              — a GapFill toAdmin threw
 //   unexpected(dispatch_aborted)                — transport write error
 
-asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
-    seqnum_t begin, seqnum_t requested_end, bool end_is_through_current) noexcept {
+asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::replay_outbound_range_(
+    seqnum_t begin, seqnum_t requested_end, bool end_is_through_current,
+    std::optional<fsm_state> arm) noexcept {
+    // 093 plan OD-25: on a Logon arm's 789 path, the predicate is tested immediately
+    // before each effect of the walk: a GapFill's toAdmin, a replay frame's write, and
+    // the gap-filled-slot event. Each suspension (the store read, each retrieve, each
+    // write) is followed by one of those or by a return; on an error return,
+    // honor_peer_next_expected_ tests the predicate before its Disconnected write.
+    const auto superseded = [this, arm] { return arm && logon_arm_superseded_(*arm); };
     const auto st52_sr = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                              : SendingTimeStamp{};
@@ -5877,7 +6219,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
     };
 
     const auto emit_gapfill_async =
-        [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<fixpp::core::expected_t<void>> {
+        [&](seqnum_t at_seq,
+            seqnum_t new_seqno) -> asio::awaitable<fixpp::core::expected_t<replay_outcome>> {
+        if (superseded()) {
+            co_return replay_outcome::superseded;
+        }
         std::array<std::byte, 256> gf_buf{};
         auto gf = fixpp::session::build_sequence_reset_gapfill(
             std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq, cfg_.sender_comp_id,
@@ -5898,7 +6244,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
         if (!co_await transmit_async(*gf)) {
             co_return std::unexpected(fixpp::core::error::dispatch_aborted);
         }
-        co_return fixpp::core::expected_t<void>{};
+        co_return replay_outcome::completed;
     };
 
     // Resolve the effective end: through-current or clamped to our last stored
@@ -5920,10 +6266,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
     if (!store_ || our_last == 0 || begin > eff_end) {
         const seqnum_t new_seq_no =
             end_is_through_current ? seqnum_mgr_.peek_outbound() : (requested_end + 1U);
-        if (auto g = co_await emit_gapfill_async(begin > 0 ? begin : 1U, new_seq_no); !g) {
-            co_return std::unexpected(g.error());
-        }
-        co_return fixpp::core::expected_t<void>{};
+        co_return co_await emit_gapfill_async(begin > 0 ? begin : 1U, new_seq_no);
     }
 
     // Per-slot store-walk over [begin, eff_end]. Accumulate absent, admin and
@@ -5967,10 +6310,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
                 // Built first, flushed second: an unbuildable slot must be able
                 // to join the open gap run below instead of splitting it.
                 if (gap_open) {
-                    if (auto g = co_await emit_gapfill_async(gap_start, k); !g) {
-                        co_return std::unexpected(g.error());
-                    }
+                    auto g = co_await emit_gapfill_async(gap_start, k);
+                    if (!g || *g == replay_outcome::superseded) co_return g;
                     gap_open = false;
+                }
+                if (superseded()) {
+                    co_return replay_outcome::superseded;
                 }
                 if (!co_await transmit_async(*rp)) {
                     co_return std::unexpected(fixpp::core::error::dispatch_aborted);
@@ -5981,6 +6326,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             // a skipped number leaves the peer's gap open [FIX-SL §4.8.3]. Rejected:
             // failing the whole resend (leaves the gap open too). A frame too large
             // to CAPTURE stays loud (the cv.truncated disconnect above, D5).
+            if (superseded()) {
+                co_return replay_outcome::superseded;
+            }
             emit_event(session_event_resend_slot_gap_filled{.seq = k, .code = rp.error()});
         }
         // Absent slot, admin message, or unbuildable replay → fold into a GapFill run.
@@ -5990,12 +6338,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
         }
     }
     if (gap_open) {
-        if (auto g = co_await emit_gapfill_async(gap_start, eff_end + 1U); !g) {
-            co_return std::unexpected(g.error());
-        }
+        co_return co_await emit_gapfill_async(gap_start, eff_end + 1U);
     }
     // Remain in Active after responding to ResendRequest / 789 honor.
-    co_return fixpp::core::expected_t<void>{};
+    co_return replay_outcome::completed;
 }
 
 // ── 027 — honor_peer_next_expected_ ──────────────────────────────────────────
@@ -6007,13 +6353,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
 // [contract C4/C6/C8, data-model I-NEX-2/3/4/9/11, D-6/D-10]
 //
 // Returns:
-//   expected_t<bool>{true}   — X==N or X<N resend succeeded; caller continues.
-//   expected_t<bool>{false}  — X==0 or X>N: Logout emitted + Disconnected recorded;
-//                              caller MUST co_return expected_t<void>{}.
-//   unexpected(err)          — X<N resend failed; Disconnected recorded;
-//                              caller MUST co_return std::unexpected(err).
-asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected_(
-    std::string_view raw_789, bool /*present_789*/, seqnum_t next_outbound_ref) noexcept {
+//   in_sync_continue     — X==N or X<N resend succeeded; caller continues.
+//   ended_disconnected   — X==0 or X>N: Logout emitted + Disconnected recorded;
+//                          caller MUST co_return expected_t<void>{}.
+//   superseded           — 093 plan OD-25: logon_arm_superseded_(arm) held after a
+//                          suspension, before the next effect; nothing more written,
+//                          no state recorded; caller MUST co_return expected_t<void>{}.
+//   unexpected(err)      — X<N resend failed; Disconnected recorded;
+//                          caller MUST co_return std::unexpected(err).
+asio::awaitable<fixpp::core::expected_t<Session::logon_789_outcome>>
+Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*/,
+                                   seqnum_t next_outbound_ref, fsm_state arm) noexcept {
     const seqnum_t x789 = parse_seqnum(raw_789);
     // 031: compare the peer's 789 against the comparison reference (the acceptor passes
     // its PRE-reply next-outbound; the initiator passes current peek_outbound()), NOT the
@@ -6047,13 +6397,17 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 }
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
-                    auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                    auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
                     (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                 }
             }
         }
+        // 093 plan OD-25: the Logout's store and write are suspensions.
+        if (logon_arm_superseded_(arm)) {
+            co_return logon_789_outcome::superseded;
+        }
         record_state_transition_(fsm_state::Disconnected);
-        co_return fixpp::core::expected_t<bool>{false};
+        co_return logon_789_outcome::ended_disconnected;
     } else if (x789 > n789) {
         // X > N: peer claims to have received frames we haven't sent yet.
         // Sequence-integrity violation: Logout(text) + disconnect.
@@ -6091,13 +6445,17 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
                 }
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
-                    auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                    auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
                     (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                 }
             }
         }
+        // 093 plan OD-25: the Logout's store and write are suspensions.
+        if (logon_arm_superseded_(arm)) {
+            co_return logon_789_outcome::superseded;
+        }
         record_state_transition_(fsm_state::Disconnected);
-        co_return fixpp::core::expected_t<bool>{false};
+        co_return logon_789_outcome::ended_disconnected;
     } else if (x789 < n789) {
         // X < N: proactively resend [X, N-1].
         // [contract C4/C8, I-NEX-2/3]
@@ -6107,14 +6465,21 @@ asio::awaitable<fixpp::core::expected_t<bool>> Session::honor_peer_next_expected
         // per replay_outbound_range_'s eff_end formula), but written explicitly for
         // contract-fidelity and robustness.
         auto rr789 = co_await replay_outbound_range_(x789, seqnum_mgr_.peek_outbound() - 1U,
-                                                     /*end_is_through_current=*/true);
+                                                     /*end_is_through_current=*/true, arm);
         if (!rr789) {
+            // 093 plan OD-25: the failure followed a suspension of the walk.
+            if (logon_arm_superseded_(arm)) {
+                co_return logon_789_outcome::superseded;
+            }
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(rr789.error());
         }
+        if (*rr789 == replay_outcome::superseded) {
+            co_return logon_789_outcome::superseded;
+        }
     }
     // X == N: in sync, no resend.
-    co_return fixpp::core::expected_t<bool>{true};
+    co_return logon_789_outcome::in_sync_continue;
 }
 
 }  // namespace fixpp::session

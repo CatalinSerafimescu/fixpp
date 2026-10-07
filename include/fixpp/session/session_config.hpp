@@ -225,7 +225,12 @@ struct SessionConfig {
     std::optional<std::chrono::milliseconds> sending_time_threshold;  // value owned by 005
     RejectPolicy reject_policy{};                                     // owned by 005
 
-    std::pmr::memory_resource* message_arena = nullptr;       // null → engine default
+    std::pmr::memory_resource* message_arena = nullptr;  // null → engine default
+    // 093-inbound-frame-dispositions (data-model E-2, contract C-7 row 15): open()
+    // allocates the read pump's carry from framer_carry_arena (null → new_delete), L plus
+    // one read plus a container proxy's slack, and the per-session parse buffer B(L) from
+    // the session arena (session_arena, else the engine's default_session_resource, else
+    // the default resource). A failure is an open() error (out_of_memory).
     std::pmr::memory_resource* framer_carry_arena = nullptr;  // owned by 2b; recorded here
     std::pmr::memory_resource* session_arena = nullptr;
 
@@ -324,6 +329,16 @@ struct SessionConfig {
     // SessionState.logoutTimeoutMs=2000L). Must be > 0; validated at
     // SessionConfig-build time per [arch §5.3] construction-time carve-out.
     std::uint32_t logout_disconnect_timeout_ms{2000};
+
+    // 093-inbound-frame-dispositions (FR-006; contract C-4; data-model E-7): the
+    // establishment timeout T, in milliseconds. One absolute deadline per connection, on
+    // EngineConfig::clock (SessionConfig::clock_override does not move it), from accept on
+    // the acceptor and from the return of drive_reconnect() on the initiator, until the
+    // session first reaches Active. On expiry the connection is closed, with
+    // session_event_establishment_timeout and a log record once a Session exists.
+    // Zero is refused with invalid_session_config by Engine::register_session and by
+    // Session::open().
+    std::uint32_t logon_timeout_ms{10000};
 
     // FR-023 / Clarifications Q3=A — operator-supplied allow-list of
     // {principal → {compid_set}} bindings. Default-constructed = empty
@@ -521,14 +536,14 @@ struct SessionConfig {
 
     // ── 070-fix44-closeout S-030 / data-model E2 — negotiated MaxMessageSize(383) ──
     // advertised_max_message_size: when set, the engine advertises MaxMessageSize(383)
-    //   =<value> on its outbound Logon and, once the session is established (Active),
-    //   DISCONNECTS a peer whose inbound frame exceeds this many bytes (the peer
-    //   violated the size it agreed to). `nullopt` (default) ⇒ no 383 emitted and no
-    //   negotiated enforcement — byte/disposition-identical baseline (FR-012). This
-    //   NEGOTIATED limit is distinct from and never weakens the absolute framer
-    //   backstop (wire::Framer::max_frame_bytes); the effective inbound cap is
-    //   min(value, max_frame_bytes). No new include: std::optional already used.
-    //   [FR-004/FR-005/FR-006/FR-007]
+    //   =<value> on its outbound Logon, and the value is the session's inbound limit L.
+    //   `nullopt` (default) ⇒ no 383 emitted, and L is 65536. No new include:
+    //   std::optional already used. [FR-004/FR-005/FR-006/FR-007]
+    //   093-inbound-frame-dispositions (FR-010, FR-013; plan OD-2, OD-3) supersedes 070's
+    //   Active-only disconnect and its pre-establishment exemption: a frame over L is
+    //   refused at framing in every state and closes the session (the acceptor's first
+    //   frame closes the connection), and Engine::register_session and Session::open()
+    //   refuse a value below 4096 or above 262144 (invalid_session_config).
     std::optional<std::uint32_t> advertised_max_message_size;
 
     // ── 070-fix44-closeout S-037 / data-model E3 — advertised supported MsgTypes ──

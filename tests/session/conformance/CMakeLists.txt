@@ -8,6 +8,11 @@
 # Later phases (T030/T038/T045/T052/T053): seqnum/liveness/logout/reject/
 # sendingtime tests added here under TDD red-green-refactor per
 # [const §VII.1]/[const §VII.3].
+#
+# The FIX-TC 2020 garbled-frame rows 2d, 2m, 2t, 3b, 3c and 3e are not here: they
+# need the real read pump and its resyncing Framer, which this corpus does not drive.
+# They are witnessed by the TC002_*/TC003_* cells of
+# tests/session/inbound_frame_dispositions_test.cpp (093-inbound-frame-dispositions).
 find_package(GTest CONFIG REQUIRED)
 
 # ── T020: tc_establishment — 1a/1b/1c/1d/1e/2i/2k/2k oracle scenarios ─────────

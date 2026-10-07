@@ -47,12 +47,17 @@
 //
 // Liveness_* (tasks.md T031; spec FR-018): one faulty frame inside the first heartbeat
 // interval does not refresh inbound liveness, so a TestRequest is still sent at it.
+// 093 (tasks.md T072) adds a 35-not-third frame and a Framer garble.
+//
+// Refresh_* (093 tasks.md T071; spec FR-020, SC-005): one well-formed frame of each
+// class that takes an early return of the LogonReceived/Active arm refreshes inbound
+// liveness. The section comment above run_refresh_cell states each cell.
 //
 // ProfileRoleMatrix/*, ValidatorLive/*, RowByValidation/* (tasks.md T033; spec FR-011;
 // contract C-3 I-6): the disposition does not depend on inbound validation, the profile,
 // the role or whether an Application is registered.
 //
-// App_*, I2_*, Dup34_*, Dup35_*, AwaitingResend_*, MaxMessageSize_*, RefMsgTypeBound_*
+// App_*, I2_*, Dup34_*, Dup35_*, AwaitingResend_*, RefMsgTypeBound_*
 // (tasks.md T034; spec FR-005, FR-013; contract C-3 I-2, I-3): a faulty application
 // message is rejected, never delivered, and accounted as C-2's D-5/D-6 say. The section
 // comment above App_AtN_MalformedTag states each cell.
@@ -66,7 +71,8 @@
 //
 // LateSite_* (tasks.md T038; contract C-6; spec FR-016, SC-008): one cell per late
 // inbound parse site, each with a frame the header scan finds fault-free but the parse
-// cannot index. The session closes terminally, sends no Reject and does not invoke the
+// cannot index, through an entry cap lowered by session_test_access (093). The session
+// closes terminally, sends no Reject and does not invoke the
 // parse target's receive callback; the durable NextNumIn a reconnect resumes from is
 // pinned per site (contract C-5 L-6). The section comment above LateKnobs states each
 // cell.
@@ -127,6 +133,7 @@
 #include <deque>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
@@ -154,10 +161,12 @@
 #include <utility>
 #include <vector>
 
+#include "plain_engine_rig.hpp"
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/reify_test_frame.hpp"
+#include "support/session_test_access.hpp"
 #include "support/temp_dir.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
@@ -615,6 +624,9 @@ struct ActiveCell {
 };
 
 // D-8: field 3 is not 35 → disregarded: nothing sent, NextNumIn unchanged, Active.
+// 093-inbound-frame-dispositions (contract C-2 step 1) takes this shape before the
+// fault branch, so D-8 is no longer reached; the outcome is the same disregard, and the
+// frame is now counted as one garbled frame.
 void anchor_d8(bool validate) {
     ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
@@ -627,6 +639,8 @@ void anchor_d8(bool validate) {
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "D-8: the faulty frame must not disconnect";
     EXPECT_TRUE(c.fix.transport.sent_frames().empty()) << "D-8: the faulty frame draws nothing";
     EXPECT_EQ(c.app->from_app, 0) << "D-8: the faulty frame never reaches fromApp";
+    EXPECT_EQ(c.sess->garbled_frame_count(), 1U)
+        << "093 C-2 step 1: a frame whose field 3 is not 35 is one garbled frame";
 
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, "D-8 (NextNumIn unchanged)");
 }
@@ -1411,11 +1425,12 @@ TEST(UnparseableFrameDisposition, RejectLoop_EachFixppRejectAnswersOnePeerFrame)
 // TestReqID(112) and stays Active past the grace window; the others send nothing more
 // and are disconnected exactly at the grace window.
 //
-// A cell labelled a pin sends a frame that returns before the Active arm's liveness
-// refresh on the pre-092 session as well, so reverting the disposer cannot fail it. To
-// check that such a cell (or the D-7 cell) can fail, make dispose_unparseable_ write
-// last_inbound_steady_ in a scratch copy and run the cell: it must fail at the
-// TestRequest-at-the-interval check.
+// Each cell holds on the condition that the arm's liveness write comes after the
+// 35-not-third check and the fault check (093 contract C-5), so a frame either check
+// takes never reaches it. To check that a cell can fail, in a scratch copy move that
+// write above the check its frame takes (or make dispose_unparseable_ write
+// last_inbound_steady_) and run the cell: it must fail at the TestRequest-at-the-interval
+// check.
 //
 // Time is the mock clock's. After each advance, drain_ready runs every handler the
 // advance made ready; no wall-clock window decides a cell.
@@ -1487,7 +1502,6 @@ void run_liveness_cell(std::vector<std::byte> const& faulty, std::uint32_t next_
         << row << ": the unanswered TestRequest must end the session at the grace window";
 }
 
-// Pin (see the section comment).
 TEST(UnparseableFrameDisposition, Liveness_D4_SequenceReset_TestRequestAtInterval) {
     run_liveness_cell(
         make_raw_frame("4", 2, std::string{"123=N\x01"} + "36=500\x01" + kMalformedTag), 2,
@@ -1499,13 +1513,12 @@ TEST(UnparseableFrameDisposition, Liveness_D5_Application_TestRequestAtInterval)
                       "D-5 (application)");
 }
 
-// Pin (see the section comment).
 TEST(UnparseableFrameDisposition, Liveness_D5_Reject_TestRequestAtInterval) {
     run_liveness_cell(make_raw_frame("3", 2, kRejectFields + kMalformedTag), 3, Ending::silent,
                       "D-5 (Reject)");
 }
 
-// Pin (see the section comment). The one answered cell.
+// The one answered cell.
 TEST(UnparseableFrameDisposition, Liveness_D6_TooHigh_TestRequestAnswered) {
     run_liveness_cell(make_raw_frame("D", 7, kOrderFields + kMalformedTag), 2, Ending::answered,
                       "D-6");
@@ -1514,6 +1527,217 @@ TEST(UnparseableFrameDisposition, Liveness_D6_TooHigh_TestRequestAnswered) {
 TEST(UnparseableFrameDisposition, Liveness_D7_FaultBefore34_TestRequestAtInterval) {
     run_liveness_cell(wrap_body(std::string{"35=D\x01"} + kHeader + kMalformedTag + "34=2\x01"), 2,
                       Ending::silent, "D-7");
+}
+
+// 093 (tasks.md T072; quickstart Q-21; contract C-2 step 1): a well-formed frame whose
+// third field is not MsgType(35) is disregarded as garbled and does not refresh.
+TEST(UnparseableFrameDisposition, Liveness_Step1_Field3Not35_TestRequestAtInterval) {
+    run_liveness_cell(wrap_body(std::string{"34=2\x01"} + "35=D\x01" + kHeader + kOrderFields), 2,
+                      Ending::silent, "C-2 step 1");
+}
+
+// 093 (tasks.md T072; quickstart Q-21; contract C-1): a frame the Framer garbles (a
+// wrong CheckSum) never reaches the session's arm, so this cell runs the real read pump:
+// a plaintext Engine acceptor on a mock clock with a raw peer (plain_engine_rig.hpp).
+// The garbled Heartbeat arrives a third of the interval after the Logon, and the
+// TestRequest(35=1) is still sent at the interval counted from the Logon. A Framer
+// garble that refreshed liveness would move it to the interval counted from the garble,
+// past this cell's wait.
+TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
+    namespace plain_rig = fixpp::test_support::plain_rig;
+    plain_rig::Rig rig;
+    auto const cfg = rig.cfg();
+    ASSERT_TRUE(cfg.heartbeat_interval.has_value())
+        << "precondition: the config carries a heartbeat interval";
+    // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    auto const interval =
+        std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
+    // NOLINTEND(bugprone-unchecked-optional-access)
+    auto const garble_at = interval / 3;
+    ASSERT_TRUE(rig.start(cfg));
+    ASSERT_TRUE(rig.to_active());
+
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the garbled Heartbeat's
+    // SendingTime(52), built just below by rig.heartbeat() from the clock's now(), reads
+    // it. The liveness sleeper's deadline is an interval after the Logon, past this step.
+    rig.clock->advance(garble_at);
+    std::string garbled = rig.heartbeat(2);
+    auto const cs = garbled.rfind("10=");
+    ASSERT_NE(cs, std::string::npos);
+    auto const sum = static_cast<unsigned>(std::stoi(garbled.substr(cs + 3, 3)));
+    std::array<char, 4> wrong{};
+    std::snprintf(wrong.data(), wrong.size(), "%03u", (sum + 1U) % 256U);
+    garbled.replace(cs + 3, 3, wrong.data(), 3);
+    EXPECT_TRUE(rig.deliver(garbled)) << "the peer's write of the garbled frame";
+    EXPECT_TRUE(rig.run_until([&] {
+        auto const s = rig.session();
+        return s && s->garbled_frame_count() == 1U;
+    })) << "the Framer must count the wrong-CheckSum frame as one garble";
+    EXPECT_EQ(rig.state(), fsm_state::Active) << "the garbled frame must not end the session";
+
+    rig.clock->advance(interval - garble_at - 1ms);
+    rig.settle();
+    EXPECT_TRUE(plain_rig::frames_of_type(rig.peer.received, "1").empty())
+        << "no TestRequest may be sent before the interval";
+
+    rig.clock->advance(1ms);
+    EXPECT_TRUE(rig.run_until([&] {
+        return !plain_rig::frames_of_type(rig.peer.received, "1").empty();
+    })) << "a TestRequest must be sent at the interval counted from the Logon; none means the "
+           "Framer garble refreshed inbound liveness";
+    EXPECT_EQ(rig.state(), fsm_state::Active) << "state at the interval";
+    rig.stop();
+}
+
+// ── Refresh_* (093 tasks.md T071; quickstart Q-20; spec FR-020, SC-005; contract C-5) ──
+//
+// In Active, one well-formed frame of one class arrives at t1, a third of the heartbeat
+// interval after the Logon at t0 (the Logon seeds inbound liveness). Each class leaves
+// the session up through an early return of the LogonReceived/Active arm. Each cell
+// first asserts the frame ran its class's path (the outbound frames it drew, NextNumIn
+// and fromApp after it), then, on the mock clock: no TestRequest(35=1) at t0 + HeartBtInt,
+// none one millisecond before t1 + HeartBtInt, and exactly one at t1 + HeartBtInt. The
+// last check shows the liveness loop still runs, so the earlier ones cannot pass on a
+// loop that has stopped.
+//
+// A cell holds on the condition that its class's early return comes after the arm's
+// liveness write. To check that a cell can fail, in a scratch copy move that write below
+// the early return its frame takes and run the cell: it must fail at the
+// no-TestRequest-at-t0 + HeartBtInt check.
+
+struct RefreshCase {
+    std::vector<std::byte> frame;
+    bool validate = false;
+    bool validate_sequence_numbers = true;
+    std::vector<std::string> drawn;  // MsgType(35) of each frame the class frame draws
+    std::uint32_t next_in_after = 0;
+    int from_app_after = 0;
+};
+
+void run_refresh_cell(RefreshCase const& rc, std::string_view row) {
+    DispositionFixture fix;
+    auto const app = std::make_shared<CountingApplication>();
+    fix.engine.application = app;
+    auto cfg = fix.make_cfg(rc.validate);
+    cfg.validate_sequence_numbers = rc.validate_sequence_numbers;
+    if (!cfg.heartbeat_interval.has_value()) {
+        FAIL() << "precondition: the config carries a heartbeat interval";
+    }
+    auto const interval =
+        std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
+    auto const t1 = interval / 3;
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    drain_ready(fix.ioc);
+
+    fix.clock->advance(t1);
+    drain_ready(fix.ioc);
+    fix.feed(sess, rc.frame);
+    std::vector<std::string> drawn;
+    for (auto const& f : fix.transport.sent_frames()) {
+        drawn.push_back(extract_tag(f, 35));
+    }
+    EXPECT_EQ(drawn, rc.drawn) << row << ": MsgType of each frame the class frame drew";
+    EXPECT_EQ(session_test_access::seqnum_mgr(sess).next_inbound_unsafe(), rc.next_in_after)
+        << row << ": NextNumIn after the class frame";
+    EXPECT_EQ(app->from_app, rc.from_app_after) << row << ": fromApp calls";
+    EXPECT_EQ(sess.state(), fsm_state::Active)
+        << row << ": the class frame must not end the session";
+    fix.transport.reset();
+
+    fix.clock->advance(interval - t1);
+    drain_ready(fix.ioc);
+    EXPECT_TRUE(fix.sent_of_type("1").empty())
+        << row << ": a TestRequest at the interval counted from the Logon means the class "
+        << "frame did not refresh inbound liveness";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << row << ": state at the Logon's interval";
+
+    fix.clock->advance(t1 - 1ms);
+    drain_ready(fix.ioc);
+    EXPECT_TRUE(fix.sent_of_type("1").empty())
+        << row << ": no TestRequest before the interval counted from the class frame";
+
+    fix.clock->advance(1ms);
+    drain_ready(fix.ioc);
+    EXPECT_EQ(fix.sent_of_type("1").size(), 1U)
+        << row << ": a TestRequest must be sent at the interval counted from the class frame";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << row << ": state at the class frame's interval";
+}
+
+// One too-high frame (NextNumIn 2, MsgSeqNum 5). Exactly one: a second non-PossDup,
+// non-Heartbeat too-high frame ends the session (fixpp#537).
+TEST(UnparseableFrameDisposition, Refresh_TooHigh_NoTestRequestAtLogonInterval) {
+    run_refresh_cell(
+        {.frame = make_raw_frame("D", 5, kOrderFields), .drawn = {"2"}, .next_in_after = 2},
+        "too-high");
+}
+
+TEST(UnparseableFrameDisposition, Refresh_ResetModeSequenceReset_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("4", 2, std::string{"123=N\x01"} + "36=500\x01"),
+                      .next_in_after = 500},
+                     "Reset-mode SequenceReset");
+}
+
+TEST(UnparseableFrameDisposition, Refresh_GapFill_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("4", 2, std::string{"123=Y\x01"} + "36=5\x01"),
+                      .next_in_after = 5},
+                     "GapFill");
+}
+
+// The validate gate's Reject: validation on, a NewOrderSingle missing ClOrdID(11).
+TEST(UnparseableFrameDisposition, Refresh_ValidateReject_NoTestRequestAtLogonInterval) {
+    run_refresh_cell(
+        {.frame = make_raw_frame("D", 2, std::string{"54=1\x01"} + "60=20240101-00:00:00\x01"),
+         .validate = true,
+         .drawn = {"3"},
+         .next_in_after = 3},
+        "validate Reject");
+}
+
+// The PossDup Reject for an absent OrigSendingTime(122).
+TEST(UnparseableFrameDisposition, Refresh_PossDupRejectNo122_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("D", 2, std::string{"43=Y\x01"} + kOrderFields),
+                      .drawn = {"3"},
+                      .next_in_after = 3},
+                     "PossDup Reject (122 absent)");
+}
+
+// The PossDup Reject for an OrigSendingTime(122) that does not parse.
+TEST(UnparseableFrameDisposition, Refresh_PossDupRejectBad122_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame(
+                          "D", 2, std::string{"43=Y\x01"} + "122=GARBAGE\x01" + kOrderFields),
+                      .drawn = {"3"},
+                      .next_in_after = 3},
+                     "PossDup Reject (122 unparseable)");
+}
+
+TEST(UnparseableFrameDisposition, Refresh_TooLowHeartbeat_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("0", 1), .next_in_after = 2}, "too-low Heartbeat");
+}
+
+TEST(UnparseableFrameDisposition, Refresh_TooLowPossDup_NoTestRequestAtLogonInterval) {
+    run_refresh_cell(
+        {.frame = make_raw_frame("D", 1, kPossDupFields + kOrderFields), .next_in_after = 2},
+        "too-low PossDup");
+}
+
+// The knob-off path: validate_sequence_numbers = false delivers a too-high frame
+// without advancing NextNumIn (028's deliver-without-advance).
+TEST(UnparseableFrameDisposition, Refresh_KnobOff_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("D", 5, kOrderFields),
+                      .validate_sequence_numbers = false,
+                      .next_in_after = 2,
+                      .from_app_after = 1},
+                     "knob-off");
+}
+
+TEST(UnparseableFrameDisposition, Refresh_InboundReject_NoTestRequestAtLogonInterval) {
+    run_refresh_cell({.frame = make_raw_frame("3", 2, kRejectFields), .next_in_after = 3},
+                     "Reject(35=3)");
 }
 
 // ── I-6 matrix (tasks.md T033; spec FR-011; contract C-3 I-6) ────────────────
@@ -1911,7 +2135,7 @@ INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, RowByValidation,
                                     (info.param.validate ? "_ValOn" : "_ValOff");
                          });
 
-// ── App_*, I2_*, Dup*_*, AwaitingResend_*, MaxMessageSize_*, RefMsgTypeBound_*
+// ── App_*, I2_*, Dup*_*, AwaitingResend_*, RefMsgTypeBound_*
 // (tasks.md T034; spec FR-005, FR-013; contract C-2 D-5, D-6 and the Reject
 // contents, C-1 step 1b, C-3 I-2, I-3; data-model E-1; research R-5) ─────────────
 //
@@ -1935,10 +2159,6 @@ INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, RowByValidation,
 //   AwaitingResend_*: a too-high Heartbeat at 3 opens a gap from 2; the faulty frame at
 //     2 fills it, so the gap closes, and a Heartbeat at 5 then draws a fresh
 //     ResendRequest from 3 (none is sent while a gap is still open).
-//   MaxMessageSize_*_Control: an oversized faulty frame in Active is disconnected with
-//     nothing sent, because the negotiated MaxMessageSize(383) guard runs before the
-//     state switch (C-1 step 1b). A control: to check it can fail, delete that guard in
-//     a scratch copy and the cell must fail.
 //   RefMsgTypeBound_*: a faulty frame at N whose MsgType is far longer than any shipped
 //     MsgType draws a Reject without 372, and NextNumIn advances only together with that
 //     Reject. The length below is spelled out, not derived from the session's bound.
@@ -2086,36 +2306,10 @@ TEST(UnparseableFrameDisposition, AwaitingResend_FaultyFillClosesGap_LengthDataM
     run_awaiting_resend_cell(kCountShape);
 }
 
-void run_max_message_size_control(Shape const& shape) {
-    DispositionFixture fix;
-    auto app = std::make_shared<CountingApplication>();
-    fix.engine.application = app;
-    auto cfg = fix.make_cfg(/*validate=*/true);
-    cfg.advertised_max_message_size = 256;
-    Session sess{fix.engine, cfg};
-    fix.open_to_active(sess);
-    if (::testing::Test::HasFatalFailure()) {
-        return;
-    }
-    std::string const row = "MaxMessageSize (373=" + std::string{shape.reason} + ")";
-    auto const oversized = make_raw_frame(
-        "D", 2, kOrderFields + "58=" + std::string(300, 'x') + "\x01" + shape.garble);
-    ASSERT_GT(oversized.size(), 256U) << row << ": the frame must exceed the advertised size";
-    fix.feed(sess, oversized);
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << row << ": the oversized frame ends it";
-    EXPECT_TRUE(fix.transport.sent_frames().empty())
-        << row << ": nothing is sent; Rejects=" << fix.sent_of_type("3").size();
-    EXPECT_EQ(app->from_app, 0) << row << ": the oversized frame never reaches fromApp";
-}
-
-TEST(UnparseableFrameDisposition,
-     MaxMessageSize_OversizedFaulty_Disconnected_Control_MalformedTag) {
-    run_max_message_size_control(kTagShape);
-}
-TEST(UnparseableFrameDisposition,
-     MaxMessageSize_OversizedFaulty_Disconnected_Control_LengthDataMismatch) {
-    run_max_message_size_control(kCountShape);
-}
+// 093-inbound-frame-dispositions (FR-013) moved the MaxMessageSize_OversizedFaulty_*
+// controls: 070's session-level 383 check they fed below the Framer is deleted, and a
+// frame over the session's limit is refused at framing. The faulty over-limit shapes
+// are inbound_frame_dispositions_test.cpp's Q-6 set, through the read pump.
 
 void run_ref_msg_type_bound_cell(Shape const& shape) {
     StateCell c{At::active};
@@ -2147,11 +2341,17 @@ TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWithout372_L
 // command, `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp`,
 // and classify each call by the provenance of the bytes it parses.
 //
-// The trigger is a real frame the header scan finds fault-free, carrying more fields
-// than fixpp::wire::default_max_offset_entries. Parser<Index>::parse fails on it on every
-// lane: the parse arena is exhausted where its upstream is null, and the offset-table
-// cap is exceeded where it is not. So no cell needs a platform guard, and none asserts
-// which error the parse returned. The filler is distinct user-defined tags.
+// 093-inbound-frame-dispositions (contract C-3 I-4, research R-3) re-bases the trigger.
+// The session's parse capacity is derived from its inbound limit L, so every admitted
+// frame parses and a late parse failure is unreachable from the wire. The cells reach
+// the defence through session_test_access instead: after open(), the session's inbound
+// entry cap is lowered to fixpp::wire::default_max_offset_entries, and the trigger is a
+// real frame the header scan finds fault-free, within L, carrying more fields than
+// that cap. Parser<Index>::parse then fails on it with wire_offset_table_full on every
+// lane, the spill witness's upstream notwithstanding, so no cell needs a platform
+// guard, and none asserts which error the parse returned. The filler is distinct
+// user-defined tags. LateSite_Control_UnloweredCap_* shows the same frame is delivered
+// when the cap is left as open() derived it.
 //
 // Each cell asserts the C-6 disposition: a terminal close (is_open() false: the
 // Disconnected transitions that are not a close leave it true), no Reject(35=3), and
@@ -2302,6 +2502,7 @@ void expect_late_close(LateCell& c, std::vector<std::byte> const& frame, Target 
                        seqnum_t durable_after, std::string_view row) {
     int const admin_before = c.app->from_admin;
     int const app_before = c.app->from_app;
+    session_test_access::lower_inbound_entry_cap(*c.sess, fixpp::wire::default_max_offset_entries);
     c.fix.feed(*c.sess, frame);
 
     // The verdict, captured before release() closes a session left open.
@@ -2487,6 +2688,67 @@ TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_ValidateGate_Par
     EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";
     EXPECT_EQ(c.app->from_app, app_before) << "control: a rejected message is not delivered";
+}
+
+// The LateSite_* frame with the session's entry cap as open() derived it from L: it is
+// admitted, so it parses, and the message is delivered and consumed. This is why the
+// cells above lower the cap: 093 left the wire no way to reach the late close.
+TEST(UnparseableFrameDisposition, LateSite_Control_UnloweredCap_FromApp_DeliveredAndConsumed) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kLateFillerFields)));
+    EXPECT_TRUE(c.sess->is_open()) << "the session stays open";
+    EXPECT_EQ(c.sess->state(), fsm_state::Active);
+    EXPECT_EQ(c.app->from_app, app_before + 1) << "fromApp is invoked";
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty()) << "nothing is sent";
+    EXPECT_EQ(c.durable_next_inbound(), 3U) << "the message is consumed durably";
+}
+
+// ── Q-15 (T057; contract C-3 I-4): the late close through a shrunk buffer ───
+//
+// session_test_access shortens the session's parse buffer after open(), so an admitted
+// frame's parse draws past it. Where the spill witness's upstream is null, that draw
+// is refused, the parse fails and 092's late close fires: the C-6 disposition. Where
+// it forwards (MSVC debug), the draw is served from the heap and recorded, and the
+// frame is delivered. The branch is the library's own condition.
+TEST(UnparseableFrameDisposition, Q15_ShrunkParseBuffer_LateCloseOrRecordedSpill) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    // Room for a handful of entries, far less than the frame's fields need.
+    session_test_access::shrink_parse_buffer(*c.sess, 256);
+    auto const frame = make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields));
+    if (fixpp::detail::arena_upstream() == std::pmr::null_memory_resource()) {
+        expect_late_close(c, frame, Target::from_app, 2, "shrunk parse buffer");
+        return;
+    }
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, frame);
+    EXPECT_TRUE(c.sess->is_open()) << "the forwarding lane delivers from the heap";
+    EXPECT_EQ(c.app->from_app, app_before + 1);
+    EXPECT_GT(session_test_access::parse_spills(*c.sess), 0U) << "and records the spill";
+}
+
+// The spill witness can report a spill: the parse's refused (null lane) or forwarded
+// (MSVC debug) draw past the shrunk buffer is counted. This is the positive control for
+// every "nothing spilled" assertion (Q-11's, the arena-fit probes').
+TEST(UnparseableFrameDisposition, Q15_ShrunkParseBuffer_TheSpillWitnessCountsTheDraw) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::uint64_t const before = session_test_access::parse_spills(*c.sess);
+    session_test_access::shrink_parse_buffer(*c.sess, 256);
+    c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields)));
+    EXPECT_EQ(before, 0U) << "nothing spilled before the shrink";
+    EXPECT_GT(session_test_access::parse_spills(*c.sess), 0U) << "the draw past the buffer";
 }
 
 // ── ScriptedPeer_* (tasks.md T041; spec SC-007; quickstart §2 "Scripted peer") ──
@@ -2709,7 +2971,10 @@ TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_
 //     it. To check that it can fail, drop the D-1/D-2 record_state_transition_ in
 //     dispose_unparseable_ in a scratch copy: the cell must fail on the state.
 //   PreActive_D8Logon_*: a full Logon whose field 3 is SenderCompID(49), not 35, with
-//     the malformed tag last (the pre-Active disregard of such a frame is fixpp#514).
+//     the malformed tag last. 093-inbound-frame-dispositions (FR-005; contract C-2
+//     step 1, fixpp#514) superseded this pair's refusal pin: the frame is disregarded
+//     before the fault branch, so the session keeps waiting in its state, sends
+//     nothing, and counts one garbled frame.
 
 // The refusal: Disconnected, nothing sent, nothing delivered.
 void expect_pre_active_refusal(ProfileCell const& c, int delivered_before, std::string_view row) {
@@ -2783,17 +3048,27 @@ TEST(UnparseableFrameDisposition, PreActive_FaultyHeartbeat_LogonSent_Refused_Pi
 
 void run_pre_active_d8_logon(session_role role, std::string_view row) {
     ProfileCell c{Profile::fix42, role, /*validate=*/false, /*with_app=*/true};
-    run_pre_active_cell(c, role,
-                        wrap_body(std::string{"49=TW\x01"} + "35=A\x01" + "34=1\x01" +
-                                  "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" +
-                                  c.logon_fields() + kMalformedTag),
-                        row);
+    c.open_only();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    fsm_state const awaiting =
+        role == session_role::acceptor ? fsm_state::NotConnected : fsm_state::LogonSent;
+    ASSERT_EQ(c.sess->state(), awaiting) << row << ": state before the frame";
+    int const delivered = c.app_deliveries();
+    c.feed(wrap_body(std::string{"49=TW\x01"} + "35=A\x01" + "34=1\x01" +
+                     "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" + c.logon_fields() +
+                     kMalformedTag));
+    EXPECT_EQ(c.sess->state(), awaiting) << row << ": disregarded, so the session keeps waiting";
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty()) << row << ": a disregard sends nothing";
+    EXPECT_EQ(c.app_deliveries(), delivered) << row << ": the frame reached the Application";
+    EXPECT_EQ(c.sess->garbled_frame_count(), 1U) << row << ": counted as one garbled frame";
 }
 
-TEST(UnparseableFrameDisposition, PreActive_D8Logon_NotConnected_Refused) {
+TEST(UnparseableFrameDisposition, PreActive_D8Logon_NotConnected_Disregarded) {
     run_pre_active_d8_logon(session_role::acceptor, "NotConnected D-8 Logon");
 }
-TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Refused) {
+TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Disregarded) {
     run_pre_active_d8_logon(session_role::initiator, "LogonSent D-8 Logon");
 }
 
@@ -2869,7 +3144,10 @@ TEST(UnparseableFrameDisposition,
 //
 // In Active and in LogonReceived, a faulty NewOrderSingle whose 34 was not read before
 // the fault (D-7), or whose field 3 is not 35 (D-8), is disregarded: it draws nothing,
-// reaches neither fromAdmin nor fromApp, and leaves the session open in its state. The
+// reaches neither fromAdmin nor fromApp, and leaves the session open in its state.
+// 093-inbound-frame-dispositions (contract C-2 step 1) supersedes D-8: a frame whose
+// field 3 is not 35 is disregarded before the fault branch and counted as a garbled
+// frame; each cell passes run_disregard_cell the garble count its frame draws. The
 // next conformant message, a Heartbeat at N+1 = 3, must then be a gap whose
 // ResendRequest begins at N = 2: NextNumIn unchanged. Every frame whose 34 is read
 // carries 34=2, the expected number, so a disposer that routed it to D-5 would advance
@@ -2877,7 +3155,8 @@ TEST(UnparseableFrameDisposition,
 // D-6 would send a Reject. In LogonReceived the disregard is checked before
 // StateCell::settle() releases the parked Logon reply.
 
-void run_disregard_cell(At at, std::string const& body, std::string_view what) {
+void run_disregard_cell(At at, std::string const& body, std::string_view what,
+                        std::uint64_t want_garbles) {
     StateCell c{at};
     c.enter();
     if (::testing::Test::HasFatalFailure()) {
@@ -2895,6 +3174,10 @@ void run_disregard_cell(At at, std::string const& body, std::string_view what) {
     EXPECT_EQ(c.app->from_app, app_before) << row << ": the faulty frame reached fromApp";
     EXPECT_EQ(c.sess->state(), c.held) << row << ": state after the faulty frame";
     EXPECT_TRUE(c.sess->is_open()) << row << ": the faulty frame must not close the session";
+    EXPECT_EQ(c.sess->garbled_frame_count(), want_garbles)
+        << row
+        << ": a frame whose field 3 is not 35 is one garbled frame (093 C-2 step 1); "
+           "a faulty frame whose field 3 is 35 is not";
 
     c.settle();
     if (::testing::Test::HasFatalFailure()) {
@@ -2918,28 +3201,28 @@ std::string const kD7Zero34 =
 // NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, D7_Active_LengthDataBefore34_Disregarded) {
-    run_disregard_cell(At::active, kD7LengthDataBefore34, "D-7 Length+Data before 34");
+    run_disregard_cell(At::active, kD7LengthDataBefore34, "D-7 Length+Data before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_LengthDataBefore34_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7LengthDataBefore34, "D-7 Length+Data before 34");
+    run_disregard_cell(At::logon_received, kD7LengthDataBefore34, "D-7 Length+Data before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_Active_MalformedTagBefore34_Disregarded) {
-    run_disregard_cell(At::active, kD7TagBefore34, "D-7 malformed tag before 34");
+    run_disregard_cell(At::active, kD7TagBefore34, "D-7 malformed tag before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_MalformedTagBefore34_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7TagBefore34, "D-7 malformed tag before 34");
+    run_disregard_cell(At::logon_received, kD7TagBefore34, "D-7 malformed tag before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_Active_NonNumeric34BeforeFault_Disregarded) {
-    run_disregard_cell(At::active, kD7NonNumeric34, "D-7 34=abc before the fault");
+    run_disregard_cell(At::active, kD7NonNumeric34, "D-7 34=abc before the fault", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_NonNumeric34BeforeFault_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7NonNumeric34, "D-7 34=abc before the fault");
+    run_disregard_cell(At::logon_received, kD7NonNumeric34, "D-7 34=abc before the fault", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_Active_Zero34BeforeFault_Disregarded) {
-    run_disregard_cell(At::active, kD7Zero34, "D-7 34=0 before the fault");
+    run_disregard_cell(At::active, kD7Zero34, "D-7 34=0 before the fault", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_Zero34BeforeFault_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7Zero34, "D-7 34=0 before the fault");
+    run_disregard_cell(At::logon_received, kD7Zero34, "D-7 34=0 before the fault", 0U);
 }
 
 // D-8 frames: field 3 is not 35. The mixed defect reads 35=D and 34=2 before the fault
@@ -2956,16 +3239,34 @@ std::string const kD8Field3Malformed =
 // NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, D8_Active_MixedDefect_Disregarded) {
-    run_disregard_cell(At::active, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)");
+    run_disregard_cell(At::active, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)", 1U);
 }
 TEST(UnparseableFrameDisposition, D8_LogonReceived_MixedDefect_Disregarded) {
-    run_disregard_cell(At::logon_received, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)");
+    run_disregard_cell(At::logon_received, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)", 1U);
 }
 TEST(UnparseableFrameDisposition, D8_Active_Field3Malformed_Disregarded) {
-    run_disregard_cell(At::active, kD8Field3Malformed, "D-8 field 3 malformed");
+    run_disregard_cell(At::active, kD8Field3Malformed, "D-8 field 3 malformed", 1U);
 }
 TEST(UnparseableFrameDisposition, D8_LogonReceived_Field3Malformed_Disregarded) {
-    run_disregard_cell(At::logon_received, kD8Field3Malformed, "D-8 field 3 malformed");
+    run_disregard_cell(At::logon_received, kD8Field3Malformed, "D-8 field 3 malformed", 1U);
+}
+
+// 093-inbound-frame-dispositions (FR-004; contract C-2 step 1): a FAULT-FREE frame whose
+// field 3 is not 35 is disregarded the same way and counted as one garbled frame, in
+// Active and in LogonReceived (the arm StateCell parks; the read pump cannot deliver a
+// frame while the session is in it). Before 093 it was processed.
+// Test-fixture constant: a bad_alloc while building it before main aborts the test
+// binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
+std::string const kStep1FaultFree = std::string{"49=TW\x01"} + "35=D\x01" + "34=2\x01" +
+                                    "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" + kOrderFields;
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
+
+TEST(UnparseableFrameDisposition, Step1_Active_FaultFreeField3Not35_DisregardedAndCounted) {
+    run_disregard_cell(At::active, kStep1FaultFree, "fault-free field 3 is 49", 1U);
+}
+TEST(UnparseableFrameDisposition, Step1_LogonReceived_FaultFreeField3Not35_DisregardedAndCounted) {
+    run_disregard_cell(At::logon_received, kStep1FaultFree, "fault-free field 3 is 49", 1U);
 }
 
 // ── D9_* (tasks.md T048; spec FR-015; contract C-2 D-9) ──────────────────────

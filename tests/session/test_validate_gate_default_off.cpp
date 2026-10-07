@@ -10,11 +10,13 @@
 //   in the prior release — no validation-induced Reject emitted.
 //
 //   Violation fixtures (same inputs as T012 strict-mode witnesses):
-//     W_Off1: header-out-of-order (would be reason=14 under strict) → accepted
+//     W_Off1: MsgType(35) not the third field → disregarded as garbled, in both
+//             validation modes (093-inbound-frame-dispositions FR-004 superseded this
+//             row's "accepted" pin)
 //     W_Off2: undefined tag       (would be reason=2 under strict)  → accepted
 //     W_Off3: required field missing (would be reason=1 under strict) → accepted
 //
-//   Positive-dispatch proof: each violation frame is fed at seq=2; a well-formed
+//   Positive-dispatch proof (W_Off2, W_Off3): the violation frame is fed at seq=2; a well-formed
 //   frame is then fed at seq=3.  Accepting the seq=3 frame (no Reject, session
 //   stays Active) proves the violation frame was PROCESSED (not silently dropped)
 //   and that seqnum advanced — i.e. the session dispatched seq=2 normally.
@@ -258,15 +260,15 @@ TEST(ValidateGateDefaultOff, T016_ValidatorNotConstructed_SC005) {
            "so null is caused by the flag, not a missing dict)";
 }
 
-// ── T015 W_Off1 — header-out-of-order → accepted (not rejected) ──────────────
+// ── T015 W_Off1 — MsgType(35) not the third field → disregarded ─────────────
 //
-// Same violation stimulus as T012 W1 (header out of order: 49= before 35=) but
-// with validate_inbound_messages==false.
-// The message is accepted and dispatched; no Reject is emitted.
-// Positive dispatch proof: after feeding the violation at seq=2, feed a well-formed
-// Heartbeat at seq=3; it is accepted too (session stays Active, no new Reject) —
-// which proves seq=2 was processed (seqnum advanced to expect seq=3).
-TEST(ValidateGateDefaultOff, T015_HeaderOutOfOrder_Accepted) {
+// Same stimulus as T012 W1 (49= before 35=) but with validate_inbound_messages==false.
+// 093-inbound-frame-dispositions (FR-004; contract C-2 step 1) superseded this cell's
+// "accepted and dispatched" pin: a frame whose third field is not 35 is garbled in
+// both validation modes, so it is disregarded, counted, and draws nothing.
+// NextNumIn proof: a well-formed Heartbeat at seq=3 afterwards is too high and draws a
+// ResendRequest; had seq=2 been processed it would be in sequence and silent.
+TEST(ValidateGateDefaultOff, T015_HeaderOutOfOrder_Disregarded) {
     ValidateDefaultOffFixture fix;
     auto cfg = fix.make_cfg_default();
     Session sess{fix.engine, cfg};
@@ -296,19 +298,20 @@ TEST(ValidateGateDefaultOff, T015_HeaderOutOfOrder_Accepted) {
     // Feed the violation at seq=2.
     fix.feed(sess, violation_frame);
 
-    // No Reject emitted — validation gate did not fire.
-    EXPECT_FALSE(fix.has_any_reject())
-        << "W_Off1: header-out-of-order must NOT produce a Reject when validation is off";
+    EXPECT_TRUE(fix.transport.sent_frames().empty())
+        << "W_Off1: the out-of-order frame is disregarded and draws nothing";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "W_Off1: the session stays Active";
+    EXPECT_EQ(sess.garbled_frame_count(), 1U) << "W_Off1: it is counted as one garbled frame";
 
-    // Positive dispatch proof: feed a well-formed Heartbeat at seq=3.
-    // Acceptance proves seq=2 was processed (seqnum advanced; the session expects seq=3).
-    auto next_frame = make_heartbeat_frame(3);
-    fix.feed(sess, next_frame);
-
-    EXPECT_FALSE(fix.has_any_reject())
-        << "W_Off1 dispatch proof: seq=3 Heartbeat must be accepted (session advanced past seq=2)";
-    EXPECT_EQ(sess.state(), fsm_state::Active)
-        << "W_Off1 dispatch proof: session must remain Active";
+    // NextNumIn proof: NextNumIn is still 2, so Heartbeat(34=3) is too high and draws a
+    // ResendRequest(35=2). Had 34=2 been processed, 34=3 would be in sequence and silent.
+    fix.feed(sess, make_heartbeat_frame(3));
+    bool resend = false;
+    for (auto const& f : fix.transport.sent_frames()) {
+        resend = resend || ValidateDefaultOffFixture::extract_field(f, 35) == "2";
+    }
+    EXPECT_TRUE(resend) << "W_Off1: NextNumIn was not incremented, so Heartbeat(34=3) is a gap";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "W_Off1: the session stays Active";
 }
 
 // ── T015 W_Off2 — undefined tag → accepted (not rejected) ────────────────────
