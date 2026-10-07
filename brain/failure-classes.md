@@ -831,6 +831,83 @@ drain dispatches.
   Round 4 caught that. Both defects were triage prescriptions applied verbatim. That is class 2's
   shape: the replacement was itself a claim.
 
+---
+
+### 19. A commit marker published after the next fallible step reports a crossed boundary as "nothing happened"
+
+A multi-step operation crosses one irreversible step: a rename over the live file, a send, a store
+write a peer can observe. When a later step fails, the recovery path must choose between *undo,
+nothing changed* and *poison, the world moved*, and it chooses by reading a marker the operation sets
+once it has crossed. If that marker is set only after a LATER fallible step (a directory fsync, a
+flush, a reopen), a failure in between takes the "nothing changed" branch. The object then keeps
+operating on state the irreversible step already replaced, and acknowledges work it will lose. The
+happy path cannot see the gap, and a restart check can pass over it, because the lost writes never
+reach the live name.
+
+- **Trigger:** you are writing or reviewing a recovery branch that reads a flag (`committed`,
+  `sent`, `rename_done`) to decide which side of a point of no return a failure fell on; or a
+  platform call that both performs the step and makes it durable.
+- **Procedure:**
+  - Publish the marker IMMEDIATELY after the irreversible step succeeds, before any further fallible
+    call, so every later failure poisons.
+  - Where the platform splits "done" from "durable", return a tri-state (not done / done but not
+    durable / done and durable), not a bool. `return ok && flushed` sends a flush failure down the
+    pre-commit branch and recreates the hole.
+  - Witness with one fault seam per fallible call after the irreversible step. For each, assert the
+    operation reports failure AND that every later operation fails closed until reopen; those
+    in-process clauses are the discriminators. Mutant: move the marker back after the fallible
+    block, and require RED.
+- ⚠️ **The opposite ordering is the same class.** An observable flag set BEFORE a fallible step that
+  can still reject (`is_open()`, a done-sentinel armed ahead of a teardown that can raise) makes a
+  failed operation look complete, and a retry is refused or no-ops. In both directions, place each flag at the
+  step whose outcome it names, not at a neighbour that is convenient.
+- **Instance (093, PR #554, Gate B round 1, RC-1 and RC-2).** `reset_store_to` in
+  `src/session/file_store.cpp` published `rename_done` only after the parent-directory fsync, and on
+  Windows a failed `FlushFileBuffers` after the rename was ignored. Both were pre-existing on `main`
+  and reached through 093's new `reset_to`; fixpp#548 describes the POSIX hole. The decision, the
+  rejected one-liner and the witnesses are on
+  [components/message-store-quiescence](./components/message-store-quiescence.md).
+- **Sibling.** Class 1's oracle-error form: an outcome the classifier was not built to place lands in
+  the permissive branch, and the cure is to give it its own value. There the classifier is a gate;
+  here it is a production recovery path, and the misplacement comes from an ordering, not an error.
+
+### 20. A defect class fixed one site per review round does not converge
+
+A review cites one site of a class (an unchecked `now + timeout`) and the fix patches that site. The
+next round, reading the fixed code, finds a neighbour: the `deadline - now` beside it, then the fix's
+own inexact branch. Each finding is honest and each fix is right for its line, yet the loop does not
+end, because the review samples the class one member at a time and the fix is scoped to the sample.
+Per-site patches also spread the invariant across every site, so each member needs its own argument,
+and nobody can tell the last member from the next-to-last.
+
+- **Trigger:** a finding names an expression SHAPE (arithmetic on a type with a range, a lifetime, a
+  conversion, an ordering) rather than one logic error; or a round finds a sibling of a site the
+  previous round fixed.
+- **Procedure:**
+  - On the FIRST finding of the class, before writing the fix, enumerate every expression of that
+    class the change adds or alters, mechanically: diff the change against its base over `src` and
+    `include`, grep for the class's operators and types, and follow each value to its sinks as well
+    as its sources. Lay it out as site / safe? / why, and keep the recipe rather than the table
+    (class 3).
+  - Fix by construction: route every row through one helper with a stated, tested contract, such as
+    "exact when representable, else saturate; total". Test the helper on both edges of every
+    boundary against a reference oracle (a wider-precision computation over a sweep), and prove the
+    oracle reports a mismatch on the previous implementation.
+  - Use a mutant per site, plus a mutant of the helper's check order.
+  - Pre-existing members outside the change's scope go to ONE follow-up issue that names every row,
+    not one issue each.
+- **Instance (093, PR #554, Gate B rounds 2–4).** Deadline arithmetic under an arbitrary `Clock`.
+  Round 2 routed the cited `now + timeout` sums through a saturating `deadline_after`. Round 3 found
+  the acceptor's `deadline - now` subtraction and inexact saturation in that helper; its triage
+  enumerated every time expression the PR adds, and the round's fix routed them through an exact
+  `deadline_after` and a total `duration_until`. Round 4 converged, checked against a 128-bit reference shown to report
+  round 2's helper. The older sites went to fixpp#555. The decision and the rejected `Clock` range
+  precondition are on [components/inbound-message-path](./components/inbound-message-path.md).
+- **Sibling.** Class 14 is the same treadmill on a check: a forbidden list widened one spelling per
+  round, ended by pinning the whole output. Here the list is of patched sites, ended by one helper.
+  Class 9's *the reported symptom is usually the smaller half* asks the same enumeration question of
+  one wrong value's consumers.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:

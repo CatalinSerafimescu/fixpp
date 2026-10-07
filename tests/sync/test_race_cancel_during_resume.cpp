@@ -51,6 +51,8 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
@@ -58,6 +60,7 @@
 #include <chrono>
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <future>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -336,6 +339,64 @@ TEST(SeamRaceCancelDuringResume, MutexFreeAfterRace) {
 
     EXPECT_EQ(total.load(), N);
     // mtx destruction — must not std::terminate.
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 093-inbound-frame-dispositions (plan OD-25): a granted async_lock() leaves its
+// caller's cancellation filter terminal-only, whatever the caller had set. After the
+// grant, a total emission does not cancel the caller's next await; a terminal one
+// still does. 093's 141=Y reset unit (Session::run_reset_unit_) runs its store
+// operation on an empty cancellation slot because of this: a filter the unit set
+// before its first seqnum lock would not survive that lock. A change to async_lock()
+// that fails the total arm here changes the premise of that ruling: re-check it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST(SeamRaceCancelDuringResume, Od25_GrantLeavesTheCallersFilterTerminalOnly) {
+    for (auto const type : {asio::cancellation_type::total, asio::cancellation_type::terminal}) {
+        SCOPED_TRACE(type == asio::cancellation_type::total ? "total" : "terminal");
+        asio::io_context ioc;
+        async_mutex mtx;
+        asio::cancellation_signal sig;
+        bool granted = false;
+        std::optional<asio::error_code> wait_ec;
+        auto fut = asio::co_spawn(
+            ioc,
+            [&]() -> asio::awaitable<void> {
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation{});
+                auto guard = co_await mtx.async_lock();
+                granted = guard.has_value();
+                asio::steady_timer t{ioc, std::chrono::milliseconds{200}};
+                asio::error_code ec;
+                co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+                wait_ec = ec;
+            },
+            asio::bind_cancellation_slot(sig.slot(), asio::use_future));
+        for (int i = 0; i < 1000 && !granted; ++i) {
+            (void)ioc.run_one_for(std::chrono::milliseconds{10});
+        }
+        ASSERT_TRUE(granted) << "the uncontended lock was not granted";
+        sig.emit(type);
+        // Run until the coroutine completes, bounded as the grant loop above is; the
+        // readiness assertion below names the future before get().
+        for (int i = 0;
+             i < 500 && fut.wait_for(std::chrono::seconds{0}) != std::future_status::ready; ++i) {
+            (void)ioc.run_one_for(std::chrono::milliseconds{10});
+        }
+        ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::ready);
+        fut.get();
+        ASSERT_TRUE(wait_ec.has_value());
+        // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
+        if (type == asio::cancellation_type::total) {
+            EXPECT_FALSE(*wait_ec) << "a total emission after the grant cancelled the next await: "
+                                   << wait_ec->message();
+        } else {
+            EXPECT_EQ(*wait_ec, asio::error::operation_aborted)
+                << "a terminal emission after the grant did not cancel the next await";
+        }
+        // NOLINTEND(bugprone-unchecked-optional-access)
+    }
 }
 
 }  // namespace

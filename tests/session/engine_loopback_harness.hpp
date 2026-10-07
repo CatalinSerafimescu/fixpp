@@ -35,6 +35,7 @@
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <functional>
 #include <future>
 #include <memory>
 #include <stdexcept>
@@ -52,9 +53,12 @@ class EngineLoopbackHarness {
 public:
     // Build. Returns nullptr + GTEST_SKIP() intent when fixture dir absent.
     // Takes EngineConfig by move (it contains non-copyable unique_ptr members).
+    // `configure_acceptor`, when set, edits the acceptor's SessionConfig just before it
+    // is registered (093: its logon_timeout_ms and CompID authorization policy).
     [[nodiscard]] static std::unique_ptr<EngineLoopbackHarness> build(
         asio::any_io_executor exec, fixpp::core::EngineConfig engine_cfg,
-        bool register_sessions = true) {
+        bool register_sessions = true,
+        std::function<void(fixpp::session::SessionConfig&)> configure_acceptor = {}) {
         const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
 #ifdef FIXPP_TLS_FIXTURE_DIR
         static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
@@ -74,7 +78,7 @@ public:
             engine_cfg.clock = std::make_shared<fixpp::core::system_clock_source>(exec);
         }
         h->engine_ = std::make_unique<fixpp::session::Engine>(exec, std::move(engine_cfg));
-        if (register_sessions) h->register_default_sessions(exec);
+        if (register_sessions) h->register_default_sessions(exec, configure_acceptor);
         return h;
     }
 
@@ -100,7 +104,9 @@ public:
 private:
     EngineLoopbackHarness() = default;
 
-    void register_default_sessions(asio::any_io_executor exec) {
+    void register_default_sessions(
+        asio::any_io_executor exec,
+        std::function<void(fixpp::session::SessionConfig&)> const& configure_acceptor) {
         // Shared TLS factory (FR-026: SSL_CTX cached once).
         fixpp::tls::file_cert_source::Config cs_cfg;
         cs_cfg.leaf_path = fixture_dir_ + "/leaf_rsa2048.pem";
@@ -149,6 +155,7 @@ private:
         // transport_send_ to the live Transport::async_write. This no-op is the
         // initial value that is captured at open() time.
         acc.transport_send = [](std::span<const std::byte>) {};
+        if (configure_acceptor) configure_acceptor(acc);
         acceptor_id_ = fixpp::session::SessionId::from_config(acc);
         if (!engine_->register_session(std::move(acc)))
             throw std::runtime_error{"EngineLoopbackHarness: register acceptor failed"};

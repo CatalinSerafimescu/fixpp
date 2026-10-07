@@ -375,9 +375,10 @@ const std::vector<ParityRow> kParity = {
       "no equivalent in 044 step-1." },
 
     // ── Timeouts ─────────────────────────────────────────────────────────────
-    { .qf_key="LogonTimeout",     .disposition=Disposition::Gap, .key_044="",
-      .notes="No exact 044 equivalent; fixpp drives Logon retry/timeout via the "
-      "reconnect_policy timers, not a named LogonTimeout scalar." },
+    { .qf_key="LogonTimeout",     .disposition=Disposition::Mapped, .key_044="logon_timeout_ms",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::logon_timeout_ms "
+      "(093; integer ms, zero refused; QF LogonTimeout is integer seconds — different "
+      "units, same semantic: how long a connection may take to log on before it is closed)." },
     { .qf_key="LogoutTimeout",    .disposition=Disposition::Mapped, .key_044="logout_disconnect_timeout_ms",
       .notes="scalar_mappers.cpp, map_scalars — SessionConfig::logout_disconnect_timeout_ms "
       "(integer ms; QF LogoutTimeout is integer seconds — different units, "
@@ -570,6 +571,7 @@ const std::set<std::string_view> kLoaderAccepted044Keys = {
     "test_request_threshold",
     "sending_time_threshold",
     "logout_disconnect_timeout_ms",
+    "logon_timeout_ms",
     "reset_on_logon",
     "reset_on_logout",
     "reset_on_disconnect",
@@ -722,10 +724,9 @@ TEST(QuickFixParityTable, GapRowCount) {
     }
     // Known gaps (see report item 6 in the brief):
     //   SessionQualifier, SendRedundantResendRequests, CheckLatency,
-    //   ValidateLengthAndChecksum, LogonTimeout,
+    //   ValidateLengthAndChecksum,
     //   CertificateRevocationListFile, CertificateRevocationListDirectory,
     //   AllowedRemoteAddresses, SSLProtocol, SSLCipherSuite, TLSCipherSuites
-    // Total: 11 gaps.
-    EXPECT_EQ(gaps, 11) << "Unexpected number of Gap rows; update the count when gaps are "
+    EXPECT_EQ(gaps, 10) << "Unexpected number of Gap rows; update the count when gaps are "
                            "resolved or new ones are identified";
 }

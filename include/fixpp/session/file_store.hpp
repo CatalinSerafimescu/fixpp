@@ -164,6 +164,11 @@ public:
         direction_t dir, bool increment) noexcept override;
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override;
+    // 093-inbound-frame-dispositions (data-model E-9): reset() and the two target
+    // counters as one operation under the writer mutex, committed by the reset's
+    // rename, so a restart reads the old counters or the new ones.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_to(
+        seqnum_t next_in, seqnum_t next_out) noexcept override;
 
     // Engine-internal graceful-close hook dispatched at compile time via
     // fixpp::session::detail::has_flush_for_session_close (I-17; FR-028;
@@ -252,6 +257,23 @@ void arm_force_store_pwrite_fail_once() noexcept;
 // number of times the T003 seam actually fired since the last reset. Used by
 // tests to confirm the seam fired for the right reason.
 int read_and_reset_store_pwrite_fail_count() noexcept;
+// 093 (tasks.md T079, Q-29) reset-atomicity fault injection. The first arms a one-shot
+// fault in the next reset's offloaded sequence after its temp log is written and closed,
+// before the rename. The second arms a fault at the first next_seqnum() counter-record
+// write issued after a reset's rename has committed; disarm clears it whether or not it
+// fired. The counter reads and resets how many times either fault fired.
+void arm_force_reset_fail_before_rename_once() noexcept;
+void arm_fail_counter_write_after_reset_commit() noexcept;
+void disarm_fail_counter_write_after_reset_commit() noexcept;
+int read_and_reset_reset_atomicity_fault_count() noexcept;
+// 093 Gate B (fixpp#554): one-shot faults after a reset's rename has replaced the live
+// log, so the store's open file names the replaced inode. POSIX only: the next reset's
+// parent-directory open, or its parent-directory fsync, fails. Windows only: the
+// FlushFileBuffers after the next reset's rename fails. Each counts in
+// read_and_reset_reset_atomicity_fault_count() when it fires.
+void arm_force_reset_dir_open_fail_once() noexcept;
+void arm_force_reset_dir_fsync_fail_once() noexcept;
+void arm_force_reset_rename_flush_fail_once() noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session

@@ -1630,3 +1630,47 @@ TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent) {
                "use display_value() from loader_internal.hpp to redact credential keys";
     }
 }
+
+// ── 093 (data-model E-7; quickstart Q-31): logon_timeout_ms refusals ──────────
+//
+// Each fixture is neg_out_of_range.toml with one logon_timeout_ms value. Zero, a
+// negative value and one above UINT32_MAX are refused with out_of_range; a value that
+// is not an integer with malformed_value. Each refusal is a diagnostic on the key,
+// with its source location.
+namespace {
+
+void expect_logon_timeout_refusal(std::string_view fixture, fixpp::config::reason_class rc) {
+    auto result = load(neg_fixture(fixture));
+    ASSERT_FALSE(result.has_value()) << fixture << " loaded";
+    auto it = std::find_if(result.error().begin(), result.error().end(),
+                           [&](const fixpp::config::LoadDiagnostic& d) {
+                               return d.reason == rc && d.key_path == "session[0].logon_timeout_ms";
+                           });
+    std::string seen;
+    for (const auto& d : result.error()) seen += " [" + d.key_path + ": " + d.message + "]";
+    ASSERT_NE(it, result.error().end()) << fixture << ": no diagnostic of the expected class on "
+                                        << "session[0].logon_timeout_ms; got" << seen;
+    EXPECT_GT(it->location.line, std::uint32_t{0}) << "the diagnostic carries its source location";
+}
+
+}  // namespace
+
+TEST(LoadNegativeBattery, LogonTimeoutZeroIsOutOfRange) {
+    expect_logon_timeout_refusal("neg_logon_timeout_zero.toml",
+                                 fixpp::config::reason_class::out_of_range);
+}
+
+TEST(LoadNegativeBattery, LogonTimeoutNegativeIsOutOfRange) {
+    expect_logon_timeout_refusal("neg_logon_timeout_negative.toml",
+                                 fixpp::config::reason_class::out_of_range);
+}
+
+TEST(LoadNegativeBattery, LogonTimeoutAboveUint32MaxIsOutOfRange) {
+    expect_logon_timeout_refusal("neg_logon_timeout_above_u32.toml",
+                                 fixpp::config::reason_class::out_of_range);
+}
+
+TEST(LoadNegativeBattery, LogonTimeoutNotAnIntegerIsMalformed) {
+    expect_logon_timeout_refusal("neg_logon_timeout_not_integer.toml",
+                                 fixpp::config::reason_class::malformed_value);
+}

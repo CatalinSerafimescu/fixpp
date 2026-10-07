@@ -14,7 +14,8 @@
 //      tag without '=' (B-1); and, in Session::on_inbound_frame, the same two
 //      shapes as field 3 of a frame arriving in Active, which the header scan
 //      records as a fault (092 data-model E-1) and contract C-2 row D-8
-//      disregards (B-2).
+//      disregarded (B-2). 093-inbound-frame-dispositions (contract C-2 step 1)
+//      supersedes row D-8 for this shape; see the B-2 section.
 //   C. Logon-ack with msg_seq_num=0 → Disconnected (Guard (4)'s LogonSent-row seq==0 check).
 //   D. cancel_sleeps() mid-Logout-graceful-sleep → system_error catch
 //      absorbing the operation_aborted exception (run_logout_phase1's wake-early catch).
@@ -238,9 +239,10 @@ protected:
 
     // Category B-2: reaches Active with the Category C Logon-ack, feeds `faulty_body`
     // (whose field 3 is the fault and which carries MsgSeqNum 2 after it), then a
-    // conformant Heartbeat at MsgSeqNum 2. Contract C-2 row D-8: the faulty frame
-    // draws nothing and leaves the session Active with NextNumIn unmoved, so the
-    // Heartbeat is in sequence and draws nothing either.
+    // conformant Heartbeat at MsgSeqNum 2. The faulty frame, disregarded by 093's
+    // contract C-2 step 1 (092's row D-8 before it), draws nothing and leaves the
+    // session Active with NextNumIn unmoved, so the Heartbeat is in sequence and draws
+    // nothing either.
     void expect_field3_fault_disregarded(std::string const& faulty_body) {
         auto cfg = make_cfg();
         TransportDouble td;
@@ -266,6 +268,8 @@ protected:
         EXPECT_TRUE(td.sent_frames().empty())
             << "D-8: the faulty frame must draw nothing (no Reject); sent:"
             << printable_all(td.sent_frames());
+        EXPECT_EQ(s.garbled_frame_count(), 1U)
+            << "093 C-2 step 1: a frame whose field 3 is not 35 is one garbled frame";
 
         td.reset();
         std::string const heartbeat =
@@ -297,9 +301,11 @@ private:
 };
 
 // ── Category B-2: a malformed field 3 in Active is disregarded (092 D-8) ─────
-// specs/092-garbled-frame-reject contract C-2 row D-8. Each cell reaches Active
-// first, so the frame meets D-8 and not the LogonSent refusal (D-2), which
-// disconnects whatever the frame holds. The peer's CompIDs are the session's
+// specs/092-garbled-frame-reject contract C-2 row D-8. 093-inbound-frame-dispositions
+// (contract C-2 step 1) now takes this shape before the fault branch: the outcome is
+// the same disregard, and the frame is also counted as one garbled frame. Each cell
+// reaches Active first, so the frame meets the Active arm and not the LogonSent
+// arm. The peer's CompIDs are the session's
 // counterparty's (49=ISLD, 56=TW), so no identity check is what fails.
 
 TEST_F(AdversarialSessionTest, InboundFrameMalformedTagInField3IsDisregarded) {

@@ -13,6 +13,7 @@
 // header. Needs no test macro.
 
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/session/session.hpp>
 #include <span>
 
@@ -53,6 +54,59 @@ struct session_test_access {
     [[nodiscard]] static bool live_peer_id_has_value(Session const& s) noexcept {
         return s.live_peer_id_.has_value();
     }
+
+    // The inbound limit L open() stored (093, data-model E-2). Q-13 reads it.
+    [[nodiscard]] static std::uint32_t inbound_limit(Session const& s) noexcept {
+        return s.inbound_limit_;
+    }
+
+    // The capacity of the carry open() allocated: L plus one read (093, data-model E-2).
+    [[nodiscard]] static std::size_t carry_capacity(Session const& s) noexcept {
+        // Precondition: open() succeeded, so carry_ holds a value.
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        return s.carry_->capacity();
+    }
+
+    // The size of the per-session parse buffer open() allocated (093, data-model E-2).
+    [[nodiscard]] static std::size_t parse_buffer_bytes(Session const& s) noexcept {
+        return s.inbound_parse_buf_.size();
+    }
+
+    // How many requests the parse buffer's spill witness has seen: every allocation an
+    // inbound parse, or a lazy read inside a callback, made past the buffer (093,
+    // contract C-3 I-2).
+    [[nodiscard]] static std::uint64_t parse_spills(Session const& s) noexcept {
+        return s.parse_spill_witness_.spills();
+    }
+
+    // Shortens the parse buffer to its first `bytes` (093, contract C-3 I-4): an
+    // admitted frame's parse then draws past it, which reaches the spill witness. The
+    // defence cells use it after open(); `bytes` must not exceed the current size.
+    static void shrink_parse_buffer(Session& s, std::size_t bytes) noexcept {
+        s.inbound_parse_buf_ = s.inbound_parse_buf_.first(bytes);
+    }
+
+    // Lowers the entry cap every inbound parse runs under (093, data-model E-2): a
+    // frame with more fields than `n` then fails its parse with wire_offset_table_full
+    // on every lane. The defence cells use it after open().
+    static void lower_inbound_entry_cap(Session& s, std::size_t n) noexcept {
+        s.inbound_entry_cap_ = n;
+    }
+
+    // Whether a 141=Y reset unit's store operation is in flight (093, data-model E-10).
+    [[nodiscard]] static bool reset_unit_in_flight(Session const& s) noexcept {
+        return s.reset_unit_in_flight_;
+    }
+
+    // Whether Engine::stop()'s step 1 has run on the session's strand (093, data-model
+    // E-13).
+    [[nodiscard]] static bool engine_stop_requested(Session const& s) noexcept {
+        return s.engine_stop_requested_;
+    }
+
+    // The session's store, or null before open() (093 plan OD-25: a cell issues a
+    // competing store operation on it).
+    [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
 };
 
 }  // namespace fixpp::session

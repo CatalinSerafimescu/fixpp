@@ -2804,13 +2804,13 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
 // Stimulus: reset_on_logon=true initiator {in=1, out=1} — latch=true, Logon at seq=1
 //           → n_pre_outbound==2 == seqnum_min+1 → restore gate fires.
 //
-// W5 seed: fail_on_nth_outbound_write=1 (first outbound write = persist_outbound_advance_
-//          fails) → reset_seqnums_to_one_durable already succeeded (store.reset() ran)
-//          → persist_outbound_advance_ fails → fatal → Disconnected.
-// W6 seed: no failure; the arm calls:
-//   1. reset_seqnums_to_one_durable() → store.reset() → durable_outbound=1
-//   2. set_next_outbound(2) → manager=2
-//   3. persist_outbound_advance_() → next_seqnum(outbound,true) → durable_outbound=2
+// W5 seed: fail_on_nth_outbound_write=1 → the reset unit's reset_to runs reset(), then
+//          its next_seqnum(outbound, true) fails → fatal → Disconnected.
+// W6 seed: no failure; the arm runs the reset unit with outbound target 2:
+//   1. the manager's outbound counter is set to 2
+//   2. the unit's reset_to (MessageStore's default body): store.reset() →
+//      durable_outbound=1
+//   3. then next_seqnum(outbound, true) → durable_outbound=2
 //   After Active: durable_outbound==2==manager (INV-H1).
 //   Discriminating: if persist did NOT fire → durable_outbound stays 1 (post-reset
 //   base) ≠ 2 → FAIL. The 1-vs-2 gap is naturally falsifying.
@@ -2822,9 +2822,11 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
 // emit_initiator_logon_ emits at seq=1 → n_pre_outbound=2 → restore_before_send=true).
 // [032 contract C1/C3, FR-007, INV-H1]
 TEST(PersistentSeqnumHydrate, T014_W5_OutboundPersistFail_Fatal) {
-    // W5: fail_on_nth_outbound_write=1 → first outbound write fails → Disconnected.
-    // The FaultStore initial durable_outbound=1 (not the sentinel — the sentinel applies
-    // to the discriminating check, not the initial value).
+    // W5: fail_on_nth_outbound_write=1 → every outbound write fails → Disconnected.
+    // FaultStore does not override reset_to, so the 141=Y reset unit's reset_to runs
+    // MessageStore's default body (093 data-model E-9): reset(), then
+    // next_seqnum(outbound, true) for the outbound target 2, and that write fails. On a
+    // persistent store the unit takes the store error as fatal.
     // Seed {in=1, out=1} so Logon emits at seq=1 (latch=true, restore_before_send=true).
     auto factory = std::make_shared<FaultStoreFactory>(
         /*seeded_inbound=*/1, /*seeded_outbound=*/1,
@@ -2841,10 +2843,44 @@ TEST(PersistentSeqnumHydrate, T014_W5_OutboundPersistFail_Fatal) {
     // Feed peer Logon-ack with 141=Y at seq=1 (in-seq → restore gate fires).
     fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
 
-    // W5: outbound persist failure → fatal-when-persistent → Disconnected.
+    // W5: the reset unit's outbound write failure → fatal-when-persistent → Disconnected.
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
-        << "T014 W5: persist_outbound_advance_() failure on a persistent store must be "
-           "fatal → Disconnected. [032 contract C3, FR-007, 030 fatal-when-persistent]";
+        << "T014 W5: a failed outbound write in the reset unit's reset_to on a persistent "
+           "store must be fatal → Disconnected. [032 contract C3, FR-007, 030 "
+           "fatal-when-persistent]";
+}
+
+// The inbound twin of T014_W5: the default reset_to body's inbound write fails.
+// FaultStore does not override reset_to, so MessageStore's default body runs: reset(),
+// then next_seqnum(inbound, true) for the inbound target 2 (the reset-ack Logon was
+// consumed), then next_seqnum(outbound, true) for the outbound target 2. The inbound
+// write is the first inbound write the session issues, so fail_on_nth_write=1 fails
+// exactly it. The body must stop there and return the error, which the unit takes as
+// fatal on a persistent store.
+TEST(PersistentSeqnumHydrate, T014_W5_InboundPersistFailInTheDefaultResetToBody_Fatal) {
+    auto factory = std::make_shared<FaultStoreFactory>(
+        /*seeded_inbound=*/1, /*seeded_outbound=*/1,
+        /*fail_on_nth_call=*/0, /*fail_on_nth_write=*/1,
+        /*fail_on_nth_outbound_write=*/0);
+    auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
+
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
+        << "precondition: initiator must be LogonSent after open()";
+
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(store->write_count, 0) << "precondition: no inbound write before the Logon-ack";
+    ASSERT_EQ(store->outbound_write_count, 0)
+        << "precondition: no outbound write before the Logon-ack";
+
+    fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
+
+    EXPECT_EQ(store->write_count, 1) << "the default body issued its inbound write, once";
+    EXPECT_EQ(store->outbound_write_count, 0)
+        << "the default body stops at the inbound write's error: the outbound target is 2, "
+           "so a body that went on would have issued the outbound write";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "a failed inbound write in the reset unit's reset_to on a persistent store is fatal";
 }
 
 TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
@@ -2856,8 +2892,9 @@ TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
     // resets to {1,1} again (no-op at the in-memory level), Logon emits at seq=1 →
     // n_pre_outbound=2 → restore fires.
     //
-    // Discriminator: the arm's store.reset() drives durable_outbound to the post-reset base 1,
-    // then persist_outbound_advance_() advances it to 2. The assertion checks durable_outbound==2.
+    // Discriminator: the unit's reset_to (MessageStore's default body) runs reset() →
+    // durable 1, then next_seqnum(outbound, true) → durable 2. The assertion checks
+    // durable_outbound==2.
     // If persist does NOT fire, durable stays 1 (post-reset base) ≠ 2 → FAIL.
     // An external sentinel would be wiped by store.reset(); the post-reset base {1→2} IS the
     // falsifying discriminator — no external sentinel needed.
@@ -2874,8 +2911,8 @@ TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
     ASSERT_NE(store, nullptr);
 
     // Feed peer Logon-ack with 141=Y at seq=1.
-    // The arm runs: reset_seqnums_to_one_durable() → store.reset() → durable_outbound=1,
-    // then set_next_outbound(2) → manager=2, then persist_outbound_advance_() → durable=2.
+    // The arm runs the reset unit: manager outbound → 2; the unit's reset_to (MessageStore's
+    // default body) runs reset() → durable 1, then next_seqnum(outbound, true) → durable 2.
     fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
@@ -2895,8 +2932,8 @@ TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
     // → this assertion FAILS. Naturally falsifying (no external sentinel needed because
     // store.reset() on the arm already resets durable_outbound to 1 before persist).
     EXPECT_EQ(store->durable_outbound, fixpp::session::seqnum_t{2})
-        << "T014 W6 (INV-H1 outbound): durable_outbound must be 2 after "
-           "persist_outbound_advance_(). If persist did not fire, "
+        << "T014 W6 (INV-H1 outbound): durable_outbound must be 2 after the reset unit's "
+           "outbound write. If it did not run, "
            "durable=1 (post-reset base) ≠ 2 → FAIL. [032 contract C3, INV-H1, FR-007]";
 
     // INV-H1: never over-persist (store ≤ manager).

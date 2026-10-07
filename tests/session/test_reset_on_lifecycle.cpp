@@ -2110,6 +2110,42 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailu
         << store_in;
 }
 
+// ── Initiator_Received141Ack_NonPersistentStore_ResetFailure_StillActive ──────
+//
+// The initiator mirror of ResetOnLogon_Off_Received141_StoreFailure_NonPersistentStillActive,
+// on the shape of Initiator_Received141Ack_PersistentStore_ResetFailure_Disconnects: the
+// 141=Y reset unit's store operation fails on a NON-persistent store, whose disposition
+// is logged, then proceed (030 FR-010's non-persistent arm; 024 I-07). The store is seeded
+// to N after open(), as that sibling does, so the store still holding N proves the
+// injected failure fired: a reset that succeeded would have rewound it to 1, then 2.
+TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_NonPersistentStore_ResetFailure_StillActive) {
+    auto np_factory = std::make_shared<NonPersistentStoreDoubleFactory>();
+    auto cfg = make_cfg(session_role::initiator, /*reset_on_logon=*/false,
+                        reset_seqnum_policy::bilateral_lenient);
+    cfg.store_factory = np_factory;
+    Session sess(engine, cfg);
+
+    auto r = open_sync(sess);
+    ASSERT_TRUE(r.has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    constexpr seqnum_t N = 37U;
+    np_factory->store->seed_inbound(N);
+    np_factory->store->fail_next_reset();
+
+    auto ack = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
+    auto r2 = feed_sync(sess, ack);
+
+    EXPECT_EQ(np_factory->store->reset_call_count(), 1U)
+        << "the unit's store operation attempted the reset once";
+    EXPECT_EQ(np_factory->store->current_next_inbound(), N)
+        << "the injected reset failure fired, so the store was not rewound";
+    ASSERT_TRUE(r2.has_value())
+        << "a non-persistent store's reset failure is logged, not propagated";
+    EXPECT_EQ(sess.state(), fsm_state::Active)
+        << "a non-persistent store's reset failure does not disconnect the initiator";
+}
+
 // ── Witness T016g: Initiator_Received141Ack_GuardSkipsWhenNoConsumedReset ─────
 //
 // Initiator symmetric twin of T009 (FR-007/009): a peer Logon-ack carrying 141=Y

@@ -53,9 +53,11 @@ EXPECTED_PUBLIC_SURFACE = frozenset({
     "session_config_create", "session_config_destroy",
     "session_config_set_begin_string", "session_config_set_comp_ids",
     "session_config_set_dictionary", "session_config_set_heartbeat_seconds",
+    "session_config_set_logon_timeout_ms",  # 093 (C-7 row 7; plan OD-27)
     "session_config_set_reset_on_logon",
     "session_config_set_reset_seqnum_policy", "session_config_set_role",
     "session_config_set_security", "session_config_set_tcp_endpoint",
+    "session_garbled_frame_count",  # 093 (C-7 row 8; plan OD-27)
     "session_is_established", "session_open", "session_register_callback",
     "session_send",
     "strerror", "version_string",

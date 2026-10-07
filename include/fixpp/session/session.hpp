@@ -58,6 +58,7 @@
 #include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
 #include <fixpp/session/session_event.hpp>  // 013 T013a — SessionEvent + kSessionEventRingCapacity
 #include <fixpp/session/session_fsm.hpp>    // 005-session-establishment-fsm — fsm_state enum
+#include <fixpp/wire/framer.hpp>            // 093 E-2: pmr_carry_buffer, the carry open() allocates
 
 namespace fixpp::core {
 struct EngineConfig;
@@ -160,8 +161,15 @@ public:
 
     // Two-phase close ([2d §4.7] close() declaration frozen shape). Idempotent
     // THREE-STATE model (I-10): already-closing → SAME in-flight awaitable,
-    // no error, no side effects; never-opened / already-closed(drained) →
-    // error::session_already_closed; no side effects in any case. graceful
+    // no error; never-opened / already-closed(drained) →
+    // error::session_already_closed, with no side effects.
+    // OD-29 (093 — terminal close escalates a graceful one): the already-closing
+    // join has no side effects unless a terminal close arrives while a graceful
+    // one is in flight. Then the terminal close ends the graceful close's grace
+    // wait, or keeps its phase 1 (the Logout exchange) from starting, so the
+    // transport closes now; both callers get the in-flight result. A graceful
+    // close on a closing session, and close()'s wait for a reset unit, are
+    // unchanged. graceful
     // runs the engine-internal FileStore::flush_for_session_close() hook
     // once in phase 1 (after the last in-flight store(...) resumes, before
     // the Logout async_write); terminal skips phase 1 entirely (hook NOT
@@ -295,6 +303,15 @@ public:
     // behavior; there is no hard outbound guard here (see spec Assumptions).
     [[nodiscard]] std::optional<std::uint32_t> peer_max_message_size() const noexcept {
         return peer_advertised_max_message_size_;
+    }
+
+    // 093-inbound-frame-dispositions (data-model E-4; FR-003): the number of garbled
+    // inbound regions this session has disregarded, Framer garbles and frames whose
+    // third field is not MsgType(35) alike. Monotonic. A relaxed load, so any thread
+    // may call it. It is not ordered with the rest of the session's state: a caller
+    // that needs the value to reflect a given frame synchronises by other means.
+    [[nodiscard]] std::uint64_t garbled_frame_count() const noexcept {
+        return garbled_frames_.load(std::memory_order_relaxed);
     }
 
     // FR-004 / D-2 — set of recent FSM transitions (capacity ≤16).
@@ -508,6 +525,14 @@ public:
     // violation (ill-formed, no diagnostic required).
     friend struct session_test_access;
 
+    // 093-inbound-frame-dispositions (data-model E-11, plan OD-12): the engine's one
+    // named seam into a Session's private state, for run_read_pump and the accept
+    // loop. Defined in src/session/session_engine_access.hpp, which is never
+    // installed. Production code, not test access, and unconditional for the same
+    // ODR reason as the friend above. Engine hooks go there, never into this
+    // class's public surface.
+    friend struct session_engine_access;
+
     // 015 T011 — Engine-internal acceptor attach primitive.
     // Called by the engine's run_accept_loop STRICTLY-BEFORE the first
     // on_inbound_frame (happens-before invariant Gate A New-1 / E-4).
@@ -577,8 +602,10 @@ private:
     // Logout+disconnect disposition (session.cpp's 070-fix44-closeout S-029 posture-mismatch call
     // site). Called from both the acceptor inbound-Logon and the initiator inbound-Logon-ack paths.
     // [FR-002; D-F]
+    // arm: the calling Logon arm's expected state (093 plan OD-26), passed to the
+    // Logout's store_then_emit and to the Disconnected write after it.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
-        std::string_view reason_text) noexcept;
+        std::string_view reason_text, fsm_state arm) noexcept;
 
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
@@ -659,6 +686,101 @@ private:
     // 070-fix44-closeout S-030 (FR-007): peer's advertised MaxMessageSize(383),
     // parsed from its inbound Logon. Observability only (no outbound guard here).
     std::optional<std::uint32_t> peer_advertised_max_message_size_;
+
+    // 093-inbound-frame-dispositions (data-model E-2): the session's one inbound
+    // limit L, set by open() from inbound_limit_for(cfg_) (src/session/inbound_limit.hpp).
+    // 0 until open() runs.
+    std::uint32_t inbound_limit_ = 0;
+
+    // 093 (contract C-3 I-2): the spill witness, the upstream of the parse buffer's and
+    // the carry's monotonic resources. It counts every request that reaches it (every
+    // allocation past the buffer or the carry block), then forwards it to
+    // fixpp::detail::arena_upstream(): null on every lane except MSVC's debug STL, where
+    // the request is served from the heap. mutable: validate_inbound_ is const.
+    class spill_witness final : public std::pmr::memory_resource {
+    public:
+        [[nodiscard]] std::uint64_t spills() const noexcept {
+            return spills_.load(std::memory_order_relaxed);
+        }
+
+    private:
+        void* do_allocate(std::size_t bytes, std::size_t alignment) override;
+        void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override;
+        [[nodiscard]] bool do_is_equal(
+            std::pmr::memory_resource const& other) const noexcept override;
+        std::atomic<std::uint64_t> spills_{0};
+    };
+    mutable spill_witness parse_spill_witness_;
+
+    // 093 (data-model E-2): the per-session parse buffer B(L), allocated once by open()
+    // from session_arena_ (inbound_parse_block_) and released at destruction. Every
+    // inbound parse builds a fresh monotonic_buffer_resource over inbound_parse_buf_,
+    // upstream parse_spill_witness_, with inbound_entry_cap_ = N(L) as its entry cap.
+    // The span is the whole block except under session_test_access's shrink.
+    std::span<std::byte> inbound_parse_block_;
+    std::span<std::byte> inbound_parse_buf_;
+    std::size_t inbound_entry_cap_ = 0;
+
+    // 093 (data-model E-2, plan OD-13): the read pump's carry, allocated once by open()
+    // and borrowed by run_read_pump through session_engine_access. One block from
+    // cfg_.framer_carry_arena (carry_arena_), a monotonic resource over exactly that
+    // block (upstream parse_spill_witness_), and the carry over that resource, whose
+    // noexcept constructor's reserve the block serves. ~Session releases them in
+    // reverse order. 093 supersedes the pump-local carry of 015 T015.
+    std::pmr::memory_resource* carry_arena_ = nullptr;
+    std::span<std::byte> carry_block_;
+    std::optional<std::pmr::monotonic_buffer_resource> carry_resource_;
+    std::optional<fixpp::wire::pmr_carry_buffer> carry_;
+
+    // 093 (data-model E-4): the count garbled_frame_count() reads. Written only by
+    // note_garbles_, on the session strand, with relaxed ordering.
+    // Placement condition: the count is monotonic per SessionId for the engine's life
+    // only while the engine builds one Session per SessionEntry per Engine::start().
+    // Re-derive before relying on it: read what follows the run_read_pump call in
+    // run_accept_loop and in run_connect_loop (src/session/engine.cpp), and the
+    // lifecycle note above `class Engine` (include/fixpp/session/engine.hpp). If a
+    // Session ever serves a second connection, this placement must be re-derived.
+    std::atomic<std::uint64_t> garbled_frames_{0};
+
+    // 093 (data-model E-12): the logger, resolved once at open() from
+    // cfg_.logger_override, else the engine's; null when neither is set. And the
+    // garble log's rate state: whether a garble record has been written, the earliest
+    // time of the next one on effective_clock_, and the regions of rate-suppressed
+    // summaries since the last record (plan OD-21).
+    std::shared_ptr<fixpp::log::Logger> logger_;
+    bool garble_logged_ = false;
+    fixpp::core::steady_time_point garble_log_next_;
+    std::uint64_t garbles_unlogged_ = 0;
+
+    // note_garbles_ — 093 (data-model E-4, E-12): accounts one summary of disregarded
+    // inbound bytes. Reached from the engine through session_engine_access (the read
+    // pump after a feed, the accept loop once after open()) and from contract C-2 step
+    // 1. Adds `regions` to the count; when regions > 0 it emits one
+    // session_event_garbled_frame and writes a garble log record, at most one per
+    // max(HeartBtInt, 1 s). Session strand only.
+    void note_garbles_(fixpp::wire::garble_summary const& g) noexcept;
+
+    // 093-inbound-frame-dispositions (FR-013, data-model E-12): a frame over L was
+    // refused at framing once this Session exists. Writes one FIXPP_SLOG record with
+    // the failure kind and L; the read pump then closes the session terminally.
+    // Reached through session_engine_access.
+    void note_frame_too_large_() noexcept;
+
+    // 093 (data-model E-6): true once the session has first entered Active. Set by
+    // record_state_transition_ on that entry, whether or not an application is attached
+    // (onLogon_fired_ latches only with one), and never cleared. The read pump stops
+    // testing the establishment deadline once it is set. Written and read on the
+    // session strand.
+    // Placement condition: as garbled_frames_ above; a Session reused for a second
+    // connection would need this reset when the transport is installed.
+    bool reached_active_ = false;
+
+    // note_establishment_timeout_ — 093 (data-model E-5, E-12; contract C-4): the
+    // establishment deadline passed before the first Active. Emits
+    // session_event_establishment_timeout and writes one log record carrying
+    // logon_timeout_ms. Reached from the read pump through session_engine_access, just
+    // before it closes the session. Session strand only.
+    void note_establishment_timeout_() noexcept;
 
     // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
     // Stores the last ≤16 fsm_state values recorded via record_state_transition_.
@@ -806,14 +928,13 @@ private:
     //   the pre-025 byte-identical cold-open behaviour.
     // persist_inbound_advance_(): site-keyed durable inbound +1, invoked after each
     //   delivering callback at every check_inbound-success site (C3).
-    // persist_outbound_advance_(): site-keyed durable outbound +1, mirroring
-    //   persist_inbound_advance_() for the 032 outbound restore path (C3 / FR-007).
+    // 093 plan OD-26: `arm` is a Logon arm caller's expected state, for the Disconnected
+    // write that follows a failed store operation (disconnect_unless_superseded_).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_(
-        bool apply_inbound_seed, bool force = false) noexcept;
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    persist_inbound_advance_() noexcept;
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    persist_outbound_advance_() noexcept;
+        bool apply_inbound_seed, bool force = false,
+        std::optional<fsm_state> arm = std::nullopt) noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance_(
+        std::optional<fsm_state> arm = std::nullopt) noexcept;
     // consume_rejected_seqnum_(): fixpp#423 — an in-sequence message answered by a
     //   Reject before the seqnum gate consumes its MsgSeqNum (advance + persist).
     // close_filled_resend_gap_(): exit AwaitingResend once next_inbound passes the gap end.
@@ -868,6 +989,19 @@ private:
     [[nodiscard]] fixpp::core::expected_t<dispatch_outcome> parse_and_dispatch_(
         std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept;
 
+    // 093-inbound-frame-dispositions (data-model E-2, contract C-3): the overload every
+    // late inbound site calls. It parses over the session's parse buffer B(L) instead
+    // of a stack arena, under the entry cap N(L), reserving the frame's entries up
+    // front; the admin and outbound sites keep the overload above (C-3 I-6). The tag
+    // keeps the two overloads apart at each call site.
+    struct inbound_parse_t {
+        explicit inbound_parse_t() = default;
+    };
+    static constexpr inbound_parse_t inbound_parse_buffer{};
+    template <class CB>
+    [[nodiscard]] fixpp::core::expected_t<dispatch_outcome> parse_and_dispatch_(
+        std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept;
+
     // close_on_late_parse_failure_ — 092-garbled-frame-reject contract C-6: the one
     // action every late inbound parse site takes when its parse fails (a
     // parse_and_dispatch_ parse_failed outcome, or a validate_inbound_ parse_failed
@@ -897,9 +1031,11 @@ private:
     // carries `text` as Text(58); an empty text (the default) omits 58, so the frame
     // is byte-identical to build_reject's.
     // [041 T010; data-model E-4; RC-C; 092 R-5]
+    // arm: a Logon arm caller's expected state (093 plan OD-26), passed to
+    // store_then_emit and to the Disconnected write after a failed emit.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
         seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0,
-        std::string_view text = {}) noexcept;
+        std::string_view text = {}, std::optional<fsm_state> arm = std::nullopt) noexcept;
 
     // dispose_unparseable_ — 092-garbled-frame-reject (fixpp#507) contract C-2: the
     // disposition of a frame the header scan could not read (hdr.fault is set). Each
@@ -913,7 +1049,7 @@ private:
 
     // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
     // per-message coroutine-frame alloc fix):
-    // Parse `frame` with a kInboundParseArena (16384) stack arena, run
+    // Parse `frame` over the session's parse buffer B(L) (093, data-model E-2), run
     // validator_->validate(), and return the rejection decision WITHOUT emitting.
     //
     // Returns validate_outcome::pass when validation passes — caller continues
@@ -996,10 +1132,10 @@ private:
 
     // ── 005 US3 liveness state (T041) ────────────────────────────────────────
     // last_inbound_steady_ — the effective_clock.steady_now() at which the most
-    // recent inbound frame was processed in Active state. Used by the liveness
-    // timer loop to compute the inbound-silence elapsed time. Initialised to
-    // the epoch; updated on every inbound frame in Active. Single-writer on the
-    // per-session strand.
+    // recent inbound frame that was neither garbled nor faulty reached the
+    // LogonReceived/Active arm (093 contract C-5). Used by the liveness timer loop
+    // to compute the inbound-silence elapsed time. Seeded at open() and on entering
+    // Active. Single-writer on the per-session strand.
     fixpp::core::steady_time_point last_inbound_steady_;
 
     // pending_test_req_id_ — the TestReqID of the most recently emitted
@@ -1090,7 +1226,47 @@ private:
     // non-idempotent I/O (full atomic-rename + fdatasync + dir-fsync per call).
     // [contracts/reset-knobs.md C5.1; plan.md Gate A note (e)]
     // Additive POD; no new include [const §XV.9].
+    // 093-inbound-frame-dispositions (contract C-6) supersedes fixpp#518's in-unit
+    // teardown_reset_done_ stops inside the 141=Y reset units: the unit sets the
+    // manager before its one store operation, and close() waits for that operation, so
+    // the flag is only close()'s single-fire latch.
     bool teardown_reset_done_ = false;
+
+    // 093-inbound-frame-dispositions (data-model E-10; contract C-6) — the 141=Y reset
+    // unit. run_reset_unit_ is its steps 3 and 4: the manager set (reset_to_one, then
+    // both counters to the targets), stopping at the first error without returning
+    // from the arm, then, only if that succeeded, the store's one reset_to. Plan OD-25
+    // (superseding OD-14's in-place shield): the reset_to runs on an empty cancellation
+    // slot, and the arm restores its own state after the unit (step 5).
+    struct reset_unit_result {
+        fixpp::core::expected_t<void> manager;
+        fixpp::core::expected_t<void> store;
+    };
+    [[nodiscard]] asio::awaitable<reset_unit_result> run_reset_unit_(seqnum_t next_in,
+                                                                     seqnum_t next_out) noexcept;
+    // Set across the unit's reset_to await and cleared after it, error paths included.
+    // Session strand only, as teardown_reset_done_.
+    bool reset_unit_in_flight_ = false;
+    // The unit's completion signal: set by close() while it waits for an in-flight
+    // unit, called by the unit when it clears reset_unit_in_flight_. Session strand only.
+    std::function<void()> reset_unit_wake_;
+
+    // OD-29 (093 — terminal close escalates a graceful one). A close(terminal) made
+    // while a close(graceful) is in flight sets the latch, which close(graceful) reads
+    // before its phase 1 starts, and calls the wake, which is non-null only while phase
+    // 1 races its grace timer and ends that wait. Session strand only.
+    bool close_escalated_ = false;
+    std::function<void()> close_grace_wake_;
+
+    // 093-inbound-frame-dispositions (data-model E-13; contract C-6) — the engine-stop
+    // flag: Engine::stop()'s step 1 sets it on the session strand, through
+    // session_engine_access, before it emits its cancellation. logon_arm_superseded
+    // reads it, so every later predicate check on this strand stops a Logon arm.
+    // Written and read only on the session strand.
+    // Placement condition: as garbled_frames_; a Session reused for a second connection
+    // would need it reset when the transport is installed.
+    bool engine_stop_requested_ = false;
+    void note_engine_stop_() noexcept { engine_stop_requested_ = true; }
 
     // ── 013 Phase 3 T023/T026 — ReconnectFsm driver ─────────────────────────
     // 043 T012 (D-4/E-6) — Session-owned resolved transport factory.
@@ -1171,8 +1347,30 @@ private:
     //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
     // Returns ok on success; propagates store errors per I-07; propagates transport
     //   throws as dispatch_aborted (RC#B gate-b/r1-green transport error surface).
+    // arm: a Logon arm's expected state (093 plan OD-25). When set and
+    //   logon_arm_superseded_(*arm) holds after the store, the frame is not transmitted
+    //   and the call returns success; the caller's own predicate check follows.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
-        seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept;
+        seqnum_t stamped_seq, std::span<const std::byte> frame,
+        std::optional<fsm_state> arm = std::nullopt) noexcept;
+
+    // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
+    // after a resume, because the session left the state the arm expects while the arm
+    // was suspended, or Engine::stop()'s step 1 has run on this strand. The writer that
+    // matters is close(), which an application can post from a callback the arm fires
+    // (Engine::lookup() already returns the session) or from another thread, and which
+    // owns the teardown once it begins. The arm then returns success, as in the
+    // Disconnected row. `closing` is the signal because close() sets it before it can
+    // yield the strand, while a graceful close() leaves the FSM in the arm's state until
+    // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
+    // Disconnected before it gets there. `never_opened` is not a close.
+    [[nodiscard]] bool logon_arm_superseded_(fsm_state expected) const noexcept;
+
+    // 093 plan OD-26: the Disconnected write that follows a store suspension on a Logon
+    // arm (an error path, or a refusal's fail-closed write). With `arm` set and
+    // logon_arm_superseded_(*arm) true, close() or Engine::stop() owns the teardown and
+    // nothing is written; otherwise it records Disconnected.
+    void disconnect_unless_superseded_(std::optional<fsm_state> arm) noexcept;
 
     // apply_inbound_sequence_reset: apply an inbound SequenceReset(35=4)
     // NewSeqNo(36) to the expected-inbound counter (S-023; FIX-SL §4.8 /
@@ -1258,7 +1456,9 @@ private:
     // beyond-store request. The EndSeqNo=0 => through-current resolution is
     // conveyed via end_is_through_current (NOT re-derived inside the helper).
     //
-    // Returns expected_t<void>{}  on success (resend complete, remain in Active).
+    // Returns replay_outcome::completed on success (resend complete, remain in Active).
+    // Returns replay_outcome::superseded when `arm` is set and logon_arm_superseded_(*arm)
+    //   held before one of the walk's effects (093 plan OD-25): the walk stopped there.
     // Returns std::unexpected(app_callback_threw) when a GapFill toAdmin threw.
     // Returns std::unexpected(dispatch_aborted) on transport write error.
     //   In BOTH unexpected cases the CALLER owns record_state_transition_(Disconnected).
@@ -1266,12 +1466,13 @@ private:
     //
     // Callers:
     //   (1) ResendRequest handler (Active): begin=rr_begin, requested_end=rr_end
-    //       (raw parsed EndSeqNo), end_is_through_current=(rr_end==0).
+    //       (raw parsed EndSeqNo), end_is_through_current=(rr_end==0); no arm.
     //   (2) 789 honor path (T014/T015, US1): begin=X, requested_end=N-1,
-    //       end_is_through_current=true.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> replay_outbound_range_(
+    //       end_is_through_current=true; the Logon arm's expected state.
+    enum class replay_outcome : std::uint8_t { completed, superseded };
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<replay_outcome>> replay_outbound_range_(
         fixpp::session::seqnum_t begin, fixpp::session::seqnum_t requested_end,
-        bool end_is_through_current) noexcept;
+        bool end_is_through_current, std::optional<fsm_state> arm = std::nullopt) noexcept;
 
     // 027 — honor_peer_next_expected_: shared body for the 789-honor dispatch.
     // Extracted from the acceptor (NotConnected) and initiator (LogonSent)
@@ -1286,21 +1487,30 @@ private:
     //                reply Logon consumes a seq); initiator passes current peek_outbound()
     //                (byte-identical). The three comparisons use this; the resend RANGE
     //                still reads the live peek_outbound() (INV-NEX-RANGE).
+    //   arm        — the calling Logon arm's expected state (093 plan OD-25).
     //
     // Outcomes (D-10 ordering preserved: invalid-X FIRST, then X>N, then X<N):
-    //   true   (continue)    — X==N (in sync), or X<N resend succeeded; caller continues.
-    //   false  (terminated)  — X==0 invalid OR X>N violation: helper emitted Logout,
+    //   in_sync_continue     — X==N (in sync), or X<N resend succeeded; caller continues.
+    //   ended_disconnected   — X==0 invalid OR X>N violation: helper emitted Logout,
     //                          called record_state_transition_(Disconnected), caller MUST
     //                          co_return expected_t<void>{} (terminal, already handled).
+    //   superseded           — logon_arm_superseded_(arm) held after a suspension, before
+    //                          the helper's next effect: it stopped there and wrote no
+    //                          state; caller MUST co_return expected_t<void>{}.
     //   unexpected(err)      — X<N resend failed; helper called
     //                          record_state_transition_(Disconnected); caller MUST
     //                          co_return std::unexpected(err).
     //
     // The presence guard (cfg_.enable_next_expected_msg_seq_num && present_789)
     // remains at each call site so the knob-off / tag-absent no-op stays visible.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<bool>> honor_peer_next_expected_(
-        std::string_view raw_789, bool present_789,
-        fixpp::session::seqnum_t next_outbound_ref) noexcept;
+    enum class logon_789_outcome : std::uint8_t {
+        in_sync_continue,
+        ended_disconnected,
+        superseded
+    };
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<logon_789_outcome>>
+    honor_peer_next_expected_(std::string_view raw_789, bool present_789,
+                              fixpp::session::seqnum_t next_outbound_ref, fsm_state arm) noexcept;
 };
 
 }  // namespace fixpp::session

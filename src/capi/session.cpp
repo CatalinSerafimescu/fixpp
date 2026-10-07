@@ -185,6 +185,41 @@ fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_session_t* session, ui
     return FIXPP_ERR_OK;
 }
 
+fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_session_t* session, uint64_t* out) {
+    // 093-inbound-frame-dispositions (data-model E-8). Refusals in
+    // fixpp_session_is_established's order: out, then *out = 0, then the handle.
+    if (out == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    *out = 0;
+    if (fixpp_error_t c = check_session(session); c != FIXPP_ERR_OK) {
+        return c;
+    }
+    // The read takes a scoped lookup lease, released before return, as
+    // fixpp_session_close does: the shared_ptr keeps the Session alive for the read
+    // even if Engine::stop()'s registry_.clear() runs at the same time.
+    // fixpp_session_is_established reads the handle's slot and takes no lookup, so
+    // it is the pattern for the refusals only. A null lookup (no session yet) leaves
+    // the 0 written above. Steady-state thunk, as
+    // fixpp_session_acceptor_bound_endpoint.
+    fixpp_engine* e = session->engine;
+    try {
+        // check_session guarantees state_ non-null and engine_ has_value().
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) -- check_session() above
+        std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(session->id);
+        if (sess != nullptr) {
+            *out = sess->garbled_frame_count();
+        }
+    } catch (...) {
+        std::fputs(
+            "fixpp C-ABI: fixpp_session_garbled_frame_count caught an escaping exception; "
+            "aborting (steady-state invariant violation, FR-008)\n",
+            stderr);
+        std::abort();
+    }
+    return FIXPP_ERR_OK;
+}
+
 fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
     if (fixpp_error_t c = check_session(session); c != FIXPP_ERR_OK) {
         return c;

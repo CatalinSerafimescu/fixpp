@@ -24,15 +24,20 @@
 #include <asio/cancellation_type.hpp>
 #include <asio/experimental/awaitable_operators.hpp>
 #include <asio/this_coro.hpp>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until; steady_time_point
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/wire/framer.hpp>
+#include <limits>
 #include <memory_resource>
+#include <ratio>
 #include <span>
 #include <system_error>  // std::system_error — the shape Clock::sleep_until throws on cancel
+#include <type_traits>
 #include <vector>
 
 namespace fixpp::session::detail {
@@ -197,9 +202,79 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
     }
 }
 
+// 093-inbound-frame-dispositions (contract C-4, C-6; data-model E-6, E-10): the
+// absolute instant `d` after `now`, or steady_time_point::max() when that instant is
+// not representable. The bound is checked before converting `d` to the time point's
+// units, because that conversion can overflow by itself. Precondition: d >= 0.
+//
+// The static_asserts keep the unsigned magnitude calculation in range: Rep is a
+// signed integer at least as wide as the time point's, Period is an integral multiple
+// of the time point's period, and the multiplier fits in the unsigned accumulator.
+//
+// Other absolute deadlines in the session do not use this yet; see fixpp#555.
+template <class Rep, class Period>
+[[nodiscard]] constexpr fixpp::core::steady_time_point deadline_after(
+    fixpp::core::steady_time_point now, std::chrono::duration<Rep, Period> d) noexcept {
+    using time_point = fixpp::core::steady_time_point;
+    using duration = std::chrono::duration<Rep, Period>;
+    using time_duration = typename time_point::duration;
+    using scale = std::ratio_divide<Period, typename time_duration::period>;
+    static_assert(std::is_integral_v<Rep> && std::is_signed_v<Rep>);
+    static_assert(std::numeric_limits<Rep>::digits >=
+                  std::numeric_limits<typename time_point::rep>::digits);
+    static_assert(scale::den == 1);
+    static_assert(sizeof(Rep) <= sizeof(std::uint64_t));
+    static_assert(scale::num <= std::numeric_limits<std::uint64_t>::max());
+    assert(d >= duration::zero());
+    auto const headroom =
+        static_cast<std::uint64_t>(time_point::max().time_since_epoch().count()) -
+        static_cast<std::uint64_t>(now.time_since_epoch().count());
+    auto const units = static_cast<std::uint64_t>(d.count());
+    constexpr auto multiplier = static_cast<std::uint64_t>(scale::num);
+    if (units > headroom / multiplier) {
+        return time_point::max();
+    }
+    auto const result = static_cast<std::uint64_t>(now.time_since_epoch().count()) +
+                        units * multiplier;
+    return time_point{time_duration{static_cast<typename time_point::rep>(result)}};
+}
+
+// The non-negative time left until `deadline`: zero once `now` has reached or
+// passed it, exact when the mathematical difference fits the clock duration, and
+// saturated otherwise.
+[[nodiscard]] constexpr fixpp::core::steady_time_point::duration duration_until(
+    fixpp::core::steady_time_point now, fixpp::core::steady_time_point deadline) noexcept {
+    using time_point = fixpp::core::steady_time_point;
+    using duration = time_point::duration;
+    using rep = typename duration::rep;
+    static_assert(sizeof(rep) <= sizeof(std::uint64_t));
+    static_assert(std::is_signed_v<rep>);
+
+    if (now >= deadline) {
+        return duration::zero();
+    }
+    auto const diff = static_cast<std::uint64_t>(deadline.time_since_epoch().count()) -
+                      static_cast<std::uint64_t>(now.time_since_epoch().count());
+    if (diff > static_cast<std::uint64_t>(duration::max().count())) {
+        return duration::max();
+    }
+    return duration{static_cast<rep>(diff)};
+}
+
+// 093-inbound-frame-dispositions (data-model E-4, E-6): what a successful
+// read_first_frame_bounded returns. The first frame is buf[offset, offset + len);
+// the bytes after it in buf are surplus for the read pump. `garbles` sums the garble
+// summaries of every feed the read made: regions and discarded bytes added, the first
+// opened region's kind kept.
+struct first_frame_read {
+    std::size_t offset = 0;
+    std::size_t len = 0;
+    fixpp::wire::garble_summary garbles{};
+};
+
 // ── Bounded first-frame read (FR-014 / E-2 / C1 steps 2-3) ──────────────────
 // Reads raw bytes from an accepted (not-yet-TLS-handshaken, post-handshake) TCP
-// transport into `buf` with a deadline. Returns the number of bytes read on
+// transport into `buf` with a deadline. Returns the first frame's place in buf on
 // success, or an error on timeout / over-budget / read-fail.
 //
 // Used AFTER async_handshake succeeds — we read TLS application-data bytes.
@@ -211,10 +286,19 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
 // deadline fire or read error. "Complete frame" == Framer::feed returns at
 // least one frame_view.
 //
+// 093-inbound-frame-dispositions (contract C-1): `framer_cfg` is the session's
+// inbound Framer config (detail::inbound_framer_config), so the Framer resyncs:
+// garbled bytes ahead of the first frame are disregarded, summed into the result's
+// `garbles`, and not returned as an error. The budget still counts them, since buf
+// holds every byte read. The default is resync with the Framer's default caps, for
+// callers without a SessionConfig.
+//
 // [FR-014; E-2; data-model "Bounded first-frame read"]
-[[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
-    fixpp::transport::Transport& transport, std::vector<std::byte>& buf, fixpp::core::Clock& clock,
-    std::chrono::milliseconds deadline, std::size_t max_bytes) {
+[[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<first_frame_read>>
+read_first_frame_bounded(fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
+                         fixpp::core::Clock& clock, std::chrono::milliseconds deadline,
+                         std::size_t max_bytes,
+                         fixpp::wire::Framer::Config framer_cfg = {.resync_on_garble = true}) {
     using fixpp::core::error;
 
     using namespace asio::experimental::awaitable_operators;
@@ -225,13 +309,18 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
     // structural rather than a prohibition.
     //
     // ⚠️ THE RE-ARM MUTANT LIVES ON THIS LINE NOW. Moving this computation
-    // inside the loop (`clock.steady_now() + deadline` per iteration) pushes
-    // the deadline forward forever and is what B6 kills.
+    // inside the loop (`deadline_after(clock.steady_now(), deadline)` per
+    // iteration) pushes the deadline forward forever and is what B6 kills.
+    //
+    // deadline_after, not a plain sum: a caller's relative bound can reach past
+    // steady_time_point::max() (the acceptor hands in the establishment time left,
+    // rounded up to whole milliseconds), and the sum then saturates at max().
     //
     // `deadline` stays RELATIVE in the signature so every call site keeps its
     // literal (`5s`, `50ms`) and contracts/read_first_frame_bounded.md's P-
     // clauses still read as written; the clock is what makes it testable.
-    fixpp::core::steady_time_point const abs_deadline = clock.steady_now() + deadline;
+    fixpp::core::steady_time_point const abs_deadline =
+        deadline_after(clock.steady_now(), deadline);
 
     // 015 /simplify (Q-2) — the deadline must CANCEL the in-flight async_read_some,
     // not merely set a flag the loop checks between reads: a peer that completes the
@@ -249,7 +338,8 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
     // byte before any parse, making the frame-vs-budget decision unreachable).
     fixpp::wire::pmr_carry_buffer carry{max_bytes + 1, std::pmr::new_delete_resource()};
     std::array<fixpp::wire::frame_view, 1> out_frames{};
-    fixpp::wire::Framer framer;
+    fixpp::wire::Framer framer{framer_cfg};
+    fixpp::wire::garble_summary garbles{};
 
     std::array<std::byte, 4096> read_buf{};
     for (;;) {
@@ -298,6 +388,12 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
         // must not preempt a frame that already completed within budget (S3/S4).
         auto feed_r = framer.feed(std::span<const std::byte>{read_buf.data(), n}, carry,
                                   std::span<fixpp::wire::frame_view>{out_frames});
+        auto const g = framer.last_garbles();
+        if (garbles.regions == 0U && g.regions != 0U) {
+            garbles.first_kind = g.first_kind;
+        }
+        garbles.regions += g.regions;
+        garbles.discarded += g.discarded;
         if (!feed_r.has_value()) {
             // Propagated verbatim, including a framer-sourced wire_frame_too_large.
             // (088 /simplify: the previous form special-cased that enum and then
@@ -308,12 +404,16 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
             co_return std::unexpected(feed_r.error());
         }
         if (!feed_r->empty()) {
-            // First complete frame available. Return its EXACT length so the caller
-            // delivers ONLY the first frame (buf[0..len)) to on_inbound_frame and
-            // carries any surplus (buf[len..], a coalesced next frame) into the
-            // read-pump (F-015-002). buf accumulates raw bytes in arrival order, so
-            // buf[0..len) is byte-for-byte the first frame the framer emitted.
-            co_return (*feed_r)[0].bytes().size();
+            // First complete frame available. Return its EXACT place so the caller
+            // delivers ONLY the first frame (buf[offset, offset + len)) to
+            // on_inbound_frame and carries any surplus (the bytes after it, a coalesced
+            // next frame) into the read-pump (F-015-002). buf accumulates raw bytes in
+            // arrival order, and after a feed that produced a frame the Framer's
+            // pending bytes are exactly the bytes after that frame, so the frame ends
+            // pending_bytes() before the end of buf.
+            std::size_t const len = (*feed_r)[0].bytes().size();
+            std::size_t const end = buf.size() - framer.pending_bytes();
+            co_return first_frame_read{.offset = end - len, .len = len, .garbles = garbles};
         }
 
         // Single budget decision point (FR-007), strict `>` (exceeds, not

@@ -66,6 +66,7 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <fixpp/core/clock.hpp>
@@ -74,6 +75,7 @@
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/transport/test/mock_transport.hpp>
 #include <future>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -144,6 +146,7 @@ namespace {
 
 using fixpp::core::error;
 using fixpp::core::expected_t;
+using fixpp::session::detail::first_frame_read;
 using fixpp::session::detail::read_first_frame_bounded;
 using fixpp::transport::test::mock_transport;
 using fixpp::transport::test::Script;
@@ -207,8 +210,11 @@ std::vector<std::byte> make_logon_of_length(std::size_t frame_len) {
     return frame;
 }
 
-std::string describe(expected_t<std::size_t> const& r) {
-    if (r.has_value()) return "value=" + std::to_string(*r);
+std::string describe(expected_t<first_frame_read> const& r) {
+    if (r.has_value()) {
+        return "value={offset=" + std::to_string(r->offset) + ", len=" + std::to_string(r->len) +
+               "}";
+    }
     return std::string("error=") + std::string(fixpp::core::to_string(r.error()));
 }
 
@@ -225,7 +231,7 @@ std::string describe_sizes(std::vector<std::size_t> const& v) {
 // binding: one of the two errors a genuinely-cancelled read/deadline arm can
 // surface — order[0] (unspecified asio scheduler internals) decides which,
 // and this bundle elsewhere refuses to depend on that ordering (D-6.4/D-6.10a).
-bool is_cancellation_attributable(expected_t<std::size_t> const& r) {
+bool is_cancellation_attributable(expected_t<first_frame_read> const& r) {
     if (r.has_value()) return false;
     return r.error() == error::transport_read_cancelled ||
            r.error() == error::transport_handshake_timeout;
@@ -261,14 +267,14 @@ TEST(ReadFirstFrameBounded, B1) {
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B1")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     EXPECT_TRUE(result.has_value())
         << "B1 (SC-001): expected the first frame's length (" << kMaxBytes << "), got "
         << describe(result) << " — pre-fix rejects at cumulative == max_bytes BEFORE framing "
         << "runs (site B, `buf.size() >= max_bytes`).";
     if (result.has_value()) {
-        EXPECT_EQ(*result, kMaxBytes) << "B1 (SC-001): the admitted frame's exact length.";
+        EXPECT_EQ(result->len, kMaxBytes) << "B1 (SC-001): the admitted frame's exact length.";
     }
 }
 
@@ -306,14 +312,14 @@ TEST(ReadFirstFrameBounded, B3) {
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B3")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     EXPECT_TRUE(result.has_value())
         << "B3 (SC-002): expected success (frame length " << kLogonLen << "), got "
         << describe(result) << " — see B1's RED mechanism: site B (`buf.size() >= "
         << "max_bytes`) fires before framing runs.";
     if (result.has_value()) {
-        EXPECT_EQ(*result, kLogonLen)
+        EXPECT_EQ(result->len, kLogonLen)
             << "B3 (SC-002): S3 — must return the frame's EXACT length (" << kLogonLen
             << "), not the whole buffer (" << kMaxBytes << "). Kills the `return buf.size()` "
             << "mutant.";
@@ -369,7 +375,7 @@ TEST(ReadFirstFrameBounded, B2) {
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B2")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     EXPECT_TRUE(result.has_value())
         << "B2 (SC-012): expected success (frame length " << kLogonLen << "), got "
@@ -377,7 +383,7 @@ TEST(ReadFirstFrameBounded, B2) {
         << "(`4097 >= 4096`) before framer.feed ever runs on the newly-read bytes, "
         << "discarding a frame that was already complete in the accumulated buffer.";
     if (result.has_value()) {
-        EXPECT_EQ(*result, kLogonLen) << "B2 (SC-012): the admitted frame's exact length.";
+        EXPECT_EQ(result->len, kLogonLen) << "B2 (SC-012): the admitted frame's exact length.";
     }
 }
 
@@ -435,7 +441,7 @@ TEST(ReadFirstFrameBounded, B5) {
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B5")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     std::vector<std::size_t> const sizes = mt.read_sizes();
     std::vector<std::size_t> const expected_sizes{kMaxBytes, 1};
@@ -549,9 +555,9 @@ TEST(ReadFirstFrameBounded, T1) {
         mock_transport mt{ioc.get_executor(), std::move(s)};
         std::vector<std::byte> buf;
 
-        std::optional<expected_t<std::size_t>> result;
+        std::optional<expected_t<first_frame_read>> result;
         asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
-                       [&result](std::exception_ptr ep, expected_t<std::size_t> r) {
+                       [&result](std::exception_ptr ep, expected_t<first_frame_read> r) {
                            EXPECT_FALSE(ep) << "T1: the spawned coroutine threw.";
                            result = std::move(r);
                        });
@@ -637,7 +643,9 @@ TEST(ReadFirstFrameBounded, T1) {
             << " ms, read " << kReadLatency.count() << " ms, deadline " << kDeadline.count()
             << " ms), so this is NOT the arm-gap starvation of run 34074957982.";
         if (result->has_value()) {
-            EXPECT_EQ(**result, kLogonLen)
+            // The ASSERT_TRUE above returns on an empty optional; the check does not model it.
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+            EXPECT_EQ((*result)->len, kLogonLen)
                 << "T1 (SC-005/SC-006): the admitted frame's exact length.";
         }
         EXPECT_EQ(mt.async_reads_observed(), 1U)
@@ -769,7 +777,7 @@ TEST(ReadFirstFrameBounded, B4) {
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B4")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     EXPECT_FALSE(result.has_value())
         << "B4 (SC-003): expected the over-budget, never-completing payload to be rejected, got "
@@ -847,7 +855,7 @@ TEST(ReadFirstFrameBounded, B4) {
 // it is idempotent and the arm itself can no longer push the deadline forward.
 // The mutant is therefore written one level up, on the line that computes
 // `abs_deadline` in read_first_frame_bounded.hpp: recomputing
-// `clock.steady_now() + deadline` per iteration. Under it the deadline is reset
+// `deadline_after(clock.steady_now(), deadline)` per iteration. Under it the deadline is reset
 // every 7 ms and never fires; the loop drains all 201 chunks and reaches
 // `201 > 200` at the foot.
 //
@@ -944,7 +952,7 @@ TEST(ReadFirstFrameBounded, B6) {
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B6")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     EXPECT_FALSE(result.has_value())
         << "B6 (SC-004/D-1b): expected the deadline to win before the budget could be reached, got "
@@ -1083,7 +1091,7 @@ TEST(ReadFirstFrameBounded, T2a) {
 
     asio::cancellation_signal signal;
     bool entered_helper = false;
-    std::optional<expected_t<std::size_t>> result;
+    std::optional<expected_t<first_frame_read>> result;
     std::exception_ptr thrown;
 
     asio::co_spawn(
@@ -1201,7 +1209,7 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
             ioc, fut, "ReadFirstFrameBounded::CovSharedClockSweep")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     ASSERT_TRUE(result.has_value())
         << "CovSharedClockSweep (#377): a global Clock::cancel_sleeps() — which routine "
@@ -1209,7 +1217,7 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
         << "connection would have been closed as a handshake timeout. The deadline arm must "
         << "distinguish `the join cancelled me` from `the whole clock was swept`; both arrive "
         << "as operation_aborted, so the clock itself is the oracle. Got " << describe(result);
-    EXPECT_EQ(*result, payload.size())
+    EXPECT_EQ(result->len, payload.size())
         << "CovSharedClockSweep: expected the complete Logon to be returned intact after the "
         << "sweep, not a truncated or partial frame.";
 }
@@ -1221,11 +1229,12 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
 // uncovered line in read_first_frame_bounded.hpp, and Article IX §1 makes an
 // error return "genuine by default" — it must be TESTED, not waived.
 //
-// Construction: a payload that does not begin "8=" makes Framer::parse_frame
-// reject with wire_framing_resync (parse_frame's `bytes[0]`/`bytes[1]` checks) rather than
-// merely carrying the bytes forward. It is kept far below the budget so the
-// step-5 budget check cannot fire first — this cell must exercise the FRAMER
-// arm specifically, not the budget arm that B1-B4 already cover.
+// 093-inbound-frame-dispositions (contract C-1): the first-frame read's Framer
+// resyncs, so a garble no longer fails the feed; the only error the feed still
+// returns is wire_frame_too_large. The cell therefore sends a BodyLength over the
+// Framer's limit, which the resync-mode Framer refuses as soon as the body offset is
+// known (plan OD-4), long before the payload could reach the byte budget. The budget
+// arm returns the same error, so the buffer size is what tells the two arms apart.
 // ⚠️ 5 s, NOT 50 ms — the deadline is a termination bound, not a competitor.
 // This cell asserts the FRAMER arm fires. B4's sibling defect applies verbatim:
 // a real `steady_timer` deadline racing a one-read mock is decided by machine
@@ -1236,14 +1245,16 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
 TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::seconds{5};
+    constexpr std::size_t kOverLimit = fixpp::wire::default_max_frame_bytes + 1U;
 
-    std::string const junk =
-        "NOT-A-FIX-FRAME\x01"
-        "more-junk\x01";
-    ASSERT_LT(junk.size(), kMaxBytes) << "must stay under budget so the framer arm is what fires";
+    std::string const header =
+        "8=FIX.4.2\x01"
+        "9=" +
+        std::to_string(kOverLimit) + "\x01" + "35=A\x01";
+    ASSERT_LT(header.size(), kMaxBytes) << "must stay under budget so the framer arm is what fires";
 
     Script s;
-    s.inbound_bytes = to_bytes(junk);
+    s.inbound_bytes = to_bytes(header);
     s.read_latency = std::chrono::milliseconds{1};
 
     asio::io_context ioc;
@@ -1259,18 +1270,71 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
             ioc, fut, "ReadFirstFrameBounded::CovFramerErrorPropagates")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     ASSERT_FALSE(result.has_value())
-        << "coverage cell: a non-FIX payload must surface the framer's error, got "
+        << "coverage cell: an over-limit BodyLength must surface the framer's error, got "
         << describe(result);
-    EXPECT_EQ(result.error(), error::wire_framing_resync)
+    EXPECT_EQ(result.error(), error::wire_frame_too_large)
         << "coverage cell: expected the framer's own error to PROPAGATE VERBATIM "
            "(read_first_frame_bounded.hpp's feed-error arm), got "
         << describe(result);
     EXPECT_LT(buf.size(), kMaxBytes)
         << "coverage cell: the budget arm must NOT be what fired — buf stayed well under "
         << kMaxBytes << ", so this is the framer arm.";
+}
+
+// 093-inbound-frame-dispositions (contract C-1, data-model E-4, E-6): garbled bytes
+// ahead of the first frame are disregarded rather than ending the read. The read
+// returns where the first frame starts in `buf`, its length, and the summed garble
+// summary of every feed it made: here two feeds, so the sum is witnessed, and the
+// second feed's frame is followed by a surplus that stays in `buf` after the frame.
+TEST(ReadFirstFrameBounded, GarbleBeforeTheFirstFrameReturnsItsOffsetAndTheSummedSummary) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr auto kDeadline = std::chrono::seconds{5};
+
+    std::string const junk1 = "NOT-A-FIX-FRAME\x01";
+    // A BeginString longer than the cap with no SOH within it: a second region.
+    std::string const junk2 = "8=FIXGARBLEDBEGINSTRING\x01";
+    std::vector<std::byte> const logon = make_logon_of_length(1200);
+    std::string const surplus = "8=FIX.4.2\x01";
+
+    Script s;
+    s.inbound_chunks.push_back(to_bytes(junk1));
+    std::vector<std::byte> second = to_bytes(junk2);
+    second.insert(second.end(), logon.begin(), logon.end());
+    std::vector<std::byte> const tail = to_bytes(surplus);
+    second.insert(second.end(), tail.begin(), tail.end());
+    s.inbound_chunks.push_back(std::move(second));
+    s.read_latency = std::chrono::milliseconds{1};
+
+    asio::io_context ioc;
+    fixpp::core::mock_clock clock{{}, {}, ioc.get_executor()};
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
+                              asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, fut, "ReadFirstFrameBounded::GarbleBeforeTheFirstFrame")) {
+        return;
+    }
+    expected_t<first_frame_read> const result = fut.get();
+
+    ASSERT_TRUE(result.has_value())
+        << "the frame after the garbles is returned, got " << describe(result);
+    EXPECT_EQ(mt.async_reads_observed(), 2U) << "the garbles span two reads, so two feeds";
+    EXPECT_EQ(result->offset, junk1.size() + junk2.size());
+    EXPECT_EQ(result->len, logon.size());
+    ASSERT_GE(buf.size(), result->offset + result->len);
+    EXPECT_TRUE(std::equal(logon.begin(), logon.end(),
+                           buf.begin() + static_cast<std::ptrdiff_t>(result->offset)))
+        << "buf[offset, offset + len) is the Logon, byte for byte";
+    EXPECT_EQ(buf.size() - (result->offset + result->len), surplus.size())
+        << "the surplus after the frame stays in buf";
+    EXPECT_EQ(result->garbles.regions, 2U);
+    EXPECT_EQ(result->garbles.first_kind, error::wire_framing_resync);
+    EXPECT_EQ(result->garbles.discarded, junk1.size() + junk2.size());
 }
 
 // ── COVERAGE CELL — read-arm error propagation (Article IX §1) ───────────────
@@ -1304,7 +1368,7 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
             ioc, fut, "ReadFirstFrameBounded::CovReadErrorPropagates")) {
         return;
     }
-    expected_t<std::size_t> const result = fut.get();
+    expected_t<first_frame_read> const result = fut.get();
 
     ASSERT_FALSE(result.has_value())
         << "coverage cell: an exhausted transport must surface a read error, got "
@@ -1318,4 +1382,171 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
         << "coverage cell: mapping every read error to a cancellation-attributable "
            "value would leave T2a green while breaking verbatim propagation — this cell "
            "must fail if that mapping is reintroduced.";
+}
+
+// ── deadline_after: an absolute deadline that saturates at the clock's limit ─
+//
+// Each input is a run-time value, so the cells exercise the helper as the call sites
+// do. H1, H7: a sum past steady_time_point::max() saturates there. H2, H3: a sum that
+// fits is returned exactly, up to and including max(). H4: a duration whose own
+// conversion to the time point's units would overflow saturates. H5: a negative
+// time point. H6: a zero duration.
+namespace {
+using fixpp::core::steady_time_point;
+using fixpp::session::detail::deadline_after;
+
+std::chrono::milliseconds u32_max_ms() {
+    return std::chrono::milliseconds{std::numeric_limits<std::uint32_t>::max()};
+}
+}  // namespace
+
+TEST(DeadlineAfter, H1_ASumPastMaxSaturatesAtMax) {
+    auto const now = steady_time_point::max() - std::chrono::milliseconds{1};
+    EXPECT_EQ(deadline_after(now, u32_max_ms()), steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H2_ASumOfExactlyMaxIsReturned) {
+    auto const now = steady_time_point::max() - u32_max_ms();
+    EXPECT_EQ(deadline_after(now, u32_max_ms()), steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H3_ASumOneNanosecondShortOfMaxIsReturnedExactly) {
+    auto const now = steady_time_point::max() - u32_max_ms() - std::chrono::nanoseconds{1};
+    EXPECT_EQ(deadline_after(now, u32_max_ms()),
+              steady_time_point::max() - std::chrono::nanoseconds{1});
+}
+
+TEST(DeadlineAfter, H4_ADurationPastTheClockRangeSaturatesBeforeConversion) {
+    std::chrono::seconds const d{9'300'000'000};
+    EXPECT_EQ(deadline_after(steady_time_point{}, d), steady_time_point::max());
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-5}}, d),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H5_ANegativeTimePointAddsExactly) {
+    auto const now = steady_time_point{std::chrono::nanoseconds{-5}};
+    EXPECT_EQ(deadline_after(now, std::chrono::seconds{1}),
+              steady_time_point{std::chrono::nanoseconds{999'999'995}});
+}
+
+TEST(DeadlineAfter, H6_AZeroDurationReturnsNow) {
+    auto const now = steady_time_point{std::chrono::nanoseconds{123}};
+    EXPECT_EQ(deadline_after(now, std::chrono::milliseconds{0}), now);
+    EXPECT_EQ(deadline_after(steady_time_point::max(), std::chrono::milliseconds{0}),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H7_ASumOneNanosecondPastMaxSaturatesAtMax) {
+    auto const now = steady_time_point::max() - u32_max_ms() + std::chrono::nanoseconds{1};
+    EXPECT_EQ(deadline_after(now, u32_max_ms()), steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H8_NegativeMinPlusCoarseSecondsIsReturnedExactly) {
+    std::chrono::seconds const d{10'000'000'000};
+    EXPECT_EQ(deadline_after(steady_time_point::min(), d),
+              steady_time_point{std::chrono::nanoseconds{776'627'963'145'224'192}});
+}
+
+TEST(DeadlineAfter, H9_NegativeMinPlusLargestFittingSecondsIsReturnedExactly) {
+    std::chrono::seconds const d{18'446'744'073};
+    EXPECT_EQ(deadline_after(steady_time_point::min(), d),
+              steady_time_point{std::chrono::nanoseconds{9'223'372'036'145'224'192}});
+}
+
+TEST(DeadlineAfter, H10_NegativeMinPlusOverflowingSecondsSaturates) {
+    std::chrono::seconds const d{18'446'744'074};
+    EXPECT_EQ(deadline_after(steady_time_point::min(), d), steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H11_ExactMaxBoundaryAndNeighbors) {
+    std::chrono::seconds const d{10'000'000'000};
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-776'627'963'145'224'193}},
+                             d),
+              steady_time_point::max());
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-776'627'963'145'224'194}},
+                             d),
+              steady_time_point::max() - std::chrono::nanoseconds{1});
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-776'627'963'145'224'192}},
+                             d),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H12_NonExtremeNegativePlusCoarseSecondsIsReturnedExactly) {
+    std::chrono::seconds const d{9'223'372'037};
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-500'000'000}}, d),
+              steady_time_point{std::chrono::nanoseconds{9'223'372'036'500'000'000}});
+}
+
+TEST(DeadlineAfter, H13_NegativeMinPlusMillisecondsBoundary) {
+    EXPECT_EQ(deadline_after(steady_time_point::min(),
+                             std::chrono::milliseconds{18'446'744'073'709}),
+              steady_time_point{std::chrono::nanoseconds{9'223'372'036'854'224'192}});
+    EXPECT_EQ(deadline_after(steady_time_point::min(),
+                             std::chrono::milliseconds{18'446'744'073'710}),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H14_NegativeMinPlusNanosecondsMaxIsReturnedExactly) {
+    EXPECT_EQ(deadline_after(steady_time_point::min(), std::chrono::nanoseconds::max()),
+              steady_time_point{std::chrono::nanoseconds{-1}});
+}
+
+TEST(DurationUntil, U1_PositiveDifferenceIsExact) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point{}, steady_time_point{} + std::chrono::milliseconds{5}),
+              std::chrono::milliseconds{5});
+}
+
+TEST(DurationUntil, U2_EqualInstantsReturnZero) {
+    auto const now = steady_time_point{std::chrono::nanoseconds{7}};
+    EXPECT_EQ(fixpp::session::detail::duration_until(now, now), steady_time_point::duration::zero());
+}
+
+TEST(DurationUntil, U3_PassedDeadlineReturnsZero) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point{std::chrono::nanoseconds{6}},
+                  steady_time_point{std::chrono::nanoseconds{5}}),
+              steady_time_point::duration::zero());
+}
+
+TEST(DurationUntil, U4_FullClockSpanSaturates) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point::min(),
+                                                     steady_time_point::max()),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U5_MinToMinusOneIsExactMax) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point::min(), steady_time_point{std::chrono::nanoseconds{-1}}),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U6_MinToEpochSaturates) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point::min(),
+                                                     steady_time_point{}),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U7_MinusOneToMaxSaturates) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point{std::chrono::nanoseconds{-1}}, steady_time_point::max()),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U8_EpochToMaxIsExactMax) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point{}, steady_time_point::max()),
+              steady_time_point::duration::max());
+}
+
+TEST(DurationUntil, U9_MaxToMinReturnsZero) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(steady_time_point::max(),
+                                                     steady_time_point::min()),
+              steady_time_point::duration::zero());
+}
+
+TEST(DurationUntil, U10_PassedSaturatedShapeReturnsZero) {
+    EXPECT_EQ(fixpp::session::detail::duration_until(
+                  steady_time_point::max(), deadline_after(steady_time_point::min(),
+                                                           std::chrono::seconds{10})),
+              steady_time_point::duration::zero());
 }

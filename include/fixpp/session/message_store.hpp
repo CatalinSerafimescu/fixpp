@@ -2,8 +2,11 @@
 //
 // include/fixpp/session/message_store.hpp
 //
-// fixpp::session::MessageStore — 4-pure-virtual plugin interface
-// ([const §XIV.1] row 5; [const §XIV.2] 4/5 within-cap).
+// fixpp::session::MessageStore — a pure-virtual plugin interface ([const §XIV.1]
+// row 5). Every pure virtual counts against [const §XIV.2]'s cap of five; re-derive
+// the count with `grep -cE '^[^/]*\)[^;]*= 0;' include/fixpp/session/message_store.hpp`.
+// 093-inbound-frame-dispositions adds reset_to (data-model E-9), a non-pure virtual
+// with a default body, so it is not counted.
 //
 // Anchor: .specify/2e-msgstore.md v0.5 §4.1 / §4.1.1 / §4.1.2. Entity E1.
 // FR-001 (interface), FR-028 (engine-internal graceful-close hook
@@ -16,10 +19,10 @@
 //
 // Mirror of specs/008-message-store/contracts/message_store.hpp. The
 // contract is silent on the engine-internal hook scaffolding around the
-// public 4-pure-virtual interface; the scaffolding below is the A1
+// public pure-virtual interface; the scaffolding below is the A1
 // factory-type-tag retention mechanism — the concept-shaped non-virtual
 // dispatch path for FR-028 / I-17 (Opus N3-P2-1 close). NO RTTI, NO
-// dynamic_cast, NO extra pure-virtual (the cap is preserved at 4/5).
+// dynamic_cast, NO extra pure-virtual.
 #pragma once
 
 #include <asio/awaitable.hpp>
@@ -33,6 +36,15 @@
 namespace fixpp::session {
 
 class retrieve_visitor;  // forward-decl; full type in retrieve_visitor.hpp
+
+namespace detail {
+// reset_to's precondition (093-inbound-frame-dispositions, data-model E-9): next_in and
+// next_out are each 1 or 2.
+[[nodiscard]] constexpr bool reset_to_targets_valid(seqnum_t next_in, seqnum_t next_out) noexcept {
+    auto const ok = [](seqnum_t v) { return v == seqnum_min || v == seqnum_min + 1; };
+    return ok(next_in) && ok(next_out);
+}
+}  // namespace detail
 
 class MessageStore {
 public:
@@ -87,7 +99,7 @@ public:
     // the mutex via cancel_and_drain() before destroying the store.
     virtual ~MessageStore() noexcept(false) = default;
 
-    // ── Public 4-pure-virtual interface (cap 4/5) ───────────────────────
+    // ── Public pure-virtual interface ([const §XIV.2]: see the file header) ──
 
     // store: persist a single frame. frame is taken as a non-owning span and
     // MUST be deep-copied into store-owned storage AFTER acquiring the writer
@@ -129,9 +141,52 @@ public:
     // reset: clear all frames (both directions) and rewind counters to
     // next_inbound = next_outbound = 1. FileStore: atomic at the rename of
     // <live>.log.reset.tmp PLUS the platform durability primitive (Linux:
-    // parent-dir fsync MANDATORY; Windows: MOVEFILE_WRITE_THROUGH MANDATORY;
-    // I-15). MemoryStore: entry-array zero pass under writer mutex.
+    // parent-dir fsync MANDATORY; Windows: a POSIX-semantics
+    // SetFileInformationByHandle rename, then FlushFileBuffers on the renamed
+    // file's handle, MANDATORY; I-15). If that primitive or anything after the
+    // rename fails, reset returns store_io_failure and the store refuses every
+    // later operation until it is reopened (L-035-2). MemoryStore: entry-array
+    // zero pass under writer mutex.
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept = 0;
+
+    // reset_to (093-inbound-frame-dispositions, data-model E-9; fixpp#524): clear all
+    // frames, as reset() does, and leave next_inbound = next_in and
+    // next_outbound = next_out. The session calls it from its 141=Y reset unit.
+    // Precondition: next_in and next_out are each 1 or 2; any other value returns
+    // session_invalid_argument and changes nothing.
+    //
+    // The default body runs reset(), then next_seqnum(dir, true) once for each target
+    // that is 2, and returns the first error, at which it stops. It is not atomic: a
+    // crash between those steps can leave the intermediate state. Override it to make
+    // the operation one step under the store's writer lock, so no reader and no
+    // restart sees an intermediate state (re-derive which stores do with
+    // `git grep -n "reset_to(" -- include src`). An override
+    // that holds a FIFO writer lock across the whole operation also keeps the (1, 1)
+    // outcome when Session::close()'s bounded wait for the unit expires, because the
+    // teardown reset queues behind it.
+    //
+    // Adding this virtual changes MessageStore's vtable: C++ code built against the
+    // header without it must be rebuilt. A subclass needs no source change.
+    [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> reset_to(
+        seqnum_t next_in, seqnum_t next_out) noexcept {
+        if (!detail::reset_to_targets_valid(next_in, next_out)) {
+            co_return std::unexpected(fixpp::core::error::session_invalid_argument);
+        }
+        if (auto r = co_await reset(); !r) {
+            co_return r;
+        }
+        if (next_in == seqnum_min + 1) {
+            if (auto r = co_await next_seqnum(direction_t::inbound, true); !r) {
+                co_return std::unexpected(r.error());
+            }
+        }
+        if (next_out == seqnum_min + 1) {
+            if (auto r = co_await next_seqnum(direction_t::outbound, true); !r) {
+                co_return std::unexpected(r.error());
+            }
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
 
 private:
     flush_hook_fn flush_hook_{nullptr};  // A1 stash; set once by ctor, read by flush_hook()

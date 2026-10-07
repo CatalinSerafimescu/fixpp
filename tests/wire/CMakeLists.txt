@@ -62,6 +62,7 @@ add_wire_test(wire_pure_tests
   nested_group_slices_cache_test.cpp                                  # /speckit-verify cov (062)
   nested_group_extent_test.cpp                                        # T019/T020/T022 (063)
   nested_group_slices_failloud_test.cpp                               # T001 (073)
+  framer_resync_test.cpp                                              # T015 (093)
 )
 # nested_group_slices_failloud_test.cpp (T001) reaches the
 # offset_table_test_access friend seam through tests/support/wire_test_hooks.hpp.
@@ -80,6 +81,9 @@ target_compile_definitions(wire_pure_tests PRIVATE
 # wire_dict_tests "075;wire" + required_scope_two_tier_test "079;wire" pattern;
 # quickstart.md §2/§6 select this bucket by label, Article VII §8).
 set_tests_properties(wire_pure_tests PROPERTIES LABELS "079;wire")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST wire_pure_tests APPEND PROPERTY LABELS 093)
 
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).

@@ -158,6 +158,9 @@ add_sync_test(sync_cancellation_mid_wait     test_cancellation_mid_wait.cpp)
 add_sync_test(sync_race_cancel_pre_drain     test_race_cancel_pre_drain.cpp)
 add_sync_test(sync_race_multi_cancel         test_race_multi_cancel.cpp)
 add_sync_test(sync_race_cancel_during_resume test_race_cancel_during_resume.cpp)
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, so it
+# composes with any LABELS setter placed above it.
+set_property(TEST sync_race_cancel_during_resume APPEND PROPERTY LABELS 093)
 
 # ── US4 seam registrations (T053–T057) — folded into sync_pure_tests above ───
 # (sync_tsan_clean / sync_asan_clean / sync_halo_firing / sync_pmr_fallback /

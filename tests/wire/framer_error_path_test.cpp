@@ -526,4 +526,67 @@ TEST(FramerErrorPath, FrameTooLargeViaCarryAppendFailure) {
     EXPECT_EQ(r2.error(), error::wire_frame_too_large);
 }
 
+// ── 093 Q-7: strict callers are unchanged (contract C-1, plan OD-4) ──────────
+// A default Config is strict (resync off). In strict mode the
+// `frame_len > max_frame_bytes` check stays after the CheckSum, so an over-max
+// frame whose CheckSum is wrong still reports the CheckSum, and a boundary `8=`
+// with no SOH is read without a BeginString cap: it stays partial until the carry
+// overflows. Moving either check ahead (the resync-mode order) turns these RED.
+
+TEST(FramerErrorPath, Q7_StrictOverMaxBadChecksumReportsChecksumMismatch) {
+    auto frame = make_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01");
+    std::size_t const frame_len = frame.size();
+    // Corrupt the CheckSum's last digit; the frame stays structurally complete.
+    std::byte& last_digit = frame[frame_len - 2U];
+    last_digit = (last_digit == std::byte{'0'}) ? std::byte{'1'} : std::byte{'0'};
+
+    // max_frame_bytes = frame_len - 1: the BodyLength fits, the frame does not.
+    Framer::Config const cfg{.max_frame_bytes = frame_len - 1U};
+    ASSERT_GT(cfg.max_frame_bytes, 26U)
+        << "the BodyLength check must pass so that the CheckSum is reached";
+
+    std::array<std::byte, 1024> arena_storage{};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
+    Framer framer{cfg};
+    pmr_carry_buffer carry{frame.size(), &arena};
+    std::array<frame_view, 4> out{};
+
+    auto result = framer.feed(frame, carry, out);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), error::wire_checksum_mismatch);
+}
+
+TEST(FramerErrorPath, Q7_StrictBoundaryBeginStringNoSohPartialUntilCarryFills) {
+    constexpr std::size_t kCarryCapacity = 64;
+    std::array<std::byte, 1024> arena_storage{};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
+    Framer framer{};
+    pmr_carry_buffer carry{kCarryCapacity, &arena};
+    std::array<frame_view, 4> out{};
+
+    auto const head = to_bytes("8=");
+    auto r0 = framer.feed(std::span<const std::byte>{head.data(), head.size()}, carry, out);
+    ASSERT_TRUE(r0.has_value());
+    ASSERT_EQ(r0.value().size(), 0U);
+    std::size_t fed = head.size();
+
+    // One non-SOH byte per feed: partial every time while the carry has room.
+    std::array<std::byte, 1> const value_byte{std::byte{'A'}};
+    while (fed < kCarryCapacity) {
+        auto r = framer.feed(value_byte, carry, out);
+        ASSERT_TRUE(r.has_value()) << "partial expected at " << fed + 1U << " bytes";
+        ASSERT_EQ(r.value().size(), 0U);
+        ++fed;
+        ASSERT_EQ(framer.pending_bytes(), fed);
+    }
+
+    // The next byte does not fit: carry overflow.
+    auto overflow = framer.feed(value_byte, carry, out);
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error(), error::wire_frame_too_large);
+}
+
 }  // namespace

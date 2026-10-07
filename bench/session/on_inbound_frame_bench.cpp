@@ -13,6 +13,11 @@
 // Cases: an in-sequence Heartbeat (admin path) and an in-sequence NewOrderSingle
 // (application path, delivered to a counting `Application::fromApp`).
 //
+// 093-inbound-frame-dispositions (quickstart §0.1): `..._InSequence_Validated` runs
+// the same two cases with `SessionConfig::validate_inbound_messages = true`, so the
+// paired comparison also covers the inbound validator's parse. Added in a
+// bench-only commit before any production edit, for the same reason as above.
+//
 // Harness: the session test support used by tests/session/test_validate_gate_inbound.cpp
 // (a mock clock on one io_context, `transport_send` captured, the real FIX44
 // dictionary). Each iteration spawns one `on_inbound_frame` with a completion
@@ -158,7 +163,7 @@ struct InboundBench {
     }
 
     // Initiator path: open() sends a Logon, the peer's Logon reply makes it Active.
-    bool setup() {
+    bool setup(bool validate) {
         fixpp::session::SessionConfig cfg;
         cfg.sender_comp_id = "ISLD";
         cfg.target_comp_id = "TW";
@@ -170,6 +175,7 @@ struct InboundBench {
         cfg.transport_send = [this](std::span<const std::byte>) { ++sent; };
         // The peer Logon below carries no ResetSeqNumFlag(141).
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        cfg.validate_inbound_messages = validate;
         sess = std::make_unique<fixpp::session::Session>(engine, cfg);
 
         done = false;
@@ -202,10 +208,10 @@ void fill(std::vector<std::vector<std::byte>>& batch, frame_kind kind, std::uint
     }
 }
 
-void BM_Session_OnInboundFrame_InSequence(benchmark::State& state) {
+void run_in_sequence(benchmark::State& state, bool validate) {
     auto const kind = static_cast<frame_kind>(state.range(0));
     InboundBench b;
-    if (!b.setup()) {
+    if (!b.setup(validate)) {
         state.SkipWithError("session did not reach Active");
         return;
     }
@@ -242,7 +248,19 @@ void BM_Session_OnInboundFrame_InSequence(benchmark::State& state) {
         state.SkipWithError("fromApp did not run once per NewOrderSingle");
     }
 }
+
+void BM_Session_OnInboundFrame_InSequence(benchmark::State& state) {
+    run_in_sequence(state, /*validate=*/false);
+}
 BENCHMARK(BM_Session_OnInboundFrame_InSequence)
+    ->ArgName("frame")
+    ->Arg(static_cast<int>(frame_kind::heartbeat))
+    ->Arg(static_cast<int>(frame_kind::nos));
+
+void BM_Session_OnInboundFrame_InSequence_Validated(benchmark::State& state) {
+    run_in_sequence(state, /*validate=*/true);
+}
+BENCHMARK(BM_Session_OnInboundFrame_InSequence_Validated)
     ->ArgName("frame")
     ->Arg(static_cast<int>(frame_kind::heartbeat))
     ->Arg(static_cast<int>(frame_kind::nos));

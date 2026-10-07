@@ -6,8 +6,11 @@ status: stable
 refs:
   - include/fixpp/session/reconnect_fsm.hpp
   - include/fixpp/session/session.hpp
+  - src/session/session.cpp
+  - src/session/engine.cpp
+  - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
-codegraph_entry: [run_liveness_loop, drive_reconnect_attempt, drive_reconnect, ReconnectFsm]
+codegraph_entry: [run_liveness_loop, run_read_pump, drive_reconnect_attempt, drive_reconnect, ReconnectFsm]
 constitution: ["§XI.2"]
 ---
 
@@ -57,6 +60,8 @@ current list with `python3 tools/brain_inventory.py --census`, never from a list
 |---|---|---|
 | **Liveness escalates in two stages — probe, then terminate** | a silent peer and a dead peer are indistinguishable from one missed interval; the probe disambiguates before the session is torn down | **`Session::run_liveness_loop()`** in `src/session/session.cpp` — ⚠️ **not** `run_inbound_liveness_watch`, which is a stub (see the correction above). FR-004 / FR-007. **The two thresholds are NOT reproduced here** — read the source. A copied constant is what rots |
 | **The outbound timer is armed on Active entry, rearmed on every outbound, cancelled on Disconnected entry** | the cadence is *"nothing sent for HeartBtInt"*, not *"every HeartBtInt"* — so any outbound resets it and an idle session sends the minimum | **`Session::run_liveness_loop()`** — ⚠️ **not** `run_heartbeat_cadence`, which is a stub |
+| **The inbound deadline the loop sleeps to moves on every frame that is neither garbled nor faulty** | the owner's ruling R-1 on #516 (093): any such frame proves the peer is alive. Before 093 only a frame reaching the end of the Active arm moved it, so a peer whose traffic took an early return (a too-high frame, a GapFill, a Reject, …) drew a TestRequest | one write to `last_inbound_steady_` in the LogonReceived/Active arm of `on_inbound_frame`, after the fault and third-field checks; B&L `B-093-9`. Garbled and faulty frames do not move it (`B-092-5`) |
+| **Until the first Active, a third timeout ends the connection: the establishment deadline** (093, `logon_timeout_ms`) | establishment had no bound, and 093's disregard of garbled frames before Logon would otherwise let a peer hold a connection open forever. It runs on the engine's clock and has no effect after the first Active, so it never races the liveness loop | `run_read_pump` (loop-head test) and `run_accept_loop` (the first-frame read) in `src/session/engine.cpp`; B&L `B-093-4` |
 | **An inbound Heartbeat's `TestReqID(112)` must match the most recent outbound TestRequest** | an unmatched reply proves liveness of *something*, not of the exchange being probed | FR-006 → `session_testreqid_mismatch` |
 | **Reconnect mints a FRESH `Transport` per attempt; the dead instance is destroyed first** | a `Transport` is never reused across attempts | `drive_reconnect_attempt`; disclosed as **`B-012-2`** |
 | **All elapsed/threshold measurements use `steady_now()`, not `now()`** | `now()` is not promised monotonic, so a wall-clock step would fire or suppress timeouts spuriously | disclosed as **`B-007-3`** |

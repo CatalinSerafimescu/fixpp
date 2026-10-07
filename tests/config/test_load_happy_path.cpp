@@ -202,6 +202,7 @@ TEST(LoadHappyPath, T011_FieldForFieldEquivalence) {
     }
 
     EXPECT_EQ(cfg.logout_disconnect_timeout_ms, std::uint32_t{5000});  // default 2000
+    EXPECT_EQ(cfg.logon_timeout_ms, std::uint32_t{7000});              // default 10000 (093)
 
     // ── Bool knobs (non-default values) ──────────────────────────────────────
     EXPECT_TRUE(cfg.reset_on_logon);                    // default false
@@ -679,4 +680,16 @@ TEST(LoadHappyPath, GateBR1_NullResourceSubstituted) {
         << "null LoadOptions::resource must be silently substituted with "
            "get_default_resource() and load must succeed (#4 Gate B r1); "
            "if this crashes or fails, the null-resource guard is missing";
+}
+
+// ── 093 (data-model E-7; quickstart Q-31): logon_timeout_ms at its range's ends ──
+//
+// logon_timeout_bounds.toml sets it to 1 in session[0] and to UINT32_MAX in session[1]:
+// both ends of 0 < v <= UINT32_MAX are accepted as bare integers.
+TEST(LoadHappyPath, LogonTimeoutAcceptsBothEndsOfItsRange) {
+    auto result = load_fixture("logon_timeout_bounds.toml");
+    ASSERT_TRUE(result.has_value()) << "logon_timeout_bounds.toml failed to load";
+    ASSERT_EQ(result->sessions.size(), 2U);
+    EXPECT_EQ(result->sessions[0].config.logon_timeout_ms, std::uint32_t{1});
+    EXPECT_EQ(result->sessions[1].config.logon_timeout_ms, std::uint32_t{4294967295U});
 }

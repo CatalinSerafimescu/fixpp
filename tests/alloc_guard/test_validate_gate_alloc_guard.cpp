@@ -30,8 +30,12 @@
 //
 // MECHANISM
 // ---------
-// The test replicates the exact sequence in validate_inbound_():
-//   - stack-backed arena (kInboundParseArena = 16384 bytes, like production)
+// The test replicates the sequence in validate_inbound_():
+//   - the session's parse buffer B(L) at the default L, from the session's own formula
+//     (src/session/parse_capacity.hpp), allocated before main as open() allocates it
+//     before any frame; the parse runs under the entry cap N(L) with an up-front
+//     reserve (093-inbound-frame-dispositions, data-model E-2, re-based this from a
+//     stack array)
 //   - Framer + pmr_carry_buffer on the stack
 //   - Parser<Index>::parse() using the arena
 //   - dictionary_driven_validator::validate() using a scratch arena
@@ -70,6 +74,7 @@
 // declarations (no body) so they become PLT-routed dynamic symbols the
 // LD_PRELOAD interceptor can interpose; a local definition would bind
 // intra-executable and silently disable interception (item 13, 2026-06-19).
+#include "session/parse_capacity.hpp"  // 093 E-2: B(L) and N(L), the session's formula
 #include "support/alloc_guard_markers.hpp"
 
 // ── Sanitizer-detection guard ─────────────────────────────────────────────────
@@ -195,9 +200,22 @@ using fixpp::wire::Framer;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 
+// The parse buffer validate_inbound_() parses over (093, data-model E-2). A bad_alloc
+// while building it before main aborts the binary, which fails the run.
+constexpr std::uint32_t kLimit = fixpp::session::kDefaultInboundLimit;
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization,cert-err58-cpp,cppcoreguidelines-avoid-non-const-global-variables)
+std::vector<std::byte> g_parse_buffer(fixpp::session::detail::parse_capacity::buffer_bytes(kLimit));
+
+// The parse's entry cap and reserve, as validate_inbound_() passes them.
+fixpp::wire::OffsetTable::Config parse_config() {
+    return {.max_offset_entries = fixpp::session::detail::parse_capacity::entry_cap_for(kLimit)};
+}
+std::size_t parse_reserve(std::size_t frame_size) {
+    return fixpp::session::detail::parse_capacity::reserve_for(
+        fixpp::session::detail::parse_capacity::entry_cap_for(kLimit), frame_size);
+}
+
 // Arena sizes matching validate_inbound_() in session.cpp.
-// kInboundParseArena (16384) matches the dispatch arena — the FIX-1 fix.
-constexpr std::size_t kInboundParseArena = 16384;
 constexpr std::size_t kCarryArena = 512;
 constexpr std::size_t kScratchArena = 512;
 
@@ -274,13 +292,12 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
     ASSERT_FALSE(frame.empty());
 
     // ── Helper lambda: one parse→validate round ──────────────────────────────
-    // Mirrors validate_inbound_() exactly: Framer + carry on the stack, parse
-    // into a stack-backed monotonic_buffer_resource, validate with a scratch mr.
+    // Mirrors validate_inbound_(): Framer + carry on the stack, parse into a
+    // monotonic_buffer_resource over the parse buffer, validate with a scratch mr.
     // null_memory_resource() upstream ensures any arena over-run is a hard fail
     // (bad_alloc from the PMR) rather than a silent global-heap fall-back.
     auto run_validate = [&]() -> bool {
-        std::array<std::byte, kInboundParseArena> vg_buf{};
-        std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
+        std::pmr::monotonic_buffer_resource vg_mr{g_parse_buffer.data(), g_parse_buffer.size(),
                                                   std::pmr::null_memory_resource()};
         std::array<std::byte, kCarryArena> vg_carry_store{};
         std::pmr::monotonic_buffer_resource vg_carry_mr{
@@ -299,7 +316,8 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
         std::array<std::byte, kScratchArena> vg_scratch_buf{};
         std::pmr::monotonic_buffer_resource vg_scratch_mr{
             vg_scratch_buf.data(), vg_scratch_buf.size(), std::pmr::null_memory_resource()};
-        auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
+        auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr, parse_config(),
+                                       parse_reserve((*vg_feed)[0].bytes().size()));
         if (!vg_mv_r) {
             return false;
         }
@@ -421,8 +439,7 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
 
     // ── Helper lambda: one parse→validate round ───────────────────────────────
     auto run_long_validate = [&]() -> bool {
-        std::array<std::byte, kInboundParseArena> vg_buf{};
-        std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
+        std::pmr::monotonic_buffer_resource vg_mr{g_parse_buffer.data(), g_parse_buffer.size(),
                                                   std::pmr::null_memory_resource()};
         std::array<std::byte, kCarryArena> vg_carry_store{};
         std::pmr::monotonic_buffer_resource vg_carry_mr{
@@ -442,7 +459,8 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
         std::array<std::byte, kScratchArena> vg_scratch_buf{};
         std::pmr::monotonic_buffer_resource vg_scratch_mr{
             vg_scratch_buf.data(), vg_scratch_buf.size(), std::pmr::null_memory_resource()};
-        auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
+        auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr, parse_config(),
+                                       parse_reserve((*vg_feed)[0].bytes().size()));
         if (!vg_mv_r) {
             return false;
         }

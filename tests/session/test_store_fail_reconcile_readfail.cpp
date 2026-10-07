@@ -158,8 +158,6 @@ using fixpp::test_support::extract_tag;
 // fail_at_outbound_seq_ with store_err_, AND next_seqnum(outbound,false) fails
 // once — but ONLY after store() has already fired (store_fired_) and ONLY on
 // the reconcile signature (increment==false). That gating is precise:
-//   * persist_outbound_advance_ reads next_seqnum(outbound,
-//     increment=TRUE) — never faulted (wrong increment flag).
 //   * the reconcile read (store_then_emit's reconcile block) is next_seqnum(outbound,
 //     increment=FALSE), the first such read after store_fired_ → faulted once.
 // yields_persistent_store() defaults to true (no factory override), so this

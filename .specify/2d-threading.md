@@ -830,7 +830,7 @@ public:
     //
     // Idempotent — calling close() on an already-closing session returns
     // immediately with no error; calling close() on an already-closed
-    // session returns session_already_closed (§6.7).
+    // session returns session_already_closed (§6.7). [Erratum (2026-10-06, 093 plan OD-29): a close() on an already-closing session joins the in-flight close, unless a terminal close arrives while a graceful one is in flight; that terminal close escalates it (ends its grace wait, or keeps its phase 1 from starting), and both callers get the in-flight result.]
     [[nodiscard]] asio::awaitable<expected_t<void>>
         close(close_mode mode = close_mode::graceful) noexcept;
 };
@@ -861,7 +861,7 @@ Notes:
 
 - `close()` is the *public* trigger. The C ABI's `fixpp_session_close()` (owned by **2i**) calls into the same entry point with `close_mode::graceful`. The `terminal` opt-in is C++-only on the v1.0 surface; 2i may add a C-side enum if needed.
 - **Why a child cancellation state?** ASIO's `asio::cancellation_state` composition rules let a coroutine create a child state that is signalled independently of the root: the child state's slot can fire without firing the root, and an outer cancellation on the root propagates *down* to the child. The graceful-close path opens a child state, runs the Logout `async_write` and the timeout `Clock::sleep_until` under it, and lets phase 2 fire `cancellation_type::total` on the root *only after* phase 1 resolves. This closes Codex C-P1-3 (the "self-cancelling Logout" defect) and Opus root cause #1.
-- **Idempotency.** Calling `close()` on an already-closing session returns the same awaitable as the in-flight close (functionally a no-op for the second caller). Calling `close()` on a never-opened or already-closed session returns `error::session_already_closed` (§6.7).
+- **Idempotency.** Calling `close()` on an already-closing session returns the same awaitable as the in-flight close (functionally a no-op for the second caller). Calling `close()` on a never-opened or already-closed session returns `error::session_already_closed` (§6.7). *Erratum (2026-10-06, 093 plan OD-29): a second `close()` joins the in-flight close unless a terminal close arrives while a graceful one is in flight. That terminal close escalates the graceful one: it ends its grace wait, or keeps its phase 1 (the Logout exchange) from starting, so the transport closes at once; both callers get the in-flight result.*
 - The `cancellation_propagation_timeout` knob from v0.1's §6.7 is dropped per N-P2-1; the close-timeout value lives in the session-module Phase-4 spec, not in `SessionConfig`.
 
 ### 4.8 `fixpp::core::session_executor` + executor resolution path (round 2 root cause #1; round 3 root cause #1)
@@ -1170,7 +1170,7 @@ The strand's reentrancy guarantee is **the** mechanism that makes `block` work �
   - If the session FSM has not yet posted the dispatch (still in the parser loop) → `fromApp` is *not* invoked. The parser's `co_await` checkpoint observes the cancellation and unwinds.
 
 - **Logout exchange (graceful).** `Session::close(graceful)` attempts the FIX `Logout` exchange under the child cancellation state per §4.7. The Logout `async_write` and its `Clock::sleep_until` timeout are bound to the child slot — they are NOT pre-cancelled by phase 2's eventual root total. The close-timeout value is picked at the session-module Phase-4 spec (per N-P2-1). Phase 2's root cancellation fires only after phase 1 resolves.
-- **Idempotency.** `Session::close(...)` called twice returns the same outcome on the second call without side effects. Calling it on a never-opened or already-closed session returns `error::session_already_closed`.
+- **Idempotency.** `Session::close(...)` called twice returns the same outcome on the second call without side effects. Calling it on a never-opened or already-closed session returns `error::session_already_closed`. *Erratum (2026-10-06, 093 plan OD-29): a second `close()` joins the in-flight close unless a terminal close arrives while a graceful one is in flight. That terminal close escalates the graceful one, a side effect: it ends its grace wait, or keeps its phase 1 from starting, so the transport closes at once; both callers get the same outcome.*
 
 ### 6.6 Clock contract (per-call discipline; C-P2-5 fix)
 

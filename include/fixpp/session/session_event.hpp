@@ -124,6 +124,34 @@ struct session_event_resend_slot_gap_filled {
     fixpp::core::error code;  // why the replay frame could not be built
 };
 
+// 093-inbound-frame-dispositions (data-model E-5; contract C-1 Reporting, C-2 step
+// 1) — emitted once per summary of disregarded inbound bytes that opened at least
+// one garbled region: one Framer feed in the read pump, the first-frame read's whole
+// summary handed over after open(), or one frame whose third field is not
+// MsgType(35). A summary that only continues a region opened earlier emits none.
+// `first_kind` is the first opened region's kind: wire_framing_resync,
+// wire_invalid_body_length or wire_checksum_mismatch from the Framer, or
+// wire_header_out_of_order from the session. `frames` is the number of regions the
+// summary opened; `discarded_bytes` the bytes it dropped, saturating at UINT32_MAX.
+// The ring below can evict these under a flood (contract L-9);
+// Session::garbled_frame_count() is the durable count. All fields by-value.
+struct session_event_garbled_frame {
+    fixpp::core::error first_kind;
+    std::uint32_t frames;
+    std::uint32_t discarded_bytes;
+};
+
+// 093-inbound-frame-dispositions (data-model E-5; contract C-4) — emitted when the
+// session had not reached Active by its establishment deadline
+// (SessionConfig::logon_timeout_ms), just before the connection is closed. At most once
+// per connection.
+struct session_event_establishment_timeout {};
+
+// 093-inbound-frame-dispositions (data-model E-5, E-10; contract C-6) — emitted when
+// Session::close(), about to issue its teardown reset while a 141=Y reset unit's store
+// operation is in flight, gave up waiting for it at logon_timeout_ms and proceeded.
+struct session_event_close_reset_wait_expired {};
+
 // SessionEvent — NEW 013-introduced public variant union. 5 initial
 // alternatives; future features APPEND alternatives append-only (consumer-side
 // std::visit fall-throughs are responsible for tolerating future variants).
@@ -131,6 +159,8 @@ struct session_event_resend_slot_gap_filled {
 using SessionEvent =
     std::variant<session_event_peer_identity_bound, session_event_compid_authorization_failed,
                  session_event_tls_validation_failed, session_event_credentials_rotated,
-                 session_event_sequence_numbers_reset, session_event_resend_slot_gap_filled>;
+                 session_event_sequence_numbers_reset, session_event_resend_slot_gap_filled,
+                 session_event_garbled_frame, session_event_establishment_timeout,
+                 session_event_close_reset_wait_expired>;
 
 }  // namespace fixpp::session

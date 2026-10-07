@@ -6,13 +6,16 @@
 //
 // Discriminating witness (FR-004..FR-007, tasks.md T011):
 //   (a) advertised config ⇒ outbound Logon carries 383=N (unit test of build_logon).
-//   (b) established (Active) session: inbound frame of size N accepted (stays Active);
-//       size N+1 ⇒ Disconnected — exact boundary via the measured Heartbeat size.
-//   (c) a pre-establishment frame LARGER than our advertised max still establishes
-//       (Active) — the negotiated rule never fires pre-Active (only the framer
-//       backstop governs there).
-//   (d) default (unset) ⇒ no 383 on the wire and no negotiated enforcement.
+//   (d) default (unset) ⇒ no 383 on the wire, and the session's inbound limit is the
+//       default.
 //   (e) peer's advertised 383 is captured + observable (FR-007).
+//
+// 093-inbound-frame-dispositions (FR-013, plan OD-3) supersedes (b) and (c): the
+// session's inbound limit L is enforced by the Framer, in every state, below
+// on_inbound_frame, where these cells feed. A frame of exactly L is delivered through
+// the pump (engine_readpump_test.cpp, InboundAtLimitAccepted), a frame over L closes
+// in every state (inbound_frame_dispositions_test.cpp, Q-6), and 070's
+// pre-establishment exemption is reversed.
 #include <gtest/gtest.h>
 
 #include <array>
@@ -38,6 +41,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -94,16 +98,6 @@ std::vector<std::byte> make_logon_frame(std::string_view begin, std::uint32_t se
     if (peer_383.has_value()) {
         body += "383=" + std::to_string(*peer_383) + "\x01";
     }
-    return to_frame(finalize(body, begin));
-}
-
-std::vector<std::byte> make_heartbeat_frame(std::string_view begin, std::uint32_t seq,
-                                            std::string_view sender, std::string_view target) {
-    std::string body = "35=0\x01";
-    body += "34=" + std::to_string(seq) + "\x01";
-    body += "49=" + std::string(sender) + "\x01";
-    body += "52=20240101-00:00:00.000\x01";
-    body += "56=" + std::string(target) + "\x01";
     return to_frame(finalize(body, begin));
 }
 
@@ -194,49 +188,25 @@ TEST(MaxMsgSizeAdvertise, BuildLogonEmits383) {
     EXPECT_EQ(extract_field(*without, 383), "") << "no 383 when unset (byte-identical)";
 }
 
-// (b) boundary: with advertised_max == heartbeat size, an in-sequence Heartbeat of
-// exactly that size is accepted (stays Active).
-TEST_F(MaxMsgSizeTest, InboundAtLimitAccepted) {
-    auto hb = make_heartbeat_frame("FIX.4.4", 2, "TW", "ISLD");
-    auto cfg = make_acceptor_cfg(static_cast<std::uint32_t>(hb.size()));  // N == frame size
-    fixpp::session::Session sess(engine, cfg);
-    ASSERT_TRUE(open_sync(sess).has_value());
-    auto logon = make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::nullopt);
-    feed_sync(sess, std::span<const std::byte>{logon});
-    ASSERT_EQ(sess.state(), fsm_state::Active);
-    feed_sync(sess, std::span<const std::byte>{hb});
-    EXPECT_EQ(sess.state(), fsm_state::Active) << "frame size == N must be accepted";
-}
-
-// (b) boundary + (c) pre-establishment: with advertised_max == heartbeat size - 1,
-// the (larger) Logon still establishes (pre-Active not checked), then the Heartbeat
-// of size N+1 relative to the limit disconnects.
-TEST_F(MaxMsgSizeTest, InboundOverLimitDisconnects_LogonPreEstablishmentExempt) {
-    auto hb = make_heartbeat_frame("FIX.4.4", 2, "TW", "ISLD");
-    auto cfg = make_acceptor_cfg(static_cast<std::uint32_t>(hb.size() - 1));  // limit = size-1
-    fixpp::session::Session sess(engine, cfg);
-    ASSERT_TRUE(open_sync(sess).has_value());
-    auto logon = make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::nullopt);
-    ASSERT_GT(logon.size(), hb.size() - 1)
-        << "Logon must exceed the negotiated limit to prove exemption";
-    feed_sync(sess, std::span<const std::byte>{logon});
-    ASSERT_EQ(sess.state(), fsm_state::Active)
-        << "oversized-vs-negotiated Logon establishes pre-Active";
-    feed_sync(sess, std::span<const std::byte>{hb});
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "post-Active frame > N must disconnect";
-}
-
-// (d) default unset ⇒ no 383 advertised + no enforcement (in-seq Heartbeat stays Active).
-TEST_F(MaxMsgSizeTest, UnsetNoEnforcement) {
+// (d) default unset ⇒ no 383 advertised, and L is the default: the acceptor's Logon
+// reply carries no 383, and the session's inbound limit reads 65536 (093 FR-010).
+TEST_F(MaxMsgSizeTest, UnsetAdvertisesNo383AndTheLimitIsTheDefault) {
     auto cfg = make_acceptor_cfg(std::nullopt);
+    std::vector<std::string> sent;
+    cfg.transport_send = [&sent](std::span<const std::byte> f) {
+        sent.emplace_back(reinterpret_cast<const char*>(f.data()), f.size());
+    };
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());
     auto logon = make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::nullopt);
     feed_sync(sess, std::span<const std::byte>{logon});
     ASSERT_EQ(sess.state(), fsm_state::Active);
-    auto hb = make_heartbeat_frame("FIX.4.4", 2, "TW", "ISLD");
-    feed_sync(sess, std::span<const std::byte>{hb});
-    EXPECT_EQ(sess.state(), fsm_state::Active) << "no enforcement when advertised_max unset";
+    ASSERT_EQ(sent.size(), 1U) << "the acceptor's Logon reply";
+    auto const reply = std::span<const std::byte>{
+        reinterpret_cast<const std::byte*>(sent[0].data()), sent[0].size()};
+    EXPECT_EQ(extract_field(reply, 35), "A");
+    EXPECT_EQ(extract_field(reply, 383), "") << "no 383 on the wire when unset";
+    EXPECT_EQ(fixpp::session::session_test_access::inbound_limit(sess), 65536U);
 }
 
 // (e) FR-007: peer's advertised 383 is captured + observable.
