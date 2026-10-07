@@ -129,7 +129,8 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
     w.line("    ::fixpp::dict::resolved_message_version const rmv{");
     w.line("        ::fixpp::dict::resolved_message_version::kind::session_admin,");
     w.line("        profile.session,");
-    w.line("        ::fixpp::dict::application_version::Unknown");
+    w.line("        ::fixpp::dict::application_version::Unknown,");
+    w.line("        /* _reserved */ 0");
     w.line("    };");
     w.line("    // rmv drives the live owning_message_handle the factory mints below.");
     w.line("    switch (msg_type) {");
@@ -247,7 +248,8 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.line("                profile.session,");
         w.raw("                ::fixpp::dict::application_version::");
         w.raw(av.ns);
-        w.line("");
+        w.line(",");
+        w.line("                /* _reserved */ 0");
         w.line("            };");
         w.line("            if (msg_type.empty()) {");
         w.line(
