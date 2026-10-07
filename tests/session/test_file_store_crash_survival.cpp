@@ -540,7 +540,6 @@ std::vector<byte_collecting_visitor::entry> outbound_frames(fixpp::session::Mess
     return visitor.entries();
 }
 
-#ifndef _WIN32
 // Arms `arm`, resets an advanced store (reset() when `via_reset`, else reset_to(want)),
 // and checks the post-rename poison described above.
 void expect_post_rename_fault_poisons(void (*arm)() noexcept, bool via_reset,
@@ -581,6 +580,7 @@ void expect_post_rename_fault_poisons(void (*arm)() noexcept, bool via_reset,
     fixpp::store_test::remove_store_dir(dir);
 }
 
+#ifndef _WIN32
 TEST(FileStoreResetTo, Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore) {
     expect_post_rename_fault_poisons(&fixpp::session::arm_force_reset_dir_fsync_fail_once,
                                      /*via_reset=*/false, DurableCounters{.in = 2, .out = 1});
@@ -595,7 +595,12 @@ TEST(FileStoreResetTo, Q29_ResetWithADirectoryFsyncFaultPoisonsTheStore) {
     expect_post_rename_fault_poisons(&fixpp::session::arm_force_reset_dir_fsync_fail_once,
                                      /*via_reset=*/true, DurableCounters{.in = 1, .out = 1});
 }
-#endif  // !_WIN32
+#else
+TEST(FileStoreResetTo, Q29_AFlushFaultAfterTheRenamePoisonsTheStore) {
+    expect_post_rename_fault_poisons(&fixpp::session::arm_force_reset_rename_flush_fail_once,
+                                     /*via_reset=*/false, DurableCounters{.in = 2, .out = 1});
+}
+#endif  // _WIN32
 
 // Control for the cells above: with no fault armed, the same reset leaves the store
 // writable, and what it writes survives a restart.

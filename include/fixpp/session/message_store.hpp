@@ -141,8 +141,12 @@ public:
     // reset: clear all frames (both directions) and rewind counters to
     // next_inbound = next_outbound = 1. FileStore: atomic at the rename of
     // <live>.log.reset.tmp PLUS the platform durability primitive (Linux:
-    // parent-dir fsync MANDATORY; Windows: MOVEFILE_WRITE_THROUGH MANDATORY;
-    // I-15). MemoryStore: entry-array zero pass under writer mutex.
+    // parent-dir fsync MANDATORY; Windows: a POSIX-semantics
+    // SetFileInformationByHandle rename, then FlushFileBuffers on the renamed
+    // file's handle, MANDATORY; I-15). If that primitive or anything after the
+    // rename fails, reset returns store_io_failure and the store refuses every
+    // later operation until it is reopened (L-035-2). MemoryStore: entry-array
+    // zero pass under writer mutex.
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept = 0;
 
     // reset_to (093-inbound-frame-dispositions, data-model E-9; fixpp#524): clear all

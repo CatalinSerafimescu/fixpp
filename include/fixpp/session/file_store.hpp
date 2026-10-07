@@ -268,10 +268,12 @@ void disarm_fail_counter_write_after_reset_commit() noexcept;
 int read_and_reset_reset_atomicity_fault_count() noexcept;
 // 093 Gate B (fixpp#554): one-shot faults after a reset's rename has replaced the live
 // log, so the store's open file names the replaced inode. POSIX only: the next reset's
-// parent-directory open, or its parent-directory fsync, fails. Each counts in
+// parent-directory open, or its parent-directory fsync, fails. Windows only: the
+// FlushFileBuffers after the next reset's rename fails. Each counts in
 // read_and_reset_reset_atomicity_fault_count() when it fires.
 void arm_force_reset_dir_open_fail_once() noexcept;
 void arm_force_reset_dir_fsync_fail_once() noexcept;
+void arm_force_reset_rename_flush_fail_once() noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session

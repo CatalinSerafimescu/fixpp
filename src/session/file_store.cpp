@@ -144,7 +144,7 @@ static std::atomic<bool> g_force_store_pwrite_fail_once{false};
 //   g_fail_counter_write_after_reset_commit: 0 off; 1 armed; 2 armed and a reset's
 //     rename has committed. At 2, the next next_seqnum() counter-record write fails
 //     and the state returns to 0.
-//   g_reset_atomicity_fault_count: how many times either fault fired.
+//   g_reset_atomicity_fault_count: how many times any reset fault seam fired.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_reset_fail_before_rename{false};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -160,6 +160,10 @@ static std::atomic<int> g_reset_atomicity_fault_count{0};
 static std::atomic<bool> g_force_reset_dir_open_fail{false};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_reset_dir_fsync_fail{false};
+//   g_force_reset_rename_flush_fail: Windows; the FlushFileBuffers after the
+//     POSIX-semantics rename fails (posix_rename_over_open).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_force_reset_rename_flush_fail{false};
 // T004 probe counter — incremented each time g_force_store_pwrite_fail_once
 // actually fires (i.e. the injected failure took effect), so a test can
 // confirm the seam fired for the right reason rather than trust a bare RED.
@@ -440,6 +444,9 @@ void arm_force_reset_dir_open_fail_once() noexcept {
 }
 void arm_force_reset_dir_fsync_fail_once() noexcept {
     g_force_reset_dir_fsync_fail.store(true, std::memory_order_relaxed);
+}
+void arm_force_reset_rename_flush_fail_once() noexcept {
+    g_force_reset_rename_flush_fail.store(true, std::memory_order_relaxed);
 }
 
 // ── Record kinds ──────────────────────────────────────────────────────────────
@@ -1630,9 +1637,19 @@ namespace {
 // deliberately keeps the FileStore's live log handle open (on the strand) during
 // the offloaded rename for crash-safe rollback, so MoveFileEx cannot be used.
 // FILE_RENAME_FLAG_POSIX_SEMANTICS swaps atomically regardless of open handles —
-// exactly the POSIX rename(2) the cross-platform algorithm assumes. Returns
-// false (treated as a reset failure) on any error.
-bool posix_rename_over_open(const std::wstring& from, const std::wstring& to) noexcept {
+// exactly the POSIX rename(2) the cross-platform algorithm assumes.
+//
+// The outcome keeps "the rename happened" apart from "the rename was flushed",
+// because the caller must treat them differently (093 Gate B, fixpp#554): before
+// the rename the tmp is deleted and the store keeps its handle; after it the
+// store's handle names the replaced file, so a failed flush must poison the store
+// rather than take the pre-rename cleanup.
+enum class rename_outcome {
+    not_renamed,          // the live name still names the old log
+    renamed_not_flushed,  // the live name names the fresh log; FlushFileBuffers failed
+    renamed_and_flushed,
+};
+rename_outcome posix_rename_over_open(const std::wstring& from, const std::wstring& to) noexcept {
     // FILE_RENAME_INFO's Flags member and the FileRenameInfoEx class are gated
     // behind NTDDI_WIN10_RS1 in the SDK headers; define the layout + constants
     // locally so the build is independent of the project's NTDDI level.
@@ -1650,7 +1667,7 @@ bool posix_rename_over_open(const std::wstring& from, const std::wstring& to) no
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
-        return false;
+        return rename_outcome::not_renamed;
     }
     const std::size_t name_bytes = to.size() * sizeof(wchar_t);
     const std::size_t total = offsetof(RenameInfoEx, FileName) + name_bytes + sizeof(wchar_t);
@@ -1662,11 +1679,21 @@ bool posix_rename_over_open(const std::wstring& from, const std::wstring& to) no
     std::memcpy(info->FileName, to.c_str(), name_bytes + sizeof(wchar_t));
     const BOOL ok =
         SetFileInformationByHandle(h, kFileRenameInfoEx, info, static_cast<DWORD>(total));
+    bool flushed = false;
     if (ok != 0) {
-        FlushFileBuffers(h);  // WRITE_THROUGH durability parity with the old MoveFileEx
+        // WRITE_THROUGH durability parity with the old MoveFileEx
+        flushed = FlushFileBuffers(h) != 0;
+        // 093 Gate B (fixpp#554): the post-rename flush fault seam.
+        if (g_force_reset_rename_flush_fail.exchange(false, std::memory_order_relaxed)) {
+            g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+            flushed = false;
+        }
     }
     CloseHandle(h);
-    return ok != 0;
+    if (ok == 0) {
+        return rename_outcome::not_renamed;
+    }
+    return flushed ? rename_outcome::renamed_and_flushed : rename_outcome::renamed_not_flushed;
 }
 }  // namespace
 #endif  // _WIN32
@@ -1899,12 +1926,18 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
                 // posix_rename_over_open. FlushFileBuffers inside provides the
                 // WRITE_THROUGH durability the old MoveFileEx flag gave.
-                if (!posix_rename_over_open(wide_tmp, wide_live)) {
+                const rename_outcome renamed = posix_rename_over_open(wide_tmp, wide_live);
+                if (renamed == rename_outcome::not_renamed) {
                     DeleteFileW(wide_tmp.c_str());
                     return false;
                 }
-                // Rename succeeded — mark before reopen. [gate-b/r1 A.1/A.2]
+                // Rename succeeded — mark before the flush verdict and the reopen, so
+                // every failure from here takes Region 3's poison branch. The tmp name
+                // no longer exists, so there is nothing to delete.
                 *rename_done = true;
+                if (renamed == rename_outcome::renamed_not_flushed) {
+                    return false;  // the store's handle names the replaced file → poison
+                }
                 // 093 (tasks.md T079): a reset's rename has committed; an armed
                 // counter-write-after-reset-commit seam now fires at the next write.
                 {
