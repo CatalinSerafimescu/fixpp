@@ -177,14 +177,20 @@ TEST(CapiInboundFrameDispositionsQ1, TheCountReadsOneAfterA35NotThirdFrameInActi
 // garbles on its strand. The reads never decrease, and the last one, taken after the
 // fence has shown every garble counted, equals the count. The reader starts only once
 // the session is published, so it reads the live counter, and it is joined before the
-// engine is destroyed (the engine asserts no lookup lease is outstanding).
+// engine is destroyed (the engine asserts no lookup lease is outstanding). The garbles
+// are written only after the reader has completed a read that is not its final one, so
+// its reads overlap the counting and `reads > 1` holds. That wait is bounded by a budget
+// under the session's HeartBtInt; on a miss the reader is stopped and joined before the
+// cell fails.
 TEST(CapiInboundFrameDispositionsQ30, TheCountIsReadFromAnotherThreadWhileTheSessionCounts) {
     constexpr std::uint32_t kGarbles = 20;
+    constexpr std::chrono::milliseconds kReaderStartBudget{10000};
     RawAcceptor peer;
     CInitiator c{peer.port(), 30};
     ASSERT_TRUE(establish(c, peer, 30)) << "setup";
 
     std::atomic<bool> stop{false};
+    std::atomic<bool> read_once{false};
     bool calls_ok = true;
     bool monotonic = true;
     std::uint64_t last = 0;
@@ -202,8 +208,22 @@ TEST(CapiInboundFrameDispositionsQ30, TheCountIsReadFromAnotherThreadWhileTheSes
                 last = v;
                 return;
             }
+            read_once.store(true, std::memory_order_release);
         }
     });
+
+    auto const start_deadline = std::chrono::steady_clock::now() + kReaderStartBudget;
+    while (!read_once.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < start_deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    bool const reader_started = read_once.load(std::memory_order_acquire);
+    if (!reader_started) {
+        stop.store(true, std::memory_order_release);
+        reader.join();
+    }
+    ASSERT_TRUE(reader_started) << "the reader completed no read within "
+                                << kReaderStartBudget.count() << " ms";
 
     bool written = true;
     for (std::uint32_t i = 0; i < kGarbles; ++i) {

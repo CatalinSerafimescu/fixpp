@@ -534,13 +534,29 @@ constexpr std::chrono::milliseconds kDefaultLogoutTimeout{2000};
 // `c` is established with `peer`; the peer writes `bytes` once it has read the Logout.
 void logout_sent_cell(CInitiator& c, RawAcceptor& peer, std::string const& bytes) {
     auto const bound = kDefaultLogoutTimeout / 4;
+    // The band's origin is stamped by the helper thread immediately before its call, and
+    // the cell waits for that stamp, so a late thread start does not spend the band. The
+    // wait is bounded by a budget under the session's HeartBtInt.
+    constexpr std::chrono::milliseconds kCloserStartBudget{10000};
+    std::atomic<bool> calling{false};
     std::atomic<bool> returned{false};
     fixpp_error_t close_rc = FIXPP_ERR_OK;
-    auto const t0 = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point t0{};
     std::thread closer{[&] {
+        t0 = std::chrono::steady_clock::now();
+        calling.store(true, std::memory_order_release);
         close_rc = fixpp_session_close(c.session);
         returned.store(true, std::memory_order_release);
     }};
+    auto const start_deadline = std::chrono::steady_clock::now() + kCloserStartBudget;
+    while (!calling.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < start_deadline) {
+        std::this_thread::sleep_for(1ms);
+    }
+    bool const closer_started = calling.load(std::memory_order_acquire);
+    if (!closer_started) closer.join();
+    ASSERT_TRUE(closer_started) << "the closing thread made no call within "
+                                << kCloserStartBudget.count() << " ms";
     bool const logout =
         peer.read_until([](std::string const& f) { return RawAcceptor::has_field(f, "35=5"); },
                         bound)
