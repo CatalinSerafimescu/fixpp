@@ -106,11 +106,15 @@ each hook runs on a CI lane.
 **Why the guard reads any `-fsanitize=`, not named options.** A sanitizer installs its own allocator
 ahead of the interposer, so a gate registered on a sanitizer build passes vacuously. Naming
 `FIXPP_ENABLE_{ASAN,TSAN,UBSAN}` let every unnamed sanitizer (LSan, MSan, the next one) register the
-gates; matching the flag itself excludes them by default. The guard reads the compile/link flag
-variables and the directory options, not `FIXPP_ENABLE_*`, so the read that sees
-`cmake/Sanitizers.cmake`'s options is exercised (a preset that sets `CMAKE_CXX_FLAGS` in the cache
-drops the Conan toolchain's `-fsanitize`). Rejected: adding LSan and MSan to the named list — the next
-sanitizer would repeat the gap.
+gates; matching the switch itself excludes any sanitizer whose `-fsanitize=` is in what the guard
+reads, including inside a generator expression. A sanitizer added only to one target is not seen.
+The guard reads the compile/link flag variables and the directory options, not `FIXPP_ENABLE_*`, so
+the read that sees `cmake/Sanitizers.cmake`'s options is exercised (a preset that sets
+`CMAKE_CXX_FLAGS` in the cache drops the Conan toolchain's `-fsanitize`). The match is
+`cmake/FixppMallocnesiaSanitizerMatch.cmake`, pinned by `ci/test-mallocnesia-sanitizer-match.sh`.
+Rejected: adding LSan and MSan to the named list — the next sanitizer would repeat the gap. Not
+built: a deferred check of each gated target's own options; PR #557's Gate B round 1 narrowed the
+claim to what is read instead.
 
 **Why the sync gate was restructured, not budgeted.** Its window co_spawned two coroutines per
 iteration, so it measured asio's per-spawn frames, not the mutex; it was green only because

@@ -2651,6 +2651,13 @@ jobs:
       - name: "Regression pin — check_alloc refusals (#448)"
         run: bash ci/test-check-alloc.sh
 
+      # fixpp#497: the flag match that keeps the allocation gates off a sanitizer build.
+      # No configured lane carries a sanitizer that match would miss, so an edit to it
+      # is checked here or nowhere: fixture flag strings under `cmake -P`, and mutants of
+      # the match, each required to fail the cells that name its break. Buildless.
+      - name: "Regression pin — mallocnesia sanitizer flag match (#497)"
+        run: bash ci/test-mallocnesia-sanitizer-match.sh
+
       # fixpp#530: the ODR census itself runs on the linux-clang-release leg, which
       # is behind both gate labels. Its verdicts and refusals are pinned here
       # instead, on synthetic trees, each by a cell asserting its own line of output;

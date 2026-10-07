@@ -42,16 +42,15 @@
 # selection instead would leave them registered and runnable — and the unfiltered
 # full-ctest runs on those lanes would pick them up and pass vacuously.
 #
-# THE CONDITION (fixpp#497): a build is a sanitizer build when ANY `-fsanitize=` reaches
-# its compile or link lines, whichever sanitizer it names. Naming sanitizers one by one
-# let every unnamed one (LSan, MSan, the next) register the gates; matching the switch
-# itself excludes them by default. What does NOT match, by spelling, is what installs no
-# allocator: `-fno-sanitize=…`, and the `-fsanitize-<option>` family
-# (`-fsanitize-coverage=`, `-fsanitize-recover=`, …), whose `-` after "sanitize" is not
-# the `=` this matches. The per-target `-fsanitize=fuzzer-no-link` that
-# fixpp_instrument_libraries_for_fuzzing() adds is not seen here, and need not be: the
-# top-level CMakeLists.txt refuses FIXPP_BUILD_FUZZ without ASan or UBSan, whose
-# directory options are seen.
+# THE CONDITION (fixpp#497): the gates are not registered when any `-fsanitize=` appears
+# in the flags read below, whichever sanitizer it names, including inside a generator
+# expression. Naming sanitizers one by one let every unnamed one (LSan, MSan, the next)
+# register the gates. The match itself, and what it does not match, is
+# fixpp_mallocnesia_flags_name_sanitizer() in cmake/FixppMallocnesiaSanitizerMatch.cmake,
+# tested by ci/test-mallocnesia-sanitizer-match.sh. The per-target
+# `-fsanitize=fuzzer-no-link` that fixpp_instrument_libraries_for_fuzzing() adds is not
+# seen here, and need not be: the top-level CMakeLists.txt refuses FIXPP_BUILD_FUZZ
+# without ASan or UBSan, whose directory options are seen.
 #
 # Where a `-fsanitize=` can be when this file is evaluated, and so what is read:
 #   - the CMAKE_<LANG>_FLAGS and CMAKE_<LINK>_LINKER_FLAGS variables, including their
@@ -94,14 +93,14 @@ endforeach()
 get_directory_property(_mn_compile_options COMPILE_OPTIONS)
 get_directory_property(_mn_link_options LINK_OPTIONS)
 string(APPEND _mn_flags " ${_mn_compile_options} ${_mn_link_options}")
-string(REGEX MATCH "[ ;]-fsanitize=[^ ;]*" _mn_sanitizer "${_mn_flags}")
+include("${CMAKE_CURRENT_LIST_DIR}/FixppMallocnesiaSanitizerMatch.cmake")
+fixpp_mallocnesia_flags_name_sanitizer(_mn_sanitizer "${_mn_flags}")
 
 if(UNIX AND NOT APPLE AND NOT _mn_sanitizer)
   set(FIXPP_MALLOCNESIA_SUPPORTED TRUE)
 else()
   set(FIXPP_MALLOCNESIA_SUPPORTED FALSE)
   if(_mn_sanitizer)
-    string(STRIP "${_mn_sanitizer}" _mn_sanitizer)
     message(STATUS "fixpp: mallocnesia gates not registered — a sanitizer build "
                    "(${_mn_sanitizer}); its allocator would make them pass vacuously")
   endif()
