@@ -91,7 +91,7 @@ public:
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
-        std::span<std::byte> buf [[clang::lifetimebound]]) override {
+        [[maybe_unused]] std::span<std::byte> buf [[clang::lifetimebound]]) override {
         co_return std::unexpected{fixpp::core::error::transport_read_eof};
     }
 

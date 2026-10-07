@@ -177,7 +177,7 @@ public:
         : store_(store), sx_(sx) {}
 
     asio::awaitable<fixpp::core::expected_t<visit_result>> on_frame(
-        seqnum_t seq, std::span<const std::byte> /*payload*/) noexcept override {
+        seqnum_t /*seq*/, std::span<const std::byte> /*payload*/) noexcept override {
         frames_seen++;
         if (frames_seen == 1) {
             // Drive reset() during the retrieve() walk suspension.

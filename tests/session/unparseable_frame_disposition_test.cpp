@@ -830,7 +830,8 @@ public:
                               .msg_type = extract_tag(frame, 35),
                               .ref_seq = extract_tag(frame, 45)});
         } else {
-            events.push_back({.kind = EventKind::inbound_store, .seq = seq});
+            events.push_back(
+                {.kind = EventKind::inbound_store, .seq = seq, .msg_type = {}, .ref_seq = {}});
         }
         co_return fixpp::core::expected_t<void>{};
     }
@@ -858,7 +859,8 @@ public:
         if (increment) {
             ++c;
             if (dir == direction_t::inbound) {
-                events.push_back({.kind = EventKind::inbound_advance, .seq = c});
+                events.push_back(
+                    {.kind = EventKind::inbound_advance, .seq = c, .msg_type = {}, .ref_seq = {}});
             }
         }
         co_return curr;

@@ -1301,11 +1301,11 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
     };
     const std::vector<Case> cases = {
         {"021 Arm C (122 missing)", nullptr,
-         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y"))},
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y")), std::nullopt},
         {"after Guard (4): fromAdmin veto", std::make_shared<VetoHeartbeatApp>(),
-         make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
+         make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV"), std::nullopt},
         {"after Guard (4): no Application", nullptr,
-         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV"), std::nullopt},
         {.site = "092 disposer (D-5)",
          .app = std::make_shared<CountingApp029>(),
          .frame = make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", "9x9=1\x01"),

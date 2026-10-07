@@ -406,7 +406,8 @@ TEST(SeqnumDrainOnClose, OpenThenCloseTerminalIdempotent) {
     auto open_r = ctx.run_coro(session.open());
     ASSERT_TRUE(open_r.has_value()) << "open() failed";
 
-    auto close_r = ctx.run_coro(session.close(fixpp::session::close_mode::terminal));
+    [[maybe_unused]] auto close_r =
+        ctx.run_coro(session.close(fixpp::session::close_mode::terminal));
     EXPECT_FALSE(session.is_open()) << "Session must not be open after close()";
 
     auto close2 = ctx.run_coro(session.close(fixpp::session::close_mode::terminal));

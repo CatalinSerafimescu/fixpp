@@ -857,7 +857,7 @@ TEST(ValidationCompatToggles, Seq_KnobOff_AdminVsAppFanOut) {
 
     // Snapshot counters.
     const int from_admin_before = app->from_admin_count;
-    const int from_app_before = app->from_app_count;
+    [[maybe_unused]] const int from_app_before = app->from_app_count;
 
     // Feed a too-low admin frame: Heartbeat(35=0) at seq=1.
     // NOTE: the C2.2 carve-out says too-low Heartbeat(35=0) is SILENTLY DROPPED

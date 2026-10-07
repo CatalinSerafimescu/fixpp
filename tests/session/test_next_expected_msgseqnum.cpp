@@ -179,9 +179,11 @@ std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t se
 }
 
 // make_seq_reset_gapfill: SequenceReset-GapFill for admin fills during resend.
-std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::uint32_t seq,
-                                              std::string_view s, std::string_view t,
-                                              std::uint32_t new_seqno) {
+[[maybe_unused]] std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs,
+                                                               std::uint32_t seq,
+                                                               std::string_view s,
+                                                               std::string_view t,
+                                                               std::uint32_t new_seqno) {
     std::string extra;
     extra += field(43, "Y");
     extra += field(123, "Y");  // GapFillFlag=Y

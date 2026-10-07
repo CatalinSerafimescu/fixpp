@@ -850,9 +850,9 @@ public:
 struct LogonCloseCase {
     std::optional<sess::close_mode> mode;
     std::string arm_on = "A";
-    std::string peer_logon_extra;  // fields appended to the peer's Logon, SOH-terminated
+    std::string peer_logon_extra{};  // fields appended to the peer's Logon, SOH-terminated
     bool enable_789 = false;
-    std::optional<sess::session_posture> posture;
+    std::optional<sess::session_posture> posture{};
     bool reset_on_logon = false;
     bool reset_on_disconnect = false;
     sess::seqnum_t store_outbound_next = 0;  // 0 = no store_factory

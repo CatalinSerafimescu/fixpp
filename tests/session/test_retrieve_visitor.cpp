@@ -136,7 +136,7 @@ public:
         : store_{store}, dir_{dir} {}
 
     asio::awaitable<fixpp::core::expected_t<visit_result>> on_frame(
-        seqnum_t seq, std::span<const std::byte> frame) noexcept override {
+        seqnum_t seq, std::span<const std::byte> /*frame*/) noexcept override {
         // Attempt to store the NEXT frame into the same store.
         // Under US3 this must not deadlock (mutex is released before this call).
         seqnum_t next_seq = seq + 1;

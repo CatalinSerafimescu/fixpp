@@ -352,9 +352,10 @@ static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std
 }
 
 // Build a valid inbound Heartbeat (35=0) frame.
-static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string, std::uint32_t seq,
-                                                  std::string_view sender,
-                                                  std::string_view target) {
+[[maybe_unused]] static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string,
+                                                                   std::uint32_t seq,
+                                                                   std::string_view sender,
+                                                                   std::string_view target) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";

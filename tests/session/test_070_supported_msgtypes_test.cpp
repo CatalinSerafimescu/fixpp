@@ -35,7 +35,8 @@ fixpp::core::expected_t<std::span<std::byte>> build(std::span<std::byte> out,
     return fixpp::session::build_logon(
         out, 1, "TW", "ISLD", "FIX.4.4", 30, "20240101-00:00:00.000", false, std::nullopt,
         std::nullopt, std::nullopt, std::nullopt,
-        fixpp::session::logon_advertise_options{.supported_msg_types = types});
+        fixpp::session::logon_advertise_options{.max_message_size = std::nullopt,
+                                                .supported_msg_types = types});
 }
 
 // (a) exact contiguous group in configuration order, delimiter 372 first.

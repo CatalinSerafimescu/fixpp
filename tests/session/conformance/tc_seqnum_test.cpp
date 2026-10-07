@@ -322,7 +322,7 @@ TEST_F(TcSeqnumTest, Tc2q_MsgTypeNotValid) {
     // Send a message with an unknown MsgType "Z" (in-sequence seq=2).
     // This represents an unrecognised application message type.
     auto unknown = make_unknown_msgtype_frame("FIX.4.2", 2, "TW", "ISLD", "Z");
-    auto r = feed_sync(sess, unknown);
+    [[maybe_unused]] auto r = feed_sync(sess, unknown);
     // The session processes it: unknown MsgType → bounded Reject, stays Active.
 
     const auto st = sess.state();

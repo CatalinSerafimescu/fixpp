@@ -301,7 +301,7 @@ TEST_F(LogonHandshakeTest, RefusedLogonWrongBeginString) {
 
     // Peer sends Logon with wrong BeginString (FIX.3.9).
     auto logon_frame = make_logon_frame("FIX.3.9", 1, "TW", "ISLD", 30);
-    auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
+    [[maybe_unused]] auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active) << "Session must NOT enter Active on BeginString mismatch";
@@ -318,7 +318,7 @@ TEST_F(LogonHandshakeTest, RefusedLogonWrongSenderCompID) {
 
     // Peer sends Logon with wrong SenderCompID ("WT" instead of "TW").
     auto logon_frame = make_logon_frame("FIX.4.2", 1, "WT" /* wrong */, "ISLD", 30);
-    auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
+    [[maybe_unused]] auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active) << "Session must NOT enter Active on SenderCompID mismatch";
@@ -335,7 +335,7 @@ TEST_F(LogonHandshakeTest, RefusedLogonWrongTargetCompID) {
 
     // Peer sends Logon with wrong TargetCompID ("DLSI" instead of "ISLD").
     auto logon_frame = make_logon_frame("FIX.4.2", 1, "TW", "DLSI" /* wrong */, 30);
-    auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
+    [[maybe_unused]] auto inbound_result = feed_sync(sess, std::span<const std::byte>{logon_frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active) << "Session must NOT enter Active on TargetCompID mismatch";
@@ -352,7 +352,7 @@ TEST_F(LogonHandshakeTest, RefusedFirstMessageNotLogon) {
 
     // First inbound message is a Heartbeat (35=0), not a Logon (35=A).
     auto hb_frame = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    auto inbound_result = feed_sync(sess, std::span<const std::byte>{hb_frame});
+    [[maybe_unused]] auto inbound_result = feed_sync(sess, std::span<const std::byte>{hb_frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active)

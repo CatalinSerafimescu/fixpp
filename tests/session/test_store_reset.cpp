@@ -337,7 +337,9 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
             auto rv = co_await store2.retrieve(1, 0, direction_t::outbound, vis);
             EXPECT_TRUE(rv.has_value()) << "retrieve() after reset+reopen failed";
             EXPECT_EQ(vis.seqs.size(), 1U) << "expected 1 frame after reset+store(1)+reopen";
-            if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1U) << "frame seqnum must be 1";
+            if (!vis.seqs.empty()) {
+                EXPECT_EQ(vis.seqs[0], 1U) << "frame seqnum must be 1";
+            }
         },
         asio::use_future);
     fut.get();

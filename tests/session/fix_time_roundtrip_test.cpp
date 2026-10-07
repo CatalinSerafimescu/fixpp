@@ -107,11 +107,12 @@ TEST(FixTimeRoundtrip, EpochMicros) {
 TEST(FixTimeRoundtrip, KnownDateMillis) {
     // 2024-03-15T14:30:45.123 UTC
     // epoch offset: 54 years, computed precisely
-    utc_time_point tp{system_clock::from_time_t(0) +
-                      duration_cast<system_clock::duration>(
-                          hours(24 * (54 * 365 + 13))  // 54 years with 13 leap years (approx)
-                          + hours(14 * 365 + 75)       // extra days for 2024-03-15
-                          )};
+    [[maybe_unused]] utc_time_point tp{
+        system_clock::from_time_t(0) +
+        duration_cast<system_clock::duration>(
+            hours(24 * (54 * 365 + 13))  // 54 years with 13 leap years (approx)
+            + hours(14 * 365 + 75)       // extra days for 2024-03-15 (claim-ok: test input)
+            )};
     // Use a fixed known string instead, with parse→format:
     const std::string_view known = "20240315-14:30:45.123";
     auto parsed = fix_string_to_utc_time(std::span<const char>(known.data(), known.size()));
