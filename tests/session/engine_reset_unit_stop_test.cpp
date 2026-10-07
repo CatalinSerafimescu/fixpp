@@ -341,7 +341,9 @@ TEST_P(Q26, EngineStopDuringTheUnitMeetsTheTableAndTheArmActsOnNothingMore) {
 
     // The table.
     EXPECT_FALSE(holder_timed_out) << "the cell's lock was released by its bound";
-    if (p.store == StoreKind::contended) EXPECT_TRUE(lock_released);
+    if (p.store == StoreKind::contended) {
+        EXPECT_TRUE(lock_released);
+    }
     std::optional<std::pair<seqnum_t, seqnum_t>> durable;
     if (file_backed) {
         sess.reset();
@@ -465,8 +467,8 @@ std::shared_ptr<MemoryStore> seeded_store(std::vector<std::pair<seqnum_t, std::s
 }
 
 struct Od25Case {
-    std::string logon_extra;  // fields after 98 and 108 on the peer's Logon
-    std::vector<std::pair<seqnum_t, std::string>> frames;  // stored outbound before open
+    std::string logon_extra{};  // fields after 98 and 108 on the peer's Logon
+    std::vector<std::pair<seqnum_t, std::string>> frames{};  // stored outbound before open
     // Hold the n-th outbound store() (1-based; 0 = none), or the first outbound
     // next_seqnum(_, false) after the reply Logon's store.
     int hold_store = 0;
@@ -817,8 +819,8 @@ TEST(Od25, EngineStopDuringA789ReplaysReadFiresNoGapFill) {
 struct Od26Case {
     session_role role = session_role::acceptor;
     // Adjusts the session config, and builds the peer's Logon (or Logon-ack).
-    std::function<void(SessionConfig&, plain_rig::Rig&)> configure;
-    std::function<std::string(plain_rig::Rig&)> peer_logon;
+    std::function<void(SessionConfig&, plain_rig::Rig&)> configure{};
+    std::function<std::string(plain_rig::Rig&)> peer_logon{};
     // The held operation: the n-th outbound store() (1-based; an initiator's own Logon
     // is the first), the first outbound next_seqnum(_, false), or the first inbound
     // next_seqnum(_, true). fail: it returns store_io_failure once released.

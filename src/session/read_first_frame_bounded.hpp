@@ -216,7 +216,7 @@ template <class Rep, class Period>
 [[nodiscard]] constexpr fixpp::core::steady_time_point deadline_after(
     fixpp::core::steady_time_point now, std::chrono::duration<Rep, Period> d) noexcept {
     using time_point = fixpp::core::steady_time_point;
-    using duration = std::chrono::duration<Rep, Period>;
+    using duration [[maybe_unused]] = std::chrono::duration<Rep, Period>;  // assert() only
     using time_duration = typename time_point::duration;
     using scale = std::ratio_divide<Period, typename time_duration::period>;
     static_assert(std::is_integral_v<Rep> && std::is_signed_v<Rep>);

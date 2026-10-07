@@ -145,7 +145,7 @@ struct run_result {
 
 struct run_opts {
     std::size_t limit = kLargeL;
-    std::optional<std::size_t> max_begin_string_bytes;
+    std::optional<std::size_t> max_begin_string_bytes{};
     std::size_t out_slots = 1;
 };
 

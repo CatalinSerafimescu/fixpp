@@ -734,7 +734,7 @@ using fixpp::test_support::HookedStoreFactory;
 using fixpp::test_support::StoreLog;
 
 struct LogonCloseCase {
-    std::optional<sess::close_mode> mode;
+    std::optional<sess::close_mode> mode{};
     std::string arm_on = "A";
     std::string peer_logon_extra{};  // fields appended to the peer's Logon, SOH-terminated
     bool enable_789 = false;
@@ -752,7 +752,7 @@ struct LogonCloseCase {
     // Inbound validation on, over the validation test dictionary.
     bool validate = false;
     // Frames the peer writes in the same write as its Logon (or Logon-ack).
-    std::vector<std::byte> trailing;
+    std::vector<std::byte> trailing{};
     // close(graceful)'s store flush holds until the session has counted a garbled frame
     // (HookedStore::Hooks::flush_until), so a trailing frame that follows the frames under
     // test, and is garbled, shows the pump delivered them while close() was under way.
@@ -765,7 +765,7 @@ struct LogonCloseCase {
     bool hold_until_close_began = false;
     // A second connection over the store a first one left (its counters), with the
     // peer's Logon (or Logon-ack) at this MsgSeqNum.
-    std::shared_ptr<StoreLog> reuse_store;
+    std::shared_ptr<StoreLog> reuse_store{};
     int peer_logon_seq = 1;
 };
 

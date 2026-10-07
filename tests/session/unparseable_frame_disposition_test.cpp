@@ -1609,10 +1609,10 @@ TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
 // no-TestRequest-at-t0 + HeartBtInt check.
 
 struct RefreshCase {
-    std::vector<std::byte> frame;
+    std::vector<std::byte> frame{};
     bool validate = false;
     bool validate_sequence_numbers = true;
-    std::vector<std::string> drawn;  // MsgType(35) of each frame the class frame draws
+    std::vector<std::string> drawn{};  // MsgType(35) of each frame the class frame draws
     std::uint32_t next_in_after = 0;
     int from_app_after = 0;
 };
