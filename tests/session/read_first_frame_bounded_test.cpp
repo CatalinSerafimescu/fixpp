@@ -66,6 +66,7 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <fixpp/core/clock.hpp>
@@ -74,6 +75,7 @@
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/transport/test/mock_transport.hpp>
 #include <future>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -853,7 +855,7 @@ TEST(ReadFirstFrameBounded, B4) {
 // it is idempotent and the arm itself can no longer push the deadline forward.
 // The mutant is therefore written one level up, on the line that computes
 // `abs_deadline` in read_first_frame_bounded.hpp: recomputing
-// `clock.steady_now() + deadline` per iteration. Under it the deadline is reset
+// `deadline_after(clock.steady_now(), deadline)` per iteration. Under it the deadline is reset
 // every 7 ms and never fires; the loop drains all 201 chunks and reaches
 // `201 > 200` at the foot.
 //
@@ -1380,4 +1382,61 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
         << "coverage cell: mapping every read error to a cancellation-attributable "
            "value would leave T2a green while breaking verbatim propagation — this cell "
            "must fail if that mapping is reintroduced.";
+}
+
+// ── deadline_after: an absolute deadline that saturates at the clock's limit ─
+//
+// Each input is a run-time value, so the cells exercise the helper as the call sites
+// do. H1, H7: a sum past steady_time_point::max() saturates there. H2, H3: a sum that
+// fits is returned exactly, up to and including max(). H4: a duration whose own
+// conversion to the time point's units would overflow saturates. H5: a negative
+// time point. H6: a zero duration.
+namespace {
+using fixpp::core::steady_time_point;
+using fixpp::session::detail::deadline_after;
+
+std::chrono::milliseconds u32_max_ms() {
+    return std::chrono::milliseconds{std::numeric_limits<std::uint32_t>::max()};
+}
+}  // namespace
+
+TEST(DeadlineAfter, H1_ASumPastMaxSaturatesAtMax) {
+    auto const now = steady_time_point::max() - std::chrono::milliseconds{1};
+    EXPECT_EQ(deadline_after(now, u32_max_ms()), steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H2_ASumOfExactlyMaxIsReturned) {
+    auto const now = steady_time_point::max() - u32_max_ms();
+    EXPECT_EQ(deadline_after(now, u32_max_ms()), steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H3_ASumOneNanosecondShortOfMaxIsReturnedExactly) {
+    auto const now = steady_time_point::max() - u32_max_ms() - std::chrono::nanoseconds{1};
+    EXPECT_EQ(deadline_after(now, u32_max_ms()),
+              steady_time_point::max() - std::chrono::nanoseconds{1});
+}
+
+TEST(DeadlineAfter, H4_ADurationPastTheClockRangeSaturatesBeforeConversion) {
+    std::chrono::seconds const d{9'300'000'000};
+    EXPECT_EQ(deadline_after(steady_time_point{}, d), steady_time_point::max());
+    EXPECT_EQ(deadline_after(steady_time_point{std::chrono::nanoseconds{-5}}, d),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H5_ANegativeTimePointAddsExactly) {
+    auto const now = steady_time_point{std::chrono::nanoseconds{-5}};
+    EXPECT_EQ(deadline_after(now, std::chrono::seconds{1}),
+              steady_time_point{std::chrono::nanoseconds{999'999'995}});
+}
+
+TEST(DeadlineAfter, H6_AZeroDurationReturnsNow) {
+    auto const now = steady_time_point{std::chrono::nanoseconds{123}};
+    EXPECT_EQ(deadline_after(now, std::chrono::milliseconds{0}), now);
+    EXPECT_EQ(deadline_after(steady_time_point::max(), std::chrono::milliseconds{0}),
+              steady_time_point::max());
+}
+
+TEST(DeadlineAfter, H7_ASumOneNanosecondPastMaxSaturatesAtMax) {
+    auto const now = steady_time_point::max() - u32_max_ms() + std::chrono::nanoseconds{1};
+    EXPECT_EQ(deadline_after(now, u32_max_ms()), steady_time_point::max());
 }

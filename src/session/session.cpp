@@ -388,7 +388,8 @@ void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
         return;
     }
     auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
-    garble_log_next_ = now + std::max(heartbt, std::chrono::seconds{1});
+    // Saturates at steady_time_point::max() when not representable.
+    garble_log_next_ = detail::deadline_after(now, std::max(heartbt, std::chrono::seconds{1}));
     garble_logged_ = true;
     std::uint64_t const unnamed = garbles_unlogged_ + (g.regions - 1U);
     FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
@@ -1983,8 +1984,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
             asio::steady_timer unit_done{co_await asio::this_coro::executor,
                                          asio::steady_timer::time_point::max()};
             reset_unit_wake_ = [&unit_done] { unit_done.cancel(); };
-            auto const bound =
-                effective_clock_->steady_now() + std::chrono::milliseconds{cfg_.logon_timeout_ms};
+            // Saturates at steady_time_point::max() when not representable.
+            auto const bound = detail::deadline_after(
+                effective_clock_->steady_now(), std::chrono::milliseconds{cfg_.logon_timeout_ms});
             auto const which =
                 co_await (unit_done.async_wait(asio::as_tuple(asio::use_awaitable)) ||
                           detail::await_deadline(*effective_clock_, bound));

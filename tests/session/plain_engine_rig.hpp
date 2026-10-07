@@ -194,12 +194,15 @@ public:
     // start(); a FIXT session's DefaultApplVerID must name one of them.
     std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> engine_dictionaries;
 
-    explicit Rig(std::shared_ptr<fixpp::session::Application> application = nullptr)
+    // `steady_seed` is the mock clock's initial steady_now(); the UTC side is seeded
+    // independently, so a seed near steady_time_point::max() leaves SendingTime(52)
+    // ordinary.
+    explicit Rig(std::shared_ptr<fixpp::session::Application> application = nullptr,
+                 fixpp::core::steady_time_point steady_seed = {})
         : app{std::move(application)} {
         using namespace std::chrono;
         clock = std::make_shared<fixpp::core::mock_clock>(
-            system_clock::time_point{} + seconds{1704067200}, fixpp::core::steady_time_point{},
-            ioc.get_executor());
+            system_clock::time_point{} + seconds{1704067200}, steady_seed, ioc.get_executor());
     }
 
     Rig(Rig const&) = delete;

@@ -859,9 +859,11 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // 093 (contract C-4, data-model E-6): this connection's establishment deadline,
         // absolute on the engine clock from accept. It bounds the first-frame read
         // (phase a) and the pump until the first Active (phase b).
+        // Saturates at steady_time_point::max() when not representable.
         fixpp::core::steady_time_point const establish_deadline =
-            engine_cfg.clock->steady_now() +
-            std::chrono::milliseconds{entry.config.logon_timeout_ms};
+            fixpp::session::detail::deadline_after(
+                engine_cfg.clock->steady_now(),
+                std::chrono::milliseconds{entry.config.logon_timeout_ms});
 
         // T011/INV-7 (D5/E-5/R8): verify the accepted transport's socket is bound
         // to the session strand. Auto-satisfied because:
@@ -1192,8 +1194,11 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     }
     // 093 (contract C-4, data-model E-6): the establishment deadline, absolute on the
     // engine clock from the moment the Logon has been sent.
+    // Saturates at steady_time_point::max() when not representable.
     fixpp::core::steady_time_point const establish_deadline =
-        engine_cfg.clock->steady_now() + std::chrono::milliseconds{entry.config.logon_timeout_ms};
+        fixpp::session::detail::deadline_after(
+            engine_cfg.clock->steady_now(),
+            std::chrono::milliseconds{entry.config.logon_timeout_ms});
 
     // T011/INV-7 (D5/E-5/R8): verify the connect-path transport's socket is bound
     // to the session strand. Auto-satisfied because:

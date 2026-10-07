@@ -24,15 +24,19 @@
 #include <asio/cancellation_type.hpp>
 #include <asio/experimental/awaitable_operators.hpp>
 #include <asio/this_coro.hpp>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until; steady_time_point
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/wire/framer.hpp>
+#include <limits>
 #include <memory_resource>
+#include <ratio>
 #include <span>
 #include <system_error>  // std::system_error — the shape Clock::sleep_until throws on cancel
+#include <type_traits>
 #include <vector>
 
 namespace fixpp::session::detail {
@@ -197,6 +201,45 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
     }
 }
 
+// 093-inbound-frame-dispositions (contract C-4, C-6; data-model E-6, E-10): the
+// absolute instant `d` after `now`, or steady_time_point::max() when that instant is
+// not representable. Clock::steady_now() states no range, so an embedder's Clock may
+// return a time point near max(), and a configured duration can be too large for the
+// time point's units on its own (heartbeat_interval is in seconds). A plain `now + d`
+// is then signed overflow, which is undefined behaviour.
+//
+// The bound is checked in `d`'s own units BEFORE any conversion, because converting
+// a large `d` to nanoseconds overflows by itself. The headroom is max() - now, cast
+// down (floored) to `d`'s units, so the check is exact for a non-negative `now`. For
+// a negative `now` that subtraction would overflow, so the headroom is the time
+// point's whole duration range instead; a sum that is representable only because
+// `now` is negative then saturates too, which is later than the exact instant,
+// never earlier.
+//
+// The static_asserts make both casts unable to overflow: Rep is a signed integer at
+// least as wide as the time point's, and Period is no finer than the time point's.
+// Precondition: d >= 0.
+//
+// Other absolute deadlines in the session do not use this yet; see fixpp#555.
+template <class Rep, class Period>
+[[nodiscard]] constexpr fixpp::core::steady_time_point deadline_after(
+    fixpp::core::steady_time_point now, std::chrono::duration<Rep, Period> d) noexcept {
+    using time_point = fixpp::core::steady_time_point;
+    using duration = std::chrono::duration<Rep, Period>;
+    static_assert(std::is_integral_v<Rep> && std::is_signed_v<Rep>);
+    static_assert(std::numeric_limits<Rep>::digits >=
+                  std::numeric_limits<typename time_point::rep>::digits);
+    static_assert(std::ratio_greater_equal_v<Period, typename time_point::period>);
+    assert(d >= duration::zero());
+    auto const headroom = now.time_since_epoch() >= time_point::duration::zero()
+                              ? time_point::max() - now
+                              : time_point::duration::max();
+    if (d > std::chrono::duration_cast<duration>(headroom)) {
+        return time_point::max();
+    }
+    return now + std::chrono::duration_cast<typename time_point::duration>(d);
+}
+
 // 093-inbound-frame-dispositions (data-model E-4, E-6): what a successful
 // read_first_frame_bounded returns. The first frame is buf[offset, offset + len);
 // the bytes after it in buf are surplus for the read pump. `garbles` sums the garble
@@ -245,13 +288,18 @@ read_first_frame_bounded(fixpp::transport::Transport& transport, std::vector<std
     // structural rather than a prohibition.
     //
     // ⚠️ THE RE-ARM MUTANT LIVES ON THIS LINE NOW. Moving this computation
-    // inside the loop (`clock.steady_now() + deadline` per iteration) pushes
-    // the deadline forward forever and is what B6 kills.
+    // inside the loop (`deadline_after(clock.steady_now(), deadline)` per
+    // iteration) pushes the deadline forward forever and is what B6 kills.
+    //
+    // deadline_after, not a plain sum: a caller's relative bound can reach past
+    // steady_time_point::max() (the acceptor hands in the establishment time left,
+    // rounded up to whole milliseconds), and the sum then saturates at max().
     //
     // `deadline` stays RELATIVE in the signature so every call site keeps its
     // literal (`5s`, `50ms`) and contracts/read_first_frame_bounded.md's P-
     // clauses still read as written; the clock is what makes it testable.
-    fixpp::core::steady_time_point const abs_deadline = clock.steady_now() + deadline;
+    fixpp::core::steady_time_point const abs_deadline =
+        deadline_after(clock.steady_now(), deadline);
 
     // 015 /simplify (Q-2) — the deadline must CANCEL the in-flight async_read_some,
     // not merely set a flag the loop checks between reads: a peer that completes the

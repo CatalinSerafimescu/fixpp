@@ -600,6 +600,10 @@ struct PumpOptions {
     std::optional<std::chrono::seconds> heartbeat = std::chrono::seconds{30};
     std::string begin_string = "FIX.4.2";
     std::uint32_t logout_disconnect_timeout_ms = 500;
+    // The engine clock's initial steady_now().
+    fixpp::core::steady_time_point steady_seed{};
+    // Unset: the rig's session keeps SessionConfig's own logon_timeout_ms.
+    std::optional<std::uint32_t> logon_timeout_ms;
 };
 
 struct PumpCell {
@@ -607,13 +611,14 @@ struct PumpCell {
     plain_rig::Rig rig;
     bool up = false;
 
-    explicit PumpCell(PumpOptions opt = {}) : rig{std::move(opt.app)} {
+    explicit PumpCell(PumpOptions opt = {}) : rig{std::move(opt.app), opt.steady_seed} {
         rig.begin_string = std::move(opt.begin_string);
         auto cfg = rig.cfg();
         cfg.logger_override = log.logger;
         cfg.initial_trace_context = known_trace();
         cfg.heartbeat_interval = opt.heartbeat;
         cfg.logout_disconnect_timeout_ms = opt.logout_disconnect_timeout_ms;
+        if (opt.logon_timeout_ms) cfg.logon_timeout_ms = *opt.logon_timeout_ms;
         up = rig.start(std::move(cfg));
     }
 
@@ -781,6 +786,75 @@ TEST(InboundFrameDispositionsQ5, HeartBtIntZeroStillBoundsTheLogToOneRecordPerSe
     EXPECT_EQ(o.count, 13U) << "every garble is counted";
     EXPECT_EQ(suppressed_counts(records), (std::vector<std::uint64_t>{0U, 1U, 9U}))
         << "records at 0 s, 1 s and 2 s; 1 suppressed before the second, 9 before the third";
+}
+
+// The log interval near the clock's representation limit. HeartBtInt = 0, so the
+// interval is the 1 s floor and liveness does not run; the engine clock is seeded
+// 500 ms short of steady_time_point::max(), so the instant one interval after a
+// record is not representable and saturates at max(). A garble 1 ms short of max()
+// is suppressed; the next, at max(), writes a record carrying it. Every other sum the
+// cell crosses must stay representable, so logon_timeout_ms is below the headroom and
+// the logout bound is zero for the teardown at max().
+TEST(InboundFrameDispositionsQ5, NearClockMax_TheLogIntervalSaturatesAtMax) {
+    using namespace std::chrono_literals;
+    auto const max = fixpp::core::steady_time_point::max();
+    PumpCell c{{.heartbeat = std::chrono::seconds{0},
+                .logout_disconnect_timeout_ms = 0,
+                .steady_seed = max - 500ms,
+                .logon_timeout_ms = 100}};
+    bool ok = c.up && c.rig.to_active();
+    ok = ok && garble_then_heartbeat(c, 2);  // logged
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the next garble reads it
+    // synchronously (note_garbles_'s steady_now, the Heartbeat's SendingTime). No waiter.
+    c.rig.clock->step_to(max - 1ms);
+    ok = ok && garble_then_heartbeat(c, 3);  // suppressed
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the next garble reads it
+    // synchronously (note_garbles_'s steady_now, the Heartbeat's SendingTime). No waiter.
+    c.rig.clock->step_to(max);
+    ok = ok && garble_then_heartbeat(c, 4);  // logged, 1 suppressed
+    auto const o = c.observe();
+    c.rig.stop();
+    auto const records = garble_records(c.log);
+
+    ASSERT_TRUE(ok) << "setup: each garble must be followed by its processed Heartbeat";
+    EXPECT_EQ(o.count, 3U) << "every garble is counted";
+    EXPECT_EQ(suppressed_counts(records), (std::vector<std::uint64_t>{0U, 1U}))
+        << "one record at the first garble, none 1 ms short of max(), one at max()";
+}
+
+// The log interval when HeartBtInt itself is not representable in the clock's
+// nanoseconds, on an ordinary clock: an interval that large saturates the next
+// record's instant at max(), so a second garble is suppressed. LogonSent, so liveness
+// has not started; each garble is a whole frame with a wrong CheckSum, one region.
+TEST(InboundFrameDispositionsQ5, HeartBtIntBeyondTheClockRange_TheLogIntervalSaturates) {
+    constexpr std::chrono::seconds kHeartBtInt{9'300'000'000};
+    LogCapture log;
+    plain_rig::Rig rig;
+    auto cfg = rig.cfg(session_role::initiator);
+    cfg.logger_override = log.logger;
+    cfg.heartbeat_interval = kHeartBtInt;
+    bool const up = rig.start(std::move(cfg));
+    bool const logon_sent = up && rig.run_until([&] {
+        return !plain_rig::frames_of_type(rig.peer.received, "A").empty() &&
+               rig.state() == fsm_state::LogonSent;
+    });
+    auto garble = [&](std::uint64_t want) {
+        return rig.deliver(plain_rig::with_wrong_checksum(rig.heartbeat(1))) && rig.run_until([&] {
+            auto const s = rig.session();
+            return s && garbled_count(*s) == want;
+        });
+    };
+    bool const g1 = logon_sent && garble(1);
+    bool const g2 = g1 && garble(2);
+    auto const st = rig.state();
+    rig.stop();
+    auto const records = garble_records(log);
+
+    ASSERT_TRUE(up && logon_sent) << "setup";
+    ASSERT_TRUE(g1 && g2) << "each garble must be counted";
+    EXPECT_EQ(st, fsm_state::LogonSent) << "the garbles are disregarded";
+    EXPECT_EQ(suppressed_counts(records), (std::vector<std::uint64_t>{0U}))
+        << "one record at the first garble; the second is inside the interval";
 }
 
 // The suppressed count's unit is the garbled region, the counter's unit (plan OD-21):

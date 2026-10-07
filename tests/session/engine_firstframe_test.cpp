@@ -60,6 +60,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -71,6 +73,7 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <future>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -981,6 +984,43 @@ TEST(EngineFirstFramePhaseA, Q17_DiscardedBytesCountAgainstTheBudget) {
     EXPECT_FALSE(at_budget.read_ended) << "4096 discarded bytes do not exceed the budget";
     EXPECT_TRUE(over_closed) << "4097 discarded bytes exceed the budget";
     EXPECT_FALSE(over.has_session);
+}
+
+// The deadline near the clock's representation limit: logon_timeout_ms at its largest
+// accepted value, with the engine clock seeded 1500 us short of
+// steady_time_point::max(). The establishment deadline saturates at max(), and the
+// time left is rounded up to whole milliseconds, so the read's relative bound reaches
+// past max() as well; that absolute deadline saturates too. A silent peer's read is
+// still open 1 ns short of max() and ends at max(). The headroom is not a whole
+// millisecond, so the rounding is exercised, and it is below 5 s, so the bound handed
+// to the read is the time left rather than kFirstFrameDeadline.
+TEST(EngineFirstFramePhaseA, NearClockMax_SilentPeerReadEndsAtMaxNotBefore) {
+    auto const max = fixpp::core::steady_time_point::max();
+    pr::Rig rig{nullptr, max - std::chrono::microseconds{1500}};
+    auto cfg = rig.cfg();
+    cfg.logon_timeout_ms = std::numeric_limits<std::uint32_t>::max();
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    PhaseAObservation before;
+    bool closed = false;
+    PhaseAObservation after;
+    if (up) {
+        rig.settle();
+        // KIND C (ci/mock-clock-staging-sweep.sh): 1 ns short of max(); nothing may fire.
+        rig.clock->step_to(max - std::chrono::nanoseconds{1});
+        rig.settle();
+        before = observe_phase_a(rig);
+        // KIND D (ci/mock-clock-staging-sweep.sh): the read's deadline is a stored anchor
+        // predating the step.
+        rig.clock->step_to(max);
+        closed = rig.run_until([&] { return rig.peer.read_ended; });
+        after = observe_phase_a(rig);
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up) << "setup";
+    EXPECT_FALSE(before.read_ended) << "the first-frame read ended before max()";
+    EXPECT_TRUE(closed) << "the first-frame read did not end at max()";
+    EXPECT_FALSE(after.has_session) << "no Session exists, so nothing is recorded (L-6)";
 }
 
 // ── Q-17 on TLS: T below the 1500 ms handshake bound ────────────────────────

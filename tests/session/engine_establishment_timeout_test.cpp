@@ -46,6 +46,7 @@
 #include <fixpp/session/session_event.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -743,6 +744,57 @@ TEST(EstablishmentTimeoutQ36, Acceptor_ActiveBeforeTWithNoApplication_StaysActiv
 }
 TEST(EstablishmentTimeoutQ36, Initiator_ActiveBeforeTWithNoApplication_StaysActivePastT) {
     run_q36(session_role::initiator);
+}
+
+// ── The deadline near the clock's representation limit (contract C-4) ───────
+//
+// logon_timeout_ms at its largest accepted value, with the engine clock seeded one
+// hour short of steady_time_point::max(): the absolute deadline is not representable,
+// so it saturates at max(). Still open with no timeout event one millisecond before
+// the step to max(); closed with one event at max(). The hour exceeds every other
+// relative bound these contexts add to the clock before Active, so the establishment
+// deadline is the only sum that can leave the representable range.
+constexpr auto kNearMaxHeadroom = std::chrono::hours{1};
+
+void run_near_max(Ctx c) {
+    SCOPED_TRACE(name_of(c));
+    pr::Rig rig{nullptr, fixpp::core::steady_time_point::max() - kNearMaxHeadroom};
+    bool const up =
+        reach(rig, c, std::chrono::milliseconds{std::numeric_limits<std::uint32_t>::max()});
+    Snapshot before;
+    Snapshot after;
+    bool closed = false;
+    if (up) {
+        // KIND C (ci/mock-clock-staging-sweep.sh): short of max(), nothing may fire;
+        // that is the oracle.
+        rig.clock->advance(kNearMaxHeadroom - 1ms);
+        rig.settle();
+        before = snapshot(rig);
+        // KIND D (ci/mock-clock-staging-sweep.sh): the deadline is a stored anchor
+        // predating the step, so a late arm fires at once.
+        rig.clock->step_to(fixpp::core::steady_time_point::max());
+        closed = rig.run_until([&] {
+            auto const o = snapshot(rig);
+            return o.read_ended && o.timeouts == 1U;
+        });
+        after = snapshot(rig);
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up) << "the session did not reach its pre-Active context";
+    EXPECT_EQ(before.state, pre_active_state(c)) << "pre-Active 1 ms short of max()";
+    EXPECT_FALSE(before.read_ended) << "closed before the saturated deadline";
+    EXPECT_EQ(before.timeouts, 0U) << "a timeout event before the saturated deadline";
+    EXPECT_TRUE(closed) << "not closed at max()";
+    EXPECT_TRUE(after.read_ended) << "the transport is closed at max()";
+    EXPECT_EQ(after.timeouts, 1U) << "one session_event_establishment_timeout";
+}
+
+TEST(EstablishmentTimeoutNearClockMax, Initiator_DeadlineSaturatesAtMax) {
+    run_near_max(Ctx::initiator_after_logon);
+}
+TEST(EstablishmentTimeoutNearClockMax, AcceptorAfterNonLogonFrame_DeadlineSaturatesAtMax) {
+    run_near_max(Ctx::acceptor_after_non_logon);
 }
 
 }  // namespace

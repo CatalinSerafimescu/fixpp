@@ -58,6 +58,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -1854,9 +1855,7 @@ constexpr std::uint32_t kQ27Bound = 1000;  // logon_timeout_ms
 struct Q27Rig {
     asio::io_context ioc;
     asio::io_context fio;  // the FileStore's file-I/O executor; run only by the cell
-    std::shared_ptr<fixpp::core::mock_clock> clock = std::make_shared<fixpp::core::mock_clock>(
-        std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200},
-        fixpp::core::steady_time_point{}, ioc.get_executor());
+    std::shared_ptr<fixpp::core::mock_clock> clock;
     fixpp::core::EngineConfig engine;
     std::filesystem::path dir = fixpp::test_support::unique_temp_dir("q27");
     // The session's role, and whether close() issues a teardown reset
@@ -1866,7 +1865,12 @@ struct Q27Rig {
     // MsgType(35) of every frame the session sent.
     std::shared_ptr<std::vector<std::string>> sent = std::make_shared<std::vector<std::string>>();
 
-    Q27Rig() {
+    // `steady_seed` is the mock clock's initial steady_now(); the UTC side is seeded
+    // independently.
+    explicit Q27Rig(fixpp::core::steady_time_point steady_seed = {})
+        : clock{std::make_shared<fixpp::core::mock_clock>(
+              std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200},
+              steady_seed, ioc.get_executor())} {
         engine.clock = clock;
         engine.executor = ioc.get_executor();
     }
@@ -2050,6 +2054,46 @@ TEST(LogonCloseDuringSuspension, Q27_AClockWideSweepDuringTheWaitDoesNotEndIt) {
             EXPECT_TRUE(has_wait_expired_event(s)) << "the re-armed wait expires at the bound";
         }
         q27_finish(r, run);
+    }
+}
+
+// The bound near the clock's representation limit: logon_timeout_ms at its largest
+// accepted value, with the session clock seeded one hour short of
+// steady_time_point::max(). close()'s bound is not representable, so it saturates at
+// max(): the wait has not expired one millisecond before the step to max(), and expires
+// at max(). The close is terminal, so it crosses no logout bound; the hour is above
+// every other duration the cell crosses.
+TEST(LogonCloseDuringSuspension, Q27_TheBoundSaturatesAtTheClockMax) {
+    constexpr auto kHeadroom = std::chrono::hours{1};
+    auto const max = fixpp::core::steady_time_point::max();
+    Q27Rig r{max - kHeadroom};
+    Q27Run run;
+    {
+        auto cfg = r.cfg();
+        cfg.logon_timeout_ms = std::numeric_limits<std::uint32_t>::max();
+        sess::Session s{r.engine, cfg};
+        q27_start(r, s, run);
+        if (!::testing::Test::HasFatalFailure()) {
+            EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the clock moved";
+            // KIND C (ci/mock-clock-staging-sweep.sh): short of max(), nothing may fire;
+            // that is the oracle.
+            r.clock->advance(kHeadroom - std::chrono::milliseconds{1});
+            drain_ready_q27(r.ioc);
+            EXPECT_FALSE(has_wait_expired_event(s)) << "expired 1 ms short of max()";
+            EXPECT_NE(run.close.wait_for(0s), std::future_status::ready);
+            // KIND D (ci/mock-clock-staging-sweep.sh): close()'s wait deadline is a stored
+            // anchor predating the step, so a late arm fires at once.
+            r.clock->step_to(max);
+            drain_ready_q27(r.ioc);
+            EXPECT_TRUE(has_wait_expired_event(s)) << "the wait did not expire at max()";
+        }
+        // The clock is at max(): finish without advancing it further.
+        if (run.close.valid()) {
+            EXPECT_TRUE(r.run_both_until([&] {
+                return run.close.wait_for(0s) == std::future_status::ready &&
+                       (!run.feed.valid() || run.feed.wait_for(0s) == std::future_status::ready);
+            })) << "close() or the Logon never completed";
+        }
     }
 }
 
