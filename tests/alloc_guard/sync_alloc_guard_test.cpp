@@ -3,37 +3,38 @@
 // 006-async-mutex T056 — Seam #10 (b) zero-global-alloc guard for the
 // async_mutex embedded (mr==nullptr) contended hot path.
 //
-// Run under mallocnesia via tools/check_alloc.py:
-// ZERO global malloc/free between alloc_guard_start() and alloc_guard_end()
-// over the contended embedded-path acquire/release loop (steady state).
+// Run under mallocnesia via tools/check_alloc.py, which fails the run on a global
+// allocation between alloc_guard_start() and alloc_guard_end().
+//
+// THE WINDOW: two long-lived coroutines contend for one async_mutex on one io_context.
+// The holder acquires, holds across two executor round-trips, releases; the waiter
+// yields once, then acquires — finding the mutex held, so it suspends on the embedded
+// (mr==nullptr) waiter path and is resumed by the holder's release. The window opens
+// inside the holder after a warm-up and closes when it finishes, so it covers the
+// acquire, suspend, hand-off and resumption of the steady state, including the
+// executor resumptions they go through. Creating the coroutines (co_spawn) and starting
+// the io_context happen before it opens.
+//
+// Why long-lived coroutines: a co_spawn allocates its frame and its dispatch op through
+// asio's per-thread recycling allocator, which falls through to the global heap
+// (::aligned_alloc) for blocks it cannot recycle. A window that co_spawns per iteration
+// measures that, not the mutex.
 //
 // Erratum E-4 (2026-05-19): asio 1.36.0's cancellation_slot has NO
 // allocator-binding hook. Cancellation-handler memory comes from
 // asio::detail::thread_info_base's per-thread recycling cache. The FIRST
 // cancellation-slot assignment on a given thread does ONE global aligned_new;
-// every subsequent one reuses the thread-local block (zero global new/delete
-// in steady state).
-//
-// E-4 warm-up: before alloc_guard_start() we run one full contended
-// acquire+suspend+grant+release cycle on the io_context's run thread so that
-// asio's per-thread cancellation recycler is already primed.
-//
-// The measured window (between the markers) is STEADY STATE: the expected
-// allocation count is ZERO.
-//
-// Mirrors tests/alloc_guard/wire_alloc_guard_test.cpp exactly in structure.
+// every subsequent one reuses the thread-local block. The warm-up iterations before
+// the window opens prime that cache.
 
 #include <gtest/gtest.h>
 
-#include <array>
 #include <asio/co_spawn.hpp>
-#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-#include <atomic>
 #include <cstddef>
 #include <fixpp/core/sync/async_mutex.hpp>
 
@@ -52,88 +53,52 @@ asio::awaitable<void> yield_n(int n) {
 
 }  // namespace
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SyncAllocGuard / ContendedEmbeddedPathNoHeapAlloc
-//
-// Strategy:
-//   On a single io_context (single run-thread), we interleave a "holder" and
-//   a "waiter" coroutine: the holder acquires, yields to let the waiter push
-//   onto the LIFO (suspend), then releases → the waiter is granted. Each
-//   acquire/release pair is one iteration of the measured loop.
-//
-//   We drive the loop synchronously by serialising through io_context::run
-//   within the outer gtest. Between each iteration we drive the ioc again for
-//   the posted callbacks to complete.
-//
-//   All buffers and objects are constructed BEFORE alloc_guard_start().
-// ─────────────────────────────────────────────────────────────────────────────
-
 TEST(SyncAllocGuard, ContendedEmbeddedPathNoHeapAlloc) {
-    constexpr int ITERATIONS = 500;
-    constexpr int WARMUP_ITERATIONS = 5;
+    constexpr int kWarmup = 8;
+    constexpr int kIterations = kWarmup + 500;
 
-    // Construct the mutex and io_context BEFORE the guard markers.
-    // Both live on the stack for the full duration of the test.
     async_mutex mtx;
     asio::io_context ioc;
-    std::atomic<int> counter{0};
+    // Plain counters, asserted after the window: a gtest assertion inside it would
+    // allocate on failure and blur the verdict.
+    bool held = false;
+    int contended = 0;
+    int granted = 0;
+    int lock_failures = 0;
 
-    // Helper: run one contended acquire+suspend+grant+release cycle.
-    // The "holder" acquires first (fast path), then the "waiter" is spawned
-    // and pushed onto the LIFO (contended suspend path, mr==nullptr).
-    // The holder then releases, granting the waiter.
-    auto run_one_cycle = [&]() {
-        std::atomic<bool> holder_done{false};
-        std::atomic<bool> waiter_done{false};
-
-        // Holder coroutine.
-        asio::co_spawn(
-            ioc,
-            [&]() -> asio::awaitable<void> {
-                auto g = co_await mtx.async_lock(nullptr);
-                EXPECT_TRUE(g.has_value());
-                // Yield to allow the waiter to enqueue on the LIFO.
-                co_await yield_n(4);
-                holder_done.store(true, std::memory_order_release);
-                // guard released here → unlock() → grant the waiter
-            },
-            asio::detached);
-
-        // Waiter coroutine — yields once to let the holder go first.
-        asio::co_spawn(
-            ioc,
-            [&]() -> asio::awaitable<void> {
-                // One yield so the holder's async_lock fast-path wins.
-                co_await yield_n(1);
-                // This acquire must contend (holder holds lock) → suspend.
-                auto g = co_await mtx.async_lock(nullptr);
-                EXPECT_TRUE(g.has_value());
-                counter.fetch_add(1, std::memory_order_acq_rel);
-                waiter_done.store(true, std::memory_order_release);
-                // guard released
-            },
-            asio::detached);
-
-        // Run until both coroutines complete.
-        ioc.restart();
-        ioc.run();
+    auto holder = [&]() -> asio::awaitable<void> {
+        for (int i = 0; i < kIterations; ++i) {
+            if (i == kWarmup && alloc_guard_start) alloc_guard_start();
+            auto g = co_await mtx.async_lock(nullptr);
+            if (!g.has_value()) ++lock_failures;
+            held = true;
+            co_await yield_n(2);  // the waiter runs here and finds the mutex held
+            held = false;
+        }  // each iteration's guard releases here, granting the suspended waiter
+        if (alloc_guard_end) alloc_guard_end();
+    };
+    auto waiter = [&]() -> asio::awaitable<void> {
+        for (int i = 0; i < kIterations; ++i) {
+            co_await yield_n(1);
+            if (held) ++contended;
+            auto g = co_await mtx.async_lock(nullptr);
+            if (g.has_value()) {
+                ++granted;
+            } else {
+                ++lock_failures;
+            }
+        }
     };
 
-    // ── E-4 warm-up: prime asio's per-thread cancellation recycler before
-    // measuring.  One full contended acquire+suspend+cancel/grant+release cycle
-    // on the io_context's run thread is sufficient to seat the thread-local
-    // recycling block so subsequent assignments cost zero global new/delete.
-    for (int i = 0; i < WARMUP_ITERATIONS; ++i) {
-        run_one_cycle();
-    }
+    auto holder_done = asio::co_spawn(ioc, holder(), asio::use_future);
+    auto waiter_done = asio::co_spawn(ioc, waiter(), asio::use_future);
+    ioc.run();
+    holder_done.get();
+    waiter_done.get();
 
-    // ── Measured loop — ZERO global new/delete expected between markers. ──────
-    if (alloc_guard_start) alloc_guard_start();
-    for (int i = 0; i < ITERATIONS; ++i) {
-        run_one_cycle();
-    }
-    if (alloc_guard_end) alloc_guard_end();
-
-    EXPECT_EQ(counter.load(), WARMUP_ITERATIONS + ITERATIONS)
-        << "Not all waiter acquisitions completed";
+    EXPECT_EQ(lock_failures, 0);
+    EXPECT_EQ(granted, kIterations) << "Not all waiter acquisitions completed";
+    // The window measures the CONTENDED path only if the waiter usually found the
+    // mutex held; otherwise the window covered the uncontended fast path.
+    EXPECT_GT(contended, kIterations / 2) << "contended=" << contended;
 }
