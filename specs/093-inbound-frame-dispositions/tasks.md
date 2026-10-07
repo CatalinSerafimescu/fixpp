@@ -1220,7 +1220,7 @@ and every C-7 row 1–6 C witness.
 - [X] T090 [P] Via `phase-implementer`, the new `tests/capi/inbound_frame_dispositions_capi_test.cpp`,
   registered in `tests/capi/CMakeLists.txt` as ctest `capi_inbound_frame_dispositions`, labels
   `"capi;093"`:
-  - Q-30: `fixpp_session_config_set_logon_timeout_ms` refuses a null handle and zero; 
+  - Q-30: `fixpp_session_config_set_logon_timeout_ms` refuses a null handle and zero;
     `fixpp_session_garbled_frame_count` refuses a null handle and a null `out`, writes 0 before the
     session exists, and the count after a garble (Q-1's C arm);
   - Q-16's C arm: a timeout set through the setter is honoured at T. The C ABI has only a real-time
