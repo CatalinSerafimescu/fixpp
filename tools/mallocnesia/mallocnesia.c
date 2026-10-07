@@ -43,7 +43,6 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -70,13 +69,14 @@ static posix_memalign_fn real_posix_memalign;
 static page_fn           real_valloc;
 static page_fn           real_pvalloc;
 
-/* If dlsym allocates (through calloc) while resolve_fns() is running, real_calloc is
- * not yet resolved and resolving it again would recurse; such a call is served from
- * this static buffer instead. Whether any libc's dlsym does so is a property of that
- * libc, so the route is kept, and runs only under that condition. */
+/* A hook called before the real functions are resolved resolves them itself: ld.so
+ * runs a needed library's constructor before this interceptor's, so such a call is
+ * ordinary. Only a call made WHILE resolve_fns() runs (a libc whose dlsym allocates)
+ * cannot resolve again without recursing. calloc serves that call from this static
+ * buffer; every other hook aborts on it, saying so. g_resolving marks the window. */
 static char   bootstrap[8192];
 static size_t bootstrap_pos;
-static int    bootstrap_done;  /* set to 1 after dlsym calls complete */
+static int    g_resolving;
 
 static _Atomic int  g_active;  /* 1 while between start/end markers */
 static _Atomic long g_count;   /* allocations intercepted this guard window */
@@ -95,6 +95,7 @@ static __thread int g_in_hook;
     } while (0)
 
 static void resolve_fns(void) {
+    g_resolving = 1;
     RESOLVE(real_malloc,         "malloc");
     RESOLVE(real_calloc,         "calloc");
     RESOLVE(real_realloc,        "realloc");
@@ -104,21 +105,18 @@ static void resolve_fns(void) {
     RESOLVE(real_posix_memalign, "posix_memalign");
     RESOLVE(real_valloc,         "valloc");
     RESOLVE(real_pvalloc,        "pvalloc");
-    bootstrap_done = 1;
+    g_resolving = 0;
 }
 
-/* The aligned hooks' share of the calloc bootstrap below, under the same condition: a
- * call that arrives before resolve_fns() has finished must not call resolve_fns()
- * again, so it is served from the static buffer, aligned as asked. free() already
- * ignores pointers into that buffer. */
-static void *bootstrap_aligned(size_t align, size_t size) {
-    if (align == 0 || (align & (align - 1)) != 0) return NULL;
-    uintptr_t base  = (uintptr_t)bootstrap;
-    uintptr_t start = (base + bootstrap_pos + align - 1) & ~(uintptr_t)(align - 1);
-    if (start - base > sizeof(bootstrap) || size > sizeof(bootstrap) - (start - base))
-        return NULL;
-    bootstrap_pos = (size_t)(start - base) + size;
-    return (void *)start;
+/* The aligned hooks' lazy resolve: the static buffer above is calloc's alone. */
+static void resolve_or_abort(void) {
+    if (g_resolving) {
+        static const char msg[] =
+            "[mallocnesia] FATAL: an aligned allocation re-entered resolve_fns()\n";
+        (void)!write(2, msg, sizeof msg - 1);
+        abort();
+    }
+    resolve_fns();
 }
 
 /* One count, one line on stderr naming the function: ci/test-check-alloc.sh reads the
@@ -216,8 +214,9 @@ void *malloc(size_t size) {
 }
 
 void free(void *ptr) {
-    /* Bootstrap allocations live in the static buffer — nothing to free */
-    if ((char *)ptr >= bootstrap && (char *)ptr < bootstrap + sizeof(bootstrap))
+    /* Bootstrap allocations live in the static buffer — nothing to free. One unsigned
+     * compare: a relational compare against a pointer outside the buffer is undefined. */
+    if ((uintptr_t)ptr - (uintptr_t)bootstrap < sizeof(bootstrap))
         return;
     if (!real_free) resolve_fns();
     real_free(ptr);
@@ -225,7 +224,7 @@ void free(void *ptr) {
 
 void *calloc(size_t nmemb, size_t size) {
     /* Serve bootstrap calls (dlsym init) from the static buffer */
-    if (!bootstrap_done) {
+    if (g_resolving) {
         size_t total = nmemb * size;
         if (bootstrap_pos + total <= sizeof(bootstrap)) {
             void *p = bootstrap + bootstrap_pos;
@@ -235,6 +234,7 @@ void *calloc(size_t nmemb, size_t size) {
         }
         return NULL;
     }
+    if (!real_calloc) resolve_fns();
     if (atomic_load(&g_active) && !g_in_hook) {
         g_in_hook = 1;
         long n = atomic_fetch_add(&g_count, 1) + 1;
@@ -260,37 +260,32 @@ void *realloc(void *ptr, size_t size) {
 /* --- Aligned and page-aligned hooks (fixpp#497) --- */
 
 void *aligned_alloc(size_t align, size_t size) {
-    if (!bootstrap_done) return bootstrap_aligned(align, size);
+    if (!real_aligned_alloc) resolve_or_abort();
     count_aligned("aligned_alloc", align, size);
     return real_aligned_alloc(align, size);
 }
 
 void *memalign(size_t align, size_t size) {
-    if (!bootstrap_done) return bootstrap_aligned(align, size);
+    if (!real_memalign) resolve_or_abort();
     count_aligned("memalign", align, size);
     return real_memalign(align, size);
 }
 
 int posix_memalign(void **memptr, size_t align, size_t size) {
-    if (!bootstrap_done) {
-        void *p = bootstrap_aligned(align, size);
-        if (!p) return ENOMEM;
-        *memptr = p;
-        return 0;
-    }
+    if (!real_posix_memalign) resolve_or_abort();
     count_aligned("posix_memalign", align, size);
     return real_posix_memalign(memptr, align, size);
 }
 
 /* valloc/pvalloc take no alignment argument; the page size is the alignment. */
 void *valloc(size_t size) {
-    if (!bootstrap_done) return bootstrap_aligned((size_t)sysconf(_SC_PAGESIZE), size);
+    if (!real_valloc) resolve_or_abort();
     count_aligned("valloc", (size_t)sysconf(_SC_PAGESIZE), size);
     return real_valloc(size);
 }
 
 void *pvalloc(size_t size) {
-    if (!bootstrap_done) return bootstrap_aligned((size_t)sysconf(_SC_PAGESIZE), size);
+    if (!real_pvalloc) resolve_or_abort();
     count_aligned("pvalloc", (size_t)sysconf(_SC_PAGESIZE), size);
     return real_pvalloc(size);
 }

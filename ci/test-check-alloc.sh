@@ -182,6 +182,60 @@ for fn_want in aligned_alloc:aligned_alloc posix_memalign:posix_memalign \
     env ENTRY_FN="$fn" python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so"
 done
 
+# ── T11: a hook called BEFORE the interceptor's constructor returns real memory ──
+# ld.so runs a needed library's constructor before the preloaded interceptor's, so an
+# allocation made there reaches a hook whose real function is not resolved yet. Each
+# arm makes ONE entry point the process's first hooked call, from such a constructor,
+# and asks for more than the interceptor's static buffer holds: the hook must resolve
+# and forward, not serve the call from that buffer. The constructor stays pure C and
+# makes no other call first: a malloc (stdio's, libstdc++'s start-up) resolves every
+# hook, and the arm then measures nothing. `main` reads the constructor's verdict, which
+# also keeps the library linked under --as-needed, and returns before the window when it
+# failed, so check_alloc.py refuses rather than reporting interception. The malloc arm
+# is the control: it shows the fixture itself works, so a failing arm names its hook.
+cat > "$TMP/early.c" <<'EOF'
+#define _GNU_SOURCE
+#include <malloc.h>
+#include <stdlib.h>
+int early_ok;
+__attribute__((constructor)) static void early(void) {
+  void *p = 0;
+#if   defined(EARLY_aligned_alloc)
+  p = aligned_alloc(64, 16384);
+#elif defined(EARLY_posix_memalign)
+  if (posix_memalign(&p, 64, 16384) != 0) p = 0;
+#elif defined(EARLY_memalign)
+  p = memalign(64, 16384);
+#elif defined(EARLY_valloc)
+  p = valloc(16384);
+#elif defined(EARLY_pvalloc)
+  p = pvalloc(16384);
+#elif defined(EARLY_calloc)
+  p = calloc(1, 16384);
+#elif defined(EARLY_malloc)
+  p = malloc(16384);
+#endif
+  early_ok = p != 0;
+  free(p);
+}
+EOF
+cat > "$TMP/early_main.c" <<'EOF'
+extern int early_ok;
+__attribute__((weak)) void alloc_guard_start(void);
+__attribute__((weak)) void alloc_guard_end(void);
+int main(void){ if (!early_ok) return 3;
+                if(alloc_guard_start) alloc_guard_start();
+                if(alloc_guard_end) alloc_guard_end(); return 0; }
+EOF
+for fn in aligned_alloc posix_memalign memalign valloc pvalloc calloc malloc; do
+  "$CC" -O1 -w -fPIC -shared -DEARLY_"$fn" -o "$TMP/libearly_$fn.so" "$TMP/early.c"
+  "$CC" -O1 -o "$TMP/early_$fn" "$TMP/early_main.c" -L"$TMP" -learly_"$fn" \
+    -Wl,-rpath,"$TMP"
+  check "T11 $fn as the first hooked call, from a library constructor, returns memory" 0 \
+    "interception confirmed" -- \
+    python3 "$CHECK" --binary "$TMP/early_$fn" --mallocnesia "$TMP/libmn.so"
+done
+
 echo
 echo "test-check-alloc: $pass passed, $fail failed"
 [ "$fail" = 0 ]
