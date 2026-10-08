@@ -8,8 +8,25 @@
 # ── Common strict flags (#481) ───────────────────────────────────────────────
 #
 # Applied to every first-party target by fixpp_apply_common_flags_to_all_targets()
-# below. Warnings only: promoting them to errors is FIXPP_WERROR's job
-# (fixpp_maybe_werror), so -DFIXPP_WERROR=OFF leaves every warning a warning.
+# below. The warning flags raise warnings only: promoting them to errors is
+# FIXPP_WERROR's job (fixpp_maybe_werror), so -DFIXPP_WERROR=OFF leaves every
+# warning a warning.
+#
+# ⚠️ THE MSVC BRANCH ALSO CARRIES TWO CONFORMANCE SWITCHES, which are not
+# warnings and which -DFIXPP_WERROR=OFF does not remove:
+#   /permissive-     Redundant while the MSVC standard switch is
+#                    /std:c++latest, which implies it; kept to say so
+#                    explicitly. Re-check: compile
+#                    `struct S{}; void f(S&); int main(){ f(S{}); }` with
+#                    `cl /std:c++latest /c` and no /permissive-. C2664 means
+#                    the standard switch implies it; a clean compile means
+#                    this flag is live.
+#   /Zc:__cplusplus  Changes the VALUE of __cplusplus in every TU, for
+#                    first-party code and every dependency header alike
+#                    (without it MSVC reports the C++98 value). Safe for
+#                    first-party code while it tests __cplusplus only for
+#                    presence (#ifdef). Re-derive:
+#                    git grep -n -e __cplusplus -e _MSVC_LANG -- include src tests tools bench perf bindings
 #
 # ⚠️ CXX ONLY, via generator expressions, for the reason the -Wattributes block
 # below gives: this repo has a C target (`mallocnesia`).
@@ -32,6 +49,12 @@ function(fixpp_apply_common_flags target)
     # not implement ([[clang::lifetimebound]], [[gnu::used]]). A misspelled one
     # stays a hard error where the attribute is understood: clang's
     # -Wunknown-attributes is on by default and -Werror promotes it.
+    # ⚠️ That holds only while no attribute is spelled solely in code clang
+    # never compiles (an `msvc::` attribute, or one under an _MSC_VER-only
+    # arm): there this suppression hides MSVC's only report of a misspelling,
+    # and MSVC has no per-attribute form of it. Re-derive:
+    #   git grep -n "msvc::" -- include src tests tools bench perf bindings
+    #   and read the attributes inside each `git grep -n _MSC_VER` arm.
     $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/wd5030>
     # C4324 "structure was padded due to alignment specifier": the padding is
     # what an alignas() member asks for.

@@ -125,8 +125,9 @@ was also considered and rejected; the user chose to wire it on every toolchain, 
 `fixpp_apply_common_flags` by the same deferred `BUILDSYSTEM_TARGETS` walk as `FIXPP_WERROR`, for the
 same reason: a per-target call list misses the next target added without it. It fails configure on an
 empty walk, and its STATUS line names how many targets it reached and which were exempt. It is not
-gated on `FIXPP_WERROR`: the flags only raise warnings, and whether a warning fails the build stays
-that option's decision.
+gated on `FIXPP_WERROR`: its warning flags only raise warnings, and whether a warning fails the build
+stays that option's decision. The two MSVC conformance switches below are not warnings, and that
+option does not remove them.
 
 - **Opt-out is per target, with the reason in `FIXPP_COMMON_FLAGS_EXEMPT`.** It is reserved for a
   target whose TUs contain no first-party code. A first-party warning is fixed at the site, and in
@@ -142,7 +143,7 @@ that option's decision.
   after it. A suppression covering a whole TU that mixes generated and first-party code is the
   rejected shape. `fixpp.i`'s comment holds the recipe that re-checks whether the suppression is still
   needed.
-- **The flags are warnings only, `PRIVATE` and C++ only.** GCC and Clang get `-Wall -Wextra -Wpedantic`
+- **The GCC/Clang flags are warnings only, and every flag is `PRIVATE` and C++ only.** GCC and Clang get `-Wall -Wextra -Wpedantic`
   through a C++-only generator expression, because the tree has a C target. A consumer's own flags are
   untouched. The flags are prepended, so a target's own `-Wno-<x>` still wins on Clang, which applies
   warning flags in command-line order.
@@ -154,13 +155,26 @@ that option's decision.
 - **`/WX` lives only in `fixpp_maybe_werror`.** Promotion is `FIXPP_WERROR`'s decision on every
   toolchain. An unconditional `/WX` in the common function would make `-DFIXPP_WERROR=OFF` a no-op on
   MSVC.
-- **The MSVC branch is `/W4 /permissive- /Zc:__cplusplus`, with three exceptions. Each holds only while
-  its condition does.**
+- **The MSVC branch is `/W4` plus two conformance switches, which are not warnings and which
+  `-DFIXPP_WERROR=OFF` does not remove.** Each holds only while its condition does.
+  - `/permissive-`: redundant while the MSVC standard switch is `/std:c++latest`, which implies it; it
+    is kept to say so explicitly. Re-check: compile `struct S{}; void f(S&); int main(){ f(S{}); }`
+    with `cl /std:c++latest /c` and no `/permissive-`. C2664 means the standard switch implies it.
+  - `/Zc:__cplusplus`: changes the value of `__cplusplus` in every TU, for first-party code and every
+    dependency header alike. Safe for first-party code while it tests `__cplusplus` only for presence
+    (`#ifdef`). Re-derive:
+    `git grep -n -e __cplusplus -e _MSVC_LANG -- include src tests tools bench perf bindings`
+- **The MSVC branch has three exceptions. Each holds only while its condition does.**
   - `/wd5030` (attribute not recognized): the tree spells attributes MSVC does not implement
     (`[[clang::lifetimebound]]`, `[[gnu::used]]`). This is safe only while a misspelled attribute stays
     a hard error where the attribute is understood, which is Clang's default-on `-Wunknown-attributes`
     under `-Werror`. Re-check that a misspelling still fails:
     `printf 'int& f(int& x [[clang::lifetimebond]]);\n' | clang++ -std=c++23 -Werror -fsyntax-only -x c++ -`
+    That covers only attributes clang compiles. One spelled solely where clang never looks (an
+    `msvc::` attribute, or one under an `_MSC_VER`-only arm) has MSVC's C5030 as its only report, and
+    this suppression hides it; MSVC has no per-attribute form of the suppression. Re-derive:
+    `git grep -n "msvc::" -- include src tests tools bench perf bindings`, then read the attributes
+    inside each `git grep -n _MSC_VER` arm.
   - `/wd4324` (structure padded due to alignment specifier): the padding is what an `alignas` member
     asks for.
   - `_CRT_SECURE_NO_WARNINGS` and `_CRT_NONSTDC_NO_WARNINGS`, MSVC-only compile definitions through
