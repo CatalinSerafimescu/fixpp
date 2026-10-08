@@ -101,17 +101,38 @@ it plants; one control cannot stand in for another. `tools/check_mallocnesia_pop
 `POSITIVE_CONTROLS` names each, so a missing control is reported by name and an undeclared one is
 rejected. Rejected: a "≥1 control" rule — it passes with every control but one deleted. The
 interceptor is built without coverage instrumentation, so these controls are the only evidence that
-each hook runs on a CI lane.
+each hook runs on a CI lane. Each libc control also names its own hook (`EXPECT_ENTRY` →
+`check_alloc.py --expect-entry`), and `POSITIVE_CONTROLS` spells that entry out, so a
+`planted_entry_witness.cpp` row that calls a different entry point fails its control. Rejected:
+`--expect-violation` alone — it accepts any violation, so a memalign control planting a calloc
+passed. The over-aligned `new` control names no hook: which aligned entry point it reaches is the
+C++ runtime's choice.
 
-**Why the guard reads any `-fsanitize=`, not named options.** A sanitizer installs its own allocator
+**Why the interceptor forwards to glibc's `__libc_*`, not `dlsym(RTLD_NEXT)`.** A library
+constructor that runs before the interceptor's can make the process's first hooked call, so a hook
+cannot rely on anything its own constructor sets up. Resolving the real functions lazily on first
+use (PR #557's first Gate B fix) added a function table, a "resolving" flag and a static buffer for
+an allocating `dlsym`: shared state that was unsynchronised across threads and `fork`, with
+unchecked arithmetic in the buffer. Calling glibc's exported `__libc_malloc` and its siblings
+directly leaves no state to race. Rejected: synchronising the lazy route (a once-initialised table,
+a per-thread marker, fork handling, a checked bump allocator), since each piece needs its own test
+seam to protect state that need not exist. The cost is that the interceptor is glibc-only: glibc
+has no `__libc_` twin for `aligned_alloc` or `posix_memalign`, so those two hooks copy glibc's
+argument validation, and `ci/test-check-alloc.sh`'s T12 compares every hook against unhooked glibc
+to catch the copy drifting. A libc without these exports fails every gate closed, not open.
+
+**Why the guard reads any non-empty `-fsanitize=`, not named options.** A sanitizer installs its own allocator
 ahead of the interposer, so a gate registered on a sanitizer build passes vacuously. Naming
 `FIXPP_ENABLE_{ASAN,TSAN,UBSAN}` let every unnamed sanitizer (LSan, MSan, the next one) register the
 gates; matching the switch itself excludes any sanitizer whose `-fsanitize=` is in what the guard
 reads, including inside a generator expression. A sanitizer added only to one target is not seen.
 The guard reads the compile/link flag variables and the directory options, not `FIXPP_ENABLE_*`, so
 the read that sees `cmake/Sanitizers.cmake`'s options is exercised (a preset that sets
-`CMAKE_CXX_FLAGS` in the cache drops the Conan toolchain's `-fsanitize`). The match is
-`cmake/FixppMallocnesiaSanitizerMatch.cmake`, pinned by `ci/test-mallocnesia-sanitizer-match.sh`.
+`CMAKE_CXX_FLAGS` in the cache drops the Conan toolchain's `-fsanitize`). An empty `-fsanitize=`
+does not count: clang accepts it and enables nothing. The match is
+`cmake/FixppMallocnesiaSanitizerMatch.cmake`; `ci/test-mallocnesia-sanitizer-match.sh` pins it,
+and configures a throwaway project against the real `cmake/FixppMallocnesia.cmake` to pin the
+registration decision that applies it.
 Rejected: adding LSan and MSan to the named list — the next sanitizer would repeat the gap. Not
 built: a deferred check of each gated target's own options; PR #557's Gate B round 1 narrowed the
 claim to what is read instead.
