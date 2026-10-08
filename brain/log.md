@@ -6,11 +6,13 @@ status: stable
 
 # Log
 
-- **2026-10-08 — B14 (fixpp#481) Gate B round 2 (PR #558): `/Zc:__cplusplus` gains its dependency
-  condition.** `components/nfr-and-tooling.md` adds the condition the switch rests on for dependency
-  and public headers (they preprocess to the same definitions with and without it, apart from
-  attribute and linkage spellings), points at the `cl /EP` recipe in `cmake/Helpers.cmake`, and
-  records the owner's 2026-10-08 ruling to keep both conformance switches.
+- **2026-10-08 — B14 (fixpp#481) Gate B rounds 2-3 (PR #558): `/Zc:__cplusplus`'s dependency side.**
+  `components/nfr-and-tooling.md` says that a dependency or public header testing `__cplusplus` can
+  define something different under the switch, points at the `cl /EP` recipe in `cmake/Helpers.cmake`
+  for seeing what it changes, and records the owner's 2026-10-08 ruling to keep both conformance
+  switches. Rejected: a dependency-side safety condition ("same definitions apart from attribute and
+  linkage spellings"). The preprocess diff it came from already held an added crc32c overload, so it
+  was false as written.
 - **2026-10-08 — B14 (fixpp#481) Gate B (PR #558): the #481 section is corrected.**
   `components/nfr-and-tooling.md` loses the claim that the Python wrapper is code this project does
   not author: `fixpp_py` is no longer exempt, and SWIG's runtime gets a `%begin`-scoped suppression
