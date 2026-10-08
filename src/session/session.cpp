@@ -4549,12 +4549,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // [036 tasks T031; contracts C2; data-model.md INV-COV-5]
                             bool suppressed = false;
                             if (engine_.application != nullptr) {
-                                auto cb_r = parse_and_dispatch_(
+                                auto to_app_r = parse_and_dispatch_(
                                     *bmr_r, kSendParseArena, [&](auto& mv, auto& sid) {
                                         return engine_.application->toApp(mv, sid);
                                     });
-                                if (!cb_r) {
-                                    if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                if (!to_app_r) {
+                                    if (to_app_r.error() ==
+                                        fixpp::core::error::app_callback_threw) {
                                         (void)co_await close(close_mode::terminal);
                                         co_return std::unexpected(
                                             fixpp::core::error::app_callback_threw);

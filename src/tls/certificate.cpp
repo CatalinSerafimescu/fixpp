@@ -269,16 +269,16 @@ std::string_view extract_dn(X509_NAME* name, std::pmr::memory_resource& mr) {
 
                 // Allocate PMR arrays of string_view for the spans.
                 if (!dns_views.empty()) {
-                    void* p = mr.allocate(dns_views.size() * sizeof(std::string_view),
-                                          alignof(std::string_view));
-                    auto* arr = static_cast<std::string_view*>(p);
+                    void* storage = mr.allocate(dns_views.size() * sizeof(std::string_view),
+                                                alignof(std::string_view));
+                    auto* arr = static_cast<std::string_view*>(storage);
                     std::memcpy(arr, dns_views.data(), dns_views.size() * sizeof(std::string_view));
                     out.san_dns_names_ = {arr, dns_views.size()};
                 }
                 if (!uri_views.empty()) {
-                    void* p = mr.allocate(uri_views.size() * sizeof(std::string_view),
-                                          alignof(std::string_view));
-                    auto* arr = static_cast<std::string_view*>(p);
+                    void* storage = mr.allocate(uri_views.size() * sizeof(std::string_view),
+                                                alignof(std::string_view));
+                    auto* arr = static_cast<std::string_view*>(storage);
                     std::memcpy(arr, uri_views.data(), uri_views.size() * sizeof(std::string_view));
                     out.san_uris_ = {arr, uri_views.size()};
                 }

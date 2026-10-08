@@ -78,11 +78,11 @@ namespace detail {
 template <class OnValue>
 void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_hooks const& hooks,
                            OnValue&& on_value) {
-    constexpr std::byte kSoh{0x01};
+    constexpr std::byte kSohByte{0x01};
     constexpr std::byte kEq{'='};
     std::size_t const n = frame.size();
     auto const value_end = [&](std::size_t from) {
-        while (from < n && frame[from] != kSoh) {
+        while (from < n && frame[from] != kSohByte) {
             ++from;
         }
         return from;
@@ -96,7 +96,7 @@ void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_h
     // `554=` holds no Password field and needs no walk (most outbound frames).
     bool maybe_554 = false;
     for (std::size_t p = 0; p + 4 <= n && !maybe_554; ++p) {
-        maybe_554 = (p == 0 || frame[p - 1] == kSoh) && is_554_eq_at(p);
+        maybe_554 = (p == 0 || frame[p - 1] == kSohByte) && is_554_eq_at(p);
     }
     if (!maybe_554) {
         return;
@@ -108,7 +108,7 @@ void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_h
         std::size_t const field_start = i;
         std::uint32_t tag = 0;
         bool tag_ok = true;
-        while (i < n && frame[i] != kEq && frame[i] != kSoh) {
+        while (i < n && frame[i] != kEq && frame[i] != kSohByte) {
             auto const c = static_cast<unsigned char>(frame[i]);
             if (c < '0' || c > '9' || !fixpp::wire::accumulate_tag_digit(tag, c)) {
                 tag_ok = false;
@@ -127,7 +127,7 @@ void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_h
         auto const value = carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag), hooks);
         if (!value) {
             for (std::size_t p = field_start; p < n; ++p) {
-                if ((p == 0 || frame[p - 1] == kSoh) && is_554_eq_at(p)) {
+                if ((p == 0 || frame[p - 1] == kSohByte) && is_554_eq_at(p)) {
                     on_value(p + 4, value_end(p + 4));
                 }
             }
