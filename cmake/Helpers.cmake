@@ -28,6 +28,22 @@ function(fixpp_apply_common_flags target)
     $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/W4>
     $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/permissive->
     $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus>
+    # C5030 "attribute is not recognized": the tree spells attributes MSVC does
+    # not implement ([[clang::lifetimebound]], [[gnu::used]]). A misspelled one
+    # stays a hard error where the attribute is understood: clang's
+    # -Wunknown-attributes is on by default and -Werror promotes it.
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/wd5030>
+    # C4324 "structure was padded due to alignment specifier": the padding is
+    # what an alignas() member asks for.
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/wd4324>
+  )
+  # The CRT "unsafe"/POSIX-name C4996 diagnostics (getenv, fopen, getpid): the
+  # tree calls these portable C/POSIX functions on purpose. The two macros only
+  # gate the CRT's own deprecation annotations; a use of a [[deprecated]]
+  # declaration still raises C4996.
+  target_compile_definitions(${target} PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:_CRT_SECURE_NO_WARNINGS>
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:_CRT_NONSTDC_NO_WARNINGS>
   )
 endfunction()
 
