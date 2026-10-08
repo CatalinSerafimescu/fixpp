@@ -106,7 +106,7 @@ bool parse_int64(std::string_view sv, int64_t& out) noexcept {
 bool parse_double(std::string_view sv, double& out) noexcept {
     if (sv.empty()) return false;
     const char* first = sv.data();
-    // cppcheck-suppress unreadVariable  -- read only in the std::from_chars configuration
+    // read only in the std::from_chars configuration
     [[maybe_unused]] const char* last = sv.data() + sv.size();
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
     auto [ptr, ec] = std::from_chars(first, last, out);
