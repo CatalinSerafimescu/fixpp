@@ -192,7 +192,8 @@ option does not remove them.
     Without them, both must warn; that control shows the definitions are what silence the CRT call.
 - **A deliberate `[[deprecated]]` use suppresses C4996 at the same scope as its GCC/Clang
   `-Wdeprecated-declarations` push**, in an `#elif defined(_MSC_VER)` arm, the form
-  `src/config/loader_internal.hpp` uses. A site with only the GCC/Clang arm is clean on Linux and fails
+  `is_insecure_plain_tcp()` in `include/fixpp/session/security_profile.hpp` uses (with the tidy
+  suppression below). A site with only the GCC/Clang arm is clean on Linux and fails
   under MSVC `/WX`. Find a file missing its MSVC arm:
   `grep -rln -- '-Wdeprecated-declarations' src include tests | xargs grep -L 'disable : 4996'`
   Its output also names files that need no arm: the negative-compile probes and their CMake lines,
@@ -203,8 +204,8 @@ option does not remove them.
     rewrite: wrap each `#if … #endif` block in `NOLINTBEGIN/NOLINTEND` for that check, as
     `include/fixpp/core/sync/detail/atomic_shared_ptr_detect.hpp` does. `#elifdef` is C++23-only, which
     a public header cannot assume of its consumers, and the `src/` sites keep the header's spelling and
-    point to it. A bare
-    `#elif defined(...)` with no suppression is an open tidy finding, not a precedent.
+    point to it. A bare `#elif defined(...)` with no suppression is an open tidy finding, not a
+    precedent.
 - ⚠️ **LEAD — `_codegen_bootstrap` keeps the `FIXPP_WERROR` of its FIRST configure.**
   `cmake/Codegen.cmake` forwards `-DFIXPP_WERROR` only when it configures the bootstrap sub-build, and
   it configures it only while `_codegen_bootstrap/CMakeCache.txt` does not exist. A later
