@@ -28,18 +28,18 @@
 namespace fixpp::test_support {
 
 // True on the lanes the skips below exist for: MSVC's debug STL
-// (_ITERATOR_DEBUG_LEVEL >= 1). There the answer is read from a volatile, so the
-// compiler cannot fold a skip guarded by it into an unconditional return. Folded,
-// the rest of every skipped test body is unreachable code, which MSVC reports as
-// C4702 under /W4 (#481). Every lane compiles the same macro text below; only this
-// predicate's answer differs.
+// (_ITERATOR_DEBUG_LEVEL >= 1). The answer is read from a volatile on every lane,
+// so no compiler can fold a skip guarded by it into either branch. Folded to
+// true, the rest of every skipped test body is unreachable code; folded to false,
+// the skip itself is. MSVC reports either as C4702 under /W4 (#481). Every lane
+// compiles the same macro text below; only the volatile's initial value differs.
 inline bool msvc_debug_stl_active() noexcept {
 #if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
     static volatile bool active = true;
-    return active;
 #else
-    return false;
+    static volatile bool active = false;
 #endif
+    return active;
 }
 
 }  // namespace fixpp::test_support
