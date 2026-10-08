@@ -50,7 +50,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-/* PR #557 FQ-A — direct __libc_* forwarding; supersedes FQ-2's lazy dlsym resolution.
+/* claim-ok: a supersession pointer naming the decision, per the .claude/CLAUDE.md rule
+ * PR #557 Gate B r2 FQ-A — direct __libc_* forwarding; supersedes Gate B r1 FQ-2's lazy
+ * dlsym resolution.
  *
  * Every hook forwards to glibc's own allocator by the __libc_* names glibc exports, so
  * nothing is resolved at run time: there is no function table to fill, no window in which
