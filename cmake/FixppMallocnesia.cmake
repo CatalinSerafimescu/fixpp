@@ -42,9 +42,9 @@
 # selection instead would leave them registered and runnable — and the unfiltered
 # full-ctest runs on those lanes would pick them up and pass vacuously.
 #
-# THE CONDITION (fixpp#497): the gates are not registered when any `-fsanitize=` appears
-# in the flags read below, whichever sanitizer it names, including inside a generator
-# expression. Naming sanitizers one by one let every unnamed one (LSan, MSan, the next)
+# THE CONDITION (fixpp#497): the gates are not registered when any `-fsanitize=` with a
+# non-empty value appears in the flags read below, whichever sanitizer it names, including
+# inside a generator expression. Naming sanitizers one by one let every unnamed one (LSan, MSan, the next)
 # register the gates. The match itself, and what it does not match, is
 # fixpp_mallocnesia_flags_name_sanitizer() in cmake/FixppMallocnesiaSanitizerMatch.cmake,
 # tested by ci/test-mallocnesia-sanitizer-match.sh. The per-target

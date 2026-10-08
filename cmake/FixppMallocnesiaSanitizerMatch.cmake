@@ -7,14 +7,16 @@
 # against mutants of it.
 #
 # fixpp_mallocnesia_flags_name_sanitizer(<out-var> <flags>)
-#   Sets <out-var> to the first `-fsanitize=<value>` in <flags>, or to "" when there is
-#   none. Not anchored to a separator, so the switch matches inside a generator
-#   expression (`$<$<COMPILE_LANGUAGE:CXX>:-fsanitize=leak>`), whose `>` ends the value.
+#   Sets <out-var> to the first `-fsanitize=<value>` in <flags> whose value is not empty,
+#   or to "" when there is none. An empty `-fsanitize=` enables no sanitizer (clang accepts
+#   it, gcc rejects it), so it does not keep the gates off. Not anchored to a separator,
+#   so the switch matches inside a generator expression
+#   (`$<$<COMPILE_LANGUAGE:CXX>:-fsanitize=leak>`), whose `>` ends the value.
 #   Whether that expression's branch is active is not evaluated: any `-fsanitize=` keeps
 #   the gates off. `-fno-sanitize=…` and the `-fsanitize-<option>` family
 #   (`-fsanitize-coverage=`, `-fsanitize-recover=`, …) do not contain the text
 #   `-fsanitize=`, so they do not match.
 function(fixpp_mallocnesia_flags_name_sanitizer out flags)
-  string(REGEX MATCH "-fsanitize=[^ ;>]*" _match "${flags}")
+  string(REGEX MATCH "-fsanitize=[^ ;>]+" _match "${flags}")
   set(${out} "${_match}" PARENT_SCOPE)
 endfunction()

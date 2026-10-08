@@ -43,6 +43,8 @@ cell(plain-thread "-O2 -fsanitize=thread -fno-omit-frame-pointer"        "-fsani
 cell(no-sanitize  "-fno-sanitize=all -fno-sanitize-recover=all"          "")
 cell(option-cov   "-fsanitize-coverage=trace-pc"                         "")
 cell(clean        "-O2 -g -Wall"                                         "")
+cell(empty        "-fsanitize= -O2"                                      "")
+cell(genex-empty  "$<$<CONFIG:Debug>:-fsanitize=>"                       "")
 if(failed)
   message(FATAL_ERROR "sanitizer-match cells failed")
 endif()
@@ -57,15 +59,15 @@ run_cells() {  # run_cells <module> — prints the cells' output, returns cmake'
 out="$(run_cells "$MODULE")"; rc=$?
 echo "$out" | grep -E '^(ok|FAIL) '
 n_ok="$(grep -c '^ok ' <<<"$out")"
-if [ "$rc" = 0 ] && [ "$n_ok" = 7 ]; then
+if [ "$rc" = 0 ] && [ "$n_ok" = 9 ]; then
   echo "ok    real module: all cells pass"; pass=$((pass+1))
 else
-  echo "FAIL  real module: rc $rc, $n_ok cell(s) ok, wanted rc 0 and 7"; fail=$((fail+1))
+  echo "FAIL  real module: rc $rc, $n_ok cell(s) ok, wanted rc 0 and 9"; fail=$((fail+1))
 fi
 
 # ── mutants: a broken copy must fail the cells that name its break, and only those ──
 # A mutant is the module with its regex swapped for a broken one.
-REGEX='"-fsanitize=[^ ;>]*"'
+REGEX='"-fsanitize=[^ ;>]+"'
 mutant() {  # mutant <id> <what> <want-failed-cells, space-separated> <replacement regex>
   local id="$1" what="$2" want="$3" copy="$TMP/$1.cmake" out rc got
   python3 - "$MODULE" "$copy" "$REGEX" "$4" <<'PY' || { echo "FAIL  $id: transform did not apply"; fail=$((fail+1)); return; }
@@ -92,16 +94,20 @@ PY
 # expression follows `:`, not a separator, so both genex cells miss. The separator also
 # joins the value where the match does fire, so the two separator cells fail with them.
 mutant S1 "match anchored to a separator" "genex-leak genex-config list-memory plain-thread" \
-  '"[ ;]-fsanitize=[^ ;>]*"'
-# `>` dropped from the value's end set: the expression's closing bracket joins the value.
-mutant S2 "generator-expression close not ending the value" "genex-leak genex-config" \
-  '"-fsanitize=[^ ;]*"'
+  '"[ ;]-fsanitize=[^ ;>]+"'
+# `>` dropped from the value's end set: the expression's closing bracket joins the value,
+# and an empty switch inside an expression gains `>` as a value.
+mutant S2 "generator-expression close not ending the value" "genex-leak genex-config genex-empty" \
+  '"-fsanitize=[^ ;]+"'
 # Widened to every sanitize-family switch with a value: the negative forms then match.
 mutant S3 "every sanitize-family switch matched" "no-sanitize option-cov" \
-  '"-f[a-z-]*sanitize[a-z-]*=[^ ;>]*"'
+  '"-f[a-z-]*sanitize[a-z-]*=[^ ;>]+"'
 # Never matches: every positive cell fails.
 mutant S4 "match never fires" "genex-leak genex-config list-memory plain-thread" \
-  '"-fsanitize=NEVER[^ ;>]*"'
+  '"-fsanitize=NEVER[^ ;>]+"'
+# An empty value accepted: a bare `-fsanitize=`, which enables nothing, keeps the gates off.
+mutant S5 "empty value matched" "empty genex-empty" \
+  '"-fsanitize=[^ ;>]*"'
 
 echo
 echo "test-mallocnesia-sanitizer-match: $pass passed, $fail failed"
