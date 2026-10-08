@@ -28,7 +28,9 @@ const int win_crt_no_dialog_installed = [] {
     // abort(): suppress the message box AND the WER fault dialog — just terminate.
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
     // assert()/_CrtDbgReport: write to stderr, never pop the modal assertion dialog.
-    for (int report_type : {_CRT_WARN, _CRT_ERROR, _CRT_ASSERT}) {
+    // Without _DEBUG the two calls are macros that expand to nothing using
+    // report_type, so the variable is unused there (MSVC C4189 under /W4).
+    for ([[maybe_unused]] int report_type : {_CRT_WARN, _CRT_ERROR, _CRT_ASSERT}) {
         _CrtSetReportMode(report_type, _CRTDBG_MODE_FILE);
         _CrtSetReportFile(report_type, _CRTDBG_FILE_STDERR);
     }
