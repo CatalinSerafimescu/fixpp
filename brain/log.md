@@ -6,6 +6,16 @@ status: stable
 
 # Log
 
+- **2026-10-08 — B14 (fixpp#481): the common strict flags reach every first-party target.**
+  `components/nfr-and-tooling.md` loses two false claims, that `fixpp_apply_common_flags` had no call
+  site and must not be wired because of `-fno-exceptions`. It gains the deferred walk with
+  `FIXPP_COMMON_FLAGS_EXEMPT`, why `-fno-exceptions` was dropped, why `/WX` stays in
+  `fixpp_maybe_werror`, the MSVC branch's `/wd5030`, `/wd4324` and CRT definitions each with the
+  condition it depends on, the MSVC arm beside every deliberate `[[deprecated]]` use, and a lead:
+  `_codegen_bootstrap` keeps the `FIXPP_WERROR` of its first configure. `components/test.md` records
+  why the Windows alloc-guard markers are not `constexpr` (C4127), why the MSVC-debug skip predicate
+  reads a volatile on every platform (C4702 in debug and release), and that a loop leaving on its
+  first pass is the same C4702 class.
 - **2026-10-07 — 093 Gate B (PR #554), two owner-approved classes.** `failure-classes.md` gains
   **class 19**, *a commit marker published after the next fallible step reports a crossed boundary as
   "nothing happened"*: publish the marker at the irreversible step, use a tri-state where the

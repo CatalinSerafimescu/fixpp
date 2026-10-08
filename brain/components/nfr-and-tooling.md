@@ -7,6 +7,7 @@ refs:
   - .specify/constitution.md
   - spec/feature-catalogue.md
   - cmake/Helpers.cmake
+  - cmake/Codegen.cmake
   - .clang-tidy
 codegraph_entry: []
 ---
@@ -104,19 +105,6 @@ was also considered and rejected; the user chose to wire it on every toolchain, 
 - **Opt-out is per target, with the reason in `FIXPP_WERROR_EXEMPT`.** The deliberate case is a
   negative-compile WILL_FAIL probe: a failed build is its passing state, so a blanket `-Werror` would
   let any stray warning keep it green after the diagnostic it witnesses is gone.
-- ⚠️ **LEAD — for most targets it promotes only the compiler's DEFAULT warnings.** The strict set in
-  `fixpp_apply_common_flags` (`-Wall -Wextra -Wpedantic`) has no call site, and CMake adds no MSVC `/W3`
-  under the project's minimum version; the codegen tool is the exception, setting its own `-Wall` set. Re-derive before relying on it:
-  `grep -rn "fixpp_apply_common_flags\|-Wall" --include=CMakeLists.txt --include='*.cmake' .`
-- ⛔ **DO NOT WIRE `fixpp_apply_common_flags` AS IT STANDS — it carries `-fno-exceptions`.** That flag
-  is Phase-3 doctrine the tree grew out of: the shipped library throws, in 45 `src/` and 27 `include/`
-  files, including `xml_loader.cpp`'s typed `dict::xml_parse_error` / `unknown_version_error` — part of
-  the public dictionary API. Calling the function verbatim does not tighten warnings, it fails to
-  build. The codegen `CMakeLists.txt` compounds the illusion by documenting that it opts OUT of that
-  flag "deliberately" — an opt-out from a function that has never had a call site, which reads as
-  evidence the mechanism works. Re-derive the condition:
-  `grep -rlE '(^|[^a-zA-Z_])throw[ (]|catch[ ]*\(' src include | wc -l`
-  Wiring it is #439 part 2; split out because part 1 (below) was already a sweep.
 - **The gcc presets NO LONGER set `FIXPP_WERROR=OFF`** (#439). Dropping that override was not a
   one-line change: five DEFAULT-ON classes fired, so `-Wall` was never the obstacle. `-Wattributes`
   dominated, by orders of magnitude, over every other class — the tree spells `[[clang::lifetimebound]]`,
@@ -130,6 +118,65 @@ was also considered and rejected; the user chose to wire it on every toolchain, 
 - ⚠️ **`linux-gcc-debug` is built by NO CI lane** — it appears in `ci/` only as a fixture string. Its
   override was dropped too, but nothing in CI exercises that preset, so treat it as unverified.
   Re-derive: `grep -rn "linux-gcc-debug" .github/ ci/ tools/`
+
+### The common strict flags reach every first-party target (#481)
+
+**`fixpp_apply_common_flags_to_all_targets()`** (`cmake/Helpers.cmake`) applies
+`fixpp_apply_common_flags` by the same deferred `BUILDSYSTEM_TARGETS` walk as `FIXPP_WERROR`, for the
+same reason: a per-target call list misses the next target added without it. It fails configure on an
+empty walk, and its STATUS line names how many targets it reached and which were exempt. It is not
+gated on `FIXPP_WERROR`: the flags only raise warnings, and whether a warning fails the build stays
+that option's decision.
+
+- **Opt-out is per target, with the reason in `FIXPP_COMMON_FLAGS_EXEMPT`.** It is reserved for code
+  this project does not author, such as the SWIG-generated Python wrapper. A first-party warning is
+  fixed at the site, and in generated code it is fixed in the codegen emitter, never in its output. A
+  negative-compile probe needs no exemption, because added warnings cannot make a build that must fail
+  succeed.
+- **The flags are warnings only, `PRIVATE` and C++ only.** GCC and Clang get `-Wall -Wextra -Wpedantic`
+  through a C++-only generator expression, because the tree has a C target. A consumer's own flags are
+  untouched. The flags are prepended, so a target's own `-Wno-<x>` still wins on Clang, which applies
+  warning flags in command-line order.
+- **`-fno-exceptions` was dropped, not opted out of.** The shipped library throws, including the typed
+  errors of the public dictionary API, so that Phase-3 flag could never be wired as written. The codegen
+  tool's comment about opting out of it, and the tool's own duplicate warning set, were deleted with it.
+  Re-derive the condition that rules the flag out:
+  `grep -rlE '(^|[^a-zA-Z_])throw[ (]|catch[ ]*\(' src include`
+- **`/WX` lives only in `fixpp_maybe_werror`.** Promotion is `FIXPP_WERROR`'s decision on every
+  toolchain. An unconditional `/WX` in the common function would make `-DFIXPP_WERROR=OFF` a no-op on
+  MSVC.
+- **The MSVC branch is `/W4 /permissive- /Zc:__cplusplus`, with three exceptions. Each holds only while
+  its condition does.**
+  - `/wd5030` (attribute not recognized): the tree spells attributes MSVC does not implement
+    (`[[clang::lifetimebound]]`, `[[gnu::used]]`). This is safe only while a misspelled attribute stays
+    a hard error where the attribute is understood, which is Clang's default-on `-Wunknown-attributes`
+    under `-Werror`. Re-check that a misspelling still fails:
+    `printf 'int& f(int& x [[clang::lifetimebond]]);\n' | clang++ -std=c++23 -Werror -fsyntax-only -x c++ -`
+  - `/wd4324` (structure padded due to alignment specifier): the padding is what an `alignas` member
+    asks for.
+  - `_CRT_SECURE_NO_WARNINGS` and `_CRT_NONSTDC_NO_WARNINGS`, MSVC-only compile definitions through
+    the same walk: the tree calls portable C/POSIX functions (`getenv`, `fopen`, `getpid`) on purpose.
+    This is safe only while a use of a `[[deprecated]]` declaration still raises C4996 with both
+    macros defined. That diagnostic is the friction the deprecated security-profile enumerators exist
+    for. Re-check with one TU that calls a `[[deprecated]]` function and `getenv`, compiled with
+    `cl /W4` with and without the two definitions. With them, only the deprecated call may warn.
+    Without them, both must warn; that control shows the definitions are what silence the CRT call.
+- **A deliberate `[[deprecated]]` use suppresses C4996 at the same scope as its GCC/Clang
+  `-Wdeprecated-declarations` push**, in an `#elif defined(_MSC_VER)` arm, the form
+  `src/config/loader_internal.hpp` uses. A site with only the GCC/Clang arm is clean on Linux and fails
+  under MSVC `/WX`. Find a file missing its MSVC arm:
+  `grep -rln -- '-Wdeprecated-declarations' src include tests | xargs grep -L 'disable : 4996'`
+  Its output also names files that need no arm: the negative-compile probes and their CMake lines,
+  which must keep warning, and users of the `FIXPP_SUPPRESS_DEPRECATED_*` macros, which carry the
+  MSVC arm inside the macro.
+- ⚠️ **LEAD — `_codegen_bootstrap` keeps the `FIXPP_WERROR` of its FIRST configure.**
+  `cmake/Codegen.cmake` forwards `-DFIXPP_WERROR` only when it configures the bootstrap sub-build, and
+  it configures it only while `_codegen_bootstrap/CMakeCache.txt` does not exist. A later
+  `-DFIXPP_WERROR=OFF` on the outer tree therefore does not reach the codegen tool's own build. Before
+  relying on `OFF` in a reused tree, re-derive the condition with
+  `grep -n '_need_bootstrap_configure\|FIXPP_WERROR' cmake/Codegen.cmake`, then compare the two caches
+  with `grep FIXPP_WERROR <build>/CMakeCache.txt <build>/_codegen_bootstrap/CMakeCache.txt`.
+  Deleting `_codegen_bootstrap/` makes the next configure read the option again.
 
 **Lint and format exclusions are policy, each for a reason — do not "finish" them.** `specs/` is never
 formatted (generated byte-identity baselines); `include/fix/c_api*.h` is byte-frozen by

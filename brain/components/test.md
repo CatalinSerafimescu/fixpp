@@ -10,6 +10,7 @@ refs:
   - tests/support/pump_until_ready.hpp
   - tests/support/temp_dir.hpp
   - tests/support/alloc_guard_markers.hpp
+  - tests/support/msvc_debug_arena_skip.hpp
   - ci/pump-census.sh
   - ci/pump-get-sweep.sh
   - ci/pump-red-arm.sh
@@ -82,6 +83,34 @@ null — harmless until `/WX` turned MSVC's C4551 into an error at every guarded
 into `tests/support/alloc_guard_markers.hpp` (null function pointers under `_WIN32`), not into the call
 sites; rewriting every site was rejected because the null-checked call is the shape
 `tools/check_alloc_guard_markers.py` exists to keep.
+
+**Why those Windows pointers are plain `inline`, not `constexpr` (#481).** A `constexpr` null makes
+every `if (alloc_guard_start)` a constant condition, which MSVC reports as C4127 under `/W4`. A plain
+`inline` null pointer is a variable read, so the null-checked call shape survives unchanged. `if
+constexpr` at the call sites was rejected because on POSIX the address of a weak symbol is not a
+constant expression, so the same site cannot be constant on one platform and not the other.
+
+## The MSVC-debug skip macros read a volatile (#481)
+
+`FIXPP_SKIP_ON_MSVC_DEBUG_*` in `tests/support/msvc_debug_arena_skip.hpp` skip a test on MSVC's debug
+STL, whose hidden per-container `_Container_proxy` defeats a byte-exact allocation witness. They used
+to expand to an unconditional `GTEST_SKIP()` there and to nothing elsewhere. That made everything after
+the macro unreachable code, which MSVC reports as C4702 under `/W4`. Every macro now tests
+`fixpp::test_support::msvc_debug_stl_active()`, and every platform compiles the same macro text.
+
+- **The predicate reads a `static volatile bool` on every platform**, initialised true only on the
+  MSVC debug STL. A literal `return false` elsewhere was rejected: an optimiser can inline it, prove
+  the skip branch dead, and a release build can then report C4702 for the skip itself. That warning
+  comes from the back end, so the debug and release builds can report different sites.
+- **A function defined in a `.cpp` was rejected.** `tests/support` is header-only, so it would need a
+  new library and a link edge into every user target, and link-time code generation could still fold
+  it.
+- **A hand-written skip of the same shape takes `#else`:** `#if <lane> GTEST_SKIP() ... #else <body>
+  #endif`, as `test_body_builder.cpp` does, so the body is never compiled after the skip.
+- **A loop whose body leaves on its first pass is the same C4702 class.** A range-for that sets a flag
+  and `break`s, to ask whether a directory has any entry, makes the increment unreachable. Ask the
+  question directly instead:
+  `fs::directory_iterator(dir) != fs::directory_iterator{}`.
 
 ## ⭐ Bounded pumps (#289): the hazard is the unconditional `get()`, not the fixed window
 
