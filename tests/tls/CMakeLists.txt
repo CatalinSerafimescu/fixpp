@@ -148,6 +148,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     )
     set_tests_properties(tls_cipher_allow_list_negative_compile PROPERTIES
         WILL_FAIL TRUE
+        RESOURCE_LOCK fixpp_binary_dir_nested_build
         LABELS "tls;011;compile_negative"
     )
 endif()
@@ -173,6 +174,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     )
     set_tests_properties(tls_security_profile_deprecated_compile PROPERTIES
         WILL_FAIL TRUE
+        RESOURCE_LOCK fixpp_binary_dir_nested_build
         LABELS "tls;011;compile_negative"
     )
 endif()

@@ -234,9 +234,13 @@ set_tests_properties(decimal_mul_u64_wide_portable PROPERTIES
 # only: GCC keeps an explicit -Wno- in either order. A flag change forces a
 # recompile, so a stale object cannot hide a reordering.
 #
-# Both entries share one RESOURCE_LOCK: each runs a `cmake --build` in this
-# build tree, and two concurrent builds in one tree can race on ninja's log
-# and deps files.
+# Every ctest entry that runs `cmake --build` on ${CMAKE_BINARY_DIR} carries
+# RESOURCE_LOCK fixpp_binary_dir_nested_build, these two included: two
+# concurrent builds in one tree can race on ninja's log and deps files.
+# Re-derive the set:
+#   git grep -n -e '--build' -- '*CMakeLists.txt' '*.cmake'
+# and check every entry, or script an entry runs, whose build directory is
+# ${CMAKE_BINARY_DIR}.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   if(FIXPP_WERROR)
     add_library(fixpp_common_flags_reach_probe OBJECT EXCLUDE_FROM_ALL
@@ -246,7 +250,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
               --target fixpp_common_flags_reach_probe)
     set_tests_properties(build_flags_common_flags_reach PROPERTIES
       PASS_REGULAR_EXPRESSION "unused parameter [^ ]*fixpp_481_probe_param"
-      RESOURCE_LOCK fixpp_481_probe_build_tree
+      RESOURCE_LOCK fixpp_binary_dir_nested_build
       LABELS "481;build_flags")
   endif()
 
@@ -258,6 +262,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
             --target fixpp_common_flags_order_probe)
   set_tests_properties(build_flags_common_flags_order PROPERTIES
     FAIL_REGULAR_EXPRESSION "unused parameter [^ ]*fixpp_481_probe_param"
-    RESOURCE_LOCK fixpp_481_probe_build_tree
+    RESOURCE_LOCK fixpp_binary_dir_nested_build
     LABELS "481;build_flags")
 endif()

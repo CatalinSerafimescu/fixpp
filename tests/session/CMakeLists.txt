@@ -2439,6 +2439,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     )
     set_tests_properties(session_security_profile_insecure_plain_deprecated_negative_compile PROPERTIES
         WILL_FAIL TRUE
+        RESOURCE_LOCK fixpp_binary_dir_nested_build
         LABELS "043;us2;sc005;compile_negative;friction"
     )
 endif()
