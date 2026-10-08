@@ -66,10 +66,7 @@ void expect_compid_fail(const std::string& sender, const std::string& target, co
     // Enumerate any files created; none expected.
     bool any_file = false;
     if (fs::exists(dir)) {
-        for ([[maybe_unused]] const auto& ent : fs::directory_iterator(dir)) {
-            any_file = true;
-            break;
-        }
+        any_file = fs::directory_iterator(dir) != fs::directory_iterator{};
     }
     EXPECT_FALSE(any_file) << label
                            << ": a file was created despite validation failure — "
