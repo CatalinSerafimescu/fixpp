@@ -47,16 +47,6 @@ EOF
 "$CC" -O1 -o "$TMP/dirty" "$TMP/dirty.c"
 printf 'not an elf\n' > "$TMP/bogus.so"
 
-cat > "$TMP/foreign.c" <<'EOF'
-#include <stddef.h>
-extern void *__libc_malloc(size_t);
-void *malloc(size_t n) { return __libc_malloc(n); }
-EOF
-"$CC" -O1 -fPIC -shared -o "$TMP/libforeign.so" "$TMP/foreign.c"
-"$CC" -O1 -o "$TMP/foreign_behind" "$TMP/clean.c" -Wl,--no-as-needed \
-  -L"$TMP" -lforeign -Wl,-rpath,"$TMP"
-"$CC" -O1 -o "$TMP/foreign_front" "$TMP/clean.c" "$TMP/foreign.c"
-
 # ⚠️ Codex r1 P1-B's mutant, as a permanent arm. The guard markers are WEAK UNDEFINED in
 # the test binaries, so ANY strong definition in the link closure beats the preload: the
 # constructor still runs and still writes "loaded" while g_active is never set and the
@@ -399,12 +389,53 @@ check "T13e a control that misses the aligned hook set fails by name" 1 \
   env ENTRY_FN=calloc python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so" \
     --expect-violation --expect-entry aligned_alloc,posix_memalign
 
-check "T14a a process with another allocator behind the interceptor is REFUSED" 2 \
-  "the interceptor REFUSED" -- \
-  python3 "$CHECK" --binary "$TMP/foreign_behind" --mallocnesia "$TMP/libmn.so"
-check "T14b a process whose executable defines malloc ahead of the interceptor is REFUSED" 2 \
-  "the interceptor REFUSED" -- \
-  python3 "$CHECK" --binary "$TMP/foreign_front" --mallocnesia "$TMP/libmn.so"
+# T14: every allocator entry point the interceptor defines must resolve to the interceptor
+# first and to glibc next. The names come from the built .so, so a hook added without a
+# definition below fails here, and one missing from the constructor's table is not refused.
+T14_DECLS='#include <stddef.h>
+extern void *__libc_malloc(size_t); extern void *__libc_calloc(size_t, size_t);
+extern void *__libc_realloc(void *, size_t); extern void *__libc_memalign(size_t, size_t);
+extern void *__libc_valloc(size_t); extern void *__libc_pvalloc(size_t);'
+declare -A T14_DEF=(
+  [malloc]='void *malloc(size_t n) { return __libc_malloc(n); }'
+  [calloc]='void *calloc(size_t n, size_t s) { return __libc_calloc(n, s); }'
+  [realloc]='void *realloc(void *p, size_t n) { return __libc_realloc(p, n); }'
+  [aligned_alloc]='void *aligned_alloc(size_t a, size_t n) { return __libc_memalign(a, n); }'
+  [memalign]='void *memalign(size_t a, size_t n) { return __libc_memalign(a, n); }'
+  [posix_memalign]='int posix_memalign(void **m, size_t a, size_t n) { return (*m = __libc_memalign(a, n)) ? 0 : 12; }'
+  [valloc]='void *valloc(size_t n) { return __libc_valloc(n); }'
+  [pvalloc]='void *pvalloc(size_t n) { return __libc_pvalloc(n); }'
+)
+T14_HOOKED="$(nm -D --defined-only "$TMP/libmn.so" | awk '$2 == "T" && $3 !~ /^alloc_guard_/ {print $3}')"
+check "T14 the interceptor's defined names were read (malloc among them)" 0 "malloc" -- \
+  printf '%s\n' "$T14_HOOKED"
+for fn in $T14_HOOKED; do
+  if [ -z "${T14_DEF[$fn]:-}" ]; then
+    echo "FAIL  T14 $fn: the interceptor defines it, but no definition here places it ahead of or behind it"
+    fail=$((fail+1)); continue
+  fi
+  printf '%s\n%s\n' "$T14_DECLS" "${T14_DEF[$fn]}" > "$TMP/def_$fn.c"
+  "$CC" -O1 -fno-builtin -fPIC -shared -o "$TMP/libdef_$fn.so" "$TMP/def_$fn.c"
+  "$CC" -O1 -o "$TMP/behind_$fn" "$TMP/clean.c" -Wl,--no-as-needed \
+    -L"$TMP" -ldef_$fn -Wl,-rpath,"$TMP"
+  "$CC" -O1 -fno-builtin -o "$TMP/front_$fn" "$TMP/clean.c" "$TMP/def_$fn.c"
+  check "T14 $fn defined behind the interceptor is REFUSED" 2 "the interceptor REFUSED" -- \
+    python3 "$CHECK" --binary "$TMP/behind_$fn" --mallocnesia "$TMP/libmn.so"
+  check "T14 $fn defined in the executable, ahead of the interceptor, is REFUSED" 2 \
+    "the interceptor REFUSED" -- \
+    python3 "$CHECK" --binary "$TMP/front_$fn" --mallocnesia "$TMP/libmn.so"
+done
+
+cat > "$TMP/d_free.c" <<'EOF'
+#include <stddef.h>
+extern void __libc_free(void *);
+void free(void *p) { __libc_free(p); }
+EOF
+"$CC" -O1 -fPIC -shared -o "$TMP/libdfree.so" "$TMP/d_free.c"
+"$CC" -O1 -o "$TMP/behind_free" "$TMP/clean.c" -Wl,--no-as-needed \
+  -L"$TMP" -ldfree -Wl,-rpath,"$TMP"
+check "T14 a coherent free wrapper behind the interceptor is NOT refused" 0 "PASS" -- \
+  python3 "$CHECK" --binary "$TMP/behind_free" --mallocnesia "$TMP/libmn.so"
 
 echo
 echo "test-check-alloc: $pass passed, $fail failed"

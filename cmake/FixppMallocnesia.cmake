@@ -42,10 +42,11 @@
 # selection instead would leave them registered and runnable — and the unfiltered
 # full-ctest runs on those lanes would pick them up and pass vacuously.
 #
-# THE CONDITION (fixpp#497): the gates are not registered when any `-fsanitize=` with a
-# non-empty value appears in the flags read below, whichever sanitizer it names, including
-# inside a generator expression. Naming sanitizers one by one let every unnamed one (LSan, MSan, the next)
-# register the gates. The match itself, and what it does not match, is
+# THE CONDITION (fixpp#497): the gates are not registered when any `-fsanitize=` switch
+# at an option boundary, with a non-empty value, appears in the flags read below,
+# whichever sanitizer it names, including inside a generator expression. Naming
+# sanitizers one by one let every unnamed one (LSan, MSan, the next) register the gates.
+# The match itself, and what it does not match, is
 # fixpp_mallocnesia_flags_name_sanitizer() in cmake/FixppMallocnesiaSanitizerMatch.cmake,
 # tested by ci/test-mallocnesia-sanitizer-match.sh. The per-target
 # `-fsanitize=fuzzer-no-link` that fixpp_instrument_libraries_for_fuzzing() adds is not
@@ -62,9 +63,11 @@
 #     include()d before this file; the top-level CMakeLists.txt does so. A preset that
 #     sets CMAKE_CXX_FLAGS in the cache replaces the Conan toolchain's -fsanitize, so
 #     for such a preset this read is the only signal.
-# A flag added later, or only to some target, is not seen. Re-check a configuration
-# with `ctest --test-dir <build> -N -R _mallocnesia$`, which must list no test on a
-# sanitizer build.
+# A flag added later, or only to some target, is not seen; a gate on such a target fails
+# rather than passes when the sanitizer replaces the allocator, and UndefinedBehaviorSanitizer
+# alone leaves the allocator to glibc. Re-check a configuration with
+# `ctest --test-dir <build> -N -R _mallocnesia$`, which must list no test on a sanitizer
+# build.
 #
 # ⚠️ C is enabled BEFORE the flag read below, not when the target is defined: until
 # enable_language(C) runs, CFLAGS and the Conan toolchain's CMAKE_C_FLAGS_INIT have not

@@ -152,8 +152,9 @@ def main() -> int:
 
         if "refused" in notes:
             print(f"[check_alloc] FAIL: the interceptor REFUSED "
-                  f"{os.path.basename(binary)}: another allocator serves malloc in its "
-                  f"process (the interceptor's own stderr line names it), so these hooks "
+                  f"{os.path.basename(binary)}: an allocator entry point the interceptor "
+                  f"hooks is defined ahead of it, or behind it by something other than "
+                  f"glibc (the interceptor's own stderr line names it), so these hooks "
                   f"would not see every allocation and a pass would mean nothing.",
                   file=sys.stderr)
             return 2

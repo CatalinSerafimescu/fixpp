@@ -48,6 +48,13 @@ cell(option-cov   "-fsanitize-coverage=trace-pc"                         "")
 cell(clean        "-O2 -g -Wall"                                         "")
 cell(empty        "-fsanitize= -O2"                                      "")
 cell(genex-empty  "$<$<CONFIG:Debug>:-fsanitize=>"                       "")
+cell(genex-if     "$<IF:$<CONFIG:Debug>,-fsanitize=address,>"            "-fsanitize=address,")
+cell(first        "-fsanitize=address -O2"                               "-fsanitize=address")
+cell(macro        "-DNOTE=-fsanitize=address -O2"                        "")
+cell(path         "-I/opt/x-fsanitize=y/include"                         "")
+if("x-fsanitize=stale" MATCHES "(x)(-fsanitize=.*)")
+endif()
+cell(stale-match  "-O2"                                                  "")
 if(failed)
   message(FATAL_ERROR "sanitizer-match cells failed")
 endif()
@@ -62,15 +69,15 @@ run_cells() {  # run_cells <module> — prints the cells' output, returns cmake'
 out="$(run_cells "$MODULE")"; rc=$?
 echo "$out" | grep -E '^(ok|FAIL) '
 n_ok="$(grep -c '^ok ' <<<"$out")"
-if [ "$rc" = 0 ] && [ "$n_ok" = 9 ]; then
+if [ "$rc" = 0 ] && [ "$n_ok" = 14 ]; then
   echo "ok    real module: all cells pass"; pass=$((pass+1))
 else
-  echo "FAIL  real module: rc $rc, $n_ok cell(s) ok, wanted rc 0 and 9"; fail=$((fail+1))
+  echo "FAIL  real module: rc $rc, $n_ok cell(s) ok, wanted rc 0 and 14"; fail=$((fail+1))
 fi
 
 # ── mutants: a broken copy must fail the cells that name its break, and only those ──
 # A mutant is the module with its regex swapped for a broken one.
-REGEX='"-fsanitize=[^ ;>]+"'
+REGEX='"(^|[ \t;:,>])(-fsanitize=[^ ;>]+)"'
 mutant() {  # mutant <id> <what> <want-failed-cells, space-separated> <replacement regex>
   local id="$1" what="$2" want="$3" copy="$TMP/$1.cmake" out rc got
   python3 - "$MODULE" "$copy" "$REGEX" "$4" <<'PY' || { echo "FAIL  $id: transform did not apply"; fail=$((fail+1)); return; }
@@ -93,24 +100,31 @@ PY
   fi
 }
 
-# The match anchored to a preceding space or `;`: a sanitizer inside a generator
-# expression follows `:`, not a separator, so both genex cells miss. The separator also
-# joins the value where the match does fire, so the two separator cells fail with them.
-mutant S1 "match anchored to a separator" "genex-leak genex-config list-memory plain-thread" \
-  '"[ ;]-fsanitize=[^ ;>]+"'
+mutant S1 "colon not a boundary" "genex-leak genex-config" \
+  '"(^|[ \t;,>])(-fsanitize=[^ ;>]+)"'
 # `>` dropped from the value's end set: the expression's closing bracket joins the value,
 # and an empty switch inside an expression gains `>` as a value.
-mutant S2 "generator-expression close not ending the value" "genex-leak genex-config genex-empty" \
-  '"-fsanitize=[^ ;]+"'
+mutant S2 "generator-expression close not ending the value" \
+  "genex-leak genex-config genex-empty genex-if" \
+  '"(^|[ \t;:,>])(-fsanitize=[^ ;]+)"'
 # Widened to every sanitize-family switch with a value: the negative forms then match.
 mutant S3 "every sanitize-family switch matched" "no-sanitize option-cov" \
-  '"-f[a-z-]*sanitize[a-z-]*=[^ ;>]+"'
+  '"(^|[ \t;:,>])(-f[a-z-]*sanitize[a-z-]*=[^ ;>]+)"'
 # Never matches: every positive cell fails.
-mutant S4 "match never fires" "genex-leak genex-config list-memory plain-thread" \
-  '"-fsanitize=NEVER[^ ;>]+"'
+mutant S4 "match never fires" "genex-leak genex-config list-memory plain-thread genex-if first" \
+  '"(^|[ \t;:,>])(-fsanitize=NEVER[^ ;>]+)"'
 # An empty value accepted: a bare `-fsanitize=`, which enables nothing, keeps the gates off.
 mutant S5 "empty value matched" "empty genex-empty" \
-  '"-fsanitize=[^ ;>]*"'
+  '"(^|[ \t;:,>])(-fsanitize=[^ ;>]*)"'
+# No boundary: a switch embedded in another argument matches.
+mutant S6 "no boundary before the switch" "macro path" \
+  '"()(-fsanitize=[^ ;>]+)"'
+# A comma not a boundary: a switch in a generator expression's IF branch is missed.
+mutant S7 "comma not a boundary" "genex-if" \
+  '"(^|[ \t;:>])(-fsanitize=[^ ;>]+)"'
+# The start not a boundary: a switch that opens the flags is missed.
+mutant S8 "start not a boundary" "first" \
+  '"([ \t;:,>])(-fsanitize=[^ ;>]+)"'
 
 # ── the registration DECISION: the real cmake/FixppMallocnesia.cmake, configured ────
 # The cells above pin the match. These pin the decision that uses it: which flags are

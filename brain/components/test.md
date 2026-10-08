@@ -121,14 +121,23 @@ only for the standard names; a block from another allocator's own API would then
 `aligned_alloc` or `posix_memalign`, so those two hooks copy glibc's argument validation, and
 `ci/test-check-alloc.sh`'s T12 compares every hook against unhooked glibc to catch the copy
 drifting. A configure probe keeps the gates unregistered on a non-glibc libc. At run time, the
-constructor refuses a process whose executable or link closure makes another allocator serve
-`malloc`, because these hooks would not see every allocation and free pairing would be undefined.
+constructor refuses a process whose executable defines any entry point the interceptor hooks, or
+whose link closure defines one behind the interceptor in place of glibc's. The preload changes only
+the resolution of the names it defines, so those are the names whose first and next definitions are
+checked. Rejected: checking `free`, `malloc_usable_size` and other names this file does not define,
+because their resolution is unchanged by the preload.
 
 **Why the guard reads any non-empty `-fsanitize=`, not named options.** A sanitizer installs its own allocator
 ahead of the interposer, so a gate registered on a sanitizer build passes vacuously. Naming
 `FIXPP_ENABLE_{ASAN,TSAN,UBSAN}` let every unnamed sanitizer (LSan, MSan, the next one) register the
-gates; matching the switch itself excludes any sanitizer whose `-fsanitize=` is in what the guard
-reads, including inside a generator expression. A sanitizer added only to one target is not seen.
+gates; matching the switch itself at an option boundary excludes any sanitizer whose `-fsanitize=`
+is in what the guard reads, including inside a generator expression. A sanitizer added only to one
+target is not seen; a gate on such a target fails rather than passes when that sanitizer replaces
+the allocator, and UndefinedBehaviorSanitizer alone leaves the allocator to glibc. The boundary is
+the start of the flags, whitespace, a list separator, a generator-expression branch separator, an
+IF arm separator or a closed generator expression; a switch embedded inside another argument does
+not match. A quoted string with a space before the switch still matches, because the guard does not
+parse shell quoting.
 The guard reads the compile/link flag variables and the directory options, not `FIXPP_ENABLE_*`, so
 the read that sees `cmake/Sanitizers.cmake`'s options is exercised (a preset that sets
 `CMAKE_CXX_FLAGS` in the cache drops the Conan toolchain's `-fsanitize`). An empty `-fsanitize=`
