@@ -31,7 +31,29 @@
 "    from inside the callback — it deadlocks (FR-013a). Copy the field out and\n"
 "    send from another thread.") fixpp
 
+/* #481: SWIG emits %begin at the top of the wrapper and its own runtime after
+ * it; that runtime declares parameters it does not read. So -Wunused-parameter
+ * is suppressed from here to the pop that opens the first %{ block below.
+ * Code SWIG emits after the pop (this file's blocks and typemap bodies, the
+ * generated wrappers, fragments and init code) gets the full common warning
+ * set. Re-check whether the suppression is still needed:
+ * delete the push and pop, regenerate the wrapper
+ * (`swig -python -c++ -I include -o wrap.cxx bindings/python/fixpp.i`), and
+ * compile it with fixppPYTHON_wrap.cxx's command from compile_commands.json
+ * plus `-Wall -Wextra -Wpedantic`, under each combination of
+ * FIXPP_PY_GIL_CANARY and FIXPP_PY_GIL_RELEASE_CANARY. The #if keeps the
+ * pragma away from MSVC, which reports an unknown one (C4068). */
+%begin %{
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
+%}
+
 %{
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop /* opened by %begin above: SWIG's runtime ends here */
+#endif
 #include <string.h>  /* strlen — embedded-NUL check in the config-str typemaps */
 #include <stdint.h>  /* int64_t — captured main-interpreter id (T003 limited-API) */
 #include "fix/c_api.h"

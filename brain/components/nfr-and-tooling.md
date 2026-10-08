@@ -128,11 +128,20 @@ empty walk, and its STATUS line names how many targets it reached and which were
 gated on `FIXPP_WERROR`: the flags only raise warnings, and whether a warning fails the build stays
 that option's decision.
 
-- **Opt-out is per target, with the reason in `FIXPP_COMMON_FLAGS_EXEMPT`.** It is reserved for code
-  this project does not author, such as the SWIG-generated Python wrapper. A first-party warning is
-  fixed at the site, and in generated code it is fixed in the codegen emitter, never in its output. A
-  negative-compile probe needs no exemption, because added warnings cannot make a build that must fail
-  succeed.
+- **Opt-out is per target, with the reason in `FIXPP_COMMON_FLAGS_EXEMPT`.** It is reserved for a
+  target whose TUs contain no first-party code. A first-party warning is fixed at the site, and in
+  generated code it is fixed in the codegen emitter, never in its output. A negative-compile probe
+  needs no exemption, because added warnings cannot make a build that must fail succeed. The configure
+  STATUS line names the exempt targets; re-derive the users with
+  `git grep -n FIXPP_COMMON_FLAGS_EXEMPT -- '*.txt' '*.cmake'`.
+- **The Python binding `fixpp_py` is not exempt, because its wrapper TU is not all SWIG's.** SWIG
+  copies `bindings/python/fixpp.i`'s hand-written blocks, typemap bodies and `%inline` code into
+  `fixppPYTHON_wrap.cxx`, so exempting the target would hide first-party warnings. SWIG's own runtime
+  declares parameters it does not read, so `fixpp.i` suppresses `-Wunused-parameter` from a `%begin`
+  push to a pop at the start of its first `%{` block, which covers SWIG's runtime section and nothing
+  after it. A suppression covering a whole TU that mixes generated and first-party code is the
+  rejected shape. `fixpp.i`'s comment holds the recipe that re-checks whether the suppression is still
+  needed.
 - **The flags are warnings only, `PRIVATE` and C++ only.** GCC and Clang get `-Wall -Wextra -Wpedantic`
   through a C++-only generator expression, because the tree has a C target. A consumer's own flags are
   untouched. The flags are prepended, so a target's own `-Wno-<x>` still wins on Clang, which applies
