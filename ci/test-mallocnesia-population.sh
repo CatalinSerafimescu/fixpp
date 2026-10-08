@@ -196,6 +196,38 @@ check "T7g duplicate gate or control names are rejected before a command stands 
   "$(mk t7g "$(ctl alloc_guard_memalign_positive_control_mallocnesia "")" \
             "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")"
 
+# ── T7h: no label member may carry a property that alters its verdict. Each arm is the
+# full happy set plus ONE property on ONE member; a broken control exits 1, so each of
+# these turns `ctest -L mallocnesia` green over it. One arm per property on a control,
+# and one on a plain gate and one on a declared extra, so the rule is not scoped to
+# controls only.
+with_prop() {  # with_prop <dir> <test> <property> <value> — append the property, echo dir
+  printf 'set_tests_properties(%s PROPERTIES %s %s)\n' "$2" "$3" "$4" >> "$1/CTestTestfile.cmake"
+  echo "$1"
+}
+_ctl=alloc_guard_memalign_positive_control_mallocnesia
+for _pv in "DISABLED TRUE" "WILL_FAIL TRUE" "SKIP_RETURN_CODE 1" \
+           "SKIP_REGULAR_EXPRESSION check_alloc" "PASS_REGULAR_EXPRESSION check_alloc"; do
+  _p="${_pv%% *}"
+  check "T7h a control carrying $_p is rejected BY NAME" 1 \
+    "$_ctl carries $_p." \
+    "$(with_prop "$(mk "t7h-$_p" "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+                 "$_ctl" $_pv)"
+done
+check "T7h a plain gate carrying SKIP_RETURN_CODE is rejected BY NAME" 1 \
+  "a_mallocnesia carries SKIP_RETURN_CODE." \
+  "$(with_prop "$(mk t7h-gate "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+               a_mallocnesia SKIP_RETURN_CODE 1)"
+check "T7h a declared extra carrying DISABLED is rejected BY NAME" 1 \
+  "${EXTRAS[0]%%:*} carries DISABLED." \
+  "$(with_prop "$(mk t7h-extra "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+               "${EXTRAS[0]%%:*}" DISABLED TRUE)"
+# Its happy half: a property that only ADDS failures is not rejected.
+check "T7h a member carrying TIMEOUT only is accepted" 0 \
+  "named gate(s), all labelled" \
+  "$(with_prop "$(mk t7h-timeout "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+               "$_ctl" TIMEOUT 30)"
+
 # ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
 out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?
 if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 50"; then

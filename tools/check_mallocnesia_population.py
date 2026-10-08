@@ -26,6 +26,11 @@ gates at all (the old `if(EXISTS)` guards on a machine without the hand-built .s
 every set comparison trivially true, and `ctest -L mallocnesia` would then exit 0 having
 run nothing. This is the single recurring defect class in this repo: an instrument that
 reports clean because it could not report otherwise.
+
+⚠️ VERDICT. A member that is registered, labelled and named can still be disabled, or have
+a failure reported as a pass or a skip, by a CTest property. Every member is therefore
+checked against `VERDICT_PROPERTIES`. A control's expected violation is inverted inside
+check_alloc.py, never by CTest.
 """
 import argparse
 import collections
@@ -84,6 +89,14 @@ POSITIVE_CONTROLS = {
     "alloc_guard_pvalloc_positive_control_mallocnesia": (
         "pvalloc", "pvalloc (tests/alloc_guard/planted_entry_witness.cpp)"),
 }
+
+# CTest properties under which a test whose command fails is reported as passed or
+# skipped, or is not run at all. On a label member any of them turns `ctest -L mallocnesia`
+# green over a broken gate or control: a broken control exits 1, and SKIP_RETURN_CODE 1
+# reports it skipped. FAIL_REGULAR_EXPRESSION and TIMEOUT only add failures, so they
+# are not here.
+VERDICT_PROPERTIES = ("DISABLED", "WILL_FAIL", "SKIP_RETURN_CODE",
+                      "SKIP_REGULAR_EXPRESSION", "PASS_REGULAR_EXPRESSION")
 
 NAME_RE = re.compile(r"^\s*Test\s+#\d+:\s+(\S+)", re.M)
 
@@ -201,6 +214,21 @@ def main() -> int:
                 f"command names --expect-entry {named or 'nothing'}, wanted exactly "
                 f"[{entry!r}]. Without it the control passes on an allocation that reached "
                 f"any hook. Register it with EXPECT_ENTRY {entry}.")
+
+    # (0e) NO MEMBER MAY HAVE ITS VERDICT ALTERED. Every rule above reads names and
+    # commands, which a property leaves intact: a DISABLED control is still registered,
+    # labelled and named, and is never run. The controls' expected failure is inverted
+    # inside check_alloc.py (--expect-violation), so no member needs any of these.
+    for t in label_tests:
+        altered = sorted(p["name"] for p in t.get("properties", [])
+                         if p["name"] in VERDICT_PROPERTIES)
+        if altered:
+            failures.append(
+                f"{t['name']} carries {', '.join(altered)}. With it CTest can report the "
+                f"test passed or skipped although its command failed, or not run it, so "
+                f"`ctest -L mallocnesia` stays green over a broken gate. A control's "
+                f"expected violation is inverted by check_alloc.py --expect-violation; "
+                f"remove the property.")
 
     # (1) ⊆ : every named gate carries the label.
     unlabelled = sorted(by_name - by_label)

@@ -106,6 +106,9 @@ each hook runs on a CI lane. Each libc control also names its own hook (`EXPECT_
 `planted_entry_witness.cpp` row that calls a different entry point fails its control. Rejected:
 `--expect-violation` alone — it accepts any violation, so a memalign control planting a calloc
 passed. The over-aligned `new` control names the aligned hook set a C++ runtime may reach.
+No label member may carry a CTest property that turns a failing command into a pass or a skip, or
+stops it running (`VERDICT_PROPERTIES`). Rejected: names and commands only, because a `DISABLED`
+control stays registered, labelled and named, and is never run (PR #557 Gate B r5).
 
 **Why the interceptor forwards to glibc's `__libc_*`, not `dlsym(RTLD_NEXT)`.** A library
 constructor that runs before the interceptor's can make the process's first hooked call, so a hook
