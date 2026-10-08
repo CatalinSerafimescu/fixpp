@@ -170,6 +170,10 @@ option does not remove them.
     dependency header alike. Safe for first-party code while it tests `__cplusplus` only for presence
     (`#ifdef`). Re-derive:
     `git grep -n -e __cplusplus -e _MSVC_LANG -- include src tests tools bench perf bindings`
+    Safe for dependency headers while every one that an MSVC-built TU includes, and every public
+    header, preprocesses to the same definitions with and without it, apart from attribute and linkage
+    spellings. The `cl /EP` recipe that re-checks this is in `cmake/Helpers.cmake`. The owner ruled on
+    2026-10-08 to keep both switches.
 - **The MSVC branch has three exceptions. Each holds only while its condition does.**
   - `/wd5030` (attribute not recognized): the tree spells attributes MSVC does not implement
     (`[[clang::lifetimebound]]`, `[[gnu::used]]`). This is safe only while a misspelled attribute stays

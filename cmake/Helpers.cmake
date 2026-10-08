@@ -26,6 +26,22 @@
 #                    Safe for first-party code while it tests __cplusplus only for
 #                    presence (#ifdef). Re-derive:
 #                    git grep -n -e __cplusplus -e _MSVC_LANG -- include src tests tools bench perf bindings
+#                    Safe for dependency headers while every one that an
+#                    MSVC-built TU includes, and every public header,
+#                    preprocesses to the same definitions with and without
+#                    it, apart from attribute and linkage spellings.
+#                    Re-derive: list the angle includes with
+#                    git grep -hE '^\s*#\s*include\s*<' -- include src tests tools bindings
+#                    and keep those that are neither standard, platform nor
+#                    first-party (fixpp/, fix/) and that a TU an MSVC preset
+#                    compiles includes. Write one TU that #includes each of
+#                    them and one that #includes every public header, with
+#                    no __has_include guard, so a header missing from the
+#                    include path fails the run instead of dropping out. Run
+#                    `cl /EP /std:c++latest` on each with the MSVC preset's
+#                    definitions and include paths, with and without
+#                    /Zc:__cplusplus, and diff. Kept by owner ruling,
+#                    2026-10-08.  claim-ok: the date of an owner decision, not a result
 #
 # ⚠️ CXX ONLY, via generator expressions, for the reason the -Wattributes block
 # below gives: this repo has a C target (`mallocnesia`).
