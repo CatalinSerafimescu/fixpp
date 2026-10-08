@@ -1670,6 +1670,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         } else if (k == SK::one_way_ca) {
             // one_way_ca is deprecated in the TLS layer but still supported
             // for legacy interop (session layer retains it per [const §XII.5]).
+            // Portable `#elif defined` spelling: see is_insecure_plain_tcp() in
+            // fixpp/session/security_profile.hpp.
+            // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -1677,12 +1680,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
+            // NOLINTEND(readability-use-concise-preprocessor-directives)
             tls_profile = TK::one_way_ca;
+            // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
 #elif defined(_MSC_VER)
 #pragma warning(pop)
 #endif
+            // NOLINTEND(readability-use-concise-preprocessor-directives)
         }
         // insecure_plain_tcp: tls_profile stays unset; no SslCtxConfig arm.
         reconnect_fsm_.set_tls_profile(tls_profile);

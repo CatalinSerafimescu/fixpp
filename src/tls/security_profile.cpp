@@ -66,6 +66,9 @@ core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
     }
 
     // Profile-specific validation per [2g §4.5.1] 4-row table.
+    // Portable `#elif defined` spelling: see is_insecure_plain_tcp() in
+    // fixpp/session/security_profile.hpp.
+    // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -73,6 +76,7 @@ core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
+    // NOLINTEND(readability-use-concise-preprocessor-directives)
     switch (profile) {
         case SecurityProfile::mtls_pinned:
             if (!pinset) {
@@ -98,11 +102,13 @@ core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
             // Already rejected above; unreachable.
             return std::unexpected{E::tls_invalid_security_profile};
     }
+        // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
 #elif defined(_MSC_VER)
 #pragma warning(pop)
 #endif
+    // NOLINTEND(readability-use-concise-preprocessor-directives)
 
     // Build the config.
     SslCtxConfig cfg;

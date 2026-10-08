@@ -74,6 +74,8 @@ struct SecurityProfile {
 // in operator config, which this does not touch — an operator selecting the
 // enumerator still sees the diagnostic. [043 D-9; /simplify 2026-06-17]
 [[nodiscard]] constexpr bool is_insecure_plain_tcp(SecurityProfile::kind k) noexcept {
+    // #elifdef is C++23-only; this public header keeps the portable spelling.
+    // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -81,12 +83,15 @@ struct SecurityProfile {
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
+    // NOLINTEND(readability-use-concise-preprocessor-directives)
     return k == SecurityProfile::kind::insecure_plain_tcp;
+    // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
 #elif defined(_MSC_VER)
 #pragma warning(pop)
 #endif
+    // NOLINTEND(readability-use-concise-preprocessor-directives)
 }
 
 }  // namespace fixpp::session

@@ -192,6 +192,13 @@ option does not remove them.
   Its output also names files that need no arm: the negative-compile probes and their CMake lines,
   which must keep warning, and users of the `FIXPP_SUPPRESS_DEPRECATED_*` macros, which carry the
   MSVC arm inside the macro.
+  - clang-tidy's `readability-use-concise-preprocessor-directives` reports every such
+    `#elif defined(_MSC_VER)` line and suggests `#elifdef`. The house answer is a suppression, not the
+    rewrite: wrap each `#if … #endif` block in `NOLINTBEGIN/NOLINTEND` for that check, as
+    `include/fixpp/core/sync/detail/atomic_shared_ptr_detect.hpp` does. `#elifdef` is C++23-only, which
+    a public header cannot assume of its consumers, and the `src/` sites keep the header's spelling and
+    point to it. A bare
+    `#elif defined(...)` with no suppression is an open tidy finding, not a precedent.
 - ⚠️ **LEAD — `_codegen_bootstrap` keeps the `FIXPP_WERROR` of its FIRST configure.**
   `cmake/Codegen.cmake` forwards `-DFIXPP_WERROR` only when it configures the bootstrap sub-build, and
   it configures it only while `_codegen_bootstrap/CMakeCache.txt` does not exist. A later
