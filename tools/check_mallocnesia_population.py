@@ -26,8 +26,15 @@ gates at all (the old `if(EXISTS)` guards on a machine without the hand-built .s
 every set comparison trivially true, and `ctest -L mallocnesia` would then exit 0 having
 run nothing. This is the single recurring defect class in this repo: an instrument that
 reports clean because it could not report otherwise.
+
+⚠️ VERDICT. A member that is registered, labelled and named can still be disabled, or have
+a failure reported as a pass or a skip, by a CTest property. Every member is therefore
+checked against `VERDICT_PROPERTIES`. A control's expected violation is inverted inside
+check_alloc.py, never by CTest.
 """
 import argparse
+import collections
+import json
 import re
 import subprocess
 import sys
@@ -50,6 +57,47 @@ DECLARED_EXTRAS = {
         "will never match the name pattern.",
 }
 
+# The positive controls, by NAME, each with the entry point set its command must name in
+# `--expect-entry` and the allocation path it proves the
+# interceptor sees. A control vouches only for the entry point it plants: the malloc
+# control passed while every aligned entry point was unhooked (fixpp#497), so one control
+# cannot stand in for another. Any label member whose name carries `positive_control` must
+# be a row here, and every row must be registered.
+#
+# The entry set is SPELLED OUT here rather than read from the CMake registration, so
+# dropping EXPECT_ENTRY there, or pointing it at another hook, is a failure here rather
+# than a control that quietly accepts any violation.
+POSITIVE_CONTROLS = {
+    "alloc_guard_positive_control_mallocnesia": (
+        "malloc", "a plain malloc (tests/alloc_guard/planted_alloc_witness.cpp)"),
+    "alloc_guard_aligned_new_positive_control_mallocnesia": (
+        "aligned_alloc,posix_memalign", "an over-aligned operator new, which reaches libc "
+        "through an aligned entry point (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_calloc_positive_control_mallocnesia": (
+        "calloc", "calloc (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_realloc_positive_control_mallocnesia": (
+        "realloc", "realloc of a block allocated before the window "
+                   "(tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_aligned_alloc_positive_control_mallocnesia": (
+        "aligned_alloc", "aligned_alloc (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_posix_memalign_positive_control_mallocnesia": (
+        "posix_memalign", "posix_memalign (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_memalign_positive_control_mallocnesia": (
+        "memalign", "memalign (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_valloc_positive_control_mallocnesia": (
+        "valloc", "valloc (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_pvalloc_positive_control_mallocnesia": (
+        "pvalloc", "pvalloc (tests/alloc_guard/planted_entry_witness.cpp)"),
+}
+
+# CTest properties under which a test whose command fails is reported as passed or
+# skipped, or is not run at all. On a label member any of them turns `ctest -L mallocnesia`
+# green over a broken gate or control: a broken control exits 1, and SKIP_RETURN_CODE 1
+# reports it skipped. FAIL_REGULAR_EXPRESSION and TIMEOUT only add failures, so they
+# are not here.
+VERDICT_PROPERTIES = ("DISABLED", "WILL_FAIL", "SKIP_RETURN_CODE",
+                      "SKIP_REGULAR_EXPRESSION", "PASS_REGULAR_EXPRESSION")
+
 NAME_RE = re.compile(r"^\s*Test\s+#\d+:\s+(\S+)", re.M)
 
 
@@ -61,6 +109,16 @@ def ctest_names(build_dir: str, selector: str, value: str) -> set[str]:
               file=sys.stderr)
         sys.exit(2)
     return set(NAME_RE.findall(out.stdout))
+
+
+def ctest_label_tests(build_dir: str, label: str) -> list[dict]:
+    out = subprocess.run(["ctest", "--test-dir", build_dir, "--show-only=json-v1",
+                          "-L", label], capture_output=True, text=True)
+    if out.returncode != 0:
+        print(f"error: ctest --show-only=json-v1 -L {label} failed rc={out.returncode}\n"
+              f"{out.stderr}", file=sys.stderr)
+        sys.exit(2)
+    return json.loads(out.stdout).get("tests", [])
 
 
 def main() -> int:
@@ -106,21 +164,71 @@ def main() -> int:
             "exit 0 having run NOTHING. That is the shape of a green CI step that "
             "measures nothing.")
 
-    # (0b) THE POSITIVE CONTROL MUST EXIST, exactly once. The floor above counts NAMES,
+    # (0b) THE POSITIVE CONTROLS MUST EXIST, each by name. The floor above counts NAMES,
     # and a name is cheap: `add_test(NAME padding_mallocnesia COMMAND cmake -E true)` with
     # the label satisfies the count, both set relations and the raw-preload scan, while a
-    # real gate has been deleted. The count cannot tell a gate from a decoy — but the
-    # control is the one member whose ABSENCE means nobody is checking that interception
-    # works at all, so it is named here rather than left to arithmetic.
-    controls = sorted(n for n in by_label if "positive_control" in n)
-    if len(controls) != 1:
+    # real gate has been deleted. The count cannot tell a gate from a decoy — but a
+    # control is a member whose ABSENCE means nobody is checking that interception works
+    # for its entry point, so each is named here rather than left to arithmetic.
+    controls = {n for n in by_label if "positive_control" in n}
+    missing_controls = sorted(set(POSITIVE_CONTROLS) - controls)
+    if missing_controls:
         failures.append(
-            f"expected exactly ONE positive control in the `mallocnesia` label, found "
-            f"{len(controls)}: {', '.join(controls) or '(none)'}. The control is the only "
-            f"member that fails when interception silently stops working; without it "
-            f"'0 failed' is equally consistent with a clean tree and a dead interceptor. "
-            f"It must carry the label so it cannot be run separately from the gates it "
-            f"vouches for.")
+            "positive control(s) MISSING from the `mallocnesia` label: "
+            + ", ".join(f"{n} ({POSITIVE_CONTROLS[n][1]})" for n in missing_controls)
+            + ". A control is the only member that fails when interception of its entry "
+              "point silently stops working; without it '0 failed' is equally consistent "
+              "with a clean tree and a blind interceptor. It must carry the label so it "
+              "cannot be run separately from the gates it vouches for.")
+    undeclared_controls = sorted(controls - set(POSITIVE_CONTROLS))
+    if undeclared_controls:
+        failures.append(
+            "UNDECLARED positive control(s) in the `mallocnesia` label: "
+            + ", ".join(undeclared_controls)
+            + ". Add a POSITIVE_CONTROLS row naming the allocation path it proves, or "
+              "rename it: a control nobody declared is one nobody will notice losing.")
+
+    # (0c) DUPLICATES BEFORE COMMAND LOOKUP. The command pin below reads one command by
+    # name, so a duplicate can stand in for a different test with the same name.
+    label_tests = ctest_label_tests(args.build_dir, "mallocnesia")
+    dup_counts = collections.Counter(t["name"] for t in label_tests)
+    duplicates = sorted(n for n, c in dup_counts.items()
+                        if c > 1 and (n in by_name or n in POSITIVE_CONTROLS))
+    if duplicates:
+        failures.append(
+            "duplicate test name(s) in the mallocnesia label: " + ", ".join(duplicates)
+            + ". The entry pin reads one command per name, so a duplicate's command can "
+              "stand in for another's.")
+
+    # (0d) EACH CONTROL NAMES ITS OWN HOOK. --expect-violation accepts any violation, so a
+    # control whose plant reaches a different hook (a memalign row that calls calloc)
+    # passes; `--expect-entry <fn>` is what ties it to the entry point it vouches for.
+    commands = {t["name"]: t.get("command", []) for t in label_tests}
+    for name in sorted(set(POSITIVE_CONTROLS) & controls):
+        entry = POSITIVE_CONTROLS[name][0]
+        cmd = commands.get(name, [])
+        named = [cmd[i + 1] for i in range(len(cmd) - 1) if cmd[i] == "--expect-entry"]
+        if named != [entry]:
+            failures.append(
+                f"positive control {name} does not require its own entry point: its "
+                f"command names --expect-entry {named or 'nothing'}, wanted exactly "
+                f"[{entry!r}]. Without it the control passes on an allocation that reached "
+                f"any hook. Register it with EXPECT_ENTRY {entry}.")
+
+    # (0e) NO MEMBER MAY HAVE ITS VERDICT ALTERED. Every rule above reads names and
+    # commands, which a property leaves intact: a DISABLED control is still registered,
+    # labelled and named, and is never run. The controls' expected failure is inverted
+    # inside check_alloc.py (--expect-violation), so no member needs any of these.
+    for t in label_tests:
+        altered = sorted(p["name"] for p in t.get("properties", [])
+                         if p["name"] in VERDICT_PROPERTIES)
+        if altered:
+            failures.append(
+                f"{t['name']} carries {', '.join(altered)}. With it CTest can report the "
+                f"test passed or skipped although its command failed, or not run it, so "
+                f"`ctest -L mallocnesia` stays green over a broken gate. A control's "
+                f"expected violation is inverted by check_alloc.py --expect-violation; "
+                f"remove the property.")
 
     # (1) ⊆ : every named gate carries the label.
     unlabelled = sorted(by_name - by_label)

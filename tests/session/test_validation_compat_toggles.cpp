@@ -1601,7 +1601,8 @@ TEST(ValidationCompatToggles, SeqnumMax_Control_D7FaultBefore34_StaysActive) {
 //   Default_ByteIdenticalBaseline       — SC-003, I-VCT-7, C3.3
 //   Combination_Matrix_FourCells        — SC-005, FR-007, I-VCT-8, C3.1
 //   Inbound_Only_OutboundUnchanged      — FR-008, I-VCT-9, C3.2
-//   NoHeap_RelaxedDeliverPath           — [const §VIII.5], C1 remediation
+//   NoHeap_RelaxedDeliverPath           — [const §VIII.5], C1 remediation (heap half
+//                                         NOT CHECKED; see the cell)
 
 // T012 witness 1 — US3 AS2
 // Freshly default-constructed SessionConfig has check_comp_id==true AND
@@ -1953,24 +1954,16 @@ TEST(ValidationCompatToggles, Inbound_Only_OutboundUnchanged) {
 
 // T012 witness 5 — [const §VIII.5], plan IX.1, C1 remediation
 // The S4 deliver-without-advance path (validate_sequence_numbers=false + out-of-order
-// frame) performs no new global-heap allocation.
+// frame) delivers the frame and keeps the session Active.
 //
-// BINDING gate: mallocnesia LD_PRELOAD interceptor wrapping the session binary.
-// The alloc_guard_count() weak symbol is replaced by mallocnesia with a live
-// counter; the _mallocnesia ctest companion in CMakeLists.txt runs this binary
-// under LD_PRELOAD via tools/check_alloc.py.
-//
-// Without LD_PRELOAD: the weak stubs are no-ops and alloc_guard_count() returns 0
-// (the test still asserts the functional post-condition; the no-heap claim is only
-// proved by the _mallocnesia ctest variant).
-//
-// [[feedback_tracking_pmr_resource_false_pass]]: a counting_resource alone is a
-// false-pass because non-PMR std::vector / global-new escapes via global malloc,
-// invisible to the PMR. The LD_PRELOAD is the binding proof.
+// ⚠️ Its global-heap half is NOT CHECKED. [const §VIII.5] asks this path for no new
+// global-heap allocation, but an Active session's inbound path allocates (L-497-1;
+// fixpp#544), so no mallocnesia gate is registered for this cell. The
+// alloc_guard markers stay so the window can be run by hand, as
+// tests/session/CMakeLists.txt shows at this binary's registration.
 //
 // Warm-up: the asio per-thread recycler (cancellation_slot / promise frame) is
-// primed by a warm-up pass of the SAME path before the guard window is opened,
-// so the measured window is in steady state.
+// primed by a warm-up pass of the SAME path before the guard window is opened.
 TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
     // ── Setup OUTSIDE the guarded window ──────────────────────────────────────
     // Build a session with validate_sequence_numbers=false and drive to Active.
@@ -1987,7 +1980,7 @@ TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
 
     // Warm-up: run the S4 deliver-without-advance path several times to prime the
     // asio per-thread recycler (cancellation_slot's thread_info_base + promise frame
-    // recycling allocates on the FIRST call on a thread; afterwards it is zero-heap).
+    // recycling allocates on the FIRST call on a thread).
     // After warm-up, fromApp has been called N times; we snapshot the count.
     constexpr int kWarmup = 8;
     for (int i = 0; i < kWarmup; ++i) {
@@ -2002,16 +1995,14 @@ TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
     const int from_app_snapshot = app->from_app_count;
 
     // ── Guarded window: one S4 deliver-without-advance invocation ────────────
-    // NB: feed()'s miss branch now allocates inside this window (drain_or_report's
-    // run_for and ADD_FAILURE), so a miss here would make alloc_guard_end() exit(1)
-    // rather than report under LD_PRELOAD=libmallocnesia.so. Currently unreachable:
-    // this file's mallocnesia companion is if(FALSE)-disabled (REMAINING-WORK item
-    // 13), and this is not a regression — a miss here hung on main.
+    // NB: feed()'s miss branch allocates inside this window (drain_or_report's
+    // run_for and ADD_FAILURE), so under the interceptor a miss here makes
+    // alloc_guard_end() exit(1) rather than report. That matters only for a hand run:
+    // no ctest entry runs this cell under the interceptor.
     if (alloc_guard_start) alloc_guard_start();
 
     fix->feed(too_low_frame);
 
-    const long heap_allocs = alloc_guard_count ? alloc_guard_count() : 0L;
     if (alloc_guard_end) alloc_guard_end();
     // ── End of guarded window ─────────────────────────────────────────────────
 
@@ -2021,14 +2012,6 @@ TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
            "frame to fromApp inside the guarded window";
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << "[const §VIII.5]: session must stay Active after S4 deliver-without-advance";
-
-    // No-heap post-condition (binding gate = mallocnesia LD_PRELOAD, not just this
-    // assertion — see the _mallocnesia ctest companion in CMakeLists.txt).
-    EXPECT_EQ(heap_allocs, 0L)
-        << "[const §VIII.5]: S4 deliver-without-advance must not touch the global heap; "
-           "heap_allocs="
-        << heap_allocs << "; run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so to verify. "
-        << "[[feedback_tracking_pmr_resource_false_pass]]";
 }
 
 }  // namespace

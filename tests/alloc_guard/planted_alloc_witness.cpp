@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/alloc_guard/planted_alloc_witness.cpp
 //
-// fixpp#448 — THE POSITIVE CONTROL for the whole mallocnesia gate population.
+// fixpp#448 — the malloc POSITIVE CONTROL for the mallocnesia gate population.
+// (planted_entry_witness.cpp holds its siblings for the aligned entry points.)
 //
 // Every other alloc-guard binary asserts that a window does NOT allocate, and a green
 // run of those is consistent with two very different worlds: the code is clean, or the

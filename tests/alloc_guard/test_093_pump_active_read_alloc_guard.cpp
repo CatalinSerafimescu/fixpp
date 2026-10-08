@@ -15,10 +15,14 @@
 // holds the pump's read completion, its feed, the frame's delivery and the next read's
 // initiation, and nothing the peer does.
 //
-// A regression witness, not a disarm witness: asio can serve its own handler and
-// coroutine-frame storage from a per-thread recycling cache without calling operator new,
-// so a race left armed after Active need not show here. Quickstart Q-36 witnesses the
-// disarm by behaviour.
+// A regression witness, not a disarm witness: asio serves handler and coroutine-frame
+// storage from a per-thread recycling cache when a cached block fits, without calling
+// operator new, so a race left armed after Active need not show here. A frame larger than
+// the cache holds is allocated on every use instead (L-497-1). Quickstart Q-36 witnesses
+// the disarm by behaviour.
+//
+// This cell counts global operator new only. asio allocates those frames through
+// std::aligned_alloc, which the counter cannot see.
 //
 // Standalone ([const §VII.8]): it replaces global operator new for the whole binary.
 // No *_mallocnesia twin: the window wraps io_context::run_one_for(), which the

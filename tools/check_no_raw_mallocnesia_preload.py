@@ -11,11 +11,8 @@ fixpp#448 named two such sites. Converting them is a fix; this is the mechanism,
 third one cannot arrive unnoticed. Registered beside alloc_guard_markers_no_local_def,
 which guards the sibling recurrence (a test defining the markers locally).
 
-⚠️ COMMENTED-OUT SITES COUNT. Several live under `if(FALSE)` with the old pattern
-preserved verbatim as the documented restore target. Those are inert today and are
-ALLOWED — but only in that form, because the thing being prevented is someone
-uncommenting one. The allowance is narrow on purpose: a raw preload outside a disabled
-block is a finding wherever it appears.
+⚠️ ONLY A COMMENT LINE IS EXEMPT. A raw preload inside `if(FALSE)` is a finding like
+any other: a disabled block is one edit away from a live, uninstrumented gate.
 """
 import pathlib
 import re
@@ -50,7 +47,6 @@ def main() -> int:
     paths = sorted(set(REPO.glob("tests/**/CMakeLists.txt")) | set(REPO.glob("tests/**/*.cmake")))
     for path in paths:
         scanned += 1
-        disabled = False
         # ⚠️ encoding="utf-8" is NOT optional. `read_text()` with no encoding uses the
         # LOCALE default, which is cp1252 on a Windows runner, and these CMakeLists are
         # full of UTF-8 (the repo's comments use -- and warning glyphs heavily). MEASURED
@@ -61,14 +57,10 @@ def main() -> int:
         for n, line in enumerate(
                 path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             stripped = line.lstrip()
-            if stripped.startswith("if(FALSE)"):
-                disabled = True
-            elif stripped.startswith("endif("):
-                disabled = False
             if not RAW.search(line):
                 continue
-            if stripped.startswith("#") or disabled:
-                continue          # inert: a comment, or inside a disabled block
+            if stripped.startswith("#"):
+                continue          # inert: a comment
             offenders.append(f"{path.relative_to(REPO)}:{n}: {stripped[:100]}")
 
     # ⚠️ Prove the sweep reached something. A glob that matches no file reports clean,

@@ -1609,6 +1609,9 @@ CI_PIN_HARNESSES=(
   # fixpp#530's ODR census harness. ⚠️ ADDED WITH ITS OWN MUTANT (M107), same
   # dead-call-site shape as its siblings, whose mutants each prove only their own row.
   "ci/test-odr-hooks-census.sh"
+  # fixpp#497's sanitizer flag-match harness. ⚠️ ADDED WITH ITS OWN MUTANT (M125), same
+  # dead-call-site shape as its siblings, whose mutants each prove only their own row.
+  "ci/test-mallocnesia-sanitizer-match.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1933,7 +1936,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=110  # M116 M117 (the #448 gate steps' key sets, fixpp#543) + M118 M119 (their
+MUTANTS_DECLARED=111  # M125 (the ci-script-pins call-site pin for
+                     # ci/test-mallocnesia-sanitizer-match.sh, fixpp#497) + M116 M117 (the #448 gate steps' key sets, fixpp#543) + M118 M119 (their
                      # pinned run: commands) + M120 (the #448 sentinel's existence pin) +
                      # M121 M122 (its pinned body) + M123 M124 (its if: and key set) +
                      # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
@@ -2531,6 +2535,17 @@ for block in t.split("      - name:"):
     out.append(block)
 assert n == 2, "expected to mutate 2 guarded steps, mutated " + str(n)
 open(dst, "w").write("      - name:".join(out))
+'
+
+  # M125 (fixpp#497): the SAME dead-call-site shape, on the sanitizer flag-match harness.
+  mutate_workflow M125 "the sanitizer flag-match harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-mallocnesia-sanitizer-match.sh\n"
+new = "        run: echo \"bash ci/test-mallocnesia-sanitizer-match.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
 '
 
   # M107 (fixpp#530): the SAME dead-call-site shape, on the ODR census harness.

@@ -16,6 +16,29 @@ status: stable
   why the Windows alloc-guard markers are not `constexpr` (C4127), why the MSVC-debug skip predicate
   reads a volatile on every platform (C4702 in debug and release), and that a loop leaving on its
   first pass is the same C4702 class.
+- **2026-10-08 — fixpp#497 (B15) Gate B (PR #557), one new class and one extension.**
+  `failure-classes.md` gains **class 21**, *a fix that adds state to an instrument multiplies its
+  edge cases*: before synchronising added state, ask whether it needs to exist, pin the condition the
+  stateless shape rests on, and witness it with a differential oracle. Instance: mallocnesia's lazy
+  `dlsym` resolution replaced by forwarding to glibc's `__libc_*` (Gate B round 2, FQ-A). Filed as a
+  new class, not under class 15 (its sibling), whose trigger is installing or removing a global hook
+  rather than state a fix adds; not under class 1's *a fix for a false-clean is itself an instrument
+  change*, because round 2's findings were races and UB, not false cleans; not under class 16's
+  *prefer removing the cause*, which is about suppressions under a disabled gate; and not under class
+  20's fix by construction, which routes sites through one helper rather than deleting state.
+  **Class 20** gains a form, *the same class in a guard's scope*: derive the protected set from the
+  artifact that defines it and pin every member with a cell. Instance: the constructor's refusal
+  checked `malloc` only (Gate B rounds 3–4). Class 1's *present is not active* scope bullet is named
+  as its sibling. Both are entries in the implementer's anti-pattern library; the decisions stay on
+  `components/test.md`.
+- **2026-10-07 — fixpp#497 (B15), the allocation gates' blind spots.** `components/test.md` gains a
+  subsection under *Allocation discipline*: why the interceptor hooks every allocating libc entry
+  point (an over-aligned `new` and asio's coroutine frames reach libc through `aligned_alloc`); why
+  the positive-control set is exact and declared; why the registration guard reads any
+  `-fsanitize=` rather than named options; why the sync gate was restructured; why the four
+  disabled companions were deleted rather than budgeted (owner split of #544 to B35, 2026-10-07).
+  Rejected: a "≥1 control" rule, naming LSan/MSan in the guard, a `MAX_ALLOCS` budget.
+
 - **2026-10-07 — 093 Gate B (PR #554), two owner-approved classes.** `failure-classes.md` gains
   **class 19**, *a commit marker published after the next fallible step reports a crossed boundary as
   "nothing happened"*: publish the marker at the irreversible step, use a tri-state where the
