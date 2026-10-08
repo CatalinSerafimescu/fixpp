@@ -52,6 +52,14 @@ cell(genex-if     "$<IF:$<CONFIG:Debug>,-fsanitize=address,>"            "-fsani
 cell(first        "-fsanitize=address -O2"                               "-fsanitize=address")
 cell(macro        "-DNOTE=-fsanitize=address -O2"                        "")
 cell(path         "-I/opt/x-fsanitize=y/include"                         "")
+cell(shell        "SHELL:-fsanitize=address -fno-omit-frame-pointer"     "-fsanitize=address")
+# The contract's stated edges (B-497-1): a switch after `:` or `,` inside another argument
+# matches, and a switch right after a quote does not. Neither is a target; a matcher change
+# that moves one must change the text that states it.
+cell(edge-colon   "-DNOTE=x:-fsanitize=address"                          "-fsanitize=address")
+cell(edge-comma   "-DNOTE=x,-fsanitize=memory"                           "-fsanitize=memory")
+cell(edge-dquote  "\"-fsanitize=leak\""                                  "")
+cell(edge-squote  "-O2 '-fsanitize=leak'"                                "")
 if("x-fsanitize=stale" MATCHES "(x)(-fsanitize=.*)")
 endif()
 cell(stale-match  "-O2"                                                  "")
@@ -69,10 +77,10 @@ run_cells() {  # run_cells <module> — prints the cells' output, returns cmake'
 out="$(run_cells "$MODULE")"; rc=$?
 echo "$out" | grep -E '^(ok|FAIL) '
 n_ok="$(grep -c '^ok ' <<<"$out")"
-if [ "$rc" = 0 ] && [ "$n_ok" = 14 ]; then
+if [ "$rc" = 0 ] && [ "$n_ok" = 19 ]; then
   echo "ok    real module: all cells pass"; pass=$((pass+1))
 else
-  echo "FAIL  real module: rc $rc, $n_ok cell(s) ok, wanted rc 0 and 14"; fail=$((fail+1))
+  echo "FAIL  real module: rc $rc, $n_ok cell(s) ok, wanted rc 0 and 19"; fail=$((fail+1))
 fi
 
 # ── mutants: a broken copy must fail the cells that name its break, and only those ──
@@ -100,7 +108,7 @@ PY
   fi
 }
 
-mutant S1 "colon not a boundary" "genex-leak genex-config" \
+mutant S1 "colon not a boundary" "genex-leak genex-config shell edge-colon" \
   '"(^|[ \t;,>])(-fsanitize=[^ ;>]+)"'
 # `>` dropped from the value's end set: the expression's closing bracket joins the value,
 # and an empty switch inside an expression gains `>` as a value.
@@ -111,16 +119,16 @@ mutant S2 "generator-expression close not ending the value" \
 mutant S3 "every sanitize-family switch matched" "no-sanitize option-cov" \
   '"(^|[ \t;:,>])(-f[a-z-]*sanitize[a-z-]*=[^ ;>]+)"'
 # Never matches: every positive cell fails.
-mutant S4 "match never fires" "genex-leak genex-config list-memory plain-thread genex-if first" \
+mutant S4 "match never fires" "genex-leak genex-config list-memory plain-thread genex-if first shell edge-colon edge-comma" \
   '"(^|[ \t;:,>])(-fsanitize=NEVER[^ ;>]+)"'
 # An empty value accepted: a bare `-fsanitize=`, which enables nothing, keeps the gates off.
 mutant S5 "empty value matched" "empty genex-empty" \
   '"(^|[ \t;:,>])(-fsanitize=[^ ;>]*)"'
 # No boundary: a switch embedded in another argument matches.
-mutant S6 "no boundary before the switch" "macro path" \
+mutant S6 "no boundary before the switch" "macro path edge-dquote edge-squote" \
   '"()(-fsanitize=[^ ;>]+)"'
 # A comma not a boundary: a switch in a generator expression's IF branch is missed.
-mutant S7 "comma not a boundary" "genex-if" \
+mutant S7 "comma not a boundary" "genex-if edge-comma" \
   '"(^|[ \t;:>])(-fsanitize=[^ ;>]+)"'
 # The start not a boundary: a switch that opens the flags is missed.
 mutant S8 "start not a boundary" "first" \

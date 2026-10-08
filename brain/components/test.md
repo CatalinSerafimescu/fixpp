@@ -133,14 +133,20 @@ because their resolution is unchanged by the preload.
 **Why the guard reads any non-empty `-fsanitize=`, not named options.** A sanitizer installs its own allocator
 ahead of the interposer, so a gate registered on a sanitizer build passes vacuously. Naming
 `FIXPP_ENABLE_{ASAN,TSAN,UBSAN}` let every unnamed sanitizer (LSan, MSan, the next one) register the
-gates; matching the switch itself at an option boundary excludes any sanitizer whose `-fsanitize=`
+gates; matching the switch itself excludes any sanitizer whose `-fsanitize=`
 is in what the guard reads, including inside a generator expression. A sanitizer added only to one
 target is not seen; a gate on such a target fails rather than passes when that sanitizer replaces
-the allocator, and UndefinedBehaviorSanitizer alone leaves the allocator to glibc. The boundary is
-the start of the flags, whitespace, a list separator, a generator-expression branch separator, an
-IF arm separator or a closed generator expression; a switch embedded inside another argument does
-not match. A quoted string with a space before the switch still matches, because the guard does not
-parse shell quoting.
+the allocator, and UndefinedBehaviorSanitizer alone leaves the allocator to glibc. The switch counts
+at the start of the flags or after whitespace, `;`, `:`, `,` or `>`. The match is lexical and parses
+neither arguments nor shell quoting: a switch after `:`/`,` inside a macro value, or after a space
+inside a quoted value, matches and keeps the gates off; one right after a quote does not, and those
+gates then fail as on a target-local sanitizer. Neither direction lets a gate pass vacuously. The
+run-time refusal catches a miss, and the gate lane's population floor and controls catch a spurious
+match. Rejected on measurement (PR #557 Gate B r5): a rule that admits `:`/`,` only inside `$<…>` and treats quotes
+as boundaries. It fixed the reported shapes and broke two others: a `SHELL:-fsanitize=…` option was
+missed, and `-DNOTE='-fsanitize=…'` matched. Not built (owner declined, PR #557 Gate B r5): a
+token-aware parse of the flag strings and the directory-option elements; it would
+have to handle `SHELL:` options and `$<…>` elements itself.
 The guard reads the compile/link flag variables and the directory options, not `FIXPP_ENABLE_*`, so
 the read that sees `cmake/Sanitizers.cmake`'s options is exercised (a preset that sets
 `CMAKE_CXX_FLAGS` in the cache drops the Conan toolchain's `-fsanitize`). An empty `-fsanitize=`
