@@ -438,6 +438,31 @@ TEST(ReifyDispatchApplication, UnknownMsgTypeInKnownVersionHitsInnerDefault) {
     }
 }
 
+// A two-character MsgType in a version whose dictionary has no two-character
+// messages (v42). The generator emits no two-character switch for such a version
+// (#481: a switch holding only `default` is MSVC C4065), so this MsgType reaches
+// the arm's trailing fail-loud return instead of a `default` label. "AE"
+// (TradeCaptureReport) is a real v44 arm, so the v44 leg proves the input is a
+// well-formed two-character MsgType the packed-uint16 switch does match.
+TEST(ReifyDispatchApplication, TwoCharMsgTypeInVersionWithoutTwoCharArmsFailsLoud) {
+    std::pmr::monotonic_buffer_resource arena;
+    MV mv;
+    version_profile const profile{.session = session_version::vt11,
+                                  .default_appl = application_version::v50sp2,
+                                  .has_per_message_override = true,
+                                  ._reserved = 0};
+
+    auto const v44 = fixpp::dict::dispatch::dispatch_application(mv, "AE", application_version::v44,
+                                                                 profile, &arena);
+    ASSERT_TRUE(v44.has_value()) << "v44 TradeCaptureReport (AE) must dispatch to a live handle";
+
+    auto const v42 = fixpp::dict::dispatch::dispatch_application(mv, "AE", application_version::v42,
+                                                                 profile, &arena);
+    ASSERT_FALSE(v42.has_value()) << "v42 has no two-character MsgType; AE must not dispatch";
+    EXPECT_EQ(v42.error(), error::dict_reify_unknown_msg_type)
+        << "a two-character MsgType in v42 must fail loud with dict_reify_unknown_msg_type";
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // 057 US1 (T013) — discriminating per-field reify() round-trip witnesses. Each
 // reads a REAL body field from the live handle (not header-only / empty-view
