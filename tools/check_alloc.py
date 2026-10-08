@@ -5,6 +5,7 @@ Runs a binary under the mallocnesia LD_PRELOAD interceptor and exits nonzero if 
 allocation is intercepted between the guard markers.
 
     python3 tools/check_alloc.py --binary <bin> [--mallocnesia <so>] [--max-allocs N]
+                                 [--expect-violation [--expect-entry FN]]
 
 fixpp#448 — WHAT CHANGED AND WHY IT IS NOT COSMETIC.
 
@@ -74,11 +75,21 @@ def main() -> int:
                              "passes ONLY if interception was active AND the interceptor "
                              "reported the violation. See the block comment below for why "
                              "this is not the same as ctest's WILL_FAIL.")
+    parser.add_argument("--expect-entry", metavar="FN", default=None,
+                        help="With --expect-violation only: the violation must have been "
+                             "counted by the interceptor's FN hook (it names the hook on "
+                             "stderr). A control vouches for one entry point; without this, "
+                             "a plant that reaches a different hook still passes it.")
     parser.add_argument("--allow-missing", action="store_true",
                         help="Run UNINSTRUMENTED when the interceptor is absent. Local "
                              "convenience only — this is the fail-open behaviour fixpp#448 "
                              "removed, so it must never appear in a CI invocation.")
     args = parser.parse_args()
+
+    if args.expect_entry and not args.expect_violation:
+        print("error: --expect-entry applies only to a positive control "
+              "(--expect-violation); a gate's stderr is not read", file=sys.stderr)
+        return 2
 
     binary = args.binary or args.target
     if not binary:
@@ -192,6 +203,13 @@ def main() -> int:
                   f"reason (a crash, a gtest assertion) would satisfy a WILL_FAIL entry "
                   f"and prove nothing; this control requires the interceptor's own "
                   f"verdict.", file=sys.stderr)
+            return 1
+        if args.expect_entry and f"[mallocnesia] intercepted {args.expect_entry}(" \
+                not in (result.stderr or ""):
+            print(f"[check_alloc] FAIL: the interceptor reported a violation, but no "
+                  f"allocation was counted by its {args.expect_entry} hook. This control "
+                  f"vouches for {args.expect_entry}; a plant that reached another hook "
+                  f"says nothing about it.", file=sys.stderr)
             return 1
         print("[check_alloc] PASS (positive control): interception active, planted "
               "allocation detected and reported by the interceptor.")

@@ -134,7 +134,11 @@ endif()
 
 # fixpp_add_mallocnesia_test(NAME <test> TARGET <binary-target>
 #                            [LABELS <l>...] [DEPENDS <t>...] [ENVIRONMENT <e>]
-#                            [EXPECT_VIOLATION])
+#                            [EXPECT_VIOLATION [EXPECT_ENTRY <fn>]])
+#
+# EXPECT_ENTRY (positive controls only): the violation must be counted by the
+# interceptor's <fn> hook, so a control planting through one entry point cannot pass on
+# an allocation that reached another.
 #
 # No MAX_ALLOCS keyword: every gate wants zero, and zero is already the default in
 # all three layers (check_alloc.py's argparse, and the interceptor's own `g_max`
@@ -153,10 +157,13 @@ endif()
 # measurement of a fixed tree, not a description of today — re-derive the current
 # state with `tools/check_mallocnesia_population.py`, which prints both sizes.
 function(fixpp_add_mallocnesia_test)
-  cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET"
+  cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET;EXPECT_ENTRY"
                       "LABELS;DEPENDS;ENVIRONMENT" ${ARGN})
   if(NOT _MN_NAME OR NOT _MN_TARGET)
     message(FATAL_ERROR "fixpp_add_mallocnesia_test: NAME and TARGET are required")
+  endif()
+  if(_MN_EXPECT_ENTRY AND NOT _MN_EXPECT_VIOLATION)
+    message(FATAL_ERROR "fixpp_add_mallocnesia_test: EXPECT_ENTRY needs EXPECT_VIOLATION")
   endif()
   if(NOT FIXPP_MALLOCNESIA_SUPPORTED)
     return()
@@ -169,6 +176,9 @@ function(fixpp_add_mallocnesia_test)
   set(_MN_EXTRA "")
   if(_MN_EXPECT_VIOLATION)
     set(_MN_EXTRA --expect-violation)
+  endif()
+  if(_MN_EXPECT_ENTRY)
+    list(APPEND _MN_EXTRA --expect-entry ${_MN_EXPECT_ENTRY})
   endif()
   add_test(
     NAME ${_MN_NAME}

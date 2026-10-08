@@ -357,6 +357,23 @@ oracle_named() {  # oracle_named <interceptor> — every hook names its own call
 check "T12c inside a window, every hook counts the oracle's calls" 0 \
   "every hooked entry point named its calls" -- oracle_named "$TMP/libmn.so"
 
+# ── T13: a positive control vouches for ONE entry point (--expect-entry) ────────
+# --expect-violation accepts any violation, so a control whose plant reached a different
+# hook (a memalign control that calls calloc) still passed. --expect-entry also requires
+# the named hook's own intercept line.
+check "T13a a control whose plant reached the named hook PASSES" 0 \
+  "PASS (positive control)" -- \
+  env ENTRY_FN=memalign python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so" \
+    --expect-violation --expect-entry memalign
+check "T13b a control whose plant reached ANOTHER hook FAILS" 1 \
+  "no allocation was counted by its memalign hook" -- \
+  env ENTRY_FN=calloc python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so" \
+    --expect-violation --expect-entry memalign
+check "T13c --expect-entry without --expect-violation is refused" 2 \
+  "--expect-entry applies only to a positive control" -- \
+  env ENTRY_FN=memalign python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so" \
+    --expect-entry memalign
+
 echo
 echo "test-check-alloc: $pass passed, $fail failed"
 [ "$fail" = 0 ]

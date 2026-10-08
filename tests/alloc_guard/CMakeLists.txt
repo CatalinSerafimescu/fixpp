@@ -151,25 +151,37 @@ fixpp_add_mallocnesia_test(
   NAME alloc_guard_positive_control_mallocnesia
   TARGET planted_alloc_witness
   EXPECT_VIOLATION
+  EXPECT_ENTRY malloc
   LABELS "alloc_guard;positive-control;448")
 
 # fixpp#497: one control per hooked entry point other than malloc, plus an over-aligned
 # `new`. The control above plants a malloc, so it vouches for the malloc hook only. Each entry
 # below plants through the entry point its PLANTED_ENTRY names, so a hook that stops
 # counting reddens the entry naming it. tools/check_mallocnesia_population.py declares
-# each control by name. Built only where the gates register: memalign, valloc and
-# pvalloc are glibc functions.
+# each control by name, with the EXPECT_ENTRY its command must carry. Built only where
+# the gates register: memalign, valloc and pvalloc are glibc functions.
+#
+# Every libc plant names its own hook in EXPECT_ENTRY, so a planted_entry_witness.cpp row
+# that calls another entry point fails its control. aligned_new names none: which aligned
+# entry point an over-aligned `new` reaches is the C++ runtime's choice.
 if(FIXPP_MALLOCNESIA_SUPPORTED)
   add_executable(planted_entry_witness planted_entry_witness.cpp)
   target_include_directories(planted_entry_witness PRIVATE "${CMAKE_SOURCE_DIR}/tests")
   set_target_properties(planted_entry_witness PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-  foreach(_plant IN ITEMS aligned_new calloc realloc aligned_alloc posix_memalign memalign
-                          valloc pvalloc)
+  fixpp_add_mallocnesia_test(
+    NAME alloc_guard_aligned_new_positive_control_mallocnesia
+    TARGET planted_entry_witness
+    EXPECT_VIOLATION
+    LABELS "alloc_guard;positive-control;497"
+    ENVIRONMENT "PLANTED_ENTRY=aligned_new")
+  foreach(_plant IN ITEMS calloc realloc aligned_alloc posix_memalign memalign valloc
+                          pvalloc)
     fixpp_add_mallocnesia_test(
       NAME alloc_guard_${_plant}_positive_control_mallocnesia
       TARGET planted_entry_witness
       EXPECT_VIOLATION
+      EXPECT_ENTRY ${_plant}
       LABELS "alloc_guard;positive-control;497"
       ENVIRONMENT "PLANTED_ENTRY=${_plant}")
   endforeach()

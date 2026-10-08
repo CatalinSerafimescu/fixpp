@@ -28,6 +28,7 @@ run nothing. This is the single recurring defect class in this repo: an instrume
 reports clean because it could not report otherwise.
 """
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -50,32 +51,38 @@ DECLARED_EXTRAS = {
         "will never match the name pattern.",
 }
 
-# The positive controls, by NAME, each with the allocation path it proves the interceptor
-# sees. A control vouches only for the entry point it plants: the malloc control passed
-# while every aligned entry point was unhooked (fixpp#497), so one control cannot stand
-# in for another. Any label member whose name carries `positive_control` must be a row
-# here, and every row must be registered.
+# The positive controls, by NAME, each with the entry point its command must name in
+# `--expect-entry` (None: none is required) and the allocation path it proves the
+# interceptor sees. A control vouches only for the entry point it plants: the malloc
+# control passed while every aligned entry point was unhooked (fixpp#497), so one control
+# cannot stand in for another. Any label member whose name carries `positive_control` must
+# be a row here, and every row must be registered.
+#
+# The entry is SPELLED OUT here rather than read from the CMake registration, so dropping
+# EXPECT_ENTRY there, or pointing it at another hook, is a failure here rather than a
+# control that quietly accepts any violation. aligned_new requires none: which aligned
+# entry point an over-aligned `new` reaches is the C++ runtime's choice.
 POSITIVE_CONTROLS = {
-    "alloc_guard_positive_control_mallocnesia":
-        "a plain malloc (tests/alloc_guard/planted_alloc_witness.cpp)",
-    "alloc_guard_aligned_new_positive_control_mallocnesia":
-        "an over-aligned operator new, which reaches libc through an aligned entry "
-        "point (tests/alloc_guard/planted_entry_witness.cpp)",
-    "alloc_guard_calloc_positive_control_mallocnesia":
-        "calloc (tests/alloc_guard/planted_entry_witness.cpp)",
-    "alloc_guard_realloc_positive_control_mallocnesia":
-        "realloc of a block allocated before the window "
-        "(tests/alloc_guard/planted_entry_witness.cpp)",
-    "alloc_guard_aligned_alloc_positive_control_mallocnesia":
-        "aligned_alloc (tests/alloc_guard/planted_entry_witness.cpp)",
-    "alloc_guard_posix_memalign_positive_control_mallocnesia":
-        "posix_memalign (tests/alloc_guard/planted_entry_witness.cpp)",
-    "alloc_guard_memalign_positive_control_mallocnesia":
-        "memalign (tests/alloc_guard/planted_entry_witness.cpp)",
-    "alloc_guard_valloc_positive_control_mallocnesia":
-        "valloc (tests/alloc_guard/planted_entry_witness.cpp)",
-    "alloc_guard_pvalloc_positive_control_mallocnesia":
-        "pvalloc (tests/alloc_guard/planted_entry_witness.cpp)",
+    "alloc_guard_positive_control_mallocnesia": (
+        "malloc", "a plain malloc (tests/alloc_guard/planted_alloc_witness.cpp)"),
+    "alloc_guard_aligned_new_positive_control_mallocnesia": (
+        None, "an over-aligned operator new, which reaches libc through an aligned entry "
+              "point (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_calloc_positive_control_mallocnesia": (
+        "calloc", "calloc (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_realloc_positive_control_mallocnesia": (
+        "realloc", "realloc of a block allocated before the window "
+                   "(tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_aligned_alloc_positive_control_mallocnesia": (
+        "aligned_alloc", "aligned_alloc (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_posix_memalign_positive_control_mallocnesia": (
+        "posix_memalign", "posix_memalign (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_memalign_positive_control_mallocnesia": (
+        "memalign", "memalign (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_valloc_positive_control_mallocnesia": (
+        "valloc", "valloc (tests/alloc_guard/planted_entry_witness.cpp)"),
+    "alloc_guard_pvalloc_positive_control_mallocnesia": (
+        "pvalloc", "pvalloc (tests/alloc_guard/planted_entry_witness.cpp)"),
 }
 
 NAME_RE = re.compile(r"^\s*Test\s+#\d+:\s+(\S+)", re.M)
@@ -89,6 +96,16 @@ def ctest_names(build_dir: str, selector: str, value: str) -> set[str]:
               file=sys.stderr)
         sys.exit(2)
     return set(NAME_RE.findall(out.stdout))
+
+
+def ctest_commands(build_dir: str, label: str) -> dict[str, list[str]]:
+    out = subprocess.run(["ctest", "--test-dir", build_dir, "--show-only=json-v1",
+                          "-L", label], capture_output=True, text=True)
+    if out.returncode != 0:
+        print(f"error: ctest --show-only=json-v1 -L {label} failed rc={out.returncode}\n"
+              f"{out.stderr}", file=sys.stderr)
+        sys.exit(2)
+    return {t["name"]: t.get("command", []) for t in json.loads(out.stdout).get("tests", [])}
 
 
 def main() -> int:
@@ -145,7 +162,7 @@ def main() -> int:
     if missing_controls:
         failures.append(
             "positive control(s) MISSING from the `mallocnesia` label: "
-            + ", ".join(f"{n} ({POSITIVE_CONTROLS[n]})" for n in missing_controls)
+            + ", ".join(f"{n} ({POSITIVE_CONTROLS[n][1]})" for n in missing_controls)
             + ". A control is the only member that fails when interception of its entry "
               "point silently stops working; without it '0 failed' is equally consistent "
               "with a clean tree and a blind interceptor. It must carry the label so it "
@@ -157,6 +174,23 @@ def main() -> int:
             + ", ".join(undeclared_controls)
             + ". Add a POSITIVE_CONTROLS row naming the allocation path it proves, or "
               "rename it: a control nobody declared is one nobody will notice losing.")
+
+    # (0c) EACH CONTROL NAMES ITS OWN HOOK. --expect-violation accepts any violation, so a
+    # control whose plant reaches a different hook (a memalign row that calls calloc)
+    # passes; `--expect-entry <fn>` is what ties it to the entry point it vouches for.
+    commands = ctest_commands(args.build_dir, "mallocnesia")
+    for name in sorted(set(POSITIVE_CONTROLS) & controls):
+        entry = POSITIVE_CONTROLS[name][0]
+        if entry is None:
+            continue
+        cmd = commands.get(name, [])
+        named = [cmd[i + 1] for i in range(len(cmd) - 1) if cmd[i] == "--expect-entry"]
+        if named != [entry]:
+            failures.append(
+                f"positive control {name} does not require its own entry point: its "
+                f"command names --expect-entry {named or 'nothing'}, wanted exactly "
+                f"[{entry!r}]. Without it the control passes on an allocation that reached "
+                f"any hook. Register it with EXPECT_ENTRY {entry}.")
 
     # (1) ⊆ : every named gate carries the label.
     unlabelled = sorted(by_name - by_label)

@@ -19,14 +19,16 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0; fail=0
-# mk <dir> <line>...  — build a synthetic ctest tree
+# mk <dir> <spec>...  — build a synthetic ctest tree. A spec is `<name>:<labels>`, or
+# `<name>:<labels>:<args>` to give the test's command arguments after /bin/true.
 mk() {
   local d="$TMP/$1"; shift
   mkdir -p "$d"; : > "$d/CTestTestfile.cmake"
-  local name labels
+  local name labels args
   for spec in "$@"; do
-    name="${spec%%:*}"; labels="${spec#*:}"
-    printf 'add_test(%s "/bin/true")\n' "$name" >> "$d/CTestTestfile.cmake"
+    name="${spec%%:*}"; labels="${spec#*:}"; args=""
+    case "$labels" in *:*) args="${labels#*:}"; labels="${labels%%:*}" ;; esac
+    printf 'add_test(%s "/bin/true" %s)\n' "$name" "$args" >> "$d/CTestTestfile.cmake"
     printf 'set_tests_properties(%s PROPERTIES LABELS "%s")\n' "$name" "$labels" \
       >> "$d/CTestTestfile.cmake"
   done
@@ -75,8 +77,25 @@ CONTROL_NAMES=(
   alloc_guard_valloc_positive_control_mallocnesia
   alloc_guard_pvalloc_positive_control_mallocnesia
 )
+# The entry point each control's command must name, spelled out for the same reason
+# (empty: none is required).
+declare -A CONTROL_ENTRY=(
+  [alloc_guard_positive_control_mallocnesia]=malloc
+  [alloc_guard_aligned_new_positive_control_mallocnesia]=
+  [alloc_guard_calloc_positive_control_mallocnesia]=calloc
+  [alloc_guard_realloc_positive_control_mallocnesia]=realloc
+  [alloc_guard_aligned_alloc_positive_control_mallocnesia]=aligned_alloc
+  [alloc_guard_posix_memalign_positive_control_mallocnesia]=posix_memalign
+  [alloc_guard_memalign_positive_control_mallocnesia]=memalign
+  [alloc_guard_valloc_positive_control_mallocnesia]=valloc
+  [alloc_guard_pvalloc_positive_control_mallocnesia]=pvalloc
+)
+ctl() {  # ctl <control> [<entry>] — the control's spec, naming <entry> (default: its own)
+  local e="${2-${CONTROL_ENTRY[$1]}}"
+  echo "$1:mallocnesia:--expect-violation${e:+ --expect-entry $e}"
+}
 CONTROLS=()
-for _c in "${CONTROL_NAMES[@]}"; do CONTROLS+=("$_c:mallocnesia"); done
+for _c in "${CONTROL_NAMES[@]}"; do CONTROLS+=("$(ctl "$_c")"); done
 
 # T0 — THE REAL TREE. Without this the suite proves only that the checker can say no.
 # Skipped (not failed) when no configured build is present, e.g. on a buildless lane.
@@ -123,7 +142,7 @@ check "T6 the happy case passes (the checker is not simply always-RED)" 0 \
 # may cover for another's absence, since each vouches for a different entry point.
 for _missing in "${CONTROL_NAMES[@]}"; do
   _others=()
-  for _c in "${CONTROL_NAMES[@]}"; do [ "$_c" = "$_missing" ] || _others+=("$_c:mallocnesia"); done
+  for _c in "${CONTROL_NAMES[@]}"; do [ "$_c" = "$_missing" ] || _others+=("$(ctl "$_c")"); done
   check "T7a a missing control is rejected BY NAME: $_missing" 1 \
     "MISSING from the \`mallocnesia\` label: $_missing" \
     "$(mk "t7a-$_missing" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${_others[@]}" "${EXTRAS[@]}")"
@@ -132,6 +151,45 @@ done
 check "T7b an UNDECLARED positive control is rejected (nobody would notice losing it)" 1 \
   "UNDECLARED positive control(s) in the \`mallocnesia\` label: x_positive_control_mallocnesia" \
   "$(mk t7b "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+
+# ── T7d/T7e: each control names its OWN hook. --expect-violation accepts any violation,
+# so without --expect-entry a control passes on an allocation that reached another hook.
+# One T7d arm per control that requires an entry, each with every other control intact.
+for _bare in "${CONTROL_NAMES[@]}"; do
+  [ -n "${CONTROL_ENTRY[$_bare]}" ] || continue
+  _set=()
+  for _c in "${CONTROL_NAMES[@]}"; do
+    if [ "$_c" = "$_bare" ]; then _set+=("$(ctl "$_c" "")"); else _set+=("$(ctl "$_c")"); fi
+  done
+  check "T7d a control that names no entry point is rejected BY NAME: $_bare" 1 \
+    "positive control $_bare does not require its own entry point" \
+    "$(mk "t7d-$_bare" "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+done
+
+_set=()
+for _c in "${CONTROL_NAMES[@]}"; do
+  if [ "$_c" = alloc_guard_memalign_positive_control_mallocnesia ]; then
+    _set+=("$(ctl "$_c" calloc)")
+  else
+    _set+=("$(ctl "$_c")")
+  fi
+done
+check "T7e a control that names ANOTHER control's entry point is rejected" 1 \
+  "positive control alloc_guard_memalign_positive_control_mallocnesia does not require its own entry point: its command names --expect-entry ['calloc']" \
+  "$(mk t7e "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+
+# The entry must be the VALUE of --expect-entry, not merely a token in the command.
+_set=()
+for _c in "${CONTROL_NAMES[@]}"; do
+  if [ "$_c" = alloc_guard_memalign_positive_control_mallocnesia ]; then
+    _set+=("$_c:mallocnesia:--expect-violation memalign --expect-entry calloc")
+  else
+    _set+=("$(ctl "$_c")")
+  fi
+done
+check "T7f an entry named elsewhere in the command does not count" 1 \
+  "positive control alloc_guard_memalign_positive_control_mallocnesia does not require its own entry point: its command names --expect-entry ['calloc']" \
+  "$(mk t7f "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
 
 # ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
 out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?
