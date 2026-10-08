@@ -1673,10 +1673,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
             tls_profile = TK::one_way_ca;
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
         }
         // insecure_plain_tcp: tls_profile stays unset; no SslCtxConfig arm.

@@ -208,10 +208,15 @@ fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t* cfg,
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
             cfg->cfg.security_profile.k = fixpp::session::SecurityProfile::kind::insecure_plain_tcp;
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
             return FIXPP_ERR_OK;
         default:

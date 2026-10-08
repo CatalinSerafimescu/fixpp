@@ -69,6 +69,9 @@ core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     switch (profile) {
         case SecurityProfile::mtls_pinned:
@@ -97,6 +100,8 @@ core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
     }
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 
     // Build the config.

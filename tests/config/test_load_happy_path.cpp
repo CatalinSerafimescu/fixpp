@@ -581,6 +581,9 @@ TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     EXPECT_EQ(cfg.security_profile.k, K::insecure_plain_tcp)
         << "security_profile.k must be insecure_plain_tcp for kind=\"insecure_plain_tcp\"";
@@ -588,6 +591,8 @@ TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 }
 
