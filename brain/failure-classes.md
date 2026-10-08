@@ -903,10 +903,60 @@ and nobody can tell the last member from the next-to-last.
   `deadline_after` and a total `duration_until`. Round 4 converged, checked against a 128-bit reference shown to report
   round 2's helper. The older sites went to fixpp#555. The decision and the rejected `Clock` range
   precondition are on [components/inbound-message-path](./components/inbound-message-path.md).
+- ⚠️ **The same class in a guard's SCOPE, not in arithmetic.** A check that protects a SET of names
+  is fixed for the member a review cited, and the other members stay unprotected while the gate
+  reports clean over them.
+  - **Trigger:** a guard, refusal or assertion covers a set (hooked symbols, exported names,
+    registered handlers), and the finding or the fix names one member of it.
+  - **Procedure:** derive the set from the artifact that DEFINES it, not from the cited case or a
+    hand-written list, and keep the derivation as a recipe. Then pin the guard to the set with a test
+    that every member the artifact defines has its own cell, so the table and the definitions cannot
+    drift apart.
+  - **Instance (fixpp#497, PR #557, Gate B rounds 3–4).** Round 3 made mallocnesia's constructor
+    refuse a process where another allocator serves `malloc`. It checked `malloc` only, so the other
+    hooked names could still be served elsewhere and the gate passed vacuously for them. Round 4
+    checked every name the interceptor defines; the constructor's comment in
+    `tools/mallocnesia/mallocnesia.c` gives the re-derivation (`nm -D --defined-only` on the built
+    library, minus the guard markers), and `ci/test-check-alloc.sh`'s T14 reads the defined names the
+    same way and fails on any name with no front/behind cell. The decision is on
+    [components/test](./components/test.md).
+  - **Sibling.** Class 1's *present is not active* bullet: a scan scoped to where code is expected to
+    live, not to what the linker sees. That is the same scope error made by an instrument; this one is
+    made by a fix.
 - **Sibling.** Class 14 is the same treadmill on a check: a forbidden list widened one spelling per
   round, ended by pinning the whole output. Here the list is of patched sites, ended by one helper.
   Class 9's *the reported symptom is usually the smaller half* asks the same enumeration question of
   one wrong value's consumers.
+
+### 21. A fix that adds state to an instrument multiplies its edge cases
+
+A test instrument (an LD_PRELOAD interposer, a counting hook, a seam) gets a fix that adds lazy or
+one-time state: a resolved function table, a "resolving" flag, a bootstrap buffer, an init-once latch.
+Each piece then needs its own rules for re-entrancy, threads, `fork` and allocation during
+initialisation, each rule needs a test seam, and the branches no seam can reach stay unexecuted. The
+next review finds defects in the new state, and its natural prescription is more machinery to
+synchronise it, which needs its own seams in turn.
+
+- **Trigger:** a fix to an instrument introduces state the instrument did not have, or a review
+  prescribes synchronising such state (a once-table, a thread-local marker, fork handling).
+- **Procedure:**
+  - Before synchronising the state, ask whether it needs to exist. Look for a shape in which nothing
+    is resolved or initialised at run time.
+  - Name the condition the stateless shape rests on and pin it, so a platform where it fails is
+    refused rather than silently mismeasured.
+  - Record the rejected stateful design as a rejected alternative where the next fixer will read it.
+  - Witness the stateless shape with a differential oracle against the un-instrumented behaviour
+    (same calls, same results, `errno` included), alongside the instrument's own positive controls.
+- **Instance (fixpp#497, PR #557, Gate B round 2, FQ-A).** Round 1 replaced mallocnesia's
+  constructor-time resolution with lazy `dlsym` resolution, because a foreign constructor can make
+  the first hooked call. Round 2 found races, a fork hazard, unchecked arithmetic in the bootstrap
+  buffer and branches no test could reach, and its review proposed more machinery. The fix forwards
+  to glibc's exported `__libc_*` allocator instead, so nothing is resolved at run time; a configure
+  probe keeps the gates off a non-glibc libc. The decision and the rejected stateful alternatives are
+  on [components/test](./components/test.md).
+- **Sibling.** Class 15: a process-global seam whose install window does not bracket the work it
+  counts. A foreign constructor's first call is that window's opening edge. Class 15's cure is a
+  structural barrier; this one removes the state the barrier would protect.
 
 ## How to query the instances
 

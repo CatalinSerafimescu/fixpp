@@ -6,6 +6,21 @@ status: stable
 
 # Log
 
+- **2026-10-08 — fixpp#497 (B15) Gate B (PR #557), one new class and one extension.**
+  `failure-classes.md` gains **class 21**, *a fix that adds state to an instrument multiplies its
+  edge cases*: before synchronising added state, ask whether it needs to exist, pin the condition the
+  stateless shape rests on, and witness it with a differential oracle. Instance: mallocnesia's lazy
+  `dlsym` resolution replaced by forwarding to glibc's `__libc_*` (Gate B round 2, FQ-A). Filed as a
+  new class, not under class 15 (its sibling), whose trigger is installing or removing a global hook
+  rather than state a fix adds; not under class 1's *a fix for a false-clean is itself an instrument
+  change*, because round 2's findings were races and UB, not false cleans; not under class 16's
+  *prefer removing the cause*, which is about suppressions under a disabled gate; and not under class
+  20's fix by construction, which routes sites through one helper rather than deleting state.
+  **Class 20** gains a form, *the same class in a guard's scope*: derive the protected set from the
+  artifact that defines it and pin every member with a cell. Instance: the constructor's refusal
+  checked `malloc` only (Gate B rounds 3–4). Class 1's *present is not active* scope bullet is named
+  as its sibling. Both are entries in the implementer's anti-pattern library; the decisions stay on
+  `components/test.md`.
 - **2026-10-07 — fixpp#497 (B15), the allocation gates' blind spots.** `components/test.md` gains a
   subsection under *Allocation discipline*: why the interceptor hooks every allocating libc entry
   point (an over-aligned `new` and asio's coroutine frames reach libc through `aligned_alloc`); why
