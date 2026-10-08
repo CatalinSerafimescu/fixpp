@@ -41,28 +41,86 @@
 # So the gates must not REGISTER on a sanitizer build. Excluding them at the ctest
 # selection instead would leave them registered and runnable — and the unfiltered
 # full-ctest runs on those lanes would pick them up and pass vacuously.
-if(UNIX AND NOT APPLE AND NOT FIXPP_ENABLE_ASAN AND NOT FIXPP_ENABLE_TSAN
-   AND NOT FIXPP_ENABLE_UBSAN)
-  set(FIXPP_MALLOCNESIA_SUPPORTED TRUE)
+#
+# THE CONDITION (fixpp#497): the gates are not registered when a `-fsanitize=` with a
+# non-empty value appears in the flags read below at their start or after whitespace,
+# `;`, `:`, `,` or `>`, whichever sanitizer it names, including inside a generator expression. Naming
+# sanitizers one by one let every unnamed one (LSan, MSan, the next) register the gates.
+# The match itself, and what it does not match, is
+# fixpp_mallocnesia_flags_name_sanitizer() in cmake/FixppMallocnesiaSanitizerMatch.cmake,
+# tested by ci/test-mallocnesia-sanitizer-match.sh. The per-target
+# `-fsanitize=fuzzer-no-link` that fixpp_instrument_libraries_for_fuzzing() adds is not
+# seen here, and need not be: the top-level CMakeLists.txt refuses FIXPP_BUILD_FUZZ
+# without ASan or UBSan, whose directory options are seen.
+#
+# Where a `-fsanitize=` can be when this file is evaluated, and so what is read:
+#   - the CMAKE_<LANG>_FLAGS and CMAKE_<LINK>_LINKER_FLAGS variables, including their
+#     per-config forms for the configs this build generates — these carry the cache,
+#     the preset, CFLAGS/CXXFLAGS/LDFLAGS at first configure, and the Conan toolchain's
+#     *_INIT values;
+#   - this directory's COMPILE_OPTIONS and LINK_OPTIONS, which is where
+#     cmake/Sanitizers.cmake puts FIXPP_ENABLE_{ASAN,UBSAN,TSAN}. It must therefore be
+#     include()d before this file; the top-level CMakeLists.txt does so. A preset that
+#     sets CMAKE_CXX_FLAGS in the cache replaces the Conan toolchain's -fsanitize, so
+#     for such a preset this read is the only signal.
+# A flag added later, or only to some target, is not seen; a gate on such a target fails
+# rather than passes when the sanitizer replaces the allocator, and UndefinedBehaviorSanitizer
+# alone leaves the allocator to glibc. Re-check a configuration with
+# `ctest --test-dir <build> -N -R _mallocnesia$`, which must list no test on a sanitizer
+# build.
+#
+# ⚠️ C is enabled BEFORE the flag read below, not when the target is defined: until
+# enable_language(C) runs, CFLAGS and the Conan toolchain's CMAKE_C_FLAGS_INIT have not
+# reached CMAKE_C_FLAGS, so a C-only -fsanitize= would be missed on a first configure and
+# seen on the next. `project()` declares `LANGUAGES CXX` only, so C is enabled here rather
+# than widened there: adding C to the project line would run the C compiler probe on every
+# configure of every preset, including the Windows and macOS ones that never build
+# this target. Enabling it inside the platform guard keeps the cost where the need is.
+# `enable_language` is idempotent, so the call tests/capi/CMakeLists.txt already makes
+# for its own C sources is harmless — this module is included first, which merely makes
+# that one the redundant call rather than this one.
+if(UNIX AND NOT APPLE)
+  enable_language(C)
+endif()
+set(_mn_flag_vars CMAKE_C_FLAGS CMAKE_CXX_FLAGS CMAKE_EXE_LINKER_FLAGS
+                  CMAKE_SHARED_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
+set(_mn_configs ${CMAKE_BUILD_TYPE} ${CMAKE_CONFIGURATION_TYPES})
+set(_mn_flags "")
+foreach(_mn_var IN LISTS _mn_flag_vars)
+  string(APPEND _mn_flags " ${${_mn_var}}")
+  foreach(_mn_config IN LISTS _mn_configs)
+    string(TOUPPER "${_mn_config}" _mn_config)
+    string(APPEND _mn_flags " ${${_mn_var}_${_mn_config}}")
+  endforeach()
+endforeach()
+get_directory_property(_mn_compile_options COMPILE_OPTIONS)
+get_directory_property(_mn_link_options LINK_OPTIONS)
+string(APPEND _mn_flags " ${_mn_compile_options} ${_mn_link_options}")
+include("${CMAKE_CURRENT_LIST_DIR}/FixppMallocnesiaSanitizerMatch.cmake")
+fixpp_mallocnesia_flags_name_sanitizer(_mn_sanitizer "${_mn_flags}")
+
+if(UNIX AND NOT APPLE AND NOT _mn_sanitizer)
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <stdlib.h>
+#ifndef __GLIBC__
+#error not glibc
+#endif
+int main(void) { return 0; }" FIXPP_MALLOCNESIA_GLIBC)
+  set(FIXPP_MALLOCNESIA_SUPPORTED ${FIXPP_MALLOCNESIA_GLIBC})
 else()
   set(FIXPP_MALLOCNESIA_SUPPORTED FALSE)
+  if(_mn_sanitizer)
+    message(STATUS "fixpp: mallocnesia gates not registered — a sanitizer build "
+                   "(${_mn_sanitizer}); its allocator would make them pass vacuously")
+  endif()
+endif()
+if(UNIX AND NOT APPLE AND NOT _mn_sanitizer AND NOT FIXPP_MALLOCNESIA_SUPPORTED)
+  message(STATUS "fixpp: mallocnesia gates not registered — the interceptor forwards to "
+                 "glibc's allocator internals, and the controls call glibc-only entry points")
 endif()
 
 if(FIXPP_MALLOCNESIA_SUPPORTED AND NOT TARGET mallocnesia)
-  # ⚠️ `project()` declares `LANGUAGES CXX` only, so C is enabled HERE rather than
-  # widened there: adding C to the project line would run the C compiler probe on every
-  # configure of every preset, including the Windows and macOS ones that never build
-  # this target. Enabling it inside the platform guard keeps the cost where the need is.
-  # `enable_language` is idempotent, so the call tests/capi/CMakeLists.txt already makes
-  # for its own C sources is harmless — this module is included first, which merely makes
-  # that one the redundant call rather than this one.
-  #
-  # (An earlier revision of this comment justified the placement by claiming this is
-  # "the sole C translation unit in the tree". That is false — tests/capi has three and
-  # tests/consumer a fourth. The placement is right; the reason given for it was not.)
-  enable_language(C)
   add_library(mallocnesia SHARED "${CMAKE_SOURCE_DIR}/tools/mallocnesia/mallocnesia.c")
-  target_link_libraries(mallocnesia PRIVATE ${CMAKE_DL_LIBS})
   set_target_properties(mallocnesia PROPERTIES
     C_STANDARD 11
     C_STANDARD_REQUIRED ON
@@ -81,6 +139,7 @@ if(FIXPP_MALLOCNESIA_SUPPORTED AND NOT TARGET mallocnesia)
   # both, so only the coverage pair is conditional.
   target_compile_options(mallocnesia PRIVATE -fno-sanitize=all)
   target_link_options(mallocnesia PRIVATE -fno-sanitize=all)
+  target_link_libraries(mallocnesia PRIVATE ${CMAKE_DL_LIBS})
   if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     target_compile_options(mallocnesia PRIVATE -fno-profile-instr-generate
                                                -fno-coverage-mapping)
@@ -89,7 +148,11 @@ endif()
 
 # fixpp_add_mallocnesia_test(NAME <test> TARGET <binary-target>
 #                            [LABELS <l>...] [DEPENDS <t>...] [ENVIRONMENT <e>]
-#                            [EXPECT_VIOLATION])
+#                            [EXPECT_VIOLATION [EXPECT_ENTRY <fn>]])
+#
+# EXPECT_ENTRY (positive controls only): the violation must be counted by the
+# interceptor's <fn> hook, so a control planting through one entry point cannot pass on
+# an allocation that reached another.
 #
 # No MAX_ALLOCS keyword: every gate wants zero, and zero is already the default in
 # all three layers (check_alloc.py's argparse, and the interceptor's own `g_max`
@@ -108,10 +171,13 @@ endif()
 # measurement of a fixed tree, not a description of today — re-derive the current
 # state with `tools/check_mallocnesia_population.py`, which prints both sizes.
 function(fixpp_add_mallocnesia_test)
-  cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET"
+  cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET;EXPECT_ENTRY"
                       "LABELS;DEPENDS;ENVIRONMENT" ${ARGN})
   if(NOT _MN_NAME OR NOT _MN_TARGET)
     message(FATAL_ERROR "fixpp_add_mallocnesia_test: NAME and TARGET are required")
+  endif()
+  if(_MN_EXPECT_ENTRY AND NOT _MN_EXPECT_VIOLATION)
+    message(FATAL_ERROR "fixpp_add_mallocnesia_test: EXPECT_ENTRY needs EXPECT_VIOLATION")
   endif()
   if(NOT FIXPP_MALLOCNESIA_SUPPORTED)
     return()
@@ -124,6 +190,9 @@ function(fixpp_add_mallocnesia_test)
   set(_MN_EXTRA "")
   if(_MN_EXPECT_VIOLATION)
     set(_MN_EXTRA --expect-violation)
+  endif()
+  if(_MN_EXPECT_ENTRY)
+    list(APPEND _MN_EXTRA --expect-entry ${_MN_EXPECT_ENTRY})
   endif()
   add_test(
     NAME ${_MN_NAME}

@@ -7,6 +7,9 @@ refs:
   - include/fixpp/transport/test/mock_transport.hpp
   - .specify/constitution.md
   - tools/check_alloc.py
+  - tools/mallocnesia/mallocnesia.c
+  - tools/check_mallocnesia_population.py
+  - cmake/FixppMallocnesia.cmake
   - tests/support/pump_until_ready.hpp
   - tests/support/temp_dir.hpp
   - tests/support/alloc_guard_markers.hpp
@@ -62,8 +65,9 @@ the header `#error`s without it.
 ## Allocation discipline is enforced by an interceptor, not by review
 
 `[const §VIII.5]` demands zero allocation between parse and `fromApp`. That is checked by
-**`LD_PRELOAD`-ing a malloc interceptor** around dedicated guard binaries and failing if any
-`malloc`/`free` is seen between markers.
+**`LD_PRELOAD`-ing an allocation interceptor** (`tools/mallocnesia/mallocnesia.c`) around dedicated
+guard binaries and failing if an allocation is seen between markers. Which libc entry points it hooks,
+and the rule for leaving one unhooked, is in that file's header.
 
 ⚠️ **Two things to know before trusting a green run.** The instrument is Linux-only by construction —
 a passing Windows build proves nothing about allocation. And a guard test only covers the window its
@@ -82,6 +86,90 @@ null — harmless until `/WX` turned MSVC's C4551 into an error at every guarded
 into `tests/support/alloc_guard_markers.hpp` (null function pointers under `_WIN32`), not into the call
 sites; rewriting every site was rejected because the null-checked call is the shape
 `tools/check_alloc_guard_markers.py` exists to keep.
+
+### What the gates see, where they register, and what vouches for them (#497 — B15)
+
+**Why every allocating libc entry point, not just `malloc`.** The interceptor once hooked
+`malloc`/`calloc`/`realloc` only, and its one positive control planted a `malloc` — so the control's
+proven coverage equalled the interceptor's and no more. An over-aligned `new`, and every asio
+coroutine frame (asio's `aligned_new` calls `std::aligned_alloc`), reached libc through an unhooked
+aligned entry point and passed every gate. Hooking them turned one gate red (`sync_alloc_guard_test`,
+below). ⚠️ A TU-local `operator new` counter has the same blind spot: it cannot see `aligned_alloc`.
+
+**Why the control set is EXACT and declared, never "≥1".** A control vouches only for the entry point
+it plants; one control cannot stand in for another. `tools/check_mallocnesia_population.py`'s
+`POSITIVE_CONTROLS` names each, so a missing control is reported by name and an undeclared one is
+rejected. Rejected: a "≥1 control" rule — it passes with every control but one deleted. The
+interceptor is built without coverage instrumentation, so these controls are the only evidence that
+each hook runs on a CI lane. Each libc control also names its own hook (`EXPECT_ENTRY` →
+`check_alloc.py --expect-entry`), and `POSITIVE_CONTROLS` spells that entry out, so a
+`planted_entry_witness.cpp` row that calls a different entry point fails its control. Rejected:
+`--expect-violation` alone — it accepts any violation, so a memalign control planting a calloc
+passed. The over-aligned `new` control names the aligned hook set a C++ runtime may reach.
+No label member may carry a CTest property that turns a failing command into a pass or a skip, or
+stops it running (`VERDICT_PROPERTIES`). Rejected: names and commands only, because a `DISABLED`
+control stays registered, labelled and named, and is never run (PR #557 Gate B r5).
+
+**Why the interceptor forwards to glibc's `__libc_*`, not `dlsym(RTLD_NEXT)`.** A library
+constructor that runs before the interceptor's can make the process's first hooked call, so a hook
+cannot rely on anything its own constructor sets up. Resolving the real functions lazily on first
+use (PR #557's first Gate B fix) added a function table, a "resolving" flag and a static buffer for
+an allocating `dlsym`: shared state that was unsynchronised across threads and `fork`, with
+unchecked arithmetic in the buffer. Calling glibc's exported `__libc_malloc` and its siblings
+directly leaves no state to race. Rejected: synchronising the lazy route (a once-initialised table,
+a per-thread marker, fork handling, a checked bump allocator), since each piece needs its own test
+seam to protect state that need not exist. Rejected: restoring a `free` hook, since it fixes pairing
+only for the standard names; a block from another allocator's own API would then reach glibc's
+`free`. The cost is that the interceptor is glibc-only: glibc has no `__libc_` twin for
+`aligned_alloc` or `posix_memalign`, so those two hooks copy glibc's argument validation, and
+`ci/test-check-alloc.sh`'s T12 compares every hook against unhooked glibc to catch the copy
+drifting. A configure probe keeps the gates unregistered on a non-glibc libc. At run time, the
+constructor refuses a process whose executable defines any entry point the interceptor hooks, or
+whose link closure defines one behind the interceptor in place of glibc's. The preload changes only
+the resolution of the names it defines, so those are the names whose first and next definitions are
+checked. Rejected: checking `free`, `malloc_usable_size` and other names this file does not define,
+because their resolution is unchanged by the preload.
+
+**Why the guard reads any non-empty `-fsanitize=`, not named options.** A sanitizer installs its own allocator
+ahead of the interposer, so a gate registered on a sanitizer build passes vacuously. Naming
+`FIXPP_ENABLE_{ASAN,TSAN,UBSAN}` let every unnamed sanitizer (LSan, MSan, the next one) register the
+gates; matching the switch itself excludes any sanitizer whose `-fsanitize=`
+is in what the guard reads, including inside a generator expression. A sanitizer added only to one
+target is not seen; a gate on such a target fails rather than passes when that sanitizer replaces
+the allocator, and UndefinedBehaviorSanitizer alone leaves the allocator to glibc. The switch counts
+at the start of the flags or after whitespace, `;`, `:`, `,` or `>`. The match is lexical and parses
+neither arguments nor shell quoting: a switch after `:`/`,` inside a macro value, or after a space
+inside a quoted value, matches and keeps the gates off; one right after a quote does not, and those
+gates then fail as on a target-local sanitizer. Neither direction lets a gate pass vacuously. The
+run-time refusal catches a miss, and the gate lane's population floor and controls catch a spurious
+match. Rejected on measurement (PR #557 Gate B r5): a rule that admits `:`/`,` only inside `$<…>` and treats quotes
+as boundaries. It fixed the reported shapes and broke two others: a `SHELL:-fsanitize=…` option was
+missed, and `-DNOTE='-fsanitize=…'` matched. Not built (owner declined, PR #557 Gate B r5): a
+token-aware parse of the flag strings and the directory-option elements; it would
+have to handle `SHELL:` options and `$<…>` elements itself.
+The guard reads the compile/link flag variables and the directory options, not `FIXPP_ENABLE_*`, so
+the read that sees `cmake/Sanitizers.cmake`'s options is exercised (a preset that sets
+`CMAKE_CXX_FLAGS` in the cache drops the Conan toolchain's `-fsanitize`). An empty `-fsanitize=`
+does not count: clang accepts it and enables nothing. The match is
+`cmake/FixppMallocnesiaSanitizerMatch.cmake`; `ci/test-mallocnesia-sanitizer-match.sh` pins it,
+and configures a throwaway project against the real `cmake/FixppMallocnesia.cmake` to pin the
+registration decision that applies it.
+Rejected: adding LSan and MSan to the named list — the next sanitizer would repeat the gap. Not
+built: a deferred check of each gated target's own options; PR #557's Gate B round 1 narrowed the
+claim to what is read instead.
+
+**Why the sync gate was restructured, not budgeted.** Its window co_spawned two coroutines per
+iteration, so it measured asio's per-spawn frames, not the mutex; it was green only because
+`aligned_alloc` was unhooked. Long-lived coroutines put the spawns outside the window and keep the
+contended lock/hand-off inside it. A planted allocation at the lock call is the arm that shows the
+window still covers the path.
+
+**Why the four disabled `if(FALSE)` companions were deleted, not budgeted** (owner split of #544 to
+B35, 2026-10-07). Their windows sit on an Active session's inbound path, which allocates asio
+coroutine frames that the recycling cache cannot hold (`L-497-1`, fixpp#544), so no re-scope reaches
+zero. A budget would need a `MAX_ALLOCS` knob the owner declined, and would pin a production cost as
+acceptable. The base cells keep their functional checks and say their heap half is not checked; B35's
+gates replace them.
 
 ## ⭐ Bounded pumps (#289): the hazard is the unconditional `get()`, not the fixed window
 

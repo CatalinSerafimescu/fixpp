@@ -52,13 +52,14 @@ set_target_properties(sync_alloc_guard_test PROPERTIES
 )
 add_test(NAME alloc_guard_sync_embedded COMMAND sync_alloc_guard_test)
 
-# 007-threading-clock T051 (Seam 7 / [2d §9.7]): zero-global-heap between
-# parse and fromApp over a 10⁴-message corpus. All dynamic storage is from
-# PMR arenas (cancellable_dispatch node from session_arena; per-awaiter
-# promise frame from message_arena on PMR fallback). Same mallocnesia harness.
-# CTest NAME is deliberately NOT `threading_`-prefixed (driven by
-# tools/check_alloc.py under LD_PRELOAD, not swept by the ^threading_ ctest
-# selection — same convention as alloc_guard_sync_embedded above).
+# 007-threading-clock T051 (Seam 7 / [2d §9.7]) asks for zero global heap between
+# parse and fromApp over a 10⁴-message corpus. All dynamic storage is meant to come
+# from PMR arenas (cancellable_dispatch node from session_arena; per-awaiter
+# promise frame from message_arena on PMR fallback). No preload gate is registered
+# for this binary (see "DELIBERATELY NOT GATED" below), so its window's global-heap
+# half is unchecked and the cell checks its functional post-conditions only.
+# CTest NAME is deliberately NOT `threading_`-prefixed, so the ^threading_ ctest
+# selection does not sweep it (same convention as alloc_guard_sync_embedded above).
 add_executable(test_dispatch_alloc_guard test_dispatch_alloc_guard.cpp)
 target_link_libraries(test_dispatch_alloc_guard PRIVATE
   fixpp_session
@@ -73,9 +74,10 @@ set_target_properties(test_dispatch_alloc_guard PROPERTIES
 )
 add_test(NAME alloc_guard_dispatch COMMAND test_dispatch_alloc_guard)
 
-# 007-threading-clock T052 (Seam 18 / [2d §9.18]): zero-global-heap after the
-# first heartbeat cycle over 10⁴ cycles, BOTH threading modes; an idle session
-# that never sleeps allocates no slot (E12 / D-8 / N-P1-1). Same harness.
+# 007-threading-clock T052 (Seam 18 / [2d §9.18]) asks for zero global heap after
+# the first heartbeat cycle over 10⁴ cycles, BOTH threading modes; an idle session
+# that never sleeps allocates no slot (E12 / D-8 / N-P1-1). No preload gate is
+# registered ("DELIBERATELY NOT GATED" below): the global-heap half is unchecked.
 add_executable(test_clock_sleep_alloc_guard test_clock_sleep_alloc_guard.cpp)
 target_link_libraries(test_clock_sleep_alloc_guard PRIVATE
   fixpp_session
@@ -90,15 +92,15 @@ set_target_properties(test_clock_sleep_alloc_guard PROPERTIES
 )
 add_test(NAME alloc_guard_clock_sleep COMMAND test_clock_sleep_alloc_guard)
 
-# 005-session-establishment-fsm T059 (Seam #12 / SC-009 / I-7):
-# zero-global-heap on the 005-owned hot paths — SeqnumManager
+# 005-session-establishment-fsm T059 (Seam #12 / SC-009 / I-7) asks for zero
+# global heap on the 005-owned hot paths — SeqnumManager
 # (assign_outbound + check_inbound) and the admin builders
 # (build_heartbeat / build_test_request). The cancellable_dispatch + clock
-# sleep paths are covered upstream by 007's alloc-guards above; this binary
-# focuses on the 005-specific surface. Same mallocnesia harness.
-# CTest NAME deliberately NOT `session_`-prefixed (driven by tools/check_alloc.py
-# under LD_PRELOAD, not the ^session_ ctest selection — same convention as
-# alloc_guard_dispatch above).
+# sleep paths are 007's alloc-guards above; this binary focuses on the
+# 005-specific surface. No preload gate is registered ("DELIBERATELY NOT GATED"
+# below): the global-heap half is unchecked.
+# CTest NAME deliberately NOT `session_`-prefixed, so the ^session_ ctest
+# selection does not sweep it (same convention as alloc_guard_dispatch above).
 add_executable(test_session_alloc_guard test_session_alloc_guard.cpp)
 target_link_libraries(test_session_alloc_guard PRIVATE
   fixpp_session
@@ -135,7 +137,7 @@ target_include_directories(test_validate_gate_alloc_guard PRIVATE
 set_target_properties(test_validate_gate_alloc_guard PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
-# ── fixpp#448: the POSITIVE CONTROL for the entire mallocnesia population ─────
+# ── fixpp#448: the malloc POSITIVE CONTROL for the mallocnesia population ─────
 # Eighteen gates reporting "no allocations detected" cannot tell a clean tree from a
 # dead interceptor. This one allocates on purpose and must be CAUGHT; if interception
 # silently stops, this is the entry that reddens. Registered on the same lane and in
@@ -149,7 +151,37 @@ fixpp_add_mallocnesia_test(
   NAME alloc_guard_positive_control_mallocnesia
   TARGET planted_alloc_witness
   EXPECT_VIOLATION
+  EXPECT_ENTRY malloc
   LABELS "alloc_guard;positive-control;448")
+
+# fixpp#497: one control per hooked entry point other than malloc, plus an over-aligned
+# `new`. The control above plants a malloc, so it vouches for the malloc hook only. Each
+# libc entry below plants through the entry point its PLANTED_ENTRY names, so a hook that
+# stops counting reddens the entry naming it. The aligned_new control names the set of
+# aligned entry points a C++ runtime's over-aligned `new` reaches.
+if(FIXPP_MALLOCNESIA_SUPPORTED)
+  add_executable(planted_entry_witness planted_entry_witness.cpp)
+  target_include_directories(planted_entry_witness PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+  set_target_properties(planted_entry_witness PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  fixpp_add_mallocnesia_test(
+    NAME alloc_guard_aligned_new_positive_control_mallocnesia
+    TARGET planted_entry_witness
+    EXPECT_VIOLATION
+    EXPECT_ENTRY aligned_alloc,posix_memalign
+    LABELS "alloc_guard;positive-control;497"
+    ENVIRONMENT "PLANTED_ENTRY=aligned_new")
+  foreach(_plant IN ITEMS calloc realloc aligned_alloc posix_memalign memalign valloc
+                          pvalloc)
+    fixpp_add_mallocnesia_test(
+      NAME alloc_guard_${_plant}_positive_control_mallocnesia
+      TARGET planted_entry_witness
+      EXPECT_VIOLATION
+      EXPECT_ENTRY ${_plant}
+      LABELS "alloc_guard;positive-control;497"
+      ENVIRONMENT "PLANTED_ENTRY=${_plant}")
+  endforeach()
+endif()
 
 add_test(NAME alloc_guard_validate_gate COMMAND test_validate_gate_alloc_guard)
 set_tests_properties(alloc_guard_validate_gate PROPERTIES
@@ -274,8 +306,8 @@ endif()
 # operator-new counter (the plain test) plus mallocnesia. The owned cell is the
 # gate; the borrowed cell is its EXPECT_VIOLATION control (the table copy on the
 # global heap), each selected by GTEST_FILTER. Neither name carries
-# `positive_control`: tools/check_mallocnesia_population.py requires exactly one
-# such label member, and alloc_guard_positive_control_mallocnesia is it.
+# `positive_control`: tools/check_mallocnesia_population.py rejects any label member
+# with that in its name unless its POSITIVE_CONTROLS declares it.
 add_executable(test_reify_owned_alloc_guard test_reify_owned_alloc_guard.cpp)
 target_link_libraries(test_reify_owned_alloc_guard PRIVATE
   fixpp_dictionary

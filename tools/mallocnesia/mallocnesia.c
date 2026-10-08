@@ -1,8 +1,29 @@
 /* tools/mallocnesia/mallocnesia.c
  *
  * LD_PRELOAD interceptor for the allocation discipline gate (seam #6).
- * Counts malloc/calloc/realloc calls between alloc_guard_start() and
- * alloc_guard_end() and exits 1 if the count exceeds MALLOCNESIA_MAX_ALLOCS.
+ * Counts calls to libc's heap-allocating entry points between alloc_guard_start()
+ * and alloc_guard_end() and exits 1 if the count exceeds MALLOCNESIA_MAX_ALLOCS.
+ *
+ * WHICH ENTRY POINTS (fixpp#497). The population is libc's allocator API: the exported
+ * functions whose result is new heap memory handed to the caller (malloc.h, stdlib.h).
+ * Each is hooked here unless one of these holds for it:
+ *   - libc serves it through a function hooked here, so it is already counted;
+ *   - no installed header declares it, so ordinary code cannot call it
+ *     (`grep -rn <name> /usr/include`);
+ *   - it returns no new memory.
+ * To re-derive the set for a libc, list its exports (`nm -D --defined-only <libc.so>`)
+ * and decide each against the rule. Every hooked function, and every one left unhooked
+ * on the first ground, needs an arm in ci/test-check-alloc.sh's T10, which calls it in a
+ * window and requires the interceptor to name the function that counted it: the first
+ * ground is a fact about one libc's internals, and the arm is what notices when it
+ * stops holding. Every hooked function also needs a positive control in the gate
+ * population (tests/alloc_guard/planted_entry_witness.cpp, declared in
+ * tools/check_mallocnesia_population.py): this file is built without coverage
+ * instrumentation, so those controls are what show each hook runs on a CI lane.
+ * Functions OUTSIDE the API that allocate as a side effect (strdup,
+ * asprintf, ...) are counted through whichever hook they reach; T10's strdup arm is a
+ * representative of that class, not a census of it. The aligned hooks matter to C++:
+ * an over-aligned `new` reaches libc through one of them, not through malloc.
  *
  * Build:  it is a CMake target — `cmake --build <dir> --target mallocnesia` builds it,
  *         and an ordinary build of the test tree builds it anyway. The artifact lands at
@@ -22,28 +43,51 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
-typedef void *(*malloc_fn)(size_t);
-typedef void  (*free_fn)(void *);
-typedef void *(*calloc_fn)(size_t, size_t);
-typedef void *(*realloc_fn)(void *, size_t);
-
-static malloc_fn  real_malloc;
-static free_fn    real_free;
-static calloc_fn  real_calloc;
-static realloc_fn real_realloc;
-
-/* dlsym calls calloc internally before real_calloc is resolved.
- * Serve those early calls from a static buffer to break the cycle. */
-static char   bootstrap[8192];
-static size_t bootstrap_pos;
-static int    bootstrap_done;  /* set to 1 after dlsym calls complete */
+/* claim-ok: a supersession pointer naming the decision, per the .claude/CLAUDE.md rule
+ * PR #557 Gate B r2 FQ-A — direct __libc_* forwarding; Gate B r3 FQ-E and Gate B r4 FQ-K
+ * — refuse a process where a name this file defines is defined ahead of it or, behind it,
+ * by other than glibc.
+ * claim-ok: part of the supersession pointer above; supersedes Gate B r1 FQ-2's lazy dlsym
+ * resolution.
+ *
+ * Every hook forwards to glibc's own allocator by the __libc_* names glibc exports, so
+ * nothing is resolved at run time: there is no function table to fill, no window in which
+ * a hook runs before it is filled, and no state that a second thread or a fork could see
+ * half-written. A hook called from a library constructor that runs before this one
+ * (ci/test-check-alloc.sh T11) is therefore an ordinary call. The rejected alternative
+ * kept dlsym(RTLD_NEXT) and synchronised it (a once-initialised table, a per-thread
+ * "resolving" marker, fork handling, a static buffer for an allocating dlsym), each piece
+ * needing a test seam of its own. Restoring a free hook would pair the standard names
+ * only; a block from another allocator's own API would then reach glibc's free.
+ * Checking names this file does not define (`free`, `malloc_usable_size`, ...) would
+ * refuse a process whose resolution the preload does not change.
+ *
+ * The CONDITION this rests on: the libc exports __libc_malloc, __libc_calloc,
+ * __libc_realloc, __libc_memalign, __libc_valloc and __libc_pvalloc as public, linkable
+ * symbols; no header declares them, hence the declarations below. Re-check a libc with
+ * `nm -D --defined-only <libc.so> | grep ' __libc_'`, and `objdump -T <libc.so>` to see
+ * that each shares its address with the public name it stands for. A libc without these
+ * symbols is excluded by the configure probe in cmake/FixppMallocnesia.cmake: the gates
+ * register only on glibc. The run-time condition is the constructor's.
+ *
+ * glibc has no __libc_ twin for aligned_alloc or posix_memalign, so those two hooks
+ * validate their arguments as glibc does and forward to __libc_memalign. T12 in
+ * ci/test-check-alloc.sh compares every hook's results against unhooked glibc, which is
+ * what notices if that validation and glibc's stop agreeing. */
+extern void *__libc_malloc(size_t);
+extern void *__libc_calloc(size_t, size_t);
+extern void *__libc_realloc(void *, size_t);
+extern void *__libc_memalign(size_t, size_t);
+extern void *__libc_valloc(size_t);
+extern void *__libc_pvalloc(size_t);
 
 static _Atomic int  g_active;  /* 1 while between start/end markers */
 static _Atomic long g_count;   /* allocations intercepted this guard window */
@@ -52,12 +96,19 @@ static long         g_max;     /* from MALLOCNESIA_MAX_ALLOCS env var */
 /* Per-thread flag to avoid re-entering our hook from fprintf inside the hook */
 static __thread int g_in_hook;
 
-static void resolve_fns(void) {
-    real_malloc  = (malloc_fn) dlsym(RTLD_NEXT, "malloc");
-    real_calloc  = (calloc_fn) dlsym(RTLD_NEXT, "calloc");
-    real_realloc = (realloc_fn)dlsym(RTLD_NEXT, "realloc");
-    real_free    = (free_fn)   dlsym(RTLD_NEXT, "free");
-    bootstrap_done = 1;
+/* One count, one line on stderr naming the function: ci/test-check-alloc.sh reads the
+ * name back, so a window's allocation is attributed to the entry point that made it.
+ * errno is the caller's: a failed write to stderr must not show through a successful
+ * allocation (posix_memalign's contract leaves errno alone). */
+static void count(const char *fn, size_t a, size_t b) {
+    if (atomic_load(&g_active) && !g_in_hook) {
+        int saved = errno;
+        g_in_hook = 1;
+        long n = atomic_fetch_add(&g_count, 1) + 1;
+        fprintf(stderr, "[mallocnesia] intercepted %s(%zu, %zu) — call #%ld\n", fn, a, b, n);
+        g_in_hook = 0;
+        errno = saved;
+    }
 }
 
 /* fixpp#448: PROOF OF INTERCEPTION.
@@ -101,9 +152,39 @@ static void mallocnesia_note(const char *what) {
     close(fd);
 }
 
+static const char *const k_hooked[] = {
+    "malloc", "calloc", "realloc", "aligned_alloc",
+    "memalign", "posix_memalign", "valloc", "pvalloc",
+};
+
+static const void *object_of(const void *p) {
+    Dl_info i = {0};
+    return p && dladdr(p, &i) ? i.dli_fbase : NULL;
+}
+
+/* The names this file defines must resolve here first and to glibc next. Re-derive the
+ * table with `nm -D --defined-only <libmallocnesia.so>` and exclude the guard markers.
+ * Names this file does not define resolve as they would without the preload. */
 __attribute__((constructor))
 static void mallocnesia_init(void) {
-    resolve_fns();
+    void *(*libc_malloc)(size_t) = __libc_malloc;
+    const void *self = object_of(&g_count);
+    const void *libc = object_of(*(void **)&libc_malloc);
+    for (size_t i = 0; i < sizeof k_hooked / sizeof *k_hooked; ++i) {
+        const char *name = k_hooked[i];
+        void *first = dlsym(RTLD_DEFAULT, name);
+        void *next = dlsym(RTLD_NEXT, name);
+        if (object_of(first) != self || object_of(next) != libc) {
+            Dl_info f = {0}, n = {0};
+            dladdr(first, &f);
+            dladdr(next, &n);
+            fprintf(stderr, "[mallocnesia] REFUSED: %s is defined first in %s and next in %s; "
+                    "it must be this interceptor's, then glibc's\n", name,
+                    f.dli_fname ? f.dli_fname : "-", n.dli_fname ? n.dli_fname : "-");
+            mallocnesia_note("refused");
+            _exit(1);
+        }
+    }
     mallocnesia_note("loaded");
 }
 
@@ -119,6 +200,8 @@ void alloc_guard_start(void) {
 
 void alloc_guard_end(void) {
     mallocnesia_note("end");
+    /* Counts the allocations that happen-before this call; work on another thread must
+     * be joined or awaited before the window closes. */
     atomic_store(&g_active, 0);
     long count = atomic_load(&g_count);
     if (count > g_max) {
@@ -132,54 +215,57 @@ void alloc_guard_end(void) {
 /* --- Allocator hooks --- */
 
 void *malloc(size_t size) {
-    if (!real_malloc) resolve_fns();
-    if (atomic_load(&g_active) && !g_in_hook) {
-        g_in_hook = 1;
-        long n = atomic_fetch_add(&g_count, 1) + 1;
-        fprintf(stderr, "[mallocnesia] intercepted malloc(%zu) — call #%ld\n", size, n);
-        g_in_hook = 0;
-    }
-    return real_malloc(size);
-}
-
-void free(void *ptr) {
-    /* Bootstrap allocations live in the static buffer — nothing to free */
-    if ((char *)ptr >= bootstrap && (char *)ptr < bootstrap + sizeof(bootstrap))
-        return;
-    if (!real_free) resolve_fns();
-    real_free(ptr);
+    count("malloc", size, 0);
+    return __libc_malloc(size);
 }
 
 void *calloc(size_t nmemb, size_t size) {
-    /* Serve bootstrap calls (dlsym init) from the static buffer */
-    if (!bootstrap_done) {
-        size_t total = nmemb * size;
-        if (bootstrap_pos + total <= sizeof(bootstrap)) {
-            void *p = bootstrap + bootstrap_pos;
-            bootstrap_pos += total;
-            memset(p, 0, total);
-            return p;
-        }
-        return NULL;
-    }
-    if (atomic_load(&g_active) && !g_in_hook) {
-        g_in_hook = 1;
-        long n = atomic_fetch_add(&g_count, 1) + 1;
-        fprintf(stderr, "[mallocnesia] intercepted calloc(%zu, %zu) — call #%ld\n",
-                nmemb, size, n);
-        g_in_hook = 0;
-    }
-    return real_calloc(nmemb, size);
+    count("calloc", nmemb, size);
+    return __libc_calloc(nmemb, size);
 }
 
 void *realloc(void *ptr, size_t size) {
-    if (!real_realloc) resolve_fns();
-    if (atomic_load(&g_active) && !g_in_hook) {
-        g_in_hook = 1;
-        long n = atomic_fetch_add(&g_count, 1) + 1;
-        fprintf(stderr, "[mallocnesia] intercepted realloc(%p, %zu) — call #%ld\n",
-                ptr, size, n);
-        g_in_hook = 0;
+    count("realloc", (size_t)(uintptr_t)ptr, size);
+    return __libc_realloc(ptr, size);
+}
+
+/* --- Aligned and page-aligned hooks (fixpp#497) --- */
+
+void *aligned_alloc(size_t align, size_t size) {
+    count("aligned_alloc", align, size);
+    /* glibc: EINVAL and NULL unless align is a power of two. */
+    if (align == 0 || (align & (align - 1)) != 0) {
+        errno = EINVAL;
+        return NULL;
     }
-    return real_realloc(ptr, size);
+    return __libc_memalign(align, size);
+}
+
+void *memalign(size_t align, size_t size) {
+    count("memalign", align, size);
+    return __libc_memalign(align, size);
+}
+
+int posix_memalign(void **memptr, size_t align, size_t size) {
+    count("posix_memalign", align, size);
+    /* glibc: EINVAL unless align is a power-of-two multiple of sizeof(void *); *memptr is
+     * written only on success. */
+    if (align == 0 || align % sizeof(void *) != 0
+        || ((align / sizeof(void *)) & (align / sizeof(void *) - 1)) != 0)
+        return EINVAL;
+    void *p = __libc_memalign(align, size);
+    if (!p) return ENOMEM;
+    *memptr = p;
+    return 0;
+}
+
+/* valloc/pvalloc take no alignment argument; the page size is the alignment. */
+void *valloc(size_t size) {
+    count("valloc", (size_t)sysconf(_SC_PAGESIZE), size);
+    return __libc_valloc(size);
+}
+
+void *pvalloc(size_t size) {
+    count("pvalloc", (size_t)sysconf(_SC_PAGESIZE), size);
+    return __libc_pvalloc(size);
 }

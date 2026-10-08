@@ -19,14 +19,16 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0; fail=0
-# mk <dir> <line>...  — build a synthetic ctest tree
+# mk <dir> <spec>...  — build a synthetic ctest tree. A spec is `<name>:<labels>`, or
+# `<name>:<labels>:<args>` to give the test's command arguments after /bin/true.
 mk() {
   local d="$TMP/$1"; shift
   mkdir -p "$d"; : > "$d/CTestTestfile.cmake"
-  local name labels
+  local name labels args
   for spec in "$@"; do
-    name="${spec%%:*}"; labels="${spec#*:}"
-    printf 'add_test(%s "/bin/true")\n' "$name" >> "$d/CTestTestfile.cmake"
+    name="${spec%%:*}"; labels="${spec#*:}"; args=""
+    case "$labels" in *:*) args="${labels#*:}"; labels="${labels%%:*}" ;; esac
+    printf 'add_test(%s "/bin/true" %s)\n' "$name" "$args" >> "$d/CTestTestfile.cmake"
     printf 'set_tests_properties(%s PROPERTIES LABELS "%s")\n' "$name" "$labels" \
       >> "$d/CTestTestfile.cmake"
   done
@@ -56,11 +58,44 @@ while IFS= read -r _e; do EXTRAS+=("${_e}:mallocnesia"); done < <(
   python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import check_mallocnesia_population as m; print("\n".join(m.DECLARED_EXTRAS))' "$REPO/tools")
 [ "${#EXTRAS[@]}" -gt 0 ] || { echo "FAIL: could not read DECLARED_EXTRAS from the checker"; exit 1; }
 
-# The checker also requires exactly one positive control in the label. Every fixture that
-# is meant to reach the LATER rules needs one, or it fails on this rule first and the arm
-# stops discriminating what it was written for. T4/T5 deliberately omit it — they assert
-# the vacuity rules, which fire before this one matters.
-CONTROL="alloc_guard_positive_control_mallocnesia:mallocnesia"
+# The checker also requires every DECLARED positive control in the label. Every fixture
+# that is meant to reach the LATER rules needs them, or it fails on this rule first and
+# the arm stops discriminating what it was written for. T4/T5 deliberately omit them —
+# they assert the vacuity rules, which fire before this one matters.
+#
+# ⚠️ SPELLED OUT, not derived from the checker (unlike EXTRAS above). The T7 arms assert
+# that each control's absence is reported BY NAME; reading the names from the checker
+# would let a control dropped from its declaration vanish from these arms too.
+CONTROL_NAMES=(
+  alloc_guard_positive_control_mallocnesia
+  alloc_guard_aligned_new_positive_control_mallocnesia
+  alloc_guard_calloc_positive_control_mallocnesia
+  alloc_guard_realloc_positive_control_mallocnesia
+  alloc_guard_aligned_alloc_positive_control_mallocnesia
+  alloc_guard_posix_memalign_positive_control_mallocnesia
+  alloc_guard_memalign_positive_control_mallocnesia
+  alloc_guard_valloc_positive_control_mallocnesia
+  alloc_guard_pvalloc_positive_control_mallocnesia
+)
+# The entry point each control's command must name, spelled out for the same reason
+# (empty: none is required).
+declare -A CONTROL_ENTRY=(
+  [alloc_guard_positive_control_mallocnesia]=malloc
+  [alloc_guard_aligned_new_positive_control_mallocnesia]=aligned_alloc,posix_memalign
+  [alloc_guard_calloc_positive_control_mallocnesia]=calloc
+  [alloc_guard_realloc_positive_control_mallocnesia]=realloc
+  [alloc_guard_aligned_alloc_positive_control_mallocnesia]=aligned_alloc
+  [alloc_guard_posix_memalign_positive_control_mallocnesia]=posix_memalign
+  [alloc_guard_memalign_positive_control_mallocnesia]=memalign
+  [alloc_guard_valloc_positive_control_mallocnesia]=valloc
+  [alloc_guard_pvalloc_positive_control_mallocnesia]=pvalloc
+)
+ctl() {  # ctl <control> [<entry>] — the control's spec, naming <entry> (default: its own)
+  local e="${2-${CONTROL_ENTRY[$1]}}"
+  echo "$1:mallocnesia:--expect-violation${e:+ --expect-entry $e}"
+}
+CONTROLS=()
+for _c in "${CONTROL_NAMES[@]}"; do CONTROLS+=("$(ctl "$_c")"); done
 
 # T0 — THE REAL TREE. Without this the suite proves only that the checker can say no.
 # Skipped (not failed) when no configured build is present, e.g. on a buildless lane.
@@ -73,15 +108,15 @@ fi
 
 check "T1 a gate missing the label is REPORTED, not tolerated" 1 \
   "do NOT carry the \`mallocnesia\` label" \
-  "$(mk t1 "$CONTROL" "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
+  "$(mk t1 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
 
 check "T2 an UNDECLARED label member fails (the label cannot become a catch-all)" 1 \
   "nor are declared in DECLARED_EXTRAS" \
-  "$(mk t2 "$CONTROL" "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t2 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
 
 check "T3 a STALE declared row fails (a declaration describing nothing)" 1 \
   "no longer carries the label" \
-  "$(mk t3 "$CONTROL" "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
+  "$(mk t3 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
 
 # ⚠️ THE ONE THAT MATTERS. Zero registered gates makes every set comparison trivially
 # true, and `ctest -L mallocnesia --no-tests=error` still exits 0 when ANY label member
@@ -97,23 +132,105 @@ check "T5 ZERO labelled tests is RED (a CI step that would run nothing)" 1 \
 
 check "T6 the happy case passes (the checker is not simply always-RED)" 0 \
   "named gate(s), all labelled" \
-  "$(mk t6 "$CONTROL" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t6 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
 
-# ── T7: the POSITIVE CONTROL's own membership. Codex r1 P2: the floor counts NAMES,
-# and a name is cheap — a decoy satisfies it while a real gate is deleted. The control
-# is the one member whose absence means nobody is checking that interception works, so
-# it is asserted by identity rather than left to arithmetic.
-check "T7a a missing positive control is REJECTED (the floor cannot see this)" 1 \
-  "expected exactly ONE positive control" \
-  "$(mk t7a "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+# ── T7: the POSITIVE CONTROLS' own membership. The floor counts NAMES,
+# and a name is cheap — a decoy satisfies it while a real gate is deleted. A control is
+# a member whose absence means nobody is checking that interception of its entry point
+# works, so each is asserted by identity rather than left to arithmetic.
+# One arm per control, each with every OTHER control present: no control's presence
+# may cover for another's absence, since each vouches for a different entry point.
+for _missing in "${CONTROL_NAMES[@]}"; do
+  _others=()
+  for _c in "${CONTROL_NAMES[@]}"; do [ "$_c" = "$_missing" ] || _others+=("$(ctl "$_c")"); done
+  check "T7a a missing control is rejected BY NAME: $_missing" 1 \
+    "MISSING from the \`mallocnesia\` label: $_missing" \
+    "$(mk "t7a-$_missing" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${_others[@]}" "${EXTRAS[@]}")"
+done
 
-check "T7b TWO positive controls are rejected (ambiguous: which one vouches?)" 1 \
-  "expected exactly ONE positive control" \
-  "$(mk t7b "a_mallocnesia:mallocnesia" "$CONTROL" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+check "T7b an UNDECLARED positive control is rejected (nobody would notice losing it)" 1 \
+  "UNDECLARED positive control(s) in the \`mallocnesia\` label: x_positive_control_mallocnesia" \
+  "$(mk t7b "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+
+# ── T7d/T7e: each control names its OWN hook. --expect-violation accepts any violation,
+# so without --expect-entry a control passes on an allocation that reached another hook.
+# One T7d arm per control that requires an entry, each with every other control intact.
+for _bare in "${CONTROL_NAMES[@]}"; do
+  [ -n "${CONTROL_ENTRY[$_bare]}" ] || continue
+  _set=()
+  for _c in "${CONTROL_NAMES[@]}"; do
+    if [ "$_c" = "$_bare" ]; then _set+=("$(ctl "$_c" "")"); else _set+=("$(ctl "$_c")"); fi
+  done
+  check "T7d a control that names no entry point is rejected BY NAME: $_bare" 1 \
+    "positive control $_bare does not require its own entry point" \
+    "$(mk "t7d-$_bare" "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+done
+
+_set=()
+for _c in "${CONTROL_NAMES[@]}"; do
+  if [ "$_c" = alloc_guard_memalign_positive_control_mallocnesia ]; then
+    _set+=("$(ctl "$_c" calloc)")
+  else
+    _set+=("$(ctl "$_c")")
+  fi
+done
+check "T7e a control that names ANOTHER control's entry point is rejected" 1 \
+  "positive control alloc_guard_memalign_positive_control_mallocnesia does not require its own entry point: its command names --expect-entry ['calloc']" \
+  "$(mk t7e "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+
+# The entry must be the VALUE of --expect-entry, not merely a token in the command.
+_set=()
+for _c in "${CONTROL_NAMES[@]}"; do
+  if [ "$_c" = alloc_guard_memalign_positive_control_mallocnesia ]; then
+    _set+=("$_c:mallocnesia:--expect-violation memalign --expect-entry calloc")
+  else
+    _set+=("$(ctl "$_c")")
+  fi
+done
+check "T7f an entry named elsewhere in the command does not count" 1 \
+  "positive control alloc_guard_memalign_positive_control_mallocnesia does not require its own entry point: its command names --expect-entry ['calloc']" \
+  "$(mk t7f "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+
+check "T7g duplicate gate or control names are rejected before a command stands in" 1 \
+  "duplicate test name(s)" \
+  "$(mk t7g "$(ctl alloc_guard_memalign_positive_control_mallocnesia "")" \
+            "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")"
+
+# ── T7h: no label member may carry a property that alters its verdict. Each arm is the
+# full happy set plus ONE property on ONE member; a broken control exits 1, so each of
+# these turns `ctest -L mallocnesia` green over it. One arm per property on a control,
+# and one on a plain gate and one on a declared extra, so the rule is not scoped to
+# controls only.
+with_prop() {  # with_prop <dir> <test> <property> <value> — append the property, echo dir
+  printf 'set_tests_properties(%s PROPERTIES %s %s)\n' "$2" "$3" "$4" >> "$1/CTestTestfile.cmake"
+  echo "$1"
+}
+_ctl=alloc_guard_memalign_positive_control_mallocnesia
+for _pv in "DISABLED TRUE" "WILL_FAIL TRUE" "SKIP_RETURN_CODE 1" \
+           "SKIP_REGULAR_EXPRESSION check_alloc" "PASS_REGULAR_EXPRESSION check_alloc"; do
+  _p="${_pv%% *}"
+  check "T7h a control carrying $_p is rejected BY NAME" 1 \
+    "$_ctl carries $_p." \
+    "$(with_prop "$(mk "t7h-$_p" "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+                 "$_ctl" $_pv)"
+done
+check "T7h a plain gate carrying SKIP_RETURN_CODE is rejected BY NAME" 1 \
+  "a_mallocnesia carries SKIP_RETURN_CODE." \
+  "$(with_prop "$(mk t7h-gate "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+               a_mallocnesia SKIP_RETURN_CODE 1)"
+check "T7h a declared extra carrying DISABLED is rejected BY NAME" 1 \
+  "${EXTRAS[0]%%:*} carries DISABLED." \
+  "$(with_prop "$(mk t7h-extra "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+               "${EXTRAS[0]%%:*}" DISABLED TRUE)"
+# Its happy half: a property that only ADDS failures is not rejected.
+check "T7h a member carrying TIMEOUT only is accepted" 0 \
+  "named gate(s), all labelled" \
+  "$(with_prop "$(mk t7h-timeout "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+               "$_ctl" TIMEOUT 30)"
 
 # ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
-out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "$CONTROL" "${EXTRAS[@]}")" --min-gates 5 2>&1)"; rc=$?
-if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 5"; then
+out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 50"; then
   echo "ok    T7c the --min-gates floor fires when the population SHRINKS"; pass=$((pass+1))
 else
   echo "FAIL  T7c floor did not fire: rc=$rc"; echo "$out" | sed 's/^/      /' | head -2; fail=$((fail+1))
@@ -162,6 +279,31 @@ if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q "set LD_PRELOAD directly" \
 else
   echo "FAIL  T8b rc=$rc (want 1, finding reported, no traceback, ASCII-only output)"
   echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
+fi
+
+# ── T9: the raw-preload scanner's only exemption is a comment line (#497) ─────
+# A raw preload inside `if(FALSE)` was once exempt, for disabled companions kept as
+# restore targets. Those are deleted, and so is the exemption: T9a must be REPORTED.
+# T9b is its positive control, so T9a cannot pass by the scanner reporting everything.
+W="$TMP/iffalse/tests/x"; mkdir -p "$W" "$TMP/iffalse/tools"
+printf 'if(FALSE)\n  set_property(TEST t APPEND PROPERTY ENVIRONMENT "LD_PRELOAD=/x.so")\nendif()\n' > "$W/CMakeLists.txt"
+cp "$RAW" "$TMP/iffalse/tools/c.py"
+out="$(cd "$TMP/iffalse" && python3 tools/c.py 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q "tests/x/CMakeLists.txt:2"; then
+  echo "ok    T9a a raw preload inside if(FALSE) is REPORTED (no disabled-block exemption)"
+  pass=$((pass+1))
+else
+  echo "FAIL  T9a rc=$rc (want 1 naming tests/x/CMakeLists.txt:2)"; echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
+fi
+
+C="$TMP/comment/tests/x"; mkdir -p "$C" "$TMP/comment/tools"
+printf '# set_property(TEST t APPEND PROPERTY ENVIRONMENT "LD_PRELOAD=/x.so")\nadd_test(NAME t COMMAND true)\n' > "$C/CMakeLists.txt"
+cp "$RAW" "$TMP/comment/tools/c.py"
+out="$(cd "$TMP/comment" && python3 tools/c.py 2>&1)"; rc=$?
+if [ "$rc" = 0 ]; then
+  echo "ok    T9b a commented-out raw preload stays exempt"; pass=$((pass+1))
+else
+  echo "FAIL  T9b rc=$rc (want 0)"; echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
 fi
 
 echo
