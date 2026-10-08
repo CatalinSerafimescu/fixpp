@@ -155,15 +155,10 @@ fixpp_add_mallocnesia_test(
   LABELS "alloc_guard;positive-control;448")
 
 # fixpp#497: one control per hooked entry point other than malloc, plus an over-aligned
-# `new`. The control above plants a malloc, so it vouches for the malloc hook only. Each entry
-# below plants through the entry point its PLANTED_ENTRY names, so a hook that stops
-# counting reddens the entry naming it. tools/check_mallocnesia_population.py declares
-# each control by name, with the EXPECT_ENTRY its command must carry. Built only where
-# the gates register: memalign, valloc and pvalloc are glibc functions.
-#
-# Every libc plant names its own hook in EXPECT_ENTRY, so a planted_entry_witness.cpp row
-# that calls another entry point fails its control. aligned_new names none: which aligned
-# entry point an over-aligned `new` reaches is the C++ runtime's choice.
+# `new`. The control above plants a malloc, so it vouches for the malloc hook only. Each
+# libc entry below plants through the entry point its PLANTED_ENTRY names, so a hook that
+# stops counting reddens the entry naming it. The aligned_new control names the set of
+# aligned entry points a C++ runtime's over-aligned `new` reaches.
 if(FIXPP_MALLOCNESIA_SUPPORTED)
   add_executable(planted_entry_witness planted_entry_witness.cpp)
   target_include_directories(planted_entry_witness PRIVATE "${CMAKE_SOURCE_DIR}/tests")
@@ -173,6 +168,7 @@ if(FIXPP_MALLOCNESIA_SUPPORTED)
     NAME alloc_guard_aligned_new_positive_control_mallocnesia
     TARGET planted_entry_witness
     EXPECT_VIOLATION
+    EXPECT_ENTRY aligned_alloc,posix_memalign
     LABELS "alloc_guard;positive-control;497"
     ENVIRONMENT "PLANTED_ENTRY=aligned_new")
   foreach(_plant IN ITEMS calloc realloc aligned_alloc posix_memalign memalign valloc

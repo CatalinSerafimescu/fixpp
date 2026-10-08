@@ -97,13 +97,23 @@ include("${CMAKE_CURRENT_LIST_DIR}/FixppMallocnesiaSanitizerMatch.cmake")
 fixpp_mallocnesia_flags_name_sanitizer(_mn_sanitizer "${_mn_flags}")
 
 if(UNIX AND NOT APPLE AND NOT _mn_sanitizer)
-  set(FIXPP_MALLOCNESIA_SUPPORTED TRUE)
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <stdlib.h>
+#ifndef __GLIBC__
+#error not glibc
+#endif
+int main(void) { return 0; }" FIXPP_MALLOCNESIA_GLIBC)
+  set(FIXPP_MALLOCNESIA_SUPPORTED ${FIXPP_MALLOCNESIA_GLIBC})
 else()
   set(FIXPP_MALLOCNESIA_SUPPORTED FALSE)
   if(_mn_sanitizer)
     message(STATUS "fixpp: mallocnesia gates not registered — a sanitizer build "
                    "(${_mn_sanitizer}); its allocator would make them pass vacuously")
   endif()
+endif()
+if(UNIX AND NOT APPLE AND NOT _mn_sanitizer AND NOT FIXPP_MALLOCNESIA_SUPPORTED)
+  message(STATUS "fixpp: mallocnesia gates not registered — the interceptor forwards to "
+                 "glibc's allocator internals, and the controls call glibc-only entry points")
 endif()
 
 if(FIXPP_MALLOCNESIA_SUPPORTED AND NOT TARGET mallocnesia)
@@ -126,6 +136,7 @@ if(FIXPP_MALLOCNESIA_SUPPORTED AND NOT TARGET mallocnesia)
   # both, so only the coverage pair is conditional.
   target_compile_options(mallocnesia PRIVATE -fno-sanitize=all)
   target_link_options(mallocnesia PRIVATE -fno-sanitize=all)
+  target_link_libraries(mallocnesia PRIVATE ${CMAKE_DL_LIBS})
   if(CMAKE_C_COMPILER_ID MATCHES "Clang")
     target_compile_options(mallocnesia PRIVATE -fno-profile-instr-generate
                                                -fno-coverage-mapping)

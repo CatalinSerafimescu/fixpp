@@ -143,7 +143,7 @@ reg_cell() {
   local envs=()
   while [ "$1" != "--" ]; do envs+=("$1"); shift; done
   shift
-  if ! env "${envs[@]}" cmake -S "$TMP/proj" -B "$b" \
+  if ! env CCACHE_DISABLE=1 "${envs[@]}" cmake -S "$TMP/proj" -B "$b" \
          -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY "$@" >"$b.log" 2>&1; then
     echo "FAIL  $name: configure failed"; tail -3 "$b.log" | sed 's/^/      /'; rm -rf "$b"; return
   fi
@@ -230,6 +230,8 @@ endif()
 set(_mn_flag_vars' 'set(_mn_flag_vars' \
     'if(UNIX AND NOT APPLE AND NOT _mn_sanitizer)' 'enable_language(C)
 if(UNIX AND NOT APPLE AND NOT _mn_sanitizer)'
+  wmutant M7 "glibc probe inverted" "clean" \
+    '__GLIBC__' '__GLIBC_NOT__'
 else
   echo "FAIL  registration cells: no C or C++ compiler; refusing to skip"; fail=$((fail+1))
 fi

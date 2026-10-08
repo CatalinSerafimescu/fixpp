@@ -81,7 +81,7 @@ CONTROL_NAMES=(
 # (empty: none is required).
 declare -A CONTROL_ENTRY=(
   [alloc_guard_positive_control_mallocnesia]=malloc
-  [alloc_guard_aligned_new_positive_control_mallocnesia]=
+  [alloc_guard_aligned_new_positive_control_mallocnesia]=aligned_alloc,posix_memalign
   [alloc_guard_calloc_positive_control_mallocnesia]=calloc
   [alloc_guard_realloc_positive_control_mallocnesia]=realloc
   [alloc_guard_aligned_alloc_positive_control_mallocnesia]=aligned_alloc
@@ -190,6 +190,11 @@ done
 check "T7f an entry named elsewhere in the command does not count" 1 \
   "positive control alloc_guard_memalign_positive_control_mallocnesia does not require its own entry point: its command names --expect-entry ['calloc']" \
   "$(mk t7f "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+
+check "T7g duplicate gate or control names are rejected before a command stands in" 1 \
+  "duplicate test name(s)" \
+  "$(mk t7g "$(ctl alloc_guard_memalign_positive_control_mallocnesia "")" \
+            "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")"
 
 # ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
 out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?

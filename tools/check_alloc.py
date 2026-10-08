@@ -77,9 +77,10 @@ def main() -> int:
                              "this is not the same as ctest's WILL_FAIL.")
     parser.add_argument("--expect-entry", metavar="FN", default=None,
                         help="With --expect-violation only: the violation must have been "
-                             "counted by the interceptor's FN hook (it names the hook on "
-                             "stderr). A control vouches for one entry point; without this, "
-                             "a plant that reaches a different hook still passes it.")
+                             "counted by one of the interceptor's FN[,FN...] hooks (it "
+                             "names the hook on stderr). A control vouches for its entry "
+                             "point set; without this, a plant that reaches a different "
+                             "hook still passes it.")
     parser.add_argument("--allow-missing", action="store_true",
                         help="Run UNINSTRUMENTED when the interceptor is absent. Local "
                              "convenience only — this is the fail-open behaviour fixpp#448 "
@@ -149,6 +150,14 @@ def main() -> int:
                 if pid == str(child_pid):
                     notes.add(what)
 
+        if "refused" in notes:
+            print(f"[check_alloc] FAIL: the interceptor REFUSED "
+                  f"{os.path.basename(binary)}: another allocator serves malloc in its "
+                  f"process (the interceptor's own stderr line names it), so these hooks "
+                  f"would not see every allocation and a pass would mean nothing.",
+                  file=sys.stderr)
+            return 2
+
         if "loaded" not in notes:
             print(f"[check_alloc] FAIL: the interceptor left no witness — it was NOT loaded "
                   f"into {os.path.basename(binary)}, so nothing was intercepted and the "
@@ -204,8 +213,13 @@ def main() -> int:
                   f"and prove nothing; this control requires the interceptor's own "
                   f"verdict.", file=sys.stderr)
             return 1
-        if args.expect_entry and f"[mallocnesia] intercepted {args.expect_entry}(" \
-                not in (result.stderr or ""):
+        if args.expect_entry:
+            entries = args.expect_entry.split(",")
+            seen = any(f"[mallocnesia] intercepted {entry}(" in (result.stderr or "")
+                       for entry in entries)
+        else:
+            seen = True
+        if not seen:
             print(f"[check_alloc] FAIL: the interceptor reported a violation, but no "
                   f"allocation was counted by its {args.expect_entry} hook. This control "
                   f"vouches for {args.expect_entry}; a plant that reached another hook "

@@ -28,6 +28,7 @@ run nothing. This is the single recurring defect class in this repo: an instrume
 reports clean because it could not report otherwise.
 """
 import argparse
+import collections
 import json
 import re
 import subprocess
@@ -51,23 +52,22 @@ DECLARED_EXTRAS = {
         "will never match the name pattern.",
 }
 
-# The positive controls, by NAME, each with the entry point its command must name in
-# `--expect-entry` (None: none is required) and the allocation path it proves the
+# The positive controls, by NAME, each with the entry point set its command must name in
+# `--expect-entry` and the allocation path it proves the
 # interceptor sees. A control vouches only for the entry point it plants: the malloc
 # control passed while every aligned entry point was unhooked (fixpp#497), so one control
 # cannot stand in for another. Any label member whose name carries `positive_control` must
 # be a row here, and every row must be registered.
 #
-# The entry is SPELLED OUT here rather than read from the CMake registration, so dropping
-# EXPECT_ENTRY there, or pointing it at another hook, is a failure here rather than a
-# control that quietly accepts any violation. aligned_new requires none: which aligned
-# entry point an over-aligned `new` reaches is the C++ runtime's choice.
+# The entry set is SPELLED OUT here rather than read from the CMake registration, so
+# dropping EXPECT_ENTRY there, or pointing it at another hook, is a failure here rather
+# than a control that quietly accepts any violation.
 POSITIVE_CONTROLS = {
     "alloc_guard_positive_control_mallocnesia": (
         "malloc", "a plain malloc (tests/alloc_guard/planted_alloc_witness.cpp)"),
     "alloc_guard_aligned_new_positive_control_mallocnesia": (
-        None, "an over-aligned operator new, which reaches libc through an aligned entry "
-              "point (tests/alloc_guard/planted_entry_witness.cpp)"),
+        "aligned_alloc,posix_memalign", "an over-aligned operator new, which reaches libc "
+        "through an aligned entry point (tests/alloc_guard/planted_entry_witness.cpp)"),
     "alloc_guard_calloc_positive_control_mallocnesia": (
         "calloc", "calloc (tests/alloc_guard/planted_entry_witness.cpp)"),
     "alloc_guard_realloc_positive_control_mallocnesia": (
@@ -98,14 +98,14 @@ def ctest_names(build_dir: str, selector: str, value: str) -> set[str]:
     return set(NAME_RE.findall(out.stdout))
 
 
-def ctest_commands(build_dir: str, label: str) -> dict[str, list[str]]:
+def ctest_label_tests(build_dir: str, label: str) -> list[dict]:
     out = subprocess.run(["ctest", "--test-dir", build_dir, "--show-only=json-v1",
                           "-L", label], capture_output=True, text=True)
     if out.returncode != 0:
         print(f"error: ctest --show-only=json-v1 -L {label} failed rc={out.returncode}\n"
               f"{out.stderr}", file=sys.stderr)
         sys.exit(2)
-    return {t["name"]: t.get("command", []) for t in json.loads(out.stdout).get("tests", [])}
+    return json.loads(out.stdout).get("tests", [])
 
 
 def main() -> int:
@@ -175,14 +175,24 @@ def main() -> int:
             + ". Add a POSITIVE_CONTROLS row naming the allocation path it proves, or "
               "rename it: a control nobody declared is one nobody will notice losing.")
 
-    # (0c) EACH CONTROL NAMES ITS OWN HOOK. --expect-violation accepts any violation, so a
+    # (0c) DUPLICATES BEFORE COMMAND LOOKUP. The command pin below reads one command by
+    # name, so a duplicate can stand in for a different test with the same name.
+    label_tests = ctest_label_tests(args.build_dir, "mallocnesia")
+    dup_counts = collections.Counter(t["name"] for t in label_tests)
+    duplicates = sorted(n for n, c in dup_counts.items()
+                        if c > 1 and (n in by_name or n in POSITIVE_CONTROLS))
+    if duplicates:
+        failures.append(
+            "duplicate test name(s) in the mallocnesia label: " + ", ".join(duplicates)
+            + ". The entry pin reads one command per name, so a duplicate's command can "
+              "stand in for another's.")
+
+    # (0d) EACH CONTROL NAMES ITS OWN HOOK. --expect-violation accepts any violation, so a
     # control whose plant reaches a different hook (a memalign row that calls calloc)
     # passes; `--expect-entry <fn>` is what ties it to the entry point it vouches for.
-    commands = ctest_commands(args.build_dir, "mallocnesia")
+    commands = {t["name"]: t.get("command", []) for t in label_tests}
     for name in sorted(set(POSITIVE_CONTROLS) & controls):
         entry = POSITIVE_CONTROLS[name][0]
-        if entry is None:
-            continue
         cmd = commands.get(name, [])
         named = [cmd[i + 1] for i in range(len(cmd) - 1) if cmd[i] == "--expect-entry"]
         if named != [entry]:

@@ -24,6 +24,7 @@ command -v "$CC" >/dev/null || { echo "SKIP: no C compiler"; exit 0; }
 # The real interceptor, built from the shipped source — NOT a stand-in. A fake would
 # make every arm below a test of the fake.
 "$CC" -O1 -fPIC -shared -o "$TMP/libmn.so" "$REPO/tools/mallocnesia/mallocnesia.c" \
+  -ldl \
   2>"$TMP/cc.log" || { echo "FAIL: could not build the interceptor"; cat "$TMP/cc.log"; exit 1; }
 
 # Subject binaries. The markers are weak-undefined: the preload defines them, and
@@ -45,6 +46,16 @@ EOF
 "$CC" -O1 -o "$TMP/clean" "$TMP/clean.c"
 "$CC" -O1 -o "$TMP/dirty" "$TMP/dirty.c"
 printf 'not an elf\n' > "$TMP/bogus.so"
+
+cat > "$TMP/foreign.c" <<'EOF'
+#include <stddef.h>
+extern void *__libc_malloc(size_t);
+void *malloc(size_t n) { return __libc_malloc(n); }
+EOF
+"$CC" -O1 -fPIC -shared -o "$TMP/libforeign.so" "$TMP/foreign.c"
+"$CC" -O1 -o "$TMP/foreign_behind" "$TMP/clean.c" -Wl,--no-as-needed \
+  -L"$TMP" -lforeign -Wl,-rpath,"$TMP"
+"$CC" -O1 -o "$TMP/foreign_front" "$TMP/clean.c" "$TMP/foreign.c"
 
 # ⚠️ Codex r1 P1-B's mutant, as a permanent arm. The guard markers are WEAK UNDEFINED in
 # the test binaries, so ANY strong definition in the link closure beats the preload: the
@@ -173,6 +184,14 @@ int main(void){
   if(alloc_guard_end) alloc_guard_end(); return 0; }
 EOF
 "$CC" -O1 -w -o "$TMP/entry" "$TMP/entry.c"
+
+rows_match() {
+  cmp -s "$1" "$2" || {
+    echo "rows differ from unhooked glibc (< glibc, > preloaded):"
+    diff "$1" "$2" | grep '^[<>]' | head -6
+    return 1
+  }
+}
 
 for fn_want in aligned_alloc:aligned_alloc posix_memalign:posix_memalign \
                memalign:memalign valloc:valloc pvalloc:pvalloc calloc:calloc \
@@ -329,12 +348,7 @@ oracle_diff() {  # oracle_diff <interceptor> <mode> — rc 0 iff instrumented an
   grep -v '^pid ' "$TMP/oracle-$mode.plain"  >"$TMP/oracle-$mode.p"
   grep -v '^pid ' "$TMP/oracle-$mode.hooked" >"$TMP/oracle-$mode.h"
   [ -s "$TMP/oracle-$mode.p" ] || { echo "the unhooked oracle wrote no rows"; return 1; }
-  n="$(diff "$TMP/oracle-$mode.p" "$TMP/oracle-$mode.h" | grep -c '^>')"
-  if [ "$n" != 0 ]; then
-    echo "$n row(s) differ from unhooked glibc (< glibc, > preloaded):"
-    diff "$TMP/oracle-$mode.p" "$TMP/oracle-$mode.h" | grep '^[<>]' | head -6
-    return 1
-  fi
+  rows_match "$TMP/oracle-$mode.p" "$TMP/oracle-$mode.h" || return 1
   echo "instrumented, and every row matches unhooked glibc"
 }
 check "T12a outside a window, every hook returns what glibc returns" 0 \
@@ -343,6 +357,9 @@ check "T12b inside a window with stderr closed, errno and results are glibc's" 0
   "every row matches unhooked glibc" -- oracle_diff "$TMP/libmn.so" window
 check "T12d a preload that was ignored is refused, not read as identical" 1 \
   "the run was not instrumented" -- oracle_diff "$TMP/nope.so" window
+head -n 5 "$TMP/oracle-plain.p" > "$TMP/oracle-trunc.h"
+check "T12e a preloaded run that lost rows is a difference, not a match" 1 \
+  "rows differ" -- rows_match "$TMP/oracle-plain.p" "$TMP/oracle-trunc.h"
 
 oracle_named() {  # oracle_named <interceptor> — every hook names its own calls
   local err fn missing=""
@@ -373,6 +390,21 @@ check "T13c --expect-entry without --expect-violation is refused" 2 \
   "--expect-entry applies only to a positive control" -- \
   env ENTRY_FN=memalign python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so" \
     --expect-entry memalign
+check "T13d a control may name the aligned hook set it can reach" 0 \
+  "PASS (positive control)" -- \
+  env ENTRY_FN=posix_memalign python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so" \
+    --expect-violation --expect-entry aligned_alloc,posix_memalign
+check "T13e a control that misses the aligned hook set fails by name" 1 \
+  "no allocation was counted by its aligned_alloc,posix_memalign hook" -- \
+  env ENTRY_FN=calloc python3 "$CHECK" --binary "$TMP/entry" --mallocnesia "$TMP/libmn.so" \
+    --expect-violation --expect-entry aligned_alloc,posix_memalign
+
+check "T14a a process with another allocator behind the interceptor is REFUSED" 2 \
+  "the interceptor REFUSED" -- \
+  python3 "$CHECK" --binary "$TMP/foreign_behind" --mallocnesia "$TMP/libmn.so"
+check "T14b a process whose executable defines malloc ahead of the interceptor is REFUSED" 2 \
+  "the interceptor REFUSED" -- \
+  python3 "$CHECK" --binary "$TMP/foreign_front" --mallocnesia "$TMP/libmn.so"
 
 echo
 echo "test-check-alloc: $pass passed, $fail failed"

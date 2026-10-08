@@ -105,8 +105,7 @@ each hook runs on a CI lane. Each libc control also names its own hook (`EXPECT_
 `check_alloc.py --expect-entry`), and `POSITIVE_CONTROLS` spells that entry out, so a
 `planted_entry_witness.cpp` row that calls a different entry point fails its control. Rejected:
 `--expect-violation` alone — it accepts any violation, so a memalign control planting a calloc
-passed. The over-aligned `new` control names no hook: which aligned entry point it reaches is the
-C++ runtime's choice.
+passed. The over-aligned `new` control names the aligned hook set a C++ runtime may reach.
 
 **Why the interceptor forwards to glibc's `__libc_*`, not `dlsym(RTLD_NEXT)`.** A library
 constructor that runs before the interceptor's can make the process's first hooked call, so a hook
@@ -116,10 +115,14 @@ an allocating `dlsym`: shared state that was unsynchronised across threads and `
 unchecked arithmetic in the buffer. Calling glibc's exported `__libc_malloc` and its siblings
 directly leaves no state to race. Rejected: synchronising the lazy route (a once-initialised table,
 a per-thread marker, fork handling, a checked bump allocator), since each piece needs its own test
-seam to protect state that need not exist. The cost is that the interceptor is glibc-only: glibc
-has no `__libc_` twin for `aligned_alloc` or `posix_memalign`, so those two hooks copy glibc's
-argument validation, and `ci/test-check-alloc.sh`'s T12 compares every hook against unhooked glibc
-to catch the copy drifting. A libc without these exports fails every gate closed, not open.
+seam to protect state that need not exist. Rejected: restoring a `free` hook, since it fixes pairing
+only for the standard names; a block from another allocator's own API would then reach glibc's
+`free`. The cost is that the interceptor is glibc-only: glibc has no `__libc_` twin for
+`aligned_alloc` or `posix_memalign`, so those two hooks copy glibc's argument validation, and
+`ci/test-check-alloc.sh`'s T12 compares every hook against unhooked glibc to catch the copy
+drifting. A configure probe keeps the gates unregistered on a non-glibc libc. At run time, the
+constructor refuses a process whose executable or link closure makes another allocator serve
+`malloc`, because these hooks would not see every allocation and free pairing would be undefined.
 
 **Why the guard reads any non-empty `-fsanitize=`, not named options.** A sanitizer installs its own allocator
 ahead of the interposer, so a gate registered on a sanitizer build passes vacuously. Naming

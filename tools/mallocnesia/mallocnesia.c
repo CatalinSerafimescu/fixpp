@@ -42,6 +42,7 @@
  *                 --mallocnesia <build>/lib/libmallocnesia.so
  */
 #define _GNU_SOURCE
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdatomic.h>
@@ -50,9 +51,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-/* claim-ok: a supersession pointer naming the decision, per the .claude/CLAUDE.md rule
- * PR #557 Gate B r2 FQ-A — direct __libc_* forwarding; supersedes Gate B r1 FQ-2's lazy
- * dlsym resolution.
+/* claim-ok: PR #557 Gate B r2 FQ-A — direct __libc_* forwarding; Gate B r3 FQ-E — refuse mixed allocator processes; supersedes Gate B r1 FQ-2's lazy dlsym resolution.
  *
  * Every hook forwards to glibc's own allocator by the __libc_* names glibc exports, so
  * nothing is resolved at run time: there is no function table to fill, no window in which
@@ -61,16 +60,16 @@
  * (ci/test-check-alloc.sh T11) is therefore an ordinary call. The rejected alternative
  * kept dlsym(RTLD_NEXT) and synchronised it (a once-initialised table, a per-thread
  * "resolving" marker, fork handling, a static buffer for an allocating dlsym), each piece
- * needing a test seam of its own.
+ * needing a test seam of its own. Restoring a free hook would pair the standard names
+ * only; a block from another allocator's own API would then reach glibc's free.
  *
  * The CONDITION this rests on: the libc exports __libc_malloc, __libc_calloc,
  * __libc_realloc, __libc_memalign, __libc_valloc and __libc_pvalloc as public, linkable
  * symbols; no header declares them, hence the declarations below. Re-check a libc with
  * `nm -D --defined-only <libc.so> | grep ' __libc_'`, and `objdump -T <libc.so>` to see
  * that each shares its address with the public name it stands for. A libc without them
- * leaves these references undefined in the .so (it is not linked with -z defs, so the
- * tree still builds), and every gate then fails at run time rather than passing:
- * check_alloc.py refuses a run that left no witness notes.
+ * gates are registered only on glibc. At run time, glibc must serve the standard names
+ * this file does not define, and nothing may define malloc ahead of this file.
  *
  * glibc has no __libc_ twin for aligned_alloc or posix_memalign, so those two hooks
  * validate their arguments as glibc does and forward to __libc_memalign. T12 in
@@ -146,8 +145,28 @@ static void mallocnesia_note(const char *what) {
     close(fd);
 }
 
+/* Only glibc's allocator may serve the standard names this file does not define (free,
+ * malloc_usable_size, ...), and nothing may define malloc ahead of this file. Otherwise
+ * the process allocates or frees through code these hooks never see. */
 __attribute__((constructor))
 static void mallocnesia_init(void) {
+    Dl_info self = {0}, front = {0}, next = {0};
+    void *f = dlsym(RTLD_DEFAULT, "malloc");
+    void *n = dlsym(RTLD_NEXT, "malloc");
+    void *(*next_malloc)(size_t);
+    *(void **)&next_malloc = n;
+
+    dladdr((void *)&g_count, &self);
+    dladdr(f, &front);
+    dladdr(n, &next);
+    if (front.dli_fbase != self.dli_fbase || next_malloc != __libc_malloc) {
+        fprintf(stderr, "[mallocnesia] REFUSED: malloc is defined in %s ahead of this "
+                "interceptor and in %s behind it; only glibc may stand behind it\n",
+                front.dli_fname ? front.dli_fname : "?",
+                next.dli_fname ? next.dli_fname : "?");
+        mallocnesia_note("refused");
+        _exit(1);
+    }
     mallocnesia_note("loaded");
 }
 
@@ -163,6 +182,8 @@ void alloc_guard_start(void) {
 
 void alloc_guard_end(void) {
     mallocnesia_note("end");
+    /* Counts the allocations that happen-before this call; work on another thread must
+     * be joined or awaited before the window closes. */
     atomic_store(&g_active, 0);
     long count = atomic_load(&g_count);
     if (count > g_max) {

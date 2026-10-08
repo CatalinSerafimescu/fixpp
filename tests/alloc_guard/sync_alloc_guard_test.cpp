@@ -8,12 +8,13 @@
 //
 // THE WINDOW: two long-lived coroutines contend for one async_mutex on one io_context.
 // The holder acquires, holds across two executor round-trips, releases; the waiter
-// yields once, then acquires — finding the mutex held, so it suspends on the embedded
-// (mr==nullptr) waiter path and is resumed by the holder's release. The window opens
-// inside the holder after a warm-up and closes when it finishes, so it covers the
-// acquire, suspend, hand-off and resumption of the steady state, including the
-// executor resumptions they go through. Creating the coroutines (co_spawn) and starting
-// the io_context happen before it opens.
+// yields once, then acquires. The holder yields more executor turns while holding than
+// the waiter yields before its attempt, so an immediate waiter grant would overlap the
+// hold; a correct grant suspends on the embedded (mr==nullptr) waiter path and resumes
+// after release. The window opens inside the holder after a warm-up and closes when it
+// finishes, so it covers the acquire, suspend, hand-off and resumption of the steady
+// state, including the executor resumptions they go through. Creating the coroutines
+// (co_spawn) and starting the io_context happen before it opens.
 //
 // Why long-lived coroutines: a co_spawn allocates its frame and its dispatch op through
 // asio's per-thread recycling allocator, which falls through to the global heap
@@ -64,6 +65,7 @@ TEST(SyncAllocGuard, ContendedEmbeddedPathNoHeapAlloc) {
     bool held = false;
     int contended = 0;
     int granted = 0;
+    int overlaps = 0;
     int lock_failures = 0;
 
     auto holder = [&]() -> asio::awaitable<void> {
@@ -84,6 +86,7 @@ TEST(SyncAllocGuard, ContendedEmbeddedPathNoHeapAlloc) {
             auto g = co_await mtx.async_lock(nullptr);
             if (g.has_value()) {
                 ++granted;
+                if (held) ++overlaps;
             } else {
                 ++lock_failures;
             }
@@ -98,6 +101,7 @@ TEST(SyncAllocGuard, ContendedEmbeddedPathNoHeapAlloc) {
 
     EXPECT_EQ(lock_failures, 0);
     EXPECT_EQ(granted, kIterations) << "Not all waiter acquisitions completed";
+    EXPECT_EQ(overlaps, 0) << "the waiter was granted while the holder held the mutex";
     // The window measures the CONTENDED path only if the waiter usually found the
     // mutex held; otherwise the window covered the uncontended fast path.
     EXPECT_GT(contended, kIterations / 2) << "contended=" << contended;
