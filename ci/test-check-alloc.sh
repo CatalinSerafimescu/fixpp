@@ -23,7 +23,7 @@ command -v "$CC" >/dev/null || { echo "SKIP: no C compiler"; exit 0; }
 
 # The real interceptor, built from the shipped source — NOT a stand-in. A fake would
 # make every arm below a test of the fake.
-"$CC" -O1 -fPIC -shared -ldl -o "$TMP/libmn.so" "$REPO/tools/mallocnesia/mallocnesia.c" \
+"$CC" -O1 -fPIC -shared -o "$TMP/libmn.so" "$REPO/tools/mallocnesia/mallocnesia.c" \
   2>"$TMP/cc.log" || { echo "FAIL: could not build the interceptor"; cat "$TMP/cc.log"; exit 1; }
 
 # Subject binaries. The markers are weak-undefined: the preload defines them, and
@@ -166,6 +166,7 @@ int main(void){
   else if (!strcmp(w, "memalign"))       p = memalign(64, 64);
   else if (!strcmp(w, "valloc"))         p = valloc(64);
   else if (!strcmp(w, "pvalloc"))        p = pvalloc(64);
+  else if (!strcmp(w, "calloc"))         p = calloc(1, 64);
   else if (!strcmp(w, "reallocarray"))   p = reallocarray(pre, 512, 8);
   else if (!strcmp(w, "strdup"))         p = strdup("planted");
   else return 2;
@@ -174,7 +175,7 @@ EOF
 "$CC" -O1 -w -o "$TMP/entry" "$TMP/entry.c"
 
 for fn_want in aligned_alloc:aligned_alloc posix_memalign:posix_memalign \
-               memalign:memalign valloc:valloc pvalloc:pvalloc \
+               memalign:memalign valloc:valloc pvalloc:pvalloc calloc:calloc \
                reallocarray:realloc strdup:malloc; do
   fn="${fn_want%%:*}"; want="${fn_want#*:}"
   check "T10 $fn inside the window is counted as $want" 1 \
@@ -184,15 +185,18 @@ done
 
 # ── T11: a hook called BEFORE the interceptor's constructor returns real memory ──
 # ld.so runs a needed library's constructor before the preloaded interceptor's, so an
-# allocation made there reaches a hook whose real function is not resolved yet. Each
-# arm makes ONE entry point the process's first hooked call, from such a constructor,
-# and asks for more than the interceptor's static buffer holds: the hook must resolve
-# and forward, not serve the call from that buffer. The constructor stays pure C and
-# its planted call comes first: a malloc ahead of it (stdio's, libstdc++'s start-up)
-# would resolve every hook, and the arm would then measure nothing. `main` reads the constructor's verdict, which
-# also keeps the library linked under --as-needed, and returns before the window when it
-# failed, so check_alloc.py refuses rather than reporting interception. The malloc arm
-# is the control: it shows the fixture itself works, so a failing arm names its hook.
+# allocation made there reaches a hook before the interceptor has run any code of its
+# own. Each arm makes ONE entry point the process's first hooked call, from such a
+# constructor, and asks for a block larger than a small static reserve would hold: the
+# hook must hand back real memory from glibc without depending on its own constructor.
+# A hook that relies on state its own constructor, or an earlier call, fills in fails
+# it. The constructor stays pure C and its planted call comes first,
+# so the call under test is the process's first through a hook rather than one after
+# stdio's or libstdc++'s start-up allocations. `main` reads the constructor's verdict,
+# which also keeps the library linked under --as-needed, and returns before the window
+# when it failed, so check_alloc.py refuses rather than reporting interception. The
+# malloc arm is the control: it shows the fixture itself works, so a failing arm names
+# its hook.
 cat > "$TMP/early.c" <<'EOF'
 #define _GNU_SOURCE
 #include <malloc.h>
@@ -235,6 +239,123 @@ for fn in aligned_alloc posix_memalign memalign valloc pvalloc calloc malloc; do
     "interception confirmed" -- \
     python3 "$CHECK" --binary "$TMP/early_$fn" --mallocnesia "$TMP/libmn.so"
 done
+
+# ── T12: every hook returns what glibc returns — a differential oracle ──────────
+# The interceptor forwards to glibc's allocator, and for aligned_alloc and posix_memalign
+# it re-implements glibc's argument validation. The oracle calls each hooked entry point
+# over a grid of alignments and sizes, records the result (NULL, return code, errno after
+# a sentinel, whether *memptr was written, alignment), and the arm compares a preloaded
+# run against an unhooked one row by row. A validation that drifts from glibc's, on
+# either side, is a differing row.
+#   T12a  outside a window: the forwarding and the validation copies.
+#   T12b  inside a window with stderr closed: the counting path writes to stderr, and a
+#         failed write must not show through a successful allocation as errno
+#         (posix_memalign's contract leaves errno alone).
+#   T12c  inside a window with stderr open: every hook named its own calls, so the
+#         rows above were made through the hooks and not around them.
+#   T12d  the comparison refuses a run whose preload was ignored.
+# ⚠️ -fno-builtin: with builtins on, the compiler assumes posix_memalign leaves errno
+# alone and does not re-read it after the call, so an errno clobber cannot be seen.
+# ⚠️ Two identical row sets also come from two UNINSTRUMENTED runs. So each preloaded
+# run must leave its own witness notes, for the oracle's own pid, in that same run —
+# T12d is the arm that shows the comparison says so rather than reading clean.
+cat > "$TMP/oracle.c" <<'EOF'
+#define _GNU_SOURCE
+#include <errno.h>
+#include <malloc.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+__attribute__((weak)) void alloc_guard_start(void);
+__attribute__((weak)) void alloc_guard_end(void);
+static FILE *out;
+static void rec(const char *fn, size_t a, size_t s, void *p, int rc, int err, int touched) {
+  size_t al = a;
+  if (!strcmp(fn, "valloc") || !strcmp(fn, "pvalloc")) al = (size_t)sysconf(_SC_PAGESIZE);
+  if (al == 0 || (al & (al - 1)) != 0) al = 1;
+  fprintf(out, "%s a=%zu s=%zu null=%d rc=%d errno=%d touched=%d aligned=%d\n",
+          fn, a, s, p == NULL, rc, err, touched, p ? (int)((uintptr_t)p % al == 0) : -1);
+}
+int main(int argc, char **argv) {
+  const char *mode = argc > 1 ? argv[1] : "";
+  int window = !strcmp(mode, "window") || !strcmp(mode, "window-stderr");
+  out = fdopen(dup(1), "w");
+  if (!out) return 2;
+  fprintf(out, "pid %ld\n", (long)getpid());   /* also allocates stdio's buffer, before any window */
+  if (!strcmp(mode, "window")) close(2);
+  const size_t aligns[] = {0, 1, 3, 4, 8, 16, 24, 32, 64, 4096, SIZE_MAX / 2 + 1, SIZE_MAX};
+  const size_t sizes[]  = {0, 64, 100000, SIZE_MAX};
+  if (window && alloc_guard_start) alloc_guard_start();
+  for (unsigned i = 0; i < sizeof aligns / sizeof *aligns; i++)
+    for (unsigned j = 0; j < sizeof sizes / sizeof *sizes; j++) {
+      size_t a = aligns[i], s = sizes[j]; void *p; int e, rc;
+      errno = 4242; p = aligned_alloc(a, s); e = errno; rec("aligned_alloc", a, s, p, 0, e, 0); free(p);
+      errno = 4242; p = memalign(a, s);      e = errno; rec("memalign", a, s, p, 0, e, 0); free(p);
+      void *q = (void *)0x1;
+      errno = 4242; rc = posix_memalign(&q, a, s); e = errno;
+      rec("posix_memalign", a, s, rc == 0 ? q : NULL, rc, e, q != (void *)0x1);
+      if (rc == 0) free(q);
+      if (i == 0) {
+        errno = 4242; p = valloc(s);        e = errno; rec("valloc", 0, s, p, 0, e, 0); free(p);
+        errno = 4242; p = pvalloc(s);       e = errno; rec("pvalloc", 0, s, p, 0, e, 0); free(p);
+        errno = 4242; p = malloc(s);        e = errno; rec("malloc", 0, s, p, 0, e, 0); free(p);
+        errno = 4242; p = calloc(2, s);     e = errno; rec("calloc", 2, s, p, 0, e, 0); free(p);
+        errno = 4242; p = realloc(NULL, s); e = errno; rec("realloc", 0, s, p, 0, e, 0); free(p);
+      }
+    }
+  fflush(out);
+  if (window && alloc_guard_end) alloc_guard_end();
+  return 0;
+}
+EOF
+"$CC" -O1 -fno-builtin -w -o "$TMP/oracle" "$TMP/oracle.c"
+
+oracle_diff() {  # oracle_diff <interceptor> <mode> — rc 0 iff instrumented and identical
+  local so="$1" mode="$2" w pid note n
+  w="$TMP/oracle-$mode.witness"
+  rm -f "$w"
+  "$TMP/oracle" "$mode" >"$TMP/oracle-$mode.plain" 2>/dev/null \
+    || { echo "the unhooked oracle failed"; return 1; }
+  env LD_PRELOAD="$so" MALLOCNESIA_WITNESS="$w" MALLOCNESIA_MAX_ALLOCS=1000000 \
+    "$TMP/oracle" "$mode" >"$TMP/oracle-$mode.hooked" 2>/dev/null \
+    || { echo "the preloaded oracle failed"; return 1; }
+  pid="$(sed -n 's/^pid //p' "$TMP/oracle-$mode.hooked")"
+  for note in loaded $([ "$mode" = plain ] || echo start end); do
+    grep -qx "$note $pid" "$w" 2>/dev/null \
+      || { echo "no '$note' witness for the oracle's pid '$pid': the run was not instrumented"; return 1; }
+  done
+  grep -v '^pid ' "$TMP/oracle-$mode.plain"  >"$TMP/oracle-$mode.p"
+  grep -v '^pid ' "$TMP/oracle-$mode.hooked" >"$TMP/oracle-$mode.h"
+  [ -s "$TMP/oracle-$mode.p" ] || { echo "the unhooked oracle wrote no rows"; return 1; }
+  n="$(diff "$TMP/oracle-$mode.p" "$TMP/oracle-$mode.h" | grep -c '^>')"
+  if [ "$n" != 0 ]; then
+    echo "$n row(s) differ from unhooked glibc (< glibc, > preloaded):"
+    diff "$TMP/oracle-$mode.p" "$TMP/oracle-$mode.h" | grep '^[<>]' | head -6
+    return 1
+  fi
+  echo "instrumented, and every row matches unhooked glibc"
+}
+check "T12a outside a window, every hook returns what glibc returns" 0 \
+  "every row matches unhooked glibc" -- oracle_diff "$TMP/libmn.so" plain
+check "T12b inside a window with stderr closed, errno and results are glibc's" 0 \
+  "every row matches unhooked glibc" -- oracle_diff "$TMP/libmn.so" window
+check "T12d a preload that was ignored is refused, not read as identical" 1 \
+  "the run was not instrumented" -- oracle_diff "$TMP/nope.so" window
+
+oracle_named() {  # oracle_named <interceptor> — every hook names its own calls
+  local err fn missing=""
+  err="$(env LD_PRELOAD="$1" MALLOCNESIA_MAX_ALLOCS=1000000 \
+           "$TMP/oracle" window-stderr 2>&1 >/dev/null)"
+  for fn in malloc calloc realloc aligned_alloc memalign posix_memalign valloc pvalloc; do
+    grep -qF "intercepted $fn(" <<<"$err" || missing="$missing $fn"
+  done
+  if [ -n "$missing" ]; then echo "no intercept line for:$missing"; return 1; fi
+  echo "every hooked entry point named its calls"
+}
+check "T12c inside a window, every hook counts the oracle's calls" 0 \
+  "every hooked entry point named its calls" -- oracle_named "$TMP/libmn.so"
 
 echo
 echo "test-check-alloc: $pass passed, $fail failed"

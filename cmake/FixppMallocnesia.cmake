@@ -108,7 +108,6 @@ endif()
 
 if(FIXPP_MALLOCNESIA_SUPPORTED AND NOT TARGET mallocnesia)
   add_library(mallocnesia SHARED "${CMAKE_SOURCE_DIR}/tools/mallocnesia/mallocnesia.c")
-  target_link_libraries(mallocnesia PRIVATE ${CMAKE_DL_LIBS})
   set_target_properties(mallocnesia PROPERTIES
     C_STANDARD 11
     C_STANDARD_REQUIRED ON

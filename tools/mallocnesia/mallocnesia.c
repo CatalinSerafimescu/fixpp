@@ -42,41 +42,44 @@
  *                 --mallocnesia <build>/lib/libmallocnesia.so
  */
 #define _GNU_SOURCE
-#include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
-typedef void *(*malloc_fn)(size_t);
-typedef void  (*free_fn)(void *);
-typedef void *(*calloc_fn)(size_t, size_t);
-typedef void *(*realloc_fn)(void *, size_t);
-typedef void *(*aligned_fn)(size_t, size_t);   /* aligned_alloc, memalign */
-typedef int   (*posix_memalign_fn)(void **, size_t, size_t);
-typedef void *(*page_fn)(size_t);              /* valloc, pvalloc */
-
-static malloc_fn  real_malloc;
-static free_fn    real_free;
-static calloc_fn  real_calloc;
-static realloc_fn real_realloc;
-static aligned_fn        real_aligned_alloc;
-static aligned_fn        real_memalign;
-static posix_memalign_fn real_posix_memalign;
-static page_fn           real_valloc;
-static page_fn           real_pvalloc;
-
-/* A hook called before the real functions are resolved resolves them itself: ld.so
- * runs a needed library's constructor before this interceptor's, so such a call is
- * ordinary. Only a call made WHILE resolve_fns() runs (a libc whose dlsym allocates)
- * cannot resolve again without recursing. calloc serves that call from this static
- * buffer; every other hook aborts on it, saying so. g_resolving marks the window. */
-static char   bootstrap[8192];
-static size_t bootstrap_pos;
-static int    g_resolving;
+/* PR #557 FQ-A — direct __libc_* forwarding; supersedes FQ-2's lazy dlsym resolution.
+ *
+ * Every hook forwards to glibc's own allocator by the __libc_* names glibc exports, so
+ * nothing is resolved at run time: there is no function table to fill, no window in which
+ * a hook runs before it is filled, and no state that a second thread or a fork could see
+ * half-written. A hook called from a library constructor that runs before this one
+ * (ci/test-check-alloc.sh T11) is therefore an ordinary call. The rejected alternative
+ * kept dlsym(RTLD_NEXT) and synchronised it (a once-initialised table, a per-thread
+ * "resolving" marker, fork handling, a static buffer for an allocating dlsym), each piece
+ * needing a test seam of its own.
+ *
+ * The CONDITION this rests on: the libc exports __libc_malloc, __libc_calloc,
+ * __libc_realloc, __libc_memalign, __libc_valloc and __libc_pvalloc as public, linkable
+ * symbols; no header declares them, hence the declarations below. Re-check a libc with
+ * `nm -D --defined-only <libc.so> | grep ' __libc_'`, and `objdump -T <libc.so>` to see
+ * that each shares its address with the public name it stands for. A libc without them
+ * leaves these references undefined in the .so (it is not linked with -z defs, so the
+ * tree still builds), and every gate then fails at run time rather than passing:
+ * check_alloc.py refuses a run that left no witness notes.
+ *
+ * glibc has no __libc_ twin for aligned_alloc or posix_memalign, so those two hooks
+ * validate their arguments as glibc does and forward to __libc_memalign. T12 in
+ * ci/test-check-alloc.sh compares every hook's results against unhooked glibc, which is
+ * what notices if that validation and glibc's stop agreeing. */
+extern void *__libc_malloc(size_t);
+extern void *__libc_calloc(size_t, size_t);
+extern void *__libc_realloc(void *, size_t);
+extern void *__libc_memalign(size_t, size_t);
+extern void *__libc_valloc(size_t);
+extern void *__libc_pvalloc(size_t);
 
 static _Atomic int  g_active;  /* 1 while between start/end markers */
 static _Atomic long g_count;   /* allocations intercepted this guard window */
@@ -85,49 +88,18 @@ static long         g_max;     /* from MALLOCNESIA_MAX_ALLOCS env var */
 /* Per-thread flag to avoid re-entering our hook from fprintf inside the hook */
 static __thread int g_in_hook;
 
-/* POSIX guarantees that a dlsym() result converts to a function pointer; ISO C does
- * not, and gcc -Wpedantic rejects the cast. So the bits are copied instead (the POSIX
- * dlsym() example writes through a `void **` alias for the same reason). */
-#define RESOLVE(var, name)                                   \
-    do {                                                     \
-        void *sym_ = dlsym(RTLD_NEXT, name);                 \
-        memcpy(&(var), &sym_, sizeof(var));                  \
-    } while (0)
-
-static void resolve_fns(void) {
-    g_resolving = 1;
-    RESOLVE(real_malloc,         "malloc");
-    RESOLVE(real_calloc,         "calloc");
-    RESOLVE(real_realloc,        "realloc");
-    RESOLVE(real_free,           "free");
-    RESOLVE(real_aligned_alloc,  "aligned_alloc");
-    RESOLVE(real_memalign,       "memalign");
-    RESOLVE(real_posix_memalign, "posix_memalign");
-    RESOLVE(real_valloc,         "valloc");
-    RESOLVE(real_pvalloc,        "pvalloc");
-    g_resolving = 0;
-}
-
-/* The aligned hooks' lazy resolve: the static buffer above is calloc's alone. */
-static void resolve_or_abort(void) {
-    if (g_resolving) {
-        static const char msg[] =
-            "[mallocnesia] FATAL: an aligned allocation re-entered resolve_fns()\n";
-        (void)!write(2, msg, sizeof msg - 1);
-        abort();
-    }
-    resolve_fns();
-}
-
 /* One count, one line on stderr naming the function: ci/test-check-alloc.sh reads the
- * name back, so a window's allocation is attributed to the entry point that made it. */
-static void count_aligned(const char *fn, size_t align, size_t size) {
+ * name back, so a window's allocation is attributed to the entry point that made it.
+ * errno is the caller's: a failed write to stderr must not show through a successful
+ * allocation (posix_memalign's contract leaves errno alone). */
+static void count(const char *fn, size_t a, size_t b) {
     if (atomic_load(&g_active) && !g_in_hook) {
+        int saved = errno;
         g_in_hook = 1;
         long n = atomic_fetch_add(&g_count, 1) + 1;
-        fprintf(stderr, "[mallocnesia] intercepted %s(%zu, %zu) — call #%ld\n",
-                fn, align, size, n);
+        fprintf(stderr, "[mallocnesia] intercepted %s(%zu, %zu) — call #%ld\n", fn, a, b, n);
         g_in_hook = 0;
+        errno = saved;
     }
 }
 
@@ -174,7 +146,6 @@ static void mallocnesia_note(const char *what) {
 
 __attribute__((constructor))
 static void mallocnesia_init(void) {
-    resolve_fns();
     mallocnesia_note("loaded");
 }
 
@@ -203,89 +174,57 @@ void alloc_guard_end(void) {
 /* --- Allocator hooks --- */
 
 void *malloc(size_t size) {
-    if (!real_malloc) resolve_fns();
-    if (atomic_load(&g_active) && !g_in_hook) {
-        g_in_hook = 1;
-        long n = atomic_fetch_add(&g_count, 1) + 1;
-        fprintf(stderr, "[mallocnesia] intercepted malloc(%zu) — call #%ld\n", size, n);
-        g_in_hook = 0;
-    }
-    return real_malloc(size);
-}
-
-void free(void *ptr) {
-    /* Bootstrap allocations live in the static buffer — nothing to free. One unsigned
-     * compare: a relational compare against a pointer outside the buffer is undefined. */
-    if ((uintptr_t)ptr - (uintptr_t)bootstrap < sizeof(bootstrap))
-        return;
-    if (!real_free) resolve_fns();
-    real_free(ptr);
+    count("malloc", size, 0);
+    return __libc_malloc(size);
 }
 
 void *calloc(size_t nmemb, size_t size) {
-    /* Serve bootstrap calls (dlsym init) from the static buffer */
-    if (g_resolving) {
-        size_t total = nmemb * size;
-        if (bootstrap_pos + total <= sizeof(bootstrap)) {
-            void *p = bootstrap + bootstrap_pos;
-            bootstrap_pos += total;
-            memset(p, 0, total);
-            return p;
-        }
-        return NULL;
-    }
-    if (!real_calloc) resolve_fns();
-    if (atomic_load(&g_active) && !g_in_hook) {
-        g_in_hook = 1;
-        long n = atomic_fetch_add(&g_count, 1) + 1;
-        fprintf(stderr, "[mallocnesia] intercepted calloc(%zu, %zu) — call #%ld\n",
-                nmemb, size, n);
-        g_in_hook = 0;
-    }
-    return real_calloc(nmemb, size);
+    count("calloc", nmemb, size);
+    return __libc_calloc(nmemb, size);
 }
 
 void *realloc(void *ptr, size_t size) {
-    if (!real_realloc) resolve_fns();
-    if (atomic_load(&g_active) && !g_in_hook) {
-        g_in_hook = 1;
-        long n = atomic_fetch_add(&g_count, 1) + 1;
-        fprintf(stderr, "[mallocnesia] intercepted realloc(%p, %zu) — call #%ld\n",
-                ptr, size, n);
-        g_in_hook = 0;
-    }
-    return real_realloc(ptr, size);
+    count("realloc", (size_t)(uintptr_t)ptr, size);
+    return __libc_realloc(ptr, size);
 }
 
 /* --- Aligned and page-aligned hooks (fixpp#497) --- */
 
 void *aligned_alloc(size_t align, size_t size) {
-    if (!real_aligned_alloc) resolve_or_abort();
-    count_aligned("aligned_alloc", align, size);
-    return real_aligned_alloc(align, size);
+    count("aligned_alloc", align, size);
+    /* glibc: EINVAL and NULL unless align is a power of two. */
+    if (align == 0 || (align & (align - 1)) != 0) {
+        errno = EINVAL;
+        return NULL;
+    }
+    return __libc_memalign(align, size);
 }
 
 void *memalign(size_t align, size_t size) {
-    if (!real_memalign) resolve_or_abort();
-    count_aligned("memalign", align, size);
-    return real_memalign(align, size);
+    count("memalign", align, size);
+    return __libc_memalign(align, size);
 }
 
 int posix_memalign(void **memptr, size_t align, size_t size) {
-    if (!real_posix_memalign) resolve_or_abort();
-    count_aligned("posix_memalign", align, size);
-    return real_posix_memalign(memptr, align, size);
+    count("posix_memalign", align, size);
+    /* glibc: EINVAL unless align is a power-of-two multiple of sizeof(void *); *memptr is
+     * written only on success. */
+    if (align == 0 || align % sizeof(void *) != 0
+        || ((align / sizeof(void *)) & (align / sizeof(void *) - 1)) != 0)
+        return EINVAL;
+    void *p = __libc_memalign(align, size);
+    if (!p) return ENOMEM;
+    *memptr = p;
+    return 0;
 }
 
 /* valloc/pvalloc take no alignment argument; the page size is the alignment. */
 void *valloc(size_t size) {
-    if (!real_valloc) resolve_or_abort();
-    count_aligned("valloc", (size_t)sysconf(_SC_PAGESIZE), size);
-    return real_valloc(size);
+    count("valloc", (size_t)sysconf(_SC_PAGESIZE), size);
+    return __libc_valloc(size);
 }
 
 void *pvalloc(size_t size) {
-    if (!real_pvalloc) resolve_or_abort();
-    count_aligned("pvalloc", (size_t)sysconf(_SC_PAGESIZE), size);
-    return real_pvalloc(size);
+    count("pvalloc", (size_t)sysconf(_SC_PAGESIZE), size);
+    return __libc_pvalloc(size);
 }
