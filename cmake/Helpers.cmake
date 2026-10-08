@@ -22,9 +22,8 @@
 #                    the standard switch implies it; a clean compile means
 #                    this flag is live.
 #   /Zc:__cplusplus  Changes the VALUE of __cplusplus in every TU, for
-#                    first-party code and every dependency header alike
-#                    (without it MSVC reports the C++98 value). Safe for
-#                    first-party code while it tests __cplusplus only for
+#                    first-party code and every dependency header alike.
+#                    Safe for first-party code while it tests __cplusplus only for
 #                    presence (#ifdef). Re-derive:
 #                    git grep -n -e __cplusplus -e _MSVC_LANG -- include src tests tools bench perf bindings
 #
@@ -255,8 +254,10 @@ endfunction()
 #
 # The same enumeration as fixpp_apply_werror_to_all_targets() above, and for
 # the same reason: a per-target call list misses the next target added without
-# it. Unlike that walk this one is not gated on FIXPP_WERROR — the flags only
-# raise warnings; whether a warning fails the build stays FIXPP_WERROR's call.
+# it. Unlike that walk this one is not gated on FIXPP_WERROR — the warning
+# flags only raise warnings; whether a warning fails the build stays
+# FIXPP_WERROR's call. The MSVC conformance switches are applied either way
+# (see fixpp_apply_common_flags above).
 #
 # ⚠️ CALL IT DEFERRED, for the reason fixpp_apply_werror_to_all_targets() gives:
 # BUILDSYSTEM_TARGETS holds only the targets defined so far.
