@@ -6,6 +6,13 @@ status: stable
 
 # Log
 
+- **2026-10-08 — B14 (fixpp#481) Gate B (PR #558): the #481 section is corrected.**
+  `components/nfr-and-tooling.md` loses the claim that the Python wrapper is code this project does
+  not author: `fixpp_py` is no longer exempt, and SWIG's runtime gets a `%begin`-scoped suppression
+  instead. The MSVC branch's `/permissive-` and `/Zc:__cplusplus` are named as conformance switches,
+  each with its condition and recipe, and `/wd5030` gains the condition it rests on. The section
+  gains the two ctest build probes that pin the walk's reach and `BEFORE` order, and the NOLINT form
+  for the `#elif defined(_MSC_VER)` arm.
 - **2026-10-08 — B14 (fixpp#481): the common strict flags reach every first-party target.**
   `components/nfr-and-tooling.md` loses two false claims, that `fixpp_apply_common_flags` had no call
   site and must not be wired because of `-fno-exceptions`. It gains the deferred walk with

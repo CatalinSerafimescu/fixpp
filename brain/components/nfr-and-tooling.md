@@ -143,10 +143,16 @@ option does not remove them.
   after it. A suppression covering a whole TU that mixes generated and first-party code is the
   rejected shape. `fixpp.i`'s comment holds the recipe that re-checks whether the suppression is still
   needed.
-- **The GCC/Clang flags are warnings only, and every flag is `PRIVATE` and C++ only.** GCC and Clang get `-Wall -Wextra -Wpedantic`
-  through a C++-only generator expression, because the tree has a C target. A consumer's own flags are
-  untouched. The flags are prepended, so a target's own `-Wno-<x>` still wins on Clang, which applies
-  warning flags in command-line order.
+- **The GCC/Clang flags are warnings only, and every flag is `PRIVATE` and C++ only.** GCC and Clang
+  get `-Wall -Wextra -Wpedantic` through a C++-only generator expression, because the tree has a C
+  target. A consumer's own flags are untouched. The flags are prepended, so a target's own `-Wno-<x>`
+  still wins on Clang, which applies warning flags in command-line order.
+- **Two ctest build probes pin the mechanism**, in the `#481` block of `tests/core/CMakeLists.txt`.
+  `build_flags_common_flags_reach` (registered only under `FIXPP_WERROR`) passes only if a target in
+  that subdirectory gets `-Wextra`'s unused-parameter diagnostic, so it goes red if the deferred walk
+  stops reaching nested targets. `build_flags_common_flags_order` fails if a target's own
+  `-Wno-unused-parameter` stops winning, which catches a lost `BEFORE` on Clang only. Both are
+  Clang/GNU-only; MSVC reach is not pinned.
 - **`-fno-exceptions` was dropped, not opted out of.** The shipped library throws, including the typed
   errors of the public dictionary API, so that Phase-3 flag could never be wired as written. The codegen
   tool's comment about opting out of it, and the tool's own duplicate warning set, were deleted with it.
