@@ -162,7 +162,7 @@ option does not remove them.
   toolchain. An unconditional `/WX` in the common function would make `-DFIXPP_WERROR=OFF` a no-op on
   MSVC.
 - **The MSVC branch is `/W4` plus two conformance switches, which are not warnings and which
-  `-DFIXPP_WERROR=OFF` does not remove.** Each holds only while its condition does.
+  `-DFIXPP_WERROR=OFF` does not remove.**
   - `/permissive-`: redundant while the MSVC standard switch is `/std:c++latest`, which implies it; it
     is kept to say so explicitly. Re-check: compile `struct S{}; void f(S&); int main(){ f(S{}); }`
     with `cl /std:c++latest /c` and no `/permissive-`. C2664 means the standard switch implies it.
@@ -174,7 +174,7 @@ option does not remove them.
     under it, and an MSVC consumer whose setting differs from fixpp's compiles the public headers under
     the other value (B-481-1). The `cl /EP` recipe that shows what the switch changes in the headers
     fixpp includes is in `cmake/Helpers.cmake`. The owner ruled on 2026-10-08 to keep both switches.
-- **The MSVC branch has three exceptions. Each holds only while its condition does.**
+- **The MSVC branch has three exceptions.**
   - `/wd5030` (attribute not recognized): the tree spells attributes MSVC does not implement
     (`[[clang::lifetimebound]]`, `[[gnu::used]]`). This is safe only while a misspelled attribute stays
     a hard error where the attribute is understood, which is Clang's default-on `-Wunknown-attributes`
