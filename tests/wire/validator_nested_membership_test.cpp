@@ -31,6 +31,7 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
+#include <initializer_list>
 #include <memory_resource>
 #include <string>
 #include <string_view>
@@ -96,11 +97,12 @@ table_view make_nested_membership_dict() {
 
     // Context store — correct membership at each real path.
     tvb.set_group_first_ctx("i", root, 296, 302);
-    for (std::uint16_t const m : {295, 299, 132, 133, 555, 602, 603}) {
+    for (std::uint16_t const m :
+         std::initializer_list<std::uint16_t>{295, 299, 132, 133, 555, 602, 603}) {
         tvb.add_group_member_ctx("i", root, 296, m);
     }
     tvb.set_group_first_ctx("i", p296, 295, 299);
-    for (std::uint16_t const m : {132, 133, 555, 602, 603}) {
+    for (std::uint16_t const m : std::initializer_list<std::uint16_t>{132, 133, 555, 602, 603}) {
         tvb.add_group_member_ctx("i", p296, 295, m);
     }
     tvb.set_group_first_ctx("i", p296_295, 555, 602);  // CORRECT grandchild delimiter
@@ -109,9 +111,12 @@ table_view make_nested_membership_dict() {
     // Bare/first-seen store — 296/295 correct, but 555's delimiter WRONG (299),
     // the divergence the nesting-aware walk must resolve via context.
     tvb.set_group_first(296, 302);
-    for (std::uint16_t const m : {295, 299, 132, 133, 555, 602, 603}) tvb.add_group_member(296, m);
+    for (std::uint16_t const m :
+         std::initializer_list<std::uint16_t>{295, 299, 132, 133, 555, 602, 603})
+        tvb.add_group_member(296, m);
     tvb.set_group_first(295, 299);
-    for (std::uint16_t const m : {132, 133, 555, 602, 603}) tvb.add_group_member(295, m);
+    for (std::uint16_t const m : std::initializer_list<std::uint16_t>{132, 133, 555, 602, 603})
+        tvb.add_group_member(295, m);
     tvb.set_group_first(555, 299);  // WRONG bare delimiter (first-seen variant)
     tvb.add_group_member(555, 602).add_group_member(555, 603);
     return std::move(tvb).build();

@@ -48,6 +48,7 @@
 #include <fixpp/wire/body_builder.hpp>
 #include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <initializer_list>
 #include <memory_resource>
 #include <new>
 #include <optional>
@@ -162,7 +163,7 @@ TEST(BodyBuilder, FlatMessage_ByteExact) {
 
 // ── INV-2: framing tags rejected at field() ─────────────────────────────────
 TEST(BodyBuilder, Inv2_FramingTagRejected) {
-    for (std::uint16_t tag : {8, 9, 34, 49, 52, 56, 10}) {
+    for (std::uint16_t tag : std::initializer_list<std::uint16_t>{8, 9, 34, 49, 52, 56, 10}) {
         body_builder bb{"X"};
         auto r = bb.field(tag, std::string_view{"whatever"});
         EXPECT_FALSE(r.has_value()) << "tag " << tag << " must be rejected";
