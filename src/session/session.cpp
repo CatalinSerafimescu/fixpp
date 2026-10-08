@@ -2626,7 +2626,7 @@ Session::InboundValidation Session::validate_inbound_(
 // compid_authorization_policy.cpp (which is in an anonymous namespace there).
 // Declared locally here to avoid cross-TU linkage of an internal helper.
 // noexcept — pure string scanning.
-[[nodiscard]] [[maybe_unused]] static std::string_view parse_cn_from_dn_local(
+[[nodiscard]] [[maybe_unused]] static std::string_view parse_cn_from_dn_local(  // see fixpp#559
     std::string_view dn) noexcept {
     std::size_t pos = 0;
     while (pos < dn.size()) {

@@ -161,7 +161,7 @@ public:
         std::pmr::memory_resource* mr = cfg.mr ? cfg.mr : std::pmr::get_default_resource();
 
         fixpp::tls::peer_identity pid;
-        // subject_dn in "CN=<value>" format so parse_cn_from_dn_local extracts it.
+        // subject_dn in "CN=<value>" format so parse_cn_from_dn extracts it.
         pid.subject_dn = std::pmr::string{"CN=" + injected_cn_, mr};
         pid.leaf_fingerprint = {};
 
