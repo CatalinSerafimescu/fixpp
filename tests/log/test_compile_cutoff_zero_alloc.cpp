@@ -248,9 +248,9 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
     // Fill levels to test: 10%, 50%, 95% of 1024 = 102, 512, 972 records.
     // The drain RUNS so these are non-overflow enqueues.
     constexpr std::uint64_t kCapacity = 1024U;
-    [[maybe_unused]] constexpr std::uint64_t k10pct = kCapacity / 10;  // 102
-    [[maybe_unused]] constexpr std::uint64_t k50pct = kCapacity / 2;   // 512
-    constexpr std::uint64_t k95pct = (kCapacity * 95) / 100;  // 972
+    [[maybe_unused]] constexpr std::uint64_t k10pct = kCapacity / 10;
+    [[maybe_unused]] constexpr std::uint64_t k50pct = kCapacity / 2;
+    constexpr std::uint64_t k95pct = (kCapacity * 95) / 100;
 
     for (std::uint64_t i = 0; i < k95pct; ++i) {
         emit_warn(logger.get(), i + 1U);
