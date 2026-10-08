@@ -213,7 +213,7 @@ set_target_properties(fixpp_py PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
-# #481: fixpp_py gets the common warning flags like every other target. Its
+# #481: fixpp_py is not FIXPP_COMMON_FLAGS_EXEMPT, so it gets the common flags. Its
 # wrapper TU mixes SWIG's runtime with this project's own code from fixpp.i, so
 # the suppression SWIG's runtime needs is scoped inside the wrapper (fixpp.i's
 # %begin block), not applied to the target.
