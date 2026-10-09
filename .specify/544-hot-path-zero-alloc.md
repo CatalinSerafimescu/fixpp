@@ -1,6 +1,6 @@
 # fixpp#544 — zero allocation on the Active inbound read and the `MemoryStore` write (B35)
 
-> **Status: v0.4.**
+> **Status: v0.5.**
 > - **Gate A loop instance 1:**
 >   - round 1: BLOCK — Codex P1=3 P2=8 P3=1; Opus post-judging P1=2 P2=6 P3=12; rewritten to v0.2,
 >     addressing RC-1..RC-3;
@@ -10,7 +10,7 @@
 > - **v0.4** implements R-1′: fixpp exports `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` (§2.4). It re-checks
 >   §1–§7 against it.
 > - Owner rulings **R-6** and **R-7** (2026-10-09) are in §0; their justification is §5.
-> - **Gate A loop instance 2 starts on v0.4. Round 1 is pending.**
+> - Gate A instance 2 round 1: BLOCK — Codex P1=3 P2=2 P3=1; Opus post-judging P1=2 P2=3 P3=3; owner rulings R-8, R-9, R-10; rewritten to v0.5. Instance 2 round 2 pending.
 >
 > **How this design was reached.** The owner replaced design→Gate A with two independent consults: Codex
 > `gpt-5.6-sol` (read-only) and Fable (`fable-consult`). Both had the same brief, and the convergence criteria
@@ -27,9 +27,13 @@
 > - Gate A round 1's p1–p5, in `b35_544_gate_a_r1/`;
 > - Gate A round 2's q1–q3, in `b35_544_gate_a_r2/`, with the v0.3 rewrite's q4 and q5 beside them. q5 is
 >   the evidence for R-1′ (§0).
+> - Gate A instance 2 round 1's r1 and r2 (`r1_buffer_lifetime.cpp`, `r2_overlimit_send_evicts.cpp`, with
+>   `r2_log.cpp`) and its header-closure script `closure.py`, in `b35_544_gate_a_i2r1/`, with the v0.5
+>   rewrite's r3 (`r3_reentrant_send_inline.cpp`) beside them.
 >
 > Each round's review and triage are listed under `## Gate A`. Each triage's Appendix A gives its probes'
-> build line and recipe. "Round-1 triage p*N*" and "round-2 triage q*N*" below name those probes.
+> build line and recipe. "Round-1 triage p*N*", "round-2 triage q*N*" and "instance-2 triage r*N*" below
+> name those probes. r3's build line and rows are in its file header.
 >
 > **Independence (`[const §XVII.3]`).** The author of this note is the Opus orchestrator. Gate A's Codex
 > review runs in a fresh Codex session, which has not seen the consult session.
@@ -39,14 +43,24 @@
 > (`conanfile.py`). #544, L-497-1 and several header comments cite 1.36; every asio citation below is from 1.38.
 >
 > **Trigger (`[const §XVII.1]`).** This touches the executor model and public C++ headers:
-> `include/fixpp/core/sync/async_mutex.hpp`, `include/fixpp/session/memory_store.hpp` and
-> `include/fixpp/session/engine.hpp`. No C-ABI symbol or layout changes, so it is not BREAKING under
-> `[const §X.7]`. The C++ surface changes are disclosed in §4:
+> `include/fixpp/core/sync/async_mutex.hpp`, `include/fixpp/session/memory_store.hpp`,
+> `include/fixpp/session/engine.hpp` and (R-9) `include/fixpp/session/session.hpp`.
+>
+> **Not BREAKING under `[const §X.7]`.** No C-ABI declaration, symbol or layout changes. §X.7 also counts
+> a consumer that "is no longer ABI-compatible". R-1′ changes the asio inline code that `libfixpp_capi.a`
+> carries (§2.4), so a C-ABI static consumer whose own asio TUs use another N becomes ODR-inconsistent.
+> That hazard needs the consumer's own C++ asio TUs, which the C ABI never promised compatibility with; the
+> same hazard already exists for any asio-version mismatch. It is disclosed as a usage obligation (§4), not
+> as a C-ABI change (instance-2 triage O3-2).
+>
+> The C++ surface changes are disclosed in §4:
 > - `SessionEntry::session_strand`'s type;
 > - one `FIXPP_DETAIL_` macro, together with the `fixpp::sync::detail` names its expansion uses;
-> - (R-1′) an INTERFACE compile definition, `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, on the exported
->   targets whose interface carries asio. A new installed guard header comes with it, and so does an ODR
->   obligation on every TU in the process that includes asio (§2.4).
+> - (R-1′) a PUBLIC compile definition, `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, on `fixpp_core`. Every
+>   C++ exported target that publishes the `include/` root inherits it (§2.4). A new installed guard header
+>   comes with it, and so does an ODR obligation on every TU in the process that includes asio (§2.4);
+> - (R-9) `Session`'s layout: it gains session-owned send scratch storage and a slot flag (§2.5). `Session`
+>   is a public class in an installed header, so this is a C++ layout change, as `SessionEntry`'s is.
 >
 > All of them become visible to consumers of the installed package.
 >
@@ -69,21 +83,50 @@
 | R-5 | TLS per-record allocation | **Orchestrator default, not yet an owner ruling.** Measure W-A on a TLS rig in the RED step (§3). If OpenSSL allocates per record (asio sets `SSL_MODE_RELEASE_BUFFERS`, `asio/ssl/detail/impl/engine.ipp`), file a new issue; it is outside B35. |
 | R-6 | Constitutional status of B35's conditional zero (owner ruling, **2026-10-09**) | **A `[const §VIII.5]` justification, recorded in this note, which serves as the plan in issue mode** (§5). Precedent: `.specify/2f-async-mutex.md` Erratum E-4 and B&L L-006-2. The zero holds only when the Engine's executor is `io_context::executor_type` **and** the handling thread stays inside one scheduler call (`run`-family). The residual configurations — R-2 fallback executors, consumer-driven bounded `run_for`/`run_one_for`/`poll` loops, and mixed-traffic eviction — are tracked as **open B&L limitations**, with **no constitution amendment**. |
 | R-7 | Does R-6 cover `MemoryStore::store`, whose clause is `[const §XV.1]`'s MemoryStore sentence with no deviation provision? (owner ruling, **2026-10-09**) | **Yes — owner interpretation.** R-6's `[const §VIII.5]` justification extends to `[const §XV.1]`'s MemoryStore sentence for B35's conditional zero (the same two conditions, the same residuals tracked in B&L). Basis: §XV.1's own v0.2 amendment already records that the asio awaitable frame is opaque to any bound allocator. Recorded in this note only. No issue is filed and the constitution text is unchanged. |
+| R-8 | R-1′'s Conan `package_info` half, given that no fixpp Conan package exists (instance-2 triage C-2; owner ruling, **2026-10-09**) | **Confirmed in its narrowed form.** The installed CMake package's PUBLIC/INTERFACE definition is B35's whole delivery, and the guard header's `static_assert` is the safety net. The Conan half applies only once a fixpp Conan package exists: a future recipe sets `cpp_info.defines` from the guard header and adds a `test_package` consumer leg. |
+| R-9 | Every `Session::send` is an over-limit frame request that evicts a cached block (instance-2 triage O3-1; owner ruling, **2026-10-09**) | **B35 is widened** to bring `Session::send_impl`'s coroutine frame under asio's recycler limit. Its three 4096-B arrays, live across `co_await`s, move out of the frame into **session-owned scratch storage**, pre-allocated per session and never per message (`[const §XV.1]`). The existing write-path serialisation must guarantee that no two `send_impl` invocations use it at once; if it cannot, the note specifies the safe alternative. A **two-way window** gates it: the inbound Active pair interleaved with application sends, asserting 0 on the gated Release presets, with a fix-deleted arm that restores an over-limit send frame and must go RED. |
+| R-10 | The guard for `send_impl`'s session-owned frame buffer, given that `send_impl` is not serialised across its suspensions and a send started inside `toApp` runs nested inline (probe r3; §2.5) (owner ruling, **2026-10-09**) | **Flag + fallback.** A strand-local in-use flag guards the session slot. A send that finds it taken (nested in `toApp`, or overlapping a suspended send) uses the fallback leaf, which allocates. That residual is disclosed under R-6. Rejected: a session send gate, because of its drain, deadlock and cancellation conditions. |
 
-**Implemented forms.** Neither triage judged a ruling technically unimplementable. Four forms are narrowed:
-three from the round-1 triage (*Owner items* and O-1/O-2/O-3), and one from the round-2 triage (C2-1). v0.4
-adds two forms for R-1′. This note writes all of them:
+**Implemented forms.** Instance 1's triages judged no ruling technically unimplementable. Four forms are
+narrowed: three from the round-1 triage (*Owner items* and O-1/O-2/O-3), and one from the round-2 triage
+(C2-1). v0.4 added two forms for R-1′. v0.5 corrects one of them (R-8) and adds one for R-9, whose premise
+the code does not satisfy. This note writes all of them:
 - **R-1's frameless lock op, kept by R-1′,** is implemented through **one macro**, whose first part is the
   pre-check today's `co_await` performs (O-2, C-4; §2.3). Of the two wrappers v0.1 offered, the RAII one is
   not implementable.
-- **R-1′'s Conan half has no artifact to edit today.** fixpp's `conanfile.py` declares requirements and options
-  only; it has no `package_info` and does not package fixpp (`grep -n "def package_info" conanfile.py` finds
-  nothing). The installed CMake package is therefore the whole delivery of the definition (§2.4). A fixpp Conan
-  recipe added later must carry the definition in its `package_info`, and §2.4's consumer witness is the check.
-  This is recorded for the owner. It does not narrow the ruling.
-- **R-1′ on fixpp's exported CMake targets** means every export-set member whose usage requirements carry
-  asio. `fixpp::capi` is not one of them: it reaches the closure only through `$<LINK_ONLY:>`, and its headers
-  include no asio (§2.4, *The C ABI*).
+- **R-1′'s Conan half: the narrowed form R-8 confirms (instance-2 triage C-2).** v0.4 said this "does not
+  narrow the ruling". That was false: the Conan half has no artifact to apply to, so it is a narrowed form.
+  - fixpp's `conanfile.py` declares requirements and options only. It has no `package()`, `package_info()`,
+    `exports_sources` or `package_type`, and `conan/recipes/` holds civetweb only. Re-check with
+    `grep -nE "def |package_type|exports" conanfile.py` and `ls conan/recipes`. So no fixpp Conan package
+    exists, and nothing evaluates a fixpp `package_info`.
+  - Until one exists, the installed CMake package is the whole delivery of the definition (§2.4), and the
+    guard header's `static_assert` is the mechanical net.
+  - **The condition for a future recipe.** A recipe that adds `package_info` sets
+    `cpp_info.defines = ["ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>"]`, with N read from the guard header, and
+    adds a `test_package` consumer leg that checks it.
+  - §2.4's consumer witness is **not** that check. It runs `find_package(fixpp)` against fixpp's own CMake
+    install (`tests/consumer/CMakeLists.txt`). A Conan consumer that uses `CMakeDeps` gets targets generated
+    from `package_info`, not from `fixppConfig.cmake`, so the witness cannot see a missing `cpp_info.defines`
+    (inferred, from how `CMakeDeps` generates targets).
+- **R-1′ on fixpp's exported CMake targets** is a PUBLIC definition on `fixpp_core` (C-1; §2.4). Every C++
+  export-set member that publishes the `include/` root links `fixpp_core` PUBLIC/INTERFACE, directly or
+  transitively, so all of them inherit it. `fixpp::capi` and `fixpp::service` withhold it: they reach the
+  closure only through `$<LINK_ONLY:>`, and their headers include no asio (§2.4, *The C ABI*).
+- **R-9's "existing write-path serialisation" does not exist (§2.5).** No lock or strand keeps two
+  `send_impl` invocations apart across their suspensions. A second send can start while the first is
+  suspended in its store or its write, and a send started from inside `toApp` runs inline, nested inside the
+  first (probe r3). So the frame buffer cannot be one shared slot by that guarantee. The implemented form,
+  which R-10 rules:
+  - the two build arrays are session-owned and used only inside a synchronous helper, which the strand
+    alone makes exclusive;
+  - the frame buffer is one session-owned slot, held by a strand-local flag from its first write until
+    `store_then_emit` returns;
+  - a send that finds the slot held takes a fallback leaf coroutine that owns its own buffer. That send is
+    over the limit and allocates. This is an R-6 residual, disclosed as a condition (§4): when a send starts
+    while the slot is held, because it is nested in `toApp` or overlaps a send suspended in its store or its
+    write, that send allocates its frame and evicts one cached block.
+  - The alternative that keeps that send at zero too, a session send gate, is rejected by R-10 (§2.5).
 - **R-2's "reads zero"** holds only while the handling thread stays inside one scheduler call (O-1, O-4; §1(b)).
   R-6 records that condition.
 - **R-3′'s `windows-msvc-release` row** covers class (a) only: W-A and W-B with arm (a) (O-3; §3).
@@ -268,10 +311,54 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
   dispatcher has returned. **Every arm takes every parameter by value; the only reference it may hold is
   `*this`.** Today's coroutine already takes `std::span<const std::byte> frame` by value and has no locals
   before its `switch`, so the rule preserves current behaviour.
-- Every scratch array and every synchronous parse, validate or reply-building block is hoisted out of the
-  coroutine arms into **non-coroutine helpers**, so its storage is on the stack and not in a frame. The file
-  already uses this shape (`validate_inbound_`). This covers the Reject/Logout/reply buffers in the Active and
-  Logon arms; re-derive them with `grep -n "std::array<std::byte" src/session/session.cpp`.
+- **Scratch storage leaves the arms by its lifetime (C-3).** v0.4 hoisted every scratch array into a
+  non-coroutine helper. That is a use-after-return for every array whose bytes a later `co_await` reads.
+  The class of a buffer is decided by **data flow**: where the last read of the storage, or of any span or
+  view into it, falls relative to the arm's next `co_await`.
+  - **Class 1: dead before the next suspension → a non-coroutine helper.** The storage, and every span or
+    view into it, is last read before the arm's next `co_await`. It moves onto a non-coroutine helper's
+    stack. The file already uses this shape (`validate_inbound_`).
+  - **Class 2: read by a later `co_await` → a leaf coroutine that owns it.** Each such reply block (build,
+    `assign_outbound`, `fire_to_admin_`, `store_then_emit`) becomes one private leaf coroutine. The leaf
+    declares the buffer and performs the emit, and the arm `co_await`s the leaf directly.
+  - **Why class 2 cannot use a helper.** `store_then_emit` takes a non-owning `std::span` frame. It suspends
+    in the store, and then transmits **the caller's original span** through `live_write_serialized_(frame)`
+    (`src/session/session.cpp`, `Session::store_then_emit`). A buffer owned by a helper that has returned
+    dangles by then. Instance-2 triage r1, row `unsafe`, measured it on 2026-10-09: at -O2 the emitted bytes
+    differed from the built ones on g++ and clang++. ASan with default options reported
+    `stack-use-after-return` on both. With `detect_stack_use_after_return=0`, clang's ASan reported nothing.
+  - **Keeping the buffers in the arm is not a fallback.** GCC 13 does not overlap the frame slots of locals in
+    disjoint scopes. r1's row `mono` (six 512-B blocks inline in one coroutine), run on 2026-10-09, requested
+    a frame several times the limit on g++ 13 and one under it on clang++. `linux-gcc-release` builds with gcc-13
+    (`conan/profiles/linux-gcc-release`). So an Active arm that keeps its reply buffers is over the limit on
+    that preset by construction, and W-A could not read 0 there.
+  - **The leaf's own frame.**
+    - It is cycled only on its reply path. W-A's Heartbeat and W-B's `fromApp` take no reply, so the gated
+      chains do not change.
+    - It must itself fit the limit (§1(b), condition 1). r1's row `leaf` (a leaf that owns one 512-B buffer
+      and does the emit) requested a frame under the limit on both compilers, and was correct and ASan-clean
+      under every option. Re-run r1; do not cite its numbers.
+    - The §2.4 recipe counts the leaf on reply chains, which stay ungated (§3).
+  - **Parameters.** The by-value rule above binds only where a **non-coroutine** returns an awaitable, which
+    is the dispatcher. A leaf that the arm `co_await`s directly may take references to the arm's locals,
+    because the arm's frame outlives that `co_await`.
+  - **The recipe, and why it is only a lead.** Re-derive the arrays with
+    `grep -n "std::array<std::byte" src/session/session.cpp`. For each one inside `on_inbound_frame`, list the
+    `co_await`s between its declaration and the end of its enclosing block (comments stripped). That scan is
+    lexical, and it over-reports. An array with no `co_await` in its block is class 1. An array with one is
+    class 1 only if reading the data flow shows that nothing reads it, or a view into it, after that
+    `co_await`. The instance-2 triage's scan found no class-1 array in today's `on_inbound_frame`; re-run it.
+  - **Rejected: a `Session`-member scratch buffer for the inbound reply blocks.** Other chains on the strand
+    emit while a reply is suspended in its write, such as `run_liveness_loop`'s Heartbeat and TestRequest
+    emits. A shared buffer would need a per-chain exclusivity argument, and the leaf form needs none. §2.5
+    makes that argument for `send_impl`, where the leaf form is not available: a 4096-B buffer is over the
+    limit in any frame.
+  - **Gates.** W-A on `linux-gcc-release` is the frame-size check. The ASan lane with default options is the
+    lifetime check, **because** no session lane disables `detect_stack_use_after_return`. Re-check with
+    `git grep -n ASAN_OPTIONS -- CMakePresets.json .github cmake tests ci`: the only setting is the python
+    legs' `detect_leaks=0:halt_on_error=1` (`ci/derive-python-sanitizer.sh`). An override that sets
+    `detect_stack_use_after_return=0` would blind clang's ASan to this class (r1). ASan sees only the reply
+    paths the session suites exercise.
 - **Target:** on the Active path, every cycled frame fits the recycler limit on the three Release presets. The
   Active chain is `on_inbound_active_` → `SeqnumManager::check_inbound`, because the dispatcher and, after
   §2.3, the lock add no frame. That chain, together with every cycled frame other chains hold on the same
@@ -280,7 +367,7 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     count is now N. It does not relax the limit. Today's coroutine keeps its scratch arrays in its frame, and
     #544 attributes the frame's excess over the limit to them (the grep above lists them). A frame over the
     limit is allocated on every message, and raising N cannot cache it (§1(b), condition 1). The per-state
-    arms and the hoisted helpers are what make the frames fit.
+    arms, the class-1 helpers and the class-2 leaves are what make the frames fit.
   - The non-coroutine dispatcher is kept. It is legal (round-1 triage p5), already designed, and removes one
     cycled frame from the Active chain, which is headroom under N.
   - §2.3 puts a `lock_frame` into each converted caller's frame. That frame grows, and must still fit (§6 risk 3).
@@ -428,8 +515,12 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     The other SeqnumManager methods stay on the public `async_lock`.
   - `MemoryStore::store` (W-D). `next_seqnum`, `reset`, `reset_to` and `retrieve` stay on the public
     `async_lock`: no gated window reaches them.
-  - FileStore and the outbound `write_gate_` are **not** converted. FileStore is under the §XV.4 exemption,
-    and the outbound path is outside B35. Both are listed in B&L.
+  - FileStore, the outbound `write_gate_` and `SeqnumManager::assign_outbound` are **not** converted.
+    FileStore is under the §XV.4 exemption. Under R-9, W-E gates `Session::send`'s chain (§2.5, §3), so the
+    public `async_lock` frames of `assign_outbound` and of `write_gate_`, and the transport write's
+    `use_awaitable` adapter, now sit on a zero-gated path. They stay unconverted: they are cycled frames that
+    fit the limit, and they count in §2.4's live set. Converting them is headroom, not a gate, so B35 does
+    not do it. B&L lists them.
 - **Erratum E-6 to `.specify/2f-async-mutex.md`: a narrow supersession, for internal callers only.**
   - It supersedes E-1's "`async_lock(mr)` is the operation" and E-2's "`async_lock(mr)` coroutine frame"
     lifetime wording, for callers that use the macro.
@@ -452,7 +543,10 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     once on one scheduler call, at any instant on a zero-gated production path, plus headroom. "Live at once"
     counts every chain that shares the scheduler call (§1(b), *What counts as cycled*). That includes the
     pending inbound read during an outbound `store`, which is q5's case, and an outbound emit suspended in its
-    write while an inbound message is handled.
+    write while an inbound message is handled. Under R-9 the outbound emit includes an application send
+    through `Session::send`, whose chain is deeper than the liveness loop's emits (step 5).
+  - **Headroom, as a condition.** At the largest gated instant, N leaves room for at least one more nested
+    `co_await` on each chain live at that instant.
   - **The recipe that re-derives the live set.**
     1. List the long-lived coroutines of an Active session: those `co_spawn`ed once per connection or per
        Active entry and looping (the read pump in `src/session/engine.cpp`, `Session::run_liveness_loop`). Re-derive
@@ -468,19 +562,40 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
        transport. By reading the branch base, r is 1 after §2.3's plain-read edit: `asio_plain_transport::async_read_some`
        is one coroutine, and the `deferred` read adds no adapter. It is 2 without the edit. §3's W-A (b-S) pair
        and W-D-R are written in terms of r.
-  - **The value the PR sets: N = 8.**
+    5. Count **e**, the cycled frames of an application send suspended in its write, the same way (R-9). Walk
+       from `Session::send` (`src/session/session.cpp`) through `send_impl`, `store_then_emit` and
+       `live_write_serialized_` into the plain transport's `async_write`
+       (`src/transport/asio_plain_transport.cpp`). Count its `use_awaitable` adapter, or, at the write gate,
+       the public `async_lock` frame and its adapter in place of the write's two. The sender that calls
+       `Session::send` is long-lived in W-E and holds no slot. A send that is itself `co_spawn`ed adds the
+       spawn's entry-point frame and the spawned coroutine's frame. §3's W-D-W is written in terms of e.
+       - **A send started from inside `fromApp` or `fromAdmin` stacks on the inbound arm.** It runs inline
+         until its first suspension (§2.5, probe r3), so its frames count on top of `on_inbound_active_`'s, not
+         beside them. That is the ordinary FIX shape of answering an order from `fromApp`. It is derived, not
+         gated.
+  - **The value the PR sets: N = 16** (v0.4 set 8).
     - Fable's consult proposes 8 as a floor (`fable_544_design_consult.md`, D-B(3a)).
-    - By reading the branch base `d51ce86d` with the recipe above, the largest live set is an inbound Active message handled
-      while an outbound emit is suspended in its write. That is the Active pair (`on_inbound_active_`,
-      `check_inbound`), plus the emit chain: `store_then_emit` → `live_write_serialized_` → the transport's
-      `async_write` and its `use_awaitable` adapter, or, at the write gate, the public `async_lock` and its
-      adapter.
-    - q5's case, the store chain plus a pending read, is smaller.
-    - 8 exceeds that set's count, with headroom for at least one more nested `co_await` on each of its two
-      chains. Count it with the recipe; the verify record carries the count. The outbound write path is not
-      gated (§7), but its frames take slots while gated work runs, so N is sized to include them.
-    - Re-run the recipe at implementation time. The chain list above is a lead, and the PR's verify record
-      carries the derivation and its date.
+    - **Why 8 no longer meets the condition.** v0.4 sized N on the liveness loop's emit chain:
+      `store_then_emit` → `live_write_serialized_` → the transport write and its adapter. R-9 puts the
+      `Session::send` chain on a gated path (W-E), and that chain adds `Session::send` and `send_impl` above
+      `store_then_emit`. By reading the branch base with the recipe, the largest gated instant is now the
+      inbound Active pair (`on_inbound_active_`, `check_inbound`) requested while an application send is
+      suspended in its write: 2 + e. At N = 8 that instant leaves no headroom, so it fails the headroom
+      condition above. This is inferred by reading; W-D-W (§3) gates it.
+    - By the same reading, 16 meets the condition at that instant, and still leaves headroom when the send is
+      itself `co_spawn`ed (step 5).
+    - q5's case, the store chain plus a pending read, is smaller. So is W-E's own largest instant, a send
+      chain plus the pending read.
+    - Re-run the recipe at implementation time. The chain list above is a lead. The PR's verify record
+      carries the derivation and its date, and W-D-W's bracket re-checks the headroom on every run.
+    - **What 16 does not reach.** `Engine::send`'s chain is deeper still: two `co_spawn` hops, each with an
+      entry-point frame, a spawned lambda frame and a `use_awaitable` adapter, above `Session::send`
+      (`src/session/engine.cpp`, `Engine::send`). That path allocates per call anyway (§2.5), so no zero is
+      claimed for it. Whether the inbound pair stays at 0 while such a send is suspended depends on N against
+      that chain. That is derived, not gated (§4).
+    - Raising N does not reach O3-1. Instance-2 triage r2 measured the over-limit send's eviction identically
+      at N = 8 and N = 16 on 2026-10-09: eviction is not a capacity effect. R-9's frame change (§2.5) is what
+      reaches it.
   - **The pin.** (b-S) in W-D's driver harness (§3) instantiates a nest of exactly N trivial cycled frames,
     which must read 0, and a nest of N+1, which must read > 0. Both read N from the macro, so they track the
     exported value. Together they pin that the running recycler holds exactly the macro's slot count.
@@ -488,18 +603,44 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     to (purposes × N) cached blocks, each no larger than the limit plus one byte, and frees them on return
     (`~thread_info_base`). The existing benches are the check on the scan. No figure is written here.
 - **Where the definition is attached.**
-  - **Installed interface.** It is an INTERFACE compile definition on every export-set member
-    (`FIXPP_EXPORT_TARGETS` in `CMakeLists.txt`) that links `asio::asio` in its PUBLIC/INTERFACE link set. One CMake helper applies
-    both the link and the definition, so the two cannot drift apart. Re-derive the members with
-    `git grep -n "asio::asio" -- 'src/*CMakeLists.txt'`. A consumer then inherits the definition through
-    `fixpp::fixpp` or any of those members.
-  - **In-tree.** The same value is appended to the build tree's imported `asio::asio` target
-    (`INTERFACE_COMPILE_DEFINITIONS`). Every in-tree TU that has asio's include path then gets it, including
-    test-only targets that link `asio::asio` without a fixpp library: `fixpp_mock_clock`, and test executables
-    under `tests/core`, `tests/otel` and `tests/sync`. Re-derive them with
-    `git grep -n "asio::asio" -- '*CMakeLists.txt'`. Identical duplicates of the definition are harmless; the
-    census below checks the value.
-  - **Not on `fixpp::capi`.** Its installed interface reaches the closure only through
+  - **Installed interface: a PUBLIC definition on `fixpp_core` (C-1).**
+    `target_compile_definitions(fixpp_core PUBLIC ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>)`, with N read from
+    the guard header. v0.4 attached it to the members that link `asio::asio`, and so left `fixpp::core` out.
+    `fixpp::core` links no asio, but its installed headers include it (`clock.hpp`,
+    `session_executor.hpp`, `engine_config.hpp` and `trace_context.hpp` among them).
+    - **The selector is "publishes the `include/` root", not "links asio".** Every C++ member that publishes
+      `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` exposes every installed header, the asio-including
+      ones too. So link edges cannot tell which consumer TU sees fixpp's asio. Every such member links
+      `fixpp_core` PUBLIC/INTERFACE, directly or transitively. One attachment therefore reaches the umbrella,
+      every member, and every CMake consumer of any of them.
+    - `fixpp_core`'s own TUs include no asio (`src/core/CMakeLists.txt` compiles `decimal.cpp` and
+      `fix_time.cpp`; `system_clock_source.cpp` is compiled into `fixpp_session`), so the definition is inert
+      there.
+    - **The enumeration recipe.** Re-run it whenever a target, link edge or installed header changes.
+      1. The members are `FIXPP_EXPORT_TARGETS` in `CMakeLists.txt`, plus the umbrella `fixpp` and the
+         conditional `fixpp_log_otlp` appended after it.
+      2. Each member's installed include root:
+         `git grep -n "INSTALL_INTERFACE" -- CMakeLists.txt 'src/*CMakeLists.txt' cmake`.
+      3. Each root-publishing member's PUBLIC/INTERFACE link set:
+         `git grep -n -A3 "target_link_libraries" -- CMakeLists.txt 'src/*CMakeLists.txt'`.
+      4. Which installed headers reach asio: run `python3 -I closure.py <module dirs under include/>` from the
+         library root (`b35_544_gate_a_i2r1/closure.py`). It prints each header that has an include chain to
+         an `asio*` header, with the chain.
+    - **The condition the recipe checks.** Every member that publishes the `include/` root reaches
+      `fixpp_core` through PUBLIC/INTERFACE links. A member that does not needs its own attachment. A member
+      that publishes another root and reaches the closure only through `$<LINK_ONLY:>` withholds the
+      definition: that is `fixpp_capi` (`include/capi`) and `fixpp_service` (`include/service-iface`, through
+      `fixpp_capi`). That is correct, because their headers include no asio (*The C ABI*, below).
+      Instance-2 triage C-1 holds the enumeration at `07b7ff30`, as a dated lead; the plan re-runs the recipe.
+    - v0.4's single helper that coupled the `asio::asio` link with the definition is dropped. The two now
+      have different selectors.
+  - **In-tree, kept beside the `fixpp_core` attachment.** The same value is appended to the build tree's
+    imported `asio::asio` target (`INTERFACE_COMPILE_DEFINITIONS`). Every in-tree TU that has asio's include
+    path then gets it, including test-only targets that link `asio::asio` without a fixpp library:
+    `fixpp_mock_clock`, and test executables under `tests/core`, `tests/otel` and `tests/sync`. Re-derive them
+    with `git grep -n "asio::asio" -- '*CMakeLists.txt'`. Identical duplicates of the definition are harmless;
+    the census below checks the value.
+  - **Not on `fixpp::capi` or `fixpp::service`.** Their installed interfaces reach the closure only through
     `$<LINK_ONLY:fixpp::capi_objects>`, which withholds compile definitions as it already withholds
     `ASIO_STANDALONE` (`tests/consumer/run_consumer_witness.cmake`, leg 3's comment). That is the correct
     state, because the C ABI's headers include no asio (below).
@@ -515,12 +656,11 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     `reusable_memory_`, into the rest of the object on that call's stack. The opposite mismatch makes two
     purposes share slots. Neither is diagnosed, and which one occurs can change with link order.
   - **Who inherits it, and who must define it.**
-    - CMake consumers of `find_package(fixpp)` that link `fixpp::fixpp` or an asio-carrying member inherit the
-      definition.
-    - **`fixpp::core` is not asio-carrying.** It links no asio (`src/core/CMakeLists.txt`), yet several of its
-      installed headers include asio (`clock.hpp` and `session_executor.hpp` among them). A consumer that
-      links only `fixpp::core` and supplies asio itself gets neither asio nor the definition from fixpp. Only
-      the guard's `static_assert` catches that consumer.
+    - CMake consumers of `find_package(fixpp)` that link any `fixpp::` target except `fixpp::capi` and
+      `fixpp::service` inherit the definition, through `fixpp_core`. That includes a consumer that links only
+      `fixpp::core` and supplies asio itself: it gets the definition from fixpp, though not asio.
+    - A CMake consumer that links only `fixpp::capi` or `fixpp::service` does not inherit it. Its fixpp headers
+      include no asio, so it needs the definition only for its own asio TUs (below).
     - Non-CMake consumers (any build that uses the installed headers and archives directly) must define it
       themselves. New B&L row (§4).
     - **Static co-linking reaches C-ABI consumers too.** `libfixpp_capi.a` carries asio's inline symbols,
@@ -580,15 +720,18 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
       fail until re-scoped". Those lines correspond to leg 3's `file(GENERATE)` producer in
       `tests/consumer/CMakeLists.txt` and its reader in `run_consumer_witness.cmake`. This note reads them
       differently, and the witness run decides.
-  - **A new leg for the C++ consumer.** `tests/consumer/CMakeLists.txt` writes, with `file(GENERATE)`, the
-    observed `COMPILE_DEFINITIONS` of `probe_umbrella`, which links `fixpp::fixpp`. The driver passes in the
-    expected N, read from the same guard header.
+  - **Two new legs for the C++ consumer.** `tests/consumer/CMakeLists.txt` writes, with `file(GENERATE)`, the
+    observed `COMPILE_DEFINITIONS` of two probes: `probe_umbrella`, which links `fixpp::fixpp`, and a new
+    `probe_core`, which links only `fixpp::core` (C-1). The driver passes in the expected N, read from the
+    same guard header. Both legs use the same check, below.
+    - `probe_core` is the leg that turns red if the attachment moves off `fixpp_core`. The umbrella leg alone
+      cannot see that, because the umbrella would still inherit the definition from any member that carries it.
     - `run_consumer_witness.cmake` keeps the entries that match `^ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE(=|$)` and
       removes identical duplicates. The kept set must **equal** exactly `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`.
     - It goes red when the definition is missing (empty set), when it has the wrong value (a different entry),
       and when two different values arrive (two entries).
-    - Its arms are run once and recorded in the verify record: delete the attachment, which turns the set
-      empty; and attach a different literal, which mismatches.
+    - Its arms are run once and recorded in the verify record: delete the `fixpp_core` attachment, which
+      turns both sets empty; and attach a different literal, which mismatches.
     - Independently, `consumer_witness.cpp` includes fixpp headers, so the guard's `static_assert` stops that
       build too.
 - **Other dependencies that include asio: none.**
@@ -605,14 +748,165 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
   - No build file sets another asio macro: `git grep -n "ASIO_" -- CMakeLists.txt cmake conanfile.py
     CMakePresets.json` finds no definition.
 
+### 2.5 Class (b) on the send path: `Session::send_impl`'s frame (R-9)
+
+- **The defect (instance-2 triage O3-1).** `Session::send_impl` (`src/session/session.cpp`) declares three
+  `std::array<std::byte, 4096>`: `strip_buf`, `body_buf` and `buf`. They are in scope across its
+  `co_await`s, so its frame is over the limit on every compiler. Every application send goes through it:
+  `Session::send` awaits it, `Engine::send` reaches `Session::send` on the session strand, and the C ABI
+  calls `Engine::send` (`src/capi/session.cpp`, `fixpp_session_send`).
+  - An over-limit request fits no cached block, so it evicts the first occupied slot of its purpose before
+    `aligned_new`. On free, a block over the limit is deleted, not cached (`asio/detail/thread_info_base.hpp`,
+    `allocate` and `deallocate`).
+  - Instance-2 triage r2 measured the consequence in a model on 2026-10-09. An inbound Active pair
+    interleaved with an over-limit send allocated inside the inbound pair once per message, at N = 8 and
+    N = 16, on g++ and clang++. With an in-limit send it read 0. r2 is sequential, so it shows the mechanism
+    and its insensitivity to N, not production's rate. Re-run it; do not cite its numbers.
+- **Lifetimes, by C-3's discipline (§2.2).** The decision is data flow, not lexical scope.
+  - **`strip_buf` and `body_buf` are class 1.** Every view into them is last read when the body is copied
+    into `buf`. Those views are `app_payload` (rebound to `strip_buf`), the `pv` views, `msgtype_field` and
+    `rest_payload`. That copy happens before `toApp` runs and before `send_impl`'s first `co_await`, which is
+    `close()` on the `app_callback_threw` path or `seqnum_mgr_.assign_outbound()`. The lexical crossing scan
+    reports them as crossing only because they are declared at function scope.
+  - **`buf` is class 2.** `toApp`'s parse reads it synchronously, and then `store_then_emit` reads it across
+    the store's suspension and the write (§2.2, *Why class 2 cannot use a helper*).
+  - A class-2 leaf is not available: a frame that owns 4096 B is over the limit by definition. That is why R-9
+    asks for session-owned storage.
+- **What serialises `send_impl`: nothing, across its suspensions (the R-9 premise, checked against the code).**
+  - The session strand runs one handler at a time, so it serialises coroutines only **between suspensions**.
+  - Every send suspends at least once after building `buf`. `MemoryStore::store` begins with `asio::post`
+    (`include/fixpp/session/memory_store.hpp`), which always suspends, and §2.3's `deferred` edit is still
+    a post. A send can also suspend in `assign_outbound`'s lock, in `write_gate_`'s lock and in the write.
+  - `write_gate_` is acquired inside `live_write_serialized_`, after the store, and covers only the write.
+    Taking it before `buf` is built would make `store_then_emit`'s own `live_write_serialized_` lock it a
+    second time, and `async_mutex` tracks no owner, so a holder that locks again waits for itself (inferred
+    from `include/fixpp/core/sync/async_mutex.hpp`, which counts holders and records no owner).
+  - The seqnum mutex is held only inside `assign_outbound`.
+  - **The paths that overlap two `send_impl` invocations:**
+    - concurrent `Engine::send` or `fixpp_session_send` callers. Each `Engine::send` `co_spawn`s its own
+      coroutine onto the session strand (`src/session/engine.cpp`, `Engine::send`, Step C). The second can
+      run while the first is suspended in its store or its write;
+    - a C++ consumer that `co_spawn`s `Session::send` more than once without awaiting each;
+    - **a send started from inside a callback on the session strand, which runs inline.** asio's `co_spawn`
+      enters through `co_spawn_dispatch` (`asio/impl/co_spawn.hpp`, `co_spawn_entry_point`). A strand's
+      `dispatch` runs the function inline when the strand is already running on this thread, and an idle
+      strand dispatches its invoker to the inner executor, which also runs inline inside the `io_context`
+      (`asio/detail/impl/strand_executor_service.hpp`, `dispatch`).
+      - Probe r3 (`b35_544_gate_a_i2r1/r3_reentrant_send_inline.cpp`) measured this on 2026-10-09 with g++
+        and clang++. From inside a coroutine on the session strand, a synchronous callback started a nested
+        send in three ways: `co_spawn` onto the session strand, `co_spawn` of `Engine::send`'s two-hop shape
+        onto the `io_context` executor, and onto the control strand. In all three, the nested body ran inline,
+        before the callback's `co_spawn` returned. Its control, `asio::post`, did not.
+      - So a send that `toApp` starts runs nested inside the outer `send_impl`, while the outer `buf` is live
+        and `toApp`'s `MessageView` points into it.
+  - Liveness, admin and reply emits never touch `send_impl`'s storage: they build into their own buffers
+    (`run_liveness_loop`, §2.2).
+  - **So the existing serialisation cannot guarantee exclusive use of one session-owned `buf`.**
+- **The implemented form (R-10: flag + fallback).**
+  - **Storage.** It is session-owned and allocated with the `Session` object, so once per session and never
+    per message. The Engine creates that object with `std::make_shared<Session>` once per accepted connection
+    or connect loop, before `open()` (`src/session/engine.cpp`). That meets `[const §XV.1]`: pre-allocated
+    per session at open, never per message. It holds:
+    - the **build scratch**, two 4096-B arrays standing in for `strip_buf` and `body_buf`;
+    - the **frame slot**, one 4096-B array standing in for `buf`;
+    - the **slot flag**, a `bool` read and written only on the session strand.
+    - Whether the storage is a member or one block owned by the `Session` is plan-level. Either way
+      `Session`'s layout changes (Trigger; §4). Before growing the object, grep the whole repo for a size pin:
+      `git grep -n "sizeof(Session)\|sizeof(fixpp::session::Session)\|sizeof(session::Session)"`.
+  - **The build: one non-coroutine helper (class 1).** The excision and partition pass and the framing move
+    into a non-coroutine helper. It writes the finished frame into a caller-supplied span and returns its
+    length, or the same error the inline code returns today.
+    - It uses the build scratch without the flag. It is synchronous and calls no user code: `toApp` runs
+      after it returns. So on the strand nothing else can use the build scratch while it runs. That includes
+      a send nested inside `toApp` (r3), because the outer send's build has finished by then.
+    - The 020 checks and the scanner pass use no scratch. Whether they move into the helper is plan-level;
+      their order and dispositions do not change.
+  - **The frame slot: held by the flag (class 2).**
+    - Before the helper writes the first byte of the frame, `send_impl` tests the flag. If the flag is clear,
+      `send_impl` sets it through an RAII holder in its own frame, and the helper builds into the slot.
+    - The holder clears the flag when that invocation ends: every `co_return`, the throw path, and destruction
+      of the frame while it is suspended. It is cleared **only after `store_then_emit` returns**, because the
+      write reads the slot until then. A store failure or a vetoed `toApp` releases it on that `co_return`.
+    - The flag is a strand-local `bool`, not a lock. Nothing waits on it, it adds no suspension point, and
+      `close()` and `Engine::stop` neither see it nor drain it.
+  - **The fallback leaf, for an invocation that finds the flag set.** That invocation `co_await`s a private
+    leaf coroutine. The leaf's frame owns a 4096-B frame buffer, and the leaf runs the same tail: the helper
+    into its own buffer, `toApp`, `assign_outbound`, `store_then_emit`.
+    - Its frame is over the limit by construction. A send that takes it allocates one frame through
+      `aligned_new` and evicts one cached block, by O3-1's mechanism. That is bounded, not zero (§4).
+    - **R-6 residual, as a condition.** When a send starts while the slot is held, because it is nested in
+      `toApp` (r3) or overlaps a send suspended in its store or its write, it takes the leaf and allocates.
+      R-10 discloses this under R-6.
+    - The fallback buffer cannot be a conditionally declared local inside `send_impl`. A coroutine frame's size
+      is fixed at compile time, so any local of `send_impl` sizes its frame on every call. It must be a separate
+      coroutine.
+    - **One implementation of the tail.** The plan chooses the shape, for instance one tail coroutine that
+      takes the frame span. The condition: on the primary path, the send chain gains no cycled frame over
+      today's `Session::send` → `send_impl` → (`assign_outbound` | `store_then_emit` → …); the fallback adds
+      exactly the leaf. §2.4's e counts the primary path.
+  - **`send_impl`'s frame after the change** holds no array. Its frame must fit the limit on the three
+    Release presets (§1(b), condition 1); W-E is that check (§3).
+  - **Behaviour is unchanged.** The validation, the field order, the dispositions, the seqnum ordering, the
+    store-before-transmit ordering and the cancellation points are all the same. The existing session suites
+    are the behaviour oracle. A new overlap cell (§3, *Behaviour*) covers what no allocation gate can see:
+    a broken flag corrupts bytes silently.
+- **What R-9 does not reach: the allocations of `Engine::send` and the C ABI.** R-9 removes the over-limit
+  frame from `Session::send`'s chain. The two public entry points above it still allocate on every call, and
+  B35 does not change them:
+  - `Engine::send` copies the payload into a `std::vector<std::byte>` and makes two `co_spawn` hops, one
+    through `control_strand_` (`src/session/engine.cpp`, `Engine::send`);
+  - `fixpp_session_send` adds a `co_spawn` with `asio::use_future`, whose handler `allocate_shared`s its
+    promise (`src/capi/session.cpp`; `asio/impl/use_future.hpp`).
+  - So no send through those entry points is zero. W-E therefore drives `Session::send` directly (§3). Their
+    chains also hold more cycled frames than W-E's, which bears on the inbound pair (§2.4, *What 16 does not
+    reach*; §4).
+- **Rejected by R-10: a session send gate.** This would be a session-owned
+  `async_mutex`, taken through the frameless macro before the frame is built and held until
+  `store_then_emit` returns. It would keep an overlapping send at zero too. R-10 rejects it for its drain,
+  deadlock and cancellation conditions:
+  - sends queue behind each other's store and write. With FileStore, a send's build waits for the previous
+    send's durable store;
+  - the gate must join `close()`'s and `Engine::stop`'s drain sequence, and its waiters must be cancellable by
+    `root_cancel_`;
+  - the `app_callback_threw` path `co_await`s `close()` inside `send_impl`. It would need the gate released
+    first, or `close()` would wait on its own caller;
+  - a cancellation pending on entry would now throw at the gate's part-1 pre-check, earlier than today's
+    first `co_await`. A send that today returns a validation error or a `toApp` veto would then disconnect.
+- **Also rejected:**
+  - `write_gate_` taken early: it self-deadlocks (above).
+  - A per-send leaf that owns `buf`: that is the over-limit frame itself.
+  - A pool of K slots: the number of concurrent sends has no bound, so a pool still needs a fallback. No
+    measurement shows overlap common enough to size K.
+- **A pre-existing defect that r3 exposes, outside B35 (inferred; not reproduced at session level).**
+  `send_impl` peeks the outbound MsgSeqNum before `toApp` and stamps the frame with the peeked value. It
+  advances the counter with `assign_outbound` after `toApp`, and stores and transmits under the peeked value.
+  - A send nested inside `toApp` runs inline (r3). It peeks the same value, assigns it, and reaches its store
+    before the outer send resumes.
+  - The outer send then assigns the next value, but stores and transmits under the value it peeked.
+  - The result is two frames carrying one MsgSeqNum, and a counter that has advanced by two.
+  - `include/fixpp/session/engine.hpp` documents that "Re-entrant calls from on-strand callbacks are enqueued
+    behind the current dispatch". r3 contradicts that for every `co_spawn` form it tried.
+  - **Filed as fixpp#563 (label `bug`; UNCONFIRMED; placed in batch B28).** B35 does not fix it. B35's
+    overlap cell asserts each frame's bytes, not MsgSeqNum uniqueness, so it does not depend on the defect
+    (§3).
+
 ## 3. Tests and gates
 
 **RED task 0, before any edit: take the baseline.**
-- On this branch's base (`d51ce86d`), run W-A..W-D in the window shapes below, under mallocnesia
+- On this branch's base (`d51ce86d`), run W-A..W-E in the window shapes below, under mallocnesia
   (`tools/check_alloc.py`), on `linux-clang-release` and `linux-gcc-release`. Record the per-window counts in
   the verify record, with the command.
-- At the base, the slot count is asio's default. W-D-R has no base form, because the base has no
-  W-D-R harness. Its RED evidence is the bracket's arm (§3, *Windows*).
+- At the base, the slot count is asio's default. W-D-R and W-D-W have no base form, because the base has
+  no harness for them. Their RED evidence is each bracket's arm (§3, *Windows*). W-E has a base form: its
+  rig drives today's `Session::send`, whose frame is over the limit (§2.5).
+- **The TLS diagnostic (R-5, C-5).** In the same step, run W-A's run-thread shape on a TLS rig under the
+  full mallocnesia counter, on both Linux Release presets, before and after the change.
+  - Record the interceptions by entry (`malloc`, `aligned_alloc`, …) and the stack that `tools/check_alloc.py`
+    prints for each.
+  - **Disposition.** A hit that originates in OpenSSL's per-record path, under asio's
+    `SSL_MODE_RELEASE_BUFFERS` (`asio/ssl/detail/impl/engine.ipp`), goes to a new labelled issue, outside B35.
+    A hit in fixpp or asio code on the TLS read path is a B35 defect, because §2.3 changes the TLS read.
+  - It is diagnostic: it registers no gate. R-5 is an orchestrator default, not a ruling.
 - The pump window has never been measured under the full counter.
 - This baseline is **supporting measurement** only. It cannot attribute anything to §2.2, because classes (a)
   and (c) are present in the same window at the base. §2.2's recurrence arm is (b-L), planted in W-A's own window.
@@ -653,7 +947,8 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
       - At D = N, the macro form allocated too.
       - At N = 2, D = 1 is q3's production depth, and q3's rows reproduced.
       - The probe is `b35_544_gate_a_r2/q6_padded_depth.cpp`, filed beside q5 by the orchestrator from the
-        rewrite's scratch copy. Re-run it; do not cite its numbers.
+        rewrite's scratch copy. Re-run it; do not cite its numbers. v0.5 raises the exported N to 16
+        (§2.4), at which q6 has not been run: the plan re-runs it there.
   - Inside the driver: a fixed **K** warm-up iterations, then `alloc_guard_start()`. It then awaits **M**
     iterations (M, not N, which is the cache size), with no `co_spawn` and no `use_future` in between, calls `alloc_guard_end()`, and returns.
   - All of it runs under one `ioc.run()`.
@@ -777,6 +1072,52 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
     - a nest of N − r + 1 frames is the arm and must read > 0.
     - The arm proves the stand-in really holds a slot. Without a live, cycled read frame it would read 0
       (q5's "no read" control).
+- **W-E (new in v0.5; R-9). Two-way: the inbound Active pair interleaved with application sends.** It must
+  read 0.
+  - **Rig.** W-B's rig: the run-thread shape, an application message and a registered `fromApp`. A long-lived
+    test-owned *sender* coroutine is `co_spawn`ed on the session's executor before arming, like W-A's
+    launcher. It waits on a strand-side signal that the test-owned `fromApp` sets. Each wake performs one
+    `co_await session.send(payload)` over a pre-built payload, and then bumps the completion atomic. In W-E
+    the sender bumps it, not `fromApp`. So the test thread writes frame *i+1* only after send *i* has
+    completed.
+  - **The wake must complete by post**, for instance a timer-cancel completion. Then the sender runs after
+    the inbound arm has returned, beside it rather than on top of it. A send started inside `fromApp` itself
+    would run inline, stacked on `on_inbound_active_` (r3). That shape is derived, not gated (§2.4 step 5;
+    §4).
+  - **Why `Session::send` and not `Engine::send`.** `Engine::send` and the C ABI allocate on every call
+    (§2.5). mallocnesia counts process-wide, so a window through them could never read 0.
+  - **The peer must drain.** The rig's peer keeps an async read in flight (`start_reading()`), so the writes
+    complete. In W-E that read completes and re-arms once per send, inside the window. It is a callback with
+    a fixed buffer and no coroutine frame. If it allocated, W-E would read > 0, which fails toward red (the
+    harness rule above).
+  - **What W-E gates.**
+    - Every frame on the `Session::send` chain fits the limit, `send_impl`'s first among them (condition 1).
+    - That chain plus the pending read fits N (condition 2).
+    - It does **not** hold the inbound pair live while a send is suspended in its write. The send completes
+      before the next frame is written. So W-E does not cover N's two-way sizing instant; W-D-W does.
+  - Its fix-deleted arm is (e) below, and its twin is W-E itself.
+- **W-D-W (new in v0.5; C-4). The two-way sizing instant, as a model in W-D-R's harness.** It must read 0.
+  - This is the instant §2.4 sizes N on: the inbound Active pair requesting blocks while an application send
+    is suspended in its write. A real rig cannot hold that write pending deterministically. It would need a
+    peer that stops reading until the socket buffers fill.
+  - A long-lived test-owned *emitter* coroutine is `co_spawn`ed before arming. It loops over a chain of e
+    cycled child coroutines, the innermost awaiting a test-owned timer. That chain stands in for the send
+    chain suspended in its write. **e is taken from the production chain** by §2.4's recipe, step 5.
+  - Each iteration, the driver awaits an **Active-depth replica pair** through the shared template at D = 1.
+    The wrapper stands in for `on_inbound_active_`, and the callee is a test-owned coroutine shaped like
+    `check_inbound`, so the pair is two cycled frames. The driver then cancels the emitter's timer and yields
+    twice with `asio::post(ex, asio::deferred)`, so the chain completes and re-arms.
+  - **The bracket, shifted by e and the pair.** The replica callee awaits a nest of k trivial cycled frames.
+    - k = 0 is the window.
+    - k = N − e − 2 is the twin, and must read 0. It fills exactly N.
+    - k = N − e − 1 is the arm, and must read > 0. It proves the emitter really holds e slots while the pair
+      runs.
+  - **The headroom condition, as a check.** §2.4 requires N − e − 2 ≥ 2: one more nested `co_await` per
+    chain. A `static_assert` in the harness TU states it, from the macro and the harness's e. That makes it
+    exactly as current as e, and e is re-derived by the recipe whenever the send chain gains a `co_await`
+    (§6 risk 4).
+  - W-D-W covers C-4 at the gated depth. The deeper `co_spawn`ed and `Engine::send` shapes stay derived,
+    not gated (§2.4; §4).
 - **FileStore `store()`** is bounded, not zero: at most one frame per offloaded I/O op, the `[const §XV.1]`
   §XV.4 exemption. FileStore `retrieve` is disclosed, not gated.
 
@@ -784,7 +1125,7 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
 
 | Preset | Windows | Counter | Assertion | Fix-deleted arms run here |
 |---|---|---|---|---|
-| `linux-clang-release` (CI today), `linux-gcc-release` (CI widened) | W-A..W-D, W-D-R | mallocnesia `_mallocnesia` twins, `MALLOCNESIA_MAX_ALLOCS=0` | **0** | (a), (b-L), (b-S), (c-L), (c-P), (c-H), (s), and W-D-R's bracket, each with its in-boundary twin |
+| `linux-clang-release` (CI today), `linux-gcc-release` (CI widened) | W-A..W-E, W-D-R, W-D-W | mallocnesia `_mallocnesia` twins, `MALLOCNESIA_MAX_ALLOCS=0` | **0** | (a), (b-L), (b-S), (c-L), (c-P), (c-H), (e), (s), and the W-D-R and W-D-W brackets, each with its in-boundary twin |
 | `windows-msvc-release` | W-A, W-B. T044's rig is ported, and its `if(CMAKE_SYSTEM_NAME STREQUAL "Linux")` guard in `tests/alloc_guard/CMakeLists.txt` is lifted for the new cells | TU-local `operator new` counter (T044's) | **0** `operator new`; the `_aligned_malloc` half is disclosed | (a) only |
 | unsanitized Debug presets, including the unsanitized libc++ lane | the same cells | TU-local counter: printed, not asserted. mallocnesia: not registered (Release only, below) | — | — |
 | sanitizer lanes | the same cells | **semantic execution, counter unavailable** (C2-5). mallocnesia is not registered under a sanitizer (`cmake/FixppMallocnesia.cmake`, the sanitizer condition), and T044's counter is compiled out under `FIXPP_SANITIZER_REPLACES_NEW` | — | — |
@@ -795,6 +1136,9 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
   - An `operator new` counter therefore cannot see classes (b) and (c). Arms (b) and (c) cannot read > 0 there.
   - W-C and W-D contain no class-(a) content, so on MSVC they would assert zero on paths whose B35 defects the
     counter cannot see. They are **not registered on MSVC** as B35 evidence.
+  - The same holds for W-D-R and W-D-W, which are slot models, and for W-E, whose B35 defect is
+    `send_impl`'s over-limit frame, a class-(b) request that goes to `_aligned_malloc`. W-E's class-(a)
+    content is W-A's and W-B's strand, which those windows already gate there.
 - **Release only (O-6).** `fixpp_add_mallocnesia_test` (`cmake/FixppMallocnesia.cmake`) has no build-type
   condition, and `FIXPP_MALLOCNESIA_SUPPORTED` is true on every non-sanitizer glibc build, Debug included.
   - The new twins, arms and in-boundary twins are registered only for a Release build type, so R-4's Debug
@@ -916,6 +1260,17 @@ above; each twin asserts 0 in the same harness.**
     callee, except for the one reverted edit. To check, compare the replica's `co_await`s with
     `grep -n "co_await" include/fixpp/session/memory_store.hpp src/session/seqnum_manager.cpp`, read inside
     `MemoryStore::store` and `SeqnumManager::hydrate`.
+- **(e) The over-limit send, restored (R-9)** (Linux; `--expect-violation --expect-entry aligned_alloc`).
+  - Through `session_test_access` (the unconditional friend in `tests/support/`), the test sets the slot flag
+    before arming and leaves it set. Every send in the window then finds the slot held and takes the fallback
+    leaf (§2.5), whose frame owns a 4096-B buffer across its `co_await`s. That is the over-limit send frame R-9
+    removes, on a real production path, with no replica.
+  - It must read > 0. Its RED comes from the leaf's own over-limit frame request, so it shows that W-E's
+    counter sees an over-limit frame on the send chain inside the window. It is **not** an eviction
+    witness. r2 is the evidence for eviction (§2.5).
+  - Its twin is W-E itself: the same rig and launch path, with the flag left to `send_impl`.
+  - The test, not an invocation, owns the flag it set. The fallback path never writes the flag, and the
+    primary path's holder clears only a flag it set itself, so the arm's flag stays set for the whole window.
 - **(s) Scope control** (Linux; `--expect-violation --expect-entry aligned_alloc`).
   - It is the W-A workload driven by a `run_one_for` loop instead of the run thread, which is T044's current
     shape. It must read > 0 on the fully fixed tree.
@@ -941,7 +1296,26 @@ above; each twin asserts 0 in the same harness.**
   - work tracking keeps `run()` alive while a read is pending.
   - They are registered on Linux and on `windows-msvc-release` and `windows-msvc-debug` (C2-1). On MSVC they
     are the fixpp executor's behaviour oracle (§2.1).
-- **New lock cells for the macro (RC-2).** Each runs against the converted sites, not against the public
+- **New overlap cells for the send slot (R-9; §2.5).** No allocation gate can see a broken flag: two sends
+  sharing the slot corrupt bytes silently. So each cell asserts that every send stores, and transmits, exactly
+  the frame it built. It compares the MemoryStore's stored bytes and the peer's received bytes with a frame
+  built independently from the same payload, seq and mock-clock time.
+  - **Interleaved.** A test coroutine on the session strand `co_spawn`s two `Session::send`s with distinct
+    payloads, back to back. The second starts while the first is suspended in its store's leading post, which
+    always suspends (§2.5).
+  - **Nested.** Inside the test `toApp` for the first send, the cell snapshots the bytes of the frame that
+    `toApp`'s `MessageView` spans. It then starts the second send with a `co_spawn` onto the session strand,
+    which runs inline until its store's post suspends it (r3). After that `co_spawn` returns, the cell compares
+    the frame's bytes with the snapshot.
+    - This checks the slot where the flag protects it, during `toApp`. It reads neither the store nor the
+      wire, so it does not depend on the pre-existing MsgSeqNum defect (§2.5). That defect makes both sends
+      store under one seq, so a stored-bytes or wire check in this variant would test the defect, not the
+      flag.
+    - The stored-bytes and wire checks belong to the interleaved variant only. There the second send peeks
+      after the first has assigned, so the defect does not arise.
+  - **Mutants, each of which must turn a cell RED:** the flag test deleted, so both sends use the slot (both
+    variants); and the holder released before `store_then_emit` returns (the interleaved variant).
+  - They are registered wherever the session suites run, including the ASan lane with default options. Each runs against the converted sites, not against the public
   `async_lock` alone. Each names the mutant it must be RED against.
   - **Pre-initiation cancellation (O-2).** A terminal cancellation emitted on the session's cancel slot while
     `MemoryStore::store` is suspended in its leading post makes `store_then_emit` return `dispatch_aborted`,
@@ -992,13 +1366,34 @@ above; each twin asserts 0 in the same harness.**
       - **Outbound work during a pending read** is now gated by W-D-R (§3), and leaves this row.
       - **The full Logon chain** is within N when its frames fit the limit, but it is **not gated**. It stays
         here as "no zero claimed", not as "allocates".
+    - **Application sends (R-9).** Before B35, every `Session::send` was an over-limit frame request, so a
+      two-way session evicted a cached block on every send (instance-2 triage O3-1). After B35, the
+      condition is narrower:
+      - **A send that overlaps another send on the same session.** A send that starts while another send on
+        that session is between its frame build and the end of its `store_then_emit` takes the fallback leaf
+        (§2.5). Its frame is over the limit, so it allocates and evicts one cached block. That covers
+        concurrent `Engine::send` or `fixpp_session_send` callers, a consumer that `co_spawn`s
+        `Session::send` more than once without awaiting each, and a send started from inside `toApp`.
+        Bounded, not zero.
+      - **Sends through `Engine::send` or `fixpp_session_send`.** These entry points allocate on every call:
+        the payload copy, the `co_spawn` hops, and the C ABI's `use_future` promise (§2.5). No zero is
+        claimed for them. Their chains also hold more cycled frames than W-E's. When such a chain plus the
+        inbound pair exceeds N, the inbound pair allocates too. That is derived, not gated: count it with
+        §2.4's recipe, step 5.
+      - **A send started from inside `fromApp` or `fromAdmin`.** It runs inline, stacked on the inbound arm,
+        until its first suspension (§2.5, probe r3). Its frames count on top of the arm's. When that stack
+        exceeds N, the inbound pair allocates. Derived, not gated: count it with §2.4's recipe, step 5.
+      - Sequential sends through `Session::send`, started beside the inbound arm, are gated by W-E. The
+        two-way sizing instant is gated by W-D-W (§3).
   - Debug and sanitizer presets are not gated.
   - libc++ has no Release preset.
   - `windows-msvc-release` checks `operator new` only. Its `_aligned_malloc` half is unchecked, and W-C and W-D
     are not gated there.
   - FileStore `retrieve`.
-  - The outbound path.
-  - TLS, pending R-5's measurement.
+  - The outbound path beyond `Session::send` (W-E, §3): `Engine::send`'s and the C ABI's own allocations, and
+    the unconverted public locks of `assign_outbound` and `write_gate_`, which are cycled frames counted in
+    N rather than removed (§2.3).
+  - TLS, pending R-5's measurement (§3, RED task 0).
 - **L-006-2.** Rewrite "one-time per-thread … warm-up" to the scheduler-call scope. The warm-up is once per
   scheduler call, not once per thread. Its status is unchanged.
 - **`SessionEntry::session_strand` type change.** A C++ source and layout change to a public, nameable struct
@@ -1011,16 +1406,26 @@ above; each twin asserts 0 in the same harness.**
   - Every TU in a process that includes asio must be compiled with fixpp's
     `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` value. A mismatch is undefined behaviour in asio's recycler, and is
     not diagnosed at link time.
-  - CMake consumers that link `fixpp::fixpp` or an asio-carrying `fixpp::` target inherit the definition.
+  - CMake consumers that link any `fixpp::` target except `fixpp::capi` and `fixpp::service` inherit the
+    definition, through `fixpp::core` (§2.4).
   - Non-CMake consumers must define it themselves.
+  - A Conan consumer has no fixpp package to inherit it from today (R-8). A future fixpp recipe carries it in
+    `cpp_info.defines`.
   - So must a consumer's own asio TUs that include no fixpp header, including a C-ABI consumer that links
     `libfixpp_capi.a` into a process with its own asio code. The definition does not propagate through
     `fixpp::capi`.
   - A TU that includes a fixpp header is checked at compile time by the guard header's `static_assert`. A TU
     that includes only asio is not checked.
   - The row names the guard header as the place the value is defined, and gives no number.
-- **The INTERFACE compile definition** on the asio-carrying exported targets, and the new installed guard
-  header, are C++ package changes (§2.4). They are not C-ABI changes.
+- **The PUBLIC compile definition** on `fixpp_core`, which every C++ exported target that publishes the
+  `include/` root inherits, and the new installed guard header, are C++ package changes (§2.4). They are not
+  C-ABI changes.
+- **`Session`'s layout change (R-9).** `Session` gains the session-owned send scratch storage and the slot
+  flag (§2.5). It is a public class in an installed header, so this is a C++ layout change (`sizeof`). It is
+  not a C-ABI change: the C ABI exposes `Session` only through an opaque handle.
+- **Pre-existing, not B35's: a send nested inside `toApp` can reuse the outer send's MsgSeqNum** (§2.5,
+  inferred from the code and probe r3). It goes to a new labelled issue, filed by the orchestrator, which the
+  B&L row then names. `engine.hpp`'s "enqueued behind the current dispatch" sentence is part of that issue.
 
 **Documentation and comment edits the PR must make (C-11, RC-1).**
 
@@ -1029,13 +1434,14 @@ above; each twin asserts 0 in the same harness.**
 | `spec/behaviors-and-limitations.md` | L-497-1 rewritten as above; L-006-2's scope wording; the new ODR-obligation row; new rows if the B&L workflow prefers one row per R-6 residual |
 | `spec/behaviors-and-limitations-closed.md` | the resolved part of L-497-1 |
 | `spec/feature-catalogue.md` | S-012's evidence says the global-heap half is unchecked. Re-point it to the W-D and W-D-R mallocnesia gates on the two Linux Release presets |
-| `cmake/fixppConfig.cmake.in` | a comment next to the dependency block: the package carries the asio cache-size definition, and a TU that includes asio outside the `fixpp::` targets must match it (§2.4) |
-| `tests/consumer/CMakeLists.txt`, `tests/consumer/run_consumer_witness.cmake` | the new C++-consumer leg (§2.4). Leg 3's closed empty expectation stays as it is |
+| `cmake/fixppConfig.cmake.in` | a comment next to the dependency block: the package carries the asio cache-size definition through `fixpp::core`, and a TU that includes asio outside the `fixpp::` targets must match it (§2.4) |
+| `src/session/session.cpp` | `send_impl`'s header comment ("Stack buffer: 4096 bytes … no heap allocation on this path") is replaced by a pointer to this note's §2.5. It names the slot, the flag and the fallback, and states no size or count |
+| `tests/consumer/CMakeLists.txt`, `tests/consumer/run_consumer_witness.cmake` | the two new C++-consumer legs, `probe_umbrella` and `probe_core` (§2.4). Leg 3's closed empty expectation stays as it is |
 | `.specify/2f-async-mutex.md` | Erratum E-6 (§2.3), including E-4's scope correction |
 | `.specify/2d-threading.md` | annotate the executor-model paragraph that says the engine never picks a concrete executor. The engine still uses the caller's executor, but it keeps its concrete type when that type is `io_context`'s, as `strand<session_inner_executor_t>` (§2.1) |
 | `brain/components/async-mutex.md` | E-6 pointer; the macro is the internal route |
-| `brain/components/inbound-message-path.md` | the dispatcher/arm split; W-A/W-B as the gates of its zero-allocation invariant |
-| `brain/components/session.md`, `brain/components/transport.md` | the concrete `io_context` strand target and the fallback |
+| `brain/components/inbound-message-path.md` | the dispatcher/arm split; the two lifetime classes (helper vs reply leaf) and why the v0.4 hoist was rejected; W-A/W-B as the gates of its zero-allocation invariant |
+| `brain/components/session.md`, `brain/components/transport.md` | the concrete `io_context` strand target and the fallback; in `session.md`, `send_impl`'s session-owned scratch, the slot flag and the fallback leaf, and why the existing serialisation could not carry R-9 (§2.5) |
 | `brain/components/message-store-quiescence.md` | `MemoryStore::store`'s lock now goes through the macro; the siblings do not |
 | `include/fixpp/core/sync/async_mutex.hpp` | the "8 B on asio/1.36.0" comment (§2.3); the E-4 recycler comment's "per-thread" |
 | `tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp`, `tests/perf/test_store_alloc_guard.cpp` | header comments: "per-thread" becomes the scheduler-call scope |
@@ -1079,6 +1485,14 @@ Within those conditions:
   - v0.3 recorded that its store chain then allocated in the steady state of an Active session that receives
     traffic. That was true at asio's default two slots (q5).
   - Under R-1′ the exported N covers that live set (§2.4), and W-D-R gates it (§3).
+- an application send used to be an over-limit frame request on every call, and so evicted a cached block on
+  every send of a two-way session (instance-2 triage O3-1). That was not an occasional eviction, and N could
+  not reach it.
+  - Under R-9, `send_impl`'s frame holds no array (§2.5), and W-E gates sequential sends through
+    `Session::send` (§3).
+  - What remains is a send that overlaps another send on the same session, plus the entry points that
+    allocate on every call (`Engine::send`, `fixpp_session_send`). Both are conditions in §4's mixed-traffic
+    row.
 
 **R-1′'s cache size is a build precondition, not a third condition of the zero.**
 - The exported N holds only if every TU in the process sees it (§2.4). That is an ODR obligation on the build,
@@ -1096,7 +1510,8 @@ with the priming disclosed — is what R-6 applies here.
 (§4):
 - the R-2 fallback executors (condition 1 fails);
 - consumer-driven bounded `run_for` / `run_one_for` / `poll` loops (condition 2 fails);
-- mixed-traffic eviction.
+- mixed-traffic eviction, including the overlapping-send fallback and the sends through `Engine::send` and the
+  C ABI (§4).
 
 **Scope of the clauses.**
 - `[const §VIII.5]`'s text spans parse → `fromApp`, which W-A and W-B gate.
@@ -1105,6 +1520,12 @@ with the priming disclosed — is what R-6 applies here.
 - W-D's and W-D-R's `MemoryStore::store` is reached through the outbound `store_then_emit`. Its clause is
   `[const §XV.1]`'s MemoryStore sentence, which has no deviation provision of its own. R-7 (§0) settles the
   clause question for W-D: R-6's justification extends to that sentence for B35's conditional zero.
+- W-E's `Session::send` chain reaches the same `MemoryStore::store`, so R-7 covers it in the same way. W-D-W is
+  a slot model of the same chain.
+- **R-9's storage against `[const §XV.1]`.** The send scratch is allocated with the `Session` object, once per
+  session and before `open()` (§2.5). That is pre-allocation per session, not a per-message allocation, so it
+  is the form §XV.1 permits. The fallback leaf's frame is a per-message allocation on the overlapping send
+  only. It is a residual under R-6's mixed-traffic condition, and is disclosed as such (§4).
 
 **What this section does not do.** It does not amend the constitution. Article XX §1–§2 make any change to the
 constitution's text an owner amendment, and R-6 rules that none is needed.
@@ -1131,14 +1552,16 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
    - Re-run the recipe at implementation time; the list above is a lead.
 3. **Frame-size drift.** A new local or `co_await` temporary on the Active path can push a frame over the limit
    on one compiler only. The `lock_frame` that §2.3 adds to each converted caller's frame is such a growth, and
-   `check_inbound`'s and `store`'s frames must still fit. The Release-preset gates are the only guard. No size is
-   pinned.
+   `check_inbound`'s and `store`'s frames must still fit. So must `send_impl`'s after §2.5, and each class-2
+   reply leaf's (§2.2). The Release-preset gates are the only guard: W-A for the arms, W-E for `send_impl`.
+   No size is pinned.
 4. **Slot budget.** A new nested `co_await` on the Active path, on the W-B dispatch path, or on any chain that
    shares the scheduler call with them can push the live set past N (§2.4's condition). W-B's dispatch is
    synchronous `fromApp` (§3), so it adds no frame today. W-B's RED-task-0 baseline shows whether the path is
    already deeper. The (b-S) pair pins N itself. A change to a chain's depth is caught only when a gated
    window's live set reaches N + 1, so §2.4's recipe is re-run whenever a gated or slot-sharing chain gains a
-   `co_await`.
+   `co_await`. The `Session::send` chain is now such a chain: its count e sizes W-D-W, and W-D-W's
+   headroom `static_assert` reads that e (§3).
 5. **Other recyclers on the path.** The cancellation-slot emplacement in `reset_cancellation_state` and
    `inherited_slot.assign` uses `cancellation_signal_tag`; executor ops use `executor_function`. Both have
    `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` slots, the exported N, under the same policy and the same
@@ -1162,15 +1585,25 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
      `static_assert` so that they keep passing. A guard rewritten as `#error` would break them, loudly.
    - Fable's consult and this note read the consumer witness's leg 3 differently (§2.4). The witness run
      decides which reading is right.
+   - A new export member that publishes the `include/` root without linking `fixpp_core` would escape the
+     attachment. §2.4's enumeration recipe is the check, and `probe_core` pins the attachment itself.
+10. **The send slot's exclusivity (§2.5).** The slot is correct only while every path into `send_impl` tests
+    the flag before the first frame byte is written, and only while the holder lives until `store_then_emit`
+    returns.
+    - A broken flag corrupts bytes silently. No allocation gate sees it. The overlap cells, with their two
+      mutants, are the only guard (§3).
+    - A new synchronous user callback inside `send_impl` before the build would let a nested send reach the
+      build scratch while the outer build is live (r3). The build helper's "calls no user code" condition is
+      what keeps the build scratch flag-free. Re-check it whenever the helper changes.
 
 ## 7. What this does not decide
 
-- The outbound send path (`store_then_emit` → `write_gate_` → `async_write`), beyond `MemoryStore::store`.
+- The outbound send path beyond R-9: `Engine::send`'s and the C ABI's own allocations, and converting the
+  outbound locks (`assign_outbound`, `write_gate_`), which stay as cycled frames counted in N (§2.3, §2.5).
+- The pre-existing MsgSeqNum reuse by a send nested inside `toApp` (§2.5). It goes to its own issue.
 - FileStore's lock call sites.
 - A generic executor (rejected by R-2).
-- Raising asio's cache size. v0.3 listed it here as rejected by R-1. R-1′ (2026-10-09) decided it: it is
-  exported, with N = 8 (§2.4).
-- A fixpp Conan recipe. Today there is none to carry R-1′'s `package_info` half (§0, implemented forms).
+- A fixpp Conan recipe. Today there is none to carry R-1′'s `package_info` half (R-8; §0, implemented forms).
 - A libc++ Release preset.
 - Sanitizer and MSVC-debug allocation counters.
 - TLS allocation beyond R-5's measurement.
@@ -1183,6 +1616,112 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
 - Round 1 applied 2026-10-09: Codex P1=3 P2=8 P3=1; Opus post-judging P1=2 P2=6 P3=12; rewrite addresses root causes RC-1, RC-2, RC-3 (+R-6). Reviews: research/reviews/codex_544_1_hot-path-zero-alloc_review.md, research/reviews/opus_544_1_hot-path-zero-alloc_triage.md.
 - Round 2 applied 2026-10-09: Codex P1=1 P2=3 P3=2; Opus post-judging P1=1 P2=1 P3=6; rewrite addresses root causes 1, 2, 3, 4 of the round-2 triage (recorded below as RC-A, RC-B, RC-C, RC-D). Reviews: research/reviews/codex_544_2_hot-path-zero-alloc_review.md, research/reviews/opus_544_2_hot-path-zero-alloc_triage.md.
 - Instance 1 closed 2026-10-09 after round 2 (rewrites 2/2): owner revised R-1 → R-1′ on probe q5; v0.4 written; Gate A instance 2 round 1 pending.
+- Instance 2 round 1 applied 2026-10-09: Codex P1=3 P2=2 P3=1; Opus post-judging P1=2 P2=3 P3=3; rewrite addresses I2-RC1, I2-RC2, I2-RC3, I2-RC4 and R-8/R-9. Reviews: research/reviews/codex_544_i2-1_hot-path-zero-alloc_review.md, research/reviews/opus_544_i2-1_hot-path-zero-alloc_triage.md.
+
+### v0.5 — what instance 2 round 1 and R-8/R-9 changed (for instance 2's round 2)
+
+- Header: the probe list gains `b35_544_gate_a_i2r1/` (r1, r2, `closure.py`, and the rewrite's r3). The
+  Trigger gains `session.hpp`, the O3-2 sentence on `[const §X.7]`'s "ABI-compatible" clause, and
+  `Session`'s layout change.
+- §0: rulings R-8 and R-9. The Conan implemented form is restated as R-8's narrowed form, and its false
+  "does not narrow the ruling" sentence is removed (C-2). The exported-targets form moves to `fixpp_core`
+  (C-1). A new form records that R-9's "existing write-path serialisation" does not exist, and what is
+  implemented instead.
+- §2.2: storage is classified by data-flow lifetime. Class 1 goes to non-coroutine helpers, class 2 to leaf
+  coroutines that own their buffers. The gcc-13 disjoint-scope fact, the parameter rule's scope and the two
+  gates (W-A on `linux-gcc-release`, ASan with default options) are stated (C-3).
+- §2.3: the outbound locks are on a gated path now, unconverted and counted in N.
+- §2.4: the condition gains the `Session::send` chain (recipe step 5, e) and an explicit headroom condition.
+  **N rises from 8 to 16**, because at 8 the two-way instant leaves no headroom. The definition attaches to
+  `fixpp_core`, selected by "publishes the `include/` root", with the enumeration recipe. A `probe_core`
+  consumer leg is added (C-1).
+- §2.5 (new): R-9. The lifetimes of `send_impl`'s arrays; the serialisation finding, with probe r3; session
+  scratch, the build helper, the slot flag and the fallback leaf; the rejected send gate, recorded for the
+  owner; the per-call allocations of `Engine::send` and the C ABI; and a pre-existing MsgSeqNum defect, for
+  an issue.
+- §3: W-E and arm (e) (R-9); W-D-W with its shifted bracket (C-4); the TLS diagnostic in RED task 0 (C-5); the
+  overlap cells and their mutants; the MSVC and Linux table rows.
+- §4: the mixed-traffic row gains the application-send conditions; the ODR row's inherit clause; R-8 for
+  Conan consumers; `Session`'s layout; the pre-existing defect.
+- §5 is updated for O3-1 and R-9, including `[const §XV.1]` for the send scratch. §6 updates risks 3, 4 and
+  9, and adds risk 10. §7 drops the decided cache-size bullet (C-6) and narrows the outbound bullet.
+
+### Instance 2 round 1 — root causes
+
+The instance-2 triage numbers its root causes 1–4. Here they are I2-RC1..I2-RC4, so they cannot be confused
+with instance 1's RC-1..RC-3 and RC-A..RC-D.
+- **I2-RC1 (triage root cause 1). A storage location was prescribed without a lifetime split** (C-3).
+  - §2.2's two classes, decided by data flow.
+  - §2.5 applies the same split to `send_impl`.
+- **I2-RC2 (triage root cause 2). Target coverage was decided from link edges, not from the shared include
+  root** (C-1).
+  - §2.4's `fixpp_core` attachment, with its selector and enumeration recipe.
+  - The `probe_core` leg, and the B&L inherit clause.
+- **I2-RC3 (triage root cause 3). Slot sizing was reasoned in frame counts, one direction at a time** (C-4,
+  O3-1).
+  - R-9 and §2.5.
+  - §2.4's step 5 and headroom condition, and N = 16.
+  - W-E, W-D-W and arm (e).
+  - The mixed-traffic row's send conditions.
+- **I2-RC4 (triage root cause 4). The ruling's text was checked against the artifacts, but the classification
+  was not** (C-2).
+  - R-8, and §0's narrowed Conan form with its `test_package` condition.
+
+### Instance 2 round 1 — disposition of every finding
+
+| Finding | Judged severity | Where addressed |
+|---|---|---|
+| C-1 (`fixpp::core` gets no definition) | P2 (Codex P1) | §0 exported-targets form; §2.4 `fixpp_core` attachment, selector, enumeration recipe, `probe_core` leg, inherit clause; §4 ODR row; §6 risk 9 |
+| C-2 (R-1′'s Conan half) | P1 + owner item → R-8 | §0 R-8 and the narrowed Conan form; the consumer-witness sentence corrected (a `test_package` leg); §4 ODR row; §7 |
+| C-3 (the hoist is a use-after-return) | P1 | §2.2 lifetime classes, leaf form, gcc-13 fact, parameter scope, gates; §2.5 for `send_impl`; §6 risk 3 |
+| C-4 (N's two-way sizing case has no witness) | P2 | §2.4 recipe step 5, headroom condition, N = 16; §3 W-D-W with its shifted bracket and headroom `static_assert`; W-E does not cover it, and §3 says so |
+| C-5 (R-5's TLS measurement missing) | P3 (Codex P2) | §3 RED task 0, the TLS diagnostic with its disposition; §4 |
+| C-6 (decided item under "does not decide") | P3 | §7 bullet deleted |
+| O3-1 (every send evicts a cached block) | P2 + owner item → R-9 | §0 R-9 and its implemented form; §2.4; §2.5; §3 W-E, arm (e), overlap cells; §4 mixed traffic; §5 |
+| O3-2 (the "not BREAKING" verdict argued symbols and layout only) | P3 | Header Trigger: the "ABI-compatible" clause, answered in one paragraph |
+
+### Instance 2 round 1 — disagreements
+
+**Rejected by the triage, so not applied:**
+- **C-1, "the same problem reaches `fixpp_log`, whose header closure can expose those core headers":
+  refuted.** A transitive include walk over `include/` (`b35_544_gate_a_i2r1/closure.py`) finds asio
+  reachable only from `fixpp/core`, `fixpp/otel` and `fixpp/config` headers. It finds none from `fixpp/log`,
+  `fixpp/wire`, `fixpp/dictionary`, `fixpp/tap`, `fixpp/service` or `include/fix`. So Codex's proposed
+  `fixpp::log` consumer-witness leg is not added. `fixpp::log` inherits the definition through `fixpp_core`
+  in any case (§2.4).
+- **C-1 at P1: judged P2.** The failure is loud: a `fixpp::core`-only consumer that includes an
+  asio-bearing header fails the guard's `static_assert`. The fix is applied all the same.
+- **C-5 at P2: judged P3.** R-5 is an orchestrator default, and the measurement is diagnostic, with no gate
+  resting on it. The fix is applied all the same.
+
+**Counter-proposals not adopted, with the finding addressed by the triage's fix instead:**
+- **C-2, "expand B35 to create and gate an actual Conan package".** The owner chose the narrowed form instead
+  (R-8).
+- **C-3, "alternatively make the callee take ownership of a fixed-capacity buffer".** Not adopted for the
+  inbound arms. The triage's leaf form needs no change to `store_then_emit`'s contract. Codex's first
+  alternative, a per-reply leaf that owns the buffer, is the form adopted (§2.2).
+- **C-4, "a production-shaped window that holds `live_write_serialized_` → `Transport::async_write`
+  pending".** A real pending write needs a peer that stops reading until the socket buffers fill, which is
+  neither deterministic nor cheap. The triage's model window is adopted as W-D-W, with e taken from the
+  production chain (§3).
+
+**Departures from the triage's prescribed fixes, each with its reason:**
+- **O3-1 option (b), "W-E: W-A's rig with one app send per inbound message, asserting 0 on the inbound
+  pair".** W-E uses W-B's rig and a long-lived sender that calls `Session::send` directly, and it asserts 0
+  for the whole window. mallocnesia counts process-wide, so it cannot attribute a count to the inbound pair
+  alone. `Engine::send` cannot be the sender, because it allocates on every call (§2.5).
+- **O3-1 option (b), "by C-3's leaf form or caller-owned storage".** The leaf form cannot hold a 4096-B buffer
+  under the limit. R-9 ruled for session-owned storage, and §2.5 implements it.
+- **The triage's rejected alternative, a `Session`-member scratch buffer, stays rejected for the inbound
+  arms** (§2.2). R-9's send slot is the case where that alternative is the only one left. §2.5 supplies the
+  per-chain exclusivity argument the triage said it would need: the slot flag, with a fallback leaf.
+- **R-9's "the existing write-path serialisation must guarantee" premise does not hold** (§2.5, probe r3).
+  The implemented form is the slot flag with a fallback leaf. Its cost is a disclosed condition: an
+  overlapping send allocates. The session send gate that would also keep that send at zero is recorded in
+  §2.5 for the owner, with the four conditions it would have to meet.
+- **N = 16, not 8.** This is not a triage item. R-9 adds the `Session::send` chain to §2.4's gated live set,
+  and by reading, the two-way instant then leaves no headroom at 8. The value follows the condition, and
+  W-D-W's bracket and headroom `static_assert` check it (§2.4, §3).
 
 ### v0.4 — what R-1′ changed (for instance 2's round 1)
 
