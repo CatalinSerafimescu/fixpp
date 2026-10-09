@@ -334,7 +334,7 @@ TYPED_TEST(B35StrandSemantics, Equality_SessionExecutorAndSocketCompareEqualToTh
 // How long a cell watches run() for an early return. A run() that returns although work
 // is outstanding returns at once, so this only has to exceed scheduling noise.
 constexpr auto kStaysAliveFor = 200ms;
-// How long a released run() may take to return; nothing else holds the io_context.
+// A bound on how long run() may take to return once the cell's work is released.
 constexpr auto kReturnBudget = 10s;
 
 TYPED_TEST(B35StrandSemantics, WorkTracking_TrackedCopyKeepsRunAliveUntilReleased) {
