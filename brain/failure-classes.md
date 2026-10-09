@@ -275,6 +275,14 @@ prints `0` for a whole syntax.
   - Prove the bench reaches the path: a mutant that slows or deletes the path must move the number, or trace one iteration.
   - Size small moved work with an attribution bench that times it alone. A small cost inside a large, noisy call is below resolution, not absent.
 
+**The same class, in the shell that runs the instrument: a list that zsh never splits.**
+- zsh does not word-split an unquoted `$var`. A file list or a flag string held in one variable reaches the command as ONE argument, so a loop runs once over a name no file has, or the compiler gets one unknown option. The instrument then examines nothing and can print a clean result.
+- The B14 case (PR #558, fixpp#481), twice: a flag-order probe got `-Wno-x -Wall` as a single argument and "passed" on `unknown warning option`; a clang-tidy re-run over a `$files` list reported **0 findings**, the pre-existing ones included. Both were caught only because the zero was implausible.
+- **Trigger:** a command line in a zsh session (this repo's shell) expands a variable that holds more than one word.
+- **Procedure:**
+  - Expand explicitly: `${=var}` for a space-separated string, `${(f)var}` for a newline-separated list, or an array.
+  - Then prove the expansion: the run must report a finding you know is there (a pre-existing finding, or a seeded one), or must print the count of items it actually processed.
+
 ### 2. A fix that replaces a wrong claim with a NEW claim reproduces the defect
 
 Rounds of review converge only when a claim is **deleted**, not refreshed. A corrected claim is still a

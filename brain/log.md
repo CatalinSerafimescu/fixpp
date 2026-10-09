@@ -6,6 +6,10 @@ status: stable
 
 # Log
 
+- **2026-10-09 — B14 (fixpp#481) close-out: class 1 gains a shell form.** `failure-classes.md`,
+  class 1 (an instrument fails toward CLEAN), adds *a list that zsh never splits*: an unquoted `$var`
+  reaches the command as one argument, so the check examines nothing. Owner-approved from PR #558's
+  Gate B record; the other two candidates there were not adopted.
 - **2026-10-08 — B14 (fixpp#481) Gate B rounds 2-3 (PR #558): `/Zc:__cplusplus`'s dependency side.**
   `components/nfr-and-tooling.md` says that a dependency or public header testing `__cplusplus` can
   define something different under the switch, points at the `cl /EP` recipe in `cmake/Helpers.cmake`
