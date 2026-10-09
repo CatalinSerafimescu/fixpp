@@ -13,6 +13,7 @@
 
 #include <fixpp/session/engine.hpp>
 #include <functional>
+#include <optional>
 #include <utility>
 
 namespace fixpp::session {
@@ -30,6 +31,16 @@ struct engine_test_access {
     // start a late Engine::send() in that window.
     static void set_post_send_drain_hook(Engine& e, std::function<asio::awaitable<void>()> hook) {
         e.test_hook_post_send_drain_ = std::move(hook);
+    }
+
+    // fixpp#544 §2.1: a copy of a registered session's SessionEntry::session_strand, or
+    // nullopt for an unknown id. It reads the registry unsynchronised, so call it only
+    // while no thread runs the engine's io_context.
+    static std::optional<asio::any_io_executor> session_strand(Engine const& e,
+                                                               SessionId const& id) {
+        auto const it = e.registry_.find(id);
+        if (it == e.registry_.end()) return std::nullopt;
+        return it->second.session_strand;
     }
 };
 

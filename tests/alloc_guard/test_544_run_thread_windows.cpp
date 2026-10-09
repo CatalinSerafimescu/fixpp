@@ -43,6 +43,7 @@
 #include <string>
 #include <vector>
 
+#include "session/session_strand.hpp"  // fixpp#544 §2.1: the target-type oracle
 #include "support/recycler_driver.hpp"
 #include "support/run_thread_engine_rig.hpp"
 
@@ -189,6 +190,11 @@ struct window_result {
     std::size_t tu_count = 0;
     int warm = 0;
     int measured = 0;
+    // The target-type oracle (§2.1), read on the session strand after the window: the
+    // session executor's target is the fast-path strand, or the fallback strand. Each is
+    // -1 when the read did not run.
+    int fast_path_strand = -1;
+    int fallback_strand = -1;
 };
 
 enum class inbound : std::uint8_t { heartbeat, new_order };
@@ -259,6 +265,18 @@ window_result run_window(cell_spec const& spec, MakeBody make_body) {
         (void)rig.wait_until([&] { return rig.reader.app_frames.load() >= want; });
     }
     r.snap = rig.observe();
+    if (sess) {
+        // Shared, so a handler still queued after a missed wait writes into live state.
+        auto oracle = std::make_shared<std::pair<std::atomic<int>, std::atomic<int>>>(-1, -1);
+        (void)rig.on_strand([oracle, sess] {
+            asio::any_io_executor const ex = sess->executor().underlying();
+            using fast_t = asio::strand<fixpp::session::detail::session_inner_executor_t>;
+            oracle->first = ex.target<fast_t>() != nullptr ? 1 : 0;
+            oracle->second = ex.target<asio::strand<asio::any_io_executor>>() != nullptr ? 1 : 0;
+        });
+        r.fast_path_strand = oracle->first.load();
+        r.fallback_strand = oracle->second.load();
+    }
     r.stopped = rig.stop();
     r.completions = done.load();
     r.heartbeats = rig.app->heartbeats.load();
@@ -296,6 +314,7 @@ TEST(B35RunThreadWindows, WA_ActiveHeartbeat) {
     auto const r = run_window(cell_spec{.opt = {.mode = rt::hook::signal_from_admin}});
     expect_window_ran(r);
     EXPECT_EQ(r.heartbeats, r.completions);
+    EXPECT_EQ(r.fast_path_strand, 1) << "the session strand is not the fast-path strand";
     check_tu_count(r.tu_count, tu_expect::base_allocates, "W-A");
 }
 
@@ -308,6 +327,7 @@ TEST(B35RunThreadWindows, WB_ActiveAppMessage) {
     expect_window_ran(r);
     EXPECT_TRUE(r.snap.has_validator) << "validation is off, so the window never validated";
     EXPECT_EQ(r.app_messages, r.completions) << "a NewOrderSingle did not reach fromApp";
+    EXPECT_EQ(r.fast_path_strand, 1) << "the session strand is not the fast-path strand";
     check_tu_count(r.tu_count, tu_expect::base_allocates, "W-B");
 }
 
@@ -348,6 +368,10 @@ TEST(B35RunThreadWindows, ArmA_TrackedExecutorFallback) {
     auto const r = run_window(
         cell_spec{.opt = {.mode = rt::hook::signal_from_admin, .tracked_executor = true}});
     expect_window_ran(r);
+    // The oracle half (T1.7): a work-tracked executor's target type is not
+    // io_context::executor_type, so make_session_strand takes the fallback.
+    EXPECT_EQ(r.fast_path_strand, 0) << "a tracked executor reached the fast-path strand";
+    EXPECT_EQ(r.fallback_strand, 1) << "the session strand is not the fallback strand";
     check_tu_count(r.tu_count, tu_expect::allocates, "arm (a)");
 }
 

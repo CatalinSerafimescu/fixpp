@@ -432,7 +432,8 @@ foreach(_t IN LISTS _b35_run_thread_targets)
     GTest::gtest
     GTest::gtest_main
   )
-  target_include_directories(${_t} PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+  # src/: session/session_strand.hpp, for the target-type oracle (fixpp#544 §2.1).
+  target_include_directories(${_t} PRIVATE "${CMAKE_SOURCE_DIR}/tests" "${CMAKE_SOURCE_DIR}/src")
   set_target_properties(${_t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endforeach()
 add_test(NAME alloc_guard_544_run_thread COMMAND test_544_run_thread_counter)

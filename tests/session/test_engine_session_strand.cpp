@@ -61,8 +61,8 @@
 //
 //   V-10 SocketExecutorIsSessionStrand
 //        Directly checks: after a session is established by the engine, the
-//        underlying TCP socket of its transport is associated with a
-//        asio::strand<asio::any_io_executor>, NOT the bare io_context executor.
+//        underlying TCP socket of its transport is associated with the session
+//        strand, NOT the bare io_context executor.
 //        Pre-T011 (no strand binding) the socket is on bare exec_ → assertion
 //        FAILS → RED for the right reason. [C-7/V-10/E-5/D5/R8/INV-7]
 //
@@ -153,6 +153,7 @@
 // Internal transport header: needed for V-10's socket executor inspection.
 // The engine_session_strand_test CMakeLists adds "${CMAKE_SOURCE_DIR}/src" to
 // the include path for this purpose (mirrors tests/perf/test_socket_option_defaults).
+#include "session/session_strand.hpp"  // fixpp#544: V-10's fast-path strand type
 #include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/wait_until.hpp"
@@ -813,15 +814,16 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
 // ── V-10: SocketExecutorIsSessionStrand ──────────────────────────────────────
 //
 // Checks that the TCP socket of a live engine-managed session's transport is
-// associated with a strand (asio::strand<asio::any_io_executor>), not the bare
-// io_context executor.
+// associated with the session strand, not the bare io_context executor. The
+// Engine here runs on `ioc.get_executor()`, so the strand is fixpp#544's fast-path
+// type, `asio::strand<session_inner_executor_t>` (src/session/session_strand.hpp).
 //
 // Mechanism:
 //   1. Establish a session via the engine.
 //   2. Access the live transport via lookup() → session.live_transport().
 //   3. dynamic_cast to asio_tls_transport (the concrete type).
 //   4. Use asio_tls_transport_test_access::socket_of() to access socket_.
-//   5. Check socket_.get_executor().target<asio::strand<asio::any_io_executor>>() != nullptr.
+//   5. Check socket_.get_executor().target<asio::strand<session_inner_executor_t>>() != nullptr.
 //
 // Pre-T011 RED (definitive, not pass-by-luck):
 //   Engine loops (run_accept_loop/run_connect_loop) are spawned on bare exec_.
@@ -922,8 +924,10 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     //   - the wrong session's strand
     //
     // acc_session->executor().underlying() is the any_io_executor holding the
-    // asio::strand<asio::any_io_executor> that was emplaced in start() for this
-    // session.  The socket's executor must be exactly this object.
+    // strand that was emplaced in start() for this session.  The socket's
+    // executor must be exactly this object.
+    // fixpp#544 §2.1: on this io_context executor the strand's inner executor is
+    // session_inner_executor_t, not any_io_executor.
     //
     // The older target<strand_t>() != nullptr check is kept alongside to
     // preserve its RED-proof explanation; both must pass.
@@ -931,7 +935,7 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     auto& acc_sock = fixpp::transport::asio_tls_transport_test_access::socket_of(*acc_tls);
     auto& ini_sock = fixpp::transport::asio_tls_transport_test_access::socket_of(*ini_tls);
 
-    using strand_t = asio::strand<asio::any_io_executor>;
+    using strand_t = asio::strand<fixpp::session::detail::session_inner_executor_t>;
 
     // Stronger equality check: socket executor == session's own strand.
     const asio::any_io_executor acc_expected_exec = acc_session->executor().underlying();

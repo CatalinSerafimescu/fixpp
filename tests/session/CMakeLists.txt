@@ -1896,6 +1896,36 @@ set_tests_properties(engine_session_strand PROPERTIES
   LABELS "023;session;control_strand;tsan"
   TIMEOUT 120)
 
+# fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.1, §3 "Behaviour"): the session
+# strand's fast path — the fit and type pins, the target-type oracle, and the
+# serialisation, equality and work-tracking cells against both the production strand and
+# session_io_executor's (task A-1). Registered on every platform: on MSVC, where the
+# production alias is session_io_executor, these cells are its behaviour oracle. TSan
+# runs it with no suppressions file.
+add_executable(session_544_strand_test
+  test_544_session_strand.cpp
+)
+target_link_libraries(session_544_strand_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_strand_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # session/session_strand.hpp, transport/asio_plain_transport.hpp
+)
+add_test(NAME session_544_strand COMMAND session_544_strand_test)
+set_tests_properties(session_544_strand PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
 # ── 026-nanosecond-sendingtime (S-039) — session emit/inbound precision suite ──
 # Session config/emit/inbound + no-heap witnesses for configurable SendingTime(52)
 # precision incl. nanos (27-char) + lenient inbound parse. Core formatter/parser
