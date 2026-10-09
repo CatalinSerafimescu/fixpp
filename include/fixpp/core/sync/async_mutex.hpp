@@ -36,8 +36,9 @@
 // Erratum E-1 (2026-05-18): The async_mutex_awaiter is a frame-local variable
 // — NOT separately heap-allocated via global operator new. The asio completion
 // handler is stored via placement-new into the awaiter's inline slot_storage_
-// buffer (32 B). This achieves zero global heap allocation on both the
-// uncontended and contended paths when mr==nullptr and HALO fires (§4.3.4 case 1).
+// buffer (32 B).
+// This achieves zero global heap allocation on both the uncontended and contended
+// paths when mr==nullptr and HALO fires (§4.3.4 case 1).
 //
 // Frameless lock op (fixpp#544, .specify/544-hot-path-zero-alloc.md §2.3): the
 // awaiter lives in a caller-owned detail::lock_frame, and the lock is a

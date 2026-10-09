@@ -7,10 +7,10 @@
 // against cancel_and_drain(). A lock op that meets draining_ completes with
 // sync_lock_drained, and every waiter_record the scenario draws goes back to the pool.
 //
-//   AfterDrain_…    turns RED if the initiation's entry draining_ check is deleted: the
-//                   fast path then grants a drained mutex.
-//   DuringDrain_…   turns RED if the macro's part 5 (finish_lock) is deleted: the reaped
-//                   waiter's record then keeps its attachment reference and never returns
+//   AfterDrain_…    witnesses the initiation's entry draining_ check: without it, the
+//                   fast path grants a drained mutex.
+//   DuringDrain_…   witnesses the macro's part 5 (finish_lock): without it, the reaped
+//                   waiter's record keeps its attachment reference and never returns
 //                   to the free list.
 //
 // The pool is read through the FIXPP_ASYNC_MUTEX_TEST_SEAM accessors, so this target is
@@ -89,8 +89,8 @@ TEST(B35LockMacroDrain, AfterDrain_LockOpCompletesDrainedAndDrawsNoRecord) {
 // A holder holds the lock. A waiter queues behind it, drawing the first pool record. The
 // drain starts: it reaps the waiter, which completes with sync_lock_aborted, and keeps
 // yielding while the holder is active. A lock op issued then completes with
-// sync_lock_drained. The holder releases, and the drain finishes. The waiter's record
-// must then be back on the free list, and no other record drawn.
+// sync_lock_drained. The holder releases, and the drain finishes. The waiter's record,
+// the one record the scenario draws, must then be back on the free list.
 
 struct during_drain_outcome {
     bool holder_granted = false;
