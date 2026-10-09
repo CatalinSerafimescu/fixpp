@@ -360,3 +360,150 @@ set_tests_properties(alloc_guard_no_raw_preload PROPERTIES
   LABELS "alloc_guard;mallocnesia;448")
 set_tests_properties(alloc_guard_markers_no_local_def PROPERTIES
   LABELS "alloc_guard;mallocnesia;item13")
+
+# ── fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3): driver-form windows ──
+# W-D-R and its bracket, W-D's (b-L)/(b-S) pairs, the (c-L)/(c-H) arms and production
+# twins, and W-D-W's stand-in bracket, in W-D's harness (tests/support/recycler_driver.hpp).
+# The plain registration runs every case without the interceptor, for its functional
+# post-conditions. The interceptor registrations are Release-only, one per case. Linux
+# only: these windows' subject is class (b) and (c), which reach `std::aligned_alloc`, and
+# MSVC's `_aligned_malloc` half is disclosed (§3, "Why MSVC is class (a) only").
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(test_544_driver_windows test_544_driver_windows.cpp)
+  target_link_libraries(test_544_driver_windows PRIVATE
+    fixpp_session
+    fixpp_mock_clock
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_544_driver_windows PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+  set_target_properties(test_544_driver_windows PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  add_test(NAME alloc_guard_544_driver_windows COMMAND test_544_driver_windows)
+  set_tests_properties(alloc_guard_544_driver_windows PROPERTIES LABELS "544;alloc_guard")
+
+  # name | gtest case | expected entry (empty: the case must read zero)
+  set(_b35_driver_cells
+    "alloc_guard_544_wdr_store_live_read_mallocnesia|WDR_StoreWithLiveRead|aligned_alloc"
+    "alloc_guard_544_wdr_bracket_twin_mallocnesia|WDR_BracketTwin_NestFillsSlots|"
+    "alloc_guard_544_wdr_bracket_arm_mallocnesia|WDR_BracketArm_NestOneOverSlots|aligned_alloc"
+    "alloc_guard_544_wd_bl_arm_mallocnesia|WD_BL_Arm_OverLimitFrame|aligned_alloc"
+    "alloc_guard_544_wd_bl_twin_mallocnesia|WD_BL_Twin_InLimitFrame|"
+    "alloc_guard_544_wd_bs_arm_mallocnesia|WD_BS_Arm_NestOneOverSlots|aligned_alloc"
+    "alloc_guard_544_wd_bs_twin_mallocnesia|WD_BS_Twin_NestFillsSlots|"
+    "alloc_guard_544_cl_arm_mallocnesia|CL_Arm_StoreReplicaOnPublicLock|aligned_alloc"
+    "alloc_guard_544_cl_production_twin_mallocnesia|CL_ProductionTwin_MemoryStoreStore|aligned_alloc"
+    "alloc_guard_544_ch_arm_mallocnesia|CH_Arm_HydrateReplicaOnPublicLock|aligned_alloc"
+    "alloc_guard_544_ch_production_twin_mallocnesia|CH_ProductionTwin_SeqnumManagerHydrate|aligned_alloc")
+  foreach(_cell IN LISTS _b35_driver_cells)
+    string(REPLACE "|" ";" _cell "${_cell}")
+    list(GET _cell 0 _name)
+    list(GET _cell 1 _case)
+    list(GET _cell 2 _entry)
+    fixpp_add_release_mallocnesia_test(
+      NAME ${_name}
+      TARGET test_544_driver_windows
+      CASE "B35DriverWindows.${_case}"
+      EXPECT_ENTRY "${_entry}"
+      LABELS alloc_guard 544)
+  endforeach()
+endif()
+
+# ── fixpp#544 (B35; §3): the run-thread windows (W-A, W-B, W-E, the veto-then-zero cell,
+# arms (a), (b-L), (b-S) and (s)) on tests/support/run_thread_engine_rig.hpp. One source,
+# two binaries: `mallocnesia.c` refuses a process that defines the allocator names, so the
+# interceptor runs the build without a counter, and FIXPP_B35_TU_COUNTER builds T044's
+# operator new counter in.
+#
+# The counter build is the T0.29 MSVC port: it is registered on every platform. On Windows
+# it runs W-A, W-B and arm (a) only, the class-(a) cells an operator new counter can see
+# there (§3, "Why MSVC is class (a) only"). Its count is asserted on Release builds only.
+add_executable(test_544_run_thread_counter test_544_run_thread_windows.cpp)
+target_compile_definitions(test_544_run_thread_counter PRIVATE FIXPP_B35_TU_COUNTER=1)
+set(_b35_run_thread_targets test_544_run_thread_counter)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(test_544_run_thread_windows test_544_run_thread_windows.cpp)
+  list(APPEND _b35_run_thread_targets test_544_run_thread_windows)
+endif()
+foreach(_t IN LISTS _b35_run_thread_targets)
+  target_link_libraries(${_t} PRIVATE
+    fixpp_session
+    fixpp_mock_clock
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${_t} PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+  set_target_properties(${_t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endforeach()
+add_test(NAME alloc_guard_544_run_thread COMMAND test_544_run_thread_counter)
+set_tests_properties(alloc_guard_544_run_thread PROPERTIES LABELS "544;alloc_guard" TIMEOUT 600)
+if(WIN32)
+  set_tests_properties(alloc_guard_544_run_thread PROPERTIES ENVIRONMENT
+    "GTEST_FILTER=B35RunThreadWindows.WA_ActiveHeartbeat:B35RunThreadWindows.WB_ActiveAppMessage:B35RunThreadWindows.ArmA_TrackedExecutorFallback")
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # name | gtest case | expected entry (empty: the case must read zero)
+  set(_b35_rig_cells
+    "alloc_guard_544_wa_active_heartbeat_mallocnesia|WA_ActiveHeartbeat|malloc,aligned_alloc"
+    "alloc_guard_544_wb_active_app_message_mallocnesia|WB_ActiveAppMessage|malloc,aligned_alloc"
+    "alloc_guard_544_we_sends_interleaved_mallocnesia|WE_InboundPairInterleavedWithSends|malloc,aligned_alloc"
+    "alloc_guard_544_veto_then_zero_mallocnesia|VetoThenZero_SendsAfterAVetoedSend|malloc,aligned_alloc"
+    "alloc_guard_544_arm_a_tracked_executor_mallocnesia|ArmA_TrackedExecutorFallback|malloc"
+    "alloc_guard_544_wa_bl_arm_mallocnesia|WA_BL_Arm_OverLimitPlant|aligned_alloc"
+    "alloc_guard_544_wa_bl_twin_mallocnesia|WA_BL_Twin_InLimitPlant|malloc,aligned_alloc"
+    "alloc_guard_544_wa_bs_arm_mallocnesia|WA_BS_Arm_NestOneOverSlots|aligned_alloc"
+    "alloc_guard_544_wa_bs_twin_mallocnesia|WA_BS_Twin_NestFillsSlots|malloc,aligned_alloc"
+    "alloc_guard_544_arm_s_run_one_for_mallocnesia|ArmS_RunOneForScope|aligned_alloc")
+  foreach(_cell IN LISTS _b35_rig_cells)
+    string(REPLACE "|" ";" _cell "${_cell}")
+    list(GET _cell 0 _name)
+    list(GET _cell 1 _case)
+    list(GET _cell 2 _entry)
+    fixpp_add_release_mallocnesia_test(
+      NAME ${_name}
+      TARGET test_544_run_thread_windows
+      CASE "B35RunThreadWindows.${_case}"
+      EXPECT_ENTRY "${_entry}"
+      LABELS alloc_guard 544)
+  endforeach()
+endif()
+
+# ── fixpp#544 (B35; §3, "The TLS diagnostic"; R-5): W-A's run-thread shape on a TLS
+# session. A diagnostic run by hand before and after the change (its file header has the
+# recipe); it registers no ctest. Built on Linux, where the interceptor runs it.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(OpenSSL 3.0 REQUIRED)
+  find_library(FIXPP_B35_OPENSSL_CRYPTO_LIB NAMES crypto libcrypto
+               PATHS "${openssl_LIB_DIRS_RELEASE}" NO_DEFAULT_PATH)
+  find_library(FIXPP_B35_OPENSSL_SSL_LIB NAMES ssl libssl
+               PATHS "${openssl_LIB_DIRS_RELEASE}" NO_DEFAULT_PATH)
+  find_package(ZLIB REQUIRED)
+  find_library(FIXPP_B35_ZLIB_LIB NAMES z libz PATHS "${zlib_LIB_DIRS_RELEASE}" NO_DEFAULT_PATH)
+  if(NOT FIXPP_B35_OPENSSL_CRYPTO_LIB)
+    set(FIXPP_B35_OPENSSL_CRYPTO_LIB OpenSSL::Crypto)
+  endif()
+  if(NOT FIXPP_B35_OPENSSL_SSL_LIB)
+    set(FIXPP_B35_OPENSSL_SSL_LIB OpenSSL::SSL)
+  endif()
+  if(NOT FIXPP_B35_ZLIB_LIB)
+    set(FIXPP_B35_ZLIB_LIB ZLIB::ZLIB)
+  endif()
+  add_executable(test_544_tls_diagnostic test_544_tls_diagnostic.cpp)
+  target_link_libraries(test_544_tls_diagnostic PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    fixpp_mock_clock
+    "${FIXPP_B35_OPENSSL_SSL_LIB}"
+    "${FIXPP_B35_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_B35_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_544_tls_diagnostic PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+  target_compile_definitions(test_544_tls_diagnostic PRIVATE
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures")
+  set_target_properties(test_544_tls_diagnostic PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
