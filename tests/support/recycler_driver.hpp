@@ -69,21 +69,26 @@ inline constexpr std::size_t kRecycleLimit = kChunkSize * UCHAR_MAX;
 //
 // r: the pending read's own cycled frames. Walk from the read pump's Active-branch
 // `read_r = co_await transport.async_read_some(read_span)` (src/session/engine.cpp)
-// into `asio_plain_transport::async_read_some` (src/transport/asio_plain_transport.cpp).
-inline constexpr int kPendingReadCycledFrames = 2;
+// into `asio_plain_transport::async_read_some` (src/transport/asio_plain_transport.cpp),
+// counting each coroutine and each `use_awaitable` adapter; an operation awaited with
+// `asio::deferred` adds no frame.
+inline constexpr int kPendingReadCycledFrames = 1;
 
 // e: the cycled frames of an application send suspended in its write. Walk from
 // `Session::send` (src/session/session.cpp) through `send_impl`, `store_then_emit` and
-// `live_write_serialized_` into the plain transport's `async_write`, or, at the write
-// gate, the public `async_lock` frame and its adapter in place of the write's two.
+// `live_write_serialized_` into the plain transport's `async_write` and its
+// `use_awaitable` adapter. A send waiting at the write gate holds the public
+// `async_lock` frame there instead, which is fewer.
 inline constexpr int kSendInWriteCycledFrames = 6;
 
 // The production callee's own cycled frames at the filled depth (§3, "One template"):
-// the depth D at which D plus this count is exactly the slot count. This holds the
-// count the note's design gives `MemoryStore::store` and `SeqnumManager::hydrate` once
-// their lock is the frameless lock op. Re-derive the base count by walking the callee's
-// `co_await`s: `grep -n "co_await" include/fixpp/session/memory_store.hpp
-// src/session/seqnum_manager.cpp`, then into `async_mutex::async_lock`.
+// the depth D at which D plus this count is exactly the slot count, for
+// `MemoryStore::store` and `SeqnumManager::hydrate`. Re-derive it by walking the
+// callee's `co_await`s, read inside each callee in the output of
+//   grep -n "co_await\|FIXPP_DETAIL_CO_AWAIT_LOCK" include/fixpp/session/memory_store.hpp
+//   grep -n "co_await\|FIXPP_DETAIL_CO_AWAIT_LOCK" src/session/seqnum_manager.cpp
+// A `deferred` post and FIXPP_DETAIL_CO_AWAIT_LOCK add no frame; a public
+// `async_mutex::async_lock` adds one.
 inline constexpr int kFilledDepthCalleeFrames = 1;
 inline constexpr int kFilledDepth = kCacheSize - kFilledDepthCalleeFrames;
 

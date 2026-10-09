@@ -518,6 +518,28 @@ target_link_libraries(test_pool_exhaustion_reuse PRIVATE
 add_test(NAME sync_pool_exhaustion_reuse
   COMMAND test_pool_exhaustion_reuse)
 
+# ── fixpp#544 (B35; .specify/544-hot-path-zero-alloc.md §3, "E-5's drain"): the
+# frameless lock op against cancel_and_drain(). It reads the waiter pool through
+# the FIXPP_ASYNC_MUTEX_TEST_SEAM accessors, so it is standalone (zero fixpp_sync
+# linkage) for the ODR reason given at the aba_interleave registration above.
+add_executable(test_544_lock_macro_drain
+  test_544_lock_macro_drain.cpp)
+target_compile_definitions(test_544_lock_macro_drain PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_544_lock_macro_drain PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_544_lock_macro_drain PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_544_lock_macro_drain
+  COMMAND test_544_lock_macro_drain)
+set_tests_properties(sync_544_lock_macro_drain PROPERTIES
+  LABELS "544;sync;tsan"
+  TIMEOUT 60)
+
 # ── 058-async-mutex-hardening T023/T024/T026: AM-P3-1/AM-P3-2 impossible-
 # state terminate-trap witnesses ───────────────────────────────────────────
 # research.md D-5/D-6: uses the FIXPP_ASYNC_MUTEX_TEST_SEAM-gated mutable

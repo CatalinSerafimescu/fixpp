@@ -1926,6 +1926,32 @@ set_tests_properties(session_544_strand PROPERTIES
   LABELS "544;session;tsan"
   TIMEOUT 300)
 
+# fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.3, §3 "Behaviour"): the
+# cancellation cells for FIXPP_DETAIL_CO_AWAIT_LOCK at its converted sites. Registered on
+# every platform and build type, like the session suites.
+add_executable(session_544_lock_cells_test
+  test_544_lock_cells.cpp
+)
+target_link_libraries(session_544_lock_cells_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_lock_cells_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_544_lock_cells COMMAND session_544_lock_cells_test)
+set_tests_properties(session_544_lock_cells PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
 # ── 026-nanosecond-sendingtime (S-039) — session emit/inbound precision suite ──
 # Session config/emit/inbound + no-heap witnesses for configurable SendingTime(52)
 # precision incl. nanos (27-char) + lenient inbound parse. Core formatter/parser

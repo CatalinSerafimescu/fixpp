@@ -7,7 +7,8 @@
 //
 //   - W-D-R: `MemoryStore::store` with a stand-in pending read live, and its bracket;
 //   - W-D's (b-L) and (b-S) pairs, planted directly in the driver;
-//   - the (c-L) and (c-H) single-edit arms at the filled depth, and their production twins;
+//   - the (c-L), (c-P) and (c-H) single-edit arms at the filled depth, their production
+//     twins, and the no-edit replica twins;
 //   - W-D-W's stand-in bracket. Its nest sizes are N - e - 2 and N - e - 1, which are
 //     negative below N = e + 2, so its cells skip there (they are registered once the
 //     exported slot count admits them).
@@ -32,6 +33,7 @@
 #include <asio/post.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -139,6 +141,60 @@ struct hydrate_replica_call {
     seqnum_t* in = nullptr;
     seqnum_t* out = nullptr;
     auto operator()() const { return hydrate_replica_public_lock::run(*m, *in, *out); }
+};
+
+// (c-P): `store()` with the lock in its macro form and the leading post reverted to
+// `use_awaitable`.
+struct store_replica_use_awaitable_post {
+    static asio::awaitable<fixpp::core::expected_t<void>> run(fixpp::sync::async_mutex& m,
+                                                              seqnum_t& counter) {
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        FIXPP_DETAIL_CO_AWAIT_LOCK(lock_storage, guard, m, nullptr);
+        if (!guard) co_return std::unexpected(fixpp::core::error::store_cancelled);
+        ++counter;
+        co_return fixpp::core::expected_t<void>{};
+    }
+};
+struct store_replica_ua_post_call {
+    fixpp::sync::async_mutex* m = nullptr;
+    seqnum_t* counter = nullptr;
+    auto operator()() const { return store_replica_use_awaitable_post::run(*m, *counter); }
+};
+
+// The no-edit replicas: each (c) replica with no edit reverted, so that an allocation in
+// the replica's own code cannot satisfy its arm. (c-L)'s and (c-P)'s coincide: both are
+// `store()`'s shape with the `deferred` post and the macro.
+struct store_replica_no_edit {
+    static asio::awaitable<fixpp::core::expected_t<void>> run(fixpp::sync::async_mutex& m,
+                                                              seqnum_t& counter) {
+        co_await asio::post(co_await asio::this_coro::executor, asio::deferred);
+        FIXPP_DETAIL_CO_AWAIT_LOCK(lock_storage, guard, m, nullptr);
+        if (!guard) co_return std::unexpected(fixpp::core::error::store_cancelled);
+        ++counter;
+        co_return fixpp::core::expected_t<void>{};
+    }
+};
+struct store_replica_no_edit_call {
+    fixpp::sync::async_mutex* m = nullptr;
+    seqnum_t* counter = nullptr;
+    auto operator()() const { return store_replica_no_edit::run(*m, *counter); }
+};
+
+struct hydrate_replica_no_edit {
+    static asio::awaitable<fixpp::core::expected_t<void>> run(fixpp::sync::async_mutex& m,
+                                                              seqnum_t& in, seqnum_t& out) {
+        FIXPP_DETAIL_CO_AWAIT_LOCK(lock_storage, guard, m, nullptr);
+        if (!guard) co_return std::unexpected(fixpp::core::error::session_already_closed);
+        in = 5;
+        out = 7;
+        co_return fixpp::core::expected_t<void>{};
+    }
+};
+struct hydrate_replica_no_edit_call {
+    fixpp::sync::async_mutex* m = nullptr;
+    seqnum_t* in = nullptr;
+    seqnum_t* out = nullptr;
+    auto operator()() const { return hydrate_replica_no_edit::run(*m, *in, *out); }
 };
 
 // ── Window runners ───────────────────────────────────────────────────────────
@@ -280,6 +336,44 @@ TEST(B35DriverWindows, CH_ProductionTwin_SeqnumManagerHydrate) {
         [&](asio::any_io_executor) { return hydrate_call{.mgr = &mgr}; });
     expect_every_iteration_ok(out);
     EXPECT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(5));
+}
+
+// ── (c-P): store()'s leading post reverted, at the filled depth ──────────────
+// Its production twin is CL_ProductionTwin_MemoryStoreStore: the same callee at the same
+// depth.
+
+TEST(B35DriverWindows, CP_Arm_StoreReplicaOnUseAwaitablePost) {
+    fixpp::sync::async_mutex m;
+    seqnum_t counter = 0;
+    auto out = run_alone<rc::kFilledDepth>([&](asio::any_io_executor) {
+        return store_replica_ua_post_call{.m = &m, .counter = &counter};
+    });
+    expect_every_iteration_ok(out);
+    EXPECT_EQ(counter, static_cast<seqnum_t>(kWarm + kMeasured));
+}
+
+// ── The no-edit replica twins, at the filled depth ───────────────────────────
+
+TEST(B35DriverWindows, CLP_NoEditReplicaTwin_Store) {
+    fixpp::sync::async_mutex m;
+    seqnum_t counter = 0;
+    auto out = run_alone<rc::kFilledDepth>([&](asio::any_io_executor) {
+        return store_replica_no_edit_call{.m = &m, .counter = &counter};
+    });
+    expect_every_iteration_ok(out);
+    EXPECT_EQ(counter, static_cast<seqnum_t>(kWarm + kMeasured));
+}
+
+TEST(B35DriverWindows, CH_NoEditReplicaTwin_Hydrate) {
+    fixpp::sync::async_mutex m;
+    seqnum_t in = 1;
+    seqnum_t out_seq = 1;
+    auto out = run_alone<rc::kFilledDepth>([&](asio::any_io_executor) {
+        return hydrate_replica_no_edit_call{.m = &m, .in = &in, .out = &out_seq};
+    });
+    expect_every_iteration_ok(out);
+    EXPECT_EQ(in, static_cast<seqnum_t>(5));
+    EXPECT_EQ(out_seq, static_cast<seqnum_t>(7));
 }
 
 // ── W-D-W's stand-in bracket (§3, W-D-W) ─────────────────────────────────────

@@ -362,8 +362,9 @@ set_tests_properties(alloc_guard_markers_no_local_def PROPERTIES
   LABELS "alloc_guard;mallocnesia;item13")
 
 # ── fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3): driver-form windows ──
-# W-D-R and its bracket, W-D's (b-L)/(b-S) pairs, the (c-L)/(c-H) arms and production
-# twins, and W-D-W's stand-in bracket, in W-D's harness (tests/support/recycler_driver.hpp).
+# W-D-R and its bracket, W-D's (b-L)/(b-S) pairs, the (c-L)/(c-P)/(c-H) arms, their
+# production and no-edit replica twins, and W-D-W's stand-in bracket, in W-D's harness
+# (tests/support/recycler_driver.hpp).
 # The plain registration runs every case without the interceptor, for its functional
 # post-conditions. The interceptor registrations are Release-only, one per case. Linux
 # only: these windows' subject is class (b) and (c), which reach `std::aligned_alloc`, and
@@ -394,7 +395,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_544_cl_arm_mallocnesia|CL_Arm_StoreReplicaOnPublicLock|aligned_alloc"
     "alloc_guard_544_cl_production_twin_mallocnesia|CL_ProductionTwin_MemoryStoreStore|aligned_alloc"
     "alloc_guard_544_ch_arm_mallocnesia|CH_Arm_HydrateReplicaOnPublicLock|aligned_alloc"
-    "alloc_guard_544_ch_production_twin_mallocnesia|CH_ProductionTwin_SeqnumManagerHydrate|aligned_alloc")
+    "alloc_guard_544_ch_production_twin_mallocnesia|CH_ProductionTwin_SeqnumManagerHydrate|aligned_alloc"
+    "alloc_guard_544_cp_arm_mallocnesia|CP_Arm_StoreReplicaOnUseAwaitablePost|aligned_alloc"
+    "alloc_guard_544_clp_no_edit_twin_mallocnesia|CLP_NoEditReplicaTwin_Store|"
+    "alloc_guard_544_ch_no_edit_twin_mallocnesia|CH_NoEditReplicaTwin_Hydrate|")
   foreach(_cell IN LISTS _b35_driver_cells)
     string(REPLACE "|" ";" _cell "${_cell}")
     list(GET _cell 0 _name)
