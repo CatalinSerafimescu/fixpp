@@ -1,12 +1,16 @@
 # fixpp#544 — zero allocation on the Active inbound read and the `MemoryStore` write (B35)
 
-> **Status: v0.3.**
-> - **Gate A round 1: BLOCK — Codex P1=3 P2=8 P3=1; Opus post-judging P1=2 P2=6 P3=12; rewritten to v0.2
->   addressing RC-1..RC-3.**
-> - **Gate A round 2: BLOCK — Codex P1=1 P2=3 P3=2; Opus post-judging P1=1 P2=1 P3=6; rewritten to v0.3
->   addressing O2-1, O2-2 and the P3s.**
+> **Status: v0.4.**
+> - **Gate A loop instance 1:**
+>   - round 1: BLOCK — Codex P1=3 P2=8 P3=1; Opus post-judging P1=2 P2=6 P3=12; rewritten to v0.2,
+>     addressing RC-1..RC-3;
+>   - round 2: BLOCK — Codex P1=1 P2=3 P3=2; Opus post-judging P1=1 P2=1 P3=6; rewritten to v0.3,
+>     addressing O2-1, O2-2 and the P3s;
+>   - **closed before round 3**, because the owner revised R-1 to **R-1′** on 2026-10-09, on probe q5 (§0).
+> - **v0.4** implements R-1′: fixpp exports `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` (§2.4). It re-checks
+>   §1–§7 against it.
 > - Owner rulings **R-6** and **R-7** (2026-10-09) are in §0; their justification is §5.
-> - **Gate A is not converged; round 3 is pending.**
+> - **Gate A loop instance 2 starts on v0.4. Round 1 is pending.**
 >
 > **How this design was reached.** The owner replaced design→Gate A with two independent consults: Codex
 > `gpt-5.6-sol` (read-only) and Fable (`fable-consult`). Both had the same brief, and the convergence criteria
@@ -21,7 +25,8 @@
 > `research/G19-fix-fpml-iso20022/research/probes/` (`../research/probes/` from the library root):
 > - the executor probe, `b35_544_executor_alloc_probe.cpp`;
 > - Gate A round 1's p1–p5, in `b35_544_gate_a_r1/`;
-> - Gate A round 2's q1–q3, in `b35_544_gate_a_r2/`.
+> - Gate A round 2's q1–q3, in `b35_544_gate_a_r2/`, with the v0.3 rewrite's q4 and q5 beside them. q5 is
+>   the evidence for R-1′ (§0).
 >
 > Each round's review and triage are listed under `## Gate A`. Each triage's Appendix A gives its probes'
 > build line and recipe. "Round-1 triage p*N*" and "round-2 triage q*N*" below name those probes.
@@ -36,9 +41,14 @@
 > **Trigger (`[const §XVII.1]`).** This touches the executor model and public C++ headers:
 > `include/fixpp/core/sync/async_mutex.hpp`, `include/fixpp/session/memory_store.hpp` and
 > `include/fixpp/session/engine.hpp`. No C-ABI symbol or layout changes, so it is not BREAKING under
-> `[const §X.7]`. The C++ surface changes are disclosed in §4: `SessionEntry::session_strand`'s type, and one
-> `FIXPP_DETAIL_` macro, together with the `fixpp::sync::detail` names its expansion uses. Both become visible
-> to consumers of the installed headers.
+> `[const §X.7]`. The C++ surface changes are disclosed in §4:
+> - `SessionEntry::session_strand`'s type;
+> - one `FIXPP_DETAIL_` macro, together with the `fixpp::sync::detail` names its expansion uses;
+> - (R-1′) an INTERFACE compile definition, `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, on the exported
+>   targets whose interface carries asio. A new installed guard header comes with it, and so does an ODR
+>   obligation on every TU in the process that includes asio (§2.4).
+>
+> All of them become visible to consumers of the installed package.
 >
 > **Amends (each with an erratum or annotation in the PR).** `.specify/2f-async-mutex.md` gains erratum
 > **E-6** (§2.3). `.specify/2d-threading.md` gets an annotation on the strand's inner executor type (§2.1).
@@ -50,7 +60,8 @@
 
 | # | Question | Ruling |
 |---|---|---|
-| R-1 | How the lock frame and the 2-slot cache are handled | **Internal frameless lock op.** A `fixpp::sync::detail` entry returns a `deferred` lock operation that hot-path callers `co_await` directly. The public `async_mutex::async_lock` signature is unchanged. Rejected: a PUBLIC `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE`, and changing `async_lock`'s public return type. |
+| R-1 | How the lock frame and the 2-slot cache are handled | **Revised by R-1′ (2026-10-09).** Original ruling, kept as history: **Internal frameless lock op.** A `fixpp::sync::detail` entry returns a `deferred` lock operation that hot-path callers `co_await` directly. The public `async_mutex::async_lock` signature is unchanged. Rejected: a PUBLIC `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE`, and changing `async_lock`'s public return type. *R-1′ keeps the frameless lock op and the rejection of a public return-type change. It reverses the rejection of the public cache-size macro.* |
+| R-1′ | The same question, given probe q5 (owner ruling, **2026-10-09**) | **Export the cache size, and keep the frameless lock op.** fixpp exports `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=N` as a PUBLIC/INTERFACE compile definition on its exported CMake targets, and in the Conan `package_info`, so that every TU that sees fixpp's asio sees the same N. The frameless lock op (§2.3) and the `deferred` changes stay: they reduce depth and are already designed. The cache size is added on top of them. **Why R-1 was revised:** `MemoryStore::store` runs on the outbound path. In an Active session the inbound read is always pending, and a pending read that inbound traffic re-arms holds one cycled frame on the same scheduler call (§1(b)). The store chain plus that frame exceeds the 2-slot default. **Evidence:** probe `b35_544_gate_a_r2/q5_cycled_read.cpp`, built with `g++ -std=c++23 -O2 -DASIO_STANDALONE -DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N> -I<asio 1.38 include>` for N = 2, 3, 4 and run with no arguments. The orchestrator ran it on 2026-10-09. At N=2, its row "wrapper → store_macro, cycled read child live" allocated through `aligned_alloc` on every iteration, while at N=3 and N=4 it read 0. Its controls read 0 at every N. The v0.4 rewrite re-ran it the same day at N = 2, 3, 4 and 8 with g++, with the same pattern; N=8 read like N=3 and N=4. Re-run the probe; do not cite its numbers. |
 | R-2 | Which executors must reach zero | **The `io_context` fast path.** When the Engine's executor targets `asio::io_context::executor_type`, the session strand is `strand<io_context::executor_type>` and reads zero. Any other executor keeps today's path, which is disclosed. Rejected: a generic fixpp executor wrapping any caller executor. |
 | R-3 | Platforms that must prove zero | Superseded by R-3′. |
 | R-3′ | Platforms that must prove zero, given R-4 | **Three Release presets.** mallocnesia gates `linux-clang-release` and `linux-gcc-release`, and the CI mallocnesia step is widened to `linux-gcc-release`. `windows-msvc-release` gates the `operator new` half with the TU-local counter, and its `_aligned_malloc` half is disclosed. No sanitizer-hook or `_CrtSetAllocHook` instrument is built in B35. Debug, sanitizer and libc++ lanes run the cells as **diagnostics**. libc++ is disclosed: it has no Release preset. |
@@ -60,10 +71,19 @@
 | R-7 | Does R-6 cover `MemoryStore::store`, whose clause is `[const §XV.1]`'s MemoryStore sentence with no deviation provision? (owner ruling, **2026-10-09**) | **Yes — owner interpretation.** R-6's `[const §VIII.5]` justification extends to `[const §XV.1]`'s MemoryStore sentence for B35's conditional zero (the same two conditions, the same residuals tracked in B&L). Basis: §XV.1's own v0.2 amendment already records that the asio awaitable frame is opaque to any bound allocator. Recorded in this note only. No issue is filed and the constitution text is unchanged. |
 
 **Implemented forms.** Neither triage judged a ruling technically unimplementable. Four forms are narrowed:
-three from the round-1 triage (*Owner items* and O-1/O-2/O-3), and one from the round-2 triage (C2-1). This
-note writes those forms:
-- **R-1** is implemented through **one macro**, whose first part is the pre-check today's `co_await` performs
-  (O-2, C-4; §2.3). Of the two wrappers v0.1 offered, the RAII one is not implementable.
+three from the round-1 triage (*Owner items* and O-1/O-2/O-3), and one from the round-2 triage (C2-1). v0.4
+adds two forms for R-1′. This note writes all of them:
+- **R-1's frameless lock op, kept by R-1′,** is implemented through **one macro**, whose first part is the
+  pre-check today's `co_await` performs (O-2, C-4; §2.3). Of the two wrappers v0.1 offered, the RAII one is
+  not implementable.
+- **R-1′'s Conan half has no artifact to edit today.** fixpp's `conanfile.py` declares requirements and options
+  only; it has no `package_info` and does not package fixpp (`grep -n "def package_info" conanfile.py` finds
+  nothing). The installed CMake package is therefore the whole delivery of the definition (§2.4). A fixpp Conan
+  recipe added later must carry the definition in its `package_info`, and §2.4's consumer witness is the check.
+  This is recorded for the owner. It does not narrow the ruling.
+- **R-1′ on fixpp's exported CMake targets** means every export-set member whose usage requirements carry
+  asio. `fixpp::capi` is not one of them: it reaches the closure only through `$<LINK_ONLY:>`, and its headers
+  include no asio (§2.4, *The C ABI*).
 - **R-2's "reads zero"** holds only while the handling thread stays inside one scheduler call (O-1, O-4; §1(b)).
   R-6 records that condition.
 - **R-3′'s `windows-msvc-release` row** covers class (a) only: W-A and W-B with arm (a) (O-3; §3).
@@ -101,9 +121,14 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     for the frame.
   - A block is recycled only when `size <= chunk_size * UCHAR_MAX`. `chunk_size` is 4 unless
     `ASIO_HAS_IO_URING` is defined; no preset defines it.
-  - There are **`ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` (default 2) slots per purpose**
-    (`asio/detail/thread_info_base.hpp`). A request that fits no cached block evicts one, then calls
-    `aligned_new`. That is `std::aligned_alloc` on Linux and `_aligned_malloc` on MSVC (`asio/detail/memory.hpp`).
+  - There are **`ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` slots per purpose** (`asio/detail/thread_info_base.hpp`).
+    asio's default is 2. Under R-1′ fixpp exports a larger N (§2.4). The macro sizes every purpose's slots:
+    `default_tag`, `awaitable_frame_tag`, `executor_function_tag`, `cancellation_signal_tag`,
+    `parallel_group_tag` and `timed_cancel_tag`.
+    - A request that fits no cached block evicts the **first occupied** slot of its purpose, even when an
+      empty slot exists, and then calls `aligned_new`. That is `std::aligned_alloc` on Linux and
+      `_aligned_malloc` on MSVC (`asio/detail/memory.hpp`).
+    - An over-limit request also evicts, because no cached block can fit it.
   - **Scope.** The cache lives in a `thread_info` object that each scheduler call declares on its own stack and
     pushes as the thread's call-stack context:
     - `scheduler::run`, `run_one`, `wait_one`, `poll` and `poll_one` (`asio/detail/impl/scheduler.ipp`,
@@ -119,8 +144,12 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
       Erratum E-4's "per-thread" wording is therefore wrong in the same way (§4).
   - **So steady-state zero needs all three of these:**
     1. every cycled frame fits under the limit;
-    2. the number of cycled frames live at once is at most the slot count;
+    2. for each purpose, the number of cycled blocks of that purpose live at once is at most the slot count N.
+       For `awaitable_frame_tag` that is the number of cycled frames; the other purposes are counted the same
+       way (§6 risk 5);
     3. the handling thread stays inside **one** scheduler call across the messages.
+  - Condition 2 is where R-1′ acts: it raises N. Conditions 1 and 3 do not change. A frame over the limit is
+    never cached, whatever N is, and every scheduler call still starts with an empty cache.
   - **What counts as cycled (O2-1).** A frame is *cycled* if it is allocated and freed inside the window. A
     frame that lives for the whole window, such as a test driver or a session-lifetime loop, is never freed
     there and takes no slot. Condition 2 counts every cycled frame live on that scheduler call, including the
@@ -129,14 +158,20 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     - A pending transport read's frame counts when the read completes and is re-armed inside the window: it is
       then cycled.
     - A frame suspended across the whole window does not count.
-    - The rewrite's probes measured both cases on 2026-10-09, with g++ and clang++. They are variants of
+    - The v0.3 rewrite's probes measured both cases on 2026-10-09, with g++ and clang++. They are variants of
       round-2 triage q3, built with that triage's build line: `q5_cycled_read.cpp` for a read re-armed every
       iteration, and `q4_suspended.cpp` for a read suspended throughout, both in `b35_544_gate_a_r2/`.
+    - q5 is R-1′'s evidence. Built with `-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, its "store chain with a
+      cycled read live" row allocates at the default N and reads 0 once N covers the read frame (§0, R-1′).
+    - q5's "nest of CACHE_SIZE" rows nest a **fixed two** frames. Their label holds only at N=2, so they are
+      not a slot-count pin at any other N. §3's (b-S) pair is that pin.
   - **Warm-up.** The recycler is first-fit, but a recycled block keeps its capacity
     (`thread_info_base::allocate` saves it in `mem[size]`, `deallocate` restores it to `mem[0]`). So a
     size-inverted nest converges after a few passes rather than thrashing. Round-2 triage q2/q2c measured this
-    on asio's real `thread_info_base`. To re-derive how many passes it takes, build `q2c_random.cpp` and run it
-    with arguments `2 <warm>` for increasing `<warm>`. §3 sets K from that recipe.
+    on asio's real `thread_info_base`, at the default slot count. To re-derive how many passes it takes at the
+    exported N, build `q2c_random.cpp` with `-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`. Run it with arguments
+    `<depth> <warm>`, increasing `<warm>`, where `<depth>` is the largest live set the gated windows hold (§3).
+    Its first argument is the maximum nesting depth it searches. §3 sets K from that recipe.
   - Condition 3 is what round-1 triage p3 measured on 2026-10-09: the same workload under one `ioc.run()`
     against `run_one_for` and `poll_one` loops (recipe in that triage's Appendix A).
 - **(c) The `use_awaitable` adapter frame.**
@@ -224,7 +259,7 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     executor is predicted to compile only there. Those cells exercise its `prefer(tracked)`, its `blocking`
     query and its equality.
 
-### 2.2 Class (b): `Session::on_inbound_frame` split so the Active path's frames fit and stay ≤2 deep
+### 2.2 Class (b): `Session::on_inbound_frame` split so the Active path's frames fit the limit
 
 - `on_inbound_frame` becomes a **non-coroutine** function returning `asio::awaitable<…>`. It selects a
   per-state coroutine (`on_inbound_active_`, `on_inbound_logon_`, …) and returns that coroutine's awaitable,
@@ -237,34 +272,46 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
   coroutine arms into **non-coroutine helpers**, so its storage is on the stack and not in a frame. The file
   already uses this shape (`validate_inbound_`). This covers the Reject/Logout/reply buffers in the Active and
   Logon arms; re-derive them with `grep -n "std::array<std::byte" src/session/session.cpp`.
-- **Target:** on the Active path, every cycled frame fits the recycler limit on the three Release presets, and
-  at most two are live at once. After §2.3 that is `on_inbound_active_` → `SeqnumManager::check_inbound`,
-  because the lock adds no frame.
+- **Target:** on the Active path, every cycled frame fits the recycler limit on the three Release presets. The
+  Active chain is `on_inbound_active_` → `SeqnumManager::check_inbound`, because the dispatcher and, after
+  §2.3, the lock add no frame. That chain, together with every cycled frame other chains hold on the same
+  scheduler call at that moment, stays within the exported N (§2.4).
+  - **Why the split stays under R-1′.** R-1′ relaxes v0.3's "at most two live" depth target, because the slot
+    count is now N. It does not relax the limit. Today's coroutine keeps its scratch arrays in its frame, and
+    #544 attributes the frame's excess over the limit to them (the grep above lists them). A frame over the
+    limit is allocated on every message, and raising N cannot cache it (§1(b), condition 1). The per-state
+    arms and the hoisted helpers are what make the frames fit.
+  - The non-coroutine dispatcher is kept. It is legal (round-1 triage p5), already designed, and removes one
+    cycled frame from the Active chain, which is headroom under N.
   - §2.3 puts a `lock_frame` into each converted caller's frame. That frame grows, and must still fit (§6 risk 3).
   - Frame size is a per-compiler, per-`-O` RESULT, so no size is written in a comment.
-  - The instrument is the gate itself: mallocnesia logs every `aligned_alloc(align, N)` it intercepts.
+  - The instrument is the gate itself: mallocnesia logs every `aligned_alloc(<align>, <size>)` it intercepts.
 - **Behaviour is unchanged.** This is a pure restructuring: same states, same transitions, same replies.
   - The existing session suites are the behaviour oracle.
   - No test is edited to accommodate the split, except for names that change.
 
 ### 2.3 Class (c): `deferred` for hot-path awaited operations, and the frameless lock op (R-1)
 
+- **What the frame-removing edits are worth under R-1′.** With the exported N (§2.4), no production window at its
+  modelled depth needs these edits to read 0: one extra frame on a chain stays within N. They are kept because
+  R-1′ keeps them. Each removes a cycled frame, and that frame is slot headroom for every chain that shares the
+  scheduler call. So each edit is witnessed by an arm that fills the slots to exactly N, where one extra frame is
+  visible (§3, arms (c)). That supersedes v0.3's "load-bearing at W-D's depth", which held only at N=2.
 - **`deferred` in place of `use_awaitable`.**
-  - **Gated:** `MemoryStore::store`'s leading `asio::post(…, use_awaitable)`
-    (`include/fixpp/session/memory_store.hpp`). At W-D's caller depth it is load-bearing, and arm (c-P) deletes
-    it (§3).
-  - **Headroom only, not gated:** the plain transport read (`src/transport/asio_plain_transport.cpp`,
+  - **Witnessed:** `MemoryStore::store`'s leading `asio::post(…, use_awaitable)`
+    (`include/fixpp/session/memory_store.hpp`). Arm (c-P) reverts it at the filled depth (§3).
+  - **Headroom, witnessed incidentally:** the plain transport read (`src/transport/asio_plain_transport.cpp`,
     `async_read_some` with `redirect_error(use_awaitable, ec)`). The TLS transport's read gets the same change
     for symmetry; its zero is R-5's measurement.
-    - Reverting the plain-read edit is expected to leave W-A at 0 (round-2 triage O2-1, inferred). The read
-      chain runs strictly before the Active pair, and with `use_awaitable` it is two cycled frames, within the
-      slot count.
+    - Reverting the plain-read edit leaves W-A at 0: the read chain runs strictly before the Active pair, and
+      two read frames are within N (round-2 triage O2-1, inferred).
     - The edit removes one frame from a chain that stays live for as long as the pump waits for input. That
       matters only when other coroutine work runs on the same scheduler call during the wait (§1(b), *What
       counts as cycled*).
-    - No production window turns RED when it is reverted, so it is not one of B35's gated edits. Its only
-      registered witness is incidental: W-A's (b-L) twin runs while the read is pending, and it is expected to
-      go RED on revert (inferred: two read frames plus the plant exceed the slots, by q5's arithmetic; §3).
+    - No production window turns RED when it is reverted, so it is not one of B35's gated edits. Its registered
+      witness is incidental: W-A's (b-S) twin runs a nest of N − r frames while the read is pending, and is
+      expected to go RED on revert (inferred: the reverted read chain, r + 1 frames, plus N − r exceeds N, by
+      q5's arithmetic; §3).
   - The `redirect_error(deferred, ec)` / `as_tuple(deferred)` forms compile and complete against 1.38 (round-1
     triage p5). The PR's build is the check.
 - **The frameless lock op.** In `include/fixpp/core/sync/async_mutex.hpp`:
@@ -390,7 +437,173 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
   - It records that E-2's lifetime argument was re-run with the awaiter living to the end of the caller's frame.
   - It corrects E-4's "per-thread" recycler wording to the scheduler-call scope (§1(b)), without changing E-4's
     disposition.
+  - It records that the recycler's slot count per purpose, `cancellation_signal_tag`'s included, is now fixpp's
+    exported N (§2.4), not asio's default.
   - Its header names this note. The `brain/components/async-mutex.md` entry gets the same pointer.
+
+### 2.4 Class (b): the exported cache size (R-1′)
+
+- **The definition.** `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, with N taken from **one source**: a constant
+  in a new installed guard header (`include/fixpp/core/detail/asio_recycler_config.hpp`; the name is
+  plan-level). CMake reads the constant from that header with `file(STRINGS … REGEX …)`. No other source or
+  build file writes N as a literal.
+- **How N is chosen: a condition, not a number.**
+  - **Condition.** For every recycler purpose, N ≥ the largest number of cycled blocks of that purpose live at
+    once on one scheduler call, at any instant on a zero-gated production path, plus headroom. "Live at once"
+    counts every chain that shares the scheduler call (§1(b), *What counts as cycled*). That includes the
+    pending inbound read during an outbound `store`, which is q5's case, and an outbound emit suspended in its
+    write while an inbound message is handled.
+  - **The recipe that re-derives the live set.**
+    1. List the long-lived coroutines of an Active session: those `co_spawn`ed once per connection or per
+       Active entry and looping (the read pump in `src/session/engine.cpp`, `Session::run_liveness_loop`). Re-derive
+       them with `git grep -n "co_spawn(" -- src/session src/transport`. They hold no slot.
+    2. For each one, walk down its `co_await`s to every suspension point it can hold while a gated window's
+       work runs. Count the cycled coroutine frames on that path, and count each `use_awaitable` adapter as one
+       more. The walk uses `grep -n "co_await" src/session/session.cpp src/session/engine.cpp
+       src/transport/asio_plain_transport.cpp include/fixpp/session/memory_store.hpp`.
+    3. The live set at an instant is the sum over chains. Take the largest sum over every instant at which a
+       gated chain requests a block.
+    4. Count **r**, the pending read's own cycled frames, the same way. Walk from the pump's Active-branch
+       `read_r = co_await transport.async_read_some(read_span)` (`src/session/engine.cpp`) into the
+       transport. By reading the branch base, r is 1 after §2.3's plain-read edit: `asio_plain_transport::async_read_some`
+       is one coroutine, and the `deferred` read adds no adapter. It is 2 without the edit. §3's W-A (b-S) pair
+       and W-D-R are written in terms of r.
+  - **The value the PR sets: N = 8.**
+    - Fable's consult proposes 8 as a floor (`fable_544_design_consult.md`, D-B(3a)).
+    - By reading the branch base `d51ce86d` with the recipe above, the largest live set is an inbound Active message handled
+      while an outbound emit is suspended in its write. That is the Active pair (`on_inbound_active_`,
+      `check_inbound`), plus the emit chain: `store_then_emit` → `live_write_serialized_` → the transport's
+      `async_write` and its `use_awaitable` adapter, or, at the write gate, the public `async_lock` and its
+      adapter.
+    - q5's case, the store chain plus a pending read, is smaller.
+    - 8 exceeds that set's count, with headroom for at least one more nested `co_await` on each of its two
+      chains. Count it with the recipe; the verify record carries the count. The outbound write path is not
+      gated (§7), but its frames take slots while gated work runs, so N is sized to include them.
+    - Re-run the recipe at implementation time. The chain list above is a lead, and the PR's verify record
+      carries the derivation and its date.
+  - **The pin.** (b-S) in W-D's driver harness (§3) instantiates a nest of exactly N trivial cycled frames,
+    which must read 0, and a nest of N+1, which must read > 0. Both read N from the macro, so they track the
+    exported value. Together they pin that the running recycler holds exactly the macro's slot count.
+  - **Cost, as conditions.** asio's first-fit scan is linear in N per request. Each scheduler call can hold up
+    to (purposes × N) cached blocks, each no larger than the limit plus one byte, and frees them on return
+    (`~thread_info_base`). The existing benches are the check on the scan. No figure is written here.
+- **Where the definition is attached.**
+  - **Installed interface.** It is an INTERFACE compile definition on every export-set member
+    (`FIXPP_EXPORT_TARGETS` in `CMakeLists.txt`) that links `asio::asio` in its PUBLIC/INTERFACE link set. One CMake helper applies
+    both the link and the definition, so the two cannot drift apart. Re-derive the members with
+    `git grep -n "asio::asio" -- 'src/*CMakeLists.txt'`. A consumer then inherits the definition through
+    `fixpp::fixpp` or any of those members.
+  - **In-tree.** The same value is appended to the build tree's imported `asio::asio` target
+    (`INTERFACE_COMPILE_DEFINITIONS`). Every in-tree TU that has asio's include path then gets it, including
+    test-only targets that link `asio::asio` without a fixpp library: `fixpp_mock_clock`, and test executables
+    under `tests/core`, `tests/otel` and `tests/sync`. Re-derive them with
+    `git grep -n "asio::asio" -- '*CMakeLists.txt'`. Identical duplicates of the definition are harmless; the
+    census below checks the value.
+  - **Not on `fixpp::capi`.** Its installed interface reaches the closure only through
+    `$<LINK_ONLY:fixpp::capi_objects>`, which withholds compile definitions as it already withholds
+    `ASIO_STANDALONE` (`tests/consumer/run_consumer_witness.cmake`, leg 3's comment). That is the correct
+    state, because the C ABI's headers include no asio (below).
+- **The ODR obligation.**
+  - The macro sizes `thread_info_base::reusable_memory_[max_mem_index]` and every purpose's slot range
+    (`asio/detail/thread_info_base.hpp`). Header-only asio compiles `scheduler::run`'s `thread_info` and
+    `thread_info_base::allocate`/`deallocate` as inline functions in every TU that uses them. So **every TU in
+    the process that includes asio must see the same N.** That covers fixpp's own TUs, consumer C++ TUs that
+    include asio or fixpp headers, and the python bindings.
+  - **Failure mode of a mismatch.** Undefined behaviour (an ODR violation). The linker keeps one copy of each
+    inline function, and which copy it keeps is unspecified. A scheduler call whose `thread_info` was laid out
+    with a smaller N than the `allocate`/`deallocate` copy that indexes it reads and writes past
+    `reusable_memory_`, into the rest of the object on that call's stack. The opposite mismatch makes two
+    purposes share slots. Neither is diagnosed, and which one occurs can change with link order.
+  - **Who inherits it, and who must define it.**
+    - CMake consumers of `find_package(fixpp)` that link `fixpp::fixpp` or an asio-carrying member inherit the
+      definition.
+    - **`fixpp::core` is not asio-carrying.** It links no asio (`src/core/CMakeLists.txt`), yet several of its
+      installed headers include asio (`clock.hpp` and `session_executor.hpp` among them). A consumer that
+      links only `fixpp::core` and supplies asio itself gets neither asio nor the definition from fixpp. Only
+      the guard's `static_assert` catches that consumer.
+    - Non-CMake consumers (any build that uses the installed headers and archives directly) must define it
+      themselves. New B&L row (§4).
+    - **Static co-linking reaches C-ABI consumers too.** `libfixpp_capi.a` carries asio's inline symbols,
+      compiled at fixpp's N, as weak/COMDAT definitions. Check with `nm -C <build>/lib/libfixpp_capi.a | grep
+      "asio::detail::"`. A C-ABI consumer that links it into a process that has its own asio TUs at another N
+      is in the same mismatch, although its own headers include no asio. The B&L row covers this case.
+    - `fixpp_capi_shared` hides every non-`fixpp_*` symbol on POSIX (`src/capi/fixpp_capi.map`). It is
+      test-only.
+  - **The C ABI.** The C-ABI headers include no asio. `git grep -n "#\s*include" -- 'include/fix/*'` lists only
+    `<stdbool.h>`, `<stddef.h>`, `<stdint.h>` and `fix/` headers. `git grep -n asio -- include/fix` finds two
+    comments, in `include/fix/c_api/engine.h` and `include/fix/c_api/error.h`. So a C-ABI-only TU needs no
+    definition. The static co-linking case above is the exception, and it concerns the consumer's own asio TUs.
+  - **The python bindings.** The SWIG wrapper TU includes only `fix/c_api.h` and C headers
+    (`bindings/python/fixpp.i`). `fixpp_py` links `fixpp_capi` in-tree, so the asio TUs inside the module are
+    fixpp's own, built with the in-tree definition. The wheel is built from the same CMake tree, so it
+    inherits it too. Nothing else in the wheel includes asio.
+- **The mechanical guards.**
+  - **Consumer and in-tree TUs that include a fixpp header: a `static_assert`.** The guard header includes
+    `<asio/detail/thread_info_base.hpp>`, which defines the macro as 2 when no one else has. It then asserts
+    `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE == FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE`, the header's constant,
+    with a message that names the obligation. So a missing definition and a wrong value both fail to compile,
+    whichever of asio and fixpp the TU includes first.
+    - The header never `#define`s the asio macro itself: that would hide a mismatch, not detect it.
+    - It is a `static_assert`, not `#error`. The `[const §XV.9]` corpus gates in `tests/sync/CMakeLists.txt`
+      preprocess public headers with `-E` and `-I` flags only. A `static_assert` is not evaluated there, but an
+      `#error` would fire.
+    - **Condition: every installed header that includes an asio header includes the guard header.** Recipe:
+      the set difference of `git grep -l "#\s*include <asio" -- include` and
+      `git grep -l "asio_recycler_config.hpp" -- include`, with the guard header itself removed from the first
+      set, must be empty. The guard header includes asio and does not name itself, so without that exclusion
+      the recipe would always report it. It is registered as a ctest beside
+      the corpus gate, with a seeded positive: a fixture header that includes asio and not the guard must be
+      reported.
+    - A negative-compile ctest compiles one TU that includes a fixpp header with the definition omitted. It
+      asserts that the compile fails **and** that the compiler output carries the guard's message token, so a
+      failure for another reason cannot pass it.
+  - **In-tree TUs that include asio and no fixpp header: a compile-command census.** A ctest reads the build's
+    `compile_commands.json` (every preset sets `CMAKE_EXPORT_COMPILE_COMMANDS`). It requires every entry whose
+    command carries asio's include directory to carry `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, with N read
+    from the guard header. Its positive control runs the same check over a copy of the file with one entry's
+    definition stripped, and must report that entry.
+  - **What no guard covers.** A consumer TU that includes asio but no fixpp header, linked into the same
+    process. GCC and Clang have no cheap link-time check for it: asio's inline symbols carry no tag for the
+    macro. MSVC's `#pragma detect_mismatch` would record a value only in TUs that include the guard header,
+    and those are already checked at compile time, so it adds nothing. That case is the B&L row's obligation.
+- **The consumer witness.** `tests/consumer/run_consumer_witness.cmake` asserts closed usage-requirement sets.
+  - **Leg 3 is not re-scoped.** It checks `probe_usage_requirements`, which links only `fixpp::capi`. Its closed
+    expectation stays **empty** for `COMPILE_DEFINITIONS`.
+    - **Why it should stay green.** `ASIO_STANDALONE` already sits in the same closure, and it reaches that
+      closure the same way the new definition will: through `fixpp_sync`'s PUBLIC `asio::asio` link, inside
+      `$<LINK_ONLY:fixpp::capi_objects>`. Leg 3 is green today with it withheld. The new definition sits behind
+      the same boundary, so it is withheld too. That is inferred from today's green leg; the witness run is
+      the check.
+    - If leg 3 goes red with the new definition, the definition leaked through `fixpp::capi`. That is a
+      defect in the attachment, not in the leg.
+    - **Disagreement with Fable, kept visible.** Fable's consult cites "250-256" and predicts that leg 3 "will
+      fail until re-scoped". Those lines correspond to leg 3's `file(GENERATE)` producer in
+      `tests/consumer/CMakeLists.txt` and its reader in `run_consumer_witness.cmake`. This note reads them
+      differently, and the witness run decides.
+  - **A new leg for the C++ consumer.** `tests/consumer/CMakeLists.txt` writes, with `file(GENERATE)`, the
+    observed `COMPILE_DEFINITIONS` of `probe_umbrella`, which links `fixpp::fixpp`. The driver passes in the
+    expected N, read from the same guard header.
+    - `run_consumer_witness.cmake` keeps the entries that match `^ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE(=|$)` and
+      removes identical duplicates. The kept set must **equal** exactly `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`.
+    - It goes red when the definition is missing (empty set), when it has the wrong value (a different entry),
+      and when two different values arrive (two entries).
+    - Its arms are run once and recorded in the verify record: delete the attachment, which turns the set
+      empty; and attach a different literal, which mismatches.
+    - Independently, `consumer_witness.cpp` includes fixpp headers, so the guard's `static_assert` stops that
+      build too.
+- **Other dependencies that include asio: none.**
+  - `conanfile.py` requires `asio/1.38.0` directly. Its recipe's `package_info` defines only `ASIO_STANDALONE`.
+  - **Headers.** No other package in the Conan cache ships a header that includes asio. The scan, run on
+    2026-10-09, matched asio's own package only:
+    `for d in ~/.conan2/p/*/p/include; do grep -rlE '#\s*include\s*[<"](asio|boost/asio)' "$d" | head -1; done`.
+  - **Binaries.** No package library carries an `asio::` symbol. The scan, run on the same date, found none:
+    `find ~/.conan2/p -path '*/p/lib/*' \( -name '*.a' -o -name '*.so*' \) -exec sh -c 'nm -C "$1" 2>/dev/null | grep -q "asio::" && echo "$1"' _ {} \;`.
+    Its positive control is fixpp's own `libfixpp_session.a` from any build tree, on which `nm -C … | grep -c
+    "asio::"` is non-zero.
+  - That covers OpenTelemetry, prometheus-cpp, civetweb (`conan/recipes/civetweb`), curl, gtest, benchmark
+    and the rest. Re-run both scans whenever a dependency is added or bumped.
+  - No build file sets another asio macro: `git grep -n "ASIO_" -- CMakeLists.txt cmake conanfile.py
+    CMakePresets.json` finds no definition.
 
 ## 3. Tests and gates
 
@@ -398,6 +611,8 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
 - On this branch's base (`d51ce86d`), run W-A..W-D in the window shapes below, under mallocnesia
   (`tools/check_alloc.py`), on `linux-clang-release` and `linux-gcc-release`. Record the per-window counts in
   the verify record, with the command.
+- At the base, the slot count is asio's default. W-D-R has no base form, because the base has no
+  W-D-R harness. Its RED evidence is the bracket's arm (§3, *Windows*).
 - The pump window has never been measured under the full counter.
 - This baseline is **supporting measurement** only. It cannot attribute anything to §2.2, because classes (a)
   and (c) are present in the same window at the base. §2.2's recurrence arm is (b-L), planted in W-A's own window.
@@ -409,21 +624,38 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
   - One coroutine, the *driver*, is `co_spawn`ed **before** arming. Its spawn and its completion lie outside the
     window, so its completion token does not matter. It lives for the whole window, so it is not cycled
     (§1(b)).
-  - The driver awaits each iteration through exactly **one test-owned wrapper coroutine**, and the wrapper
-    awaits the operation: driver → wrapper → operation.
+  - In a production window, the driver awaits each iteration through exactly **one test-owned wrapper
+    coroutine**, and the wrapper awaits the operation: driver → wrapper → operation. The (c) arms use more
+    wrappers (the template below).
     - The wrapper is a named coroutine function with its own frame.
     - No lambda coroutine is used on this path. A lambda coroutine adds a cycled frame that nobody chose:
       round-2 triage q3's first run wrapped each call in one, and every row moved one column right (q3,
       *Control*).
     - Only non-coroutine forwarders may sit between the driver and the wrapper: functions that return an
       awaitable without being coroutines. Nothing sits between the wrapper and the operation.
-  - **One template provides the driver and the wrapper.** W-C, W-D and their (c) arms all instantiate it and
-    differ only in the callee. The depth pin is therefore a construction, not prose:
-    - remove the wrapper, and every (c) arm reads 0 and fails its `--expect-violation` (q3, the driver → store
-      rows);
-    - add a frame, and the production windows read > 0 (q3, *Control*).
-  - Inside the driver: a fixed **K** warm-up iterations, then `alloc_guard_start()`. It then awaits **N**
-    iterations, with no `co_spawn` and no `use_future` in between, calls `alloc_guard_end()`, and returns.
+  - **One template provides the driver and the wrapper.** W-C, W-D, W-D-R and their (c) arms all instantiate
+    it. It takes the callee and a **wrapper depth D**: exactly D test-owned wrapper frames between the driver
+    and the callee, with a non-coroutine forwarder at depth 0.
+    - The production windows use D = 1, the modelled depth.
+    - The (c) arms and their production twins use the **filled depth**: D chosen so that D plus the
+      production callee's own cycled frames equals exactly N. Under the macro, `store()` and `hydrate()` each
+      cycle one frame, so D = N − 1. The plan re-derives the callee's own count with the §2.4 recipe.
+  - **The depth pin is therefore a construction, not prose (v0.4, at the exported N):**
+    - at the filled depth, the production callee reads 0 and each single-edit replica reads > 0;
+    - one wrapper fewer, and every (c) arm reads 0 and fails its `--expect-violation`;
+    - one wrapper more, and the filled-depth production twin reads > 0.
+    - The v0.4 rewrite measured this on 2026-10-09 with g++ and clang++ at N = 2 and N = 8.
+      - The probe is q3's three store forms (macro; public lock; `use_awaitable` post), driven through a
+        `padder<D, S>` template: D coroutine wrappers, with a non-coroutine forwarder at D = 0. It was built
+        with q3's build line plus `-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`.
+      - At D = 1 and N = 8, all three forms read 0.
+      - At D = N − 1, the macro form read 0 and both reverted forms allocated on every store.
+      - At D = N, the macro form allocated too.
+      - At N = 2, D = 1 is q3's production depth, and q3's rows reproduced.
+      - The probe is `b35_544_gate_a_r2/q6_padded_depth.cpp`, filed beside q5 by the orchestrator from the
+        rewrite's scratch copy. Re-run it; do not cite its numbers.
+  - Inside the driver: a fixed **K** warm-up iterations, then `alloc_guard_start()`. It then awaits **M**
+    iterations (M, not N, which is the cache size), with no `co_spawn` and no `use_future` in between, calls `alloc_guard_end()`, and returns.
   - All of it runs under one `ioc.run()`.
   - The existing `W8_NoHeap_RehydratePath` and `perf_store_alloc_guard` shapes are **not reused verbatim**.
     Each spawns with `use_future` inside its window, and `use_future`'s handler `allocate_shared`s its promise
@@ -439,25 +671,30 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
     - The window models the shallowest chain.
   - **W-D** models `run_liveness_loop` (long-lived) → `store_then_emit` (cycled) → `MemoryStore::store`. That is
     the shallowest chain to `store()`.
-    - At this depth, round-2 triage q3 measured the production form at 0, and each of `store()`'s two edits
-      reverted at one allocation per store (g++ and clang++).
+    - At this depth and asio's default N, round-2 triage q3 measured the production form at 0, and each of
+      `store()`'s two edits reverted at one allocation per store (g++ and clang++). At the exported N, a
+      reverted edit at this depth stays within the slots. The (c) arms therefore run at the filled depth
+      instead (above).
     - Deeper chains, such as an inbound arm's reply through `store_then_emit`, add cycled frames and are not
-      gated (the outbound path, §7).
+      gated (the outbound path, §7). Within N they are expected to read 0 as well, but B35 does not claim it.
   - **W-C** models `ensure_hydrated_` → `SeqnumManager::hydrate`. That is feature 025's W8 apply-step proxy
     (`specs/025-refresh-on-logon/data-model.md`, row W8). The full production chain is deeper.
     - `ensure_hydrated_` is itself awaited from the Logon handling in `Session::on_inbound_frame` (after §2.2,
       the Logon arm) and from `Session::emit_initiator_logon_`. Both are cycled per Logon.
-    - So at least three cycled frames are live at the lock, even with the macro. That full Logon chain is not
-      gated; it falls under the mixed-traffic residual (§4).
-    - The wrapper depth is the shallowest at which the hydrate conversion is load-bearing. That is inferred
-      from q3 by analogy; arm (c-H) is its check.
+    - So at least three cycled frames are live at the lock, even with the macro. v0.3 placed that full Logon
+      chain under the mixed-traffic residual, because it exceeded the default two slots. Under R-1′ it is
+      within N if every frame on it fits the limit. It is still **not gated**, and B35 claims no zero for it
+      (§4).
+    - W-C's wrapper depth models W8's apply step. The hydrate conversion is witnessed at the filled depth by
+      arm (c-H) (inferred by analogy with q3's store rows; the arm is the check).
   - **The concurrent read.** When one thread runs the session's handlers and the session is Active, the
     pump's transport read is pending whenever the liveness loop runs. That read's frame is then live on the same
     scheduler call, and it is cycled once inbound traffic re-arms it.
-    - q5 models this: with a read re-armed every iteration, the store chain at W-D's depth allocates once per
-      iteration. Its controls read 0 (§1(b)).
-    - W-D's driver form does not include a pending read. W-D's zero is therefore the store chain's zero in isolation.
-    - The interleaving is disclosed under the mixed-traffic residual (§4).
+    - q5 models this. With a read re-armed every iteration, the store chain at W-D's depth allocates once per
+      iteration at asio's default N, and reads 0 once N covers the read frame. Its controls read 0 at every N
+      (§0, R-1′; §1(b)).
+    - v0.3 left this interleaving ungated and disclosed it. Under R-1′ it is gated: **W-D-R** is W-D with that
+      pending read live (*Windows* below).
 - **Run thread (W-A, W-B).**
   - A dedicated thread holds one `ioc.run()` under a work guard for the whole test, from rig setup through
     teardown. **It is the only thread that drives the io_context.** If the test thread kept any `run*` or
@@ -473,9 +710,9 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
     handle, which it captures before the run thread starts. The alternative is to issue the write from the run
     thread.
   - The test thread pre-builds every frame before arming. For the window it does four things in order: it
-    arms; it writes N+1 frames through the peer socket, each after the previous one's completion signal; it
-    waits for the N+1-th signal; it disarms.
-  - Read cycles 1..N lie wholly inside the window. Cycle *i*'s tail, including the next read's initiation, must
+    arms; it writes M+1 frames through the peer socket, each after the previous one's completion signal; it
+    waits for the M+1-th signal; it disarms.
+  - Read cycles 1..M lie wholly inside the window. Cycle *i*'s tail, including the next read's initiation, must
     run before frame *i+1*'s read can complete.
   - **The completion signal must neither allocate nor race.** mallocnesia counts process-wide, so the waiting
     thread must not allocate.
@@ -483,7 +720,7 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
       Polling it from the test thread while the run thread writes is a data race that the TSan diagnostic lane
       would report.
     - The signal is a `std::atomic` that a test-owned Application callback bumps on the session strand:
-      `fromApp` for W-B, and `fromAdmin` for W-A. In W-A's (b-L) arm and twin, the plant iteration bumps it
+      `fromApp` for W-B, and `fromAdmin` for W-A. In W-A's (b) arms and twins, the plant iteration bumps it
       instead (arm (b) below).
     - The plan confirms that an in-sequence Active Heartbeat reaches `fromAdmin` (`grep -n "fromAdmin("
       src/session/session.cpp`). If it does not, W-A uses another test-owned hook on the strand.
@@ -493,8 +730,9 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
   cannot compare counts.
   - **K is set by a recipe (O2-3).** One pass is not enough: a size-inverted nest needs more than one pass to
     converge (§1(b), *Warm-up*). K is at least the larger of two values:
-    1. the smallest warm-up at which `q2c_random.cpp`, run with arguments `2 <warm>`, reports no allocating
-       depth-≤2 pattern;
+    1. the smallest warm-up at which `q2c_random.cpp`, built with `-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>` and
+       run with arguments `<depth> <warm>`, reports no allocating pattern. `<depth>` is the largest live set a
+       gated window or twin holds, which is N for the (b-S) and filled-depth twins;
     2. the smallest K at which each gated window reads 0 on each gated preset, found by hand by raising K under
        `tools/check_alloc.py`.
   - Both values go in the verify record, with their commands. A K that is too small fails toward red.
@@ -523,6 +761,22 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
   - The window calls `hydrate` on the SeqnumManager directly, so the store does no work inside it.
 - **W-D.** `MemoryStore::store` steady state, in the driver-coroutine form at the depth above, over pre-built
   frames.
+- **W-D-R (new in v0.4; R-1′).** W-D with a pending inbound read live, which models q5 at production depth. It
+  must read 0.
+  - A long-lived test-owned *pump* coroutine is `co_spawn`ed before arming. It loops over a chain of r child
+    coroutines, the innermost awaiting a test-owned timer. That chain is r cycled frames, standing in for the
+    transport read after §2.3's plain-read edit (r from §2.4, recipe step 4).
+  - Each iteration, the driver cancels the timer and yields twice with `asio::post(ex, asio::deferred)`, so
+    the read completes and the pump re-arms it. The driver then awaits the store through the wrapper, as in
+    W-D. q5's driver has this shape.
+  - **The stand-in's frame count is r, taken from the production read chain** by §2.4's recipe: the pump in
+    `src/session/engine.cpp` → `async_read_some` in `src/transport/asio_plain_transport.cpp`.
+  - **The bracket, so that the zero is not vacuous.** It is the harness rule's twin pair, applied to the
+    stand-in. In W-D-R's own harness, with the read live:
+    - a (b-S)-style nest of N − r frames is the twin and must read 0;
+    - a nest of N − r + 1 frames is the arm and must read > 0.
+    - The arm proves the stand-in really holds a slot. Without a live, cycled read frame it would read 0
+      (q5's "no read" control).
 - **FileStore `store()`** is bounded, not zero: at most one frame per offloaded I/O op, the `[const §XV.1]`
   §XV.4 exemption. FileStore `retrieve` is disclosed, not gated.
 
@@ -530,7 +784,7 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
 
 | Preset | Windows | Counter | Assertion | Fix-deleted arms run here |
 |---|---|---|---|---|
-| `linux-clang-release` (CI today), `linux-gcc-release` (CI widened) | W-A..W-D | mallocnesia `_mallocnesia` twins, `MALLOCNESIA_MAX_ALLOCS=0` | **0** | (a), (b-L), (b-S), (c-L), (c-P), (c-H), (s), each with its in-boundary twin |
+| `linux-clang-release` (CI today), `linux-gcc-release` (CI widened) | W-A..W-D, W-D-R | mallocnesia `_mallocnesia` twins, `MALLOCNESIA_MAX_ALLOCS=0` | **0** | (a), (b-L), (b-S), (c-L), (c-P), (c-H), (s), and W-D-R's bracket, each with its in-boundary twin |
 | `windows-msvc-release` | W-A, W-B. T044's rig is ported, and its `if(CMAKE_SYSTEM_NAME STREQUAL "Linux")` guard in `tests/alloc_guard/CMakeLists.txt` is lifted for the new cells | TU-local `operator new` counter (T044's) | **0** `operator new`; the `_aligned_malloc` half is disclosed | (a) only |
 | unsanitized Debug presets, including the unsanitized libc++ lane | the same cells | TU-local counter: printed, not asserted. mallocnesia: not registered (Release only, below) | — | — |
 | sanitizer lanes | the same cells | **semantic execution, counter unavailable** (C2-5). mallocnesia is not registered under a sanitizer (`cmake/FixppMallocnesia.cmake`, the sanitizer condition), and T044's counter is compiled out under `FIXPP_SANITIZER_REPLACES_NEW` | — | — |
@@ -581,7 +835,8 @@ above; each twin asserts 0 in the same harness.**
   - On MSVC the TU counter must read > 0.
   - Its twin is W-A itself: the same rig on `ioc.get_executor()`.
 - **(b) Planted witnesses** (Linux only; entry `aligned_alloc`). Each witness reads the cache-size macro and the
-  computed limit (`chunk_size * UCHAR_MAX`, §1(b)); it does not hardcode them.
+  computed limit (`chunk_size * UCHAR_MAX`, §1(b)); it does not hardcode them. The macro's value in the test TU
+  is the exported N, and §2.4's guard pins that.
   - **(b-L) The limit, as a bracket.** A planted coroutine holds a buffer across a `co_await asio::post(ex,
     asio::deferred)`.
     - Arm: the buffer alone exceeds the limit, so the frame request does too. It must allocate at least once per
@@ -597,46 +852,66 @@ above; each twin asserts 0 in the same harness.**
     - If the twin's frame grows past the limit, the twin reads > 0, which is loud. Re-derive the buffer when the
       compiler or asio changes.
   - **(b-S) The slot budget.** The plant is a nest of trivial cycled awaitables.
-    - Arm: `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE + 1` nested. It must allocate.
-    - Twin: exactly `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` nested. It must read 0.
+    - Arm: N + 1 nested, where N is `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE`, the exported value (§2.4). It must
+      allocate.
+    - Twin: exactly N nested. It must read 0.
+    - This pair is §2.4's pin on the exported N. If the exported value changes, the pair follows it. If the
+      recycler's slot count stops matching the macro, the pair fails.
   - **Where each pair is planted.**
     - **W-D's driver harness: (b-L) and (b-S).** The driver awaits the plant directly, between stores. No other
       cycled frame is live while the plant runs, so the (b-S) boundary is exactly the slot count.
-    - **W-A's run-thread rig: (b-L) only.**
+    - **W-A's run-thread rig: (b-L), and (b-S) shifted by r.**
       - A long-lived *launcher* coroutine is `co_spawn`ed before arming. It waits on a strand-side signal that
         the test-owned `fromAdmin` sets, and each wake runs one plant iteration.
       - The plant iteration bumps the completion atomic, not `fromAdmin`. So frame *i+1* is written only after
         the plant has finished, and its read cannot race the plant.
       - The twin uses the identical launcher and signal, so its 0 proves that the launch path allocates nothing.
       - The pump re-arms its read before the launcher resumes, so the transport read's frame is live, and
-        cycled, while the plant runs (§1(b), *What counts as cycled*). A nest of exactly
-        `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` plus that frame exceeds the slots: q5 measured that nest at one
-        allocation per iteration with a cycled read live, and at 0 without it. A single in-limit plant read 0
-        in both cases. A (b-S) twin in W-A would therefore be RED by construction,
-        which is why (b-S) is planted in W-D's harness only. That departs from the round-2 triage's O2-2 fix,
-        and the departure is recorded under round-2 disagreements.
-      - The (b-L) twin's zero in W-A also needs the read chain plus the plant to fit the slot count. Reverting
-        the plain-read `deferred` edit is expected to turn it RED (inferred). That is the incidental witness
-        §2.3 names, a harness dependency rather than a production gate.
+        cycled, while the plant runs (§1(b), *What counts as cycled*). A nest of exactly N plus that frame
+        exceeds the slots. q5 measured that at asio's default N: one allocation per iteration with a cycled read
+        live, and 0 without it.
+      - **So W-A's (b-S) pair is shifted by r**, the pending read's cycled-frame count (§2.4, recipe step 4).
+        The twin is a nest of N − r, which with the read chain fills exactly N, and must read 0. The arm is a
+        nest of N − r + 1, and must read > 0.
+        - By reading the branch base, r is 1 after §2.3's plain-read edit. If the plan's walk finds an
+          intermediate coroutine on the Active read path, r grows and the pair follows it. A hardcoded N − 1
+          would then go RED by construction, the trap v0.3's departure was written about.
+        - The pair pins, in the real rig, that the pending read holds exactly r slots.
+        - It replaces v0.3's departure from O2-2, under which W-A carried (b-L) only (round-2 disagreements,
+          superseded there).
+      - **The (b-S) twin is the plain-read edit's incidental witness.** Reverting §2.3's plain-read `deferred`
+        edit adds the adapter frame to the read chain, so the twin's nest of N − r plus the read exceeds N. The twin is
+        then expected to go RED (inferred, by q5's arithmetic). That is a harness dependency, not a production
+        gate (§2.3).
+      - The (b-L) twin's zero in W-A needs only the read chain plus one in-limit plant to fit N. At the exported
+        N it does, whether or not the plain-read edit is reverted.
     - Planted in W-A, (b-L) is §2.2's recurrence arm for frame size: it shows that W-A's gate sees a frame over
-      the limit in that window. The slot-budget half of §2.2's class is pinned by (b-S).
-- **(c) Single-edit arms at the modelled depth** (Linux only; entry `aligned_alloc`). These replace v0.2's
+      the limit in that window. The slot-budget half is pinned by (b-S), in both harnesses.
+- **(c) Single-edit arms at the filled depth** (Linux only; entry `aligned_alloc`). These replace v0.2's
   two-defect replica, which carried both reverted edits at once. It reddened whichever edit was reverted, so it
   discriminated neither (round-2 triage O2-1).
-  - Each arm instantiates the shared driver-and-wrapper template with a **test-only replica** of the production
-    callee in which exactly **one** B35 edit is reverted. No production seam is added to `MemoryStore` or
-    `SeqnumManager`.
+  - **Why the filled depth (v0.4).** v0.3 ran these arms at the modelled depth, where asio's default two slots
+    made one extra frame visible. At the exported N, one extra frame at that depth stays within the slots and
+    reads 0, so an arm there could not fail. The arms therefore run at the filled depth: the template's D
+    chosen so that the production callee's chain fills exactly N (*One template* above). There, one extra frame
+    is the (N+1)-th.
+  - Each arm instantiates the shared driver-and-wrapper template, at the filled depth, with a **test-only
+    replica** of the production callee in which exactly **one** B35 edit is reverted. No production seam is
+    added to `MemoryStore` or `SeqnumManager`.
   - **(c-L) `store()`'s lock reverted.** A store-shaped replica: the `deferred` leading post, then the real
-    public `async_mutex::async_lock` instead of the macro. It must read > 0 (q3: one allocation per store).
+    public `async_mutex::async_lock` instead of the macro. It must read > 0 (the v0.4 padded probe: one
+    allocation per store).
   - **(c-P) `store()`'s leading post reverted.** A store-shaped replica: `asio::post(…, use_awaitable)`, then
-    the macro. It must read > 0 (q3: one allocation per store).
+    the macro. It must read > 0 (the same probe: one allocation per store).
   - **(c-H) `hydrate()`'s lock reverted.** A hydrate-shaped replica on the real public `async_lock`. It must
-    read > 0 (inferred by analogy with q3's (c-L) row; the arm is the check).
-  - The public `async_lock` is the right mutant. Re-expressed over the macro, it is one coroutine frame, and at
-    the modelled depth that frame is what the conversion removes (q3).
+    read > 0 (inferred by analogy with (c-L); the arm is the check).
+  - The public `async_lock` is the right mutant. Re-expressed over the macro, it is one coroutine frame. At the
+    filled depth, that frame is the one over N, and removing it is what the conversion does.
   - **Twins.** Each (c) arm has two twins, and both must read 0:
-    - its production window (W-D or W-C), which is the same template with the production callee;
-    - the replica with no edit reverted, so that an allocation in the replica itself cannot satisfy the arm.
+    - its production callee at the same filled depth, through the same template. That is W-D's or W-C's
+      callee at D = N − 1, where its production window uses D = 1;
+    - the replica with no edit reverted, at the filled depth, so that an allocation in the replica itself
+      cannot satisfy the arm.
   - **The replica condition.** A replica awaits the same operations, in the same order, as its production
     callee, except for the one reverted edit. To check, compare the replica's `co_await`s with
     `grep -n "co_await" include/fixpp/session/memory_store.hpp src/session/seqnum_manager.cpp`, read inside
@@ -704,18 +979,19 @@ above; each twin asserts 0 in the same harness.**
     so coroutine frames allocate on every message. Cross-reference L-284-1, which names that topology.
     - The C-ABI engine is not affected: it passes `ioc_.get_executor()`, and its workers call `ioc_.run()`
       (`src/capi/engine.cpp`).
-  - **Mixed traffic (R-6 residual).** A message whose path cycles a frame the cache cannot hold (Logon, Reject,
-    resend) evicts a cached block. The next gated-path message re-primes the cache, so this is bounded, not zero.
-    Two more cases belong here (§3, *Which production chain each depth models*):
-    - **The full Logon chain** (inferred). The Logon arm → `ensure_hydrated_` → `hydrate` chain is deeper than
-      the slot count. W-C gates only W8's apply-step proxy.
-    - **Outbound work during a pending read** (measured in a model, q5).
-      - When one thread runs the session's handlers, a Heartbeat or TestRequest emitted by the liveness loop
-        runs while the pump's read is pending, and it shares the slot count with that read's frame.
-      - In q5's model, the store chain at W-D's depth allocates whenever the read was re-armed since the
-        previous emit. With the read suspended throughout, it reads 0 (q4).
-      - So in an Active session that receives traffic, the store under a liveness emit is not zero. W-D gates
-        the store chain in isolation.
+  - **Mixed traffic (R-6 residual), restated as a condition under R-1′.** asio evicts a cached block of a
+    purpose whenever a request of that purpose fits no cached block. Over-limit frames are such requests
+    (§1(b)).
+    - **The condition.** A gated-path message allocates when, at that moment, the cache holds fewer blocks
+      that fit its live set than that live set needs. That happens after ungated requests (Logon, Reject,
+      resend, or any frame over the limit) have evicted blocks since the cache last held enough.
+    - The gated message then re-primes the cache. So this is bounded, not zero.
+    - It also applies whenever the live set on the scheduler call exceeds N (§2.4's condition). N is sized
+      so that no gated instant reaches that.
+    - v0.3 listed two cases here, and R-1′ moves both:
+      - **Outbound work during a pending read** is now gated by W-D-R (§3), and leaves this row.
+      - **The full Logon chain** is within N when its frames fit the limit, but it is **not gated**. It stays
+        here as "no zero claimed", not as "allocates".
   - Debug and sanitizer presets are not gated.
   - libc++ has no Release preset.
   - `windows-msvc-release` checks `operator new` only. Its `_aligned_malloc` half is unchecked, and W-C and W-D
@@ -730,14 +1006,31 @@ above; each twin asserts 0 in the same harness.**
 - **`FIXPP_DETAIL_CO_AWAIT_LOCK`** (final name plan-level) becomes visible to every TU that includes
   `async_mutex.hpp` or `memory_store.hpp`. So do the names its expansion uses: `fixpp::sync::detail::lock_frame`,
   `detail::async_lock_op` and `detail::finish_lock` (C2-2). None of them is supported API.
+- **New row: the asio cache-size ODR obligation (R-1′; §2.4).** It is a usage obligation, not a residual of
+  the zero.
+  - Every TU in a process that includes asio must be compiled with fixpp's
+    `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` value. A mismatch is undefined behaviour in asio's recycler, and is
+    not diagnosed at link time.
+  - CMake consumers that link `fixpp::fixpp` or an asio-carrying `fixpp::` target inherit the definition.
+  - Non-CMake consumers must define it themselves.
+  - So must a consumer's own asio TUs that include no fixpp header, including a C-ABI consumer that links
+    `libfixpp_capi.a` into a process with its own asio code. The definition does not propagate through
+    `fixpp::capi`.
+  - A TU that includes a fixpp header is checked at compile time by the guard header's `static_assert`. A TU
+    that includes only asio is not checked.
+  - The row names the guard header as the place the value is defined, and gives no number.
+- **The INTERFACE compile definition** on the asio-carrying exported targets, and the new installed guard
+  header, are C++ package changes (§2.4). They are not C-ABI changes.
 
 **Documentation and comment edits the PR must make (C-11, RC-1).**
 
 | File | Edit |
 |---|---|
-| `spec/behaviors-and-limitations.md` | L-497-1 rewritten as above; L-006-2's scope wording; new rows if the B&L workflow prefers one row per R-6 residual |
+| `spec/behaviors-and-limitations.md` | L-497-1 rewritten as above; L-006-2's scope wording; the new ODR-obligation row; new rows if the B&L workflow prefers one row per R-6 residual |
 | `spec/behaviors-and-limitations-closed.md` | the resolved part of L-497-1 |
-| `spec/feature-catalogue.md` | S-012's evidence says the global-heap half is unchecked. Re-point it to the W-D mallocnesia gate on the two Linux Release presets |
+| `spec/feature-catalogue.md` | S-012's evidence says the global-heap half is unchecked. Re-point it to the W-D and W-D-R mallocnesia gates on the two Linux Release presets |
+| `cmake/fixppConfig.cmake.in` | a comment next to the dependency block: the package carries the asio cache-size definition, and a TU that includes asio outside the `fixpp::` targets must match it (§2.4) |
+| `tests/consumer/CMakeLists.txt`, `tests/consumer/run_consumer_witness.cmake` | the new C++-consumer leg (§2.4). Leg 3's closed empty expectation stays as it is |
 | `.specify/2f-async-mutex.md` | Erratum E-6 (§2.3), including E-4's scope correction |
 | `.specify/2d-threading.md` | annotate the executor-model paragraph that says the engine never picks a concrete executor. The engine still uses the caller's executor, but it keeps its concrete type when that type is `io_context`'s, as `strand<session_inner_executor_t>` (§2.1) |
 | `brain/components/async-mutex.md` | E-6 pointer; the macro is the internal route |
@@ -779,10 +1072,19 @@ justification in the relevant `/plan`."
 
 Within those conditions:
 - the first message in each scheduler call primes the cache, which is amortised and not per message;
-- a message on an ungated path can evict a cached block, and the next gated message re-primes it;
-- an outbound emit from the liveness loop that runs while a re-armed inbound read is pending shares the slot
-  count with that read's frame. Its store chain then allocates, in the steady state of an Active session that
-  receives traffic, not only occasionally (§4, mixed traffic; measured in q5's model).
+- a message on an ungated path can evict a cached block, and the next gated message re-primes it (§4, mixed
+  traffic, as a condition);
+- an outbound emit from the liveness loop that runs while a re-armed inbound read is pending shares the slots
+  with that read's frame.
+  - v0.3 recorded that its store chain then allocated in the steady state of an Active session that receives
+    traffic. That was true at asio's default two slots (q5).
+  - Under R-1′ the exported N covers that live set (§2.4), and W-D-R gates it (§3).
+
+**R-1′'s cache size is a build precondition, not a third condition of the zero.**
+- The exported N holds only if every TU in the process sees it (§2.4). That is an ODR obligation on the build,
+  stated in its own B&L row (§4).
+- It is not added to R-6's two conditions. R-6 is the owner's ruling, and this note does not widen it.
+- Whether the obligation belongs among the zero's conditions is for the owner to decide.
 
 **Precedent.** `.specify/2f-async-mutex.md` Erratum E-4 (user-authorized) sanctioned asio's cancellation
 recycler as an allocator whose guarantee is met in steady state, with the first touch "amortized and … not a
@@ -800,7 +1102,7 @@ with the priming disclosed — is what R-6 applies here.
 - `[const §VIII.5]`'s text spans parse → `fromApp`, which W-A and W-B gate.
 - W-C's zero comes from feature 025's W8 requirement (`specs/025-refresh-on-logon/data-model.md`, row W8),
   which anchors the re-hydrate apply step (`SeqnumManager::hydrate()`) on `[const §VIII.5]`.
-- W-D's `MemoryStore::store` is reached through the outbound `store_then_emit`. Its clause is
+- W-D's and W-D-R's `MemoryStore::store` is reached through the outbound `store_then_emit`. Its clause is
   `[const §XV.1]`'s MemoryStore sentence, which has no deviation provision of its own. R-7 (§0) settles the
   clause question for W-D: R-6's justification extends to that sentence for B35's conditional zero.
 
@@ -831,13 +1133,16 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
    on one compiler only. The `lock_frame` that §2.3 adds to each converted caller's frame is such a growth, and
    `check_inbound`'s and `store`'s frames must still fit. The Release-preset gates are the only guard. No size is
    pinned.
-4. **Slot budget.** A new nested `co_await` on the Active path or the W-B dispatch path can exceed two cycled
-   frames. W-B's dispatch is synchronous `fromApp` (§3), so it adds no frame today. W-B's RED-task-0 baseline
-   shows whether the path is already deeper. If it is, §2.2's split extends to it before the gate can pass.
+4. **Slot budget.** A new nested `co_await` on the Active path, on the W-B dispatch path, or on any chain that
+   shares the scheduler call with them can push the live set past N (§2.4's condition). W-B's dispatch is
+   synchronous `fromApp` (§3), so it adds no frame today. W-B's RED-task-0 baseline shows whether the path is
+   already deeper. The (b-S) pair pins N itself. A change to a chain's depth is caught only when a gated
+   window's live set reaches N + 1, so §2.4's recipe is re-run whenever a gated or slot-sharing chain gains a
+   `co_await`.
 5. **Other recyclers on the path.** The cancellation-slot emplacement in `reset_cancellation_state` and
    `inherited_slot.assign` uses `cancellation_signal_tag`; executor ops use `executor_function`. Both have
-   `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` slots under the same policy and the same scheduler-call scope. The full
-   counter decides.
+   `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` slots, the exported N, under the same policy and the same
+   scheduler-call scope. §2.4's condition is per purpose. The full counter decides.
 6. **MSVC layout** (§2.1 RED task 1). Round-2 triage q1 predicts that MSVC takes the fixpp executor, so on
    MSVC its correctness rests on the fast-path semantic cells registered there (§3). The non-MSVC `is_same` pin
    keeps Linux on `io_context::executor_type`.
@@ -845,15 +1150,27 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
    first checked for harness allocations, before the production path is blamed. Inside an arm they fail toward
    green, and the arm's in-boundary twin is the guard.
 8. **Window depth drift** (§3). A window shallower than its modelled caller chain cannot see the edits it gates
-   (round-2 triage O2-1). The shared driver-and-wrapper template pins the depth: without the wrapper, the (c)
-   arms read 0 and fail.
+   (round-2 triage O2-1). Under R-1′ the edits are witnessed at the filled depth, not at the modelled depth.
+   The shared driver-and-wrapper template pins both: one wrapper fewer at the filled depth, and the (c) arms
+   read 0 and fail.
+9. **The ODR obligation and its guards (§2.4).**
+   - A TU that includes asio but not the guard header escapes the compile-time check. In-tree, the
+     compile-command census covers it. In a consumer, nothing covers it, and the B&L row says so.
+   - The guard header includes `<asio/detail/thread_info_base.hpp>`, an asio detail header. An asio bump that
+     moves or renames the macro makes the guard fail to compile, which fails toward red.
+   - The `[const §XV.9]` corpus gates preprocess headers without the definition. The guard is a
+     `static_assert` so that they keep passing. A guard rewritten as `#error` would break them, loudly.
+   - Fable's consult and this note read the consumer witness's leg 3 differently (§2.4). The witness run
+     decides which reading is right.
 
 ## 7. What this does not decide
 
 - The outbound send path (`store_then_emit` → `write_gate_` → `async_write`), beyond `MemoryStore::store`.
 - FileStore's lock call sites.
 - A generic executor (rejected by R-2).
-- Raising asio's cache size (rejected by R-1).
+- Raising asio's cache size. v0.3 listed it here as rejected by R-1. R-1′ (2026-10-09) decided it: it is
+  exported, with N = 8 (§2.4).
+- A fixpp Conan recipe. Today there is none to carry R-1′'s `package_info` half (§0, implemented forms).
 - A libc++ Release preset.
 - Sanitizer and MSVC-debug allocation counters.
 - TLS allocation beyond R-5's measurement.
@@ -865,6 +1182,25 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
 
 - Round 1 applied 2026-10-09: Codex P1=3 P2=8 P3=1; Opus post-judging P1=2 P2=6 P3=12; rewrite addresses root causes RC-1, RC-2, RC-3 (+R-6). Reviews: research/reviews/codex_544_1_hot-path-zero-alloc_review.md, research/reviews/opus_544_1_hot-path-zero-alloc_triage.md.
 - Round 2 applied 2026-10-09: Codex P1=1 P2=3 P3=2; Opus post-judging P1=1 P2=1 P3=6; rewrite addresses root causes 1, 2, 3, 4 of the round-2 triage (recorded below as RC-A, RC-B, RC-C, RC-D). Reviews: research/reviews/codex_544_2_hot-path-zero-alloc_review.md, research/reviews/opus_544_2_hot-path-zero-alloc_triage.md.
+- Instance 1 closed 2026-10-09 after round 2 (rewrites 2/2): owner revised R-1 → R-1′ on probe q5; v0.4 written; Gate A instance 2 round 1 pending.
+
+### v0.4 — what R-1′ changed (for instance 2's round 1)
+
+- §0: R-1 is shown as revised; R-1′ is a new row with q5's recipe; two implemented forms are added (no Conan
+  recipe exists to carry `package_info`; `fixpp::capi` is not an asio-carrying target).
+- §1(b): the slot count is the exported N, for every purpose; eviction is first-occupied-slot.
+- §2.2: the "at most two live" target is replaced by §2.4's condition. The split is kept for the frame-size
+  limit.
+- §2.3: the frame-removing edits are headroom under N, and are witnessed at the filled depth.
+- §2.4 (new): N = 8 and how it is derived; where the definition is attached; the ODR obligation and its
+  failure mode; the guard header's `static_assert`, the header-inclusion check and the compile-command census;
+  the C-ABI, python and other-dependency findings; and the consumer witness's new leg, with leg 3 kept.
+- §3: the template takes a wrapper depth D; the (c) arms move to the filled depth; W-D-R is new, with its
+  bracket; W-A gains a shifted (b-S) pair, which supersedes the O2-2 departure; K's recipe is built at N.
+- §4: mixed traffic restated as a condition; the q5 case leaves it for W-D-R; a new ODR-obligation row.
+- §5: the q5 bullet is updated; the cache size is recorded as a build precondition, not a third zero
+  condition.
+- §6: risks 4, 5 and 8 are updated, and risk 9 is new. §7: the cache-size entry is now decided by R-1′.
 
 ### Round 1 — root causes
 
@@ -1001,8 +1337,11 @@ round 1's RC-1..RC-3 or with the rulings R-1..R-7.
 - **C2-5, "specify the exact non-failing mallocnesia threshold".** Not adopted. The twins register on Release
   only, because a non-failing `_mallocnesia` registration is a member that cannot fail (§3, *Release only*).
 
-**Departures from the round-2 triage's prescribed fixes, each with its reason:**
-- **O2-2: the slot-budget twin is not planted in W-A.** The triage prescribes "a nest of exactly
+**Departures from the round-2 triage's prescribed fixes, each with its reason.** These are v0.3's, kept as
+history. Each carries its v0.4 status under R-1′.
+- **O2-2: the slot-budget twin is not planted in W-A.** *Superseded in v0.4:* W-A now carries a (b-S) pair
+  shifted by the read chain's count r, with a nest of N − r as the twin and a nest of N − r + 1 as the arm (§3). The shift absorbs the read
+  frame, which restores the triage's fix in W-A. The triage prescribes "a nest of exactly
   `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE`" as an in-boundary twin in each (b) harness.
   - In W-A, the launcher resumes after the pump has re-armed its read, so the transport read's frame is live
     while the plant runs. The W-A nest twin would then exceed the slots by construction.
@@ -1016,11 +1355,12 @@ round 1's RC-1..RC-3 or with the rulings R-1..R-7.
   - In production, `ensure_hydrated_` is itself awaited from cycled Logon frames, so the full chain is deeper
     (§3, *Which production chain each depth models*).
   - W-C keeps the triage's depth as W8's apply-step proxy, and the full Logon chain is disclosed under mixed
-    traffic (§4).
+    traffic (§4). *v0.4:* the departure stands. Under R-1′ the full chain is within N but still not gated.
   - W-C's rig is W8's persistent-store rig, not a MemoryStore-backed session: `ensure_hydrated_` skips
     `hydrate` on a non-persistent store.
 - **O2-1: W-D's depth leaves out the concurrent read.** The triage calls the driver → wrapper → store column
-  "production depth".
+  "production depth". *Superseded in v0.4:* the question below went to the owner, who answered it with R-1′.
+  W-D-R gates the interleaving (§3).
   - With one handler thread, a liveness emit also runs while the pump's read frame is live. In q5's model,
     the store chain at that depth then allocates whenever the read was re-armed since the previous emit (§1(b)).
   - W-D keeps the triage's depth. The interleaving is disclosed under mixed traffic (§4).
@@ -1028,4 +1368,6 @@ round 1's RC-1..RC-3 or with the rulings R-1..R-7.
     the steady state of an Active session that receives traffic, not an occasional eviction, and R-7 concerns
     exactly `MemoryStore::store`'s zero.
 - **O2-1 fix 3: the plain-read `deferred` edit is kept as headroom, not witnessed.** This is the triage's
-  second option. Witnessing it would need a test transport. §2.3 states that it is headroom only.
+  second option. Witnessing it would need a test transport. §2.3 states that it is headroom only. *v0.4:*
+  it is still headroom with no production gate. Its incidental witness moves from W-A's (b-L) twin, which no
+  longer sees it at the exported N, to W-A's shifted (b-S) twin (§2.3, §3).
