@@ -1482,8 +1482,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // stored it in cfg_.engine_adopt_strand, use the adopt_strand_t overload
     // which stores it DIRECTLY with strand_wrapped=true (no second make_strand
     // wrap — the D1 anti-pattern). The ordinary user per_session_strand path
-    // (the make_session_executor(resolved, mode, ...) call below) is
-    // BYTE-UNCHANGED and still unconditionally wraps with make_strand.
+    // (the make_session_executor(resolved, mode, ...) call below) still
+    // unconditionally wraps in a strand.
     if (cfg_.engine_adopt_strand.has_value()) {
         // Engine-only path: adopt the pre-created strand directly.
         exec_ = fixpp::core::make_session_executor(fixpp::core::adopt_strand_t{},

@@ -183,10 +183,13 @@ struct SessionEntry {
     /// teardown closes) runs on this strand. NOT yet bound to the loop in this
     /// phase — US1 (T009/T010) binds the loop/Session/transport to it.
     /// INV-1: each session gets exactly one strand; never shared across sessions.
-    /// nullopt until Engine::start() assigns it via emplace(make_strand(exec_)).
-    /// Optional to allow default-construction of SessionEntry without a valid
-    /// executor (asio::strand<any_io_executor> throws bad_executor on default-ctor).
-    std::optional<asio::strand<asio::any_io_executor>> session_strand;
+    /// nullopt until Engine::start() assigns it.
+    /// fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.1): the strand is held
+    /// type-erased. When the Engine's executor is exactly `io_context::executor_type`,
+    /// the stored target is a strand over a concrete io_context executor, which
+    /// `any_io_executor` holds without allocating; any other executor is wrapped as
+    /// `asio::strand<asio::any_io_executor>`. Built by `make_session_strand` (src/).
+    std::optional<asio::any_io_executor> session_strand;
 };
 
 // ── Engine — public multi-session runtime engine (T005 / R1 / E-1) ───────────

@@ -187,8 +187,8 @@ static_assert(!std::is_trivially_copyable_v<session_executor>,
 // executor DIRECTLY with strand_wrapped=true (truthful — the engine only
 // passes an already-strand executor via this tag). Does NOT re-wrap in a
 // second make_strand (the D1 anti-pattern). The ordinary user
-// per_session_strand path in make_session_executor(..., mode, ...) is
-// BYTE-UNCHANGED and still unconditionally wraps with make_strand.
+// per_session_strand path in make_session_executor(..., mode, ...) still
+// unconditionally wraps in a strand.
 //
 // Declared in the core leaf header; DEFINITION lands in the session TU
 // (src/session/session_executor.cpp) where Session is complete — same

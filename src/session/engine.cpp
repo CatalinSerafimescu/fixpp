@@ -81,6 +81,7 @@
 #include "inbound_limit.hpp"  // 093 E-2: L, before a Session exists
 #include "read_pump.hpp"
 #include "session_engine_access.hpp"
+#include "session_strand.hpp"  // fixpp#544 §2.1: make_session_strand
 
 namespace fixpp::session {
 
@@ -344,8 +345,8 @@ namespace {
 // In DEBUG builds: asserts and returns the check result.
 // In RELEASE builds: compiles away to a no-op (zero cost).
 // The comparison uses asio::any_io_executor::operator==, which compares the
-// type-erased executor targets — two any_io_executors wrapping the same
-// asio::strand<any_io_executor> object are equal iff they share the same strand.
+// target types and then the targets — two any_io_executors holding strands of
+// the same type are equal iff they share the same strand implementation.
 //
 // Called after every engine-managed transport construction site (R8 lynchpin):
 //   (1) accept path: after raw_listener->async_accept() returns a transport.
@@ -353,8 +354,7 @@ namespace {
 // The assert witnesses that no construction site samples the bare exec_ member
 // instead of the loop-local session strand.
 [[maybe_unused]] void assert_transport_on_session_strand(
-    fixpp::transport::Transport& transport,
-    const asio::strand<asio::any_io_executor>& session_strand) noexcept {
+    fixpp::transport::Transport& transport, const asio::any_io_executor& session_strand) noexcept {
 #ifndef NDEBUG
     // Downcast to the concrete transport type to access socket_executor().
     // 043 T016 (D-13/R8): the engine now supports both asio_tls_transport (TLS)
@@ -365,7 +365,7 @@ namespace {
     if (tls != nullptr) {
         // INV-7: the socket's executor MUST equal the session strand.
         // Failure = a construction site sampled bare exec_ (R8 — the silent lynchpin).
-        assert(tls->socket_executor() == asio::any_io_executor{session_strand} &&
+        assert(tls->socket_executor() == session_strand &&
                "INV-7: transport socket executor != session_strand "
                "(T011/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
         return;
@@ -373,7 +373,7 @@ namespace {
     auto* plain = dynamic_cast<fixpp::transport::asio_plain_transport*>(&transport);
     if (plain != nullptr) {
         // Same INV-7 check for the plaintext transport path (043/D-13).
-        assert(plain->socket_executor() == asio::any_io_executor{session_strand} &&
+        assert(plain->socket_executor() == session_strand &&
                "INV-7: plain transport socket executor != session_strand "
                "(T016/D5/R8: a ctor site sampled bare exec_ instead of the strand)");
     }
@@ -1310,7 +1310,8 @@ fixpp::core::expected_t<void> Engine::start() {
         // One strand per session — INV-1 (never shared across sessions).
         // Created-but-not-yet-bound here; US1 (T009/T010) binds the role loop,
         // Session, and transport to this strand. [E-1/E-2/D1]
-        entry.session_strand.emplace(asio::make_strand(exec_));
+        // fixpp#544 §2.1: make_session_strand is the one construction point.
+        entry.session_strand.emplace(fixpp::session::detail::make_session_strand(exec_));
 
         // T009 (D3-B / E-3 / INV-3a): set the engine-only adopt-strand seam so
         // Session::open() stores the pre-created strand directly (strand_wrapped=true)
@@ -1318,7 +1319,7 @@ fixpp::core::expected_t<void> Engine::start() {
         // This seam is NOT the public `already_serialized_executor` flag — D3-B
         // explicitly forbids inferring adoption from it (a user may set it under
         // per_session_strand and the flag does not guarantee the executor is a strand).
-        entry.config.engine_adopt_strand = asio::any_io_executor{*entry.session_strand};
+        entry.config.engine_adopt_strand = *entry.session_strand;
 
         ++(*counter);
         if (entry.session_role == SessionEntry::role::acceptor) {
