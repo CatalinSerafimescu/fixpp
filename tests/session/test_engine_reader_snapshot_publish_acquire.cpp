@@ -52,6 +52,9 @@
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
 
 #include <gtest/gtest.h>
@@ -104,9 +107,9 @@ constexpr auto kPublishBudget = fixpp::test_support::kPumpBudget;
 // FIX protocol implementation or TLS on the peer side.
 // The port is passed by reference and set before the coroutine suspends so the
 // main thread can read it after binding.
-asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_port,
-                                       std::atomic<bool>& port_ready,
-                                       std::chrono::milliseconds hold_window) {
+[[maybe_unused]] asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_port,
+                                                        std::atomic<bool>& port_ready,
+                                                        std::chrono::milliseconds hold_window) {
     asio::ip::tcp::acceptor acceptor{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     acceptor.open(ep.protocol());
@@ -184,11 +187,16 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     sc.security_profile =
         fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
     sc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", bound_port};
     // Unlimited reconnect attempts so the loop stays alive for the whole publish budget.
@@ -416,4 +424,6 @@ TEST(EngineReaderSnapshotPublishAcquire, PendingAcceptDoesNotWedgeBoundedDrain) 
 
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif

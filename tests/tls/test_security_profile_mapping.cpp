@@ -113,6 +113,9 @@ TEST(SecurityProfileMapping, OneWayCaAccepted) {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     auto result =
         make_ssl_ctx_config(SecurityProfile::one_way_ca, make_cs(), make_clock(), nullptr, nullptr);
@@ -120,6 +123,8 @@ TEST(SecurityProfileMapping, OneWayCaAccepted) {
     EXPECT_EQ(result->profile, SecurityProfile::one_way_ca);
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 }
 
@@ -169,11 +174,16 @@ TEST(SecurityProfileMapping, OneWayCaWithPinsetRejected) {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     auto result =
         make_ssl_ctx_config(SecurityProfile::one_way_ca, make_cs(), make_clock(), pinset, nullptr);
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile);
@@ -221,10 +231,15 @@ TEST(SecurityProfileMapping, EnumHasFourValues) {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     static_assert(static_cast<uint8_t>(SecurityProfile::one_way_ca) == 3);
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
     SUCCEED();
 }

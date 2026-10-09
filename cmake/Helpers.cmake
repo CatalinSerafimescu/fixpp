@@ -5,24 +5,85 @@
 # Read preset name from environment (set by CI) or from cmake --preset.
 # CMakePresets.json sets FIXPP_PRESET via cacheVariables.
 
-# ── Common strict flags for Clang/GCC ────────────────────────────────────────
+# ── Common strict flags (#481) ───────────────────────────────────────────────
+#
+# Applied to every first-party target by fixpp_apply_common_flags_to_all_targets()
+# below. The warning flags raise warnings only: promoting them to errors is
+# FIXPP_WERROR's job (fixpp_maybe_werror), so -DFIXPP_WERROR=OFF leaves every
+# warning a warning.
+#
+# ⚠️ THE MSVC BRANCH ALSO CARRIES TWO CONFORMANCE SWITCHES, which are not
+# warnings and which -DFIXPP_WERROR=OFF does not remove:
+#   /permissive-     Redundant while the MSVC standard switch is
+#                    /std:c++latest, which implies it; kept to say so
+#                    explicitly. Re-check: compile
+#                    `struct S{}; void f(S&); int main(){ f(S{}); }` with
+#                    `cl /std:c++latest /c` and no /permissive-. C2664 means
+#                    the standard switch implies it; a clean compile means
+#                    this flag is live.
+#   /Zc:__cplusplus  Changes the VALUE of __cplusplus in every TU, for
+#                    first-party code and every dependency header alike.
+#                    Safe for first-party code while it tests __cplusplus only for
+#                    presence (#ifdef). Re-derive:
+#                    git grep -n -e __cplusplus -e _MSVC_LANG -- include src tests tools bench perf bindings
+#                    A dependency or public header that tests the value can
+#                    declare or define something different under it. To see
+#                    what the switch changes in the headers fixpp includes:
+#                    list the angle includes with
+#                    git grep -hE '^\s*#\s*include\s*<' -- include src tests tools bindings
+#                    and keep those that are neither standard, platform nor
+#                    first-party (fixpp/, fix/) and that a TU an MSVC preset
+#                    compiles includes. Write one TU that #includes each of
+#                    them and one that #includes every public header, with
+#                    no __has_include guard, so a header missing from the
+#                    include path fails the run instead of dropping out. Run
+#                    `cl /EP /std:c++latest` on each with the MSVC preset's
+#                    definitions and include paths, with and without
+#                    /Zc:__cplusplus, diff, and judge each difference. One
+#                    aggregate TU shows each header in a single include
+#                    context, not in every real TU's. Kept by owner ruling,
+#                    2026-10-08.  claim-ok: the date of an owner decision, not a result
+#
+# ⚠️ CXX ONLY, via generator expressions, for the reason the -Wattributes block
+# below gives: this repo has a C target (`mallocnesia`).
+#
+# ⚠️ PREPENDED (BEFORE), so a target's own `-Wno-<x>` still wins. Clang applies
+# warning flags in command-line order, so a group flag placed AFTER a
+# target-specific `-Wno-<x>` re-enables <x>; GCC keeps the explicit flag in
+# either order. Check by compiling a TU with an unused parameter under
+# `-Wno-unused-parameter -Wextra` and under the reverse order.
 function(fixpp_apply_common_flags target)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(${target} PRIVATE
-      -Wall
-      -Wextra
-      -Wpedantic
-      -Wno-unused-parameter   # phase-3 stubs generate lots of these
-      -fno-exceptions         # Phase 3 default — revisit if module specs mandate exceptions
-    )
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    target_compile_options(${target} PRIVATE
-      /W4
-      /WX
-      /permissive-
-      /Zc:__cplusplus
-    )
-  endif()
+  target_compile_options(${target} BEFORE PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall>
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wextra>
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wpedantic>
+    # MSVC: no /WX here; fixpp_maybe_werror adds it under FIXPP_WERROR
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/W4>
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/permissive->
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus>
+    # C5030 "attribute is not recognized": the tree spells attributes MSVC does
+    # not implement ([[clang::lifetimebound]], [[gnu::used]]). A misspelled one
+    # stays a hard error where the attribute is understood: clang's
+    # -Wunknown-attributes is on by default and -Werror promotes it.
+    # ⚠️ That holds only while no attribute is spelled solely in code clang
+    # never compiles (an `msvc::` attribute, or one under an _MSC_VER-only
+    # arm): there this suppression hides MSVC's only report of a misspelling,
+    # and MSVC has no per-attribute form of it. Re-derive:
+    #   git grep -n "msvc::" -- include src tests tools bench perf bindings
+    #   and read the attributes inside each `git grep -n _MSC_VER` arm.
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/wd5030>
+    # C4324 "structure was padded due to alignment specifier": the padding is
+    # what an alignas() member asks for.
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/wd4324>
+  )
+  # The CRT "unsafe"/POSIX-name C4996 diagnostics (getenv, fopen, getpid): the
+  # tree calls these portable C/POSIX functions on purpose. The two macros only
+  # gate the CRT's own deprecation annotations; a use of a [[deprecated]]
+  # declaration still raises C4996.
+  target_compile_definitions(${target} PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:_CRT_SECURE_NO_WARNINGS>
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:_CRT_NONSTDC_NO_WARNINGS>
+  )
 endfunction()
 
 # ── Werror — turned on in CI via FIXPP_WERROR cache variable ─────────────────
@@ -201,6 +262,56 @@ function(fixpp_apply_werror_to_all_targets)
       "a build. The target walk is broken, not the tree (#417).")
   endif()
   message(STATUS "fixpp: FIXPP_WERROR applied to ${_applied} target(s); exempt: ${_exempt}")
+endfunction()
+
+# ── #481: the common strict flags reach every first-party compiled target ────
+#
+#   fixpp_apply_common_flags_to_all_targets()   — call DEFERRED from the
+#                                                 top-level CMakeLists.txt
+#
+# The same enumeration as fixpp_apply_werror_to_all_targets() above, and for
+# the same reason: a per-target call list misses the next target added without
+# it. Unlike that walk this one is not gated on FIXPP_WERROR — the warning
+# flags only raise warnings; whether a warning fails the build stays
+# FIXPP_WERROR's call. The MSVC conformance switches are applied either way
+# (see fixpp_apply_common_flags above).
+#
+# ⚠️ CALL IT DEFERRED, for the reason fixpp_apply_werror_to_all_targets() gives:
+# BUILDSYSTEM_TARGETS holds only the targets defined so far.
+#
+# ⚠️ OPT-OUT IS PER TARGET AND CARRIES A REASON. Set the target property
+# FIXPP_COMMON_FLAGS_EXEMPT to the reason. Reserve it for a target whose TUs
+# contain no first-party code; first-party warnings are fixed at the site. A TU
+# that mixes generated and first-party code is not exempted: scope a pragma to
+# the generated part instead, as bindings/python/fixpp.i does for SWIG's
+# runtime. A negative-compile probe needs no exemption: added warnings cannot
+# make a build that must fail succeed. The configure STATUS line below names
+# the exempt targets; re-derive the users with
+#   git grep -n FIXPP_COMMON_FLAGS_EXEMPT -- '*.txt' '*.cmake'
+#
+# ⚠️ AN EMPTY ENUMERATION IS AN INSTRUMENT FAILURE: the flags would then reach
+# nothing with nothing saying so.
+function(fixpp_apply_common_flags_to_all_targets)
+  fixpp_collect_buildsystem_targets(_targets
+    "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
+  set(_applied 0)
+  set(_exempt "")
+  foreach(_tgt IN LISTS _targets)
+    get_target_property(_reason ${_tgt} FIXPP_COMMON_FLAGS_EXEMPT)
+    if(_reason)
+      list(APPEND _exempt "${_tgt}")
+      continue()
+    endif()
+    fixpp_apply_common_flags(${_tgt})
+    math(EXPR _applied "${_applied} + 1")
+  endforeach()
+
+  if(_applied EQUAL 0)
+    message(FATAL_ERROR
+      "No compiled target was enumerated, so the common warning flags reach nothing. "
+      "The target walk is broken, not the tree (#481).")
+  endif()
+  message(STATUS "fixpp: common warning flags applied to ${_applied} target(s); exempt: ${_exempt}")
 endfunction()
 
 # ── #508: the library code a fuzzer links must feed it coverage ──────────────

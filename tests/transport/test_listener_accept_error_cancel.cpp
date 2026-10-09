@@ -19,9 +19,19 @@
 
 #include "support/pump_until_ready.hpp"
 
+// Clang's -Wkeyword-macro flags redefining a keyword; the redefinition is the
+// point here (private-member access for this test), so it is silenced for
+// these lines only.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wkeyword-macro"
+#endif
 #define private public
 #include "transport/asio_listener.hpp"
 #undef private
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 namespace {
 

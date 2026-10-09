@@ -796,7 +796,7 @@ TEST(FixtCredentials, FQ2_ThrowingLogonValidator_SessionDisconnectsNoTerminate) 
 
     // Pre-fix: this call terminates the process via std::terminate.
     // Post-fix: it returns normally (the throw is absorbed inside authorize_logon).
-    auto r = run_sync_creds(s, [&] {
+    [[maybe_unused]] auto r = run_sync_creds(s, [&] {
         return acceptor.on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
     });
 

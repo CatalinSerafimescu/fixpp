@@ -124,7 +124,6 @@ TEST(CapiThunkSplit, AbortTrapMechanismCatchesSameThreadAbort) {
     g_abort_caught = 0;
     if (FIXPP_ABORT_SETJMP(g_abort_jmp) == 0) {
         std::abort();  // simulate the steady-state invariant-violation abort
-        ADD_FAILURE() << "std::abort() returned — unreachable";
     }
     EXPECT_EQ(g_abort_caught, 1)
         << "the in-process SIGABRT trap must catch a same-thread std::abort() "

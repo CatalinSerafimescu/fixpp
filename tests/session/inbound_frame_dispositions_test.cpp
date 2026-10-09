@@ -597,14 +597,14 @@ TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotSohTerminated_DisregardedAn
 std::string junk(std::size_t n = 12) { return std::string(n, 'Q') + "\x01"; }
 
 struct PumpOptions {
-    std::shared_ptr<Application> app;
+    std::shared_ptr<Application> app{};
     std::optional<std::chrono::seconds> heartbeat = std::chrono::seconds{30};
     std::string begin_string = "FIX.4.2";
     std::uint32_t logout_disconnect_timeout_ms = 500;
     // The engine clock's initial steady_now().
     fixpp::core::steady_time_point steady_seed{};
     // Unset: the rig's session keeps SessionConfig's own logon_timeout_ms.
-    std::optional<std::uint32_t> logon_timeout_ms;
+    std::optional<std::uint32_t> logon_timeout_ms{};
 };
 
 struct PumpCell {

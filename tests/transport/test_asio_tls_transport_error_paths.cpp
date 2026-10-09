@@ -111,7 +111,8 @@ struct HandshakenPair {
     std::unique_ptr<Transport> server;
 };
 
-HandshakenPair make_handshaken_pair(LoopbackTlsFixture& fixture, asio::io_context& ioc) {
+[[maybe_unused]] HandshakenPair make_handshaken_pair(LoopbackTlsFixture& fixture,
+                                                     asio::io_context& ioc) {
     std::optional<expected_t<ConnectInfo>> connect_result;
     std::optional<expected_t<handshake_result>> client_hs;
     std::optional<expected_t<std::unique_ptr<Transport>>> accept_result;

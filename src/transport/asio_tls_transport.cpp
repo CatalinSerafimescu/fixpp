@@ -587,8 +587,8 @@ asio_tls_transport::asio_tls_transport(from_factory_tag, asio::any_io_executor e
       exec_{exec},
       socket_{std::move(accepted_socket)},
       ssl_ctx_{std::move(shared_ctx)},
-      role_(role_t::server),
-      state_(state_t::connected) {
+      state_(state_t::connected),
+      role_(role_t::server) {
     apply_socket_options_();
 }
 
@@ -613,8 +613,8 @@ asio_tls_transport::asio_tls_transport(asio::any_io_executor exec, Transport::Co
       exec_{exec},
       socket_{std::move(accepted_socket)},
       ssl_ctx_{std::make_shared<asio::ssl::context>(asio::ssl::context::tls)},
-      role_(role_t::server),
-      state_(state_t::connected) {
+      state_(state_t::connected),
+      role_(role_t::server) {
     setup_ssl_ctx_();
     apply_socket_options_();
 }

@@ -1422,9 +1422,9 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 // has no effect once any earlier test has already pumped. Reaching delta == 0
 // at the real kSiteOpen/kSiteLogonAck sites requires the env var set BEFORE
 // process start, i.e. a separate process invocation:
-//   FIXPP_FORCE_WINDOW_MISS='FlushRunsAndFramesDurableAfterClose/open' \
-//     ./session_logout_exchange \
-//     --gtest_filter='SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose'
+// clang-format off
+//   FIXPP_FORCE_WINDOW_MISS='FlushRunsAndFramesDurableAfterClose/open' ./session_logout_exchange --gtest_filter='SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose'
+// clang-format on
 // `forced_miss_here` (called before `pump_until` ever reaches `ioc.run_for`) returns
 // on that FIRST call, so no offload can have entered a pool thread by the time the
 // snapshot is compared -- the delta==0 branch, and the probe_file_pool secondary

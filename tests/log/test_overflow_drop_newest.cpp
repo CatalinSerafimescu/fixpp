@@ -99,37 +99,6 @@ TEST(LogOverflow, DropNewestPreservesOldest) {
     logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, k_first_fmt_id,
                     zeroed_trace_id, 0U, ts, {fixpp::log::ArgValue::from_u64(0U)});
 
-    // Give the drain thread a brief moment to pick up the first record and
-    // enter the blocking emit().  Without this, the drain might not have
-    // consumed slot 0 yet when we send slot 1, and the second enqueue would
-    // see 1 slot in use rather than 0, causing unpredictable behaviour.
-    // We busy-poll until the drain has advanced read_sequence_.
-    // (In production code we'd never busy-poll; this is test-only.)
-    //
-    // Strategy: wait until drop_count() or filter_count() > 0 OR
-    // until the drain has processed the first record (drop_count still 0 but
-    // the ring is empty again). We detect this via a short sleep + retry.
-    // Since capacity=1 and drop_newest, after the drain picks up slot 0,
-    // write-read difference becomes 0 again.
-
-    // Wait for the drain to claim and lock on record 0.
-    // The drain blocks in emit() → the record is OUT of the ring (read_sequence_
-    // advanced), so producers can reclaim the slot.
-    // We wait until we can successfully enqueue without a drop.
-    {
-        // Attempt to detect "drain entered emit" by watching write vs. read.
-        // We give it up to 1 second.
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
-        while (std::chrono::steady_clock::now() < deadline) {
-            // Try one more enqueue; if it does NOT increment drop_count, the
-            // ring slot was freed by the drain (drain consumed record 0, slot
-            // now empty, our enqueue lands in it).
-            // But we don't want to send real data here — just probe.
-            // Simplest: enqueue record #1 here and measure drop_count afterwards.
-            break;  // We'll rely on the second batch approach below.
-        }
-    }
-
     // Enqueue records #1..#99 (the "newest" ones; all should be dropped after
     // the drain has locked slot 0).
     // We loop and count drops ourselves vs. what the logger reports.
@@ -315,7 +284,7 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain) {
     //   read_sequence_ advances AFTER emit() returns.
 
     // Check drop_count before unblocking the drain.
-    auto const drops_before_resume = logger->drop_count();
+    [[maybe_unused]] auto const drops_before_resume = logger->drop_count();
 
     // Unblock the drain.
     exact_sink_raw->may_proceed.store(true, std::memory_order_release);

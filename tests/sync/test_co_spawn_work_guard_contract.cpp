@@ -255,8 +255,9 @@ TEST(SyncCoSpawnWorkGuard, StrandOfTheDrivenContextIsTheDrivenContext) {
 // claim: written line-oriented it matched only ITS OWN COMMENT and missed the real
 // instance, whose `co_spawn(` and `bind_executor(` sit on different lines. Re-derive with
 // one that spans the call and excludes this file:
-//     git grep -n --heading -A2 'asio::co_spawn' -- tests/ \
-//       ':!tests/sync/test_co_spawn_work_guard_contract.cpp' | grep -B2 bind_executor
+// clang-format off
+//     git grep -n --heading -A2 'asio::co_spawn' -- tests/ ':!tests/sync/test_co_spawn_work_guard_contract.cpp' | grep -B2 bind_executor
+// clang-format on
 // ⚠️ AND THEN APPLY THE DISCRIMINATOR, because that recipe OVER-MATCHES and the tree
 // contains hits: `co_spawn(ex, awaitable, token)` — only a wrapper on the THIRD argument
 // is what this arm is about. `bind_executor` on the SECOND binds the executor the

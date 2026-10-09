@@ -296,7 +296,7 @@ TEST(SeamRaceCancelDuringResume, MutexFreeAfterRace) {
         co_await yield_n(N);
     };
 
-    auto make_waiter = [&](int idx) -> asio::awaitable<void> {
+    auto make_waiter = [&](int /*idx*/) -> asio::awaitable<void> {
         co_await yield_n(1);
         auto r = co_await mtx.async_lock();
         (void)r;

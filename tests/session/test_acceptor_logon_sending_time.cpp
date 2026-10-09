@@ -195,10 +195,10 @@ public:
     explicit SeededStore(seqnum_t seeded_inbound = seqnum_min,
                          seqnum_t seeded_outbound = seqnum_min)
         : MessageStore(flush_thunk_for<SeededStore>()),
-          next_inbound_(seeded_inbound),
-          next_outbound_(seeded_outbound),
           durable_inbound(seeded_inbound),
-          durable_outbound(seeded_outbound) {}
+          durable_outbound(seeded_outbound),
+          next_inbound_(seeded_inbound),
+          next_outbound_(seeded_outbound) {}
 
     // Observable durable counters (post-persist values).
     seqnum_t durable_inbound;

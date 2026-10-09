@@ -112,8 +112,9 @@ std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                        std::string_view sender, std::string_view target) {
+[[maybe_unused]] std::vector<std::byte> make_logon_frame(std::string_view begin_string,
+                                                         std::uint32_t seq, std::string_view sender,
+                                                         std::string_view target) {
     std::string body;
     body += fix_field(35, "A");
     body += fix_field(34, std::to_string(seq));

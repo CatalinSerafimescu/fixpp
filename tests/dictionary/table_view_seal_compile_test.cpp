@@ -51,10 +51,10 @@
 //
 // Re-derivation recipe for the structural half (§6 seam 2) — the counts are
 // deliberately NOT written here, because nothing re-runs a comment:
-//   grep -nE '^[[:space:]]*friend[[:space:]]+class[[:space:]]+(table_view|table_view_builder);' \
-//        include/fixpp/dict/table_view.hpp
-//   awk '/^class table_view \{/{f=1} f&&/^(public|private|protected):/{print NR": "$0} \
-//        f&&/^\};/{exit}' include/fixpp/dict/table_view.hpp
+// clang-format off
+//   grep -nE '^[[:space:]]*friend[[:space:]]+class[[:space:]]+(table_view|table_view_builder);' include/fixpp/dict/table_view.hpp
+//   awk '/^class table_view \{/{f=1} f&&/^(public|private|protected):/{print NR": "$0} f&&/^\};/{exit}' include/fixpp/dict/table_view.hpp
+// clang-format on
 //
 // Mutation procedure — PROVE THESE PROBES CAN REPORT NON-ZERO before trusting a green
 // build, because a green build is also the signature of sixteen blind probes:

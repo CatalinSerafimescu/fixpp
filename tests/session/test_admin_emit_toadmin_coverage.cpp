@@ -186,10 +186,10 @@ class ObservableStore final : public MessageStore {
 public:
     explicit ObservableStore(seqnum_t seed_inbound = 1, seqnum_t seed_outbound = 1)
         : MessageStore(flush_thunk_for<ObservableStore>()),
-          next_inbound_(seed_inbound),
-          next_outbound_(seed_outbound),
           durable_inbound(seed_inbound),
-          durable_outbound(seed_outbound) {}
+          durable_outbound(seed_outbound),
+          next_inbound_(seed_inbound),
+          next_outbound_(seed_outbound) {}
 
     // Observable state for witnesses.
     seqnum_t durable_inbound;     // updated by next_seqnum(inbound, true)

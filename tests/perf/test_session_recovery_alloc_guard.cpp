@@ -132,7 +132,7 @@ std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq, st
     return make_fix_frame(bs, "0", seq, s, t);
 }
 
-bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
+[[maybe_unused]] bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     return wire.contains("35=" + std::string(type) + "\x01");
 }
@@ -294,7 +294,7 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
     // emitted ResendRequest, not via feed's own result.
     (void)feed(sess, gap_hb);
 
-    std::size_t pmr_allocs_in_window = pmr.alloc_count - pre_pmr_count;
+    [[maybe_unused]] std::size_t pmr_allocs_in_window = pmr.alloc_count - pre_pmr_count;
     if (alloc_guard_end) alloc_guard_end();
     // --- CLOSE GUARD WINDOW ---
 

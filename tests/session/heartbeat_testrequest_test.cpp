@@ -159,8 +159,8 @@ std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint
 // ── FSM-fixture helpers (pattern from seqnum_gap_fatal_test.cpp) ──────────────
 
 // Drive `co_spawn(ioc, coro, use_future)` with a readiness-checked window (#289).
-fixpp::core::expected_t<void> run_coro_result(asio::io_context& ioc,
-                                              asio::awaitable<fixpp::core::expected_t<void>> coro) {
+[[maybe_unused]] fixpp::core::expected_t<void> run_coro_result(
+    asio::io_context& ioc, asio::awaitable<fixpp::core::expected_t<void>> coro) {
     auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, "run_coro_result")) {
         // No Clock here on purpose: `run_coro_result` is a free helper declared ABOVE the

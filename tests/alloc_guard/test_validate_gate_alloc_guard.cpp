@@ -43,8 +43,9 @@
 // failure rather than a heap fall-back that hides an alloc.
 //
 // Run under mallocnesia via tools/check_alloc.py:
-//   python3 tools/check_alloc.py \
-//       --binary build/linux-clang-debug/bin/test_validate_gate_alloc_guard
+// clang-format off
+//   python3 tools/check_alloc.py --binary build/linux-clang-debug/bin/test_validate_gate_alloc_guard
+// clang-format on
 //
 // [041-validation-gate-wiring; const §VIII.5; data-model E-4; SC-005]
 
@@ -167,6 +168,13 @@ void* operator new[](std::size_t n) {
     return p;
 }
 
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new;
+// it cannot see that the replacement operator new above allocates with
+// std::malloc, so the matching std::free below is flagged although it is correct.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 // NOLINTNEXTLINE(cert-dcl58-cpp)
 void operator delete(void* p) noexcept { std::free(p); }
 
@@ -178,6 +186,9 @@ void operator delete[](void* p) noexcept { std::free(p); }
 
 // NOLINTNEXTLINE(cert-dcl58-cpp)
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #endif  // !FIXPP_SANITIZER_REPLACES_NEW
 

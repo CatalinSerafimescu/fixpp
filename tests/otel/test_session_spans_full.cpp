@@ -313,7 +313,7 @@ TEST_F(SessionSpansFullTest, ChildSpansParentedToSessionSpan) {
     // Reset provider after to allow span flush.
 
     // Capture the session span_id for assertion.
-    auto session_span_id = session_sc.span_id();
+    [[maybe_unused]] auto session_span_id = session_sc.span_id();
 
     // Destroy ss to end the lifecycle span.
     {

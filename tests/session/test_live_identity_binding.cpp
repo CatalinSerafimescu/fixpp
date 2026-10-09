@@ -161,7 +161,7 @@ public:
         std::pmr::memory_resource* mr = cfg.mr ? cfg.mr : std::pmr::get_default_resource();
 
         fixpp::tls::peer_identity pid;
-        // subject_dn in "CN=<value>" format so parse_cn_from_dn_local extracts it.
+        // subject_dn in "CN=<value>" format so parse_cn_from_dn extracts it.
         pid.subject_dn = std::pmr::string{"CN=" + injected_cn_, mr};
         pid.leaf_fingerprint = {};
 
@@ -229,7 +229,7 @@ protected:
     // Returns the ReconnectFsm (must stay alive through the Logon-ack feed).
     template <typename FactoryT>
     static std::unique_ptr<fixpp::session::ReconnectFsm> drive_to_logon_sent(
-        asio::io_context& ioc, fixpp::session::Session& session, FactoryT* factory,
+        asio::io_context& /*ioc*/, fixpp::session::Session& session, FactoryT* factory,
         fixpp::transport::Endpoint ep) {
         auto fsm = std::make_unique<fixpp::session::ReconnectFsm>(factory, make_fast_policy(3), 30s,
                                                                   2000ms);

@@ -147,10 +147,14 @@ bool frame_has_field(std::span<const std::byte> frame, int tag, std::string_view
 }
 
 // Check that a frame is a ResendRequest (MsgType=2).
-bool is_resend_request(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "2"); }
+[[maybe_unused]] bool is_resend_request(std::span<const std::byte> frame) {
+    return frame_has_field(frame, 35, "2");
+}
 
 // Check that a frame is a Logout (MsgType=5).
-bool is_logout(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "5"); }
+[[maybe_unused]] bool is_logout(std::span<const std::byte> frame) {
+    return frame_has_field(frame, 35, "5");
+}
 
 }  // namespace
 

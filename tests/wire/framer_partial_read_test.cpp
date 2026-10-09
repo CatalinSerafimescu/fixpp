@@ -96,9 +96,6 @@ TEST(WireFramerPartialRead, ReassemblesKnownPipelineAcrossEveryChunkSize) {
     std::vector<std::byte> const pipeline = concat(first, second);
     std::vector<std::vector<std::byte>> const expected{first, second};
 
-    std::array<std::byte, 1024> arena_storage{};
-    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};
-
     for (std::size_t chunk_size = 1; chunk_size <= pipeline.size(); ++chunk_size) {
         std::array<std::byte, 1024> arena_storage{};
         std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size()};

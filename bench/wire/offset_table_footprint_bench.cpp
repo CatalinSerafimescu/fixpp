@@ -47,7 +47,7 @@ namespace {
 // Raised cap for this bench only — does NOT change the shipped default.
 // Sized to accommodate SecurityList×5000 (~25000 occ) comfortably.
 // This constant is LOCAL to this bench; it is NOT fixpp::wire::default_max_offset_entries.
-inline constexpr std::size_t kFootprintBenchMaxOcc = 32768;
+[[maybe_unused]] inline constexpr std::size_t kFootprintBenchMaxOcc = 32768;
 
 // ── Frame builders ─────────────────────────────────────────────────────────
 

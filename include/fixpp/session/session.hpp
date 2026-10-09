@@ -400,6 +400,7 @@ public:
     template <class F>
     void dispatch_app_callback(F&& f) const {
         asio::post(exec_, [this, g = std::forward<F>(f)]() mutable {
+            (void)this;  // read only by the debug-only guard below
 #ifndef NDEBUG
             // Seam 16 / Edge Case: in DEBUG builds a detected
             // concurrent session-callback entry trips the

@@ -839,11 +839,8 @@ TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty) {
         << "construct_loggers_if_clean must not build a Logger when acc is non-empty";
 
     // Assert: no file was created in the log directory.
-    bool any_file_created = false;
-    for ([[maybe_unused]] const auto& entry : std::filesystem::directory_iterator{log_dir}) {
-        any_file_created = true;
-        break;
-    }
+    bool const any_file_created =
+        std::filesystem::directory_iterator{log_dir} != std::filesystem::directory_iterator{};
     EXPECT_FALSE(any_file_created)
         << "construct_loggers_if_clean must not create any files when acc is non-empty";
 }

@@ -8,8 +8,7 @@
 // (SC-003; I-16; E12; D-8).
 //
 // Run under mallocnesia via tools/check_alloc.py:
-//   python3 tools/check_alloc.py \
-//       --binary build/linux-clang-debug/bin/test_clock_sleep_alloc_guard
+//   python3 tools/check_alloc.py --binary build/linux-clang-debug/bin/test_clock_sleep_alloc_guard
 //
 // Design anchors:
 //   D-8  — per-session reusable steady_timer slot, keyed by Session*,

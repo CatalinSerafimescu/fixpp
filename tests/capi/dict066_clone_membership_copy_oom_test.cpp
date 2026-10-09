@@ -133,6 +133,13 @@ void* operator new[](std::size_t size) {
     ++g_live;
     return p;
 }
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new;
+// it cannot see that the replacement operator new above allocates with
+// std::malloc, so the matching std::free below is flagged although it is correct.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void operator delete(void* p) noexcept {
     if (p != nullptr) --g_live;
     std::free(p);
@@ -149,6 +156,9 @@ void operator delete[](void* p, std::size_t) noexcept {
     if (p != nullptr) --g_live;
     std::free(p);
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 // fixpp#458 (090-capi-refusals) T049: the ALIGNED overloads. Measured (not
 // assumed): libstdc++'s std::pmr::monotonic_buffer_resource routes its

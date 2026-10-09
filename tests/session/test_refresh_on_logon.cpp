@@ -468,8 +468,9 @@ ReconnectInitiatorFixture make_reconnect_initiator(
         // nulling would trade a hang for a null dereference. Verified for both this
         // helper's callers and `make_acceptor_notconnected`'s -- re-derive rather than
         // trusting this line, the callers are the thing that moves:
-        //   git grep -n -A2 'make_reconnect_initiator(\|make_acceptor_notconnected(' \
-        //     -- tests/session/test_refresh_on_logon.cpp
+        // clang-format off
+        //   git grep -n -A2 'make_reconnect_initiator(\|make_acceptor_notconnected(' -- tests/session/test_refresh_on_logon.cpp
+        // clang-format on
         // ⚠️ WHAT STOPS A QUIET PASS IS THE `ADD_FAILURE` ABOVE, AND ONLY THAT. An
         // earlier draft of this line added "the state EXPECT below fails too" -- false,
         // and falsifiable by reading three lines further: this `return` leaves the

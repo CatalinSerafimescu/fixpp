@@ -560,11 +560,9 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 
 // Build a minimal app message (Heartbeat) with optional ApplVerID(1128) field.
 // Used for W8: verifies dict-free delivery of inbound app messages.
-[[nodiscard]] std::vector<std::byte> make_heartbeat_frame_1128(std::string_view begin_string,
-                                                               std::uint32_t msg_seq_num,
-                                                               std::string_view sender_comp_id,
-                                                               std::string_view target_comp_id,
-                                                               std::string_view appl_ver_id = "") {
+[[maybe_unused]] [[nodiscard]] std::vector<std::byte> make_heartbeat_frame_1128(
+    std::string_view begin_string, std::uint32_t msg_seq_num, std::string_view sender_comp_id,
+    std::string_view target_comp_id, std::string_view appl_ver_id = "") {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";
@@ -598,7 +596,8 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 }
 
 // Extract a field value from a FIX wire frame by tag number (SOH-delimited).
-[[nodiscard]] std::string extract_wire_field(std::span<const std::byte> frame, int tag) {
+[[maybe_unused]] [[nodiscard]] std::string extract_wire_field(std::span<const std::byte> frame,
+                                                              int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "\x01" + std::to_string(tag) + "=";
     auto pos = wire.find(needle);

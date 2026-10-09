@@ -873,7 +873,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_DurableStoreFailure_BlocksActive) {
 
     // Feed a peer Logon (this triggers the reset path if wired).
     auto logon = make_peer_logon(1);
-    auto r2 = feed_sync(sess, logon);
+    [[maybe_unused]] auto r2 = feed_sync(sess, logon);
 
     // C2.6 / FR-008: with reset_on_logon=true and a store failure, the session
     // MUST NOT reach Active (fatal disposition propagates the error).
@@ -1508,10 +1508,9 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_NextInitiatorLogon_Emits141) {
 // the reset runs at most once per session lifecycle event (logon/logout/disconnect).
 //
 // Gate: mallocnesia LD_PRELOAD interceptor (global-malloc interception).
-//   Run: LD_PRELOAD=$(pwd)/tools/mallocnesia/libmallocnesia.so \
-//        MALLOCNESIA_MAX_ALLOCS=0 \
-//        build/linux-clang-debug/bin/session_reset_on_lifecycle \
-//        --gtest_filter="*NoHeapOnResetPath*"
+// clang-format off
+//   Run: LD_PRELOAD=$(pwd)/tools/mallocnesia/libmallocnesia.so MALLOCNESIA_MAX_ALLOCS=0 build/linux-clang-debug/bin/session_reset_on_lifecycle --gtest_filter="*NoHeapOnResetPath*"
+// clang-format on
 //
 // Why mallocnesia is the binding gate (not counting_resource alone):
 // [[feedback_tracking_pmr_resource_false_pass]]: a counting_resource PMR only
@@ -1890,7 +1889,7 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnect
     factory->store->fail_next_reset();
 
     auto logon = make_peer_logon(/*seq=*/1, /*reset_seqnum=*/true);
-    auto r2 = feed_sync(sess, logon);
+    [[maybe_unused]] auto r2 = feed_sync(sess, logon);
 
     // (i) Session must be Disconnected (fatal-when-persistent FR-010).
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)

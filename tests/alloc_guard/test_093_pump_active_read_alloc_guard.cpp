@@ -96,6 +96,13 @@ void* operator new[](std::size_t n) {
     return p;
 }
 
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new;
+// it cannot see that the replacement operator new above allocates with
+// std::malloc, so the matching std::free below is flagged although it is correct.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 // NOLINTNEXTLINE(cert-dcl58-cpp)
 void operator delete(void* p) noexcept { std::free(p); }
 // NOLINTNEXTLINE(cert-dcl58-cpp)
@@ -104,6 +111,9 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 // NOLINTNEXTLINE(cert-dcl58-cpp)
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 // NOLINTEND(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,hicpp-no-malloc)
 
 namespace {
@@ -134,7 +144,7 @@ using fixpp::session::fsm_state;
 // build this cell against the merge-base, run it, read the per-read counts it reports on
 // failure (or set this to 0), and attribute each call with gdb, breaking in this file's
 // operator new on `g_arming` and printing a backtrace.
-constexpr std::size_t kBaseActiveReadAllocs = 5;
+[[maybe_unused]] constexpr std::size_t kBaseActiveReadAllocs = 5;
 
 std::uint32_t next_inbound(fixpp::session::Session& s) {
     return fixpp::session::session_test_access::seqnum_mgr(s).next_inbound_unsafe();
@@ -170,7 +180,7 @@ TEST(PumpActiveReadAllocGuard, AnActiveReadAfterAWarmUpReadAllocatesNothing) {
     constexpr std::uint32_t kFirst = 3;
     constexpr std::uint32_t kLast = 6;
     std::size_t processed = 0;
-    std::size_t counts[kLast - kFirst + 1] = {};
+    [[maybe_unused]] std::size_t counts[kLast - kFirst + 1] = {};
     std::error_code write_ec;
     if (warmed) {
         for (std::uint32_t seq = kFirst; seq <= kLast; ++seq) {

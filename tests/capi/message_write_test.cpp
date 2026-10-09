@@ -28,6 +28,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <memory_resource>
@@ -707,7 +708,7 @@ TEST(MessageWrite, RoundTripCommitPayloadFormatAndPeerReceive) {
         << "committed payload must contain 112=ROUNDTRIP_STR\\x01";
 
     // Payload must NOT contain framing tags at field boundaries
-    for (uint16_t t : {8U, 9U, 34U, 49U, 52U, 56U, 10U}) {
+    for (uint16_t t : std::initializer_list<uint16_t>{8, 9, 34, 49, 52, 56, 10}) {
         EXPECT_TRUE(span_lacks_tag(payload, payload_len, static_cast<uint16_t>(t)))
             << "framing tag " << t << " must not appear in committed payload";
     }
@@ -1003,7 +1004,7 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
         << "committed payload must contain 11=ORD001\\x01";
     EXPECT_TRUE(span_has_field(payload, payload_len, 58, "SC001_WITNESS"))
         << "committed payload must contain 58=SC001_WITNESS\\x01";
-    for (uint16_t t : {8U, 9U, 34U, 49U, 52U, 56U, 10U}) {
+    for (uint16_t t : std::initializer_list<uint16_t>{8, 9, 34, 49, 52, 56, 10}) {
         EXPECT_TRUE(span_lacks_tag(payload, payload_len, static_cast<uint16_t>(t)))
             << "framing tag " << t << " must not appear in committed payload";
     }

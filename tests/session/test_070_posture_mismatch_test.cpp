@@ -388,7 +388,9 @@ TEST(PostureAdvertise, BuildLogonEmits464YWhenTest) {
     auto with_flag = fixpp::session::build_logon(
         std::span<std::byte>{buf.data(), buf.size()}, 1, "TW", "ISLD", "FIX.4.4", 30,
         "20240101-00:00:00.000", false, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
-        fixpp::session::logon_advertise_options{.test_message_indicator = true});
+        fixpp::session::logon_advertise_options{.max_message_size = std::nullopt,
+                                                .test_message_indicator = true,
+                                                .supported_msg_types = {}});
     ASSERT_TRUE(with_flag.has_value());
     EXPECT_EQ(extract_field(*with_flag, 464), "Y");
 

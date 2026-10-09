@@ -97,7 +97,7 @@ namespace {
 
 // Minimal SOH-delimited frame builder — only the Logon this file needs, to
 // reach Active and prove the view is WIRED and not merely stored.
-std::vector<std::byte> make_logon_frame() {
+[[maybe_unused]] std::vector<std::byte> make_logon_frame() {
     std::string body;
     body += "35=A\x01";
     body += "34=1\x01";

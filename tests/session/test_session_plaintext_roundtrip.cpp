@@ -111,6 +111,9 @@
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
 #include <fixpp/session/security_profile.hpp>
 
@@ -734,11 +737,11 @@ using fixpp::test_support::HookedStoreFactory;
 using fixpp::test_support::StoreLog;
 
 struct LogonCloseCase {
-    std::optional<sess::close_mode> mode;
+    std::optional<sess::close_mode> mode{};
     std::string arm_on = "A";
-    std::string peer_logon_extra;  // fields appended to the peer's Logon, SOH-terminated
+    std::string peer_logon_extra{};  // fields appended to the peer's Logon, SOH-terminated
     bool enable_789 = false;
-    std::optional<sess::session_posture> posture;
+    std::optional<sess::session_posture> posture{};
     bool reset_on_logon = false;
     bool reset_on_disconnect = false;
     sess::seqnum_t store_outbound_next = 0;  // 0 = no store_factory
@@ -752,7 +755,7 @@ struct LogonCloseCase {
     // Inbound validation on, over the validation test dictionary.
     bool validate = false;
     // Frames the peer writes in the same write as its Logon (or Logon-ack).
-    std::vector<std::byte> trailing;
+    std::vector<std::byte> trailing{};
     // close(graceful)'s store flush holds until the session has counted a garbled frame
     // (HookedStore::Hooks::flush_until), so a trailing frame that follows the frames under
     // test, and is garbled, shows the pump delivered them while close() was under way.
@@ -765,7 +768,7 @@ struct LogonCloseCase {
     bool hold_until_close_began = false;
     // A second connection over the store a first one left (its counters), with the
     // peer's Logon (or Logon-ack) at this MsgSeqNum.
-    std::shared_ptr<StoreLog> reuse_store;
+    std::shared_ptr<StoreLog> reuse_store{};
     int peer_logon_seq = 1;
 };
 
@@ -2219,4 +2222,6 @@ TEST(LogonCloseDuringSuspension, Q24_FileStoreInitiatorTeardownResetLeavesOneOne
 
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif

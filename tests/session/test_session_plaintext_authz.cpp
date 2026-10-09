@@ -95,6 +95,9 @@
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
 #include <fixpp/session/security_profile.hpp>
 
@@ -543,4 +546,6 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
 }
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif

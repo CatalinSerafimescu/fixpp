@@ -230,6 +230,13 @@ private:
 
 namespace detail {
 
+// The macros' compile-time level gate. A function, not an inline comparison:
+// with FIXPP_LOG_MIN_LEVEL at 0, GCC's -Wtype-limits reports
+// `static_cast<int>(Level::x) >= 0` as always true at every macro site.
+[[nodiscard]] constexpr bool level_enabled(Level level, int min_level) noexcept {
+    return static_cast<int>(level) >= min_level;
+}
+
 // enqueue_record_notrace: called by FIXPP_LOG0.
 // Zeroed trace_id / span_id (context-free; not a bug per [2k §6.4]).
 // Takes an explicit Logger* so tests can pass a concrete Logger directly.
@@ -273,15 +280,16 @@ inline void enqueue_record(Logger* logger, Level level, Category category, std::
 // below FIXPP_LOG_MIN_LEVEL compile to zero bytes (contracts/log-core.md FR-010).
 //
 // [2k §4.3] / contracts/log-core.md / data-model.md §Trace-correlation-macros.
-#define FIXPP_LOG0(logger_ptr, lvl, cat, fmt, ...)                                         \
-    do {                                                                                   \
-        if constexpr (static_cast<int>(::fixpp::log::Level::lvl) >= FIXPP_LOG_MIN_LEVEL) { \
-            ::fixpp::log::detail::enqueue_record_notrace(                                  \
-                (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),       \
-                std::chrono::time_point_cast<std::chrono::nanoseconds>(                    \
-                    std::chrono::system_clock::now()),                                     \
-                {__VA_ARGS__});                                                            \
-        }                                                                                  \
+#define FIXPP_LOG0(logger_ptr, lvl, cat, fmt, ...)                                   \
+    do {                                                                             \
+        if constexpr (::fixpp::log::detail::level_enabled(::fixpp::log::Level::lvl,  \
+                                                          FIXPP_LOG_MIN_LEVEL)) {    \
+            ::fixpp::log::detail::enqueue_record_notrace(                            \
+                (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt), \
+                std::chrono::time_point_cast<std::chrono::nanoseconds>(              \
+                    std::chrono::system_clock::now()),                               \
+                {__VA_ARGS__});                                                      \
+        }                                                                            \
     } while (false)
 
 // ── FIXPP_SLOG ──────────────────────────────────────────────────────────────
@@ -299,22 +307,23 @@ inline void enqueue_record(Logger* logger, Level level, Category category, std::
 //
 // No thread_local ([const §XIII.3]). No co_await.
 // [2k §4.3] / contracts/log-core.md LOG-003 / [2k App D §D.1].
-#define FIXPP_SLOG(logger_ptr, lvl, tc, cat, fmt, ...)                                     \
-    do {                                                                                   \
-        if constexpr (static_cast<int>(::fixpp::log::Level::lvl) >= FIXPP_LOG_MIN_LEVEL) { \
-            /* otel::trace_context::trace_id is std::array<std::byte,16>;  */              \
-            /* Record::trace_id is std::array<std::uint8_t,16> — same size  */             \
-            /* and alignment; reinterpret_cast is safe (both char-based).   */             \
-            /* otel::trace_context::span_id is std::array<std::byte,8>;    */              \
-            /* Record::span_id is uint64_t — convert via std::bit_cast.     */             \
-            ::fixpp::log::detail::enqueue_record(                                          \
-                (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),       \
-                reinterpret_cast<std::array<std::uint8_t, 16> const&>((tc).trace_id),      \
-                std::bit_cast<std::uint64_t>((tc).span_id),                                \
-                std::chrono::time_point_cast<std::chrono::nanoseconds>(                    \
-                    std::chrono::system_clock::now()),                                     \
-                {__VA_ARGS__});                                                            \
-        }                                                                                  \
+#define FIXPP_SLOG(logger_ptr, lvl, tc, cat, fmt, ...)                                \
+    do {                                                                              \
+        if constexpr (::fixpp::log::detail::level_enabled(::fixpp::log::Level::lvl,   \
+                                                          FIXPP_LOG_MIN_LEVEL)) {     \
+            /* otel::trace_context::trace_id is std::array<std::byte,16>;  */         \
+            /* Record::trace_id is std::array<std::uint8_t,16> — same size  */        \
+            /* and alignment; reinterpret_cast is safe (both char-based).   */        \
+            /* otel::trace_context::span_id is std::array<std::byte,8>;    */         \
+            /* Record::span_id is uint64_t — convert via std::bit_cast.     */        \
+            ::fixpp::log::detail::enqueue_record(                                     \
+                (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),  \
+                reinterpret_cast<std::array<std::uint8_t, 16> const&>((tc).trace_id), \
+                std::bit_cast<std::uint64_t>((tc).span_id),                           \
+                std::chrono::time_point_cast<std::chrono::nanoseconds>(               \
+                    std::chrono::system_clock::now()),                                \
+                {__VA_ARGS__});                                                       \
+        }                                                                             \
     } while (false)
 
 // ── FIXPP_ELOG ──────────────────────────────────────────────────────────────
@@ -333,7 +342,8 @@ inline void enqueue_record(Logger* logger, Level level, Category category, std::
 // record's timestamp equals mock.now() — exercising FR-006 routing.
 #define FIXPP_ELOG(logger_ptr, lvl, engine_ref, cat, fmt, ...)                                  \
     do {                                                                                        \
-        if constexpr (static_cast<int>(::fixpp::log::Level::lvl) >= FIXPP_LOG_MIN_LEVEL) {      \
+        if constexpr (::fixpp::log::detail::level_enabled(::fixpp::log::Level::lvl,             \
+                                                          FIXPP_LOG_MIN_LEVEL)) {               \
             auto const _elog_tc = (engine_ref).engine_trace_context();                          \
             auto const _elog_ts = (engine_ref).clock()                                          \
                                       ? (engine_ref).clock()->now()                             \

@@ -122,11 +122,11 @@ public:
 // These format strings are ONLY referenced via their CRC32 ID at the
 // producer site.  With FIXPP_LOG_MIN_LEVEL=3 (warn), the debug/info IDs
 // below should NOT appear in .rodata of this TU.
-constexpr std::uint32_t kFmtDebug =
+[[maybe_unused]] constexpr std::uint32_t kFmtDebug =
     static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("zero alloc debug {}"));
-constexpr std::uint32_t kFmtInfo =
+[[maybe_unused]] constexpr std::uint32_t kFmtInfo =
     static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("zero alloc info {}"));
-constexpr std::uint32_t kFmtWarn =
+[[maybe_unused]] constexpr std::uint32_t kFmtWarn =
     static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("zero alloc warn {}"));
 
 // Helper: enqueue one warn-level record via the FIXPP_LOG0 macro.
@@ -248,9 +248,9 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
     // Fill levels to test: 10%, 50%, 95% of 1024 = 102, 512, 972 records.
     // The drain RUNS so these are non-overflow enqueues.
     constexpr std::uint64_t kCapacity = 1024U;
-    constexpr std::uint64_t k10pct = kCapacity / 10;          // 102
-    constexpr std::uint64_t k50pct = kCapacity / 2;           // 512
-    constexpr std::uint64_t k95pct = (kCapacity * 95) / 100;  // 972
+    [[maybe_unused]] constexpr std::uint64_t k10pct = kCapacity / 10;
+    [[maybe_unused]] constexpr std::uint64_t k50pct = kCapacity / 2;
+    constexpr std::uint64_t k95pct = (kCapacity * 95) / 100;
 
     for (std::uint64_t i = 0; i < k95pct; ++i) {
         emit_warn(logger.get(), i + 1U);

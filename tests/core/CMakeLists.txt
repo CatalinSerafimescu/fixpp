@@ -212,3 +212,56 @@ add_test(NAME decimal_mul_u64_wide_portable COMMAND decimal_mul_u64_wide_test_po
 set_tests_properties(decimal_mul_u64_wide_portable PROPERTIES
   LABELS "060;US2;decimal_compare"
   TIMEOUT 120)
+
+# ── #481: the common warning flags reach a nested target, prepended ──────────
+#
+# Two build probes for fixpp_apply_common_flags_to_all_targets()
+# (cmake/Helpers.cmake). Each ctest entry builds an EXCLUDE_FROM_ALL target
+# compiled from common_flags_probe.cpp, whose function does not read its
+# parameter; of the common flags, only -Wextra reports that. Each regex names
+# the diagnostic as well as the parameter, so an unrelated build failure, or
+# a different diagnostic echoing the source line, cannot satisfy it.
+#
+# REACH — passes only if the build reports the unused parameter, i.e. the
+# deferred walk reached a target declared in this subdirectory. Registered
+# only under FIXPP_WERROR: the compile then fails and writes no object, so
+# every run recompiles. Under OFF a first run would write the object and a
+# second would find it up to date, print nothing, and fail.
+#
+# ORDER — the target adds its own -Wno-unused-parameter, and the entry fails
+# if the diagnostic appears. The common flags are prepended (BEFORE), so the
+# target's -Wno- comes after -Wextra and wins. This discriminates on Clang
+# only: GCC keeps an explicit -Wno- in either order. A flag change forces a
+# recompile, so a stale object cannot hide a reordering.
+#
+# Every ctest entry that runs `cmake --build` on ${CMAKE_BINARY_DIR} carries
+# RESOURCE_LOCK fixpp_binary_dir_nested_build, these two included: two
+# concurrent builds in one tree can race on ninja's log and deps files.
+# Re-derive the set:
+#   git grep -n -e '--build' -- '*CMakeLists.txt' '*.cmake'
+# and check every entry, or script an entry runs, whose build directory is
+# ${CMAKE_BINARY_DIR}.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  if(FIXPP_WERROR)
+    add_library(fixpp_common_flags_reach_probe OBJECT EXCLUDE_FROM_ALL
+      common_flags_probe.cpp)
+    add_test(NAME build_flags_common_flags_reach
+      COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}"
+              --target fixpp_common_flags_reach_probe)
+    set_tests_properties(build_flags_common_flags_reach PROPERTIES
+      PASS_REGULAR_EXPRESSION "unused parameter [^ ]*fixpp_481_probe_param"
+      RESOURCE_LOCK fixpp_binary_dir_nested_build
+      LABELS "481;build_flags")
+  endif()
+
+  add_library(fixpp_common_flags_order_probe OBJECT EXCLUDE_FROM_ALL
+    common_flags_probe.cpp)
+  target_compile_options(fixpp_common_flags_order_probe PRIVATE -Wno-unused-parameter)
+  add_test(NAME build_flags_common_flags_order
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}"
+            --target fixpp_common_flags_order_probe)
+  set_tests_properties(build_flags_common_flags_order PROPERTIES
+    FAIL_REGULAR_EXPRESSION "unused parameter [^ ]*fixpp_481_probe_param"
+    RESOURCE_LOCK fixpp_binary_dir_nested_build
+    LABELS "481;build_flags")
+endif()

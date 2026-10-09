@@ -43,7 +43,7 @@ constexpr pin_fingerprint kFp1 = [] {
     return f;
 }();
 
-constexpr pin_fingerprint kFp2 = [] {
+[[maybe_unused]] constexpr pin_fingerprint kFp2 = [] {
     pin_fingerprint f{};
     f[0] = std::byte{0x02};
     return f;

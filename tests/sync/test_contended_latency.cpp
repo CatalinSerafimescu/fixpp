@@ -25,7 +25,7 @@ namespace {
 using fixpp::sync::async_mutex;
 
 // Runs all co_spawned tasks to completion.
-void run_ctx(asio::io_context& ioc) { ioc.run(); }
+[[maybe_unused]] void run_ctx(asio::io_context& ioc) { ioc.run(); }
 
 TEST(SeamContendedLatency, SecondAcquirerSuspends) {
     // Two coroutines race for the same mutex.  The first one holds it while the

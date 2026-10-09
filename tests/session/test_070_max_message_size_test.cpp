@@ -174,7 +174,8 @@ TEST(MaxMsgSizeAdvertise, BuildLogonEmits383) {
     auto with = fixpp::session::build_logon(
         std::span<std::byte>{buf.data(), buf.size()}, 1, "TW", "ISLD", "FIX.4.4", 30,
         "20240101-00:00:00.000", false, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
-        fixpp::session::logon_advertise_options{.max_message_size = 4096U});
+        fixpp::session::logon_advertise_options{.max_message_size = 4096U,
+                                                .supported_msg_types = {}});
     ASSERT_TRUE(with.has_value());
     EXPECT_EQ(extract_field(*with, 383), "4096");
 

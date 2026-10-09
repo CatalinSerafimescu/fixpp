@@ -18,16 +18,18 @@
 // (__SANITIZE_ADDRESS__ covers MSVC ASan) carry the zero-alloc gate on that platform.
 // They used to be inline no-op functions, which made the null check test a function
 // name that is never null -- MSVC warning C4551, an error under FIXPP_WERROR (#417).
+// They are not `constexpr` either: a constant null makes every `if (alloc_guard_start)`
+// a constant condition, MSVC warning C4127 under /W4 (#481).
 //
 // All four symbols are declared here regardless of which a given test uses; an
 // unreferenced weak decl (POSIX) or unused pointer (Windows) is harmless.
 #pragma once
 
 #ifdef _WIN32
-inline constexpr void (*alloc_guard_start)() = nullptr;
-inline constexpr void (*alloc_guard_end)() = nullptr;
-inline constexpr long (*alloc_guard_count)() = nullptr;
-inline constexpr long (*alloc_guard_global_count)() = nullptr;
+inline void (*alloc_guard_start)() = nullptr;
+inline void (*alloc_guard_end)() = nullptr;
+inline long (*alloc_guard_count)() = nullptr;
+inline long (*alloc_guard_global_count)() = nullptr;
 #else
 extern "C" {
 __attribute__((weak)) void alloc_guard_start();

@@ -844,7 +844,8 @@ public:
                               .msg_type = extract_tag(frame, 35),
                               .ref_seq = extract_tag(frame, 45)});
         } else {
-            events.push_back({.kind = EventKind::inbound_store, .seq = seq});
+            events.push_back(
+                {.kind = EventKind::inbound_store, .seq = seq, .msg_type = {}, .ref_seq = {}});
         }
         co_return fixpp::core::expected_t<void>{};
     }
@@ -872,7 +873,8 @@ public:
         if (increment) {
             ++c;
             if (dir == direction_t::inbound) {
-                events.push_back({.kind = EventKind::inbound_advance, .seq = c});
+                events.push_back(
+                    {.kind = EventKind::inbound_advance, .seq = c, .msg_type = {}, .ref_seq = {}});
             }
         }
         co_return curr;
@@ -1607,10 +1609,10 @@ TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
 // no-TestRequest-at-t0 + HeartBtInt check.
 
 struct RefreshCase {
-    std::vector<std::byte> frame;
+    std::vector<std::byte> frame{};
     bool validate = false;
     bool validate_sequence_numbers = true;
-    std::vector<std::string> drawn;  // MsgType(35) of each frame the class frame draws
+    std::vector<std::string> drawn{};  // MsgType(35) of each frame the class frame draws
     std::uint32_t next_in_after = 0;
     int from_app_after = 0;
 };

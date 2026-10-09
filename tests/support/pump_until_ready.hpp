@@ -242,8 +242,9 @@ inline constexpr const char* kPumpBudgetMiss =
 //     the tail, so a tracked-files-only search fails toward clean over exactly the files
 //     the batch is adding, at exactly the moment someone runs it.
 //     # BOTH fragments, `grep -rn` not `git grep`, and the WHOLE tree:
-//     grep -rn -e 'preserved window returned' -e 'bounded grace that follows' \
-//          ci/ tools/ tests/ brain/ .github/
+// clang-format off
+//     grep -rn -e 'preserved window returned' -e 'bounded grace that follows' ci/ tools/ tests/ brain/ .github/
+// clang-format on
 inline constexpr const char* kWindowMiss =
     "#289: the operation was not ready when its preserved window returned, and did "
     "not become ready within the bounded grace that follows. Site: ";
@@ -292,10 +293,9 @@ inline constexpr const char* kRunMiss =
 // with each new adopter. The recipe (a PROCEDURE — the answer is a measurement
 // and belongs nowhere in this comment):
 //
-//     comm -12 \
-//       <(git grep -l kWindowMissSentinel -- tests/ | grep -v pump_until_ready.hpp | sort) \
-//       <(git grep -lE 'EXPECT_NONFATAL_FAILURE|ScopedFakeTestPartResultReporter|gtest-spi' \
-//              -- tests/ | sort)
+// clang-format off
+//     comm -12 <(git grep -l kWindowMissSentinel -- tests/ | grep -v pump_until_ready.hpp | sort) <(git grep -lE 'EXPECT_NONFATAL_FAILURE|ScopedFakeTestPartResultReporter|gtest-spi' -- tests/ | sort)
+// clang-format on
 //
 // The precondition holds while that intersection is EMPTY, transitively through
 // includes.

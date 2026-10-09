@@ -1670,14 +1670,25 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         } else if (k == SK::one_way_ca) {
             // one_way_ca is deprecated in the TLS layer but still supported
             // for legacy interop (session layer retains it per [const §XII.5]).
+            // Portable `#elif defined` spelling: see is_insecure_plain_tcp() in
+            // fixpp/session/security_profile.hpp.
+            // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
+            // NOLINTEND(readability-use-concise-preprocessor-directives)
             tls_profile = TK::one_way_ca;
+            // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
+            // NOLINTEND(readability-use-concise-preprocessor-directives)
         }
         // insecure_plain_tcp: tls_profile stays unset; no SslCtxConfig arm.
         reconnect_fsm_.set_tls_profile(tls_profile);
@@ -2615,7 +2626,8 @@ Session::InboundValidation Session::validate_inbound_(
 // compid_authorization_policy.cpp (which is in an anonymous namespace there).
 // Declared locally here to avoid cross-TU linkage of an internal helper.
 // noexcept — pure string scanning.
-[[nodiscard]] static std::string_view parse_cn_from_dn_local(std::string_view dn) noexcept {
+[[nodiscard]] [[maybe_unused]] static std::string_view parse_cn_from_dn_local(  // see fixpp#559
+    std::string_view dn) noexcept {
     std::size_t pos = 0;
     while (pos < dn.size()) {
         const auto found = dn.find("CN=", pos);
@@ -4543,12 +4555,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // [036 tasks T031; contracts C2; data-model.md INV-COV-5]
                             bool suppressed = false;
                             if (engine_.application != nullptr) {
-                                auto cb_r = parse_and_dispatch_(
+                                auto to_app_r = parse_and_dispatch_(
                                     *bmr_r, kSendParseArena, [&](auto& mv, auto& sid) {
                                         return engine_.application->toApp(mv, sid);
                                     });
-                                if (!cb_r) {
-                                    if (cb_r.error() == fixpp::core::error::app_callback_threw) {
+                                if (!to_app_r) {
+                                    if (to_app_r.error() ==
+                                        fixpp::core::error::app_callback_threw) {
                                         (void)co_await close(close_mode::terminal);
                                         co_return std::unexpected(
                                             fixpp::core::error::app_callback_threw);

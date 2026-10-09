@@ -129,7 +129,8 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
     w.line("    ::fixpp::dict::resolved_message_version const rmv{");
     w.line("        ::fixpp::dict::resolved_message_version::kind::session_admin,");
     w.line("        profile.session,");
-    w.line("        ::fixpp::dict::application_version::Unknown");
+    w.line("        ::fixpp::dict::application_version::Unknown,");
+    w.line("        /* _reserved */ 0");
     w.line("    };");
     w.line("    // rmv drives the live owning_message_handle the factory mints below.");
     w.line("    switch (msg_type) {");
@@ -231,6 +232,18 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
             }
         }
 
+        // A length bucket with no messages gets no switch at all: a switch holding
+        // only `default` is MSVC C4065 under /W4 (#481). Such a MsgType falls
+        // through to the trailing fail-loud return, the same error `default` gave.
+        bool has_one_char = false;
+        bool has_two_char = false;
+        if (ir != nullptr) {
+            for (auto const& m : ir->messages) {
+                has_one_char = has_one_char || m.msg_type.size() == 1;
+                has_two_char = has_two_char || m.msg_type.size() == 2;
+            }
+        }
+
         w.raw("        case ::fixpp::dict::application_version::");
         w.raw(av.ns);
         w.line(": {");
@@ -247,7 +260,8 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.line("                profile.session,");
         w.raw("                ::fixpp::dict::application_version::");
         w.raw(av.ns);
-        w.line("");
+        w.line(",");
+        w.line("                /* _reserved */ 0");
         w.line("            };");
         w.line("            if (msg_type.empty()) {");
         w.line(
@@ -257,10 +271,10 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.line("            // Length-first two-level dispatch (max MsgType length is 2): a");
         w.line("            // single-char switch, else a packed-uint16 switch. Length-first so");
         w.line("            // a single-char 'A' cannot collide with a two-char \"A?\".");
-        w.line("            if (msg_type.size() == 1) {");
-        w.line("                switch (static_cast<unsigned char>(msg_type[0])) {");
+        if (has_one_char) {
+            w.line("            if (msg_type.size() == 1) {");
+            w.line("                switch (static_cast<unsigned char>(msg_type[0])) {");
 
-        if (ir != nullptr) {
             // Single-char arms, bytewise-sorted order (002 D-6) preserved.
             for (auto const& m : ir->messages) {
                 if (m.msg_type.size() != 1) {
@@ -276,21 +290,21 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
                     "::fixpp::dict::detail::owning_message_handle_from_frame(rmv_app, view, mr);");
                 w.line("                    }");
             }
+
+            w.line("                    default:");
+            w.line(
+                "                        return "
+                "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+            w.line("                }");
+            w.line("            }");
         }
+        if (has_two_char) {
+            w.line("            if (msg_type.size() == 2) {");
+            w.line(
+                "                switch (static_cast<::std::uint16_t>("
+                "static_cast<unsigned char>(msg_type[0])) << 8");
+            w.line("                        | static_cast<unsigned char>(msg_type[1])) {");
 
-        w.line("                    default:");
-        w.line(
-            "                        return "
-            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
-        w.line("                }");
-        w.line("            }");
-        w.line("            if (msg_type.size() == 2) {");
-        w.line(
-            "                switch (static_cast<::std::uint16_t>("
-            "static_cast<unsigned char>(msg_type[0])) << 8");
-        w.line("                        | static_cast<unsigned char>(msg_type[1])) {");
-
-        if (ir != nullptr) {
             // Two-char arms, bytewise-sorted order (== ascending packed uint16).
             for (auto const& m : ir->messages) {
                 if (m.msg_type.size() != 2) {
@@ -314,15 +328,20 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
                     "::fixpp::dict::detail::owning_message_handle_from_frame(rmv_app, view, mr);");
                 w.line("                    }");
             }
-        }
 
-        w.line("                    default:");
-        w.line(
-            "                        return "
-            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
-        w.line("                }");
-        w.line("            }");
-        w.raw("            // Unreachable (max MsgType length is 2) — fail-loud for ");
+            w.line("                    default:");
+            w.line(
+                "                        return "
+                "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+            w.line("                }");
+            w.line("            }");
+        }
+        if (has_one_char && has_two_char) {
+            w.raw("            // Unreachable (max MsgType length is 2) — fail-loud for ");
+        } else {
+            // A length with no messages in this version reaches here as well.
+            w.raw("            // No dispatch arm for this MsgType length — fail-loud for ");
+        }
         w.raw(av.ns);
         w.line(" (I-11 / R3 / AC-D7).");
         w.line(

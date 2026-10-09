@@ -7,8 +7,7 @@
 // (PMR-arena allocations expected, NOT flagged — N-P2-4; SC-003; I-16).
 //
 // Run under mallocnesia via tools/check_alloc.py:
-//   python3 tools/check_alloc.py \
-//       --binary build/linux-clang-debug/bin/test_dispatch_alloc_guard
+//   python3 tools/check_alloc.py --binary build/linux-clang-debug/bin/test_dispatch_alloc_guard
 //
 // The critical path: parse (MessageView from frame_view) → cancellable_dispatch
 // → handler. All dynamic storage is either:

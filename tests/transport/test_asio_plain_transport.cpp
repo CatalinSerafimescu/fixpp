@@ -67,7 +67,7 @@ namespace fe = fixpp::transport::errors;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Build a loopback acceptor on an ephemeral port and return its endpoint.
-asio::ip::tcp::endpoint make_loopback_acceptor(asio::io_context& ioc,
+asio::ip::tcp::endpoint make_loopback_acceptor(asio::io_context& /*ioc*/,
                                                asio::ip::tcp::acceptor& acc) {
     asio::ip::tcp::endpoint ep{asio::ip::address_v4::loopback(), 0};
     acc.open(ep.protocol());

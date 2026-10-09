@@ -715,19 +715,30 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     if (!is_plaintext) {
         auto k = entry.config.security_profile.k;
         // The engine must still map the deprecated-but-supported legacy profile.
+        // Portable `#elif defined` spelling: see is_insecure_plain_tcp() in
+        // fixpp/session/security_profile.hpp.
+        // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
+        // NOLINTEND(readability-use-concise-preprocessor-directives)
         if (k == sk::mtls_pinned)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_pinned;
         else if (k == sk::one_way_ca)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::one_way_ca;
         else  // mtls_ca (default for TLS acceptors)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
+        // NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
+        // NOLINTEND(readability-use-concise-preprocessor-directives)
 
         if (entry.config.transport_factory_override)
             ssl_cfg.cs = entry.config.transport_factory_override->cert_source_snapshot();

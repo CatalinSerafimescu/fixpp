@@ -32,7 +32,7 @@ namespace fixpp::core::test {
 
 // A minimal wider representation (mantissa stored as __int128 for wider range).
 struct decimal_wide {
-    __int128 mantissa{};
+    __extension__ __int128 mantissa{};
     std::int8_t exponent{};
 };
 
@@ -61,7 +61,7 @@ struct decimal_traits<test::decimal_wide> {
 
     static expected_t<test::decimal_wide> from_pod(pod_decimal pd) noexcept {
         // Widen: always succeeds for in-domain pod_decimal values
-        return test::decimal_wide{.mantissa = static_cast<__int128>(pd.mantissa),
+        return test::decimal_wide{.mantissa = __extension__ static_cast<__int128>(pd.mantissa),
                                   .exponent = pd.exponent};
     }
 
@@ -70,8 +70,9 @@ struct decimal_traits<test::decimal_wide> {
         // Returns decimal_overflow — the contract-correct error for an out-of-domain pod.
         // The cross-traits wrapper (decimal::from/to) is responsible for remapping
         // this to decimal_precision_loss per 2a §6.4.
-        static constexpr __int128 INT64_MIN_128 = static_cast<__int128>(INT64_MIN) + 1;
-        static constexpr __int128 INT64_MAX_128 = static_cast<__int128>(INT64_MAX);
+        __extension__ static constexpr __int128 INT64_MIN_128 =
+            static_cast<__int128>(INT64_MIN) + 1;
+        __extension__ static constexpr __int128 INT64_MAX_128 = static_cast<__int128>(INT64_MAX);
         if (v.mantissa < INT64_MIN_128 || v.mantissa > INT64_MAX_128)
             return std::unexpected{error::decimal_overflow};
         // Also enforce exponent domain per the canonical pod_decimal contract.
@@ -125,7 +126,7 @@ TEST(DecimalCrossTraits, X1_RoundTripThroughPod) {
 TEST(DecimalCrossTraits, X2_NarrowingPrecisionLoss) {
     using Wide = fixpp::core::test::decimal_wide;
     // A value that overflows int64 — mock to_pod returns decimal_overflow
-    static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
+    __extension__ static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
     decimal<Wide> wide_val{Wide{.mantissa = TOO_BIG, .exponent = 0}};
 
     auto r = wide_val.to<pod_decimal>();
@@ -168,7 +169,7 @@ TEST(DecimalCrossTraits, MockTraitsFromPodFail) {
 #ifndef _MSC_VER  // decimal_wide / __int128 — see guard above
 TEST(DecimalCrossTraits, X4_FromOverflowRemap) {
     using Wide = fixpp::core::test::decimal_wide;
-    static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
+    __extension__ static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
     decimal<Wide> wide_val{Wide{.mantissa = TOO_BIG, .exponent = 0}};
 
     // from<U>() where U=Wide — Wide's to_pod returns decimal_overflow

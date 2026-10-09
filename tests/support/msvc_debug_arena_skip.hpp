@@ -25,14 +25,32 @@
 
 #include <gtest/gtest.h>
 
+namespace fixpp::test_support {
+
+// True on the lanes the skips below exist for: MSVC's debug STL
+// (_ITERATOR_DEBUG_LEVEL >= 1). The answer is read from a volatile on every lane,
+// so no compiler can fold a skip guarded by it into either branch. Folded to
+// true, the rest of every skipped test body is unreachable code; folded to false,
+// the skip itself is. MSVC reports either as C4702 under /W4 (#481). Every lane
+// compiles the same macro text below; only the volatile's initial value differs.
+inline bool msvc_debug_stl_active() noexcept {
 #if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
-#define FIXPP_SKIP_ON_MSVC_DEBUG_ARENA()                                                        \
-    GTEST_SKIP() << "byte-exact OOM-injection arena is incompatible with MSVC debug STL's "     \
-                    "per-container _Container_proxy allocation (the OOM-degradation behaviour " \
-                    "is covered on the windows-msvc-release lane and all Linux lanes)"
+    static volatile bool active = true;
 #else
-#define FIXPP_SKIP_ON_MSVC_DEBUG_ARENA() ((void)0)
+    static volatile bool active = false;
 #endif
+    return active;
+}
+
+}  // namespace fixpp::test_support
+
+#define FIXPP_SKIP_ON_MSVC_DEBUG_ARENA()                                                   \
+    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                 \
+    } else                                                                                 \
+        GTEST_SKIP()                                                                       \
+            << "byte-exact OOM-injection arena is incompatible with MSVC debug STL's "     \
+               "per-container _Container_proxy allocation (the OOM-degradation behaviour " \
+               "is covered on the windows-msvc-release lane and all Linux lanes)"
 
 // FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD(): GTEST_SKIP a zero-GLOBAL-heap
 // assertion (a TU-local `operator new` counter that must read 0 across a
@@ -54,15 +72,13 @@
 // (debug/asan/tsan/ubsan/libc++). Only the MSVC-debug-iterator interaction is
 // skipped. See feedback_operator_new_witness_breaks_sanitizers /
 // feedback_msvc_debug_container_proxy_null_memory_resource.
-#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD()                                          \
-    GTEST_SKIP() << "MSVC debug STL heap-allocates a hidden _Container_proxy per std::pmr "   \
-                    "container via global operator new (_ITERATOR_DEBUG_LEVEL), so a "        \
-                    "zero-global-heap read guard cannot hold; the discipline is verified on " \
-                    "windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
-#else
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD() ((void)0)
-#endif
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD()                                              \
+    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                        \
+    } else                                                                                        \
+        GTEST_SKIP() << "MSVC debug STL heap-allocates a hidden _Container_proxy per std::pmr "   \
+                        "container via global operator new (_ITERATOR_DEBUG_LEVEL), so a "        \
+                        "zero-global-heap read guard cannot hold; the discipline is verified on " \
+                        "windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
 
 // FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP(): GTEST_SKIP a test that SWEEPS a
 // global `operator new` override, failing the Nth allocation for every N in turn,
@@ -91,13 +107,12 @@
 // verified on windows-msvc-RELEASE (no debug iterators, no proxy) and on ALL Linux
 // lanes (debug/asan/tsan/ubsan/libc++); only the MSVC-debug-iterator interaction
 // is skipped.
-#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP()                                            \
-    GTEST_SKIP() << "MSVC debug STL draws a hidden _Container_proxy per std::pmr container "   \
-                    "through global operator new (_ITERATOR_DEBUG_LEVEL), so an allocation "   \
-                    "sweep fails one of those instead of the operation's own and terminates "  \
-                    "inside member-initialisation; the exception-safety behaviour is verified " \
-                    "on windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
-#else
-#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP() ((void)0)
-#endif
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP()                                        \
+    if (!::fixpp::test_support::msvc_debug_stl_active()) {                                 \
+    } else                                                                                 \
+        GTEST_SKIP()                                                                       \
+            << "MSVC debug STL draws a hidden _Container_proxy per std::pmr container "    \
+               "through global operator new (_ITERATOR_DEBUG_LEVEL), so an allocation "    \
+               "sweep fails one of those instead of the operation's own and terminates "   \
+               "inside member-initialisation; the exception-safety behaviour is verified " \
+               "on windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"

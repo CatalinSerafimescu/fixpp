@@ -6,6 +6,30 @@ status: stable
 
 # Log
 
+- **2026-10-08 — B14 (fixpp#481) Gate B rounds 2-3 (PR #558): `/Zc:__cplusplus`'s dependency side.**
+  `components/nfr-and-tooling.md` says that a dependency or public header testing `__cplusplus` can
+  define something different under the switch, points at the `cl /EP` recipe in `cmake/Helpers.cmake`
+  for seeing what it changes, and records the owner's 2026-10-08 ruling to keep both conformance
+  switches. Rejected: a dependency-side safety condition ("same definitions apart from attribute and
+  linkage spellings"). The preprocess diff it came from already held an added crc32c overload, so it
+  was false as written.
+- **2026-10-08 — B14 (fixpp#481) Gate B (PR #558): the #481 section is corrected.**
+  `components/nfr-and-tooling.md` loses the claim that the Python wrapper is code this project does
+  not author: `fixpp_py` is no longer exempt, and SWIG's runtime gets a `%begin`-scoped suppression
+  instead. The MSVC branch's `/permissive-` and `/Zc:__cplusplus` are named as conformance switches,
+  each with its condition and recipe, and `/wd5030` gains the condition it rests on. The section
+  gains the two ctest build probes that pin the walk's reach and `BEFORE` order, and the NOLINT form
+  for the `#elif defined(_MSC_VER)` arm.
+- **2026-10-08 — B14 (fixpp#481): the common strict flags reach every first-party target.**
+  `components/nfr-and-tooling.md` loses two false claims, that `fixpp_apply_common_flags` had no call
+  site and must not be wired because of `-fno-exceptions`. It gains the deferred walk with
+  `FIXPP_COMMON_FLAGS_EXEMPT`, why `-fno-exceptions` was dropped, why `/WX` stays in
+  `fixpp_maybe_werror`, the MSVC branch's `/wd5030`, `/wd4324` and CRT definitions each with the
+  condition it depends on, the MSVC arm beside every deliberate `[[deprecated]]` use, and a lead:
+  `_codegen_bootstrap` keeps the `FIXPP_WERROR` of its first configure. `components/test.md` records
+  why the Windows alloc-guard markers are not `constexpr` (C4127), why the MSVC-debug skip predicate
+  reads a volatile on every platform (C4702 in debug and release), and that a loop leaving on its
+  first pass is the same C4702 class.
 - **2026-10-08 — fixpp#497 (B15) Gate B (PR #557), one new class and one extension.**
   `failure-classes.md` gains **class 21**, *a fix that adds state to an instrument multiplies its
   edge cases*: before synchronising added state, ask whether it needs to exist, pin the condition the

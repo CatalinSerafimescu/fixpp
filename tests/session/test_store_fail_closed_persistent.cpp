@@ -110,9 +110,10 @@ std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::s
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
-                                           std::string_view s, std::string_view t,
-                                           std::uint32_t begin_seqno, std::uint32_t end_seqno) {
+[[maybe_unused]] std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
+                                                            std::string_view s, std::string_view t,
+                                                            std::uint32_t begin_seqno,
+                                                            std::uint32_t end_seqno) {
     std::string extra;
     extra += field(7, std::to_string(begin_seqno));
     extra += field(16, std::to_string(end_seqno));
@@ -141,7 +142,7 @@ bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
 }
 
 // SequenceReset{GapFillFlag=Y, NewSeqNo=<new_seqno>}
-bool is_gapfill_to(const std::vector<std::byte>& frame, std::uint32_t new_seqno) {
+[[maybe_unused]] bool is_gapfill_to(const std::vector<std::byte>& frame, std::uint32_t new_seqno) {
     if (!is_msg_type(frame, "4")) return false;
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     if (!wire.contains("123=Y\x01")) return false;
@@ -150,7 +151,8 @@ bool is_gapfill_to(const std::vector<std::byte>& frame, std::uint32_t new_seqno)
 
 // Frame carries PossDupFlag(43)=Y and has the given MsgSeqNum(34) — a real
 // application-message replay (as opposed to an administrative gap-fill).
-bool is_replay_with_poss_dup(const std::vector<std::byte>& frame, std::uint32_t seq) {
+[[maybe_unused]] bool is_replay_with_poss_dup(const std::vector<std::byte>& frame,
+                                              std::uint32_t seq) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     if (!wire.contains("43=Y\x01")) return false;
     return wire.contains("34=" + std::to_string(seq) + "\x01");

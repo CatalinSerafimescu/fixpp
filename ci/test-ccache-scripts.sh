@@ -768,7 +768,7 @@ wheel_arm rotate '#439-gate-condition' cmake/Helpers.cmake \
   'if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND FIXPP_WERROR)' \
   'if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")'
 host_arm rotate 'common-flags-list' cmake/Helpers.cmake \
-  "      -Wpedantic${NL}" "      -Wpedantic${NL}      -Wshadow${NL}"
+  ':-Wpedantic>' ':-Wpedantic> -Wshadow'
 host_arm rotate 'werror-walk-early-return' cmake/Helpers.cmake \
   "  if(NOT FIXPP_WERROR)${NL}    return()" "  if(NOT FIXPP_WERROR OR FIXPP_NEVER)${NL}    return()"
 host_arm rotate 'werror-walk-deferred-call' CMakeLists.txt \
@@ -811,7 +811,7 @@ wheel_arm rotate 'cibw-environment' .github/workflows/tier1.yml \
 
 # ── KEEP: comments, layout and non-flag code ──
 host_arm keep 'comment-inside-argument-list' cmake/Helpers.cmake \
-  '# phase-3 stubs generate lots of these' '# reworded, still a comment'
+  '# MSVC: no /WX here; fixpp_maybe_werror adds it under FIXPP_WERROR' '# reworded, still a comment'
 host_arm keep 'bracket-comment' cmake/Helpers.cmake \
   'function(fixpp_apply_common_flags target)' "#[[ a bracket${NL}comment ]]${NL}function(fixpp_apply_common_flags target)"
 wheel_arm keep '#439-block-comment' cmake/Helpers.cmake \

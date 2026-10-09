@@ -119,10 +119,15 @@ inline std::shared_ptr<fixpp::transport::TransportFactory> make_interop_tls_fact
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     ssl.profile = fixpp::tls::SecurityProfile::one_way_ca;
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
     ssl.cs = std::move(*cs);
     ssl.clock = nullptr;

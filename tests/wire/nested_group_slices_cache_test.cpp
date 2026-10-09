@@ -299,7 +299,7 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
     GTEST_SKIP() << "noexcept-ctor member-init proxy allocation escapes under "
                     "MSVC debug STL (_ITERATOR_DEBUG_LEVEL != 0); covered on "
                     "libstdc++ and MSVC release";
-#endif
+#else
     auto dict = make_oom_dict();
     auto buf = make_oom_frame();
     auto fv = fixpp::wire::test::make_frame_view(buf);
@@ -374,4 +374,5 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
     }
     ASSERT_TRUE(found) << "no injected allocation offset within the search bound produced a "
                           "serve-without-caching result (nested_group_slices' own catch unreached)";
+#endif
 }

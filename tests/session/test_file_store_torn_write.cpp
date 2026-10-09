@@ -361,7 +361,9 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
             asio::use_future);
         fut.get();
         EXPECT_EQ(vis.seqs.size(), 1U) << "expected 1 surviving frame";
-        if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1U);
+        if (!vis.seqs.empty()) {
+            EXPECT_EQ(vis.seqs[0], 1U);
+        }
     }
 
     if (minted2.has_value()) minted2.value() = nullptr;

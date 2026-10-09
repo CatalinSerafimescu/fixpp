@@ -119,7 +119,7 @@ std::vector<std::byte> make_valid_logon(std::string_view begin_string = "FIX.4.2
 }
 
 // Build a frame (any msg type) manually — allows arbitrary field ordering.
-std::vector<std::byte> build_frame_raw(std::string raw_content) {
+[[maybe_unused]] std::vector<std::byte> build_frame_raw(std::string raw_content) {
     std::vector<std::byte> frame;
     for (char c : raw_content) frame.push_back(static_cast<std::byte>(c));
     return frame;
@@ -179,10 +179,9 @@ std::vector<std::byte> make_logon_no_sending_time(std::string_view begin_string 
 }
 
 // Build a Logon with present-but-malformed 52 ("NOTATIME" instead of UTC).
-std::vector<std::byte> make_logon_malformed_sending_time(std::string_view begin_string = "FIX.4.2",
-                                                         std::uint32_t seq = 1,
-                                                         std::string_view sender = "TW",
-                                                         std::string_view target = "ISLD") {
+[[maybe_unused]] std::vector<std::byte> make_logon_malformed_sending_time(
+    std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
+    std::string_view sender = "TW", std::string_view target = "ISLD") {
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
                                       "98=0\x01"
                                       "108=30\x01");
@@ -194,10 +193,9 @@ std::vector<std::byte> make_logon_malformed_sending_time(std::string_view begin_
 }
 
 // Build a Logon with a timestamp that is stale (more than 120s from mock clock).
-std::vector<std::byte> make_logon_stale_sending_time(std::string_view begin_string = "FIX.4.2",
-                                                     std::uint32_t seq = 1,
-                                                     std::string_view sender = "TW",
-                                                     std::string_view target = "ISLD") {
+[[maybe_unused]] std::vector<std::byte> make_logon_stale_sending_time(
+    std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
+    std::string_view sender = "TW", std::string_view target = "ISLD") {
     // Use a timestamp one year before the mock clock (2024-01-01 00:00:00).
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
                                       "98=0\x01"

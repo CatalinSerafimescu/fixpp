@@ -176,23 +176,30 @@ TEST(LoadHappyPath, T011_FieldForFieldEquivalence) {
 
     // ── Credentials ──────────────────────────────────────────────────────────
     EXPECT_TRUE(cfg.username.has_value());
-    if (cfg.username.has_value()) EXPECT_EQ(*cfg.username, "user42");
+    if (cfg.username.has_value()) {
+        EXPECT_EQ(*cfg.username, "user42");
+    }
 
     EXPECT_TRUE(cfg.password.has_value());
-    if (cfg.password.has_value()) EXPECT_EQ(*cfg.password, "s3cr3t");
+    if (cfg.password.has_value()) {
+        EXPECT_EQ(*cfg.password, "s3cr3t");
+    }
 
     // ── Timing / thresholds ───────────────────────────────────────────────────
     EXPECT_TRUE(cfg.heartbeat_interval.has_value());
-    if (cfg.heartbeat_interval.has_value())
+    if (cfg.heartbeat_interval.has_value()) {
         EXPECT_EQ(*cfg.heartbeat_interval, std::chrono::seconds{30});
+    }
 
     EXPECT_TRUE(cfg.test_request_threshold.has_value());
-    if (cfg.test_request_threshold.has_value())
+    if (cfg.test_request_threshold.has_value()) {
         EXPECT_EQ(*cfg.test_request_threshold, std::chrono::milliseconds{15000});
+    }
 
     EXPECT_TRUE(cfg.sending_time_threshold.has_value());
-    if (cfg.sending_time_threshold.has_value())
+    if (cfg.sending_time_threshold.has_value()) {
         EXPECT_EQ(*cfg.sending_time_threshold, std::chrono::milliseconds{5000});
+    }
 
     EXPECT_EQ(cfg.logout_disconnect_timeout_ms, std::uint32_t{5000});  // default 2000
     EXPECT_EQ(cfg.logon_timeout_ms, std::uint32_t{7000});              // default 10000 (093)
@@ -574,6 +581,9 @@ TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
 #endif
     EXPECT_EQ(cfg.security_profile.k, K::insecure_plain_tcp)
         << "security_profile.k must be insecure_plain_tcp for kind=\"insecure_plain_tcp\"";
@@ -581,6 +591,8 @@ TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 }
 

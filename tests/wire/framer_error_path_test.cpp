@@ -78,10 +78,9 @@ constexpr char soh = '\x01';
 }
 
 // Feed a single-chunk frame into a framer and return the error code.
-fixpp::core::expected_t<std::span<frame_view>> feed_one(Framer& framer,
-                                                        std::vector<std::byte> const& frame,
-                                                        pmr_carry_buffer& carry,
-                                                        std::array<frame_view, 4>& out) {
+[[maybe_unused]] fixpp::core::expected_t<std::span<frame_view>> feed_one(
+    Framer& framer, std::vector<std::byte> const& frame, pmr_carry_buffer& carry,
+    std::array<frame_view, 4>& out) {
     return framer.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry, out);
 }
 

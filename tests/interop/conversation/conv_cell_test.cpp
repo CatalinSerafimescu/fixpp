@@ -415,7 +415,7 @@ public:
     }
 
     fixpp::core::expected_t<void> fromApp(MessageView<access_mode::Index> const& msg,
-                                          SessionId const& id) override {
+                                          SessionId const& /*id*/) override {
         std::string const mt(msg.msg_type());
         long long const seq = msg.msg_seq_num();
         bool poss_dup = false;

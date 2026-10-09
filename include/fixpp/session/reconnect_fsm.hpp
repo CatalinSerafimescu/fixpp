@@ -269,9 +269,9 @@ private:
     // set_transport_factory() to the resolved effective factory. [043 T011; D-4]
     fixpp::transport::TransportFactory* factory_;
     fixpp::transport::ReconnectPolicy policy_;
-    std::uint32_t attempt_index_ = 0;
-    std::chrono::seconds heartbeat_interval_;
-    std::chrono::milliseconds logout_disconnect_timeout_;
+    [[maybe_unused]] std::uint32_t attempt_index_ = 0;                      // see fixpp#559
+    [[maybe_unused]] std::chrono::seconds heartbeat_interval_;              // see fixpp#559
+    [[maybe_unused]] std::chrono::milliseconds logout_disconnect_timeout_;  // see fixpp#559
 
     // 014 T009 — peer endpoint for async_connect (set by Session::open via
     // set_reconnect_endpoint before drive_reconnect_attempt is first called).

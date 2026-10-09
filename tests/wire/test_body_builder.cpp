@@ -48,6 +48,7 @@
 #include <fixpp/wire/body_builder.hpp>
 #include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <initializer_list>
 #include <memory_resource>
 #include <new>
 #include <optional>
@@ -107,10 +108,20 @@ void* operator new[](std::size_t size) {
     return p;
 }
 
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new;
+// it cannot see that the replacement operator new above allocates with
+// std::malloc, so the matching std::free below is flagged although it is correct.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #endif  // !FIXPP_SANITIZER_REPLACES_NEW
 
 namespace {
@@ -152,7 +163,7 @@ TEST(BodyBuilder, FlatMessage_ByteExact) {
 
 // ── INV-2: framing tags rejected at field() ─────────────────────────────────
 TEST(BodyBuilder, Inv2_FramingTagRejected) {
-    for (std::uint16_t tag : {8, 9, 34, 49, 52, 56, 10}) {
+    for (std::uint16_t tag : std::initializer_list<std::uint16_t>{8, 9, 34, 49, 52, 56, 10}) {
         body_builder bb{"X"};
         auto r = bb.field(tag, std::string_view{"whatever"});
         EXPECT_FALSE(r.has_value()) << "tag " << tag << " must be rejected";

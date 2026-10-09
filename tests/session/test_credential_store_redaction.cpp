@@ -168,7 +168,6 @@ TEST(Masker_SameLength_FieldAnchored_unit, D_Idempotent_SecondPassByteStable) {
     auto buf = make_buf(
         "\x01"
         "554=abc\x01");
-    auto before_first = buf;
 
     bool r1 = mask_tag554_same_length_inplace(std::span<std::byte>{buf});
     EXPECT_TRUE(r1) << "first pass: must return true (field found)";
