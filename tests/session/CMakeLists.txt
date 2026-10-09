@@ -2069,13 +2069,16 @@ add_test(NAME session_refresh_on_logon
 set_tests_properties(session_refresh_on_logon PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "025;s018;refresh-on-logon;setup")
-# T040 W8_NoHeap_RehydratePath: its global-heap claim is NOT CHECKED. No mallocnesia
-# gate is registered for it, because SeqnumManager::hydrate() allocates an asio
-# coroutine frame through std::aligned_alloc (the mechanism behind L-497-1;
-# fixpp#544), so the window cannot be zero until that is fixed.
-# The base test still runs its functional assertions. To run the window by hand:
-#   GTEST_FILTER='*W8_NoHeap_RehydratePath*' python3 tools/check_alloc.py \
-#       --binary <build>/bin/session_refresh_on_logon --mallocnesia <build>/lib/libmallocnesia.so
+# T040 W8_NoHeap_RehydratePath is fixpp#544's W-C (B35, §3), in the driver-template window
+# shape. Its global-heap half is registered under the interceptor, Release-only. It is
+# `--expect-violation` until fixpp#544's fix brings the window to zero, then it asserts
+# zero. The base test still runs its functional assertions.
+fixpp_add_release_mallocnesia_test(
+  NAME session_refresh_on_logon_w8_mallocnesia
+  TARGET session_refresh_on_logon
+  CASE "RefreshOnLogon.W8_NoHeap_RehydratePath"
+  EXPECT_ENTRY aligned_alloc
+  LABELS 025 alloc_guard 544)
 
 # ── 033-fixt-fix50sp2-session — T002 Setup + T004/T005 Foundational ──────────
 # T002: create RED test targets + ctest registration so `ctest -R fixt` works.

@@ -69,6 +69,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/recycler_driver.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
@@ -1446,13 +1447,7 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
 
 // ── Phase 5 (T040) — W8: NoHeap_RehydratePath ────────────────────────────────
 //
-// ⚠️ The global-heap half of this witness is NOT CHECKED. [const §VIII.5] asks the
-// per-logon re-hydrate path for zero global-heap allocations, but SeqnumManager::hydrate()
-// allocates an asio coroutine frame through std::aligned_alloc (the mechanism behind
-// L-497-1; fixpp#544), so no mallocnesia gate is registered for this cell.
-// It still checks the functional post-condition. The alloc_guard markers stay so the
-// window can be run by hand, as tests/session/CMakeLists.txt shows at this
-// binary's registration.
+// [const §VIII.5] asks the per-logon re-hydrate path for zero global-heap allocations.
 //
 // Strategy: measure SeqnumManager::hydrate() directly — this IS the re-hydrate
 // apply step that ensure_hydrated_() calls after reading the store. The FaultStore's
@@ -1462,9 +1457,15 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
 // drive_reconnect() is NOT wrapped (MockReconnectFactory::make() calls
 // std::make_unique<mock_transport>, a global new). SeqnumManager::hydrate()
 // is the equivalent proxy — it is exactly the apply step of ensure_hydrated_().
-// This matches 029's proxy approach (029 W8 measures the warm persist path which
-// traverses the same async_mutex + co_await surface; same class of steady-state
-// hot-path witness).
+//
+// fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3, W-C): this cell is W-C, and
+// its window is the driver-template shape (tests/support/recycler_driver.hpp). One driver
+// coroutine, spawned before the window, runs the warm-up and the windowed calls under one
+// `ioc.run()`, through exactly one test-owned wrapper frame, which models
+// `ensure_hydrated_` -> `hydrate`. A window must not spawn with `use_future` (its handler
+// allocates its promise) or run in `run_for` slices (each is a fresh scheduler call with
+// an empty frame cache). Its interceptor registration (tests/session/CMakeLists.txt, at
+// this binary's registration) is Release-only.
 //
 // Anchors: data-model.md W8; [const §VIII.5]; seqnum_manager.hpp hydrate();
 //          029 test NoHeap_HydrateAndPersistPaths (proxy strategy);
@@ -1478,48 +1479,27 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     auto result = make_reconnect_initiator(/*seeded_in=*/5, /*seeded_out=*/7,
                                            /*refresh_on_logon=*/true, /*persistent=*/true);
     auto& fix = *result.fix;
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
 
-    // Warm-up: run SeqnumManager::hydrate() kWarmup times OUTSIDE the guard window.
-    // The first iterations touch per-thread lazy-init paths (async_mutex slot pool,
-    // cancellation_slot thread_info_base, promise frame recycling).
+    // The callee, a non-coroutine forwarder: the wrapper frame above it is the template's.
+    auto hydrate = [&mgr] {
+        return mgr.hydrate(static_cast<fixpp::session::seqnum_t>(5),
+                           static_cast<fixpp::session::seqnum_t>(7));
+    };
     constexpr int kWarmup = 8;
-    for (int i = 0; i < kWarmup; ++i) {
-        auto warm_fut = asio::co_spawn(fix.ioc,
-                                       fixpp::session::session_test_access::seqnum_mgr(*fix.session)
-                                           .hydrate(static_cast<fixpp::session::seqnum_t>(5),
-                                                    static_cast<fixpp::session::seqnum_t>(7)),
-                                       asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(fix.ioc, warm_fut, 500ms,
-                                                        "W8_NoHeap/hydrate_warm")) {
-            fixpp::test_support::drain_or_report(fix.ioc, "W8_NoHeap/hydrate_warm");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W8_NoHeap/hydrate_warm";
-            return;
-        }
-        (void)warm_fut.get();
-    }
+    constexpr int kMeasured = 100;
+    // The session's own pending work keeps run() from returning, so the driver stops the
+    // io_context once the window has closed.
+    auto const out = fixpp::test_support::recycler::run_driver_window<1>(
+        fix.ioc, fix.ioc.get_executor(), hydrate,
+        fixpp::test_support::recycler::window_spec{
+            .warm = kWarmup, .measured = kMeasured, .stop_after = &fix.ioc});
 
-    // ── Guarded window: one SeqnumManager::hydrate() invocation ───────────────
-    if (alloc_guard_start) alloc_guard_start();
-
-    auto measured_fut = asio::co_spawn(fix.ioc,
-                                       fixpp::session::session_test_access::seqnum_mgr(*fix.session)
-                                           .hydrate(static_cast<fixpp::session::seqnum_t>(5),
-                                                    static_cast<fixpp::session::seqnum_t>(7)),
-                                       asio::use_future);
-    if (!fixpp::test_support::run_window_then_ready(fix.ioc, measured_fut, 500ms,
-                                                    "W8_NoHeap/hydrate_measured")) {
-        fixpp::test_support::drain_or_report(fix.ioc, "W8_NoHeap/hydrate_measured");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "W8_NoHeap/hydrate_measured";
-        return;
-    }
-    (void)measured_fut.get();
-
-    if (alloc_guard_end) alloc_guard_end();
-    // ── End of guarded window ─────────────────────────────────────────────────
-
-    // Functional post-condition: hydrate set counters correctly.
-    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe(),
-              static_cast<fixpp::session::seqnum_t>(5))
+    // Functional post-conditions: every call ran and succeeded, and hydrate set the counter.
+    EXPECT_TRUE(out.closed) << "W8: the driver never reached the end of its window";
+    EXPECT_EQ(out.iterations, kWarmup + kMeasured);
+    EXPECT_EQ(out.ok, kWarmup + kMeasured) << "W8: a hydrate() call failed inside the window";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), static_cast<fixpp::session::seqnum_t>(5))
         << "W8: hydrate() must apply the inbound counter inside the guarded window";
 }
 
