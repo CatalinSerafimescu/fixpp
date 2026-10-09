@@ -1952,6 +1952,27 @@ set_tests_properties(session_544_lock_cells PROPERTIES
   LABELS "544;session;tsan"
   TIMEOUT 300)
 
+# fixpp#544 (B35 Phase 4; `.specify/544-hot-path-zero-alloc.md` §2.2, orchestrator ruling B):
+# differential cells for the cancellation check points of the on_inbound_frame split. They
+# hold at base and after the split; the naive-boundary mutant turns them RED.
+add_executable(session_544_inbound_split_cancel_test
+  test_544_inbound_split_cancel_cells.cpp
+)
+target_link_libraries(session_544_inbound_split_cancel_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_inbound_split_cancel_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_544_inbound_split_cancel COMMAND session_544_inbound_split_cancel_test)
+set_tests_properties(session_544_inbound_split_cancel PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
 # ── 026-nanosecond-sendingtime (S-039) — session emit/inbound precision suite ──
 # Session config/emit/inbound + no-heap witnesses for configurable SendingTime(52)
 # precision incl. nanos (27-char) + lenient inbound parse. Core formatter/parser

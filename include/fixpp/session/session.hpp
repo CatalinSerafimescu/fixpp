@@ -1083,6 +1083,110 @@ private:
         std::span<const std::byte> frame,
         fixpp::session::detail::FrameHeader const& hdr) const noexcept;
 
+    // fixpp#544 (B35 Phase 4, `.specify/544-hot-path-zero-alloc.md` §2.2): on_inbound_frame's
+    // split. on_inbound_frame and on_inbound_cold_ are non-coroutines returning an arm's
+    // awaitable; every other member below is a coroutine whose first statement is
+    // FIXPP_INBOUND_SPLIT_ENTRY(tic), the callee half of the b3 boundary defined in
+    // src/session/session.cpp. `tic` is the caller's saved throw_if_cancelled value.
+    // Members taking `hdr` or a view are awaited directly by the arm that owns that storage.
+    using inbound_result_t = asio::awaitable<fixpp::core::expected_t<void>>;
+    using inbound_continue_t = asio::awaitable<std::optional<fixpp::core::expected_t<void>>>;
+    [[nodiscard]] inbound_result_t on_inbound_active_(std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_cold_(bool tic,
+                                                    std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_drained_(bool tic) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_not_connected_(
+        bool tic, std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_logout_sent_(
+        bool tic, std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_logon_sent_(
+        bool tic, std::span<const std::byte> frame) noexcept;
+    // The Active arm's synchronous SendingTime(52) MaxLatency check.
+    [[nodiscard]] bool inbound_sending_time_ok_(
+        fixpp::session::detail::FrameHeader const& hdr) const noexcept;
+    // The sub-arm a rarely-taken Active branch selects, with the arm locals it takes by value.
+    struct inbound_slow_t {
+        enum class kind : std::uint8_t {
+            none,
+            validate_failed,
+            sending_time_reject,
+            sequence_reset,
+            too_high,
+            out_of_sequence,
+            gap_fill,
+            logout,
+            from_admin_failed,
+            test_request,
+            resend_request,
+            unsupported,
+            from_app_failed,
+        };
+        kind k = kind::none;
+        InboundValidation v{};
+        seqnum_t next_expected = 0;
+        seqnum_t seq = 0;
+        fixpp::core::error chk_error{};
+        fixpp::core::expected_t<dispatch_outcome> cb_r{};
+    };
+    // A non-coroutine: returns the awaitable of the sub-arm `slow` names.
+    [[nodiscard]] inbound_result_t on_inbound_active_slow_(
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_slow_t const& slow) noexcept;
+    // The Active arm's sub-arms. An inbound_continue_t returns nullopt when the arm continues.
+    [[nodiscard]] inbound_result_t on_inbound_active_validate_failed_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, InboundValidation v) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_sending_time_reject_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_sequence_reset_(
+        bool tic, std::span<const std::byte> frame,
+        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_too_high_(bool tic, seqnum_t next_expected,
+                                                               seqnum_t seq) noexcept;
+    [[nodiscard]] inbound_continue_t on_inbound_active_poss_dup_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_out_of_sequence_(
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        fixpp::core::error chk_error) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_gap_fill_(
+        bool tic, std::span<const std::byte> frame,
+        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_logout_(
+        bool tic, std::span<const std::byte> frame,
+        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_from_admin_failed_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr,
+        fixpp::core::expected_t<dispatch_outcome> cb_r) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_test_request_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_resend_request_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_unsupported_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_from_app_failed_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr,
+        fixpp::core::expected_t<dispatch_outcome> cb_r) noexcept;
+    // Reply leaves (§2.2 class 2): each owns the buffer its reply frame is built in.
+    [[nodiscard]] inbound_result_t inbound_reject_leaf_(
+        bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
+        std::string_view sending_time, std::optional<fsm_state> arm = std::nullopt) noexcept;
+    [[nodiscard]] inbound_result_t inbound_reject_best_effort_leaf_(
+        bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
+        std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic,
+                                                        std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_logon_sent_logout_leaf_(
+        bool tic, std::string_view text, std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_resend_request_leaf_(
+        bool tic, seqnum_t begin_seqno, std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_heartbeat_reply_leaf_(
+        bool tic, std::string_view test_req_id, std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_business_reject_leaf_(
+        bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
+        std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_acceptor_reply_logon_leaf_(
+        bool tic, bool peer_sent_reset, int heartbt_sec, std::string_view reply_sending_time_view,
+        seqnum_t& n_pre_outbound) noexcept;
+
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
     // session_ back-pointer. ReconnectFsm is a value member of Session
