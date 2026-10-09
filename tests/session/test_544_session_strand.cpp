@@ -498,19 +498,17 @@ TEST(B35SessionIoExecutor, ExecuteHonoursBlockingNever) {
     asio::io_context ioc;
     sd::session_io_executor const e{ioc.get_executor()};
     auto const never = asio::require(e, asio::execution::blocking.never);
+    // Every flag lives in this frame: the blocking.never function runs after the
+    // handler that submitted it has returned.
+    bool possibly_ran = false;
     bool possibly_inline = false;
-    bool never_inline = true;
     bool never_ran = false;
+    bool never_inline = true;
     asio::post(ioc, [&] {
-        bool possibly_ran = false;
         e.execute([&] { possibly_ran = true; });
         possibly_inline = possibly_ran;
-        bool ran = false;
-        never.execute([&] {
-            ran = true;
-            never_ran = true;
-        });
-        never_inline = ran;
+        never.execute([&] { never_ran = true; });
+        never_inline = never_ran;
     });
     ioc.run();
     EXPECT_TRUE(possibly_inline) << "blocking.possibly did not run inline inside the io_context";
