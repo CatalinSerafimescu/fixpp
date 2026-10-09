@@ -27,6 +27,7 @@
 #pragma once
 
 #include <asio/any_io_executor.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>             // expected_t
 #include <fixpp/session/message_store.hpp>  // MessageStore
 #include <memory>

@@ -18,6 +18,7 @@
 #include <asio/awaitable.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>      // expected_t / error
 #include <fixpp/session/seqnum.hpp>  // seqnum_t
 #include <span>

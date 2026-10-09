@@ -89,6 +89,7 @@
 #include <asio/system_error.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 
 #include "fixpp/core/error.hpp"
 

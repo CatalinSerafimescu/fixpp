@@ -27,6 +27,7 @@
 #include <asio/prefer.hpp>
 #include <asio/query.hpp>
 #include <asio/require.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>  // expected_t (std::expected) — core leaf, no session edge
 #include <memory_resource>
 #include <type_traits>

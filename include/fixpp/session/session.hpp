@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>  // expected_t
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>

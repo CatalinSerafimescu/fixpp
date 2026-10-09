@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)

@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/engine_config.hpp>  // EngineConfig — held by value in Engine
 #include <fixpp/core/error.hpp>          // expected_t<T>, error enum (incl. slot 121)
 #include <fixpp/core/sync/detail/atomic_shared_ptr.hpp>  // 046 (NFR-017): libc++ fallback primitive (reverses 023 CHK046)

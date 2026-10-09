@@ -14,6 +14,7 @@
 #include <asio/any_io_executor.hpp>
 #include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <memory_resource>
 
 namespace fixpp::config {

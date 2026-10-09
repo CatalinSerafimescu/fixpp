@@ -9,9 +9,8 @@
 //   - W-D's (b-L) and (b-S) pairs, planted directly in the driver;
 //   - the (c-L), (c-P) and (c-H) single-edit arms at the filled depth, their production
 //     twins, and the no-edit replica twins;
-//   - W-D-W's stand-in bracket. Its nest sizes are N - e - 2 and N - e - 1, which are
-//     negative below N = e + 2, so its cells skip there (they are registered once the
-//     exported slot count admits them).
+//   - W-D-W's stand-in bracket and its real-chain twin. Their nest sizes are N - e - 2 and
+//     N - e - 1, and the headroom `static_assert` below requires N - e - 2 >= 2.
 //
 // W-D itself is `perf_store_alloc_guard`'s steady-state cell, and W-C is
 // `session_refresh_on_logon`'s W8 cell; both instantiate the same template.
@@ -24,7 +23,6 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/deferred.hpp>
@@ -397,9 +395,16 @@ struct replica_pair_call {
     auto operator()() const { return check_inbound_shaped<K>::run(ex); }
 };
 
-inline constexpr bool kWdwInstantiable = rc::kCacheSize >= rc::kSendInWriteCycledFrames + 2;
-inline constexpr int kWdwTwinNest = std::max(0, rc::kCacheSize - rc::kSendInWriteCycledFrames - 2);
-inline constexpr int kWdwArmNest = std::max(0, rc::kCacheSize - rc::kSendInWriteCycledFrames - 1);
+inline constexpr int kWdwTwinNest = rc::kCacheSize - rc::kSendInWriteCycledFrames - 2;
+inline constexpr int kWdwArmNest = rc::kCacheSize - rc::kSendInWriteCycledFrames - 1;
+
+// The headroom condition (§2.4, "Headroom, as a condition"; §3, W-D-W): at the instant N is
+// sized on, the inbound pair requesting blocks while a send is held in its write, the slots
+// leave room for at least one more nested `co_await` on each of the two chains. It reads N
+// from the macro and e from the harness, so it is as current as e: re-derive e by its recipe
+// (tests/support/recycler_driver.hpp) whenever the send chain gains a `co_await`.
+static_assert(rc::kCacheSize - rc::kSendInWriteCycledFrames - 2 >= 2,
+              "W-D-W headroom: ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE - e - 2 must be at least 2");
 
 template <int K>
 void run_wdw_stand_in() {
@@ -408,20 +413,11 @@ void run_wdw_stand_in() {
     expect_every_iteration_ok(out);
 }
 
-TEST(B35DriverWindows, WDW_StandIn_Window) {
-    if (!kWdwInstantiable) GTEST_SKIP() << "W-D-W needs a slot count of at least e + 2";
-    run_wdw_stand_in<0>();
-}
+TEST(B35DriverWindows, WDW_StandIn_Window) { run_wdw_stand_in<0>(); }
 
-TEST(B35DriverWindows, WDW_StandIn_Twin) {
-    if (!kWdwInstantiable) GTEST_SKIP() << "W-D-W needs a slot count of at least e + 2";
-    run_wdw_stand_in<kWdwTwinNest>();
-}
+TEST(B35DriverWindows, WDW_StandIn_Twin) { run_wdw_stand_in<kWdwTwinNest>(); }
 
-TEST(B35DriverWindows, WDW_StandIn_Arm) {
-    if (!kWdwInstantiable) GTEST_SKIP() << "W-D-W needs a slot count of at least e + 2";
-    run_wdw_stand_in<kWdwArmNest>();
-}
+TEST(B35DriverWindows, WDW_StandIn_Arm) { run_wdw_stand_in<kWdwArmNest>(); }
 
 // ── W-D-W's real-chain twin (§3, I2R2 C-1) ───────────────────────────────────
 //
@@ -529,14 +525,8 @@ void check_wdw_real_chain() {
         << "a send parked in its write did not complete";
 }
 
-TEST(B35DriverWindows, WDW_RealChain_Twin) {
-    if (!kWdwInstantiable) GTEST_SKIP() << "W-D-W needs a slot count of at least e + 2";
-    check_wdw_real_chain<kWdwTwinNest>();
-}
+TEST(B35DriverWindows, WDW_RealChain_Twin) { check_wdw_real_chain<kWdwTwinNest>(); }
 
-TEST(B35DriverWindows, WDW_RealChain_Arm) {
-    if (!kWdwInstantiable) GTEST_SKIP() << "W-D-W needs a slot count of at least e + 2";
-    check_wdw_real_chain<kWdwArmNest>();
-}
+TEST(B35DriverWindows, WDW_RealChain_Arm) { check_wdw_real_chain<kWdwArmNest>(); }
 
 }  // namespace

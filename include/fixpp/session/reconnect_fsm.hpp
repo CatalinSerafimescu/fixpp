@@ -44,6 +44,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <functional>
 #include <memory>
 #include <optional>

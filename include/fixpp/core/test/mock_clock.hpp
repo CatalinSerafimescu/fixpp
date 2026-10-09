@@ -16,6 +16,7 @@
 #include <asio/any_io_executor.hpp>
 #include <chrono>
 #include <fixpp/core/clock.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <memory>
 
 namespace fixpp::core {

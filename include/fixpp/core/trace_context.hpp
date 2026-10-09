@@ -24,6 +24,7 @@
 #include <asio/this_coro.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/session_executor.hpp>  // typed session_ptr recovery (RC#1)
 #include <type_traits>
 

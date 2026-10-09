@@ -106,6 +106,57 @@ if(NOT _cfg_rc EQUAL 0)
   message(FATAL_ERROR "consumer configure failed (exit ${_cfg_rc}):\n${_cfg_out}\n${_cfg_err}")
 endif()
 
+# ── 2a. fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.4) — the recycler legs ──
+#
+# Each leg keeps the collected COMPILE_DEFINITIONS entries of its carrier that match
+# ^ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE(=|$), removes identical duplicates, and requires the
+# kept set to EQUAL exactly ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>. So it fails when the
+# definition is missing (empty set), has another value (a different entry), or arrives with
+# two values (two entries). N is read from the guard header, the value's one source.
+#
+# It runs HERE, before the build, on purpose: file(GENERATE) writes both carriers'
+# definition sets at the end of the configure, so the legs can be judged without depending
+# on whether anything in the build below would stop first.
+include("${FIXPP_SOURCE_DIR}/cmake/FixppAsioRecycler.cmake")
+fixpp_read_asio_recycler_cache_size(
+  "${FIXPP_SOURCE_DIR}/include/fixpp/core/detail/asio_recycler_config.hpp" _recycler_n)
+set(_recycler_expected "ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=${_recycler_n}")
+set(_recycler_file "${_sub_build}/asio-recycler-definitions.txt")
+if(NOT EXISTS "${_recycler_file}")
+  message(FATAL_ERROR
+    "fixpp#544: ${_recycler_file} was not generated — the recycler legs' carriers are missing "
+    "from tests/consumer/CMakeLists.txt, so the legs assert nothing.")
+endif()
+file(READ "${_recycler_file}" _recycler_txt)
+message(STATUS "fixpp#544 recycler definitions at the C++ consumer:\n${_recycler_txt}")
+set(_recycler_failed "")
+foreach(_leg UMBRELLA CORE)
+  if(NOT _recycler_txt MATCHES "(^|\n)OBSERVED_${_leg}=([^\n]*)")
+    message(FATAL_ERROR "fixpp#544: no OBSERVED_${_leg}= line in ${_recycler_file}")
+  endif()
+  string(REPLACE "|" ";" _defs "${CMAKE_MATCH_2}")
+  set(_kept "")
+  foreach(_d IN LISTS _defs)
+    if(_d MATCHES "^ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE(=|$)")
+      list(APPEND _kept "${_d}")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _kept)
+  if(NOT _kept STREQUAL _recycler_expected)
+    message(STATUS
+      "fixpp#544 FAIL: the ${_leg} leg's ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE set is [${_kept}], "
+      "expected exactly [${_recycler_expected}].")
+    list(APPEND _recycler_failed "${_leg}")
+  endif()
+endforeach()
+if(_recycler_failed)
+  message(FATAL_ERROR
+    "fixpp#544 recycler legs failed: ${_recycler_failed}. An empty set means the PUBLIC "
+    "definition no longer reaches that carrier (src/core/CMakeLists.txt attaches it to "
+    "fixpp_core); another value means the attachment and the guard header disagree.")
+endif()
+message(STATUS "fixpp#544 recycler legs: OK — both carriers see exactly ${_recycler_expected}")
+
 # ── 3. Build it — BY NAME, so a deleted gate fails closed ────────────────────
 #
 # 086 / Gate B r1 P1 #3. A bare `cmake --build` builds whatever targets happen to
@@ -127,6 +178,7 @@ set(_required_targets
   probe_capi_positive_c      # ✅ all 12 C-ABI headers, C
   probe_service_positive     # ✅ fixpp::service reaches the plugin header AND the C ABI
   probe_umbrella             # ✅ the umbrella still reaches everything
+  probe_core                 # fixpp#544 recycler leg carrier (links only fixpp::core)
   probe_usage_requirements   # C-3 leg 3 carrier
   # ❌ cells. Since Gate B r3 these are ordinary targets asserted to COMPILE
   # (`__has_include` + a unique-token `#error`), so BUILDING them IS the

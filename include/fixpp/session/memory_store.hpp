@@ -39,6 +39,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <fixpp/session/direction.hpp>

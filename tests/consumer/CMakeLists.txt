@@ -254,6 +254,27 @@ EXPECTED_COMPILE_FEATURES=${FIXPP_086_EXPECTED_COMPILE_FEATURES}
 OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPILE_FEATURES>,|>
 ")
 
+# ── fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.4) — the recycler legs ──
+# asio's recycler slot count reaches a C++ consumer as the PUBLIC compile definition
+# ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N> of fixpp::core. Two carriers, and both are needed:
+#   probe_umbrella   links fixpp::fixpp (above);
+#   probe_core       links ONLY fixpp::core. It is the leg a definition moved off
+#                    fixpp::core empties: the umbrella would still inherit it from any
+#                    member that carried it.
+# file(GENERATE) only writes their collected definitions. The compare is in
+# run_consumer_witness.cmake, right after this project's configure, against the N it reads
+# from the guard header. fixpp::capi's leg 3 above keeps its empty expectation: the
+# definition reaches fixpp::capi's closure only through $<LINK_ONLY:>, which withholds it.
+add_library(probe_core OBJECT probe_core.cpp)
+target_link_libraries(probe_core PRIVATE fixpp::core)
+
+file(GENERATE
+  OUTPUT "${CMAKE_BINARY_DIR}/asio-recycler-definitions.txt"
+  CONTENT
+"OBSERVED_UMBRELLA=$<JOIN:$<TARGET_PROPERTY:probe_umbrella,COMPILE_DEFINITIONS>,|>
+OBSERVED_CORE=$<JOIN:$<TARGET_PROPERTY:probe_core,COMPILE_DEFINITIONS>,|>
+")
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 087-system-include-binding — the installed system-include interface
 # (specs/087-system-include-binding/contracts/system-include-interface.md)

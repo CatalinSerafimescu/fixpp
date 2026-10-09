@@ -363,8 +363,8 @@ set_tests_properties(alloc_guard_markers_no_local_def PROPERTIES
 
 # ── fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3): driver-form windows ──
 # W-D-R and its bracket, W-D's (b-L)/(b-S) pairs, the (c-L)/(c-P)/(c-H) arms, their
-# production and no-edit replica twins, and W-D-W's stand-in bracket, in W-D's harness
-# (tests/support/recycler_driver.hpp).
+# production and no-edit replica twins, and W-D-W's stand-in bracket and real-chain twin,
+# in W-D's harness (tests/support/recycler_driver.hpp).
 # The plain registration runs every case without the interceptor, for its functional
 # post-conditions. The interceptor registrations are Release-only, one per case. Linux
 # only: these windows' subject is class (b) and (c), which reach `std::aligned_alloc`, and
@@ -398,7 +398,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_544_ch_production_twin_mallocnesia|CH_ProductionTwin_SeqnumManagerHydrate|aligned_alloc"
     "alloc_guard_544_cp_arm_mallocnesia|CP_Arm_StoreReplicaOnUseAwaitablePost|aligned_alloc"
     "alloc_guard_544_clp_no_edit_twin_mallocnesia|CLP_NoEditReplicaTwin_Store|"
-    "alloc_guard_544_ch_no_edit_twin_mallocnesia|CH_NoEditReplicaTwin_Hydrate|")
+    "alloc_guard_544_ch_no_edit_twin_mallocnesia|CH_NoEditReplicaTwin_Hydrate|"
+    # W-D-W (§3): instantiable at the exported slot count. The stand-in bracket is in its
+    # final form. The real-chain twin reads above zero until `send_impl`'s frame fits the
+    # limit (§2.5), so it is registered as a violation until that flip.
+    "alloc_guard_544_wdw_stand_in_window_mallocnesia|WDW_StandIn_Window|"
+    "alloc_guard_544_wdw_stand_in_twin_mallocnesia|WDW_StandIn_Twin|"
+    "alloc_guard_544_wdw_stand_in_arm_mallocnesia|WDW_StandIn_Arm|aligned_alloc"
+    "alloc_guard_544_wdw_real_chain_twin_mallocnesia|WDW_RealChain_Twin|aligned_alloc"
+    "alloc_guard_544_wdw_real_chain_arm_mallocnesia|WDW_RealChain_Arm|aligned_alloc")
   foreach(_cell IN LISTS _b35_driver_cells)
     string(REPLACE "|" ";" _cell "${_cell}")
     list(GET _cell 0 _name)
