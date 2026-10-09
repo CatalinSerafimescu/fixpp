@@ -301,7 +301,9 @@ public:
     fixpp::session::SessionId id;
     std::string begin_string = "FIX.4.2";
     asio::ip::tcp::socket peer{ioc};
-    native_socket peer_handle{};
+    // Seeded from the unopened `peer` because the IOCP `native_handle_type` has no default
+    // constructor; `start_and_logon()` re-reads it once `peer` is open.
+    native_socket peer_handle = peer.native_handle();
     PeerReader reader{peer};
 
     // A woken loop's state (W-A's launcher, W-E's sender).
