@@ -518,7 +518,15 @@ TEST(B35SessionIoExecutor, ExecuteHonoursBlockingNever) {
     EXPECT_TRUE(never_ran) << "the blocking.never function never ran";
 }
 
-TEST(B35SessionIoExecutor, TrackedCopiesMovesAndAssignmentsBalanceWork) {
+// One operation on tracked and untracked executors over one io_context. `tracked` is a
+// tracked executor the caller keeps; `untracked` is not tracked.
+using work_op = void (*)(sd::session_io_executor const& tracked,
+                         sd::session_io_executor const& untracked);
+
+// Runs `op` while run() runs, then checks that run() stays alive while the caller's own
+// tracked executor is held (no over-finish) and returns once it is released (no leak).
+// One operation per run, so a leak in one cannot hide an over-finish in another.
+void expect_balanced(work_op op) {
     asio::io_context ioc;
     sd::session_io_executor const e{ioc.get_executor()};
     std::optional<sd::session_io_executor> keep{
@@ -528,25 +536,83 @@ TEST(B35SessionIoExecutor, TrackedCopiesMovesAndAssignmentsBalanceWork) {
         ioc.run();
         returned.store(true, std::memory_order_release);
     }};
-    {
-        sd::session_io_executor a = *keep;         // copy: starts work
-        sd::session_io_executor b = std::move(a);  // move: transfers it
-        sd::session_io_executor c = e;             // untracked
-        c = b;                                     // copy-assign onto untracked
-        c = *keep;                                 // copy-assign onto tracked
-        b = e;                                     // tracked replaced by untracked
-        sd::session_io_executor d = asio::prefer(e, asio::execution::outstanding_work.tracked);
-        d = std::move(c);  // move-assign onto tracked
-        a = std::move(d);  // move-assign onto moved-from
-    }
+    op(*keep, e);
     std::this_thread::sleep_for(kStaysAliveFor);
     bool const alive_while_held = !returned.load(std::memory_order_acquire);
     keep.reset();
     bool const returned_after_release = wait_for(returned, kReturnBudget);
     if (!returned_after_release) ioc.stop();
     runner.join();
-    EXPECT_TRUE(alive_while_held) << "a copy, move or assignment finished work it did not hold";
-    EXPECT_TRUE(returned_after_release) << "a copy, move or assignment leaked outstanding work";
+    EXPECT_TRUE(alive_while_held) << "the operation finished work it did not hold";
+    EXPECT_TRUE(returned_after_release) << "the operation leaked outstanding work";
 }
+
+// NOLINTBEGIN(bugprone-use-after-move,clang-analyzer-cplusplus.Move) — moved-from use is the
+// subject
+TEST(B35SessionIoExecutor, TrackedCopiesMovesAndAssignmentsBalanceWork) {
+    struct named_op {
+        char const* name;
+        work_op op;
+    };
+    named_op const ops[] = {
+        {"copy-construct", [](auto const& t, auto const&) { sd::session_io_executor a = t; }},
+        {"move-construct",
+         [](auto const& t, auto const&) {
+             sd::session_io_executor a = t;
+             sd::session_io_executor b = std::move(a);
+         }},
+        {"copy-assign tracked onto untracked",
+         [](auto const& t, auto const& u) {
+             sd::session_io_executor a = u;
+             a = t;
+         }},
+        {"copy-assign untracked onto tracked",
+         [](auto const& t, auto const& u) {
+             sd::session_io_executor a = t;
+             a = u;
+         }},
+        {"copy-assign tracked onto tracked",
+         [](auto const& t, auto const&) {
+             sd::session_io_executor a = t;
+             a = t;
+         }},
+        {"move-assign tracked onto untracked",
+         [](auto const& t, auto const& u) {
+             sd::session_io_executor a = u;
+             sd::session_io_executor b = t;
+             a = std::move(b);
+         }},
+        {"move-assign untracked onto tracked",
+         [](auto const& t, auto const& u) {
+             sd::session_io_executor a = t;
+             sd::session_io_executor b = u;
+             a = std::move(b);
+         }},
+        {"move-assign tracked onto a moved-from",
+         [](auto const& t, auto const&) {
+             sd::session_io_executor a = t;
+             sd::session_io_executor b = std::move(a);
+             sd::session_io_executor c = t;
+             a = std::move(c);
+         }},
+        {"self-assign",
+         [](auto const& t, auto const&) {
+             sd::session_io_executor a = t;
+             auto& alias = a;
+             a = alias;
+             a = std::move(alias);
+         }},
+        {"require tracked, then untracked",
+         [](auto const&, auto const& u) {
+             auto const a = asio::require(u, asio::execution::outstanding_work.tracked);
+             auto const b = asio::require(a, asio::execution::outstanding_work.untracked);
+         }},
+    };
+    for (auto const& o : ops) {
+        SCOPED_TRACE(o.name);
+        expect_balanced(o.op);
+    }
+}
+// NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
 }  // namespace
