@@ -1,6 +1,6 @@
 # fixpp#544 — zero allocation on the Active inbound read and the `MemoryStore` write (B35)
 
-> **Status: v0.5.**
+> **Status: v0.5.1.** **Gate A CONVERGED — instance 2 round 2, 2026-10-09** (Codex P1=0 P2=3 P3=1; Opus post-judging P1=0 P2=0 P3=5; the five P3s applied as amendment v0.5.1 with no further round, per the triage's closing recommendation). Owner pre-authorised continuation on convergence (2026-10-09).
 > - **Gate A loop instance 1:**
 >   - round 1: BLOCK — Codex P1=3 P2=8 P3=1; Opus post-judging P1=2 P2=6 P3=12; rewritten to v0.2,
 >     addressing RC-1..RC-3;
@@ -10,7 +10,10 @@
 > - **v0.4** implements R-1′: fixpp exports `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` (§2.4). It re-checks
 >   §1–§7 against it.
 > - Owner rulings **R-6** and **R-7** (2026-10-09) are in §0; their justification is §5.
-> - Gate A instance 2 round 1: BLOCK — Codex P1=3 P2=2 P3=1; Opus post-judging P1=2 P2=3 P3=3; owner rulings R-8, R-9, R-10; rewritten to v0.5. Instance 2 round 2 pending.
+> - Gate A instance 2 round 1: BLOCK — Codex P1=3 P2=2 P3=1; Opus post-judging P1=2 P2=3 P3=3; owner rulings R-8, R-9, R-10; rewritten to v0.5.
+> - Gate A instance 2 round 2: CONVERGED — Codex P1=0 P2=3 P3=1; Opus post-judging P1=0 P2=0 P3=5; the P3s
+>   applied as v0.5.1. This round's finding IDs are written I2R2 C-1..C-4 and I2R2 O4-1, so they cannot be
+>   confused with instance-2 round 1's C-1..C-6.
 >
 > **How this design was reached.** The owner replaced design→Gate A with two independent consults: Codex
 > `gpt-5.6-sol` (read-only) and Fable (`fable-consult`). Both had the same brief, and the convergence criteria
@@ -30,10 +33,11 @@
 > - Gate A instance 2 round 1's r1 and r2 (`r1_buffer_lifetime.cpp`, `r2_overlimit_send_evicts.cpp`, with
 >   `r2_log.cpp`) and its header-closure script `closure.py`, in `b35_544_gate_a_i2r1/`, with the v0.5
 >   rewrite's r3 (`r3_reentrant_send_inline.cpp`) beside them.
+> - Gate A instance 2 round 2's s1 (`s1_holder_release.cpp`), in `b35_544_gate_a_i2r2/`.
 >
 > Each round's review and triage are listed under `## Gate A`. Each triage's Appendix A gives its probes'
-> build line and recipe. "Round-1 triage p*N*", "round-2 triage q*N*" and "instance-2 triage r*N*" below
-> name those probes. r3's build line and rows are in its file header.
+> build line and recipe. "Round-1 triage p*N*", "round-2 triage q*N*", "instance-2 triage r*N*" and
+> "instance-2 round-2 triage s1" below name those probes. r3's build line and rows are in its file header.
 >
 > **Independence (`[const §XVII.3]`).** The author of this note is the Opus orchestrator. Gate A's Codex
 > review runs in a fresh Codex session, which has not seen the consult session.
@@ -587,7 +591,9 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     - q5's case, the store chain plus a pending read, is smaller. So is W-E's own largest instant, a send
       chain plus the pending read.
     - Re-run the recipe at implementation time. The chain list above is a lead. The PR's verify record
-      carries the derivation and its date, and W-D-W's bracket re-checks the headroom on every run.
+      carries the derivation and its date. On every run, W-D-W's stand-in bracket re-checks the recycler's
+      arithmetic for the derived e, and its real-chain twin (§3) checks that derived e against the production
+      `Session::send` chain held in its write, in both directions (I2R2 C-1).
     - **What 16 does not reach.** `Engine::send`'s chain is deeper still: two `co_spawn` hops, each with an
       entry-point frame, a spawned lambda frame and a `use_awaitable` adapter, above `Session::send`
       (`src/session/engine.cpp`, `Engine::send`). That path allocates per call anyway (§2.5), so no zero is
@@ -623,9 +629,12 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
          `git grep -n "INSTALL_INTERFACE" -- CMakeLists.txt 'src/*CMakeLists.txt' cmake`.
       3. Each root-publishing member's PUBLIC/INTERFACE link set:
          `git grep -n -A3 "target_link_libraries" -- CMakeLists.txt 'src/*CMakeLists.txt'`.
-      4. Which installed headers reach asio: run `python3 -I closure.py <module dirs under include/>` from the
-         library root (`b35_544_gate_a_i2r1/closure.py`). It prints each header that has an include chain to
-         an `asio*` header, with the chain.
+      4. Which installed headers reach asio: run
+         `python3 -I ../research/probes/b35_544_gate_a_i2r1/closure.py <module dirs, relative to include/>`
+         (for instance `fixpp/core`) from the library root (I2R2 C-4). It prints each header that has an
+         include chain to an `asio*` header, with the chain. The script lives in the parent repo, so a
+         library-only checkout cannot run this step; the guard-header census ctest (*The mechanical guards*,
+         below) is the in-repo mechanical check of the condition that matters.
     - **The condition the recipe checks.** Every member that publishes the `include/` root reaches
       `fixpp_core` through PUBLIC/INTERFACE links. A member that does not needs its own attachment. A member
       that publishes another root and reaches the closure only through `$<LINK_ONLY:>` withholds the
@@ -822,28 +831,46 @@ The mechanisms are re-derived from asio 1.38. #544's text, its comments and L-49
     - The 020 checks and the scanner pass use no scratch. Whether they move into the helper is plan-level;
       their order and dispositions do not change.
   - **The frame slot: held by the flag (class 2).**
-    - Before the helper writes the first byte of the frame, `send_impl` tests the flag. If the flag is clear,
-      `send_impl` sets it through an RAII holder in its own frame, and the helper builds into the slot.
+    - Before the helper writes the first byte of the frame, `Session::send` tests the flag. If the flag is
+      clear, `Session::send` sets it through an RAII holder, and the helper builds into the slot. The holder
+      lives in a frame that outlives `store_then_emit`'s return: `Session::send`'s, under the shape below.
     - The holder clears the flag when that invocation ends: every `co_return`, the throw path, and destruction
       of the frame while it is suspended. It is cleared **only after `store_then_emit` returns**, because the
-      write reads the slot until then. A store failure or a vetoed `toApp` releases it on that `co_return`.
+      write reads the slot until then. A store failure or a vetoed `toApp` releases it when that
+      invocation's `co_return` unwinds the holder's frame.
+    - The release is by RAII on every exit, never by a manual clear. Condition: the holder is declared inside
+      `Session::send`'s `try` block, so it is released before that block's `catch` runs.
+    - Instance-2 round-2 triage s1 (`../research/probes/b35_544_gate_a_i2r2/s1_holder_release.cpp`) exercises
+      an RAII holder in an `asio::awaitable` callee under an awaiting, catching wrapper, on four exits: a
+      normal return, an early return before any suspension, a throw after a suspension, and destruction of the
+      suspended frame by `~io_context`. It places the holder in the callee, not in the wrapper's `try`. To
+      check the chosen shape, re-run s1 with the holder moved into the wrapper's `try`; do not cite its
+      output. The veto-then-zero cell (§3) gates the non-success exit (I2R2 C-3).
     - The flag is a strand-local `bool`, not a lock. Nothing waits on it, it adds no suspension point, and
       `close()` and `Engine::stop` neither see it nor drain it.
   - **The fallback leaf, for an invocation that finds the flag set.** That invocation `co_await`s a private
-    leaf coroutine. The leaf's frame owns a 4096-B frame buffer, and the leaf runs the same tail: the helper
-    into its own buffer, `toApp`, `assign_outbound`, `store_then_emit`.
+    leaf coroutine. The leaf's frame owns a 4096-B frame buffer, and the leaf `co_await`s the same tail,
+    `send_impl`, over that buffer: the helper into the leaf's buffer, `toApp`, `assign_outbound`,
+    `store_then_emit`.
     - Its frame is over the limit by construction. A send that takes it allocates one frame through
       `aligned_new` and evicts one cached block, by O3-1's mechanism. That is bounded, not zero (§4).
     - **R-6 residual, as a condition.** When a send starts while the slot is held, because it is nested in
       `toApp` (r3) or overlaps a send suspended in its store or its write, it takes the leaf and allocates.
       R-10 discloses this under R-6.
-    - The fallback buffer cannot be a conditionally declared local inside `send_impl`. A coroutine frame's size
-      is fixed at compile time, so any local of `send_impl` sizes its frame on every call. It must be a separate
-      coroutine.
-    - **One implementation of the tail.** The plan chooses the shape, for instance one tail coroutine that
-      takes the frame span. The condition: on the primary path, the send chain gains no cycled frame over
-      today's `Session::send` → `send_impl` → (`assign_outbound` | `store_then_emit` → …); the fallback adds
-      exactly the leaf. §2.4's e counts the primary path.
+    - The fallback buffer cannot be a conditionally declared local inside the frame that tests the flag
+      (`Session::send`'s) or inside `send_impl`. A coroutine frame's size is fixed at compile time, so any
+      local of either sizes its frame on every call. It must be a separate coroutine.
+    - **One implementation of the tail (I2R2 C-2).** The condition: on the primary path, the send chain gains
+      no cycled frame over today's `Session::send` → `send_impl` → (`assign_outbound` | `store_then_emit` →
+      …); the fallback adds exactly the leaf. §2.4's e counts the primary path.
+      - **The shape that meets it.** `Session::send` hosts the flag test and the holder, and `send_impl`
+        becomes the tail, taking the frame span. Primary path: `Session::send` (holder) → `send_impl` (slot),
+        which is today's depth. Fallback: `Session::send` → leaf (owns the buffer) → `send_impl` (leaf
+        buffer), which adds exactly the leaf. Condition: every caller of `send_impl` is `Session::send` or the
+        leaf; check it with `git grep -n "send_impl(" -- src include`.
+      - No non-coroutine dispatcher is introduced on the send path. So `send_impl`'s span and
+        `bool& disconnect_required` parameters fall under §2.2's clause for a callee `co_await`ed directly:
+        the caller's frame outlives that `co_await` (I2R2 O4-1).
   - **`send_impl`'s frame after the change** holds no array. Its frame must fit the limit on the three
     Release presets (§1(b), condition 1); W-E is that check (§3).
   - **Behaviour is unchanged.** The validation, the field order, the dispositions, the seqnum ordering, the
@@ -1096,13 +1123,29 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
     - It does **not** hold the inbound pair live while a send is suspended in its write. The send completes
       before the next frame is written. So W-E does not cover N's two-way sizing instant; W-D-W does.
   - Its fix-deleted arm is (e) below, and its twin is W-E itself.
-- **W-D-W (new in v0.5; C-4). The two-way sizing instant, as a model in W-D-R's harness.** It must read 0.
+- **The veto-then-zero cell (new in v0.5.1; I2R2 C-3). A non-success exit must release the slot.** It must
+  read 0.
+  - **Why.** A missed clear on a success path is caught by W-E: its first send would leave the flag set, and
+    every later send would take the over-limit leaf. A missed clear on a non-success exit is silent: bytes
+    stay correct, so the overlap cells pass, and W-E's sends all succeed. The RAII holder (§2.5) prevents it
+    by construction; this cell pins it.
+  - **Rig.** W-E's rig. Before arming, one `Session::send` is vetoed by the test `toApp`. The window is then a
+    W-E-shaped run of sends, which must read 0: each must find the slot clear.
+  - Optionally, the cell asserts the flag clear through `session_test_access` after a send that took the
+    `app_callback_threw` path (`Session::send_impl`'s `toApp` throw arm).
+  - **Mutant, which must turn it RED:** the RAII holder replaced by a manual clear that the veto path skips.
+  - Cancellation and frame-destruction cells are not added: under RAII those exits are structurally the
+    veto's (§2.5, instance-2 round-2 triage s1).
+- **W-D-W (new in v0.5; C-4; real-chain twin added in v0.5.1, I2R2 C-1). The two-way sizing instant, in
+  W-D-R's harness: a stand-in bracket that pins the recycler boundary, and a real-chain twin that pins e.** Each
+  must read 0.
   - This is the instant §2.4 sizes N on: the inbound Active pair requesting blocks while an application send
-    is suspended in its write. A real rig cannot hold that write pending deterministically. It would need a
-    peer that stops reading until the socket buffers fill.
-  - A long-lived test-owned *emitter* coroutine is `co_spawn`ed before arming. It loops over a chain of e
-    cycled child coroutines, the innermost awaiting a test-owned timer. That chain stands in for the send
-    chain suspended in its write. **e is taken from the production chain** by §2.4's recipe, step 5.
+    is suspended in its write.
+  - **The stand-in bracket.** A long-lived test-owned *emitter* coroutine is `co_spawn`ed before arming. It
+    loops over a chain of e cycled child coroutines, the innermost awaiting a test-owned timer. That chain
+    stands in for the send chain suspended in its write. **e is taken from the production chain** by §2.4's
+    recipe, step 5. If the recipe miscounts e, this bracket stays consistent with the wrong e, so it pins the
+    recycler's arithmetic, not the production chain's depth. The real-chain twin below pins the depth.
   - Each iteration, the driver awaits an **Active-depth replica pair** through the shared template at D = 1.
     The wrapper stands in for `on_inbound_active_`, and the callee is a test-owned coroutine shaped like
     `check_inbound`, so the pair is two cycled frames. The driver then cancels the emitter's timer and yields
@@ -1116,6 +1159,28 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
     chain. A `static_assert` in the harness TU states it, from the macro and the harness's e. That makes it
     exactly as current as e, and e is re-derived by the recipe whenever the send chain gains a `co_await`
     (§6 risk 4).
+  - **The real-chain twin (I2R2 C-1).** The same bracket, with the stand-in emitter replaced by the real
+    `Session::send` chain held in its write by a write-blocking transport double. The tree already holds a
+    public send in that state deterministically: `ControlledWriteTransport`'s `arm_block()`/`release()`
+    (`tests/session/test_live_outbound_serialized.cpp`, used by `CloseCancelsBlockedPublicSend`), with the
+    real Engine pump reachable through `SessionConfig::transport_factory_override`, as
+    `ScriptedReadTransportFactory` uses it (`tests/support/transport_double.hpp`).
+    - **Driver form, under one `ioc.run()`.** Each iteration the driver calls `arm_block()`; wakes a
+      long-lived test-owned sender, which `co_await`s `session.send(payload)` until the send is parked in the
+      write; awaits the replica pair and the nest of k; calls `release()`; and yields twice, so the send
+      completes.
+    - **Why it pins e in both directions.** If the real chain holds more than the derived e, the twin at
+      k = N − e − 2 reads > 0. If it holds fewer, the arm at k = N − e − 1 reads 0 and fails its
+      `--expect-violation`. So the derived e is a checked input. This is the launcher-and-shifted-bracket
+      construction of W-A's (b-S) pair.
+    - **Conditions on the double.** Its write chain must match the plain transport's frame for frame (one
+      coroutine plus its `use_awaitable` adapter; compare the double's `async_write` with
+      `asio_plain_transport::async_write` by reading). Its write must not allocate: any captured write needs
+      pre-sized storage, unlike `ScriptedReadTransport::async_write`'s `emplace_back`; an allocating double
+      fails toward red. `release()` must run on the run thread, as it does in the driver form: a post from a
+      thread with no scheduler call on its stack bypasses the recycling cache (`asio/detail/thread_info_base.hpp`,
+      `thread_info_base::allocate`).
+    - The replica pair's "2" stays a model input, as in the stand-in bracket.
   - W-D-W covers C-4 at the gated depth. The deeper `co_spawn`ed and `Engine::send` shapes stay derived,
     not gated (§2.4; §4).
 - **FileStore `store()`** is bounded, not zero: at most one frame per offloaded I/O op, the `[const §XV.1]`
@@ -1125,7 +1190,7 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
 
 | Preset | Windows | Counter | Assertion | Fix-deleted arms run here |
 |---|---|---|---|---|
-| `linux-clang-release` (CI today), `linux-gcc-release` (CI widened) | W-A..W-E, W-D-R, W-D-W | mallocnesia `_mallocnesia` twins, `MALLOCNESIA_MAX_ALLOCS=0` | **0** | (a), (b-L), (b-S), (c-L), (c-P), (c-H), (e), (s), and the W-D-R and W-D-W brackets, each with its in-boundary twin |
+| `linux-clang-release` (CI today), `linux-gcc-release` (CI widened) | W-A..W-E, W-D-R, W-D-W, the veto-then-zero cell (I2R2 C-3) | mallocnesia `_mallocnesia` twins, `MALLOCNESIA_MAX_ALLOCS=0` | **0** | (a), (b-L), (b-S), (c-L), (c-P), (c-H), (e), (s), and the W-D-R and W-D-W brackets (W-D-W's stand-in and real-chain twin), each with its in-boundary twin |
 | `windows-msvc-release` | W-A, W-B. T044's rig is ported, and its `if(CMAKE_SYSTEM_NAME STREQUAL "Linux")` guard in `tests/alloc_guard/CMakeLists.txt` is lifted for the new cells | TU-local `operator new` counter (T044's) | **0** `operator new`; the `_aligned_malloc` half is disclosed | (a) only |
 | unsanitized Debug presets, including the unsanitized libc++ lane | the same cells | TU-local counter: printed, not asserted. mallocnesia: not registered (Release only, below) | — | — |
 | sanitizer lanes | the same cells | **semantic execution, counter unavailable** (C2-5). mallocnesia is not registered under a sanitizer (`cmake/FixppMallocnesia.cmake`, the sanitizer condition), and T044's counter is compiled out under `FIXPP_SANITIZER_REPLACES_NEW` | — | — |
@@ -1136,7 +1201,8 @@ with an empty cache, so it cannot read zero (§1(b)). Two shapes satisfy the rul
   - An `operator new` counter therefore cannot see classes (b) and (c). Arms (b) and (c) cannot read > 0 there.
   - W-C and W-D contain no class-(a) content, so on MSVC they would assert zero on paths whose B35 defects the
     counter cannot see. They are **not registered on MSVC** as B35 evidence.
-  - The same holds for W-D-R and W-D-W, which are slot models, and for W-E, whose B35 defect is
+  - The same holds for W-D-R and W-D-W, which are slot brackets, for the veto-then-zero cell, which is
+    W-E-shaped, and for W-E, whose B35 defect is
     `send_impl`'s over-limit frame, a class-(b) request that goes to `_aligned_malloc`. W-E's class-(a)
     content is W-A's and W-B's strand, which those windows already gate there.
 - **Release only (O-6).** `fixpp_add_mallocnesia_test` (`cmake/FixppMallocnesia.cmake`) has no build-type
@@ -1268,7 +1334,7 @@ above; each twin asserts 0 in the same harness.**
   - It must read > 0. Its RED comes from the leaf's own over-limit frame request, so it shows that W-E's
     counter sees an over-limit frame on the send chain inside the window. It is **not** an eviction
     witness. r2 is the evidence for eviction (§2.5).
-  - Its twin is W-E itself: the same rig and launch path, with the flag left to `send_impl`.
+  - Its twin is W-E itself: the same rig and launch path, with the flag left to `Session::send`'s holder.
   - The test, not an invocation, owns the flag it set. The fallback path never writes the flag, and the
     primary path's holder clears only a flag it set itself, so the arm's flag stays set for the whole window.
 - **(s) Scope control** (Linux; `--expect-violation --expect-entry aligned_alloc`).
@@ -1520,8 +1586,8 @@ with the priming disclosed — is what R-6 applies here.
 - W-D's and W-D-R's `MemoryStore::store` is reached through the outbound `store_then_emit`. Its clause is
   `[const §XV.1]`'s MemoryStore sentence, which has no deviation provision of its own. R-7 (§0) settles the
   clause question for W-D: R-6's justification extends to that sentence for B35's conditional zero.
-- W-E's `Session::send` chain reaches the same `MemoryStore::store`, so R-7 covers it in the same way. W-D-W is
-  a slot model of the same chain.
+- W-E's `Session::send` chain reaches the same `MemoryStore::store`, so R-7 covers it in the same way. W-D-W's
+  stand-in bracket is a slot model of the same chain, and its real-chain twin runs that chain.
 - **R-9's storage against `[const §XV.1]`.** The send scratch is allocated with the `Session` object, once per
   session and before `open()` (§2.5). That is pre-allocation per session, not a per-message allocation, so it
   is the form §XV.1 permits. The fallback leaf's frame is a per-message allocation on the overlapping send
@@ -1560,8 +1626,9 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
    synchronous `fromApp` (§3), so it adds no frame today. W-B's RED-task-0 baseline shows whether the path is
    already deeper. The (b-S) pair pins N itself. A change to a chain's depth is caught only when a gated
    window's live set reaches N + 1, so §2.4's recipe is re-run whenever a gated or slot-sharing chain gains a
-   `co_await`. The `Session::send` chain is now such a chain: its count e sizes W-D-W, and W-D-W's
-   headroom `static_assert` reads that e (§3).
+   `co_await`. The `Session::send` chain is now such a chain: its count e sizes W-D-W, W-D-W's
+   headroom `static_assert` reads that e, and W-D-W's real-chain twin goes RED when the derived e and the
+   production chain disagree (§3).
 5. **Other recyclers on the path.** The cancellation-slot emplacement in `reset_cancellation_state` and
    `inherited_slot.assign` uses `cancellation_signal_tag`; executor ops use `executor_function`. Both have
    `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE` slots, the exported N, under the same policy and the same
@@ -1587,9 +1654,9 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
      decides which reading is right.
    - A new export member that publishes the `include/` root without linking `fixpp_core` would escape the
      attachment. §2.4's enumeration recipe is the check, and `probe_core` pins the attachment itself.
-10. **The send slot's exclusivity (§2.5).** The slot is correct only while every path into `send_impl` tests
-    the flag before the first frame byte is written, and only while the holder lives until `store_then_emit`
-    returns.
+10. **The send slot's exclusivity (§2.5).** The slot is correct only while every path that builds into the
+    slot tests the flag (in `Session::send`, §2.5) before the first frame byte is written, and only while the
+    holder lives until `store_then_emit` returns.
     - A broken flag corrupts bytes silently. No allocation gate sees it. The overlap cells, with their two
       mutants, are the only guard (§3).
     - A new synchronous user callback inside `send_impl` before the build would let a nested send reach the
@@ -1617,6 +1684,21 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
 - Round 2 applied 2026-10-09: Codex P1=1 P2=3 P3=2; Opus post-judging P1=1 P2=1 P3=6; rewrite addresses root causes 1, 2, 3, 4 of the round-2 triage (recorded below as RC-A, RC-B, RC-C, RC-D). Reviews: research/reviews/codex_544_2_hot-path-zero-alloc_review.md, research/reviews/opus_544_2_hot-path-zero-alloc_triage.md.
 - Instance 1 closed 2026-10-09 after round 2 (rewrites 2/2): owner revised R-1 → R-1′ on probe q5; v0.4 written; Gate A instance 2 round 1 pending.
 - Instance 2 round 1 applied 2026-10-09: Codex P1=3 P2=2 P3=1; Opus post-judging P1=2 P2=3 P3=3; rewrite addresses I2-RC1, I2-RC2, I2-RC3, I2-RC4 and R-8/R-9. Reviews: research/reviews/codex_544_i2-1_hot-path-zero-alloc_review.md, research/reviews/opus_544_i2-1_hot-path-zero-alloc_triage.md.
+- Instance 2 round 2 2026-10-09: Codex P1=0 P2=3 P3=1; Opus post-judging P1=0 P2=0 P3=5 → CONVERGED. P3s C-1..C-4, O4-1 applied as v0.5.1. Reviews: research/reviews/codex_544_i2-2_hot-path-zero-alloc_review.md, research/reviews/opus_544_i2-2_hot-path-zero-alloc_triage.md.
+
+### Instance 2 round 2 — disposition of every finding (v0.5.1)
+
+The IDs are the instance-2 round-2 triage's, prefixed I2R2 so they cannot be confused with instance-2
+round 1's C-1..C-6 below. No further review round: the triage's closing recommendation converges on severity
+and prescribes these five as the amendment.
+
+| Finding | Judged severity | Where addressed |
+|---|---|---|
+| I2R2 C-1 (N=16's witness is circular: W-D-W's stand-in takes e as an input) | P3 (Codex P2) | §3 W-D-W: the "a real rig cannot hold that write pending" sentences deleted; the real-chain twin over a held write added, the stand-in kept as the recycler-boundary pin; §2.4's re-check sentence says which cell checks what; §5; §6 risk 4; the instance-2 round-1 C-4 disagreement marked superseded |
+| I2R2 C-2 (the send-tail example contradicts its own frame condition) | P3 (Codex P2) | §2.5: "for instance one tail coroutine" struck; the shape named (`Session::send` hosts the flag test and holder, `send_impl` is the tail); the holder's frame re-worded; §3 arm (e); §6 risk 10 |
+| I2R2 C-3 (no cell observes the flag after a non-success exit) | P3 (Codex P2) | §2.5 RAII release with probe s1's recipe; §3 the veto-then-zero cell and its mutant; the Linux counters row; the MSVC exclusion |
+| I2R2 C-4 (`closure.py`'s path is not runnable from the library root) | P3 | §2.4 recipe step 4: the runnable relative path, the parent-repo caveat, and the guard-header census ctest as the in-repo check |
+| I2R2 O4-1 (§2.2's by-value rule would forbid a safe `bool&` under a dispatcher shape) | P3 | §2.5: no non-coroutine dispatcher is introduced on the send path, so `send_impl`'s parameters fall under §2.2's directly-`co_await`ed clause; §2.2's rule is unchanged |
 
 ### v0.5 — what instance 2 round 1 and R-8/R-9 changed (for instance 2's round 2)
 
@@ -1636,8 +1718,8 @@ constitution's text an owner amendment, and R-6 rules that none is needed.
   `fixpp_core`, selected by "publishes the `include/` root", with the enumeration recipe. A `probe_core`
   consumer leg is added (C-1).
 - §2.5 (new): R-9. The lifetimes of `send_impl`'s arrays; the serialisation finding, with probe r3; session
-  scratch, the build helper, the slot flag and the fallback leaf; the rejected send gate, recorded for the
-  owner; the per-call allocations of `Engine::send` and the C ABI; and a pre-existing MsgSeqNum defect, for
+  scratch, the build helper, the slot flag and the fallback leaf; the send gate, rejected by
+  R-10; the per-call allocations of `Engine::send` and the C ABI; and a pre-existing MsgSeqNum defect, for
   an issue.
 - §3: W-E and arm (e) (R-9); W-D-W with its shifted bracket (C-4); the TLS diagnostic in RED task 0 (C-5); the
   overlap cells and their mutants; the MSVC and Linux table rows.
@@ -1704,6 +1786,8 @@ with instance 1's RC-1..RC-3 and RC-A..RC-D.
   pending".** A real pending write needs a peer that stops reading until the socket buffers fill, which is
   neither deterministic nor cheap. The triage's model window is adopted as W-D-W, with e taken from the
   production chain (§3).
+  - **Superseded by I2R2 C-1 (v0.5.1).** This entry's premise came from the instance-2 round-1 triage and was
+    not checked against the test tree. W-D-W now has a real-chain twin over a held write (§3).
 
 **Departures from the triage's prescribed fixes, each with its reason:**
 - **O3-1 option (b), "W-E: W-A's rig with one app send per inbound message, asserting 0 on the inbound
@@ -1717,8 +1801,8 @@ with instance 1's RC-1..RC-3 and RC-A..RC-D.
   per-chain exclusivity argument the triage said it would need: the slot flag, with a fallback leaf.
 - **R-9's "the existing write-path serialisation must guarantee" premise does not hold** (§2.5, probe r3).
   The implemented form is the slot flag with a fallback leaf. Its cost is a disclosed condition: an
-  overlapping send allocates. The session send gate that would also keep that send at zero is recorded in
-  §2.5 for the owner, with the four conditions it would have to meet.
+  overlapping send allocates. The session send gate that would also keep that send at zero was rejected by
+  R-10, for the four conditions it would have to meet (§2.5).
 - **N = 16, not 8.** This is not a triage item. R-9 adds the `Session::send` chain to §2.4's gated live set,
   and by reading, the two-way instant then leaves no headroom at 8. The value follows the condition, and
   W-D-W's bracket and headroom `static_assert` check it (§2.4, §3).
