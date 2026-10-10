@@ -20,8 +20,10 @@ refs:
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
 refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/2d-threading.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/005-session-establishment-fsm-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/013-session-reconnect-binding-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/023-engine-session-strand-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/024-reset-refresh-on-logon-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/025-refresh-on-logon-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/027-next-expected-msgseqnum-gatea.md
@@ -280,6 +282,12 @@ plus its "As built" section). The behaviour a user must know is B&L `B-544-1`…
   `specs/023-engine-session-strand/data-model.md` (`session_strand = make_strand(exec_)`). On the fast path
   the strand's target is `strand<session_inner_executor_t>`, and `SessionEntry::session_strand`'s type
   changed (B&L `B-544-2`).
+  Why a per-session strand exists at all is in two parent-repo convergence records, both **current**:
+  `decisions/2d-threading.md` (the default per-session strand and the `session_executor` wrapper over
+  `any_io_executor`; the strand's inner type is not in it) and
+  `decisions/speckit/023-engine-session-strand-gatea.md` (the engine control strand beside the
+  per-session strand, and the rejected one-domain design). The 2d record's `close()` summary predates
+  093's OD-29; the erratum is in `.specify/2d-threading.md` (the close row above).
 - **`send_impl` no longer carries its buffers in its frame.** The `Session` owns two build-scratch
   buffers, a frame slot and a slot flag (`send_strip_scratch_`, `send_body_scratch_`,
   `send_frame_slot_`, `send_slot_in_use_` in `session.hpp`). The build is a non-coroutine helper,

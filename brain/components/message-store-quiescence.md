@@ -18,6 +18,7 @@ refs:
   - spec/behaviors-and-limitations.md
   - tests/session/test_file_store_crash_survival.cpp
 refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
@@ -88,6 +89,13 @@ not updated: `.specify/2e-msgstore.md`'s `MemoryStore::store` latency-budget row
 `specs/008-message-store/contracts/message_store.hpp`'s fast-path comment. Their lock semantics still
 hold; for `MemoryStore::store` the route is the macro (2f Erratum E-6). Frozen bundles are annotated
 here, not edited.
+
+The 2e convergence record (parent repo, `decisions/2e-msgstore.md`) is the **why** of the store's
+mutex, of durable-before-transmit and of the atomic `reset()`: current as history. ⚠️ Its Windows
+`reset()` primitive, `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`, is
+**superseded**: the reset now renames with POSIX semantics over the open log and flushes, with three
+outcomes (the FileStore reset section below). Re-derive with
+`grep -n "posix_rename_over_open\|MoveFileExW" src/session/file_store.cpp`.
 
 ## The 141=Y reset unit's store operation (093, fixpp#524) — still awaited, now not cancellable
 
