@@ -22,9 +22,10 @@
 // this binary's registration.
 //
 // Warm-up rationale (Erratum E-4 / feedback_asio_cancellation_slot_no_allocator_hook):
-// asio's per-thread cancellation recycler may do one global alloc on the FIRST
-// slot assignment per thread. We run WARMUP_ITER store() calls BEFORE the
-// guard window to prime the recycler.
+// asio's cancellation recycler may do one global alloc on the FIRST slot
+// assignment in a scheduler call: its cache lives for one io_context run-family
+// call, not for the thread (Erratum E-6). We run WARMUP_ITER store() calls BEFORE
+// the guard window, in the same scheduler call, to prime the recycler.
 
 #include <gtest/gtest.h>
 
@@ -216,7 +217,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
 //   Layer 2 — the global-heap half: NOT CHECKED (see the file header). Under a
 //             hand run with the interceptor, an escape exits(1) in alloc_guard_end().
 //
-// Warm-up: one retrieve() run outside the guard window to prime asio's per-thread
+// Warm-up: one retrieve() run outside the guard window to prime asio's
 // cancellation recycler (same rationale as store steady-state test above).
 #ifndef _WIN32
 TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {

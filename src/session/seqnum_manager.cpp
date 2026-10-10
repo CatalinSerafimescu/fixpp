@@ -24,7 +24,8 @@
 // Discipline (I-7, Karpathy no-alloc hot path):
 //   No std::string, no std::vector, no std::function in the check/assign paths.
 //   The async_mutex fast path (uncontended CAS) does not suspend on the session strand.
-//   Per-thread recycler handles the cancellation-handler closure (E-4 pattern).
+//   asio's recycler handles the cancellation-handler closure (E-4 pattern; its cache
+//   lives for one scheduler call, not for the thread: Erratum E-6).
 
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_type.hpp>  // NOLINT(misc-include-cleaner) — IWYU: operator! via cancellation_slot

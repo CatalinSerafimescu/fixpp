@@ -18,8 +18,9 @@
 //
 // Erratum E-4 warm-up (mirrors sync_alloc_guard_test.cpp): asio's
 // cancellation_slot has NO allocator-binding hook. On the first
-// cancellation-slot assignment on a thread asio's detail::thread_info_base
-// performs ONE global aligned_new for its per-thread recycling block.
+// cancellation-slot assignment in a scheduler call asio's
+// detail::thread_info_base performs ONE global aligned_new for its recycling
+// block; the cache lives for that scheduler call, not for the thread (E-6).
 // The warm-up pass before alloc_guard_start() primes this recycler so the
 // MEASURED window is zero-global-heap (steady state).
 //
@@ -145,7 +146,7 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
     auto se = *se_result;
 
     // ── Erratum E-4 warm-up pass ─────────────────────────────────────────
-    // Prime asio's per-thread cancellation recycler before the guard window.
+    // Prime asio's cancellation recycler before the guard window.
     // Run 3 warm-up cancellable_dispatch rounds (prime recycler + caches).
     constexpr int WARMUP = 3;
     std::atomic<int> warmup_count{0};

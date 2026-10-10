@@ -2102,8 +2102,8 @@ set_tests_properties(session_validation_compat_toggles PROPERTIES
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_validation_compat_toggles APPEND PROPERTY LABELS 092)
 # T012 NoHeap_RelaxedDeliverPath: its global-heap claim is NOT CHECKED. No mallocnesia
-# gate is registered for it, because an Active session's inbound path allocates
-# (L-497-1; fixpp#544), so the window cannot be zero until that is fixed.
+# gate is registered for it: the S4 deliver-without-advance path is not one of
+# fixpp#544's gated windows, and L-497-1 discloses it.
 # The base test still runs its functional assertions. To run the window by hand:
 #   GTEST_FILTER='*NoHeap_RelaxedDeliverPath*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/session_validation_compat_toggles --mallocnesia <build>/lib/libmallocnesia.so
@@ -2136,8 +2136,8 @@ set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY LABELS 092)
 # T012 NoHeap_HydrateAndPersistPaths: its global-heap claim is NOT CHECKED. No mallocnesia
-# gate is registered for it, because an Active session's inbound path allocates
-# (L-497-1; fixpp#544), so the window cannot be zero until that is fixed.
+# gate is registered for it: its persistent-store persist path is not one of fixpp#544's
+# gated windows, and L-497-1 discloses it.
 # The base test still runs its functional assertions. To run the window by hand:
 #   GTEST_FILTER='*NoHeap_HydrateAndPersistPaths*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/session_persistent_seqnum_hydrate --mallocnesia <build>/lib/libmallocnesia.so

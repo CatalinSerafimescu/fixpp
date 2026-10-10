@@ -17,16 +17,17 @@
 // (co_spawn) and starting the io_context happen before it opens.
 //
 // Why long-lived coroutines: a co_spawn allocates its frame and its dispatch op through
-// asio's per-thread recycling allocator, which falls through to the global heap
+// asio's recycling allocator, which falls through to the global heap
 // (::aligned_alloc) for blocks it cannot recycle. A window that co_spawns per iteration
 // measures that, not the mutex.
 //
-// Erratum E-4 (2026-05-19): asio 1.36.0's cancellation_slot has NO
-// allocator-binding hook. Cancellation-handler memory comes from
-// asio::detail::thread_info_base's per-thread recycling cache. The FIRST
-// cancellation-slot assignment on a given thread does ONE global aligned_new;
-// every subsequent one reuses the thread-local block. The warm-up iterations before
-// the window opens prime that cache.
+// Erratum E-4: asio's cancellation_slot has NO allocator-binding hook.
+// Cancellation-handler memory comes from asio::detail::thread_info_base's recycling
+// cache. That cache lives for one scheduler call (the io_context run-family call on
+// the thread), not for the thread (Erratum E-6): the first cancellation-slot
+// assignment in a scheduler call allocates, and later ones in the same call reuse the
+// cached block. The warm-up iterations before the window opens run inside the same
+// run() as the window, so they prime that cache.
 
 #include <gtest/gtest.h>
 

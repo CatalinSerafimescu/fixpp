@@ -35,7 +35,8 @@ void BM_Session_SeqnumNextWithIncrement(benchmark::State& state) {
     asio::io_context ioc;
     SeqnumManager mgr;
 
-    // Warm-up: prime asio's per-thread caches + the async_mutex slot pool.
+    // Warm-up: prime the async_mutex slot pool. asio's recycling cache lives for one
+    // scheduler call, so each ioc.run() below starts with it empty.
     for (int i = 0; i < 8; ++i) {
         auto fut = asio::co_spawn(ioc, mgr.assign_outbound(), asio::use_future);
         ioc.run();

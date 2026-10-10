@@ -18,8 +18,9 @@
 //
 // Erratum E-4 warm-up (mirrors sync_alloc_guard_test.cpp): asio's
 // cancellation_slot has NO allocator-binding hook. On the first
-// cancellation-slot assignment on a thread asio's detail::thread_info_base
-// performs ONE global aligned_new for its per-thread recycling block.
+// cancellation-slot assignment in a scheduler call asio's
+// detail::thread_info_base performs ONE global aligned_new for its recycling
+// block; the cache lives for that scheduler call, not for the thread (E-6).
 // The FIRST sleep_until call on a new session also performs ONE global
 // alloc to create the per-session timer slot (the slot is allocated from
 // session_arena via allocate_shared — the shared_ptr control block goes
@@ -72,7 +73,7 @@ using fixpp::session::threading_mode;
 //
 // Strategy:
 //   1. Build all objects (arenas, engine, session, clock) BEFORE markers.
-//   2. Run WARMUP_CYCLES to prime asio's per-thread recycler + allocate the
+//   2. Run WARMUP_CYCLES to prime asio's recycler + allocate the
 //      per-session timer slot (one-time PMR allocation from session_arena).
 //   3. alloc_guard_start()
 //   4. Run CORPUS_CYCLES using immediate deadlines in the past (no real sleep).

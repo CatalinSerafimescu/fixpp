@@ -1475,7 +1475,7 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     // ── Setup OUTSIDE the guarded window ─────────────────────────────────────
     // Build an initiator with refresh_on_logon=true, bilateral_lenient, persistent
     // FaultStore. All one-time allocations (Session ctor, coroutine frames,
-    // per-thread recycler init) happen during setup outside the alloc guard.
+    // recycler init) happen during setup outside the alloc guard.
     auto result = make_reconnect_initiator(/*seeded_in=*/5, /*seeded_out=*/7,
                                            /*refresh_on_logon=*/true, /*persistent=*/true);
     auto& fix = *result.fix;

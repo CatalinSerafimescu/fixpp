@@ -26,7 +26,7 @@
 //   due to Lewis Baker / cppcoro; all post-RC additions are original work.
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Design anchor: .specify/2f-async-mutex.md v1.6 (errata E-1..E-5)
+// Design anchor: .specify/2f-async-mutex.md v1.6 (errata E-1..E-6)
 // Data model:    specs/048-async-mutex-strand-reap/data-model.md
 // Contracts:     specs/048-async-mutex-strand-reap/contracts/async_mutex-contract.md
 //                specs/006-async-mutex/contracts/async_mutex_awaiter.hpp
@@ -40,7 +40,7 @@
 // This achieves zero global heap allocation on both the uncontended and contended
 // paths when mr==nullptr and HALO fires (§4.3.4 case 1).
 //
-// Frameless lock op (fixpp#544, .specify/544-hot-path-zero-alloc.md §2.3): the
+// Erratum E-6 (fixpp#544 — frameless lock op), .specify/544-hot-path-zero-alloc.md §2.3: the
 // awaiter lives in a caller-owned detail::lock_frame, and the lock is a
 // `deferred` operation that the caller co_awaits directly, through the one
 // sequence FIXPP_DETAIL_CO_AWAIT_LOCK defines. async_lock() is a thin coroutine
@@ -520,14 +520,17 @@ namespace detail {
 //
 // Erratum E-4 (2026-05-19): asio 1.36.0's cancellation_slot has NO
 // allocator-binding hook (cancellation_signal::prepare_memory ->
-// thread_info_base::allocate(cancellation_signal_tag); a per-thread recycling
-// cache, not bind_allocator-aware). slot_allocator is therefore NOT bound to
+// thread_info_base::allocate(cancellation_signal_tag); asio's recycling cache,
+// not bind_allocator-aware). slot_allocator is therefore NOT bound to
 // the cancellation slot. It is retained as the typed, Allocator-shaped
 // storage-policy wrapper for the allocation 2f *does* control — the
 // waiter_record fallback — and is unit-verified by §9 seam #21 in isolation.
-// The cancellation-handler closure uses asio's per-thread recycler (zero
-// global new/delete in steady state by construction; one-time per-thread
-// first-touch is §6.4 bench-soft).
+// The cancellation-handler closure uses asio's recycler (zero global
+// new/delete in steady state by construction; the first touch in each
+// scheduler call is §6.4 bench-soft). Erratum E-6 corrects E-4's scope: the
+// cache lives for one scheduler call (an io_context run-family call), not
+// for the thread, and holds fixpp's exported slot count per purpose
+// (include/fixpp/core/detail/asio_recycler_config.hpp).
 //
 // Three exhaustive cases (post-E-4, re-anchored to waiter_record storage):
 //   case 1 (mr == nullptr): the per-mutex waiter_pool_ arm (E-2) — modelled

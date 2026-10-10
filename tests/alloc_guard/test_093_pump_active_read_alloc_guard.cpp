@@ -16,10 +16,12 @@
 // initiation, and nothing the peer does.
 //
 // A regression witness, not a disarm witness: asio serves handler and coroutine-frame
-// storage from a per-thread recycling cache when a cached block fits, without calling
-// operator new, so a race left armed after Active need not show here. A frame larger than
-// the cache holds is allocated on every use instead (L-497-1). Quickstart Q-36 witnesses
-// the disarm by behaviour.
+// storage from a recycling cache when a cached block fits, without calling operator new,
+// so a race left armed after Active need not show here. That cache lives for one
+// scheduler call (an io_context run-family call), not for the thread
+// (`.specify/544-hot-path-zero-alloc.md` §1(b)). A frame larger than the cache's block
+// limit is allocated on every use instead. Quickstart Q-36 witnesses the disarm by
+// behaviour.
 //
 // This cell counts global operator new only. asio allocates those frames through
 // std::aligned_alloc, which the counter cannot see.
