@@ -338,8 +338,10 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
 TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
 #ifndef NDEBUG
     // The nested send's own toApp enters callback_dispatch_scope while the outer toApp's is
-    // live, and that scope asserts no nested callback entry in builds without NDEBUG.
-    GTEST_SKIP() << "a send nested in toApp trips callback_dispatch_scope's assert without NDEBUG";
+    // live, and that scope asserts no nested callback entry in builds without NDEBUG. That
+    // assert is fixpp#564; this cell runs where NDEBUG is defined until #564 is resolved.
+    GTEST_SKIP() << "fixpp#564: a send nested in toApp trips callback_dispatch_scope's "
+                    "assert without NDEBUG";
 #endif
     SlotFixture f;
     Session sess(f.engine, f.cfg());
