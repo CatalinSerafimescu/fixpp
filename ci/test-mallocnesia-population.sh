@@ -97,6 +97,48 @@ ctl() {  # ctl <control> [<entry>] — the control's spec, naming <entry> (defau
 CONTROLS=()
 for _c in "${CONTROL_NAMES[@]}"; do CONTROLS+=("$(ctl "$_c")"); done
 
+# fixpp#544 (B35)'s gates, which the checker requires BY NAME (its REQUIRED_GATES). Every
+# fixture meant to reach the later rules carries them, for the reason given for the
+# controls above. SPELLED OUT, not derived from the checker, for the same reason as
+# CONTROL_NAMES: the T10a arms assert each one's absence is reported by name.
+REQUIRED_NAMES=(
+  alloc_guard_544_arm_a_tracked_executor_mallocnesia
+  alloc_guard_544_arm_e_slot_held_mallocnesia
+  alloc_guard_544_arm_s_run_one_for_mallocnesia
+  alloc_guard_544_ch_arm_mallocnesia
+  alloc_guard_544_ch_no_edit_twin_mallocnesia
+  alloc_guard_544_ch_production_twin_mallocnesia
+  alloc_guard_544_cl_arm_mallocnesia
+  alloc_guard_544_cl_production_twin_mallocnesia
+  alloc_guard_544_clp_no_edit_twin_mallocnesia
+  alloc_guard_544_cp_arm_mallocnesia
+  alloc_guard_544_veto_then_zero_mallocnesia
+  alloc_guard_544_wa_active_heartbeat_mallocnesia
+  alloc_guard_544_wa_bl_arm_mallocnesia
+  alloc_guard_544_wa_bl_twin_mallocnesia
+  alloc_guard_544_wa_bs_arm_mallocnesia
+  alloc_guard_544_wa_bs_twin_mallocnesia
+  alloc_guard_544_wb_active_app_message_mallocnesia
+  alloc_guard_544_wd_bl_arm_mallocnesia
+  alloc_guard_544_wd_bl_twin_mallocnesia
+  alloc_guard_544_wd_bs_arm_mallocnesia
+  alloc_guard_544_wd_bs_twin_mallocnesia
+  alloc_guard_544_wdr_bracket_arm_mallocnesia
+  alloc_guard_544_wdr_bracket_twin_mallocnesia
+  alloc_guard_544_wdr_store_live_read_mallocnesia
+  alloc_guard_544_wdw_real_chain_arm_mallocnesia
+  alloc_guard_544_wdw_real_chain_twin_mallocnesia
+  alloc_guard_544_wdw_stand_in_arm_mallocnesia
+  alloc_guard_544_wdw_stand_in_twin_mallocnesia
+  alloc_guard_544_wdw_stand_in_window_mallocnesia
+  alloc_guard_544_we_sends_interleaved_mallocnesia
+  perf_session_recovery_heartbeat_mallocnesia
+  perf_store_alloc_guard_wd_mallocnesia
+  session_refresh_on_logon_w8_mallocnesia
+)
+REQUIRED=()
+for _r in "${REQUIRED_NAMES[@]}"; do REQUIRED+=("$_r:mallocnesia"); done
+
 # T0 — THE REAL TREES, one per Linux Release preset tier1.yml runs the gates on. Without
 # this the suite proves only that the checker can say no. Each is skipped (not failed) when
 # its configured build is absent, e.g. on a buildless lane.
@@ -111,15 +153,15 @@ done
 
 check "T1 a gate missing the label is REPORTED, not tolerated" 1 \
   "do NOT carry the \`mallocnesia\` label" \
-  "$(mk t1 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
+  "$(mk t1 "${CONTROLS[@]}" "${REQUIRED[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
 
 check "T2 an UNDECLARED label member fails (the label cannot become a catch-all)" 1 \
   "nor are declared in DECLARED_EXTRAS" \
-  "$(mk t2 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t2 "${CONTROLS[@]}" "${REQUIRED[@]}" "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
 
 check "T3 a STALE declared row fails (a declaration describing nothing)" 1 \
   "no longer carries the label" \
-  "$(mk t3 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
+  "$(mk t3 "${CONTROLS[@]}" "${REQUIRED[@]}" "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
 
 # ⚠️ THE ONE THAT MATTERS. Zero registered gates makes every set comparison trivially
 # true, and `ctest -L mallocnesia --no-tests=error` still exits 0 when ANY label member
@@ -135,7 +177,7 @@ check "T5 ZERO labelled tests is RED (a CI step that would run nothing)" 1 \
 
 check "T6 the happy case passes (the checker is not simply always-RED)" 0 \
   "named gate(s), all labelled" \
-  "$(mk t6 "${CONTROLS[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t6 "${CONTROLS[@]}" "${REQUIRED[@]}" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
 
 # ── T7: the POSITIVE CONTROLS' own membership. The floor counts NAMES,
 # and a name is cheap — a decoy satisfies it while a real gate is deleted. A control is
@@ -148,12 +190,12 @@ for _missing in "${CONTROL_NAMES[@]}"; do
   for _c in "${CONTROL_NAMES[@]}"; do [ "$_c" = "$_missing" ] || _others+=("$(ctl "$_c")"); done
   check "T7a a missing control is rejected BY NAME: $_missing" 1 \
     "MISSING from the \`mallocnesia\` label: $_missing" \
-    "$(mk "t7a-$_missing" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${_others[@]}" "${EXTRAS[@]}")"
+    "$(mk "t7a-$_missing" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${_others[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")"
 done
 
 check "T7b an UNDECLARED positive control is rejected (nobody would notice losing it)" 1 \
   "UNDECLARED positive control(s) in the \`mallocnesia\` label: x_positive_control_mallocnesia" \
-  "$(mk t7b "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t7b "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
 
 # ── T7d/T7e: each control names its OWN hook. --expect-violation accepts any violation,
 # so without --expect-entry a control passes on an allocation that reached another hook.
@@ -166,7 +208,7 @@ for _bare in "${CONTROL_NAMES[@]}"; do
   done
   check "T7d a control that names no entry point is rejected BY NAME: $_bare" 1 \
     "positive control $_bare does not require its own entry point" \
-    "$(mk "t7d-$_bare" "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+    "$(mk "t7d-$_bare" "a_mallocnesia:mallocnesia" "${_set[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")"
 done
 
 _set=()
@@ -179,7 +221,7 @@ for _c in "${CONTROL_NAMES[@]}"; do
 done
 check "T7e a control that names ANOTHER control's entry point is rejected" 1 \
   "positive control alloc_guard_memalign_positive_control_mallocnesia does not require its own entry point: its command names --expect-entry ['calloc']" \
-  "$(mk t7e "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+  "$(mk t7e "a_mallocnesia:mallocnesia" "${_set[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")"
 
 # The entry must be the VALUE of --expect-entry, not merely a token in the command.
 _set=()
@@ -192,12 +234,12 @@ for _c in "${CONTROL_NAMES[@]}"; do
 done
 check "T7f an entry named elsewhere in the command does not count" 1 \
   "positive control alloc_guard_memalign_positive_control_mallocnesia does not require its own entry point: its command names --expect-entry ['calloc']" \
-  "$(mk t7f "a_mallocnesia:mallocnesia" "${_set[@]}" "${EXTRAS[@]}")"
+  "$(mk t7f "a_mallocnesia:mallocnesia" "${_set[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")"
 
 check "T7g duplicate gate or control names are rejected before a command stands in" 1 \
   "duplicate test name(s)" \
   "$(mk t7g "$(ctl alloc_guard_memalign_positive_control_mallocnesia "")" \
-            "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")"
+            "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")"
 
 # ── T7h: no label member may carry a property that alters its verdict. Each arm is the
 # full happy set plus ONE property on ONE member; a broken control exits 1, so each of
@@ -214,29 +256,63 @@ for _pv in "DISABLED TRUE" "WILL_FAIL TRUE" "SKIP_RETURN_CODE 1" \
   _p="${_pv%% *}"
   check "T7h a control carrying $_p is rejected BY NAME" 1 \
     "$_ctl carries $_p." \
-    "$(with_prop "$(mk "t7h-$_p" "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+    "$(with_prop "$(mk "t7h-$_p" "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" \
                  "$_ctl" $_pv)"
 done
 check "T7h a plain gate carrying SKIP_RETURN_CODE is rejected BY NAME" 1 \
   "a_mallocnesia carries SKIP_RETURN_CODE." \
-  "$(with_prop "$(mk t7h-gate "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+  "$(with_prop "$(mk t7h-gate "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" \
                a_mallocnesia SKIP_RETURN_CODE 1)"
 check "T7h a declared extra carrying DISABLED is rejected BY NAME" 1 \
   "${EXTRAS[0]%%:*} carries DISABLED." \
-  "$(with_prop "$(mk t7h-extra "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+  "$(with_prop "$(mk t7h-extra "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" \
                "${EXTRAS[0]%%:*}" DISABLED TRUE)"
 # Its happy half: a property that only ADDS failures is not rejected.
 check "T7h a member carrying TIMEOUT only is accepted" 0 \
   "named gate(s), all labelled" \
-  "$(with_prop "$(mk t7h-timeout "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" \
+  "$(with_prop "$(mk t7h-timeout "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" \
                "$_ctl" TIMEOUT 30)"
 
 # ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
-out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?
+out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?
 if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 50"; then
   echo "ok    T7c the --min-gates floor fires when the population SHRINKS"; pass=$((pass+1))
 else
   echo "FAIL  T7c floor did not fire: rc=$rc"; echo "$out" | sed 's/^/      /' | head -2; fail=$((fail+1))
+fi
+
+# ── T10: B35's gates, by identity. The floor counts names, so with --min-gates equal to the
+# population a deleted gate plus a padding gate passes it. One arm per required gate, each
+# with every other required gate present and the floor met exactly, so only the identity
+# rule can fire: the arm also requires that the floor did NOT.
+_floor=$(( ${#CONTROL_NAMES[@]} + ${#REQUIRED_NAMES[@]} ))
+for _missing in "${REQUIRED_NAMES[@]}"; do
+  _others=()
+  for _r in "${REQUIRED_NAMES[@]}"; do [ "$_r" = "$_missing" ] || _others+=("$_r:mallocnesia"); done
+  out="$(python3 "$CHECK" --min-gates "$_floor" --build-dir "$(mk "t10a-$_missing" \
+          "${CONTROLS[@]}" "${_others[@]}" "padding_mallocnesia:mallocnesia" "${EXTRAS[@]}")" 2>&1)"; rc=$?
+  if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "MISSING by name: $_missing" \
+     && ! printf '%s' "$out" | grep -qF "floor is"; then
+    echo "ok    T10a a missing B35 gate is rejected BY NAME at an exact floor: $_missing"; pass=$((pass+1))
+  else
+    echo "FAIL  T10a $_missing: rc=$rc (want 1, named, floor not fired)"
+    echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
+  fi
+done
+# The label half of the same rule: every B35 gate registered, one without the label.
+_set=()
+for _r in "${REQUIRED_NAMES[@]}"; do
+  if [ "$_r" = "${REQUIRED_NAMES[0]}" ]; then _set+=("$_r:alloc_guard"); else _set+=("$_r:mallocnesia"); fi
+done
+check "T10c a B35 gate without the label is rejected BY NAME" 1 \
+  "MISSING from the \`mallocnesia\` label: ${REQUIRED_NAMES[0]}." \
+  "$(mk t10c "${CONTROLS[@]}" "${_set[@]}" "${EXTRAS[@]}")"
+out="$(python3 "$CHECK" --min-gates "$_floor" --build-dir "$(mk t10b \
+        "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -qF "named gate(s), all labelled"; then
+  echo "ok    T10b every B35 gate present at the same floor passes"; pass=$((pass+1))
+else
+  echo "FAIL  T10b rc=$rc (want 0)"; echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
 fi
 
 # ── T8: the raw-preload scanner under a NON-UTF-8 LOCALE ─────────────────────
