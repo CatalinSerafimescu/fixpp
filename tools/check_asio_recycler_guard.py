@@ -17,8 +17,8 @@ include/fixpp/core/detail/asio_recycler_config.hpp. Two checks:
   census   Every compile_commands.json entry whose command line carries one of asio's
            include directories also carries `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, and
            only that value, with N read from the guard header. It fails closed when no entry
-           carries asio's directory, or when a --require-source file is not among the
-           entries that do. With --positive-control <source>, it strips the definition from
+           carries asio's directory, when a --require-source file is not among the
+           entries that do, or when an entry carries a response file other than a .modmap. With --positive-control <source>, it strips the definition from
            that entry in memory and passes only if the check then reports exactly that
            entry.
 
@@ -177,6 +177,14 @@ def census(entries: list[dict], asio_dirs: set[str], n: str) -> tuple[list[dict]
     failures: list[str] = []
     for entry in entries:
         tokens = entry_tokens(entry)
+        # A response file can carry the -I/-isystem that makes an entry reach asio, and the
+        # census does not read it, so such an entry is refused, not skipped. CMake's module
+        # scanning adds `@<obj>.modmap`, which carries no include or define. Precedent:
+        # ci/odr-hooks-census.py, parse_entry.
+        for tok in tokens:
+            if tok.startswith("@") and not tok.endswith(".modmap"):
+                raise InstrumentError(f"response file {tok} in {entry['file']}: its flags "
+                                      "cannot be read")
         dirs, values = entry_includes_and_values(tokens, entry.get("directory", "."))
         if not dirs & asio_dirs:
             continue

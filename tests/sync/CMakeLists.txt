@@ -341,7 +341,9 @@ endif()  # NOT WIN32 — no_std_mutex bash lint gate (waived on Windows)
 #   asio_recycler_compile_census           every compile_commands.json entry with asio's
 #                                          include directory carries the exported value;
 #   asio_recycler_compile_census_positive_control  its positive control: one entry stripped
-#                                          in memory, and only it, is reported.
+#                                          in memory, and only it, is reported;
+#   asio_recycler_compile_census_response_file_refused  a seeded database whose wrong value
+#                                          sits in a response file must be refused (exit 2).
 # Linux/macOS only for now: they shell out to python3 and to the compiler with GCC/Clang
 # flags; the driver refuses an MSVC front end.
 if(NOT WIN32)
@@ -380,10 +382,24 @@ if(NOT WIN32)
   add_test(NAME asio_recycler_compile_census_positive_control
     COMMAND python3 "${_fixpp_recycler_tool}" census ${_fixpp_recycler_census_args}
       --positive-control "src/session/session.cpp")
+  # The seeded database (fixtures/asio_recycler_guard/census_response_file) has one entry that
+  # carries N and a .modmap, and one whose include directory and wrong value are only in
+  # wrong_n.rsp. The census must refuse the second entry by name: the message is printed on
+  # the exit-2 path only, and it names the .rsp, so neither a pass nor a refusal of the
+  # .modmap matches it.
+  add_test(NAME asio_recycler_compile_census_response_file_refused
+    COMMAND python3 "${_fixpp_recycler_tool}" census
+      --compile-commands compile_commands.json --asio-include=asio
+      --guard-header guard_value.hpp
+    WORKING_DIRECTORY "${_fixpp_recycler_fixtures}/census_response_file")
+  set_tests_properties(asio_recycler_compile_census_response_file_refused PROPERTIES
+    PASS_REGULAR_EXPRESSION
+      "ERROR \\(the instrument did not run\\): response file @wrong_n\\.rsp in via_response_file\\.cpp: its flags cannot be read")
   set_tests_properties(
     asio_recycler_guard_inclusion asio_recycler_guard_inclusion_seeded
     asio_recycler_guard_negative_compile asio_recycler_compile_census
     asio_recycler_compile_census_positive_control
+    asio_recycler_compile_census_response_file_refused
     PROPERTIES LABELS "544;asio_recycler")
 endif()
 
