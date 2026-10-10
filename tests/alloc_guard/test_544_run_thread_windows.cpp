@@ -9,6 +9,9 @@
 //   W-B    an Active inbound application message through parse -> validate -> dispatch;
 //   W-E    W-B interleaved with `Session::send`s from a long-lived sender, and the
 //          veto-then-zero cell (a vetoed send before the window);
+//   (e)    W-E with the send slot's flag set by the test before the warm-up and left set,
+//          so every send takes the fallback leaf, whose frame is over the recycler's limit;
+//          its twin is W-E;
 //   (a)    W-A with the Engine on a work-tracked executor, which takes the strand's
 //          fallback path; its twin is W-A;
 //   (b-L)  W-A with a planted frame over, and under, the recycler's size limit;
@@ -46,6 +49,7 @@
 #include "session/session_strand.hpp"  // fixpp#544 §2.1: the target-type oracle
 #include "support/recycler_driver.hpp"
 #include "support/run_thread_engine_rig.hpp"
+#include "support/session_test_access.hpp"
 
 // ── Sanitizer-detection guard (tests/alloc_guard/test_validate_gate_alloc_guard.cpp) ──
 #ifdef __has_feature
@@ -207,6 +211,8 @@ struct cell_spec {
     inbound frames = inbound::heartbeat;
     loop_kind loop = loop_kind::none;
     bool veto_one_before_window = false;
+    // Arm (e): the test holds the send slot, on the session strand, before the warm-up.
+    bool hold_send_slot = false;
 };
 
 // Runs one window: setup, K warm-up frames, the window over M + 1 frames, a strand-side
@@ -236,6 +242,10 @@ window_result run_window(cell_spec const& spec, MakeBody make_body) {
     auto sess = rig.session();
     auto body = make_body(rig, sess.get(), std::span<const std::byte>{payload});
     if (r.up && sess && spec.loop != loop_kind::none) r.up = rig.start_woken_loop(body);
+    if (r.up && sess && spec.hold_send_slot) {
+        r.up = rig.on_strand(
+            [sess] { fixpp::session::session_test_access::send_slot_in_use(*sess) = true; });
+    }
 
     int next = 0;
     if (r.up) {
@@ -360,6 +370,19 @@ TEST(B35RunThreadWindows, VetoThenZero_SendsAfterAVetoedSend) {
     EXPECT_EQ(r.loop_ok, r.completions - 1) << "a send after the vetoed one did not succeed";
     EXPECT_GE(r.peer_app_frames, r.loop_ok);
     check_tu_count(r.tu_count, tu_expect::print_only, "veto-then-zero");
+}
+
+// ── Arm (e): every send takes the fallback leaf ──────────────────────────────
+
+TEST(B35RunThreadWindows, ArmE_SlotHeldSendsTakeTheLeaf) {
+    cell_spec spec = sender_spec(false);
+    spec.hold_send_slot = true;
+    auto const r = run_window(spec, make_sender);
+    expect_window_ran(r);
+    EXPECT_EQ(r.app_messages, r.completions);
+    EXPECT_EQ(r.loop_ok, r.completions) << "a send in the window did not succeed";
+    EXPECT_GE(r.peer_app_frames, r.loop_ok) << "a successful send did not reach the peer";
+    check_tu_count(r.tu_count, tu_expect::print_only, "arm (e)");
 }
 
 // ── Arm (a): the strand's fallback executor ──────────────────────────────────

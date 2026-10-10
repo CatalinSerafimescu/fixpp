@@ -1501,8 +1501,37 @@ private:
     // error value (a toApp passthrough can carry a store-block error value
     // without having reached the commit region). Default-false; the caller
     // must initialize it. [contracts/store-then-emit-disposition.md item 3]
+    // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; rulings R-9, R-10):
+    // send_impl is the send tail. It builds into `frame_buf` through build_send_frame_,
+    // then runs toApp, assign_outbound and store_then_emit over it, so `frame_buf` must
+    // outlive the call. Its callers are Session::send (the session's frame slot) and
+    // send_fallback_leaf_ (the leaf's own buffer); re-check with
+    // `git grep -n "send_impl(" -- src include`.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
-        std::span<const std::byte> app_payload, bool& disconnect_required);
+        std::span<const std::byte> app_payload, std::span<std::byte> frame_buf,
+        bool& disconnect_required);
+
+    // fixpp#544 §2.5: the frame build of Session::send, a non-coroutine. It runs the 020
+    // payload checks, the 022 scanner and excision pass, the SendingTime(52) stamp, the
+    // MsgSeqNum peek and the framing, in that order, and writes the frame into `out`. It
+    // uses send_strip_scratch_ and send_body_scratch_ without the slot flag, which is sound
+    // while it calls no Application callback: on the strand nothing else can run while it
+    // does. Its one injected dependency is the clock's now(), at the position the stamp
+    // has always had.
+    struct send_frame_built {
+        std::size_t size = 0;
+        seqnum_t seq = 0;
+    };
+    [[nodiscard]] fixpp::core::expected_t<send_frame_built> build_send_frame_(
+        std::span<const std::byte> app_payload, std::span<std::byte> out);
+
+    // fixpp#544 §2.5 (R-10): the fallback for a send that finds the frame slot held (a send
+    // nested in toApp, or overlapping one suspended in its store or its write). Its frame
+    // owns a frame buffer, so it is over asio's recycler limit and allocates; it never
+    // writes the slot flag. Its first statement is FIXPP_INBOUND_SPLIT_ENTRY(tic), the
+    // callee half of the b3 boundary Session::send awaits it through.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_fallback_leaf_(
+        bool tic, std::span<const std::byte> app_payload, bool& disconnect_required);
 
     // 015 T016(d) — emit the initial initiator Logon via the admin-builder path
     // (build_logon + assign_outbound + store_then_emit). Extracted from open()'s
@@ -1616,6 +1645,21 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<logon_789_outcome>>
     honor_peer_next_expected_(std::string_view raw_789, bool present_789,
                               fixpp::session::seqnum_t next_outbound_ref, fsm_state arm) noexcept;
+
+    // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; rulings R-9, R-10): the
+    // send path's session-owned storage, allocated with the Session, so once per session
+    // and never per message ([const §XV.1]).
+    //   - send_strip_scratch_ and send_body_scratch_: build_send_frame_'s scratch, used
+    //     only inside that synchronous helper;
+    //   - send_frame_slot_: the frame Session::send's primary path builds into; it is read
+    //     until store_then_emit returns;
+    //   - send_slot_in_use_: set and cleared only by Session::send's RAII holder, on the
+    //     session strand. A send that finds it set takes send_fallback_leaf_.
+    static constexpr std::size_t kSendFrameBytes = 4096;
+    std::array<std::byte, kSendFrameBytes> send_strip_scratch_{};
+    std::array<std::byte, kSendFrameBytes> send_body_scratch_{};
+    std::array<std::byte, kSendFrameBytes> send_frame_slot_{};
+    bool send_slot_in_use_ = false;
 };
 
 }  // namespace fixpp::session

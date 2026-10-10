@@ -1973,6 +1973,27 @@ set_tests_properties(session_544_inbound_split_cancel PROPERTIES
   LABELS "544;session;tsan"
   TIMEOUT 300)
 
+# fixpp#544 (B35 Phase 5; `.specify/544-hot-path-zero-alloc.md` §2.5, §3 "Behaviour"): the
+# send slot's overlap, release and cancellation cells. Registered on every platform and build
+# type, like the session suites; the ASan lane runs them with default options.
+add_executable(session_544_send_slot_test
+  test_544_send_slot_cells.cpp
+)
+target_link_libraries(session_544_send_slot_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_send_slot_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_544_send_slot COMMAND session_544_send_slot_test)
+set_tests_properties(session_544_send_slot PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
 # ── 026-nanosecond-sendingtime (S-039) — session emit/inbound precision suite ──
 # Session config/emit/inbound + no-heap witnesses for configurable SendingTime(52)
 # precision incl. nanos (27-char) + lenient inbound parse. Core formatter/parser

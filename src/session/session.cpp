@@ -5349,7 +5349,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
 // Pipeline per FR-001 + [2e §4.1] durable-before-transmit:
 //   (1) stamp SendingTime(52) from effective_clock.now();
 //   (2) assign outbound MsgSeqNum(34) via seqnum_mgr_.assign_outbound() (RC#A);
-//   (3) build the framed wire bytes into a stack buffer ([const §VIII.5] — no heap);
+//   (3) build the framed wire bytes into the session's frame slot, or the fallback
+//       leaf's own buffer (fixpp#544 §2.5);
 //   (4) store_then_emit (I-3): store(outbound) BEFORE transport_send_.
 //
 // Frame layout: 8=<begin_string>\x01 9=<NNN>\x01 34=<seq>\x01 49=<sender>\x01
@@ -5359,8 +5360,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
 // CheckSum (10=): byte-sum mod 256 over all bytes from start through end of "10=CCC\x01" body.
 // Per [FIX-SL §4.2]: 9= and 10= computed here; all other session fields stamped inline.
 //
-// Stack buffer: 4096 bytes. app_payload larger than ~3800 bytes returns wire_frame_too_large.
-// [const §VIII.5]: no heap allocation on this path.
+// Frame buffer: kSendFrameBytes. app_payload larger than ~3800 bytes returns wire_frame_too_large.
+// [const §VIII.5]: no heap allocation on the primary path. A send that finds the frame slot
+// held takes send_fallback_leaf_, whose frame owns its buffer and is allocated (fixpp#544
+// §2.5, rulings R-10 and R-6).
 //
 // gate-b/r1 FQ-1 (RC#1): the persistent store-retain fatal class, matching
 // store_then_emit's durability-classified gate (is_persistent_retain_fatal) rather
@@ -5373,6 +5376,33 @@ static bool is_persistent_retain_fatal(fixpp::core::error e) noexcept {
     using fixpp::core::error;
     return e >= error::store_io_failure && e < error::store_cancelled;
 }
+
+namespace {
+// fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; ruling R-10): one Session::send
+// invocation's hold on the session's frame slot. It takes the slot only when the flag is
+// clear, and clears only a flag it set itself, so a send that found the slot held, and a
+// flag a test set, are left alone. Its destructor is the only place the flag is cleared,
+// and it runs on every exit of the invocation: a co_return, a throw, and the destruction of
+// a suspended frame.
+class send_slot_holder {
+public:
+    explicit send_slot_holder(bool& in_use) noexcept : in_use_(in_use), held_(!in_use) {
+        if (held_) in_use_ = true;
+    }
+    ~send_slot_holder() {
+        if (held_) in_use_ = false;
+    }
+    send_slot_holder(const send_slot_holder&) = delete;
+    send_slot_holder(send_slot_holder&&) = delete;
+    send_slot_holder& operator=(const send_slot_holder&) = delete;
+    send_slot_holder& operator=(send_slot_holder&&) = delete;
+    [[nodiscard]] bool held() const noexcept { return held_; }
+
+private:
+    bool& in_use_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    bool held_;
+};
+}  // namespace
 
 asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
@@ -5402,7 +5432,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
         // allows any error::* return) without having reached the commit region,
         // and must stay Active per INV-5/SC-004.
         bool disconnect_required = false;
-        auto impl_r = co_await send_impl(app_payload, disconnect_required);
+        // fixpp#544 §2.5 (R-10): the holder is declared inside this try, so a throw releases
+        // the slot before a catch below runs, and it outlives send_impl, whose
+        // store_then_emit reads the slot until it returns. Session::send -> send_impl is
+        // the boundary that predates the slot, so it stays a plain co_await. The leaf is a
+        // new boundary, so it goes through the b3 sequence (FIXPP_INBOUND_SPLIT_AWAIT): the
+        // first cancellation check of a leaf send stays at send_impl's own co_awaits.
+        const send_slot_holder slot{send_slot_in_use_};
+        fixpp::core::expected_t<void> impl_r{};
+        if (slot.held()) {
+            impl_r = co_await send_impl(app_payload, send_frame_slot_, disconnect_required);
+        } else {
+            bool tic = true;
+            FIXPP_INBOUND_SPLIT_AWAIT(leaf_r, tic,
+                                      send_fallback_leaf_(tic, app_payload, disconnect_required));
+            impl_r = leaf_r;
+        }
         // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
         // into dispatch_aborted expected_t error, transition to Disconnected per US1 AC3.
         // dispatch_aborted(55) is outside is_persistent_retain_fatal's [56,65) range, so
@@ -5469,8 +5514,8 @@ static bool is_send_header_tag(std::uint32_t tag) noexcept {
     return std::ranges::find(kSendHeaderTags, tag) != kSendHeaderTags.end();
 }
 
-asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
-    std::span<const std::byte> app_payload, bool& disconnect_required) {
+fixpp::core::expected_t<Session::send_frame_built> Session::build_send_frame_(
+    std::span<const std::byte> app_payload, std::span<std::byte> out) {
     using fixpp::core::error;
 
     // ── T010: Opaque-payload validation — BEFORE seqnum peek/assign/stamp ──────
@@ -5481,12 +5526,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
         // (1) Empty payload is malformed.
         if (pv.empty()) {
-            co_return std::unexpected(error::app_payload_malformed);
+            return std::unexpected(error::app_payload_malformed);
         }
 
         // (2) Payload must lead with "35=".
         if (pv.size() < 3 || pv[0] != '3' || pv[1] != '5' || pv[2] != '=') {
-            co_return std::unexpected(error::app_payload_malformed);
+            return std::unexpected(error::app_payload_malformed);
         }
 
         // (2a) Payload must end with SOH so the last field is terminated before
@@ -5494,7 +5539,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         //      field to be appended without a field boundary. [RC#2: gate-b/r1]
         // cppcheck-suppress containerOutOfBounds  // FP: the pv.empty() guard above returns first
         if (pv.back() != '\x01') {
-            co_return std::unexpected(error::app_payload_malformed);
+            return std::unexpected(error::app_payload_malformed);
         }
 
         // (2b) MsgType value must be non-empty: the first SOH must be at offset > 3
@@ -5504,7 +5549,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             const std::size_t fst = pv.find('\x01');
             // fst != npos is guaranteed because pv.back() == '\x01' was verified above.
             if (fst <= 3U) {
-                co_return std::unexpected(error::app_payload_malformed);
+                return std::unexpected(error::app_payload_malformed);
             }
         }
 
@@ -5539,13 +5584,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     //   INV-1: 35= (field 0) never touched.
     //   INV-2: only complete, real 43=..\x01 / 122=..\x01 fields removed.
     //   INV-3: stripped payload remains 35=-leading SOH-delimited.
-    //   INV-4: no heap — ONE stack scratch strip_buf (sized same as body_buf).
+    //   INV-4: no heap — ONE scratch strip_buf, session-owned (sized same as body_buf).
     //   INV-5: build_replay_frame is NOT on this path.
 
-    // strip_buf declared at this scope so it outlives the scanner+excision block
-    // and remains valid when the framing block below reads app_payload (which may
-    // be rebound to point into it). [research.md D6; INV-4]
-    std::array<std::byte, 4096> strip_buf{};
+    // strip_buf names the session-owned send_strip_scratch_ (fixpp#544 §2.5), so it
+    // outlives the scanner+excision block and remains valid when the framing block
+    // below reads app_payload (which may be rebound to point into it). [research.md D6; INV-4]
+    auto& strip_buf = send_strip_scratch_;
     std::size_t strip_len = 0;
 
     {
@@ -5590,7 +5635,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             while (pos < pv.size()) {
                 const auto field = next_field(pos, carry);
                 if (!field || std::ranges::find(kRefusedTags, field->tag) != kRefusedTags.end()) {
-                    co_return std::unexpected(error::app_payload_malformed);
+                    return std::unexpected(error::app_payload_malformed);
                 }
                 pos = field->end;
             }
@@ -5608,7 +5653,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
             // INV-1: always copy the leading 35=<value>\x01 field verbatim.
             if (!wstrip(pv.substr(0, lead_soh + 1))) {
-                co_return std::unexpected(error::wire_frame_too_large);
+                return std::unexpected(error::wire_frame_too_large);
             }
 
             // Pass 1 copies the header-class fields, pass 2 the rest, each in the
@@ -5620,7 +5665,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
                 while (pos < pv.size()) {
                     const auto field = next_field(pos, carry);
                     if (!field) {  // the scanner pass accepted every field
-                        co_return std::unexpected(error::app_payload_malformed);
+                        return std::unexpected(error::app_payload_malformed);
                     }
                     const bool header =
                         field->counted ? prev_header : is_send_header_tag(field->tag);
@@ -5630,7 +5675,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
                     if (!excised && header == header_pass) {
                         // Copy the field (including its terminating SOH).
                         if (!wstrip(pv.substr(field->start, field->end - field->start))) {
-                            co_return std::unexpected(error::wire_frame_too_large);
+                            return std::unexpected(error::wire_frame_too_large);
                         }
                     }
                     prev_header = header;
@@ -5640,7 +5685,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
             // Rebind app_payload to the rebuilt buffer — the existing framing below
             // consumes it unchanged (INV-3; contracts §C2.6).
-            // strip_buf is alive at send_impl scope until co_return.
+            // strip_buf is session-owned, so it outlives the framing below.
             app_payload = std::span<const std::byte>(strip_buf.data(), strip_len);
         }
     }
@@ -5655,7 +5700,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     //   1. Stamp SendingTime(52).
     //   2. Peek seqnum.
     //   3. Split the leading "35=<value>\x01" off app_payload.
-    //   4. Build the BODY into a local stack scratch buffer `body_buf`:
+    //   4. Build the BODY into the session-owned scratch buffer `body_buf`:
     //        35=<value>\x01  34=<seq>\x01  49=<sender>\x01  52=<time>\x01
     //        56=<target>\x01  <rest-of-payload>
     //   5. Measure body length L.
@@ -5681,15 +5726,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // truncated — the payload has no SOH terminator, which is a well-formed
     // frame requirement. Reject gracefully.
     if (first_soh == std::string_view::npos) {
-        co_return std::unexpected(error::app_payload_malformed);
+        return std::unexpected(error::app_payload_malformed);
     }
     std::string_view msgtype_field = pv.substr(0, first_soh + 1);  // "35=D\x01"
     std::string_view rest_payload = pv.substr(first_soh + 1);      // remaining fields
 
-    // (4) Build BODY into a second stack buffer.
+    // (4) Build BODY into a second scratch buffer, session-owned (send_body_scratch_).
     // Body layout: 35=<value>\x01  34=<seq>\x01  49=<sender>\x01  52=<time>\x01
     //              56=<target>\x01  <rest_payload>
-    std::array<std::byte, 4096> body_buf{};
+    auto& body_buf = send_body_scratch_;
     std::size_t bpos = 0;
     const std::byte SOH{0x01};
 
@@ -5710,7 +5755,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     // 35=<value>\x01 (already includes SOH from the split above)
     if (!wsv_body(msgtype_field)) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
     // 34=<seq>\x01
     {
@@ -5718,35 +5763,35 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         auto [end, ec] = std::to_chars(nbuf, nbuf + sizeof(nbuf), static_cast<std::uint32_t>(seq));
         (void)ec;
         if (!wfield_body("34=", std::string_view{nbuf, static_cast<std::size_t>(end - nbuf)})) {
-            co_return std::unexpected(error::wire_frame_too_large);
+            return std::unexpected(error::wire_frame_too_large);
         }
     }
     // 49=<sender>\x01
     if (!wfield_body("49=", cfg_.sender_comp_id)) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
     // 52=<time>\x01
     if (!wfield_body("52=", st52.value)) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
     // 56=<target>\x01
     if (!wfield_body("56=", cfg_.target_comp_id)) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
     // rest of app_payload (business fields after the 35= field)
     if (bpos + rest_payload.size() > body_buf.size()) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
     if (!wsv_body(rest_payload)) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
 
     const std::size_t body_len = bpos;  // exact body length, no padding
 
-    // (5) Build the wire frame into `buf`.
+    // (5) Build the wire frame into `buf`, the caller's frame buffer.
     // Frame: "8=<begin>\x01" "9=" <body_len digits> "\x01" <body_buf[0..body_len)>
     //        "10=" <CCC> "\x01"
-    std::array<std::byte, 4096> buf{};
+    const std::span<std::byte> buf = out;
     std::size_t pos = 0;
 
     const auto wb = [&](const char* s, std::size_t n) -> bool {
@@ -5764,7 +5809,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     // 8=<BeginString>\x01
     if (!wfield("8=", cfg_.begin_string)) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
 
     // 9=<body_len digits (no padding)>\x01
@@ -5773,13 +5818,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         auto [bl_end, bl_ec] = std::to_chars(bl_buf, bl_buf + sizeof(bl_buf), body_len);
         (void)bl_ec;
         if (!wfield("9=", std::string_view{bl_buf, static_cast<std::size_t>(bl_end - bl_buf)})) {
-            co_return std::unexpected(error::wire_frame_too_large);
+            return std::unexpected(error::wire_frame_too_large);
         }
     }
 
     // Append the pre-built body (35=…34=…49=…52=…56=…rest).
     if (pos + body_len > buf.size()) {
-        co_return std::unexpected(error::wire_frame_too_large);
+        return std::unexpected(error::wire_frame_too_large);
     }
     for (std::size_t i = 0; i < body_len; ++i) {
         buf[pos++] = body_buf[i];
@@ -5799,9 +5844,26 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
         cs_buf[1] = static_cast<char>('0' + ((csum % 100U) / 10U));
         cs_buf[2] = static_cast<char>('0' + (csum % 10U));
         if (!wfield("10=", std::string_view{cs_buf, 3})) {
-            co_return std::unexpected(error::wire_frame_too_large);
+            return std::unexpected(error::wire_frame_too_large);
         }
     }
+
+    return send_frame_built{.size = pos, .seq = seq};
+}
+
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
+    std::span<const std::byte> app_payload, std::span<std::byte> frame_buf,
+    bool& disconnect_required) {
+    using fixpp::core::error;
+
+    // fixpp#544 §2.5: the build is synchronous and calls no Application callback; toApp
+    // below runs after it, over the frame it wrote into frame_buf.
+    const auto built = build_send_frame_(app_payload, frame_buf);
+    if (!built) {
+        co_return std::unexpected(built.error());
+    }
+    const std::size_t pos = built->size;
+    const seqnum_t seq = built->seq;
 
     // ── 019 T013: toApp inspection/veto (FR-006/007; US2 AC1/AC2; research D6) ──
     // Called AFTER the complete frame is built so the MessageView passed to toApp
@@ -5810,7 +5872,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // A veto does NOT consume the seqnum (assign_outbound called below, after this check).
     // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
     if (engine_.application != nullptr) {
-        std::span<const std::byte> built_frame{buf.data(), pos};
+        std::span<const std::byte> built_frame{frame_buf.data(), pos};
         auto cb_r = parse_and_dispatch_(built_frame, kSendParseArena, [&](auto& mv, auto& sid) {
             return engine_.application->toApp(mv, sid);
         });
@@ -5844,9 +5906,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // Pass the stamped seqnum explicitly (RC#A: next_outbound_seq_ removed).
     // gate-b/r2 FQ-1: commit-region producer site — set provenance flag from the
     // store's own error before returning it un-coerced.
-    auto emit_r = co_await store_then_emit(seq, std::span<const std::byte>(buf.data(), pos));
+    auto emit_r = co_await store_then_emit(seq, std::span<const std::byte>(frame_buf.data(), pos));
     disconnect_required = !emit_r.has_value() && is_persistent_retain_fatal(emit_r.error());
     co_return emit_r;  // store's own error, un-coerced
+}
+
+// fixpp#544 §2.5 (R-10): a send that found the frame slot held. The buffer is a local of
+// this separate coroutine because a coroutine frame's size is fixed at compile time: a
+// buffer declared in Session::send or send_impl would size their frames on every call.
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_fallback_leaf_(
+    bool tic, std::span<const std::byte> app_payload, bool& disconnect_required) {
+    FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    std::array<std::byte, kSendFrameBytes> buf{};
+    co_return co_await send_impl(app_payload, buf, disconnect_required);
 }
 
 fsm_state Session::state() const noexcept { return fsm_state_; }

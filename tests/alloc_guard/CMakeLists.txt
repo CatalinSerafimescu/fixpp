@@ -422,7 +422,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 # ── fixpp#544 (B35; §3): the run-thread windows (W-A, W-B, W-E, the veto-then-zero cell,
-# arms (a), (b-L), (b-S) and (s)) on tests/support/run_thread_engine_rig.hpp. One source,
+# arms (a), (b-L), (b-S), (e) and (s)) on tests/support/run_thread_engine_rig.hpp. One source,
 # two binaries: `mallocnesia.c` refuses a process that defines the allocator names, so the
 # interceptor runs the build without a counter, and FIXPP_B35_TU_COUNTER builds T044's
 # operator new counter in.
@@ -462,6 +462,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_544_wb_active_app_message_mallocnesia|WB_ActiveAppMessage|malloc,aligned_alloc"
     "alloc_guard_544_we_sends_interleaved_mallocnesia|WE_InboundPairInterleavedWithSends|malloc,aligned_alloc"
     "alloc_guard_544_veto_then_zero_mallocnesia|VetoThenZero_SendsAfterAVetoedSend|malloc,aligned_alloc"
+    "alloc_guard_544_arm_e_slot_held_mallocnesia|ArmE_SlotHeldSendsTakeTheLeaf|aligned_alloc"
     "alloc_guard_544_arm_a_tracked_executor_mallocnesia|ArmA_TrackedExecutorFallback|malloc"
     "alloc_guard_544_wa_bl_arm_mallocnesia|WA_BL_Arm_OverLimitPlant|aligned_alloc"
     "alloc_guard_544_wa_bl_twin_mallocnesia|WA_BL_Twin_InLimitPlant|malloc,aligned_alloc"

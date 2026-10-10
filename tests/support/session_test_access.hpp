@@ -107,6 +107,11 @@ struct session_test_access {
     // The session's store, or null before open() (093 plan OD-25: a cell issues a
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
+
+    // The send path's frame-slot flag (fixpp#544 §2.5). Read and write it on the session
+    // strand. A flag the test sets stays set: Session::send's holder clears only a flag it
+    // set itself, and the fallback leaf never writes it.
+    [[nodiscard]] static bool& send_slot_in_use(Session& s) noexcept { return s.send_slot_in_use_; }
 };
 
 }  // namespace fixpp::session
