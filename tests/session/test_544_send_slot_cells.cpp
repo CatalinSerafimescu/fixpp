@@ -253,7 +253,7 @@ struct SlotFixture {
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, what);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << what;
-            return std::unexpected(error::dispatch_aborted);
+            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
         return fut.get();
     }

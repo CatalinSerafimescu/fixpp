@@ -66,6 +66,7 @@
 #include "session/plain_engine_rig.hpp"
 #include "session/session_strand.hpp"
 #include "support/engine_test_access.hpp"
+#include "support/wait_until.hpp"
 #include "transport/asio_plain_transport.hpp"
 
 namespace {
@@ -169,16 +170,6 @@ struct form_names {
 
 using forms = ::testing::Types<production_form, contingency_form>;
 TYPED_TEST_SUITE(B35StrandSemantics, forms, form_names);
-
-// Waits until `flag` is set, or `budget` elapses. True iff set.
-bool wait_for(std::atomic<bool> const& flag, std::chrono::steady_clock::duration budget) {
-    auto const limit = std::chrono::steady_clock::now() + budget;
-    while (!flag.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= limit) return false;
-        std::this_thread::sleep_for(1ms);
-    }
-    return true;
-}
 
 // ── Serialisation ────────────────────────────────────────────────────────────
 
@@ -363,7 +354,7 @@ TYPED_TEST(B35StrandSemantics, WorkTracking_TrackedCopyKeepsRunAliveUntilRelease
     std::this_thread::sleep_for(kStaysAliveFor);
     bool const alive_while_held = !returned.load(std::memory_order_acquire);
     tracked.reset();
-    bool const returned_after_release = wait_for(returned, kReturnBudget);
+    bool const returned_after_release = fixpp::test_support::wait_for_flag(returned, kReturnBudget);
     if (!returned_after_release) ioc.stop();
     runner.join();
     EXPECT_TRUE(alive_while_held) << "run() returned while a tracked executor was held";
@@ -400,7 +391,7 @@ TYPED_TEST(B35StrandSemantics, WorkTracking_PendingReadKeepsRunAliveAndCompletes
     // not a concurrent operation on it.
     std::error_code wec;
     asio::write(writer, asio::buffer("x", 1), wec);
-    bool const returned_after_read = wait_for(returned, kReturnBudget);
+    bool const returned_after_read = fixpp::test_support::wait_for_flag(returned, kReturnBudget);
     if (!returned_after_read) ioc.stop();
     runner.join();
     EXPECT_FALSE(wec) << wec.message();
@@ -542,7 +533,7 @@ void expect_balanced(work_op op) {
     std::this_thread::sleep_for(kStaysAliveFor);
     bool const alive_while_held = !returned.load(std::memory_order_acquire);
     keep.reset();
-    bool const returned_after_release = wait_for(returned, kReturnBudget);
+    bool const returned_after_release = fixpp::test_support::wait_for_flag(returned, kReturnBudget);
     if (!returned_after_release) ioc.stop();
     runner.join();
     EXPECT_TRUE(alive_while_held) << "the operation finished work it did not hold";
