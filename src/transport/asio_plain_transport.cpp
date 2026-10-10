@@ -17,6 +17,7 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/async_result.hpp>
 #include <asio/connect.hpp>
+#include <asio/deferred.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/socket_base.hpp>
@@ -307,8 +308,9 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // NEVER allocate in the read-path completion handler per [const §VIII.5].
     // socket_.async_read_some writes directly into the caller-owned buf.
     asio::error_code ec;
+    // `deferred` (fixpp#544 §2.3): awaited directly, the read adds no adapter frame.
     std::size_t bytes_read = co_await socket_.async_read_some(
-        asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::use_awaitable, ec));
+        asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::deferred, ec));
 
     if (ec) {
         if (ec == asio::error::operation_aborted) {

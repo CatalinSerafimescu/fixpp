@@ -18,15 +18,18 @@
 //
 // Erratum E-4 warm-up (mirrors sync_alloc_guard_test.cpp): asio's
 // cancellation_slot has NO allocator-binding hook. On the first
-// cancellation-slot assignment on a thread asio's detail::thread_info_base
-// performs ONE global aligned_new for its per-thread recycling block.
+// cancellation-slot assignment in a scheduler call asio's
+// detail::thread_info_base performs ONE global aligned_new for its recycling
+// block; the cache lives for that scheduler call, not for the thread (E-6).
+// The warm-up runs in an earlier scheduler call than the window, so it does not
+// prime that cache for the window, and this window is not gated
+// (tests/alloc_guard/CMakeLists.txt, 'WINDOWS OVER SEVERAL SCHEDULER CALLS').
 // The FIRST sleep_until call on a new session also performs ONE global
 // alloc to create the per-session timer slot (the slot is allocated from
 // session_arena via allocate_shared — the shared_ptr control block goes
 // into session_arena, not the global heap; but asio's internal timer
 // strand construction may touch the global heap on first use). The warm-up
-// pass below covers all first-touch allocations so the MEASURED window is
-// zero-global-heap (steady state after cycle 1).
+// pass below covers the slot's first-touch allocation.
 //
 // [const §VIII.5] extended to heartbeat path (N-P1-1); D-8; N-P2-4.
 
@@ -72,7 +75,7 @@ using fixpp::session::threading_mode;
 //
 // Strategy:
 //   1. Build all objects (arenas, engine, session, clock) BEFORE markers.
-//   2. Run WARMUP_CYCLES to prime asio's per-thread recycler + allocate the
+//   2. Run WARMUP_CYCLES to allocate the
 //      per-session timer slot (one-time PMR allocation from session_arena).
 //   3. alloc_guard_start()
 //   4. Run CORPUS_CYCLES using immediate deadlines in the past (no real sleep).
@@ -83,7 +86,7 @@ using fixpp::session::threading_mode;
 // wall-clock delay, no TSan flakiness from timing.
 // ─────────────────────────────────────────────────────────────────────────────
 void run_sleep_corpus(threading_mode mode) {
-    constexpr int WARMUP_CYCLES = 5;  // prime asio recycler + slot alloc
+    constexpr int WARMUP_CYCLES = 5;  // slot alloc (see the Strategy above)
     constexpr int CORPUS_CYCLES = 10'000;
 
     constexpr std::size_t kSessionArenaSize = 65536;

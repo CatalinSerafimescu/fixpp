@@ -25,6 +25,7 @@
 #pragma once
 
 #include <asio/awaitable.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>           // core::expected_t<T>
 #include <fixpp/transport/transport.hpp>  // Transport
 #include <memory>

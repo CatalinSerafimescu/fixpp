@@ -27,6 +27,7 @@
 
 #include <asio/awaitable.hpp>
 #include <cstddef>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>                                  // expected_t / error
 #include <fixpp/session/detail/has_flush_for_session_close.hpp>  // concept (FR-028 A1)
 #include <fixpp/session/direction.hpp>                           // direction_t

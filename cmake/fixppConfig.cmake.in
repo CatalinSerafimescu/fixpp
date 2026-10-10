@@ -43,6 +43,17 @@
 # dependencies, so the consumer's final link must still resolve them). A missing
 # entry therefore surfaces as a hard error inside find_package(fixpp) at CONFIGURE
 # time, not as an undefined symbol at link time.
+#
+# ASIO'S RECYCLER SLOT COUNT (fixpp#544; `.specify/544-hot-path-zero-alloc.md` §2.4).
+# The package carries ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE as a PUBLIC compile
+# definition of fixpp::core, so a consumer of any fixpp:: target that links it
+# inherits it; fixpp::capi and fixpp::service withhold it, because their headers
+# include no asio. The value is written once, in
+# fixpp/core/detail/asio_recycler_config.hpp. Every translation unit in your process
+# that includes asio must be compiled with that same value, including your own asio
+# TUs outside the fixpp:: targets: a mismatch is undefined behaviour that no linker
+# reports. The header's static_assert checks only TUs that include a fixpp header that
+# reaches asio (B&L L-544-1).
 
 include(CMakeFindDependencyMacro)
 

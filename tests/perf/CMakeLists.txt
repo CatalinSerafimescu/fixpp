@@ -51,13 +51,18 @@ endif()
 
 # ── 008-message-store seam registrations ────────────────────────────────────
 # T050 — seam 14: MemoryStore alloc-guard (SC-007 / FR-027 / [const §VIII.5])
-# ⚠️ Its global-heap claim is NOT CHECKED: no mallocnesia gate is registered for it,
-# because the steady-state store() window allocates (asio coroutine frames through
-# std::aligned_alloc; mechanism: fixpp#544). The base test still
-# runs its counting_resource and functional assertions. To run the window by hand:
-#   GTEST_FILTER='*Mallocnesia*' python3 tools/check_alloc.py \
+# fixpp#544 (B35, §3 W-D): the steady-state store() cell is W-D, in the driver-template
+# window shape, and its global-heap half is registered under the interceptor, Release-only,
+# where it must read zero. ⚠️ The FileStore retrieve() cell's global-heap half is NOT CHECKED
+# (disclosed, not gated). To run that window by hand:
+#   GTEST_FILTER='*FileStoreRetrieve*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/perf_store_alloc_guard --mallocnesia <build>/lib/libmallocnesia.so
 fixpp_add_store_test(perf_store_alloc_guard SOURCES test_store_alloc_guard.cpp)
+fixpp_add_release_mallocnesia_test(
+  NAME perf_store_alloc_guard_wd_mallocnesia
+  TARGET perf_store_alloc_guard
+  CASE "StoreAllocGuard.Mallocnesia_ZeroGlobalHeapStoreSteadyState"
+  LABELS perf alloc_guard 544)
 
 # ── Phase 3a tests (wired by T029): ──────────────────────────────────────────
 
@@ -113,10 +118,12 @@ set_tests_properties(perf_socket_option_defaults PROPERTIES
 
 # T020 — 013-session-reconnect-binding Phase 3 (RED) — session recovery alloc-guard.
 # CTest name: perf_session_recovery_alloc_guard
-# ⚠️ Only the counting_resource (in-band PMR) half is checked. The global-heap half has
-# no mallocnesia gate: an Active session's inbound path allocates (L-497-1;
-# fixpp#544), so its windows cannot be zero until that is fixed. To run it by hand:
-#   python3 tools/check_alloc.py --binary <build>/bin/perf_session_recovery_alloc_guard \
+# The global-heap half: the Heartbeat steady-state cell is fixpp#544's W-A window, on the
+# run-thread rig, and is registered under the interceptor below, Release-only, where it
+# must read zero. ⚠️ The AwaitingResend cell's global-heap half is NOT CHECKED (resend/gap mixed
+# traffic, disclosed under L-497-1). To run that window by hand:
+#   GTEST_FILTER='*AwaitingResend*' python3 tools/check_alloc.py \
+#       --binary <build>/bin/perf_session_recovery_alloc_guard \
 #       --mallocnesia <build>/lib/libmallocnesia.so
 add_executable(perf_session_recovery_alloc_guard
   test_session_recovery_alloc_guard.cpp)
@@ -132,3 +139,8 @@ add_test(NAME perf_session_recovery_alloc_guard
 set_tests_properties(perf_session_recovery_alloc_guard PROPERTIES
   LABELS "session;013;us1;perf;alloc_guard"
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+fixpp_add_release_mallocnesia_test(
+  NAME perf_session_recovery_heartbeat_mallocnesia
+  TARGET perf_session_recovery_alloc_guard
+  CASE "SessionRecoveryAllocGuardTest.HeartbeatSteadyState_DualGate"
+  LABELS perf alloc_guard 544)

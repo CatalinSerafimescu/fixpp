@@ -1,0 +1,12 @@
+[
+  {
+    "directory": ".",
+    "file": "carries_n.cpp",
+    "arguments": ["c++", "-Iasio", "-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=8", "-c", "carries_n.cpp"]
+  },
+  {
+    "directory": ".",
+    "file": "redefined.cpp",
+    "arguments": ["c++", "-Iasio", "-UASIO_RECYCLING_ALLOCATOR_CACHE_SIZE", "-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=8", "-c", "redefined.cpp"]
+  }
+]

@@ -6,6 +6,17 @@ status: stable
 
 # Log
 
+- **2026-10-10 — B35 (fixpp#544), pre-push (pipeline step 15a): the hot-path zero allocation.**
+  `components/async-mutex.md` gains the Erratum E-6 lineage row (the frameless lock op, the macro as the
+  internal route, E-4's scope corrected to the scheduler call, and the failed "removing a frame is only
+  headroom" premise, F-2). `components/inbound-message-path.md` gains the zero-allocation invariant with
+  W-A/W-B as its gates, the dispatcher/arm split as built (ruling a2), the helper-vs-leaf lifetime classes
+  with the rejected v0.4 hoist, and the b3 boundary. `components/session.md` gains the session strand's
+  concrete target and fallback, the send slot, flag and fallback leaf, why the existing serialisation could
+  not carry one buffer, and the send gate R-10 rejected. `components/transport.md`,
+  `components/message-store-quiescence.md` and `components/engine-accept-path.md` note the strand target,
+  the `deferred` read, `store()`'s converted lock and `SessionEntry::session_strand`'s new type.
+  `components/test.md`'s note on the deleted companions is annotated, not rewritten.
 - **2026-10-09 — B14 (fixpp#481) close-out: class 1 gains a shell form.** `failure-classes.md`,
   class 1 (an instrument fails toward CLEAN), adds *a list that zsh never splits*: an unquoted `$var`
   reaches the command as one argument, so the check examines nothing. Owner-approved from PR #558's

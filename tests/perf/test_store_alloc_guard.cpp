@@ -14,17 +14,18 @@
 // a counting_resource, then calls retrieve() inside an alloc_guard window and checks
 // that the snapshot + frame-read allocations are routed through the store_resource.
 //
-// ⚠️ The global-heap half of both is NOT CHECKED. SC-007 / FR-027 ask these windows for
-// zero global-heap allocation, but the store paths run asio coroutines whose frames are
-// allocated through std::aligned_alloc (mechanism: fixpp#544), so no
-// mallocnesia gate is registered for this binary. The alloc_guard markers stay so the
-// windows can be run by hand, as tests/perf/CMakeLists.txt shows at this binary's
-// registration.
+// The global-heap half. SC-007 / FR-027 ask these windows for zero global-heap
+// allocation. Test 1's window is fixpp#544's W-D, and its interceptor registration is
+// Release-only (tests/perf/CMakeLists.txt). ⚠️ Test 2's global-heap half is NOT CHECKED:
+// FileStore `retrieve` is disclosed, not gated (fixpp#544, L-497-1). Its alloc_guard
+// markers stay so the window can be run by hand, as tests/perf/CMakeLists.txt shows at
+// this binary's registration.
 //
 // Warm-up rationale (Erratum E-4 / feedback_asio_cancellation_slot_no_allocator_hook):
-// asio's per-thread cancellation recycler may do one global alloc on the FIRST
-// slot assignment per thread. We run WARMUP_ITER store() calls BEFORE the
-// guard window to prime the recycler.
+// asio's cancellation recycler may do one global alloc on the FIRST slot
+// assignment in a scheduler call: its cache lives for one io_context run-family
+// call, not for the thread (Erratum E-6). We run WARMUP_ITER store() calls BEFORE
+// the guard window, in the same scheduler call, to prime the recycler.
 
 #include <gtest/gtest.h>
 
@@ -50,13 +51,15 @@
 #include <vector>
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers when it
-// is preloaded; no ctest entry preloads it for this binary (see the file header).
+// is preloaded: its Release registration preloads it for the MemoryStore steady-state
+// cell (tests/perf/CMakeLists.txt); the FileStore cell's window is run by hand (see the
+// file header).
 #include "support/alloc_guard_markers.hpp"
 #include "support/temp_dir.hpp"  // replaced a local copy of this helper (#404).
 // NOT byte-identical, and the difference is on disk: the local one prefixed
 // "fixpp_perf_", the shared one prefixes "fixpp_test_" -- only current_pid()
 // was identical. The tag below carries "perf_" so the name stays greppable.
-#include "support/pump_until_ready.hpp"
+#include "support/recycler_driver.hpp"
 
 namespace {
 
@@ -137,27 +140,32 @@ public:
 
 // ── StoreAllocGuard / Mallocnesia ─────────────────────────────────────────────
 //
+// fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3, W-D): this cell is W-D, and its
+// window is the driver-template shape (tests/support/recycler_driver.hpp). One driver
+// coroutine, spawned before the window, runs the warm-up and the windowed store() calls
+// under one `ioc.run()`, through exactly one test-owned wrapper frame, which models
+// `run_liveness_loop` (long-lived) -> `store_then_emit` -> `MemoryStore::store`, the
+// shallowest production chain to store(). A window must not spawn with `use_future`
+// (its handler allocates its promise) or span several `ioc.run()` calls (each is a fresh
+// scheduler call with an empty frame cache). Its interceptor registration
+// (tests/perf/CMakeLists.txt) is Release-only.
+//
 // Strategy:
 //   1. Construct a MemoryStore with bounded policy (so the slab is pre-allocated
 //      at ctor) using new_delete_resource(). The guard window starts AFTER ctor.
-//   2. Pre-build all frames BEFORE alloc_guard_start() — the frame vectors
-//      are heap-allocated, which is fine because they're built outside the guard.
-//   3. Warm up kWarmupIter store() calls to prime asio's per-thread recycler.
-//   4. Call alloc_guard_start().
-//   5. Drive kMeasuredIter store() calls in a BATCH coroutine — a single
-//      co_spawn drives all kMeasuredIter store() calls so the coroutine
-//      infrastructure is warm. (FR-007 / I-10 ask store() for zero global-heap
-//      allocations here; NOT CHECKED, see the file header.)
-//   6. Call alloc_guard_end() — mallocnesia exits(1) if count > 0.
+//   2. Pre-build all frames BEFORE the driver starts — the frame vectors are
+//      heap-allocated, which is fine because they're built outside the guard.
+//   3. The driver warms up kWarmupIter store() calls, calls alloc_guard_start(), drives
+//      kMeasuredIter store() calls (FR-007 / I-10 ask store() for zero global-heap
+//      allocations here) and calls alloc_guard_end() — mallocnesia exits(1) if count > 0.
 //
 TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
     // ── Construction (outside guard window) ──────────────────────────────────
 
     // Use bounded policy so the slab is pre-allocated at ctor; store() must
     // need no further slab allocation (FR-007 / I-10 / SC-007).
-    // Capacity: warm-up (20) + measured (10,000) + margin (200) iterations,
-    // all outbound. max_frame_bytes = 1024 → slab = 10220 × 1 KiB ≈ 10 MiB,
-    // well within the 1 GiB engine cap ([2e §1.2]).
+    // Capacity: every warm-up and window iteration, plus a margin, all outbound, in
+    // 1 KiB slots.
     const std::size_t kTotalCapacity = static_cast<std::size_t>(kWarmupIter + kMeasuredIter + 200);
     MemoryStore::Config cfg;
     cfg.policy = capacity_policy::bounded;
@@ -175,73 +183,25 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
         frames.push_back(make_frame(static_cast<seqnum_t>(i + 1)));
     }
 
-    // io_context for running coroutines. Stays alive for the whole test.
-    asio::io_context ioc;
-
-    // Helper: run a batch of N store() calls starting at seq `start` using
-    // a single co_spawn (all in one coroutine, no repeated co_spawn overhead).
-    auto run_batch = [&](int start, int count) {
-        bool all_ok = true;
-        // Spawn then run: the future is only retrieved AFTER ioc.run() drains.
-        auto fut = asio::co_spawn(
-            ioc.get_executor(),
-            [&]() -> asio::awaitable<void> {
-                for (int i = 0; i < count; ++i) {
-                    int fi = start + i;
-                    auto result = co_await store.store(
-                        static_cast<seqnum_t>(fi + 1),
-                        std::span<const std::byte>(frames[static_cast<std::size_t>(fi)]),
-                        direction_t::outbound);
-                    if (!result.has_value()) all_ok = false;
-                }
-            },
-            asio::use_future);
-        // Drive the context until all handlers complete.
-        //
-        // ⚠️ #289 — AND THIS SITE IS WHY `MAX_SPLICE` WAS MEASURED RATHER THAN
-        // ARGUED. `ci/pump-get-sweep.sh` could not see it: the declaration above
-        // spans more than the sweep's 12-line splice limit, so `fut` never entered
-        // `known` and this `.get()` produced no row at all. The classifier files it
-        // under THREAD-IN-FILE (a `thread_pool` exists elsewhere in this TU), which is
-        // escalation and not a dismissal, and reading the site says the caller is the
-        // only pump.
-        //
-        // ⚠️ NO DELTA IS WRITTEN HERE, and an earlier revision's "+46 rows" had already
-        // rotted before it shipped -- the migration in this very diff changes the corpus
-        // the number is computed over, so the reader re-running it gets a different one
-        // and cannot tell rot from a broken instrument. THE RECIPE: raise `MAX_SPLICE`
-        // in a COPY of `ci/pump-get-sweep.sh`, run `--disposition` on the tree you mean,
-        // and diff the class table against the unmodified run. The finding that stands
-        // is the SHAPE -- widening the limit reveals rows, and the batch-18 measurement
-        // found none of them `CALLER-ONLY` except this one, which the executor axis had
-        // filed elsewhere.
-        //
-        // `false` here is honest rather than merely convenient: the caller asserts
-        // on it, and `run_to_exhaustion_or_report` has already reported the site by
-        // name, so a miss cannot read as a store failure in the output.
-        if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut,
-                                                              "StoreAllocGuard::run_batch")) {
-            ioc.restart();
-            return false;
-        }
-        ioc.restart();
-        fut.get();  // propagate any exception; coroutine is done by now
-        return all_ok;
+    // The callee, a non-coroutine forwarder: one store() per call, in seq order. The
+    // wrapper frame above it is the template's.
+    std::size_t next = 0;
+    auto store_next = [&] {
+        auto const i = next++;
+        return store.store(static_cast<seqnum_t>(i + 1), std::span<const std::byte>(frames[i]),
+                           direction_t::outbound);
     };
 
-    // ── Warm-up (outside guard window) ───────────────────────────────────────
-    ASSERT_TRUE(run_batch(0, kWarmupIter)) << "warm-up store() calls failed";
-
-    // ── Measured window ───────────────────────────────────────────────────────
-    if (alloc_guard_start) alloc_guard_start();
-
-    bool measured_ok = run_batch(kWarmupIter, kMeasuredIter);
-
-    if (alloc_guard_end) alloc_guard_end();
+    asio::io_context ioc;
+    auto const out = fixpp::test_support::recycler::run_driver_window<1>(
+        ioc, ioc.get_executor(), store_next,
+        fixpp::test_support::recycler::window_spec{.warm = kWarmupIter, .measured = kMeasuredIter});
     // If mallocnesia was LD_PRELOADed and detected any global heap allocation,
     // alloc_guard_end() will have already called exit(1) before reaching here.
 
-    EXPECT_TRUE(measured_ok) << "store() failed during measured window";
+    EXPECT_TRUE(out.closed) << "the driver never reached the end of its window";
+    EXPECT_EQ(out.iterations, kTotalIter);
+    EXPECT_EQ(out.ok, kTotalIter) << "store() failed during the warm-up or the measured window";
 }
 
 // ── FileStore::retrieve() alloc-guard (N4 gate) ────────────────────────────────
@@ -258,7 +218,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
 //   Layer 2 — the global-heap half: NOT CHECKED (see the file header). Under a
 //             hand run with the interceptor, an escape exits(1) in alloc_guard_end().
 //
-// Warm-up: one retrieve() run outside the guard window to prime asio's per-thread
+// Warm-up: one retrieve() run outside the guard window to prime asio's
 // cancellation recycler (same rationale as store steady-state test above).
 #ifndef _WIN32
 TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {

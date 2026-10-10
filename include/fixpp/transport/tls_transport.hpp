@@ -13,6 +13,7 @@
 #pragma once
 
 #include <asio/awaitable.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>            // defines core::expected_t<T>
 #include <fixpp/tls/peer_identity.hpp>     // [2g §4.5] peer_identity (LOCKED)
 #include <fixpp/tls/pinset.hpp>            // [2g §4.3] pin_snapshot (LOCKED)

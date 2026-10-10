@@ -61,6 +61,7 @@
 #include <asio/use_awaitable.hpp>
 #include <atomic>
 #include <exception>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>  // expected_t, error
 #include <fixpp/core/session_executor.hpp>
 #include <memory>

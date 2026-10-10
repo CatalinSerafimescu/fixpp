@@ -28,6 +28,7 @@
 
 #include <asio/awaitable.hpp>
 #include <concepts>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>  // expected_t
 
 namespace fixpp::session::detail {
