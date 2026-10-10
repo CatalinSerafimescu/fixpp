@@ -5,13 +5,19 @@ description: Every document describing fixpp's async mutex, with the pre-048 des
 status: stable
 refs:
   - include/fixpp/core/sync/async_mutex.hpp
+  - .specify/2f-async-mutex.md
+  - .specify/544-hot-path-zero-alloc.md
+  - include/fixpp/session/memory_store.hpp
+  - src/session/seqnum_manager.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/phases/phase-4/core/048-async-mutex-strand-reap.md
   - research/G19-fix-fpml-iso20022/phases/phase-4/core/058-async-mutex-hardening.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/048-async-mutex-strand-reap-gateb.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/006-async-mutex-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/2f-async-mutex.md
-codegraph_entry: [async_mutex, async_lock_guard, cancel_and_drain]
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-evidence.md
+codegraph_entry: [async_mutex, async_lock_guard, cancel_and_drain, lock_frame, async_lock_op, finish_lock]
 constitution: ["§XV.9"]
 ---
 
@@ -81,11 +87,15 @@ line-number citation (#310).
 | **006** (PR #73) | First shipped version, per `2f-async-mutex.md` (6 review rounds). **Rejected then:** a `steady_timer`-backed latch (needs an executor; the mutex must stay `constexpr`-default-constructible); a 4-state waiter phase (collapsed to 3); a public `try_lock()` (removed to `detail::` — admitted a same-mutex-aliasing bug) |
 | **048** (PR #144) | **The pivotal cancellation/drain redesign.** Removed the cross-thread convergence machinery; replaced with a strand-local quiescence loop. A deliberate **narrowing**: cross-thread drain overlap went from handled to explicitly undefined, because production consumers only ever drain strand-locally |
 | **058** (PR #162) | Hardening — ABA on the free list, in-flight-resumer happens-before, destructor-guard widening, bounded-CAS exhaustion, chain-walk CAS loss, acquire livelock. **Did not change the cancellation model** |
+| **fixpp#544** (B35) | **Erratum E-6, the frameless lock op.** For the internal callers that lock through `FIXPP_DETAIL_CO_AWAIT_LOCK` (`SeqnumManager::check_inbound`, `SeqnumManager::hydrate`, `MemoryStore::store`) the awaiter lives in a caller-owned `detail::lock_frame` in the **caller's** frame, and the lock is a `deferred` operation awaited directly: no coroutine frame of its own and no `use_awaitable` adapter, which is what E-1 intended. Public `async_lock` is unchanged, a thin coroutine over the same macro. The macro and `detail::lock_frame` / `async_lock_op` / `finish_lock` are not supported API (B&L `B-544-5`). E-6 also corrects E-4's "per-thread" recycler to the **scheduler-call** scope, disposition unchanged, and records that the recycler's slot count is fixpp's exported value (B&L `L-544-1`). **Rejected:** an inline function plus an RAII restore of the cancellation filter (`reset_cancellation_state` exists only as a promise `await_transform`, so a destructor cannot restore it). ⚠️ **A design premise that failed (F-2):** "removing a frame is only headroom" is false at asio's default slot count, where the first-fit, evict-first-occupied recycler can settle into an allocating cycle on the smaller pattern; an existing zero gate on the public `async_lock` (`sync_alloc_guard_test_mallocnesia`) did so until the exported count landed. Record: `.specify/544-hot-path-zero-alloc.md` §2.3 and its "As built" section |
 
 ## Consumers, and the teardown contract
 
 `Session::write_gate_` (the one that actually exercises contention and cancellation),
 `SeqnumManager::mutex_`, `MemoryStore::mutex_`, `FileStoreImpl::mutex_`.
+*(fixpp#544:)* `SeqnumManager::check_inbound`/`hydrate` and `MemoryStore::store` reach their mutex through
+`FIXPP_DETAIL_CO_AWAIT_LOCK`; every other call site, `write_gate_` and `assign_outbound` included, uses the
+public `async_lock`. Re-derive with `git grep -n "FIXPP_DETAIL_CO_AWAIT_LOCK" -- src include`.
 
 The stores are **never explicitly drained**, and that is correct — see
 [`message-store-quiescence.md`](./message-store-quiescence.md). The contract is discharged
@@ -96,12 +106,13 @@ structurally, not by a call.
 Verified 2026-08-29 during the Step-R sweep, and worth stating because every other entry on this page
 is a failure: **this document did the thing correctly.**
 
-- It carries **in-document errata `E-1` … `E-5`**, each dated, each naming the feature and the
+- It carries **in-document errata `E-1` … `E-6`**, each dated, each naming the feature and the
   authority that approved it — appended rather than rewritten, so the original design and its
-  corrections both survive.
+  corrections both survive. *(E-6, fixpp#544, is at the END of the file rather than beside E-5, so
+  that no line-number citation into the file moves; the status line says so.)*
 - Its Status header names what shipped it (`006-async-mutex`), instead of leaving a bare *"Draft"*.
 - The shipped header **points back**: `include/fixpp/core/sync/async_mutex.hpp` says
-  *"Design anchor: `.specify/2f-async-mutex.md` v1.6 (errata E-1..E-5)"* — so the code and the doc
+  *"Design anchor: `.specify/2f-async-mutex.md` v1.6 (errata E-1..E-6)"* — so the code and the doc
   name each other, and neither can drift without the other becoming visibly wrong.
 
 That closed loop is why a blind agent found the 048 supersession here unaided, and did not find the

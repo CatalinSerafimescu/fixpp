@@ -26,13 +26,18 @@ refs:
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
   - tests/session/read_first_frame_bounded_test.cpp
+  - .specify/544-hot-path-zero-alloc.md
+  - src/session/session_strand.cpp
+  - tests/alloc_guard/test_544_run_thread_windows.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/015-runtime-engine-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
-codegraph_entry: [run_read_pump, Framer, on_inbound_frame, Session, scan_frame_header, dispose_unparseable_, inbound_framer_config, note_garbles_, read_first_frame_bounded]
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-evidence.md
+codegraph_entry: [run_read_pump, Framer, on_inbound_frame, on_inbound_active_, make_session_strand, Session, scan_frame_header, dispose_unparseable_, inbound_framer_config, note_garbles_, read_first_frame_bounded]
 constitution: ["§VIII.5", "§XI.2"]
 ---
 
@@ -318,3 +323,43 @@ Witnesses: the `DeadlineAfter` and `DurationUntil` suites in
 - **Older sites are tracked in fixpp#555**: the session's graceful-logout wait and liveness loop
   still form raw sums. Check the issue's state, and grep `src/session/session.cpp` for
   `steady_now() +` and `+ heartbt_int`, before relying on either.
+
+## Zero allocation on the Active read (fixpp#544)
+
+The design is `.specify/544-hot-path-zero-alloc.md` (§1, §2.2; its "As built" section records where the
+implementation departs). The user-facing statement is B&L `B-544-1`; what stays open is `L-497-1`.
+
+- **The invariant.** On an Active session, a read up to `fromApp` makes no global-heap allocation in
+  steady state, when the Engine's executor's target type is exactly `io_context::executor_type` and the
+  thread that runs the session's handlers stays inside one scheduler call. **Its gates are W-A (an
+  Active Heartbeat) and W-B (an Active application message through `fromApp`)**: mallocnesia
+  registrations on the two Linux Release presets (`ctest -N -L 544` lists them), and the TU-local
+  `operator new` counter of `alloc_guard_544_run_thread`, which also runs on `windows-msvc-release`.
+  ⚠️ The recycler's cache belongs to the **scheduler call**, not to the thread, so a pump driven by
+  bounded `run_for` / `run_one*` / `poll*` calls allocates on every message (arm (s) in
+  `tests/alloc_guard/test_544_run_thread_windows.cpp` pins that it does).
+- **The dispatcher and the arms.** `Session::on_inbound_frame` is a **non-coroutine** that returns an
+  awaitable, so it adds no frame. As built (orchestrator ruling A → a2) it always returns the Active
+  arm, `on_inbound_active_`, which reads the FSM state on the strand at resume and hands a cold state to
+  its own arm (one frame more, on ungated paths). Selecting the arm in the dispatcher was rejected: it
+  would read the FSM state on the caller's thread. Every arm takes its parameters by value, because an
+  awaitable starts suspended and runs after the dispatcher has returned.
+- **Two lifetime classes for the scratch buffers, decided by data flow, not lexical scope.** Class 1: a
+  buffer last read, with every view into it, before the arm's next `co_await` moves to a non-coroutine
+  helper's stack. Class 2: a buffer a later `co_await` reads moves into a **reply leaf** coroutine that
+  owns it and performs the emit, because `store_then_emit` transmits the caller's original span after
+  suspending in the store. **Rejected: v0.4's hoist of every buffer into a non-coroutine helper** — a
+  use-after-return for every class-2 buffer, measured as differing emitted bytes at `-O2` and as
+  `stack-use-after-return` under ASan with default options. **Also rejected:** keeping the buffers in the
+  arm (GCC 13 does not overlap disjoint-scope locals, so the arm is over the limit on
+  `linux-gcc-release`), and a `Session`-member reply buffer (other chains emit while a reply is suspended,
+  so it would need a per-chain exclusivity argument the leaf does not).
+- **The cancellation check at a new boundary (ruling B → b3).** Each `co_await` boundary the split
+  introduces goes through `FIXPP_INBOUND_SPLIT_AWAIT`, and each callee starts with
+  `FIXPP_INBOUND_SPLIT_ENTRY` (`src/session/session.cpp`): the first cancellation check stays at the moved
+  block's first original `co_await`, so a callback that ran before an await under a cancelled chain still
+  runs. `session_544_inbound_split_cancel` holds the differential cells.
+- **The other two changes on this path.** The session strand keeps the concrete executor type
+  (`make_session_strand`; see [`session`](./session.md)), and `SeqnumManager::check_inbound` locks
+  through the frameless lock op (see [`async-mutex`](./async-mutex.md)). The plain and TLS transport
+  reads are awaited as `deferred` operations (see [`transport`](./transport.md)).

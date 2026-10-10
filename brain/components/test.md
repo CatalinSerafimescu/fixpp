@@ -176,7 +176,9 @@ B35, 2026-10-07). Their windows sit on an Active session's inbound path, which a
 coroutine frames that the recycling cache cannot hold (`L-497-1`, fixpp#544), so no re-scope reaches
 zero. A budget would need a `MAX_ALLOCS` knob the owner declined, and would pin a production cost as
 acceptable. The base cells keep their functional checks and say their heap half is not checked; B35's
-gates replace them.
+gates replace them. *(Since B35 (fixpp#544): the W8, Heartbeat and store windows are zero gates again, and the
+other cells stay disclosed under the rewritten `L-497-1`, which also states the conditions under which
+the inbound path still allocates.)*
 
 ## The MSVC-debug skip macros read a volatile (#481)
 

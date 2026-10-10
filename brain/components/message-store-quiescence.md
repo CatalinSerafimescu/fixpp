@@ -15,9 +15,12 @@ refs:
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
   - tests/session/test_file_store_crash_survival.cpp
+  - .specify/544-hot-path-zero-alloc.md
+  - include/fixpp/core/sync/async_mutex.hpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
 codegraph_entry: [MessageStore, MemoryStore, FileStore, Engine, run_reset_unit_]
 constitution: ["§XV.4"]
 ---
@@ -67,6 +70,17 @@ the literal reading of *"callers must drain the mutex before destroying the stor
 That ordering is load-bearing and was itself hardened by a Gate B round-1 finding: `outstanding_counter_`
 must be published **before** any loop is spawned, or a late assignment observes it null, skips the
 join, and clears the registry while a spawned loop still holds `SessionEntry&` → use-after-free.
+
+## `MemoryStore::store`'s lock is the frameless lock op; its siblings are not (fixpp#544)
+
+`MemoryStore::store` (`include/fixpp/session/memory_store.hpp`) locks its `async_mutex` through
+`FIXPP_DETAIL_CO_AWAIT_LOCK` (2f Erratum E-6), and its leading post is awaited as `deferred`; together
+they take two coroutine frames off the store chain, which fixpp#544's W-D window gates at zero. `next_seqnum`,
+`reset`, `reset_to` and `retrieve` stay on the public `async_lock`, and FileStore is not converted
+(`.specify/544-hot-path-zero-alloc.md` §2.3). **This page's argument is unchanged:** the macro is the
+same lock with the same waiter and reap model, so the store's mutex still has no holder and no waiter
+once no store `co_await` is in flight. Re-derive the converted sites with
+`git grep -n "FIXPP_DETAIL_CO_AWAIT_LOCK" -- src include`.
 
 ## The 141=Y reset unit's store operation (093, fixpp#524) — still awaited, now not cancellable
 

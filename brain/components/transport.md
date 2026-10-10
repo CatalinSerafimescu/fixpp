@@ -9,8 +9,12 @@ refs:
   - include/fixpp/transport/tls_transport.hpp
   - include/fixpp/transport/reconnect_policy.hpp
   - .specify/2h-transport.md
+  - .specify/544-hot-path-zero-alloc.md
+  - src/session/session_strand.cpp
+  - src/transport/asio_plain_transport.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2h-transport.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
 codegraph_entry: [Transport, Listener, TransportFactory, ReconnectPolicy]
 constitution: ["§XIV.1", "§XIV.2", "§XV.2"]
 ---
@@ -161,6 +165,25 @@ default with jitter and a cap (thundering-herd defence), and a QuickFIX-compatib
 ⭐ **The compat preset is the interesting half:** matching an incumbent's *absence* of jitter is a
 deliberate interop choice, not an oversight. Read the header before changing either preset's values —
 they are not reproduced here.
+
+## The executor a transport is built on, and the `deferred` read (fixpp#544)
+
+The interface did not change: transports still take an `asio::any_io_executor`, and no transport,
+listener or plugin signature moved. What changed is the type that `any_io_executor` stores.
+
+- **The session strand's target type.** `make_session_strand` (`src/session/session_strand.cpp`) builds
+  the session strand over the concrete `io_context::executor_type` when the Engine's executor's target
+  type is exactly that, and over the type-erased executor otherwise (the fallback, a residual of B&L
+  `L-497-1`). The transport is built on that strand, so its executor compares equal to the session's;
+  `assert_transport_on_session_strand` (`src/session/engine.cpp`) now takes an `any_io_executor` and
+  still compares with `operator==`. ⚠️ **Re-erasure is the risk:** any accept, connect, reconnect,
+  timer or SSL site that wraps the session in a fresh `strand<any_io_executor>` brings the per-handler
+  allocation back. Re-run `git grep -n "make_strand\|strand<" -- src include` and classify each hit as
+  on or off the read path (`.specify/544-hot-path-zero-alloc.md` §6 risk 2).
+- **The read is awaited as a `deferred` operation.** `async_read_some` in both the plain and the TLS
+  transport awaits `async_read_some(..., redirect_error(deferred, ec))` directly, so the read adds no
+  `use_awaitable` adapter frame. On the plain read that is slot headroom, not a gated edit; on TLS it is
+  for symmetry, and the TLS read's remaining allocations are OpenSSL's (fixpp#565).
 
 ## Related
 

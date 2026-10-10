@@ -17,6 +17,8 @@ refs:
   - specs/093-inbound-frame-dispositions/research.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
+  - .specify/544-hot-path-zero-alloc.md
+  - src/session/session_strand.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/005-session-establishment-fsm-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/013-session-reconnect-binding-gatea.md
@@ -32,6 +34,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/511-test-hooks-odr-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-evidence.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -257,6 +261,52 @@ follow the same pattern, each with its own `*_test_access` header there. Verify 
   `#define FIXPP_TEST_HOOKS` for the same access, with UB. Rejected: public seqnum getters, hooked library
   twins, and the explicit-instantiation access loophole. Record: parent repo,
   `decisions/speckit/511-test-hooks-odr-gatea.md`.
+
+## Allocation on the hot path — the session strand and the send slot (fixpp#544)
+
+The design is `.specify/544-hot-path-zero-alloc.md` (issue mode: that note is the plan; §2.1 and §2.5,
+plus its "As built" section). The behaviour a user must know is B&L `B-544-1`…`B-544-5` and
+`L-544-1`…`L-544-4`; what stays open is `L-497-1`. Re-derive the shape from source, not from here.
+
+- **The session strand keeps the concrete executor type.** `make_session_strand`
+  (`src/session/session_strand.cpp`) is the one construction point. When the Engine's executor's target
+  type is exactly `io_context::executor_type`, it stores `strand<session_inner_executor_t>` in an
+  `any_io_executor`; otherwise it falls back to a strand over the type-erased executor, as before. The
+  test is exact target type, so a work-tracked or custom-allocator `io_context` executor takes the
+  fallback. ⚠️ `.specify/2d-threading.md`'s "the engine never picks a concrete executor" is annotated by
+  a document-level amendment at that file's END; read it before citing the sentence.
+- **`send_impl` no longer carries its buffers in its frame.** The `Session` owns two build-scratch
+  buffers, a frame slot and a slot flag (`send_strip_scratch_`, `send_body_scratch_`,
+  `send_frame_slot_`, `send_slot_in_use_` in `session.hpp`). The build is a non-coroutine helper,
+  `build_send_frame_`, which uses the scratch without the flag because it neither suspends nor calls an
+  Application callback. `Session::send` tests the flag through an RAII holder declared inside its `try`;
+  a send that finds it held takes `send_fallback_leaf_`, whose frame owns its own buffer and so
+  allocates.
+- **Why the existing serialisation could not carry one session-owned buffer.** The strand serialises
+  handlers only between suspensions, and every send suspends after its frame is built (the store's
+  leading post, the seqnum lock, the write gate, the write). So two sends can overlap: concurrent
+  `Engine::send` callers, a consumer `co_spawn`ing `Session::send` without awaiting, and a send started
+  from inside `toApp`, which runs inline (the note's probe r3). `write_gate_` covers only the write and
+  is taken after the store.
+- **Rejected, and why** (owner ruling R-10; §2.5):
+  - **a session send gate** (an `async_mutex` held from before the build until `store_then_emit`
+    returns): sends would queue behind each other's store and write, the gate would have to join
+    `close()`'s and `Engine::stop`'s drain, the `app_callback_threw` path awaits `close()` inside
+    `send_impl`, and a pending cancellation would throw earlier than today, turning a validation error
+    or a `toApp` veto into a disconnect;
+  - **`write_gate_` taken early**: `async_mutex` records no owner, so `store_then_emit` locking it again
+    would wait on itself;
+  - **a per-send leaf that owns the buffer**: that is the over-limit frame itself;
+  - **a pool of K slots**: the number of concurrent sends has no bound, so a pool still needs the
+    fallback.
+- **A new caller condition (`L-544-2`).** The slot holder writes `Session` memory when the send's frame
+  ends, so a direct `Session::send` caller must keep the `Session` alive until that frame has completed
+  or been destroyed. `Engine::send` does.
+- **Two pre-existing defects this work surfaced, not fixed by it:** a send nested in `toApp` can reuse
+  the outer send's MsgSeqNum (`L-544-3`, fixpp#563), and a send from inside an application callback
+  trips `callback_dispatch_scope`'s `assert` without `NDEBUG` (`L-544-4`, fixpp#564).
+- The inbound side of the same work, the dispatcher split and its leaves, is on
+  [`inbound-message-path`](./inbound-message-path.md).
 
 ## Runtime flows
 
