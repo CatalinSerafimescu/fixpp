@@ -220,8 +220,8 @@ endfunction()
 # Release build type. `alloc_guard_end()` exits the process on any interception, so each
 # case gets its own registration through GTEST_FILTER.
 #
-# EXPECT_ENTRY registers it `--expect-violation --expect-entry <fn>`: an arm, or a window
-# whose current reading is above zero. Without it the case must read zero.
+# EXPECT_ENTRY registers it `--expect-violation --expect-entry <fn>`: an arm, which must be
+# intercepted through <fn>. Without it the case must read zero.
 #
 # ⚠️ NO NON-ASSERTING REGISTRATION ON OTHER BUILD TYPES. A Debug lane's frames and run
 # loop differ, and a registered member that cannot fail is the defect class

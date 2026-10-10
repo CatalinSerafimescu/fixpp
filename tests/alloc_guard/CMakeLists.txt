@@ -56,8 +56,8 @@ add_test(NAME alloc_guard_sync_embedded COMMAND sync_alloc_guard_test)
 # parse and fromApp over a 10⁴-message corpus. All dynamic storage is meant to come
 # from PMR arenas (cancellable_dispatch node from session_arena; per-awaiter
 # promise frame from message_arena on PMR fallback). No preload gate is registered
-# for this binary (see "DELIBERATELY NOT GATED" below), so its window's global-heap
-# half is unchecked and the cell checks its functional post-conditions only.
+# for this binary (see "WINDOWS OVER SEVERAL SCHEDULER CALLS" below), so its window's
+# global-heap half is unchecked and the cell checks its functional post-conditions only.
 # CTest NAME is deliberately NOT `threading_`-prefixed, so the ^threading_ ctest
 # selection does not sweep it (same convention as alloc_guard_sync_embedded above).
 add_executable(test_dispatch_alloc_guard test_dispatch_alloc_guard.cpp)
@@ -77,7 +77,8 @@ add_test(NAME alloc_guard_dispatch COMMAND test_dispatch_alloc_guard)
 # 007-threading-clock T052 (Seam 18 / [2d §9.18]) asks for zero global heap after
 # the first heartbeat cycle over 10⁴ cycles, BOTH threading modes; an idle session
 # that never sleeps allocates no slot (E12 / D-8 / N-P1-1). No preload gate is
-# registered ("DELIBERATELY NOT GATED" below): the global-heap half is unchecked.
+# registered ("WINDOWS OVER SEVERAL SCHEDULER CALLS" below): the global-heap half is
+# unchecked.
 add_executable(test_clock_sleep_alloc_guard test_clock_sleep_alloc_guard.cpp)
 target_link_libraries(test_clock_sleep_alloc_guard PRIVATE
   fixpp_session
@@ -97,8 +98,8 @@ add_test(NAME alloc_guard_clock_sleep COMMAND test_clock_sleep_alloc_guard)
 # (assign_outbound + check_inbound) and the admin builders
 # (build_heartbeat / build_test_request). The cancellable_dispatch + clock
 # sleep paths are 007's alloc-guards above; this binary focuses on the
-# 005-specific surface. No preload gate is registered ("DELIBERATELY NOT GATED"
-# below): the global-heap half is unchecked.
+# 005-specific surface. No preload gate is registered ("WINDOWS OVER SEVERAL SCHEDULER
+# CALLS" below): the global-heap half is unchecked.
 # CTest NAME deliberately NOT `session_`-prefixed, so the ^session_ ctest
 # selection does not sweep it (same convention as alloc_guard_dispatch above).
 add_executable(test_session_alloc_guard test_session_alloc_guard.cpp)
@@ -214,12 +215,17 @@ endif()
 #
 # Only the binaries whose MEASURED WINDOW is genuinely zero-global-alloc are gated
 # here (decimal / wire / sync — all verified green under the now-real interceptor).
-# DELIBERATELY NOT GATED: test_dispatch_alloc_guard, test_clock_sleep_alloc_guard,
-# test_session_alloc_guard — their windows wrap `ioc.run()` / `run_sync()` /
-# `co_spawn()`, which allocate coroutine frames + asio run-loop handlers on the
-# global heap (the false-green these were silently relying on). Gating them at
-# max-allocs=0 would be red. Re-scoping those windows to the true steady-state hot
-# path is tracked as a follow-up (see parent REMAINING-WORK.md item 13).
+# WINDOWS OVER SEVERAL SCHEDULER CALLS are not gated: test_dispatch_alloc_guard,
+# test_clock_sleep_alloc_guard, test_session_alloc_guard. Their windows wrap
+# `ioc.run()` / `run_sync()` / `co_spawn()`, so they span several scheduler calls or
+# spawn inside the window. asio's recycling cache is scoped to one scheduler call, so such
+# a window allocates coroutine frames and handlers on the global heap whatever the code
+# under test does (`.specify/544-hot-path-zero-alloc.md` §1(b) and §3, "The window rule").
+# Gating them at max-allocs=0 would be red. A window that reads zero runs inside one
+# scheduler call on the thread that runs the session's handlers: the B35 cells below
+# (fixpp#544), on tests/support/recycler_driver.hpp and tests/support/run_thread_engine_rig.hpp.
+# Re-scoping those three windows is tracked as a follow-up (see parent REMAINING-WORK.md
+# item 13).
 foreach(_ag IN ITEMS
     decimal_alloc_guard_test
     wire_alloc_guard_test
@@ -235,7 +241,7 @@ endforeach()
 # Parser<Index>{tv} + OffsetTable level (NOT through Session::on_inbound_frame
 # — see the file header's "MEASUREMENT SCOPE" note: a session-dispatch window
 # wraps co_spawn/ioc.run(), which is the same coroutine-frame/asio-run-loop
-# global-heap noise the "DELIBERATELY NOT GATED" note above already
+# global-heap noise the "WINDOWS OVER SEVERAL SCHEDULER CALLS" note above
 # documents for test_dispatch_alloc_guard/test_session_alloc_guard). Dual
 # gate: TU-local operator-new counter (this test) + mallocnesia below.
 add_executable(test_dict066_grouped_read_alloc_guard test_dict066_grouped_read_alloc_guard.cpp)
@@ -274,14 +280,16 @@ if(TEST dict066_grouped_read_alloc_guard_mallocnesia)
 endif()
 
 # 093-inbound-frame-dispositions T044 (quickstart Q-19; FR-052; plan OD-22): an Active
-# read of the real session read pump makes no NEW global operator new call, against a
-# constant taken from the merge-base's pump (its recipe is in the cell). Standalone ([const §VII.8]): its TU replaces
+# read of the real session read pump makes no NEW global operator new call, and on a
+# Release build none at all (fixpp#544 §3). Standalone ([const §VII.8]): its TU replaces
 # global operator new for the whole binary, and its cells run an Engine over loopback TCP
-# on a mock clock. No *_mallocnesia twin: its window wraps io_context::run_one_for(), the
-# class the "DELIBERATELY NOT GATED" note above keeps out of the LD_PRELOAD gate.
-# Linux only: the constant is the Linux one, where asio's reactor and executor queries
-# are the ones the cell's constant names; another platform's completion path can make a
-# different number of calls.
+# on a mock clock. No *_mallocnesia twin: its window wraps io_context::run_one_for(), one
+# of the "WINDOWS OVER SEVERAL SCHEDULER CALLS" above. Its global-heap half is gated by W-A
+# (alloc_guard_544_wa_active_heartbeat_mallocnesia), the same workload on the run-thread
+# rig, and arm (s) (alloc_guard_544_arm_s_run_one_for_mallocnesia) pins that this cell's
+# run_one_for shape allocates.
+# Linux only: its window is the reactor's completion path. On Windows the operator new
+# check on this workload is W-A in alloc_guard_544_run_thread's counter build.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(test_093_pump_active_read_alloc_guard test_093_pump_active_read_alloc_guard.cpp)
   target_link_libraries(test_093_pump_active_read_alloc_guard PRIVATE
@@ -385,7 +393,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
   # name | gtest case | expected entry (empty: the case must read zero)
   set(_b35_driver_cells
-    "alloc_guard_544_wdr_store_live_read_mallocnesia|WDR_StoreWithLiveRead|aligned_alloc"
+    "alloc_guard_544_wdr_store_live_read_mallocnesia|WDR_StoreWithLiveRead|"
     "alloc_guard_544_wdr_bracket_twin_mallocnesia|WDR_BracketTwin_NestFillsSlots|"
     "alloc_guard_544_wdr_bracket_arm_mallocnesia|WDR_BracketArm_NestOneOverSlots|aligned_alloc"
     "alloc_guard_544_wd_bl_arm_mallocnesia|WD_BL_Arm_OverLimitFrame|aligned_alloc"
@@ -393,19 +401,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_544_wd_bs_arm_mallocnesia|WD_BS_Arm_NestOneOverSlots|aligned_alloc"
     "alloc_guard_544_wd_bs_twin_mallocnesia|WD_BS_Twin_NestFillsSlots|"
     "alloc_guard_544_cl_arm_mallocnesia|CL_Arm_StoreReplicaOnPublicLock|aligned_alloc"
-    "alloc_guard_544_cl_production_twin_mallocnesia|CL_ProductionTwin_MemoryStoreStore|aligned_alloc"
+    "alloc_guard_544_cl_production_twin_mallocnesia|CL_ProductionTwin_MemoryStoreStore|"
     "alloc_guard_544_ch_arm_mallocnesia|CH_Arm_HydrateReplicaOnPublicLock|aligned_alloc"
-    "alloc_guard_544_ch_production_twin_mallocnesia|CH_ProductionTwin_SeqnumManagerHydrate|aligned_alloc"
+    "alloc_guard_544_ch_production_twin_mallocnesia|CH_ProductionTwin_SeqnumManagerHydrate|"
     "alloc_guard_544_cp_arm_mallocnesia|CP_Arm_StoreReplicaOnUseAwaitablePost|aligned_alloc"
     "alloc_guard_544_clp_no_edit_twin_mallocnesia|CLP_NoEditReplicaTwin_Store|"
     "alloc_guard_544_ch_no_edit_twin_mallocnesia|CH_NoEditReplicaTwin_Hydrate|"
-    # W-D-W (§3): instantiable at the exported slot count. The stand-in bracket is in its
-    # final form. The real-chain twin reads above zero until `send_impl`'s frame fits the
-    # limit (§2.5), so it is registered as a violation until that flip.
+    # W-D-W (§3): the stand-in bracket, and the real-chain pair, whose twin needs every
+    # frame of the `Session::send` chain to fit the recycler's limit (§2.5).
     "alloc_guard_544_wdw_stand_in_window_mallocnesia|WDW_StandIn_Window|"
     "alloc_guard_544_wdw_stand_in_twin_mallocnesia|WDW_StandIn_Twin|"
     "alloc_guard_544_wdw_stand_in_arm_mallocnesia|WDW_StandIn_Arm|aligned_alloc"
-    "alloc_guard_544_wdw_real_chain_twin_mallocnesia|WDW_RealChain_Twin|aligned_alloc"
+    "alloc_guard_544_wdw_real_chain_twin_mallocnesia|WDW_RealChain_Twin|"
     "alloc_guard_544_wdw_real_chain_arm_mallocnesia|WDW_RealChain_Arm|aligned_alloc")
   foreach(_cell IN LISTS _b35_driver_cells)
     string(REPLACE "|" ";" _cell "${_cell}")
@@ -458,16 +465,16 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # name | gtest case | expected entry (empty: the case must read zero)
   set(_b35_rig_cells
-    "alloc_guard_544_wa_active_heartbeat_mallocnesia|WA_ActiveHeartbeat|malloc,aligned_alloc"
-    "alloc_guard_544_wb_active_app_message_mallocnesia|WB_ActiveAppMessage|malloc,aligned_alloc"
-    "alloc_guard_544_we_sends_interleaved_mallocnesia|WE_InboundPairInterleavedWithSends|malloc,aligned_alloc"
-    "alloc_guard_544_veto_then_zero_mallocnesia|VetoThenZero_SendsAfterAVetoedSend|malloc,aligned_alloc"
+    "alloc_guard_544_wa_active_heartbeat_mallocnesia|WA_ActiveHeartbeat|"
+    "alloc_guard_544_wb_active_app_message_mallocnesia|WB_ActiveAppMessage|"
+    "alloc_guard_544_we_sends_interleaved_mallocnesia|WE_InboundPairInterleavedWithSends|"
+    "alloc_guard_544_veto_then_zero_mallocnesia|VetoThenZero_SendsAfterAVetoedSend|"
     "alloc_guard_544_arm_e_slot_held_mallocnesia|ArmE_SlotHeldSendsTakeTheLeaf|aligned_alloc"
     "alloc_guard_544_arm_a_tracked_executor_mallocnesia|ArmA_TrackedExecutorFallback|malloc"
     "alloc_guard_544_wa_bl_arm_mallocnesia|WA_BL_Arm_OverLimitPlant|aligned_alloc"
-    "alloc_guard_544_wa_bl_twin_mallocnesia|WA_BL_Twin_InLimitPlant|malloc,aligned_alloc"
+    "alloc_guard_544_wa_bl_twin_mallocnesia|WA_BL_Twin_InLimitPlant|"
     "alloc_guard_544_wa_bs_arm_mallocnesia|WA_BS_Arm_NestOneOverSlots|aligned_alloc"
-    "alloc_guard_544_wa_bs_twin_mallocnesia|WA_BS_Twin_NestFillsSlots|malloc,aligned_alloc"
+    "alloc_guard_544_wa_bs_twin_mallocnesia|WA_BS_Twin_NestFillsSlots|"
     "alloc_guard_544_arm_s_run_one_for_mallocnesia|ArmS_RunOneForScope|aligned_alloc")
   foreach(_cell IN LISTS _b35_rig_cells)
     string(REPLACE "|" ";" _cell "${_cell}")

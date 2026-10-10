@@ -162,17 +162,19 @@ std::size_t close_window() {
     return n;
 }
 
-// What the operator new count of a cell must show. `base_allocates` is a window the
-// change brings to zero later; `allocates` is an arm, which allocates on every tree.
-// Debug builds print the count and assert nothing (R-4: zero is gated on Release only).
-enum class tu_expect : std::uint8_t { print_only, base_allocates, allocates };
+// What the operator new count of a cell must show. `zero` is a window, which makes no
+// operator new call; `allocates` is an arm, which allocates on every tree. Debug builds
+// print the count and assert nothing (R-4: zero is gated on Release only).
+enum class tu_expect : std::uint8_t { print_only, zero, allocates };
 
 void check_tu_count([[maybe_unused]] std::size_t n, [[maybe_unused]] tu_expect e,
                     [[maybe_unused]] char const* cell) {
 #if FIXPP_B35_COUNTS_NEW
     std::printf("[b35] %s: global operator new calls in the window = %zu\n", cell, n);
 #if defined(NDEBUG)
-    if (e != tu_expect::print_only) {
+    if (e == tu_expect::zero) {
+        EXPECT_EQ(n, 0U) << cell << ": global operator new calls in the window";
+    } else if (e == tu_expect::allocates) {
         EXPECT_GT(n, 0U) << cell << ": the counter saw no operator new call in the window";
     }
 #endif
@@ -325,7 +327,7 @@ TEST(B35RunThreadWindows, WA_ActiveHeartbeat) {
     expect_window_ran(r);
     EXPECT_EQ(r.heartbeats, r.completions);
     EXPECT_EQ(r.fast_path_strand, 1) << "the session strand is not the fast-path strand";
-    check_tu_count(r.tu_count, tu_expect::base_allocates, "W-A");
+    check_tu_count(r.tu_count, tu_expect::zero, "W-A");
 }
 
 // ── W-B ──────────────────────────────────────────────────────────────────────
@@ -338,7 +340,7 @@ TEST(B35RunThreadWindows, WB_ActiveAppMessage) {
     EXPECT_TRUE(r.snap.has_validator) << "validation is off, so the window never validated";
     EXPECT_EQ(r.app_messages, r.completions) << "a NewOrderSingle did not reach fromApp";
     EXPECT_EQ(r.fast_path_strand, 1) << "the session strand is not the fast-path strand";
-    check_tu_count(r.tu_count, tu_expect::base_allocates, "W-B");
+    check_tu_count(r.tu_count, tu_expect::zero, "W-B");
 }
 
 // ── W-E and the veto-then-zero cell ──────────────────────────────────────────

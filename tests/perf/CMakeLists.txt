@@ -52,9 +52,8 @@ endif()
 # ── 008-message-store seam registrations ────────────────────────────────────
 # T050 — seam 14: MemoryStore alloc-guard (SC-007 / FR-027 / [const §VIII.5])
 # fixpp#544 (B35, §3 W-D): the steady-state store() cell is W-D, in the driver-template
-# window shape, and its global-heap half is registered under the interceptor, Release-only.
-# It is `--expect-violation` until fixpp#544's fix brings the window to zero, then it
-# asserts zero. ⚠️ The FileStore retrieve() cell's global-heap half is NOT CHECKED
+# window shape, and its global-heap half is registered under the interceptor, Release-only,
+# where it must read zero. ⚠️ The FileStore retrieve() cell's global-heap half is NOT CHECKED
 # (disclosed, not gated). To run that window by hand:
 #   GTEST_FILTER='*FileStoreRetrieve*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/perf_store_alloc_guard --mallocnesia <build>/lib/libmallocnesia.so
@@ -63,7 +62,6 @@ fixpp_add_release_mallocnesia_test(
   NAME perf_store_alloc_guard_wd_mallocnesia
   TARGET perf_store_alloc_guard
   CASE "StoreAllocGuard.Mallocnesia_ZeroGlobalHeapStoreSteadyState"
-  EXPECT_ENTRY aligned_alloc
   LABELS perf alloc_guard 544)
 
 # ── Phase 3a tests (wired by T029): ──────────────────────────────────────────
@@ -121,9 +119,8 @@ set_tests_properties(perf_socket_option_defaults PROPERTIES
 # T020 — 013-session-reconnect-binding Phase 3 (RED) — session recovery alloc-guard.
 # CTest name: perf_session_recovery_alloc_guard
 # The global-heap half: the Heartbeat steady-state cell is fixpp#544's W-A window, on the
-# run-thread rig, and is registered under the interceptor below, Release-only. It is
-# `--expect-violation` until fixpp#544's fix brings the window to zero, then it asserts
-# zero. ⚠️ The AwaitingResend cell's global-heap half is NOT CHECKED (resend/gap mixed
+# run-thread rig, and is registered under the interceptor below, Release-only, where it
+# must read zero. ⚠️ The AwaitingResend cell's global-heap half is NOT CHECKED (resend/gap mixed
 # traffic, disclosed under L-497-1). To run that window by hand:
 #   GTEST_FILTER='*AwaitingResend*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/perf_session_recovery_alloc_guard \
@@ -146,5 +143,4 @@ fixpp_add_release_mallocnesia_test(
   NAME perf_session_recovery_heartbeat_mallocnesia
   TARGET perf_session_recovery_alloc_guard
   CASE "SessionRecoveryAllocGuardTest.HeartbeatSteadyState_DualGate"
-  EXPECT_ENTRY "malloc,aligned_alloc"
   LABELS perf alloc_guard 544)
