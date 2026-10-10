@@ -236,52 +236,233 @@ fi
 # (Python re vs awk), so they are re-derivations, not copies, and a comment
 # saying "if you change one, change both" is an instruction someone has to
 # remember. This runs the shipped awk over the REAL log the driver just produced
-# and requires the same three numbers. It is the version of that claim that
+# and requires the same executed count, the same real time, and summed durations
+# no more than one printed step apart. It is the version of that claim that
 # cannot rot.
-LOG="$WORK/run/pass1.ctest.log"
-awk_ran="$(awk 'match($0, /^[0-9]+% tests passed, [0-9]+ tests failed out of [0-9]+$/) { m = $0; sub(/.* out of /, "", m); n = m } END { print n }' "$LOG")"
-awk_real="$(awk -F'= *' '/Total Test time \(real\)/ { t = $2 } END { gsub(/[^0-9.]/, "", t); print t }' "$LOG")"
-awk_sum="$(awk '/^ *[0-9]+\/[0-9]+ +Test +#[0-9]+/ && match($0, /[0-9.]+ sec$/) { s += substr($0, RSTART, RLENGTH-4) } END { if (s > 0) printf "%.1f", s }' "$LOG")"
-py="$(cd "$WORK" && python3 -c '
+#
+# ⚠️ THE SUMMED DURATIONS ARE COMPARED WITHIN ONE PRINTED STEP, NOT FOR
+# EQUALITY (#552). The other two figures are READ from one line each; this one
+# is ACCUMULATED and then rounded, and the two sides do not accumulate alike —
+# awk keeps a naive running total, Python's sum() of floats is compensated from
+# 3.12 on. Both totals are within float noise of the true one, so each printed
+# value is within half a step of it; when the true total sits on a rounding
+# boundary the two land on opposite sides and print one step apart, on a
+# correct tree, from the same lines. One step is therefore the whole of that
+# effect, and anything wider is a real disagreement.
+#
+# Making the two sides sum alike, or comparing unrounded totals, would each
+# change one of the shipped parsers — and this cell exists to run both AS
+# SHIPPED.
+
+# The printed precision of the summed durations, on both sides: the `%.1f` in
+# the awk below and the `round(…, 1)` in parse_ctest_log. S4_STEP, one unit in
+# the last printed place, is derived from it and never written out. s4_compare
+# refuses (PRECISION) a sum that is not printed at this many decimals, so it
+# cannot drift from either side quietly.
+S4_SUM_DECIMALS=1
+S4_STEP="$(python3 -c 'import sys; print(10.0 ** -int(sys.argv[1]))' "$S4_SUM_DECIMALS")"
+
+# ⚠️ WHAT THE TOLERANCE HIDES. One step of tolerance plus half a step of
+# rounding on each side: the two summed durations can truly differ by up to
+# S4_HIDDEN and still agree here, and only a larger difference is CERTAIN to be
+# refused. So a parser that dropped a duration line no longer than S4_HIDDEN
+# could pass this cell. On the real log that is sound ONLY while every test of
+# the project at the top of this file runs for longer than S4_HIDDEN — a
+# relation between this cell and that project's sleep, which S4 CHECKS on the
+# durations the driver actually logged rather than leaving it as a note for
+# whoever next shrinks the sleeps.
+S4_HIDDEN="$(python3 -c 'import sys; print(2 * float(sys.argv[1]))' "$S4_STEP")"
+
+# s4_compare AWK_LOG PARSER_LOG [exact]   ->   sets s4_verdict and s4_read
+#
+# THE ONE READ-AND-COMPARE EVERY S4 ARM GOES THROUGH: the shipped awk over
+# AWK_LOG, the shipped parser over PARSER_LOG. An arm that retyped the awk or
+# the comparison would be testing a copy. The real-log arm passes one log
+# twice; S4b passes two, which is how "one parser lost a line" is staged without
+# editing either parser. `exact` compares the summed durations with no
+# tolerance at all, and exists so S4a can prove its fixture is on the boundary.
+#
+# s4_verdict is `AGREE`, or `DISAGREE on <figures> …`, or one of EMPTY /
+# UNPARSABLE / PRECISION when there was nothing sound to compare. An arm that
+# EXPECTS a disagreement must match `DISAGREE on sum_s` and not merely "not
+# AGREE": the other three would satisfy that while measuring nothing.
+s4_compare() {
+  local awk_log="$1" py_log="$2" mode="${3:-step}" awk_ran awk_real awk_sum py
+  awk_ran="$(awk 'match($0, /^[0-9]+% tests passed, [0-9]+ tests failed out of [0-9]+$/) { m = $0; sub(/.* out of /, "", m); n = m } END { print n }' "$awk_log")"
+  awk_real="$(awk -F'= *' '/Total Test time \(real\)/ { t = $2 } END { gsub(/[^0-9.]/, "", t); print t }' "$awk_log")"
+  awk_sum="$(awk '/^ *[0-9]+\/[0-9]+ +Test +#[0-9]+/ && match($0, /[0-9.]+ sec$/) { s += substr($0, RSTART, RLENGTH-4) } END { if (s > 0) printf "%.1f", s }' "$awk_log")"
+  py="$(cd "$WORK" && python3 -c '
 import pathlib, sys
 sys.path.insert(0, "ci")
 import importlib.util
 spec = importlib.util.spec_from_file_location("v", "ci/parallelism-verdict.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 d = m.parse_ctest_log(pathlib.Path(sys.argv[1]))
-print(f"{d["ran"]} {d["real_s"]} {d["sum_s"]}")' "$LOG")"
-# ⚠️ The awk figures must be NON-EMPTY first. Two empty strings compare equal,
-# so a broken awk would agree with a broken parser and this cell would pass
-# having compared nothing.
-#
-# ⚠️ AND THE COMPARISON IS NUMERIC, NOT TEXTUAL. It was a string compare, and it
-# went red on main for a ctest total of `4.90`: awk's gsub preserves the log's
-# trailing zero, Python's float() drops it, so `4.90` != `4.9` as text while the
-# two parsers agreed perfectly on the VALUE. It passed locally only because the
-# runs happened to produce timings without a trailing zero — a cell whose verdict
-# depended on the decimal representation of a wall time. What this cell exists to
-# check is that the two parsers read the same NUMBERS out of one log; comparing
-# their formatting is a different and worthless question.
-if [ -z "$awk_ran" ] || [ -z "$awk_real" ] || [ -z "$awk_sum" ]; then
-  bad "S4 the shipped awk read NOTHING from a real log (ran='$awk_ran' real='$awk_real' sum='$awk_sum') — the comparison would have been vacuous"
-else
+print(f"{d["ran"]} {d["real_s"]} {d["sum_s"]}")' "$py_log")"
+  s4_read="ran=$awk_ran real=$awk_real sum=$awk_sum"
+  # ⚠️ The awk figures must be NON-EMPTY first. Two empty strings compare equal,
+  # so a broken awk would agree with a broken parser and this cell would pass
+  # having compared nothing.
+  #
+  # ⚠️ AND THE COMPARISON IS NUMERIC, NOT TEXTUAL. A string compare reads a ctest
+  # total of `4.90` as different from `4.9`: awk's gsub preserves the log's
+  # trailing zero, Python's float() drops it, so `4.90` != `4.9` as text while the
+  # two parsers agree perfectly on the VALUE — a cell whose verdict depends on the
+  # decimal representation of a wall time. What this cell exists to check is that
+  # the two parsers read the same NUMBERS out of one log; comparing their
+  # formatting is a different and worthless question.
+  if [ -z "$awk_ran" ] || [ -z "$awk_real" ] || [ -z "$awk_sum" ]; then
+    s4_verdict="EMPTY the shipped awk read NOTHING from the log (ran='$awk_ran' real='$awk_real' sum='$awk_sum') — the comparison would have been vacuous"
+    return
+  fi
   # shellcheck disable=SC2086  # $py is three fields and MUST word-split into
   # three argv entries; quoting it would pass one string and the compare would
   # silently become "1 vs 3 values".
   s4_verdict="$(python3 -c '
 import sys
-awk = sys.argv[1:4]
-py  = sys.argv[4:7]
+mode, decimals, step = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+awk = sys.argv[4:7]
+py  = sys.argv[7:]
 try:
     a = [float(x) for x in awk]
     b = [float(x) for x in py]
 except ValueError as exc:
     print(f"UNPARSABLE {exc}"); raise SystemExit(0)
-print("AGREE" if a == b else f"DISAGREE awk={awk} verdict={py}")' \
-    "$awk_ran" "$awk_real" "$awk_sum" $py)"
-  case "$s4_verdict" in
-    AGREE) ok "S4 both parsers agree on the same real log (ran=$awk_ran real=$awk_real sum=$awk_sum)" ;;
-    *)     bad "S4 $s4_verdict" ;;
+if len(b) != len(a):
+    print(f"UNPARSABLE the parser printed {len(b)} figure(s) awk={awk} verdict={py}"); raise SystemExit(0)
+if any(len(s.partition(".")[2]) != decimals for s in (awk[2], py[2])):
+    print(f"PRECISION a summed duration is not printed at {decimals} decimal(s), so S4_SUM_DECIMALS no longer describes the step awk={awk} verdict={py}"); raise SystemExit(0)
+# Two printed values one step apart do not subtract to exactly one step in
+# binary; eps is the slack for that.
+eps = step / 1e6
+tol = (0.0, 0.0, 0.0 if mode == "exact" else step + eps)
+# not (… <= t) rather than (… > t): a NaN must land in DISAGREE, not in AGREE.
+off = [n for n, x, y, t in zip(("ran", "real_s", "sum_s"), a, b, tol) if not abs(x - y) <= t]
+print("AGREE" if not off else f"DISAGREE on {",".join(off)} awk={awk} verdict={py}")' \
+    "$mode" "$S4_SUM_DECIMALS" "$S4_STEP" "$awk_ran" "$awk_real" "$awk_sum" $py)"
+}
+
+LOG="$WORK/run/pass1.ctest.log"
+s4_compare "$LOG" "$LOG"
+# The S4_HIDDEN relation, checked: the shortest per-test duration in the real
+# log, read with the parser's own DUR_RX, must be ABOVE what the tolerance can
+# hide. An empty reading is refused for the same reason as an empty awk figure.
+s4_floor="$(cd "$WORK" && python3 -c '
+import pathlib, sys
+sys.path.insert(0, "ci")
+import importlib.util
+spec = importlib.util.spec_from_file_location("v", "ci/parallelism-verdict.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+hits = map(m.DUR_RX.match, pathlib.Path(sys.argv[1]).read_text().splitlines())
+durs = [float(h.group(1)) for h in hits if h]
+if durs:
+    print("ABOVE" if min(durs) > float(sys.argv[2]) else f"the shortest test in the real log ran for {min(durs)} s")' "$LOG" "$S4_HIDDEN")"
+if [ "$s4_verdict" != AGREE ]; then
+  bad "S4 $s4_verdict"
+elif [ "$s4_floor" != ABOVE ]; then
+  bad "S4 ${s4_floor:-NO per-test duration could be read from the real log} — a parser that dropped a line of up to ${S4_HIDDEN} s can pass this cell, so every test must run for LONGER than that"
+else
+  ok "S4 both parsers agree on the same real log ($s4_read)"
+fi
+
+# ── S4a: THE ROUNDING BOUNDARY, STAGED ───────────────────────────────────────
+#
+# The real log reaches the boundary only when its timings happen to, so on most
+# runs S4 says nothing about the tolerance. This log is fixed. Its SHAPE is a
+# log the driver wrote for the project at the top of this file; its durations
+# are a list whose naive running total and whose sum() round to different
+# printed values.
+#
+# ⚠️ THE FIXTURE IS CHECKED ON EVERY RUN, NOT TRUSTED. Whether a list sits on
+# the boundary is a property of the two summations — that is, of whichever awk
+# and Python are on PATH. So the `exact` comparison must DISAGREE on it, on the
+# summed durations alone, before the agreement is allowed to count.
+# If it does not, this cell FAILS: a fixture that has left the boundary would
+# agree under any comparison, and the cell would pass having staged nothing.
+#
+# To re-derive one: draw random lists of two-decimal durations; keep a list for
+# which `"%.1f" % total` over a `total += d` loop differs from
+# `round(sum(list), 1)`; write it into this shape; then run this file once per
+# awk you can reach, each one first on PATH, and require S4a to PASS. Then
+# re-check S4b against it — see the note there.
+S4_FIX="$WORK/s4-boundary.ctest.log"
+cat > "$S4_FIX" <<'CTESTLOG'
+Test project /nonexistent/aba-seam-s4-boundary
+      Start  1: seam_t1
+ 1/12 Test  #1: seam_t1 ..........................   Passed    0.44 sec
+      Start  2: seam_t2
+ 2/12 Test  #2: seam_t2 ..........................   Passed    0.45 sec
+      Start  3: seam_t3
+ 3/12 Test  #3: seam_t3 ..........................   Passed    0.40 sec
+      Start  4: seam_t4
+ 4/12 Test  #4: seam_t4 ..........................   Passed    0.45 sec
+      Start  5: seam_t5
+ 5/12 Test  #5: seam_t5 ..........................   Passed    0.45 sec
+      Start  6: seam_t6
+ 6/12 Test  #6: seam_t6 ..........................   Passed    0.42 sec
+      Start  7: seam_t7
+ 7/12 Test  #7: seam_t7 ..........................   Passed    0.43 sec
+      Start  8: seam_t8
+ 8/12 Test  #8: seam_t8 ..........................   Passed    0.38 sec
+      Start  9: seam_t9
+ 9/12 Test  #9: seam_t9 ..........................   Passed    0.39 sec
+      Start 10: seam_t10
+10/12 Test #10: seam_t10 .........................   Passed    0.39 sec
+      Start 11: seam_t11
+11/12 Test #11: seam_t11 .........................   Passed    0.44 sec
+      Start 12: seam_t12
+12/12 Test #12: seam_t12 .........................   Passed    0.41 sec
+
+100% tests passed, 0 tests failed out of 12
+
+Total Test time (real) =   5.07 sec
+CTESTLOG
+s4_compare "$S4_FIX" "$S4_FIX" exact; s4_exact="$s4_verdict"
+s4_compare "$S4_FIX" "$S4_FIX"
+case "$s4_exact" in
+  "DISAGREE on sum_s "*)
+    case "$s4_verdict" in
+      AGREE) ok "S4a both parsers agree on a log whose summed durations sit on a rounding boundary ($s4_read)" ;;
+      *)     bad "S4a $s4_verdict" ;;
+    esac ;;
+  *)
+    bad "S4a THE FIXTURE IS NO LONGER ON THE ROUNDING BOUNDARY — the exact comparison must DISAGREE on sum_s and read '$s4_exact'. Re-derive the fixture; do not delete the cell" ;;
+esac
+
+# ── S4b: A LOST LINE MUST STILL BE REFUSED ───────────────────────────────────
+#
+# The tolerance must not buy agreement for a parser that lost a line. That is
+# staged without touching either parser: the same log with and without one
+# completion line, one to each side, in BOTH directions. The summary line is
+# left alone, so the executed count and the real time agree and the refusal has
+# to come from the summed durations.
+#
+# The lost line runs for S4_DROP — S4_HIDDEN plus a tenth of a step, formatted
+# as ctest prints a duration — because just above S4_HIDDEN is the smallest loss
+# CERTAIN to be refused. A larger one would prove less: it stays refused under a
+# tolerance several steps wide.
+#
+# To see where this arm bites, apply each and require a FAIL here: shrink
+# S4_DROP below one step; widen the tolerance in s4_compare to two steps. The
+# second is refused only while the two printed sums staged here differ by
+# exactly two steps in at least one direction. That is a property of the
+# fixture, so repeat it whenever S4a's fixture is replaced.
+S4_DROP="$(python3 -c 'import sys; print(f"{float(sys.argv[1]) + float(sys.argv[2]) / 10:.2f}")' "$S4_HIDDEN" "$S4_STEP")"
+S4_KEPT="$WORK/s4-kept.ctest.log"
+S4_LOST="$WORK/s4-lost.ctest.log"
+sed "/^ *1\\//s/[0-9.]* sec\$/${S4_DROP} sec/" "$S4_FIX" > "$S4_KEPT"
+sed '/^ *1\//d' "$S4_KEPT" > "$S4_LOST"
+if ! grep -q "^ *1/.* ${S4_DROP} sec\$" "$S4_KEPT" \
+   || [ "$(wc -l < "$S4_LOST")" -ne "$(( $(wc -l < "$S4_KEPT") - 1 ))" ]; then
+  bad "S4b THE LOST LINE WAS NOT STAGED — re-point it, do not delete the cell"
+else
+  s4_compare "$S4_KEPT" "$S4_LOST"; s4_parser_lost="$s4_verdict"
+  s4_compare "$S4_LOST" "$S4_KEPT"; s4_awk_lost="$s4_verdict"
+  case "$s4_parser_lost|$s4_awk_lost" in
+    "DISAGREE on sum_s "*"|DISAGREE on sum_s "*)
+      ok "S4b a parser that lost one ${S4_DROP} s line is REFUSED on the summed durations, from either side" ;;
+    *)
+      bad "S4b a lost ${S4_DROP} s line was not refused on the summed durations alone — parser lost it: '$s4_parser_lost' / awk lost it: '$s4_awk_lost'" ;;
   esac
 fi
 
@@ -562,7 +743,7 @@ case "$s11_in" in
     bad "S11 an --out INSIDE the source tree was accepted — the sample would dirty the tree and fail codegen-build-graph-check in every pass" ;;
 esac
 
-SEAM_DECLARED=14
+SEAM_DECLARED=16
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$SEAM_DECLARED" ]; then
