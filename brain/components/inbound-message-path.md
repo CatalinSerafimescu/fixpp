@@ -359,7 +359,9 @@ implementation departs). The user-facing statement is B&L `B-544-1`; what stays 
   `FIXPP_INBOUND_SPLIT_ENTRY` (`src/session/session.cpp`): the first cancellation check stays at the moved
   block's first original `co_await`, so a callback that ran before an await under a cancelled chain still
   runs. `session_544_inbound_split_cancel` holds the differential cells.
-- **The other two changes on this path.** The session strand keeps the concrete executor type
-  (`make_session_strand`; see [`session`](./session.md)), and `SeqnumManager::check_inbound` locks
-  through the frameless lock op (see [`async-mutex`](./async-mutex.md)). The plain and TLS transport
-  reads are awaited as `deferred` operations (see [`transport`](./transport.md)).
+- **The other changes on this path.** The session strand keeps the concrete executor type
+  (`make_session_strand`; see [`session`](./session.md)), which is what removes the per-read `operator new`
+  calls. `SeqnumManager::check_inbound` locks through the frameless lock op (see
+  [`async-mutex`](./async-mutex.md)), and the plain and TLS transport reads are awaited as `deferred`
+  operations (see [`transport`](./transport.md)); each removes a frame, which is slot headroom under the
+  exported count, not what makes the arms' frames fit.

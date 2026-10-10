@@ -60,7 +60,7 @@ resumer (`B-006-2`) — a deliberate hard precondition, not an error return.
 | Document | Status |
 |---|---|
 | ⚠️ `decisions/2f-async-mutex.md` — **the 9.6 KB decision record in the PRIVATE parent**, *not* the 309 KB design doc of the same basename at `.specify/2f-async-mutex.md`. Two different artifacts, one name. Check the size or the path before concluding anything | **HISTORICAL.** Describes the pre-048 cross-thread drain: a `shared_ptr`-owned `drain_latch_state` over an `asio::experimental::concurrent_channel`, a Dekker-style publication handshake, `active_acquirers_count_` epoch counters |
-| `specs/006-async-mutex/` — `spec.md`, `research.md`, `data-model.md`, `contracts/` | **HISTORICAL** for drain/cancellation. Frozen at the original feature; never updated after 048 |
+| `specs/006-async-mutex/` — `spec.md`, `research.md`, `data-model.md`, `contracts/` | **HISTORICAL** for drain/cancellation. Frozen at the original feature; never updated after 048. ⚠️ Also stale, since fixpp#544, where its contracts place the frame-local awaiter in `async_lock`'s own frame: for callers of `FIXPP_DETAIL_CO_AWAIT_LOCK` it lives in a `detail::lock_frame` in the caller's frame (2f Erratum E-6, at the end of `.specify/2f-async-mutex.md`) |
 
 Feature **048** removed that machinery entirely. Reading 006-only docs gives a **materially wrong
 mental model of `cancel_and_drain()` today**. They remain valuable for *why the original shape was

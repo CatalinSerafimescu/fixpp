@@ -275,6 +275,11 @@ plus its "As built" section). The behaviour a user must know is B&L `B-544-1`…
   test is exact target type, so a work-tracked or custom-allocator `io_context` executor takes the
   fallback. ⚠️ `.specify/2d-threading.md`'s "the engine never picks a concrete executor" is annotated by
   a document-level amendment at that file's END; read it before citing the sentence.
+  ⚠️ Also written before this and not updated: `specs/007-threading-clock/contracts/session_executor.hpp`
+  ("Holds the resolved inner executor — `asio::strand<asio::any_io_executor>`") and
+  `specs/023-engine-session-strand/data-model.md` (`session_strand = make_strand(exec_)`). On the fast path
+  the strand's target is `strand<session_inner_executor_t>`, and `SessionEntry::session_strand`'s type
+  changed (B&L `B-544-2`).
 - **`send_impl` no longer carries its buffers in its frame.** The `Session` owns two build-scratch
   buffers, a frame slot and a slot flag (`send_strip_scratch_`, `send_body_scratch_`,
   `send_frame_slot_`, `send_slot_in_use_` in `session.hpp`). The build is a non-coroutine helper,

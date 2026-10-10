@@ -74,13 +74,20 @@ join, and clears the registry while a spawned loop still holds `SessionEntry&` �
 ## `MemoryStore::store`'s lock is the frameless lock op; its siblings are not (fixpp#544)
 
 `MemoryStore::store` (`include/fixpp/session/memory_store.hpp`) locks its `async_mutex` through
-`FIXPP_DETAIL_CO_AWAIT_LOCK` (2f Erratum E-6), and its leading post is awaited as `deferred`; together
-they take two coroutine frames off the store chain, which fixpp#544's W-D window gates at zero. `next_seqnum`,
+`FIXPP_DETAIL_CO_AWAIT_LOCK` (2f Erratum E-6), and its leading post is awaited as `deferred`. Each removes
+a cycled coroutine frame from the store chain: slot headroom under the exported count, witnessed by arms that
+fill the slots to exactly that count, not the reason W-D reads zero. `next_seqnum`,
 `reset`, `reset_to` and `retrieve` stay on the public `async_lock`, and FileStore is not converted
 (`.specify/544-hot-path-zero-alloc.md` §2.3). **This page's argument is unchanged:** the macro is the
 same lock with the same waiter and reap model, so the store's mutex still has no holder and no waiter
 once no store `co_await` is in flight. Re-derive the converted sites with
 `git grep -n "FIXPP_DETAIL_CO_AWAIT_LOCK" -- src include`.
+
+⚠️ **Documents that describe `store()`'s lock as the public `async_lock`**, written before fixpp#544 and
+not updated: `.specify/2e-msgstore.md`'s `MemoryStore::store` latency-budget row, and
+`specs/008-message-store/contracts/message_store.hpp`'s fast-path comment. Their lock semantics still
+hold; for `MemoryStore::store` the route is the macro (2f Erratum E-6). Frozen bundles are annotated
+here, not edited.
 
 ## The 141=Y reset unit's store operation (093, fixpp#524) — still awaited, now not cancellable
 

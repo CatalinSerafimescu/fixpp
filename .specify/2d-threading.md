@@ -1702,7 +1702,8 @@ Placed at the end for the same reason as the amendment above: line-number citati
 document. The individual sites are **not** rewritten.
 
 **What changed.** §1 goal 1, the §1 "Executor model" bullet and the §3 inherited-surface primitive say
-the engine **never picks a concrete executor** and does not assume one. Since fixpp#544
+the engine **never picks a concrete executor** and does not assume one; §1's "Strand cost" bullet and
+§4.8's code comments spell the session strand `asio::strand<asio::any_io_executor>` (`session_strand_t`). Since fixpp#544
 (`.specify/544-hot-path-zero-alloc.md` §2.1, owner ruling R-2) that holds for the **choice**, not for
 the **type the session strand stores**:
 

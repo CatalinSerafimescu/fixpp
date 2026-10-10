@@ -47,6 +47,9 @@ strand (**INV-7**, `assert_transport_on_session_strand`).
 strand `make_session_strand` (`src/session/session_strand.cpp`) builds; its target is the concrete
 `io_context` executor type when the Engine's executor is exactly that (B&L `B-544-2`, `B-544-1`). The
 assertion's parameter is `const asio::any_io_executor&` and it still compares with `operator==`.
+⚠️ `specs/015-runtime-engine/research.md`'s amendment ("itself `make_strand(exec_)`") and
+`specs/023-engine-session-strand/data-model.md` (`session_strand = make_strand(exec_)`) predate this: the
+construction is now `make_session_strand(exec_)`. Frozen bundles; annotated here, not edited.
 
 The structural fact underneath: `asio_listener::async_accept()` is an ordinary coroutine that never
 dispatches onto its own stored executor, so **it resumes on whatever executor its awaiter runs on**.
