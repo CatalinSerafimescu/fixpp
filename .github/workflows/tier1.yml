@@ -925,7 +925,7 @@ jobs:
         if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
         run: |
           python3 tools/check_mallocnesia_population.py \
-            --build-dir build/${{ matrix.preset }} --min-gates 20
+            --build-dir build/${{ matrix.preset }} --min-gates 63
 
       # The gates themselves. No `|| true`, no continue-on-error: a real allocation on a
       # gated hot path must fail this lane. `mallocnesia_positive_control` runs inside

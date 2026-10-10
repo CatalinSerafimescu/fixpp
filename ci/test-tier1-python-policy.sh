@@ -1082,7 +1082,7 @@ $got"
   local want_population_run
   want_population_run="$(cat <<'POPULATION'
 python3 tools/check_mallocnesia_population.py \
-  --build-dir build/${{ matrix.preset }} --min-gates 20
+  --build-dir build/${{ matrix.preset }} --min-gates 63
 POPULATION
 )"
   g="$(echo "$json" | jq -r '.mallocnesia_step_runs.mallocnesia_population | length')"
@@ -2719,7 +2719,7 @@ open(dst, "w").write(t.replace(old, new))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "            --build-dir build/${{ matrix.preset }} --min-gates 20\n"
+old = "            --build-dir build/${{ matrix.preset }} --min-gates 63\n"
 new = "            --build-dir build/${{ matrix.preset }} --min-gates 1\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
