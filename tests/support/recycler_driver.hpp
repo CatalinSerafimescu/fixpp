@@ -61,6 +61,13 @@ inline constexpr std::size_t kChunkSize = 4;
 // request above it is allocated on every use and evicts a cached block.
 inline constexpr std::size_t kRecycleLimit = kChunkSize * UCHAR_MAX;
 
+// The (b-L) pairs' plant buffers.
+inline constexpr std::size_t kOverLimitPlantBytes = 2 * kRecycleLimit;
+// The twin's buffer leaves room under the limit for the frame's overhead. It is a
+// parameter: re-derive it per compiler from the arm's log, where each interception prints
+// `aligned_alloc(<align>, <size>)` and asio requests `chunks * chunk_size + 1` bytes.
+inline constexpr std::size_t kInLimitPlantBytes = kRecycleLimit / 4;
+
 // ── Production-chain parameters (harness inputs, not assertions) ─────────────
 //
 // Each is a count of cycled coroutine frames on a production chain, derived by the

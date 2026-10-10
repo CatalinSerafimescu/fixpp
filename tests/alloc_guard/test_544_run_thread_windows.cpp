@@ -405,10 +405,6 @@ TEST(B35RunThreadWindows, ArmA_TrackedExecutorFallback) {
 
 // ── W-A's (b-L) and (b-S) pairs, planted through a launcher woken by fromAdmin ──
 
-inline constexpr std::size_t kOverLimitPlantBytes = 2 * rc::kRecycleLimit;
-// A parameter: re-derive it per compiler from the arm's log, as in W-D's harness.
-inline constexpr std::size_t kInLimitPlantBytes = rc::kRecycleLimit / 4;
-
 template <class Plant>
 window_result run_planted() {
     return run_window(
@@ -425,11 +421,11 @@ void expect_planted_ran(window_result const& r) {
 }
 
 TEST(B35RunThreadWindows, WA_BL_Arm_OverLimitPlant) {
-    expect_planted_ran(run_planted<rc::buffer_plant<kOverLimitPlantBytes>>());
+    expect_planted_ran(run_planted<rc::buffer_plant<rc::kOverLimitPlantBytes>>());
 }
 
 TEST(B35RunThreadWindows, WA_BL_Twin_InLimitPlant) {
-    expect_planted_ran(run_planted<rc::buffer_plant<kInLimitPlantBytes>>());
+    expect_planted_ran(run_planted<rc::buffer_plant<rc::kInLimitPlantBytes>>());
 }
 
 // Shifted by r: the pending read holds r cycled frames while the plant runs, so a nest of

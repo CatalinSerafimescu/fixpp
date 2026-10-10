@@ -264,21 +264,18 @@ TEST(B35DriverWindows, WDR_BracketArm_NestOneOverSlots) {
 // ── W-D's (b-L) pair: the recycler's size limit ──────────────────────────────
 
 // The arm's frame request exceeds the limit on its buffer alone.
-inline constexpr std::size_t kOverLimitPlantBytes = 2 * rc::kRecycleLimit;
-// The twin's buffer leaves room under the limit for the frame's overhead. It is a
-// parameter: re-derive it per compiler from the arm's log, where each interception prints
-// `aligned_alloc(<align>, <size>)` and asio requests `chunks * chunk_size + 1` bytes.
-inline constexpr std::size_t kInLimitPlantBytes = rc::kRecycleLimit / 4;
 
 TEST(B35DriverWindows, WD_BL_Arm_OverLimitFrame) {
-    auto out = run_alone<0>(
-        [](asio::any_io_executor ex) { return rc::buffer_plant<kOverLimitPlantBytes>{.ex = ex}; });
+    auto out = run_alone<0>([](asio::any_io_executor ex) {
+        return rc::buffer_plant<rc::kOverLimitPlantBytes>{.ex = ex};
+    });
     expect_every_iteration_ok(out);
 }
 
 TEST(B35DriverWindows, WD_BL_Twin_InLimitFrame) {
-    auto out = run_alone<0>(
-        [](asio::any_io_executor ex) { return rc::buffer_plant<kInLimitPlantBytes>{.ex = ex}; });
+    auto out = run_alone<0>([](asio::any_io_executor ex) {
+        return rc::buffer_plant<rc::kInLimitPlantBytes>{.ex = ex};
+    });
     expect_every_iteration_ok(out);
 }
 
