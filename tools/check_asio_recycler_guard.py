@@ -189,11 +189,13 @@ def census(entries: list[dict], asio_dirs: set[str], n: str) -> tuple[list[dict]
 
 def strip_definition(entry: dict) -> dict:
     out = dict(entry)
-    pattern = re.compile(r"[-/]D\s*" + MACRO + r"(=\S*)?")
     if "arguments" in entry:
+        # The arguments form strips a joined -DMACRO[=...] token only; a split '-D' 'MACRO'
+        # pair is left, and the positive control then fails loud.
         out["arguments"] = [a for a in entry["arguments"]
                             if not re.fullmatch(r"[-/]D" + MACRO + r"(=.*)?", a)]
     else:
+        pattern = re.compile(r"[-/]D\s*" + MACRO + r"(=\S*)?")
         out["command"] = pattern.sub("", entry["command"])
     return out
 
