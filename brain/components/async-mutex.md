@@ -5,10 +5,10 @@ description: Every document describing fixpp's async mutex, with the pre-048 des
 status: stable
 refs:
   - include/fixpp/core/sync/async_mutex.hpp
-  - .specify/2f-async-mutex.md
-  - .specify/544-hot-path-zero-alloc.md
   - include/fixpp/session/memory_store.hpp
   - src/session/seqnum_manager.cpp
+  - .specify/2f-async-mutex.md
+  - .specify/544-hot-path-zero-alloc.md
 refs_external:
   - research/G19-fix-fpml-iso20022/phases/phase-4/core/048-async-mutex-strand-reap.md
   - research/G19-fix-fpml-iso20022/phases/phase-4/core/058-async-mutex-hardening.md

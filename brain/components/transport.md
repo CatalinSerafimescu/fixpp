@@ -8,10 +8,10 @@ refs:
   - include/fixpp/transport/listener.hpp
   - include/fixpp/transport/tls_transport.hpp
   - include/fixpp/transport/reconnect_policy.hpp
-  - .specify/2h-transport.md
-  - .specify/544-hot-path-zero-alloc.md
   - src/session/session_strand.cpp
   - src/transport/asio_plain_transport.cpp
+  - .specify/2h-transport.md
+  - .specify/544-hot-path-zero-alloc.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2h-transport.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md

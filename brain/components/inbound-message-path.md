@@ -16,6 +16,8 @@ refs:
   - include/fixpp/core/clock.hpp
   - src/core/fix_time.cpp
   - src/session/sending_time.cpp
+  - src/session/session_strand.cpp
+  - .specify/544-hot-path-zero-alloc.md
   - specs/015-runtime-engine/research.md
   - specs/092-garbled-frame-reject/spec.md
   - specs/092-garbled-frame-reject/research.md
@@ -26,8 +28,6 @@ refs:
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
   - tests/session/read_first_frame_bounded_test.cpp
-  - .specify/544-hot-path-zero-alloc.md
-  - src/session/session_strand.cpp
   - tests/alloc_guard/test_544_run_thread_windows.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/015-runtime-engine-gatea.md

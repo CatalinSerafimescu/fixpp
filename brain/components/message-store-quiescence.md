@@ -10,13 +10,13 @@ refs:
   - src/session/file_store.cpp
   - src/session/engine.cpp
   - src/session/session.cpp
+  - include/fixpp/core/sync/async_mutex.hpp
+  - .specify/544-hot-path-zero-alloc.md
   - specs/093-inbound-frame-dispositions/spec.md
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
   - tests/session/test_file_store_crash_survival.cpp
-  - .specify/544-hot-path-zero-alloc.md
-  - include/fixpp/core/sync/async_mutex.hpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md

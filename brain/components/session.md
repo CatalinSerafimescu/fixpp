@@ -10,15 +10,15 @@ refs:
   - include/fixpp/session/config_byte_floor.hpp
   - include/fixpp/session/message_store.hpp
   - src/session/session.cpp
+  - src/session/session_strand.cpp
   - .specify/447-458-452-capi-refusals.md
+  - .specify/544-hot-path-zero-alloc.md
   - specs/005-session-establishment-fsm/spec.md
   - specs/093-inbound-frame-dispositions/spec.md
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/research.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
-  - .specify/544-hot-path-zero-alloc.md
-  - src/session/session_strand.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/005-session-establishment-fsm-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/013-session-reconnect-binding-gatea.md

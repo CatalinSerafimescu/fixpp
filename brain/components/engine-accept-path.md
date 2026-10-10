@@ -7,8 +7,8 @@ refs:
   - src/session/engine.cpp
   - src/transport/asio_listener.hpp
   - include/fixpp/transport/listener.hpp
-  - .specify/544-hot-path-zero-alloc.md
   - src/session/session_strand.cpp
+  - .specify/544-hot-path-zero-alloc.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr331-330-asio-listener-executor-gateb.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr326-310-315-gateb.md
