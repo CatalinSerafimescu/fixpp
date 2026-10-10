@@ -12,13 +12,13 @@
 // Each cell drives one reply block whose user callback (toAdmin / toApp) runs before the
 // block's first original `co_await`, under a chain that the test cancels just before the
 // block. It asserts what today's code does: the callback runs, then the first original
-// `co_await` throws, and the reply is not transmitted. The LogonSent cell drives the path
-// where the reply fails to build and today's block has no `co_await` at all: the session
-// disconnects and the frame completes with a value.
+// `co_await` throws, and the reply is not transmitted. The LogonSent and too-high
+// build-failure cells drive the path where the reply fails to build and today's block has no
+// `co_await` at all: the frame completes with a value.
 //
-// The cells are a differential oracle: they hold at base and after the split. Mutant: make
-// FIXPP_INBOUND_SPLIT_AWAIT a plain `co_await (call)` and FIXPP_INBOUND_SPLIT_ENTRY a no-op
-// in src/session/session.cpp; every cell then goes RED.
+// The cells are a differential oracle: each must hold at base and after the split. Mutant:
+// reduce FIXPP_INBOUND_SPLIT_AWAIT to `auto var = co_await (call)` and
+// FIXPP_INBOUND_SPLIT_ENTRY to a no-op in src/session/session.cpp; each cell must then fail.
 
 #include <gtest/gtest.h>
 
@@ -425,6 +425,37 @@ TEST(B35InboundSplitCancel, LogonSentLogoutBuildFailure_DisconnectsWithoutThrow)
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
     EXPECT_EQ(f.app->to_admin_count("5"), 0) << "the Logout must have failed to build";
     EXPECT_EQ(f.sent_count("5"), 0);
+}
+
+// Too-high MsgSeqNum, reply-build-failure path. The CompIDs are sized so the initiator's Logon
+// fits its buffer and a ResendRequest whose BeginSeqNo has ten digits does not fit its own: a
+// Reset-mode SequenceReset moves NextNumIn to a ten-digit value first. now()'s second call (the
+// ResendRequest's stamp) cancels the chain. Today the failed build reaches no co_await, so the
+// session stays Active and the frame completes with a value.
+TEST(B35InboundSplitCancel, TooHighResendRequestBuildFailure_StaysActiveWithoutThrow) {
+    CancelFixture f;
+    f.sender = std::string(88, 'S');
+    f.target = std::string(88, 'T');
+    Session s(f.engine, f.cfg());
+    ASSERT_TRUE(f.open_to_active(s)) << "the initiator Logon must fit its buffer";
+    ASSERT_TRUE(
+        f.feed_plain(s, make_frame("4", 2, f.target, f.sender, kFresh52, "36=4000000000\x01")));
+    ASSERT_EQ(s.state(), fsm_state::Active);
+
+    f.clock->on_now = [&](int n) {
+        if (n == 2) f.cancel_chain();
+    };
+    f.clock->armed = true;
+    auto o = f.feed_cancellable(s, make_frame("0", 4000000005U, f.target, f.sender, kFresh52));
+    f.clock->armed = false;
+
+    ASSERT_TRUE(f.emitted) << "the cell's cancellation point was never reached";
+    ASSERT_TRUE(o.completed);
+    EXPECT_FALSE(o.aborted) << "a failed build reaches no co_await, so nothing may throw";
+    EXPECT_TRUE(o.value);
+    EXPECT_EQ(s.state(), fsm_state::Active);
+    EXPECT_EQ(f.app->to_admin_count("2"), 0) << "the ResendRequest must have failed to build";
+    EXPECT_EQ(f.sent_count("2"), 0);
 }
 
 }  // namespace
