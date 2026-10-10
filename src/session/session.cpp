@@ -5381,9 +5381,10 @@ namespace {
 // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; ruling R-10): one Session::send
 // invocation's hold on the session's frame slot. It takes the slot only when the flag is
 // clear, and clears only a flag it set itself, so a send that found the slot held, and a
-// flag a test set, are left alone. Its destructor is the only place the flag is cleared,
-// and it runs on every exit of the invocation: a co_return, a throw, and the destruction of
-// a suspended frame.
+// flag a test set, are left alone. The flag is cleared in its destructor and never by hand
+// (re-check with `grep -n "in_use_ = false" src/session/session.cpp`), so the clear runs on
+// every exit of the invocation: a co_return, a throw, and the destruction of a suspended
+// frame.
 class send_slot_holder {
 public:
     explicit send_slot_holder(bool& in_use) noexcept : in_use_(in_use), held_(!in_use) {

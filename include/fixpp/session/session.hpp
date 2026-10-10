@@ -1514,10 +1514,10 @@ private:
     // fixpp#544 §2.5: the frame build of Session::send, a non-coroutine. It runs the 020
     // payload checks, the 022 scanner and excision pass, the SendingTime(52) stamp, the
     // MsgSeqNum peek and the framing, in that order, and writes the frame into `out`. It
-    // uses send_strip_scratch_ and send_body_scratch_ without the slot flag, which is sound
-    // while it calls no Application callback: on the strand nothing else can run while it
-    // does. Its one injected dependency is the clock's now(), at the position the stamp
-    // has always had.
+    // uses send_strip_scratch_ and send_body_scratch_ without the slot flag. That is sound
+    // while it neither suspends nor calls an Application callback, because the strand runs
+    // one handler at a time. The clock's now() is the injected dependency it calls, at the
+    // position the stamp has always had.
     struct send_frame_built {
         std::size_t size = 0;
         seqnum_t seq = 0;
