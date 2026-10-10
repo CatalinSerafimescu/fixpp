@@ -203,7 +203,7 @@ private:
         }
         return ex;
     }
-
+    friend struct session_io_executor_test_access;  // defined in tests/support/
     std::uintptr_t target_;
 };
 

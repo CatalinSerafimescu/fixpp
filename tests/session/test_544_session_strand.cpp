@@ -24,8 +24,9 @@
 //     and SessionEntry::session_strand compare equal, and handlers on a live session's
 //     strand never overlap.
 //   session_io_executor cells: equality and queries follow the context and the property
-//     bits; execute honours blocking.never; tracked copies, moves and assignments
-//     balance the outstanding work.
+//     bits; execute honours blocking.never; the inner executor execute() forwards to
+//     carries relationship.continuation; tracked copies, moves and assignments balance the
+//     outstanding work.
 //
 // SerialisationProbe_Control_BareExecutorOverlaps is a positive control for
 // overlap_probe::body only; the comment above it states how the serialisation probe's
@@ -67,6 +68,7 @@
 #include "session/plain_engine_rig.hpp"
 #include "session/session_strand.hpp"
 #include "support/engine_test_access.hpp"
+#include "support/session_io_executor_test_access.hpp"
 #include "support/wait_until.hpp"
 #include "transport/asio_plain_transport.hpp"
 
@@ -510,6 +512,40 @@ TEST(B35SessionIoExecutor, ExecuteHonoursBlockingNever) {
     EXPECT_TRUE(possibly_inline) << "blocking.possibly did not run inline inside the io_context";
     EXPECT_FALSE(never_inline) << "blocking.never ran inline";
     EXPECT_TRUE(never_ran) << "the blocking.never function never ran";
+}
+
+// execute() forwards to inner(), an io_context executor rebuilt from the property bits; the
+// relationship bit must reach it, because the io_context executor's post reads it. No public
+// operation of session_io_executor returns the inner executor, and the bit has no effect
+// every scheduler shows (the IOCP io_context ignores it), so the cell queries inner()
+// through the test-access friend. Mutant: delete the relationship.continuation `require`
+// in inner(); the continuation query must then fail.
+TEST(B35SessionIoExecutor, InnerExecutorCarriesContinuation) {
+    asio::io_context ioc;
+    sd::session_io_executor const e{ioc.get_executor()};
+    auto const cont = asio::require(e, asio::execution::relationship_t::continuation);
+
+    auto const fork_inner = sd::session_io_executor_test_access::inner(e);
+    EXPECT_TRUE(asio::query(fork_inner, asio::execution::relationship) ==
+                asio::execution::relationship_t::fork);
+
+    auto const cont_inner = sd::session_io_executor_test_access::inner(cont);
+    EXPECT_TRUE(asio::query(cont_inner, asio::execution::relationship) ==
+                asio::execution::relationship_t::continuation)
+        << "inner() dropped relationship.continuation";
+    EXPECT_TRUE(asio::query(cont_inner, asio::execution::blocking) ==
+                asio::execution::blocking_t::possibly);
+    EXPECT_EQ(&asio::query(cont_inner, asio::execution::context), &ioc);
+
+    // A handler executed through the continuation executor, and one through its inner
+    // executor, both run on the io_context.
+    bool via_cont = false;
+    bool via_inner = false;
+    cont.execute([&] { via_cont = true; });
+    cont_inner.execute([&] { via_inner = true; });
+    ioc.run();
+    EXPECT_TRUE(via_cont) << "a handler executed through the continuation executor never ran";
+    EXPECT_TRUE(via_inner) << "a handler executed through its inner executor never ran";
 }
 
 // One operation on tracked and untracked executors over one io_context. `tracked` is a
