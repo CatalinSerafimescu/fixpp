@@ -2753,13 +2753,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // Witness: tests/session/test_544_inbound_split_cancel_cells.cpp. Mutant: reduce the first
 // macro to `auto var = co_await (call)` and the second to `(void)(tic)`; each cell must then
 // fail.
-// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+// NOLINTBEGIN(cppcoreguidelines-macro-usage,bugprone-macro-parentheses): var is a declared name
 #define FIXPP_INBOUND_SPLIT_AWAIT(var, tic, call)             \
     (tic) = co_await ::asio::this_coro::throw_if_cancelled(); \
     co_await ::asio::this_coro::throw_if_cancelled(false);    \
     auto var = co_await (call)
 #define FIXPP_INBOUND_SPLIT_ENTRY(tic) co_await ::asio::this_coro::throw_if_cancelled(tic)
-// NOLINTEND(cppcoreguidelines-macro-usage)
+// NOLINTEND(cppcoreguidelines-macro-usage,bugprone-macro-parentheses)
 
 // fixpp#544 §2.2 class 2: reply leaves. Each owns the buffer its frame is built in, because
 // store_then_emit transmits the caller's span after the store suspends. A leaf is awaited

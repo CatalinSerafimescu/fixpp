@@ -100,7 +100,7 @@ static_assert(sizeof(contingency_strand_t) <= kInlineSize,
 static_assert(alignof(contingency_strand_t) <= kInlineAlign,
               "strand<session_io_executor> is over-aligned for any_io_executor's inline storage");
 
-#if !defined(_MSC_VER)
+#ifndef _MSC_VER
 // Without this pin an asio layout change could move this compiler onto the contingency
 // executor silently. MSVC's layout takes the contingency executor.
 static_assert(std::is_same_v<sd::session_inner_executor_t, asio::io_context::executor_type>,
@@ -110,6 +110,7 @@ static_assert(std::is_same_v<sd::session_inner_executor_t, asio::io_context::exe
 static_assert(asio::execution::is_executor<sd::session_io_executor>::value);
 // Every property change keeps the type, so a property change cannot produce a strand type
 // that might not fit.
+// NOLINTBEGIN(readability-static-accessed-through-instance): asio's property-object spelling
 static_assert(std::is_same_v<decltype(asio::prefer(std::declval<sd::session_io_executor>(),
                                                    asio::execution::outstanding_work.tracked)),
                              sd::session_io_executor>);
@@ -119,6 +120,7 @@ static_assert(std::is_same_v<decltype(asio::require(std::declval<sd::session_io_
 static_assert(std::is_same_v<decltype(asio::prefer(std::declval<sd::session_io_executor>(),
                                                    asio::execution::relationship.continuation)),
                              sd::session_io_executor>);
+// NOLINTEND(readability-static-accessed-through-instance)
 
 // ── Target-type oracle ───────────────────────────────────────────────────────
 
@@ -133,6 +135,7 @@ TEST(B35SessionStrand, TargetTypeOracle_OtherExecutorsTakeTheFallback) {
     asio::io_context ioc;
     asio::thread_pool pool{1};
     std::vector<asio::any_io_executor> const others{
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
         asio::prefer(ioc.get_executor(), asio::execution::outstanding_work.tracked),
         pool.get_executor(),
     };
@@ -250,7 +253,7 @@ bool run_serialisation_probe(asio::io_context& ioc, asio::any_io_executor const&
     producer_b.join();
     for (int i = 0; i < kCoroutines; ++i) asio::co_spawn(s, segmented_body(s, p), asio::detached);
 
-    int const want_bodies = 2 * kPostsPerProducer + kCoroutines * kSegments;
+    int const want_bodies = (2 * kPostsPerProducer) + (kCoroutines * kSegments);
     auto const limit = std::chrono::steady_clock::now() + kProbeBudget;
     bool done = false;
     while (std::chrono::steady_clock::now() < limit) {
@@ -286,6 +289,7 @@ TEST(B35SessionStrand, SerialisationProbe_Control_BareExecutorOverlaps) {
     asio::io_context ioc{kRunThreads};
     auto guard = asio::make_work_guard(ioc);
     std::vector<std::thread> runners;
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation): a control
     for (int i = 0; i < kRunThreads; ++i) runners.emplace_back([&ioc] { ioc.run(); });
     overlap_probe p;
     // Two bodies, each waiting for the other: on an executor that runs them on two
@@ -339,6 +343,7 @@ TYPED_TEST(B35StrandSemantics, WorkTracking_TrackedCopyKeepsRunAliveUntilRelease
     asio::io_context ioc;
     asio::any_io_executor const s = TypeParam::make(ioc);
     std::optional<asio::any_io_executor> tracked{
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
         asio::prefer(s, asio::execution::outstanding_work.tracked)};
     std::atomic<bool> returned{false};
     std::thread runner{[&] {
@@ -430,10 +435,12 @@ TEST(B35SessionStrand, Engine_SessionExecutorTransportAndSessionStrandCompareEqu
     ASSERT_TRUE(up && sess) << "the session did not reach Active";
     ASSERT_TRUE(entry_strand.has_value()) << "SessionEntry::session_strand is not set";
     ASSERT_TRUE(socket_exec.has_value()) << "the live transport is not asio_plain_transport";
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): each follows an ASSERT_TRUE on it
     EXPECT_NE(entry_strand->target<fast_strand_t>(), nullptr)
         << "the stored session strand is not the fast-path strand";
     EXPECT_TRUE(*session_exec == *entry_strand) << "session executor != session_strand";
     EXPECT_TRUE(*socket_exec == *entry_strand) << "transport socket executor != session_strand";
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(B35SessionStrand, Engine_HandlersOnALiveSessionStrandNeverOverlap) {
@@ -468,6 +475,7 @@ TEST(B35SessionIoExecutor, EqualityAndQueriesFollowContextAndBits) {
     EXPECT_TRUE(asio::query(e, asio::execution::outstanding_work) ==
                 asio::execution::outstanding_work.untracked);
 
+    // NOLINTBEGIN(readability-static-accessed-through-instance): asio's property-object spelling
     auto const never = asio::require(e, asio::execution::blocking.never);
     EXPECT_TRUE(asio::query(never, asio::execution::blocking) == asio::execution::blocking.never);
     EXPECT_FALSE(never == e);
@@ -489,12 +497,14 @@ TEST(B35SessionIoExecutor, EqualityAndQueriesFollowContextAndBits) {
     EXPECT_TRUE(from_never == never);
     sd::session_io_executor const from_cont{
         asio::require(ioc.get_executor(), asio::execution::relationship.continuation)};
+    // NOLINTEND(readability-static-accessed-through-instance)
     EXPECT_TRUE(from_cont == cont);
 }
 
 TEST(B35SessionIoExecutor, ExecuteHonoursBlockingNever) {
     asio::io_context ioc;
     sd::session_io_executor const e{ioc.get_executor()};
+    // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
     auto const never = asio::require(e, asio::execution::blocking.never);
     // Every flag lives in this frame: the blocking.never function runs after the
     // handler that submitted it has returned.
@@ -560,6 +570,7 @@ void expect_balanced(work_op op) {
     asio::io_context ioc;
     sd::session_io_executor const e{ioc.get_executor()};
     std::optional<sd::session_io_executor> keep{
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
         asio::prefer(e, asio::execution::outstanding_work.tracked)};
     std::atomic<bool> returned{false};
     std::thread runner{[&] {
@@ -584,6 +595,9 @@ TEST(B35SessionIoExecutor, TrackedCopiesMovesAndAssignmentsBalanceWork) {
         char const* name;
         work_op op;
     };
+    // NOLINTBEGIN(modernize-use-designated-initializers): name, then op
+    // NOLINTBEGIN(performance-unnecessary-copy-initialization): the copy is the op
+    // NOLINTBEGIN(readability-static-accessed-through-instance): asio's spelling
     named_op const ops[] = {
         {"copy-construct", [](auto const& t, auto const&) { sd::session_io_executor a = t; }},
         {"move-construct",
@@ -638,6 +652,9 @@ TEST(B35SessionIoExecutor, TrackedCopiesMovesAndAssignmentsBalanceWork) {
              auto const b = asio::require(a, asio::execution::outstanding_work.untracked);
          }},
     };
+    // NOLINTEND(readability-static-accessed-through-instance)
+    // NOLINTEND(performance-unnecessary-copy-initialization)
+    // NOLINTEND(modernize-use-designated-initializers)
     for (auto const& o : ops) {
         SCOPED_TRACE(o.name);
         expect_balanced(o.op);

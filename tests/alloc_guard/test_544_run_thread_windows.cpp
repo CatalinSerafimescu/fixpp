@@ -135,7 +135,9 @@ constexpr int kMeasuredFrames = 20;
 // told from a fixed cost by two readings.
 int measured_frames() {
 #ifndef _WIN32
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): safe while nothing calls setenv
     if (char const* v = std::getenv("FIXPP_B35_MEASURED")) {
+        // NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion,cert-err34-c): n > 0
         int const n = std::atoi(v);
         if (n > 0) return n;
     }
@@ -170,8 +172,9 @@ enum class tu_expect : std::uint8_t { print_only, zero, allocates };
 void check_tu_count([[maybe_unused]] std::size_t n, [[maybe_unused]] tu_expect e,
                     [[maybe_unused]] char const* cell) {
 #if FIXPP_B35_COUNTS_NEW
+    // NOLINTNEXTLINE(modernize-use-std-print): std::println is C++23
     std::printf("[b35] %s: global operator new calls in the window = %zu\n", cell, n);
-#if defined(NDEBUG)
+#ifdef NDEBUG
     if (e == tu_expect::zero) {
         EXPECT_EQ(n, 0U) << cell << ": global operator new calls in the window";
     } else if (e == tu_expect::allocates) {
@@ -345,6 +348,7 @@ TEST(B35RunThreadWindows, WB_ActiveAppMessage) {
 
 // ── W-E and the veto-then-zero cell ──────────────────────────────────────────
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables): a stateless lambda
 auto make_sender = [](rt::Rig&, fixpp::session::Session* s, std::span<const std::byte> payload) {
     return rt::send_body{.session = s, .payload = payload};
 };

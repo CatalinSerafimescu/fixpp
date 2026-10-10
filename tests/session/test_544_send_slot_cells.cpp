@@ -320,8 +320,10 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
     EXPECT_EQ(to_app_after_second, 2);
     ASSERT_FALSE(r1.threw);
     ASSERT_FALSE(r2.threw);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the stream runs only if the optional is set
     EXPECT_FALSE(r1.err.has_value()) << "first send failed: " << static_cast<int>(*r1.err);
     EXPECT_FALSE(r2.err.has_value()) << "second send failed: " << static_cast<int>(*r2.err);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 
     const std::string e1 = expected_frame(seq0, kPayloadOne);
     const std::string e2 = expected_frame(seq0 + 1, kPayloadTwo);
@@ -427,6 +429,7 @@ void expect_cancelled_after_to_app(const CancelOutcome& o, std::size_t wire_befo
     EXPECT_EQ(o.to_app_calls, 1) << "toApp did not run exactly once";
     EXPECT_FALSE(o.send.threw);
     ASSERT_TRUE(o.send.err.has_value()) << "the cancelled send returned a value";
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): ASSERT_TRUE above
     EXPECT_EQ(*o.send.err, error::dispatch_aborted);
     EXPECT_EQ(o.wire_after, wire_before) << "the cancelled send was transmitted";
     EXPECT_EQ(o.next_out_after, seq0) << "the cancelled send consumed a seqnum";

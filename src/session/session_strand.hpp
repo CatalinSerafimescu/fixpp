@@ -106,7 +106,7 @@ public:
     [[nodiscard]] asio::io_context& query(asio::execution::context_t) const noexcept {
         return *context_ptr();
     }
-
+    // NOLINTBEGIN(readability-static-accessed-through-instance): asio's property-object spelling
     [[nodiscard]] asio::execution::blocking_t query(asio::execution::blocking_t) const noexcept {
         return (bits() & blocking_never) != 0U
                    ? asio::execution::blocking_t(asio::execution::blocking.never)
@@ -127,7 +127,7 @@ public:
                    : asio::execution::outstanding_work_t(
                          asio::execution::outstanding_work.untracked);
     }
-
+    // NOLINTEND(readability-static-accessed-through-instance)
     [[nodiscard]] session_io_executor require(asio::execution::blocking_t::never_t) const noexcept {
         return {context_ptr(), bits() | blocking_never};
     }
@@ -173,7 +173,7 @@ private:
             ctx->get_executor().on_work_started();
         }
     }
-
+    // NOLINTBEGIN(readability-static-accessed-through-instance): asio's property-object spelling
     static std::uintptr_t bits_of(asio::io_context::executor_type const& ex) noexcept {
         std::uintptr_t b = 0;
         if (asio::query(ex, asio::execution::blocking) == asio::execution::blocking.never) {
@@ -206,7 +206,7 @@ private:
     friend struct session_io_executor_test_access;  // defined in tests/support/
     std::uintptr_t target_;
 };
-
+// NOLINTEND(readability-static-accessed-through-instance)
 // The session strand's inner executor on the fast path: `io_context::executor_type` where
 // its strand fits `any_io_executor` inline, `session_io_executor` where it does not.
 using session_inner_executor_t =

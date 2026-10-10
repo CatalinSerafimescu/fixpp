@@ -51,7 +51,7 @@ inline constexpr int kCacheSize = ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE;
 // `chunk_size` is a private enumerator of `asio::detail::thread_info_base`, so it cannot
 // be named here. This mirrors its definition under the same condition. Re-check with
 //   grep -n "chunk_size = " <asio include>/asio/detail/thread_info_base.hpp
-#if defined(ASIO_HAS_IO_URING)
+#ifdef ASIO_HAS_IO_URING
 inline constexpr std::size_t kChunkSize = 8;
 #else
 inline constexpr std::size_t kChunkSize = 4;
@@ -109,6 +109,7 @@ struct awaited<asio::awaitable<T, E>> {
     using type = T;
 };
 template <class A>
+// NOLINTNEXTLINE(readability-redundant-typename): the pre-C++20 spelling
 using awaited_t = typename awaited<std::remove_cvref_t<A>>::type;
 
 // ── padder<D, F>: exactly D cycled wrapper frames above the callee ──────────
@@ -149,6 +150,7 @@ struct no_hook {
 struct cancel_then_yield_twice : no_hook {
     static constexpr int yields = 2;
     asio::steady_timer* timer = nullptr;
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method): replaces no_hook's
     void before() const { timer->cancel(); }
 };
 
@@ -263,6 +265,7 @@ struct nest_plant {
 
 // Written through, so a planted buffer's address escapes and the compiler must keep the
 // buffer in the coroutine frame across the suspension.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables): the sink
 inline std::byte* volatile g_plant_sink = nullptr;
 
 // A frame holding `Bytes` across one deferred post (§3, arm (b-L)). Its frame request

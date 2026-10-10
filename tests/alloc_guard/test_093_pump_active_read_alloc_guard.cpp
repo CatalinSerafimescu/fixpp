@@ -210,7 +210,7 @@ TEST(PumpActiveReadAllocGuard, AnActiveReadAfterAWarmUpReadAllocatesNothing) {
                                         << " made a different number of operator new calls "
                                            "from the read of 34="
                                         << kFirst << ": a per-read growth";
-#if defined(NDEBUG)
+#ifdef NDEBUG
         // The session strand is the fast-path strand over the concrete io_context executor
         // (fixpp#544 §2.1), so neither the recv completion's dispatch nor the next read's
         // initiation erases an executor. To attribute a non-zero count, break in this

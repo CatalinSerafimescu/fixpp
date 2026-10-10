@@ -30,7 +30,7 @@
 #pragma once
 
 #include <asio/detail/thread_info_base.hpp>
-
+// NOLINTNEXTLINE(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum): CMake reads the #define
 #define FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE 16
 
 static_assert(ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE == FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE,

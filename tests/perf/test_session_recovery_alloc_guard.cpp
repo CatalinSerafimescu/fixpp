@@ -242,6 +242,7 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
     rt::Rig rig{rt::options{.mode = rt::hook::signal_from_admin, .message_arena = &pmr}};
     std::vector<std::string> frames;
     for (int i = 0; i < kWarm + kIter; ++i) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): built before the window opens
         frames.push_back(rig.heartbeat(static_cast<std::uint32_t>(2 + i)));
     }
     auto& done = rig.app->completions;

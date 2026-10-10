@@ -1479,7 +1479,7 @@ inline void finish_lock(lock_frame& frame) noexcept {
 // and `out`, so two uses in one scope cannot collide. Never #undef'd: inline
 // functions in installed headers (MemoryStore::store) expand it in consumers' TUs.
 // ─────────────────────────────────────────────────────────────────────────────
-// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+// NOLINTBEGIN(cppcoreguidelines-macro-usage,bugprone-macro-parentheses): out is a declared name
 #define FIXPP_DETAIL_CO_AWAIT_LOCK(lf, out, mutex, mr)                                            \
     ::fixpp::sync::detail::lock_frame lf{mutex};                                                  \
     if ((co_await ::asio::this_coro::throw_if_cancelled()) &&                                     \
@@ -1492,7 +1492,7 @@ inline void finish_lock(lock_frame& frame) noexcept {
     auto out = co_await ::fixpp::sync::detail::async_lock_op(mutex, lf, mr);                      \
     co_await ::asio::this_coro::reset_cancellation_state(::asio::enable_terminal_cancellation{}); \
     ::fixpp::sync::detail::finish_lock(lf)
-// NOLINTEND(cppcoreguidelines-macro-usage)
+// NOLINTEND(cppcoreguidelines-macro-usage,bugprone-macro-parentheses)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // async_lock — the public awaitable coroutine (Erratum E-1 conforming), over the

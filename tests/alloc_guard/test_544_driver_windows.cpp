@@ -434,6 +434,7 @@ struct park_send_then_release : rc::no_hook {
     asio::steady_timer* sender_wake = nullptr;
     std::atomic<std::uint64_t>* sends_done = nullptr;
     std::uint64_t* sends_issued = nullptr;
+    // NOLINTBEGIN(bugprone-derived-method-shadowing-base-method): hooks replace no_hook's
     void before() const {
         write->arm_block();
         ++*sends_issued;
@@ -444,6 +445,7 @@ struct park_send_then_release : rc::no_hook {
     [[nodiscard]] bool settled() const {
         return sends_done->load(std::memory_order_acquire) >= *sends_issued;
     }
+    // NOLINTEND(bugprone-derived-method-shadowing-base-method)
 };
 
 struct real_chain_outcome {

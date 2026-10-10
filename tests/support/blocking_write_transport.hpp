@@ -78,9 +78,11 @@ public:
         if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
         if (state_->block_next) {
             state_->parked = true;
+            // NOLINTBEGIN(bugprone-unchecked-optional-access): the constructor emplaces the timer
             state_->timer->expires_at(asio::steady_timer::time_point::max());
             std::error_code ec;
             co_await state_->timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+            // NOLINTEND(bugprone-unchecked-optional-access)
             state_->parked = false;
             if (closed_) co_return std::unexpected(fixpp::core::error::transport_already_closed);
         }

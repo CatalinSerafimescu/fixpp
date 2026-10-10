@@ -1128,7 +1128,7 @@ private:
         seqnum_t next_expected = 0;
         seqnum_t seq = 0;
         fixpp::core::error chk_error{};
-        fixpp::core::expected_t<dispatch_outcome> cb_r{};
+        fixpp::core::expected_t<dispatch_outcome> cb_r{};  // NOLINT(*redundant-member-init): frozen
     };
     // A non-coroutine: returns the awaitable of the sub-arm `slow` names.
     [[nodiscard]] inbound_result_t on_inbound_active_slow_(

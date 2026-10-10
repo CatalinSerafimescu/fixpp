@@ -179,7 +179,7 @@ public:
     }
 
 private:
-    void wake_loop() {
+    void wake_loop() {  // NOLINT(readability-make-member-function-const): it cancels a timer
         // The cancel's completion is posted, so the woken loop runs after the inbound arm
         // returns, beside it rather than on top of it (§3, W-E).
         if (auto* t = wake.load(std::memory_order_acquire)) t->cancel();
@@ -317,10 +317,12 @@ public:
         clock = std::make_shared<fixpp::core::mock_clock>(
             system_clock::time_point{} + seconds{1704067200}, fixpp::core::steady_time_point{},
             ioc.get_executor());
+        // NOLINTBEGIN(readability-static-accessed-through-instance): asio's spelling
         engine_exec = opt.tracked_executor
                           ? asio::any_io_executor{asio::prefer(
                                 ioc.get_executor(), asio::execution::outstanding_work.tracked)}
                           : asio::any_io_executor{ioc.get_executor()};
+        // NOLINTEND(readability-static-accessed-through-instance)
     }
 
     Rig(Rig const&) = delete;
@@ -386,7 +388,7 @@ public:
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER)  // NOLINT(readability-use-concise-preprocessor-directives): C++23 form
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
@@ -394,7 +396,7 @@ public:
             fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER)  // NOLINT(readability-use-concise-preprocessor-directives): C++23 form
 #pragma warning(pop)
 #endif
         if (opt.validating) {

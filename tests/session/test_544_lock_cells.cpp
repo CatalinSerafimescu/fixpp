@@ -171,6 +171,7 @@ TEST(B35LockCells, PreInitiationCancel_StoreThenEmitReturnsDispatchAbortedAndTra
     ASSERT_TRUE(finished) << "the cell's coroutine did not finish";
     EXPECT_TRUE(out.memory_store) << "the session's store is not a MemoryStore";
     ASSERT_TRUE(out.result.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): each follows its ASSERT_TRUE(has_value())
     ASSERT_FALSE(out.result->has_value())
         << "store_then_emit succeeded: the cancellation that landed in store()'s leading "
            "post was erased before the lock";
@@ -179,6 +180,7 @@ TEST(B35LockCells, PreInitiationCancel_StoreThenEmitReturnsDispatchAbortedAndTra
     ASSERT_TRUE(out.next_before.has_value());
     ASSERT_TRUE(out.next_after.has_value());
     EXPECT_EQ(*out.next_after, *out.next_before) << "the store committed the frame";
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // ── throw_if_cancelled(false) (§3, C2-4 window 1) ────────────────────────────────
@@ -230,6 +232,7 @@ TEST(B35LockCells, ThrowIfCancelledFalse_StoreCompletesAndRecordsTheFrame) {
         << "store() threw with throw_if_cancelled(false): the pre-check ignored the flag";
     EXPECT_TRUE(off.stored);
     ASSERT_TRUE(off.next_after.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): ASSERT_TRUE above
     EXPECT_EQ(*off.next_after, static_cast<seqnum_t>(2)) << "the record was not stored";
 
     auto const on = run_store_under_cancellation(true);
@@ -238,6 +241,7 @@ TEST(B35LockCells, ThrowIfCancelledFalse_StoreCompletesAndRecordsTheFrame) {
         << "control: with throw_if_cancelled() true the cancellation must abort store()";
     EXPECT_FALSE(on.stored);
     ASSERT_TRUE(on.next_after.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): ASSERT_TRUE above
     EXPECT_EQ(*on.next_after, static_cast<seqnum_t>(1));
 }
 
