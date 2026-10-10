@@ -97,14 +97,17 @@ ctl() {  # ctl <control> [<entry>] — the control's spec, naming <entry> (defau
 CONTROLS=()
 for _c in "${CONTROL_NAMES[@]}"; do CONTROLS+=("$(ctl "$_c")"); done
 
-# T0 — THE REAL TREE. Without this the suite proves only that the checker can say no.
-# Skipped (not failed) when no configured build is present, e.g. on a buildless lane.
-if [ -f "$REPO/build/linux-clang-release/CTestTestfile.cmake" ]; then
-  check "T0 the real linux-clang-release population reconciles" 0 \
-    "named gate(s), all labelled" "$REPO/build/linux-clang-release"
-else
-  echo "skip  T0 (no configured build/linux-clang-release — buildless lane)"
-fi
+# T0 — THE REAL TREES, one per Linux Release preset tier1.yml runs the gates on. Without
+# this the suite proves only that the checker can say no. Each is skipped (not failed) when
+# its configured build is absent, e.g. on a buildless lane.
+for _preset in linux-clang-release linux-gcc-release; do
+  if [ -f "$REPO/build/$_preset/CTestTestfile.cmake" ]; then
+    check "T0 the real $_preset population reconciles" 0 \
+      "named gate(s), all labelled" "$REPO/build/$_preset"
+  else
+    echo "skip  T0 (no configured build/$_preset — buildless lane)"
+  fi
+done
 
 check "T1 a gate missing the label is REPORTED, not tolerated" 1 \
   "do NOT carry the \`mallocnesia\` label" \

@@ -898,10 +898,14 @@ jobs:
       # that had hand-built the interceptor. A bug fix adding a malloc to a hot path
       # merged green.
       #
-      # linux-clang-release ONLY, and that is a property of the mechanism, not a budget
-      # decision: the interceptor is an LD_PRELOAD malloc interposer, which the sanitizer
-      # lanes cannot host (their own allocator re-enters these hooks), and Release is the
-      # build whose hot path the zero-allocation rule is actually about.
+      # The two Linux Release legs ONLY, linux-gcc-release and linux-clang-release, and that
+      # is a property of the mechanism, not a budget decision: the interceptor is an
+      # LD_PRELOAD malloc interposer, which the sanitizer lanes cannot host (their own
+      # allocator re-enters these hooks), and Release is the build whose hot path the
+      # zero-allocation rule is actually about. fixpp#544's windows register only on a
+      # Release build type, and each compiler lays out asio's coroutine frames on its own,
+      # so both compilers' Release legs run them (`.specify/544-hot-path-zero-alloc.md` §3,
+      # "Counters, and where each one binds").
       #
       # ⚠️ TWO STEPS, and the first is NOT redundant with `--no-tests=error`. MEASURED:
       # with the gates deliberately unregistered, `ctest -L mallocnesia --no-tests=error`
@@ -918,7 +922,7 @@ jobs:
       # ci/test-tier1-python-policy.sh (fixpp#543), so this note sits outside it.
       - name: "Assert the mallocnesia gate population (#448)"
         id: mallocnesia_population
-        if: matrix.preset == 'linux-clang-release'
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
         run: |
           python3 tools/check_mallocnesia_population.py \
             --build-dir build/${{ matrix.preset }} --min-gates 20
@@ -930,7 +934,7 @@ jobs:
       # interceptor, which is exactly the state this issue found on main.
       - name: "Run the allocation-discipline gates (#448)"
         id: mallocnesia_gates
-        if: matrix.preset == 'linux-clang-release'
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
         run: ctest --preset ${{ matrix.preset }} -L mallocnesia --no-tests=error --output-on-failure
 
       # ⚠️ THE STEPS ABOVE ARE GUARDED BY A STRING, AND A STRING CAN BE MISSPELLED.
@@ -943,7 +947,7 @@ jobs:
       # what catches the inverse mistake of the gates silently running on a lane that
       # cannot host the interposer (see the lane rationale above).
       #
-      # It REPORTS the outcomes and names no cause (fixpp#543). `skipped` on the release
+      # It REPORTS the outcomes and names no cause (fixpp#543). `skipped` on a Release
       # leg is what a mistyped guard produces, and equally what any earlier failed step in
       # this job produces; that step's own log says which. Its key set, if: and body are
       # pinned in ci/test-tier1-python-policy.sh.
@@ -954,14 +958,14 @@ jobs:
           pop="${{ steps.mallocnesia_population.outcome }}"
           gates="${{ steps.mallocnesia_gates.outcome }}"
           echo "preset=${{ matrix.preset }} population=${pop:-<unset>} gates=${gates:-<unset>}"
-          if [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
+          if [ "${{ matrix.preset }}" = "linux-gcc-release" ] || [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
             if [ "$pop" != "success" ] || [ "$gates" != "success" ]; then
-              echo "::error::the allocation gates did not run to success on linux-clang-release (population=$pop gates=$gates)."
+              echo "::error::the allocation gates did not run to success on ${{ matrix.preset }} (population=$pop gates=$gates)."
               exit 1
             fi
           elif [ "$pop" != "skipped" ] || [ "$gates" != "skipped" ]; then
             echo "::error::the allocation gates ran on ${{ matrix.preset }}; they are wired to"
-            echo "::error::linux-clang-release only (population=$pop gates=$gates)."
+            echo "::error::linux-gcc-release and linux-clang-release only (population=$pop gates=$gates)."
             exit 1
           fi
 

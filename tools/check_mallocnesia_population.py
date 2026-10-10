@@ -155,7 +155,8 @@ def main() -> int:
             "clean population over nothing. Expected causes, in order of likelihood: "
             "(a) this is a SANITIZER build, where the gates deliberately do not register "
             "at all — a sanitizer's allocator interposes ahead of the interceptor, so "
-            "they would pass vacuously (run this against linux-clang-release); "
+            "they would pass vacuously (run this against a Linux Release tree, "
+            "linux-clang-release or linux-gcc-release); "
             "(b) the gates are not registered on this lane, the failure fixpp#448 "
             "removed; (c) the naming convention moved.")
     if not by_label:
