@@ -621,6 +621,9 @@ add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 # install_store_offload_exit_probe seams (file_store.hpp).
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 
+# fixpp#563 / fixpp#564 (B41) — reproduction: a Session::send started inside an Application callback.
+add_threading_test(session_563_564_callback_send test_563_564_callback_send.cpp)
+
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
 # branch's polarity — see the file header for the documented scope limits.
