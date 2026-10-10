@@ -273,7 +273,7 @@ S4_STEP="$(python3 -c 'import sys; print(10.0 ** -int(sys.argv[1]))' "$S4_SUM_DE
 # whoever next shrinks the sleeps.
 S4_HIDDEN="$(python3 -c 'import sys; print(2 * float(sys.argv[1]))' "$S4_STEP")"
 
-# s4_compare AWK_LOG PARSER_LOG [exact]   ->   sets s4_verdict and s4_read
+# s4_compare AWK_LOG PARSER_LOG [exact|twostep]   ->   sets s4_verdict and s4_read
 #
 # THE ONE READ-AND-COMPARE EVERY S4 ARM GOES THROUGH: the shipped awk over
 # AWK_LOG, the shipped parser over PARSER_LOG. An arm that retyped the awk or
@@ -281,6 +281,8 @@ S4_HIDDEN="$(python3 -c 'import sys; print(2 * float(sys.argv[1]))' "$S4_STEP")"
 # twice; S4b passes two, which is how "one parser lost a line" is staged without
 # editing either parser. `exact` compares the summed durations with no
 # tolerance at all, and exists so S4a can prove its fixture is on the boundary.
+# `twostep` compares them within two printed steps, and exists so S4b can prove
+# its staged pair is close enough to refuse a tolerance that wide.
 #
 # s4_verdict is `AGREE`, or `DISAGREE on <figures> …`, or one of EMPTY /
 # UNPARSABLE / PRECISION when there was nothing sound to compare. An arm that
@@ -336,6 +338,10 @@ if any(len(s.partition(".")[2]) != decimals for s in (awk[2], py[2])):
 # binary; eps is the slack for that.
 eps = step / 1e6
 tol = (0.0, 0.0, 0.0 if mode == "exact" else step + eps)
+# The twostep probe is written out in full, not derived from the line above: it
+# is what S4b measures that line against, so the two must not move together.
+if mode == "twostep":
+    tol = (0.0, 0.0, 2 * step + eps)
 # not (… <= t) rather than (… > t): a NaN must land in DISAGREE, not in AGREE.
 off = [n for n, x, y, t in zip(("ran", "real_s", "sum_s"), a, b, tol) if not abs(x - y) <= t]
 print("AGREE" if not off else f"DISAGREE on {",".join(off)} awk={awk} verdict={py}")' \
@@ -383,8 +389,7 @@ fi
 # To re-derive one: draw random lists of two-decimal durations; keep a list for
 # which `"%.1f" % total` over a `total += d` loop differs from
 # `round(sum(list), 1)`; write it into this shape; then run this file once per
-# awk you can reach, each one first on PATH, and require S4a to PASS. Then
-# re-check S4b against it — see the note there.
+# awk you can reach, each one first on PATH, and require S4a to PASS.
 S4_FIX="$WORK/s4-boundary.ctest.log"
 cat > "$S4_FIX" <<'CTESTLOG'
 Test project /nonexistent/aba-seam-s4-boundary
@@ -443,10 +448,13 @@ esac
 # tolerance several steps wide.
 #
 # To see where this arm bites, apply each and require a FAIL here: shrink
-# S4_DROP below one step; widen the tolerance in s4_compare to two steps. The
-# second is refused only while the two printed sums staged here differ by
-# exactly two steps in at least one direction. That is a property of the
-# fixture, so repeat it whenever S4a's fixture is replaced.
+# S4_DROP below one step; widen the tolerance in s4_compare to two steps.
+#
+# ⚠️ THE STAGED PAIR IS CHECKED ON EVERY RUN, NOT TRUSTED, as S4a's fixture is.
+# A pair whose printed sums are more than two steps apart in both directions
+# would still be refused by a tolerance two steps wide, and this arm would pass
+# having bounded nothing. So the `twostep` comparison must AGREE in at least one
+# direction before the refusal is allowed to count.
 S4_DROP="$(python3 -c 'import sys; print(f"{float(sys.argv[1]) + float(sys.argv[2]) / 10:.2f}")' "$S4_HIDDEN" "$S4_STEP")"
 S4_KEPT="$WORK/s4-kept.ctest.log"
 S4_LOST="$WORK/s4-lost.ctest.log"
@@ -458,9 +466,15 @@ if ! grep -q "^ *1/.* ${S4_DROP} sec\$" "$S4_KEPT" \
 else
   s4_compare "$S4_KEPT" "$S4_LOST"; s4_parser_lost="$s4_verdict"
   s4_compare "$S4_LOST" "$S4_KEPT"; s4_awk_lost="$s4_verdict"
+  s4_compare "$S4_KEPT" "$S4_LOST" twostep; s4_parser_lost_twostep="$s4_verdict"
+  s4_compare "$S4_LOST" "$S4_KEPT" twostep; s4_awk_lost_twostep="$s4_verdict"
   case "$s4_parser_lost|$s4_awk_lost" in
     "DISAGREE on sum_s "*"|DISAGREE on sum_s "*)
-      ok "S4b a parser that lost one ${S4_DROP} s line is REFUSED on the summed durations, from either side" ;;
+      if [ "$s4_parser_lost_twostep" = AGREE ] || [ "$s4_awk_lost_twostep" = AGREE ]; then
+        ok "S4b a parser that lost one ${S4_DROP} s line is REFUSED on the summed durations, from either side"
+      else
+        bad "S4b THE STAGED LOGS CANNOT REFUSE A TWO-STEP TOLERANCE — the lost line is still refused under one in both directions, so widening s4_compare that far would pass this arm unseen. parser lost it: '$s4_parser_lost_twostep' / awk lost it: '$s4_awk_lost_twostep'. Re-derive S4a's fixture; do not delete the cell"
+      fi ;;
     *)
       bad "S4b a lost ${S4_DROP} s line was not refused on the summed durations alone — parser lost it: '$s4_parser_lost' / awk lost it: '$s4_awk_lost'" ;;
   esac
