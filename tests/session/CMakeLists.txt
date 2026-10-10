@@ -625,6 +625,9 @@ target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 add_threading_test(session_536_shared_clock_liveness test_536_shared_clock_liveness.cpp)
 # fixpp#537 (B28) — reproduction: a second non-PossDup too-high frame while awaiting a replay.
 add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
+# fixpp#538 (B28) — reproduction: the resend answer after a 141=Y Logon exchange (MemoryStore and FileStore).
+add_threading_test(session_538_volatile_store_after_reset_logon
+  test_538_volatile_store_after_reset_logon.cpp)
 
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
