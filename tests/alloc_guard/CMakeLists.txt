@@ -369,6 +369,23 @@ set_tests_properties(alloc_guard_no_raw_preload PROPERTIES
 set_tests_properties(alloc_guard_markers_no_local_def PROPERTIES
   LABELS "alloc_guard;mallocnesia;item13")
 
+# One interceptor registration per "name|case|entry" row in ARGN, for gtest suite _suite in
+# _target. An empty entry means the case must read zero.
+function(_fixpp_b35_register_cells _target _suite)
+  foreach(_cell IN LISTS ARGN)
+    string(REPLACE "|" ";" _cell "${_cell}")
+    list(GET _cell 0 _name)
+    list(GET _cell 1 _case)
+    list(GET _cell 2 _entry)
+    fixpp_add_release_mallocnesia_test(
+      NAME ${_name}
+      TARGET ${_target}
+      CASE "${_suite}.${_case}"
+      EXPECT_ENTRY "${_entry}"
+      LABELS alloc_guard 544)
+  endforeach()
+endfunction()
+
 # ── fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3): driver-form windows ──
 # W-D-R and its bracket, W-D's (b-L)/(b-S) pairs, the (c-L)/(c-P)/(c-H) arms, their
 # production and no-edit replica twins, and W-D-W's stand-in bracket and real-chain twin,
@@ -414,18 +431,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_544_wdw_stand_in_arm_mallocnesia|WDW_StandIn_Arm|aligned_alloc"
     "alloc_guard_544_wdw_real_chain_twin_mallocnesia|WDW_RealChain_Twin|"
     "alloc_guard_544_wdw_real_chain_arm_mallocnesia|WDW_RealChain_Arm|aligned_alloc")
-  foreach(_cell IN LISTS _b35_driver_cells)
-    string(REPLACE "|" ";" _cell "${_cell}")
-    list(GET _cell 0 _name)
-    list(GET _cell 1 _case)
-    list(GET _cell 2 _entry)
-    fixpp_add_release_mallocnesia_test(
-      NAME ${_name}
-      TARGET test_544_driver_windows
-      CASE "B35DriverWindows.${_case}"
-      EXPECT_ENTRY "${_entry}"
-      LABELS alloc_guard 544)
-  endforeach()
+  _fixpp_b35_register_cells(test_544_driver_windows B35DriverWindows ${_b35_driver_cells})
 endif()
 
 # ── fixpp#544 (B35; §3): the run-thread windows (W-A, W-B, W-E, the veto-then-zero cell,
@@ -479,18 +485,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     "alloc_guard_544_wa_bs_arm_mallocnesia|WA_BS_Arm_NestOneOverSlots|aligned_alloc"
     "alloc_guard_544_wa_bs_twin_mallocnesia|WA_BS_Twin_NestFillsSlots|"
     "alloc_guard_544_arm_s_run_one_for_mallocnesia|ArmS_RunOneForScope|aligned_alloc")
-  foreach(_cell IN LISTS _b35_rig_cells)
-    string(REPLACE "|" ";" _cell "${_cell}")
-    list(GET _cell 0 _name)
-    list(GET _cell 1 _case)
-    list(GET _cell 2 _entry)
-    fixpp_add_release_mallocnesia_test(
-      NAME ${_name}
-      TARGET test_544_run_thread_windows
-      CASE "B35RunThreadWindows.${_case}"
-      EXPECT_ENTRY "${_entry}"
-      LABELS alloc_guard 544)
-  endforeach()
+  _fixpp_b35_register_cells(test_544_run_thread_windows B35RunThreadWindows ${_b35_rig_cells})
 endif()
 
 # ── fixpp#544 (B35; §3, "The TLS diagnostic"; R-5): W-A's run-thread shape on a TLS
