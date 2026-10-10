@@ -1504,8 +1504,8 @@ private:
     // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; rulings R-9, R-10):
     // send_impl is the send tail. It builds into `frame_buf` through build_send_frame_,
     // then runs toApp, assign_outbound and store_then_emit over it, so `frame_buf` must
-    // outlive the call. Its callers are Session::send (the session's frame slot) and
-    // send_fallback_leaf_ (the leaf's own buffer); re-check with
+    // outlive the call. Its callers must be Session::send (over the session's frame slot) or
+    // send_fallback_leaf_ (over the leaf's own buffer); re-check with
     // `git grep -n "send_impl(" -- src include`.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
         std::span<const std::byte> app_payload, std::span<std::byte> frame_buf,

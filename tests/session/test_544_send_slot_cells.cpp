@@ -8,7 +8,8 @@
 // held takes a fallback leaf that owns its own buffer. No allocation gate can see a broken
 // flag: two sends sharing the slot corrupt bytes silently. These cells assert the bytes.
 //
-// Part 1 holds at base too, where every send owns its buffer. It is the differential half:
+// Part 1 is required to hold at base too, where every send owns its buffer. It is the
+// differential half:
 //   - Interleaved: two sends spawned back to back from the session strand; the second runs
 //     while the first is suspended in its store. Each send's stored and transmitted bytes
 //     must equal a frame built here, by hand, from the same payload, seq and mock-clock time.
@@ -27,12 +28,13 @@
 // To run part 1 at base, copy this file into a worktree at the base commit, delete everything
 // from the part-2 banner to the end of the anonymous namespace, and register it as below.
 //
-// Mutants, each run against the whole binary:
+// Mutants, each run against the whole binary; each named cell must then fail:
 //   - Session::send's flag test deleted, so every send builds into the slot: Interleaved and
-//     Nested fail;
-//   - the holder released before send_impl's store_then_emit returns: Interleaved fails;
-//   - the holder replaced by a clear on success only: the veto and throw cells fail;
-//   - the leaf's FIXPP_INBOUND_SPLIT_ENTRY deleted: the leaf-path cancellation cell fails.
+//     Nested;
+//   - the holder released before send_impl's store_then_emit returns: Interleaved;
+//   - the holder replaced by a clear on success only: the veto and throw cells;
+//   - the leaf's FIXPP_INBOUND_SPLIT_ENTRY deleted: the leaf-path cancellation cell;
+//   - the b3 sequence applied to Session::send -> send_impl: the primary-path cancellation cell.
 
 #include <gtest/gtest.h>
 
