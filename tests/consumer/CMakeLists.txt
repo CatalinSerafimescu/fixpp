@@ -275,6 +275,29 @@ file(GENERATE
 OBSERVED_CORE=$<JOIN:$<TARGET_PROPERTY:probe_core,COMPILE_DEFINITIONS>,|>
 ")
 
+# fixpp#544 (finding F-5): the installed guard's two arms, on one TU that includes an
+# installed asio-reaching header (probe_recycler_guard.cpp has both arms' contract).
+#   twin      probe_recycler_guard_twin compiles through fixpp::fixpp;
+#   negative  run_consumer_witness.cmake compiles the same TU from the inputs written below:
+#             the staged include directory plus asio's include directories and definitions,
+#             as the consumer's asio::asio carries them, with no fixpp target and so without
+#             ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE.
+add_library(probe_recycler_guard_twin OBJECT probe_recycler_guard.cpp)
+target_link_libraries(probe_recycler_guard_twin PRIVATE fixpp::fixpp)
+
+separate_arguments(_fixpp_544_cxx_flags NATIVE_COMMAND "${CMAKE_CXX_FLAGS}")
+list(JOIN _fixpp_544_cxx_flags "|" _fixpp_544_cxx_flags)
+file(GENERATE
+  OUTPUT "${CMAKE_BINARY_DIR}/asio-recycler-guard-inputs.txt"
+  CONTENT
+"CXX_ID=${CMAKE_CXX_COMPILER_ID}
+CXX_FRONTEND=${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}
+CXX_FLAGS=${_fixpp_544_cxx_flags}
+ASIO_INCLUDE_DIRS=$<JOIN:$<TARGET_PROPERTY:asio::asio,INTERFACE_INCLUDE_DIRECTORIES>,|>
+ASIO_DEFINES=$<JOIN:$<FILTER:$<TARGET_PROPERTY:asio::asio,INTERFACE_COMPILE_DEFINITIONS>,EXCLUDE,^ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE>,|>
+TU=${CMAKE_CURRENT_SOURCE_DIR}/probe_recycler_guard.cpp
+")
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 087-system-include-binding — the installed system-include interface
 # (specs/087-system-include-binding/contracts/system-include-interface.md)

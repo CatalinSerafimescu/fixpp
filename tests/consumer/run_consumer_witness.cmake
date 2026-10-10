@@ -157,6 +157,64 @@ if(_recycler_failed)
 endif()
 message(STATUS "fixpp#544 recycler legs: OK — both carriers see exactly ${_recycler_expected}")
 
+# ── 2b. fixpp#544 (finding F-5) — the installed guard refuses a TU without the definition ──
+#
+# tests/consumer/probe_recycler_guard.cpp includes an installed fixpp header that reaches
+# asio. Here it is compiled with the staged include directory and asio's (read from the
+# inputs tests/consumer/CMakeLists.txt writes), and no fixpp target, by the in-tree driver
+# tests/sync/run_asio_recycler_negative_compile.cmake. That driver requires: the definition
+# omitted fails on the guard's token; a wrong value fails on it; the exported value
+# compiles. The twin, the same TU through fixpp::fixpp, is probe_recycler_guard_twin in the
+# build below. Skipped on an MSVC front end, as the driver's in-tree registration is
+# (tests/sync/CMakeLists.txt, under `if(NOT WIN32)`).
+set(_guard_inputs "${_sub_build}/asio-recycler-guard-inputs.txt")
+if(NOT EXISTS "${_guard_inputs}")
+  message(FATAL_ERROR
+    "fixpp#544: ${_guard_inputs} was not generated — the installed guard's negative arm "
+    "has no inputs, so it asserts nothing.")
+endif()
+file(STRINGS "${_guard_inputs}" _guard_lines)
+foreach(_key CXX_ID CXX_FRONTEND CXX_FLAGS ASIO_INCLUDE_DIRS ASIO_DEFINES TU)
+  set(_guard_${_key} "")
+  set(_guard_${_key}_seen FALSE)
+  foreach(_l IN LISTS _guard_lines)
+    if(_l MATCHES "^${_key}=(.*)$")
+      set(_guard_${_key} "${CMAKE_MATCH_1}")
+      set(_guard_${_key}_seen TRUE)
+    endif()
+  endforeach()
+  if(NOT _guard_${_key}_seen)
+    message(FATAL_ERROR "fixpp#544: no ${_key}= line in ${_guard_inputs}")
+  endif()
+endforeach()
+if(_guard_CXX_ID STREQUAL "MSVC" OR _guard_CXX_FRONTEND STREQUAL "MSVC")
+  message(STATUS "fixpp#544 installed guard negative arm: not run on an MSVC front end")
+else()
+  if(_guard_ASIO_INCLUDE_DIRS STREQUAL "")
+    message(FATAL_ERROR "fixpp#544: the consumer's asio::asio has no include directory")
+  endif()
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_CXX=${FIXPP_CXX_COMPILER}"
+      "-DFIXPP_CXX_ID=${_guard_CXX_ID}"
+      "-DFIXPP_CXX_FLAGS=${_guard_CXX_FLAGS}"
+      "-DFIXPP_INCLUDE_DIRS=${_stage}/include|${_guard_ASIO_INCLUDE_DIRS}"
+      "-DFIXPP_DEFINES=${_guard_ASIO_DEFINES}"
+      "-DFIXPP_TU=${_guard_TU}"
+      "-DFIXPP_CACHE_SIZE=${_recycler_n}"
+      -P "${FIXPP_SOURCE_DIR}/tests/sync/run_asio_recycler_negative_compile.cmake"
+    RESULT_VARIABLE _guard_rc
+    OUTPUT_VARIABLE _guard_out
+    ERROR_VARIABLE  _guard_err)
+  message(STATUS "fixpp#544 installed guard arms:\n${_guard_out}${_guard_err}")
+  if(NOT _guard_rc EQUAL 0)
+    message(FATAL_ERROR
+      "fixpp#544: the installed guard's negative arm failed (exit ${_guard_rc}): a staged "
+      "asio-reaching header compiled without ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE, or failed "
+      "for a reason other than the guard (output above).")
+  endif()
+endif()
+
 # ── 3. Build it — BY NAME, so a deleted gate fails closed ────────────────────
 #
 # 086 / Gate B r1 P1 #3. A bare `cmake --build` builds whatever targets happen to
@@ -179,6 +237,7 @@ set(_required_targets
   probe_service_positive     # ✅ fixpp::service reaches the plugin header AND the C ABI
   probe_umbrella             # ✅ the umbrella still reaches everything
   probe_core                 # fixpp#544 recycler leg carrier (links only fixpp::core)
+  probe_recycler_guard_twin  # fixpp#544 F-5 twin: an asio-reaching header through fixpp::fixpp
   probe_usage_requirements   # C-3 leg 3 carrier
   # ❌ cells. Since Gate B r3 these are ordinary targets asserted to COMPILE
   # (`__has_include` + a unique-token `#error`), so BUILDING them IS the

@@ -10,6 +10,9 @@
 #   N           the compile must SUCCEED, so the TU is well-formed but for the definition.
 # A failure without the token is a failure for another reason, and fails this test.
 #
+# tests/consumer/run_consumer_witness.cmake (step 2b) also runs it, against the staged
+# install's include directory and a TU of its own (finding F-5).
+#
 # The token is spelled here, not read from the guard header, so that a change to the
 # guard's message has to be made in both places.
 #
