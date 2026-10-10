@@ -1994,3 +1994,62 @@ history. Each carries its v0.4 status under R-1′.
   second option. Witnessing it would need a test transport. §2.3 states that it is headroom only. *v0.4:*
   it is still headroom with no production gate. Its incidental witness moves from W-A's (b-L) twin, which no
   longer sees it at the exported N, to W-A's shifted (b-S) twin (§2.3, §3).
+
+---
+
+## As built (2026-10-10)
+
+The sections above are the Gate-A-closed design and are not rewritten. This section states where the
+implementation departs from them, each as a condition with its pointer. The records are in the parent repo:
+the task list (`decisions/speckit/544-hot-path-zero-alloc-tasks.md`, § *Follow-ups found during
+implementation*, which holds F-1..F-7 and the orchestrator's rulings) and the evidence file
+(`decisions/speckit/544-hot-path-zero-alloc-evidence.md`, by phase), reached from this tree through
+`.specify/decisions/`.
+
+- **F-2: at asio's default slot count, removing a frame is not only headroom.** §2.3 says each frame-removing
+  edit is slot headroom. That holds at the exported N. At asio's default N, the recycler is first-fit and
+  evicts its first occupied slot, so a smaller or fewer-frame pattern can change its steady-state cycle and
+  turn a zero window into an allocating one. An existing zero gate on the public `async_lock` did so between
+  the frameless lock op and the exported N (evidence, Phase 2). The exported N is therefore part of what makes
+  the zero hold; B&L `L-544-1` says why the value is fixpp's.
+- **F-5: the guard's scope is narrower than §2.4 claims.** §2.4 says `consumer_witness.cpp`'s build is stopped
+  by the guard's `static_assert`. It is not: that TU includes no header that reaches asio. The guard checks a
+  translation unit that includes an installed fixpp header reaching asio; a translation unit that includes
+  asio and no such header is not checked. `tests/consumer/run_consumer_witness.cmake`'s guard step compiles an
+  asio-reaching consumer TU against the staged install without the definition and requires the guard's
+  failure, with a twin through the imported target that must compile (negative arm on GCC and Clang front
+  ends only). B&L `L-544-1` states the scope.
+- **Phase 4 ruling A → a2 (the dispatcher).** §2.2's dispatcher was to select the per-state coroutine. As
+  built, the non-coroutine `on_inbound_frame` always returns the Active arm, and the Active arm reads the FSM
+  state on the strand at resume and hands a cold state to its own arm. Cold paths, which are ungated, cost one
+  frame more. Reason: selecting the arm in the dispatcher would read the FSM state on the caller's thread.
+- **Phase 4 ruling B → b3 (the cancellation check at a new boundary).** Every `co_await` boundary the split
+  introduces (a leaf, a sub-arm, a2's cold hand-off) goes through one sequence:
+  `FIXPP_INBOUND_SPLIT_AWAIT` reads `throw_if_cancelled`, sets it false and awaits the callee, and the callee's
+  first statement, `FIXPP_INBOUND_SPLIT_ENTRY`, restores it (`src/session/session.cpp`). The first
+  cancellation check therefore stays at the moved block's first original `co_await`, as before the split.
+- **b3 on the send path: the naive-boundary mutant does not apply.** `Session::send`'s boundary into the
+  fallback leaf goes through the same sequence. There, a cancellation already pending throws at the caller's
+  `co_await` before anything observable runs, so deleting the sequence moves no check; the discriminating
+  mutants are the leaf's entry-restore deleted and the sequence applied on the existing `send → send_impl`
+  boundary (evidence, Phase 5).
+- **R-10: the flag and the fallback.** The frame slot is held by `send_slot_in_use_`, through an RAII holder
+  declared in `Session::send`'s `try`; a send that finds it held takes `send_fallback_leaf_`, which owns its
+  buffer and so allocates. The holder writes `Session` memory when the send's frame ends, which adds a caller
+  condition for direct `Session::send` callers (F-7, B&L `L-544-2`); production's only caller, `Engine::send`,
+  meets it (evidence, Phase 6, T6.F7).
+- **F-3: one `asio::detail` name in a `static_assert`.** The handler-size pin beside `detail::lock_op_handler_t`
+  names `asio::detail::awaitable_async_op_handler`, because asio has no public name for it. It is a
+  compile-time pin with no runtime dependency (2f Erratum E-6).
+- **MSVC selects the fixpp executor.** §2.1's prediction holds: on `windows-msvc-*` `session_inner_executor_t`
+  is the internal fixpp executor, and on GCC and Clang it is `io_context::executor_type` (evidence, MSVC
+  session 1, "Which executor MSVC selected"). On MSVC the fast-path semantic cells are its behaviour oracle,
+  and the counter checks the Active read's `operator new` half only.
+- **Issues filed from this work, outside its scope:**
+  - **fixpp#563** — a send nested in `toApp` can reuse the outer send's MsgSeqNum (§2.5; B&L `L-544-3`);
+  - **fixpp#564** — a `Session::send` from inside an application callback trips `callback_dispatch_scope`'s
+    `assert` on builds without `NDEBUG`, reproduced on the base (B&L `L-544-4`);
+  - **fixpp#565** — TLS: OpenSSL's per-record allocations on the engine side remain on an Active TLS read
+    (R-5's disposition; B&L `L-497-1`);
+  - **fixpp#566** — the ccache flag surface does not see the guard header's N or the in-tree `asio::asio`
+    definition append, so changing N alone does not rotate the ccache tag (F-4).

@@ -1,6 +1,6 @@
 # Design Doc 2d — Application Threading Contract & `fixpp::core::Clock`
 
-> **Status:** Draft v0.4 — Gate A round 3 converged (post-cap line-edit pass — 2c precedent); **shipped via 007-threading-clock PR #74 (merged 2026-05-20, squash `9c39a275`) + layer-hotfix PR #75 (squash `dab5f6a`)**; **post-sign-off targeted amendment 2026-08-29 → v0.5 — see "Document-level amendment" at the END of this file (deliberately placed there: 28 line-number citations across 16 files point INTO this document, and an insertion anywhere above them rots every one)** — the "listener accept" parenthetical no longer means what it meant at sign-off
+> **Status:** Draft v0.4 — Gate A round 3 converged (post-cap line-edit pass — 2c precedent); **shipped via 007-threading-clock PR #74 (merged 2026-05-20, squash `9c39a275`) + layer-hotfix PR #75 (squash `dab5f6a`)**; **post-sign-off targeted amendments 2026-08-29 → v0.5 and 2026-10-10 (fixpp#544, the session strand's inner executor type) — see the two "Document-level amendment" sections at the END of this file (deliberately placed there: 28 line-number citations across 16 files point INTO this document, and an insertion anywhere above them rots every one)** — the "listener accept" parenthetical no longer means what it meant at sign-off
 > **Date:** 2026-05-08
 > **Convergence-log pointer:** addresses Codex round-3 review (1 P1 / 0 P2 / 0 P3) and Opus round-3 adversarial review (combined post-judging 1 P1 / 0 P2 / 0 P3; 1 root cause), see Appendix C round 3 entry.
 > **Owner:** `fixpp::core` (`include/fixpp/core/clock.hpp`, `include/fixpp/core/engine_config.hpp`, `include/fixpp/core/session_executor.hpp`, `include/fixpp/core/session_local.hpp`, `include/fixpp/core/trace_context.hpp`); `fixpp::session` (`include/fixpp/session/session_config.hpp`); test surface co-owned with `tests/support/` (`include/fixpp/core/test/mock_clock.hpp`).
@@ -1693,3 +1693,36 @@ parenthetical, illustrative inside a `thread_local` prohibition whose rule is un
 carries an **inline non-normative editorial note** that ages the illustration, states the rule is
 untouched, and points back here. The illustration itself is still **not** rewritten: that is a
 normative edit needing its own Gate A pass.
+
+---
+
+## ⚠️ Document-level amendment, 2026-10-10 (fixpp#544) — read before citing "the engine never picks a concrete executor"
+
+Placed at the end for the same reason as the amendment above: line-number citations point into this
+document. The individual sites are **not** rewritten.
+
+**What changed.** §1 goal 1, the §1 "Executor model" bullet and the §3 inherited-surface primitive say
+the engine **never picks a concrete executor** and does not assume one. Since fixpp#544
+(`.specify/544-hot-path-zero-alloc.md` §2.1, owner ruling R-2) that holds for the **choice**, not for
+the **type the session strand stores**:
+
+- The engine still uses the executor the caller supplies (`EngineConfig::executor`), and still builds
+  one strand per session from it. No executor is chosen on the caller's behalf.
+- When that executor's target type is **exactly** `asio::io_context::executor_type`, the session strand
+  is built over the concrete type, as `strand<session_inner_executor_t>`, and stored in an
+  `any_io_executor`. `session_inner_executor_t` is `io_context::executor_type` itself where the strand
+  over it fits `any_io_executor`'s inline storage (GCC and Clang), and an internal fixpp executor of the
+  same behaviour where it does not (MSVC). Otherwise, including a work-tracked or custom-allocator
+  `io_context` executor, the strand is over the type-erased executor, as before.
+- The one construction point is `make_session_strand` (`src/session/session_strand.cpp`). Both strand
+  construction sites go through it: the Engine's per-session entry and `make_session_executor`'s
+  `per_session_strand` path.
+- Why: a strand over the type-erased executor makes asio's executor queries allocate on every handler
+  dispatch; over the concrete type they do not (B&L `B-544-1`; the fallback is a residual of `L-497-1`).
+- `SessionEntry::session_strand` changed type accordingly (B&L `B-544-2`).
+
+**A clause of the amendment above is stale.** Its item 1 says the engine spawns role loops on "a bare
+`asio::strand<asio::any_io_executor>`". The strand the role loops run on is now the `any_io_executor`
+`make_session_strand` returns. That item's behavioural conclusion (the accept loop still misses the
+`session_executor` wrapper and falls through to the engine snapshot) is not affected by the type, and
+was not re-verified here. Re-derive the spawn sites with the recipe that amendment gives.
