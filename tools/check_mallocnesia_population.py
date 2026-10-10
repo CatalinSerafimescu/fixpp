@@ -90,7 +90,7 @@ POSITIVE_CONTROLS = {
         "pvalloc", "pvalloc (tests/alloc_guard/planted_entry_witness.cpp)"),
 }
 
-# fixpp#544 (B35)'s allocation gates: its zero cells, their arms and twins, and the three
+# fixpp#544 (B35)'s allocation gates: its zero cells, their arms and twins, and the
 # pre-existing gates B35 re-shaped. They are #544's acceptance evidence, and the floor cannot
 # keep them: it counts names, so once a later gate adds slack, or a padding gate replaces one,
 # a dropped B35 gate passes it. So each is required BY NAME, spelled out like
