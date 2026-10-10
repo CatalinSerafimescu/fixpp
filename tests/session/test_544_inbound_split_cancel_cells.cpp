@@ -404,7 +404,13 @@ TEST(B35InboundSplitCancel, LogonSentLogoutBuildFailure_DisconnectsWithoutThrow)
     f.target = std::string(86, 'T');
     Session s(f.engine, f.cfg());
     auto fut = asio::co_spawn(f.ioc, s.open(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms));
+    // On a miss, drain while `s` is alive: it is declared after `f`, so it dies before `f.ioc`.
+    const bool opened = fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms);
+    if (!opened) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "LogonSentLogoutBuildFailure.open");
+    }
+    ASSERT_TRUE(opened);
     ASSERT_TRUE(fut.get().has_value()) << "the initiator Logon must fit its buffer";
     ASSERT_EQ(s.state(), fsm_state::LogonSent);
     ASSERT_EQ(f.sent_count("A"), 1);

@@ -312,9 +312,13 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
     asio::co_spawn(ex, driver(), asio::detached);
     // `driver` is a named closure, so it must be driven inside its own scope by a call that
     // tools/audit_co_spawn_named_closure.py counts as a drive. The free pump is one; the
-    // fixture's member pump is not.
-    ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return r1.done && r2.done; }))
-        << "a send did not complete";
+    // fixture's member pump is not. On a miss, drain while `sess` and the send state are alive:
+    // `f.ioc` is destroyed after them, and a suspended send frame's slot holder writes into `sess`.
+    const bool done = fixpp::test_support::pump_until(f.ioc, [&] { return r1.done && r2.done; });
+    if (!done) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "B35SendSlot.Interleaved");
+    }
+    ASSERT_TRUE(done) << "a send did not complete";
 
     // Positive controls: the two sends overlapped, and each built its frame and reached toApp
     // while the first was suspended.
@@ -385,8 +389,12 @@ TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
         }
     };
     asio::co_spawn(ex, sess.send(one), record_into(outer));
-    ASSERT_TRUE(f.pump_until([&] { return outer.done && inner.done; }))
-        << "a send did not complete";
+    // On a miss, drain while `sess` and the captures are alive (see the Interleaved cell).
+    const bool done = f.pump_until([&] { return outer.done && inner.done; });
+    if (!done) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "B35SendSlot.Nested");
+    }
+    ASSERT_TRUE(done) << "a send did not complete";
 
     // Positive controls: the nested send ran inline, inside the outer toApp, over a frame
     // different from the outer one.
@@ -420,7 +428,13 @@ CancelOutcome send_cancelled_in_to_app(SlotFixture& f, Session& sess,
     const auto ex = sess.executor().underlying();
     asio::co_spawn(ex, sess.send(one),
                    asio::bind_cancellation_slot(sig.slot(), record_into(o.send)));
-    EXPECT_TRUE(f.pump_until([&] { return o.send.done; })) << "the send did not complete";
+    // On a miss, drain here: the frame spans `one` and its completion is bound to `sig`'s slot,
+    // and both die when this helper returns, so no guard in a caller can protect them.
+    if (!f.pump_until([&] { return o.send.done; })) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "send_cancelled_in_to_app");
+        ADD_FAILURE() << "the send did not complete";
+    }
     o.to_app_calls = f.app->to_app_calls;
     o.wire_after = f.wire.size();
     o.next_out_after = next_outbound(sess);

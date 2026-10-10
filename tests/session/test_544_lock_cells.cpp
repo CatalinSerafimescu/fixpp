@@ -153,13 +153,15 @@ TEST(B35LockCells, PreInitiationCancel_StoreThenEmitReturnsDispatchAbortedAndTra
         up = rig.run_until([&] { return rig.state() == fixpp::session::fsm_state::Active; });
     }
     pre_initiation_outcome out;
+    // At function scope: the frame's bound slot points into `sig`, and `rig.stop()` below can
+    // resume or cancel that frame, so `sig` must outlive it.
+    asio::cancellation_signal sig;
     std::size_t writes_before = 0;
     std::size_t writes_after = 0;
     bool finished = false;
     auto const sess = rig.session();
     if (up && sess) {
         writes_before = write->writes;
-        asio::cancellation_signal sig;
         asio::co_spawn(sess->executor().underlying(), cancel_while_store_posts(*sess, sig, out),
                        asio::bind_cancellation_slot(sig.slot(), asio::detached));
         finished = rig.run_until([&] { return out.done; });
