@@ -8,7 +8,7 @@
 // fixpp::session::threading_mode enum is visible without core/ back-edging
 // into session/ ([arch §2.3] leaf rule — the core header only declares it).
 // Linked into fixpp_session; its sole call site is Session::open() (T020).
-#include <asio/strand.hpp>
+#include <asio/any_io_executor.hpp>
 #include <cassert>
 #include <expected>
 #include <fixpp/core/error.hpp>  // error enum values
@@ -18,6 +18,8 @@
 #include <fixpp/session/session_config.hpp>  // complete threading_mode
 #include <memory_resource>
 #include <utility>
+
+#include "session_strand.hpp"  // fixpp#544 §2.1: make_session_strand
 
 namespace fixpp::core {
 
@@ -31,8 +33,8 @@ expected_t<session_executor> make_session_executor(asio::any_io_executor resolve
     switch (mode) {
         case threading_mode::per_session_strand:
             // The strand wrapping lives INSIDE inner_ ([2d §4.8]); the wrapper is
-            // strand_wrapped == true.
-            return session_executor{asio::any_io_executor{asio::make_strand(resolved_exec)},
+            // strand_wrapped == true. fixpp#544 §2.1: make_session_strand builds it.
+            return session_executor{fixpp::session::detail::make_session_strand(resolved_exec),
                                     session,
                                     /*strand_wrapped=*/true};
 
@@ -63,7 +65,7 @@ session_executor make_session_executor(adopt_strand_t, asio::any_io_executor str
     // Precondition (INV-3a / D3-B): strand_exec IS a strand created by the engine.
     // Store it directly — no re-wrap. strand_wrapped=true is truthful here because
     // the engine-created strand IS a strand; the public per_session_strand path
-    // still unconditionally wraps (byte-unchanged at the `per_session_strand` case above).
+    // still unconditionally wraps (the `per_session_strand` case above).
     return session_executor{std::move(strand_exec), session, /*strand_wrapped=*/true};
 }
 // NOLINTEND(bugprone-exception-escape)

@@ -28,6 +28,7 @@
 #include <asio/any_io_executor.hpp>
 #include <climits>
 #include <cstddef>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>

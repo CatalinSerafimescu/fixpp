@@ -1060,11 +1060,14 @@ $got"
   # the same wrong preset).
   # fixpp#448 — the gate steps' PREDICATE, not just their presence.
   local want_guard="matrix.preset == 'linux-clang-release'"
+  # fixpp#544 (B35): the #448 pair runs on both Linux Release legs. Its own string, so the
+  # #530 census pin below keeps the clang-only want_guard.
+  local want_mallocnesia_guard="matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'"
   local g
   for k in mallocnesia_population mallocnesia_gates; do
     g="$(echo "$json" | jq -r --arg k "$k" '.mallocnesia_guards[$k] // "<absent>"')"
-    [ "$g" = "$want_guard" ] \
-      || fail "$case_id: the #448 step '$k' has if: '$g', expected '$want_guard'. A typo here SKIPS the allocation gates on every leg while the job stays green and the step count is unchanged — which is why the string is pinned and not merely counted."
+    [ "$g" = "$want_mallocnesia_guard" ] \
+      || fail "$case_id: the #448 step '$k' has if: '$g', expected '$want_mallocnesia_guard'. A typo here SKIPS the allocation gates on every leg while the job stays green and the step count is unchanged — which is why the string is pinned and not merely counted."
   done
   [ "$(echo "$json" | jq -r '.mallocnesia_sentinel')" = "true" ] \
     || fail "$case_id: the #448 outcome sentinel step is gone. Without it, both gate steps can be skipped by a mistyped preset and nothing reads their outcome — a green job is not evidence a step ran."
@@ -1079,7 +1082,7 @@ $got"
   local want_population_run
   want_population_run="$(cat <<'POPULATION'
 python3 tools/check_mallocnesia_population.py \
-  --build-dir build/${{ matrix.preset }} --min-gates 20
+  --build-dir build/${{ matrix.preset }} --min-gates 63
 POPULATION
 )"
   g="$(echo "$json" | jq -r '.mallocnesia_step_runs.mallocnesia_population | length')"
@@ -1100,14 +1103,14 @@ set -euo pipefail
 pop="${{ steps.mallocnesia_population.outcome }}"
 gates="${{ steps.mallocnesia_gates.outcome }}"
 echo "preset=${{ matrix.preset }} population=${pop:-<unset>} gates=${gates:-<unset>}"
-if [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
+if [ "${{ matrix.preset }}" = "linux-gcc-release" ] || [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
   if [ "$pop" != "success" ] || [ "$gates" != "success" ]; then
-    echo "::error::the allocation gates did not run to success on linux-clang-release (population=$pop gates=$gates)."
+    echo "::error::the allocation gates did not run to success on ${{ matrix.preset }} (population=$pop gates=$gates)."
     exit 1
   fi
 elif [ "$pop" != "skipped" ] || [ "$gates" != "skipped" ]; then
   echo "::error::the allocation gates ran on ${{ matrix.preset }}; they are wired to"
-  echo "::error::linux-clang-release only (population=$pop gates=$gates)."
+  echo "::error::linux-gcc-release and linux-clang-release only (population=$pop gates=$gates)."
   exit 1
 fi
 SENTINEL
@@ -1936,7 +1939,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=111  # M125 (the ci-script-pins call-site pin for
+MUTANTS_DECLARED=112  # M126 (the #448 gate-step guard narrowed to one Release leg, fixpp#544) +
+                     # M125 (the ci-script-pins call-site pin for
                      # ci/test-mallocnesia-sanitizer-match.sh, fixpp#497) + M116 M117 (the #448 gate steps' key sets, fixpp#543) + M118 M119 (their
                      # pinned run: commands) + M120 (the #448 sentinel's existence pin) +
                      # M121 M122 (its pinned body) + M123 M124 (its if: and key set) +
@@ -2537,6 +2541,27 @@ assert n == 2, "expected to mutate 2 guarded steps, mutated " + str(n)
 open(dst, "w").write("      - name:".join(out))
 '
 
+  # M126 (fixpp#544): the #448 gate steps narrowed back to linux-clang-release. The gcc
+  # leg then skips its allocation gates while every other assertion about the pair holds.
+  # Scoped to the #448 gate steps by their ids, as M106 is; no literal single quote (see
+  # M106).
+  mutate_workflow M126 "the #448 gate steps narrowed to linux-clang-release only" "expected .matrix.preset == .linux-gcc-release. \\|\\| " '
+import re, sys
+q = chr(39)
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+good = "matrix.preset == " + q + "linux-gcc-release" + q + " || matrix.preset == " + q + "linux-clang-release" + q
+bad = "matrix.preset == " + q + "linux-clang-release" + q
+n = 0
+out = []
+for block in t.split("      - name:"):
+    if re.search(r"id: mallocnesia_(population|gates)\b", block) and good in block:
+        block = block.replace(good, bad, 1); n += 1
+    out.append(block)
+assert n == 2, "expected to mutate 2 guarded steps, mutated " + str(n)
+open(dst, "w").write("      - name:".join(out))
+'
+
   # M125 (fixpp#497): the SAME dead-call-site shape, on the sanitizer flag-match harness.
   mutate_workflow M125 "the sanitizer flag-match harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
 import sys
@@ -2694,7 +2719,7 @@ open(dst, "w").write(t.replace(old, new))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "            --build-dir build/${{ matrix.preset }} --min-gates 20\n"
+old = "            --build-dir build/${{ matrix.preset }} --min-gates 63\n"
 new = "            --build-dir build/${{ matrix.preset }} --min-gates 1\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))

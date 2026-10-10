@@ -41,6 +41,7 @@
 #pragma once
 
 #include <asio/awaitable.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>             // expected_t / error
 #include <fixpp/core/sync/async_mutex.hpp>  // fixpp::sync::async_mutex
 #include <fixpp/session/seqnum.hpp>         // seqnum_t / seqnum_min / seqnum_max

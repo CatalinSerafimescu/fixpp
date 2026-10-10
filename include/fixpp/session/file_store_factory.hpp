@@ -37,6 +37,7 @@
 #pragma once
 
 #include <asio/any_io_executor.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>

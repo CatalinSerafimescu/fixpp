@@ -1,0 +1,12 @@
+[
+  {
+    "directory": ".",
+    "file": "carries_n.cpp",
+    "arguments": ["c++", "-Iasio", "-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=8", "-c", "carries_n.cpp"]
+  },
+  {
+    "directory": ".",
+    "file": "refused.cpp",
+    "arguments": ["c++", "-Iasio", "-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=8", "--define-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=9", "-c", "refused.cpp"]
+  }
+]

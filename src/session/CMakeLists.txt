@@ -17,6 +17,8 @@ add_library(fixpp_session STATIC
   session_executor.cpp   # fixpp::core::make_session_executor (T019; the
                          # core-namespace bridge defined session-side so
                          # core/ stays the asio-free leaf — [arch §2.3])
+  session_strand.cpp     # fixpp#544 §2.1: make_session_strand, the one session
+                         # strand construction point
   ${CMAKE_SOURCE_DIR}/src/core/system_clock_source.cpp  # production fixpp::core
                          # default Clock impl (T028); asio-dependent so it is
                          # compiled here, NOT into the asio-free fixpp_core

@@ -31,6 +31,7 @@
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/connect.hpp>
+#include <asio/deferred.hpp>
 #include <asio/detached.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/redirect_error.hpp>
@@ -1330,8 +1331,9 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     // NEVER allocate in the read-path completion-handler dispatch per [const §VIII.5].
     // asio::ssl::stream::async_read_some writes directly into the caller-owned buf.
     asio::error_code ec;
+    // `deferred` (fixpp#544 §2.3): awaited directly, the read adds no adapter frame.
     std::size_t bytes_read = co_await ssl_stream_->async_read_some(
-        asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::use_awaitable, ec));
+        asio::buffer(buf.data(), buf.size()), asio::redirect_error(asio::deferred, ec));
 
     if (ec) {
         if (ec == asio::error::operation_aborted) {

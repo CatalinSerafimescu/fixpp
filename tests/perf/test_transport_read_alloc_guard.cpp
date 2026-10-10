@@ -16,8 +16,8 @@
 // 10^4-frame test. Gate: ZERO global new/delete/malloc while the read buffer
 // is arena-backed and passed as span to async_read_some.
 //
-// Warm-up: run WARMUP_ITER frames before the guard window to prime asio's
-// per-thread cancellation recycler (per Erratum E-4 /
+// Warm-up: run WARMUP_ITER frames before the guard window, in the same scheduler
+// call, to prime asio's cancellation recycler (per Erratum E-4, scope per E-6 /
 // [[feedback_asio_cancellation_slot_no_allocator_hook]]).
 //
 // Run:
@@ -106,7 +106,7 @@ TEST(DISABLED_TransportReadAllocGuard, TenKFramesZeroGlobalAlloc) {
     //   1. Construct asio_tls_transport over loopback with a PMR-arena-backed
     //      read buffer (std::array<std::byte, 256KiB> on stack; pass as span).
     //   2. Run WARMUP_ITER = 100 frames through async_read_some to prime asio
-    //      per-thread recycler (Erratum E-4).
+    //      recycler (Erratum E-4; its cache lives for one scheduler call, E-6).
     //   3. Call alloc_guard_start() [no-op without LD_PRELOAD].
     //   4. For i in 0..10000: peer sends frame; co_await async_read_some → buf.
     //   5. Call alloc_guard_end().

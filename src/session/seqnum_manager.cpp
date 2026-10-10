@@ -16,11 +16,16 @@
 //   auto lk = co_await mutex_.async_lock();
 //   if (!lk) { ... handle sync_lock_aborted / sync_lock_drained ... }
 //   // hold lk; RAII unlocks on scope exit.
+// check_inbound and hydrate lock through FIXPP_DETAIL_CO_AWAIT_LOCK instead (async_mutex.hpp;
+// .specify/544-hot-path-zero-alloc.md §2.3, 'Call sites converted'): the same lock with no
+// coroutine frame of its own. The other methods keep async_lock(); §2.3 gives the reason
+// assign_outbound, which W-E's chain also reaches, is not converted.
 //
 // Discipline (I-7, Karpathy no-alloc hot path):
 //   No std::string, no std::vector, no std::function in the check/assign paths.
 //   The async_mutex fast path (uncontended CAS) does not suspend on the session strand.
-//   Per-thread recycler handles the cancellation-handler closure (E-4 pattern).
+//   asio's recycler handles the cancellation-handler closure (E-4 pattern; its cache
+//   lives for one scheduler call, not for the thread: Erratum E-6).
 
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_type.hpp>  // NOLINT(misc-include-cleaner) — IWYU: operator! via cancellation_slot
@@ -61,7 +66,7 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqn
     using fixpp::core::error;
 
     // Acquire mutex — RAII scoped_lock, unlocks on scope exit.
-    auto lk_result = co_await mutex_.async_lock();
+    FIXPP_DETAIL_CO_AWAIT_LOCK(lk_storage, lk_result, mutex_, nullptr);
     if (!lk_result) {
         // Mutex was drained (session teardown) or cancelled.
         // Surface as session_already_closed (session is terminating).
@@ -141,7 +146,7 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> SeqnumManager::assign_outboun
 
 asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::hydrate(
     seqnum_t next_inbound, seqnum_t next_outbound) noexcept {
-    auto lk_result = co_await mutex_.async_lock();
+    FIXPP_DETAIL_CO_AWAIT_LOCK(lk_storage, lk_result, mutex_, nullptr);
     if (!lk_result) {
         co_return std::unexpected(fixpp::core::error::session_already_closed);
     }

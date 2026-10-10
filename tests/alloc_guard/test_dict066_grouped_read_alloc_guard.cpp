@@ -14,8 +14,8 @@
 // MEASUREMENT SCOPE — measured at the `Parser<Index>{tv}` + `OffsetTable`
 // level, NOT through `Session::on_inbound_frame` / `ctest -R alloc_guard_
 // dispatch|alloc_guard_session`'s coroutine-wrapped window:
-// tests/alloc_guard/CMakeLists.txt documents (item 13 comment,
-// "DELIBERATELY NOT GATED") that a window wrapping `co_spawn`/`ioc.run()`
+// tests/alloc_guard/CMakeLists.txt documents (item 13 comment, "WINDOWS OVER
+// SEVERAL SCHEDULER CALLS") that a window wrapping `co_spawn`/`ioc.run()`
 // allocates coroutine frames + asio run-loop handlers on the global heap —
 // gating THAT window at max-allocs=0 would be false-red, independent of
 // anything 066 changed. `Session::parse_and_dispatch_` itself

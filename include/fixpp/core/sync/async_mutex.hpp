@@ -26,7 +26,7 @@
 //   due to Lewis Baker / cppcoro; all post-RC additions are original work.
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Design anchor: .specify/2f-async-mutex.md v1.6 (errata E-1..E-5)
+// Design anchor: .specify/2f-async-mutex.md v1.6 (errata E-1..E-6)
 // Data model:    specs/048-async-mutex-strand-reap/data-model.md
 // Contracts:     specs/048-async-mutex-strand-reap/contracts/async_mutex-contract.md
 //                specs/006-async-mutex/contracts/async_mutex_awaiter.hpp
@@ -34,11 +34,18 @@
 //                specs/006-async-mutex/contracts/completion_policy.hpp
 //
 // Erratum E-1 (2026-05-18): The async_mutex_awaiter is a frame-local variable
-// inside async_lock()'s own coroutine frame — NOT separately heap-allocated via
-// global operator new. The asio completion handler produced by use_awaitable is
-// stored via placement-new into the awaiter's inline slot_storage_ buffer (32 B).
+// — NOT separately heap-allocated via global operator new. The asio completion
+// handler is stored via placement-new into the awaiter's inline slot_storage_
+// buffer (32 B).
 // This achieves zero global heap allocation on both the uncontended and contended
 // paths when mr==nullptr and HALO fires (§4.3.4 case 1).
+//
+// Erratum E-6 (fixpp#544 — frameless lock op), .specify/544-hot-path-zero-alloc.md §2.3: the
+// awaiter lives in a caller-owned detail::lock_frame, and the lock is a
+// `deferred` operation that the caller co_awaits directly, through the one
+// sequence FIXPP_DETAIL_CO_AWAIT_LOCK defines. async_lock() is a thin coroutine
+// over that macro, so its own frame is where its lock_frame lives. The E-2
+// waiter_record split and the E-5 reap/drain model are unchanged.
 //
 // Erratum E-5 (048 — strand-local reap): cancel_and_drain() is narrowed to the
 // strand-serialised contract its two consumers actually use. The cross-thread
@@ -65,19 +72,24 @@
 #include <type_traits>
 #include <utility>
 
-// ASIO — standalone asio/1.36.0 (Conan dep).
+// ASIO — standalone asio (Conan dep; conanfile.py pins the version).
 #include <asio/any_io_executor.hpp>
 #include <asio/as_tuple.hpp>
+#include <asio/associated_cancellation_slot.hpp>
+#include <asio/associated_executor.hpp>
 #include <asio/async_result.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/cancellation_state.hpp>
 #include <asio/cancellation_type.hpp>
+#include <asio/deferred.hpp>
 #include <asio/dispatch.hpp>
 #include <asio/error.hpp>
 #include <asio/post.hpp>
+#include <asio/system_error.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 
 #include "fixpp/core/error.hpp"
 
@@ -152,6 +164,12 @@ class slot_allocator;
 // async_lock_guard must be complete for that instantiation).
 struct async_mutex_awaiter;
 struct waiter_record;
+
+// The frameless lock op (fixpp#544 §2.3). Defined after async_mutex_awaiter;
+// FIXPP_DETAIL_CO_AWAIT_LOCK below is the only supported way to use them.
+struct lock_frame;
+inline auto async_lock_op(async_mutex& mutex, lock_frame& frame,
+                          std::pmr::memory_resource* mr) noexcept;
 
 }  // namespace detail
 
@@ -405,8 +423,16 @@ private:
     // Per-mutex completion policy (immutable after construction).
     completion_policy const policy_{completion_policy::dispatch};
 
+    // The lock op's initiation (fixpp#544 §2.3): a `deferred` operation the
+    // caller awaits from its own frame. A member, because the body reads
+    // private state and constructs async_lock_guard{this}. Reached only
+    // through detail::async_lock_op.
+    auto lock_op_(detail::lock_frame& frame, std::pmr::memory_resource* mr) noexcept;
+
     friend struct detail::async_mutex_awaiter;
     friend struct detail::waiter_record;
+    friend auto detail::async_lock_op(async_mutex& mutex, detail::lock_frame& frame,
+                                      std::pmr::memory_resource* mr) noexcept;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -494,14 +520,17 @@ namespace detail {
 //
 // Erratum E-4 (2026-05-19): asio 1.36.0's cancellation_slot has NO
 // allocator-binding hook (cancellation_signal::prepare_memory ->
-// thread_info_base::allocate(cancellation_signal_tag); a per-thread recycling
-// cache, not bind_allocator-aware). slot_allocator is therefore NOT bound to
+// thread_info_base::allocate(cancellation_signal_tag); asio's recycling cache,
+// not bind_allocator-aware). slot_allocator is therefore NOT bound to
 // the cancellation slot. It is retained as the typed, Allocator-shaped
 // storage-policy wrapper for the allocation 2f *does* control — the
 // waiter_record fallback — and is unit-verified by §9 seam #21 in isolation.
-// The cancellation-handler closure uses asio's per-thread recycler (zero
-// global new/delete in steady state by construction; one-time per-thread
-// first-touch is §6.4 bench-soft).
+// The cancellation-handler closure uses asio's recycler (zero global
+// new/delete in steady state by construction; the first touch in each
+// scheduler call is §6.4 bench-soft). Erratum E-6 corrects E-4's scope: the
+// cache lives for one scheduler call (an io_context run-family call), not
+// for the thread, and holds fixpp's exported slot count per purpose
+// (include/fixpp/core/detail/asio_recycler_config.hpp).
 //
 // Three exhaustive cases (post-E-4, re-anchored to waiter_record storage):
 //   case 1 (mr == nullptr): the per-mutex waiter_pool_ arm (E-2) — modelled
@@ -512,8 +541,9 @@ namespace detail {
 //          modelled here by forwarding allocate/deallocate to mr; mr
 //          exhaustion -> std::bad_alloc -> trap -> sync_lock_alloc_failed.
 //
-// The production waiter_record allocation lives inline in async_lock()
-// (per-mutex waiter_pool_ freelist / pmr_waiter_block) and realises the same
+// The production waiter_record allocation lives inline in the lock op's
+// initiation, async_mutex::lock_op_ (per-mutex waiter_pool_ freelist /
+// pmr_waiter_block), and realises the same
 // three cases directly; slot_allocator carries the policy for seam #21.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -560,21 +590,20 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 // async_mutex_awaiter — intrusive waiter node (full definition).
-// One node per in-flight contended async_lock() call.
+// One node per in-flight contended lock op.
 //
 // Erratum E-1 conformance (2026-05-18):
-//   The awaiter is a frame-local variable inside async_lock()'s coroutine frame
-//   (NOT separately heap-allocated via global operator new). The asio completion
-//   handler is stored via placement-new into the 32-byte slot_storage_ buffer,
-//   making the contended path zero-global-heap when mr==nullptr + HALO fires.
+//   The awaiter is frame-local: it is the member of a detail::lock_frame that
+//   lives in the awaiting coroutine's frame (fixpp#544 §2.3), NOT separately
+//   heap-allocated via global operator new. The asio completion handler is
+//   stored via placement-new into the 32-byte slot_storage_ buffer, making the
+//   contended path zero-global-heap when mr==nullptr + HALO fires.
 //
 //   Field mapping per Erratum E-1:
 //     - coro_ (the design's "stored continuation") is replaced by the completion
 //       handler stored in slot_storage_ via placement-new.
-//     - result_ points at a local variable in async_lock()'s frame.
+//     - the result is the completion value the awaiting frame receives.
 //     - invoke_fn_ / destroy_fn_: type-erased pointers into slot_storage_.
-//     - All other fields (mutex_, next_, phase_, slot_, result_, slot_storage_)
-//       are unchanged from the design layout.
 //
 // Defined AFTER async_lock_guard because invoke_fn_t uses
 // expected_t<async_lock_guard> which requires async_lock_guard to be complete.
@@ -596,8 +625,9 @@ struct alignas(std::max_align_t) waiter_record {
 
     // 058 T044 (tasks.md Phase 7.5, discharges W-6 by construction): the ONLY
     // executor type ever stored here in production is asio::any_io_executor
-    // (async_lock() captures `co_await asio::this_coro::executor`, which is
-    // always this type). This static_assert proves at compile time that it
+    // (the lock op stores its handler's associated executor, the executor of
+    // the awaiting asio::awaitable<> thread, which every fixpp coroutine
+    // declares with this default type). This static_assert proves at compile time that it
     // fits `exec_storage_`, which makes store_executor()'s
     // `sizeof(RawExecutor) > sizeof(exec_storage_)` fail arm (A7,
     // store_executor's `return false;` below) STRUCTURALLY UNREACHABLE for
@@ -748,8 +778,8 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
                     awaiter->invoke_handler(std::move(record->result_));
                 } else {
                     // 058 T024 (research.md D-6, spec FR-006 / AM-P3-2):
-                    // attached_awaiter_ is nulled ONLY at the async_lock()
-                    // coroutine tail (just before co_return result), strictly AFTER this runner
+                    // attached_awaiter_ is nulled ONLY by detail::finish_lock
+                    // (FIXPP_DETAIL_CO_AWAIT_LOCK's last part), strictly AFTER this runner
                     // invokes the handler for THIS SAME schedule (each record
                     // is resumed at most once — the single-schedule
                     // invariant: every schedule_record_resume() call site
@@ -851,10 +881,47 @@ static_assert(sizeof(waiter_record) <= 248,
 // The frame-local awaiter (Erratum E-2 split: intrusive identity moved to
 // waiter_record) must stay within the published ≤ 96 B ceiling so it fits in
 // the caller's coroutine-frame free space and the HALO elision (§6.4, seam #9)
-// remains viable. async_lock's await_ready/await_suspend equivalents are the
-// inline header-only async_initiate lambda below — no out-of-line escape.
+// remains viable. The lock op's await_ready/await_suspend equivalents are the
+// inline header-only async_initiate lambda in async_mutex::lock_op_ below — no
+// out-of-line escape.
 static_assert(sizeof(async_mutex_awaiter) <= 96,
               "fixpp::sync: async_mutex_awaiter exceeds the §1.1 ≤ 96 B HALO budget.");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lock_frame — the caller-owned storage of one frameless lock op (fixpp#544 §2.3).
+//
+// FIXPP_DETAIL_CO_AWAIT_LOCK declares one in the awaiting coroutine's frame. It
+// lives from the macro to the end of the enclosing scope, so it outlives the
+// lock op's suspension; the initiation and the cancellation handler reach the
+// awaiter through it by reference. Not copyable or movable for that reason.
+// ─────────────────────────────────────────────────────────────────────────────
+struct lock_frame {
+    explicit lock_frame(async_mutex& mutex) noexcept { awaiter.mutex_ = &mutex; }
+    lock_frame(lock_frame const&) = delete;
+    lock_frame(lock_frame&&) = delete;
+    lock_frame& operator=(lock_frame const&) = delete;
+    lock_frame& operator=(lock_frame&&) = delete;
+    ~lock_frame() = default;
+
+    async_mutex_awaiter awaiter;
+};
+
+// The handler a `co_await` of the deferred lock op passes to the initiation:
+// asio::awaitable's await_transform wraps an async operation in
+// awaitable_async_op, whose handler_type is this class
+// (asio/impl/awaitable.hpp). asio gives it no public name. store_handler places
+// it in slot_storage_, and its own static_asserts check whatever is stored;
+// these name the type, so a change to it fails here. On an asio bump, re-check
+// by reading awaitable_async_op_handler's base class and members in that file.
+using lock_op_handler_t =
+    asio::detail::awaitable_async_op_handler<void(expected_t<async_lock_guard>),
+                                             asio::any_io_executor>;
+static_assert(sizeof(lock_op_handler_t) <= sizeof(async_mutex_awaiter::slot_storage_),
+              "fixpp::sync: the lock op's completion handler does not fit the awaiter's "
+              "slot_storage_.");
+static_assert(alignof(lock_op_handler_t) <= 8,
+              "fixpp::sync: the lock op's completion handler is over-aligned for the "
+              "awaiter's slot_storage_.");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 058 T006 — compile-gated free-list pop test seam (research.md D-7).
@@ -1097,44 +1164,44 @@ inline void fixpp::sync::detail::async_mutex_awaiter::on_cancel(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// T026: async_lock — awaitable coroutine (Erratum E-1 conforming).
+// T026: the lock op (Erratum E-1 conforming), as a `deferred` operation
+// (fixpp#544, .specify/544-hot-path-zero-alloc.md §2.3).
 // [2f §4.1], [2f §4.2], [2f §4.2.1], [2f §4.2.2].
 //
 // 048 (Erratum E-5): active_acquirers_count_ REMOVED (vestigial — the corrected
-// terminal condition does not read it; async_lock's initiation body from the
+// terminal condition does not read it; the initiation body from the
 // draining_ load to the state_ push is synchronous, so the reap cannot
 // interleave a half-finished acquirer on the one strand; the drain contract
 // forbids cross-thread overlap — research.md D-2/W-3b).
 //
-// async_lock is itself an asio::awaitable<expected_t<async_lock_guard>>
-// coroutine. The async_mutex_awaiter is declared as a LOCAL VARIABLE in this
-// frame — it is NOT heap-allocated via global operator new (Erratum E-1).
+// The awaiter is the caller-owned frame.awaiter (detail::lock_frame), never
+// heap-allocated via global operator new (Erratum E-1). The completion handler
+// is the one the awaiting coroutine's co_await supplies; it is stored via
+// placement-new into the awaiter's inline slot_storage_ buffer, and the
+// static_asserts beside detail::lock_op_handler_t check that it fits. The
+// executor and the cancellation slot are the handler's associated ones: the
+// awaiting thread's executor, and its cancellation state's slot after
+// FIXPP_DETAIL_CO_AWAIT_LOCK's total reset.
 //
-// The asio completion handler (produced by use_awaitable) is stored via
-// placement-new into the awaiter's inline slot_storage_ buffer (32 B).
-// sizeof(awaitable_handler<any_io_executor, T>) == 8 B (one pointer) on
-// asio/1.36.0, leaving 24 B headroom within the 32-byte buffer.
-//
-// Result lifetime: `result` is a local variable in this frame. `awaiter.result_`
-// points at it. Both are valid from contended-path entry through co_return.
+// Equivalence with the coroutine form this replaces: diff this lambda's body
+// against the lambda async_mutex::async_lock passed to async_initiate before
+// fixpp#544 (`git log -p -- include/fixpp/core/sync/async_mutex.hpp` finds it).
+// Each hunk must be the source of the executor and the slot, the capture list,
+// or the name through which the body reaches the caller-owned awaiter (§2.3,
+// "The condition").
 // ─────────────────────────────────────────────────────────────────────────────
 
-inline asio::awaitable<fixpp::sync::expected_t<fixpp::sync::async_lock_guard>>
-fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
-    using detail::async_mutex_awaiter;
+inline auto fixpp::sync::async_mutex::lock_op_(detail::lock_frame& frame,
+                                               std::pmr::memory_resource* mr) noexcept {
     using detail::waiter_phase;
     using detail::waiter_record;
 
-    async_mutex_awaiter awaiter;
-    awaiter.mutex_ = this;
-    auto bound_executor = co_await asio::this_coro::executor;
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
-    auto cancellation_state = co_await asio::this_coro::cancellation_state;
-    auto inherited_slot = cancellation_state.slot();
+    return asio::async_initiate<const asio::deferred_t&, void(expected_t<async_lock_guard>)>(
+        [this, &frame, mr](auto handler) mutable {
+            auto& awaiter = frame.awaiter;
+            auto bound_executor = asio::get_associated_executor(handler);
+            auto inherited_slot = asio::get_associated_cancellation_slot(handler);
 
-    auto result = co_await asio::async_initiate<const asio::use_awaitable_t<>&,
-                                                void(expected_t<async_lock_guard>)>(
-        [this, &awaiter, mr, bound_executor, inherited_slot](auto handler) mutable {
             if (draining_.load(std::memory_order_acquire)) {
                 std::move(handler)(expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_drained)});
@@ -1361,23 +1428,81 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                 waiter_record::release_ref(record);  // failed membership attempt
             }
         },
-        asio::use_awaitable);
+        asio::deferred);
+}
 
-    // Restore the caller coroutine's default (terminal-only) cancellation
-    // filter. async_lock()'s total-cancel enablement (set above for the
-    // acquisition) MUST be scoped strictly to this operation: per
-    // [2f §4.2.3] / §4.5.1 window 3 a stale/late `total` arriving after the
-    // operation has completed (e.g. post-grant) is a no-op and must NOT abort
-    // the caller's subsequent awaits. Leaving the filter mutated leaked
-    // `operation_aborted` into the caller (seam #17 LateSignal/GrantOrCancel).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_terminal_cancellation{});
+namespace fixpp::sync::detail {
 
+// The forwarder FIXPP_DETAIL_CO_AWAIT_LOCK awaits; async_mutex befriends it.
+inline auto async_lock_op(async_mutex& mutex, lock_frame& frame,
+                          std::pmr::memory_resource* mr) noexcept {
+    return mutex.lock_op_(frame, mr);
+}
+
+// The post-grant tail: release the awaiter's attachment to its waiter_record, if
+// the contended path made one. It leaves record_ == nullptr, so nothing releases
+// that reference twice. Touches only public members of awaiter and record.
+inline void finish_lock(lock_frame& frame) noexcept {
+    auto& awaiter = frame.awaiter;
     if (awaiter.record_ != nullptr) {
         auto* record = awaiter.record_;
         record->attached_awaiter_.store(nullptr, std::memory_order_release);
-        detail::waiter_record::release_ref(record);
+        waiter_record::release_ref(record);
         awaiter.record_ = nullptr;
     }
+}
+
+}  // namespace fixpp::sync::detail
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIXPP_DETAIL_CO_AWAIT_LOCK, parameters lf, out, mutex, mr — NOT SUPPORTED API.
+//
+// The frameless lock (fixpp#544, .specify/544-hot-path-zero-alloc.md §2.3), and
+// the only definition of its sequence. Inside a coroutine body it declares a
+// ::fixpp::sync::detail::lock_frame named `lf` and an
+// expected_t<async_lock_guard> named `out` in the enclosing scope, and runs
+// five parts, in this order:
+//   1. The pre-check a co_await of an awaitable performs (asio/impl/awaitable.hpp,
+//      await_transform): when throw_if_cancelled() is set and the cancellation
+//      state is already cancelled, throw asio::system_error(operation_aborted).
+//      Part 2 replaces the state and so clears cancelled(); without this check a
+//      cancellation that landed before the lock would be erased, never re-delivered.
+//   2. Reset the cancellation state to total, for the acquisition.
+//   3. co_await the deferred lock op. Both resets are always ready, so nothing
+//      runs between part 2 and part 3's own await_transform check.
+//   4. Reset to terminal, unconditionally, whatever filter the caller entered
+//      with: a total cancellation that arrives after the grant must not abort
+//      the caller's next co_await (seam #17, LateSignal/GrantOrCancel).
+//   5. finish_lock.
+// `lf` lives to the end of the enclosing scope, which outlives the lock op.
+// `mutex` is evaluated more than once, so pass a name. The caller chooses `lf`
+// and `out`, so two uses in one scope cannot collide. Never #undef'd: inline
+// functions in installed headers (MemoryStore::store) expand it in consumers' TUs.
+// ─────────────────────────────────────────────────────────────────────────────
+// NOLINTBEGIN(cppcoreguidelines-macro-usage,bugprone-macro-parentheses): out is a declared name
+#define FIXPP_DETAIL_CO_AWAIT_LOCK(lf, out, mutex, mr)                                            \
+    ::fixpp::sync::detail::lock_frame lf{mutex};                                                  \
+    if ((co_await ::asio::this_coro::throw_if_cancelled()) &&                                     \
+        (co_await ::asio::this_coro::cancellation_state).cancelled() !=                           \
+            ::asio::cancellation_type::none) {                                                    \
+        throw ::asio::system_error(                                                               \
+            ::asio::error::make_error_code(::asio::error::operation_aborted), "co_await");        \
+    }                                                                                             \
+    co_await ::asio::this_coro::reset_cancellation_state(::asio::enable_total_cancellation{});    \
+    auto out = co_await ::fixpp::sync::detail::async_lock_op(mutex, lf, mr);                      \
+    co_await ::asio::this_coro::reset_cancellation_state(::asio::enable_terminal_cancellation{}); \
+    ::fixpp::sync::detail::finish_lock(lf)
+// NOLINTEND(cppcoreguidelines-macro-usage,bugprone-macro-parentheses)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// async_lock — the public awaitable coroutine (Erratum E-1 conforming), over the
+// frameless lock op. Its own frame holds the lock_frame, so a consumer's
+// co_await of it costs that one coroutine frame.
+// ─────────────────────────────────────────────────────────────────────────────
+
+inline asio::awaitable<fixpp::sync::expected_t<fixpp::sync::async_lock_guard>>
+fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
+    FIXPP_DETAIL_CO_AWAIT_LOCK(frame, result, *this, mr);
     co_return result;
 }
 
@@ -1395,7 +1520,7 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
 //
 // Erratum E-1: "resume the waiter" is now awaiter->invoke_handler(result)
 // instead of resume_fn_(result). The awaiter node is frame-local; do NOT
-// delete it — it lives in async_lock()'s coroutine frame.
+// delete it — it lives in the awaiting frame's detail::lock_frame.
 // ─────────────────────────────────────────────────────────────────────────────
 
 inline void fixpp::sync::async_mutex::unlock() noexcept {

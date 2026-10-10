@@ -42,6 +42,21 @@ find_package(benchmark CONFIG QUIET)
 # asio/1.36.0 — 006-async-mutex (first async/coroutine feature; user-approved
 # new Conan row per [const §III.2], conanfile.py).
 find_package(asio CONFIG QUIET)
+# fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.4, owner ruling R-1′): asio's
+# recycler slot count, read from its one source, the guard header. src/core attaches it to
+# fixpp_core PUBLIC, which is the installed interface. In-tree it is also appended to the
+# imported asio::asio, so a TU that has asio's include path without linking a fixpp library
+# (fixpp_mock_clock, test executables that link asio::asio alone) sees the same value; find
+# them with `git grep -n "asio::asio" -- '*CMakeLists.txt'`. The ctest
+# asio_recycler_compile_census checks the result in compile_commands.json.
+include(cmake/FixppAsioRecycler.cmake)
+fixpp_read_asio_recycler_cache_size(
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/fixpp/core/detail/asio_recycler_config.hpp"
+  FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE)
+if(TARGET asio::asio)
+  set_property(TARGET asio::asio APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS
+    "ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=${FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE}")
+endif()
 # crc32c/1.1.2 — 008-message-store FileStore per-record + sentinel CRC32
 # (Castagnoli polynomial 0x1EDC6F41; research D-3 / [const §III.2]).
 # QUIET so the symbol exists for src/session even if the toolchain hasn't been

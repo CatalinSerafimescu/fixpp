@@ -90,6 +90,49 @@ POSITIVE_CONTROLS = {
         "pvalloc", "pvalloc (tests/alloc_guard/planted_entry_witness.cpp)"),
 }
 
+# fixpp#544 (B35)'s allocation gates: its zero cells, their arms and twins, and the
+# pre-existing gates B35 re-shaped. They are #544's acceptance evidence, and the floor cannot
+# keep them: it counts names, so once a later gate adds slack, or a padding gate replaces one,
+# a dropped B35 gate passes it. So each is required BY NAME, spelled out like
+# POSITIVE_CONTROLS rather than read from the registration. Re-derive the list on a Linux
+# Release tree with `ctest --test-dir build/<preset> -N -L 544 | grep -o '[^ ]*_mallocnesia$'`.
+# They register on Release build types only (design ruling R-4).
+REQUIRED_GATES = frozenset({
+    "alloc_guard_544_arm_a_tracked_executor_mallocnesia",
+    "alloc_guard_544_arm_e_slot_held_mallocnesia",
+    "alloc_guard_544_arm_s_run_one_for_mallocnesia",
+    "alloc_guard_544_ch_arm_mallocnesia",
+    "alloc_guard_544_ch_no_edit_twin_mallocnesia",
+    "alloc_guard_544_ch_production_twin_mallocnesia",
+    "alloc_guard_544_cl_arm_mallocnesia",
+    "alloc_guard_544_cl_production_twin_mallocnesia",
+    "alloc_guard_544_clp_no_edit_twin_mallocnesia",
+    "alloc_guard_544_cp_arm_mallocnesia",
+    "alloc_guard_544_veto_then_zero_mallocnesia",
+    "alloc_guard_544_wa_active_heartbeat_mallocnesia",
+    "alloc_guard_544_wa_bl_arm_mallocnesia",
+    "alloc_guard_544_wa_bl_twin_mallocnesia",
+    "alloc_guard_544_wa_bs_arm_mallocnesia",
+    "alloc_guard_544_wa_bs_twin_mallocnesia",
+    "alloc_guard_544_wb_active_app_message_mallocnesia",
+    "alloc_guard_544_wd_bl_arm_mallocnesia",
+    "alloc_guard_544_wd_bl_twin_mallocnesia",
+    "alloc_guard_544_wd_bs_arm_mallocnesia",
+    "alloc_guard_544_wd_bs_twin_mallocnesia",
+    "alloc_guard_544_wdr_bracket_arm_mallocnesia",
+    "alloc_guard_544_wdr_bracket_twin_mallocnesia",
+    "alloc_guard_544_wdr_store_live_read_mallocnesia",
+    "alloc_guard_544_wdw_real_chain_arm_mallocnesia",
+    "alloc_guard_544_wdw_real_chain_twin_mallocnesia",
+    "alloc_guard_544_wdw_stand_in_arm_mallocnesia",
+    "alloc_guard_544_wdw_stand_in_twin_mallocnesia",
+    "alloc_guard_544_wdw_stand_in_window_mallocnesia",
+    "alloc_guard_544_we_sends_interleaved_mallocnesia",
+    "perf_session_recovery_heartbeat_mallocnesia",
+    "perf_store_alloc_guard_wd_mallocnesia",
+    "session_refresh_on_logon_w8_mallocnesia",
+})
+
 # CTest properties under which a test whose command fails is reported as passed or
 # skipped, or is not run at all. On a label member any of them turns `ctest -L mallocnesia`
 # green over a broken gate or control: a broken control exits 1, and SKIP_RETURN_CODE 1
@@ -140,7 +183,8 @@ def main() -> int:
     # (0a) FLOOR. Deliberately brittle, and the same shape as tier1.yml's neighbouring
     # `-L consumer -N` / `-L packaging -N` pins: a gate population that SHRINKS is the
     # hazard, and no set relation below can see it. A floor rather than an exact count
-    # because ADDING a gate must not need a CI edit, while removing one must.
+    # because ADDING a gate must not need a CI edit. So it sees a count below it, not
+    # which gates are present: that is (0b) and (0b').
     if args.min_gates and len(by_name) < args.min_gates:
         failures.append(
             f"only {len(by_name)} gate(s) registered, floor is {args.min_gates}. Gates have "
@@ -155,7 +199,8 @@ def main() -> int:
             "clean population over nothing. Expected causes, in order of likelihood: "
             "(a) this is a SANITIZER build, where the gates deliberately do not register "
             "at all — a sanitizer's allocator interposes ahead of the interceptor, so "
-            "they would pass vacuously (run this against linux-clang-release); "
+            "they would pass vacuously (run this against a Linux Release tree, "
+            "linux-clang-release or linux-gcc-release); "
             "(b) the gates are not registered on this lane, the failure fixpp#448 "
             "removed; (c) the naming convention moved.")
     if not by_label:
@@ -187,6 +232,19 @@ def main() -> int:
             + ", ".join(undeclared_controls)
             + ". Add a POSITIVE_CONTROLS row naming the allocation path it proves, or "
               "rename it: a control nobody declared is one nobody will notice losing.")
+
+    # (0b') B35'S GATES MUST EXIST, each by name and in the label. The floor sees a population
+    # that shrinks; only this sees WHICH gates are in it.
+    for kind, have in (("by name", by_name), ("from the `mallocnesia` label", by_label)):
+        missing = sorted(REQUIRED_GATES - have)
+        if missing:
+            failures.append(
+                f"fixpp#544 (B35) gate(s) MISSING {kind}: " + ", ".join(missing)
+                + ". They are #544's acceptance evidence, and the floor cannot see a gate "
+                  "replaced by another of the same count. They register on Release build "
+                  "types only (R-4): on a Debug tree run this against linux-gcc-release or "
+                  "linux-clang-release instead. If the removal is deliberate, delete the row "
+                  "from REQUIRED_GATES in the same commit and say why.")
 
     # (0c) DUPLICATES BEFORE COMMAND LOOKUP. The command pin below reads one command by
     # name, so a duplicate can stand in for a different test with the same name.

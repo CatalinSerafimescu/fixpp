@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/clock.hpp>  // steady_time_point (T041 US3 liveness)
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>  // expected_t
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
@@ -1082,6 +1083,112 @@ private:
         std::span<const std::byte> frame,
         fixpp::session::detail::FrameHeader const& hdr) const noexcept;
 
+    // fixpp#544 (B35 Phase 4, `.specify/544-hot-path-zero-alloc.md` §2.2): on_inbound_frame's
+    // split. on_inbound_frame is a non-coroutine that returns the Active arm's awaitable.
+    // on_inbound_cold_ and on_inbound_active_slow_ are non-coroutines that return a sub-arm's
+    // awaitable and pass `tic` on to it. on_inbound_active_ is the entry arm and declares `tic`
+    // itself. inbound_sending_time_ok_ is synchronous. Every coroutine member below that takes
+    // `tic` starts with FIXPP_INBOUND_SPLIT_ENTRY(tic), the callee half of the b3 boundary
+    // defined in src/session/session.cpp. `tic` is the caller's saved throw_if_cancelled value.
+    // Members taking `hdr` or a view are awaited directly by the arm that owns that storage.
+    using inbound_result_t = asio::awaitable<fixpp::core::expected_t<void>>;
+    using inbound_continue_t = asio::awaitable<std::optional<fixpp::core::expected_t<void>>>;
+    [[nodiscard]] inbound_result_t on_inbound_active_(std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_cold_(bool tic,
+                                                    std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_drained_(bool tic) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_not_connected_(
+        bool tic, std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_logout_sent_(
+        bool tic, std::span<const std::byte> frame) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_logon_sent_(
+        bool tic, std::span<const std::byte> frame) noexcept;
+    // The Active arm's synchronous SendingTime(52) MaxLatency check.
+    [[nodiscard]] bool inbound_sending_time_ok_(
+        fixpp::session::detail::FrameHeader const& hdr) const noexcept;
+    // The sub-arm a rarely-taken Active branch selects, with the arm locals it takes by value.
+    struct inbound_slow_t {
+        enum class kind : std::uint8_t {
+            none,
+            validate_failed,
+            sending_time_reject,
+            sequence_reset,
+            too_high,
+            out_of_sequence,
+            gap_fill,
+            logout,
+            from_admin_failed,
+            test_request,
+            resend_request,
+            unsupported,
+            from_app_failed,
+        };
+        kind k = kind::none;
+        InboundValidation v{};
+        seqnum_t next_expected = 0;
+        seqnum_t seq = 0;
+        fixpp::core::error chk_error{};
+        fixpp::core::expected_t<dispatch_outcome> cb_r{};  // NOLINT(*redundant-member-init): frozen
+    };
+    // A non-coroutine: returns the awaitable of the sub-arm `slow` names.
+    [[nodiscard]] inbound_result_t on_inbound_active_slow_(
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        inbound_slow_t const& slow) noexcept;
+    // The Active arm's sub-arms. An inbound_continue_t returns nullopt when the arm continues.
+    [[nodiscard]] inbound_result_t on_inbound_active_validate_failed_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, InboundValidation v) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_sending_time_reject_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_sequence_reset_(
+        bool tic, std::span<const std::byte> frame,
+        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_too_high_(bool tic, seqnum_t next_expected,
+                                                               seqnum_t seq) noexcept;
+    [[nodiscard]] inbound_continue_t on_inbound_active_poss_dup_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_out_of_sequence_(
+        bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
+        fixpp::core::error chk_error) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_gap_fill_(
+        bool tic, std::span<const std::byte> frame,
+        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_logout_(
+        bool tic, std::span<const std::byte> frame,
+        fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_from_admin_failed_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr,
+        fixpp::core::expected_t<dispatch_outcome> cb_r) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_test_request_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_resend_request_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_unsupported_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    [[nodiscard]] inbound_result_t on_inbound_active_from_app_failed_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr,
+        fixpp::core::expected_t<dispatch_outcome> cb_r) noexcept;
+    // Reply leaves (§2.2 class 2): each owns the buffer its reply frame is built in.
+    [[nodiscard]] inbound_result_t inbound_reject_leaf_(
+        bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
+        std::string_view sending_time, std::optional<fsm_state> arm = std::nullopt) noexcept;
+    [[nodiscard]] inbound_result_t inbound_reject_best_effort_leaf_(
+        bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
+        std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic,
+                                                        std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_logon_sent_logout_leaf_(
+        bool tic, std::string_view text, std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_resend_request_leaf_(
+        bool tic, seqnum_t begin_seqno, std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_heartbeat_reply_leaf_(
+        bool tic, std::string_view test_req_id, std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_business_reject_leaf_(
+        bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
+        std::string_view sending_time) noexcept;
+    [[nodiscard]] inbound_result_t inbound_acceptor_reply_logon_leaf_(
+        bool tic, bool peer_sent_reset, int heartbt_sec, std::string_view reply_sending_time_view,
+        seqnum_t& n_pre_outbound) noexcept;
+
     // 014 T010/T015 — PRIVATE handoff from ReconnectFsm on a successful attempt.
     // Called by ReconnectFsm::drive_reconnect_attempt() (step 8) via the
     // session_ back-pointer. ReconnectFsm is a value member of Session
@@ -1396,8 +1503,37 @@ private:
     // error value (a toApp passthrough can carry a store-block error value
     // without having reached the commit region). Default-false; the caller
     // must initialize it. [contracts/store-then-emit-disposition.md item 3]
+    // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; rulings R-9, R-10):
+    // send_impl is the send tail. It builds into `frame_buf` through build_send_frame_,
+    // then runs toApp, assign_outbound and store_then_emit over it, so `frame_buf` must
+    // outlive the call. Its callers must be Session::send (over the session's frame slot) or
+    // send_fallback_leaf_ (over the leaf's own buffer); re-check with
+    // `git grep -n "send_impl(" -- src include`.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
-        std::span<const std::byte> app_payload, bool& disconnect_required);
+        std::span<const std::byte> app_payload, std::span<std::byte> frame_buf,
+        bool& disconnect_required);
+
+    // fixpp#544 §2.5: the frame build of Session::send, a non-coroutine. It runs the 020
+    // payload checks, the 022 scanner and excision pass, the SendingTime(52) stamp, the
+    // MsgSeqNum peek and the framing, in that order, and writes the frame into `out`. It
+    // uses send_strip_scratch_ and send_body_scratch_ without the slot flag. That is sound
+    // while it neither suspends nor calls an Application callback, because the strand runs
+    // one handler at a time. The clock's now() is the injected dependency it calls, at the
+    // position the stamp has always had.
+    struct send_frame_built {
+        std::size_t size = 0;
+        seqnum_t seq = 0;
+    };
+    [[nodiscard]] fixpp::core::expected_t<send_frame_built> build_send_frame_(
+        std::span<const std::byte> app_payload, std::span<std::byte> out);
+
+    // fixpp#544 §2.5 (R-10): the fallback for a send that finds the frame slot held (a send
+    // nested in toApp, or overlapping one suspended in its store or its write). Its frame
+    // owns a frame buffer, so it is over asio's recycler limit and allocates; it never
+    // writes the slot flag. Its first statement is FIXPP_INBOUND_SPLIT_ENTRY(tic), the
+    // callee half of the b3 boundary Session::send awaits it through.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_fallback_leaf_(
+        bool tic, std::span<const std::byte> app_payload, bool& disconnect_required);
 
     // 015 T016(d) — emit the initial initiator Logon via the admin-builder path
     // (build_logon + assign_outbound + store_then_emit). Extracted from open()'s
@@ -1511,6 +1647,21 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<logon_789_outcome>>
     honor_peer_next_expected_(std::string_view raw_789, bool present_789,
                               fixpp::session::seqnum_t next_outbound_ref, fsm_state arm) noexcept;
+
+    // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; rulings R-9, R-10): the
+    // send path's session-owned storage, allocated with the Session, so once per session
+    // and never per message ([const §XV.1]).
+    //   - send_strip_scratch_ and send_body_scratch_: build_send_frame_'s scratch, used
+    //     only inside that synchronous helper;
+    //   - send_frame_slot_: the frame Session::send's primary path builds into; it is read
+    //     until store_then_emit returns;
+    //   - send_slot_in_use_: set and cleared only by Session::send's RAII holder, on the
+    //     session strand. A send that finds it set takes send_fallback_leaf_.
+    static constexpr std::size_t kSendFrameBytes = 4096;
+    std::array<std::byte, kSendFrameBytes> send_strip_scratch_{};
+    std::array<std::byte, kSendFrameBytes> send_body_scratch_{};
+    std::array<std::byte, kSendFrameBytes> send_frame_slot_{};
+    bool send_slot_in_use_ = false;
 };
 
 }  // namespace fixpp::session
