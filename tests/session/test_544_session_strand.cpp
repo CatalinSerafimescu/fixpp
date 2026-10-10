@@ -282,8 +282,12 @@ TYPED_TEST(B35StrandSemantics, Serialisation_TwoHandlersNeverOverlap) {
     EXPECT_EQ(p.max_seen.load(), 1) << "two handlers on one strand overlapped";
 }
 
-// The positive control: the same probe on the bare io_context executor must see two
-// bodies at once, so the probe can report an overlap.
+// The positive control for overlap_probe::body: two bodies on the bare io_context executor,
+// each with a long partner wait, must see each other. It does not run run_serialisation_probe
+// or kStrandPartnerWait. Their ability to expose an overlap is shown by mutation: make
+// make_session_strand's fast path return the bare executor, and
+// Engine_HandlersOnALiveSessionStrandNeverOverlap must fail with 'two handlers on a live
+// session's strand overlapped'.
 TEST(B35SessionStrand, SerialisationProbe_Control_BareExecutorOverlaps) {
     asio::io_context ioc{kRunThreads};
     auto guard = asio::make_work_guard(ioc);

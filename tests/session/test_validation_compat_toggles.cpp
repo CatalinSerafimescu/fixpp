@@ -1979,10 +1979,12 @@ TEST(ValidationCompatToggles, NoHeap_RelaxedDeliverPath) {
     // We use seq=1 (too-low, expected=2) — a representative S4 too-low path.
     const auto too_low_frame = make_fix_frame("FIX.4.4", "D", 1, "CLI", "SRV");
 
-    // Warm-up: run the S4 deliver-without-advance path several times to prime the
-    // asio recycler (cancellation_slot's thread_info_base + promise frame recycling
+    // Warm-up: run the S4 deliver-without-advance path several times
+    // (cancellation_slot's thread_info_base + promise frame recycling
     // allocates on the FIRST call in a scheduler call; the cache lives for that call,
-    // not for the thread: 2f Erratum E-6).
+    // not for the thread: 2f Erratum E-6). Each feed() is its own scheduler call, so the
+    // warm-up does not prime the window's cache; no ctest runs this window under the
+    // interceptor.
     // After warm-up, fromApp has been called N times; we snapshot the count.
     constexpr int kWarmup = 8;
     for (int i = 0; i < kWarmup; ++i) {

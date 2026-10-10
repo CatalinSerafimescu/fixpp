@@ -1084,10 +1084,12 @@ private:
         fixpp::session::detail::FrameHeader const& hdr) const noexcept;
 
     // fixpp#544 (B35 Phase 4, `.specify/544-hot-path-zero-alloc.md` §2.2): on_inbound_frame's
-    // split. on_inbound_frame and on_inbound_cold_ are non-coroutines returning an arm's
-    // awaitable; every other member below is a coroutine whose first statement is
-    // FIXPP_INBOUND_SPLIT_ENTRY(tic), the callee half of the b3 boundary defined in
-    // src/session/session.cpp. `tic` is the caller's saved throw_if_cancelled value.
+    // split. on_inbound_frame is a non-coroutine that returns the Active arm's awaitable.
+    // on_inbound_cold_ and on_inbound_active_slow_ are non-coroutines that return a sub-arm's
+    // awaitable and pass `tic` on to it. on_inbound_active_ is the entry arm and declares `tic`
+    // itself. inbound_sending_time_ok_ is synchronous. Every coroutine member below that takes
+    // `tic` starts with FIXPP_INBOUND_SPLIT_ENTRY(tic), the callee half of the b3 boundary
+    // defined in src/session/session.cpp. `tic` is the caller's saved throw_if_cancelled value.
     // Members taking `hdr` or a view are awaited directly by the arm that owns that storage.
     using inbound_result_t = asio::awaitable<fixpp::core::expected_t<void>>;
     using inbound_continue_t = asio::awaitable<std::optional<fixpp::core::expected_t<void>>>;

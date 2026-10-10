@@ -389,6 +389,9 @@ TEST(B35RunThreadWindows, ArmE_SlotHeldSendsTakeTheLeaf) {
 
 // ── Arm (a): the strand's fallback executor ──────────────────────────────────
 
+// The entry is the allocator the arm's class reaches (design §1): class (a) through global
+// operator new (`new impl<E>` in asio's shared_target_executor), which reaches `malloc`; the
+// recycler classes through its fall-through, which reaches `aligned_alloc`.
 TEST(B35RunThreadWindows, ArmA_TrackedExecutorFallback) {
     auto const r = run_window(
         cell_spec{.opt = {.mode = rt::hook::signal_from_admin, .tracked_executor = true}});

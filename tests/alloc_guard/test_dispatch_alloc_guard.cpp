@@ -21,8 +21,9 @@
 // cancellation-slot assignment in a scheduler call asio's
 // detail::thread_info_base performs ONE global aligned_new for its recycling
 // block; the cache lives for that scheduler call, not for the thread (E-6).
-// The warm-up pass before alloc_guard_start() primes this recycler so the
-// MEASURED window is zero-global-heap (steady state).
+// The warm-up runs in an earlier scheduler call than the window, so it does not
+// prime that cache for the window, and this window is not gated
+// (tests/alloc_guard/CMakeLists.txt, 'WINDOWS OVER SEVERAL SCHEDULER CALLS').
 //
 // [const §VIII.5] / [const §XI.6]; D-6; N-P2-4.
 
@@ -146,8 +147,8 @@ TEST(DispatchAllocGuard, HotPathNoGlobalHeapAlloc) {
     auto se = *se_result;
 
     // ── Erratum E-4 warm-up pass ─────────────────────────────────────────
-    // Prime asio's cancellation recycler before the guard window.
-    // Run 3 warm-up cancellable_dispatch rounds (prime recycler + caches).
+    // Warm-up rounds before the guard window (the file header says what they do not prime).
+    // Run WARMUP cancellable_dispatch rounds.
     constexpr int WARMUP = 3;
     std::atomic<int> warmup_count{0};
     asio::co_spawn(

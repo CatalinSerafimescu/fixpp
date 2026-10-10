@@ -51,7 +51,9 @@
 #include <vector>
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers when it
-// is preloaded; no ctest entry preloads it for this binary (see the file header).
+// is preloaded: its Release registration preloads it for the MemoryStore steady-state
+// cell (tests/perf/CMakeLists.txt); the FileStore cell's window is run by hand (see the
+// file header).
 #include "support/alloc_guard_markers.hpp"
 #include "support/temp_dir.hpp"  // replaced a local copy of this helper (#404).
 // NOT byte-identical, and the difference is on disk: the local one prefixed

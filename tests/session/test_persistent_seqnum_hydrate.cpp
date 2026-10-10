@@ -2217,12 +2217,13 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
     // allocations (Session ctor, coroutine frames, recycler init)
     // happen during setup, outside the alloc guard.
     //
-    // Warm-up: prime the asio recycler by running the SAME path
+    // Warm-up: run the SAME path
     // (open + inbound deliver + persist) several times before the guard window.
     // The first iteration touches lazy-init paths (cancellation_slot's
     // thread_info_base, promise frame recycling). The recycler's cache lives for one
     // scheduler call, not for the thread (2f Erratum E-6) (mirrors validation_compat_toggles
-    // NoHeap_RelaxedDeliverPath).
+    // NoHeap_RelaxedDeliverPath). Each feed() is its own scheduler call, so the warm-up does
+    // not prime the window's cache; no ctest runs this window under the interceptor.
 
     // Session setup: persistent FaultStore seeded {in=1, out=1}.
     // We use an acceptor so both the hydrate path (in the Logon handler) and

@@ -16,10 +16,10 @@
 //   auto lk = co_await mutex_.async_lock();
 //   if (!lk) { ... handle sync_lock_aborted / sync_lock_drained ... }
 //   // hold lk; RAII unlocks on scope exit.
-// check_inbound and hydrate, which fixpp#544's allocation windows reach, lock through
-// FIXPP_DETAIL_CO_AWAIT_LOCK instead (async_mutex.hpp; .specify/544-hot-path-zero-alloc.md
-// §2.3): the same lock with no coroutine frame of its own. The other methods keep
-// async_lock().
+// check_inbound and hydrate lock through FIXPP_DETAIL_CO_AWAIT_LOCK instead (async_mutex.hpp;
+// .specify/544-hot-path-zero-alloc.md §2.3, 'Call sites converted'): the same lock with no
+// coroutine frame of its own. The other methods keep async_lock(); §2.3 gives the reason
+// assign_outbound, which W-E's chain also reaches, is not converted.
 //
 // Discipline (I-7, Karpathy no-alloc hot path):
 //   No std::string, no std::vector, no std::function in the check/assign paths.

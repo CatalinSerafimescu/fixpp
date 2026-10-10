@@ -224,7 +224,7 @@ endif()
 # Gating them at max-allocs=0 would be red. A window that reads zero runs inside one
 # scheduler call on the thread that runs the session's handlers: the B35 cells below
 # (fixpp#544), on tests/support/recycler_driver.hpp and tests/support/run_thread_engine_rig.hpp.
-# Re-scoping those three windows is tracked as a follow-up (see parent REMAINING-WORK.md
+# Re-scoping those windows is tracked as a follow-up (see parent REMAINING-WORK.md
 # item 13).
 foreach(_ag IN ITEMS
     decimal_alloc_guard_test
@@ -464,6 +464,9 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # name | gtest case | expected entry (empty: the case must read zero)
+  # The entry is the allocator the arm's class reaches (design §1): class (a) through global
+  # operator new (`new impl<E>` in asio's shared_target_executor), which reaches `malloc`; the
+  # recycler classes through its fall-through, which reaches `aligned_alloc`.
   set(_b35_rig_cells
     "alloc_guard_544_wa_active_heartbeat_mallocnesia|WA_ActiveHeartbeat|"
     "alloc_guard_544_wb_active_app_message_mallocnesia|WB_ActiveAppMessage|"

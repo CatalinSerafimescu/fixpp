@@ -2963,8 +2963,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_business_reject_
         // toApp fires BEFORE seqnum assignment so a veto consumes
         // no outbound seqnum (C2/INV-COV-5/FR-004).
         // Veto (app_do_not_send): set suppressed=true and fall through
-        // to persist_inbound_advance_() below — do NOT early-return
-        // (under-persist hazard:
+        // to persist_inbound_advance_(), which the caller
+        // on_inbound_active_from_app_failed_ runs after this leaf returns —
+        // do NOT early-return (under-persist hazard:
         // [[feedback_unconditional_persist_at_multiexit_gate_breaks_lowerbound]]).
         // Throw: terminal close + early return (persist moot under close).
         // [036 tasks T031; contracts C2; data-model.md INV-COV-5]
@@ -2978,8 +2979,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_business_reject_
                     (void)co_await close(close_mode::terminal);
                     co_return std::unexpected(fixpp::core::error::app_callback_threw);
                 }
-                // app_do_not_send: suppress the BMR emit; still
-                // fall through to persist_inbound_advance_() below.
+                // app_do_not_send: suppress the BMR emit; still fall through to
+                // persist_inbound_advance_(), which the caller
+                // on_inbound_active_from_app_failed_ runs after this leaf returns.
                 suppressed = true;
             }
         }
@@ -3012,7 +3014,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_acceptor_reply_l
     // RC#C-2 (gate-b/r2): bilateral_lenient also mirrors 141=Y in reply —
     // it is the defining behavior of bilateral_lenient (FR-017:148-149).
     // unilateral: outbound 141 is config-driven, NOT mirror-driven (FR-017:149).
-    // peer_sent_reset captured before this block from the seqnum-check block.
+    // peer_sent_reset is passed in by on_inbound_not_connected_, which captured it from its
+    // seqnum-check block.
     // [spec.md FR-017: bilateral_strict + bilateral_lenient mirror 141=Y in reply]
     const bool acpt_reset_seqnum =
         (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict ||
@@ -3020,10 +3023,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_acceptor_reply_l
         peer_sent_reset;
     const seqnum_t reply_seq = seqnum_mgr_.peek_outbound();
     n_pre_outbound = reply_seq;  // 031: capture N_pre before the reply consumes it
-    // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (above in
-    // this handler) which already advanced next_inbound_. Advertise plain
-    // next_inbound_unsafe() — NO +1 (E-OBO). Value is cause-dependent under 141 reset
-    // (data-model Reset table). [contract C2, I-NEX-1, E-OBO]
+    // 027 T013 I-NEX-1, E-OBO: acceptor reply is built AFTER check_inbound (in
+    // on_inbound_not_connected_, before it awaits this leaf) which already advanced
+    // next_inbound_. Advertise plain next_inbound_unsafe() — NO +1 (E-OBO). Value is
+    // cause-dependent under 141 reset (data-model Reset table). [contract C2, I-NEX-1, E-OBO]
     const std::optional<fixpp::session::seqnum_t> acpt_next_expected =
         cfg_.enable_next_expected_msg_seq_num
             ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
@@ -4308,8 +4311,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequen
     // Wire fromAdmin for inbound SequenceReset(Reset mode) AFTER the
     // FSM acts on it (apply_inbound_sequence_reset below applies the
     // new seqno). We fire BEFORE here since apply_inbound_sequence_reset
-    // may co_return early on Reject — the message was accepted by the
-    // FSM guards above and we fire consistent with US1 wiring (after
+    // may co_return early on Reject — the message was accepted by
+    // on_inbound_active_'s FSM guards before it selected this sub-arm and
+    // we fire consistent with US1 wiring (after
     // seqnum/FSM validation accepts). A fromAdmin reject emits
     // session Reject(35=3) per FR-005/D4.
     // [019-app-callbacks T016; FR-004; research D3/D4]
@@ -4777,7 +4781,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_test_r
         }
     }
     // 029 T010 — PERSIST: inbound TestRequest (35=1).
-    // check_inbound advanced next_inbound; fromAdmin dispatched above.
+    // check_inbound advanced next_inbound; fromAdmin dispatched by on_inbound_active_ before it
+    // selected this sub-arm.
     // [029 tasks T010; contracts C3.1; data-model §Persist matrix TestRequest]
     {
         auto p_r = co_await persist_inbound_advance_();
@@ -4806,7 +4811,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_resend
     }
     // 029 T010 — PERSIST: inbound ResendRequest (35=2).
     // check_inbound advanced next_inbound (ResendRequest is in-seq);
-    // fromAdmin dispatched above. Persist after handling.
+    // fromAdmin dispatched by on_inbound_active_ before it selected this sub-arm. Persist after
+    // handling.
     // [029 tasks T010; contracts C3.1; data-model §Persist matrix ResendRequest]
     {
         auto p_r = co_await persist_inbound_advance_();
@@ -5346,12 +5352,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
 
 // T008 (US1 / FR-001): Session::send outbound pipeline.
 //
-// Pipeline per FR-001 + [2e §4.1] durable-before-transmit:
-//   (1) stamp SendingTime(52) from effective_clock.now();
-//   (2) assign outbound MsgSeqNum(34) via seqnum_mgr_.assign_outbound() (RC#A);
-//   (3) build the framed wire bytes into the session's frame slot, or the fallback
-//       leaf's own buffer (fixpp#544 §2.5);
-//   (4) store_then_emit (I-3): store(outbound) BEFORE transport_send_.
+// Pipeline per FR-001 + [2e §4.1] durable-before-transmit: build_send_frame_ validates the
+// payload, stamps SendingTime(52), peeks MsgSeqNum(34) and frames the bytes into the
+// session's frame slot, or into the fallback leaf's own buffer (fixpp#544 §2.5). Then toApp;
+// then assign_outbound (RC#A), after toApp so a veto consumes no seqnum; then store_then_emit
+// (I-3), which stores before transport_send_.
 //
 // Frame layout: 8=<begin_string>\x01 9=<NNN>\x01 34=<seq>\x01 49=<sender>\x01
 //               52=<time>\x01 56=<target>\x01 <app_payload> 10=<CCC>\x01
@@ -5360,7 +5365,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
 // CheckSum (10=): byte-sum mod 256 over all bytes from start through end of "10=CCC\x01" body.
 // Per [FIX-SL §4.2]: 9= and 10= computed here; all other session fields stamped inline.
 //
-// Frame buffer: kSendFrameBytes. app_payload larger than ~3800 bytes returns wire_frame_too_large.
+// Frame buffer: kSendFrameBytes. A frame that does not fit it returns wire_frame_too_large.
 // [const §VIII.5]: no heap allocation on the primary path. A send that finds the frame slot
 // held takes send_fallback_leaf_, whose frame owns its buffer and is allocated (fixpp#544
 // §2.5, rulings R-10 and R-6).
@@ -5481,11 +5486,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     }
 }
 
-// send_impl: the actual send pipeline, called from the noexcept wrapper above.
-// May throw asio::system_error on cancellation of the store awaitable.
-// Separated so the outer noexcept wrapper can catch and convert to expected_t.
-// [F5 Round-A drift fix: noexcept-throw trap separation]
-//
 // ── 020 T010: Opaque-payload validation (FR-016; INV-8; research.md D1) ──────
 // Validate app_payload BEFORE stamping SendingTime, peeking seqnum, or building
 // the frame. Any rejection returns app_payload_malformed (131) with NO seqnum
@@ -5496,11 +5496,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
 //   (2) payload must begin with the bytes '3','5','=' (i.e. "35=" at offset 0);
 //   (3) no DUPLICATE 35= field, and
 //   (4) no session header/trailer field (tags 8, 9, 34, 49, 52, 56, 10) after it.
-//   Both are checked on real fields only, by send_impl's per-field walk: a Data
+//   Both are checked on real fields only, by build_send_frame_'s per-field walk: a Data
 //   value counted by its Length is one field (fixpp#426), so `<SOH>34=` inside
 //   EncodedText is neither a second field nor a MsgSeqNum.
 
-// fixpp#422: is `tag` a StandardHeader field? send_impl moves such a field ahead
+// fixpp#422: is `tag` a StandardHeader field? build_send_frame_ moves such a field ahead
 // of the payload's body fields; a strict peer (QuickFIX-J UseDataDictionary=Y)
 // rejects a header field that follows a body field (373=14). The set is the
 // <header> of dictionaries/FIXT11.xml (a superset of FIX44.xml's) plus
@@ -5852,6 +5852,10 @@ fixpp::core::expected_t<Session::send_frame_built> Session::build_send_frame_(
     return send_frame_built{.size = pos, .seq = seq};
 }
 
+// send_impl: the actual send pipeline, called from the noexcept wrapper above.
+// May throw asio::system_error on cancellation of the store awaitable.
+// Separated so the outer noexcept wrapper can catch and convert to expected_t.
+// [F5 Round-A drift fix: noexcept-throw trap separation]
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     std::span<const std::byte> app_payload, std::span<std::byte> frame_buf,
     bool& disconnect_required) {

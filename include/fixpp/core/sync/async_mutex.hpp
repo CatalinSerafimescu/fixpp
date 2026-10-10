@@ -604,8 +604,6 @@ private:
 //       handler stored in slot_storage_ via placement-new.
 //     - the result is the completion value the awaiting frame receives.
 //     - invoke_fn_ / destroy_fn_: type-erased pointers into slot_storage_.
-//     - All other fields (mutex_, next_, phase_, slot_, result_, slot_storage_)
-//       are unchanged from the design layout.
 //
 // Defined AFTER async_lock_guard because invoke_fn_t uses
 // expected_t<async_lock_guard> which requires async_lock_guard to be complete.
