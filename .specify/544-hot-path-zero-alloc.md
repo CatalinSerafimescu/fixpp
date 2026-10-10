@@ -2019,6 +2019,12 @@ implementation*, which holds F-1..F-7 and the orchestrator's rulings) and the ev
   asio-reaching consumer TU against the staged install without the definition and requires the guard's
   failure, with a twin through the imported target that must compile (negative arm on GCC and Clang front
   ends only). B&L `L-544-1` states the scope.
+- **T-2: the recycler ctests are registered on non-WIN32 only.** §2.4 does not restrict its mechanical guards
+  by platform. As built, `tests/sync/CMakeLists.txt` registers every `asio_recycler_*` ctest inside
+  `if(NOT WIN32)`, so on MSVC neither the compile-command census nor the inclusion check runs, and a direct-asio
+  MSVC translation unit (one that includes asio and no fixpp header reaching it) is checked by no guard. A
+  translation unit that includes such a fixpp header is still checked by the guard's `static_assert`, which is
+  platform-independent. Of these ctests, only the negative compile needs a GCC or Clang front end.
 - **Phase 4 ruling A → a2 (the dispatcher).** §2.2's dispatcher was to select the per-state coroutine. As
   built, the non-coroutine `on_inbound_frame` always returns the Active arm, and the Active arm reads the FSM
   state on the strand at resume and hands a cold state to its own arm. Cold paths, which are ungated, cost one

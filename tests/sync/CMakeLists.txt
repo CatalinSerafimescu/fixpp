@@ -432,7 +432,7 @@ if(NOT WIN32)
   foreach(_pair
       "include|-include" "imacros|-imacros" "long_include|--include=x\\.h"
       "long_imacros|--imacros=x\\.h"
-      "define_macro|--define-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=9"
+      "define_macro|--define-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=[9]"
       "undefine_macro|--undefine-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE"
       "wp|-Wp,-UASIO_RECYCLING_ALLOCATOR_CACHE_SIZE" "xpreprocessor|-Xpreprocessor"
       "xclang|-Xclang" "msvc_fi|/FIx\\.h")

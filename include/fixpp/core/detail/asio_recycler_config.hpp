@@ -7,13 +7,13 @@
 // translation unit was compiled with the same count.
 //
 // ONE SOURCE. FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE below is where the value is written;
-// build files and scripts read it from here rather than spelling the number (re-check with
-// `git grep -n "ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=[0-9]" -- . ':!*.md'`, which must print
-// nothing). cmake/FixppAsioRecycler.cmake reads it from this file and attaches
-// `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<value>` as a PUBLIC compile definition of
-// fixpp::core, so a CMake consumer of any fixpp:: target that publishes the `include/` root
-// inherits it. A build that uses the installed headers without fixpp's CMake package must
-// define it itself.
+// build files and scripts read it from here rather than spelling the number. Re-check with
+//   git grep -n "ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=[0-9]" -- . ':!*.md' ':!tests/sync/fixtures'
+// which must print nothing (the census fixtures there seed foreign values on purpose).
+// cmake/FixppAsioRecycler.cmake reads it from this file and attaches
+// `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<value>` as a PUBLIC compile definition of fixpp::core,
+// so a CMake consumer of any fixpp:: target that publishes the `include/` root inherits it. A
+// build that uses the installed headers without fixpp's CMake package must define it itself.
 //
 // THE OBLIGATION (ODR). The macro sizes `asio::detail::thread_info_base`, whose inline
 // members every TU that includes asio compiles. So every TU in one process that includes
