@@ -335,14 +335,26 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
         << "the second transmitted frame is not the second send's";
 }
 
-TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
+// True in a build without NDEBUG. Read from a volatile so that no compiler folds the skip
+// below: folded either way, one branch is unreachable code, which MSVC reports as C4702
+// under /W4 (the precedent is tests/support/msvc_debug_arena_skip.hpp).
+bool asserts_enabled() noexcept {
 #ifndef NDEBUG
+    static volatile bool on = true;
+#else
+    static volatile bool on = false;
+#endif
+    return on;
+}
+
+TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
     // The nested send's own toApp enters callback_dispatch_scope while the outer toApp's is
     // live, and that scope asserts no nested callback entry in builds without NDEBUG. That
     // assert is fixpp#564; this cell runs where NDEBUG is defined until #564 is resolved.
-    GTEST_SKIP() << "fixpp#564: a send nested in toApp trips callback_dispatch_scope's "
-                    "assert without NDEBUG";
-#endif
+    if (asserts_enabled()) {
+        GTEST_SKIP() << "fixpp#564: a send nested in toApp trips callback_dispatch_scope's "
+                        "assert without NDEBUG";
+    }
     SlotFixture f;
     Session sess(f.engine, f.cfg());
     ASSERT_TRUE(f.open_to_active(sess));
