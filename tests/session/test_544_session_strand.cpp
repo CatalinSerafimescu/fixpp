@@ -27,8 +27,9 @@
 //     bits; execute honours blocking.never; tracked copies, moves and assignments
 //     balance the outstanding work.
 //
-// The serialisation probe has a positive control (the bare io_context executor, which
-// must show an overlap), so a probe that cannot see an overlap fails.
+// SerialisationProbe_Control_BareExecutorOverlaps is a positive control for
+// overlap_probe::body only; the comment above it states how the serialisation probe's
+// ability to expose an overlap is shown.
 
 #include <gtest/gtest.h>
 
