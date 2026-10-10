@@ -97,8 +97,8 @@ TEST(SessionAllocGuard, SeqnumPathNoGlobalHeapAlloc) {
 
     // Warm-up: prime the async_mutex slot pool. asio's recycling cache lives for one
     // scheduler call (Erratum E-6), so each run_sync below starts with it empty.
-    // The loop mirrors test_dispatch_alloc_guard's WARMUP pattern. Use the same per-iteration run_sync
-    // pattern as the existing seqnum_manager_test LongRunZeroDrift, which is
+    // The loop mirrors test_dispatch_alloc_guard's WARMUP pattern. Use the same per-iteration
+    // run_sync pattern as the existing seqnum_manager_test LongRunZeroDrift, which is
     // known-working — a single-spawn 10⁴-iteration coroutine over the
     // async_mutex's awaitable surface crashes on this build (likely the
     // mutex's awaiter recycling assumes per-call ioc cycles).
