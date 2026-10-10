@@ -641,3 +641,24 @@ add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_disposi
 # lane /speckit-verify runs and on MSVC debug and msvc-asan (re-measure on msvc-asan,
 # under the same -j the lane uses), and size from the slowest.
 set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 1200)
+
+# fixpp#541 reproduction: fixpp_msg_get_group and fixpp_group_get_nested_group must
+# report an exhausted parse arena as an error code, never by an exception crossing
+# extern "C". Standalone: every cell runs a live engine against a raw TCP peer. The
+# src include root is for session/parse_capacity.hpp, which sizes the loop cap from B(L).
+add_executable(capi_group_cursor_shell_exhaustion_test
+  group_cursor_shell_arena_exhaustion_capi_test.cpp)
+target_link_libraries(capi_group_cursor_shell_exhaustion_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_group_cursor_shell_exhaustion_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+  "${CMAKE_SOURCE_DIR}/src")
+target_compile_definitions(capi_group_cursor_shell_exhaustion_test PRIVATE
+  "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_group_cursor_shell_exhaustion
+  COMMAND capi_group_cursor_shell_exhaustion_test)
+set_tests_properties(capi_group_cursor_shell_exhaustion PROPERTIES
+  LABELS "capi;repro" TIMEOUT 300)
