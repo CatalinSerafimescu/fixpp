@@ -390,6 +390,9 @@ fi
 # which `"%.1f" % total` over a `total += d` loop differs from
 # `round(sum(list), 1)`; write it into this shape; then run this file once per
 # awk you can reach, each one first on PATH, and require S4a to PASS.
+#
+# The real time ends in a zero on purpose: awk keeps the zero and float() drops
+# it, so a textual comparison of the figures disagrees on this log.
 S4_FIX="$WORK/s4-boundary.ctest.log"
 cat > "$S4_FIX" <<'CTESTLOG'
 Test project /nonexistent/aba-seam-s4-boundary
@@ -420,7 +423,7 @@ Test project /nonexistent/aba-seam-s4-boundary
 
 100% tests passed, 0 tests failed out of 12
 
-Total Test time (real) =   5.07 sec
+Total Test time (real) =   5.10 sec
 CTESTLOG
 s4_compare "$S4_FIX" "$S4_FIX" exact; s4_exact="$s4_verdict"
 s4_compare "$S4_FIX" "$S4_FIX"
