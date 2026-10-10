@@ -1,0 +1,13 @@
+[
+  {
+    "directory": ".",
+    "file": "carries_n.cpp",
+    "arguments": ["c++", "-Iasio", "-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=8",
+                  "@carries_n.cpp.modmap", "-c", "carries_n.cpp"]
+  },
+  {
+    "directory": ".",
+    "file": "via_response_file.cpp",
+    "arguments": ["c++", "@wrong_n.rsp", "-c", "via_response_file.cpp"]
+  }
+]

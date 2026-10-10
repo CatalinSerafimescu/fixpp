@@ -1896,6 +1896,104 @@ set_tests_properties(engine_session_strand PROPERTIES
   LABELS "023;session;control_strand;tsan"
   TIMEOUT 120)
 
+# fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.1, §3 "Behaviour"): the session
+# strand's fast path — the fit and type pins, the target-type oracle, and the
+# serialisation, equality and work-tracking cells against both the production strand and
+# session_io_executor's (task A-1). Registered on every platform: on MSVC, where the
+# production alias is session_io_executor, these cells are its behaviour oracle. TSan
+# runs it with no suppressions file.
+add_executable(session_544_strand_test
+  test_544_session_strand.cpp
+)
+target_link_libraries(session_544_strand_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_strand_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # session/session_strand.hpp, transport/asio_plain_transport.hpp
+)
+add_test(NAME session_544_strand COMMAND session_544_strand_test)
+set_tests_properties(session_544_strand PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
+# fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.3, §3 "Behaviour"): the
+# cancellation cells for FIXPP_DETAIL_CO_AWAIT_LOCK at its converted sites. Registered on
+# every platform and build type, like the session suites.
+add_executable(session_544_lock_cells_test
+  test_544_lock_cells.cpp
+)
+target_link_libraries(session_544_lock_cells_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_lock_cells_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_544_lock_cells COMMAND session_544_lock_cells_test)
+set_tests_properties(session_544_lock_cells PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
+# fixpp#544 (B35 Phase 4; `.specify/544-hot-path-zero-alloc.md` §2.2, orchestrator ruling B):
+# differential cells for the cancellation check points of the on_inbound_frame split. They
+# hold at base and after the split; the naive-boundary mutant turns them RED.
+add_executable(session_544_inbound_split_cancel_test
+  test_544_inbound_split_cancel_cells.cpp
+)
+target_link_libraries(session_544_inbound_split_cancel_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_inbound_split_cancel_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_544_inbound_split_cancel COMMAND session_544_inbound_split_cancel_test)
+set_tests_properties(session_544_inbound_split_cancel PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
+# fixpp#544 (B35 Phase 5; `.specify/544-hot-path-zero-alloc.md` §2.5, §3 "Behaviour"): the
+# send slot's overlap, release and cancellation cells. Registered on every platform and build
+# type, like the session suites; the ASan lane runs them with default options.
+add_executable(session_544_send_slot_test
+  test_544_send_slot_cells.cpp
+)
+target_link_libraries(session_544_send_slot_test PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_544_send_slot_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_544_send_slot COMMAND session_544_send_slot_test)
+set_tests_properties(session_544_send_slot PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1"
+  LABELS "544;session;tsan"
+  TIMEOUT 300)
+
 # ── 026-nanosecond-sendingtime (S-039) — session emit/inbound precision suite ──
 # Session config/emit/inbound + no-heap witnesses for configurable SendingTime(52)
 # precision incl. nanos (27-char) + lenient inbound parse. Core formatter/parser
@@ -2004,8 +2102,8 @@ set_tests_properties(session_validation_compat_toggles PROPERTIES
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_validation_compat_toggles APPEND PROPERTY LABELS 092)
 # T012 NoHeap_RelaxedDeliverPath: its global-heap claim is NOT CHECKED. No mallocnesia
-# gate is registered for it, because an Active session's inbound path allocates
-# (L-497-1; fixpp#544), so the window cannot be zero until that is fixed.
+# gate is registered for it: the S4 deliver-without-advance path is not one of
+# fixpp#544's gated windows, and L-497-1 discloses it.
 # The base test still runs its functional assertions. To run the window by hand:
 #   GTEST_FILTER='*NoHeap_RelaxedDeliverPath*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/session_validation_compat_toggles --mallocnesia <build>/lib/libmallocnesia.so
@@ -2038,8 +2136,8 @@ set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY LABELS 092)
 # T012 NoHeap_HydrateAndPersistPaths: its global-heap claim is NOT CHECKED. No mallocnesia
-# gate is registered for it, because an Active session's inbound path allocates
-# (L-497-1; fixpp#544), so the window cannot be zero until that is fixed.
+# gate is registered for it: its persistent-store persist path is not one of fixpp#544's
+# gated windows, and L-497-1 discloses it.
 # The base test still runs its functional assertions. To run the window by hand:
 #   GTEST_FILTER='*NoHeap_HydrateAndPersistPaths*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/session_persistent_seqnum_hydrate --mallocnesia <build>/lib/libmallocnesia.so
@@ -2069,13 +2167,14 @@ add_test(NAME session_refresh_on_logon
 set_tests_properties(session_refresh_on_logon PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "025;s018;refresh-on-logon;setup")
-# T040 W8_NoHeap_RehydratePath: its global-heap claim is NOT CHECKED. No mallocnesia
-# gate is registered for it, because SeqnumManager::hydrate() allocates an asio
-# coroutine frame through std::aligned_alloc (the mechanism behind L-497-1;
-# fixpp#544), so the window cannot be zero until that is fixed.
-# The base test still runs its functional assertions. To run the window by hand:
-#   GTEST_FILTER='*W8_NoHeap_RehydratePath*' python3 tools/check_alloc.py \
-#       --binary <build>/bin/session_refresh_on_logon --mallocnesia <build>/lib/libmallocnesia.so
+# T040 W8_NoHeap_RehydratePath is fixpp#544's W-C (B35, §3), in the driver-template window
+# shape. Its global-heap half is registered under the interceptor, Release-only, where it
+# must read zero. The base test still runs its functional assertions.
+fixpp_add_release_mallocnesia_test(
+  NAME session_refresh_on_logon_w8_mallocnesia
+  TARGET session_refresh_on_logon
+  CASE "RefreshOnLogon.W8_NoHeap_RehydratePath"
+  LABELS 025 alloc_guard 544)
 
 # ── 033-fixt-fix50sp2-session — T002 Setup + T004/T005 Foundational ──────────
 # T002: create RED test targets + ctest registration so `ctest -R fixt` works.

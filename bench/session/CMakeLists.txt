@@ -72,3 +72,10 @@ foreach(_092_bench scan_frame_header_bench on_inbound_frame_bench)
   target_compile_definitions(${_092_bench} PRIVATE
     "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 endforeach()
+
+# fixpp#544 (B35; owner ruling R-11) — sequential `Session::send` on one Active session over
+# a bounded MemoryStore. Soft/advisory; public API only, so the same source builds at the
+# merge-base for the paired comparison ([const §VIII.2], [const §VIII.3]).
+add_bench_with_test_include(session_send_bench session_send_bench.cpp)
+target_compile_definitions(session_send_bench PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")

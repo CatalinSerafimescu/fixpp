@@ -29,6 +29,7 @@
 #include <asio/ip/tcp.hpp>
 #include <atomic>
 #include <cstdint>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>                          // defines core::expected_t<T>
 #include <fixpp/core/sync/detail/atomic_shared_ptr.hpp>  // 046 (NFR-017): libc++ fallback primitive
 #include <fixpp/tls/cert_source.hpp>                     // for reload_credentials (013 T012)

@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstring>
 #include <fixpp/core/clock.hpp>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>  // expected_t / error (clock_not_set)
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/dict/version_registry.hpp>          // dict::version_registry (2d construction)

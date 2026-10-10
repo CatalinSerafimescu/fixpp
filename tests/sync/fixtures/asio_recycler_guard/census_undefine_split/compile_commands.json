@@ -1,0 +1,12 @@
+[
+  {
+    "directory": ".",
+    "file": "carries_n.cpp",
+    "arguments": ["c++", "-Iasio", "-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=8", "-c", "carries_n.cpp"]
+  },
+  {
+    "directory": ".",
+    "file": "undefined_split.cpp",
+    "arguments": ["c++", "-Iasio", "-DASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=8", "-U", "ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE", "-c", "undefined_split.cpp"]
+  }
+]

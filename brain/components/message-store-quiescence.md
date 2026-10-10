@@ -10,14 +10,18 @@ refs:
   - src/session/file_store.cpp
   - src/session/engine.cpp
   - src/session/session.cpp
+  - include/fixpp/core/sync/async_mutex.hpp
+  - .specify/544-hot-path-zero-alloc.md
   - specs/093-inbound-frame-dispositions/spec.md
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
   - tests/session/test_file_store_crash_survival.cpp
 refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
 codegraph_entry: [MessageStore, MemoryStore, FileStore, Engine, run_reset_unit_]
 constitution: ["§XV.4"]
 ---
@@ -67,6 +71,31 @@ the literal reading of *"callers must drain the mutex before destroying the stor
 That ordering is load-bearing and was itself hardened by a Gate B round-1 finding: `outstanding_counter_`
 must be published **before** any loop is spawned, or a late assignment observes it null, skips the
 join, and clears the registry while a spawned loop still holds `SessionEntry&` → use-after-free.
+
+## `MemoryStore::store`'s lock is the frameless lock op; its siblings are not (fixpp#544)
+
+`MemoryStore::store` (`include/fixpp/session/memory_store.hpp`) locks its `async_mutex` through
+`FIXPP_DETAIL_CO_AWAIT_LOCK` (2f Erratum E-6), and its leading post is awaited as `deferred`. Each removes
+a cycled coroutine frame from the store chain: slot headroom under the exported count, witnessed by arms that
+fill the slots to exactly that count, not the reason W-D reads zero. `next_seqnum`,
+`reset`, `reset_to` and `retrieve` stay on the public `async_lock`, and FileStore is not converted
+(`.specify/544-hot-path-zero-alloc.md` §2.3). **This page's argument is unchanged:** the macro is the
+same lock with the same waiter and reap model, so the store's mutex still has no holder and no waiter
+once no store `co_await` is in flight. Re-derive the converted sites with
+`git grep -n "FIXPP_DETAIL_CO_AWAIT_LOCK" -- src include`.
+
+⚠️ **Documents that describe `store()`'s lock as the public `async_lock`**, written before fixpp#544 and
+not updated: `.specify/2e-msgstore.md`'s `MemoryStore::store` latency-budget row, and
+`specs/008-message-store/contracts/message_store.hpp`'s fast-path comment. Their lock semantics still
+hold; for `MemoryStore::store` the route is the macro (2f Erratum E-6). Frozen bundles are annotated
+here, not edited.
+
+The 2e convergence record (parent repo, `decisions/2e-msgstore.md`) is the **why** of the store's
+mutex, of durable-before-transmit and of the atomic `reset()`: current as history. ⚠️ Its Windows
+`reset()` primitive, `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`, is
+**superseded**: the reset now renames with POSIX semantics over the open log and flushes, with three
+outcomes (the FileStore reset section below). Re-derive with
+`grep -n "posix_rename_over_open\|MoveFileExW" src/session/file_store.cpp`.
 
 ## The 141=Y reset unit's store operation (093, fixpp#524) — still awaited, now not cancellable
 

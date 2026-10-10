@@ -327,6 +327,135 @@ add_test(NAME check_no_std_mutex_corpus
 )
 endif()  # NOT WIN32 — no_std_mutex bash lint gate (waived on Windows)
 
+# ── fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.4, "The mechanical guards") ──
+# asio's recycler slot count must be the same in every TU that includes asio (the ODR
+# obligation). These registrations sit beside the corpus gate above, because the guard header
+# (include/fixpp/core/detail/asio_recycler_config.hpp) is a `static_assert` precisely so that
+# these `-E` gates are not affected by it:
+#   asio_recycler_guard_inclusion          every installed header that includes asio
+#                                          includes the guard header;
+#   asio_recycler_guard_inclusion_seeded   its positive control: the seeded fixture header
+#                                          that skips the guard, and only it, is reported;
+#   asio_recycler_guard_negative_compile   a fixpp header compiled without the definition,
+#                                          and with a wrong one, fails on the guard's message;
+#   asio_recycler_compile_census           every compile_commands.json entry with asio's
+#                                          include directory carries the exported value;
+#   asio_recycler_compile_census_positive_control  its positive control: one entry stripped
+#                                          in memory, and only it, is reported;
+#   asio_recycler_compile_census_response_file_refused  a seeded database whose wrong value
+#                                          sits in a response file must be refused (exit 2);
+#   asio_recycler_compile_census_undefine_*  seeded databases where a -U follows, or precedes,
+#                                          the definition: the census reads the effective state;
+#   asio_recycler_compile_census_refused_*  one seeded database per option the census cannot
+#                                          read the macro's state through: refused (exit 2).
+# Linux/macOS only for now: they shell out to python3 and to the compiler with GCC/Clang
+# flags; the driver refuses an MSVC front end.
+if(NOT WIN32)
+  set(_fixpp_recycler_guard "${CMAKE_SOURCE_DIR}/include/fixpp/core/detail/asio_recycler_config.hpp")
+  set(_fixpp_recycler_tool "${CMAKE_SOURCE_DIR}/tools/check_asio_recycler_guard.py")
+  set(_fixpp_recycler_fixtures "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/asio_recycler_guard")
+  add_test(NAME asio_recycler_guard_inclusion
+    COMMAND python3 "${_fixpp_recycler_tool}" headers
+      --include-root "${CMAKE_SOURCE_DIR}/include")
+  add_test(NAME asio_recycler_guard_inclusion_seeded
+    COMMAND python3 "${_fixpp_recycler_tool}" headers
+      --include-root "${_fixpp_recycler_fixtures}/include"
+      --expect-reported fixpp/seeded/missing_guard.hpp)
+
+  separate_arguments(_fixpp_recycler_cxx_flags NATIVE_COMMAND "${CMAKE_CXX_FLAGS}")
+  list(JOIN _fixpp_recycler_cxx_flags "|" _fixpp_recycler_cxx_flags)
+  add_test(NAME asio_recycler_guard_negative_compile
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_CXX=${CMAKE_CXX_COMPILER}"
+      "-DFIXPP_CXX_ID=${CMAKE_CXX_COMPILER_ID}"
+      "-DFIXPP_CXX_FLAGS=${_fixpp_recycler_cxx_flags}"
+      "-DFIXPP_INCLUDE_DIRS=${CMAKE_SOURCE_DIR}/include|$<JOIN:$<TARGET_PROPERTY:asio::asio,INTERFACE_INCLUDE_DIRECTORIES>,|>"
+      "-DFIXPP_DEFINES=$<JOIN:$<FILTER:$<TARGET_PROPERTY:asio::asio,INTERFACE_COMPILE_DEFINITIONS>,EXCLUDE,^ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE>,|>"
+      "-DFIXPP_TU=${_fixpp_recycler_fixtures}/negative_compile.cpp"
+      "-DFIXPP_CACHE_SIZE=${FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_asio_recycler_negative_compile.cmake")
+
+  set(_fixpp_recycler_census_args
+    --compile-commands "${CMAKE_BINARY_DIR}/compile_commands.json"
+    "--asio-include=$<JOIN:$<TARGET_PROPERTY:asio::asio,INTERFACE_INCLUDE_DIRECTORIES>,|>"
+    --guard-header "${_fixpp_recycler_guard}")
+  add_test(NAME asio_recycler_compile_census
+    COMMAND python3 "${_fixpp_recycler_tool}" census ${_fixpp_recycler_census_args}
+      --require-source "${CMAKE_SOURCE_DIR}/src/session/session.cpp"
+      --require-source "${CMAKE_CURRENT_SOURCE_DIR}/test_544_lock_macro_drain.cpp")
+  add_test(NAME asio_recycler_compile_census_positive_control
+    COMMAND python3 "${_fixpp_recycler_tool}" census ${_fixpp_recycler_census_args}
+      --positive-control "src/session/session.cpp")
+  # The seeded database (fixtures/asio_recycler_guard/census_response_file) has one entry that
+  # carries N and a .modmap, and one whose include directory and wrong value are only in
+  # wrong_n.rsp. The census must refuse the second entry by name: the message is printed on
+  # the exit-2 path only, and it names the .rsp, so neither a pass nor a refusal of the
+  # .modmap matches it.
+  add_test(NAME asio_recycler_compile_census_response_file_refused
+    COMMAND python3 "${_fixpp_recycler_tool}" census
+      --compile-commands compile_commands.json --asio-include=asio
+      --guard-header guard_value.hpp
+    WORKING_DIRECTORY "${_fixpp_recycler_fixtures}/census_response_file")
+  set_tests_properties(asio_recycler_compile_census_response_file_refused PROPERTIES
+    PASS_REGULAR_EXPRESSION
+      "ERROR \\(the instrument did not run\\): response file @wrong_n\\.rsp in via_response_file\\.cpp: its flags cannot be read")
+  # One database per case: PASS_REGULAR_EXPRESSION passes when ANY of its regexes matches and
+  # ignores the exit status, so two cases in one database could pass with one of them missed.
+  # A MISMATCH line is printed on the exit-1 path only, and an ERROR line on the exit-2 path
+  # only, so each regex below also fixes the exit status.
+  set(_fixpp_recycler_census_seeded
+    --compile-commands compile_commands.json --asio-include=asio
+    --guard-header ../census_guard_value.hpp)
+  set(_fixpp_recycler_mismatch
+    "MISMATCH [a-z_]+\\.cpp \\(<unknown target>\\): ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE values \\[absent\\], expected exactly \\[8\\]")
+  set(_fixpp_recycler_cases)
+  # A -U after the definition leaves the macro undefined, in its joined and its split spelling.
+  foreach(_case joined split)
+    set(_t asio_recycler_compile_census_undefine_${_case})
+    add_test(NAME ${_t}
+      COMMAND python3 "${_fixpp_recycler_tool}" census ${_fixpp_recycler_census_seeded}
+      WORKING_DIRECTORY "${_fixpp_recycler_fixtures}/census_undefine_${_case}")
+    string(REPLACE "[a-z_]+" "undefined_${_case}" _re "${_fixpp_recycler_mismatch}")
+    set_tests_properties(${_t} PROPERTIES
+      PASS_REGULAR_EXPRESSION "${_re}" FAIL_REGULAR_EXPRESSION "MISMATCH carries_n")
+    list(APPEND _fixpp_recycler_cases ${_t})
+  endforeach()
+  # A -U before the definition is overridden by it: the entry passes.
+  add_test(NAME asio_recycler_compile_census_undefine_then_define
+    COMMAND python3 "${_fixpp_recycler_tool}" census ${_fixpp_recycler_census_seeded}
+    WORKING_DIRECTORY "${_fixpp_recycler_fixtures}/census_undefine_then_define")
+  set_tests_properties(asio_recycler_compile_census_undefine_then_define PROPERTIES
+    PASS_REGULAR_EXPRESSION "PASS: every entry that carries asio's include directory"
+    FAIL_REGULAR_EXPRESSION "MISMATCH")
+  list(APPEND _fixpp_recycler_cases asio_recycler_compile_census_undefine_then_define)
+  # Each option the census refuses, as <fixture suffix>|<the token the refusal must name>.
+  foreach(_pair
+      "include|-include" "imacros|-imacros" "long_include|--include=x\\.h"
+      "long_imacros|--imacros=x\\.h"
+      "define_macro|--define-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=[9]"
+      "undefine_macro|--undefine-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE"
+      "wp|-Wp,-UASIO_RECYCLING_ALLOCATOR_CACHE_SIZE" "xpreprocessor|-Xpreprocessor"
+      "xclang|-Xclang" "msvc_fi|/FIx\\.h")
+    string(REPLACE "|" ";" _pair "${_pair}")
+    list(GET _pair 0 _case)
+    list(GET _pair 1 _tok)
+    set(_t asio_recycler_compile_census_refused_${_case})
+    add_test(NAME ${_t}
+      COMMAND python3 "${_fixpp_recycler_tool}" census ${_fixpp_recycler_census_seeded}
+      WORKING_DIRECTORY "${_fixpp_recycler_fixtures}/census_refused_${_case}")
+    set_tests_properties(${_t} PROPERTIES PASS_REGULAR_EXPRESSION
+      "ERROR \\(the instrument did not run\\): option ${_tok} in refused\\.cpp: the census cannot read ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE through it")
+    list(APPEND _fixpp_recycler_cases ${_t})
+  endforeach()
+  set_tests_properties(
+    asio_recycler_guard_inclusion asio_recycler_guard_inclusion_seeded
+    asio_recycler_guard_negative_compile asio_recycler_compile_census
+    asio_recycler_compile_census_positive_control
+    asio_recycler_compile_census_response_file_refused
+    ${_fixpp_recycler_cases}
+    PROPERTIES LABELS "544;asio_recycler")
+endif()
+
 # ── 046 T013 CT-1c/CT-1d: libc++ corpus gate (FIXPP_LIBCXX_LANE only) ────────
 # Registers two ctests guarded by FIXPP_LIBCXX_LANE=ON (set only by the
 # linux-clang-libc++ preset). Inert on all default libstdc++ presets.
@@ -517,6 +646,28 @@ target_link_libraries(test_pool_exhaustion_reuse PRIVATE
 )
 add_test(NAME sync_pool_exhaustion_reuse
   COMMAND test_pool_exhaustion_reuse)
+
+# ── fixpp#544 (B35; .specify/544-hot-path-zero-alloc.md §3, "E-5's drain"): the
+# frameless lock op against cancel_and_drain(). It reads the waiter pool through
+# the FIXPP_ASYNC_MUTEX_TEST_SEAM accessors, so it is standalone (zero fixpp_sync
+# linkage) for the ODR reason given at the aba_interleave registration above.
+add_executable(test_544_lock_macro_drain
+  test_544_lock_macro_drain.cpp)
+target_compile_definitions(test_544_lock_macro_drain PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_544_lock_macro_drain PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_544_lock_macro_drain PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_544_lock_macro_drain
+  COMMAND test_544_lock_macro_drain)
+set_tests_properties(sync_544_lock_macro_drain PROPERTIES
+  LABELS "544;sync;tsan"
+  TIMEOUT 60)
 
 # ── 058-async-mutex-hardening T023/T024/T026: AM-P3-1/AM-P3-2 impossible-
 # state terminate-trap witnesses ───────────────────────────────────────────

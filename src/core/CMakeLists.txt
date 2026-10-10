@@ -14,6 +14,20 @@ target_include_directories(fixpp_core PUBLIC
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
+# fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §2.4, R-1′): asio's recycler slot
+# count, PUBLIC. The selector is "publishes the include/ root", not "links asio": the
+# installed headers include asio (clock.hpp among them), and every exported C++ member that
+# publishes that root links fixpp_core PUBLIC/INTERFACE, directly or transitively, so one
+# attachment here reaches all of them and their CMake consumers. fixpp::capi and
+# fixpp::service reach it only through $<LINK_ONLY:>, which withholds it; their headers
+# include no asio. fixpp_core's own TUs include no asio, so it is inert here. The value
+# comes from the root CMakeLists.txt (cmake/FixppAsioRecycler.cmake).
+if(NOT FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "src/core: FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE is not set")
+endif()
+target_compile_definitions(fixpp_core PUBLIC
+  "ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=${FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE}")
+
 # core has no internal project dependencies — it is the leaf [arch §2.2].
 # The asio-dependent fixpp::core threading impls do NOT live in this leaf
 # target: system_clock_source.cpp is compiled into fixpp_session; the

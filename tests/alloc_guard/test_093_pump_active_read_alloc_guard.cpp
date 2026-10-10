@@ -5,8 +5,8 @@
 // 093-inbound-frame-dispositions T044 (quickstart Q-19; FR-052; contract C-4; plan OD-22):
 // after the session first reaches Active the read pump reads without the establishment
 // deadline's race, so an Active read makes no NEW global operator new call: every Active
-// read the cell drives makes the same number of calls, and that number is at most
-// kBaseActiveReadAllocs, the count the merge-base's pump makes with this cell's rig.
+// read the cell drives makes the same number of calls, and on a Release build that number
+// is zero (fixpp#544, `.specify/544-hot-path-zero-alloc.md` §3, "Superseded pins").
 //
 // The real pump is driven past Active over loopback TCP (tests/session/plain_engine_rig.hpp),
 // a warm-up Heartbeat is processed, then each later Heartbeat is written by the peer
@@ -16,18 +16,21 @@
 // initiation, and nothing the peer does.
 //
 // A regression witness, not a disarm witness: asio serves handler and coroutine-frame
-// storage from a per-thread recycling cache when a cached block fits, without calling
-// operator new, so a race left armed after Active need not show here. A frame larger than
-// the cache holds is allocated on every use instead (L-497-1). Quickstart Q-36 witnesses
-// the disarm by behaviour.
+// storage from a recycling cache when a cached block fits, without calling operator new,
+// so a race left armed after Active need not show here. That cache lives for one
+// scheduler call (an io_context run-family call), not for the thread
+// (`.specify/544-hot-path-zero-alloc.md` §1(b)). A frame larger than the cache's block
+// limit is allocated on every use instead. Quickstart Q-36 witnesses the disarm by
+// behaviour.
 //
 // This cell counts global operator new only. asio allocates those frames through
 // std::aligned_alloc, which the counter cannot see.
 //
 // Standalone ([const §VII.8]): it replaces global operator new for the whole binary.
-// No *_mallocnesia twin: the window wraps io_context::run_one_for(), which the
-// "DELIBERATELY NOT GATED" note in tests/alloc_guard/CMakeLists.txt keeps out of the
-// LD_PRELOAD gate.
+// No *_mallocnesia twin: the window wraps io_context::run_one_for(), so every handler runs
+// in a scheduler call of its own, and that shape reaches std::aligned_alloc on every tree
+// (arm (s) in tests/alloc_guard/test_544_run_thread_windows.cpp). The interceptor gate on
+// this workload is W-A, which runs it on the run-thread rig.
 
 #include <gtest/gtest.h>
 
@@ -134,18 +137,6 @@ namespace {
 namespace pr = fixpp::test_support::plain_rig;
 using fixpp::session::fsm_state;
 
-// The global operator new calls one Active read makes on the merge-base's pump, with this
-// cell's rig (plan OD-22). Not zero: asio's type-erased executor allocates, at
-// `any_executor_base::query_fn_non_void<..., prefer_only<blocking::possibly_t>>` when the
-// session strand dispatches the socket's recv completion, and at that query and at
-// `shared_target_executor::shared_target_executor<strand<any_io_executor>>` when the pump
-// initiates its next read (`handler_work_base`'s tracked-work `prefer`). A change of asio
-// that changes those frames changes the count. To re-derive:
-// build this cell against the merge-base, run it, read the per-read counts it reports on
-// failure (or set this to 0), and attribute each call with gdb, breaking in this file's
-// operator new on `g_arming` and printing a backtrace.
-[[maybe_unused]] constexpr std::size_t kBaseActiveReadAllocs = 5;
-
 std::uint32_t next_inbound(fixpp::session::Session& s) {
     return fixpp::session::session_test_access::seqnum_mgr(s).next_inbound_unsafe();
 }
@@ -219,9 +210,14 @@ TEST(PumpActiveReadAllocGuard, AnActiveReadAfterAWarmUpReadAllocatesNothing) {
                                         << " made a different number of operator new calls "
                                            "from the read of 34="
                                         << kFirst << ": a per-read growth";
-        EXPECT_LE(counts[i], kBaseActiveReadAllocs)
-            << "global operator new calls during the Active read of 34=" << (kFirst + i)
-            << ": more than the merge-base's pump makes";
+#ifdef NDEBUG
+        // The session strand is the fast-path strand over the concrete io_context executor
+        // (fixpp#544 §2.1), so neither the recv completion's dispatch nor the next read's
+        // initiation erases an executor. To attribute a non-zero count, break in this
+        // file's operator new on `g_arming` under gdb and print a backtrace.
+        EXPECT_EQ(counts[i], 0U) << "global operator new calls during the Active read of 34="
+                                 << (kFirst + i);
+#endif
     }
 #endif
 }

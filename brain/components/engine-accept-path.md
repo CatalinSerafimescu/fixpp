@@ -7,6 +7,8 @@ refs:
   - src/session/engine.cpp
   - src/transport/asio_listener.hpp
   - include/fixpp/transport/listener.hpp
+  - src/session/session_strand.cpp
+  - .specify/544-hot-path-zero-alloc.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr331-330-asio-listener-executor-gateb.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/pr326-310-315-gateb.md
@@ -41,6 +43,13 @@ constitution: ["§XI"]
 strand, one per acceptor `SessionEntry`. The loop reads `co_await this_coro::executor` at the top,
 builds the `asio_listener` with **that** executor, and asserts every accepted transport is on the same
 strand (**INV-7**, `assert_transport_on_session_strand`).
+*(fixpp#544:)* `SessionEntry::session_strand` is now `std::optional<asio::any_io_executor>`, holding the
+strand `make_session_strand` (`src/session/session_strand.cpp`) builds; its target is the concrete
+`io_context` executor type when the Engine's executor is exactly that (B&L `B-544-2`, `B-544-1`). The
+assertion's parameter is `const asio::any_io_executor&` and it still compares with `operator==`.
+⚠️ `specs/015-runtime-engine/research.md`'s amendment ("itself `make_strand(exec_)`") and
+`specs/023-engine-session-strand/data-model.md` (`session_strand = make_strand(exec_)`) predate this: the
+construction is now `make_session_strand(exec_)`. Frozen bundles; annotated here, not edited.
 
 The structural fact underneath: `asio_listener::async_accept()` is an ordinary coroutine that never
 dispatches onto its own stored executor, so **it resumes on whatever executor its awaiter runs on**.

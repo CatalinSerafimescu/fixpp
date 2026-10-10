@@ -211,3 +211,40 @@ function(fixpp_add_mallocnesia_test)
     set_tests_properties(${_MN_NAME} PROPERTIES DEPENDS "${_MN_DEPENDS}")
   endif()
 endfunction()
+
+# fixpp_add_release_mallocnesia_test(NAME <test> TARGET <binary-target> CASE <gtest filter>
+#                                    [EXPECT_ENTRY <fn>[,<fn>...]] [LABELS <l>...])
+#
+# fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3, "Release only"): one gtest case
+# of a binary that holds several windows, run under the interceptor, registered only for a
+# Release build type. `alloc_guard_end()` exits the process on any interception, so each
+# case gets its own registration through GTEST_FILTER.
+#
+# EXPECT_ENTRY registers it `--expect-violation --expect-entry <fn>`: an arm, which must be
+# intercepted through <fn>. Without it the case must read zero.
+#
+# ⚠️ NO NON-ASSERTING REGISTRATION ON OTHER BUILD TYPES. A Debug lane's frames and run
+# loop differ, and a registered member that cannot fail is the defect class
+# tools/check_mallocnesia_population.py's verdict check guards against.
+function(fixpp_add_release_mallocnesia_test)
+  cmake_parse_arguments(_RMN "" "NAME;TARGET;CASE;EXPECT_ENTRY" "LABELS" ${ARGN})
+  if(NOT _RMN_NAME OR NOT _RMN_TARGET OR NOT _RMN_CASE)
+    message(FATAL_ERROR "fixpp_add_release_mallocnesia_test: NAME, TARGET and CASE are required")
+  endif()
+  if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    return()
+  endif()
+  set(_rmn_verdict "")
+  if(_RMN_EXPECT_ENTRY)
+    set(_rmn_verdict EXPECT_VIOLATION EXPECT_ENTRY "${_RMN_EXPECT_ENTRY}")
+  endif()
+  fixpp_add_mallocnesia_test(
+    NAME ${_RMN_NAME}
+    TARGET ${_RMN_TARGET}
+    LABELS ${_RMN_LABELS}
+    ENVIRONMENT "GTEST_FILTER=${_RMN_CASE}"
+    ${_rmn_verdict})
+  if(TEST ${_RMN_NAME})
+    set_tests_properties(${_RMN_NAME} PROPERTIES TIMEOUT 300)
+  endif()
+endfunction()

@@ -31,6 +31,7 @@
 #pragma once
 
 #include <asio/awaitable.hpp>
+#include <asio/deferred.hpp>
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -38,6 +39,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <fixpp/session/direction.hpp>
@@ -130,7 +132,7 @@ public:
     //
     // Leading asio::post: breaks the awaitable_thread::pump() recursive-call
     // chain that occurs when store() is called inside a tight coroutine loop.
-    // async_mutex::async_lock()'s fast path fires the completion handler
+    // The async_mutex lock op's fast path fires the completion handler
     // synchronously (inside async_initiate's initiation lambda), which invokes
     // an inner pump() while the outer pump() is already running, causing stack
     // growth proportional to loop-iteration count. The leading post ensures each
@@ -138,14 +140,20 @@ public:
     // to O(1) per call regardless of call count. Asio's internal thread-pool
     // allocator is used for the post — NOT the store's PMR resource — so the
     // zero-alloc guarantee (FR-007 / I-10) is preserved.
+    //
+    // fixpp#544 (.specify/544-hot-path-zero-alloc.md §2.3): the post is a
+    // `deferred` operation and the lock is FIXPP_DETAIL_CO_AWAIT_LOCK, so neither
+    // adds a coroutine frame of its own. The macro's first part keeps a
+    // cancellation that lands during the post: it throws operation_aborted, as a
+    // co_await of async_lock() would.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame [[clang::lifetimebound]],
         direction_t dir) noexcept override {
         // Yield through executor to break recursive pump() chain (see above).
-        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        co_await asio::post(co_await asio::this_coro::executor, asio::deferred);
 
         // Acquire writer mutex — FIFO-fair per async_mutex contract.
-        auto guard_result = co_await mutex_.async_lock();
+        FIXPP_DETAIL_CO_AWAIT_LOCK(lock_storage, guard_result, mutex_, nullptr);
         if (!guard_result) {
             // Mutex was cancelled/drained (shutdown path)
             co_return std::unexpected(fixpp::core::error::store_cancelled);

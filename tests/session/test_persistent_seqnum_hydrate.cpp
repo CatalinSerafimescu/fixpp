@@ -2200,11 +2200,12 @@ TEST(PersistentSeqnumHydrate, CustomStore_Discriminator) {
 //
 // Witnesses that the in-seq persist path (persist_inbound_advance_) runs inside a
 // window around one inbound deliver+persist, after a warm-up that primes the
-// per-thread caches (asio recycler, async_mutex slot pool).
+// caches (asio recycler, async_mutex slot pool).
 //
 // ⚠️ Its global-heap half is NOT CHECKED. [const §VIII.5] asks the hydrate and persist
-// paths for zero global-heap allocation, but an Active session's inbound path allocates
-// (L-497-1; fixpp#544), so no mallocnesia gate is registered for this cell.
+// paths for zero global-heap allocation. No mallocnesia gate is registered for this cell:
+// its window, a persistent-store persist on the Active path, is not one of fixpp#544's
+// gated windows, and L-497-1 discloses it.
 // It still checks the functional post-conditions. The alloc_guard markers stay so the
 // window can be run by hand, as tests/session/CMakeLists.txt shows at this
 // binary's registration.
@@ -2213,14 +2214,16 @@ TEST(PersistentSeqnumHydrate, CustomStore_Discriminator) {
 TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
     // ── Setup OUTSIDE the guarded window ─────────────────────────────────────
     // Build a persistent-store acceptor session and reach Active. All one-time
-    // allocations (Session ctor, coroutine frames, per-thread recycler init)
+    // allocations (Session ctor, coroutine frames, recycler init)
     // happen during setup, outside the alloc guard.
     //
-    // Warm-up: prime the asio per-thread recycler by running the SAME path
+    // Warm-up: run the SAME path
     // (open + inbound deliver + persist) several times before the guard window.
-    // The first iteration touches per-thread lazy-init paths (cancellation_slot's
-    // thread_info_base, promise frame recycling) (mirrors validation_compat_toggles
-    // NoHeap_RelaxedDeliverPath).
+    // The first iteration touches lazy-init paths (cancellation_slot's
+    // thread_info_base, promise frame recycling). The recycler's cache lives for one
+    // scheduler call, not for the thread (2f Erratum E-6) (mirrors validation_compat_toggles
+    // NoHeap_RelaxedDeliverPath). Each feed() is its own scheduler call, so the warm-up does
+    // not prime the window's cache; no ctest runs this window under the interceptor.
 
     // Session setup: persistent FaultStore seeded {in=1, out=1}.
     // We use an acceptor so both the hydrate path (in the Logon handler) and

@@ -45,6 +45,7 @@ Define FIXPP_ALLOW_MOCK_TRANSPORT in the consuming test target."
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>               // core::expected_t<T>
 #include <fixpp/tls/peer_identity.hpp>        // fixpp::tls::peer_identity
 #include <fixpp/tls/pinset.hpp>               // fixpp::tls::pin_snapshot

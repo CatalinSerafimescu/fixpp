@@ -74,6 +74,7 @@
 
 #include <asio/awaitable.hpp>
 #include <cstddef>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/certificate.hpp>
 #include <functional>

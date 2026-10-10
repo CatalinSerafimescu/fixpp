@@ -5,11 +5,13 @@
 // Session recovery alloc-guard. Checked: the counting_resource PMR half (in-band PMR
 // allocations, counted) and the behaviour of each path.
 //
-// ⚠️ The global-heap half is NOT CHECKED. [const §VIII.5] asks the ACTIVE steady-state
-// and AwaitingResend transition paths for zero global-heap allocation, but an Active
-// session's inbound path allocates (L-497-1; fixpp#544), so no mallocnesia
-// gate is registered for this binary. The alloc_guard markers stay so the windows can
-// be run by hand, as tests/perf/CMakeLists.txt shows at this binary's registration.
+// The global-heap half. [const §VIII.5] asks the ACTIVE steady-state and AwaitingResend
+// transition paths for zero global-heap allocation. The Heartbeat steady-state cell is
+// fixpp#544's W-A window, and its interceptor registration is Release-only
+// (tests/perf/CMakeLists.txt). ⚠️ The AwaitingResend cell's global-heap half is NOT
+// CHECKED: its window is resend/gap mixed traffic, which fixpp#544 discloses rather than
+// gates (L-497-1). Its alloc_guard markers stay so the window can be run by hand, as
+// tests/perf/CMakeLists.txt shows at this binary's registration.
 //
 // Anchors: spec.md §US1 / FR-009; [const §VIII.5];
 //   plan.md §Test plan T020; [[feedback_tracking_pmr_resource_false_pass]].
@@ -52,6 +54,7 @@ using namespace std::chrono_literals;
 // Defined by the interceptor when it is preloaded; no-ops otherwise.
 #include "support/alloc_guard_markers.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/run_thread_engine_rig.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -214,54 +217,82 @@ protected:
 // ─────────────────────────────────────────────────────────────────────────────
 // T020-A: Heartbeat steady-state processing path — DUAL-GATE alloc check.
 //
-// counting_resource gate: zero PMR allocs in the window. (Global heap: NOT
-// checked; see the file header.)
+// counting_resource gate: zero PMR allocs in the window.
 //
-// Behavioral assertion: we feed N inbound Heartbeats in a loop and check that
-//   the session emits NO outbound frame — a Heartbeat is never answered
+// Behavioral assertion: we feed inbound Heartbeats and check that the session emits NO
+//   outbound frame — a Heartbeat is never answered
 //   (specs/005-session-establishment-fsm/data-model.md's FSM table, Active×inbound-Heartbeat =
 //   "advance counter", no emit). The alloc gates measure the steady-state inbound-Heartbeat
 //   processing path.
+//
+// fixpp#544 (B35; `.specify/544-hot-path-zero-alloc.md` §3): this window is W-A's, and it
+// runs on the run-thread rig (tests/support/run_thread_engine_rig.hpp): the real Engine read
+// pump over loopback TCP, one dedicated thread running the io_context for the whole test,
+// and every Heartbeat written by the peer after the previous one's fromAdmin. A window
+// driven with `use_future` and `run_for` slices cannot read zero: each slice is a fresh
+// scheduler call with an empty frame cache. Its global-heap half is registered under the
+// interceptor, Release-only (tests/perf/CMakeLists.txt). The fixture's own session is not
+// used by this cell.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
-    auto cfg = make_cfg();
-    fixpp::session::Session sess(engine, cfg);
-    ASSERT_TRUE(drive_to_active(sess));
-
+    namespace rt = fixpp::test_support::run_thread_rig;
+    constexpr int kWarm = 10;
     constexpr int kIter = 20;
 
-    // Warm up (primes asio per-thread recycler outside the guard window).
-    auto warmup_hb = make_heartbeat("FIX.4.2", 2, "TW", "ISLD");
-    for (int i = 0; i < 10; ++i) (void)feed(sess, warmup_hb);  // priming only
-    outbound_frames.clear();
-    pmr.alloc_count = 0;
+    rt::Rig rig{rt::options{.mode = rt::hook::signal_from_admin, .message_arena = &pmr}};
+    std::vector<std::string> frames;
+    for (int i = 0; i < kWarm + kIter; ++i) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): built before the window opens
+        frames.push_back(rig.heartbeat(static_cast<std::uint32_t>(2 + i)));
+    }
+    auto& done = rig.app->completions;
 
-    // --- OPEN GUARD WINDOW ---
-    if (alloc_guard_start) alloc_guard_start();
-    std::size_t pre_pmr_count = pmr.alloc_count;
-
-    for (int i = 0; i < kIter; ++i) {
-        auto hb = make_heartbeat("FIX.4.2", static_cast<std::uint32_t>(3 + i), "TW", "ISLD");
-        // Inside the alloc-measured window; behavior is checked below via
-        // outbound_frames, not via feed's own result.
-        (void)feed(sess, hb);
+    bool const up = rig.start_and_logon();
+    bool warmed = up;
+    for (int i = 0; i < kWarm && warmed; ++i) {
+        warmed = rig.write_and_wait(frames[i], done, static_cast<std::uint64_t>(i + 1));
     }
 
-    std::size_t pmr_allocs_in_window = pmr.alloc_count - pre_pmr_count;
-    if (alloc_guard_end) alloc_guard_end();
-    // --- CLOSE GUARD WINDOW ---
+    // The arena is counted on the run thread, so its count is read on the session strand.
+    std::size_t pmr_before = 0;
+    std::size_t pmr_after = 0;
+    std::size_t peer_bytes_before = 0;
+    bool window_done = false;
+    if (warmed && rig.on_strand([&] { pmr_before = pmr.alloc_count; })) {
+        peer_bytes_before = rig.reader.bytes.load(std::memory_order_acquire);
+        // --- OPEN GUARD WINDOW ---
+        if (alloc_guard_start) alloc_guard_start();
+        bool ok = true;
+        for (int i = kWarm; i < kWarm + kIter && ok; ++i) {
+            ok = rig.write_and_wait(frames[i], done, static_cast<std::uint64_t>(i + 1));
+        }
+        if (alloc_guard_end) alloc_guard_end();
+        // --- CLOSE GUARD WINDOW ---
+        window_done = ok && rig.on_strand([&] { pmr_after = pmr.alloc_count; });
+    }
+    std::size_t const peer_bytes_after = rig.reader.bytes.load(std::memory_order_acquire);
+    auto const snap = rig.observe();
+    bool const stopped = rig.stop();
+
+    ASSERT_TRUE(up) << "the session did not reach Active";
+    ASSERT_TRUE(warmed) << "a warm-up Heartbeat was not processed";
+    ASSERT_TRUE(window_done) << "a Heartbeat written inside the window was not processed";
+    EXPECT_TRUE(stopped) << "Engine::stop() did not complete";
+    EXPECT_EQ(done.load(), static_cast<std::uint64_t>(kWarm + kIter));
+    EXPECT_EQ(snap.state, fixpp::session::fsm_state::Active);
+    EXPECT_EQ(snap.next_inbound, static_cast<fixpp::session::seqnum_t>(2 + kWarm + kIter));
 
     // counting_resource gate: zero PMR allocations (all-arena path).
-    EXPECT_EQ(pmr_allocs_in_window, 0U)
+    EXPECT_EQ(pmr_after - pmr_before, 0U)
         << "counting_resource gate: PMR allocs in Heartbeat steady-state window "
         << "must be zero. [const §VIII.5].";
 
     // Behavioral gate: inbound Heartbeats must produce NO outbound frame
     // (a Heartbeat is never answered; specs/005-session-establishment-fsm/data-model.md's FSM
     // table).
-    EXPECT_EQ(outbound_frames.size(), 0U)
+    EXPECT_EQ(peer_bytes_after, peer_bytes_before)
         << "Behavioral gate: " << kIter << " inbound Heartbeats must produce ZERO "
-        << "outbound frames (a Heartbeat is never answered); got " << outbound_frames.size();
+        << "outbound bytes (a Heartbeat is never answered)";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

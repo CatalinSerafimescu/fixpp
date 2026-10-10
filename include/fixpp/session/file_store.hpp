@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>

@@ -11,6 +11,7 @@
 
 #include <asio/awaitable.hpp>
 #include <chrono>
+#include <fixpp/core/detail/asio_recycler_config.hpp>
 
 namespace fixpp::session {
 class Session;  // opaque key for forget_session (defined in fixpp/session/session.hpp)
