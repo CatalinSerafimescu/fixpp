@@ -59,7 +59,6 @@
 // NOT byte-identical, and the difference is on disk: the local one prefixed
 // "fixpp_perf_", the shared one prefixes "fixpp_test_" -- only current_pid()
 // was identical. The tag below carries "perf_" so the name stays greppable.
-#include "support/pump_until_ready.hpp"
 #include "support/recycler_driver.hpp"
 
 namespace {
