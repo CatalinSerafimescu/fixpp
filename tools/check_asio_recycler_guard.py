@@ -16,11 +16,16 @@ include/fixpp/core/detail/asio_recycler_config.hpp. Two checks:
 
   census   Every compile_commands.json entry whose command line carries one of asio's
            include directories also carries `ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=<N>`, and
-           only that value, with N read from the guard header. It fails closed when no entry
-           carries asio's directory, when a --require-source file is not among the
-           entries that do, or when an entry carries a response file other than a .modmap. With --positive-control <source>, it strips the definition from
-           that entry in memory and passes only if the check then reports exactly that
-           entry.
+           only that value, with N read from the guard header. The value is the effective
+           definition after every -D/-U (or /D, /U) on the command line, in order: a -U
+           clears what the -D before it set. It fails closed when no entry carries asio's
+           directory, when a --require-source file is not among the entries that do, when an
+           entry carries a response file other than a .modmap, or when an entry carries an
+           option the census cannot read the macro's state through (REFUSED_OPTIONS:
+           -include, -imacros and their -- forms, --define-macro, --undefine-macro, /FI,
+           -Wp, and the -Xpreprocessor and -Xclang pass-throughs). With --positive-control
+           <source>, it strips the definition from that entry in memory and passes only if
+           the check then reports exactly that entry.
 
 Exit status: 0 the check holds; 1 it does not; 2 the instrument could not run.
 """
@@ -130,6 +135,14 @@ def entry_tokens(entry: dict) -> list[str]:
 
 
 INCLUDE_FLAGS = ("-isystem", "-I", "-iquote", "-idirafter", "/I", "-external:I", "/external:I")
+DEFINE_FLAGS = ("-D", "/D")
+UNDEFINE_FLAGS = ("-U", "/U")
+# Options through which a command line can set or clear the macro other than by a -D/-U token
+# this census reads: a forced include, the drivers' long spellings, and the pass-throughs that
+# hand a -D/-U to the preprocessor unread. A token that starts with one is refused (exit 2),
+# like an unreadable response file, rather than modelled.
+REFUSED_OPTIONS = ("-include", "-imacros", "--include", "--imacros", "--define-macro",
+                   "--undefine-macro", "/FI", "-Wp,", "-Xpreprocessor", "-Xclang")
 
 
 def entry_includes_and_values(tokens: list[str], base: str) -> tuple[set[str], list[str]]:
@@ -147,15 +160,18 @@ def entry_includes_and_values(tokens: list[str], base: str) -> tuple[set[str], l
                 dirs.add(_norm(tok[len(flag):], base))
                 break
         define = None
-        if tok in ("-D", "/D") and i + 1 < len(tokens):
+        if tok in DEFINE_FLAGS + UNDEFINE_FLAGS and i + 1 < len(tokens):
             define = tokens[i + 1]
             i += 1
-        elif tok.startswith(("-D", "/D")) and len(tok) > 2:
+        elif tok.startswith(DEFINE_FLAGS + UNDEFINE_FLAGS) and len(tok) > 2:
             define = tok[2:]
         if define is not None:
             name, _, value = define.partition("=")
             if name == MACRO:
-                values.append(value)
+                if tok.startswith(UNDEFINE_FLAGS):
+                    values.clear()
+                else:
+                    values.append(value)
         i += 1
     return dirs, values
 
@@ -185,6 +201,9 @@ def census(entries: list[dict], asio_dirs: set[str], n: str) -> tuple[list[dict]
             if tok.startswith("@") and not tok.endswith(".modmap"):
                 raise InstrumentError(f"response file {tok} in {entry['file']}: its flags "
                                       "cannot be read")
+            if tok.startswith(REFUSED_OPTIONS):
+                raise InstrumentError(f"option {tok} in {entry['file']}: the census cannot "
+                                      f"read {MACRO} through it")
         dirs, values = entry_includes_and_values(tokens, entry.get("directory", "."))
         if not dirs & asio_dirs:
             continue
