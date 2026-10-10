@@ -343,7 +343,7 @@ endif()  # NOT WIN32 — no_std_mutex bash lint gate (waived on Windows)
 #   asio_recycler_compile_census_positive_control  its positive control: one entry stripped
 #                                          in memory, and only it, is reported.
 # Linux/macOS only for now: they shell out to python3 and to the compiler with GCC/Clang
-# flags; the driver has an MSVC branch that has not been run.
+# flags; the driver refuses an MSVC front end.
 if(NOT WIN32)
   set(_fixpp_recycler_guard "${CMAKE_SOURCE_DIR}/include/fixpp/core/detail/asio_recycler_config.hpp")
   set(_fixpp_recycler_tool "${CMAKE_SOURCE_DIR}/tools/check_asio_recycler_guard.py")
