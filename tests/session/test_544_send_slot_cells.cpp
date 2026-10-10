@@ -310,7 +310,11 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
         co_return;
     };
     asio::co_spawn(ex, driver(), asio::detached);
-    ASSERT_TRUE(f.pump_until([&] { return r1.done && r2.done; })) << "a send did not complete";
+    // `driver` is a named closure, so it must be driven inside its own scope by a call that
+    // tools/audit_co_spawn_named_closure.py counts as a drive. The free pump is one; the
+    // fixture's member pump is not.
+    ASSERT_TRUE(fixpp::test_support::pump_until(f.ioc, [&] { return r1.done && r2.done; }))
+        << "a send did not complete";
 
     // Positive controls: the two sends overlapped, and each built its frame and reached toApp
     // while the first was suspended.
