@@ -68,6 +68,38 @@
 //   ToAdminStartsSend_AssignFirstSite_Sequential
 //                             its control: the same send started after the
 //                             inbound frame was fully processed.
+//   ToAdminStartsSend_AssignFirstSite_FileStore
+//                             ToAdminStartsSend_AssignFirstSite on a persistent
+//                             FileStore.
+//   OverlappingSends          batch B41. No callback is involved: one handler
+//                             on the session's executor starts send A and then
+//                             send B without waiting for A, repeated over many
+//                             pairs. This is the shape a send deferred out of a
+//                             callback has while the frame that callback
+//                             belongs to is still being stored. Asserts that
+//                             wire order, MsgSeqNum order and start order
+//                             agree, and that every frame is retained under its
+//                             own number; prints how many pairs ran and how
+//                             many did not keep the order.
+//   OverlappingSends_FileStore
+//                             the same on a persistent FileStore, whose store()
+//                             suspends on a file-I/O pool. The fixture's pool
+//                             has one thread.
+//   FromAppSendsReply_NestedToAppThrows
+//                             batch B41, characterisation. fromApp starts a
+//                             send whose toApp throws. Prints the session's
+//                             state and lifecycle inside fromApp and after the
+//                             inbound call, both results, the callbacks that
+//                             ran from the throw on, the frames transmitted and
+//                             the sequence numbers. Asserts only that the path
+//                             was driven and that on_inbound_frame completed.
+//   FromAppSendsReply_NestedToAppThrows_FileStore
+//                             the same on a FileStore, where the inbound
+//                             number's persistence can be read from the store.
+//   FromAppSendsReply_NestedToAppThrows_FromAppRejects
+//                             the same, with fromApp returning an error after
+//                             it started the send, which asks the session for a
+//                             BusinessMessageReject.
 //
 // Witness, asserted first in every nested cell: the nested send's toApp ran
 // while the outer callback was still on the stack. Without it a pass of the
@@ -129,6 +161,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -240,12 +273,22 @@ public:
     std::function<void()> on_to_app;
     // Called with the admin frame's MsgType(35).
     std::function<void(std::string_view)> on_to_admin;
+    // Called with "onLogon" or "onLogout".
+    std::function<void(const char*)> on_lifecycle;
+    // What fromApp returns, after on_from_app ran.
+    expected_t<void> from_app_result;
 
     expected_t<void> fromApp(const MessageView<access_mode::Index>& /*mv*/,
                              const SessionId& /*id*/) override {
         ++from_app_calls;
         if (on_from_app) on_from_app();
-        return {};
+        return from_app_result;
+    }
+    void onLogon(const SessionId& /*id*/) override {
+        if (on_lifecycle) on_lifecycle("onLogon");
+    }
+    void onLogout(const SessionId& /*id*/) override {
+        if (on_lifecycle) on_lifecycle("onLogout");
     }
     expected_t<void> toApp(const MessageView<access_mode::Index>& /*mv*/,
                            const SessionId& /*id*/) override {
@@ -308,6 +351,9 @@ struct Fixture {
     asio::thread_pool file_pool{1};
     std::filesystem::path file_dir;
     StoreKind store_kind;
+    // The MemoryStore's outbound capacity; a cell that sends more frames raises
+    // it before calling cfg().
+    std::size_t memory_outbound_capacity = 16;
     asio::any_io_executor exec;
     std::shared_ptr<fixpp::core::mock_clock> clock;
     std::shared_ptr<CallbackApp> app = std::make_shared<CallbackApp>();
@@ -357,7 +403,7 @@ struct Fixture {
         } else {
             MemoryStore::Config sc;
             sc.inbound_capacity = 16;
-            sc.outbound_capacity = 16;
+            sc.outbound_capacity = memory_outbound_capacity;
             sc.max_frame_bytes = 4096;
             c.store_factory = std::make_shared<MemoryStoreFactory>(sc);
         }
@@ -445,6 +491,13 @@ void expect_retained_as_sent(Fixture& f, Session& sess, const std::string& sent,
         << "(c) the store's frame under outbound 34=" << seq << " is "
         << describe(got.frames.front()) << ", but " << describe(sent)
         << " was transmitted with that MsgSeqNum. " << context;
+}
+
+std::string describe_retained(const Retained& r) {
+    std::string out = describe(r.frames);
+    if (!r.status)
+        out += " (retrieve error " + std::to_string(static_cast<int>(r.status.error())) + ")";
+    return out;
 }
 
 enum class Shape { nested_in_to_app, sequential };
@@ -779,8 +832,8 @@ TEST(CallbackSend, TestRequestThenSend) {
 // initiator. The session answers with a Reject(35=3) and stays Active; an
 // application message is sent either from inside that Reject's toAdmin or after
 // the inbound frame was fully processed.
-void run_poss_dup_reject_then_send(AdminShape shape) {
-    Fixture f{ExecKind::io_context};
+void run_poss_dup_reject_then_send(AdminShape shape, StoreKind store = StoreKind::memory) {
+    Fixture f{ExecKind::io_context, store};
     Session sess{f.engine, f.cfg()};
     ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
     ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
@@ -848,7 +901,9 @@ void run_poss_dup_reject_then_send(AdminShape shape) {
         "; state=" + std::to_string(static_cast<int>(sess.state())) +
         "; NextNumOut in the Reject's toAdmin=" + seen_in_to_admin +
         ", in the send's toApp=" + seen_in_to_app +
-        ", in toAdmin after the co_spawn returned=" + seen_after_spawn + ".";
+        ", in toAdmin after the co_spawn returned=" + seen_after_spawn +
+        "; the store holds under outbound 34=2: " + describe_retained(f.retained(sess, 2)) +
+        ", under 34=3: " + describe_retained(f.retained(sess, 3)) + ".";
     ::testing::Test::RecordProperty("classification", classification);
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
@@ -897,6 +952,289 @@ TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite) {
 
 TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_Sequential) {
     run_poss_dup_reject_then_send(AdminShape::send_after_test_request);
+}
+
+TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_FileStore) {
+    run_poss_dup_reject_then_send(AdminShape::send_inside_to_admin, StoreKind::file);
+}
+
+// Pairs of sends, A then B, both started from one handler on the session's
+// executor, B without waiting for A. No Application callback starts anything.
+void run_overlapping_sends(StoreKind store) {
+    constexpr std::size_t kPairs = 200;
+    Fixture f{ExecKind::io_context, store};
+    f.memory_outbound_capacity = 2 * kPairs + 16;
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+
+    const auto ex = sess.executor().underlying();
+    const auto payload = [](char which, std::size_t i) {
+        return bytes_of(std::string("35=D\x01"
+                                    "11=OV-") +
+                        which + "-" + std::to_string(i) +
+                        "\x01"
+                        "55=AAA\x01");
+    };
+    const auto id_of = [](char which, std::size_t i) {
+        return std::string("OV-") + which + "-" + std::to_string(i);
+    };
+    const std::size_t wire_start = f.wire.size();
+    const auto started = std::chrono::steady_clock::now();
+
+    std::size_t pairs_run = 0;
+    std::size_t wire_not_in_start_order = 0;     // B transmitted before A, or a frame missing
+    std::size_t numbers_not_in_start_order = 0;  // A, B not stamped 2+2i, 3+2i
+    std::size_t same_number = 0;                 // A and B stamped alike
+    std::size_t sends_failed = 0;
+    std::string first_anomaly;
+
+    for (std::size_t i = 0; i < kPairs; ++i) {
+        const auto a_payload = payload('A', i);
+        const auto b_payload = payload('B', i);
+        SendOutcome a;
+        SendOutcome b;
+        std::string out_after_a = "not recorded";
+        std::string out_after_b = "not recorded";
+        const std::size_t wire_before = f.wire.size();
+        asio::post(ex, [&] {
+            asio::co_spawn(ex, sess.send(a_payload), record_into(a));
+            out_after_a =
+                std::to_string(next_out(sess)) + (a.done ? " (A completed)" : " (A pending)");
+            asio::co_spawn(ex, sess.send(b_payload), record_into(b));
+            out_after_b = std::to_string(next_out(sess));
+        });
+        if (!f.pump_done([&] { return a.done && b.done; }, "CallbackSend::overlapping")) return;
+        ++pairs_run;
+
+        const std::vector<std::string> sent(
+            f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before), f.wire.end());
+        const auto want_a = static_cast<seqnum_t>(2 + 2 * i);
+        const std::string* sent_a = frame_with_id(sent, id_of('A', i));
+        const std::string* sent_b = frame_with_id(sent, id_of('B', i));
+        const bool wire_ok = sent.size() == 2 && sent_a == sent.data() && sent_b == sent.data() + 1;
+        const bool numbers_ok = sent_a != nullptr && sent_b != nullptr &&
+                                seq_of(*sent_a) == want_a && seq_of(*sent_b) == want_a + 1;
+        const bool alike =
+            sent_a != nullptr && sent_b != nullptr && seq_of(*sent_a) == seq_of(*sent_b);
+        const bool ok = !a.err && !a.threw && !b.err && !b.threw;
+        if (!wire_ok) ++wire_not_in_start_order;
+        if (!numbers_ok) ++numbers_not_in_start_order;
+        if (alike) ++same_number;
+        if (!ok) ++sends_failed;
+        if (first_anomaly.empty() && (!wire_ok || !numbers_ok || !ok)) {
+            first_anomaly = "pair " + std::to_string(i) + ": transmitted " + describe(sent) +
+                            "; send(A): " + describe(a) + "; send(B): " + describe(b) +
+                            "; NextNumOut after A's co_spawn returned=" + out_after_a +
+                            ", after B's=" + out_after_b;
+        }
+        if (sess.state() != fsm_state::Active) break;
+    }
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - started)
+                                .count();
+
+    // Retention: one range retrieve over every number the pairs used, compared
+    // with what was transmitted under each number.
+    const std::vector<std::string> all(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_start),
+                                       f.wire.end());
+    std::size_t not_retained_as_sent = 0;
+    std::string retrieve_status = "not run";
+    if (MessageStore* st = session_test_access::store(sess); st != nullptr && pairs_run > 0) {
+        CollectVisitor v;
+        const auto last = static_cast<seqnum_t>(1 + 2 * pairs_run);
+        const auto r = f.run(st->retrieve(2, last, direction_t::outbound, v),
+                             "CallbackSend::overlapping_retrieve");
+        retrieve_status = r ? "ok" : "error " + std::to_string(static_cast<int>(r.error()));
+        for (const auto& fr : all) {
+            const auto held = std::ranges::find_if(
+                v.frames, [&](const std::string& h) { return seq_of(h) == seq_of(fr); });
+            if (held == v.frames.end() || *held != fr) ++not_retained_as_sent;
+        }
+    }
+
+    const std::string context =
+        "Pairs requested=" + std::to_string(kPairs) + ", run=" + std::to_string(pairs_run) +
+        "; pairs not transmitted in start order=" + std::to_string(wire_not_in_start_order) +
+        "; pairs whose MsgSeqNums were not in start order=" +
+        std::to_string(numbers_not_in_start_order) +
+        "; pairs sharing one MsgSeqNum=" + std::to_string(same_number) +
+        "; pairs with a failed send=" + std::to_string(sends_failed) +
+        "; frames transmitted=" + std::to_string(all.size()) +
+        ", of them not retained under their own number=" + std::to_string(not_retained_as_sent) +
+        " (range retrieve: " + retrieve_status +
+        "); NextNumOut: manager=" + std::to_string(next_out(sess)) +
+        ", store=" + f.store_next_out(sess) +
+        "; state=" + std::to_string(static_cast<int>(sess.state())) +
+        "; elapsed ms=" + std::to_string(elapsed_ms) +
+        "; first anomaly: " + (first_anomaly.empty() ? std::string("none") : first_anomaly) + ".";
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    EXPECT_EQ(pairs_run, kPairs) << context;
+    EXPECT_EQ(same_number, 0U) << "(a) two overlapping sends must not share a MsgSeqNum. "
+                               << context;
+    EXPECT_EQ(wire_not_in_start_order, 0U)
+        << "every pair must be transmitted in the order its sends were started. " << context;
+    EXPECT_EQ(numbers_not_in_start_order, 0U)
+        << "every pair must take consecutive MsgSeqNums in the order its sends were started. "
+        << context;
+    EXPECT_EQ(not_retained_as_sent, 0U)
+        << "every frame must be retained under the MsgSeqNum it was transmitted with. " << context;
+    EXPECT_EQ(f.store_next_out(sess), std::to_string(next_out(sess)))
+        << "the store's NextNumOut must agree with the manager's. " << context;
+    EXPECT_EQ(sends_failed, 0U) << context;
+    EXPECT_EQ(sess.state(), fsm_state::Active) << context;
+}
+
+TEST(CallbackSend, OverlappingSends) { run_overlapping_sends(StoreKind::memory); }
+
+TEST(CallbackSend, OverlappingSends_FileStore) { run_overlapping_sends(StoreKind::file); }
+
+enum class FromAppReturns { ok, reject };
+
+// fromApp for an inbound 35=D starts a send whose toApp throws. Everything is
+// recorded and printed; little is asserted.
+void run_nested_to_app_throws(StoreKind store, FromAppReturns from_app_returns) {
+    Fixture f{ExecKind::io_context, store};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+    ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+
+    const auto ex = sess.executor().underlying();
+    const auto reply = bytes_of(kPayloadOne);
+    const std::size_t wire_before = f.wire.size();
+
+    SendOutcome nested;
+    bool in_from_app = false;
+    bool thrown = false;
+    std::optional<bool> throwing_to_app_inside_from_app;
+    std::string seen_in_from_app = "not recorded";
+    std::vector<std::string> events;  // callbacks from the throw on, in order
+
+    const auto session_now = [&] {
+        return "state=" + std::to_string(static_cast<int>(sess.state())) +
+               " lifecycle=" + std::to_string(session_test_access::lifecycle_value(sess));
+    };
+    const auto where = [&] {
+        return std::string(in_from_app ? " (fromApp on the stack)" : " (fromApp returned)");
+    };
+
+    f.app->on_from_app = [&] {
+        in_from_app = true;
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] fromApp: starting Session::send\n");
+        asio::co_spawn(ex, sess.send(reply), record_into(nested));
+        std::fprintf(stderr, "[ B41 ] fromApp: co_spawn returned\n");
+        seen_in_from_app = session_now() + ", send " + describe(nested);
+        if (thrown) events.push_back("fromApp returns");
+        in_from_app = false;
+    };
+    f.app->on_to_app = [&] {
+        if (thrown) {
+            events.push_back("toApp, call " + std::to_string(f.app->to_app_calls) + where());
+            return;
+        }
+        thrown = true;
+        throwing_to_app_inside_from_app = in_from_app;
+        events.push_back("toApp throws" + where());
+        throw std::runtime_error{"B41: toApp throws"};
+    };
+    f.app->on_lifecycle = [&](const char* name) {
+        events.push_back(std::string(name) + where() + " " + session_now());
+    };
+    f.app->on_to_admin = [&](std::string_view msg_type) {
+        if (thrown) events.push_back("toAdmin 35=" + std::string(msg_type) + where());
+    };
+    if (from_app_returns == FromAppReturns::reject) {
+        f.app->from_app_result = std::unexpected(error::session_invalid_argument);
+    }
+
+    const auto order = peer_frame("D", 2,
+                                  "11=PEER-1\x01"
+                                  "54=1\x01"
+                                  "55=AAPL\x01");
+    bool inbound_done = false;
+    std::string inbound_result = "not completed";
+    asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{order}),
+                   [&](std::exception_ptr ep, expected_t<void> r) {
+                       inbound_done = true;
+                       inbound_result =
+                           ep  ? "threw"
+                           : r ? "ok"
+                               : "error " + std::to_string(static_cast<int>(r.error()));
+                   });
+    // Bounded: a call that does not complete is reported below, not waited for.
+    const auto all_done = [&] {
+        return inbound_done && (nested.done || f.app->from_app_calls == 0);
+    };
+    const bool completed = fixpp::test_support::pump_until(f.ioc, all_done, std::chrono::seconds{5},
+                                                           fixpp::test_support::kPumpSlice,
+                                                           "CallbackSend::nested_to_app_throws");
+
+    // Store reads, each bounded and reported as text.
+    const auto store_next = [&](direction_t dir) -> std::string {
+        MessageStore* st = session_test_access::store(sess);
+        if (st == nullptr) return "no store";
+        std::string out = "read not completed";
+        bool done = false;
+        asio::co_spawn(f.exec, st->next_seqnum(dir, false),
+                       [&](std::exception_ptr ep, expected_t<seqnum_t> r) {
+                           done = true;
+                           out = ep  ? "threw"
+                                 : r ? std::to_string(*r)
+                                     : "error " + std::to_string(static_cast<int>(r.error()));
+                       });
+        (void)fixpp::test_support::pump_until(
+            f.ioc, [&] { return done; }, std::chrono::seconds{2}, fixpp::test_support::kPumpSlice,
+            "CallbackSend::nested_to_app_throws_store");
+        return out;
+    };
+
+    const std::string classification = !throwing_to_app_inside_from_app.has_value() ? "never ran"
+                                       : *throwing_to_app_inside_from_app           ? "nested"
+                                                                                    : "deferred";
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    std::string event_text;
+    for (const auto& e : events) event_text += " [" + e + "]";
+    const std::string context =
+        "Classification: " + classification +
+        ". Inside fromApp after the co_spawn returned: " + seen_in_from_app +
+        "; after on_inbound_frame: " + session_now() + "; on_inbound_frame: " + inbound_result +
+        "; send: " + describe(nested) +
+        "; callbacks from the throw on, in order:" + (event_text.empty() ? " (none)" : event_text) +
+        "; frames transmitted after the inbound frame was fed: " + describe(sent) +
+        "; NextNumIn: manager=" + std::to_string(next_in(sess)) +
+        ", store=" + store_next(direction_t::inbound) +
+        "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
+        ", store=" + store_next(direction_t::outbound) + "; fromApp returned " +
+        (from_app_returns == FromAppReturns::reject ? "an error" : "success") + ".";
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+    if (!completed) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "CallbackSend::nested_to_app_throws");
+    }
+
+    ASSERT_EQ(f.app->from_app_calls, 1)
+        << "PATH NOT DRIVEN: the inbound 35=D did not reach fromApp. " << context;
+    ASSERT_TRUE(thrown) << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
+    EXPECT_TRUE(inbound_done) << "on_inbound_frame must complete. " << context;
+}
+
+TEST(CallbackSend, FromAppSendsReply_NestedToAppThrows) {
+    run_nested_to_app_throws(StoreKind::memory, FromAppReturns::ok);
+}
+
+TEST(CallbackSend, FromAppSendsReply_NestedToAppThrows_FileStore) {
+    run_nested_to_app_throws(StoreKind::file, FromAppReturns::ok);
+}
+
+TEST(CallbackSend, FromAppSendsReply_NestedToAppThrows_FromAppRejects) {
+    run_nested_to_app_throws(StoreKind::memory, FromAppReturns::reject);
 }
 
 }  // namespace fixpp::session::test
