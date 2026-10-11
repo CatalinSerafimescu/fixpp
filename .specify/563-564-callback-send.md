@@ -1,15 +1,24 @@
 # fixpp#563, fixpp#564 — a send started inside an application callback (B41)
 
-> **Status: v0.6 — Gate A converged at round 3 (2026-10-11); owner-signed-off 2026-10-11.** Issue mode:
-> this note is the plan; there is no `specs/<id>/` bundle. Branch `563-564-callback-send`. Round 3 ran on
-> v0.5 and found no P1 and no P2; v0.6 applies its nine P3 items, and those edits were not reviewed.
-> Nothing is implemented, and every outcome is still read, not run. The last section, "Gate A", has the
-> tallies, the reviews and how each round was applied.
+> **Status: v0.7 — Gate A converged at round 3 (2026-10-11); owner-signed-off 2026-10-11, for Gate A and
+> for the plan; post-Gate-A `/analyze` applied.** Issue mode: this note is the plan; there is no
+> `specs/<id>/` bundle. Branch `563-564-callback-send`. Round 3 ran on v0.5 and, after judging, left no P1
+> and no P2 (Codex had raised two P2 findings; both were judged P3). v0.6 applied that round's P3 items,
+> except the one the owner declined (Codex F-2). `/analyze` then ran over v0.6, and v0.7 applies its
+> findings. Neither v0.6's edits nor v0.7's were reviewed by Codex. Nothing is implemented. The last
+> section, "Gate A", has the tallies, the reviews, and how each round and the `/analyze` pass were applied.
 >
-> **Read, not run.** Rounds 1 and 2 and their rewrites ran nothing but §4's searches. Every outcome below
-> that depends on the order of handlers on the strand, or on what a sanitizer reports, is a prediction
-> from reading. §3 lists each one, under "Predictions to measure first", with the measurement that
-> settles it and what follows if it disagrees.
+> **Read, not run, with the exceptions named here.** §1's measurements were run before the design, and the
+> record has them. Of the design's own outcomes, what has been run is: §4's searches; the measurements
+> of predictions P-4 and P-11 (2026-10-11; both agree); and the measurements made on today's code before
+> any production edit (2026-10-11), each with its start posted: P-1 for a close started in `toApp`, P-1a,
+> P-1b, P-1c, P-2, P-3, P-5 and P-6, and an early reading of P-10 with a plain post. None disagrees. §3
+> has each result with its evidence file. The Gate A rounds, their rewrites, and the edits of v0.6 and
+> v0.7 ran nothing else. Every other outcome below that depends on the order of handlers on the strand,
+> or on what a sanitizer reports, is still a prediction from reading; among §3's rows that is P-1 for a
+> close started in `toAdmin`, P-7, P-8, P-9, and P-10 on the mechanism itself. §3 lists each row, under
+> "Predictions to measure first", with the measurement that settles it and what follows if it
+> disagrees.
 >
 > **How this design was reached.** Both issues were re-measured after B35, then widened by measurement
 > (`Engine::send`, `toAdmin`, both store kinds, several io threads, a close started from a callback). The
@@ -22,7 +31,12 @@
 >   means this file.
 > - `research/G19-fix-fpml-iso20022/research/reviews/fable_b41_callback_send_contract_consult.md`: the consult.
 > - `research/G19-fix-fpml-iso20022/research/probes/b41_563_564/`: the deferral-cost probe p1 and its build
->   script.
+>   script; P-4's probe (`p4_post_cancellation.cpp`, `build_p4.sh`) with its output
+>   (`p4_post_cancellation.output.txt`); P-11's hook (`p11_hook.patch`) with its runs
+>   (`p11_runs.output.txt`); and the temporary cells of the other measured predictions
+>   (`p0b_measurements.patch`) with their runs (`p0b_runs.output.txt`).
+> - `research/G19-fix-fpml-iso20022/research/reviews/analyze_563_564_callback-send.md`: the `/analyze`
+>   report over v0.6, with the orchestrator's dispositions.
 >
 > The cells are on this branch: `tests/session/test_563_564_callback_send.cpp` (suite `CallbackSend`) and
 > `tests/session/test_563_564_engine_callback_send.cpp` (suite `EngineCallbackSend`). They are measurement
@@ -58,8 +72,9 @@
     waiting for the whole operation that called the callback, and over a split rule for outbound emits;
     both are in §5.
 - **R-5 — `Engine::stop()` started from a callback is out of this PR** (owner, after round 1). The note
-  claims nothing about it and adds no cell for it; `ApplicationEngineSend.SendDrainRaceNoUAF`, a shipped
-  cell, is on that route, and §3 describes it as what it is. What was read about that route is in
+  claims nothing about it beyond one effect of OD-3 on that route (§2.1a), and adds no cell for it;
+  `ApplicationEngineSend.SendDrainRaceNoUAF`, a shipped cell, is on that route, and §3 describes it as
+  what it is. What was read about that route is in
   §2.1a, the limitation is in §4, and the follow-up is fixpp#579. Chosen over a post at `stop()`'s entry
   in this PR.
 - **R-6 — store order is a requirement** (owner, after round 1). "Calls to `store()` complete in the order
@@ -79,32 +94,60 @@
   today's code admits (§2.4). OD-3 stays,
   as the hit path's replacement for the control-strand read of `stopped_`. The note carries one
   first-step measurement on the base tree (§3, P-11); if it disagrees, the C-ABI question returns to the
-  owner before the PR proceeds. Chosen over keeping the bump and over measuring before deciding.
+  owner before the PR proceeds. It was run on 2026-10-11 and agrees (§3). Chosen over keeping the bump and
+  over measuring before deciding.
 - **OD-5 — the `Engine::send` bench is in this PR and its manifest row is `paired`** (owner, after
   round 2), isolated from the socket write. A `paired` row cannot be removed afterwards, and CI does not
-  compare it in the PR that adds it, so this PR's evidence is a local paired run (§3, "Cost"). `L-023-2`
-  closes for the send route; its establish-churn half is rewritten and stays open (§4). Chosen over an
-  in-tree bench that is not paired, and over accepting two probes as the PR's evidence.
+  compare it in the PR that adds it, so this PR's evidence is a local paired run (§3, "Cost"). The bench
+  is single-threaded, because the selection rule in the header of `bench/ci-suite.txt` admits only
+  single-threaded, CPU-bound binaries to the manifest, and so to its paired tier; as the PR's gated
+  evidence it replaces the foreign-thread probe that the first OD-5 ruling promoted; and that probe is
+  kept as a local base-against-candidate measurement, reported in the verification record whichever way
+  it falls and not gated (the orchestrator's disposition of 2026-10-11; the owner was told and can
+  overrule it). `L-023-2` closes for the send route; its establish-churn half is rewritten and stays open
+  (§4). Chosen over an in-tree bench that is not paired, and over accepting two probes as the PR's
+  evidence.
 
-The record's last two sections, "Gate A round 1, and three owner rulings from it" and "Gate A round 2, and
-the owner rulings from it", have R-4's reading, R-5, R-6, R-7 and the OD-5 and OD-6 rulings as the owner
-gave them; the numbers R-5, R-6 and R-7 are this note's. "B35's ruling R-10" below is a ruling of another
-note (`.specify/544-hot-path-zero-alloc.md`), not one of these.
+The record's sections "Gate A round 1, and three owner rulings from it" and "Gate A round 2, and the
+owner rulings from it" have R-4's reading, R-5, R-6, R-7 and the OD-5 and OD-6 rulings as the owner gave
+them; the numbers R-5, R-6 and R-7 are this note's. Its section "Gate A round 3: converged, and the
+owner's sign-off" has the Gate A sign-off and the plan sign-off (§0a). "B35's ruling R-10" below is a
+ruling of another note (`.specify/544-hot-path-zero-alloc.md`), not one of these.
+
+OD-1, OD-3 and OD-4 are not owner rulings. They are the decisions v0.3 left open, which Gate A round 1
+settled; §6 states them. OD-1 is the result of a deferred send that is cancelled before it starts
+(used in §2.1), OD-3 is the stop check on `Engine::send`'s hit path (§2.3, §2.4), and OD-4 is the
+statement that `Engine::send` from a callback of an unpublished session cannot be admitted (§2.3).
 
 ## 0a. Constitution triggers
 
 - **`[const §XVII.1]`, Gate A.** The change touches the public C++ behaviour of `Session::send`,
   `Session::close` and `Engine::send`, the cancellation and executor model, and the message store contract
-  (R-6). Gate A applies and is this loop.
+  (R-6). Gate A applied. It ran as the loop the last section records, and it has converged.
 - **`[const §XI.7]` and Appendix A, the four controls.** Appendix A's rows this change falls under are
   threading (a new await on two entry points, a new route for `Engine::send`) and error semantics
   (`dispatch_aborted` returned by `Session::send` stops implying `Disconnected`, OD-1). They are discharged
   in issue mode as `.specify/495-493-486-dict-reify-copy.md` §0.2 did:
-  - Codex Gate A: this loop.
+  - Codex Gate A: converged at round 3, on v0.5 (last section).
   - `/clarify`: by hand. The owner rulings of §0 are its record.
-  - `/analyze`: not run yet. It runs over this note once Gate A has converged and before implementation
-    starts, and its findings are applied to the note.
-  - Owner `/plan` sign-off: not given yet. It is the owner's approval of the converged note.
+  - `/analyze`: run on 2026-10-11 by the spec-analyzer over v0.6, after Gate A converged and before
+    implementation. v0.7 applies its findings.
+  - Owner `/plan` sign-off: given 2026-10-11. The owner signed off the converged note at round 3 and
+    confirmed the same day that the sign-off covers the plan; the record has both. Asked whether the Gate
+    A sign-off also stands as the plan sign-off, the owner answered: "Yes, it covers the plan. Push the
+    branch, then proceed with implementation" (the record, "Gate A round 3: converged, and the owner's
+    sign-off").
+- **`[const §VII.3]`, TDD.** Each cell lands in the PR's tree with its final assertions before the
+  production edit it witnesses, and the verification record shows it RED there (an abort or a failed
+  assertion on at least one of the two build types). The scratch builds of §3 are never the PR's tree. A
+  cell that is green on both build types before the production edit is recorded as a pin of existing
+  behaviour, by name.
+- **`[const §VIII.5]`, `[const §XV.1]`, `[const §XI.6]`, allocation.** The path those articles scope
+  (parse to `fromApp`; parse, validate, dispatch; `MemoryStore::store`) gains no allocation; B35's gates
+  are re-run (§3). The deferred path allocates per send: its coroutine frame, the payload copy and, where
+  the outer send holds the slot, the fallback leaf's frame (§2.1, "Cost"). Only a send started inside
+  `toApp` or `toAdmin` takes it, which is outside `B-544-1`'s "sequential `Session::send`" and inside
+  what `L-497-1` leaves open.
 - **`[const §VIII.3]`, "No perf change merged without a benchmark in the same PR".** R-2 changes the route
   of every `Engine::send`, and §2.2 adds counter writes to every application callback (§2.1, "Cost", has
   the one statement of how many). The note claims no speed-up. The PR carries a bench for the route, with
@@ -114,14 +157,23 @@ note (`.specify/544-hot-path-zero-alloc.md`), not one of these.
 - **`[const §X.7]`: no C-ABI change is declared** (OD-6 withdrawn). `fixpp_session_send` reaches
   `Engine::send`. The C ABI's symbols, types and error codes do not change. §2.4 has why no call that
   succeeds today fails afterwards, §4 ("Compatibility") has the statement a consumer reads, and P-11 (§3)
-  measures the reading on the base tree. R-1 and R-4 are not reachable through the C ABI's blocking
-  calls, which deadlock inside a callback today and still do (`L-054-1`).
+  measured the reading on the base tree and agrees with it. R-1 and R-4 are not reachable through the C
+  ABI's blocking calls, which deadlock inside a callback today and still do (`L-054-1`).
 - **`[const §IX]`, coverage, sanitizers, static analysis.** §3 has the three sanitizers, the coverage
   measurement with the dispositions it fixes in advance, and the tools Article IX §4 names.
-- **`[const §XVII.3]`, independence.** The note's author is the Opus orchestrator. This revision was
-  applied by Gate A's rewrite agent (`[const §XVII.5]`). Codex has implemented nothing here, so its Gate A
-  review is independent of both. If Codex later implements or fixes under escalation, that PR's Codex
-  review comes from a separate Codex session.
+- **`[const §XVII.3]`, independence.** The note's author is the Opus orchestrator. v0.4 and v0.5 were
+  written by Gate A's rewrite agent (`[const §XVII.5]`). v0.6's edits were applied after convergence by a
+  sub-agent working from the judge's fix shapes, and v0.7's by a sub-agent working from the `/analyze`
+  report; neither set was reviewed by Codex (last section). Codex has implemented nothing here, so its
+  Gate A review is independent of all of them. If Codex later implements or fixes under escalation, that
+  PR's Codex review comes from a separate Codex session.
+- **`[const §XVII.7]`, the local build.** Before the PR is opened, the article's cycle (Conan install,
+  configure, build, ctest) runs locally on `linux-clang-debug`, and the PR description carries the
+  article's one-line confirmation. The owner approves each local build before it runs. §3 names the Linux
+  presets its cells and gates run on. The MSVC leg is a local build and run in the sandbox, by
+  `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` in the parent repo: the B41 test binaries
+  and every test target the PR touches, on `windows-msvc-debug`, a build with assertions, and on
+  `windows-msvc-release`. Its result goes into the verification record.
 - No wire format, parser, codegen or security surface changes. The session FSM gains no state; what
   changes is when a `close()` started inside a callback begins.
 
@@ -166,9 +218,10 @@ does not see it either, and nothing in the design depends on it (§2.1a, "Which 
 One emit has a shorter stretch. The SequenceReset-GapFill of a resend replay (`emit_gapfill_async` in
 `replay_outbound_range_`) is numbered with the start of the gap, calls `toAdmin` and transmits; it assigns
 nothing and stores nothing. Its NewSeqNo can be a peek taken before the `toAdmin`. The same argument
-covers it: between its build and its transmit only the callback can let another send body in, so a send
-that waits for the callback to return is numbered at or after that NewSeqNo and transmitted after the
-GapFill (§2.1's table has its row).
+covers it, with the same scope: between its build and its transmit the only way in for another send body
+through an `Application` callback is that `toAdmin` (the paragraph above has what configuration
+supplies), so a send that waits for the callback to return is numbered at or after that NewSeqNo and
+transmitted after the GapFill (§2.1's table has its row).
 
 So the rule is not about which callback, and not about which emit site. It is: **no emit body on session S
 may begin while S has an outbound callback on the stack.** R-1 is that rule for `Session::send`; §2.1a
@@ -203,8 +256,11 @@ exists in every build type.
 **Writer.** One place: the stack-arena overload of `parse_and_dispatch_`, which is the only route by which
 `toApp` and `toAdmin` are invoked (`fire_to_admin_`, `send_impl`, `inbound_business_reject_leaf_`). An RAII
 scope increments the depth before the callback and restores the previous value after it, on every exit,
-including a throwing callback. The inbound overload (`fromApp`, `fromAdmin`) and the `onLogon`, `onLogout`
-and `onCreate` sites do not touch it.
+including a throwing callback. The order inside the overload is: its `callback_dispatch_scope`, then
+§2.2's assertion on this depth, then the increment, then the callback (§2.2, "The members, and who reads
+which"). The inbound overload (`fromApp`, `fromAdmin`) and the `onLogon`, `onLogout`
+and `onCreate` sites do not write it. On a build with assertions the `onLogon` and `onLogout` sites read
+it (§2.2).
 
 Writing it in the overload, not at each call site, is deliberate: a future emit that calls `toApp` or
 `toAdmin` gets the guard without being told about it. The implementer confirms the overload has no other
@@ -228,7 +284,8 @@ taken:
 3. Apply asio's own cancellation test by hand ("Cancellation at the hop", below). If it holds, return the
    OD-1 error.
 4. Assert that the outbound-callback depth is zero.
-5. Return `session_invalid_state_for_send` if a `close()` has begun (`state_ == lifecycle::closing`).
+5. Return `session_invalid_state_for_send` if a `close()` has begun (`state_ == lifecycle::closing`); a
+   close that has finished is refused by step 6's Active check, with the same error.
 6. Await the private coroutine on the copy, with the argument set to "skip": the Active check, the slot
    holder, and today's conversion for a send in flight, and no depth test.
 
@@ -266,7 +323,8 @@ A test that drives a raw `Session` from a bare `io_context` handler, as the cell
 holds the callback is not the strand's. That driver has already left the reentrancy contract's
 "session-strand" clause for `on_inbound_frame()` and `send()`, so this is not a second exposed setup; it
 is outside the contract before R-7. NC-16 and NC-20 are the cells whose callbacks run the `io_context`,
-and both use the `direct_executor` fixture.
+and both use the `direct_executor` fixture; NC-16's fourth arm, the control, runs the same callback on
+`ExecKind::strand`.
 
 - **Step 4** is the diagnostic for that setup on a build with assertions. It costs one load.
 - **Step 6 skips the depth test** because the alternative is worse. On a build without assertions step 4
@@ -338,6 +396,12 @@ twin, and the post controls of the nested cells on both stores and with no store
   that body enabled. `Engine::send`'s session-strand body enables total, for a caller whose own chain
   passes it. A thread that has taken any `async_mutex` lock is left at terminal only (the fourth part of
   the lock sequence, `include/fixpp/core/sync/async_mutex.hpp`).
+- A recorded cancellation can be erased. The state's handler assigns the filtered value of each emission
+  to its record; it does not accumulate (`asio/cancellation_state.hpp`, the call operator of the state's
+  `impl`). So a recorded `terminal` cancellation is erased when a later emission that the filter reduces
+  to nothing, a `total` under the default filter, arrives on the same signal before the coroutine's next
+  await. P-4's probe measured it: with a `terminal` and then a `total` emission during the wait, the
+  record reads `none` after the post and the next await does not throw (§3).
 
 So a deferred send that is cancelled while it waits does not throw at the post. Left alone it would resume,
 and the recorded cancellation would throw at its next await. If that await is inside `Session::send`'s
@@ -349,7 +413,10 @@ number, no store slot, no frame. So in step 3 the deferred path applies asio's t
 with the session's state untouched. The lock sequence of `async_mutex` applies the same pair by hand
 (`FIXPP_DETAIL_CO_AWAIT_LOCK` in `include/fixpp/core/sync/async_mutex.hpp`). A chain that turned
 `throw_if_cancelled` off is therefore not refused at the hop, as asio would not throw for it; NC-4's fifth
-arm pins that half of the test.
+arm pins that half of the test. Step 3 reads the record that asio's own test reads, so it also behaves as
+asio does where a recorded `terminal` cancellation was erased by a later emission that the filter
+dropped: that send is not refused at the hop, and its next await would not have thrown either. NC-4 needs
+no arm for it.
 
 - No test is needed before the post. The caller's own await of `Session::send` began with the same test,
   and nothing suspends between that await and the post, so the state cannot have changed in between.
@@ -360,17 +427,21 @@ arm pins that half of the test.
 
 This is the hazard that made B35's ruling R-10 reject a session send gate
 (`.specify/544-hot-path-zero-alloc.md` §2.5): there the new await sat on every send; here it sits only on a
-send started inside an outbound callback. The sequence above is read, not run (§3, prediction P-4).
+send started inside an outbound callback. The sequence above was read first and then measured: P-4's
+probe agrees with it (§3, prediction P-4).
 
 **The payload.** `Session::send` takes a span, and its doc comment states no lifetime rule. Today the span
 is consumed before the send's first suspension: `send_impl` begins with `build_send_frame_`, which copies
 it into the frame buffer. So a callback may pass a span over a buffer of its own and start the send
 detached. On the deferred path the build runs after the callback has returned, when that buffer may be
-gone. So step 1 copies the payload before the post and step 6 sends the copy. The frame that owns the copy
+gone. So step 1 copies the payload before the post and step 6 sends the copy. The copy's storage comes
+from the default allocator and is owned by a local of the deferred path's coroutine: a
+`std::vector<std::byte>`, the container `Engine::send` uses for its own copy (§0a has the allocation
+articles' disposition). The frame that owns the copy
 awaits the inner send, so it outlives it. Decided by the orchestrator at round 1 (the alternative is in
 §5). The cost is one allocation for the copy, on the deferred path only; a send that does not wait copies
-nothing more than today. `Engine::send` already copies the payload before its first hop (§2.3), so a send
-that reaches the deferred path through it is copied twice.
+nothing more than today. `Engine::send` already copies the payload twice before `Session::send` runs
+(§2.3), so a send that reaches the deferred path through it is copied a third time (§7).
 
 **The frame slot.** The holder is taken in step 6, after the hop. Which buffer the deferred send gets
 depends on where the outer emit is by then (the table above):
@@ -413,9 +484,13 @@ free: §3 measures them with the in-tree benches that drive those paths.
 |---|---|---|
 | `fromApp`, `fromAdmin`, `onLogon` | nested | nested: numbered, and its `toApp` run, inside the callback |
 | `toApp`, `toAdmin` | nested; one number on two frames, or frames out of order | starts after the callback returns, over a copy of the payload taken before it returned; numbered after the frame whose callback started it; transmitted after it, on a store that meets R-6's requirement |
+| `onLogout`, `onCreate` | refused with `session_invalid_state_for_send`: the session is not Active. `onLogout` runs after the state it leaves Active for has been written, and `onCreate` runs at the end of `open()`, before the session can be Active | unchanged |
 | outside any callback | inline | unchanged |
 
-On a build with assertions the left column was an abort in every row. The right column is stated for
+On a build with assertions the left column was an abort in the `fromApp` row and in the `toApp` row. The
+`onLogout` row and the last row were as on an `NDEBUG` build: a send that is refused at the Active check,
+and a send outside any callback, enter no callback scope. NC-2 pins the `fromAdmin` and `onLogon` cases
+of the `fromApp` row. The right column is stated for
 every configuration inside the contract. In the exposed setup of R-7, a send started in `toApp` or
 `toAdmin` by a callback that then runs the `io_context` nests on a build without assertions, as it does
 today.
@@ -476,17 +551,36 @@ strand's queue. It is not the end of the arm that called the callback. So:
   close runs during that suspension, and the arm resumes on a closing or closed session. That is the
   position of a close from another thread today, and the session's existing handling of it applies
   (`close()`'s drains of the seqnum manager and the write gate; the Logon arms' superseded check).
-- **An outbound emit can be cut.** The close's post is queued inside `toApp` or `toAdmin`, ahead of the
-  post that begins the outer frame's store call. A terminal close therefore runs before the outer frame is
-  stored or transmitted. Predicted (P-1): on a live transport the outer frame is stored under its number
-  and not transmitted, and its send returns `dispatch_aborted`. A graceful close started there emits the
-  outer frame first, then the Logout
-  (measured with the start posted, on the cells' synchronous sink; the live-transport arm is P-1b).
-- **The close can be late.** The read pump delivers every complete frame of one read with no yield between
-  them, and an Active arm on a volatile store does not suspend after `fromApp`. So a `close()` started in
-  `fromApp` for one frame begins only after the later frames of the same read have been delivered: their
-  callbacks run, their replies are sent, and a send started there is admitted. Today's inline close stops
-  them. Predicted (P-3); disclosed in §4.
+- **An outbound emit can be cut.** The close's post is queued inside `toApp` or `toAdmin`. On a shipped
+  store the outer emit's first yield after the callback is the post that begins its store call (§2.1's
+  first-yield table), and that post queues behind the close's. The outer frame's number is assigned by
+  then: before the callback at an assign-first site, after it at a callback-first one. So on a shipped
+  store a terminal close runs while the outer frame's store call is suspended, and before the frame is
+  transmitted. The table's other branches, a store that completes without yielding and no store, were
+  not measured. Measured for a close started in `toApp`, on the shipped stores, with the start posted
+  (P-1; §3 names the evidence): the outer frame's store call begins before the posted close runs and
+  completes after it; on a live transport the frame is retained under its number and not transmitted,
+  and its send returns `dispatch_aborted`.
+  - **With `reset_on_disconnect` set** (P-1a, measured; §3 names the evidence): the close is suspended
+    in its teardown reset before it has drained the write gate, so the outer frame's write passes the
+    gate and reaches a transport that is already closed. On a transport that refuses a write after its
+    `close()`, nothing is transmitted and the send returns `dispatch_aborted`; the store ends empty,
+    with both next numbers at their initial value. This is stated from the arm whose transport double
+    refuses the write. A double whose `close()` does nothing reports the frame as transmitted, which is
+    an artifact of the double.
+  - A graceful close started there emits the outer frame first, then the Logout (measured with the start
+    posted, on the cells' synchronous sink and on the live transport; P-1b).
+  - NC-6 is the cell for a terminal close started in `toAdmin`. P-1 has not been measured there, at
+    a callback-first site or at an assign-first one.
+- **The close can be late, on a volatile store.** The read pump delivers every complete frame of one read
+  with no yield between them, and an Active arm on a volatile store does not suspend after `fromApp`. So
+  on a volatile store a `close()` started in `fromApp` for one frame begins only after the later frames
+  of the same read have been delivered: their callbacks run, their replies are sent, and a send started
+  there is admitted. Today's inline close stops them. Measured on a `MemoryStore` with two frames (P-3;
+  §3 names the evidence): the second `fromApp` runs before `onLogout`. On a persistent store the bullet
+  does not hold. Measured on a `FileStore` (the same row): the arm suspends in its persist, the close
+  runs there, the second `fromApp` does not run, and the second frame's `on_inbound_frame` returns ok on
+  the closed session. Disclosed in §4.
 
 The owner chose this reading knowing these costs (§0, R-4). §2.5 has what it means for the state v0.3 said
 it removed.
@@ -496,14 +590,17 @@ it removed.
 - **Graceful.** Measured without the wait: started inside `toApp` or `toAdmin`, its Logout takes the outer
   frame's number at a callback-first site and goes out ahead of the outer frame at an assign-first site,
   and the outer frame is then transmitted after our own Logout. With the start posted, the outer frame goes
-  first and the Logout follows, both retained. The wait also keeps the Logout's `toAdmin` off the caller's
-  stack in `fromApp`, where order was not at risk.
+  first and the Logout follows, both retained. On a `MemoryStore` the Logout's `toAdmin` runs before the
+  outer frame is transmitted, while the outer emit is suspended in its store call; the wire order is
+  still the outer frame, then the Logout (P-1b, measured; §3 names the evidence). The wait also keeps the
+  Logout's `toAdmin` off the caller's stack in `fromApp`, where order was not at risk.
 - **Terminal.** It begins no emit. Without the wait it closes the session under the callback's feet: the
   session is `closed_drained`, and `onLogout` has run, before the call returns (§2.5). With the wait it
   runs after the callback, at the positions above.
 
 **The lifecycle callbacks.** R-4 says "any callback", and these three sit in different places. Each
-disposition is read, not run (P-5):
+disposition was read first and then measured with the start posted (P-5; §3 names the evidence and the
+routes that were run). The measurement agrees in every arm, and every arm ends closed:
 
 - **`onLogon`** runs inside the Logon arm, at the write of Active and before the arm's persist. A close
   started there begins after `onLogon` returns. Where the arm persists the inbound advance on a persistent
@@ -521,7 +618,9 @@ disposition is read, not run (P-5):
 - **`onCreate`** runs at the end of `open()`, before the role loop connects or publishes. A close started
   there begins after `onCreate` returns. `open()` has no suspension after the callback, so it returns
   success, and the close runs at its caller's first suspension. The session never reached Active, so no
-  Logout is sent and `onLogout` does not run. This disposition is a raw-`Session` one, and NC-11 is its
+  Logout is sent and `onLogout` does not run. On a raw initiator `open()` transmits the Logon before it
+  calls `onCreate` (measured, P-5), so a close started in `onCreate`, in either mode, ends the session
+  after a Logon and with no Logout. This disposition is a raw-`Session` one, and NC-11 is its
   cell. Under the Engine an application has nothing to close with in `onCreate`: the callback receives a
   `SessionId`, and `Engine::lookup` finds no session until the role loop has published it, which is after
   `open()` returns.
@@ -539,6 +638,8 @@ runs just after the callback, not inside it.
 - `disable_cancellation` is the state's filter from `close()`'s reset on, so a cancellation emitted during
   the wait is not recorded, and the reset built a state that records none. The post has no cancellation
   handler. No lock precedes the wait, so nothing has replaced that filter. The close resumes and runs.
+  P-4's probe measured this order on asio alone, in its arm that resets to `disable_cancellation` before
+  the post (§3).
 - This is the in-place disable, and it is enough here. 093's reset unit could not use it: its store
   operation takes a lock, and the lock sequence replaces the filter, so 093 plan OD-25 moved that operation
   onto its own awaitable thread bound to an empty slot. v0.3 cited OD-25 as the model for this wait; that
@@ -594,9 +695,9 @@ the second and the third and missed the fourth.
 | What the assertion does today | Why it matters | What carries it after this PR |
 |---|---|---|
 | It detects a second thread entering a session's callbacks: a `direct_executor` attested over an executor that does not serialise. This is the misuse its message names. | It is the debug diagnostic for a broken threading contract. | An **atomic owner token**. Entering a scope compares and swaps the token from "no owner" to the current thread. If the swap fails and the owner is another thread, the assertion fires. If the owner is the current thread, the entry is nested and passes. The scope that installed the token clears it on exit; a nested scope leaves it alone. The swap is the scope's first action and the clear is its last, so the depth is incremented after the swap and decremented before the clear. |
-| It does that through an atomic exchange, so the detection is not itself a data race. | In the misuse, two threads read and write the guard's state at once. With a plain depth and a plain owner the second thread can read both as free and pass, and the death cell would be a TSan report on the guard. | The same token. A foreign thread reads and writes only the atomic, and asserts before it touches any plain member. |
+| It does that through an atomic exchange, so the detection is not itself a data race. | In the misuse, two threads read and write the guard's state at once. With a plain depth and a plain owner the second thread can read both as free and pass, and the death cell would be a TSan report on the guard. | The same token. A foreign thread that enters a scope reads and writes only the atomic there, and asserts before the scope touches a plain member. The assertions at the parse sites, which read a depth ahead of a scope, are the stated exception ("The members, and who reads which", below). |
 | It makes a nested inbound parse abort. 093 contract C-3 I-3 depends on that ("No inbound parse nests inside another. Callbacks are synchronous, and the callback scope asserts it"), and so does the comment on the inbound overload of `parse_and_dispatch_`: one parse buffer per session is safe because no inbound parse runs inside another. | Without it, a `fromApp` that starts `on_inbound_frame` again rebuilds the parse resource over `inbound_parse_buf_` while the outer callback's `MessageView` still points into it: silent corruption where there was an abort. | **An assertion on the depth of all callbacks at each parse site over the session's buffer.** A parse site is a function that builds a memory resource over `inbound_parse_buf_` (`grep -n "inbound_parse_buf_" src/session/session.cpp`): the inbound overload of `parse_and_dispatch_`, and `validate_inbound_`, which the arms call before dispatch when the validate gate is on. Each asserts, before it builds the resource, that the depth of all callbacks is zero. |
-| It makes every other same-thread entry abort: an inbound frame fed from `toApp`, `toAdmin`, `onLogon`, `onLogout` or `onCreate`, an outbound callback entered inside an outbound callback, and `onLogon` or `onLogout` entered inside another callback. | The first is a frame the application fed from inside a callback, which the contract does not allow from any callback (§2.1a); from `toApp` or `toAdmin` the nested arm's replies would begin emits inside the outer emit's stretch. The second is R-1's rule being broken: by the run of the `io_context` that R-7 excludes, or by a future emit that does not go through `Session::send`. The third is the session entering or leaving Active under a callback. The design relies on one case of it, leaving Active inside an inbound callback or `onLogon` (a nested send that disconnects; the table below). Inside `toApp` or `toAdmin` it happens inside an emit's stretch, and the outer emit then carries on; it is reached there only from outside the contract. Those are the routes on which a diagnostic is wanted. | The parse-site assertion of the row above, which reads the depth of all callbacks and so fires whichever callback is on the stack. And **an assertion at the entry of the stack-arena overload that the outbound depth is zero.** And **an assertion at the `onLogon` and `onLogout` sites that the outbound depth is zero**, which carries the third inside `toApp` and `toAdmin` only. |
+| It makes every other same-thread entry abort: an inbound frame fed from `toApp`, `toAdmin`, `onLogon`, `onLogout` or `onCreate`, an outbound callback entered inside an outbound callback, and `onLogon` or `onLogout` entered inside another callback. | The first is a frame the application fed from inside a callback, which the contract does not allow from any callback (§2.1a); from `toApp` or `toAdmin` the nested arm's replies would begin emits inside the outer emit's stretch. The second is R-1's rule being broken: by the run of the `io_context` that R-7 excludes, or by a future emit that does not go through `Session::send`. The third is the session entering or leaving Active under a callback. The design relies on one case of it, leaving Active inside an inbound callback or `onLogon` (a nested send that disconnects; the table below). Inside `toApp` or `toAdmin` it happens inside an emit's stretch, and the outer emit then carries on; it is reached there only from outside the contract. Those are the routes on which a diagnostic is wanted. | The parse-site assertion of the row above, which reads the depth of all callbacks and so fires whichever callback is on the stack. And **an assertion in the stack-arena overload that the outbound depth is zero.** And **an assertion at the `onLogon` and `onLogout` sites that the outbound depth is zero**, which carries the third inside `toApp` and `toAdmin` only. Each of these two is evaluated after its site's `callback_dispatch_scope` has been constructed, and before the outbound depth is raised or the callback is called ("The members, and who reads which", below). |
 
 **The inbound-parse mark of v0.4 is removed.** It was a member of its own, set by the inbound overload,
 whose assertion fired on an inbound parse inside an inbound parse. Two reasons:
@@ -614,7 +715,9 @@ whose assertion fired on an inbound parse inside an inbound parse. Two reasons:
 and then the outbound depth, as the inner entry finds them. "Lifecycle site" means the scopes at
 `onLogon`, `onLogout` and `onCreate`, which carry the token and the depth of all callbacks. The `onLogon`
 and `onLogout` sites also assert that the outbound depth is zero; the `onCreate` site has no assertion of
-its own.
+its own. The stack-arena overload's check and the lifecycle sites' check are each evaluated after the
+site's scope has been constructed, so on one thread the token has already passed when the depth is
+read.
 
 | Inner entry, inside what | Depths | Check at the inner entry | Result |
 |---|---|---|---|
@@ -628,7 +731,7 @@ its own.
 | a parse over the buffer, inside `onLogon`, `onLogout` or `onCreate` | non-zero, zero | the same | aborts |
 | `toApp` or `toAdmin`, inside `toApp` or `toAdmin` | non-zero, non-zero | stack-arena overload: the outbound depth is zero | aborts |
 | `onLogon` or `onLogout`, inside `toApp` or `toAdmin` | non-zero, non-zero | lifecycle site: the outbound depth is zero | aborts |
-| any callback, entered from a second thread while a first is inside | any | the token | aborts |
+| any callback, entered from a second thread while a first is inside | any | the token; for an inbound frame the parse-site assertion can fire first | aborts |
 | **Outside the contract: not detected** | | | |
 | `toApp` or `toAdmin` of an emit that is not a send, inside `fromApp`, `fromAdmin` or a lifecycle callback | non-zero, zero | stack-arena overload: the outbound depth is zero | passes |
 | `onLogon` or `onLogout`, inside `fromApp`, `fromAdmin` or a lifecycle callback, on a route other than the legal row's | non-zero, zero | lifecycle site: the outbound depth is zero | passes |
@@ -684,13 +787,39 @@ written and read only on the session's serialisation domain, and maintained in e
   exit. `close()` reads it (§2.1a). On a build with assertions the parse sites and the close's wait read
   it too.
 - **The depth of outbound callbacks.** Written in the stack-arena overload (§2.1). The send's body reads
-  it. On a build with assertions the stack-arena overload's entry, the `onLogon` and `onLogout` sites and
-  the deferred path's step 4 read it too.
+  it. On a build with assertions the stack-arena overload's assertion, the assertion at the `onLogon` and
+  `onLogout` sites and the deferred path's step 4 read it too.
 
 Neither depth is atomic, and the cross-thread check reads neither. Under the misuse the token detects, two
 threads would race on them, as they already race on every strand-confined member of `Session`; a build
 with assertions aborts at the token before it reaches them. An atomic depth for `close()` to read was
 considered and not taken (§5).
+
+The parse sites remain the stated exception to that last statement: their assertion reads a depth
+ahead of a scope. `validate_inbound_` has no scope, and the inbound overload builds its resource before it enters
+one, so a foreign thread that delivers a frame reads the depth of all callbacks before it reaches a
+token. If it reads non-zero it dies at the parse-site assertion; if it reads zero it dies at the token.
+
+**The stack-arena overload and the `onLogon` and `onLogout` sites are not exceptions.** At each of
+them, the depth assertion is evaluated after that site's `callback_dispatch_scope` has been constructed,
+and before the outbound depth is raised or the callback is called. So a foreign thread that enters one
+of them while a first thread is inside dies at the token before it reads a plain depth. Decided by the
+orchestrator on 2026-10-11. The text v0.7 first carried put the stack-arena overload's assertion ahead
+of its scope and did not say on which side of the scope the lifecycle sites' assertion sits (the last
+section, F1). The decision has had no review.
+
+- **What the source shows.** Each of these sites already constructs its scope immediately before it
+  invokes the callback. The stack-arena overload does so after it has framed and parsed the frame over
+  its stack arena. `record_state_transition_` does so in its `onLogon` branch and in its `onLogout`
+  branch, after the state has been written. Re-derive: `grep -n "callback_dispatch_scope cs"
+  src/session/session.cpp`, and read from each hit to the callback it guards.
+- **No assertion moves relative to the callback.** At each site the assertion still precedes the
+  callback, and in the stack-arena overload it still precedes the raise of the outbound depth. What
+  changes is that it follows the scope, and so, in the stack-arena overload, the overload's own parse.
+  A frame that fails to parse there returns before the scope and calls no callback, so no nesting the
+  assertion exists for is passed over.
+- **The order in the stack-arena overload:** the scope, the assertion, the raise of the outbound depth,
+  the callback. At the `onLogon` and `onLogout` sites: the scope, the assertion, the callback.
 
 **What compiles out under `NDEBUG`:** the token's operations and every assertion this section, §2.1's
 step 4 and §2.1a name. The members exist in every build type, as `in_dispatch_` does today, so the class
@@ -718,7 +847,8 @@ on the control strand after each control-plane mutation and read by `Engine::loo
    call `Engine::lookup`. On a build with assertions `lookup` returns a handle backed by a lease that
    `~Engine` asserts is released, and that lease is not something `stop()` drains. A send frame destroyed
    after the Engine (an `io_context` destroyed later, with sends suspended) would trip that assertion,
-   where today's copy from `registry_` does not.
+   where today's copy from `registry_` does not. The rule has no witness, and the scenario is one
+   `~Engine` already forbids (§3).
 4. **Hit:** copy the snapshot's plain `shared_ptr<Session>` as the keepalive and `co_spawn` onto that
    session's executor. There: enable total cancellation as today, apply the stop check of OD-3, check
    `state() == Active`, then `co_await session->send(payload)`. The stop check reads the session's engine-stop flag through
@@ -742,7 +872,8 @@ send is still ordered.
 Active on a frame its read pump delivers, and both role loops publish the session, and republish the
 snapshot, before the pump or the first-frame delivery starts. A callback that runs before publication
 (`onCreate`, the initiator's Logon `toAdmin`) is before Active, so a send there is refused on either path.
-§3 pins this with a cell per role, because it is a property of two role loops, not of this function.
+This is OD-4 (§6). §3 pins it with a cell per role (NC-1), because it is a property of two role loops, not
+of this function.
 
 **Why the miss path stays.** The snapshot holds only published sessions and `register_session` does not
 republish. Telling "registered, not yet published" from "unknown" out of the snapshot would need every
@@ -776,7 +907,8 @@ mutations on the control strand". Each guarantee, and its carrier on the hit pat
 | A send whose session-strand body would start after `stop()`'s step 1 ran on that strand fails | the second `stopped_` read, on the control strand, which refuses every send whose control-strand step follows `stop()`'s write of `stopped_` | OD-3: the engine-stop flag, which step 1 sets on the session's strand and the body reads there |
 
 The first six do not depend on the hop. The seventh did, and v0.4 misdescribed it. Traced through
-today's `Engine::send` and `Engine::stop` (read, not run; P-11 measures it):
+today's `Engine::send` and `Engine::stop` (read first; P-11 then measured the refusal on the base tree
+and agrees, §3):
 
 - `stop()`'s control-strand body writes `stopped_` first, after a cancellation reset that does not
   suspend, and only then runs step 1, which sets the engine-stop flag on each session's strand.
@@ -799,10 +931,18 @@ What R-2 changes is the other direction. A send that passed the admission re-che
 path. Today that send is refused whenever its control-strand step runs after `stop()`'s body has begun.
 So a narrow class of sends that race `stop()` is refused today and can be admitted afterwards. Such a
 send runs during teardown as a send does today whose control-strand step preceded `stop()`: it is
-enrolled, so `stop()`'s drain waits for it, and the Active check bounds what it does. Which side of
-`stop()` a racing send falls on depends on timing today and still does; the window in which it is
-admitted is wider. A caller can observe the widening: a send that races `stop()` may succeed where it
-failed before. A call that failed and can now succeed is not a breaking change under `[const §X.7]`.
+enrolled, so `stop()`'s drain waits for it. The Active check does not refuse it. P-11's runs read the
+session's FSM state as Active at every reading, from before `stop()` to the seam after `stop()`'s send
+drain, which is past steps 1 to 3 (§3). So for a send that has passed its admission re-check, what
+refuses it after step 1 on today's code is the control-strand read of `stopped_`, where P-11 observed
+the refusal, and not the Active check; on the hit path OD-3's check has that place (the table's last
+row). Which side of `stop()` a racing send falls on depends on timing today and still does; the window in
+which it is admitted is wider. A caller can observe the widening: a send that races `stop()` may succeed where it
+failed before. Under `[const §X.7]` a change is breaking when a call a consumer could already make fails,
+or returns a result other than the one documented. Neither holds: the outcome of a send that races
+`stop()` depended on timing, and no documentation promises that it fails (re-derive: read the comments on
+`fixpp_session_send` in `include/fix/c_api/session.h` and on `fixpp_engine_destroy` in
+`include/fix/c_api/engine.h`).
 
 One route is an exception: `stop()` started inside a callback of the session, where step 1 runs ahead of
 bodies already queued (§2.1a, R-5). It is the only route on which OD-3 refuses a send that is admitted
@@ -826,8 +966,8 @@ source". It does not, and the sentence is withdrawn together with R-4's conseque
 - **Removed:** the close running inside the callback. The callback returns to a session that is as it was
   when the callback started the close, and `onLogout` no longer runs with the callback on the stack.
 - **Left:** the arm resumed on a session that closed meanwhile, wherever the arm suspends after its
-  callback (§2.1a). On a FileStore the close's completion is still expected to precede
-  `on_inbound_frame`'s (P-2), as measured for today's inline close.
+  callback (§2.1a). On a FileStore the close's completion still precedes `on_inbound_frame`'s, with
+  the start posted (P-2, measured; §3 names the evidence), as it did for today's inline close.
 
 What is left is the position of a close that arrives from another thread while an arm is in flight. The
 session already has handling for that position: `close()` drains the seqnum manager and the write gate, a
@@ -845,12 +985,12 @@ of its inbound arms is on the stack:
 - a caller that drives a raw `Session` owns that obligation already (B&L `L-015-4`, `L-544-2`).
 
 So a sanitizer cell would come back clean by construction and decides nothing about lifetime. The
-sanitizer runs of §3 stay, as a net under paths that assertion builds could not reach before §2.2.
+sanitizer runs of §3 stay (R-3), as a net under paths that assertion builds could not reach before §2.2.
 
 **What R-4 does not cover.** A nested send can leave the session `Disconnected` without calling `close()`,
 because `Session::send` writes that state inline on some results of its body. Started in an inbound
-callback, each of the following happens inside the callback: `onLogout` runs there, and the arm resumes on
-a disconnected session.
+callback or in `onLogon`, each of the following happens inside the callback: `onLogout` runs there, and
+the arm resumes on a disconnected session.
 
 - `assign_outbound()` reports the sequence number overflow. It needs a MsgSeqNum at its maximum.
 - On a session with no store, a config-time `transport_send` throws. `store_then_emit` returns
@@ -871,35 +1011,74 @@ there is one of these routes when the code before it has not suspended.
 
 ## 3. Tests and gates
 
-Every cell runs alone (`--gtest_filter`), on `linux-clang-debug` and `linux-clang-release`, with the
-exceptions the cells' rows name. A death arm exists only on a build with assertions, because the
-assertion it dies at compiles out under `NDEBUG`; it skips on `linux-clang-release`, as the I-3 test does
-today. NC-16's third arm exists only on `linux-clang-release`. "Classification" is the cells' own
+Every cell runs alone (`--gtest_filter`), on a build with assertions and on a build with `NDEBUG`, with
+the exceptions the cells' rows name. `linux-clang-debug` and `linux-clang-release` are the presets this
+section names for the two, and where a row below names one of them the condition it means is that one:
+assertions, or `NDEBUG`. Every cell also passes in a whole-binary run, which is how ctest runs it. A death
+arm exists only on a build with assertions, because the assertion it dies at compiles out under `NDEBUG`;
+it skips on a build with `NDEBUG`, as the I-3 test does today. NC-16's third arm exists only on a build
+with `NDEBUG`. "Classification" is the cells' own
 three-way witness: nested, deferred, never ran. A cell that expects one classification fails on either of
 the other two.
 
 **Mutant first.** Every cell or arm this revision adds or changes was specified from its mutant: the row
 in "Arms that must go RED" states what the wrong implementation does in the cell, and the cell's assertion
-is the one that outcome fails. The exceptions are named as such in their rows: a control (NC-9 (c),
-NC-16's fourth arm) and an arm that pins a disclosed limitation as measured (NC-5 (f)). Where a mechanism
+is the one that outcome fails. The exceptions are these: controls (NC-9 (c),
+NC-16's fourth arm, NC-4's second and fourth arms, NC-7's `total` arm, NC-11's positive-control arm);
+arms that pin a disclosed
+limitation or consequence as measured (NC-5 (f), NC-12, NC-14); and pins of a property this PR does not
+introduce (NC-1, NC-2's `onLogon` arm, NC-18, and NC-17's assertion on the outer frame's bytes, which is
+B35's property; NC-17's order assertion is in the first mutant row). Where a mechanism
 has no cell that can fail, none is claimed (the list after the mutant table).
 
-**Fixture additions the cells need.** The fixture of `test_563_564_callback_send.cpp` leaves the threading
-mode at its default and sets the heartbeat interval to zero. The new cells need:
+**Fixture additions the cells need.** At the commit Gate A reviewed, the fixture of
+`test_563_564_callback_send.cpp` left the threading mode at its default and set the heartbeat interval to
+zero. A tests-only commit made with the measurements of 2026-10-11, `be46718a`, adds part of what
+follows; each addition has a default that leaves every existing cell as it was, and the commit's message
+lists them. "On the branch" marks an addition that commit made. The new cells need:
 
-- a threading-mode knob: `direct_executor`, attested, over the bare `io_context` executor (NC-16, NC-20);
-- a heartbeat-interval knob (NC-20);
-- an `onCreate` hook on the cell application, which has hooks for `onLogon` and `onLogout` and none for
-  `onCreate` (NC-11);
+- a threading-mode knob: `direct_executor`, attested, over the bare `io_context` executor (NC-16, NC-20).
+  On the branch;
+- a heartbeat-interval knob (NC-20, and NC-11's `onLogon` arm on a persistent store). On the branch;
+- an `onCreate` hook on the cell application, which had hooks for `onLogon` and `onLogout` and none for
+  `onCreate` (NC-11). On the branch;
 - a peer-frame builder that takes the BeginString; `peer_frame` writes the session's own (NC-19's
-  lifecycle arm);
+  lifecycle arm, and NC-11's `onLogout` sub-arm that a `Disconnected` write outside `close()` fires). On
+  the branch;
 - test access to `callback_dispatch_scope`, so that a cell can enter and leave a scope without a session
-  doing it (NC-9);
-- the store double of NC-14.
+  doing it (NC-9). It is added to `session_test_access` in `tests/support/session_test_access.hpp`, the
+  one file in which that struct is defined (`brain/components/session.md`, "Test access to private
+  `Session` state"). Not on the branch;
+- the store double of NC-14. It is local to `tests/session/test_563_564_callback_send.cpp`, the file of
+  the cell that uses it. `tests/support/hooked_store.hpp` is read first, and its `HookedStore` is used
+  instead if it can hold one `store()` call and complete a later one first. Not on the branch.
+
+Also on the branch from that commit, for arms this section already specifies: a role knob (NC-11's
+"both roles"); a delivery of several frames by one coroutine with nothing between two frames (NC-12);
+the transport kind as an argument of the helper that the inbound close cells share ("The arms every
+close cell has"); the value `toApp` returns, set by the cell; and, on the live transport double, a count
+of `close()` calls and of the writes begun after the first one, with a setting that makes such a write
+fail as a write on a closed socket does. The setting is off by default.
+
+Two facts about the fixture were found while measuring, and each binds the cells below (the record,
+"Fixture facts found while measuring"):
+
+- **A default-mode cell with a non-zero heartbeat interval feeds the peer's Logon on the session's own
+  executor.** The fixture's `open_to_active()` feeds it on the fixture's executor, and the Logon arm
+  spawns the liveness loop on the executor the arm runs on. In the default mode over the bare
+  `io_context` the loop then runs off the session's strand. With a zero interval the loop returns at
+  once and nothing shows. Measured in the early reading of P-10 (`p0b_runs.output.txt`, under its heading):
+  with the Logon fed by `open_to_active()`, the loop's emit ran inside a `toApp` that polls; with the
+  Logon fed on the session's executor, it did not. NC-11's `onLogon` arm on a persistent store and that
+  arm's control are such cells. No helper for this feed is on the branch.
+- **A live-transport cell whose subject is a write that can follow a `close()` uses the double that
+  refuses a write after `close()`.** With the setting off, the double's `close()` changes nothing that
+  a later write sees, and such a write counts as transmitted (P-1a). The third arm of
+  `ToAppStartsClose_Terminal` is such a cell.
 
 One addition is to another file's fixture: `ValidateGateFixture`
 (`tests/session/test_validate_gate_inbound.cpp`) has no `Application` today, and NC-19's validate arm needs
-one attached.
+one attached. The arm is written in that file, where the fixture is defined.
 
 Death arms use gtest's death tests, which the session tests already use. Where an arm starts threads, it
 starts them inside the death statement, and the TSan arm of NC-9 runs in the `threadsafe` death-test style
@@ -909,7 +1088,11 @@ starts them inside the death statement, and the TSan arm of NC-9 runs in the `th
 R-4 from a wrong one. The inbound ones record and print, and assert that the callback ran and that
 `on_inbound_frame` completed (`run_callback_starts_close` says of itself "little is asserted"). The
 outbound ones pass on a property of the fixture: its config-time sink transmits whatever state the session
-is in. So every close cell, existing or new, runs in these arms:
+is in. So every close cell, existing or new, runs in these arms unless its row fixes the transport or
+the store. The close cells are, on the branch, `ToAppStartsClose_*`, `ToAdminStartsClose_*`,
+`FromAppStartsClose_*`, `FromAdminStartsClose_Terminal` and `FromAppSendsReply_NestedToAppThrows*`, and,
+among the new cells, NC-5, NC-6, NC-7, NC-8, NC-11, NC-12 and NC-13. NC-16's second arm starts a close
+too, but it is a death arm and asserts only its death. The arms:
 
 - **Transport:** the synchronous sink (`TransportKind::sync_capture`) and the live transport whose write
   suspends (`TransportKind::live_suspending_write`, the fixture's `SuspendingWriteTransport`).
@@ -925,45 +1108,65 @@ And in every arm each of these is an assertion, not a printed line:
 - what was transmitted, what the store retained, and the result of each operation.
 
 The fixture sets `heartbeat_interval` to zero, so its liveness loop returns at once and a terminal close in
-these cells has no suspension of its own. Under the Engine it has several. NC-13 is the cell where the
+these cells has no suspension of its own; NC-11's `onLogon` arm on a persistent store sets the interval
+through the knob, for the reason its row gives. Under the Engine it has several. NC-13 is the cell where the
 transport and the liveness loop are real.
 
-**Predictions to measure first.** Each row is an outcome this note states from reading. Nothing below was
-run. For each, the first implementation step for the cells concerned is the measurement in the third
-column, on a scratch build of the mechanism, before the cells' assertions are written.
+**Predictions to measure first.** Each row is an outcome this note states from reading. What has been
+measured was measured on 2026-10-11, and the evidence is in the parent repo's
+`research/G19-fix-fpml-iso20022/research/probes/b41_563_564/`:
 
-| Id | Predicted (read, not run) | Measurement | If it disagrees |
+- **P-4 and P-11.** Both agree. Their rows name their evidence files.
+- **P-1 for a close started in `toApp`, P-1a, P-1b, P-1c, P-2, P-3, P-5 and P-6,** on today's code, each
+  with its start wrapped in `asio::post`. None disagrees. The temporary cells are
+  `p0b_measurements.patch`, which applies on the fixture commit `be46718a`. Every run is in
+  `p0b_runs.output.txt`, under a heading that names the prediction. The cells ran on `linux-clang-release`
+  and again on `linux-clang-asan`. Each of these rows has a "Measured 2026-10-11" statement in its third
+  column, and those files are its evidence.
+- **P-10, an early reading only,** with a plain post in place of each continuation. It agrees, and its
+  row says what it covered. The row's own measurement, on the mechanism, is still to come.
+
+Not run yet: P-1 at NC-6's `toAdmin` sites, P-7, P-8, P-9, and P-10 on the mechanism. For each of
+these, the first implementation step for the cells concerned is the measurement in the third column: on
+today's tree with the start posted where the row says so, otherwise on a scratch build of the mechanism.
+It comes before the cells' assertions are written.
+
+A row measured with the start posted keeps its "If it disagrees" column. The post stands in for the
+mechanism, and the same outcome is read again on the mechanism itself when that mechanism is
+implemented, through the cells' own assertions. The column applies to that reading as well.
+
+| Id | Predicted (read; not run unless the row says "Measured") | Measurement | If it disagrees |
 |---|---|---|---|
-| P-1 | A terminal close started in `toApp`, with the start posted. On the synchronous sink: the outer frame is transmitted after `onLogout`, with the session `Disconnected` at the transmit; it is retained; its send returns ok. On the live transport: the outer frame is retained under its number and not transmitted; its send returns `dispatch_aborted`. | `CallbackSend.ToAppStartsClose_Terminal` with the close's `co_spawn` wrapped in `asio::post`; read the session state at the transmit event. Then the same with `TransportKind::live_suspending_write`. | The row for that cell, §2.1a's "An outbound emit can be cut" and the B&L limitation are rewritten to what was measured, and the difference is reported to the owner before the cell is written, because R-4's reading was chosen on this cost. |
-| P-1a | The same close with `reset_on_disconnect` set. The close's teardown reset and the outer frame's store call are then both in flight. Their order was not read to a conclusion. | The live-transport arm of P-1 with the knob set; read what the store holds and what the send returns. | Nothing to disagree with: the arm's assertions are written from the measurement, and the B&L limitation states the outcome. |
-| P-1b | A graceful close started in `toApp` or `toAdmin`, on the live transport: the outer frame, then the Logout; both retained; both operations ok. (On the synchronous sink this was measured with the start posted.) | The existing graceful cells with the start posted and the live transport attached. | As P-1. |
-| P-1c | A terminal close started in `fromAdmin` on a TestRequest. The Heartbeat reply's `toAdmin` runs before the close, on an Active session, with either store kind. On the synchronous sink the Heartbeat is transmitted after `onLogout`; on the live transport it is retained and not transmitted. What `on_inbound_frame` returns in the live arm was not read to a conclusion. | `FromAdminStartsClose_Terminal` with the start posted, in both transport arms. | As P-1; `on_inbound_frame`'s result is asserted as measured. |
-| P-2 | A terminal close started in `fromApp` on a FileStore: the close's completion still precedes `on_inbound_frame`'s; `on_inbound_frame` returns ok; the store has recorded the inbound number. | `FromAppStartsClose_Terminal_FileStore` with the start posted. | §2.5's "Left" bullet and the cell's order assertion are rewritten to what was measured. |
-| P-3 | Two application frames delivered with no yield between them, as `run_read_pump` delivers the frames of one read; a terminal close started in the first `fromApp`; `MemoryStore`. The second `fromApp` runs before `onLogout`. | NC-12's setup with the start posted. | If the second `fromApp` does not run, the "close can be late" bullet of §2.1a and its B&L sentence are deleted, and NC-12 asserts the measured order. |
-| P-4 | asio's sequence at a post. A coroutine awaits `asio::post(ex, asio::deferred)`; a terminal cancellation is emitted on its slot while it waits. The exception surfaces at the coroutine's next await, not at the post. In a second arm the coroutine resets its cancellation state after the post, and no exception surfaces. | A standalone probe beside p1 in the parent repo's `research/probes/b41_563_564/`, built against the pinned asio. | §2.1's "Cancellation at the hop" and §2.1a's "Cancellation and the wait" are wrong. The note returns to Gate A before either wait is implemented. |
-| P-5 | The lifecycle dispositions of §2.1a: a close started in `onLogon`, in `onLogout` and in `onCreate`. | NC-11's setups with the start posted. | §2.1a's bullet for that callback and NC-11's assertions are rewritten to what was measured. A disposition that leaves a session open after a close was asked for is reported to the owner. |
-| P-6 | `B35SendSlot.Nested_ASendInsideToAppLeavesTheOuterFrameIntact` after R-1: the second send is deferred, starts while the outer send is suspended in its `MemoryStore` call, and takes `send_fallback_leaf_`. | That cell with its nested `co_spawn` wrapped in `asio::post`. | NC-17's assertions follow the measurement; the cell's subject (the outer frame's bytes are what `toApp` saw) does not depend on which buffer the second send takes. |
+| P-1 | A terminal close started in `toApp`, with the start posted. On the synchronous sink: the outer frame is transmitted after `onLogout`, with the session `Disconnected` at the transmit; it is retained; its send returns ok. On the live transport: the outer frame is retained under its number and not transmitted; its send returns `dispatch_aborted`. | `CallbackSend.ToAppStartsClose_Terminal` with the close's `co_spawn` wrapped in `asio::post`; read the session state at the transmit event. Then the same with `TransportKind::live_suspending_write`. For NC-6, the same measurement with the close started in `toAdmin`, at a callback-first site and at an assign-first one. **Measured 2026-10-11, for a close started in `toApp`: agrees** (`p0b_runs.output.txt`, heading "T0.5 (P-1)"; cells in `p0b_measurements.patch`). Synchronous sink: the outer frame is transmitted after `onLogout`, with the session `Disconnected`; it is retained; its send returns ok. Live transport: nothing is transmitted, the frame is retained under its number, and its send returns `dispatch_aborted`. Both hold on a `MemoryStore` and on a `FileStore`. Read at the store, through a recording wrapper over the `MemoryStore`: the outer frame's store call begins before the posted close runs and completes after it. The `toAdmin` half, for NC-6, has not been run. | The row for that cell, §2.1a's "An outbound emit can be cut" and the B&L limitation are rewritten to what was measured, and the difference is reported to the owner before the cell is written, because R-4's reading was chosen on this cost. |
+| P-1a | The same close with `reset_on_disconnect` set. The close's teardown reset and the outer frame's store call are then both in flight. Their order was not read to a conclusion. | The live-transport arm of P-1 with the knob set; read what the store holds and what the send returns. **Measured 2026-10-11** (`p0b_runs.output.txt`, heading "T0.6 (P-1a)"; cells in `p0b_measurements.patch`). The close is suspended in its teardown reset before it has drained the write gate, so the outer frame's write passes the gate and reaches a transport whose `close()` has already been called. In the arm whose transport double refuses a write after `close()`: nothing is transmitted, and the send returns `dispatch_aborted`; read at the end, the store holds no frame and both next numbers are at their initial value, in the manager and in the store, on a `MemoryStore` and on a `FileStore`. In the arm whose double's `close()` does nothing, the frame is reported as transmitted and the send returns ok. That is an artifact of the double, and no assertion is written from it. | Nothing to disagree with: the arm's assertions are written from the measurement, and the B&L limitation states the outcome. |
+| P-1b | A graceful close started in `toApp` or `toAdmin`, on the live transport: the outer frame, then the Logout; both retained; both operations ok. (On the synchronous sink this was measured with the start posted.) | The existing graceful cells with the start posted and the live transport attached. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.7 (P-1b)"; cells in `p0b_measurements.patch`), for a close started in `toApp` and in `toAdmin`, at a callback-first site and at an assign-first one: the outer frame, then the Logout, both retained, both operations ok. On a `MemoryStore` the Logout's `toAdmin` runs before the outer frame is transmitted, while the outer emit is suspended in its store call; the wire order is still the outer frame, then the Logout. | As P-1. |
+| P-1c | A terminal close started in `fromAdmin` on a TestRequest. The Heartbeat reply's `toAdmin` runs before the close, on an Active session, with either store kind. On the synchronous sink the Heartbeat is transmitted after `onLogout`; on the live transport it is retained and not transmitted. In the live arm `on_inbound_frame` returns `dispatch_aborted`, and on a persistent store the inbound number is then not persisted; reading had not settled this, and it is stated from the measurement in the next column. | `FromAdminStartsClose_Terminal` with the start posted, in both transport arms. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.8 (P-1c)"; cells in `p0b_measurements.patch`). The Heartbeat's `toAdmin` runs before the close, on an Active session, on a `MemoryStore` and on a `FileStore`. Live arm: nothing is transmitted, the Heartbeat is retained, and `on_inbound_frame` returns `dispatch_aborted`; on a `FileStore` the manager's next inbound number has advanced and the store's has not. | As P-1; `on_inbound_frame`'s result is asserted as measured. |
+| P-2 | A terminal close started in `fromApp` on a FileStore: the close's completion still precedes `on_inbound_frame`'s; `on_inbound_frame` returns ok; the store has recorded the inbound number. | `FromAppStartsClose_Terminal_FileStore` with the start posted. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.9 (P-2)"; cells in `p0b_measurements.patch`): the close completes before `on_inbound_frame` does, `on_inbound_frame` returns ok, and the store has recorded the inbound number. | §2.5's "Left" bullet and the cell's order assertion are rewritten to what was measured. |
+| P-3 | Two application frames delivered with no yield between them, as `run_read_pump` delivers the frames of one read; a terminal close started in the first `fromApp`; `MemoryStore`. The second `fromApp` runs before `onLogout`. | NC-12's setup with the start posted. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.10 (P-3)"; cells in `p0b_measurements.patch`): on a `MemoryStore` the second `fromApp` runs before `onLogout`. The same setup on a `FileStore`, which this row did not predict: the second `fromApp` does not run. The arm suspends in its persist, the close runs there, and the second frame's `on_inbound_frame` returns ok on the closed session. So the bullet and its B&L sentence hold on a volatile store only, and both are scoped to that. | If the second `fromApp` does not run, the "close can be late" bullet of §2.1a and its B&L sentence are deleted, and NC-12 asserts the measured order. |
+| P-4 | asio's sequence at a post. A coroutine awaits `asio::post(ex, asio::deferred)`; a terminal cancellation is emitted on its slot while it waits. The exception surfaces at the coroutine's next await, not at the post. In a second arm the coroutine resets its cancellation state to `asio::disable_cancellation{}` before the post, as `close()` does; a terminal cancellation emitted while it waits surfaces at no later await. In a third arm the reset follows the post; no exception surfaces there either (the placement §3 lists as not witnessed). | A standalone probe beside p1 in the parent repo's `research/probes/b41_563_564/`, built against the pinned asio. **Measured 2026-10-11: agrees.** The probe is `p4_post_cancellation.cpp`, built by `build_p4.sh`; its output is `p4_post_cancellation.output.txt`. First arm (the probe's arms A, whose second await is a post, a timer wait or a nested awaitable): no exception at the post, the record reads `terminal` after it, and the second await throws `operation_aborted`. Second arm (the probe's arm S1): nothing is recorded and no await throws. Third arm (the probe's arms B, a reset to the default filter and a reset to total): the reset clears the record and no await throws. The positive control (a cancellation recorded before the first post throws at that post) and the null control (no emission: nothing recorded, nothing thrown) pass. The probe's other arms (C, D, E, S2, S3, S4) measured §2.1's statements about the filter, about `throw_if_cancelled`, about a chain that awaits a spawned chain, and about a recorded cancellation that a later emission erases; each agrees. | §2.1's "Cancellation at the hop" and §2.1a's "Cancellation and the wait" are wrong. The note returns to Gate A before either wait is implemented. |
+| P-5 | The lifecycle dispositions of §2.1a: a close started in `onLogon`, in `onLogout` and in `onCreate`. | NC-11's setups with the start posted. **Measured 2026-10-11: agrees in every arm, and every arm ends closed** (`p0b_runs.output.txt`, heading "T0.11 (P-5)"; cells in `p0b_measurements.patch`). The routes that were run: `onLogon`, in both roles, both close modes and both store kinds; `onLogout` fired by a graceful close, with a terminal close started in it; `onLogout` fired by a `Disconnected` write of `Session::send`, whose `toApp` returned `dispatch_aborted`, with a close of each mode started in it; `onCreate`, in both close modes. The route NC-11 names for the `Disconnected` write outside `close()`, a frame with another BeginString, is not the one that was run; it is measured when the cell is written. On a raw initiator the Logon is transmitted before `onCreate` runs, so a close started there ends the session after a Logon with no Logout. | §2.1a's bullet for that callback and NC-11's assertions are rewritten to what was measured. A disposition that leaves a session open after a close was asked for is reported to the owner. |
+| P-6 | `B35SendSlot.Nested_ASendInsideToAppLeavesTheOuterFrameIntact` after R-1: the second send is deferred, starts while the outer send is suspended in its `MemoryStore` call, and takes `send_fallback_leaf_`. | That cell with its nested `co_spawn` wrapped in `asio::post`. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.12 (P-6)"; cell in `p0b_measurements.patch`): the second send is deferred, starts while the outer send is suspended in its store call, and takes the fallback leaf's buffer. | NC-17's assertions follow the measurement; the cell's subject (the outer frame's bytes are what `toApp` saw) does not depend on which buffer the second send takes. |
 | P-7 | NC-9's arm (d) under TSan. With the atomic token: the second thread's entry dies at the token's assertion and no ThreadSanitizer report is printed. With the token built as a plain member: ThreadSanitizer prints a data-race report on the token before the assertion fires. The second half rests on ThreadSanitizer's happens-before model as known, not on a run: a relaxed atomic load and store create no ordering between the two threads, where a mutex, a condition variable or a non-relaxed atomic would. | Arm (d) on `linux-clang-tsan`, once on the mechanism and once on a scratch copy with the token made plain. | If the plain token draws no report, arm (d) cannot see the difference: it is deleted, its mutant row moves to the list of mutants with no witness, and the token's atomicity is recorded in the verification record as a property carried by reading the diff. If the atomic token draws a report, the two threads share more than the token, or a foreign thread touches a plain member before it asserts; that is a defect in §2.2's design and is fixed there. |
 | P-8 | NC-8. Arm 1: a terminal close on the cell fixture, with no send in flight and `reset_on_disconnect` off, completes without suspending, so it has reached `closed_drained` before the waiting close resumes. Read through the places it could suspend: the default `close_async` returns `close()`'s result; both drains post only while the mutex has a holder, a waiter or a resumption in flight; the liveness wait posts only while the loop is alive, and with a zero heartbeat interval it is not. Arm 2: a graceful close that finds another graceful close in flight joins it, and the scripted flush hook has run once when both complete. | The two arms on a scratch build of the wait. | Arm 1: if the first close does suspend, the waiting close joins it; the arm's assertion is rewritten to arm 2's oracle, and the mutant row names arm 2 alone. Arm 2: the assertion follows the measurement; if a second run of the body cannot be told from a join there either, the mutant has no witness and is listed as such. |
 | P-9 | NC-5's two arms added at round 2. (e) A graceful `close()` and then a send started in one `fromApp`, `MemoryStore`: the send nests, its frame is transmitted, then the Logout, both retained, both ok. (f) A logout the peer starts; a send started in the confirming Logout's `toAdmin`: it is deferred, passes step 5 and the Active check, and is numbered and transmitted after our Logout on the synchronous sink. What that send returns was not read to a conclusion. | The two arms on a scratch build of R-1 and R-4. | (e): the arm asserts the measured order, and §2.1a's "the close never runs inside the callback" is re-read against it. (f): §7's bullet and the B&L sentence are rewritten to what was measured; if the send is refused, the bullet is deleted. |
-| P-10 | The setups of NC-16, NC-19 and NC-20. On the `direct_executor` fixture a callback's `poll` runs the deferred send's continuation (first arm), the waiting close's (second arm) and, after the callback has advanced the mock clock by the heartbeat interval, the liveness loop's emit (NC-20), each inside the callback. On a session in the default mode that the fixture drives from a strand of its own (`ExecKind::strand`), over which the session's strand is a second one, the same callback's `poll` does not run the continuation (NC-16's fourth arm). A frame fed from `onLogon` with the expected inbound number reaches the inbound overload (NC-19's `onLogon` arm). A frame with another BeginString, fed from `toApp` on an Active session, reaches the `onLogout` site with no parse over the buffer and no emit before it (NC-19's lifecycle arm). | Those arms on a scratch build, with a recorded line at the point each continuation runs. | If the continuation does not run inside the callback on the `direct_executor` fixture, the fixture is not the exposed setup and the arms are rebuilt before any death is trusted. If it does run inside the callback on the strand fixture, §2.1's statement that the default mode is immune is wrong; R-7 was ruled on that statement, so the note returns to the owner. If the lifecycle arm's frame aborts or is disposed of before the `onLogout` site, the arm is rebuilt on a frame that reaches it; if none does, the lifecycle sites' assertion joins the list of mechanisms without a witness. |
-| P-11 | OD-6's withdrawal (§2.4). On the base tree, one `Engine::send` parked between its admission re-check and its control-strand `co_spawn` while `stop()` runs its step 1 on the session's strand, then released: it returns `session_invalid_state_for_send`, and nothing of it is transmitted. | A hook at that point in a scratch copy of the base tree (`22702dc9`); the hook is not part of the PR. One send is parked there, `stop()` is run until the engine-stop flag is set on the session, and the send is released. | If the send is transmitted, §2.4's reading is wrong and a send that succeeds today would be refused by OD-3. The C-ABI question returns to the owner before the PR proceeds. |
+| P-10 | The setups of NC-16, NC-19 and NC-20. On the `direct_executor` fixture a callback's `poll` runs the deferred send's continuation (first arm), the waiting close's (second arm) and, after the callback has advanced the mock clock by the heartbeat interval, the liveness loop's emit (NC-20), each inside the callback. On a session in the default mode that the fixture drives from a strand of its own (`ExecKind::strand`), over which the session's strand is a second one, the same callback's `poll` does not run the continuation (NC-16's fourth arm). A frame fed from `onLogon` with the expected inbound number reaches the inbound overload (NC-19's `onLogon` arm). A frame with another BeginString, fed from `toApp` on an Active session, reaches the `onLogout` site with no parse over the buffer and no emit before it (NC-19's lifecycle arm). | Those arms on a scratch build, with a recorded line at the point each continuation runs. **Early reading, 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.13 (early reading of P-10)"; cells in `p0b_measurements.patch`). It was taken on today's code, with a plain `asio::post` onto the session's executor in place of each continuation. On the `direct_executor` fixture a callback's `poll` runs the posted handler inside the callback. In the default mode the handler runs after the callback returns, while a handler posted onto the bare `io_context` runs inside it; that last arm is the positive control. This is not the row's measurement: that one is made on the mechanism and is still to come. | If the continuation does not run inside the callback on the `direct_executor` fixture, the fixture is not the exposed setup and the arms are rebuilt before any death is trusted. If it does run inside the callback on the strand fixture, a strand did not hold back a post made under one of its handlers, the property §2.1's statement also rests on; R-7 was ruled on that statement, so the note returns to the owner. If the lifecycle arm's frame aborts or is disposed of before the `onLogout` site, the arm is rebuilt on a frame that reaches it; if none does, the lifecycle sites' assertion joins the list of mechanisms without a witness. |
+| P-11 | OD-6's withdrawal (§2.4). On the base tree, one `Engine::send` parked between its admission re-check and its control-strand `co_spawn` while `stop()` runs its step 1 on the session's strand, then released: it returns `session_invalid_state_for_send`, and nothing of it is transmitted. | A hook at that point in a scratch copy of the base tree (`22702dc9`); the hook is not part of the PR. One send is parked there, `stop()` is run until the engine-stop flag is set on the session, and the send is released. **Measured 2026-10-11: agrees.** The hook and its cells are `p11_hook.patch`, applied to the tree at `53b365c4`, whose `src/` and `include/` are the base tree's (re-derive: `git diff --stat 22702dc9 53b365c4 -- src include`); the runs are `p11_runs.output.txt`. A send released after `stop()`'s step 1 had set the flag on its session returned `session_invalid_state_for_send`: its `toApp` did not run, the outbound number did not move, the store retained nothing of it and the peer received nothing. A send released when `stop()` had reached its send drain had the same outcome. Refusal site, in both: the control-strand read of `stopped_`. Control: a send released before `stop()` was started was sent, retained and received. The session's FSM state read Active at every reading, the one at the seam after `stop()`'s send drain included (§2.4). | If the send is transmitted, §2.4's reading is wrong and a send that succeeds today would be refused by OD-3. The C-ABI question returns to the owner before the PR proceeds. |
 
 **Cells that must turn** (they exist on the branch). The transport and store arms above apply to every
-row whose cells start a close.
+row whose cells start a close, unless the row fixes the transport or the store.
 
 | Cells | Must assert |
 |---|---|
 | `CallbackSend.ToAppSendsNested*`, `ToAdminStartsSend`, `ToAdminStartsSend_AssignFirstSite`, `…_FileStore`; `EngineCallbackSend.EngineSendFromToApp*` | deferred; distinct consecutive numbers in transmit order; each frame retained under its own number; store and manager agree; both outcomes ok |
 | `CallbackSend.FromAppSendsReply`; `EngineCallbackSend.EngineSendFromFromApp*` | nested; pass on the debug build too |
-| `EngineCallbackSend.MtEngineSendFromFromApp_Quiet`, `…_BusyControlStrand` | every reply nested, in both arms |
+| `EngineCallbackSend.MtEngineSendFromFromApp_Quiet`, `…_BusyControlStrand` | every reply nested, in both arms. **On a build with assertions, a run of `…_BusyControlStrand` counts only with its tally.** Measured 2026-10-11 on today's code (`p0b_runs.output.txt`, the runs of this cell on `linux-clang-asan`): the cell passed in some runs, each with every reply deferred, and aborted at the guard's assertion in the others, before it printed its tally; that assertion fires when a reply's `toApp` enters inside `fromApp`. So a pass there is not evidence that any reply nested. The cell prints, for the replies it drove, how many were nested and how many were deferred. A run counts as GREEN only when that line shows every driven reply nested and none deferred, and the line is recorded with the result. A run counts as RED, for the state before R-2 and for the mutant "the hit path replaced by the control-strand hop", only when the line shows a deferred reply. A run that aborts before it prints the line counts for neither and is run again |
 | the `…_NoStore` and `…_NoStore_LiveWrite` nested cells | deferred; distinct consecutive numbers in transmit order |
 | `CallbackSend.ToAppStartsClose_Graceful`, `ToAppStartsClose_Graceful_FileStore`, `ToAdminStartsClose_Graceful`, `ToAdminStartsClose_Graceful_AssignFirstSite`, `FromAppStartsClose_Graceful` | inside the callback after the start: Active, lifecycle open, the Logout's `toAdmin` not run. After it: the outer frame first where there is one, then the Logout; distinct consecutive numbers; both retained where there is a store; both operations ok. Live-transport arm: P-1b. Pass on the debug build too |
 | `CallbackSend.FromAppStartsClose_Terminal`, `FromAppStartsClose_Terminal_FileStore` | inside `fromApp` after the start: Active, lifecycle open, `onLogout` not run. `onLogout` after `fromApp` returned. The session `closed_drained` at the end and the close's result ok. `MemoryStore`: `on_inbound_frame` completes before `onLogout`. FileStore: the order and results of P-2. Pass on the debug build too |
 | `CallbackSend.FromAdminStartsClose_Terminal` | inside `fromAdmin` after the start: as the row above. The Heartbeat reply's `toAdmin` runs on an Active session, on either store kind: the TestRequest sub-arm emits its reply before it persists the inbound advance, so nothing suspends between `fromAdmin`'s return and that `toAdmin`. Then per transport arm: P-1c |
-| `CallbackSend.ToAppStartsClose_Terminal` | inside `toApp` after the start: Active, lifecycle open, `onLogout` not run. Then per transport arm: P-1. The synchronous-sink arm asserts the FSM state at the transmit, so that it cannot pass for a reason that does not hold on a live transport |
+| `CallbackSend.ToAppStartsClose_Terminal` | inside `toApp` after the start: Active, lifecycle open, `onLogout` not run. Then per transport arm: P-1. The synchronous-sink arm asserts the FSM state at the transmit, so that it cannot pass for a reason that does not hold on a live transport. A third arm, the live transport with `reset_on_disconnect` set, asserts what P-1a measured; it uses the transport double that refuses a write after `close()` ("Fixture additions the cells need") |
 | `CallbackSend.FromAppSendsReply_NestedToAppThrows`, `…_FileStore`, `…_FromAppRejects` | inside `fromApp` after the start: Active, lifecycle open, the send not completed. `onLogout` after `fromApp` returned. The send returns `app_callback_threw`. The session `closed_drained` at the end. `…_FromAppRejects`: the BusinessMessageReject's callback runs on an Active session, before the close, on either store kind (that sub-arm also emits before it persists); whether its frame is transmitted follows P-1's two arms |
-| every control (`Sequential*`, `OverlappingSends*`, `TestRequestThenSend`) | unchanged |
+| every control (`Sequential*`, `OverlappingSends*`, `TestRequestThenSend`, `ToAdminStartsSend_AssignFirstSite_Sequential`) | unchanged |
 
 The cells' names and their "expected classification" asserts are re-decided when they are lifted: a cell
 named `…Nested` that must report "deferred" is renamed.
@@ -973,23 +1176,23 @@ named `…Nested` that must report "deferred" is renamed.
 | Id | Drives | Asserts |
 |---|---|---|
 | NC-1 | `Engine::send` from `onLogon`, initiator and acceptor | nested, and the send succeeds. Pins §2.3's premise that a session is published before it can be Active |
-| NC-2 | `Session::send` from `onLogon` and from `fromAdmin` | nested |
-| NC-3 | a send to session B from a callback of session A, A's `toApp` included, on one io thread with B's strand idle. **Route:** `Engine::send` for B, or a `co_spawn` of B's `send` onto B's executor. Not a direct `co_await` of B's `send` from A's strand, which would run B's send outside B's serialisation domain | B's send is not deferred: its `toApp` runs before A's callback returns |
+| NC-2 | `Session::send` from `onLogon` and from `fromAdmin`. The admin message of the `fromAdmin` arm is the implementer's choice; what constrains it is that the session is still Active when its `fromAdmin` runs and stays so, as with the Heartbeat of NC-19's validate arm or the TestRequest of `FromAdminStartsClose_Terminal` | nested |
+| NC-3 | a send to session B from a callback of session A, A's `toApp` included, on one io thread with B's strand idle. **Route:** `Engine::send` for B, or a `co_spawn` of B's `send` onto B's executor. Which of the two is the implementer's choice; what constrains it is the cell's fixture (a fixture of raw sessions has no Engine) and that B's send runs on B's executor. Not a direct `co_await` of B's `send` from A's strand, which would run B's send outside B's serialisation domain | B's send is not deferred: its `toApp` runs before A's callback returns |
 | NC-4 | a deferred send cancelled while it waits. **Route:** `Session::send` started in `toApp` by a `co_spawn` onto the session's executor whose completion token is bound to a cancellation slot the cell owns (`asio::bind_cancellation_slot`). A detached spawn has no slot, and the cell would measure its own setup. **Emission:** `terminal`, which a plain `co_spawn` chain records, emitted from inside `toApp` after the `co_spawn` has returned, so the send is waiting on its post. Second arm: a `total` emission on the same chain. Third arm: the route through `Engine::send`, started the same way, with a `terminal` emission. Fourth arm: that route with a `total` emission. Fifth arm: the first arm's route with the send awaited from a wrapper coroutine that first turns `throw_if_cancelled` off, the slot bound to the wrapper's `co_spawn`, and a `terminal` emission | first and third arms: the send returns the OD-1 error, the session stays Active, nothing of it is transmitted, no number is consumed. Second and fourth arms: the chain's terminal-only filter drops the emission (in the fourth, at `Engine::send`'s outer frame, before the session-strand body's filter is consulted), and the send completes ok. These two show that the other arms' result comes from a recorded cancellation and not from the setup. Fifth arm: the cancellation is recorded and the send is not refused at the hop: its own `toApp` runs. What it returns after that is asserted as measured |
 | NC-5 | (a) to (c): a `close()` and a send started in one `toApp`, in three orders: terminal close then send; graceful close then send; send then graceful close. (d) A send started in the graceful Logout's `toAdmin`. (e) A graceful `close()` and then a send started in one `fromApp`. (f) A logout the peer starts, with a send started in the confirming Logout's `toAdmin` | (a), (b), (d): the send returns `session_invalid_state_for_send`, nothing of it is transmitted, no number is consumed, and after a graceful close the Logout is the last frame transmitted. (c): the send's frame, then the Logout. (e): the close has not begun, so the send is admitted and nests: its `toApp` runs inside `fromApp`; then the order of P-9. (f): the order of P-9; this arm pins a disclosed limitation (§7), not a wanted behaviour |
-| NC-6 | a terminal close started in `toAdmin`, at a callback-first site and at an assign-first one | as `ToAppStartsClose_Terminal`, in both transport arms; the store and the manager agree at the end |
-| NC-7 | a close that waits, in each mode, cancelled meanwhile. The close is started in a callback by a `co_spawn` bound to a slot the cell owns; `terminal` and, in a second arm, `total` are emitted from inside the callback after the `co_spawn` has returned | the session reaches `closed_drained` and the close's result is ok, in both arms |
+| NC-6 | a terminal close started in `toAdmin`, at a callback-first site and at an assign-first one | inside `toAdmin` after the start: as `ToAppStartsClose_Terminal` inside `toApp`. Then per transport arm, as that cell: P-1, for the outer admin frame. NC-6's outer operation is `on_inbound_frame`, not a send, so the result of the operation that called `toAdmin`, and whether the store and the manager agree, are asserted as measured (P-1's measurement, run at both sites) |
+| NC-7 | a close that waits, in each mode, cancelled meanwhile. The close is started in a callback by a `co_spawn` bound to a slot the cell owns; `terminal` and, in a second arm, `total` are emitted from inside the callback after the `co_spawn` has returned. In the graceful mode the cell ends the close's wait for the peer's Logout as NC-8's second arm does, by advancing the mock clock past `logout_disconnect_timeout_ms` | the session reaches `closed_drained` and the close's result is ok, in both arms |
 | NC-8 | a close that waits while another close runs first. Before it runs the `io_context`, the cell queues the delivery of the frame and, behind it, a handler that starts the other close. That handler is then ahead of the post that the callback's close makes. **Arm 1:** the other close is terminal, on the synchronous sink, with no send in flight and `reset_on_disconnect` off, so that it cannot suspend (P-8); the callback's close is terminal. **Arm 2:** both closes are graceful, and the cell installs a counting hook with `set_close_flush_hook`. It ends the first close's wait for the peer's Logout by advancing the mock clock past `logout_disconnect_timeout_ms`, which ends `run_logout_phase1`'s sleep on the session's clock | Arm 1: the callback's close returns exactly `session_already_closed`; `onLogout` runs once; the lifecycle ends `closed_drained`. Arm 2: the callback's close joins the first: both return the same result, the Logout is transmitted once, and the hook has run once |
 | NC-9 | the guard, through test access to the scope object, so that the guard's state is the only session state the cell's threads share. Builds with assertions only. (a) A first thread enters one session's scope and stays inside; a second thread enters after the first has told it so through an ordinary handshake (a promise or a condition variable). (b) One thread enters, enters a nested scope and leaves it; a second thread then enters while the outer scope is live. (c) One thread enters a nested scope, leaves both, and enters again. (d) On `linux-clang-tsan`: as (a), but the only ordering between the two threads is a `std::atomic<bool>` that the first stores and the second reads with `memory_order_relaxed`. The first thread stays inside the scope until the process dies. The main thread starts both and then joins them, so the death statement does not return first; a join orders nothing between the two threads | (a) and (b): death at the token's assertion. (c): no assertion; a control. (d): the death's output is matched by a gmock matcher that requires the token assertion's text and the absence of the string `ThreadSanitizer` (`AllOf(HasSubstr(…), Not(HasSubstr("ThreadSanitizer")))`); P-7. **What (a) proves and does not prove:** it proves that a second thread's entry while a first is inside is detected. It does not prove that the detection is free of a data race: the handshake orders the first thread's write before the second thread's read, for ThreadSanitizer as for the hardware, so a token built as a plain member passes (a) on every preset. Arm (d) is the only witness of the token's atomicity |
 | NC-10 | the OD-3 check. The cell sets the session's engine-stop flag on the session's strand through `session_engine_access::note_engine_stop`, and then calls `Engine::send` for that session. This is a construction: the order it stands for (a send between its admission re-check and its spawn while `stop()` runs its first step) cannot be produced on demand, because no test hook sits between those two statements. The real interleaving is not driven. The cell calls C++ `Engine::send`, and no C-ABI twin is added: with OD-6 withdrawn the check changes nothing a C-ABI consumer can observe (§2.4), so there is no C-ABI effect to witness | the send returns `session_invalid_state_for_send` and nothing is transmitted |
-| NC-11 | a close started in each lifecycle callback. `onLogon`: both roles, both modes, a persistent and a volatile store. `onLogout`: fired by a graceful close, with a terminal close started in it; and fired by a `Disconnected` write outside `close()`. `onCreate`: both modes | inside the callback after the start: the state and lifecycle the callback entered with. Then, per callback, the disposition of §2.1a (P-5): for `onLogon` on a persistent store, no liveness loop is started and `on_inbound_frame` returns ok; for `onLogout` inside a graceful close, the terminal close joins it and the grace wait ends; for `onCreate`, `open()` returns ok and the session is closed at the end with no `onLogout` |
-| NC-12 | two application frames delivered by one coroutine with no yield between them, a terminal close started in the first `fromApp`, `MemoryStore` | the order of P-3. This cell pins a disclosed limitation, not a wanted behaviour |
-| NC-13 | Engine level: two Engines over loopback TCP with a non-zero heartbeat interval. A terminal and a graceful close started in `fromApp`, and in `toApp` of an `Engine::send`. One arm on `linux-clang-asan` | inside the callback after the start: Active, lifecycle open. The session's role loop ends and the Engine stops cleanly afterwards. Graceful from `toApp`: the peer receives the outer frame and then the Logout. Terminal from `toApp`: the peer does not receive the outer frame (P-1). This is the cell in which an owner (the role loop, then `stop()`) frees the Session after the close |
+| NC-11 | a close started in each lifecycle callback. `onLogon`: both roles, both close modes, a persistent and a volatile store; the arm on a persistent store sets a non-zero heartbeat interval through the fixture's knob and feeds the peer's Logon on the session's own executor ("Fixture additions the cells need"), and it has a positive-control arm, the same setup with no close started in `onLogon`. `onLogout`: fired by a graceful close, with a terminal close started in it; and fired by a `Disconnected` write outside `close()`, with a close started in it. **Route of that write:** with the validate gate off, the test body delivers to the Active session a frame whose BeginString is not the session's. The Active arm writes `Disconnected` at its BeginString test, with no `close()` and no emit; it is the frame NC-19's lifecycle arm feeds from `toApp`. `onCreate`: both close modes | inside the callback after the start: the state and lifecycle the callback entered with. Then, per callback, the disposition of §2.1a (P-5): for `onLogon` on a persistent store, no liveness loop is started and `on_inbound_frame` returns ok. The observable for "no liveness loop" is the mock clock's count of parked sleeps (`inflight_count()`), read as `expect_close_from_on_logon_starts_no_liveness` in `tests/session/test_session_plaintext_roundtrip.cpp` reads it: with a non-zero heartbeat interval a started loop parks a sleep while the session is Active, and the arm asserts that none is parked. A loop started on a session that has already left Active ends at its first test of the state and parks nothing, so the reading tells "not started" from "started" only where the session is still Active when the Logon arm resumes; elsewhere the assertion is kept and claims no more than that no sleep is parked. That reading is a zero, so it counts only beside its positive control: in the same setup with no close started, the count of parked sleeps is non-zero while the session is Active. The control is run with the arm, and the arm's zero is not reported without it (added by the orchestrator, 2026-10-11; not reviewed). For `onLogout` inside a graceful close, the terminal close joins it and the grace wait ends; for `onLogout` after a `Disconnected` write outside `close()`, the close started there is the session's first: it joins no other close and does not return `session_already_closed`; for `onCreate`, `open()` returns ok and the session is closed at the end with no `onLogout` |
+| NC-12 | two application frames delivered by one coroutine with no yield between them, a terminal close started in the first `fromApp`. First arm: `MemoryStore`. Second arm: `FileStore` | First arm: the order of P-3, the second `fromApp` before `onLogout`. This arm pins a disclosed limitation, not a wanted behaviour. Second arm, as P-3's measurement found it on a persistent store: the second `fromApp` does not run, and the second frame's `on_inbound_frame` returns ok on the closed session. This arm pins where the limitation stops |
+| NC-13 | Engine level: two Engines over loopback TCP with a non-zero heartbeat interval. A terminal and a graceful close started in `fromApp`, and in `toApp` of an `Engine::send`. The arm for a terminal close started in `fromApp` also runs on `linux-clang-asan`; it is R-3's measurement | inside the callback after the start: Active, lifecycle open. The session's role loop ends and the Engine stops cleanly afterwards. Graceful from `toApp`: the peer receives the outer frame and then the Logout. Terminal from `toApp`: the peer does not receive the outer frame (P-1). This is the cell in which an owner (the role loop, then `stop()`) frees the Session after the close |
 | NC-14 | R-6. A test-double store that holds its first `store()` call and completes the second one first. Two overlapping sends; then the same with the second send started in the first one's `toApp` | the second frame is transmitted before the first, in both shapes. This cell shows the consequence of a store that breaks the requirement, as the B&L row states it; it is not a wanted behaviour |
 | NC-15 | the payload copy, on `linux-clang-asan`. `toApp` allocates a buffer on the heap, starts a detached `Session::send` over it, and frees the buffer before it returns. The buffer is on the heap because a buffer on the stack is seen only with `detect_stack_use_after_return`, and the preset sets no `ASAN_OPTIONS` | no ASan report; the transmitted frame carries the payload's bytes |
-| NC-16 | the exposed setup of R-7: the fixture's `direct_executor` knob, attested over the bare `io_context` executor. A callback starts a send (first arm, from `toApp`) or a close (second arm, from `fromApp`) and then runs the `io_context` (`poll`) before it returns, so the post's continuation runs inside the callback (P-10). The first two arms run on builds with assertions only. **Third arm,** `linux-clang-release` only: the first arm's setup, with the callback's `poll` loop bounded by a count of handlers. This arm pins behaviour outside the contract. It is there only so that the mutant "step 6 defers again" can go RED, and the cell's comment says so. **Fourth arm,** a control on both build types: the first arm's callback on a session in the default mode that the fixture drives from a strand of its own (`ExecKind::strand`). The session's strand is a second strand, made over that one, so the handler that holds the callback is the outer strand's and a post onto the session's strand executes through it. The arm shows a driver on a serialising executor. It is not §2.1's case, entry points on the session's own strand | first arm: death at step 4's assertion. Second arm: death at the close's depth assertion. Third arm: the loop ends below its bound and the send has run nested, as it does today; the cell fails if the bound is hit. Fourth arm: no death; the send is deferred, its `toApp` running after the outer `toApp` returned (P-10) |
-| NC-17 | `B35SendSlot.Nested_ASendInsideToAppLeavesTheOuterFrameIntact`, rewritten. Today it asserts that the send started in `toApp` reached its own `toApp` inline, and skips on a build with assertions, citing fixpp#564 | the skip is removed. The second send's `toApp` runs after the outer `toApp` returned. The bytes the outer `toApp`'s view spanned are the bytes stored and transmitted for the outer frame. Which buffer the second send took: P-6 |
-| NC-18 | the miss path during `stop()`: the twin of `V15_SendCounterEnrolledBeforeControlHop_NoUAF`. Many `Engine::send` calls for an unregistered id, and for a registered id whose session is not published, queued while `stop()` runs; then the Engine is destroyed. Under ASan and TSan. As in V-15, whether a given send is on the control strand's queue when `stop()` drains depends on timing across several io threads; the cell drives many sends and claims the drain for those that are, not a forced interleaving | `stop()` completes; no sanitizer report; each send returns one of the miss path's two documented errors or `session_invalid_state_for_send` |
+| NC-16 | the exposed setup of R-7: the fixture's `direct_executor` knob, attested over the bare `io_context` executor. A callback starts a send (first arm, from `toApp`) or a close (second arm, from `fromApp`) and then runs the `io_context` (`poll`) before it returns, so the post's continuation runs inside the callback (P-10). The first two arms run on builds with assertions only. **Third arm,** `linux-clang-release` only: the first arm's setup, with the callback's `poll` loop bounded by a count of handlers. The count is the implementer's choice; what constrains it is that a correct run, whose loop ends when `poll` runs no handler, ends well below it, and that the mutant's run, which does not end by itself, reaches it. This arm pins behaviour outside the contract. It is there only so that the mutant "step 6 defers again" can go RED, and the cell's comment says so. **Fourth arm,** a control on both build types: the first arm's callback on a session in the default mode that the fixture drives from a strand of its own (`ExecKind::strand`). The session's strand is a second strand, made over that one, so the handler that holds the callback is the outer strand's and a post onto the session's strand executes through it. The arm shows a driver on a serialising executor. It is not §2.1's case, entry points on the session's own strand | first arm: death at step 4's assertion. Second arm: death at the close's depth assertion. Third arm: the loop ends below its bound and the send has run nested, as it does today; the cell fails if the bound is hit. Fourth arm: no death; the send is deferred, its `toApp` running after the outer `toApp` returned (P-10) |
+| NC-17 | `B35SendSlot.Nested_ASendInsideToAppLeavesTheOuterFrameIntact`, rewritten. Today it asserts that the send started in `toApp` reached its own `toApp` inline, and skips on a build with assertions, citing fixpp#564 | the skip is removed. The second send's `toApp` runs after the outer `toApp` returned. The bytes the outer `toApp`'s view spanned are the bytes stored and transmitted for the outer frame; that assertion is a pin of B35's property, which this PR does not introduce, and the order assertion before it is the one R-1 changes (the first mutant row). Which buffer the second send took: P-6 |
+| NC-18 | the miss path during `stop()`: the twin of `V15_SendCounterEnrolledBeforeControlHop_NoUAF`. Many `Engine::send` calls for an unregistered id, and for a registered id whose session is not published, queued while `stop()` runs; then the Engine is destroyed. How many sends and how many io threads is the implementer's choice, taken from V-15, its twin; what constrains it is that the cell claims nothing about any single send. Under ASan and TSan. As in V-15, whether a given send is on the control strand's queue when `stop()` drains depends on timing across several io threads; the cell drives many sends and claims the drain for those that are, not a forced interleaving | `stop()` completes; no sanitizer report; each send returns one of the miss path's two documented errors or `session_invalid_state_for_send` |
 | NC-19 | a frame fed from inside a callback, on builds with assertions. The callback starts `on_inbound_frame` by a `co_spawn` that begins inline, as the I-3 test does from `fromApp`. **Dispatch arms,** validate gate off: fed from `toApp`, from `toAdmin` and from `onLogon`, each with an application frame that carries the inbound number the session expects at that moment, so that its arm reaches dispatch. **Validate arm,** on `ValidateGateFixture` (`tests/session/test_validate_gate_inbound.cpp`) with an `Application` attached: `fromAdmin` on a conformant Heartbeat feeds a Heartbeat with a tag the dictionary does not define for it, as `UnexpectedTag_Reason2` does. The validate gate runs before the sequence check, so that frame's number does not matter. **Lifecycle arm,** validate gate off: the `toApp` of a send on an Active session feeds a frame whose BeginString is not the session's. The Active arm tests BeginString before the sequence check, writes `Disconnected` there and emits nothing, so `onLogout` is entered inside `toApp` (P-10) | dispatch and validate arms: death at the parse-site assertion. In the validate arm the nested arm never reaches the inbound overload, so the death can only come from `validate_inbound_`'s assertion. The `onLogon` arm is kept only if its nested frame reaches a parse there (P-10's measurement run records it); the lifecycle scopes' count is also witnessed by NC-11. Lifecycle arm: death at the lifecycle sites' assertion. The nested arm reaches no parse site and enters no outbound callback, so the death can only come from that assertion |
 | NC-20 | an outbound callback inside an outbound callback, on builds with assertions: NC-16's `direct_executor` fixture with a non-zero heartbeat interval. A send from the test body; its `toApp` advances the mock clock by the heartbeat interval and then runs the `io_context` (`poll`), so the liveness loop wakes and begins its emit inside `toApp` (P-10) | death at the stack-arena overload's assertion |
 
@@ -1005,8 +1208,8 @@ in the table; those are listed after it.
 
 | Mutant | Fails | Trace |
 |---|---|---|
-| the depth test removed from the send's body, or the public `send` passing "skip" | the classification assertion of the `toApp` and `toAdmin` send cells | The send started in the outbound callback runs inline. On a build without assertions its own `toApp` runs with the starting callback on the stack, and the witness records "nested" where "deferred" is asserted; at a callback-first site the "distinct numbers" assertion fails too. On a build with assertions the process aborts first, at the stack-arena overload's assertion, when the nested send reaches its `toApp` |
-| the outbound depth counted at the inbound overload too | the classification assertion of `FromAppSendsReply` and `EngineSendFromFromApp*`; NC-5 (e) | `fromApp` raises the outbound depth, the send started there takes the deferred path, its `toApp` runs after `fromApp` returned, and the witness records "deferred" where "nested" is asserted. In NC-5 (e) the deferred send then finds the close begun and is refused at step 5, where "admitted" is asserted |
+| the depth test removed from the send's body, or the public `send` passing "skip" | the classification assertion of the `toApp` and `toAdmin` send cells; NC-17's order assertion | The send started in the outbound callback runs inline. On a build without assertions its own `toApp` runs with the starting callback on the stack, and the witness records "nested" where "deferred" is asserted; at a callback-first site the "distinct numbers" assertion fails too. On a build with assertions the process aborts first, at the stack-arena overload's assertion, when the nested send reaches its `toApp`. NC-17's second send is started in `toApp` in the same way, so its `toApp` runs before the outer `toApp` has returned, where "after" is asserted |
+| the outbound depth counted at the inbound overload too | the classification assertion of `FromAppSendsReply` and `EngineSendFromFromApp*`; NC-2's `fromAdmin` arm; NC-5 (e) | `fromApp` raises the outbound depth, the send started there takes the deferred path, its `toApp` runs after `fromApp` returned, and the witness records "deferred" where "nested" is asserted. The inbound overload calls `fromAdmin` too, so NC-2's `fromAdmin` arm fails the same way. In NC-5 (e) the deferred send then finds the close begun and is refused at step 5, where "admitted" is asserted |
 | the cancellation test removed from the deferred path (a bare post, then the send) | NC-4, first and third arms | The recorded cancellation throws at the await of the inner send. With that await outside a `try`, the send completes with an exception where the OD-1 error is asserted. With it inside one that converts as `Session::send`'s does, `Disconnected` is written and "the session stays Active" fails |
 | the deferred path's cancellation test reading the recorded cancellation alone, without `throw_if_cancelled` | NC-4, fifth arm | The chain turned throwing off and a `terminal` cancellation is recorded. The test holds on the record alone, and the send returns the OD-1 error at the hop. Its own `toApp` never runs, where the arm asserts that it does |
 | the depth kept outside the `Session`, as one counter for the thread or for the engine | NC-3 | A's `toApp` raises the shared depth. B's send, started inline from A's callback, reads it as non-zero and takes the deferred path. B's `toApp` runs after A's callback returned, where "not deferred" is asserted |
@@ -1069,8 +1272,25 @@ Specified without a witness, and claimed as such:
   session is on the stack, and no setup for that was read to a conclusion.
 - **The close's wait after `close()`'s reset and not in front of it**, with no test after it: the third
   bullet of the v0.3 list above.
+- **The side of its scope on which the stack-arena overload's assertion sits, and the lifecycle sites'**
+  (§2.2: after the scope). On one thread both placements die at the same assertion, with the same text.
+  NC-9, the cell with two threads, reaches the scope through test access and enters neither site. Listed
+  with the orchestrator's decision of 2026-10-11.
+- **The default mode's immunity where the session's entry points run on its own strand** (§2.1). NC-16's
+  fourth arm is a neighbouring control: its handler is the fixture's outer strand's.
+- **The sends R-2 admits that today's control-strand read refuses** (§2.4). Which side of `stop()` a
+  racing send falls on is timing; no cell forces it.
+- **OD-3's refusal on R-5's route** (§2.1a). The route is out of this PR; fixpp#579 inherits it.
+- **The branch "the GapFill of a resend replay" of §2.1's first-yield table.** No cell starts a send in
+  that GapFill's `toAdmin`: no setup for a send started inside a resend replay was read to a conclusion.
+  The cells that start a send in `toAdmin` do so at the Heartbeat that answers a TestRequest and at a
+  session Reject. The row rests on §1's reading of `emit_gapfill_async`.
+- **The branch "a failure exit" of the same table:** a veto, a throwing callback or a failed assign of
+  the outer emit, after its callback started a send. No cell drives it. The outer frame is abandoned
+  there, so nothing of it is stored or sent that the deferred send could be ordered against.
 
-A mutant that stays green is a finding about its cell, and the cell is fixed or deleted before sign-off.
+A mutant that stays green is a finding about its cell, and the cell is fixed or deleted before the
+verification record's verdict is written.
 
 **Existing tests that pin this path and must stay green**, each with whether it still reaches the code it
 was written for:
@@ -1091,10 +1311,11 @@ was written for:
 **Sanitizers** (`[const §IX.2]`: all three run on the PR).
 - TSan: the `EngineSessionStrand` suite, the two `Mt*` cells, NC-9's arm (d) and NC-18. The hit path reads
   the snapshot off the control strand from io threads, which is new for `Engine::send`.
-- UBSan: every cell above on `linux-clang-ubsan`. The change adds integer counters that are incremented
-  and decremented in pairs, and no arithmetic on untrusted input; a clean run is expected and is stated
-  as what it drove.
-- ASan: every cell above, NC-13, NC-15 and NC-18, and the cells of §2.5
+- UBSan: every cell above on `linux-clang-ubsan`. The change adds integer counters, one depth
+  incremented and decremented in pairs, the other saved and restored, and no arithmetic on untrusted
+  input; a clean run is expected and is stated as what it drove.
+- ASan: every cell above; of NC-13, the arm its row names, a terminal close started in `fromApp` (R-3);
+  NC-15 and NC-18; and the cells of §2.5
   (`FromAppSendsReply_NestedToAppThrows*`, `FromAppStartsClose_*`, `FromAdminStartsClose_Terminal`), which
   the preset could not reach before §2.2. The disabled control cell in the test file shows the instrument
   reports on this binary. By §2.5 no owner frees the Session in the direct-`Session` cells, so a clean run
@@ -1103,8 +1324,9 @@ was written for:
 - A clean sanitizer run is stated as what it drove, not as absence.
 
 **Coverage** (`[const §IX.1]`). Measured on `linux-clang-coverage` with fresh per-binary profiles, over
-the functions the PR changes in `src/session/session.cpp`, `src/session/engine.cpp` and
-`include/fixpp/session/session.hpp`, against the article's line and branch thresholds for the touched
+the functions the PR changes in `src/session/session.cpp`, `src/session/engine.cpp`,
+`src/session/session_engine_access.hpp` and `include/fixpp/session/session.hpp`, against the article's
+line and branch thresholds for the touched
 module. Every line or branch the diff adds that stays uncovered gets a disposition in the verification
 record: tested, waived with its reason, or escalated to an issue. These dispositions are fixed in advance:
 
@@ -1112,7 +1334,8 @@ record: tested, waived with its reason, or escalated to an issue. These disposit
   by NC-4's fifth arm. No arm of v0.4 reached it.
 - The failing side of each assertion this note adds: reached only in a death arm's child process. Where
   the coverage run does not collect a child's profile, that side is waived as the violated precondition
-  the death arm witnesses, and the record names the arm.
+  the death arm witnesses, and the record names the arm. The lifecycle sites' assertion at the `onLogon`
+  site has no death arm (the list above); its failing side is waived on that statement.
 
 **Static analysis and format** (`[const §IX.4]`): `clang-tidy`, the `clang-format` check, `cppcheck` and
 `include-what-you-use`, over the files the PR touches, as `/speckit-verify` runs them.
@@ -1123,7 +1346,9 @@ measure is not started inside an outbound callback, so it does not take the defe
 the depth test, and the inbound read pays the counter writes. One `test_544_*` cell does start a send
 inside `toApp` and changes: NC-17.
 
-**Cost (OD-5).** The PR adds a bench and its manifest row, and its evidence is a local paired run.
+**Cost (OD-5).** The PR adds a bench, in a commit of its own before any production edit, and its manifest
+row, in a later commit after the local run. Its evidence is that local paired run. "This PR's evidence",
+below, fixes the order of the steps.
 
 - **The bench.** Source `bench/session/engine_send_bench.cpp`. Target `engine_send_bench`, added in
   `bench/session/CMakeLists.txt` with `add_bench_with_test_include`, the helper that gives a bench the
@@ -1167,7 +1392,7 @@ inside `toApp` and changes: NC-17.
   send is started from the bench thread, outside any strand's handler, and each `co_spawn` runs as a
   dispatch on that thread. The row times the route's CPU cost. It does not time the wake-up of an io
   thread by a send started on another thread, which is a scheduling measurement; `L-023-2` keeps that
-  sentence (§4).
+  sentence (§4), and the foreign-thread probe below measures it locally, outside the gate.
 - **The manifest row,** in the session block of `bench/ci-suite.txt`, under comment lines that name this
   note and say what the bench times:
 
@@ -1178,13 +1403,30 @@ inside `toApp` and changes: NC-17.
 - **This PR's evidence.** CI does not compare a `paired` row that is absent from the merge base's
   manifest: `[const §VIII.2a]` makes it a candidate-only addition, gated on execution and schema and
   left out of the timing comparison for that PR. So the comparison is local: A-B-A-B on
-  `linux-clang-release`, compared min per tree. The bench source uses the public API and a test-support
-  header that exists at the merge base, and `Engine::send`'s signature does not change, so the same file
-  is compiled in a base worktree. The bench lands in a commit of its own before any production edit, and
-  the baseline is taken then. The base worktree's path is padded to the candidate path's length, because
+  `linux-clang-release`, compared min per tree. The bench source uses the public API and test-support
+  headers that exist at the merge base (`tests/support/transport_double.hpp`,
+  `tests/support/fix44_dictionary.hpp`), and `Engine::send`'s signature does not change, so the same file
+  and the same target lines build in a base worktree. The order is fixed. (1) One commit, before any
+  production edit, adds `bench/session/engine_send_bench.cpp` and its target in
+  `bench/session/CMakeLists.txt`, and nothing else: no manifest row, no `MANDATORY_PAIRED` entry. (2) The
+  production edits. (3) The local A-B-A-B run, with both same-tree spreads, and the foreign-thread probe
+  on both trees ("The foreign-thread probe", below). (4) One commit with the manifest row, the
+  `MANDATORY_PAIRED` entry and the erratum in `.specify/ci209-bench-gate.md`. A run at step 1 checks reach
+  and gives a first look at the spread; it is not a leg of the comparison. If the bench source changes
+  after step 1, step 3 is run again on both trees. The base worktree's path is padded to the candidate
+  path's length, because
   a path of another length shifts code layout. The result goes into the verification record whichever
   way it falls; a slowdown beyond the budget of `[const §VIII.2]` needs the acceptance that article
   describes.
+- **The local run's command.** Each leg runs the bench binaries with the Google Benchmark flags that
+  `ci/run-bench-suite.sh` passes: by hand, or by that script given an explicit manifest as its last
+  argument, a scratch file that lists the binaries of this run. The shipped manifest cannot serve: it has
+  no row for `engine_send_bench` before step 4 and none for `session_send_bench`. Base and candidate
+  alternate. With those flags each leg's JSON holds aggregate rows only, and "min per tree" is, for each
+  benchmark, the minimum over a tree's legs of each leg's median `cpu_time`, the statistic `run_paired` in
+  `tools/bench_compare.py` takes. `tools/bench_compare.py --paired` itself is not the instrument for this
+  comparison: it leaves a `paired` row that is absent from the base manifest out of the timing
+  comparison, which is why the comparison is local.
 - **The same-tree spread.** The comparator fails a run in which a `paired` row's two measurements of one
   tree differ by more than its noise band, and CI takes no such reading for a row in the PR that adds
   it. So the local run also records the spread between the two base runs and between the two candidate
@@ -1197,8 +1439,17 @@ inside `toApp` and changes: NC-17.
   and so pay the counter writes on the inbound read; and `bin/session_send_bench`, whose two cases pay
   the depth test and whose `to_app` case pays an outbound callback's counter writes.
   `on_inbound_frame_bench`'s manifest status does not change; `session_send_bench` has no manifest row
-  and is run by hand. Probe p1 is re-run for the reply path: the nested arm must not be slower than
-  its base beyond the probe's own run-to-run spread.
+  and is run by hand. These benches are read under the same rule as the route bench: A-B-A-B, min per
+  tree, `[const §VIII.2]`'s budget, and the result goes into the verification record whichever way it
+  falls. Probe p1 is re-run for the reply path: the nested arm must not be slower than the same arm built
+  against the base tree, beyond the probe's own run-to-run spread.
+- **The foreign-thread probe.** v0.4's second probe: it times `Engine::send` from a foreign thread, base
+  against candidate. The first OD-5 ruling promoted it to a paired bench; the manifest's selection rule
+  does not admit a binary of that kind ("One thread", above), so the paired bench above is the PR's gated
+  evidence in its place (§0). The probe is kept as a local measurement, at step 3: it is run on the base
+  tree and on the candidate, and its result goes into the verification record whichever way it falls. It
+  is not gated: it has no manifest row and no pass criterion. Its source goes beside p1 in the parent
+  repo's `research/probes/b41_563_564/`, outside the PR's tree.
 - **The known cost of the ruling.** A `paired` row cannot be removed or downgraded once merged
   (`[const §VIII.2a]`).
 
@@ -1206,7 +1457,8 @@ inside `toApp` and changes: NC-17.
 over the changed manifest (`ci/run-bench-suite.sh` on the candidate build), every Tier 1 source-audit job
 (the `co_spawn` closure audit and its census reconciliation read `engine.cpp`'s spawn sites, which change),
 `check_line_citations.py --shift-audit origin/main..HEAD` (023's bundle cites `engine.cpp` by line), and
-`check-comment-claims.py`.
+`check-comment-claims.py`, which is in the parent repo's `.claude/scripts/` and is run with the library
+as its `--root`. The `[const §XVII.7]` local build and the MSVC leg are in §0a.
 
 ## 4. Disclosures, documentation and catalogue
 
@@ -1273,7 +1525,7 @@ rewritten a site, its family is checked against the base tree instead (`git grep
 | the same | (read) the reentrancy contract says nothing about a callback that runs the session's executor | R-7's sentence added: a callback must not run the session's own executor |
 | `include/fixpp/core/session_executor.hpp` | (read) the comment on choosing a threading mode lists "a single-thread `io_context`" as an executor the attestation fits, with no condition | R-7's sentence added there |
 | `include/fixpp/session/session_config.hpp`, `include/fixpp/core/error.hpp`, `include/fixpp/core/trace_context.hpp`, `.specify/2l-tap.md`, `.specify/2j-controlplane.md` | (read) they name the attestation knob: when it is required, the error for its absence, an example with it off, and two design documents that mention it in passing | No change: none says what the attested executor may do inside a callback |
-| the same | the comment on `send_fallback_leaf_` ("a send nested in toApp") and on the engine-stop flag ("`logon_arm_superseded` reads it") | Rewritten in place: a send deferred from `toApp`; a second reader, `Engine::send`'s hit path |
+| `include/fixpp/session/session.hpp` | the comment on `send_fallback_leaf_` ("a send nested in toApp") and on the engine-stop flag ("`logon_arm_superseded` reads it") | Rewritten in place: a send deferred from `toApp`; a second reader, `Engine::send`'s hit path |
 | `include/fixpp/session/message_store.hpp` | `store`'s doc comment says nothing about concurrent calls | R-6's requirement added |
 | `include/fixpp/session/application.hpp` | the callbacks' comments say nothing about a send or a close started inside them | A sentence per callback kind added, from §2.1's and §2.1a's tables |
 | `include/fix/c_api/session.h` | the blocking thunk "posts onto the same strand" | No change: it describes the C ABI's blocking call, which this PR does not change. The file is not reformatted |
@@ -1283,7 +1535,7 @@ rewritten a site, its family is checked against the base tree instead (`git grep
 | the same | `open()`'s comment at `onCreate` (the scope is dropped "so onLogout … can acquire its own … without hitting the re-entrancy assert") and the "T019 note" comments at the inbound sites | Rewritten in place: a nested scope is legal on one thread; what those sites now rely on is the depth being back to its entry value |
 | `src/session/session_engine_access.hpp` | the engine-stop flag "Logon arms test" | Rewritten in place; the reader OD-3 needs is added beside the setter |
 | `spec/behaviors-and-limitations.md` | `B-019-3` ("posts onto the per-session strand", "enqueued behind the current dispatch") and `B-023-2` ("`send` traverses caller→control→session") | Each rewritten in place |
-| the same | `L-023-2`, whose title is "No dedicated `Engine::send` two-hop / establish-churn perf micro-bench" and whose text defines its subject as "the two-hop send (`caller→control→session`)" | Rewritten in place and kept open, for its establish-churn half only (OD-5). What goes: the two-hop send as a subject, and the sentence that a send micro-bench "would be dominated by TLS-loopback setup". What is added: the send route is measured by `bin/engine_send_bench`, a `paired` row, since this PR, on one thread; the wake-up of an io thread by a send started on another thread is not timed. What remains, as the row's subject and its follow-up: no bench times the snapshot's republish on session establishment and teardown, and the recorded fact that the snapshot atomic is not lock-free on the supported standard libraries (`B-023-3`). Status stays "follow-up" |
+| the same | `L-023-2`, whose title is "No dedicated `Engine::send` two-hop / establish-churn perf micro-bench" and whose text defines its subject as "the two-hop send (`caller→control→session`)" | Rewritten in place and kept open, for its establish-churn half only (OD-5). What goes: the two-hop send as a subject, and the sentence that a send micro-bench "would be dominated by TLS-loopback setup". What is added: the send route is measured by `bin/engine_send_bench`, a `paired` row, since this PR, on one thread; the wake-up of an io thread by a send started on another thread is not timed by a gated bench. What remains, as the row's subject and its follow-up: no bench times the snapshot's republish on session establishment and teardown, and the recorded fact that the snapshot atomic is not lock-free on the supported standard libraries (`B-023-3`). Status stays "follow-up" |
 | the same | (read) `L-007-2`: a `direct_executor` attested over a non-serialising executor is undefined in release and asserts in debug | Widened in place (R-7): same-thread re-entry, a callback that runs the session's own executor, is named beside concurrent entry, with the same disposition and status |
 | the same | `L-050-6`, which lists "`Engine::send`'s control-strand hop and session-strand hop" in the chain a C-ABI send awaits | That clause rewritten in place |
 | the same | `L-544-3`, `L-544-4` | Moved to the closed file |
@@ -1310,8 +1562,8 @@ rewritten a site, its family is checked against the base tree instead (`git grep
 | `tests/session/test_application_engine_send.cpp`, `tests/session/test_application_outbound.cpp` | the re-entrant cells' prose ("posted behind the current dispatch", "releases in_dispatch_", "must enqueue behind the current dispatch") | Rewritten in place: the deferral in these cells is the test's own post |
 | `tests/session/test_application_engine_send.cpp` | (read) `SendDrainRaceNoUAF`'s comments: its hook "posts stop()", and its `total` emission "cancels Engine::send's inner coroutine" | Rewritten in place to what the cell does (§3): the hook starts `stop()` inline, and the emission is dropped by the chain's filter. The cell's assertions are not changed; fixpp#579 inherits it |
 | `spec/coverage-index.md` | 023's entry records "send micro-bench → L-023-2" | That clause gets a pointer in place: the send route's bench was delivered by this PR, and `L-023-2` now tracks establish-churn. This PR gets its own entry |
-| `bench/ci-suite.txt`, `bench/session/CMakeLists.txt` | — | The manifest row and the target of §3 ("Cost"); `bench/session/engine_send_bench.cpp` is new |
-| `.specify/ci209-bench-gate.md` | (read) the bench gate's design record. Its census names the binaries of the paired tier and is already behind the manifest, and its promotion rule asks a binary added to that tier for a history of same-tree spread | An erratum appended at the end: `engine_send_bench` joins the paired tier as a row born `paired` (`[const §VIII.2a]`, OD-5), on the local spread check of §3 ("Cost") and without that history. The census is re-derived by the commands the record gives, not copied |
+| `bench/ci-suite.txt`, `bench/session/CMakeLists.txt` | — | The target of §3 ("Cost") and `bench/session/engine_send_bench.cpp`, which is new, in a commit of their own before any production edit; the manifest row in a later commit, after the local run (§3, "This PR's evidence") |
+| `.specify/ci209-bench-gate.md` | (read) the bench gate's design record. Its census names the binaries of the paired tier and is already behind the manifest, and its promotion rule asks a binary added to that tier for a history of same-tree spread | An erratum appended at the end, in the commit that adds the manifest row: `engine_send_bench` joins the paired tier as a row born `paired` (`[const §VIII.2a]`, OD-5), on the local spread check of §3 ("Cost") and without that history. The census is re-derived by the commands the record gives, not copied |
 | `ci/test-bench-gate.sh` | (read) `MANDATORY_PAIRED`, the floor that keeps a `paired` row of the shipped manifest from being downgraded | `engine_send_bench` is added to the list, in the commit that adds the manifest row |
 | `tests/session/test_session_plaintext_roundtrip.cpp` | the fixpp#518 block comment: a close started by `co_spawn` in a callback "would run close() inline inside the callback" | Rewritten in place: after R-4 it would wait. The cells keep their `asio::post` and are unchanged in behaviour |
 | `tests/session/test_business_messages_roundtrip.cpp`, `tests/interop/test_business_message_interop.cpp`, `tests/interop/conversation/conv_cell_test.cpp` | "re-entrant `Engine::send` from inside `fromApp`", with the note that the call is hoisted by `asio::post` | No change: each says that it posts |
@@ -1350,10 +1602,18 @@ and quickstart, which repeat the same statements; the flag is on the bundle and 
   - the arm that called the callback can resume on a closing or closed session, wherever it suspends
     after the callback (a persistent store; any arm that answers the frame);
   - a terminal close started in `toApp` or `toAdmin` can leave the outer frame retained and not
-    transmitted, its send in error (P-1), and its outcome with `reset_on_disconnect` set is the measured
-    one (P-1a);
+    transmitted, its send in error (P-1, measured for `toApp`);
+  - with `reset_on_disconnect` set, the outer frame's write can reach a transport that is already
+    closed. Where the transport refuses it, nothing is transmitted and the send returns
+    `dispatch_aborted`, and the teardown reset leaves the store empty with both next numbers at their
+    initial value (P-1a, measured for `toApp`);
   - frames already read with the frame whose callback asked for the close can be processed before the
-    close begins, on a store that does not suspend the arm (P-3);
+    close begins, on a volatile store, which does not suspend the arm (P-3, measured on a
+    `MemoryStore`). On a persistent store the arm suspends in its persist, the close runs there, and the
+    later frames' callbacks do not run (measured on a `FileStore`, the same row);
+  - a close started in `onCreate` on an initiator that an application drives itself ends the session
+    after its Logon has been transmitted, with no Logout (P-5, measured). Under the Engine an
+    application has nothing to close with in `onCreate` (§2.1a);
   - on a TLS transport a write can begin while the transport's `close_async` is suspended; what the
     transport does with it is not measured (§7).
 - **`Engine::send` through the snapshot (R-2):** the hit path and the condition on the caller under which
@@ -1371,7 +1631,8 @@ and quickstart, which repeat the same statements; the flag is on the bundle and 
 - **`MessageStore::store` (R-6):** calls complete in the order they were made; a store that completes two
   calls out of order has their frames transmitted out of order (NC-14). This binds every existing
   implementation of the interface.
-- **A limitation: a nested send that disconnects inside an inbound callback** (§2.5, each route it lists).
+- **A limitation: a nested send that disconnects inside an inbound callback or `onLogon`** (§2.5, each
+  route it lists).
 - **A limitation: `Engine::stop()` started from an application callback** (R-5). On one io thread it can
   close the session's transport before the callback returns; on several it depends on whether the control
   strand is idle. Sends already queued on that session's strand, which today are sent, are refused with
@@ -1393,13 +1654,18 @@ follow-up.
 - The threading contract gains a sentence (R-7). It states what `L-007-2` already made undefined for a
   false attestation, for a case no sentence named.
 - The C ABI's symbols, types and error codes do not change, and no call that succeeds today fails
-  afterwards (OD-6 withdrawn). The reason is §2.4's last row. OD-3 refuses only sends that the
-  control-strand read refuses today, with the same error. The sends it refuses and today's code admits
-  are on a route the C ABI cannot take. And a send that races `fixpp_engine_destroy` from another thread
+  afterwards (OD-6 withdrawn). The reason is §2.4's last row. Outside the route R-5 sets aside, OD-3
+  refuses only sends that the control-strand read refuses today, with the same error. The sends it
+  refuses and today's code admits are on that route, which the C ABI cannot take. And a send that races
+  `fixpp_engine_destroy` from another thread
   has an outcome that depends on timing today and still does; the window in which it is admitted is
-  wider. A consumer can observe that widening: such a send may succeed where it failed before. A call
-  that failed and can now succeed is not a breaking change under `[const §X.7]`. No version bump, and no
-  BREAKING clause. P-11 measures the reading before the PR proceeds.
+  wider. A consumer can observe that widening: such a send may succeed where it failed before. Under
+  `[const §X.7]` a change is breaking when a call a consumer could already make fails, or returns a
+  result other than the one documented. Neither holds: the outcome of a send that races
+  `fixpp_engine_destroy` depended on timing, and no documentation promises that it fails (re-derive: read
+  the comments on `fixpp_session_send` in `include/fix/c_api/session.h` and on `fixpp_engine_destroy` in
+  `include/fix/c_api/engine.h`). No version bump, and no BREAKING clause. P-11 measured the reading on
+  the base tree, and it agrees (§3).
 
 ## 5. Rejected alternatives
 
@@ -1508,10 +1774,11 @@ Added at Gate A round 2:
 - **Declare OD-3 a breaking C-ABI change** (the first OD-6 ruling). Withdrawn by the owner on the
   corrected premise (§0, §2.4): a BREAKING paragraph would describe a failure no consumer can observe.
 
-## 6. Open decisions for Gate A and the owner
+## 6. Decisions, all settled
 
 **Settled at round 1.** The triage judged each of v0.3's three; none is reopened unless a later round
-finds the judgement wrong.
+finds the judgement wrong. OD-2 is not in the list: it was v0.2's question about an inbound arm whose
+callback closed the session, and R-4 settled it at v0.3.
 
 - **OD-1 — the result of a deferred send cancelled before it starts: `dispatch_aborted`, with no state
   change.** Sound, on two conditions that this revision writes in. The result has to be produced by an
@@ -1537,20 +1804,21 @@ finds the judgement wrong.
 implements it.
 
 - **OD-5 — how `[const §VIII.3]` is met: a bench for `Engine::send` in this PR, with a `paired` manifest
-  row.** §3 ("Cost") has the source file, the target, what it times, the isolation, the row, and how this
-  PR's evidence is produced. `L-023-2` closes for the send route and stays open for establish-churn (§4).
+  row.** §3 ("Cost") has the source file, the target, what it times, the isolation, the row, how this
+  PR's evidence is produced, and the foreign-thread probe that is kept outside the gate (§0). `L-023-2`
+  closes for the send route and stays open for establish-churn (§4).
   The alternative v0.4 listed, two probes accepted as the PR's evidence, is gone.
 - **OD-6 — withdrawn: OD-3 is not a breaking change, and this PR declares no C-ABI change.** v0.4 said
   that a send whose session-strand work starts after `stop()`'s first step "can be transmitted today and
   is refused after this PR". By reading, today's control-strand read refuses that send already (§2.4).
   OD-3 stays. P-11 measures the reading as a first implementation step; a transmitted send there returns
-  the question to the owner.
+  the question to the owner. It was run on 2026-10-11, and no send was transmitted there (§3).
 - **Same-thread re-entry (the triage's Q2-1) — outside the contract: R-7.** §2.1 has the setups and the
   contract sentence, §2.2 the assertions, §4 the widened `L-007-2`, and §5 the latch and the run-time
   refusal that were not taken.
 
-No decision is open. Outstanding, as steps and not as decisions: P-11's measurement, which gates the
-rest of the implementation; `/analyze` over the converged note; and the owner's `/plan` sign-off (§0a).
+No decision is open. `/analyze` ran over v0.6 and the owner's `/plan` sign-off is given (§0a). P-11,
+which gated the rest of the implementation, is measured and agrees (§3).
 
 ## 7. What this does not decide
 
@@ -1582,8 +1850,10 @@ rest of the implementation; `/analyze` over the converged note; and the owner's 
   (R-5, fixpp#579), beyond the one effect of OD-3 on that route that §2.1a states.
 - The further copies of the payload on `Engine::send`'s path: its own copy, then the session-strand
   body's, then the deferred path's when that is taken.
-- What `Engine::send` costs across threads, and a bench for establish-churn. The new bench times the
-  route on one thread (§3, "Cost"); `L-023-2` stays open for the rest.
+- A gated bench for what `Engine::send` costs across threads, and a bench for establish-churn. The new
+  bench times the route on one thread, and the foreign-thread probe is a local measurement that is
+  reported and not gated (§3, "Cost"). `L-023-2` stays open for establish-churn; the cross-thread wake-up
+  is a sentence in that row, not its subject.
 - What a callback that runs the session's own executor gets on a build without assertions (R-7,
   `L-007-2`).
 - Whether `register_session` should republish the snapshot; two comments in `engine.cpp` and `engine.hpp`
@@ -1594,8 +1864,10 @@ rest of the implementation; `/analyze` over the converged note; and the owner's 
 - Round 1 applied 2026-10-11: Codex P1=3 P2=4 P3=1; Opus post-judging P1=2 P2=12 P3=5; rewrite addresses root causes 1–5 and the stand-alone items N-2, N-7, N-8, N-9, N-10, N-11, N-12 and F-5. Reviews: research/reviews/codex_563_564_1_callback-send_review.md, research/reviews/opus_563_564_1_callback-send_triage.md (parent repo).
 - Round 2 applied 2026-10-11: Codex P1=3 P2=4 P3=1; Opus post-judging P1=0 P2=7 P3=9; rewrite addresses root causes 1–4 and the stand-alone items F-5, F-7, F-8, N2-4, N2-6, N2-7, N2-8 and N2-9. Reviews: research/reviews/codex_563_564_2_callback-send_review.md, research/reviews/opus_563_564_2_callback-send_triage.md (parent repo).
 - Round 3 (on v0.5) 2026-10-11: Codex P1=0 P2=2 P3=2; Opus post-judging P1=0 P2=0 P3=9. Converged. Codex's two P2 findings (the owner token's exit order; the snapshot read having no witness) were judged P3. Reviews: research/reviews/codex_563_564_3_callback-send_review.md, research/reviews/opus_563_564_3_callback-send_triage.md (parent repo).
-- v0.6 applies the nine P3 items of round 3 after convergence; these edits were not reviewed. Owner sign-off 2026-10-11.
+- v0.6 applies the P3 items of round 3 after convergence, except Codex F-2, which the owner declined; these edits were not reviewed. Owner sign-off 2026-10-11.
 - The assertion at the `onLogon` and `onLogout` sites that the outbound depth is zero (§2.2) was added after the final review, at the owner's choice. The triage offered it as optional under N3-2. It has had no review: neither reviewer saw its nesting rows, its death arm (NC-19's lifecycle arm) or its mutant row.
+- v0.7 (2026-10-11) applies the findings of the `/analyze` pass over v0.6 (report: research/reviews/analyze_563_564_callback-send.md, parent repo) and records the P-4 and P-11 measurements; these edits were not reviewed.
+- v0.7 also records, with no change of version, the measurements made on 2026-10-11 before any production edit: P-1 for a close started in `toApp`, P-1a, P-1b, P-1c, P-2, P-3, P-5 and P-6, and an early reading of P-10 (§3 has each with its evidence, research/probes/b41_563_564/p0b_runs.output.txt and p0b_measurements.patch, parent repo). None disagreed. It also records decisions of the orchestrator: at the stack-arena overload and at the `onLogon` and `onLogout` sites the depth assertion is evaluated after the site's scope and before its callback (§2.2), which replaces what the F1 line below says was left, and is listed in §3 as specified without a witness; and NC-11 has a positive-control arm (§3). The passages these changed are in the header, §2.1 ("Writer"), §2.1a, §2.2, §2.5, §3 and §4. None of this was reviewed.
 
 ### Round 1 — disagreements
 
@@ -1664,8 +1936,9 @@ Stated so that round 3 can judge each one:
   overload and `validate_inbound_`, because the validate gate parses a nested frame over the buffer
   before dispatch and can end the arm before the overload is reached. NC-19's validate arm and its mutant
   row are the witness.
-- **N2-2, one case stays undetected,** and §2.2's table says so: an emit that is not a send, begun inside
-  an inbound or lifecycle callback. The triage's two assertions do not catch it and nor do these.
+- **N2-2, one case stays undetected** at this round, and §2.2's table says so: an emit that is not a
+  send, begun inside an inbound or lifecycle callback. The triage's two assertions do not catch it and
+  nor do these. Round 3's N3-2 added a second undetected case (below).
 - **F-1, which sessions are exposed.** The triage describes the read pump's next completion running
   inside `fromApp` under `direct_executor`. By source, every session under the Engine adopts a strand the
   Engine made, whatever its `mode` (`Engine::start()` sets `engine_adopt_strand`; `Session::open()` uses
@@ -1694,7 +1967,8 @@ Stated so that round 3 can judge each one:
 
 ### Round 3 — how each P3 was applied
 
-Hand edits after convergence, one line per finding. None was reviewed.
+Edits after convergence, applied by a sub-agent from the judge's fix shapes, one line per finding. None
+was reviewed.
 
 - **Codex F-1:** §2.2's token row states the order: the swap is the scope's first action and the clear
   its last.
@@ -1719,3 +1993,86 @@ Hand edits after convergence, one line per finding. None was reviewed.
   NC-16's control arm and P-10 say that the fixture's strand is the outer one, not the session's own.
 - **N3-5:** §1 scopes "the only way in" to `Application` callbacks and names the store's synchronous
   part and the config-time `transport_send`; §2.1a's bullet covers a send as well as a `close()`.
+
+### v0.7 — how each /analyze finding was applied
+
+Edits applied by a sub-agent from the `/analyze` report and from the orchestrator's dispositions at its
+end, one line per finding. None was reviewed. The report's line numbers are v0.6's.
+
+- **A1:** §2.1 ("The payload") says that `Engine::send` copies the payload twice before `Session::send`
+  runs and that the deferred path makes a third copy, as §2.3 and §7 have it.
+- **A2:** §2.3's step 3 says that the rule has no witness and that `~Engine` already forbids the scenario.
+- **A3:** §7 says that `L-023-2` stays open for establish-churn.
+- **A4:** §3's UBSan line describes each depth as §2.1 and §2.2 do.
+- **B1:** §3 ("Cost") fixes the order: the bench's commit, the production edits, the local run, the
+  manifest's commit. §4's rows agree.
+- **B2:** a mutant that stays green is settled before the verification record's verdict is written.
+- **B3:** NC-11 says "close modes".
+- **B4:** §2.1's step 5 names the check that refuses a send after a close has finished.
+- **B5:** §3's introduction to the predictions says which measurements run on today's tree and which on
+  a scratch build.
+- **B6:** §3's first paragraph keys the arms on assertions and on `NDEBUG`, and says that every cell also
+  passes in a whole-binary run.
+- **B7:** NC-2, NC-3, NC-16 and NC-18 state each open parameter as the implementer's choice, with what
+  constrains it.
+- **C1:** NC-11 names its observable for "no liveness loop" (the mock clock's parked sleeps, with a
+  non-zero heartbeat interval) and the route of the `Disconnected` write outside `close()` (a frame with
+  another BeginString). The fixture list follows.
+- **C2:** NC-13 names its ASan arm, the terminal close started in `fromApp`; the ASan line agrees.
+- **C3:** §3 ("Cost") puts the in-tree benches under the route bench's rule, names the local run's
+  command, and says what p1's base is.
+- **C4:** NC-6 asserts its outer operation's result, and whether the store and the manager agree, as
+  measured.
+- **C5:** NC-7 says how its graceful arm ends the wait.
+- **C6:** §3 names the close cells and excepts a row that fixes the transport or the store.
+- **C7:** the coverage scope includes `src/session/session_engine_access.hpp`.
+- **C8:** §2.1's table has a row for `onLogout` and `onCreate`, written from `Session::send`'s Active
+  check and from the order of the write and the callback in `record_state_transition_`.
+- **C9:** §3 says where NC-9's test access, NC-14's store double and NC-19's validate arm go, and where
+  `check-comment-claims.py` is.
+- **D1:** the header, §0a and §6 record the Appendix A controls as done, with the owner's words on the
+  plan sign-off.
+- **D2:** §0a and the first line under "Round 3 — how each P3 was applied" say who applied each revision.
+- **D3:** §0a has the `[const §VII.3]` disposition.
+- **D4:** the text route. §0a has the allocation disposition, and §2.1 names the copy's storage. Flagged
+  to the owner.
+- **D5:** §2.4 and §4 ("Compatibility") state the article's conditions. The re-derivation was read
+  against the comments in both C-ABI headers before it was written.
+- **D6:** §0a's Gate A bullet is in the past tense, and §0a has a bullet for the `[const §XVII.7]` build
+  and the MSVC leg.
+- **E1:** R-3 is referenced in §2.5, in NC-13's row and on the ASan line.
+- **E2:** the text route. The default mode's immunity is listed as specified without a witness, and
+  P-10's last column is reworded.
+- **E3:** "Mutant first" names every exception, and NC-2's `fromAdmin` arm joins the second mutant row.
+- **E4:** the sends R-2 admits, and OD-3's refusal on R-5's route, are listed as specified without a
+  witness.
+- **E5:** the row of `ToAppStartsClose_Terminal` has P-1a's arm.
+- **E6:** the controls row names `ToAdminStartsSend_AssignFirstSite_Sequential`.
+- **E7:** §0 says what OD-1, OD-3 and OD-4 are and where each is used; §2.1, §2.1a and §2.3 reference
+  NC-2, NC-6, NC-1 and OD-4; §6 says what OD-2 was.
+- **F1:** the text route, in part. §2.2 narrows the cross-thread claim: the parse sites and the
+  stack-arena overload's entry read a depth before a token is reached. The report's wording that puts
+  the stack-arena overload's assertion and the lifecycle sites' after their scopes is not applied: it
+  moves an assertion, and the disposition says that none moves. Settled afterwards by the orchestrator
+  (the `## Gate A` list): both are evaluated after their scopes and before their callbacks. By source
+  each scope is constructed immediately before its callback, so neither assertion moves relative to
+  its callback, and §2.2 now says so.
+- **F2:** the coverage waiver covers the assertion at the `onLogon` site.
+- **F3:** §2.1 says that the lifecycle sites do not write the outbound depth and that the `onLogon` and
+  `onLogout` sites read it.
+- **F4:** P-4's row has its arms as the probe ran them.
+- **F5:** §0's OD-5 bullet says that the paired bench is single-threaded and replaces the foreign-thread
+  probe as the gated evidence. §3 ("Cost") keeps that probe as a local step. §4's `L-023-2` text, §6 and
+  §7 agree.
+- **F6:** §0's R-5 bullet and §4 ("Compatibility") are scoped to the route R-5 sets aside.
+- **F7:** §2.1 says that NC-16's fourth arm runs on `ExecKind::strand`.
+- **F8:** the header, §0's paragraph on the record, §1's GapFill paragraph, the paragraph under §2.1's
+  table, §2.5, §4's limitation bullet, the round-2 line on N2-2 and this section's line on v0.6 are
+  corrected.
+- **The measurements:** the rows of P-4 and P-11 record each result and its evidence files. The header,
+  §0, §0a, §2.1, §2.1a, §2.4, §4 and §6 say what has been run. §2.1 has the cancellation that a later
+  emission erases. §2.4 no longer says that the Active check bounds a send admitted during `stop()`.
+- **From the task-list derivation:** NC-17's order assertion joins the first mutant row, and its
+  assertion on the outer frame's bytes is named a pin. The GapFill and failure-exit branches of §2.1's
+  first-yield table are listed as specified without a witness. §4's ambiguous "the same" row names
+  `include/fixpp/session/session.hpp`.
