@@ -100,6 +100,44 @@
 //                             the same, with fromApp returning an error after
 //                             it started the send, which asks the session for a
 //                             BusinessMessageReject.
+//   FromAppStartsClose_Terminal
+//                             batch B41, characterisation; no send is involved.
+//                             fromApp starts Session::close(terminal) with a
+//                             co_spawn on the session's executor. Prints the
+//                             state and lifecycle inside fromApp, when
+//                             on_inbound_frame completed and at the end; both
+//                             results; the callbacks and the two completion
+//                             handlers in order; the frames transmitted; the
+//                             sequence numbers. Asserts only that the path was
+//                             driven and that on_inbound_frame completed.
+//   FromAppStartsClose_Graceful
+//                             the same with close(graceful), whose Logout goes
+//                             through toAdmin. No peer Logout is fed, so the
+//                             close ends on its own wait, which the cell
+//                             shortens through logout_disconnect_timeout_ms.
+//   FromAppStartsClose_Terminal_FileStore
+//                             the terminal cell on a FileStore, where the
+//                             inbound arm persists its number after fromApp.
+//   FromAdminStartsClose_Terminal
+//                             fromAdmin for an inbound TestRequest starts
+//                             close(terminal); the arm goes on to its Heartbeat
+//                             reply after fromAdmin returns.
+//   DISABLED_MemoryCheckerPositiveControl_UseAfterFree
+//                             a control for a memory checker, not a measurement
+//                             of fixpp: reads a heap block after deleting it.
+//                             It runs only with --gtest_also_run_disabled_tests,
+//                             and then only in a binary built with
+//                             AddressSanitizer or with
+//                             B41_RUN_UNDER_MEMORY_CHECKER=1 in the environment
+//                             (for valgrind's memcheck on an uninstrumented
+//                             binary); otherwise it is skipped. A checker that
+//                             reports nothing for this cell cannot report a
+//                             use-after-free for any other.
+//
+// Running the callback-starts-close cells under a memory checker: this fixture
+// keeps the Session on the test's stack for the whole cell, so no cell frees the
+// Session while one of its arms is running or suspended. What a sanitizer can
+// see here is a read or write of something close() itself released.
 //
 // Witness, asserted first in every nested cell: the nested send's toApp ran
 // while the outer callback was still on the stack. Without it a pass of the
@@ -140,6 +178,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
@@ -275,6 +314,8 @@ public:
     std::function<void(std::string_view)> on_to_admin;
     // Called with "onLogon" or "onLogout".
     std::function<void(const char*)> on_lifecycle;
+    // Called with the inbound admin frame's MsgType(35).
+    std::function<void(std::string_view)> on_from_admin;
     // What fromApp returns, after on_from_app ran.
     expected_t<void> from_app_result;
 
@@ -283,6 +324,14 @@ public:
         ++from_app_calls;
         if (on_from_app) on_from_app();
         return from_app_result;
+    }
+    expected_t<void> fromAdmin(const MessageView<access_mode::Index>& mv,
+                               const SessionId& /*id*/) override {
+        if (on_from_admin) {
+            const auto mt = mv.get(35);
+            on_from_admin(mt ? mt->as_string() : std::string_view{});
+        }
+        return {};
     }
     void onLogon(const SessionId& /*id*/) override {
         if (on_lifecycle) on_lifecycle("onLogon");
@@ -1235,6 +1284,195 @@ TEST(CallbackSend, FromAppSendsReply_NestedToAppThrows_FileStore) {
 
 TEST(CallbackSend, FromAppSendsReply_NestedToAppThrows_FromAppRejects) {
     run_nested_to_app_throws(StoreKind::memory, FromAppReturns::reject);
+}
+
+enum class CloseFrom { from_app, from_admin };
+
+// A callback of an Active session starts Session::close on the session's
+// executor, directly. Everything is recorded and printed; little is asserted.
+void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store) {
+    Fixture f{ExecKind::io_context, store};
+    auto cfg = f.cfg();
+    // close(graceful) waits this long for a peer Logout that this cell never feeds.
+    cfg.logout_disconnect_timeout_ms = 300;
+    Session sess{f.engine, cfg};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+    ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+
+    const auto ex = sess.executor().underlying();
+    const std::size_t wire_before = f.wire.size();
+    const char* callback_name = from == CloseFrom::from_app ? "fromApp" : "fromAdmin";
+
+    bool started = false;
+    bool in_callback = false;
+    bool close_done = false;
+    bool inbound_done = false;
+    std::string close_result = "not completed";
+    std::string inbound_result = "not completed";
+    std::string seen_in_callback = "not recorded";
+    std::string seen_when_inbound_done = "not recorded";
+    std::vector<std::string> events;  // from the close's start on, in order
+
+    const auto session_now = [&] {
+        return "state=" + std::to_string(static_cast<int>(sess.state())) +
+               " lifecycle=" + std::to_string(session_test_access::lifecycle_value(sess));
+    };
+    const auto where = [&] {
+        return std::string(in_callback ? " (callback on the stack)" : " (callback returned)");
+    };
+    const auto result_text = [](std::exception_ptr ep, const expected_t<void>& r) {
+        return ep  ? std::string("threw")
+               : r ? std::string("ok")
+                   : "error " + std::to_string(static_cast<int>(r.error()));
+    };
+    const auto start_close = [&] {
+        started = true;
+        in_callback = true;
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] %s: starting Session::close\n", callback_name);
+        asio::co_spawn(ex, sess.close(mode), [&](std::exception_ptr ep, expected_t<void> r) {
+            close_done = true;
+            close_result = result_text(ep, r);
+            events.push_back("close's completion handler" + where() +
+                             (inbound_done ? ", on_inbound_frame completed"
+                                           : ", on_inbound_frame not completed"));
+        });
+        std::fprintf(stderr, "[ B41 ] %s: co_spawn returned\n", callback_name);
+        seen_in_callback = session_now() + ", close " + close_result;
+        events.push_back(std::string(callback_name) + " returns");
+        in_callback = false;
+    };
+
+    if (from == CloseFrom::from_app) {
+        f.app->on_from_app = [&] {
+            if (!started) start_close();
+        };
+    } else {
+        f.app->on_from_admin = [&](std::string_view msg_type) {
+            if (msg_type == "1" && !started) start_close();
+        };
+    }
+    f.app->on_to_app = [&] {
+        if (started) events.push_back("toApp" + where());
+    };
+    f.app->on_lifecycle = [&](const char* name) {
+        if (started) events.push_back(std::string(name) + where() + " " + session_now());
+    };
+    f.app->on_to_admin = [&](std::string_view msg_type) {
+        if (started) events.push_back("toAdmin 35=" + std::string(msg_type) + where());
+    };
+
+    const auto inbound = from == CloseFrom::from_app ? peer_frame("D", 2,
+                                                                  "11=PEER-1\x01"
+                                                                  "54=1\x01"
+                                                                  "55=AAPL\x01")
+                                                     : peer_frame("1", 2, "112=B41-TR\x01");
+    asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{inbound}),
+                   [&](std::exception_ptr ep, expected_t<void> r) {
+                       inbound_done = true;
+                       inbound_result = result_text(ep, r);
+                       seen_when_inbound_done = session_now();
+                       events.push_back("on_inbound_frame's completion handler");
+                   });
+    // Bounded: an operation that does not complete is reported below, not waited for.
+    const bool completed = fixpp::test_support::pump_until(
+        f.ioc, [&] { return inbound_done && (close_done || !started); }, std::chrono::seconds{5},
+        fixpp::test_support::kPumpSlice, "CallbackSend::callback_starts_close");
+
+    // Store reads, each bounded and reported as text.
+    const auto store_next = [&](direction_t dir) -> std::string {
+        MessageStore* st = session_test_access::store(sess);
+        if (st == nullptr) return "no store";
+        std::string out = "read not completed";
+        bool done = false;
+        asio::co_spawn(f.exec, st->next_seqnum(dir, false),
+                       [&](std::exception_ptr ep, expected_t<seqnum_t> r) {
+                           done = true;
+                           out = ep  ? "threw"
+                                 : r ? std::to_string(*r)
+                                     : "error " + std::to_string(static_cast<int>(r.error()));
+                       });
+        (void)fixpp::test_support::pump_until(
+            f.ioc, [&] { return done; }, std::chrono::seconds{2}, fixpp::test_support::kPumpSlice,
+            "CallbackSend::callback_starts_close_store");
+        return out;
+    };
+
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    std::string event_text;
+    for (const auto& e : events) event_text += " [" + e + "]";
+    const std::string context =
+        std::string("Callback: ") + callback_name +
+        "; close mode: " + (mode == close_mode::terminal ? "terminal" : "graceful") +
+        ". Inside the callback after the co_spawn returned: " + seen_in_callback +
+        "; when on_inbound_frame completed: " + seen_when_inbound_done +
+        "; at the end: " + session_now() + "; on_inbound_frame: " + inbound_result +
+        "; close: " + close_result +
+        "; callbacks and completion handlers from the close's start on, in order:" +
+        (event_text.empty() ? " (none)" : event_text) +
+        "; frames transmitted after the inbound frame was fed: " + describe(sent) +
+        "; NextNumIn: manager=" + std::to_string(next_in(sess)) +
+        ", store=" + store_next(direction_t::inbound) +
+        "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
+        ", store=" + store_next(direction_t::outbound) + ".";
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+    if (!completed) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "CallbackSend::callback_starts_close");
+    }
+
+    ASSERT_TRUE(started) << "PATH NOT DRIVEN: the inbound frame did not reach " << callback_name
+                         << ". " << context;
+    EXPECT_TRUE(inbound_done) << "on_inbound_frame must complete. " << context;
+}
+
+TEST(CallbackSend, FromAppStartsClose_Terminal) {
+    run_callback_starts_close(CloseFrom::from_app, close_mode::terminal, StoreKind::memory);
+}
+
+TEST(CallbackSend, FromAppStartsClose_Graceful) {
+    run_callback_starts_close(CloseFrom::from_app, close_mode::graceful, StoreKind::memory);
+}
+
+TEST(CallbackSend, FromAppStartsClose_Terminal_FileStore) {
+    run_callback_starts_close(CloseFrom::from_app, close_mode::terminal, StoreKind::file);
+}
+
+TEST(CallbackSend, FromAdminStartsClose_Terminal) {
+    run_callback_starts_close(CloseFrom::from_admin, close_mode::terminal, StoreKind::memory);
+}
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define B41_BUILT_WITH_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define B41_BUILT_WITH_ASAN 1
+#endif
+
+// Not a measurement of fixpp: see the file header.
+TEST(CallbackSend, DISABLED_MemoryCheckerPositiveControl_UseAfterFree) {
+#ifdef B41_BUILT_WITH_ASAN
+    const bool run = true;
+#else
+    const char* opt_in =
+        std::getenv("B41_RUN_UNDER_MEMORY_CHECKER");  // NOLINT(concurrency-mt-unsafe)
+    const bool run = opt_in != nullptr && std::string_view{opt_in} == "1";
+#endif
+    if (!run) GTEST_SKIP() << "not built with AddressSanitizer, and not opted in for a checker";
+    auto* block = new int[4]{1, 2, 3, 4};
+    int* volatile dangling = block;
+    delete[] block;
+    std::printf("[ B41 ] reading a deleted heap block: %d\n", dangling[1]);
+    std::fflush(stdout);
+#ifdef B41_BUILT_WITH_ASAN
+    FAIL() << "AddressSanitizer did not stop the read of a deleted heap block.";
+#endif
 }
 
 }  // namespace fixpp::session::test
