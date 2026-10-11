@@ -27,6 +27,19 @@
 //   EngineSendFromFromAppOnSessionExecutor
 //                             the same, spawned on the acceptor session's
 //                             executor.
+//   MtEngineSendFromFromApp_Quiet
+//                             EngineSendFromFromApp's shape on an io_context
+//                             run by three threads, repeated: the initiator
+//                             sends one message at a time and waits for its
+//                             reply; every acceptor fromApp starts
+//                             engine.send(REPLY-k) directly. Prints how many
+//                             replies were nested, deferred, never ran.
+//   MtEngineSendFromFromApp_BusyControlStrand
+//                             the same while two foreign threads keep calling
+//                             Engine::send for a SessionId that is not
+//                             registered. Such a call runs on the engine's
+//                             control strand up to its registry lookup and
+//                             touches no session.
 //
 // Classification, printed by every cell and attached to every failure:
 //   nested     the second send's toApp ran while the callback that started it
@@ -57,6 +70,18 @@
 // session refused shows only as a missing delivery, an admin callback and a
 // state change.
 //
+// The multi-threaded cells classify per reply with a thread_local: the acceptor's
+// fromApp for message k marks its own thread with k around the co_spawn, and the
+// acceptor's toApp for REPLY-k reads the mark on the thread it runs on. Both
+// callbacks run on the acceptor's strand, so REPLY-k's toApp can see the mark k
+// only when it runs inside that fromApp. Per-reply records are written on one
+// session's strand each and read after the io threads are joined; what another
+// thread reads while they run is atomic or under a mutex. These cells assert
+// what must hold in every interleaving (each reply sent once, consecutive
+// MsgSeqNums on each side, both sessions Active) and print the rest. A build
+// with asserts also writes one stderr line per reply, so an abort shows how far
+// the cell got. No sanitizer build is part of these cells' procedure.
+//
 // Fixture: tests/session/test_application_engine_send.cpp's, one Engine holding
 // an acceptor and an initiator over loopback mTLS on one io_context run by the
 // test thread, plus a bounded MemoryStore on each session. A multi-threaded
@@ -67,14 +92,18 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/use_future.hpp>
+#include <atomic>
 #include <charconv>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -100,14 +129,17 @@
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <memory_resource>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -223,7 +255,8 @@ std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char*
 SessionConfig make_session_cfg(asio::io_context& ioc,
                                std::shared_ptr<fixpp::transport::TransportFactory> fac,
                                const char* sender, const char* target, session_role role,
-                               const char* peer_compid, uint16_t port) {
+                               const char* peer_compid, uint16_t port,
+                               std::size_t store_outbound_capacity = 16) {
     SessionConfig c;
     c.sender_comp_id = sender;
     c.target_comp_id = target;
@@ -241,7 +274,7 @@ SessionConfig make_session_cfg(asio::io_context& ioc,
     c.transport_send = [](std::span<const std::byte>) {};
     MemoryStore::Config sc;
     sc.inbound_capacity = 16;
-    sc.outbound_capacity = 16;
+    sc.outbound_capacity = store_outbound_capacity;
     sc.max_frame_bytes = 4096;
     c.store_factory = std::make_shared<MemoryStoreFactory>(sc);
     return c;
@@ -762,6 +795,477 @@ void run_and_check(Shape shape, SpawnOn spawn_on) {
     EXPECT_EQ(o.acc_state_end, active) << "ACC must stay Active. " << ctx;
 }
 
+// ── Multi-threaded cells ──────────────────────────────────────────────────────
+
+constexpr std::size_t kMtReplies = 2000;
+constexpr std::size_t kMtIoThreads = 3;
+constexpr std::string_view kMtPrefixA = "B41-A-";
+constexpr std::string_view kMtPrefixReply = "B41-R-";
+
+// The reply whose starting fromApp is running on this thread, or -1.
+thread_local long tl_reply_being_started = -1;
+
+std::vector<std::byte> mt_payload(std::string_view prefix, std::size_t k, char side) {
+    std::string p =
+        "35=D\x01"
+        "11=";
+    p += prefix;
+    p += std::to_string(k);
+    p += "\x01"
+         "54=";
+    p += side;
+    p += "\x01"
+         "55=AAA\x01";
+    return bytes_of(p);
+}
+
+// The k in "<prefix><k>", or -1.
+long mt_index(std::string_view id, std::string_view prefix) {
+    if (!id.starts_with(prefix)) return -1;
+    id.remove_prefix(prefix.size());
+    long k = -1;
+    const auto [ptr, ec] = std::from_chars(id.data(), id.data() + id.size(), k);
+    if (ec != std::errc{} || ptr != id.data() + id.size()) return -1;
+    return k;
+}
+
+enum class MtClass : std::uint8_t { never_ran = 0, nested = 1, deferred = 2 };
+
+struct MtDelivery {
+    long k;
+    seqnum_t seq;
+};
+
+struct MtReadings {
+    bool skipped = false;
+    bool setup_ok = false;
+    bool stopped = false;
+    std::size_t requested = 0;
+    std::size_t driven = 0;  // messages whose reply arrived back at the initiator
+    std::string stall;       // empty, or why the driver stopped early
+
+    // Written on the acceptor's strand; read after the io threads are joined.
+    std::vector<MtClass> classification;
+    std::vector<std::uint32_t> reply_to_app_calls;
+    std::vector<seqnum_t> reply_seq;
+    std::vector<MtDelivery> acc_deliveries;
+    // Written on the initiator's strand; read after the io threads are joined.
+    std::vector<std::uint32_t> a_to_app_calls;
+    std::vector<seqnum_t> a_seq;
+    std::vector<MtDelivery> ini_deliveries;
+
+    // Written by completion handlers and load threads, on any thread.
+    std::atomic<std::uint64_t> reply_sends_ok{0};
+    std::atomic<std::uint64_t> reply_sends_failed{0};
+    std::atomic<int> first_reply_send_error{0};
+    std::atomic<std::uint64_t> load_sends{0};
+    std::atomic<std::uint64_t> load_sends_not_unregistered{0};
+
+    std::mutex admin_mu;
+    std::vector<std::string> admin;  // admin callbacks after setup, any session
+
+    SessionSnapshot ini;
+    SessionSnapshot acc;
+    std::string ini_state_end = "not read";
+    std::string acc_state_end = "not read";
+
+    explicit MtReadings(std::size_t n)
+        : requested(n),
+          classification(n, MtClass::never_ran),
+          reply_to_app_calls(n, 0),
+          reply_seq(n, 0),
+          a_to_app_calls(n, 0),
+          a_seq(n, 0) {
+        acc_deliveries.reserve(n);
+        ini_deliveries.reserve(n);
+    }
+};
+
+struct MtTally {
+    std::size_t nested = 0;
+    std::size_t deferred = 0;
+    std::size_t never_ran = 0;
+    long first_nested = -1;
+    long first_deferred = -1;
+};
+
+MtTally tally(const MtReadings& o) {
+    MtTally t;
+    for (std::size_t k = 0; k < o.requested; ++k) {
+        switch (o.classification[k]) {
+            case MtClass::nested:
+                if (t.nested++ == 0) t.first_nested = static_cast<long>(k);
+                break;
+            case MtClass::deferred:
+                if (t.deferred++ == 0) t.first_deferred = static_cast<long>(k);
+                break;
+            case MtClass::never_ran:
+                ++t.never_ran;
+                break;
+        }
+    }
+    return t;
+}
+
+std::string mt_context(MtReadings& o, bool busy) {
+    const MtTally t = tally(o);
+    std::string out =
+        "Replies requested=" + std::to_string(o.requested) +
+        ", driven=" + std::to_string(o.driven) + ": nested=" + std::to_string(t.nested) +
+        " deferred=" + std::to_string(t.deferred) + " never ran=" + std::to_string(t.never_ran) +
+        "; first nested at reply " + std::to_string(t.first_nested) + ", first deferred at reply " +
+        std::to_string(t.first_deferred) + "; io threads=" + std::to_string(kMtIoThreads) +
+        "; control-strand load: " +
+        (busy ? std::to_string(o.load_sends.load()) +
+                    " Engine::send calls for an unregistered SessionId completed, " +
+                    std::to_string(o.load_sends_not_unregistered.load()) +
+                    " of them with a result other than session_invalid_argument"
+              : std::string("none")) +
+        "; reply sends ok=" + std::to_string(o.reply_sends_ok.load()) +
+        " failed=" + std::to_string(o.reply_sends_failed.load()) + " (first error " +
+        std::to_string(o.first_reply_send_error.load()) + ")" + "; deliveries: ACC " +
+        std::to_string(o.acc_deliveries.size()) + ", INI " +
+        std::to_string(o.ini_deliveries.size()) +
+        "; driver: " + (o.stall.empty() ? std::string("ran to the end") : o.stall) +
+        "; at the end: INI " + describe(o.ini) + "; ACC " + describe(o.acc) +
+        "; INI state=" + o.ini_state_end + " ACC state=" + o.acc_state_end +
+        "; admin callbacks after setup:";
+    const std::scoped_lock lk(o.admin_mu);
+    for (const auto& a : o.admin) out += " [" + a + "]";
+    out += ".";
+    return out;
+}
+
+// Runs one multi-threaded cell to a stopped engine and joined threads.
+void run_mt_cell(bool busy, MtReadings& o) {
+    const char* fd = get_fixture_dir();
+    if (!fd || fd[0] == '\0') {
+        o.skipped = true;
+        return;
+    }
+    const std::size_t n = o.requested;
+
+    asio::io_context ioc;
+    auto app = std::make_shared<RecordingApp>();
+    auto fac = make_tls_factory(fd);
+    if (!fac) {
+        ADD_FAILURE() << "setup: TLS factory failed";
+        return;
+    }
+
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.application = app;
+    ecfg.clock = make_mock_clock(ioc);
+    Engine engine{ioc.get_executor(), std::move(ecfg)};
+
+    const uint16_t port = reserve_free_port(ioc);
+    const std::size_t capacity = n + 64;
+    auto acc_cfg = make_session_cfg(ioc, fac, "ACCEPTOR", "INITIATOR", session_role::acceptor,
+                                    "INITIATOR", port, capacity);
+    auto ini_cfg = make_session_cfg(ioc, fac, "INITIATOR", "ACCEPTOR", session_role::initiator,
+                                    "ACCEPTOR", port, capacity);
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
+    const SessionId ini_id = SessionId::from_config(ini_cfg);
+    // A SessionId no session is registered under, for the control-strand load.
+    SessionConfig nobody_cfg;
+    nobody_cfg.sender_comp_id = "NOBODY";
+    nobody_cfg.target_comp_id = "NOWHERE";
+    nobody_cfg.begin_string = "FIX.4.2";
+    const SessionId nobody_id = SessionId::from_config(nobody_cfg);
+
+    // Every payload outlives every send: Engine::send reads its span when its body
+    // first runs, which may be after the callback that started it returned.
+    std::vector<std::vector<std::byte>> a_payloads;
+    std::vector<std::vector<std::byte>> reply_payloads;
+    a_payloads.reserve(n);
+    reply_payloads.reserve(n);
+    for (std::size_t k = 0; k < n; ++k) {
+        a_payloads.push_back(mt_payload(kMtPrefixA, k, '1'));
+        reply_payloads.push_back(mt_payload(kMtPrefixReply, k, '2'));
+    }
+
+    // Setup runs on the test thread alone; the io threads start once both sessions
+    // are Active.
+    const bool registered = engine.register_session(std::move(acc_cfg)).has_value() &&
+                            engine.register_session(std::move(ini_cfg)).has_value();
+    if (!registered || !engine.start().has_value()) {
+        ADD_FAILURE() << "setup: register_session or engine.start() failed";
+        return;
+    }
+    std::shared_ptr<Session> ini_h;
+    std::shared_ptr<Session> acc_h;
+    const auto active = [&](const SessionId& id) {
+        const auto h = engine.lookup(id);
+        return h && h->state() == fsm_state::Active;
+    };
+    const bool is_active = fixpp::test_support::pump_until(
+        ioc, [&] { return active(acc_id) && active(ini_id); }, 5s, fixpp::test_support::kPumpSlice,
+        "EngineCallbackSend/mt-active");
+    if (is_active) {
+        ini_h = engine.lookup(ini_id);
+        acc_h = engine.lookup(acc_id);
+    }
+    o.setup_ok = is_active && ini_h && acc_h;
+
+    std::atomic<bool> recording{o.setup_ok};
+    std::mutex mu;
+    std::condition_variable cv;
+    std::size_t replies_back = 0;  // under mu
+    const asio::any_io_executor exec{ioc.get_executor()};
+
+    const auto on_reply_done = [&o](std::exception_ptr ep, expected_t<void> r) {
+        if (!ep && r) {
+            o.reply_sends_ok.fetch_add(1);
+            return;
+        }
+        int expected_zero = 0;
+        o.first_reply_send_error.compare_exchange_strong(expected_zero,
+                                                         ep ? -1 : static_cast<int>(r.error()));
+        o.reply_sends_failed.fetch_add(1);
+    };
+
+    // Installed before the io threads start and never reassigned while they run.
+    app->on_from_app = [&](const View& mv, const SessionId& id) {
+        if (!recording.load()) return;
+        const std::string id11 = value(mv, 11);
+        const seqnum_t seq = to_seq(value(mv, 34));
+        if (id == acc_id) {
+            const long k = mt_index(id11, kMtPrefixA);
+            o.acc_deliveries.push_back({k, seq});
+            if (k < 0 || static_cast<std::size_t>(k) >= n) return;
+#ifndef NDEBUG
+            std::fprintf(stderr, "[ B41 ] reply %ld: starting\n", k);
+#endif
+            // The second send, started inside this callback: no post.
+            tl_reply_being_started = k;
+            asio::co_spawn(exec,
+                           engine.send(acc_id, std::span<const std::byte>(
+                                                   reply_payloads[static_cast<std::size_t>(k)])),
+                           on_reply_done);
+            tl_reply_being_started = -1;
+        } else {
+            const long k = mt_index(id11, kMtPrefixReply);
+            o.ini_deliveries.push_back({k, seq});
+            {
+                const std::scoped_lock lk(mu);
+                ++replies_back;
+            }
+            cv.notify_all();
+        }
+    };
+    app->on_to_app = [&](const View& mv, const SessionId& id) {
+        if (!recording.load()) return;
+        const std::string id11 = value(mv, 11);
+        const seqnum_t seq = to_seq(value(mv, 34));
+        if (id == acc_id) {
+            const long k = mt_index(id11, kMtPrefixReply);
+            if (k < 0 || static_cast<std::size_t>(k) >= n) return;
+            const auto i = static_cast<std::size_t>(k);
+            ++o.reply_to_app_calls[i];
+            o.reply_seq[i] = seq;
+            o.classification[i] = tl_reply_being_started == k ? MtClass::nested : MtClass::deferred;
+#ifndef NDEBUG
+            std::fprintf(stderr, "[ B41 ] reply %ld: %s\n", k,
+                         tl_reply_being_started == k ? "nested" : "deferred");
+#endif
+        } else {
+            const long k = mt_index(id11, kMtPrefixA);
+            if (k < 0 || static_cast<std::size_t>(k) >= n) return;
+            ++o.a_to_app_calls[static_cast<std::size_t>(k)];
+            o.a_seq[static_cast<std::size_t>(k)] = seq;
+        }
+    };
+    app->on_admin = [&](const char* callback, const View& mv, const SessionId& id) {
+        if (!recording.load()) return;
+        std::string line = std::string(id == ini_id ? "INI " : "ACC ") + callback +
+                           " 35=" + value(mv, 35) + " 34=" + value(mv, 34);
+        const std::string text = value(mv, 58);
+        if (!text.empty()) line += " 58=" + text;
+        const std::scoped_lock lk(o.admin_mu);
+        o.admin.push_back(std::move(line));
+    };
+
+    auto work = asio::make_work_guard(ioc);
+    std::vector<std::thread> io_threads;
+    for (std::size_t i = 0; i < kMtIoThreads; ++i) {
+        io_threads.emplace_back([&ioc] { ioc.run(); });
+    }
+
+    // The control-strand load: foreign threads, each keeping a few Engine::send calls
+    // for the unregistered id in flight.
+    std::atomic<bool> stop_load{false};
+    std::vector<std::thread> load_threads;
+    const auto load_payload = mt_payload("B41-LOAD-", 0, '1');
+    if (busy && o.setup_ok) {
+        for (int t = 0; t < 2; ++t) {
+            load_threads.emplace_back([&] {
+                constexpr std::size_t kInFlight = 8;
+                while (!stop_load.load()) {
+                    std::array<std::future<expected_t<void>>, kInFlight> futs;
+                    for (auto& f : futs) {
+                        f = asio::co_spawn(
+                            ioc, engine.send(nobody_id, std::span<const std::byte>(load_payload)),
+                            asio::use_future);
+                    }
+                    for (auto& f : futs) {
+                        if (f.wait_for(5s) != std::future_status::ready) {
+                            stop_load.store(true);
+                            o.load_sends_not_unregistered.fetch_add(1);
+                            continue;
+                        }
+                        const auto r = f.get();
+                        o.load_sends.fetch_add(1);
+                        if (r || r.error() != error::session_invalid_argument) {
+                            o.load_sends_not_unregistered.fetch_add(1);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // The driver: one message at a time, the next only once its reply is back, so
+    // the driver's own sends are not in flight when the next fromApp runs.
+    if (o.setup_ok) {
+        for (std::size_t k = 0; k < n; ++k) {
+            auto fut =
+                asio::co_spawn(ioc, engine.send(ini_id, std::span<const std::byte>(a_payloads[k])),
+                               asio::use_future);
+            if (fut.wait_for(5s) != std::future_status::ready) {
+                o.stall =
+                    "the initiator's send of message " + std::to_string(k) + " did not complete";
+                break;
+            }
+            if (const auto r = fut.get(); !r) {
+                o.stall = "the initiator's send of message " + std::to_string(k) +
+                          " returned error " + std::to_string(static_cast<int>(r.error()));
+                break;
+            }
+            std::unique_lock lk(mu);
+            if (!cv.wait_for(lk, 5s, [&] { return replies_back > k; })) {
+                o.stall = "reply " + std::to_string(k) + " did not arrive back at the initiator";
+                break;
+            }
+            ++o.driven;
+        }
+    }
+
+    stop_load.store(true);
+    for (auto& t : load_threads) t.join();
+
+    // Both sessions, each read on its own strand.
+    if (o.setup_ok) {
+        const auto read = [&](Session& s, SessionSnapshot& snap) {
+            auto fut =
+                asio::co_spawn(s.executor().underlying(), read_session(s, snap), asio::use_future);
+            if (fut.wait_for(5s) != std::future_status::ready) return;
+            try {
+                fut.get();
+                snap.done = true;
+            } catch (...) {
+                snap.threw = true;
+            }
+        };
+        read(*ini_h, o.ini);
+        read(*acc_h, o.acc);
+        auto states = asio::co_spawn(
+            ioc,
+            [&]() -> asio::awaitable<void> {
+                // Each state is read on its session's strand.
+                o.ini_state_end = co_await asio::co_spawn(
+                    ini_h->executor().underlying(),
+                    [&]() -> asio::awaitable<std::string> {
+                        co_return std::to_string(static_cast<int>(ini_h->state()));
+                    },
+                    asio::use_awaitable);
+                o.acc_state_end = co_await asio::co_spawn(
+                    acc_h->executor().underlying(),
+                    [&]() -> asio::awaitable<std::string> {
+                        co_return std::to_string(static_cast<int>(acc_h->state()));
+                    },
+                    asio::use_awaitable);
+            },
+            asio::use_future);
+        (void)states.wait_for(5s);
+    }
+    recording.store(false);
+
+    ini_h.reset();
+    acc_h.reset();
+    {
+        auto sf = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+        if (sf.wait_for(10s) == std::future_status::ready) {
+            sf.get();
+            o.stopped = engine.stopped();
+        } else {
+            ADD_FAILURE() << "engine.stop() did not complete";
+        }
+    }
+    work.reset();
+    ioc.stop();
+    for (auto& t : io_threads) t.join();
+}
+
+void run_and_check_mt(bool busy) {
+    MtReadings o{kMtReplies};
+    run_mt_cell(busy, o);
+    if (o.skipped) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    ASSERT_TRUE(o.setup_ok) << "setup did not complete";
+    const std::string ctx = mt_context(o, busy);
+    const MtTally t = tally(o);
+    ::testing::Test::RecordProperty("nested", static_cast<int>(t.nested));
+    ::testing::Test::RecordProperty("deferred", static_cast<int>(t.deferred));
+    ::testing::Test::RecordProperty("never_ran", static_cast<int>(t.never_ran));
+    std::printf("[ MEASURED ] %s\n", ctx.c_str());
+    std::fflush(stdout);
+
+    EXPECT_TRUE(o.stopped) << "the engine must stop. " << ctx;
+    if (busy) {
+        EXPECT_GT(o.load_sends.load(), 0U) << "the control-strand load must have run. " << ctx;
+        EXPECT_EQ(o.load_sends_not_unregistered.load(), 0U)
+            << "every load call must have ended at the control strand's registry lookup. " << ctx;
+    }
+
+    // Every reply sent once.
+    EXPECT_EQ(o.driven, o.requested) << "every message must have been answered. " << ctx;
+    EXPECT_EQ(t.never_ran, 0U) << "PATH NOT DRIVEN for some replies: toApp never ran. " << ctx;
+    const auto once = [](const std::vector<std::uint32_t>& calls) {
+        return std::ranges::all_of(calls, [](std::uint32_t c) { return c == 1; });
+    };
+    EXPECT_TRUE(once(o.reply_to_app_calls)) << "each reply must reach toApp once. " << ctx;
+    EXPECT_TRUE(once(o.a_to_app_calls)) << "each message must reach toApp once. " << ctx;
+    EXPECT_EQ(o.reply_sends_ok.load(), o.requested) << "each reply's send must succeed. " << ctx;
+
+    // MsgSeqNums on each side: distinct and consecutive, as stamped and as delivered.
+    std::vector<seqnum_t> want;
+    for (std::size_t i = 0; i < o.requested; ++i) {
+        want.push_back(kFirstAppSeq + static_cast<seqnum_t>(i));
+    }
+    const auto sorted = [](std::vector<seqnum_t> v) {
+        std::ranges::sort(v);
+        return v;
+    };
+    EXPECT_EQ(sorted(o.reply_seq), want)
+        << "ACC: the replies must carry distinct, consecutive MsgSeqNum(34) values from 2. " << ctx;
+    EXPECT_EQ(sorted(o.a_seq), want)
+        << "INI: the messages must carry distinct, consecutive MsgSeqNum(34) values from 2. "
+        << ctx;
+    const auto arrival = [](const std::vector<MtDelivery>& d) {
+        std::vector<seqnum_t> v;
+        for (const auto& x : d) v.push_back(x.seq);
+        return v;
+    };
+    EXPECT_EQ(arrival(o.acc_deliveries), want)
+        << "ACC: fromApp must deliver consecutive MsgSeqNums in arrival order. " << ctx;
+    EXPECT_EQ(arrival(o.ini_deliveries), want)
+        << "INI: fromApp must deliver consecutive MsgSeqNums in arrival order. " << ctx;
+
+    const std::string active = std::to_string(static_cast<int>(fsm_state::Active));
+    EXPECT_EQ(o.ini_state_end, active) << "INI must stay Active. " << ctx;
+    EXPECT_EQ(o.acc_state_end, active) << "ACC must stay Active. " << ctx;
+}
+
 }  // namespace
 
 TEST(EngineCallbackSend, SequentialEngineSends) {
@@ -783,5 +1287,9 @@ TEST(EngineCallbackSend, EngineSendFromFromApp) {
 TEST(EngineCallbackSend, EngineSendFromFromAppOnSessionExecutor) {
     run_and_check(Shape::from_from_app, SpawnOn::session_executor);
 }
+
+TEST(EngineCallbackSend, MtEngineSendFromFromApp_Quiet) { run_and_check_mt(false); }
+
+TEST(EngineCallbackSend, MtEngineSendFromFromApp_BusyControlStrand) { run_and_check_mt(true); }
 
 }  // namespace fixpp::session::test
