@@ -299,16 +299,17 @@ std::string text_of(std::span<const std::byte> b) {
     return {reinterpret_cast<const char*>(b.data()), b.size()};
 }
 
-// An inbound frame from the peer: MsgType, 34, 49, 52, 56, then `rest`.
-std::vector<std::byte> peer_frame(std::string_view msg_type, std::uint32_t seq,
-                                  std::string_view rest) {
+// An inbound frame from the peer under BeginString `begin`: MsgType, 34, 49, 52,
+// 56, then `rest`.
+std::vector<std::byte> peer_frame_with_begin(std::string_view begin, std::string_view msg_type,
+                                             std::uint32_t seq, std::string_view rest) {
     std::string body = "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(kTarget) + "\x01";
     body += "52=" + std::string(kStamp52) + "\x01";
     body += "56=" + std::string(kSender) + "\x01";
     body += rest;
-    std::string full = "8=" + std::string(kBegin) + "\x01";
+    std::string full = "8=" + std::string(begin) + "\x01";
     full += "9=" + std::to_string(body.size()) + "\x01";
     full += body;
     unsigned int cs = 0;
@@ -317,6 +318,12 @@ std::vector<std::byte> peer_frame(std::string_view msg_type, std::uint32_t seq,
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs & 0xFFU);
     full += "10=" + std::string(csbuf) + "\x01";
     return bytes_of(full);
+}
+
+// The same under the session's own BeginString.
+std::vector<std::byte> peer_frame(std::string_view msg_type, std::uint32_t seq,
+                                  std::string_view rest) {
+    return peer_frame_with_begin(kBegin, msg_type, seq, rest);
 }
 
 // Value of tag `tag` in a SOH-delimited frame, matched at a field boundary.
@@ -358,10 +365,15 @@ public:
     std::function<void(std::string_view)> on_to_admin;
     // Called with "onLogon" or "onLogout".
     std::function<void(const char*)> on_lifecycle;
+    // Called from onCreate, which a Session fires at the end of open(). Set it
+    // before open().
+    std::function<void()> on_create;
     // Called with the inbound admin frame's MsgType(35).
     std::function<void(std::string_view)> on_from_admin;
     // What fromApp returns, after on_from_app ran.
     expected_t<void> from_app_result;
+    // What toApp returns, after on_to_app ran.
+    expected_t<void> to_app_result;
 
     expected_t<void> fromApp(const MessageView<access_mode::Index>& /*mv*/,
                              const SessionId& /*id*/) override {
@@ -377,6 +389,9 @@ public:
         }
         return {};
     }
+    void onCreate(const SessionId& /*id*/) override {
+        if (on_create) on_create();
+    }
     void onLogon(const SessionId& /*id*/) override {
         if (on_lifecycle) on_lifecycle("onLogon");
     }
@@ -387,7 +402,7 @@ public:
                            const SessionId& /*id*/) override {
         ++to_app_calls;
         if (on_to_app) on_to_app();
-        return {};
+        return to_app_result;
     }
     void toAdmin(const MessageView<access_mode::Index>& mv, const SessionId& /*id*/) override {
         if (!on_to_admin) return;
@@ -442,12 +457,22 @@ struct LiveWrites {
     std::size_t started = 0;
     int in_flight = 0;
     int max_in_flight = 0;
+    // close() calls on the transport, and the writes begun after the first one.
+    std::size_t closes = 0;
+    std::size_t begun_after_close = 0;
+    // Set it before the transport is attached. True: a write begun after close()
+    // returns transport_write_error, is not counted in `started` and hands
+    // nothing to `on_write`, as a closed socket does. False: such a write is
+    // handed to `on_write` like any other, so a cell whose subject is a write
+    // that can follow a close sets this.
+    bool refuse_after_close = false;
 };
 
 // A live transport for a session that is already Active: async_write hands the
 // frame to `on_write`, then suspends once on its executor before completing, so
 // a write is a real suspension point and two writes in flight would show in
-// `stats`. Reads report end of stream; no read pump is run on it.
+// `stats`. Reads report end of stream; no read pump is run on it. close() is
+// counted in `stats`; LiveWrites::refuse_after_close says what a later write does.
 class SuspendingWriteTransport final : public fixpp::transport::Transport {
 public:
     SuspendingWriteTransport(std::function<void(std::span<const std::byte>)> on_write,
@@ -468,6 +493,10 @@ public:
     }
     [[nodiscard]] asio::awaitable<expected_t<std::size_t>> async_write(
         std::span<const std::byte> buf) override {
+        if (stats_.closes > 0) {
+            ++stats_.begun_after_close;
+            if (stats_.refuse_after_close) co_return std::unexpected{error::transport_write_error};
+        }
         ++stats_.started;
         stats_.max_in_flight = std::max(stats_.max_in_flight, ++stats_.in_flight);
         on_write_(buf);
@@ -477,7 +506,10 @@ public:
         co_return n;
     }
     [[nodiscard]] expected_t<void> cancel() noexcept override { return {}; }
-    [[nodiscard]] expected_t<void> close() noexcept override { return {}; }
+    [[nodiscard]] expected_t<void> close() noexcept override {
+        ++stats_.closes;
+        return {};
+    }
 
 private:
     std::function<void(std::span<const std::byte>)> on_write_;
@@ -496,6 +528,25 @@ struct Fixture {
     // The MemoryStore's outbound capacity; a cell that sends more frames raises
     // it before calling cfg().
     std::size_t memory_outbound_capacity = 16;
+    // SessionConfig::role, read by cfg(). open_to_active() drives either role
+    // to Active.
+    session_role role = session_role::initiator;
+    // Read by cfg(). True: threading_mode::direct_executor, attested, so the
+    // session runs on `exec` itself with no strand of its own. With
+    // ExecKind::io_context that is the bare io_context executor, and a callback
+    // that runs the io_context can then run a handler posted to the session's
+    // executor. False: the default mode, a strand made over `exec`.
+    bool direct_executor = false;
+    // SessionConfig::heartbeat_interval, read by cfg(). Zero: the liveness loop
+    // returns at once. A cell that sets another value uses the 108= of
+    // open_to_active()'s peer Logon, and closes the session before it leaves,
+    // because the liveness loop is a detached coroutine over the Session.
+    // The Logon arm spawns that loop on the executor the arm itself runs on, and
+    // open_to_active() feeds the peer's Logon on `exec`. So in the default mode
+    // the loop then runs on `exec` and not on the session's strand; a cell that
+    // needs it on the session's strand feeds the Logon itself, on
+    // sess.executor().underlying().
+    std::chrono::seconds heartbeat_interval{0};
     // Called with every frame the session transmits, after it is appended to `wire`.
     std::function<void(const std::string&)> on_transmit;
     LiveWrites live_writes;
@@ -532,7 +583,12 @@ struct Fixture {
         c.sender_comp_id = std::string(kSender);
         c.target_comp_id = std::string(kTarget);
         c.begin_string = std::string(kBegin);
-        c.heartbeat_interval = 0s;
+        c.role = role;
+        if (direct_executor) {
+            c.mode = threading_mode::direct_executor;
+            c.already_serialized_executor = true;
+        }
+        c.heartbeat_interval = heartbeat_interval;
         c.security_profile = fixpp::test_support::make_minimal_security_profile();
         c.dictionary = fixpp::test_support::make_minimal_dictionary();
         c.executor_override = exec;
@@ -593,6 +649,7 @@ struct Fixture {
     }
 
     // Initiator: open() emits the Logon, then the peer's Logon acknowledges it.
+    // Acceptor: open() emits nothing, and the session answers the peer's Logon.
     bool open_to_active(Session& s) {
         if (!run(s.open(), "CallbackSend::open")) return false;
         const auto logon = peer_frame("A", 1,
@@ -602,6 +659,22 @@ struct Fixture {
             return false;
         }
         return s.state() == fsm_state::Active;
+    }
+
+    // Delivers `frames` the way the Engine's read pump delivers the complete
+    // frames of one read: one coroutine, one co_await of on_inbound_frame per
+    // frame, nothing between two frames. Like the pump it stops at the first
+    // frame whose delivery returns an error; unlike the pump it does not close
+    // the session then. Returns one result per frame delivered. Start it on the
+    // session's executor.
+    static asio::awaitable<std::vector<expected_t<void>>> deliver_in_one_read(
+        Session& s, std::vector<std::vector<std::byte>> frames) {
+        std::vector<expected_t<void>> results;
+        for (const auto& frame : frames) {
+            results.push_back(co_await s.on_inbound_frame(std::span<const std::byte>{frame}));
+            if (!results.back()) break;
+        }
+        co_return results;
     }
 
     Retained retained(Session& s, seqnum_t seq) {
@@ -1416,13 +1489,16 @@ enum class CloseFrom { from_app, from_admin };
 
 // A callback of an Active session starts Session::close on the session's
 // executor, directly. Everything is recorded and printed; little is asserted.
-void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store) {
+void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store,
+                               TransportKind transport = TransportKind::sync_capture) {
     Fixture f{ExecKind::io_context, store};
     auto cfg = f.cfg();
     // close(graceful) waits this long for a peer Logout that this cell never feeds.
     cfg.logout_disconnect_timeout_ms = 300;
     Session sess{f.engine, cfg};
     ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "setup: session left Active";
     ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
     ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
 
