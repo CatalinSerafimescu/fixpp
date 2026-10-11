@@ -131,9 +131,10 @@
 //                             TestRequest (callback before the counter
 //                             advances), or the toAdmin of the PossDup Reject
 //                             (counter advanced first). A graceful close emits
-//                             a Logout, a second frame started inside the first
-//                             one's emit. The close is started once; the
-//                             Logout's own toAdmin is only recorded. Each cell
+//                             a Logout; whether that Logout's emit starts
+//                             inside the first frame's emit is what each cell
+//                             records. The close is started once; the Logout's
+//                             own toAdmin is only recorded. Each cell
 //                             prints the frames in wire order, what the store
 //                             holds under each frame's number, both outcomes,
 //                             state and lifecycle at three points and the
@@ -148,8 +149,11 @@
 //                             shapes on a session with no MessageStore
 //                             (SessionConfig::store_factory left null), where
 //                             store_then_emit goes straight to the transport.
-//                             With this fixture's synchronous capture nothing
-//                             on that path suspends. (c) and (d) do not apply.
+//                             This fixture's capture is a synchronous function,
+//                             so the write is not a suspension point here; the
+//                             cells record whether the nested send transmits
+//                             before the starting callback returns. (c) and (d)
+//                             do not apply.
 //   the same four with _LiveWrite
 //                             the same with a live transport attached, whose
 //                             async_write records the frame and then suspends
