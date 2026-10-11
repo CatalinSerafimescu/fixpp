@@ -54,6 +54,20 @@
 //                             assertions run either way.
 //   TestRequestThenSend       its control: the same send started after the
 //                             TestRequest was fully processed.
+//   ToAdminStartsSend_AssignFirstSite
+//                             batch B41. The peer sends an in-sequence 35=D with
+//                             PossDupFlag(43)=Y and no OrigSendingTime(122); the
+//                             session answers with a Reject and stays Active.
+//                             That Reject's leaf advances the outbound counter
+//                             BEFORE toAdmin, so the Reject owns its MsgSeqNum
+//                             when toAdmin starts a send of an application
+//                             message. The question is order: whether the two
+//                             frames are transmitted, and offered to the store,
+//                             in ascending MsgSeqNum order. Classified and
+//                             printed like ToAdminStartsSend.
+//   ToAdminStartsSend_AssignFirstSite_Sequential
+//                             its control: the same send started after the
+//                             inbound frame was fully processed.
 //
 // Witness, asserted first in every nested cell: the nested send's toApp ran
 // while the outer callback was still on the stack. Without it a pass of the
@@ -759,6 +773,130 @@ TEST(CallbackSend, ToAdminStartsSend) {
 
 TEST(CallbackSend, TestRequestThenSend) {
     run_test_request_then_send(AdminShape::send_after_test_request);
+}
+
+// An in-sequence PossDup 35=D without OrigSendingTime(122) on an Active
+// initiator. The session answers with a Reject(35=3) and stays Active; an
+// application message is sent either from inside that Reject's toAdmin or after
+// the inbound frame was fully processed.
+void run_poss_dup_reject_then_send(AdminShape shape) {
+    Fixture f{ExecKind::io_context};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+    ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+
+    const auto ex = sess.executor().underlying();
+    const auto order = bytes_of(kPayloadOne);
+    const std::size_t wire_before = f.wire.size();
+    const bool inside = shape == AdminShape::send_inside_to_admin;
+
+    SendOutcome send;
+    bool outer_live = false;
+    std::optional<bool> inner_saw_outer_live;
+    int reject_to_admin_calls = 0;
+    std::string seen_in_to_admin = "not recorded";
+    std::string seen_in_to_app = "not recorded";
+    std::string seen_after_spawn = "not recorded";
+
+    f.app->on_to_admin = [&](std::string_view msg_type) {
+        if (msg_type != "3") return;
+        ++reject_to_admin_calls;
+        seen_in_to_admin = std::to_string(next_out(sess));
+        if (!inside || reject_to_admin_calls != 1) return;
+        outer_live = true;
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] toAdmin(Reject): starting Session::send\n");
+        asio::co_spawn(ex, sess.send(order), record_into(send));
+        std::fprintf(stderr, "[ B41 ] toAdmin(Reject): co_spawn returned\n");
+        outer_live = false;
+        seen_after_spawn =
+            std::to_string(next_out(sess)) + (send.done ? " (send completed)" : " (send pending)");
+    };
+    f.app->on_to_app = [&] {
+        inner_saw_outer_live = outer_live;
+        seen_in_to_app = std::to_string(next_out(sess));
+    };
+
+    const auto poss_dup = peer_frame("D", 2,
+                                     "43=Y\x01"
+                                     "11=PEER-DUP\x01"
+                                     "54=1\x01"
+                                     "55=AAPL\x01");
+    const auto in_r = f.run(sess.on_inbound_frame(std::span<const std::byte>{poss_dup}),
+                            "CallbackSend::poss_dup");
+    if (!inside) asio::co_spawn(ex, sess.send(order), record_into(send));
+    // No Reject toAdmin means no send was started inside it: nothing to wait for.
+    if (!f.pump_done([&] { return send.done || (inside && reject_to_admin_calls == 0); },
+                     "CallbackSend::reject_send")) {
+        return;
+    }
+
+    const std::string classification = !inside                             ? "sequential (control)"
+                                       : !inner_saw_outer_live.has_value() ? "never ran"
+                                       : *inner_saw_outer_live             ? "nested"
+                                                                           : "deferred";
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    const std::string context =
+        "Classification: " + classification + ". Transmitted, in wire order: " + describe(sent) +
+        "; send: " + describe(send) + "; on_inbound_frame(PossDup 35=D): " +
+        (in_r ? "ok" : "error " + std::to_string(static_cast<int>(in_r.error()))) +
+        "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
+        ", store=" + f.store_next_out(sess) + "; NextNumIn=" + std::to_string(next_in(sess)) +
+        "; state=" + std::to_string(static_cast<int>(sess.state())) +
+        "; NextNumOut in the Reject's toAdmin=" + seen_in_to_admin +
+        ", in the send's toApp=" + seen_in_to_app +
+        ", in toAdmin after the co_spawn returned=" + seen_after_spawn + ".";
+    ::testing::Test::RecordProperty("classification", classification);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    // Witness.
+    ASSERT_EQ(reject_to_admin_calls, 1)
+        << "PATH NOT DRIVEN: the inbound frame was not answered through one Reject toAdmin. "
+        << context;
+    ASSERT_NE(classification, "never ran")
+        << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
+
+    ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
+    const auto rj_it =
+        std::ranges::find_if(sent, [](const std::string& fr) { return field(fr, 35) == "3"; });
+    const std::string* sent_order = frame_with_id(sent, kIdOne);
+    ASSERT_NE(rj_it, sent.end()) << "the Reject was not transmitted. " << context;
+    ASSERT_NE(sent_order, nullptr) << "the application message was not transmitted. " << context;
+
+    // (a) Distinct MsgSeqNums.
+    EXPECT_NE(seq_of(*rj_it), seq_of(*sent_order))
+        << "(a) the Reject and the application message must carry distinct MsgSeqNum(34) values. "
+        << context;
+    // (b) Transmitted in ascending MsgSeqNum order.
+    EXPECT_EQ((std::vector<seqnum_t>{seq_of(sent[0]), seq_of(sent[1])}),
+              (std::vector<seqnum_t>{2U, 3U}))
+        << "(b) the two frames must be transmitted in ascending MsgSeqNum(34) order, 2 then 3. "
+        << context;
+    // (c) The store holds each frame under its own number.
+    expect_retained_as_sent(f, sess, *rj_it, context);
+    expect_retained_as_sent(f, sess, *sent_order, context);
+    // (d) The store and the manager agree on the next outbound number.
+    EXPECT_EQ(f.store_next_out(sess), std::to_string(next_out(sess)))
+        << "(d) the store's NextNumOut must agree with the manager's. " << context;
+    EXPECT_EQ(next_out(sess), 4U) << "(d) NextNumOut must have advanced by two. " << context;
+    // (e) Both operations report what happened.
+    EXPECT_EQ(describe(send), "ok") << "(e) " << context;
+    EXPECT_TRUE(in_r.has_value()) << "(e) " << context;
+
+    EXPECT_EQ(next_in(sess), 3U) << "the rejected frame must have been consumed. " << context;
+    EXPECT_EQ(sess.state(), fsm_state::Active) << context;
+}
+
+TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite) {
+    run_poss_dup_reject_then_send(AdminShape::send_inside_to_admin);
+}
+
+TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_Sequential) {
+    run_poss_dup_reject_then_send(AdminShape::send_after_test_request);
 }
 
 }  // namespace fixpp::session::test
