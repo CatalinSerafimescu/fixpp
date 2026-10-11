@@ -122,6 +122,39 @@
 //                             fromAdmin for an inbound TestRequest starts
 //                             close(terminal); the arm goes on to its Heartbeat
 //                             reply after fromAdmin returns.
+//   ToAppStartsClose_Graceful, ToAppStartsClose_Terminal,
+//   ToAppStartsClose_Graceful_FileStore, ToAdminStartsClose_Graceful,
+//   ToAdminStartsClose_Graceful_AssignFirstSite
+//                             batch B41. An OUTBOUND callback starts
+//                             Session::close: the toApp of an application
+//                             send, the toAdmin of the Heartbeat that answers a
+//                             TestRequest (callback before the counter
+//                             advances), or the toAdmin of the PossDup Reject
+//                             (counter advanced first). A graceful close emits
+//                             a Logout, a second frame started inside the first
+//                             one's emit. The close is started once; the
+//                             Logout's own toAdmin is only recorded. Each cell
+//                             prints the frames in wire order, what the store
+//                             holds under each frame's number, both outcomes,
+//                             state and lifecycle at three points and the
+//                             callbacks in order, then checks (a) distinct
+//                             MsgSeqNums, (b) ascending wire order, (c) each
+//                             frame retained under its own number, (d) store
+//                             and manager agree, (e) both operations report
+//                             success. The final state is not judged.
+//   ToAppSendsNested_NoStore, ToAdminStartsSend_NoStore,
+//   ToAdminStartsSend_AssignFirstSite_NoStore, OverlappingSends_NoStore
+//                             batch B41. The nested-send and overlapping-send
+//                             shapes on a session with no MessageStore
+//                             (SessionConfig::store_factory left null), where
+//                             store_then_emit goes straight to the transport.
+//                             With this fixture's synchronous capture nothing
+//                             on that path suspends. (c) and (d) do not apply.
+//   the same four with _LiveWrite
+//                             the same with a live transport attached, whose
+//                             async_write records the frame and then suspends
+//                             once, so the send path goes through the write
+//                             gate and yields there.
 //   DISABLED_MemoryCheckerPositiveControl_UseAfterFree
 //                             a control for a memory checker, not a measurement
 //                             of fixpp: reads a heap block after deleting it.
@@ -168,9 +201,13 @@
 
 #include <algorithm>
 #include <asio/any_io_executor.hpp>
+#include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/deferred.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
 #include <asio/strand.hpp>
+#include <asio/this_coro.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
 #include <charconv>
@@ -196,6 +233,9 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/transport/endpoint.hpp>
+#include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport.hpp>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -391,7 +431,56 @@ struct Retained {
 };
 
 enum class ExecKind { io_context, strand };
-enum class StoreKind { memory, file };
+// `none` leaves SessionConfig::store_factory null: the session has no store.
+enum class StoreKind { memory, file, none };
+
+struct LiveWrites {
+    std::size_t started = 0;
+    int in_flight = 0;
+    int max_in_flight = 0;
+};
+
+// A live transport for a session that is already Active: async_write hands the
+// frame to `on_write`, then suspends once on its executor before completing, so
+// a write is a real suspension point and two writes in flight would show in
+// `stats`. Reads report end of stream; no read pump is run on it.
+class SuspendingWriteTransport final : public fixpp::transport::Transport {
+public:
+    SuspendingWriteTransport(std::function<void(std::span<const std::byte>)> on_write,
+                             LiveWrites& stats)
+        : on_write_{std::move(on_write)}, stats_{stats} {}
+
+    [[nodiscard]] asio::awaitable<expected_t<fixpp::transport::ConnectInfo>> async_connect(
+        fixpp::transport::Endpoint const& ep) override {
+        fixpp::transport::ConnectInfo info;
+        info.remote = ep;
+        info.local = fixpp::transport::Endpoint{"127.0.0.1", 0};
+        info.family = 2;
+        co_return info;
+    }
+    [[nodiscard]] asio::awaitable<expected_t<std::size_t>> async_read_some(
+        std::span<std::byte> /*buf*/) override {
+        co_return std::unexpected{error::transport_read_eof};
+    }
+    [[nodiscard]] asio::awaitable<expected_t<std::size_t>> async_write(
+        std::span<const std::byte> buf) override {
+        ++stats_.started;
+        stats_.max_in_flight = std::max(stats_.max_in_flight, ++stats_.in_flight);
+        on_write_(buf);
+        const std::size_t n = buf.size();
+        co_await asio::post(co_await asio::this_coro::executor, asio::deferred);
+        --stats_.in_flight;
+        co_return n;
+    }
+    [[nodiscard]] expected_t<void> cancel() noexcept override { return {}; }
+    [[nodiscard]] expected_t<void> close() noexcept override { return {}; }
+
+private:
+    std::function<void(std::span<const std::byte>)> on_write_;
+    LiveWrites& stats_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+};
+
+enum class TransportKind { sync_capture, live_suspending_write };
 
 struct Fixture {
     asio::io_context ioc;
@@ -403,6 +492,9 @@ struct Fixture {
     // The MemoryStore's outbound capacity; a cell that sends more frames raises
     // it before calling cfg().
     std::size_t memory_outbound_capacity = 16;
+    // Called with every frame the session transmits, after it is appended to `wire`.
+    std::function<void(const std::string&)> on_transmit;
+    LiveWrites live_writes;
     asio::any_io_executor exec;
     std::shared_ptr<fixpp::core::mock_clock> clock;
     std::shared_ptr<CallbackApp> app = std::make_shared<CallbackApp>();
@@ -441,8 +533,10 @@ struct Fixture {
         c.dictionary = fixpp::test_support::make_minimal_dictionary();
         c.executor_override = exec;
         c.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
-        c.transport_send = [this](std::span<const std::byte> f) { wire.push_back(text_of(f)); };
-        if (store_kind == StoreKind::file) {
+        c.transport_send = [this](std::span<const std::byte> f) { transmitted(f); };
+        if (store_kind == StoreKind::none) {
+            // No store_factory: the session runs without a MessageStore.
+        } else if (store_kind == StoreKind::file) {
             file_dir = fixpp::test_support::unique_temp_dir("b28_563");
             FileStore::Config fc;
             fc.directory = file_dir;
@@ -478,6 +572,20 @@ struct Fixture {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
         ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << site;
         return false;
+    }
+
+    void transmitted(std::span<const std::byte> f) {
+        wire.push_back(text_of(f));
+        if (on_transmit) on_transmit(wire.back());
+    }
+
+    // Attaches a SuspendingWriteTransport to an Active session. From here on the
+    // session writes through it, and the config-time transport_send is not used.
+    void attach_live_transport(Session& s) {
+        s.attach_accepted_transport(
+            std::make_unique<SuspendingWriteTransport>(
+                [this](std::span<const std::byte> f) { transmitted(f); }, live_writes),
+            fixpp::transport::handshake_result{});
     }
 
     // Initiator: open() emits the Logon, then the peer's Logon acknowledges it.
@@ -1009,12 +1117,14 @@ TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_FileStore) {
 
 // Pairs of sends, A then B, both started from one handler on the session's
 // executor, B without waiting for A. No Application callback starts anything.
-void run_overlapping_sends(StoreKind store) {
+void run_overlapping_sends(StoreKind store, TransportKind transport = TransportKind::sync_capture) {
     constexpr std::size_t kPairs = 200;
     Fixture f{ExecKind::io_context, store};
     f.memory_outbound_capacity = 2 * kPairs + 16;
     Session sess{f.engine, f.cfg()};
     ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "setup: session left Active";
     ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
 
     const auto ex = sess.executor().underlying();
@@ -1115,6 +1225,8 @@ void run_overlapping_sends(StoreKind store) {
         "); NextNumOut: manager=" + std::to_string(next_out(sess)) +
         ", store=" + f.store_next_out(sess) +
         "; state=" + std::to_string(static_cast<int>(sess.state())) +
+        "; live writes started=" + std::to_string(f.live_writes.started) +
+        ", most in flight at once=" + std::to_string(f.live_writes.max_in_flight) +
         "; elapsed ms=" + std::to_string(elapsed_ms) +
         "; first anomaly: " + (first_anomaly.empty() ? std::string("none") : first_anomaly) + ".";
     std::printf("[ MEASURED ] %s\n", context.c_str());
@@ -1130,8 +1242,12 @@ void run_overlapping_sends(StoreKind store) {
         << context;
     EXPECT_EQ(not_retained_as_sent, 0U)
         << "every frame must be retained under the MsgSeqNum it was transmitted with. " << context;
-    EXPECT_EQ(f.store_next_out(sess), std::to_string(next_out(sess)))
-        << "the store's NextNumOut must agree with the manager's. " << context;
+    if (store != StoreKind::none) {
+        EXPECT_EQ(f.store_next_out(sess), std::to_string(next_out(sess)))
+            << "the store's NextNumOut must agree with the manager's. " << context;
+    }
+    EXPECT_EQ(next_out(sess), 2U + 2U * kPairs) << "every send must take one number. " << context;
+    EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << context;
     EXPECT_EQ(sends_failed, 0U) << context;
     EXPECT_EQ(sess.state(), fsm_state::Active) << context;
 }
@@ -1139,6 +1255,12 @@ void run_overlapping_sends(StoreKind store) {
 TEST(CallbackSend, OverlappingSends) { run_overlapping_sends(StoreKind::memory); }
 
 TEST(CallbackSend, OverlappingSends_FileStore) { run_overlapping_sends(StoreKind::file); }
+
+TEST(CallbackSend, OverlappingSends_NoStore) { run_overlapping_sends(StoreKind::none); }
+
+TEST(CallbackSend, OverlappingSends_NoStore_LiveWrite) {
+    run_overlapping_sends(StoreKind::none, TransportKind::live_suspending_write);
+}
 
 enum class FromAppReturns { ok, reject };
 
@@ -1444,6 +1566,319 @@ TEST(CallbackSend, FromAppStartsClose_Terminal_FileStore) {
 
 TEST(CallbackSend, FromAdminStartsClose_Terminal) {
     run_callback_starts_close(CloseFrom::from_admin, close_mode::terminal, StoreKind::memory);
+}
+
+// Whose outbound callback starts the second operation.
+enum class OuterSite {
+    app_send,         // the toApp of a Session::send
+    heartbeat_reply,  // the toAdmin of the Heartbeat answering a TestRequest
+    poss_dup_reject,  // the toAdmin of the Reject answering a PossDup without 122
+};
+enum class Starts { close_graceful, close_terminal, send };
+
+// An outbound callback of an Active session starts a second operation on the
+// session's executor, directly: a close or a send.
+void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store,
+                                  TransportKind transport = TransportKind::sync_capture) {
+    Fixture f{ExecKind::io_context, store};
+    auto cfg = f.cfg();
+    // close(graceful) waits this long for a peer Logout that this cell never feeds.
+    cfg.logout_disconnect_timeout_ms = 300;
+    Session sess{f.engine, cfg};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "setup: session left Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+    ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+
+    const auto ex = sess.executor().underlying();
+    const std::size_t wire_before = f.wire.size();
+    const auto outer_payload = bytes_of(
+        "35=D\x01"
+        "11=B41-OUTER\x01"
+        "55=AAA\x01");
+    const auto inner_payload = bytes_of(
+        "35=D\x01"
+        "11=B41-INNER\x01"
+        "55=BBB\x01");
+    const char* inner_name = starts == Starts::send ? "send" : "close";
+    const char* outer_name = site == OuterSite::app_send ? "send" : "on_inbound_frame";
+
+    bool started = false;
+    bool in_callback = false;
+    bool outer_done = false;
+    bool inner_done = false;
+    std::string outer_result = "not completed";
+    std::string inner_result = "not completed";
+    std::string seen_in_callback = "not recorded";
+    std::string seen_when_outer_done = "not recorded";
+    std::optional<bool> inner_to_app_in_callback;  // Starts::send only
+    std::vector<std::string> events;               // from the second operation's start on, in order
+
+    const auto session_now = [&] {
+        return "state=" + std::to_string(static_cast<int>(sess.state())) +
+               " lifecycle=" + std::to_string(session_test_access::lifecycle_value(sess));
+    };
+    const auto where = [&] {
+        return std::string(in_callback ? " (starting callback on the stack)"
+                                       : " (starting callback returned)");
+    };
+    const auto result_text = [](std::exception_ptr ep, const expected_t<void>& r) {
+        return ep  ? std::string("threw")
+               : r ? std::string("ok")
+                   : "error " + std::to_string(static_cast<int>(r.error()));
+    };
+    const auto start_inner = [&](const char* callback) {
+        started = true;
+        in_callback = true;
+        const auto on_done = [&](std::exception_ptr ep, expected_t<void> r) {
+            inner_done = true;
+            inner_result = result_text(ep, r);
+            events.push_back(std::string("the ") + inner_name + "'s completion handler" + where());
+        };
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] %s: starting Session::%s\n", callback, inner_name);
+        if (starts == Starts::send) {
+            asio::co_spawn(ex, sess.send(inner_payload), on_done);
+        } else {
+            asio::co_spawn(ex,
+                           sess.close(starts == Starts::close_terminal ? close_mode::terminal
+                                                                       : close_mode::graceful),
+                           on_done);
+        }
+        std::fprintf(stderr, "[ B41 ] %s: co_spawn returned\n", callback);
+        seen_in_callback = session_now() + ", NextNumOut=" + std::to_string(next_out(sess)) + ", " +
+                           inner_name + " " + inner_result;
+        events.push_back(std::string(callback) + " returns");
+        in_callback = false;
+    };
+
+    f.on_transmit = [&](const std::string& frame) {
+        if (started) {
+            events.push_back("transmit " + describe(frame) + where() + " " + session_now());
+        }
+    };
+    f.app->on_to_app = [&] {
+        if (site == OuterSite::app_send && f.app->to_app_calls == 1) {
+            start_inner("toApp");
+            return;
+        }
+        if (!started) return;
+        if (starts == Starts::send && !inner_to_app_in_callback.has_value()) {
+            inner_to_app_in_callback = in_callback;
+        }
+        events.push_back("toApp, call " + std::to_string(f.app->to_app_calls) + where());
+    };
+    f.app->on_to_admin = [&](std::string_view msg_type) {
+        if (!started && site == OuterSite::heartbeat_reply && msg_type == "0") {
+            start_inner("toAdmin(35=0)");
+            return;
+        }
+        if (!started && site == OuterSite::poss_dup_reject && msg_type == "3") {
+            start_inner("toAdmin(35=3)");
+            return;
+        }
+        // Any other admin frame, the close's own Logout included, is only recorded.
+        if (started) events.push_back("toAdmin 35=" + std::string(msg_type) + where());
+    };
+    f.app->on_lifecycle = [&](const char* name) {
+        if (started) events.push_back(std::string(name) + where() + " " + session_now());
+    };
+
+    const auto on_outer_done = [&](std::exception_ptr ep, expected_t<void> r) {
+        outer_done = true;
+        outer_result = result_text(ep, r);
+        seen_when_outer_done = session_now();
+        events.push_back(std::string("the outer ") + outer_name + "'s completion handler");
+    };
+    const auto inbound = site == OuterSite::heartbeat_reply ? peer_frame("1", 2, "112=B41-TR\x01")
+                                                            : peer_frame("D", 2,
+                                                                         "43=Y\x01"
+                                                                         "11=PEER-DUP\x01"
+                                                                         "54=1\x01"
+                                                                         "55=AAPL\x01");
+    if (site == OuterSite::app_send) {
+        asio::co_spawn(ex, sess.send(outer_payload), on_outer_done);
+    } else {
+        asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{inbound}),
+                       on_outer_done);
+    }
+    // Bounded: an operation that does not complete is reported below, not waited
+    // for. The bound is well above the graceful close's shortened wait.
+    const bool completed = fixpp::test_support::pump_until(
+        f.ioc, [&] { return outer_done && (inner_done || !started); }, std::chrono::seconds{5},
+        fixpp::test_support::kPumpSlice, "CallbackSend::outbound_callback_starts");
+
+    // Store reads: each bounded, each into storage that outlives a late completion.
+    MessageStore* st = session_test_access::store(sess);
+    const auto store_next_out = [&]() -> std::string {
+        if (st == nullptr) return "no store";
+        auto slot = std::make_shared<std::pair<bool, std::string>>(false, "read not completed");
+        asio::co_spawn(f.exec, st->next_seqnum(direction_t::outbound, false),
+                       [slot](std::exception_ptr ep, expected_t<seqnum_t> r) {
+                           slot->first = true;
+                           slot->second =
+                               ep  ? "threw"
+                               : r ? std::to_string(*r)
+                                   : "error " + std::to_string(static_cast<int>(r.error()));
+                       });
+        (void)fixpp::test_support::pump_until(
+            f.ioc, [&] { return slot->first; }, std::chrono::seconds{2},
+            fixpp::test_support::kPumpSlice, "CallbackSend::outbound_callback_starts_store");
+        return slot->second;
+    };
+    std::vector<std::shared_ptr<CollectVisitor>> visitors;
+    // The frames the store returns for one outbound number, and the read's status.
+    const auto store_holds = [&](seqnum_t seq) -> std::pair<std::string, std::vector<std::string>> {
+        if (st == nullptr) return {"no store", {}};
+        auto visitor = std::make_shared<CollectVisitor>();
+        visitors.push_back(visitor);
+        auto slot = std::make_shared<std::pair<bool, std::string>>(false, "read not completed");
+        asio::co_spawn(f.exec, st->retrieve(seq, seq, direction_t::outbound, *visitor),
+                       [slot](std::exception_ptr ep, expected_t<void> r) {
+                           slot->first = true;
+                           slot->second =
+                               ep  ? "threw"
+                               : r ? "ok"
+                                   : "error " + std::to_string(static_cast<int>(r.error()));
+                       });
+        (void)fixpp::test_support::pump_until(
+            f.ioc, [&] { return slot->first; }, std::chrono::seconds{2},
+            fixpp::test_support::kPumpSlice, "CallbackSend::outbound_callback_starts_retrieve");
+        return {slot->second, slot->first ? visitor->frames : std::vector<std::string>{}};
+    };
+
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    std::vector<seqnum_t> wire_seqs;
+    for (const auto& fr : sent) wire_seqs.push_back(seq_of(fr));
+    std::vector<seqnum_t> unique_seqs = wire_seqs;
+    std::ranges::sort(unique_seqs);
+    const bool distinct = std::ranges::adjacent_find(unique_seqs) == unique_seqs.end();
+    const bool ascending =
+        std::ranges::adjacent_find(wire_seqs, std::greater_equal<>{}) == wire_seqs.end();
+    unique_seqs.erase(std::unique(unique_seqs.begin(), unique_seqs.end()), unique_seqs.end());
+
+    const bool has_store = st != nullptr;
+    bool all_retained = true;
+    std::string store_text;
+    for (const seqnum_t seq : unique_seqs) {
+        const auto [status, frames] = store_holds(seq);
+        store_text += " 34=" + std::to_string(seq) + ": " + describe(frames) + "(" + status + ")";
+        for (const auto& fr : sent) {
+            if (seq_of(fr) != seq) continue;
+            if (frames.size() != 1 || frames.front() != fr) all_retained = false;
+        }
+    }
+    const std::string manager_out = std::to_string(next_out(sess));
+    const std::string store_out = store_next_out();
+    const bool store_agrees = store_out == manager_out;
+    const bool outcomes_ok = outer_result == "ok" && inner_result == "ok";
+    const auto verdict = [](bool applies, bool holds) {
+        return std::string(!applies ? "n/a (no store)" : holds ? "holds" : "FAILS");
+    };
+
+    const std::string classification = starts != Starts::send ? std::string("n/a (a close)")
+                                       : !inner_to_app_in_callback.has_value()
+                                           ? std::string("never ran")
+                                       : *inner_to_app_in_callback ? std::string("nested")
+                                                                   : std::string("deferred");
+    std::string event_text;
+    for (const auto& e : events) event_text += " [" + e + "]";
+    const std::string context =
+        std::string("Outer: ") + outer_name + "; started inside its callback: " + inner_name +
+        (starts == Starts::close_graceful   ? " (graceful)"
+         : starts == Starts::close_terminal ? " (terminal)"
+                                            : "") +
+        "; the inner send's toApp: " + classification +
+        ". Transmitted, in wire order: " + describe(sent) + "; the store holds under" +
+        (store_text.empty() ? " (nothing read)" : store_text) + "; outer " + outer_name + ": " +
+        outer_result + "; " + inner_name + ": " + inner_result +
+        "; NextNumOut: manager=" + manager_out + ", store=" + store_out +
+        "; inside the starting callback after the co_spawn returned: " + seen_in_callback +
+        "; when the outer operation completed: " + seen_when_outer_done +
+        "; at the end: " + session_now() + "; from the second operation's start on, in order:" +
+        (event_text.empty() ? " (none)" : event_text) +
+        "; live writes started=" + std::to_string(f.live_writes.started) +
+        ", most in flight at once=" + std::to_string(f.live_writes.max_in_flight) +
+        ". (a) distinct MsgSeqNums: " + verdict(true, distinct) +
+        "; (b) ascending wire order: " + verdict(true, ascending) +
+        "; (c) each frame retained under its own number: " + verdict(has_store, all_retained) +
+        "; (d) store and manager agree: " + verdict(has_store, store_agrees) +
+        "; (e) both operations report success: " + verdict(true, outcomes_ok) + ".";
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+    if (!completed) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "CallbackSend::outbound_callback_starts");
+    }
+
+    ASSERT_TRUE(started) << "PATH NOT DRIVEN: the starting callback never ran. " << context;
+    if (starts == Starts::send) {
+        ASSERT_NE(classification, "never ran")
+            << "PATH NOT DRIVEN: the inner send's toApp never ran. " << context;
+    }
+    EXPECT_TRUE(distinct) << "(a) " << context;
+    EXPECT_TRUE(ascending) << "(b) " << context;
+    if (has_store) {
+        EXPECT_TRUE(all_retained) << "(c) " << context;
+        EXPECT_TRUE(store_agrees) << "(d) " << context;
+    }
+    EXPECT_TRUE(outcomes_ok) << "(e) " << context;
+    EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << context;
+    if (starts == Starts::send) {
+        EXPECT_EQ(manager_out, "4") << "two frames must take two numbers. " << context;
+    }
+}
+
+TEST(CallbackSend, ToAppStartsClose_Graceful) {
+    run_outbound_callback_starts(OuterSite::app_send, Starts::close_graceful, StoreKind::memory);
+}
+
+TEST(CallbackSend, ToAppStartsClose_Terminal) {
+    run_outbound_callback_starts(OuterSite::app_send, Starts::close_terminal, StoreKind::memory);
+}
+
+TEST(CallbackSend, ToAppStartsClose_Graceful_FileStore) {
+    run_outbound_callback_starts(OuterSite::app_send, Starts::close_graceful, StoreKind::file);
+}
+
+TEST(CallbackSend, ToAdminStartsClose_Graceful) {
+    run_outbound_callback_starts(OuterSite::heartbeat_reply, Starts::close_graceful,
+                                 StoreKind::memory);
+}
+
+TEST(CallbackSend, ToAdminStartsClose_Graceful_AssignFirstSite) {
+    run_outbound_callback_starts(OuterSite::poss_dup_reject, Starts::close_graceful,
+                                 StoreKind::memory);
+}
+
+TEST(CallbackSend, ToAppSendsNested_NoStore) {
+    run_outbound_callback_starts(OuterSite::app_send, Starts::send, StoreKind::none);
+}
+
+TEST(CallbackSend, ToAdminStartsSend_NoStore) {
+    run_outbound_callback_starts(OuterSite::heartbeat_reply, Starts::send, StoreKind::none);
+}
+
+TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_NoStore) {
+    run_outbound_callback_starts(OuterSite::poss_dup_reject, Starts::send, StoreKind::none);
+}
+
+TEST(CallbackSend, ToAppSendsNested_NoStore_LiveWrite) {
+    run_outbound_callback_starts(OuterSite::app_send, Starts::send, StoreKind::none,
+                                 TransportKind::live_suspending_write);
+}
+
+TEST(CallbackSend, ToAdminStartsSend_NoStore_LiveWrite) {
+    run_outbound_callback_starts(OuterSite::heartbeat_reply, Starts::send, StoreKind::none,
+                                 TransportKind::live_suspending_write);
+}
+
+TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_NoStore_LiveWrite) {
+    run_outbound_callback_starts(OuterSite::poss_dup_reject, Starts::send, StoreKind::none,
+                                 TransportKind::live_suspending_write);
 }
 
 #if defined(__has_feature)
