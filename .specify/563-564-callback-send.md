@@ -104,10 +104,26 @@ kind of caller (`grep -n "parse_and_dispatch_(" src/session/session.cpp`, read e
   re-checks `fsm_state_ == Active` and returns `session_invalid_state_for_send` if the session left Active
   while it waited. Then it proceeds as an ordinary send.
 
-When the posted continuation runs, the handler that held the callback has yielded, which it can only do at
-or after the outer emit's store call. So the deferred send peeks after the outer assign, and its store call
-is queued after the outer one. A deferred send is then exactly an overlapping send, which both stores
-already order (measured: `OverlappingSends`, `OverlappingSends_FileStore`).
+**Why the wait is long enough.** The posted continuation runs only after the handler that held the
+callback has yielded. Where the outer emit first yields depends on the branch `store_then_emit` takes, and
+on every branch the outer frame's number is assigned, and its bytes are handed on, before that yield:
+
+| Branch of the outer emit | Its first yield | What precedes that yield |
+|---|---|---|
+| a shipped store (`MemoryStore`, `FileStore`) | the post that begins the store call | the assign, and the store call itself |
+| a `MessageStore` whose `store` completes without yielding, or no store at all (`store_` is null when no factory is configured) | the live write: the write gate if a write is in flight, else the transport's write, which holds the gate | the assign, the completed store call if there is one, and the gate request |
+| the same, with a synchronous `transport_send_` | none: the emit completes inside the handler | everything |
+| a failure exit (a veto, a throwing callback, a failed assign) | wherever the exit path yields | the outer frame is abandoned; nothing of it is stored or sent |
+
+So the deferred send peeks after the outer assign; its store call follows the outer one; and its request for
+the write gate follows the outer one, because the handler that completes a store goes on to request the gate
+before it yields again. A deferred send is then exactly an overlapping send. Three premises carry the rest,
+each already relied on by two sends that overlap today: a store completes its calls in the order they were
+made (B&L `L-518-1` names this premise for the shipped stores; `FileStore::store` takes its FIFO mutex on
+the strand before it offloads); the write gate grants in arrival order (`async_mutex`'s FIFO grant); and an
+uncontended `assign_outbound()` does not yield (§1). Measured: `OverlappingSends` and
+`OverlappingSends_FileStore`, and the post controls of the nested cells on both stores. The no-store branch
+is measured in §3.
 
 **Cancellation at the hop (OD-1).** The post is a new await, so it is a new point where a cancelled chain
 throws. A send that is cancelled while it waits has consumed nothing: no number, no store slot, no frame.
@@ -121,11 +137,14 @@ callback. The error value is OD-1.
 deferred from its `toApp` starts, so that send takes `send_fallback_leaf_`, as a send nested in `toApp`
 does today. A send deferred from `toAdmin` finds the slot free.
 
+**Where the hop lives.** In its own small coroutine, which `Session::send` awaits only when the depth is
+non-zero. `Session::send`'s own frame and the position of its first cancellation check, both of which B35
+measured, are then the same as today on the path that does not wait.
+
 **Cost.** A send that is not started inside an outbound callback pays one integer load and a branch. A send
-that is pays one post: probe p1 measured the same hop on the reply path at +210 to +270 ns on the Engine's
-session executor type, with no call to `operator new` or `aligned_alloc`. B35's zero-allocation gates must
-stay green (§3); if the added await grows `Session::send`'s frame enough to move them, the deferred path
-goes into its own small coroutine.
+that is pays one post and that coroutine's frame: probe p1 measured a post on the reply path at +210 to
++270 ns on the Engine's session executor type, with no call to `operator new` or `aligned_alloc`. B35's
+zero-allocation gates must stay green (§3).
 
 **What an application observes.**
 
@@ -183,6 +202,12 @@ executor that is already running in the calling thread starts its body inline, o
 From any other thread the same `co_spawn` queues behind S's current handler, which is the serialisation
 `Engine::send` promises. Nothing in step 4 consults a second strand.
 
+The claim has a condition on the caller, and the B&L row states it: `Engine::send` is a coroutine, and it
+nests when the application starts it from the callback in a way that runs its body at once (a `co_spawn`
+onto an executor already running in that thread, the session's own or the `io_context`'s). An application
+that posts first, or starts it on a strand of its own, gets a send that begins after the callback. That
+send is still ordered.
+
 **Why a miss cannot happen where nesting matters.** A send is admitted only in Active. A session reaches
 Active on a frame its read pump delivers, and both role loops publish the session, and republish the
 snapshot, before the pump or the first-frame delivery starts. A callback that runs before publication
@@ -194,9 +219,11 @@ republish. Telling "registered, not yet published" from "unknown" out of the sna
 registered id in it and a republish per registration, which is a rebuild of the map per call. The miss path
 is cold: a send to a session that is not established.
 
-**The payload.** `Engine::send` copies the caller's span into its frame so a caller's stack buffer may die
-before the send completes. That copy stays. The hit path passes a view of it to the session-strand body,
-whose lifetime the outer frame covers.
+**The payload.** `Engine::send` copies the caller's span into its frame, so a caller's stack buffer may die
+before the send completes, and the session-strand body captures its own copy by value. Both stay as they
+are. The body must not hold a view into the outer frame: frames can be destroyed out of order when an
+`io_context` is destroyed with sends suspended, which is the class PR #572's Gate B fixed at its miss-path
+drains.
 
 **Cost.** One snapshot load and one keepalive copy replace a hop through the engine-wide strand. On the
 fallback `atomic_shared_ptr` the load takes a shard lock (`include/fixpp/core/sync/detail/atomic_shared_ptr.hpp`).
@@ -238,14 +265,23 @@ This is what release builds do today. It is not created by R-1 or R-2, and defer
 remove it. What this PR changes is reach: once §2.2 is in, these paths run on assertion builds, and so on
 the sanitizer presets, for the first time.
 
-In this PR:
-- the cells that drive it run under the ASan preset, including one at Engine level, where the role loop
-  owns the Session and something can free it (§3);
-- if a sanitizer reports, the inbound arms get a check after each inbound callback returns, in the shape of
-  `logon_arm_superseded_` ("close began: act no further on this frame"), and that check is part of this PR;
-- if none reports, the behaviour is disclosed as a limitation (§4) and the check is a follow-up issue.
+**It is a behaviour question, not a memory-safety one, as far as reading goes.** Nothing that owns a
+Session can free it while one of its inbound arms is on the stack:
+- under the Engine, each role loop holds its own `shared_ptr` to the Session (`local_session` in
+  `run_accept_loop` and `run_connect_loop`) across `run_read_pump`, and the arm runs inside the pump;
+  `stop()` joins the role loops before its terminal closes and before it clears the registry;
+- the C ABI's engine shell keeps its sessions for its own lifetime;
+- a caller that drives a raw `Session` owns that obligation already (B&L `L-015-4`, `L-544-2`).
 
-Which of the two last items applies is OD-2.
+So a sanitizer cell at Engine level would come back clean by construction, as the Session-level cells did
+under valgrind, and it cannot decide anything. The sanitizer runs of §3 stay, as a net under the newly
+reachable paths, not as the answer to this question.
+
+The question is what an arm should do with a frame whose callback closed the session: go on (today: the
+inbound number is consumed and, on a persistent store, persisted after the close reported completion; a
+reply's `toAdmin` or `toApp` still runs; nothing is transmitted), or stop at the callback's return, in the
+shape of `logon_arm_superseded_`. By reading, QuickFIX C++ goes on: its `next*` handlers increment the
+target number after `verify` returns, with no check that the callback disconnected. That is OD-2.
 
 ## 3. Tests and gates
 
@@ -308,8 +344,9 @@ they stay as they are.
   control strand from io threads, which is new for `Engine::send`.
 - ASan: every cell above, and the cells of §2.5 (`FromAppSendsReply_NestedToAppThrows*`,
   `FromAppStartsClose_*`, `FromAdminStartsClose_Terminal`), which the preset could not reach before §2.2.
-  Plus one Engine-level cell in which a callback closes its session while the Engine owns it. The disabled
-  control cell in the test file shows the instrument reports on this binary.
+  The disabled control cell in the test file shows the instrument reports on this binary. By §2.5 no owner
+  frees the Session in these cells, so a clean run shows the absence of other faults on these paths and
+  says nothing about lifetime.
 - A clean sanitizer run is stated as what it drove, not as absence.
 
 **B35's gates.** The zero-allocation gates on the Active inbound read and on `Session::send`
@@ -393,10 +430,11 @@ the first release. The C ABI's symbols, types and error codes do not change.
 - **OD-1 — the result of a deferred send cancelled before it starts.** Proposed: `dispatch_aborted`,
   returned from before the existing conversion, with no state change. The alternative is a new error
   value, which touches the error taxonomy and the C ABI's translation table.
-- **OD-2 — the check after an inbound callback (§2.5).** Proposed: decide on the sanitizer result. A report
-  makes the check part of this PR. No report leaves a disclosed limitation and a follow-up issue, because
-  the check is a behaviour decision for every Active arm (what the arm does with a frame whose callback
-  closed the session) and deserves its own review.
+- **OD-2 — an inbound arm whose callback closed the session (§2.5).** An owner decision on behaviour; a
+  sanitizer cannot make it. Proposed: this PR does not change it. It discloses what the arm does today as a
+  limitation (§4) and files an issue for the decision, because it is a decision for every Active arm and
+  the reading of QuickFIX C++ ("goes on") points the same way as doing nothing. If a sanitizer run of §3
+  does report on these paths, that report is a defect in its own right and is fixed here.
 - **OD-3 — the stop check on the hit path.** Proposed: in the session-strand body, read the session's
   engine-stop flag, which `stop()`'s first step sets on that strand before it emits cancellation, through
   `session_engine_access`. It is ordered with `stop()` by the strand, not by an atomic read that can go
