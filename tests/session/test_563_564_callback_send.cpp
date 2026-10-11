@@ -2,7 +2,7 @@
 //
 // tests/session/test_563_564_callback_send.cpp
 //
-// fixpp#563 and fixpp#564 (batch B28) — reproduction only, no fix.
+// fixpp#563 and fixpp#564 (batch B28).
 //
 // Subject: a Session::send started from inside an Application callback, on the
 // session's own executor. co_spawn's first step is a dispatch, so when the
@@ -14,12 +14,14 @@
 // started inside toApp peeks the same value, so two frames carry one
 // MsgSeqNum(34) while the counter moves by two.
 //
-// #564's claim: on a build without NDEBUG the nested send's own toApp
-// constructs a callback_dispatch_scope while the outer callback's scope is
-// live, and that scope's assert aborts the process. So every cell marked
-// "nested" below is expected to abort there on such a build, and #563 is only
-// observable where the assert is compiled out. No cell depends on another: run
-// each alone with --gtest_filter.
+// #564: on a build without NDEBUG the session's debug guard aborts the process
+// where a callback is entered inside another callback of the same session in a
+// way the contract does not allow, at the assertion of the site where that
+// nesting begins (`.specify/563-564-callback-send.md` §2.2). A nesting the
+// contract allows passes. A cell whose own process drives a nesting of the
+// first kind therefore ends in that abort on such a build, and what the cell
+// measures is observable only where the assertions are compiled out. No cell
+// depends on another: run each alone with --gtest_filter.
 //
 // Cells:
 //   ToAppSendsNested          #563 claim. toApp for message ONE starts a send

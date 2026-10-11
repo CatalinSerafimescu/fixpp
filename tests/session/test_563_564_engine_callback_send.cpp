@@ -2,7 +2,7 @@
 //
 // tests/session/test_563_564_engine_callback_send.cpp
 //
-// fixpp#563 and fixpp#564 (batch B41) — measurement only, no fix.
+// fixpp#563 and fixpp#564 (batch B41).
 //
 // Subject: an Engine::send started from inside an Application callback, with no
 // asio::post between the callback and the co_spawn. Engine::send hops to the
@@ -60,11 +60,12 @@
 // MsgSeqNums in arrival order. Both sends report success and both sessions stay
 // Active.
 //
-// On a build with asserts a nested entry is expected to stop in
-// callback_dispatch_scope before the second toApp's body runs, so the cell
-// cannot print its classification. The lines the hook writes to stderr around
-// the co_spawn bracket that case: an abort between "starting" and "returned"
-// happened while the outer callback was on the stack.
+// On a build with asserts, a toApp entered inside toApp or toAdmin of the same
+// session stops at the session's debug guard before the second toApp's body
+// runs (`.specify/563-564-callback-send.md` §2.2), so a cell in which that
+// happens cannot print its classification. The lines the hook writes to stderr
+// around the co_spawn bracket that case: an abort between "starting" and
+// "returned" happened while the outer callback was on the stack.
 //
 // Observation limits: the bytes on the socket are not tapped. What was stamped
 // is read from the frame toApp is handed, which is the buffer the send path
