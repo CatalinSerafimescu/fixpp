@@ -1,9 +1,10 @@
 # fixpp#563, fixpp#564 — a send started inside an application callback (B41)
 
-> **Status: v0.2 — draft for Gate A.** Issue mode: this note is the plan; there is no `specs/<id>/` bundle.
+> **Status: v0.3 — draft for Gate A.** Issue mode: this note is the plan; there is no `specs/<id>/` bundle.
 > Branch `563-564-callback-send`. Gate A has not run. v0.2 extends the rule from `Session::send` to every
 > entry point that can begin an emit (§2.1a), after a graceful `close()` started inside an outbound callback
-> was measured to reproduce the defect.
+> was measured to reproduce the defect. v0.3 records ruling R-4 (every `close()` started inside a callback
+> waits), which replaces v0.2's open decisions on the close.
 >
 > **How this design was reached.** Both issues were re-measured after B35, then widened by measurement
 > (`Engine::send`, `toAdmin`, both store kinds, several io threads, a close started from a callback). The
@@ -40,6 +41,11 @@
 - **R-3.** The session closed from inside one of its own callbacks is to be measured under a memory
   checker. The existing ASan preset could not reach it (§2.5); the measurement moves to this PR's
   verification.
+- **R-4 — `Session::close`.** A close in either mode, started while any callback of that session is on the
+  stack, begins after the callback returns. So an arm never runs on a session that its own callback's
+  `close()` closed, and a requested Logout is never emitted inside the caller. Chosen over a check after
+  each inbound callback, and over leaving the arm to carry on as QuickFIX C++ and J do. It is QuickFIX/Go's
+  shape; the owner preferred the session not to be left half-processed.
 
 ## 1. What is wrong, and the one condition behind it
 
@@ -176,35 +182,40 @@ it from a callback of the same session:
 |---|---|---|
 | `Session::send` | yes | §2.1 |
 | `Engine::send` | only through `Session::send` | §2.3; guarded by §2.1 |
-| `Session::close`, graceful | yes: `run_logout_phase1` peeks, calls `toAdmin`, assigns and stores, unless a store's flush hook suspends first | below |
-| `Session::close`, terminal | no: it emits nothing | unchanged; below |
-| `Engine::stop` | no emit; it reaches `Session::close` in terminal mode | unchanged; not decided here (§7) |
+| `Session::close`, graceful | yes: `run_logout_phase1` peeks, calls `toAdmin`, assigns and stores, unless a store's flush hook suspends first | below (R-4) |
+| `Session::close`, terminal | no: it emits nothing, but it closes the session inline | below (R-4) |
+| `Engine::stop` | no emit; it reaches `Session::close` in terminal mode | covered at `Session::close`; `stop()` itself is not changed (§7) |
 | `Session::open`, `Session::drive_reconnect` | the initiator's Logon | engine-driven; refused or meaningless on a session that is already open; not an application entry point from a callback |
 | `Session::on_inbound_frame` | reply emits | fed by the read pump; an application that feeds frames from inside a callback is outside the contract |
 
-**Graceful `close()`.** Measured: started inside `toApp` or `toAdmin`, its Logout takes the outer frame's
-number at a callback-first site and goes out ahead of the outer frame at an assign-first site, and the
-outer frame is then transmitted after our own Logout. With the start posted, the outer frame goes first and
-the Logout follows, both retained.
+**`Session::close`, both modes (R-4).** At its entry, for every caller, `close()` waits by one post onto
+the session's executor while the depth of all callbacks of that session is non-zero, and then proceeds as
+it does today. The check is in `close()` itself, not at the application's call, so it also covers the
+terminal close that `send_impl` awaits when a nested send's `toApp` throws, and the terminal close
+`Engine::stop()` reaches when an application starts it from a callback.
+
+What it does for the two modes:
+
+- **Graceful.** Measured without the wait: started inside `toApp` or `toAdmin`, its Logout takes the outer
+  frame's number at a callback-first site and goes out ahead of the outer frame at an assign-first site,
+  and the outer frame is then transmitted after our own Logout. With the start posted, the outer frame goes
+  first and the Logout follows, both retained. The wait also keeps the Logout's `toAdmin` off the caller's
+  stack in `fromApp`, where order was not at risk.
+- **Terminal.** It begins no emit. Without the wait it closes the session under the callback's feet: the
+  session is `closed_drained`, and `onLogout` has run, before the call returns, and the arm that called
+  the callback resumes on it (§2.5). With the wait, the close reaches that arm the way a close from another
+  thread does: while the arm is suspended, or after it has finished.
 
 What the three QuickFIX engines do, read: an application's `logout()` sets a flag (C++, J) or queues a
-request (Go), and the engine's own loop generates the Logout later. So the Logout is never emitted, and its
-`toAdmin` never runs, inside the caller, whichever callback the caller is in.
-
-So a graceful `close()` waits, by one post onto the session's executor, while **any** callback of that
-session is on the stack, and then proceeds as a graceful close does today. That is the QuickFIX behaviour,
-and it contains the condition of §1 (an outbound callback is a callback). It needs the count of all
-callbacks in every build type, which §2.2's guard already keeps. Waiting only under an outbound callback
-would also restore order; it is the alternative in OD-5.
+request (Go), and the engine's own loop generates the Logout later, so it is never emitted inside the
+caller. `disconnect()` in C++ and J runs inline, `onLogout` included, and the inbound handler then carries
+on with the frame. Go has no inline close: a stop is queued to the session's loop. R-4 follows all three
+for a graceful close and follows Go for a terminal one; the departure from C++ and J is that `onLogout`
+runs just after the callback, not inside it.
 
 The wait must not be a way to skip the close. It runs with cancellation shut out, as 093 did for the
-store operation of its reset unit (plan OD-25): a close that was asked for still closes.
-
-**Terminal `close()`.** It begins no emit, so §1's condition does not reach it, and it is not changed.
-Measured from `toApp`: the outer send returns `session_already_closed`, nothing is transmitted, no number
-is consumed, and the store and the manager agree. From `toAdmin` it is not measured yet; §3 adds those
-cells, and they must show the same: no frame after the close, and numbers that agree. What the outer arm
-does afterwards is the subject of §2.5.
+store operation of its reset unit (plan OD-25): a close that was asked for still closes. A close that
+finds the session already closed when it resumes returns as a repeated close does today.
 
 ### 2.2 The debug guard keeps its meaning (fixpp#564)
 
@@ -224,7 +235,7 @@ gets the same shape. The members exist in every build type, as `in_dispatch_` do
 one definition; only the checks compile out under `NDEBUG`.
 
 Two counts, then, both strand-confined plain integers that exist in every build type: the depth of all
-callbacks, which the guard's checks read under assertions and a graceful `close()` reads always (§2.1a);
+callbacks, which the guard's checks read under assertions and `close()` reads always (§2.1a);
 and the depth of outbound callbacks, which `Session::send` reads (§2.1). The owner-thread check is the only
 part that compiles out.
 
@@ -307,33 +318,34 @@ not changed.
 
 ### 2.5 A session closed from inside one of its own callbacks
 
-Measured on an `NDEBUG` build, with no nested send involved: a terminal `Session::close` started in
-`fromApp` or `fromAdmin` runs inline to `closed_drained`, and `onLogout` fires, before the call returns.
-The inbound arm then resumes on the closed session: it reports success, or `session_already_closed` where
-it goes on to emit. With a FileStore the close reports completion before the inbound arm has finished. A
-nested send whose `toApp` throws reaches the same state, because that branch awaits a terminal close.
+Measured on an `NDEBUG` build before this change, with no nested send involved: a terminal
+`Session::close` started in `fromApp` or `fromAdmin` runs inline to `closed_drained`, and `onLogout` fires,
+before the call returns. The inbound arm then resumes on the closed session: it reports success, or
+`session_already_closed` where it goes on to emit. With a FileStore the close reports completion before the
+inbound arm has finished. A nested send whose `toApp` throws reaches the same state, because that branch
+awaits a terminal close.
 
-This is what release builds do today. It is not created by R-1 or R-2, and deferring every send would not
-remove it. What this PR changes is reach: once §2.2 is in, these paths run on assertion builds, and so on
-the sanitizer presets, for the first time.
+R-4 removes that state at its source: no `close()` begins while a callback of the session is on the stack,
+so the arm that called the callback is never resumed on a session its own callback closed. The close then
+meets the arm as any close does that arrives while an arm is in flight, which is the case the session is
+already built and tested for (`Session::close`'s drain of the seqnum manager and the write gate, the store
+quiescence it waits for, 093's rules for the Logon arms).
 
-**It is a behaviour question, not a memory-safety one, as far as reading goes.** Nothing that owns a
-Session can free it while one of its inbound arms is on the stack:
+**Not a memory-safety defect, as far as reading goes.** Nothing that owns a Session can free it while one
+of its inbound arms is on the stack:
 - under the Engine, each role loop holds its own `shared_ptr` to the Session (`local_session` in
   `run_accept_loop` and `run_connect_loop`) across `run_read_pump`, and the arm runs inside the pump;
   `stop()` joins the role loops before its terminal closes and before it clears the registry;
 - the C ABI's engine shell keeps its sessions for its own lifetime;
 - a caller that drives a raw `Session` owns that obligation already (B&L `L-015-4`, `L-544-2`).
 
-So a sanitizer cell at Engine level would come back clean by construction, as the Session-level cells did
-under valgrind, and it cannot decide anything. The sanitizer runs of §3 stay, as a net under the newly
-reachable paths, not as the answer to this question.
+So a sanitizer cell would come back clean by construction and decides nothing about lifetime. The
+sanitizer runs of §3 stay, as a net under paths that assertion builds could not reach before §2.2.
 
-The question is what an arm should do with a frame whose callback closed the session: go on (today: the
-inbound number is consumed and, on a persistent store, persisted after the close reported completion; a
-reply's `toAdmin` or `toApp` still runs; nothing is transmitted), or stop at the callback's return, in the
-shape of `logon_arm_superseded_`. By reading, QuickFIX C++ goes on: its `next*` handlers increment the
-target number after `verify` returns, with no check that the callback disconnected. That is OD-2.
+**What R-4 does not cover.** A nested send can leave the session `Disconnected` without calling `close()`:
+`Session::send` writes that state inline when `assign_outbound()` reports the sequence number overflow.
+Started in an inbound callback, that happens inside the callback, and the arm resumes on a disconnected
+session. It needs a MsgSeqNum at its maximum; it is disclosed (§4), not changed.
 
 ## 3. Tests and gates
 
@@ -350,7 +362,9 @@ fails on either of the other two.
 | `EngineCallbackSend.MtEngineSendFromFromApp_Quiet`, `…_BusyControlStrand` | every reply nested, in both arms |
 | `CallbackSend.ToAppStartsClose_Graceful`, `ToAdminStartsClose_Graceful`, `…_AssignFirstSite`, `FromAppStartsClose_Graceful` | the close's Logout after the callback returned: its `toAdmin` not on the starting callback's stack; the outer frame first, then the Logout; distinct consecutive numbers; both retained; pass on the debug build too |
 | the `…_NoStore` and `…_NoStore_LiveWrite` nested cells | deferred; distinct consecutive numbers in transmit order |
-| `ToAppStartsClose_Terminal`, `FromAppStartsClose_Terminal*`, `FromAdminStartsClose_Terminal` | as measured today, and on the debug build too (§2.2 lets them run there) |
+| `FromAppStartsClose_Terminal*`, `FromAdminStartsClose_Terminal` | inside the callback after the start: the session still Active and open; `onLogout` after the callback returned; the session closed at the end; pass on the debug build too |
+| `ToAppStartsClose_Terminal` | the outer frame transmitted and retained, its send ok; then the close |
+| `FromAppSendsReply_NestedToAppThrows*` | inside `fromApp` after the start: still Active; `onLogout` after `fromApp` returned; the send returns `app_callback_threw`; the session closed at the end |
 | every control (`Sequential*`, `OverlappingSends*`, `TestRequestThenSend`) | unchanged |
 
 The cells' names and their "expected classification" asserts are re-decided when they are lifted: a cell
@@ -365,9 +379,13 @@ named `…Nested` that must report "deferred" is renamed.
 - A deferred send cancelled while it waits: returns the OD-1 error, the session stays Active, nothing is
   transmitted, no number is consumed.
 - A deferred send whose session leaves Active while it waits: returns `session_invalid_state_for_send`.
-- A terminal close started in `toAdmin`, at a callback-first site and at an assign-first one: no frame is
-  transmitted after the close, and the store and the manager agree.
-- A graceful close that waits, with the chain cancelled meanwhile: the session still closes.
+- A terminal close started in `toAdmin`, at a callback-first site and at an assign-first one: the outer
+  frame is transmitted and retained first, no frame follows the close, and the store and the manager agree.
+- A close that waits, in each mode, with the chain cancelled meanwhile: the session still closes.
+- A close that waits while a second close, from outside the callback, runs to completion: the waiting one
+  returns as a repeated close does.
+- `Engine::stop()` started from a callback: it completes, and the callback's arm is not resumed on a
+  closed session.
 - A graceful close started in `fromApp` on a session with no store, and with a FileStore: the Logout after
   the callback in both (today the first is inline and the second is not).
 - The guard: two threads entering one session's callbacks still assert (a death cell); a nested callback
@@ -383,8 +401,10 @@ named `…Nested` that must report "deferred" is renamed.
 | the depth counted at the inbound overload too | `FromAppSendsReply` and `EngineSendFromFromApp*` (they must report nested) |
 | the scope's exit setting the depth to zero | a cell with a `toAdmin` inside a `toApp`'s deferred window; written for this arm |
 | the Active re-check after the hop removed | the "leaves Active while it waits" cell |
-| the graceful close's wait removed | `ToAppStartsClose_Graceful`, `ToAdminStartsClose_Graceful*`, and `FromAppStartsClose_Graceful`'s "not on the callback's stack" witness |
-| the graceful close's wait made cancellable | the cancelled-close cell |
+| the close's wait removed | `ToAppStartsClose_Graceful`, `ToAdminStartsClose_Graceful*`, and the "not on the callback's stack" witness of every `…StartsClose_*` and `…NestedToAppThrows*` cell |
+| the close's wait limited to graceful mode | the terminal cells and the `…NestedToAppThrows*` cells |
+| the close's wait limited to outbound callbacks | `FromAppStartsClose_*`, `FromAdminStartsClose_Terminal` |
+| the close's wait made cancellable | the cancelled-close cells |
 | the hop's cancellation routed into the `Disconnected` conversion | the cancelled-deferred-send cell |
 | the hit path replaced by the control-strand hop | `MtEngineSendFromFromApp_BusyControlStrand` (it reports deferred replies) |
 | the guard's owner check removed | the two-thread death cell |
@@ -429,15 +449,15 @@ Article VIII §2 runs for the rows that exist.
 
 **B&L, live file.**
 - New rows: the `Session::send` contract of R-1 as an application observes it (the table in §2.1); a
-  graceful `close()` started in a callback (§2.1a); the `Engine::send` path of R-2, including the cold path
-  and what it returns; the reshaped guard.
+  `close()` started in a callback, with the departure from QuickFIX C++ and J that `onLogout` follows the
+  callback (§2.1a); the `Engine::send` path of R-2, including the cold path and what it returns; the
+  reshaped guard; the residual of §2.5 as a limitation.
 - `L-544-3` and `L-544-4` move to the closed file.
 - `B-019-3` ("enqueued behind the current dispatch") and `B-023-2` ("`send` traverses
   caller→control→session") describe behaviour this PR changes; each is rewritten in place.
 - `L-054-1` stays: the blocking C-ABI send from inside the receive callback still deadlocks, because the
   wrapper blocks the strand on its own completion. Python's refusal (`B-055-2`) stays.
 - `L-023-2` stays open unless the second probe is promoted to a bench.
-- The outcome of OD-2: a limitation row for §2.5, or the rows for the check.
 
 **Headers.** The re-entrancy sentence in `Engine::send`'s doc comment; the `send()` line of the reentrancy
 contract in `session.hpp`; the comment on `callback_dispatch_scope`. `engine.cpp`'s header comment names
@@ -483,8 +503,12 @@ the first release. The C ABI's symbols, types and error codes do not change.
 - **Guard `Session::send` only.** The first draft of this note. A graceful `close()` is a second emit body
   and reproduces the defect (measured); making same-thread nesting legal would have turned an abort into a
   silent duplicate on every build type.
-- **Make a terminal `close()` wait too.** It begins no emit and its measured outcome from `toApp` is clean.
-  Waiting would change what `close(terminal)` means inside a callback with nothing to gain for §1.
+- **Leave a terminal `close()` inline** (v0.2 of this note), with a check after each inbound callback, or
+  with the arm left to carry on as QuickFIX C++ and J do. Rejected by R-4: the check is needed at every
+  Active arm and has to decide what a half-processed frame counts as; carrying on leaves a session that
+  reports closed while one of its arms still runs.
+- **Make a graceful `close()` wait only inside an outbound callback.** The smallest change that restores
+  order; it leaves the Logout's `toAdmin` running inside `fromApp`, which no QuickFIX engine does.
 - **`Engine::send`: document "nested or deferred".** Rejected by R-2.
 - **`Engine::send`: a post at the first hop**, so it is always deferred. Rejected by R-2: it departs from
   `Session::send` and from QuickFIX, and adds a post to every `Engine::send`.
@@ -498,23 +522,12 @@ the first release. The C ABI's symbols, types and error codes do not change.
 - **OD-1 — the result of a deferred send cancelled before it starts.** Proposed: `dispatch_aborted`,
   returned from before the existing conversion, with no state change. The alternative is a new error
   value, which touches the error taxonomy and the C ABI's translation table.
-- **OD-2 — an inbound arm whose callback closed the session (§2.5).** An owner decision on behaviour; a
-  sanitizer cannot make it. Proposed: this PR does not change it. It discloses what the arm does today as a
-  limitation (§4) and files an issue for the decision, because it is a decision for every Active arm and
-  the reading of QuickFIX C++ ("goes on") points the same way as doing nothing. If a sanitizer run of §3
-  does report on these paths, that report is a defect in its own right and is fixed here.
 - **OD-3 — the stop check on the hit path.** Proposed: in the session-strand body, read the session's
   engine-stop flag, which `stop()`'s first step sets on that strand before it emits cancellation, through
   `session_engine_access`. It is ordered with `stop()` by the strand, not by an atomic read that can go
   stale between the check and the send. Alternatives: read `stopped_` there with `acquire` (the
   check-then-act gap 093's OD-15 rejected for the same flag), or no second check (the Active check and the
   drain already bound what such a send can do).
-- **OD-5 — when a graceful `close()` waits (§2.1a).** Proposed: while any callback of that session is on
-  the stack, because that is what all three QuickFIX engines do with a requested logout. The alternative
-  waits only while an outbound callback is on the stack: it is the smallest change that restores order,
-  and it leaves the Logout's `toAdmin` running inside `fromApp`, which no QuickFIX engine does. An owner
-  decision under the principle of §0; it is an application of R-1's condition, not part of the ruling as
-  given.
 - **OD-4 — `Engine::send` from a callback of an unpublished session.** By §2.3 it cannot be admitted. If
   Gate A finds a route to Active before publication, the miss path's timing dependence is back for that
   route and R-2 is not met there.
@@ -526,7 +539,8 @@ the first release. The C ABI's symbols, types and error codes do not change.
   added a lock for it. Not changed here; a candidate issue.
 - The C ABI's and Python's send from a callback (`L-054-1`, `B-055-2`).
 - A session send queue, a bound on overlapping sends, or their back-pressure.
-- `Engine::stop()` started from a callback.
+- `Engine::stop()` itself. Started from a callback, its terminal closes wait under R-4; its own steps on
+  the control strand are not examined here.
 - A bench for `Engine::send` (`L-023-2`).
 - Whether `register_session` should republish the snapshot; two comments in `engine.cpp` and `engine.hpp`
   disagree with the code about it. Noted, not changed.
