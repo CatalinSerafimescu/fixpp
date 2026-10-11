@@ -108,9 +108,8 @@ struct session_test_access {
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
 
-    // The lifecycle value (Session::lifecycle: never_opened 0, open 1, closing 2,
-    // closed_drained 3). Read it on the session's strand. The B41 cells print it from
-    // inside a callback and after the inbound call that ran the callback.
+    // The numeric value of the session's Session::lifecycle (see the enum in session.hpp
+    // for the names). Read it on the session's strand.
     [[nodiscard]] static int lifecycle_value(Session const& s) noexcept {
         return static_cast<int>(s.state_);
     }

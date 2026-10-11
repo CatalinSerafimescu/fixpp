@@ -70,11 +70,14 @@
 // session refused shows only as a missing delivery, an admin callback and a
 // state change.
 //
-// The multi-threaded cells classify per reply with a thread_local: the acceptor's
-// fromApp for message k marks its own thread with k around the co_spawn, and the
-// acceptor's toApp for REPLY-k reads the mark on the thread it runs on. Both
-// callbacks run on the acceptor's strand, so REPLY-k's toApp can see the mark k
-// only when it runs inside that fromApp. Per-reply records are written on one
+// The multi-threaded cells classify per reply with two marks. The acceptor's
+// fromApp for message k marks its own thread with k around the co_spawn
+// (thread_local) and moves an atomic phase for k from "not started" to "in
+// fromApp" before the co_spawn and to "the co_spawn returned" after it. The
+// acceptor's toApp for REPLY-k is nested when its thread carries the mark k,
+// deferred when the phase says the co_spawn had returned, and overlapped when
+// the phase says fromApp(k) was still inside the co_spawn on another thread,
+// which the session's strand is meant to exclude. Per-reply records are written on one
 // session's strand each and read after the io threads are joined; what another
 // thread reads while they run is atomic or under a mutex. These cells assert
 // what must hold in every interleaving (each reply sent once, consecutive
@@ -829,7 +832,16 @@ long mt_index(std::string_view id, std::string_view prefix) {
     return k;
 }
 
-enum class MtClass : std::uint8_t { never_ran = 0, nested = 1, deferred = 2 };
+enum class MtClass : std::uint8_t {
+    never_ran = 0,
+    nested = 1,      // on the thread, and inside, the fromApp that started it
+    deferred = 2,    // after that fromApp's co_spawn had returned
+    overlapped = 3,  // on another thread while that fromApp was inside the co_spawn
+    unstarted = 4,   // before any fromApp started it
+};
+
+// Where the acceptor's fromApp for message k is.
+enum class MtPhase : std::uint8_t { not_started = 0, in_from_app = 1, co_spawn_returned = 2 };
 
 struct MtDelivery {
     long k;
@@ -854,6 +866,9 @@ struct MtReadings {
     std::vector<seqnum_t> a_seq;
     std::vector<MtDelivery> ini_deliveries;
 
+    // Per reply, written by the acceptor's fromApp and read by its toApp.
+    std::unique_ptr<std::atomic<MtPhase>[]> phase;
+
     // Written by completion handlers and load threads, on any thread.
     std::atomic<std::uint64_t> reply_sends_ok{0};
     std::atomic<std::uint64_t> reply_sends_failed{0};
@@ -875,7 +890,9 @@ struct MtReadings {
           reply_to_app_calls(n, 0),
           reply_seq(n, 0),
           a_to_app_calls(n, 0),
-          a_seq(n, 0) {
+          a_seq(n, 0),
+          phase(std::make_unique<std::atomic<MtPhase>[]>(n)) {
+        for (std::size_t k = 0; k < n; ++k) phase[k].store(MtPhase::not_started);
         acc_deliveries.reserve(n);
         ini_deliveries.reserve(n);
     }
@@ -884,6 +901,8 @@ struct MtReadings {
 struct MtTally {
     std::size_t nested = 0;
     std::size_t deferred = 0;
+    std::size_t overlapped = 0;
+    std::size_t unstarted = 0;
     std::size_t never_ran = 0;
     long first_nested = -1;
     long first_deferred = -1;
@@ -899,6 +918,12 @@ MtTally tally(const MtReadings& o) {
             case MtClass::deferred:
                 if (t.deferred++ == 0) t.first_deferred = static_cast<long>(k);
                 break;
+            case MtClass::overlapped:
+                ++t.overlapped;
+                break;
+            case MtClass::unstarted:
+                ++t.unstarted;
+                break;
             case MtClass::never_ran:
                 ++t.never_ran;
                 break;
@@ -912,8 +937,10 @@ std::string mt_context(MtReadings& o, bool busy) {
     std::string out =
         "Replies requested=" + std::to_string(o.requested) +
         ", driven=" + std::to_string(o.driven) + ": nested=" + std::to_string(t.nested) +
-        " deferred=" + std::to_string(t.deferred) + " never ran=" + std::to_string(t.never_ran) +
-        "; first nested at reply " + std::to_string(t.first_nested) + ", first deferred at reply " +
+        " deferred=" + std::to_string(t.deferred) + " overlapped=" + std::to_string(t.overlapped) +
+        " before-its-fromApp=" + std::to_string(t.unstarted) +
+        " never ran=" + std::to_string(t.never_ran) + "; first nested at reply " +
+        std::to_string(t.first_nested) + ", first deferred at reply " +
         std::to_string(t.first_deferred) + "; io threads=" + std::to_string(kMtIoThreads) +
         "; control-strand load: " +
         (busy ? std::to_string(o.load_sends.load()) +
@@ -1038,12 +1065,17 @@ void run_mt_cell(bool busy, MtReadings& o) {
             std::fprintf(stderr, "[ B41 ] reply %ld: starting\n", k);
 #endif
             // The second send, started inside this callback: no post.
+            o.phase[static_cast<std::size_t>(k)].store(MtPhase::in_from_app);
             tl_reply_being_started = k;
             asio::co_spawn(exec,
                            engine.send(acc_id, std::span<const std::byte>(
                                                    reply_payloads[static_cast<std::size_t>(k)])),
                            on_reply_done);
             tl_reply_being_started = -1;
+            o.phase[static_cast<std::size_t>(k)].store(MtPhase::co_spawn_returned);
+#ifndef NDEBUG
+            std::fprintf(stderr, "[ B41 ] reply %ld: co_spawn returned\n", k);
+#endif
         } else {
             const long k = mt_index(id11, kMtPrefixReply);
             o.ini_deliveries.push_back({k, seq});
@@ -1064,10 +1096,18 @@ void run_mt_cell(bool busy, MtReadings& o) {
             const auto i = static_cast<std::size_t>(k);
             ++o.reply_to_app_calls[i];
             o.reply_seq[i] = seq;
-            o.classification[i] = tl_reply_being_started == k ? MtClass::nested : MtClass::deferred;
+            const MtPhase phase = o.phase[i].load();
+            const MtClass cls = tl_reply_being_started == k           ? MtClass::nested
+                                : phase == MtPhase::co_spawn_returned ? MtClass::deferred
+                                : phase == MtPhase::in_from_app       ? MtClass::overlapped
+                                                                      : MtClass::unstarted;
+            o.classification[i] = cls;
 #ifndef NDEBUG
             std::fprintf(stderr, "[ B41 ] reply %ld: %s\n", k,
-                         tl_reply_being_started == k ? "nested" : "deferred");
+                         cls == MtClass::nested       ? "nested"
+                         : cls == MtClass::deferred   ? "deferred"
+                         : cls == MtClass::overlapped ? "overlapped"
+                                                      : "before its fromApp");
 #endif
         } else {
             const long k = mt_index(id11, kMtPrefixA);
@@ -1216,6 +1256,7 @@ void run_and_check_mt(bool busy) {
     const MtTally t = tally(o);
     ::testing::Test::RecordProperty("nested", static_cast<int>(t.nested));
     ::testing::Test::RecordProperty("deferred", static_cast<int>(t.deferred));
+    ::testing::Test::RecordProperty("overlapped", static_cast<int>(t.overlapped));
     ::testing::Test::RecordProperty("never_ran", static_cast<int>(t.never_ran));
     std::printf("[ MEASURED ] %s\n", ctx.c_str());
     std::fflush(stdout);
@@ -1230,6 +1271,10 @@ void run_and_check_mt(bool busy) {
     // Every reply sent once.
     EXPECT_EQ(o.driven, o.requested) << "every message must have been answered. " << ctx;
     EXPECT_EQ(t.never_ran, 0U) << "PATH NOT DRIVEN for some replies: toApp never ran. " << ctx;
+    EXPECT_EQ(t.overlapped + t.unstarted, 0U)
+        << "a reply's toApp must not run on another thread while its fromApp is inside the "
+           "co_spawn, nor before that fromApp. "
+        << ctx;
     const auto once = [](const std::vector<std::uint32_t>& calls) {
         return std::ranges::all_of(calls, [](std::uint32_t c) { return c == 1; });
     };
