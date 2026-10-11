@@ -79,3 +79,12 @@ endforeach()
 add_bench_with_test_include(session_send_bench session_send_bench.cpp)
 target_compile_definitions(session_send_bench PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+
+# fixpp#563, fixpp#564 (B41; `.specify/563-564-callback-send.md` §3 "Cost (OD-5)") — the
+# route of `Engine::send` on one Active engine-managed session over the scripted transport
+# double of tests/support/transport_double.hpp. Public API and test-support headers only, so
+# the same source builds at the merge-base for the paired comparison ([const §VIII.2],
+# [const §VIII.3]).
+add_bench_with_test_include(engine_send_bench engine_send_bench.cpp)
+target_compile_definitions(engine_send_bench PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
