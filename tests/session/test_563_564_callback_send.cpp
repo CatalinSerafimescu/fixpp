@@ -42,6 +42,18 @@
 //                             its control.
 //   FromAppSendsReply         #564's acceptance shape. fromApp for an inbound
 //                             35=D starts a send of a reply. nested.
+//   ToAdminStartsSend         batch B41. The peer sends a TestRequest; toAdmin
+//                             for the Heartbeat that answers it starts a send
+//                             of an application message. The reply leaf reads
+//                             the next outbound MsgSeqNum before toAdmin and
+//                             advances the counter after it, so this is the
+//                             toApp cell's shape with an admin frame as the
+//                             outer one. This cell classifies the send as
+//                             nested, deferred or never ran, prints that, and
+//                             fails only on "never ran"; the sequence-number
+//                             assertions run either way.
+//   TestRequestThenSend       its control: the same send started after the
+//                             TestRequest was fully processed.
 //
 // Witness, asserted first in every nested cell: the nested send's toApp ran
 // while the outer callback was still on the stack. Without it a pass of the
@@ -61,8 +73,9 @@
 //
 // Not covered here: Engine::send from a callback. It hops to the engine's
 // control strand before returning to the session's, and needs an Engine with a
-// live transport; tests/session/test_application_engine_send.cpp holds the
-// cells that drive it.
+// live transport; tests/session/test_563_564_engine_callback_send.cpp holds
+// the cells that start it directly inside a callback (batch B41), and
+// tests/session/test_application_engine_send.cpp the ones that post it.
 //
 // mock_clock: nothing here depends on elapsed time. HeartBtInt is 0, so no
 // liveness loop runs.
@@ -211,6 +224,8 @@ public:
     int to_app_calls = 0;
     std::function<void()> on_from_app;
     std::function<void()> on_to_app;
+    // Called with the admin frame's MsgType(35).
+    std::function<void(std::string_view)> on_to_admin;
 
     expected_t<void> fromApp(const MessageView<access_mode::Index>& /*mv*/,
                              const SessionId& /*id*/) override {
@@ -223,6 +238,11 @@ public:
         ++to_app_calls;
         if (on_to_app) on_to_app();
         return {};
+    }
+    void toAdmin(const MessageView<access_mode::Index>& mv, const SessionId& /*id*/) override {
+        if (!on_to_admin) return;
+        const auto mt = mv.get(35);
+        on_to_admin(mt ? mt->as_string() : std::string_view{});
     }
 };
 
@@ -625,6 +645,120 @@ TEST(CallbackSend, FromAppSendsReply) {
                                   << (in_r ? 0 : static_cast<int>(in_r.error())) << ". " << context;
     EXPECT_EQ(next_in(sess), 3U) << "the inbound 35=D must have been consumed. " << context;
     EXPECT_EQ(sess.state(), fsm_state::Active) << context;
+}
+
+enum class AdminShape { send_inside_to_admin, send_after_test_request };
+
+// A TestRequest from the peer on an Active initiator. The session answers with
+// a Heartbeat; an application message is sent either from inside that
+// Heartbeat's toAdmin or after the TestRequest was fully processed.
+void run_test_request_then_send(AdminShape shape) {
+    Fixture f{ExecKind::io_context};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+    ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+
+    const auto ex = sess.executor().underlying();
+    const auto order = bytes_of(kPayloadOne);
+    const std::size_t wire_before = f.wire.size();
+    const bool inside = shape == AdminShape::send_inside_to_admin;
+
+    SendOutcome send;
+    bool outer_live = false;
+    std::optional<bool> inner_saw_outer_live;
+    int heartbeat_to_admin_calls = 0;
+    std::string seen_in_to_app = "not recorded";
+    std::string seen_after_spawn = "not recorded";
+
+    f.app->on_to_admin = [&](std::string_view msg_type) {
+        if (msg_type != "0") return;
+        ++heartbeat_to_admin_calls;
+        if (!inside || heartbeat_to_admin_calls != 1) return;
+        outer_live = true;
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] toAdmin(Heartbeat): starting Session::send\n");
+        asio::co_spawn(ex, sess.send(order), record_into(send));
+        std::fprintf(stderr, "[ B41 ] toAdmin(Heartbeat): co_spawn returned\n");
+        outer_live = false;
+        seen_after_spawn =
+            std::to_string(next_out(sess)) + (send.done ? " (send completed)" : " (send pending)");
+    };
+    f.app->on_to_app = [&] {
+        inner_saw_outer_live = outer_live;
+        seen_in_to_app = std::to_string(next_out(sess));
+    };
+
+    const auto test_request = peer_frame("1", 2, "112=B41-TR\x01");
+    const auto in_r = f.run(sess.on_inbound_frame(std::span<const std::byte>{test_request}),
+                            "CallbackSend::test_request");
+    if (!inside) asio::co_spawn(ex, sess.send(order), record_into(send));
+    // No Heartbeat toAdmin means no send was started inside it: nothing to wait for.
+    if (!f.pump_done([&] { return send.done || (inside && heartbeat_to_admin_calls == 0); },
+                     "CallbackSend::admin_send")) {
+        return;
+    }
+
+    const std::string classification = !inside                             ? "sequential (control)"
+                                       : !inner_saw_outer_live.has_value() ? "never ran"
+                                       : *inner_saw_outer_live             ? "nested"
+                                                                           : "deferred";
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    const std::string context =
+        "Classification: " + classification + ". Transmitted, in wire order: " + describe(sent) +
+        "; send: " + describe(send) + "; on_inbound_frame(TestRequest): " +
+        (in_r ? "ok" : "error " + std::to_string(static_cast<int>(in_r.error()))) +
+        "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
+        ", store=" + f.store_next_out(sess) + "; NextNumIn=" + std::to_string(next_in(sess)) +
+        "; state=" + std::to_string(static_cast<int>(sess.state())) +
+        "; NextNumOut in the send's toApp=" + seen_in_to_app +
+        ", in toAdmin after the co_spawn returned=" + seen_after_spawn + ".";
+    ::testing::Test::RecordProperty("classification", classification);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    // Witness.
+    ASSERT_EQ(heartbeat_to_admin_calls, 1)
+        << "PATH NOT DRIVEN: the TestRequest was not answered through one Heartbeat toAdmin. "
+        << context;
+    ASSERT_NE(classification, "never ran")
+        << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
+
+    EXPECT_EQ(describe(send), "ok") << context;
+    EXPECT_TRUE(in_r.has_value()) << context;
+
+    // The Heartbeat and the application message: both transmitted, under
+    // distinct and consecutive MsgSeqNums, each retained under its own.
+    ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
+    const auto hb_it =
+        std::ranges::find_if(sent, [](const std::string& fr) { return field(fr, 35) == "0"; });
+    const std::string* sent_order = frame_with_id(sent, kIdOne);
+    ASSERT_NE(hb_it, sent.end()) << "the Heartbeat was not transmitted. " << context;
+    ASSERT_NE(sent_order, nullptr) << "the application message was not transmitted. " << context;
+    EXPECT_EQ(field(*hb_it, 112), "B41-TR") << context;
+    std::vector<seqnum_t> seqs{seq_of(*hb_it), seq_of(*sent_order)};
+    std::ranges::sort(seqs);
+    EXPECT_EQ(seqs, (std::vector<seqnum_t>{2U, 3U}))
+        << "the two frames must carry distinct, consecutive MsgSeqNum(34) values, 2 and 3. "
+        << context;
+    expect_retained_as_sent(f, sess, *hb_it, context);
+    expect_retained_as_sent(f, sess, *sent_order, context);
+
+    EXPECT_EQ(next_out(sess), 4U) << "NextNumOut must have advanced by two. " << context;
+    EXPECT_EQ(f.store_next_out(sess), "4")
+        << "the store's NextNumOut must agree with the manager's. " << context;
+    EXPECT_EQ(next_in(sess), 3U) << "the TestRequest must have been consumed. " << context;
+    EXPECT_EQ(sess.state(), fsm_state::Active) << context;
+}
+
+TEST(CallbackSend, ToAdminStartsSend) {
+    run_test_request_then_send(AdminShape::send_inside_to_admin);
+}
+
+TEST(CallbackSend, TestRequestThenSend) {
+    run_test_request_then_send(AdminShape::send_after_test_request);
 }
 
 }  // namespace fixpp::session::test

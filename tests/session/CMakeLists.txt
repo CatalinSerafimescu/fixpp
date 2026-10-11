@@ -623,6 +623,20 @@ target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 
 # fixpp#563 / fixpp#564 (B41) — reproduction: a Session::send started inside an Application callback.
 add_threading_test(session_563_564_callback_send test_563_564_callback_send.cpp)
+# fixpp#563 / fixpp#564 (B41) — measurement: an Engine::send started inside an Application callback.
+# Real loopback TLS, so it carries application_engine_send_019_test's link set and fixture directory.
+# Its own binary: on a build with asserts one cell's abort ends the process.
+add_threading_test(session_563_564_engine_callback_send test_563_564_engine_callback_send.cpp)
+target_link_libraries(session_563_564_engine_callback_send PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+)
+target_compile_definitions(session_563_564_engine_callback_send PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
 
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
