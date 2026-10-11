@@ -280,6 +280,45 @@ fixpp::dict::version_profile Session::negotiated_version_profile() const noexcep
                                         ._reserved = 0};
 }
 
+// ── fixpp#564 (`.specify/563-564-callback-send.md` §2.2) — the debug guard ────
+//
+// The owner token's value for the calling thread: the address of an object with
+// thread storage duration. Each live thread has its own.
+const void* Session::callback_thread_tag_() noexcept {
+    thread_local char tag = 0;
+    return &tag;
+}
+
+// The same-thread assertions of §2.2. The owner token (callback_owner_hold in
+// session.hpp) lets a nested entry on the owner's thread pass; these name the
+// nestings that are outside the contract, each where it begins. Each kind has
+// one text, whichever site evaluates it, and no text contains another's or the
+// token's, so a death test can match the assertion it is written for. They are
+// macros so that an abort names the function and line of the site.
+//
+// A parse site is a function that builds a memory resource over
+// inbound_parse_buf_ (re-derive: `grep -n "inbound_parse_buf_" src/session/session.cpp`).
+// It evaluates this before it builds the resource, ahead of any scope.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE()                        \
+    assert(callback_depth_ == 0 &&                                      \
+           "inbound parse begun inside a callback of the same session " \
+           "(on_inbound_frame() called from an application callback?)")
+// The stack-arena overload of parse_and_dispatch_ evaluates this after its
+// callback_dispatch_scope is constructed and before it raises the outbound depth.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_OUTBOUND_ENTRY()              \
+    assert(outbound_callback_depth_ == 0 &&                                \
+           "toApp or toAdmin entered inside toApp or toAdmin of the same " \
+           "session (a callback ran the session's executor?)")
+// The onLogon and onLogout sites evaluate this after the site's
+// callback_dispatch_scope is constructed and before the callback is called.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_LIFECYCLE_ENTRY()                \
+    assert(outbound_callback_depth_ == 0 &&                                   \
+           "onLogon or onLogout entered inside toApp or toAdmin of the same " \
+           "session (the session entered or left Active inside an emit)")
+
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
 // record_state_transition_: write new_state into the 16-slot ring and advance
 // fsm_state_. The write index (fsm_visit_write_idx_) is a separate uint32 that
@@ -314,6 +353,7 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         onLogon_fired_ = true;
         const SessionId sid = SessionId::from_config(cfg_);
         callback_dispatch_scope cs{*this};
+        FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_LIFECYCLE_ENTRY();
         auto r = invoke_callback_safe([&]() { engine_.application->onLogon(sid); });
         (void)cs;
         if (!r) lifecycle_cb_threw_ = true;
@@ -326,6 +366,7 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         onLogout_fired_ = true;
         const SessionId sid = SessionId::from_config(cfg_);
         callback_dispatch_scope cs{*this};
+        FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_LIFECYCLE_ENTRY();
         auto r = invoke_callback_safe([&]() { engine_.application->onLogout(sid); });
         (void)cs;
         // A throw from onLogout is absorbed: the session is already leaving Active.
@@ -457,6 +498,26 @@ void Session::note_frame_too_large_() noexcept {
 namespace {
 constexpr std::size_t kAdminParseArena = 8192;  // admin frames: bounded small
 constexpr std::size_t kSendParseArena = 16384;  // outbound app frames: larger payloads
+
+// Raises the outbound-callback depth for one toApp or toAdmin call and restores the
+// value it found, on every exit (`.specify/563-564-callback-send.md` §2.1 "Writer").
+class outbound_callback_raise {
+public:
+    explicit outbound_callback_raise(std::uint32_t& depth) noexcept
+        : depth_(depth), previous_(depth) {
+        ++depth_;
+    }
+    ~outbound_callback_raise() noexcept { depth_ = previous_; }
+    outbound_callback_raise(const outbound_callback_raise&) = delete;
+    outbound_callback_raise(outbound_callback_raise&&) = delete;
+    outbound_callback_raise& operator=(const outbound_callback_raise&) = delete;
+    outbound_callback_raise& operator=(outbound_callback_raise&&) = delete;
+
+private:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+    std::uint32_t& depth_;
+    std::uint32_t previous_;
+};
 }  // namespace
 
 template <class CB>
@@ -492,7 +553,13 @@ template <class CB>
     if (!mv_r) return dispatch_outcome::parse_failed;
 
     const SessionId sid = SessionId::from_config(cfg_);
+    // fixpp#563/#564 (`.specify/563-564-callback-send.md` §2.1 "Writer", §2.2): this
+    // overload is the one route to toApp and toAdmin, so it is the one writer of the
+    // outbound depth. The order is: the scope, the assertion, the raise, the callback.
+    // The raise is declared after the scope, so it is restored before the scope exits.
     callback_dispatch_scope cs{*this};
+    FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_OUTBOUND_ENTRY();
+    const outbound_callback_raise outbound{outbound_callback_depth_};
     auto result = invoke_callback_safe([&]() { return std::forward<CB>(cb)(*mv_r, sid); });
     (void)cs;
     if (!result) return std::unexpected(result.error());
@@ -505,10 +572,13 @@ template <class CB>
 // recorded (and refused where the witness's upstream is null). The entry cap is N(L),
 // and the entries are reserved up front for the most fields the frame can hold, which
 // B(L) budgets. One buffer serves every inbound parse because none nests inside
-// another: callbacks are synchronous, and callback_dispatch_scope asserts it.
+// another: callbacks are synchronous, and no parse over the buffer begins while a
+// callback of the session is on the stack. On a build with assertions each parse
+// site asserts that (fixpp#564, `.specify/563-564-callback-send.md` §2.2).
 template <class CB>
 [[nodiscard]] fixpp::core::expected_t<Session::dispatch_outcome> Session::parse_and_dispatch_(
     std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept {
+    FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE();
     std::pmr::monotonic_buffer_resource pa_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
                                               &parse_spill_witness_};
     std::array<std::byte, 512> carry_store{};
@@ -1750,12 +1820,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         const SessionId create_id = SessionId::from_config(cfg_);
         fixpp::core::expected_t<void> cb_r{};
         {
-            // T019: scope the guard BEFORE close(terminal) so onLogout (fired
-            // inside close → record_state_transition_) can acquire its own
-            // callback_dispatch_scope without hitting the re-entrancy assert.
+            // T019: the scope ends BEFORE close(terminal), so the close below and
+            // the onLogout it fires (inside close → record_state_transition_) do
+            // not run with onCreate counted as on the stack.
             callback_dispatch_scope cs{*this};
             cb_r = invoke_callback_safe([&]() { engine_.application->onCreate(create_id); });
-        }  // cs drops here — in_dispatch_ = false
+        }  // cs drops here
         if (!cb_r) {
             (void)co_await close(fixpp::session::close_mode::terminal);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -2575,6 +2645,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 Session::InboundValidation Session::validate_inbound_(
     std::span<const std::byte> frame,
     fixpp::session::detail::FrameHeader const& /*hdr*/) const noexcept {
+    FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE();
     // 093 (data-model E-2): over the session's parse buffer B(L), upstream the spill
     // witness, as the inbound dispatch sites parse.
     std::pmr::monotonic_buffer_resource vg_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),

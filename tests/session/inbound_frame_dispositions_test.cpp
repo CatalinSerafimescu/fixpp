@@ -2948,7 +2948,7 @@ TEST(InboundFrameDispositionsI3, AnInboundParseReenteredFromACallbackDies) {
 #ifdef NDEBUG
     GTEST_SKIP() << "callback_dispatch_scope's assertion is compiled out under NDEBUG";
 #else
-    EXPECT_DEATH(reenter_an_inbound_parse_from_from_app(), "concurrent session callback entry");
+    EXPECT_DEATH(reenter_an_inbound_parse_from_from_app(), "inbound parse begun inside a callback");
 #endif
 }
 

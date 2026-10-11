@@ -387,10 +387,10 @@ public:
     //
     // LIFETIME PRECONDITION (engine-internal contract): the caller MUST keep
     // this Session alive until ALL work dispatched here has fully run — the
-    // posted handler captures `this`, and in debug builds its re-entrancy
-    // dispatch_guard dtor (~below) stores to `in_dispatch_` AFTER the user
+    // posted handler captures `this`, and in debug builds its
+    // callback_owner_hold (below) stores to `callback_owner_` AFTER the user
     // callback returns. Destroying the Session while a dispatched callback is
-    // queued or running (incl. that trailing guard store) is UB / a data race.
+    // queued or running (incl. that trailing store) is UB / a data race.
     // The Engine satisfies this on teardown via stop() → close(terminal) +
     // join-before-registry-clear; a caller that constructs a raw Session and
     // drives it directly (the seam/unit tests) MUST drain `exec_` itself before
@@ -401,8 +401,6 @@ public:
     template <class F>
     void dispatch_app_callback(F&& f) const {
         asio::post(exec_, [this, g = std::forward<F>(f)]() mutable {
-            (void)this;  // read only by the debug-only guard below
-#ifndef NDEBUG
             // Seam 16 / Edge Case: in DEBUG builds a detected
             // concurrent session-callback entry trips the
             // strand-invariant assert (the symptom of
@@ -411,43 +409,85 @@ public:
             // this out — that misuse is documented
             // user-contract-violation UB, not a runtime guard.
             //
-            // RC#2 P2.3 (gate-b/r1): RAII guard so the flag is
-            // always cleared on scope exit, even if the callback
-            // throws. Without this, a throwing callback left
-            // in_dispatch_ permanently set and false-positived the
-            // next otherwise-serial dispatch assertion.
-            struct dispatch_guard {
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) — RAII guard
-                // binds to the caller's flag for clear-on-scope-exit.
-                std::atomic<bool>& flag;
-                explicit dispatch_guard(std::atomic<bool>& f) noexcept : flag(f) {}
-                ~dispatch_guard() noexcept { flag.store(false, std::memory_order_release); }
-                dispatch_guard(const dispatch_guard&) = delete;
-                dispatch_guard(dispatch_guard&&) = delete;
-                dispatch_guard& operator=(const dispatch_guard&) = delete;
-                dispatch_guard& operator=(dispatch_guard&&) = delete;
-            };
-            const bool prev = in_dispatch_.exchange(true, std::memory_order_acq_rel);
-            assert(!prev &&
-                   "concurrent session callback entry: strand "
-                   "invariant violated (direct_executor attested "
-                   "over a non-serialised executor?)");
-            [[maybe_unused]] dispatch_guard guard{in_dispatch_};
-#endif
+            // The hold is RAII, so a token it installed is cleared on scope
+            // exit even if the callback throws. It carries the owner token
+            // only: the depth of all callbacks counts callback_dispatch_scope
+            // entries, so a caller that runs an Application callback under
+            // this function must enter one of those instead
+            // (`.specify/563-564-callback-send.md` §2.2).
+            [[maybe_unused]] const callback_owner_hold hold{*this};
             g();
         });
     }
 
-    // ── 019-app-callbacks T007 ────────────────────────────────────────────────
+private:
+    // ── fixpp#564 (`.specify/563-564-callback-send.md` §2.2) — the owner token ──
     //
-    // callback_dispatch_scope — release-safe RAII guard for direct on-strand
-    // Application callback sites (research D3). Complements the existing
-    // `dispatch_guard` which is DEBUG-only and local to dispatch_app_callback.
+    // callback_owner_hold — the debug diagnostic for a broken threading contract:
+    // a second thread entering a session's callbacks while a first is inside (the
+    // symptom of direct_executor attested over an executor that does not
+    // serialise). Supersedes the `in_dispatch_` flag, whose exchange aborted on
+    // every second entry, a nested one on the owner's own thread included.
     //
-    // In DEBUG builds: asserts that no two callbacks enter concurrently for this
-    // session (strand invariant — INV-2), then clears the flag on scope exit
-    // (even if the callback throws, so the flag is never left set on unwind).
-    // In RELEASE builds: zero overhead (the guard body compiles out entirely).
+    // In DEBUG builds, construction compares and swaps `callback_owner_` from
+    // "no owner" to the calling thread:
+    //   - the swap succeeds: this hold installed the token and clears it on exit;
+    //   - it fails and the owner is the calling thread: a nested entry, which
+    //     passes and leaves the token alone on exit;
+    //   - it fails and the owner is another thread: the assertion fires.
+    // A foreign thread therefore reads and writes only the atomic here, and
+    // asserts before its caller touches a plain member.
+    // In RELEASE builds the class is empty and does nothing.
+    class callback_owner_hold {
+    public:
+#ifndef NDEBUG
+        explicit callback_owner_hold(const Session& s) noexcept : session_(s) {
+            const void* const self = callback_thread_tag_();
+            const void* owner = nullptr;
+            installed_ = session_.callback_owner_.compare_exchange_strong(
+                owner, self, std::memory_order_acq_rel, std::memory_order_acquire);
+            assert((installed_ || owner == self) &&
+                   "concurrent session callback entry: strand "
+                   "invariant violated (direct_executor attested "
+                   "over a non-serialised executor?)");
+        }
+        ~callback_owner_hold() noexcept {
+            if (installed_) session_.callback_owner_.store(nullptr, std::memory_order_release);
+        }
+#else
+        explicit callback_owner_hold(const Session& /*s*/) noexcept {}
+        ~callback_owner_hold() = default;
+#endif
+        callback_owner_hold(const callback_owner_hold&) = delete;
+        callback_owner_hold(callback_owner_hold&&) = delete;
+        callback_owner_hold& operator=(const callback_owner_hold&) = delete;
+        callback_owner_hold& operator=(callback_owner_hold&&) = delete;
+
+    private:
+#ifndef NDEBUG
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+        const Session& session_;
+        bool installed_ = false;
+#endif
+    };
+
+public:
+    // ── 019-app-callbacks T007; fixpp#564 ─────────────────────────────────────
+    //
+    // callback_dispatch_scope — RAII scope for direct on-strand Application
+    // callback sites (research D3). It does two things, in this order:
+    //
+    //   1. the owner token (callback_owner_hold above; DEBUG builds only);
+    //   2. the depth of all callbacks, `callback_depth_`, in every build type:
+    //      incremented on entry, decremented on exit.
+    //
+    // The hold is the first member, so the swap is the scope's first action and
+    // the clear its last: the depth is incremented after the swap and
+    // decremented before the clear, on any exit path (a throwing callback
+    // included). A nested entry on the owner's thread is not an error here. The
+    // nestings that are outside the contract are asserted where they begin: at
+    // the parse sites, in the stack-arena overload of parse_and_dispatch_ and at
+    // the onLogon and onLogout sites (src/session/session.cpp).
     //
     // Usage at a direct on-strand call site (T011/T014/T016 sites):
     //   callback_dispatch_scope cs{*this};
@@ -458,33 +498,24 @@ public:
     // (below) wraps the call for the terminal-close disposition (FR-011; D5).
     //
     // Anchor: specs/019-app-callbacks/research.md D3/D5; data-model.md INV-2;
-    //         tasks.md T007. [const §XV.9] — no std::mutex, no exception paths.
+    //         tasks.md T007; `.specify/563-564-callback-send.md` §2.2.
+    //         [const §XV.9] — no std::mutex, no exception paths.
     struct callback_dispatch_scope {
-#ifndef NDEBUG
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-        std::atomic<bool>& flag;
-        explicit callback_dispatch_scope(const Session& s) noexcept : flag(s.in_dispatch_) {
-            const bool prev = flag.exchange(true, std::memory_order_acq_rel);
-            assert(!prev &&
-                   "concurrent session callback entry: strand "
-                   "invariant violated (direct_executor attested "
-                   "over a non-serialised executor?)");
+        explicit callback_dispatch_scope(const Session& s) noexcept
+            : owner_(s), depth_(s.callback_depth_) {
+            ++depth_;
         }
-        ~callback_dispatch_scope() noexcept { flag.store(false, std::memory_order_release); }
+        ~callback_dispatch_scope() noexcept { --depth_; }
         callback_dispatch_scope(const callback_dispatch_scope&) = delete;
         callback_dispatch_scope(callback_dispatch_scope&&) = delete;
         callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
         callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
-#else
-        explicit callback_dispatch_scope(const Session& /*s*/) noexcept {}
-        // All special members are defaulted — the debug body is a no-op.
-        // No fields ⇒ EBO applies; the guard adds zero size/overhead in release.
-        callback_dispatch_scope(const callback_dispatch_scope&) = delete;
-        callback_dispatch_scope(callback_dispatch_scope&&) = delete;
-        callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
-        callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
-        ~callback_dispatch_scope() = default;
-#endif
+
+    private:
+        // Declared first: constructed before the depth is touched, destroyed after.
+        [[no_unique_address]] callback_owner_hold owner_;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::uint32_t& depth_;
     };
 
     // invoke_callback_safe — throw→terminal-close wrapper scaffold (FR-011; D5).
@@ -615,7 +646,28 @@ private:
 
     fixpp::core::session_executor exec_;                   // bound at open() (T020)
     std::shared_ptr<fixpp::core::Clock> effective_clock_;  // resolved at open() (T030)
-    mutable std::atomic<bool> in_dispatch_{false};         // debug strand-invariant guard (seam 16)
+    // fixpp#564 (`.specify/563-564-callback-send.md` §2.2): the debug guard's state.
+    // The members exist in every build type, so the class has one definition.
+    //
+    // callback_owner_: the owner token (seam 16). Null: no owner. Otherwise the
+    // callback_thread_tag_() of the thread whose callback_owner_hold installed it.
+    // Atomic because the misuse it detects is two threads here at once; its
+    // operations compile out under NDEBUG. mutable: dispatch_app_callback is const.
+    //
+    // The two depths are plain integers, written and read only on the session's
+    // serialisation domain, and maintained in every build type.
+    // callback_depth_: how many callback_dispatch_scope objects are live, that is,
+    // how many callbacks of this session are on the stack. mutable: the scope takes
+    // the session by const reference.
+    // outbound_callback_depth_: how many of them are toApp or toAdmin. Its one
+    // writer is the stack-arena overload of parse_and_dispatch_.
+    mutable std::atomic<const void*> callback_owner_{nullptr};
+    mutable std::uint32_t callback_depth_ = 0;
+    std::uint32_t outbound_callback_depth_ = 0;
+    // An address that identifies the calling thread for as long as it lives: the
+    // owner token's value. Defined out of line, in session.cpp, so that the inline
+    // callers in every translation unit of one linked image get the same address.
+    [[nodiscard]] static const void* callback_thread_tag_() noexcept;
     fixpp::core::session_local<fixpp::otel::trace_context> trace_slot_;  // [2d §4.6]
 
     // Lifecycle state for the idempotent three-state close model (I-10);
