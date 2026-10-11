@@ -1,33 +1,67 @@
 # fixpp#536 / #537 / #538 — session recovery and liveness (B28)
 
-> **Status: v0.3 — Gate A round 1 applied (2026-10-11).** Round 1 changed: a resend answer aborts on a store read failure, where v0.2 gap-filled it (R-7); a too-high Heartbeat answers a pending TestRequest while a resend is outstanding, so an alive peer reaches the deadline's Logout (R-6, §4.6); C ABI 1.12 is declared on each affected declaration (R-8, §6.2).
-> Every open question of v0.2's §7 is now a sentence in a decision plus a cell, or an owner item. The dispositions are under `## Gate A`.
+> **Status: v0.4 — Gate A round 2 applied (2026-10-11).** Round 2 changed: the deadline check is one helper, called at every exit a frame above NextNumIn can take while a resend is outstanding (§4.7), where v0.3 had it in one arm; a too-high Heartbeat answers a pending TestRequest also when it is the frame that opens the gap (R-9, D-537-8); a resend answer names three classes of store result, and slot 0 keeps today's fold (R-10); one pattern with no ending is disclosed, not fixed (R-11, D-537-9).
+> §0 now quotes the owner, with this note's reading under each quotation. §4.6 is derived from §4.7's exit table. Every cell of §5 has an assertion, and no cell is conditional. The dispositions are under `## Gate A`.
 >
 > - **Base:** `origin/main` = `22702dc9`. Code is named by symbol, with a recipe where a population matters; re-derive before relying on one.
 > - **Branch:** `536-537-538-recovery-liveness`, in the `fixpp-parallel` worktree.
 > - **Mode:** issue mode (no `specs/` bundle). Records go to the parent's `decisions/speckit/`.
-> - **Gate A triggers touched** (`[const §XVII.1]`): the session FSM and recovery (#537), the message store contract (#538), cancellation (#536), the C ABI (1.12, BREAKING, R-8), and comment text in public headers. Installed C++ headers also change in `session.hpp` (one new private member of `Session`; a text parameter on a private leaf) and in `reconnect_fsm.hpp` (one new non-virtual member of `ReconnectFsm`).
-> - **How to read a claim:** *measured* means a run is named; *read* means read from source at the base; *reasoned* means neither. §3.4 is measured. The timelines of §4.6 are reasoned until the cells named there run.
+> - **Gate A triggers touched** (`[const §XVII.1]`): the session FSM and recovery (#537), the message store contract (#538), cancellation (#536), the C ABI (the 1.x clause of §0, BREAKING, R-8), and comment text in public headers. Installed C++ headers also change in `session.hpp` and in `reconnect_fsm.hpp`:
+>   - `session.hpp`: one new private data member of `Session` (D-536-3; the only layout change); new private member functions, the deadline helper (D-537-5) and the TestReqID routine that D-537-6 and D-537-8 share; a text parameter on a private leaf (D-537-5); the frame header as a parameter of the private sub-arm `on_inbound_active_too_high_` (D-537-8);
+>   - `reconnect_fsm.hpp`: one new non-virtual member of `ReconnectFsm` (D-537-5).
+> - **How to read a claim:** *measured* means a run is named; *read* means read from source at the base; *reasoned* means neither. §3.4 is measured. §4.7's table is read. The timelines of §4.6 are reasoned until the cells named there run.
 
 ## 0. Owner rulings (2026-10-11). Gate A reviews whether this note implements them.
 
+Text in quotation marks is the owner's own words. What follows a quotation under **Reading** is this note's reading of it, and can be wrong where the quotation cannot.
+
 - **R-1.** Builds for this batch are approved, and may run at the same time as B41's.
-- **R-2 (#537).** First: "Check official FIX documentation and QuickFIX C++/J/Go then come back if not settled." §4.1 is that check. It did not settle what happens to the frame, so the owner chose between ignoring it, ignoring it with a deadline on an unfilled gap, and queueing it. **Ruling: ignore the frame, and end the session with a Logout when NextNumIn has not advanced for about 2 × HeartBtInt while a resend is outstanding.** The deadline is checked when a too-high frame arrives.
-  - **Reconfirmed after round 1, under R-5.** The owner was told that all three engines queue the frame, and kept the ruling. Application messages are delivered once and in order either way. The observable differences are in administrative frames and are listed in §4.5. fixpp#577 is where a too-high ResendRequest and Logout get the engines' treatment. Implemented by D-537-1 and D-537-5.
-- **R-3.** The resend walk's silent fold of a failed `retrieve` into a GapFill is fixed in this batch (D-538-4). R-7 says how.
+- **R-2 (#537).** First: "Check official FIX documentation and QuickFIX C++/J/Go then come back if not settled." §4.1 is that check. It did not settle what happens to the frame, so the owner chose between ignoring it, ignoring it with a deadline on an unfilled gap, and queueing it. The option chosen:
+  - "Ignore + gap deadline — … if NextNumIn has not advanced for about 2 x HeartBtInt while a resend is outstanding, end the session with a Logout. This gives fixpp the bound QuickFIX C++ gets from its heartbeat timeout, without reversing the #516 liveness ruling. It is new session-ending behaviour that no FIX document specifies, checked when a too-high frame arrives."
+  - Reconfirmed after round 1, under R-5, as "Keep ignore + deadline". The owner had been told that all three engines queue the frame.
+  - **Reading.** "Checked when a too-high frame arrives" is read at the frame, not at the sequence gate: a frame whose MsgSeqNum(34) is above NextNumIn, that arrives while a resend is outstanding and that its own arm does not end, runs the check wherever it leaves the inbound arm (§4.7). v0.3 read it as "reaches `check_inbound`", which is narrower than the words.
+  - With `redeliver_poss_dup` off, which is the default, application messages are delivered once and in order whether the frame is ignored or queued (§4.5 gives the exception). The observable differences are in administrative frames and are listed in §4.5. fixpp#577 is where a too-high ResendRequest and Logout get the engines' treatment.
+  - Implemented by D-537-1 and D-537-2 (the ignore) and D-537-5 (the deadline).
+- **R-3.** The resend walk's silent fold of a failed `retrieve` into a GapFill is fixed in this batch (D-538-4). R-7 and R-10 say how.
 - **R-4.** Two further leads are filed and are not in this batch: fixpp#577 and fixpp#578 (§8).
 - **R-5 (given on B41 the same day; applies here).** "Overall we try not to change behavior of QuickFIX, the internal implementation can be different." Where the three engines agree, that is fixpp's default, and a difference must be stated with its reason. §4.5 states the differences that remain.
 
 Rulings made after round 1 (2026-10-11):
 
-- **R-6 (triage O-1; the consult).** An unfilled gap is two conditions, with one ending each.
-  - (a) The peer is alive but does not fill the gap: the D-537-5 deadline. A Logout naming the unanswered resend, once NextNumIn has not advanced for 2 × HeartBtInt, checked when a too-high frame arrives.
-  - (b) The peer answers nothing: today's dead-peer ending (an unanswered TestRequest, then a silent `Disconnected`). It is unchanged, and the same with or without a gap.
-  - The fix that stops an alive peer being misjudged as dead goes in the inbound arm: while a resend is outstanding, a too-high Heartbeat received while a TestRequest is pending answers it. Implemented by D-537-6.
+- **R-6 (round 1's triage O-1; the consult).** The consult's option B, ratified:
+  - "Ratify; fix in the inbound arm — Option B. A too-high Heartbeat clears the pending TestRequest, using the same TestReqID rule as an in-sequence one. One predicate in the out-of-sequence arm B28 already edits; no timer, no new state, nothing changed inside the liveness loop. B27's surface is untouched."
+  - **Reading.** What is ratified is the consult's analysis: an unfilled gap is two conditions, with one ending each.
+    - (a) The peer is alive but does not fill the gap: the D-537-5 deadline, a Logout naming the unanswered resend.
+    - (b) The peer answers nothing: today's dead-peer ending (an unanswered TestRequest, then a silent `Disconnected`). It is unchanged, and the same with or without a gap.
+  - v0.3 limited the Heartbeat rule to "while a resend is outstanding". That limit was this note's scoping, taken from the consult's predicate. It is not in the owner's words, and R-9 removes it for the frame that opens the gap.
   - Not chosen: two endings for (a); the liveness-loop form (the consult's B′); a timer; a Logout on the dead-peer ending.
-- **R-7 (triage O-2 and C-12; supersedes the v0.2 form of R-3's implementation).** In the resend walk, a store read failure other than `store_seqnum_gap` and `store_cancelled` aborts the answer, with the disposition of the walk's existing truncated-capture arm. Nothing is gap-filled that the store merely failed to read. The same holds for a failed tail read. No event type is widened. R-3's "not silent" is met by the abort. Implemented by D-538-4.
-- **R-8 (triage C-4).** C ABI 1.12 is declared BREAKING: a 1.12 clause on each affected declaration in `include/fix/c_api/session.h`, plus the `include/fix/c_api/version.h` entry, following the 1.10 and 1.11 precedent. Implemented by §6.2.
-- **Triage C-3 is a disclosure, not a fix.** The owner was told and did not object. After the deadline's Logout the state is `Disconnected` and the transport stays open until the peer closes it or `close()` / `Engine::stop()` runs (fixpp#534, batch B27). Stated in D-537-5 and §4.6; asserted by the deadline cell (§5).
+  - Implemented by D-537-6.
+- **R-7 (round 1's triage O-2 and C-12; supersedes the v0.2 form of R-3's implementation).** The question put to the owner was "Resend walk, store read failure (not a plain gap)". The option chosen:
+  - "Abort the answer — The walk stops and the session ends with the store's error, as the truncation arm does today and as QuickFIX C++ and Go do. The peer asks again after reconnecting. Nothing is gap-filled that the store merely failed to read. No event type is widened."
+  - **Reading.** A read failure is a result that says the store could not read. A plain gap, a closing session and a refused argument are not read failures (R-10 confirms the last). The same rule holds for a failed tail read. R-3's "not silent" is met by the abort.
+  - Implemented by D-538-4.
+- **R-8 (round 1's triage C-4).** The option chosen:
+  - "Declare 1.12 BREAKING — A 1.12 clause on each affected session declaration, the version.h entry, an effect-to-declaration-to-witness table in the note, and a C-ABI witness per effect. #537 changes documented outcomes; #536 and #538 are declared too, as the precedent did."
+  - **Reading.** The number in these words predates the numbering note below; this note writes "the 1.x clause" for it.
+  - Implemented by D-ABI-1 (§6.2).
+- **Round 1's triage C-3 is a disclosure, not a fix.** The owner was told and did not object. After the deadline's Logout the state is `Disconnected` and the transport stays open until the peer closes it or `close()` / `Engine::stop()` runs (fixpp#534, batch B27). Stated in D-537-5 and §4.6; asserted by the deadline cells (§5).
+
+Rulings made after round 2 (2026-10-11):
+
+- **R-9 (round 2's triage O-1).** The Heartbeat rule of R-6 also covers the frame that opens a gap:
+  - "Yes, same rule — A too-high Heartbeat answers a pending TestRequest whether it opens the gap or arrives during it: same TestReqID check as in sequence, then the ResendRequest goes out as today. The peer sees a ResendRequest and a normal recovery; the application's session survives it."
+  - **Reading.** In the too-high arm, a Heartbeat that arrives with a TestRequest pending gets the in-sequence TestReqID disposition before the ResendRequest goes out. A mismatched TestReqID ends the session as it does in sequence, and then no ResendRequest goes out. The knob-off exclusion stays: the too-high arm is behind `validate_sequence_numbers`.
+  - Implemented by D-537-8.
+- **R-10 (round 2's Codex C-2; slot 0).** The option chosen:
+  - "Keep today's behaviour — An argument refusal is not a read failure: the slot is folded into the GapFill as today and the session stays up. Matches the three QuickFIX engines, which do not end a session on BeginSeqNo = 0. Recorded as your reading of the ruling."
+  - **Reading.** D-538-4 has three classes. A plain gap and a cancellation keep today's path. An argument refusal keeps today's fold. Every other error is a read failure and aborts the answer.
+  - Not chosen: clamping the walk's start to 1 (a wire change none of the three issues asks for; a follow-up to file, §8); aborting literally.
+  - Implemented by D-538-4.
+- **R-11 (the residual pattern).** After §4.7's call sites, one pattern has no ending: a peer that never fills the gap and that, in every interval, sends only frames that are not too high and move nothing. Those frames refresh liveness, and the deadline is checked only on a too-high frame. The option chosen:
+  - "Disclose as a limitation — Stated in the endings table and a B&L row, with a follow-up issue. The session stays Active and deaf for such a peer, as QuickFIX/J and /Go would. No new mechanism in the last rewrite the loop allows."
+  - Not chosen: checking the deadline on every non-advancing frame.
+  - Implemented by D-537-9.
+- **C-ABI numbering (owner ruling on B41, 2026-10-11).** B41 now also declares a breaking C-ABI change (behavioural only; it edits no declaration). Whichever PR merges first takes 1.12 and the second takes 1.13. This batch's entry is therefore **the next C-ABI minor: 1.12 if this PR merges first, 1.13 if B41's does.** This note calls it **the 1.x clause** everywhere else.
 
 ## 1. Evidence at the base
 
@@ -69,32 +103,44 @@ Re-derive the two lookup sites with `git grep -n -E 's - 1\)' -- include/fixpp/s
 - **D-538-2. The contract says so.** `message_store.hpp`'s `retrieve` comment gains: a frame stored after `reset()` or `reset_to()` is retrievable under its own sequence number, a sequence below the first retained one is a gap, and so is every number of an empty direction. This binds third-party stores. The default `reset_to` body is unchanged.
   - A third-party store with an absolute lookup that inherits the default `reset_to` body already shows #538 today. D-538-2 makes that store non-conforming; it does not break one that worked. One B&L row tells store implementers (§6).
 - **D-538-3. Stale comments on the changed lines are corrected**, not replaced by new counts: `file_store.cpp`'s "starting from 1" index comment, and `tests/session/test_retrieve_with_gaps.cpp`'s "seq=1 maps to index 0".
-- **D-538-4 (R-3, R-7). A store read failure aborts the resend answer.**
-  - **The slot read.** In `replay_outbound_range_`, when a slot's `retrieve` returns an error other than `store_seqnum_gap` and `store_cancelled`, the walk stops and returns `dispatch_aborted`.
-  - **The disposition is the truncated-capture arm's** (`cv.truncated` in the same walk), read from source:
+- **D-538-4 (R-3, R-7, R-10). A store read failure aborts the resend answer. A gap, a closing session and a refused argument do not.**
+  - **Three classes**, by the code a slot's `retrieve` returns in `replay_outbound_range_`:
+
+    | Class | Codes | The walk |
+    |---|---|---|
+    | 1. Not retained, or the session is closing | `store_seqnum_gap`; `store_cancelled` | today's path: the slot is folded into the GapFill run |
+    | 2. Argument refusal | `store_seqnum_invalid`; `store_invalid_range` | today's fold (R-10). The session stays up |
+    | 3. Read failure | every other code, from a shipped store or a third-party one | the walk stops and returns `dispatch_aborted` (R-7) |
+
+  - **Class 2 is closed.** Its members are the codes that `message_store.hpp`'s `retrieve` comment assigns to the request and not to the store: `begin == 0`, and `end != 0 && end < begin`. Both shipped stores return them before taking their lock or reading anything. A third-party store that returns either code is folded too; any code outside classes 1 and 2 aborts.
+  - **What each shipped `retrieve` can return**, read from the `co_return std::unexpected` sites of `MemoryStore::retrieve` and `FileStore::retrieve`:
+
+    | Code | When | Class |
+    |---|---|---|
+    | `store_seqnum_gap` | the number is not retained. The normal answer for a number never retained (`L-008-2`) | 1 |
+    | `store_cancelled` | the store's lock was cancelled or drained: the session is closing | 1 |
+    | `store_seqnum_invalid` | `begin == 0` | 2 |
+    | `store_invalid_range` | `end != 0 && end < begin`. Cannot occur here: the walk asks `(k, k)` | 2 |
+    | `store_io_failure` | `FileStore`: the log is not open (tested before the argument tests), or a payload read failed. Both stores: a reset ran between the index snapshot and the visit | 3 |
+    | `store_visitor_aborted`, or a visitor's own error | the visitor threw or asked to abort. The walk's `CaptureVisitor` does neither | 3 |
+
+  - **The tail read.** The walk's `next_seqnum(outbound, false)` has no argument to refuse. It can return `store_cancelled` (class 1: today's path) and, from a `FileStore` that is not open, `store_io_failure` (class 3). On a class 3 result the walk returns `dispatch_aborted` before it writes anything. Today the failure is dropped, `our_last` stays 0, and the whole range becomes one GapFill. Read from the two `next_seqnum` bodies.
+  - **Slot 0 (R-10).** A ResendRequest with BeginSeqNo(7) = 0 or absent starts the walk at slot 0 when the store is not empty. Both stores refuse `retrieve(0, 0)` with `store_seqnum_invalid`. That is class 2: the slot is folded and the session stays up.
+    - What today's fold puts on the wire, read: the GapFill run opens at slot 0, and `emit_gapfill_async(gap_start, …)` passes that number to `build_sequence_reset_gapfill`, which renders it. So the answer starts with a GapFill whose MsgSeqNum(34) is 0. The walk's empty-store branch clamps its start to 1; the per-slot walk does not.
+    - This is kept as it is (R-10). Clamping the per-slot walk is a follow-up to file (§8). The cell in §5 pins today's wire, so that follow-up flips one named assertion.
+    - Whether a dictionary validator rejects 7=0 before the walk was not read. The cell runs with the validate gate off, which is the default.
+  - **The disposition of class 3 is the truncated-capture arm's** (`cv.truncated` in the same walk), read from source:
     - the walk returns at once. Frames already replayed stay sent. An open GapFill run is not flushed. Nothing more is written;
     - `on_inbound_active_resend_request_` records `Disconnected`, returns the error, and skips the inbound persist;
     - `honor_peer_next_expected_` (the Logon 789 path) does the same, unless its arm was superseded (`logon_arm_superseded_`); then it records nothing and returns `superseded`;
-    - under an Engine, `run_read_pump` (`src/session/engine.cpp`) sees the failed `on_inbound_frame` and runs `close(terminal)`, which closes the transport. No Logout is sent. A Session driven without an Engine returns the error to its driver.
-  - **The tail read.** When the walk's `next_seqnum(outbound, false)` fails with an error other than `store_cancelled`, the walk returns `dispatch_aborted` before it writes anything. Today the failure is dropped, `our_last` stays 0, and the whole range becomes one GapFill.
-  - **`store_seqnum_gap` keeps today's fold.** It is the normal answer for a number that was never retained (`L-008-2`).
-  - **`store_cancelled` keeps today's path at both reads.** It means the session is closing, not that the store failed.
-  - **What each shipped `retrieve` can return**, read from the `co_return std::unexpected` sites of the two bodies:
-
-    | Code | When | Walk |
-    |---|---|---|
-    | `store_seqnum_gap` | the number is not retained | fold, as today |
-    | `store_cancelled` | the store's lock was cancelled or drained | as today |
-    | `store_io_failure` | `FileStore`: the log is not open, or a payload read failed. Both stores: a reset ran between the index snapshot and the visit | abort |
-    | `store_visitor_aborted`, or a visitor's own error | the visitor threw or asked to abort. The walk's `CaptureVisitor` does neither | abort |
-    | `store_invalid_range` | `end < begin` | cannot occur: the walk asks `(k, k)` |
-    | `store_seqnum_invalid` | `begin == 0` | **owner item, §7.** Until ruled, the fold of today |
-    | any other code from a third-party store | | abort |
-
-  - **`store_seqnum_invalid` is the one place the ruling's wording and its reach may differ.** A ResendRequest with BeginSeqNo(7) = 0 or absent starts the walk at slot 0 when the range is not empty, and both stores refuse `retrieve(0, 0)` before reading anything. R-7's words are "a store read failure"; this is an argument refusal. Taken literally, R-7 would make such a request end the session, where today the slot is folded. This note keeps the fold and puts the question to the owner (§7). Whether a dictionary validator rejects 7=0 before the walk was not read.
+    - no Logout is sent. A Session driven without an Engine returns the error to its driver.
+  - **Where this ending closes the transport, and where it does not.** The callers of `on_inbound_frame` were listed (`git grep -n 'on_inbound_frame(' -- src`; all are in `src/session/engine.cpp`), and each one's handling of a failed result was read:
+    - the delivery loops of `run_read_pump` stop the pump, and the pump's stop runs `close(terminal)`, which closes the transport. This covers a ResendRequest in Active on either role, and the initiator's 789 path, whose Logon reply arrives through the pump;
+    - the acceptor's direct delivery of its first Logon discards the result. The acceptor's 789 path runs inside that delivery, before the session enters Active. So on that path the abort leaves the transport open: the pump then starts on a session that is `Disconnected` and never reached Active, and closes it at the establishment deadline (`logon_timeout_ms`), or earlier if the peer closes.
+    - D-537-5's Logout returns success on every path, so it never closes the transport (fixpp#534).
+  - **The abort repeats while the failure lasts.** It skips the inbound persist, and the peer's gap is still open, so the peer asks again after it reconnects. A failure that persists (a payload read that fails for the same record; a log that is not open) aborts the answer again at the same slot, at every reconnect, and on the 789 path at every Logon. Nothing but an operator's action ends that: repairing the log, or a sequence reset. Reasoned from the reading above; the B&L row says so (§6.1). `L-092-1` discloses the same shape for a faulty frame.
   - **No event is added.** `session_event_resend_slot_gap_filled` keeps its one producer and its meaning, and `B-424-2` is not edited. fixpp#424's ruling D4a covers a stored frame whose replay cannot be built; it is not extended to a frame the store could not read.
   - **R-3 is met by the abort:** the failure ends the session and is returned from `on_inbound_frame`.
-  - **This ending closes the transport; D-537-5's does not.** The abort returns an error, so the read pump closes. The deadline's Logout returns success, so the transport stays open (fixpp#534).
 
 ### 2.3 Rejected
 
@@ -103,6 +149,8 @@ Re-derive the two lookup sites with `git grep -n -E 's - 1\)' -- include/fixpp/s
 - **Keeping (1, 1) and re-storing the Logon.** It would change 093's reset unit and its commit boundary to work around a lookup.
 - **Gap-fill the unreadable slot and record an event** (v0.2's D-538-4). Superseded by R-7. A read error can be transient; a GapFill is permanent on the wire. No engine does it by default (§4.5).
 - **Abort only on a persistent store.** R-7 applies to every store.
+- **Abort on slot 0** (R-7 read as a set of two codes; Codex's round-2 fix). Not chosen (R-10). No frame can exist at slot 0, so folding it gap-fills nothing the store failed to read. It would differ from all three engines, and it would let any peer end a session with one frame.
+- **Clamp the per-slot walk's start to 1.** Not chosen here (R-10): it changes the wire for BeginSeqNo(7) = 0, which none of the three issues asks for. A follow-up to file (§8).
 
 ## 3. #536 — one session's close ends other sessions' liveness loops
 
@@ -232,24 +280,44 @@ The reset to terminal is the lock sequence's, not the liveness loop's, and it da
 - **D-537-4. The comments that describe the old route are corrected**: the one at the `check_inbound` call, the function's header comment, and "Too-low Heartbeat", which takes any out-of-sequence Heartbeat.
 - **D-537-5 (R-2, R-6 a). An unfilled gap has a deadline.**
   - **The clock.** The time point is `ResendState::started_at`, which exists and has no writer today. A new non-virtual member of `ReconnectFsm` writes it; `exit_awaiting_resend` already clears it with the rest of the state. The session writes it when it enters AwaitingResend, and again each time NextNumIn advances while the resend is outstanding. No class layout changes. The field's comment in `resend_state.hpp` changes with its meaning: it promised a recovery-elapsed metric, and a field refreshed on each advance is no longer that.
-  - **The check.** It runs when a frame fails the sequence check as too high while a resend is outstanding. It sits at the top of `on_inbound_active_out_of_sequence_`, after the overflow arm and before that function's Heartbeat and PossDup arms. No timer is added.
-  - **Which frames reach it.** Only a frame that gets as far as `check_inbound` in `on_inbound_active_`. A too-high frame stopped earlier does not run the check. Read, arm by arm:
-    - a Reject, and the session stays up: the validate gate's `reject` outcome (`on_inbound_active_validate_failed_`), and PossDup Stage 1's Arm C with its unparseable-122 branch (`on_inbound_active_poss_dup_`). Their `consume_rejected_seqnum_` does nothing for a too-high number;
-    - the session ends there: Stage 1's Arm D (Reject, Logout, `Disconnected`), the validate gate's `parse_failed` outcome (a close), and the BeginString, CompID and SendingTime guards.
-  - **Ahead of every callback of its arm** (a condition B41 relies on). The check precedes the PossDup redelivery's `fromApp` and the knob-off dispatch, and no callback runs between the top of the function and the check. B41's premise is that at every inbound arm the outbound number is peeked after any inbound callback of that arm; the check's Logout peeks it with none before.
+  - **The check is one helper** (R-2), a new private member function of `Session`. It tests, in this order:
+    1. the frame's MsgSeqNum(34) parses and is above NextNumIn;
+    2. a resend is outstanding;
+    3. the bound is on, and `steady_now()` is at or past the time point plus the bound.
+    - When all three hold, it runs the expiry below, and its caller returns the helper's result at once: success, or the Logout leaf's error. Otherwise it does nothing and its caller goes on as today.
+    - No timer is added.
+  - **Tests 1 and 2 are inside the helper, not at its call sites.** Without them the helper would fire on an in-sequence frame that a Reject arm is about to consume. Such a frame advances NextNumIn and refreshes the time point only after the helper ran (`consume_rejected_seqnum_`), so a healthy slow replay would draw the Logout from a stale time point. Read; a guard cell in §5.
+  - **Call sites.** Every exit of the Active inbound arm that a frame above NextNumIn can take while a resend is outstanding, that refreshes liveness, and that does not end the session. §4.7 derives them from `on_inbound_active_` and its sub-arms. They are:
+    - `on_inbound_active_validate_failed_`, the `reject` outcome, before `consume_rejected_seqnum_`;
+    - `on_inbound_active_poss_dup_`, Arm C (OrigSendingTime(122) absent) and the unparseable-122 branch, each before `consume_rejected_seqnum_`;
+    - `on_inbound_active_sequence_reset_`, at each of its returns that leave the session up: after the best-effort Reject of a reset that `fromAdmin` rejected, and after `apply_inbound_sequence_reset` returned success;
+    - `on_inbound_active_out_of_sequence_`, at its top, after the overflow arm and before its Heartbeat and PossDup arms (v0.3's one site).
+  - **What the frame's own arm still does when the helper fires.**
+    - At the Reject arms ahead of the gate, nothing: no consume, no Reject. `consume_rejected_seqnum_` does nothing for a number that is not in sequence, so nothing is lost.
+    - In the Reset-mode arm the helper runs after the arm's own outcome is known, so the arm's Reject, where it has one, goes out first and the Logout follows.
+    - The Reset-mode site needs no test of its own for "moved nothing". A reset that moves NextNumIn has ended the resend inside `apply_inbound_sequence_reset`, so the helper's second test is false. The site does not repeat that function's cases. Read; guard cell S3.
+  - **The helper is never called ahead of the BeginString, CompID and SendingTime guards for a frame that reaches them.** Those guards, a MsgSeqNum(34) that does not parse, Stage 1's Arm D and the late parse failures end the session as today, with the disposition each has today (§4.7).
+  - **One site is ahead of those guards by the code's own order.** At HEAD the validate gate is tested before the BeginString, CompID and SendingTime guards, so a frame that fails validation never meets them, today or after this change. Consequence, read: with the gate on, a dictionary-invalid frame above NextNumIn that those guards would have refused draws a Reject today, and after the bound draws the deadline's Logout. A frame that passes validation meets the guards first and keeps their disposition. No guard's disposition changes; §5 has a cell for each half.
+  - **B41's condition.** B41's premise is that at every inbound arm the outbound number is peeked after any inbound callback of that arm. The helper's Logout goes through `inbound_logout_leaf_`, which peeks inside the leaf. At the call sites outside the Reset-mode arm, no inbound callback has run in the arm. At the Reset-mode arm's sites, `fromAdmin` has returned before the helper is called. So no inbound callback runs between the leaf's peek and its store call at any site. In the out-of-sequence arm the helper also precedes the PossDup redelivery's `fromApp`. v0.3 stated this as "ahead of every callback of its arm"; that is no longer true of the Reset-mode arm, and B41's premise does not need it.
   - **The bound** is 2 × HeartBtInt since the time point, where HeartBtInt is the value `run_liveness_loop` resolves. One helper computes it, by applying the saturating `detail::deadline_after` twice, never as a bare `2 * hb`. The deadline has expired when `steady_now()` is at or past it.
   - **Off** when HeartBtInt ≤ 0 or the session has no clock. The liveness loop is off only at exactly 0, and `deadline_after` requires a non-negative duration, so the deadline states its own test. A bound of zero would end the session at the second frame, which is the defect.
   - **Not configurable.** The ruling names the value.
   - **On expiry** the session sends a Logout whose Text(58) names the unanswered resend and the expected MsgSeqNum, records `Disconnected`, and returns success.
     - `inbound_logout_leaf_` gains a text parameter, passed to `build_logout`; its other callers pass an empty text. Its order is kept: `toAdmin` before `assign_outbound`. The leaf is declared in the installed `session.hpp`.
-    - The text is built in a stack buffer, as `honor_peer_next_expected_`'s too-high arm builds its own.
-    - If the Logout cannot be built, no frame goes out and `Disconnected` is still recorded. If `toAdmin` throws or the assign fails, the leaf records `Disconnected` and returns the error, as today.
+    - The text is a fixed phrase plus the expected MsgSeqNum. It is built in a stack buffer, as `honor_peer_next_expected_`'s too-high arm builds its own, and it is at most 64 bytes with the number at its longest.
+    - **If the Logout cannot be built, no frame goes out and `Disconnected` is still recorded.** That is the shape of `honor_peer_next_expected_`'s Logout with a text. If `toAdmin` throws or the assign fails, the leaf records `Disconnected` and returns the error, as today.
+    - **That branch is reachable, and more easily than D-537-7's.** The Logout is built in a buffer of the Logon's size, and its Text(58) field is longer than what the Logon carries beyond the common header (D-537-7 has the arithmetic). So a session whose CompIDs bring its Logon within a text's length of the buffer's end cannot build this Logout, and ends silently at the bound. Read and reasoned. It has a cell (§5), and the B&L row says so (§6.1).
+    - Not taken: falling back to a Logout with no text. It would fit wherever the Logon did (reasoned from the same arithmetic: it carries less than the Logon beyond the header, even after its MsgSeqNum gains digits). But it is one more branch, and the existing arm with a text has no such fallback.
   - **After expiry** (the C-3 disclosure). The state is `Disconnected` and a Logout was written. The transport stays open until the peer closes it or `close()` / `Engine::stop()` runs. Every later frame is drained by the `Disconnected` row. The liveness loop leaves at its next wake. This is fixpp#534 (B27), and every existing Logout-then-`Disconnected` arm has the same shape. Read.
-  - **Refresh sites.** NextNumIn advances during a resend at the in-sequence `check_inbound` in `on_inbound_active_` and at the one in `consume_rejected_seqnum_` (a rejected frame that consumes its number, fixpp#423). Both already call `close_filled_resend_gap_()` straight after, and the refresh is one statement there, behind that function's existing `is_awaiting_resend()` test. `apply_inbound_sequence_reset` also moves NextNumIn, and it ends the resend. Re-derive with `git grep -n -E 'check_inbound\(|set_next_inbound\(' -- src/session/session.cpp`. The other hits are on the Logon paths and in the reset unit, where no resend is outstanding unless fixpp#578 holds (§8).
-  - **A GapFill that lands short of the recorded end** ends AwaitingResend (`apply_inbound_sequence_reset` exits it unconditionally). That is progress in R-2's sense: NextNumIn moved. The next too-high frame takes the too-high arm again, sends a fresh ResendRequest, and starts a new time point. Read and reasoned; a cell in §5.
+  - **Refresh sites.** NextNumIn advances during a resend at the in-sequence `check_inbound` in `on_inbound_active_` and at the one in `consume_rejected_seqnum_` (a rejected frame that consumes its number, fixpp#423). Both already call `close_filled_resend_gap_()` straight after, and the refresh is one statement in that function.
+    - That function has one compound condition today, which exits the state when NextNumIn has passed the recorded end. The refresh is a second statement after it. It runs when a resend is still outstanding, that is, when the function did not just leave the state, and when the session has a clock.
+    - `apply_inbound_sequence_reset` also moves NextNumIn, when NewSeqNo(36) is above it, and in that case it ends the resend. Its other outcomes (NewSeqNo absent, equal, or below) move nothing and leave the state as it was; they are §4.7's Reset-mode rows.
+    - Re-derive with `git grep -n -E 'check_inbound\(|set_next_inbound\(' -- src/session/session.cpp`. The other hits are on the Logon paths and in the reset unit, where no resend is outstanding unless fixpp#578 holds (§8).
+  - **A GapFill that lands short of the recorded end** ends AwaitingResend: `apply_inbound_sequence_reset` exits the state whenever it advances NextNumIn, whatever the recorded end. That is progress in R-2's sense: NextNumIn moved. The next too-high frame takes the too-high arm again, sends a fresh ResendRequest, and starts a new time point. Read and reasoned; a cell in §5.
 - **D-537-6 (R-6). While a resend is outstanding, a too-high Heartbeat answers a pending TestRequest.**
   - **Why.** While a resend is outstanding, every Heartbeat the peer sends is too high, and the out-of-sequence arm drops it before the only site that clears `pending_test_req_id_` can run (the in-sequence Heartbeat branch of `on_inbound_active_`). So a TestRequest fixpp sends in that state cannot be answered, and the liveness loop ends the session silently at its grace check, ahead of D-537-5's Logout. Read. Re-derive the clear site with `git grep -n -E 'pending_test_req_id_\.(clear|assign)' -- src/session/session.cpp`.
-  - **Where.** In `on_inbound_active_out_of_sequence_`, after D-537-5's check, so a Heartbeat that arrives past the bound draws the Logout and not a clear.
+  - **Scope.** This decision covers a Heartbeat that arrives while a resend is already outstanding. The Heartbeat that opens the gap takes another arm and is D-537-8.
+  - **Where.** In `on_inbound_active_out_of_sequence_`, after the deadline helper's call (D-537-5), so a Heartbeat that arrives past the bound draws the Logout and not a clear.
   - **Predicate.** The frame is a Heartbeat, the error is `session_seqnum_too_high`, a resend is outstanding, and a TestRequest is pending.
   - **Action.** The in-sequence branch's TestReqID disposition. An empty or matching TestReqID(112) clears `pending_test_req_id_` and `unanswered_tr_`. A mismatched 112 follows the in-sequence rule: a silent `Disconnected`. Then the arm returns: no advance, no persist, no `fromAdmin`.
   - **Unchanged.** A too-low Heartbeat keeps today's drop. So does a too-high Heartbeat with no TestRequest pending.
@@ -258,9 +326,42 @@ The reset to terminal is the lock sequence's, not the liveness loop's, and it da
   - **Contact with B27.** The rule reads and writes `pending_test_req_id_` and `unanswered_tr_`, which `run_liveness_loop` owns. No line of the loop changes.
 - **D-537-7 (triage C-5). A ResendRequest that cannot be built ends the session.** In `inbound_resend_request_leaf_`, a failed `build_resend_request` records `Disconnected` and returns `dispatch_aborted`, the disposition `emit_gapfill_async` gives a GapFill that cannot be built.
   - Today the leaf returns success with AwaitingResend set, for a request the peer never got. With D-537-1 that session would ignore every later frame, and with HeartBtInt ≤ 0 it would do so without end.
-  - Reach: a ResendRequest that overflows the leaf's buffer while the Logon fitted, a few bytes of margin at extreme CompID lengths. Reasoned.
+  - **Reach, read from the builders and reasoned.** The Logon and the ResendRequest are built in buffers of the same size (`logon_buf` and `reply_buf` for the two roles' Logon; `rr_buf` in the leaf) by the same `Writer`, and share their header fields. They differ in:
+    - the body: `build_logon` appends EncryptMethod(98) and HeartBtInt(108), then its optional fields (1137, 553, 554, 141, 789, 383, the 384 group, 464); `build_resend_request` appends BeginSeqNo(7) and EndSeqNo(16), which is always 0;
+    - the digits of each frame's own MsgSeqNum(34).
+    - So the ResendRequest is the longer frame only when the digits of BeginSeqNo, plus the digits its MsgSeqNum has gained since the Logon, exceed the digits of HeartBtInt by more than two, and by more again for each optional field the Logon carried.
+    - The branch therefore needs both: CompIDs long enough that the Logon fills its buffer to within that margin, and a NextNumIn with enough digits. v0.3 named only the first.
+    - The second is not only a matter of a long-lived session. A peer's Reset-mode SequenceReset raises NextNumIn to any NewSeqNo(36) above it (`apply_inbound_sequence_reset`), and BeginSeqNo is NextNumIn. The first is local configuration. No bound on a CompID's length was found: `fixpp_session_config_set_comp_ids` refuses a null or empty value and a forbidden byte, and `git grep -n -i -E 'comp_id.*(size|length)\(\)' -- src include` hits only tracing code. Read.
+  - **The cell is mandatory** (§5). It finds the boundary by building, not from a byte count.
+  - **Under an Engine this ending closes the transport**: the leaf returns an error on a frame the read pump delivered (D-538-4 lists the callers).
   - Not taken: leaving AwaitingResend and retrying. The build fails for the same CompIDs at every later too-high frame.
   - A failed assign or emit already records `Disconnected` (read from the leaf).
+- **D-537-8 (R-9). A too-high Heartbeat that opens the gap answers a pending TestRequest, and then the ResendRequest goes out.**
+  - **Why.** Read:
+    - the first frame above NextNumIn takes `on_inbound_active_too_high_` whatever its type, and that function receives two numbers and never reads TestReqID(112);
+    - the grace deadline is fixed when the TestRequest is sent, and the grace check reads only the pending id (`run_liveness_loop`);
+    - a conforming replay carries no Heartbeat: administrative frames are gap-filled and not resent, as fixpp's own walk does (`replay_outbound_range_`).
+  - So today, when the peer's answer to fixpp's TestRequest is the frame that reveals the gap, the id stays set. A peer that then fills the gap is still ended silently at the grace check, and a peer that does not fill it gets the dead-peer ending, not the deadline's Logout. Reasoned from that reading; RED cells in §5.
+  - One documented way into that trace: with `enable_next_expected_msg_seq_num` on, a too-high Logon is tolerated with no ResendRequest, and the too-high arm is the recovery of last resort at the next inbound frame (`L-027-2`). On a quiet line that frame is the TestRequest's answer.
+  - **Where.** At the top of `on_inbound_active_too_high_`, before `enter_awaiting_resend`, before the time point is written and before the ResendRequest. The sub-arm gains the frame header as a parameter. It is a private member declared in the installed `session.hpp`; no layout changes.
+  - **Predicate.** The frame is a Heartbeat and a TestRequest is pending. The arm is already behind `!is_awaiting_resend()` and `validate_sequence_numbers`.
+  - **Action.** The in-sequence branch's TestReqID disposition, as in D-537-6:
+    - an empty or matching TestReqID(112) clears `pending_test_req_id_` and `unanswered_tr_`. The arm then goes on as today: AwaitingResend, the time point, the ResendRequest;
+    - a mismatched 112 is a silent `Disconnected`, the in-sequence rule. The arm returns there: AwaitingResend is not entered and no ResendRequest goes out.
+  - **One routine holds the disposition for D-537-6 and D-537-8.** It is a new private member function of `Session`, because it writes `pending_test_req_id_`, `unanswered_tr_` and the state. The in-sequence branch of `on_inbound_active_` is not edited.
+  - **Unchanged.** The Heartbeat gets no `fromAdmin`, no advance and no persist, as any first too-high frame today. A too-high Heartbeat with no TestRequest pending draws the ResendRequest as today. With `validate_sequence_numbers = false` the arm is not taken (§8).
+  - **What the peer and the application see.** The peer reads a ResendRequest and a normal recovery. The application's session survives it. If the peer never fills the gap, the session ends by §4.6: the deadline's Logout for a peer that keeps sending, the dead-peer ending for one that goes silent.
+- **D-537-9 (R-11). One pattern has no ending. It is disclosed, not fixed.**
+  - **The pattern.** A peer that never fills the gap and that, inside every HeartBtInt, sends only frames that are not above NextNumIn and that do not move it.
+  - **Why it has no ending.** Each such frame refreshes liveness, so the liveness loop sends no TestRequest. None is a too-high frame, so the helper's first test is false wherever it is called. Read.
+  - **Members**, derived as the complement of §4.7's table and not from examples: every exit of the Active inbound arm that a frame at or below NextNumIn can take, that refreshes liveness, that leaves the session up, and that does not advance NextNumIn.
+    - a too-low PossDup frame: dropped, or redelivered, by Stage 2 of the out-of-sequence arm;
+    - a too-low Heartbeat: dropped;
+    - a Reset-mode SequenceReset whose own MsgSeqNum(34) is at or below NextNumIn and whose NewSeqNo(36) is absent, equal or below, or which `fromAdmin` rejects;
+    - with the validate gate on, a too-low frame that the gate Rejects; and a too-low PossDup frame that Stage 1 Rejects for its OrigSendingTime(122). `consume_rejected_seqnum_` does nothing for a too-low number, as for a too-high one.
+  - **What it looks like.** The session stays Active. Nothing new reaches the application, because the peer sends nothing new. It ends when the peer sends any frame above NextNumIn after the bound (the deadline), stops sending (the dead-peer ending), or closes; or when `close()` / `Engine::stop()` runs. QuickFIX/J and QuickFIX/Go would also wait.
+  - **No mechanism is added.** Not chosen: running the check on every frame that does not advance (R-11).
+  - Stated in §4.6, in a B&L limitation row (§6.1), and pinned by a cell (§5). A follow-up issue is to be filed (§8).
 
 ### 4.4 Rejected
 
@@ -272,13 +373,19 @@ The reset to terminal is the lock sequence's, not the liveness loop's, and it da
 - **Two endings for an alive peer** (a Logout when it keeps sending, a silent end when it is quiet). Not taken (R-6).
 - **The grace exit reading "any sound frame since the TestRequest"** (the consult's B′). It gives the same single ending, also for a peer that sends traffic and never heartbeats, and also with the knob off. It edits `run_liveness_loop`, which is B27's surface. Not taken (R-6); noticed in §8.
 - **A Logout on the dead-peer ending.** Not taken (R-6). QuickFIX C++ also ends that case with no Logout.
+- **The deadline check ahead of the pre-gate arms** (the first form of Codex's round-2 C-1). It would sit above the BeginString, CompID and SendingTime guards, so a frame those guards end silently today would draw a Logout. Not taken; the helper at each surviving exit is (D-537-5).
+- **The helper without its own too-high test.** It would end a healthy slow replay at an in-sequence rejected frame (D-537-5). Not taken.
+- **A guard predicate at the validate gate's site** (fire only if the frame would also pass the BeginString, CompID and SendingTime guards). It would leave a stream of frames above NextNumIn with no ending, and that stream is outside R-11, which covers only frames that are not too high. Not taken; the consequence of the code's order is stated in D-537-5 and pinned by cell V2.
+- **The deadline check on every frame that does not advance NextNumIn.** It would close D-537-9's pattern. Not chosen (R-11).
+- **R-6 kept as worded, with the gap-opening Heartbeat disclosed** (option (b) of round 2's O-1). Not chosen (R-9).
 
 ### 4.5 What still differs from QuickFIX after this change (R-5)
 
 Frames (R-2):
-- **The frame is ignored, not held.** An application message is delivered once and in order either way. A QuickFIX application receives the queued original; a fixpp application receives the peer's replay, which carries PossDupFlag(43)=Y and OrigSendingTime(122). That is observable to the application, and it is already true of the first too-high frame.
+- **The frame is ignored, not held.** With `redeliver_poss_dup` off, which is the default, an application message is delivered once and in order either way. A QuickFIX application receives the queued original; a fixpp application receives the peer's replay, which carries PossDupFlag(43)=Y and OrigSendingTime(122). That is observable to the application, and it is already true of the first too-high frame.
+  - **The exception: `redeliver_poss_dup` on.** Stage 2 of the out-of-sequence arm does not look at the error. A too-high PossDup application frame is handed to `fromApp` while the gap is open, with no advance, and again when it later arrives in sequence. Read. It exists at the base and D-537-3 keeps it; no behaviour changes here.
 - **A held TestRequest** is answered by the engines once the gap closes. fixpp never answers it, because the peer gap-fills over it. A too-high TestRequest as the *first* frame already behaves this way.
-- **A too-high Heartbeat** is processed by the engines once the gap closes. fixpp ignores it, with no `fromAdmin`, except that it answers a pending TestRequest (D-537-6).
+- **A too-high Heartbeat** is processed by the engines once the gap closes. fixpp ignores it, with no `fromAdmin`, except that it answers a pending TestRequest, whether it arrives during the gap (D-537-6) or opens it (D-537-8). What each engine does with its own pending TestRequest in those two traces was not read.
 - **A too-high ResendRequest or Logout** is acted on by the engines whatever its number. fixpp does not act on it. That is fixpp#577, and it is not changed here.
 - **A frame sent during the replay** is ignored and fetched by a second ResendRequest (D-537-1). The engines hold it.
 - **After a GapFill that lands short of the recorded end**, fixpp leaves its resend state and can send a new ResendRequest where QuickFIX C++ would not: that engine keeps its range until the range's end is reached. Behaviour that exists today.
@@ -286,32 +393,81 @@ Frames (R-2):
 An unfilled gap (R-6; the endings are in §4.6):
 - **The peer is alive and does not fill the gap.** fixpp sends a Logout after 2 × HeartBtInt without progress. QuickFIX C++ disconnects at its heartbeat timeout (2.4 × HeartBtInt), with no Logout, because a too-high frame never refreshes its last-received time. QuickFIX/J and QuickFIX/Go wait. The engines differ among themselves, so there is no single behaviour to keep.
 - **The peer answers nothing.** fixpp ends as for any dead peer: an unanswered TestRequest, then a silent `Disconnected`. QuickFIX C++ does the same. This is not a difference.
+- **The peer sends only frames that are not too high and move nothing** (D-537-9). fixpp waits, as QuickFIX/J and QuickFIX/Go would (R-11). Whether QuickFIX C++'s heartbeat timeout bounds that peer was not read.
 - **HeartBtInt = 0.** The gap waits, as in QuickFIX/J and QuickFIX/Go.
 
-A store read failure in a resend answer (R-7):
+A store read failure in a resend answer (R-7, R-10):
 - fixpp aborts the answer and ends the session, with no Logout (D-538-4). This follows QuickFIX C++, whose store error leaves `generateRetransmits` and whose handler logs it and disconnects, and QuickFIX/Go, whose `resendMessages` returns the store error and whose session then leaves its connected state.
 - QuickFIX/J differs: it rethrows the error unless `ForceResendWhenCorruptedStore` is set, logs it, and sends nothing; the session stays logged on with the peer's gap open. fixpp follows the two engines that end the session, because a peer whose gap cannot be filled gains nothing from a session that stays up.
+- **BeginSeqNo(7) = 0.** fixpp folds slot 0 and stays up (D-538-4, class 2). None of the three engines ends the session for it: each passes the number to its store's range read, and QuickFIX/Go Rejects an absent tag 7 and stays up. That is from round 2's triage, which read the engine sources; it was not re-read for this rewrite. What differs is the frame fixpp's answer starts with (a GapFill with MsgSeqNum(34) = 0); the follow-up of §8 is where that changes.
 
-### 4.6 How a session with an unfilled gap ends (R-6)
+### 4.6 How a stalled gap ends, and what liveness does to a session with a gap (R-6, R-9, R-11)
 
-One table for every ending. §4.4, §4.5, §5 and §6 are written from it. E is the time the gap opened; HB is HeartBtInt.
+Scope: the endings of a gap the peer does not fill, and the liveness endings of a session that has a gap. The table is derived from §4.7; §4.4, §4.5, §5 and §6 are written from it. The endings this batch does not change are grouped in the last row. E is the time the gap opened; HB is HeartBtInt.
 
 | Condition | Trigger | What fixpp does | What the peer sees |
 |---|---|---|---|
-| (a) The peer is alive and does not fill the gap | a too-high frame reaches the check of D-537-5 at or after 2 × HB since NextNumIn last advanced | a Logout whose Text(58) names the unanswered resend; `Disconnected` | the Logout. The transport stays open until the peer closes it or `close()` / `Engine::stop()` runs (fixpp#534) |
+| (a) The peer is alive and does not fill the gap, and sends a frame above NextNumIn after the bound | that frame takes a helper exit of §4.7 at or after 2 × HB since NextNumIn last advanced | a Logout whose Text(58) names the unanswered resend; `Disconnected`. A Reset-mode SequenceReset draws its own Reject first, where it has one. No Logout where it cannot be built (D-537-5) | the Logout. The transport stays open until the peer closes it or `close()` / `Engine::stop()` runs (fixpp#534) |
 | (b) The peer answers nothing | fixpp's TestRequest is still pending at the liveness loop's grace check | silent `Disconnected`, as today, with or without a gap | no Logout; the transport stays open (fixpp#534) |
 | The peer sends frames but never a Heartbeat for fixpp's TestRequest | the same grace check: it reads only the pending id | as (b), with or without a gap | as (b) |
-| A too-high Heartbeat carries a TestReqID(112) other than the pending one | D-537-6's mismatch rule | silent `Disconnected`, the in-sequence rule | no Logout; the transport stays open |
-| Every too-high frame is stopped before the sequence gate by an arm that Rejects it and leaves the session up (D-537-5, "Which frames reach it") | none: the check never runs, and each frame refreshes liveness | nothing; the gap waits | Rejects |
+| A too-high Heartbeat carries a TestReqID(112) other than the pending one, during the gap (D-537-6) or as the frame that opens it (D-537-8) | the in-sequence mismatch rule | silent `Disconnected`. For the frame that opens the gap, no ResendRequest goes out | no Logout; the transport stays open |
+| **The residual pattern (R-11, D-537-9):** the peer never fills the gap and, inside every HB, sends only frames that are not above NextNumIn and move nothing | none: no TestRequest is sent, and the helper's too-high test is false | nothing. The session stays Active and the gap waits | what each such frame draws today: nothing, or a Reject |
 | HeartBtInt ≤ 0, or no clock | none | nothing; the gap waits | nothing |
+| **Unchanged by this batch, with or without a gap** | the protocol-fatal guards (BeginString or CompID mismatch; SendingTime; a MsgSeqNum(34) that does not parse; PossDup Stage 1's Arm D; a too-low frame without PossDup; sequence-number overflow; a drained sequence-number mutex); a late parse failure; the peer's Logout received in sequence (a too-high one is ignored, fixpp#577); a callback that throws; a transport or read failure; a local `close()` or `Engine::stop()` | as today, each with the disposition it has today | as today |
 
-- **Condition (a)'s ending is the only one this note adds.** The dead-peer endings are today's, and D-537-6 keeps an alive peer that answers TestRequests out of them.
-- **A healthy slow replay is not ended.** Replayed frames are in sequence, NextNumIn advances, and the time point is refreshed. The deadline is tripped only when a too-high frame arrives after 2 × HB with no advance: the peer interleaves new frames or Heartbeats with a replay it has not started, or has stalled.
-- **The timelines are reasoned, from the consult.**
-  - A peer that only heartbeats, or that keeps sending new messages: each too-high frame refreshes liveness and runs the check; a TestRequest sent in a lull is answered by the peer's too-high Heartbeat; the first frame at or after E + 2 HB draws the Logout. Expected between E + 2 HB and about E + 3 HB.
-  - A peer that sends nothing: TestRequest at E + HB, then the silent `Disconnected` at the loop's `grace_deadline`. The check never runs, because no frame arrives.
-  - Cells Q, N and R and Q's mutant (§5) are what turn these timelines into observation. Until they run, this section is a prediction.
-- **Not an ending of a gap, but an ending this note adds:** the R-7 abort (D-538-4). It closes the transport; the deadline's Logout does not.
+- **What this note adds to that table.**
+  - Condition (a)'s Logout. It is the only new ending of a stalled gap.
+  - The mismatch rule at frames that did not reach it before: a too-high Heartbeat during the gap was dropped, and one that opened the gap drew only a ResendRequest. The rule itself is the in-sequence one.
+  - The dead-peer endings are today's. D-537-6 and D-537-8 keep an alive peer that answers TestRequests out of them, whether its answer arrives during the gap or opens it.
+- **Endings this note adds that are not endings of a gap:** the R-7 abort (D-538-4), and the ResendRequest that cannot be built (D-537-7). Both return an error; D-538-4 says where that closes the transport.
+- **A healthy slow replay is not ended.** Replayed frames are in sequence, NextNumIn advances, and the time point is refreshed. The deadline is tripped only when a frame above NextNumIn arrives after 2 × HB with no advance: the peer interleaves new frames or Heartbeats with a replay it has not started, or has stalled.
+- **The TestRequest answer that opens the gap is not an ending** (D-537-8). The pending id is cleared, the ResendRequest goes out, and a peer that fills the gap keeps its session.
+- **The timelines are reasoned.** Round 2's triage re-read the liveness loop and confirmed the cadence that cells Q and N assume; nothing here was run.
+  - A peer that only heartbeats, or that keeps sending new messages: each too-high frame refreshes liveness and runs the helper; a TestRequest sent in a lull is answered by the peer's too-high Heartbeat; the first frame at or after E + 2 HB draws the Logout. Expected between E + 2 HB and about E + 3 HB.
+  - A peer that sends nothing: TestRequest at E + HB, then the silent `Disconnected` at the loop's `grace_deadline`. The helper never runs, because no frame arrives.
+  - A quiet peer whose TestRequest answer opens the gap and that then fills it: the id is cleared at the answer, the replay advances NextNumIn, and the grace check finds no pending id.
+  - Cells Q, N, R and T (§5), with their mutants, are what turn these timelines into observation. Until they run, this section is a prediction; §5 says what happens if a cell disagrees.
+
+### 4.7 Every exit of the Active inbound arm for a frame above NextNumIn (R-2, R-9)
+
+§4.6 and the call sites of D-537-5 are read off this table. v0.3 had no such table and attached each rule to one arm.
+
+- **How it was derived.** `on_inbound_active_` in `src/session/session.cpp` was read from its top to its final persist, with every sub-arm that `on_inbound_active_slow_` dispatches to. An exit is a `co_return`, or a `break` to a sub-arm. Re-derive it the same way; do not extend the table from a symptom.
+- **The liveness writers.** `git grep -n 'last_inbound_steady_ =' -- src/session/session.cpp`. The hit inside `on_inbound_active_` is the one per-frame writer; it sits after the garbled and faulty-frame exits and before everything else. The other hits are `open()`'s seed and the two roles' seeds on entering Active.
+- **The subject.** A frame whose MsgSeqNum(34) is above NextNumIn, arriving while a resend is outstanding. `validate_sequence_numbers` is then on, because AwaitingResend is entered only behind it.
+- **The invariants read off the table.**
+  - (i) Above NextNumIn, a resend outstanding, liveness refreshed, the session not ended by the frame's own arm ⇒ the deadline helper runs.
+  - (ii) A too-high Heartbeat with a TestRequest pending, knob on ⇒ the TestReqID disposition applies: D-537-6 during the gap, D-537-8 at the frame that opens it.
+
+Rows are in the arm's order. "Own disposition" is what the frame's arm does today, and still does whenever the helper does not fire.
+
+| Exit | Can the subject take it? | Refreshes liveness | Own disposition | Helper runs | Cell (§5) |
+|---|---|---|---|---|---|
+| The third field is not MsgType(35) (`note_garbles_`) | yes | no | disregarded | no. No refresh, so the dead-peer ending bounds a peer that sends only these | — |
+| The header scan found a fault (`dispose_unparseable_`) | yes | no | the faulty-frame dispositions of 092 | no, for the same reason | — |
+| Validate gate, `parse_failed` (`close_on_late_parse_failure_`) | yes, with the gate on | yes | the session is closed | no: the arm ends the session | — |
+| Validate gate, `reject` (`on_inbound_active_validate_failed_`) | yes, with the gate on. Reject and Logout frames are exempt from the gate | yes | a Reject; the session stays up; the number is not consumed | **yes**, before `consume_rejected_seqnum_`. When it fires, no Reject | V |
+| BeginString or CompID guard | yes | yes | silent `Disconnected` | no: the arm ends the session | G1 |
+| SendingTime guard (`on_inbound_active_sending_time_reject_`) | yes. Reject and Logout frames are exempt | yes | Reject, Logout, `Disconnected` | no: the arm ends the session | G1 |
+| Reset-mode SequenceReset (`on_inbound_active_sequence_reset_`): `fromAdmin` throws, or a late parse failure | yes | yes | the session is closed | no: the arm ends the session | — |
+| Same arm: `fromAdmin` rejects the reset | yes, with an application registered | yes | a best-effort Reject; the reset is not applied; the session stays up | **yes**, after the Reject, before the return | S1 |
+| Same arm, `apply_inbound_sequence_reset`: NewSeqNo(36) above NextNumIn | yes | yes | NextNumIn moves and AwaitingResend ends | no: progress. The helper is called after the function returns and does nothing, because the reset ended the resend | S3 |
+| Same arm, `apply_inbound_sequence_reset`: NewSeqNo absent or equal (nothing), or below (a Reject) | yes | yes | nothing, or a Reject; the session stays up | **yes**, after the function returned success | S2 |
+| Same arm: `apply_inbound_sequence_reset` fails (the counter write; the Reject's assign or its `toAdmin`) | yes | yes | `Disconnected`, error returned | no: the arm ends the session | — |
+| MsgSeqNum(34) does not parse | no: it is not above NextNumIn | — | silent `Disconnected` | — | — |
+| The too-high arm (`on_inbound_active_too_high_`) | no: its guard is `!is_awaiting_resend()`. It is the exit that opens a gap | yes | AwaitingResend and a ResendRequest | no: nothing was outstanding; the time point starts here. Invariant (ii): D-537-8 | T |
+| PossDup Stage 1, Arm C: OrigSendingTime(122) absent (`on_inbound_active_poss_dup_`) | yes, for a PossDup frame that is not a SequenceReset | yes | a Reject; the session stays up | **yes**, before `consume_rejected_seqnum_`. When it fires, no Reject | P1 |
+| Stage 1: 122 present and unparseable | as Arm C | yes | as Arm C | **yes**, as Arm C | P2 |
+| Stage 1, Arm D: 122 later than SendingTime(52) | as Arm C | yes | Reject, Logout, `Disconnected` | no: the arm ends the session | — |
+| `check_inbound` refuses for a reason other than too high (`session_already_closed`) | yes | yes | `Disconnected` ("Arm B") | no: the arm ends the session | — |
+| `on_inbound_active_out_of_sequence_`, too high: a Heartbeat | yes | yes | dropped. Invariant (ii): D-537-6 | **yes**, at the top of the function | the deadline cells |
+| Same function, too high: a PossDup frame that passed Stage 1 | yes | yes | dropped, or redelivered to `fromApp` | **yes**, the same call | the deadline cells |
+| Same function, too high: any other frame | yes | yes | ignored (D-537-2) | **yes**, the same call | the deadline cells |
+
+- **Every row that says "yes" under both "Can the subject take it?" and "Refreshes liveness" ends the session, moves NextNumIn, or runs the helper.** That is invariant (i), and it is what closes round 2's C-1.
+- **D-537-9's members are the exits above that a frame at or below NextNumIn can take, that leave the session up, and that do not advance it.** The helper is called at each of them, and its first test is false.
+- **An in-sequence frame** either advances NextNumIn, which refreshes the time point, or is ended by its arm. The one exception is a Reset-mode SequenceReset whose MsgSeqNum equals NextNumIn and which moves nothing; it is a member of D-537-9.
+- **LogonReceived.** The arm serves that state too. Under an Engine no frame is delivered in it (§5 gives the reason), so the table has no separate column for it.
 
 ## 5. Tests and gates
 
@@ -332,11 +488,13 @@ One table for every ending. §4.4, §4.5, §5 and §6 are written from it. E is 
 | D-538-1, capacity | A bounded `MemoryStore` filled to capacity after a (·, 2) reset: the retained numbers are retrievable, the refused ones are gaps | the absolute position restored |
 | D-538-2 | RED first: a wrapper that forwards `store`, `retrieve`, `next_seqnum` and `reset` to a shipped store and does not override `reset_to`. Then `reset_to(1, 2)`, `store(2)`, `retrieve(2, 2)` | the absolute position restored in the wrapped store |
 | D-538-4 | RED first: a wrapper whose `retrieve` returns `store_io_failure` for one slot, with stored application messages on both sides of it. The frames before the slot are replayed; no GapFill covers the slot; `on_inbound_frame` returns `dispatch_aborted`; the state is `Disconnected`; no Logout; no `session_event_resend_slot_gap_filled`. Today the slot is gap-filled and the session stays Active | the new error test deleted |
-| D-538-4 | Under an Engine, the same failure closes the transport | the same mutant |
+| D-538-4 | Under an Engine, a ResendRequest in Active, on each role: the same failure closes the transport at once (the read pump stops on the failed frame) | the same mutant |
 | D-538-4 | RED first, the tail read: `next_seqnum(outbound, false)` fails with `store_io_failure`. Nothing is written; `Disconnected`; the error is returned. Today one GapFill covers the range | the tail test deleted |
-| D-538-4 | The 789 path: the same failing store under `honor_peer_next_expected_`'s resend | the first mutant |
-| D-538-4, controls | A plain gap folds silently. `store_cancelled` at either read keeps today's path. An unbuildable replay still folds with its event (fixpp#424 unchanged) | each control is RED if the abort is widened to its code |
-| D-538-4, slot 0 | A ResendRequest with BeginSeqNo(7)=0 over a non-empty store. The assertion follows the owner's answer (§7) | — |
+| D-538-4 | RED first, the 789 path, initiator, under an Engine: the same failing store under `honor_peer_next_expected_`'s resend. `Disconnected`, and the transport is closed at once | the first mutant |
+| D-538-4 | RED first, the 789 path, acceptor, under an Engine: `Disconnected`; the session never reaches Active; **the transport is still open when the first Logon's delivery returns**, and it is closed at the establishment deadline (`logon_timeout_ms`). The cell asserts each of these | the first mutant: the session reaches Active |
+| D-538-4, class 1 controls | A plain gap folds silently. `store_cancelled` at either read keeps today's path. An unbuildable replay still folds with its event (fixpp#424 unchanged) | each control is RED if the abort is widened to its code |
+| D-538-4, class 2 (R-10), slot 0 | Guard: a ResendRequest with BeginSeqNo(7) = 0, and one with tag 7 absent, over a non-empty store, with the validate gate off. `on_inbound_frame` succeeds; the session stays Active; the stored application messages are replayed with PossDupFlag(43)=Y. The answer's first frame is a GapFill whose MsgSeqNum(34) is 0: today's wire, pinned in one assertion that names the clamp follow-up of §8, which flips it | the abort widened to `store_seqnum_invalid`: the cell is RED |
+| D-538-4, class 3 from another code | A wrapper whose `retrieve` returns, for one slot, a code outside classes 1 and 2 that no shipped `retrieve` returns: the answer aborts as it does for `store_io_failure` | the abort narrowed to `store_io_failure` alone: the cell is RED |
 
 - `run_q28` in `test_memory_store_round_trip.cpp` discards a `retrieve` result on exactly this state. It is noted, not changed.
 
@@ -351,42 +509,70 @@ One table for every ending. §4.4, §4.5, §5 and §6 are written from it. E is 
 | D-536-3 | RED first: a clock whose `cancel_sleeps()` does nothing. A graceful close returns when the peer's Logout arrives, not at the logout timeout | the wake's trigger in the LogoutSent arm deleted |
 | D-536-3 | Changed: `AdversarialSessionTest.LogoutGracefulCancelMidSleep` pins the old mechanism (a sweep ends the logout wait). It becomes the cell for the new one: a sweep by a third party during the logout wait does not end it; the confirmation, the deadline or the grace timer does | the deadline arm put back on a raw `sleep_until` |
 | D-536-3, lifetime | The grace timer wins while the inner wait is pending. A terminal close escalates during the wait. In both, `close` completes and no wake is called after the wait ended | the clear of the wake on exit deleted |
-| D-536-3, lifetime | The peer's Logout arrives while fixpp's Logout emit is still suspended in the store. The Logout then meets the Active arm, not the LogoutSent arm; the outcome at the base is read first. The cell asserts that `close` completes no later than the logout timeout and that no wake is called after the wait ended. Not traced | — |
+| D-536-3, lifetime | Control (GREEN at the base and after): the peer's Logout arrives while fixpp's Logout emit is still suspended in the store. Fixture: the hooked store holds only that first store call. The trace, read from `on_inbound_active_logout_` and `run_logout_phase1`: the Logout meets the Active arm, which writes a confirming Logout and records `Disconnected`; phase 1 then resumes, records `LogoutSent` over it (`record_state_transition_` assigns whatever the current state is), finds `logout_confirmed_` unset, and waits for its deadline. Asserted: both Logouts are written; `close` completes no later than the logout timeout and not before the store is released; the final state is `Disconnected`; the wake is never triggered, during the wait or after it | none: no statement of D-536-3 is on this trace except the deadline arm, which the `LogoutGracefulCancelMidSleep` row mutates. The cell shows that D-536-3 leaves the trace as it is |
 | D-536-4 | Control kept: an explicit `cancel_sleeps()` still ends an unclosed session's liveness loop | — |
 | D-536-4, disclosure | An explicit `cancel_sleeps()` on `Engine::clock()` with open sessions: each stays Active and sends no further Heartbeat. This pins the disclosed limitation | — |
 
 **#537**
 
-Before the cells are written, the one-statement edit of D-537-2 is run over §3.4's selection, as the #536 probe was. The tests that pin the old outcome are found by running, not by reading: `Disclosed_L1_*` and `Disclosed_L2_*` are named from reading only.
+The first step of implementation is a probe: the one-statement edit of D-537-2 is run over §3.4's selection, as the #536 probe was, before any #537 cell is written. The tests that pin the old outcome are found by running, not by reading: `Disclosed_L1_*` and `Disclosed_L2_*` are named from reading only. The probe has not run; its return condition is under "Implementation steps" below.
 
 Every deadline cell states the traffic that keeps the liveness loop from ending the session first: an inbound frame inside every HeartBtInt, or a Heartbeat for each TestRequest. A single clock advance past the bound with no traffic is cell N, not a deadline cell.
+
+Every helper call site of §4.7 has its own cell below, and that cell's fix-deleted arm deletes that site's call and no other. These call sites are added after the last review round, so the cells and §4.7's table are what check them.
 
 | Decision | Cell | Fix-deleted arm |
 |---|---|---|
 | D-537-1, D-537-2 | The lifted cells of `session_537_*`: `SecondTooHigh` turns GREEN on both roles | D-537-2's statement deleted |
 | D-537-1, D-537-2 | Per message type, both roles: a second too-high TestRequest, application message, Reject, GapFill without PossDup, and Logon. Each leaves the session Active, sends nothing, and leaves NextNumIn unchanged; the replay through the highest number then completes | the same mutant |
-| D-537-1, D-537-2 | The same in LogonReceived: the arm serves both states | the same mutant |
+| D-537-1, D-537-2, LogonReceived | **No cell; waived, with the reason.** The state is entered and left inside one handler (the acceptor's Logon handler records `LogonReceived` and then `Active`). The Engine delivers the acceptor's first Logon by itself and starts the read pump after that delivery returns, so no second frame is delivered in that state. A Session driven directly would have to start a second `on_inbound_frame` while the first is suspended. No shipped driver does that: the read pump awaits each delivery before the next. A cell that forced it would measure a path no caller reaches. D-537-2's statement does not read the state. Read | — |
 | D-537-1, D-537-2 | A second too-high ResendRequest and Logout: NextNumIn does not move, and the session does not enter `Disconnected` without sending a Logout. What fixpp should send is fixpp#577's question; these two assertions survive either answer | the same mutant |
-| D-537-1 | A frame sent during the replay is ignored; the next frame draws a second ResendRequest, and every message is delivered once and in order | — |
+| D-537-1 | A frame sent during the replay is ignored; the next frame draws a second ResendRequest, and every message is delivered once and in order (`redeliver_poss_dup` off) | — |
 | D-537-2, controls | A too-low frame without PossDup is still fatal, and the overflow arm is unchanged | "any error returns success" in place of the exact match: the too-low control is RED |
-| D-537-5, no progress | Mock clock, both roles: a too-high frame before the bound is ignored; one at or after it draws the Logout. Asserted: the Logout and its Text(58), `Disconnected`, **and that the transport is still open**, with a pointer to fixpp#534 so B27 flips that assertion | the check deleted: the session is still Active after the frame |
+| D-537-5, the out-of-sequence site | RED first. Mock clock, both roles: a too-high frame before the bound is ignored; one at or after it draws the Logout. Asserted: the Logout and its Text(58), `Disconnected`, **and that the transport is still open**, with a pointer to fixpp#534 so B27 flips that assertion | that site's call deleted: the session is still Active after the frame |
+| D-537-5, **V**: the validate gate's site | RED first. Validate gate on. A gap is open; inside every HB the peer sends a dictionary-invalid application frame above NextNumIn. Before the bound each draws a Reject and the session stays Active. The first at or after the bound draws the Logout with its Text(58) and no Reject; `Disconnected`; the transport is still open. Today the Rejects go on without end | that site's call deleted |
+| D-537-5, **V2**: the stated consequence | The same stream, with a CompID the CompID guard would refuse. After the bound: the deadline's Logout. This pins the consequence D-537-5 states for a frame that fails validation | as V |
+| D-537-5, **G1**: the guards keep their dispositions | Guard. After the bound, a frame above NextNumIn that passes validation: with a wrong CompID, silent `Disconnected` and no Logout; with a SendingTime outside the threshold, a Reject, a Logout with no Text(58), `Disconnected` | the helper called at the top of the arm, ahead of the guards: G1 is RED |
+| D-537-5, **P1**: Stage 1's Arm C site | RED first. A gap is open; inside every HB the peer sends a PossDup application frame above NextNumIn with no OrigSendingTime(122). Before the bound: a Reject each, Active. At or after it: the Logout, no Reject, `Disconnected` | that site's call deleted |
+| D-537-5, **P2**: Stage 1's unparseable-122 site | RED first. The same, with a 122 that does not parse | that site's call deleted |
+| D-537-5, **S1**: the Reset-mode arm, a reset `fromAdmin` rejects | RED first. An application whose `fromAdmin` rejects a SequenceReset. Inside every HB the peer sends a Reset-mode SequenceReset whose MsgSeqNum is above NextNumIn. Before the bound: a Reject each, Active. At or after it: the Reject, then the Logout, `Disconnected` | that site's call deleted |
+| D-537-5, **S2**: the Reset-mode arm, a reset that moves nothing | RED first. Inside every HB the peer sends a Reset-mode SequenceReset whose MsgSeqNum is above NextNumIn, with NewSeqNo(36) below NextNumIn, equal to it, and absent, as separate inputs. At or after the bound: the Logout; for the input below NextNumIn the Reject goes out before it | that site's call deleted |
+| D-537-5, **S3**: a reset that advances | Guard. After the bound, a Reset-mode SequenceReset whose NewSeqNo is above NextNumIn and whose own MsgSeqNum is above its NewSeqNo: NextNumIn moves, the resend ends, no Logout, Active | the helper's "a resend is outstanding" test deleted: S3 is RED |
+| D-537-5, the helper's too-high test | Guard. A resend is outstanding. Inside every HB the peer sends a too-low Heartbeat, which keeps liveness and moves nothing. More than 2 × HB after the last advance, an in-sequence frame arrives that a Reject arm consumes: once at the validate gate (gate on, dictionary-invalid), once at Stage 1's Arm C (PossDup, no 122). It is consumed and Rejected, the session stays Active, and a too-high frame straight after it is ignored, not answered with the Logout. Precondition, as in cell R: the gap is wide enough that the consumed frame does not reach the recorded end, so the resend is still outstanding at the frame that follows | the helper's "above NextNumIn" test deleted: the cell is RED at the in-sequence frame |
 | D-537-5, progress | A replay that takes longer than the bound in total, with NextNumIn advancing inside each window, completes | the refresh deleted |
 | D-537-5, second refresh site | The same, where the only advances inside a window are frames that `consume_rejected_seqnum_` consumes | the refresh moved out of `close_filled_resend_gap_` to the in-sequence caller only |
-| D-537-5, frame types | After the bound, a too-high Heartbeat ends the session with the Logout. So does a too-high PossDup frame that passes Stage 1 | the check moved below the Heartbeat arm, or below the PossDup arm |
-| D-537-5, off | HeartBtInt = 0, and a Session with no clock: no deadline. A negative HeartBtInt is tested on the helper that computes the bound: no deadline, and no assertion in the debug tree. What `run_liveness_loop` does with a negative interval was not traced, so a session cell may not stay Active long enough to observe it | "off at exactly 0" in place of "≤ 0": the negative cell is RED |
+| D-537-5, frame types | After the bound, a too-high Heartbeat ends the session with the Logout. So does a too-high PossDup frame that passes Stage 1 | the helper's call moved below the Heartbeat arm, or below the PossDup arm |
+| D-537-5, a Logout that cannot be built | RED first, on D-537-7's fixture. CompIDs at the boundary that fixture finds, and NextNumIn left small, so the ResendRequest is built and the Logout with its text is not; the cell first checks both by building. A too-high frame before the bound is ignored (the RED half: today it ends the session). One at or after the bound: nothing is written, `Disconnected`, and `on_inbound_frame` returns success | the `Disconnected` write of the build-failure branch deleted: the session is still Active after the bound |
+| D-537-5, off | HeartBtInt = 0, and a Session with no clock: no deadline. A negative HeartBtInt is tested on the helper that computes the bound: no deadline, and no assertion in the debug tree. It is not tested on a session, because of what `run_liveness_loop` does with a negative interval (read, not run): its deadlines are already past, so on its first pass it sends a Heartbeat and a TestRequest and ends the session at the grace check | "off at exactly 0" in place of "≤ 0": the negative cell is RED |
 | D-537-5, zero bound | — | a zero bound: `SecondTooHigh` is RED again |
 | D-537-5, short GapFill | A GapFill short of the recorded end, then a too-high frame: a new ResendRequest, and a deadline that starts again | — |
 | D-537-6, **Q** | Open a gap with a too-high application frame. Advance to E + HB and expect a TestRequest. Deliver a too-high Heartbeat carrying its 112. Advance to just past E + 2 HB, and not to E + 3 HB: the session is still Active (RED today and under v0.2). Deliver a too-high Heartbeat: the Logout, then `Disconnected`. The window matters: at that wake the loop sends a second TestRequest, whose grace ends near E + 3 HB (reasoned from the loop) | D-537-6's predicate deleted: Q is RED at its grace step |
 | D-537-6, **N** | The same gap, nothing delivered, the clock advanced past the grace deadline: `Disconnected`, no Logout | guard for condition (b): RED if the dead-peer ending gains a Logout or is lost |
-| D-537-6, **R** | Gap, TestRequest at E + HB, a too-high Heartbeat answer, then in-sequence PossDup frames spaced 1.5 HB apart, with every later TestRequest answered by a too-high Heartbeat: no `Disconnected` | the predicate deleted |
-| D-537-6, mismatch | A too-high Heartbeat with a 112 other than the pending one: silent `Disconnected` | — |
+| D-537-6, **R** | Gap, TestRequest at E + HB, a too-high Heartbeat answer, then in-sequence PossDup frames spaced 1.5 HB apart, with every later TestRequest answered by a too-high Heartbeat: no `Disconnected`. **Precondition, stated in the cell:** the frame that opens the gap is far enough above NextNumIn that the in-sequence frames delivered never reach the recorded end. The resend then stays outstanding for the whole cell, and every answering Heartbeat takes the out-of-sequence arm. Without it the resend ends part-way, the next answer takes the too-high arm, and the cell measures D-537-8 | D-537-6's predicate deleted |
+| D-537-6, mismatch | RED first. During the gap, a too-high Heartbeat with a 112 other than the pending one: silent `Disconnected` at that frame. Today the frame is dropped and the session ends one grace window later | the mismatch branch replaced by a clear: the session is still Active after the frame |
 | D-537-6, bounds of the rule | A too-low Heartbeat does not clear a pending TestRequest. With `validate_sequence_numbers = false`, a too-high Heartbeat does not clear it either | the gate on an outstanding resend deleted: the knob-off control is RED |
-| D-537-7 | A cell only if the fixture's CompID lengths can make `build_resend_request` fail while the Logon fits. Otherwise the statement is reported uncovered under `[const §IX.1]` | — |
+| D-537-8, **T1**: the answer opens the gap, and the peer fills it | RED first. A quiet session. Advance one HB and expect a TestRequest. Deliver a Heartbeat that carries its 112 and a MsgSeqNum above NextNumIn. Expect a ResendRequest. Deliver the replay through that number (a GapFill is enough). Advance past the TestRequest's grace deadline: the session is still Active. Today it is `Disconnected` at that step | D-537-8's disposition deleted: T1 is RED at the grace step |
+| D-537-8, **T2**: the answer opens the gap, and the peer does not fill it | RED first. The same opening; the peer then answers each later TestRequest with a too-high Heartbeat and never fills the gap. The session ends with the deadline's Logout at the first frame at or after the bound, not silently at the first grace check | the same mutant |
+| D-537-8, **T3**: mismatch | RED first. The gap-opening Heartbeat carries a 112 other than the pending one: silent `Disconnected` at that frame, and nothing is written, no ResendRequest in particular. Today a ResendRequest is written and the session stays Active until the grace check | the mismatch branch replaced by a clear: a ResendRequest is written |
+| D-537-8, bounds of the rule | Controls. A gap-opening Heartbeat that carries a 112 while no TestRequest is pending draws the ResendRequest and the session stays Active, as today. One with an empty 112 and a TestRequest pending clears it (the in-sequence rule) and draws the ResendRequest | the "a TestRequest is pending" test deleted: the first control is RED, because a 112 with nothing pending then reads as a mismatch |
+| D-537-7 | RED first, and mandatory. Fixture: a directly driven Session on the callback transport, facing hand-built frames, at its real HeartBtInt. Step 1 finds the boundary by building: the longest CompID at which the session's own Logon is still written. Step 2: the peer sends a Reset-mode SequenceReset whose NewSeqNo(36) has enough digits for D-537-7's inequality, then a frame above it. Asserted: `on_inbound_frame` returns `dispatch_aborted`; `Disconnected`; no ResendRequest is written. Today the frame returns success and the session stays Active, awaiting a request that was never sent | the leaf's success return restored: the session is Active with a resend outstanding and nothing written |
+| D-537-9, the residual pattern | Pin of the disclosed limitation (R-11). A gap is open. Inside every HB the peer sends one frame of D-537-9's members: a too-low Heartbeat; a too-low PossDup frame; a Reset-mode SequenceReset at NextNumIn that moves nothing. The clock is advanced well past the bound and past several grace windows: the session is Active, no Logout and no TestRequest were written. A frame above NextNumIn then draws the deadline's Logout. The cell names the follow-up issue of §8, which flips its first half | none: it pins a limitation, not a fix |
 
 - `Disclosed_L1_*` and `Disclosed_L2_*` pin the fatal outcome today. Their traces change: the frames are ignored, and the session ends by one of §4.6's rows, according to the traffic each cell sends.
 - No cell reconnects with the awaiting flag set (fixpp#578, §8).
 
 **C ABI.** One witness per row of §6.2's table, on the raw-peer fixture named there. Each is shown RED on the base tree first. A witness that cannot be made RED there means the effect has no C-ABI reach, and the table row is corrected, not the test.
+
+**Implementation steps that can send the design back.** None of these is an open question of the design; each is a measurement the note cannot make, with what happens if it disagrees.
+
+| Step | When | Sends the design back to the owner if |
+|---|---|---|
+| The D-537-2 probe (round 1's O-7; still a plan) | before any #537 cell is written; its verdict table goes into the verify record | a test outside `session_537_*`, `Disclosed_L1_*` and `Disclosed_L2_*` changes its verdict in a way §4.6 and §4.7 do not predict |
+| D-537-7's boundary | step 1 of its cell | no CompID length exists at which the Logon is written and the ResendRequest cannot be built. D-537-7's reach statement is then wrong; the disposition of the branch is the owner's (`[const §IX.1]`: tested, waived with a rationale, or a filed issue), and "reported uncovered" is not one of them |
+| The timelines of §4.6 | cells Q, N, R, T1, T2 | a cell's observed step differs from the timeline. The note is corrected before the fix is kept |
+| D-536-3's lifetime argument (read and reasoned) | its lifetime cells, under TSan and ASan | a wake is observed after the wait ended, or a sanitizer reports on the wake |
+| §6.2's classifications and reach (reasoned) | each C-ABI witness, RED on the base tree first | a witness cannot be made RED: the row is corrected and the PR description says so |
+| The stale awaiting flag (fixpp#578) | not exercised: no cell reconnects with the flag set | fixpp#578 is confirmed before this PR merges; D-537-5's interaction with it (§8) is then re-read |
 
 **Gates**
 - A full `ctest` in `linux-clang-debug`, then ASan, TSan and UBSan trees. TSan matters most for #536.
@@ -400,40 +586,49 @@ Every deadline cell states the traffic that keeps the liveness loop from ending 
 
 `spec/behaviors-and-limitations.md`; rows are written at implementation.
 
-- New behaviour rows: the relative lookup (#538); the abort on a store read failure (R-7); a session no longer sweeps the clock, and the logout wait has its own wake (#536); the ignored too-high frame (#537); the deadline; the too-high Heartbeat that answers a TestRequest (R-6); the ResendRequest that cannot be built (D-537-7).
-- **The deadline row states:** the two conditions of §4.6 and the ending of each; that after the Logout the transport stays open until the peer closes it or `close()` / `Engine::stop()` runs (fixpp#534); that the deadline is tripped only when a too-high frame reaches the sequence gate after 2 × HeartBtInt with no advance; and that it is off when HeartBtInt ≤ 0.
+- New behaviour rows: the relative lookup (#538); the abort on a store read failure (R-7); a session no longer sweeps the clock, and the logout wait has its own wake (#536); the ignored too-high frame (#537); the deadline; the too-high Heartbeat that answers a TestRequest, during a gap (R-6) and when it opens one (R-9); the ResendRequest that cannot be built (D-537-7).
+- **The deadline row states:** conditions (a) and (b) of §4.6 and the ending of each; that after the Logout the transport stays open until the peer closes it or `close()` / `Engine::stop()` runs (fixpp#534); that the deadline is checked only when a frame above the expected number arrives, after 2 × HeartBtInt with no advance; that a Reset-mode SequenceReset that trips it is Rejected first where it would be Rejected today; that no Logout is written when the CompIDs leave no room for its text in the frame buffer, and the session then ends silently; and that it is off when HeartBtInt ≤ 0.
+- **The store read failure row (R-7, R-10) states:** the three classes of D-538-4; that a BeginSeqNo(7) of 0 is folded as before and does not end the session; that the abort closes the connection at once except on the acceptor's NextExpectedMsgSeqNum(789) path, where the connection stays open until the establishment deadline; and that a failure that persists aborts the answer again at every reconnect until an operator repairs the log or resets the sequence numbers.
+- **New limitation row (R-11, D-537-9).** Wording: while a resend is outstanding, a peer that never fills the gap and that, inside every heartbeat interval, sends only frames whose MsgSeqNum(34) is not above the expected number and that do not advance it keeps the session Active without end. Examples: resent PossDup frames, too-low Heartbeats, a Reset-mode SequenceReset at or below the expected number, a too-low frame that is Rejected. Each such frame counts as inbound traffic, and the unfilled-gap deadline is checked only when a frame above the expected number arrives. Nothing new reaches the application. `close()` or `Engine::stop()` ends the session. The row names the follow-up issue (§8).
 - **New limitation row (D-536-4):** an explicit `Clock::cancel_sleeps()` on a clock that open sessions share ends their liveness loops, and nothing restarts them.
 - **New row for store implementers (D-538-2):** what `retrieve` must return after a reset to a first number other than 1, and for an empty direction.
-- **`L-092-1`, `L-092-2`, `L-093-7`.** The last step changes from "the session ends silently at the peer's next new message" to text that is true for both conditions:
+- **`L-092-1`, `L-092-2`, `L-093-7`.** The last step changes from "the session ends silently at the peer's next new message" to text that is true for every row of §4.6:
   - the peer's new messages are ignored;
-  - if the peer keeps sending and answers fixpp's TestRequests, the session ends with a Logout naming the unanswered resend, at the first too-high frame that reaches the sequence gate once NextNumIn has not advanced for 2 × HeartBtInt;
+  - if the peer keeps sending and answers fixpp's TestRequests, the session ends with a Logout naming the unanswered resend, at the first frame above the expected number that arrives once NextNumIn has not advanced for 2 × HeartBtInt;
   - if the peer answers nothing, or leaves a TestRequest unanswered, the session ends as it does for any dead peer: a silent `Disconnected` at the TestRequest's grace check;
+  - if the peer sends only frames that are not above the expected number and move nothing, it does not end (the R-11 row);
   - with HeartBtInt ≤ 0 it does not end.
   - `L-092-1` also says a too-high Heartbeat is dropped silently while the gap is open. It gains: unless it answers a pending TestRequest (D-537-6).
+- `L-027-2`: gains one sentence. When the frame that takes the too-high arm is the answer to fixpp's own TestRequest, it also answers that TestRequest (D-537-8).
 - `L-013-2`: corrected. No hold queue is implemented; the replay stands in for it.
 - `B-424-2`: not edited (R-7).
-- **The C-ABI 1.12 row**, marked BREAKING, with the effects of §6.2 and, as `L-092-12` does for 1.10, the effects that have no C-ABI witness.
+- **The C-ABI row for the 1.x clause**, marked BREAKING, with the effects of §6.2 and, as `L-092-12` does for 1.10, the effects that have no C-ABI witness.
 
-### 6.2 C ABI 1.12 (R-8)
+### 6.2 The C-ABI declaration: the 1.x clause (R-8)
 
-- **1.12 is declared BREAKING** under `[const §X.7]`: `FIXPP_C_ABI_VERSION_MINOR` goes to 12, with a `version.h` entry.
-- **Each affected declaration in `include/fix/c_api/session.h` carries a 1.12 clause**, as it carries its 1.10 and 1.11 clauses. The observers those entries name are `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback` and `fixpp_session_register_send_callback`.
-- **The 1.10 sentences this batch falsifies are amended in place, marked 1.12**, as 1.11 amended 1.10's. They are the 1.10 bullets that end "the session ends at the peer's next new message that is not a Heartbeat": the resent faulty frame, and the faulty SequenceReset in a resend recovery. Those bullets describe the #537 trace. Re-derive the declarations that carry them with `git grep -n "next new message" -- include/fix/c_api/session.h`; `fixpp_session_close`'s 1.10 clause refers to `fixpp_session_is_established`'s instead of repeating them.
-- **B41 declares no C-ABI change**, so 1.12 is this batch's unless B41's open decision OD-1 flips. If it does, the second PR to merge renumbers.
+- **D-ABI-1 (R-8). The next C-ABI minor is declared BREAKING** under `[const §X.7]`: `FIXPP_C_ABI_VERSION_MINOR` goes to that number, with a `version.h` entry. Which number that is depends on merge order (§0). "The 1.x clause" is the clause that carries it.
+- **Each affected declaration in `include/fix/c_api/session.h` carries the 1.x clause**, as it carries its 1.10 and 1.11 clauses. The observers those entries name are `fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback` and `fixpp_session_register_send_callback`.
+- **The clause says what the deadline depends on.** Its deadline sentence begins "with a heartbeat interval set", as the 1.10 bullet about faulty frames does, and it says that an interval of 0 turns the deadline off.
+- **`fixpp_session_config_set_heartbeat_seconds` gets no clause.** Codex's round-2 C-3 asked for one; it is declined, with the precedent, under `## Gate A`.
+- **The 1.10 sentences this batch falsifies are amended in place, marked with the clause's number**, as 1.11 amended 1.10's. They are the 1.10 bullets that end "the session ends at the peer's next new message that is not a Heartbeat": the resent faulty frame, and the faulty SequenceReset in a resend recovery. Those bullets describe the #537 trace. Re-derive the declarations that carry them with `git grep -n "next new message" -- include/fix/c_api/session.h`; `fixpp_session_close`'s 1.10 clause refers to `fixpp_session_is_established`'s instead of repeating them.
+- **B41 declares a breaking C-ABI change of its own** (§0). The PR that merges second takes the later number and renumbers its clause text, its `version.h` entry, the minor, and every site that encodes the minor (the recipe is below the table).
 - No symbol, signature or error code is added.
 
-Effect → declarations → witness. The fixture is `tests/capi/inbound_frame_dispositions_capi_support.hpp`: a C-ABI engine on a real clock, facing a raw TCP peer that writes hand-built frames. The classifications are reasoned; `.specify/api-contract.md` §11 is the bullet list `[const §X.7]` points at.
+Effect → declarations → witness. The fixture is `tests/capi/inbound_frame_dispositions_capi_support.hpp`: a C-ABI engine on a real clock, facing a raw TCP peer that writes hand-built frames. The classifications are reasoned; `.specify/api-contract.md` §11 is the bullet list `[const §X.7]` points at. HB is the heartbeat interval; a witness that samples inside a window uses an interval of 2 s, so that half an interval is a margin of 1 s on either side.
 
-| Effect | 1.12 clause on | Class, reason, §11 bullet | C-ABI witness |
+| Effect | 1.x clause on | Class, reason, §11 bullet | C-ABI witness |
 |---|---|---|---|
 | A second too-high frame while a resend is outstanding is ignored; the session stays established where it ended (D-537-1, D-537-2) | the observers named above, with the amended 1.10 bullets | **Breaking.** A documented result changes: the 1.10 bullets say the session ends there. §11: "changing the meaning of a … C-ABI symbol" | the peer opens a gap and sends a second too-high application message: `fixpp_session_is_established` stays true and the peer reads no second ResendRequest; after the replay the receive callback has each message once, in order |
-| An unfilled gap ends with a Logout once NextNumIn has not advanced for 2 × HeartBtInt (D-537-5) | the same clause | **Breaking**, same bullet: it is the new end of the trace those 1.10 bullets describe | heartbeat of 1 s; the peer keeps sending too-high frames and answers each TestRequest: it reads a Logout with Text(58); `fixpp_session_is_established` turns false; the connection is still open (pointer to fixpp#534). The cell waits at least two intervals of real time |
-| While a resend is outstanding, a too-high Heartbeat answers fixpp's TestRequest; the session stays up where it ended at the grace check (D-537-6) | the same clause | **Breaking** on the reading 1.10 and 1.11 applied to these observers: when an established session ends changes. Same bullet. No header sentence documented the old result; `L-092-1` documents the dropped Heartbeat | the same gap; the peer lets one interval pass, answers the TestRequest with a too-high Heartbeat, and the session is still established after the grace window |
-| One session's close, or a peer's Logout on one session, no longer stops the Heartbeats and TestRequests of other sessions of the engine; another session's close no longer ends this session's logout wait early (D-536-1 to D-536-3) | `fixpp_session_close`, `fixpp_session_is_established` | **A correction.** No document specified the old result, so taken alone it is additive under `[const §X.7]`'s last sentence, and no §11 bullet applies. It is declared in the 1.12 clause because R-8 declares the entry as a whole. `fixpp_session_close`'s return code does not change | two C sessions on one engine, each facing a raw peer; one is closed; the other's peer still reads Heartbeats past one interval |
+| With a heartbeat interval set, an unfilled gap ends with a Logout at the first frame above the expected number that arrives once NextNumIn has not advanced for 2 × HB (D-537-5) | the same clause | **Breaking**, same bullet: it is the new end of the trace those 1.10 bullets describe | one witness per exit of §4.7 that a C session can reach. In each the peer reads a Logout with Text(58), `fixpp_session_is_established` turns false, and the connection is still open (pointer to fixpp#534); each waits at least two intervals of real time. (1) The peer keeps sending too-high application frames and answers each TestRequest. (2) The peer sends, inside every interval, a too-high PossDup application frame with no OrigSendingTime(122): it reads Rejects, then the Logout. The same with a 122 that does not parse. (3) The peer sends, inside every interval, a too-high Reset-mode SequenceReset whose NewSeqNo(36) is below the expected number: it reads Rejects, then a Reject and the Logout |
+| While a resend is outstanding, a too-high Heartbeat answers fixpp's TestRequest; the session stays up where it ended at the grace check. A mismatched TestReqID(112) on that Heartbeat ends the session at that frame (D-537-6) | the same clause | **Breaking** on the reading 1.10 and 1.11 applied to these observers: when an established session ends changes. Same bullet. No header sentence documented the old result; `L-092-1` documents the dropped Heartbeat | (1) the peer opens a gap at E and goes silent; it reads a TestRequest near E + HB, answers it with a too-high Heartbeat, and sends nothing more. `fixpp_session_is_established` is sampled near E + 2.5 HB: true. **The window is one interval wide:** without the fix the session ends at E + 2 HB, and with it the second TestRequest's grace ends it near E + 3 HB. The peer must stay silent after its answer, because a too-high frame after E + 2 HB draws the deadline's Logout. (2) The same answer with another 112: `fixpp_session_is_established` is false when sampled near E + 1.5 HB; without the fix the session ends at E + 2 HB |
+| A too-high Heartbeat that opens a gap answers fixpp's TestRequest, and the ResendRequest follows; the session survives the recovery where it ended at the grace check. A mismatched 112 on that Heartbeat ends the session at that frame, and no ResendRequest is sent (D-537-8) | the same clause | **Breaking**, on the same reading and bullet as the row above | (1) the peer goes silent, reads a TestRequest at T, answers it with a Heartbeat whose MsgSeqNum is above the expected number, reads a ResendRequest, fills the gap with a GapFill, and sends nothing more. `fixpp_session_is_established` is sampled near T + 1.5 HB: true. The window is one interval wide: without the fix the session ends at T + HB, and with it the next TestRequest's grace ends it near T + 2 HB. (2) The same answer with another 112: the peer reads no ResendRequest, and `fixpp_session_is_established` is false when sampled near T + 0.5 HB |
+| A ResendRequest that cannot be built ends the session, where the session stayed established and ignored every later frame (D-537-7) | the same clause | **Breaking**, on the same reading: when an established session ends changes. No header sentence documented the old result | a C session whose CompIDs are at the boundary the witness finds on its own configuration, by D-537-7's recipe (the heartbeat interval and the Logon's optional fields are in the inequality, so the C++ cell's boundary is not reused); the peer sends a Reset-mode SequenceReset that raises the expected number, then a frame above it. The peer reads no ResendRequest; `fixpp_session_is_established` turns false; the connection is closed by fixpp. Reach is reasoned (D-537-7); this witness is its measurement |
+| One session's close, or a peer's Logout on one session, no longer stops the Heartbeats and TestRequests of other sessions of the engine; another session's close no longer ends this session's logout wait early (D-536-1 to D-536-3) | `fixpp_session_close`, `fixpp_session_is_established` | **A correction.** No document specified the old result, so taken alone it is additive under `[const §X.7]`'s last sentence, and no §11 bullet applies. It is declared in the 1.x clause because R-8 declares the entry as a whole. `fixpp_session_close`'s return code does not change | two C sessions on one engine, each facing a raw peer; one is closed; the other's peer still reads Heartbeats past one interval |
 | After a 141=Y exchange that leaves the first outbound number at 2, a message sent is replayed on a ResendRequest where it was gap-filled (D-538-1) | `fixpp_session_send` | **A correction**, as the row above. A resend is not surfaced to the send callback (`L-019-4`), so the effect is on the wire only | a C initiator with `fixpp_session_config_set_reset_on_logon`; the peer acknowledges with 141=Y; one `fixpp_session_send`; the peer sends a ResendRequest and reads the message with PossDupFlag(43)=Y, not a GapFill |
-| A store read failure in a resend answer ends the session where the slot was gap-filled (D-538-4) | **depends on §7 item 1.** Under this note's reading: none; the effect is recorded in the `version.h` entry as one with no carrying declaration, as the 1.10 entry records its own. Under R-7 read literally: the observers named above | **Under this note's reading, no reach through the C ABI as shipped.** A C session runs on `MemoryStoreFactory` (`src/capi/config.cpp`). `MemoryStore::retrieve`'s aborting codes are a reset between the snapshot and a visit, and a failing visitor. The walk asks one slot at a time, and no suspension separates the snapshot from that slot's generation check; `CaptureVisitor` neither throws nor aborts. Read. **Under R-7 read literally, it has reach:** a peer's ResendRequest with BeginSeqNo(7)=0 ends a C session, and the row is then breaking by the first row's bullet | under this note's reading none is possible; the C++ cells stand, and the B&L row says so. Under the literal reading: the peer sends that ResendRequest and `fixpp_session_is_established` turns false |
+| A store read failure in a resend answer ends the session where the slot was gap-filled (D-538-4, class 3) | none. The effect is recorded in the `version.h` entry as one with no carrying declaration, as the 1.10 entry records its own | **No reach through the C ABI as shipped.** A C session runs on `MemoryStoreFactory` (`src/capi/config.cpp`). `MemoryStore::retrieve`'s class 3 codes are a reset between the snapshot and a visit, and a failing visitor. The walk asks one slot at a time, and no suspension separates the snapshot from that slot's generation check; `CaptureVisitor` neither throws nor aborts. Read. A BeginSeqNo(7) of 0 is class 2 and changes nothing (R-10) | none is possible; the C++ cells stand, and the B&L row says so |
 
-- **A ResendRequest that cannot be built** (D-537-7) is declared with the first row's clause. It has no C-ABI witness unless the C fixture's CompIDs can reach it; the B&L row says which.
+- **Exits of §4.7 with no C-ABI witness, and why.** The validate gate's exit: a C session cannot turn the gate on (`git grep -c validate_inbound_messages -- src/capi` matches nothing; the control `heartbeat_interval` matches). The Reset-mode arm's `fromAdmin`-rejected exit: the C ABI's application, `CapiApplication`, does not override `fromAdmin`. Both have C++ cells (V, S1), and the B&L row lists them as without a C-ABI witness.
+- **D-537-9 changes nothing a C caller can observe.** The frames of that pattern keep a session established today as well.
 - **`[const §X.7]`'s other duties.** BREAKING is marked on each declaration, in the PR description and in the B&L delta. Every in-repository consumer is updated in the same PR; re-derive the sites that encode the minor with `git grep -n -l -i -E 'abi.?minor|VERSION_MINOR' -- include src tests bindings tools` and classify each.
 - **The Appendix A controls** (`[const §X.6]`, `[const §X.7]`, `[const §XI.7]`; Appendix A rows: ABI surface, threading / concurrency, session FSM), met as `.specify/495-493-486-dict-reify-copy.md` §0.2 met them in issue mode:
   - Codex Gate A: this loop;
@@ -445,8 +640,8 @@ Effect → declarations → witness. The fixture is `tests/capi/inbound_frame_di
 
 No violation was found. Read and reasoned:
 
-- The deadline check, the Heartbeat rule and the Logout's text are in the out-of-sequence arm, which is a slow arm of `on_inbound_active_`. The text is built in a stack buffer.
-- The refresh is on the in-sequence path, inside `close_filled_resend_gap_`, behind that function's existing `is_awaiting_resend()` test. It adds one `steady_now()` read, and only while a resend is outstanding. **Condition: the refresh stays inside that branch.**
+- The deadline helper's call sites, the Heartbeat rules (D-537-6, D-537-8) and the Logout's text are in slow sub-arms of `on_inbound_active_`: the validate-failed arm, the Reject branches of PossDup Stage 1, the Reset-mode arm, the too-high arm and the out-of-sequence arm. None is on the path of an in-sequence frame that is accepted. The text is built in a stack buffer.
+- The refresh is on the in-sequence path, inside `close_filled_resend_gap_`, as a second statement after that function's existing test. It runs only while a resend is outstanding and the session has a clock, and it adds one `steady_now()` read there. **Condition: the refresh stays behind the "a resend is outstanding" test**, so a session with no gap pays the flag read it already pays and nothing more.
 - The logout wake is a `std::function` that captures one reference, as `close_grace_wake_` does, on the close path.
 - The recovery window's global-heap half is disclosed, not gated (`tests/perf/test_session_recovery_alloc_guard.cpp`, `L-497-1`).
 
@@ -459,47 +654,45 @@ Appended at the end of each file, never inserted; frozen `specs/` are not edited
 - `brain/components/session.md` and `message-store-quiescence.md`: pointers to this note, and the rejected alternatives.
 - Header comments at each superseded decision name this note's issues, as `async_mutex.hpp` names its erratum.
 
-## 7. Still open after round 1
+## 7. Still open after round 2
 
-v0.2 listed its open risks here. Each is now a sentence in a decision plus a cell (see the disposition table under `## Gate A`). What remains:
+No decision of the design is waiting for an answer. v0.3's owner item (slot 0) is ruled (R-10), and its reasoned claims are now steps of implementation with a return condition (§5). What remains is outside this note:
 
-1. **Owner item: slot 0 under R-7.** A ResendRequest with BeginSeqNo(7) = 0 or absent, over a non-empty store, makes the walk ask `retrieve(0, 0)`, which both stores refuse with `store_seqnum_invalid`.
-   - R-7 read literally: the answer aborts and the session ends.
-   - This note's reading: an argument refusal is not a read failure; the slot keeps today's fold (D-538-4).
-   - The cell in §5 is written to the owner's answer.
-2. **Reasoned claims a second round should attack first:**
-   - §4.6's timelines, until cells Q, N, R and Q's mutant run;
-   - D-536-3's lifetime argument, which is read and reasoned, with cells named and none run;
-   - §6.2's classifications, and "no reach through the C ABI" for R-7;
-   - the interaction with a stale awaiting flag (fixpp#578, §8), which no cell exercises.
-3. **Not re-verified in round 1:** the FIX quotations of §4.1 against the local copies, and the probe transcripts beyond their verdict tables.
+1. **The owner's sign-off on the converged note, and `/analyze`** (§6.2, the Appendix A controls). Neither has happened.
+2. **Follow-up issues to file** (§8): the per-slot walk's start for BeginSeqNo(7) = 0 (R-10), and the residual pattern (R-11). The B&L rows and the cells that point at them need the issue numbers. This rewrite edits one file and files nothing.
+3. **Not re-verified by either round:** the probe transcripts of §3.4 beyond their verdict tables. The FIX quotations of §4.1 were re-read against the local copies by round 2's triage.
 
 ## 8. What this does not decide
 
 - **fixpp#577:** a too-high ResendRequest or Logout is discarded rather than acted on. Unconfirmed. §5's two cells for those frames assert only what survives either answer.
 - **fixpp#578:** the awaiting-resend flag across an in-place reconnect. Unconfirmed. If it holds, it interacts with D-537-5: the flag is cleared in `close_filled_resend_gap_` and `apply_inbound_sequence_reset` and set in `on_inbound_active_too_high_` (`git grep -n -E 'enter_awaiting_resend|exit_awaiting_resend' -- src`), and nothing clears it at a reconnect or in the reset unit. The Logon paths and the reset unit would then move NextNumIn with the flag set, and the first too-high frame after a reconnect could meet a time point from the previous connection and draw the "unanswered resend" Logout at once, for a request never sent on that connection. The deadline's own exit leaves the flag set too, as every other end of a session does today. Reasoned; not fixed here.
-- **fixpp#534** (B27): `Disconnected` does not close the transport. The deadline's Logout inherits it (D-537-5), and the deadline cell asserts the open transport so that B27 flips it.
+- **fixpp#534** (B27): `Disconnected` does not close the transport. The deadline's Logout inherits it (D-537-5), and the deadline cells assert the open transport so that B27 flips it. The mismatch endings of D-537-6 and D-537-8 inherit it too: they are silent `Disconnected` writes, like the in-sequence one.
 - **fixpp#535** (`test_request_threshold`, B27) lives in the liveness loop. This note does not touch it. While #536 is open, a #534 cell must use one session per clock.
-- **B27's surface** is `run_liveness_loop` and the `Disconnected` writers. This note adds a state test and a filter reset before each of the loop's sleeps (D-536-2) and changes no other line of it. D-537-6 shares `pending_test_req_id_` and `unanswered_tr_` with the loop, and no line.
+- **B27's surface** is `run_liveness_loop` and the `Disconnected` writers. This note adds a state test and a filter reset before each of the loop's sleeps (D-536-2) and changes no other line of it. D-537-6 and D-537-8 share `pending_test_req_id_` and `unanswered_tr_` with the loop, and no line.
 - **The grace exit reads only the pending id**, not "any sound frame since the TestRequest" (the consult's B′). That departs from Session Layer §4.10 precedence 14 for every peer that sends traffic and no Heartbeat, with or without a gap. It is in `run_liveness_loop`. Noticed, not changed (R-6).
-- **With `validate_sequence_numbers = false`**, a too-high Heartbeat does not answer a pending TestRequest. Noticed, not changed (D-537-6's gate).
+- **With `validate_sequence_numbers = false`**, a too-high Heartbeat does not answer a pending TestRequest. Noticed, not changed: D-537-6's gate excludes it, and D-537-8's arm is behind the same knob.
+- **A follow-up to file: the per-slot walk's start for BeginSeqNo(7) = 0** (R-10). Today's answer starts with a GapFill whose MsgSeqNum(34) is 0 (D-538-4). Clamping the walk's start to 1, as its empty-store branch does, changes the wire and is not in this batch. Not yet filed.
+- **A follow-up to file: the residual pattern** (R-11, D-537-9). A peer that sends only frames that are not too high and move nothing keeps a session with an unfilled gap Active without end. Not yet filed.
 - **B41** (fixpp#563, #564; its note is on its own branch):
   - B41 edits `Session::send`, `Engine::send`, the callback dispatch scope, and the entry of `Session::close`. It does not touch `run_liveness_loop`, `run_logout_phase1`, `close`'s phase 2, `on_inbound_logout_sent_`, `store_then_emit`, `replay_outbound_range_` or the stores.
   - The only shared function is `Session::close`. The second PR to merge rebases it and re-runs its cells.
+  - **Both batches now declare a breaking C-ABI change** (§0). B41's is behavioural only and edits no declaration. The first PR to merge takes the earlier number; the second takes the later one and renumbers what §6.2 lists. §0 has the numbers.
   - B41 tracks callback depth inside the one dispatch routine every `toAdmin` and `toApp` goes through. This note's new emit, the deadline's Logout, goes through the existing inbound Logout leaf, so it is covered with no action here.
-  - B41 relies on one premise that D-537-5 states as a condition: the deadline check stays ahead of every callback of its arm.
+  - B41 relies on one premise that D-537-5 states as a condition: at every inbound arm the outbound number is peeked after any inbound callback of that arm. The helper's Logout peeks inside its leaf, and no inbound callback runs between that peek and the leaf's store call at any call site. In the Reset-mode arm the helper follows `fromAdmin`; v0.3's wording ("ahead of every callback of its arm") no longer describes that arm.
   - B41's ruling on `close` makes one interleaving reachable from an application, and D-536-2's state test before the grace sleep covers it (§3.2, §5).
 - **The lock sequence's terminal reset as a general hazard** (§3.5). This note fixes the one member that this change exposes. Whether the lock should restore the caller's filter instead is a `2f` design question and is not decided here.
 - Noticed and left alone:
   - `tls_transport.hpp` says its handshake timeout uses `Clock::sleep_until`, and the code uses a private timer;
   - `reconnect_fsm.hpp` declares three timers nothing reads (fixpp#559's class);
   - `FileStoreImpl::write_frame` has no caller;
-  - a ResendRequest with BeginSeqNo(7)=0 starts the resend walk at slot 0, and the GapFill run then starts there. What that frame carries was not read;
-  - `run_liveness_loop` is off only at a HeartBtInt of exactly 0. What it does with a negative interval was not traced.
+  - `run_liveness_loop` is off only at a HeartBtInt of exactly 0. With a negative interval its deadlines are already past, so its first pass sends a Heartbeat and a TestRequest and ends the session at the grace check. Read, not run;
+  - `pending_test_req_id_` is written by the liveness loop's assign and by the in-sequence Heartbeat's clear, and by nothing else (the recipe is in D-537-6). Nothing clears it when a session ends. What an id left from an earlier connection does after an in-place reconnect was not traced; it is the class of fixpp#578;
+  - when the peer's Logout arrives while fixpp's own Logout emit is suspended, `run_logout_phase1` records `LogoutSent` over `Disconnected` and waits for its deadline although the peer has logged out (the trace is in §5's D-536-3 control). Behaviour that exists today.
 
 ## Gate A
 
 - Round 1 applied 2026-10-11: Codex P1=4 P2=8 P3=0; Opus post-judging P1=0 P2=8 P3=14; rewrite addresses root causes RC-1, RC-2, RC-3, RC-4. Reviews: research/reviews/codex_536_537_538_1_recovery-liveness_review.md, research/reviews/opus_536_537_538_1_recovery-liveness_triage.md; consult research/reviews/fable_536_537_538_stuck-gap-ending_consult.md.
+- Round 2 applied 2026-10-11: Codex P1=3 P2=1 P3=1; Opus post-judging P1=1 P2=3 P3=6; rewrite addresses root causes R2-RC-1, R2-RC-2, R2-RC-3, R2-RC-4. Reviews: research/reviews/codex_536_537_538_2_recovery-liveness_review.md, research/reviews/opus_536_537_538_2_recovery-liveness_triage.md.
 
 Paths are relative to the parent repository's `research/G19-fix-fpml-iso20022/`.
 
@@ -550,3 +743,46 @@ Codex's fix is not applied for these.
 - **C-11's "third-party implementation break".** A store that fails D-538-2 already shows #538 today, and the constitution makes no C++ API promise. A B&L row is enough.
 - **C-12's "stop probing after the first I/O error, then gap-fill the rest".** R-7 subsumes the first half: the walk stops. It rejects the second: nothing is gap-filled that the store failed to read.
 - **C-5's "commit the resend state only after successful dispatch", as a P2.** The premise is right; the reach is a few bytes of buffer margin. Kept at P3, with D-537-7.
+
+### Round 2 — root causes
+
+Numbered as in round 2's triage, with the prefix R2 to keep them apart from round 1's.
+
+- **R2-RC-1. Each new rule was attached to one arm, and a frame above NextNumIn has several exits.** The deadline and the Heartbeat rule lived only in the out-of-sequence arm. Collapses C-1, O-1, C-5 and O-4. Fix: §4.7, a table of every exit of the Active inbound arm, read from `on_inbound_active_`; the deadline check as one helper with its own "above NextNumIn" and "a resend is outstanding" tests, called at every surviving exit (D-537-5); the Heartbeat rule at the frame that opens the gap (D-537-8, R-9); §4.6 scoped and derived from the table.
+- **R2-RC-2. §0 restated rulings in this note's words, and the restatement was narrower or wider than what the owner said.** R-7 had become a set of two codes (C-2); "when a too-high frame arrives" had become "reaches the sequence gate" (C-1); R-6's gate was the consult's predicate (O-1). Fix: §0 quotes the owner, and this note's reading sits under each quotation, marked as a reading.
+- **R2-RC-3. Conditionals were left inside §5 and §6.2.** "A cell only if", "depends on §7 item 1", "the assertion follows the owner's answer", "not traced". Collapses C-4, C-2's cell and row, and O-5. Fix: each was resolved by reading. D-537-7 has a mandatory cell built from the builders' arithmetic; slot 0 has an assertion (R-10); the untraced D-536-3 cell has its trace; the LogonReceived cell is waived with its reason; §6.2's store row has one classification. What cannot be settled without running is in §5's table of implementation steps, each with the condition that sends the design back.
+- **R2-RC-4. Populations were listed by example** (round 1's RC-4 again). The exits ahead of the gate (C-1), and the paths on which a failed `on_inbound_frame` closes the transport (O-2). Fix: §4.7 was derived by reading the arm from top to bottom; D-537-9's members are its complement; the callers of `on_inbound_frame` were listed by `git grep` and each one's handling of a failed result was read (D-538-4).
+
+### Round 2 — disposition of every finding
+
+Severity is the triage's, after judging.
+
+| Finding | Severity | Disposition | Answered in |
+|---|---|---|---|
+| C-1 frames that leave before the sequence gate keep an unfilled gap open | P1 | applied (the helper at each surviving exit); the first form of the counter-proposal disagreed | D-537-5; §4.7; §4.6; §5 (V, V2, G1, P1, P2, S1, S2, S3, the too-high-test guard); §6.2 |
+| C-2 `store_seqnum_invalid` for slot 0 | P2 | applied per ruling R-10 (three classes; slot 0 keeps the fold); Codex's fix disagreed | §0; D-538-4; §2.3; §4.5; §5; §6.1; §6.2 |
+| C-3 a clause on the heartbeat setter | none (Disagree) | disagreed, not applied; the residue is O-6 | `### Round 2 — disagreements`; §6.2 |
+| C-4 D-537-7 may land without a test | P2 | applied (a mandatory cell; the reach statement corrected; its own §6.2 row); "remove it if unreachable" disagreed. The same class of branch in D-537-5, a deadline Logout that cannot be built, was found while applying this and has its own cell | D-537-7; D-537-5 ("On expiry"); §5; §6.1; §6.2 |
+| C-5 §4.6 is not a table of every ending | P3 | applied | §4.6 (renamed, scoped, one grouped row for the unchanged endings) |
+| O-1 the TestRequest answer that opens the gap | P2 | applied per ruling R-9 | §0; D-537-8; §4.5; §4.6; §4.7; §5 (T1, T2, T3, R's precondition); §6.1; §6.2 |
+| O-2 two unstated consequences of the R-7 abort | P3 | applied | D-538-4 ("Where this ending closes the transport", "The abort repeats"); §5; §6.1 |
+| O-3 "once and in order" with `redeliver_poss_dup` | P3 | applied | §0 (R-2's reading); §4.5; §5 |
+| O-4 wording that does not match the code | P3 | applied | D-537-5 ("Refresh sites", the short GapFill); §4.7; §6.3 |
+| O-5 cells that cannot be written as specified | P3 | applied | §5 (cell R; the LogonReceived waiver; the D-536-3 control; the slot-0 guard); §6.2 (the D-537-6 witness's window) |
+| O-6 §6.2's clause text and reach | P3 | applied | §6.2 (the clause's deadline sentence; the D-537-7 row; the deadline row's witnesses per exit; the exits with no C-ABI witness) |
+
+Round 2's triage also re-checked round 1's dispositions. It found three honoured in form only and one that was still a plan:
+
+- **Round 1's O-1 and RC-1** ("§4.6, one table of every ending"). The table was incomplete. It is now derived from §4.7 and scoped to what it enumerates.
+- **Round 1's C-5** (D-537-7). Its cell was conditional. It is mandatory now.
+- **Round 1's O-2 and C-12** (R-7). The exception for slot 0 was not in the disposition. R-10 rules it, and D-538-4 names it as class 2.
+- **Round 1's O-7** (the probe of the D-537-2 edit). Still a plan: it is the first step of implementation, with its return condition in §5. This rewrite ran nothing.
+
+### Round 2 — disagreements
+
+Codex's fix is not applied for these.
+
+- **C-3 (a clause on `fixpp_session_config_set_heartbeat_seconds`, and on the reset setters).** The precedent R-8 names decides it. 1.10 and 1.11 each changed what the heartbeat interval governs (a faulty frame stopped counting as traffic; every sound frame started to), and each carried the change on the five observers, not on the setter. The setter has no versioned clause, and its documented meaning and its return code do not change, so no bullet of `.specify/api-contract.md` §11 applies to it. Its "0 disables" witness is the C++ cell "D-537-5, off". What is taken from C-3: the clause's deadline sentence says "with a heartbeat interval set" (O-6).
+- **C-1's first form** (run the check ahead of the pre-gate arms). It would sit above the BeginString, CompID and SendingTime guards. The helper at each surviving exit is the fix; guard cell G1 goes RED if the check is hoisted.
+- **C-2's fix** (abort on `store_seqnum_invalid`). It differs from all three engines and is not what the owner said (R-10).
+- **C-4's "remove D-537-7 if unreachable".** The branch is reachable (D-537-7's reach).
