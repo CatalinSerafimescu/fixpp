@@ -41,7 +41,15 @@
 //   SequentialSends_NextSendIsRetained
 //                             its control.
 //   FromAppSendsReply         #564's acceptance shape. fromApp for an inbound
-//                             35=D starts a send of a reply. nested.
+//                             35=D starts a send of a reply. Asserts "nested",
+//                             on a build with asserts too: fromApp is not an
+//                             outbound callback, so the send's toApp may run
+//                             inside it.
+//   OnLogonStartsSend, FromAdminStartsSend
+//                             the same contract for a send started in onLogon
+//                             (the peer's Logon acknowledges an initiator) and
+//                             in fromAdmin (an inbound Heartbeat). Each asserts
+//                             "nested".
 //   ToAdminStartsSend         batch B41. The peer sends a TestRequest; toAdmin
 //                             for the Heartbeat that answers it starts a send
 //                             of an application message. The reply leaf reads
@@ -171,6 +179,33 @@
 //                             reports nothing for this cell cannot report a
 //                             use-after-free for any other.
 //
+// Suite CallbackGuard: the debug guard of the callback sites (fixpp#564,
+// `.specify/563-564-callback-send.md` §2.2), on builds with asserts only; under
+// NDEBUG every cell of the suite skips. Death cells: each expects the process to
+// abort at one named assertion and matches a piece of that assertion's text,
+// spelled out in this file.
+//   ASecondThreadsEntryDies, ASecondThreadsEntryDiesAfterANestedScopeEnded,
+//   NestedEntryOnOneThreadPasses, ASecondThreadsEntryDiesWithNoDataRaceOnTheToken
+//                             the owner token, entered through
+//                             session_test_access::enter_callback_scope on a
+//                             session that was never opened. The last one runs
+//                             only in a ThreadSanitizer build.
+//   AFrameFedFromToAppDies, AFrameFedFromToAdminDies, AFrameFedFromOnLogonDies
+//                             a callback feeds the next expected application
+//                             frame to on_inbound_frame, by a co_spawn that
+//                             begins inline. Death at the parse-site assertion.
+//   OnLogoutEnteredInsideToAppDies
+//                             toApp feeds a frame under another BeginString,
+//                             which disconnects the session with no parse and no
+//                             emit. Death at the onLogout site's assertion.
+//   ToAdminEnteredInsideToAppDies
+//                             direct_executor over the bare io_context, with a
+//                             heartbeat interval: toApp advances the mock clock
+//                             and runs the io_context, so the liveness loop's
+//                             Heartbeat begins inside toApp. Death at the
+//                             assertion of the overload that calls toApp and
+//                             toAdmin.
+//
 // Running the callback-starts-close cells under a memory checker: this fixture
 // keeps the Session on the test's stack for the whole cell, so no cell frees the
 // Session while one of its arms is running or suspended. What a sanitizer can
@@ -199,8 +234,10 @@
 // tests/session/test_application_engine_send.cpp the ones that post it.
 //
 // mock_clock: nothing here depends on elapsed time. HeartBtInt is 0, so no
-// liveness loop runs.
+// liveness loop runs, except in CallbackGuard.ToAdminEnteredInsideToAppDies,
+// which sets an interval and advances the mock clock itself.
 
+#include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -208,12 +245,14 @@
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/deferred.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstddef>
@@ -241,6 +280,7 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <span>
@@ -248,6 +288,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -922,14 +963,14 @@ TEST(CallbackSend, FromAppSendsReply) {
         "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
         ", store=" + f.store_next_out(sess) + "; NextNumIn=" + std::to_string(next_in(sess)) + ".";
 
-    // Witness.
+    // Witness, then the classification: a send started in fromApp runs nested.
     ASSERT_EQ(f.app->from_app_calls, 1)
         << "PATH NOT DRIVEN: the inbound 35=D did not reach fromApp. " << context;
     ASSERT_TRUE(inner_saw_outer_live.has_value())
-        << "PATH NOT DRIVEN: the nested send's toApp never ran. " << context;
+        << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
     ASSERT_TRUE(*inner_saw_outer_live)
-        << "PATH NOT DRIVEN (the send was deferred): the nested send's toApp ran only after "
-           "fromApp had returned. "
+        << "a send started in fromApp must run nested, but it was deferred: its toApp ran only "
+           "after fromApp had returned. "
         << context;
 
     // The reply: sent once, under the next outbound MsgSeqNum, and retained.
@@ -947,6 +988,112 @@ TEST(CallbackSend, FromAppSendsReply) {
     EXPECT_EQ(next_in(sess), 3U) << "the inbound 35=D must have been consumed. " << context;
     EXPECT_EQ(sess.state(), fsm_state::Active) << context;
 }
+
+enum class StartedIn { on_logon, from_admin };
+
+// A Session::send started in onLogon or in fromAdmin, on the session's executor.
+// Neither is an outbound callback, so the send runs nested: its toApp runs while
+// the starting callback is on the stack.
+//   on_logon:   an initiator after open(); the peer's Logon makes it Active, and
+//               onLogon starts the send.
+//   from_admin: an Active initiator; the peer's Heartbeat reaches fromAdmin, which
+//               starts the send. A Heartbeat draws no reply, so the send's frame is
+//               the only one transmitted.
+void run_send_started_in(StartedIn site) {
+    const bool in_on_logon = site == StartedIn::on_logon;
+    const char* site_name = in_on_logon ? "onLogon" : "fromAdmin";
+    Fixture f{ExecKind::io_context};
+    Session sess{f.engine, f.cfg()};
+    if (in_on_logon) {
+        ASSERT_TRUE(f.run(sess.open(), "CallbackSend::open").has_value()) << "setup: open failed";
+        ASSERT_EQ(next_in(sess), 1U) << "setup: no inbound frame may have been consumed yet";
+    } else {
+        ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+        ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+    }
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+
+    const auto ex = sess.executor().underlying();
+    const auto payload = bytes_of(kPayloadOne);
+    const std::size_t wire_before = f.wire.size();
+
+    SendOutcome send;
+    SendOutcome inbound;
+    bool started = false;
+    bool outer_live = false;
+    std::optional<bool> inner_saw_outer_live;
+    const auto start_send = [&] {
+        started = true;
+        outer_live = true;
+        asio::co_spawn(ex, sess.send(payload), record_into(send));
+        outer_live = false;
+    };
+    if (in_on_logon) {
+        f.app->on_lifecycle = [&](const char* name) {
+            if (!started && std::string_view{name} == "onLogon") start_send();
+        };
+    } else {
+        f.app->on_from_admin = [&](std::string_view msg_type) {
+            if (!started && msg_type == "0") start_send();
+        };
+    }
+    f.app->on_to_app = [&] { inner_saw_outer_live = outer_live; };
+
+    const auto frame = in_on_logon ? peer_frame("A", 1,
+                                                "98=0\x01"
+                                                "108=30\x01")
+                                   : peer_frame("0", 2, "");
+    asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{frame}),
+                   record_into(inbound));
+    // The callback not reached means no send was started: nothing more to wait for.
+    if (!f.pump_done([&] { return inbound.done && (send.done || !started); },
+                     "CallbackSend::send_started_in")) {
+        return;
+    }
+
+    const std::string classification = !inner_saw_outer_live.has_value() ? "never ran"
+                                       : *inner_saw_outer_live           ? "nested"
+                                                                         : "deferred";
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    const std::string context =
+        std::string("Started in: ") + site_name + ". Classification: " + classification +
+        ". Transmitted, in wire order: " + describe(sent) + "; send: " + describe(send) +
+        "; on_inbound_frame: " + describe(inbound) +
+        "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
+        ", store=" + f.store_next_out(sess) + "; NextNumIn=" + std::to_string(next_in(sess)) +
+        "; state=" + std::to_string(static_cast<int>(sess.state())) + ".";
+    ::testing::Test::RecordProperty("classification", classification);
+
+    // Witness, then the classification.
+    ASSERT_TRUE(started) << "PATH NOT DRIVEN: the inbound frame did not reach " << site_name << ". "
+                         << context;
+    ASSERT_NE(classification, "never ran")
+        << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
+    EXPECT_EQ(classification, "nested")
+        << "a send started in " << site_name << " must run nested. " << context;
+
+    // The send: transmitted once, under the next outbound MsgSeqNum, and retained.
+    EXPECT_EQ(describe(send), "ok") << context;
+    ASSERT_EQ(sent.size(), 1U) << "exactly one frame must be transmitted. " << context;
+    EXPECT_EQ(field(sent.front(), 11), kIdOne) << context;
+    EXPECT_EQ(seq_of(sent.front()), 2U)
+        << "the frame must carry the next outbound MsgSeqNum. " << context;
+    expect_retained_as_sent(f, sess, sent.front(), context);
+    EXPECT_EQ(next_out(sess), 3U) << "one send consumes one sequence number. " << context;
+    EXPECT_EQ(f.store_next_out(sess), "3")
+        << "the store's NextNumOut must agree with the manager's. " << context;
+
+    // The inbound frame: processed normally.
+    EXPECT_EQ(describe(inbound), "ok") << context;
+    EXPECT_EQ(next_in(sess), in_on_logon ? 2U : 3U)
+        << "the inbound frame must have been consumed. " << context;
+    EXPECT_EQ(sess.state(), fsm_state::Active) << context;
+}
+
+TEST(CallbackSend, OnLogonStartsSend) { run_send_started_in(StartedIn::on_logon); }
+
+TEST(CallbackSend, FromAdminStartsSend) { run_send_started_in(StartedIn::from_admin); }
 
 enum class AdminShape { send_inside_to_admin, send_after_test_request };
 
@@ -1959,6 +2106,357 @@ TEST(CallbackSend, ToAdminStartsSend_NoStore_LiveWrite) {
 TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_NoStore_LiveWrite) {
     run_outbound_callback_starts(OuterSite::poss_dup_reject, Starts::send, StoreKind::none,
                                  TransportKind::live_suspending_write);
+}
+
+// ── Suite CallbackGuard: the debug guard (`.specify/563-564-callback-send.md` §2.2) ──
+//
+// Builds with asserts only. A death cell runs its statement in a child process and
+// requires an abort whose output holds a piece of ONE assertion's text. The pieces
+// are spelled out here and not taken from session.hpp or session.cpp: an expectation
+// read from its subject cannot fail. Each is a substring of a single string literal
+// of the assertion, because the C library prints adjacent literals unjoined.
+//
+// A statement that reaches its end without an abort leaves through std::exit, with
+// the exit codes its comment gives, so that a missing death is a failed assertion
+// of the cell and not a hang or a teardown over a detached coroutine.
+
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define B41_BUILT_WITH_TSAN 1
+#endif
+#endif
+#if defined(__SANITIZE_THREAD__)
+#define B41_BUILT_WITH_TSAN 1
+#endif
+
+#ifndef NDEBUG
+namespace {
+
+// The owner token's assertion (callback_owner_hold / callback_dispatch_scope).
+constexpr const char* kOwnerTokenText = "concurrent session callback entry";
+// The assertion of a function that parses over the session's inbound parse buffer.
+constexpr const char* kParseSiteText = "inbound parse begun inside a callback";
+// The assertion of the parse_and_dispatch_ overload that calls toApp and toAdmin.
+constexpr const char* kOutboundEntryText = "toApp or toAdmin entered inside toApp or toAdmin";
+// The assertion at the onLogon and onLogout sites.
+constexpr const char* kLifecycleEntryText = "onLogon or onLogout entered inside toApp or toAdmin";
+
+// Lines a statement writes to stderr around the step that is expected to abort.
+constexpr const char* kLeftNestedScopeLine = "[ B41 ] the first thread has left its nested scope";
+constexpr const char* kStepBeginsLine = "[ B41 ] the callback begins the step";
+constexpr const char* kStepReturnedLine = "[ B41 ] the callback's step returned";
+
+void mark(const char* line) {
+    std::fprintf(stderr, "%s\n", line);
+    std::fflush(stderr);
+}
+
+// The abort came after the callback began its step and before the step returned,
+// that is, with the callback on the stack; and it carries `text`.
+auto died_inside_the_step_at(const char* text) {
+    return ::testing::AllOf(::testing::HasSubstr(kStepBeginsLine), ::testing::HasSubstr(text),
+                            ::testing::Not(::testing::HasSubstr(kStepReturnedLine)));
+}
+
+// ── NC-9: the owner token, through session_test_access::enter_callback_scope ──
+//
+// The statements enter and leave scopes on a session that was never opened, so the
+// guard's state is the only session state their threads share. A statement that
+// starts threads starts them inside the death statement.
+
+// A first thread enters a scope and stays inside; a second thread enters after the
+// first has told it so through a promise. With `first_nests_and_leaves` the first
+// thread has by then entered a nested scope, left it, and printed
+// kLeftNestedScopeLine. Returns only if the second thread's entry did not abort.
+void enter_from_a_second_thread_while_a_first_is_inside(bool first_nests_and_leaves) {
+    fixpp::core::EngineConfig engine;
+    Session sess{engine, SessionConfig{}};
+    std::promise<void> first_is_inside;
+    std::promise<void> release_first;
+    std::thread first{[&] {
+        [[maybe_unused]] const auto outer = session_test_access::enter_callback_scope(sess);
+        if (first_nests_and_leaves) {
+            {
+                [[maybe_unused]] const auto nested =
+                    session_test_access::enter_callback_scope(sess);
+            }
+            mark(kLeftNestedScopeLine);
+        }
+        first_is_inside.set_value();
+        release_first.get_future().wait();
+    }};
+    first_is_inside.get_future().wait();
+    std::thread second{[&] {
+        [[maybe_unused]] const auto scope = session_test_access::enter_callback_scope(sess);
+    }};
+    second.join();
+    release_first.set_value();
+    first.join();
+}
+
+// One thread enters a scope, enters a nested one, leaves both, and enters again.
+// Exit code 0: no assertion fired.
+[[noreturn]] void enter_nested_leave_both_and_enter_again() {
+    fixpp::core::EngineConfig engine;
+    Session sess{engine, SessionConfig{}};
+    {
+        [[maybe_unused]] const auto outer = session_test_access::enter_callback_scope(sess);
+        {
+            [[maybe_unused]] const auto nested = session_test_access::enter_callback_scope(sess);
+        }
+    }
+    {
+        [[maybe_unused]] const auto again = session_test_access::enter_callback_scope(sess);
+    }
+    std::exit(0);  // NOLINT(concurrency-mt-unsafe)
+}
+
+#ifdef B41_BUILT_WITH_TSAN
+// As the promise statement, but the only ordering between the two threads is a flag
+// that the first stores and the second loads with memory_order_relaxed, which orders
+// nothing for ThreadSanitizer. The first thread stays inside its scope until the
+// second has either died or passed. The main thread starts both and then joins
+// them, so the death statement does not return first; a join orders nothing between
+// the two threads. Returns only if the second thread's entry did not abort.
+void enter_from_a_second_thread_ordered_by_a_relaxed_flag_alone() {
+    fixpp::core::EngineConfig engine;
+    Session sess{engine, SessionConfig{}};
+    std::atomic<bool> first_is_inside{false};
+    std::atomic<bool> second_passed{false};
+    std::thread first{[&] {
+        [[maybe_unused]] const auto scope = session_test_access::enter_callback_scope(sess);
+        first_is_inside.store(true, std::memory_order_relaxed);
+        while (!second_passed.load(std::memory_order_relaxed)) std::this_thread::yield();
+    }};
+    std::thread second{[&] {
+        while (!first_is_inside.load(std::memory_order_relaxed)) std::this_thread::yield();
+        {
+            [[maybe_unused]] const auto scope = session_test_access::enter_callback_scope(sess);
+        }
+        second_passed.store(true, std::memory_order_relaxed);
+    }};
+    first.join();
+    second.join();
+}
+#endif
+
+// ── NC-19: a frame fed from inside a callback ─────────────────────────────────
+
+enum class FedFrom { to_app, to_admin, on_logon };
+enum class FedFrame {
+    // An application frame under the session's BeginString, with the inbound number
+    // the session expects when the callback feeds it: its arm reaches a parse.
+    next_expected_application,
+    // The same frame under another BeginString: the Active arm disconnects the
+    // session at its BeginString test, with no parse over the buffer and no emit.
+    other_begin_string,
+};
+
+// A callback of the session feeds one frame to on_inbound_frame, by a co_spawn on
+// the session's executor, which begins inline. The callback is the toApp of a send
+// on an Active session, the toAdmin of the Heartbeat that answers the peer's
+// TestRequest, or the onLogon that the peer's Logon fires.
+// Exit codes: 2 = setup failed; 3 = the feeding callback never ran; 0 = the feed
+// returned without an abort.
+[[noreturn]] void feed_a_frame_from_inside_a_callback(FedFrom from, FedFrame what) {
+    Fixture f{ExecKind::io_context};
+    Session sess{f.engine, f.cfg()};
+    // std::exit reports this death-test child's verdict as its exit code.
+    // NOLINTBEGIN(concurrency-mt-unsafe)
+    const bool up = from == FedFrom::on_logon
+                        ? f.run(sess.open(), "CallbackGuard::open").has_value()
+                        : f.open_to_active(sess);
+    if (!up) std::exit(2);
+    const auto ex = sess.executor().underlying();
+    std::vector<std::byte> fed_frame;
+    bool fed = false;
+    const auto feed = [&] {
+        fed = true;
+        fed_frame = peer_frame_with_begin(
+            what == FedFrame::other_begin_string ? std::string_view{"FIX.4.4"} : kBegin, "D",
+            static_cast<std::uint32_t>(next_in(sess)),
+            "11=PEER-FED\x01"
+            "54=1\x01"
+            "55=AAPL\x01");
+        mark(kStepBeginsLine);
+        asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{fed_frame}),
+                       asio::detached);
+        mark(kStepReturnedLine);
+    };
+    f.app->on_to_app = [&] {
+        if (from == FedFrom::to_app && !fed) feed();
+    };
+    f.app->on_to_admin = [&](std::string_view msg_type) {
+        if (from == FedFrom::to_admin && !fed && msg_type == "0") feed();
+    };
+    f.app->on_lifecycle = [&](const char* name) {
+        if (from == FedFrom::on_logon && !fed && std::string_view{name} == "onLogon") feed();
+    };
+
+    const auto payload = bytes_of(kPayloadOne);
+    const auto test_request = peer_frame("1", 2, "112=B41-TR\x01");
+    const auto logon = peer_frame("A", 1,
+                                  "98=0\x01"
+                                  "108=30\x01");
+    SendOutcome outer;
+    if (from == FedFrom::to_app) {
+        asio::co_spawn(ex, sess.send(payload), record_into(outer));
+    } else {
+        const auto& frame = from == FedFrom::to_admin ? test_request : logon;
+        asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{frame}),
+                       record_into(outer));
+    }
+    (void)fixpp::test_support::pump_until(
+        f.ioc, [&] { return outer.done; }, std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+        "CallbackGuard::feed_from_inside_a_callback");
+    std::exit(fed ? 0 : 3);
+    // NOLINTEND(concurrency-mt-unsafe)
+}
+
+// ── NC-20: an outbound callback inside an outbound callback ───────────────────
+
+// direct_executor, attested, over the bare io_context executor, with a heartbeat
+// interval. A send from the statement; its toApp advances the mock clock by the
+// interval and then runs the io_context, so the liveness loop wakes and begins its
+// emit, whose toAdmin is entered with toApp on the stack.
+// Exit codes: 2 = setup failed; 3 = toApp never ran; 0 = the callback's poll()
+// returned without an abort.
+[[noreturn]] void run_the_io_context_inside_to_app_after_the_heartbeat_interval() {
+    constexpr std::chrono::seconds kInterval{30};
+    Fixture f{ExecKind::io_context};
+    f.direct_executor = true;
+    f.heartbeat_interval = kInterval;
+    Session sess{f.engine, f.cfg()};
+    // std::exit reports this death-test child's verdict as its exit code.
+    // NOLINTBEGIN(concurrency-mt-unsafe)
+    if (!f.open_to_active(sess)) std::exit(2);
+    const auto ex = sess.executor().underlying();
+    bool entered = false;
+    f.app->on_to_app = [&] {
+        if (entered) return;
+        entered = true;
+        f.clock->advance(kInterval);
+        mark(kStepBeginsLine);
+        (void)f.ioc.poll();
+        mark(kStepReturnedLine);
+    };
+    const auto payload = bytes_of(kPayloadOne);
+    SendOutcome outer;
+    asio::co_spawn(ex, sess.send(payload), record_into(outer));
+    (void)fixpp::test_support::pump_until(
+        f.ioc, [&] { return outer.done; }, std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+        "CallbackGuard::poll_inside_to_app");
+    std::exit(entered ? 0 : 3);
+    // NOLINTEND(concurrency-mt-unsafe)
+}
+
+}  // namespace
+#endif  // !NDEBUG
+
+// NC-9 (a). A first thread is inside; a second enters after a handshake. This shows
+// that the second thread's entry is detected. It does not show that the detection is
+// free of a data race: the handshake orders the first thread's write before the
+// second thread's read, for ThreadSanitizer as for the hardware, so a token built as
+// a plain member passes this cell on every preset. The relaxed-flag cell below,
+// which runs under ThreadSanitizer only, is the witness of the token's atomicity.
+TEST(CallbackGuard, ASecondThreadsEntryDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the owner token's assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(enter_from_a_second_thread_while_a_first_is_inside(false),
+                 ::testing::HasSubstr(kOwnerTokenText));
+#endif
+}
+
+// NC-9 (b). The first thread has entered a nested scope and left it; its outer scope
+// is still live when the second thread enters. The line the first thread prints
+// after its nested scope ended is part of the match, so a death at the nested entry
+// itself does not pass.
+TEST(CallbackGuard, ASecondThreadsEntryDiesAfterANestedScopeEnded) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the owner token's assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(enter_from_a_second_thread_while_a_first_is_inside(true),
+                 ::testing::AllOf(::testing::HasSubstr(kLeftNestedScopeLine),
+                                  ::testing::HasSubstr(kOwnerTokenText)));
+#endif
+}
+
+// NC-9 (c). Control: one thread enters a nested scope, leaves both, and enters
+// again, and no assertion fires.
+TEST(CallbackGuard, NestedEntryOnOneThreadPasses) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the guard's assertions are compiled out under NDEBUG";
+#else
+    EXPECT_EXIT(enter_nested_leave_both_and_enter_again(), ::testing::ExitedWithCode(0), "");
+#endif
+}
+
+// NC-9 (d). The second thread's entry dies at the owner token's assertion, and the
+// detection itself draws no ThreadSanitizer report. The child is a fresh process
+// (the threadsafe style), so no thread of this binary's other cells is in it.
+TEST(CallbackGuard, ASecondThreadsEntryDiesWithNoDataRaceOnTheToken) {
+#if defined(B41_BUILT_WITH_TSAN) && !defined(NDEBUG)
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(enter_from_a_second_thread_ordered_by_a_relaxed_flag_alone(),
+                 ::testing::AllOf(::testing::HasSubstr(kOwnerTokenText),
+                                  ::testing::Not(::testing::HasSubstr("ThreadSanitizer"))));
+#else
+    GTEST_SKIP() << "needs ThreadSanitizer and a build with assertions";
+#endif
+}
+
+// NC-19, the dispatch arms. The fed frame is in sequence, so its arm reaches the
+// parse over the session's buffer, with the feeding callback on the stack.
+TEST(CallbackGuard, AFrameFedFromToAppDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the parse-site assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(
+        feed_a_frame_from_inside_a_callback(FedFrom::to_app, FedFrame::next_expected_application),
+        died_inside_the_step_at(kParseSiteText));
+#endif
+}
+
+TEST(CallbackGuard, AFrameFedFromToAdminDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the parse-site assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(
+        feed_a_frame_from_inside_a_callback(FedFrom::to_admin, FedFrame::next_expected_application),
+        died_inside_the_step_at(kParseSiteText));
+#endif
+}
+
+TEST(CallbackGuard, AFrameFedFromOnLogonDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the parse-site assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(
+        feed_a_frame_from_inside_a_callback(FedFrom::on_logon, FedFrame::next_expected_application),
+        died_inside_the_step_at(kParseSiteText));
+#endif
+}
+
+// NC-19, the lifecycle arm. The fed frame disconnects the session with no parse over
+// the buffer and no emit, so onLogout is entered inside toApp.
+TEST(CallbackGuard, OnLogoutEnteredInsideToAppDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the lifecycle sites' assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(feed_a_frame_from_inside_a_callback(FedFrom::to_app, FedFrame::other_begin_string),
+                 died_inside_the_step_at(kLifecycleEntryText));
+#endif
+}
+
+// NC-20. The liveness loop's toAdmin is entered inside toApp.
+TEST(CallbackGuard, ToAdminEnteredInsideToAppDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the outbound-entry assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(run_the_io_context_inside_to_app_after_the_heartbeat_interval(),
+                 died_inside_the_step_at(kOutboundEntryText));
+#endif
 }
 
 #if defined(__has_feature)

@@ -46,8 +46,11 @@
 //              was still on the stack;
 //   deferred   it ran only after that callback had returned;
 //   never ran  it did not run within the cell's bound.
-// "deferred" does not fail a cell and "never ran" does. The sequence-number
-// assertions run for either of the first two.
+// "never ran" fails a cell. The two cells that start the send in fromApp
+// (EngineSendFromFromApp, EngineSendFromFromAppOnSessionExecutor) require
+// "nested", on a build with asserts too: fromApp is not an outbound callback, so
+// the send's toApp may run inside it. In the other cells "deferred" does not
+// fail. The sequence-number assertions run for either of the first two.
 //
 // What a cell asserts, per session that sent: every frame toApp saw carries its
 // own MsgSeqNum(34), the values are consecutive from 2 (each session's Logon
@@ -765,6 +768,9 @@ void run_and_check(Shape shape, SpawnOn spawn_on) {
     EXPECT_TRUE(o.stopped) << "the engine must stop. " << ctx;
     ASSERT_TRUE(o.started_second) << "PATH NOT DRIVEN: the second send was never started. " << ctx;
     ASSERT_NE(cls, "never ran") << "PATH NOT DRIVEN: the second send's toApp never ran. " << ctx;
+    if (shape == Shape::from_from_app) {
+        EXPECT_EQ(cls, "nested") << "an Engine::send started in fromApp must run nested. " << ctx;
+    }
 
     EXPECT_EQ(describe(o.first), "ok") << ctx;
     EXPECT_EQ(describe(o.second), "ok") << ctx;

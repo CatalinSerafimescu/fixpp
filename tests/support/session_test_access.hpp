@@ -118,6 +118,15 @@ struct session_test_access {
     // strand. A flag the test sets stays set: Session::send's holder clears only a flag it
     // set itself, and the fallback leaf never writes it.
     [[nodiscard]] static bool& send_slot_in_use(Session& s) noexcept { return s.send_slot_in_use_; }
+
+    // Enters a callback_dispatch_scope on `s`, as a callback site of the session does,
+    // without a callback running; the scope ends when the returned object is destroyed
+    // (fixpp#564). The scope touches the guard's state only, so a session that was never
+    // opened will do, and that state is then all that two threads holding `s` share.
+    [[nodiscard]] static Session::callback_dispatch_scope enter_callback_scope(
+        Session const& s) noexcept {
+        return Session::callback_dispatch_scope{s};
+    }
 };
 
 }  // namespace fixpp::session
