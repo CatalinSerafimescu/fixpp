@@ -1,11 +1,11 @@
 # fixpp#536 / #537 / #538 — session recovery and liveness (B28)
 
-> **Status: v0.1 — draft, pre-Gate-A.** No review round has run.
+> **Status: v0.2 — draft, pre-Gate-A.** No review round has run. v0.2 is the author's own pass after the #536 probe: the sites the lock's filter reset reaches (§3.5), the deadline's refresh sites (D-537-5), a cell for the state test before the grace sleep (§5), and the `Session` layout change (D-536-3).
 >
 > - **Base:** `origin/main` = `22702dc9`. Code is named by symbol, with a recipe where a population matters; re-derive before relying on one.
 > - **Branch:** `536-537-538-recovery-liveness`, in the `fixpp-parallel` worktree.
 > - **Mode:** issue mode (no `specs/` bundle). Records go to the parent's `decisions/speckit/`.
-> - **Gate A triggers touched** (`[const §XVII.1]`): the session FSM and recovery (#537), the message store contract (#538), cancellation (#536), and comment text in public headers.
+> - **Gate A triggers touched** (`[const §XVII.1]`): the session FSM and recovery (#537), the message store contract (#538), cancellation (#536), comment text in public headers, and one new private member of `Session` in the installed `session.hpp`.
 
 ## 0. Owner rulings (2026-10-11). Gate A reviews whether this note implements them.
 
@@ -82,6 +82,8 @@ Re-derive the two lookup sites with `git grep -n -E 's - 1\)' -- include/fixpp/s
   - The reset is what §3.4 measures. Only the sleeps become cancellable by `close`, which is what the sweep reached, so an emit in flight is treated as today.
   - The state test before the grace sleep is new and is from reading: a close that runs after the TestRequest's write completed and before the loop resumes would otherwise find no sleep to cancel.
 - **D-536-3. The logout wait gets a wake of its own.** `run_logout_phase1` races a per-session wake against `detail::await_deadline(clock, deadline)`, the pattern `close` already uses for the reset unit. The LogoutSent arm triggers that wake. Because the deadline arm is `await_deadline`, a sweep by anyone else no longer reads as a logout timeout.
+  - The LogoutSent arm reaches the wake through a new private member of `Session`, beside `close_grace_wake_` and of the same kind. **This changes `Session`'s layout: C++ code built against the header without it must be rebuilt.** No source change is needed.
+  - The wake is cleared on every exit from the wait, a throw included, so a late Logout cannot call into a finished wait.
 - **D-536-4. The liveness loop's answer to an explicit clock-wide `cancel_sleeps()` is unchanged.** It still ends. That is what the `Clock` contract says the call does, and the test teardown helper `cancel_and_drain_or_report` depends on it to release the sleep of a session that was never closed.
 - **D-536-5. `clock.hpp`'s `cancel_sleeps` comment is corrected.** It says the call signals each awaiter's cancellation slot. Neither clock does that: both complete the waiter directly, which is why `await_deadline` can tell a sweep from its own cancellation. The comment also states that a session does not call it. No signature changes.
 
@@ -113,6 +115,22 @@ A throwaway edit on the debug tree, never committed. The selection is every ctes
   - That the replacing statement is the lock sequence's part 4, and that asio applies it to the whole coroutine thread, is read from source.
 - The Heartbeat sibling `HB_DistinctNow_*` passed under P1 because its loop had sent nothing: its Heartbeats are replies on the inbound path. The condition is whether the loop has called `assign_outbound()` before `close`, not which message it sent.
 - `TerminalClose_SharedClock` turning GREEN under P1 shows B kept beating. It does not show that `close` woke A's loop: the cell took one HeartBtInt longer.
+
+### 3.5 Where else the lock's filter reset matters
+
+The reset to terminal is the lock sequence's, not the liveness loop's, and it dates from 006 (PR #73), not from B35: `git log -S'enable_terminal_cancellation{}' -- include/fixpp/core/sync/async_mutex.hpp`. Every coroutine thread that takes a lock leaves with a terminal filter. Sites that ask for total cancellation: `git grep -n 'enable_total_cancellation' -- src include`. They fall into two kinds.
+
+| Kind | Members | After a lock on the same thread |
+|---|---|---|
+| An operation that resets the filter to total at its own entry, then awaits | the transports' read, write, connect and handshake; the listener's accept; the certificate source; `mock_transport`; `await_deadline` | unaffected: the reset is repeated at each use |
+| A coroutine that sets total once and relies on it at a later await | the liveness loop; the read pump and the two role loops in `engine.cpp`; `ReconnectFsm`'s attempt loop; the two reset-unit sites | affected only where the later await is not of the first kind |
+
+- **The liveness loop** awaits `Clock::sleep_until`, and neither shipped clock resets the filter. This is the member §3.4 measured, and D-536-2 moves it to the first kind.
+- **The read pump and the role loops** await transport operations and `await_deadline`, which are of the first kind. Read, not measured.
+- **`ReconnectFsm`** waits on a private timer for its backoff and resets the filter before each attempt. Whether a lock can run between that reset and the timer wait was not traced.
+- **The reset-unit sites** reset after the store operation and then run their persists; they do not sleep.
+- **What this change can newly expose** is only a clock sleeper that the sweep used to wake: the raw `sleep_until` callers of §3.1. The liveness loop's two sleeps get the reset, and the logout wait moves onto `await_deadline`.
+- One more consequence, read and not measured: the filter at a liveness sleep depends on the last callee. A store leaves it terminal; a real transport's write then sets it to total. The fixture in §3.4 sends through a callback, so it stayed terminal. D-536-2 removes that dependence.
 
 ## 4. #537 — a second too-high frame while a resend is outstanding
 
@@ -158,6 +176,7 @@ A throwaway edit on the debug tree, never committed. The selection is every ctes
   - **On expiry** the session sends a Logout whose Text(58) names the unanswered resend, and enters `Disconnected`, through the existing inbound Logout leaf.
   - **Off** when HeartBtInt is 0 or the session has no clock, as the liveness loop is. A bound of zero would end the session at the second frame, which is the defect.
   - **Not configurable.** The ruling names the value.
+  - **Refresh sites.** NextNumIn advances during a resend at the in-sequence `check_inbound` in `on_inbound_active_` and at the one in `consume_rejected_seqnum_` (a rejected frame that consumes its number, fixpp#423). Both already call `close_filled_resend_gap_()` straight after, and the time point is refreshed there. `apply_inbound_sequence_reset` also moves NextNumIn, and it ends the resend. Re-derive with `git grep -n -E 'check_inbound\(|set_next_inbound\(' -- src/session/session.cpp`; the other hits are on the Logon paths and in the reset unit, where no resend is outstanding.
 
 ### 4.4 Rejected
 
@@ -191,6 +210,7 @@ Each new or changed cell is shown RED before the fix. Each decision gets an arm 
 - New, RED first: a clock whose `cancel_sleeps()` does nothing. A graceful close returns when the peer's Logout arrives, not at the logout timeout.
 - Changed: `AdversarialSessionTest.LogoutGracefulCancelMidSleep` pins the old mechanism (a sweep ends the logout wait). It becomes the cell for the new one: a sweep by a third party during the logout wait does not end it; the confirmation, the deadline or the grace timer does.
 - New, RED when the filter reset is deleted: `close` completes promptly for a session whose liveness loop has sent a Heartbeat, and for one that has sent a TestRequest, on a mock clock. `AdminDistinctNowTest.TR_DistinctNow_*` and `CrossSessionTestReqID.*` are the existing witnesses.
+- New, RED when the state test before the grace sleep is deleted: `close` runs while the loop's TestRequest emit is suspended in the store (a hooked store holds it), and the emit is then released. `close` must still complete without the clock advancing. The probe did not cover this window.
 - New: a counting clock shows that open, traffic, graceful close and terminal close issue no `cancel_sleeps()` call. This is the arm that catches a third sweep site.
 - Control kept: an explicit `cancel_sleeps()` still ends an unclosed session's liveness loop (D-536-4).
 
@@ -231,7 +251,7 @@ Each new or changed cell is shown RED before the fix. Each decision gets an arm 
 
 ## 7. Risks Gate A should press on
 
-1. **D-536-2:** is there another await in the liveness loop where a close can leave it parked? Does resetting the filter before a sleep erase a cancellation that was already recorded, and does the state test in front of it cover that? The lock sequence's terminal reset reaches every caller of the lock, not only this loop: which other coroutine relies on total cancellation after taking it?
+1. **D-536-2:** is there another await in the liveness loop where a close can leave it parked? Resetting the filter before a sleep erases a cancellation that was already recorded; is the state test in front of it enough in every interleaving? Is §3.5's table complete, and is its "read, not measured" row for the engine loops right?
 2. **D-536-3's race inside `close`'s own race** with the grace timer: the cancellation filter, the executor, and the noexcept window.
 3. **D-537-1's coverage argument** assumes the peer answers the request in order on one connection. What if the request was never sent (its build failed)?
 4. **D-537-5's deadline:** can a slow but healthy replay trip it? Is every site that advances NextNumIn during a resend a refresh site? What does a peer see that keeps sending after the Logout (`Disconnected` does not close the transport, fixpp#534)?
@@ -244,7 +264,8 @@ Each new or changed cell is shown RED before the fix. Each decision gets an arm 
 - **fixpp#577:** a too-high ResendRequest or Logout is discarded rather than acted on. Unconfirmed.
 - **fixpp#578:** the awaiting-resend flag across an in-place reconnect. Unconfirmed.
 - **fixpp#535** (`test_request_threshold`, B27) lives in the liveness loop. This note does not touch it. While #536 is open, a #534 cell must use one session per clock.
-- **B41** (fixpp#563, #564) changes the send path in the same file. The second PR to merge rebases and re-runs its cells.
+- **B41** (fixpp#563, #564) changes the send path in the same file. Its owner ruling R-1 makes a `Session::send` wait one post while that session has `toApp` or `toAdmin` on the stack, and its measurements single out "assign-first" emit sites. The liveness loop's Heartbeat and TestRequest emits are such sites, and D-536-2's two lines sit a few lines below them. The changes are independent in meaning and adjacent in text. The second PR to merge rebases and re-runs its cells.
+- **The lock sequence's terminal reset as a general hazard** (§3.5). This note fixes the one member that this change exposes. Whether the lock should restore the caller's filter instead is a `2f` design question and is not decided here.
 - Noticed and left alone: `tls_transport.hpp` says its handshake timeout uses `Clock::sleep_until`, and the code uses a private timer; `reconnect_fsm.hpp` declares three timers nothing reads (fixpp#559's class); `FileStoreImpl::write_frame` has no caller.
 
 ## Gate A
