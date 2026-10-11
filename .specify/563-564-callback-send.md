@@ -1,7 +1,9 @@
 # fixpp#563, fixpp#564 — a send started inside an application callback (B41)
 
-> **Status: v0.1 — draft for Gate A.** Issue mode: this note is the plan; there is no `specs/<id>/` bundle.
-> Branch `563-564-callback-send`. Gate A has not run.
+> **Status: v0.2 — draft for Gate A.** Issue mode: this note is the plan; there is no `specs/<id>/` bundle.
+> Branch `563-564-callback-send`. Gate A has not run. v0.2 extends the rule from `Session::send` to every
+> entry point that can begin an emit (§2.1a), after a graceful `close()` started inside an outbound callback
+> was measured to reproduce the defect.
 >
 > **How this design was reached.** Both issues were re-measured after B35, then widened by measurement
 > (`Engine::send`, `toAdmin`, both store kinds, several io threads, a close started from a callback). The
@@ -55,7 +57,13 @@ Measured at `22702dc9` (the record has each cell's output):
 - A send started inside `fromApp` works on an `NDEBUG` build.
 - `Engine::send` from a callback runs nested on a single-threaded `io_context`. On three io threads the
   same call is nested or deferred depending on whether `control_strand_` is idle at that instant.
-- With the nested start wrapped in `asio::post`, every failing cell passes, on both store kinds.
+- A graceful `Session::close` started inside `toApp` or `toAdmin` does the same through its Logout: one
+  number on two frames at a callback-first site, the Logout ahead of the outer frame at an assign-first
+  site.
+- On a session with no store the defect needs no suspension at all: the inner frame is transmitted while
+  the starting callback is still on the stack.
+- With the nested start wrapped in `asio::post`, every failing cell passes, on both store kinds and with no
+  store.
 
 **The condition.** An emit is one synchronous stretch of a strand handler: from `peek_outbound()`, through
 the frame build, the callback and `assign_outbound()`, to the store call, whose first statement is a post in
@@ -66,8 +74,9 @@ and the only way in is a synchronous re-entry through the callback that the stre
 `toAdmin`. The inbound callbacks are never inside such a stretch: at every arm the peek follows the
 callback.
 
-So the rule is not about which callback, and not about which emit site. It is: **a `Session::send` body on
-session S must not begin while S has an outbound callback on the stack.** R-1 is that rule.
+So the rule is not about which callback, and not about which emit site. It is: **no emit body on session S
+may begin while S has an outbound callback on the stack.** R-1 is that rule for `Session::send`; §2.1a
+applies it to the other entry point that begins an emit.
 
 Re-derive the premises, do not trust this paragraph:
 - the outbound callback invocations: `grep -n "application->toApp(\|application->toAdmin(" src/session/session.cpp`;
@@ -122,8 +131,8 @@ each already relied on by two sends that overlap today: a store completes its ca
 made (B&L `L-518-1` names this premise for the shipped stores; `FileStore::store` takes its FIFO mutex on
 the strand before it offloads); the write gate grants in arrival order (`async_mutex`'s FIFO grant); and an
 uncontended `assign_outbound()` does not yield (§1). Measured: `OverlappingSends` and
-`OverlappingSends_FileStore`, and the post controls of the nested cells on both stores. The no-store branch
-is measured in §3.
+`OverlappingSends_FileStore`, `OverlappingSends_NoStore` and its live-write twin, and the post controls of
+the nested cells on both stores and with no store.
 
 **Cancellation at the hop (OD-1).** The post is a new await, so it is a new point where a cancelled chain
 throws. A send that is cancelled while it waits has consumed nothing: no number, no store slot, no frame.
@@ -156,6 +165,47 @@ zero-allocation gates must stay green (§3).
 
 On a build with assertions the left column was an abort in every row.
 
+### 2.1a Every entry point that can begin an emit
+
+The condition of §1 is about emit bodies, and `Session::send` is not the only way an application starts
+one. The public coroutine entry points (`grep -n "asio::awaitable<" include/fixpp/session/session.hpp
+include/fixpp/session/engine.hpp`, the public ones), each with what it can begin when an application starts
+it from a callback of the same session:
+
+| Entry point | Can it begin an emit inline? | Disposition |
+|---|---|---|
+| `Session::send` | yes | §2.1 |
+| `Engine::send` | only through `Session::send` | §2.3; guarded by §2.1 |
+| `Session::close`, graceful | yes: `run_logout_phase1` peeks, calls `toAdmin`, assigns and stores, unless a store's flush hook suspends first | below |
+| `Session::close`, terminal | no: it emits nothing | unchanged; below |
+| `Engine::stop` | no emit; it reaches `Session::close` in terminal mode | unchanged; not decided here (§7) |
+| `Session::open`, `Session::drive_reconnect` | the initiator's Logon | engine-driven; refused or meaningless on a session that is already open; not an application entry point from a callback |
+| `Session::on_inbound_frame` | reply emits | fed by the read pump; an application that feeds frames from inside a callback is outside the contract |
+
+**Graceful `close()`.** Measured: started inside `toApp` or `toAdmin`, its Logout takes the outer frame's
+number at a callback-first site and goes out ahead of the outer frame at an assign-first site, and the
+outer frame is then transmitted after our own Logout. With the start posted, the outer frame goes first and
+the Logout follows, both retained.
+
+What the three QuickFIX engines do, read: an application's `logout()` sets a flag (C++, J) or queues a
+request (Go), and the engine's own loop generates the Logout later. So the Logout is never emitted, and its
+`toAdmin` never runs, inside the caller, whichever callback the caller is in.
+
+So a graceful `close()` waits, by one post onto the session's executor, while **any** callback of that
+session is on the stack, and then proceeds as a graceful close does today. That is the QuickFIX behaviour,
+and it contains the condition of §1 (an outbound callback is a callback). It needs the count of all
+callbacks in every build type, which §2.2's guard already keeps. Waiting only under an outbound callback
+would also restore order; it is the alternative in OD-5.
+
+The wait must not be a way to skip the close. It runs with cancellation shut out, as 093 did for the
+store operation of its reset unit (plan OD-25): a close that was asked for still closes.
+
+**Terminal `close()`.** It begins no emit, so §1's condition does not reach it, and it is not changed.
+Measured from `toApp`: the outer send returns `session_already_closed`, nothing is transmitted, no number
+is consumed, and the store and the manager agree. From `toAdmin` it is not measured yet; §3 adds those
+cells, and they must show the same: no frame after the close, and numbers that agree. What the outer arm
+does afterwards is the subject of §2.5.
+
 ### 2.2 The debug guard keeps its meaning (fixpp#564)
 
 `callback_dispatch_scope` asserts today that no callback is on the stack when one is entered. That
@@ -173,8 +223,10 @@ Cross-thread entry still asserts. Same-thread nesting passes. The guard `dispatc
 gets the same shape. The members exist in every build type, as `in_dispatch_` does today, so the class has
 one definition; only the checks compile out under `NDEBUG`.
 
-The guard and the R-1 depth are separate: the guard counts every callback and is a debug check; the R-1
-depth counts outbound callbacks and is behaviour.
+Two counts, then, both strand-confined plain integers that exist in every build type: the depth of all
+callbacks, which the guard's checks read under assertions and a graceful `close()` reads always (§2.1a);
+and the depth of outbound callbacks, which `Session::send` reads (§2.1). The owner-thread check is the only
+part that compiles out.
 
 ### 2.3 `Engine::send` through the snapshot (R-2)
 
@@ -296,6 +348,9 @@ fails on either of the other two.
 | `CallbackSend.ToAppSendsNested*`, `ToAdminStartsSend`, `ToAdminStartsSend_AssignFirstSite`, `…_FileStore`; `EngineCallbackSend.EngineSendFromToApp*` | deferred; distinct consecutive numbers in transmit order; each frame retained under its own number; store and manager agree; both outcomes ok |
 | `CallbackSend.FromAppSendsReply`; `EngineCallbackSend.EngineSendFromFromApp*` | nested; pass on the debug build too |
 | `EngineCallbackSend.MtEngineSendFromFromApp_Quiet`, `…_BusyControlStrand` | every reply nested, in both arms |
+| `CallbackSend.ToAppStartsClose_Graceful`, `ToAdminStartsClose_Graceful`, `…_AssignFirstSite`, `FromAppStartsClose_Graceful` | the close's Logout after the callback returned: its `toAdmin` not on the starting callback's stack; the outer frame first, then the Logout; distinct consecutive numbers; both retained; pass on the debug build too |
+| the `…_NoStore` and `…_NoStore_LiveWrite` nested cells | deferred; distinct consecutive numbers in transmit order |
+| `ToAppStartsClose_Terminal`, `FromAppStartsClose_Terminal*`, `FromAdminStartsClose_Terminal` | as measured today, and on the debug build too (§2.2 lets them run there) |
 | every control (`Sequential*`, `OverlappingSends*`, `TestRequestThenSend`) | unchanged |
 
 The cells' names and their "expected classification" asserts are re-decided when they are lifted: a cell
@@ -310,6 +365,11 @@ named `…Nested` that must report "deferred" is renamed.
 - A deferred send cancelled while it waits: returns the OD-1 error, the session stays Active, nothing is
   transmitted, no number is consumed.
 - A deferred send whose session leaves Active while it waits: returns `session_invalid_state_for_send`.
+- A terminal close started in `toAdmin`, at a callback-first site and at an assign-first one: no frame is
+  transmitted after the close, and the store and the manager agree.
+- A graceful close that waits, with the chain cancelled meanwhile: the session still closes.
+- A graceful close started in `fromApp` on a session with no store, and with a FileStore: the Logout after
+  the callback in both (today the first is inline and the second is not).
 - The guard: two threads entering one session's callbacks still assert (a death cell); a nested callback
   followed by a second, sequential one does not (the restore-on-exit arm).
 - `stop()` against the hit path: the OD-3 cell, a send whose session-strand work starts after `stop()`'s
@@ -323,6 +383,8 @@ named `…Nested` that must report "deferred" is renamed.
 | the depth counted at the inbound overload too | `FromAppSendsReply` and `EngineSendFromFromApp*` (they must report nested) |
 | the scope's exit setting the depth to zero | a cell with a `toAdmin` inside a `toApp`'s deferred window; written for this arm |
 | the Active re-check after the hop removed | the "leaves Active while it waits" cell |
+| the graceful close's wait removed | `ToAppStartsClose_Graceful`, `ToAdminStartsClose_Graceful*`, and `FromAppStartsClose_Graceful`'s "not on the callback's stack" witness |
+| the graceful close's wait made cancellable | the cancelled-close cell |
 | the hop's cancellation routed into the `Disconnected` conversion | the cancelled-deferred-send cell |
 | the hit path replaced by the control-strand hop | `MtEngineSendFromFromApp_BusyControlStrand` (it reports deferred replies) |
 | the guard's owner check removed | the two-thread death cell |
@@ -366,8 +428,9 @@ Article VIII §2 runs for the rows that exist.
 ## 4. Disclosures, documentation and catalogue
 
 **B&L, live file.**
-- New rows: the `Session::send` contract of R-1 as an application observes it (the table in §2.1); the
-  `Engine::send` path of R-2, including the cold path and what it returns; the reshaped guard.
+- New rows: the `Session::send` contract of R-1 as an application observes it (the table in §2.1); a
+  graceful `close()` started in a callback (§2.1a); the `Engine::send` path of R-2, including the cold path
+  and what it returns; the reshaped guard.
 - `L-544-3` and `L-544-4` move to the closed file.
 - `B-019-3` ("enqueued behind the current dispatch") and `B-023-2` ("`send` traverses
   caller→control→session") describe behaviour this PR changes; each is rewritten in place.
@@ -417,6 +480,11 @@ the first release. The C ABI's symbols, types and error codes do not change.
   later would silently lack it.
 - **Reuse `in_dispatch_` as the R-1 predicate.** It is set for inbound callbacks too, which is the K1
   behaviour, and it is a debug check today.
+- **Guard `Session::send` only.** The first draft of this note. A graceful `close()` is a second emit body
+  and reproduces the defect (measured); making same-thread nesting legal would have turned an abort into a
+  silent duplicate on every build type.
+- **Make a terminal `close()` wait too.** It begins no emit and its measured outcome from `toApp` is clean.
+  Waiting would change what `close(terminal)` means inside a callback with nothing to gain for §1.
 - **`Engine::send`: document "nested or deferred".** Rejected by R-2.
 - **`Engine::send`: a post at the first hop**, so it is always deferred. Rejected by R-2: it departs from
   `Session::send` and from QuickFIX, and adds a post to every `Engine::send`.
@@ -441,6 +509,12 @@ the first release. The C ABI's symbols, types and error codes do not change.
   stale between the check and the send. Alternatives: read `stopped_` there with `acquire` (the
   check-then-act gap 093's OD-15 rejected for the same flag), or no second check (the Active check and the
   drain already bound what such a send can do).
+- **OD-5 — when a graceful `close()` waits (§2.1a).** Proposed: while any callback of that session is on
+  the stack, because that is what all three QuickFIX engines do with a requested logout. The alternative
+  waits only while an outbound callback is on the stack: it is the smallest change that restores order,
+  and it leaves the Logout's `toAdmin` running inside `fromApp`, which no QuickFIX engine does. An owner
+  decision under the principle of §0; it is an application of R-1's condition, not part of the ruling as
+  given.
 - **OD-4 — `Engine::send` from a callback of an unpublished session.** By §2.3 it cannot be admitted. If
   Gate A finds a route to Active before publication, the miss path's timing dependence is back for that
   route and R-2 is not met there.
