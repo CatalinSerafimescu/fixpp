@@ -133,8 +133,10 @@ import sys
 # ⚠️ THE AGREEMENT IS CHECKED, NOT ASSERTED.  A comment saying "change one,
 # change both" is an instruction someone has to follow; cell S4 of
 # ci/test-parallelism-aba-seam.sh runs peak-memory-report.sh's awk expressions
-# over a REAL ctest log and requires the same three numbers this parser reads
-# from it.  That is the only version of this claim that cannot rot.
+# over a REAL ctest log and requires the count and the real time this parser
+# reads from it, and a summed duration within one printed step of this parser's
+# (the two sides round different running totals — see that cell).  That is the
+# only version of this claim that cannot rot.
 RAN_RX = re.compile(r"^\d+% tests passed, \d+ tests failed out of (\d+)$")
 REAL_RX = re.compile(r"^Total Test time \(real\) =\s+([0-9.]+) sec$")
 DUR_RX = re.compile(r"^ *\d+/\d+ +Test +#\d+.*?([0-9.]+) sec$")
