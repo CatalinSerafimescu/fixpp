@@ -629,6 +629,54 @@ add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
 add_threading_test(session_538_volatile_store_after_reset_logon
   test_538_volatile_store_after_reset_logon.cpp)
 
+# ── fixpp#537 (B28), D-537-7 — frames the session cannot build ─────────────────────
+# Standalone, not a grouped bucket ([const §VII.8]): its cells open Sessions and drive
+# their coroutines and timers on an io_context with a mock clock, which is not the pure,
+# single-threaded, stateless class §VII.8 groups.
+add_threading_test(session_537_unbuildable_frames test_537_unbuildable_frames.cpp)
+set_tests_properties(session_537_unbuildable_frames PROPERTIES LABELS "session;537")
+
+# ── fixpp#538 (B28), D-538-4 — Engine::stop meets a resend answer on a FileStore ────
+# Standalone, not a grouped bucket ([const §VII.8]): a per-`-D` variant
+# (FIXPP_TEST_HOOKS declares install_store_offload_probe), genuine concurrency (the
+# FileStore's file I/O executor is a thread of its own), and `-R <target>` selection:
+# the batch's phase exits name this binary. Each cell runs an Engine over loopback TCP
+# (plain_engine_rig.hpp). TIMEOUT: above the sum of the bounded pumps a cell takes when
+# every one of them misses; a cell that passes takes none of them to its budget.
+add_executable(session_538_cancelled_read_measured_path
+  test_538_cancelled_read_measured_path.cpp
+)
+# The same class of binary: a measurement of Session::store_then_emit's dispositions for
+# a cancelled outbound store, on the same fixture (held_file_store_scene.hpp).
+add_executable(session_cancelled_outbound_store_measurement
+  test_cancelled_outbound_store_measurement.cpp
+)
+foreach(held_store_test
+    session_538_cancelled_read_measured_path
+    session_cancelled_outbound_store_measurement)
+  target_link_libraries(${held_store_test} PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${held_store_test} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  target_compile_definitions(${held_store_test} PRIVATE FIXPP_TEST_HOOKS)
+  add_test(NAME ${held_store_test} COMMAND ${held_store_test})
+  set_tests_properties(${held_store_test} PROPERTIES
+    ENVIRONMENT
+      "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;538"
+    TIMEOUT 300)
+endforeach()
+
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
 # branch's polarity — see the file header for the documented scope limits.
