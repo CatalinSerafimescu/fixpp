@@ -107,9 +107,9 @@
 //                             session's executor.
 //   FromAppStartsClose_Graceful
 //                             the same with close(graceful), whose Logout goes
-//                             through toAdmin. No peer Logout is fed, so the
-//                             close ends on its own wait, which the cell
-//                             shortens through logout_disconnect_timeout_ms.
+//                             through toAdmin. No peer Logout is fed; the
+//                             cell ends the close's wait for it by advancing
+//                             the mock clock.
 //   FromAppStartsClose_Terminal_FileStore
 //                             the terminal cell on a FileStore, where the
 //                             inbound arm persists its number after fromApp.
@@ -271,7 +271,9 @@
 //
 // mock_clock: nothing here depends on elapsed time. HeartBtInt is 0, so no
 // liveness loop runs, except in CallbackGuard.ToAdminEnteredInsideToAppDies,
-// which sets an interval and advances the mock clock itself.
+// which sets an interval and advances the mock clock itself. A cell that starts
+// a graceful close ends the close's wait for the peer's Logout by advancing the
+// mock clock (Fixture::end_logout_wait_when).
 
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
@@ -603,6 +605,13 @@ private:
 
 enum class TransportKind { sync_capture, live_suspending_write };
 
+// SessionConfig::logout_disconnect_timeout_ms of a cell that starts a graceful
+// close. The close waits that long, on the session's clock, for a peer Logout
+// the cell never feeds, and the cell ends that wait by advancing the mock clock.
+// close() also arms a timer on real time for the same duration; the value is one
+// that no run of a cell reaches, so that timer does not end the wait.
+constexpr std::uint32_t kLogoutWaitMs = 60000;
+
 struct Fixture {
     asio::io_context ioc;
     // The FileStore cell's file-I/O executor. Declared after ioc, so it is
@@ -744,6 +753,25 @@ struct Fixture {
             return false;
         }
         return s.state() == fsm_state::Active;
+    }
+
+    // Ends a graceful close's wait for the peer's Logout without real time. Pumps
+    // until `ready` holds, then advances the mock clock past `timeout`, the
+    // session's logout_disconnect_timeout_ms. `ready` says that everything the
+    // cell expects before the end of that wait has happened. When `ready` does
+    // not hold within the pump's bound, the clock is not advanced, a failure
+    // that carries `missing()` is reported, and false is returned; the caller
+    // then drains what it spawned before it leaves the test body.
+    template <class Ready, class Missing>
+    [[nodiscard]] bool end_logout_wait_when(Ready ready, Missing missing,
+                                            std::chrono::milliseconds timeout, const char* site) {
+        if (!fixpp::test_support::pump_until(ioc, std::move(ready), site)) {
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << site
+                          << ": the mock clock was not advanced, because " << missing();
+            return false;
+        }
+        clock->advance(timeout + std::chrono::milliseconds{1});
+        return true;
     }
 
     // Delivers `frames` the way the Engine's read pump delivers the complete
@@ -1723,6 +1751,14 @@ struct CloseCell {
         inside.logout_to_admin_calls = logout_to_admin_calls;
         inside.started_completed = started.done;
     }
+    // What had not completed when the cell's pump reached its bound. The cell
+    // records it before it drains, because the drain completes what it cancels.
+    std::string pending_at_the_bound;
+    void record_pending() {
+        pending_at_the_bound =
+            std::string(outer.done ? "" : "the operation that called the callback had not; ") +
+            (started.done ? "" : "the operation the callback started had not; ");
+    }
     // A completion handler that records the outcome into `o` and notes
     // "<what> completes".
     auto completes(SendOutcome& o, const char* what) {
@@ -1819,7 +1855,8 @@ void check_close_arm(CloseCell& cell, const CloseExpect& want, const char* callb
 
     ASSERT_TRUE(cell.inside.read) << "PATH NOT DRIVEN: " << callback
                                   << " did not start the operation. " << reading;
-    EXPECT_TRUE(completed) << "both operations must complete within the pump's bound. " << reading;
+    EXPECT_TRUE(completed) << "both operations must complete within the pump's bound; "
+                           << cell.pending_at_the_bound << reading;
 
     EXPECT_EQ(cell.inside.lifecycle, "open")
         << "inside the callback after the start, the lifecycle is open. " << reading;
@@ -1945,6 +1982,7 @@ void run_nested_to_app_throws(StoreKind store, FromAppReturns from_app_returns,
                                                            fixpp::test_support::kPumpSlice,
                                                            "CallbackSend::nested_to_app_throws");
     if (!completed) {
+        cell.record_pending();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::nested_to_app_throws");
     }
@@ -2206,8 +2244,7 @@ void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store,
                                TransportKind transport, const CloseExpect& expect) {
     Fixture f{ExecKind::io_context, store};
     auto cfg = f.cfg();
-    // close(graceful) waits this long for a peer Logout that this cell never feeds.
-    cfg.logout_disconnect_timeout_ms = 300;
+    cfg.logout_disconnect_timeout_ms = kLogoutWaitMs;
     Session sess{f.engine, cfg};
     ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
     if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
@@ -2250,13 +2287,29 @@ void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store,
                                                      : peer_frame("1", 2, "112=B41-TR\x01");
     asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{inbound}),
                    cell.completes(cell.outer, "on_inbound_frame"));
-    // Bounded: an operation that does not complete is reported below, not waited
-    // for. The bound is well above the graceful close's shortened wait.
-    const bool completed = fixpp::test_support::pump_until(
-        f.ioc, [&] { return cell.outer.done && (cell.started.done || !cell.inside.read); },
-        std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
-        "CallbackSend::callback_starts_close");
+    // A graceful close then waits for a peer Logout; everything the arm expects
+    // before the end of that wait has happened once on_inbound_frame completed
+    // and onLogout ran.
+    bool completed = true;
+    if (mode == close_mode::graceful) {
+        completed = f.end_logout_wait_when(
+            [&] { return cell.outer.done && cell.on_logout_calls > 0; },
+            [&] {
+                return std::string(cell.outer.done ? "onLogout has not run"
+                                                   : "on_inbound_frame has not completed");
+            },
+            std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            "CallbackSend::callback_starts_close_logout_wait");
+    }
+    // Bounded: an operation that does not complete is reported below, not waited for.
+    completed =
+        completed &&
+        fixpp::test_support::pump_until(
+            f.ioc, [&] { return cell.outer.done && (cell.started.done || !cell.inside.read); },
+            std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+            "CallbackSend::callback_starts_close");
     if (!completed) {
+        cell.record_pending();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::callback_starts_close");
     }
@@ -2652,8 +2705,7 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
                                   ResetOnDisconnect reset = ResetOnDisconnect::no) {
     Fixture f{ExecKind::io_context, store};
     auto cfg = f.cfg();
-    // close(graceful) waits this long for a peer Logout that this cell never feeds.
-    cfg.logout_disconnect_timeout_ms = 300;
+    cfg.logout_disconnect_timeout_ms = kLogoutWaitMs;
     cfg.reset_on_disconnect = reset == ResetOnDisconnect::yes;
     Session sess{f.engine, cfg};
     ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
@@ -2788,14 +2840,30 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
         asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{inbound}),
                        on_outer_done);
     }
-    // Bounded: an operation that does not complete is reported below, not waited
-    // for. The bound is well above the graceful close's shortened wait.
-    const bool completed = fixpp::test_support::pump_until(
-        f.ioc, [&] { return outer_done && (inner_done || !started); }, std::chrono::seconds{5},
-        fixpp::test_support::kPumpSlice, "CallbackSend::outbound_callback_starts");
+    // A graceful close then waits for a peer Logout; everything the arm expects
+    // before the end of that wait has happened once the outer operation completed
+    // and onLogout ran.
+    bool logout_wait_ended = true;
+    if (starts == Starts::close_graceful) {
+        logout_wait_ended = f.end_logout_wait_when(
+            [&] { return outer_done && cell.on_logout_calls > 0; },
+            [&] {
+                return outer_done ? std::string("onLogout has not run")
+                                  : std::string("the outer ") + outer_name + " has not completed";
+            },
+            std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            "CallbackSend::outbound_callback_starts_logout_wait");
+    }
+    // Bounded: an operation that does not complete is reported below, not waited for.
+    const bool completed =
+        logout_wait_ended &&
+        fixpp::test_support::pump_until(
+            f.ioc, [&] { return outer_done && (inner_done || !started); }, std::chrono::seconds{5},
+            fixpp::test_support::kPumpSlice, "CallbackSend::outbound_callback_starts");
 
     if (starts != Starts::send) {
         if (!completed) {
+            cell.record_pending();
             fixpp::test_support::cancel_and_drain_or_report(
                 f.ioc, *f.clock, "CallbackSend::outbound_callback_starts");
         }
