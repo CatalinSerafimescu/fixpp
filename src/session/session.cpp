@@ -886,9 +886,12 @@ static std::optional<std::uint32_t> parse_u32_opt(std::string_view sv) noexcept 
 //   re-entrancy     : if (hydrating_) co_return ok   — concurrent call on same strand
 //   non-persistent  : if (!store_is_persistent_) skip reads, co_return ok (INV-H4)
 //   read both       : next_seqnum(inbound,false) then next_seqnum(outbound,false)
-//   read failure    : clear hydrating_, Disconnected, no partial seed (C2.3/INV-H6)
+//   read failure    : Disconnected, no partial seed (C2.3/INV-H6)
 //   hydrate         : seqnum_mgr_.hydrate(apply_inbound_seed ? *in : seqnum_min, *out)
-//   latch           : hydrated_ = true; hydrating_ = false (set ONLY after success, D-9)
+//   latch           : hydrated_ = true (set ONLY after success, D-9)
+//   every exit      : hydrating_ cleared, by a guard object, so an exception that leaves
+//                     a co_await below clears it too (ruling R-20;
+//                     `.specify/536-537-538-recovery-liveness.md` §9, D-CAN-1)
 //
 // [029 tasks T007; contracts C2.1–C2.6; data-model INV-H3..H6; research D-6/D-9/D-10]
 // 029 T011 — apply_inbound_seed: when true, seed next_inbound from the store;
@@ -907,12 +910,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
         co_return fixpp::core::expected_t<void>{};
     }
     hydrating_ = true;
+    // Constructed after the re-entrancy test above, so a re-entrant call leaves the
+    // outer call's flag set.
+    struct clear_on_exit {
+        bool& flag;
+        ~clear_on_exit() { flag = false; }
+    } const clear_hydrating{hydrating_};
 
     // Non-persistent skip (D-10 / C2.2 / INV-H4): memory store, null store, or any
     // store whose factory returned yields_persistent_store()==false.
     // No read, no mutation — byte-identical to the pre-feature baseline.
     if (!store_is_persistent_) {
-        hydrating_ = false;
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -920,13 +928,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
     // IMPORTANT: mutate the manager only after BOTH reads succeed (no partial seed).
     auto in_r = co_await store_->next_seqnum(direction_t::inbound, false);
     if (!in_r) {
-        hydrating_ = false;
         disconnect_unless_superseded_(arm);
         co_return std::unexpected(in_r.error());
     }
     auto out_r = co_await store_->next_seqnum(direction_t::outbound, false);
     if (!out_r) {
-        hydrating_ = false;
         disconnect_unless_superseded_(arm);
         co_return std::unexpected(out_r.error());
     }
@@ -939,14 +945,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
     const seqnum_t seed_inbound = apply_inbound_seed ? *in_r : seqnum_min;
     auto hydrate_r = co_await seqnum_mgr_.hydrate(seed_inbound, /*next_outbound=*/*out_r);
     if (!hydrate_r) {
-        hydrating_ = false;
         disconnect_unless_superseded_(arm);
         co_return std::unexpected(hydrate_r.error());
     }
 
     // Latch success: set hydrated_ ONLY after both reads and hydrate() succeeded (D-9).
     hydrated_ = true;
-    hydrating_ = false;
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -954,6 +958,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
 // Called at every PERSIST site in the disposition matrix (data-model §Persist matrix).
 // Skips when store_is_persistent_==false (INV-H4 / C3.5).
 // Failure → Disconnected (D-3 / C3.3 / SC-006).
+// A failed store call returns store_io_failure, whatever the store returned, except
+// store_cancelled, which is returned unchanged: both timings of a cancelled persist then
+// return one code (`.specify/536-537-538-recovery-liveness.md` §9, D-CAN-4).
 // [029 tasks T010; contracts C3.0/C3.3/C3.5; data-model INV-H1/H2]
 asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_(
     std::optional<fsm_state> arm) noexcept {
@@ -963,6 +970,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_
     auto r = co_await store_->next_seqnum(direction_t::inbound, /*increment=*/true);
     if (!r) {
         disconnect_unless_superseded_(arm);
+        if (r.error() == fixpp::core::error::store_cancelled) {
+            co_return std::unexpected(r.error());
+        }
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
     co_return fixpp::core::expected_t<void>{};
@@ -3784,400 +3794,456 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_not_connected
 // one b3 boundary for all of them, so the frame cycled on an in-sequence Heartbeat or
 // application message holds only what that path uses (§2.2 target; the gate is W-A/W-B).
 // The loop body contains no loop or switch of its own, so each `break` leaves the loop.
+//
+// Ruling R-14 (`.specify/536-537-538-recovery-liveness.md` §9, D-CAN-1 to D-CAN-5): the
+// whole body is one `try`, and this is the one coroutine every inbound frame enters, in
+// every state. It supersedes the route the cells of fixpp#544's b3 ruling pinned as a throw
+// out of the frame: an exception a co_await of the inbound path throws (asio's
+// operation_aborted, when a cancellation is already recorded on the thread; or anything
+// else) ends the session here, and on_inbound_frame returns a value. The handler only notes
+// which kind it caught, because a handler may not co_await; the statements after it are
+// reached only from the handler, since every path inside the `try` returns.
 // NOLINTNEXTLINE(readability-function-size,hicpp-function-size)
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
     std::span<const std::byte> frame) noexcept {
-    // 093-inbound-frame-dispositions (FR-013, contract C-2) supersedes 070's S-030
-    // check here, which disconnected an Active session whose inbound frame exceeded
-    // the advertised MaxMessageSize(383) and exempted every frame before Active. The
-    // Framer now refuses a frame over L (the advertised 383 when set) in every state,
-    // below this function, and the read pump closes the session terminally.
-    // The saved throw_if_cancelled value each FIXPP_INBOUND_SPLIT_AWAIT boundary passes on.
-    bool tic = false;
-    if (fsm_state_ != fsm_state::LogonReceived && fsm_state_ != fsm_state::Active) {
-        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_cold_(tic, frame));
-        co_return r;
-    }
-    // T056 (US5) guard-precedence ordering:
-    // (1) parse/type recognised → else session Reject (no-loop-guard)
-    // (2) CompID/BeginString gate
-    // (3) SendingTime MaxLatency (Q3)
-    // (4) seqnum class
-    // (5) message-type-for-state
-
-    auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
-    inbound_slow_t slow{};
-    do {
-        // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
-        // faulty or not, is disregarded as garbled: counted, evented and logged, with
-        // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
-        // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
-        if (!hdr.msg_type_is_third) {
-            note_garbles_(header_out_of_order_garble(frame));
-            co_return fixpp::core::expected_t<void>{};
+    // D-CAN-5: the state the frame entered in. The last awaits of a Logon arm run with the
+    // session already Active, so "a Logon arm" is told from this value.
+    const fsm_state entry_state = fsm_state_;
+    // D-CAN-5's predicate, "superseded": the frame entered a Logon arm, and a close() is in
+    // flight or has completed, or Engine::stop() has set the engine-stop flag. It differs
+    // from logon_arm_superseded_ in that it holds after a completed close and does not test
+    // the state the arm expects, which the entry does not hold.
+    static constexpr auto superseded = [](const Session& s, fsm_state entered) noexcept {
+        return (entered == fsm_state::NotConnected || entered == fsm_state::LogonSent) &&
+               (s.state_ == lifecycle::closing || s.state_ == lifecycle::closed_drained ||
+                s.engine_stop_requested_);
+    };
+    bool caught_cancellation = false;
+    try {
+        // 093-inbound-frame-dispositions (FR-013, contract C-2) supersedes 070's S-030
+        // check here, which disconnected an Active session whose inbound frame exceeded
+        // the advertised MaxMessageSize(383) and exempted every frame before Active. The
+        // Framer now refuses a frame over L (the advertised 383 when set) in every state,
+        // below this function, and the read pump closes the session terminally.
+        // The saved throw_if_cancelled value each FIXPP_INBOUND_SPLIT_AWAIT boundary passes on.
+        bool tic = false;
+        if (fsm_state_ != fsm_state::LogonReceived && fsm_state_ != fsm_state::Active) {
+            FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_cold_(tic, frame));
+            // D-CAN-5, the returned timing: a superseded Logon arm whose store call a
+            // cancellation ended has recorded nothing, and returns success, as it does on
+            // the thrown timing below.
+            if (!r && r.error() == fixpp::core::error::store_cancelled &&
+                superseded(*this, entry_state)) {
+                co_return fixpp::core::expected_t<void>{};
+            }
+            co_return r;
         }
-        // 092 (contract C-1 step 3): a frame the scan could not read goes to C-2
-        // rows D-7 … D-6 and nothing below runs. The MaxMessageSize(383) guard
-        // above the state switch has already run (C-1 step 1b).
-        if (hdr.fault != fixpp::wire::field_fault::none) {
-            co_return co_await dispose_unparseable_(hdr, fsm_state_);
-        }
+        // T056 (US5) guard-precedence ordering:
+        // (1) parse/type recognised → else session Reject (no-loop-guard)
+        // (2) CompID/BeginString gate
+        // (3) SendingTime MaxLatency (Q3)
+        // (4) seqnum class
+        // (5) message-type-for-state
 
-        // 093 (contract C-2 step 4, C-5; spec FR-020): the one per-frame inbound
-        // liveness writer. Every frame past the two checks above is neither garbled
-        // nor faulty and proves the peer is alive, so it refreshes before the validate
-        // gate and every early return below. It supersedes the Active-only writer
-        // that sat at the end of this arm. A refresh in LogonReceived is harmless: the
-        // liveness loop runs only in Active, and both roles seed the value on
-        // entering it. The null check matches open()'s seed: a session may run
-        // without a clock.
-        if (effective_clock_) {
-            last_inbound_steady_ = effective_clock_->steady_now();
-        }
+        auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+        inbound_slow_t slow{};
+        do {
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
+            // 092 (contract C-1 step 3): a frame the scan could not read goes to C-2
+            // rows D-7 … D-6 and nothing below runs. The MaxMessageSize(383) guard
+            // above the state switch has already run (C-1 step 1b).
+            if (hdr.fault != fixpp::wire::field_fault::none) {
+                co_return co_await dispose_unparseable_(hdr, fsm_state_);
+            }
 
-        // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
-        // Runs after scan_frame_header (hdr.msg_type available for 3/5 exemption)
-        // and BEFORE check_inbound. Erratum fixpp#423: an in-sequence rejected message
-        // consumes its MsgSeqNum; 041 C-3's "seqnum NOT advanced" holds only out of
-        // sequence. #423's row 4 ("garbled (unparseable) → no Reject, no advance") is
-        // superseded by 092 contract C-2 (fixpp#507; research R-13; the owner
-        // ruling of 2026-09-27 revising row 4). claim-ok: the date names the ruling
-        // A frame the scan cannot read never reaches this gate.
-        // No-reject-loop: 35=3 and 35=5 exempt (FR-004), for a well-formed frame
-        // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
-        // Buffer: the session's parse buffer B(L), as dispatch (093).
-        if (cfg_.validate_inbound_messages && validator_) {
-            if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                auto const v = validate_inbound_(frame, hdr);
-                if (v.outcome != validate_outcome::pass) {
-                    slow.k = inbound_slow_t::kind::validate_failed;
-                    slow.v = v;
-                    break;
+            // 093 (contract C-2 step 4, C-5; spec FR-020): the one per-frame inbound
+            // liveness writer. Every frame past the two checks above is neither garbled
+            // nor faulty and proves the peer is alive, so it refreshes before the validate
+            // gate and every early return below. It supersedes the Active-only writer
+            // that sat at the end of this arm. A refresh in LogonReceived is harmless: the
+            // liveness loop runs only in Active, and both roles seed the value on
+            // entering it. The null check matches open()'s seed: a session may run
+            // without a clock.
+            if (effective_clock_) {
+                last_inbound_steady_ = effective_clock_->steady_now();
+            }
+
+            // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
+            // Runs after scan_frame_header (hdr.msg_type available for the 35=3, 35=5 exemption)
+            // and BEFORE check_inbound. Erratum fixpp#423: an in-sequence rejected message
+            // consumes its MsgSeqNum; 041 C-3's "seqnum NOT advanced" holds only out of
+            // sequence. #423's row 4 ("garbled (unparseable) → no Reject, no advance") is
+            // superseded by 092 contract C-2 (fixpp#507; research R-13; the owner
+            // ruling of 2026-09-27 revising row 4). claim-ok: the date names the ruling
+            // A frame the scan cannot read never reaches this gate.
+            // No-reject-loop: 35=3 and 35=5 exempt (FR-004), for a well-formed frame
+            // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
+            // Buffer: the session's parse buffer B(L), as dispatch (093).
+            if (cfg_.validate_inbound_messages && validator_) {
+                if (hdr.msg_type != "3" && hdr.msg_type != "5") {
+                    auto const v = validate_inbound_(frame, hdr);
+                    if (v.outcome != validate_outcome::pass) {
+                        slow.k = inbound_slow_t::kind::validate_failed;
+                        slow.v = v;
+                        break;
+                    }
                 }
             }
-        }
 
-        // ── Guard (2): CompID/BeginString gate (scenarios 2i/2k) ──────────
-        // BeginString(8) mismatch → always session-fatal → Disconnected.
-        // SenderCompID(49)/TargetCompID(56) mismatch → fatal ONLY when
-        // cfg_.check_comp_id is true (default); skipped when false
-        // (028 T005 / S1, data-model S1, contract C1, FR-003).
-        // Steady-state only: Logon-establishment CompID check (interpret_logon
-        // at NotConnected) is untouched (FR-012 / I-VCT-6).
-        if (hdr.begin_string != cfg_.begin_string) {
-            record_state_transition_(fsm_state::Disconnected);
-            co_return fixpp::core::expected_t<void>{};
-        }
-        if (cfg_.check_comp_id && (hdr.sender_comp_id != cfg_.target_comp_id ||
-                                   hdr.target_comp_id != cfg_.sender_comp_id)) {
-            record_state_transition_(fsm_state::Disconnected);
-            co_return fixpp::core::expected_t<void>{};
-        }
-
-        // ── Guard (3): SendingTime MaxLatency (Q3, T055/T056) ─────────────
-        // Check |inbound_sending_time − effective_now| ≤ MaxLatency (D-8: 120 s).
-        // No-reject-loop guard: Reject(35=3) and Logout(35=5) are exempt per I-5.
-        // Only a well-formed frame reaches this guard; a faulty one was disposed
-        // of above under 092 contract C-2.
-        // Established session: Reject(reason=10, refTag=52) → Logout → Disconnect.
-        // FR-007: missing SendingTime (empty) → Reject-Logout-Disconnect.
-        // FR-008: malformed SendingTime (parse failure) → Reject-Logout-Disconnect.
-        // T016 [US3] RC#5: both empty AND parse-failure fall through to the path.
-        // Note: the Logon-path special case (D-3) is handled in LogonSent below.
-        if (hdr.msg_type != "3" && hdr.msg_type != "5" && effective_clock_) {
-            if (!inbound_sending_time_ok_(hdr)) {
-                slow.k = inbound_slow_t::kind::sending_time_reject;
-                break;
+            // ── Guard (2): CompID/BeginString gate (scenarios 2i/2k) ──────────
+            // BeginString(8) mismatch → always session-fatal → Disconnected.
+            // SenderCompID(49)/TargetCompID(56) mismatch → fatal ONLY when
+            // cfg_.check_comp_id is true (default); skipped when false
+            // (028 T005 / S1, data-model S1, contract C1, FR-003).
+            // Steady-state only: Logon-establishment CompID check (interpret_logon
+            // at NotConnected) is untouched (FR-012 / I-VCT-6).
+            if (hdr.begin_string != cfg_.begin_string) {
+                record_state_transition_(fsm_state::Disconnected);
+                co_return fixpp::core::expected_t<void>{};
             }
-        }
-
-        // ── Inbound SequenceReset(35=4) — Reset mode (GapFillFlag ≠ Y) ───
-        // FIX-SL §4.8.6: a Reset-mode SequenceReset is processed REGARDLESS
-        // of its own MsgSeqNum — it bypasses the seqnum gate (its purpose as
-        // an admin recovery tool). Mirrors QuickFIX verify(msg, false, false).
-        // GapFill mode (123=Y) is handled AFTER the gate (it IS subject to
-        // ordering). [S-023; QuickFIX Session::nextSequenceReset]
-        if (hdr.msg_type == "4" && hdr.gap_fill_flag != "Y") {
-            slow.k = inbound_slow_t::kind::sequence_reset;
-            break;
-        }
-
-        // ── Guard (4): seqnum check (T035 / 013 T026 AwaitingResend) ─────
-        {
-            const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
-            if (seq == 0) {
-                // Cannot parse seq — session-fatal.
+            if (cfg_.check_comp_id && (hdr.sender_comp_id != cfg_.target_comp_id ||
+                                       hdr.target_comp_id != cfg_.sender_comp_id)) {
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // 013 T026 FR-009: too-high inbound seqnum → AwaitingResend
-            // (NOT Disconnected per 013 T006a amendment).
-            // State owned by reconnect_fsm_ (data-model §E-1 / T023 Fix1).
-            // [spec.md FR-009; data-model.md §E-1; plan.md T026]
-            //
-            // 027 T017 (confirm/review): this arm is NOT the primary 789 honor site
-            // (the Logon-path honor runs in the NotConnected and LogonSent handlers).
-            // It stays active as the recovery-of-last-resort for a lost proactive
-            // resend: if the peer's 789-driven resend is dropped, the next inbound
-            // frame triggers this arm and issues a ResendRequest (I-NEX-10 / D-11).
-            // Knob-off path byte-identical. A future suppression of this arm would
-            // create a never-recover hole — see L-027-2. No behavioural change.
-            // [data-model I-NEX-10, research D-11]
-            const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
-            // 028 T008 (S2): guard on validate_sequence_numbers.
-            // When the knob is off, skip AwaitingResend/ResendRequest entirely
-            // and fall through to S4 (deliver-without-advance).
-            // [data-model S2, contract C2.2, FR-006, research D-3]
-            if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend() &&
-                cfg_.validate_sequence_numbers) {
-                slow.k = inbound_slow_t::kind::too_high;
-                slow.next_expected = next_expected;
-                slow.seq = seq;
-                break;
-            }
-
-            // 021 T008 Stage-1 — PossDup OrigSendingTime validation (Arms C/D/E).
-            // Runs for any 43=Y non-SequenceReset frame, AFTER the too-high arm
-            // (forward gaps still ResendRequest per engine parity — user decision
-            // 2026-06-04) and BEFORE check_inbound. Erratum fixpp#423: an at-expected
-            // rejected dup consumes its MsgSeqNum (Arms C/D and RC#1 below); 021 FR-004's
-            // "MUST NOT advance" holds only for a too-low one.
-            // data-model.md §1 Stage 1 rows 0–4; contracts/session-possdup.md C1.
-            // Arm E (row 0): 35=4 (SequenceReset) is exempt — guard below.
-            if (hdr.poss_dup_flag == "Y" && hdr.msg_type != "4") {
-                {
-                    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_active_poss_dup_(tic, hdr));
-                    if (r.has_value()) {
-                        co_return *r;
-                    }
-                }
-            }
-            // Stage-1 passed (or not a 43=Y non-35=4 frame). Proceed to check_inbound.
-
-            // Too-low → session-fatal (not recoverable per I-4).
-            // Exception: Heartbeat(0) with too-low seqnum is silently dropped
-            // (no echo, no disconnect) to allow liveness-warmup passes to
-            // not disrupt an otherwise healthy session. [T020-A warmup behavior]
-            // in-seq → advance; too-high-while-awaiting → advance (it's a fill).
-            auto chk = co_await seqnum_mgr_.check_inbound(seq);
-            if (!chk) {
-                slow.k = inbound_slow_t::kind::out_of_sequence;
-                slow.chk_error = chk.error();
-                break;
-            }
-
-            // Gap close check: if we filled through the gap endpoint, exit AwaitingResend.
-            close_filled_resend_gap_();
-        }
-
-        // ── Inbound SequenceReset(35=4) — GapFill mode (GapFillFlag = Y) ─
-        // Subject to seqnum ordering: Guard 4 above advanced the counter by
-        // 1 for the in-seq GapFill (MsgSeqNum = gap start); now jump it to
-        // NewSeqNo(36) to skip the filled span and exit AwaitingResend.
-        // Reset mode was handled before Guard 4. [S-023]
-        if (hdr.msg_type == "4") {  // GapFillFlag == "Y" (Reset handled before gate)
-            slow.k = inbound_slow_t::kind::gap_fill;
-            break;
-        }
-
-        // T046 (US4): inbound Logout in Active/LogonReceived state.
-        // Per data-model.md matrix:
-        //   Active row:        inbound Logout → emit Logout, → Disconnected.
-        //   LogonReceived row: inbound Logout → Disconnected ([FIX-SL §4.6]).
-        // T019: emit session_event_sequence_numbers_reset{by_peer_request=false}
-        //   when Active receives peer Logout (peer-initiated clean termination
-        //   implies seqnum context is being reset at next Logon). [spec FR-018]
-        if (hdr.msg_type == "5") {  // Logout (35=5)
-            slow.k = inbound_slow_t::kind::logout;
-            break;
-        }
-
-        // I-5: a well-formed inbound Reject(35=3) is logged and accepted; never
-        // re-rejected. A faulty Reject never reaches here: 092 contract C-2
-        // disposes of it above, and can Reject it.
-        if (hdr.msg_type == "3") {  // Reject (35=3)
-            // Active row: session-level log, no Reject-of-a-Reject (I-5).
-            // 029 T010 — PERSIST: check_inbound advanced next_inbound for the
-            // inbound Reject. No fromAdmin dispatch (I-5). Persist before return.
-            // [029 tasks T010; contracts C3.1; data-model §Persist matrix Reject site]
-            {
-                auto p_r = co_await persist_inbound_advance_();
-                if (!p_r) co_return std::unexpected(p_r.error());
-            }
-            // Remain in current state.
-            co_return fixpp::core::expected_t<void>{};
-        }
-
-        // T041 (US3): in the Active state, handle liveness-specific message types
-        // (Heartbeat / TestRequest). Inbound liveness was refreshed at the top of
-        // this arm (093).
-        if (fsm_state_ == fsm_state::Active) {
-            // ── 019 T011: fromAdmin dispatch for admin-typed messages ────
-            // Called here (top of Active-only handling) for ALL admin MsgTypes
-            // that reach this point after FSM + seqnum validation.
-            // Note: Logout(35=5) and SequenceReset(35=4) return early ABOVE
-            // this block; they are NOT dispatched to fromAdmin in this slice
-            // (deferred to US3/US2 wiring). Heartbeat/TestRequest/ResendRequest/
-            // Reject are dispatched here.
-            // [research D3/D4; FR-004; INV-6]
-            if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
-                // The session's parse buffer B(L): any admitted frame parses (093).
-                // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-                // before returning, so onLogout in record_state_transition_ below
-                // can acquire its own scope.
-                auto cb_r = parse_and_dispatch_(
-                    frame, inbound_parse_buffer,
-                    [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
-                // 092 contract C-6: a late parse failure closes the session.
-                if (!cb_r || *cb_r == dispatch_outcome::parse_failed) {
-                    slow.k = inbound_slow_t::kind::from_admin_failed;
-                    slow.cb_r = cb_r;
+            // ── Guard (3): SendingTime MaxLatency (Q3, T055/T056) ─────────────
+            // Check |inbound_sending_time − effective_now| ≤ MaxLatency (D-8: 120 s).
+            // No-reject-loop guard: Reject(35=3) and Logout(35=5) are exempt per I-5.
+            // Only a well-formed frame reaches this guard; a faulty one was disposed
+            // of above under 092 contract C-2.
+            // Established session: Reject(reason=10, refTag=52) → Logout → Disconnect.
+            // FR-007: missing SendingTime (empty) → Reject-Logout-Disconnect.
+            // FR-008: malformed SendingTime (parse failure) → Reject-Logout-Disconnect.
+            // T016 [US3] RC#5: both empty AND parse-failure fall through to the path.
+            // Note: the Logon-path special case (D-3) is handled in LogonSent below.
+            if (hdr.msg_type != "3" && hdr.msg_type != "5" && effective_clock_) {
+                if (!inbound_sending_time_ok_(hdr)) {
+                    slow.k = inbound_slow_t::kind::sending_time_reject;
                     break;
                 }
             }
 
-            // T041 US3 / T018-D: Active row — inbound Heartbeat → liveness.
-            // If we had an outstanding TestRequest:
-            //   - inbound Heartbeat TestReqID matches ours → clear (TR answered)
-            //   - inbound Heartbeat TestReqID does NOT match ours → mismatch →
-            //     session_testreqid_mismatch(118) → Disconnected
-            //     [spec.md FR-006; data-model.md §E-1; T018-D]
-            // Inbound Heartbeat (35=0): per FIX a Heartbeat is NEVER answered
-            // (005 data-model.md's `Active` row → "advance counter (liveness)", no
-            // emit). If it carries a TestReqID matching our outstanding
-            // TestRequest it answers that TR (clear the pending flag); a
-            // mismatched TestReqID is session_testreqid_mismatch(118) →
-            // Disconnected (FR-006). No outbound frame is emitted in response —
-            // the retired "T020-A echo" emitted a Heartbeat here, which storms
-            // at RTT cadence when two fixpp sessions are paired (each echoes
-            // the other's beat). [self-paired heartbeat-storm fix]
-            if (hdr.msg_type == "0") {  // Heartbeat (35=0)
-                if (!pending_test_req_id_.empty()) {
-                    // We have an outstanding TestRequest. Check echo.
-                    if (!hdr.test_req_id.empty() && hdr.test_req_id != pending_test_req_id_) {
-                        // TestReqID mismatch: peer sent a Heartbeat echoing a
-                        // different (or stale) TestReqID than our outstanding one.
-                        // session_testreqid_mismatch=118 → Disconnected.
-                        // [spec.md FR-006; T018-D]
-                        record_state_transition_(fsm_state::Disconnected);
-                        co_return fixpp::core::expected_t<void>{};
-                    }
-                    // Matching or empty TestReqID: TR answered, clear flag.
-                    pending_test_req_id_.clear();
-                    unanswered_tr_ = false;
+            // ── Inbound SequenceReset(35=4) — Reset mode (GapFillFlag ≠ Y) ───
+            // FIX-SL §4.8.6: a Reset-mode SequenceReset is processed REGARDLESS
+            // of its own MsgSeqNum — it bypasses the seqnum gate (its purpose as
+            // an admin recovery tool). Mirrors QuickFIX verify(msg, false, false).
+            // GapFill mode (123=Y) is handled AFTER the gate (it IS subject to
+            // ordering). [S-023; QuickFIX Session::nextSequenceReset]
+            if (hdr.msg_type == "4" && hdr.gap_fill_flag != "Y") {
+                slow.k = inbound_slow_t::kind::sequence_reset;
+                break;
+            }
+
+            // ── Guard (4): seqnum check (T035 / 013 T026 AwaitingResend) ─────
+            {
+                const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
+                if (seq == 0) {
+                    // Cannot parse seq — session-fatal.
+                    record_state_transition_(fsm_state::Disconnected);
+                    co_return fixpp::core::expected_t<void>{};
                 }
-                // 029 T010 — PERSIST: inbound Heartbeat (35=0).
-                // check_inbound advanced next_inbound; fromAdmin dispatched above.
-                // [029 tasks T010; contracts C3.1; data-model §Persist matrix Heartbeat]
+
+                // 013 T026 FR-009: too-high inbound seqnum → AwaitingResend
+                // (NOT Disconnected per 013 T006a amendment).
+                // State owned by reconnect_fsm_ (data-model §E-1 / T023 Fix1).
+                // [spec.md FR-009; data-model.md §E-1; plan.md T026]
+                //
+                // 027 T017 (confirm/review): this arm is NOT the primary 789 honor site
+                // (the Logon-path honor runs in the NotConnected and LogonSent handlers).
+                // It stays active as the recovery-of-last-resort for a lost proactive
+                // resend: if the peer's 789-driven resend is dropped, the next inbound
+                // frame triggers this arm and issues a ResendRequest (I-NEX-10 / D-11).
+                // Knob-off path byte-identical. A future suppression of this arm would
+                // create a never-recover hole — see L-027-2. No behavioural change.
+                // [data-model I-NEX-10, research D-11]
+                const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
+                // 028 T008 (S2): guard on validate_sequence_numbers.
+                // When the knob is off, skip AwaitingResend/ResendRequest entirely
+                // and fall through to S4 (deliver-without-advance).
+                // [data-model S2, contract C2.2, FR-006, research D-3]
+                if (seq > next_expected && !reconnect_fsm_.is_awaiting_resend() &&
+                    cfg_.validate_sequence_numbers) {
+                    slow.k = inbound_slow_t::kind::too_high;
+                    slow.next_expected = next_expected;
+                    slow.seq = seq;
+                    break;
+                }
+
+                // 021 T008 Stage-1 — PossDup OrigSendingTime validation (Arms C/D/E).
+                // Runs for any 43=Y non-SequenceReset frame, AFTER the too-high arm
+                // (forward gaps still ResendRequest per engine parity — user decision
+                // 2026-06-04) and BEFORE check_inbound. claim-ok: the date names the decision
+                // Erratum fixpp#423: an at-expected rejected dup consumes its MsgSeqNum (Arms
+                // C/D and RC#1 below); 021 FR-004's "MUST NOT advance" holds only for a
+                // too-low one.
+                // data-model.md §1 Stage 1 rows 0–4; contracts/session-possdup.md C1.
+                // Arm E (row 0): 35=4 (SequenceReset) is exempt — guard below.
+                if (hdr.poss_dup_flag == "Y" && hdr.msg_type != "4") {
+                    {
+                        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_active_poss_dup_(tic, hdr));
+                        if (r.has_value()) {
+                            co_return *r;
+                        }
+                    }
+                }
+                // Stage-1 passed (or not a 43=Y non-35=4 frame). Proceed to check_inbound.
+
+                // Too-low → session-fatal (not recoverable per I-4).
+                // Exception: Heartbeat(0) with too-low seqnum is silently dropped
+                // (no echo, no disconnect) to allow liveness-warmup passes to
+                // not disrupt an otherwise healthy session. [T020-A warmup behavior]
+                // in-seq → advance; too-high-while-awaiting → advance (it's a fill).
+                auto chk = co_await seqnum_mgr_.check_inbound(seq);
+                if (!chk) {
+                    slow.k = inbound_slow_t::kind::out_of_sequence;
+                    slow.chk_error = chk.error();
+                    break;
+                }
+
+                // Gap close check: if we filled through the gap endpoint, exit AwaitingResend.
+                close_filled_resend_gap_();
+            }
+
+            // ── Inbound SequenceReset(35=4) — GapFill mode (GapFillFlag = Y) ─
+            // Subject to seqnum ordering: Guard 4 above advanced the counter by
+            // 1 for the in-seq GapFill (MsgSeqNum = gap start); now jump it to
+            // NewSeqNo(36) to skip the filled span and exit AwaitingResend.
+            // Reset mode was handled before Guard 4. [S-023]
+            if (hdr.msg_type == "4") {  // GapFillFlag == "Y" (Reset handled before gate)
+                slow.k = inbound_slow_t::kind::gap_fill;
+                break;
+            }
+
+            // T046 (US4): inbound Logout in Active/LogonReceived state.
+            // Per data-model.md matrix:
+            //   Active row:        inbound Logout → emit Logout, → Disconnected.
+            //   LogonReceived row: inbound Logout → Disconnected ([FIX-SL §4.6]).
+            // T019: emit session_event_sequence_numbers_reset{by_peer_request=false}
+            //   when Active receives peer Logout (peer-initiated clean termination
+            //   implies seqnum context is being reset at next Logon). [spec FR-018]
+            if (hdr.msg_type == "5") {  // Logout (35=5)
+                slow.k = inbound_slow_t::kind::logout;
+                break;
+            }
+
+            // I-5: a well-formed inbound Reject(35=3) is logged and accepted; never
+            // re-rejected. A faulty Reject never reaches here: 092 contract C-2
+            // disposes of it above, and can Reject it.
+            if (hdr.msg_type == "3") {  // Reject (35=3)
+                // Active row: session-level log, no Reject-of-a-Reject (I-5).
+                // 029 T010 — PERSIST: check_inbound advanced next_inbound for the
+                // inbound Reject. No fromAdmin dispatch (I-5). Persist before return.
+                // [029 tasks T010; contracts C3.1; data-model §Persist matrix Reject site]
                 {
                     auto p_r = co_await persist_inbound_advance_();
                     if (!p_r) co_return std::unexpected(p_r.error());
                 }
-                // Remain in Active — liveness tick.
+                // Remain in current state.
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // T041 US3 / T042 retirement (US4): Active row — inbound
-            // TestRequest (35=1) → emit Heartbeat echoing TestReqID(112).
-            if (hdr.msg_type == "1") {  // TestRequest (35=1)
-                slow.k = inbound_slow_t::kind::test_request;
-                break;
-            }
-
-            // 013 FR-010/FR-011/FR-012 [FIX-SL §4.3.5] — inbound
-            // ResendRequest(2): reply by walking our outbound MessageStore.
-            //   - stored application message → replay it with PossDupFlag(43)=Y
-            //     + OrigSendingTime(122), keeping its ORIGINAL MsgSeqNum;
-            //   - absent (pre-/post-store-horizon, internal gap) OR admin
-            //     message → collapse the run into one SequenceReset-GapFill(4)
-            //     {GapFillFlag(123)=Y, NewSeqNo(36)=<next live seq>} (admin
-            //     replay forbidden, FR-011).
-            // Resend-reply messages reuse the replayed sequence numbers and
-            // are transmit-only — they do NOT advance the live outbound
-            // counter and are not re-stored.
-            if (hdr.msg_type == "2") {  // ResendRequest (35=2)
-                slow.k = inbound_slow_t::kind::resend_request;
-                break;
-            }
-
-            // ── Guard (5): message-type-for-state (T056 US5) ─────────────
-            // Session admin types silently passed-through in Active: 0/1/3/5
-            // (Heartbeat / TestRequest / Reject / Logout — handled above OR
-            // dispatched via the in-seq path). Any other MsgType in Active →
-            // session-level Reject(35=3) with SessionRejectReason and RefMsgType.
-            // Session stays Active. No-reject-loop: guard (type == "3" || type
-            // == "5") exempted above, for a well-formed frame (a faulty one is
-            // disposed of under 092 contract C-2 before any guard).
-            //
-            // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey
-            // 2026-05-23): "A" (dup-Logon) IS NOT in is_session_admin — per 005
-            // data-model row 22 + FR-017 "never silent no-op" it must emit a Reject.
-            // "2" (ResendRequest, 013 Phase 3 T015) and "4" (SequenceReset,
-            // S-023 — both GapFill + Reset arms) are now handled above —
-            // they no longer reach the Reject branch.
-            // The "A" (dup-Logon) cell stays Reject per 005's intentional
-            // defensive divergence from QuickFIX convention.
-            {
-                // 019 T006: use the shared classifier (single source of truth).
-                // "A" (dup-Logon-in-Active) is deliberately EXCLUDED from
-                // is_admin_msgtype — it falls through to Reject per 005
-                // data-model row 22 / FR-017.
-                //
-                // 019 T011: app-accept branch.
-                // When engine_.application is registered, a non-admin MsgType
-                // in Active is an application message → route to fromApp instead
-                // of emitting the default Reject(35=3). This SUPPRESSES the
-                // default Reject for known app types when an Application exists.
-                // FR-014 byte-identity preserved: when application==nullptr the
-                // existing Reject path is unchanged. (research D8)
-                if (!detail::is_admin_msgtype(hdr.msg_type)) {
-                    if (engine_.application == nullptr) {
-                        slow.k = inbound_slow_t::kind::unsupported;
+            // T041 (US3): in the Active state, handle liveness-specific message types
+            // (Heartbeat / TestRequest). Inbound liveness was refreshed at the top of
+            // this arm (093).
+            if (fsm_state_ == fsm_state::Active) {
+                // ── 019 T011: fromAdmin dispatch for admin-typed messages ────
+                // Called here (top of Active-only handling) for ALL admin MsgTypes
+                // that reach this point after FSM + seqnum validation.
+                // Note: Logout(35=5) and SequenceReset(35=4) return early ABOVE
+                // this block; they are NOT dispatched to fromAdmin in this slice
+                // (deferred to US3/US2 wiring). Heartbeat/TestRequest/ResendRequest/
+                // Reject are dispatched here.
+                // [research D3/D4; FR-004; INV-6]
+                if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
+                    // The session's parse buffer B(L): any admitted frame parses (093).
+                    // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
+                    // before returning, so onLogout in record_state_transition_ below
+                    // can acquire its own scope.
+                    auto cb_r =
+                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
+                            return engine_.application->fromAdmin(mv, sid);
+                        });
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (!cb_r || *cb_r == dispatch_outcome::parse_failed) {
+                        slow.k = inbound_slow_t::kind::from_admin_failed;
+                        slow.cb_r = cb_r;
                         break;
                     }
-                    // else: Application registered → falls through to fromApp dispatch below.
                 }
-            }
 
-            // ── 019 T011: fromApp dispatch for app-typed messages ─────────
-            // Reached ONLY when engine_.application != nullptr (guard above
-            // lets app messages fall through only if Application is registered).
-            // Admin messages are dispatched via fromAdmin at the top of the
-            // Active block and return early; they never reach here.
-            // FR-003; research D3/D4/D8; [const §VIII.5] (no heap: the parse buffer
-            // open() allocated, 093).
-            if (engine_.application != nullptr) {
-                // The session's parse buffer B(L): any admitted frame parses (093).
-                // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-                // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
-                auto cb_r = parse_and_dispatch_(
-                    frame, inbound_parse_buffer,
-                    [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
-                // 092 contract C-6: a late parse failure closes the session.
-                if (!cb_r || *cb_r == dispatch_outcome::parse_failed) {
-                    slow.k = inbound_slow_t::kind::from_app_failed;
-                    slow.cb_r = cb_r;
+                // T041 US3 / T018-D: Active row — inbound Heartbeat → liveness.
+                // If we had an outstanding TestRequest:
+                //   - inbound Heartbeat TestReqID matches ours → clear (TR answered)
+                //   - inbound Heartbeat TestReqID does NOT match ours → mismatch →
+                //     session_testreqid_mismatch(118) → Disconnected
+                //     [spec.md FR-006; data-model.md §E-1; T018-D]
+                // Inbound Heartbeat (35=0): per FIX a Heartbeat is NEVER answered
+                // (005 data-model.md's `Active` row → "advance counter (liveness)", no
+                // emit). If it carries a TestReqID matching our outstanding
+                // TestRequest it answers that TR (clear the pending flag); a
+                // mismatched TestReqID is session_testreqid_mismatch(118) →
+                // Disconnected (FR-006). No outbound frame is emitted in response —
+                // the retired "T020-A echo" emitted a Heartbeat here, which storms
+                // at RTT cadence when two fixpp sessions are paired (each echoes
+                // the other's beat). [self-paired heartbeat-storm fix]
+                if (hdr.msg_type == "0") {  // Heartbeat (35=0)
+                    if (!pending_test_req_id_.empty()) {
+                        // We have an outstanding TestRequest. Check echo.
+                        if (!hdr.test_req_id.empty() && hdr.test_req_id != pending_test_req_id_) {
+                            // TestReqID mismatch: peer sent a Heartbeat echoing a
+                            // different (or stale) TestReqID than our outstanding one.
+                            // session_testreqid_mismatch=118 → Disconnected.
+                            // [spec.md FR-006; T018-D]
+                            record_state_transition_(fsm_state::Disconnected);
+                            co_return fixpp::core::expected_t<void>{};
+                        }
+                        // Matching or empty TestReqID: TR answered, clear flag.
+                        pending_test_req_id_.clear();
+                        unanswered_tr_ = false;
+                    }
+                    // 029 T010 — PERSIST: inbound Heartbeat (35=0).
+                    // check_inbound advanced next_inbound; fromAdmin dispatched above.
+                    // [029 tasks T010; contracts C3.1; data-model §Persist matrix Heartbeat]
+                    {
+                        auto p_r = co_await persist_inbound_advance_();
+                        if (!p_r) co_return std::unexpected(p_r.error());
+                    }
+                    // Remain in Active — liveness tick.
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
+                // T041 US3 / T042 retirement (US4): Active row — inbound
+                // TestRequest (35=1) → emit Heartbeat echoing TestReqID(112).
+                if (hdr.msg_type == "1") {  // TestRequest (35=1)
+                    slow.k = inbound_slow_t::kind::test_request;
                     break;
                 }
+
+                // 013 FR-010/FR-011/FR-012 [FIX-SL §4.3.5] — inbound
+                // ResendRequest(2): reply by walking our outbound MessageStore.
+                //   - stored application message → replay it with PossDupFlag(43)=Y
+                //     + OrigSendingTime(122), keeping its ORIGINAL MsgSeqNum;
+                //   - absent (pre-/post-store-horizon, internal gap) OR admin
+                //     message → collapse the run into one SequenceReset-GapFill(4)
+                //     {GapFillFlag(123)=Y, NewSeqNo(36)=<next live seq>} (admin
+                //     replay forbidden, FR-011).
+                // Resend-reply messages reuse the replayed sequence numbers and
+                // are transmit-only — they do NOT advance the live outbound
+                // counter and are not re-stored.
+                if (hdr.msg_type == "2") {  // ResendRequest (35=2)
+                    slow.k = inbound_slow_t::kind::resend_request;
+                    break;
+                }
+
+                // ── Guard (5): message-type-for-state (T056 US5) ─────────────
+                // Session admin types silently passed-through in Active: 0/1/3/5
+                // (Heartbeat / TestRequest / Reject / Logout — handled above OR
+                // dispatched via the in-seq path). Any other MsgType in Active →
+                // session-level Reject(35=3) with SessionRejectReason and RefMsgType.
+                // Session stays Active. No-reject-loop: guard (type == "3" || type
+                // == "5") exempted above, for a well-formed frame (a faulty one is
+                // disposed of under 092 contract C-2 before any guard).
+                //
+                // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey
+                // 2026-05-23). claim-ok: the date names the survey
+                // "A" (dup-Logon) IS NOT in is_session_admin — per 005
+                // data-model row 22 + FR-017 "never silent no-op" it must emit a Reject.
+                // "2" (ResendRequest, 013 Phase 3 T015) and "4" (SequenceReset,
+                // S-023 — both GapFill + Reset arms) are now handled above —
+                // they no longer reach the Reject branch.
+                // The "A" (dup-Logon) cell stays Reject per 005's intentional
+                // defensive divergence from QuickFIX convention.
+                {
+                    // 019 T006: use the shared classifier (single source of truth).
+                    // "A" (dup-Logon-in-Active) is deliberately EXCLUDED from
+                    // is_admin_msgtype — it falls through to Reject per 005
+                    // data-model row 22 / FR-017.
+                    //
+                    // 019 T011: app-accept branch.
+                    // When engine_.application is registered, a non-admin MsgType
+                    // in Active is an application message → route to fromApp instead
+                    // of emitting the default Reject(35=3). This SUPPRESSES the
+                    // default Reject for known app types when an Application exists.
+                    // FR-014 byte-identity preserved: when application==nullptr the
+                    // existing Reject path is unchanged. (research D8)
+                    if (!detail::is_admin_msgtype(hdr.msg_type)) {
+                        if (engine_.application == nullptr) {
+                            slow.k = inbound_slow_t::kind::unsupported;
+                            break;
+                        }
+                        // else: Application registered → falls through to fromApp dispatch below.
+                    }
+                }
+
+                // ── 019 T011: fromApp dispatch for app-typed messages ─────────
+                // Reached ONLY when engine_.application != nullptr (guard above
+                // lets app messages fall through only if Application is registered).
+                // Admin messages are dispatched via fromAdmin at the top of the
+                // Active block and return early; they never reach here.
+                // FR-003; research D3/D4/D8; [const §VIII.5] (no heap: the parse buffer
+                // open() allocated, 093).
+                if (engine_.application != nullptr) {
+                    // The session's parse buffer B(L): any admitted frame parses (093).
+                    // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
+                    // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
+                    auto cb_r = parse_and_dispatch_(
+                        frame, inbound_parse_buffer,
+                        [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (!cb_r || *cb_r == dispatch_outcome::parse_failed) {
+                        slow.k = inbound_slow_t::kind::from_app_failed;
+                        slow.cb_r = cb_r;
+                        break;
+                    }
+                }
             }
-        }
 
-        // 029 T010 — PERSIST: in-sequence app message (and resend-fill PossDup in-seq).
-        // check_inbound advanced next_inbound; fromApp/fromAdmin dispatched above.
-        // This also covers resend-fill replayed in-seq app (PossDup arriving in-sequence)
-        // — those advance the counter like any in-seq message (C3.1 / New-2).
-        // [029 tasks T010; contracts C3.1; data-model §Persist matrix in-seq app + resend-fill]
-        {
-            auto p_r = co_await persist_inbound_advance_();
-            if (!p_r) co_return std::unexpected(p_r.error());
-        }
+            // 029 T010 — PERSIST: in-sequence app message (and resend-fill PossDup in-seq).
+            // check_inbound advanced next_inbound; fromApp/fromAdmin dispatched above.
+            // This also covers resend-fill replayed in-seq app (PossDup arriving in-sequence)
+            // — those advance the counter like any in-seq message (C3.1 / New-2).
+            // [029 tasks T010; contracts C3.1; data-model §Persist matrix in-seq app + resend-fill]
+            {
+                auto p_r = co_await persist_inbound_advance_();
+                if (!p_r) co_return std::unexpected(p_r.error());
+            }
 
-        // In-sequence: counter advanced. Remain in current state.
-        co_return fixpp::core::expected_t<void>{};
-    } while (false);
-    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_active_slow_(tic, frame, hdr, slow));
-    co_return r;
+            // In-sequence: counter advanced. Remain in current state.
+            co_return fixpp::core::expected_t<void>{};
+        } while (false);
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, on_inbound_active_slow_(tic, frame, hdr, slow));
+        co_return r;
+    } catch (const asio::system_error& e) {
+        caught_cancellation = e.code() == asio::error::operation_aborted;
+    } catch (...) {  // NOLINT(bugprone-empty-catch): noted as "not a cancellation" above
+    }
+    // D-CAN-3: the thread is left as the returned timing leaves it, with no cancellation
+    // recorded and asio's default filter, which is what a lock sequence leaves after a
+    // cancelled wait. This await is never pre-checked, so it cannot throw.
+    co_await asio::this_coro::reset_cancellation_state();
+    // D-CAN-5, the thrown timing: a superseded Logon arm records nothing; the close() or
+    // the Engine::stop() that superseded it ends the session.
+    const bool arm_superseded = superseded(*this, entry_state);
+    if (!arm_superseded && fsm_state_ != fsm_state::Disconnected) {
+        record_state_transition_(fsm_state::Disconnected);
+    }
+    if (caught_cancellation) {
+        if (arm_superseded) {
+            co_return fixpp::core::expected_t<void>{};
+        }
+        // D-CAN-4: the code the returned timing of a cancelled store call returns.
+        co_return std::unexpected(fixpp::core::error::store_cancelled);
+    }
+    // D-CAN-2: any other exception, superseded or not.
+    co_return std::unexpected(fixpp::core::error::dispatch_aborted);
 }
 
 // The sub-arm the Active arm's `slow` names. A non-coroutine: the Active arm's one

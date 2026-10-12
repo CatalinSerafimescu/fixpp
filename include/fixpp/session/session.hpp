@@ -284,6 +284,15 @@ public:
     // Engine feeds a verified inbound FIX frame (post-Framer/Parser, [2e]
     // inbound ordering). Returns the FSM-defined disposition.
     // PLACEHOLDER — body wired per US1/T024 (Phase 3).
+    //
+    // Ruling R-14 (`.specify/536-537-538-recovery-liveness.md` §9): awaiting the result
+    // throws nothing. An exception met while the frame is processed is caught at the
+    // inbound entry, the session is recorded Disconnected, and the result is
+    // store_cancelled for a cancellation (asio's operation_aborted) and dispatch_aborted
+    // for any other exception. A Logon arm that a close() or an Engine::stop() has
+    // superseded records nothing, and returns success for a cancellation. After a caught
+    // exception no cancellation is recorded on the caller's coroutine thread, and that
+    // thread's cancellation filter is asio's default.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> on_inbound_frame(
         std::span<const std::byte> frame) noexcept;
 
@@ -823,8 +832,9 @@ private:
     //   latch; set only after both reads + SeqnumManager::hydrate() succeed — D-9 /
     //   INV-H6 / C2.1). A transient read failure leaves it false so the next
     //   reconnect retries.
-    // hydrating_: re-entrancy guard for ensure_hydrated_(); cleared on failure so a
-    //   failed hydrate is not sticky (C2.1 / D-9).
+    // hydrating_: re-entrancy guard for ensure_hydrated_(); cleared on every exit of
+    //   that function, an exception among them, so a failed hydrate is not sticky
+    //   (C2.1 / D-9; `.specify/536-537-538-recovery-liveness.md` §9, D-CAN-1).
     // store_is_persistent_: captured ONCE at open() inside the if(cfg_.store_factory)
     //   branch from cfg_.store_factory->yields_persistent_store() (C2.2 / D-10).
     //   Null-store path leaves it false (default). When false, ensure_hydrated_()

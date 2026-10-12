@@ -225,7 +225,13 @@ enum class error : std::uint8_t {
                                      //   → FIXPP_ERR_STORE_CONSISTENCY
     store_cancelled = 65,            // Cancellation winning before a method's
                                      //   linearisation point per [2e §6.1.4]
-                                     //   (I-07).
+                                     //   (I-07). Also returned by
+                                     //   Session::on_inbound_frame for a
+                                     //   cancellation that ended a frame's
+                                     //   processing, whether or not the await
+                                     //   that met it was a store call
+                                     //   (.specify/536-537-538-recovery-liveness.md
+                                     //   §9, D-CAN-4).
                                      //   → FIXPP_ERR_CANCELLED (reused; joins
                                      //     dispatch_aborted /
                                      //     clock_sleeps_cancelled).
