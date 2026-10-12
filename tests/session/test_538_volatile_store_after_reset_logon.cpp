@@ -2,24 +2,24 @@
 //
 // tests/session/test_538_volatile_store_after_reset_logon.cpp
 //
-// fixpp#538 (batch B28) — reproduction only, no fix.
+// fixpp#538 (.specify/536-537-538-recovery-liveness.md §2.2, D-538-1; §5, the table
+// "#538", "The lifted cells" and "Guard, session level").
 //
-// Claim under test: on a volatile MemoryStore, after a Logon exchange in which
-// both sides carry ResetSeqNumFlag(141)=Y, the application messages the session
-// sends are not replayed when the peer asks for them with a ResendRequest; the
-// range is answered with a SequenceReset-GapFill instead.
+// After a Logon exchange in which both sides carry ResetSeqNumFlag(141)=Y, the
+// initiator's store is reset so that its first outbound number is 2. The application
+// messages the session then sends must be replayed when the peer asks for them with a
+// ResendRequest, on a volatile MemoryStore and on a FileStore.
 //
 // Expected behaviour: FIX Session Layer (Nov 2020 errata), §4.8.5 "Gap fill
 // process": "The peer responding to a ResendRequest(35=2) message shall
 // retransmit messages requested by the peer in message sequence number order,
 // with the original sequence numbers and PossDupFlag(43) set to "Y"." The same
 // section lets a sender choose not to retransmit an application message and
-// gap fill over it. The session exposes no such choice, and the control cell
-// requires the resend, so a GapFill over the two messages is a loss of the
-// frames, not a decision.
+// gap fill over it. The session exposes no such choice, so a GapFill over the
+// messages is a loss of the frames, not a decision.
 //
-// Shape (the issue's reproduction). The store is a bounded MemoryStore from
-// MemoryStoreFactory, except in the cells named FileStore_:
+// Shape. The store is a bounded MemoryStore from MemoryStoreFactory, except in
+// the cells named FileStore_:
 //   1. Logon exchange, both Logons at 34=1.
 //   2. Two Session::send calls, 35=D, transmitted at 34=2 and 34=3.
 //   3. Peer sends ResendRequest BeginSeqNo(7)=2 EndSeqNo(16)=0.
@@ -27,32 +27,33 @@
 //      and holds no SequenceReset.
 //
 // Session cells (suite StoreAfterResetLogon):
-//   ResetLogon_ResendReplays              claim. Initiator with reset_on_logon,
-//                                         so its Logon carries 141=Y; the
-//                                         peer's Logon carries 141=Y.
+//   ResetLogon_ResendReplays              the reset shape. Initiator with
+//                                         reset_on_logon, so its Logon carries
+//                                         141=Y; the peer's Logon carries 141=Y.
 //   NoResetLogon_ResendReplays            control. No 141=Y on either side.
-//   OwnResetOnly_ResendReplays            characterisation. reset_on_logon, but
-//                                         the peer's Logon carries no 141=Y, so
-//                                         the reset before the Logon runs and
-//                                         the 141=Y reset unit does not.
-//   Acceptor_PeerResetLogon_ResendReplays characterisation. Acceptor answering
-//                                         a Logon that carries 141=Y.
-//   ResetLogon_StoreHoldsBothSends        attribution. The claim's shape up to
+//   OwnResetOnly_ResendReplays            control. reset_on_logon, but the peer's
+//                                         Logon carries no 141=Y, so the reset
+//                                         before the Logon runs and the 141=Y
+//                                         reset unit does not.
+//   Acceptor_PeerResetLogon_ResendReplays control. Acceptor answering a Logon
+//                                         that carries 141=Y.
+//   ResetLogon_StoreHoldsBothSends        attribution. The reset shape up to
 //                                         step 2, then the session's store is
 //                                         read directly.
 //   NoResetLogon_StoreHoldsBothSends      its control.
-//   FileStore_ResetLogon_ResendReplays    characterisation. The claim's shape on
-//                                         a persistent FileStore, to find out
-//                                         whether the claim is confined to the
-//                                         volatile store.
+//   FileStore_ResetLogon_ResendReplays    the reset shape on a FileStore.
 //   FileStore_NoResetLogon_ResendReplays  its control.
 //   FileStore_ResetLogon_StoreHoldsBothSends
 //                                         the attribution cell on a FileStore.
-// A FileStore cell that fails as the claim cell does means the claim is not
-// confined to the volatile store.
+//   Guard_ResetLogon_ResendRequestBeforeAnySend_OneGapFill, and the same named
+//   FileStore_                            the empty direction: step 1, then a
+//                                         ResendRequest 7=1 16=0 with nothing
+//                                         sent. The walk asks the store for
+//                                         number 1 of a direction that holds no
+//                                         frame; the answer is one GapFill.
 //
 // Store cells, no session (suite MemoryStoreAfterResetTo). They replay on a
-// bare MemoryStore the calls the initiator makes on its store in the claim's
+// bare MemoryStore the calls the initiator makes on its store in the reset
 // shape. Re-derive that sequence by reading, in src/session/session.cpp,
 // emit_initiator_logon_ (reset_seqnums_to_one_durable, then store_then_emit of
 // the Logon), the peer_ack_sent_reset_flag arm of the LogonSent handler (the
@@ -63,16 +64,16 @@
 //                        from 1, so the only difference is the sequence number
 //                        of the first frame retained after the reset.
 //
-// The attribution and store cells separate two candidate mechanisms:
+// The attribution and store cells tell two failures apart:
 //   (i)  the store's outbound counter is left behind the session's, so every
 //        store() is refused as out of order, and a volatile store's refusal is
-//        not surfaced. Prediction: store() fails; the store's NextNumOut stays
+//        not surfaced. Then store() fails, and the store's NextNumOut stays
 //        below the session's.
 //   (ii) store() succeeds, but the store cannot find a frame it holds when the
-//        first frame retained after the reset is not number 1. Prediction:
-//        store() succeeds; the store's NextNumOut equals the session's;
-//        retrieve reports a gap.
-// Each assertion below names the mechanism its failure selects.
+//        first frame retained after the reset is not number 1. Then store()
+//        succeeds, the store's NextNumOut equals the session's, and retrieve
+//        reports a gap.
+// Each assertion below names the failure it selects.
 //
 // mock_clock: nothing here depends on elapsed time. HeartBtInt is long so the
 // liveness loop stays parked for the whole cell.
@@ -376,11 +377,9 @@ protected:
         return run_sync(s.on_inbound_frame(std::span<const std::byte>{f}), "VolatileStore::feed");
     }
 
-    // Steps 1 and 2. On return `sent_a` and `sent_b` are the two application
-    // frames as transmitted. Every ASSERT here is a setup precondition: a
-    // failure means the cell did not drive the shape, not a verdict.
-    void establish_and_send_two(Session& s, Capture& cap, const LogonShape& shape,
-                                std::string& sent_a, std::string& sent_b) {
+    // Step 1. Every ASSERT here and in establish_and_send_two is a setup
+    // precondition: a failure means the cell did not drive the shape, not a verdict.
+    void establish(Session& s, Capture& cap, const LogonShape& shape) {
         ASSERT_TRUE(run_sync(s.open(), "VolatileStore::open").has_value()) << "setup: open()";
         (void)feed(s, make_frame("A", 1,
                                  shape.peer_logon_has_141 ? "98=0\x01"
@@ -403,8 +402,15 @@ protected:
         auto& mgr = session_test_access::seqnum_mgr(s);
         ASSERT_EQ(mgr.next_outbound_unsafe(), 2U) << "setup: NextNumOut after the Logon exchange";
         ASSERT_EQ(mgr.next_inbound_unsafe(), 2U) << "setup: NextNumIn after the Logon exchange";
-
         cap.frames.clear();
+    }
+
+    // Steps 1 and 2. On return `sent_a` and `sent_b` are the two application
+    // frames as transmitted.
+    void establish_and_send_two(Session& s, Capture& cap, const LogonShape& shape,
+                                std::string& sent_a, std::string& sent_b) {
+        ASSERT_NO_FATAL_FAILURE(establish(s, cap, shape));
+        auto& mgr = session_test_access::seqnum_mgr(s);
         const auto a = bytes_of(kPayloadA);
         const auto b = bytes_of(kPayloadB);
         ASSERT_TRUE(run_sync(s.send(a), "VolatileStore::send_a").has_value()) << "setup: send A";
@@ -466,6 +472,41 @@ protected:
             got.text();
         std::printf("#538 observation (session store): %s\n", context.c_str());
         expect_holds_two_and_three(got, sent_a, sent_b, context);
+    }
+
+    // The empty direction at session level: the 141=Y exchange, then the peer's
+    // ResendRequest 7=1 16=0 before the session has sent anything. The store's outbound
+    // direction holds no frame and its counter is 2, so the walk asks for number 1.
+    void run_resend_before_any_send_cell(StoreKind store) {
+        const LogonShape shape{.role = session_role::initiator,
+                               .own_reset_on_logon = true,
+                               .peer_logon_has_141 = true,
+                               .store = store};
+        Capture cap;
+        auto cfg = make_cfg(cap, shape);
+        Session s{engine, cfg};
+        ASSERT_NO_FATAL_FAILURE(establish(s, cap, shape));
+        MessageStore* store_ptr = session_test_access::store(s);
+        ASSERT_NE(store_ptr, nullptr) << "setup: the session must hold a store";
+        const auto next_out =
+            run_sync(store_ptr->next_seqnum(direction_t::outbound, false), "VolatileStore::next");
+        ASSERT_TRUE(next_out.has_value() && *next_out == 2U)
+            << "setup: the store's NextNumOut after the 141=Y exchange: " << describe(next_out);
+
+        const auto rr_r = feed(s, make_frame("2", 2,
+                                             "7=1\x01"
+                                             "16=0\x01"));
+        const std::string context =
+            "Frames sent in answer to ResendRequest 7=1 16=0, in order: " + describe(cap.frames) +
+            "; on_inbound_frame: " + describe(rr_r) + ".";
+
+        EXPECT_TRUE(rr_r.has_value()) << context;
+        ASSERT_EQ(cap.frames.size(), 1U) << "the answer must be one frame. " << context;
+        EXPECT_EQ(field(cap.frames[0], 35), "4") << context;
+        EXPECT_EQ(field(cap.frames[0], 123), "Y") << "the frame must be a GapFill. " << context;
+        EXPECT_EQ(field(cap.frames[0], 34), "1") << context;
+        EXPECT_EQ(field(cap.frames[0], 36), "2") << context;
+        EXPECT_EQ(s.state(), fsm_state::Active) << context;
     }
 };
 
@@ -579,6 +620,14 @@ TEST_F(StoreAfterResetLogon, FileStore_ResetLogon_StoreHoldsBothSends) {
                     .own_reset_on_logon = true,
                     .peer_logon_has_141 = true,
                     .store = StoreKind::file});
+}
+
+TEST_F(StoreAfterResetLogon, Guard_ResetLogon_ResendRequestBeforeAnySend_OneGapFill) {
+    run_resend_before_any_send_cell(StoreKind::memory);
+}
+
+TEST_F(StoreAfterResetLogon, Guard_FileStore_ResetLogon_ResendRequestBeforeAnySend_OneGapFill) {
+    run_resend_before_any_send_cell(StoreKind::file);
 }
 
 TEST_F(MemoryStoreAfterResetTo, FirstRetainedIsTwo) { run_unit_cell(2); }

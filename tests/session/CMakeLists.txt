@@ -625,9 +625,17 @@ target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 add_threading_test(session_536_shared_clock_liveness test_536_shared_clock_liveness.cpp)
 # fixpp#537 (B28) — reproduction: a second non-PossDup too-high frame while awaiting a replay.
 add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
-# fixpp#538 (B28) — reproduction: the resend answer after a 141=Y Logon exchange (MemoryStore and FileStore).
+# fixpp#538 (B28), D-538-1 — the resend answer after a 141=Y Logon exchange (MemoryStore and FileStore).
 add_threading_test(session_538_volatile_store_after_reset_logon
   test_538_volatile_store_after_reset_logon.cpp)
+set_tests_properties(session_538_volatile_store_after_reset_logon PROPERTIES LABELS "session;538")
+# fixpp#538 (B28), D-538-1 and D-538-2 — the stores' lookup after a reset, on a bare store.
+# Standalone, not a grouped bucket ([const §VII.8]): genuine concurrency. Its FileStore
+# arms construct a file I/O thread pool, which the bucket session_store_tests excludes by
+# its own comment.
+add_threading_test(session_538_store_lookup_after_reset
+  test_538_store_lookup_after_reset.cpp)
+set_tests_properties(session_538_store_lookup_after_reset PROPERTIES LABELS "session;538")
 
 # ── fixpp#537 (B28), D-537-7 — frames the session cannot build ─────────────────────
 # Standalone, not a grouped bucket ([const §VII.8]): its cells open Sessions and drive
@@ -664,11 +672,25 @@ target_compile_definitions(session_inbound_cancellation PRIVATE FIXPP_ALLOW_MOCK
 add_executable(session_inbound_cancellation_engine
   test_inbound_cancellation_engine.cpp
 )
+# fixpp#538 (B28), D-538-4 — a store read failure in a resend answer. Standalone
+# ([const §VII.8]), and neither is the class the clause groups:
+# session_538_resend_answer_store_failure opens Sessions and drives their coroutines and
+# timers on an io_context with a mock clock; session_538_resend_answer_store_failure_engine
+# runs an Engine with timers and coroutines over loopback TCP. They share this block for
+# its link line (plain_engine_rig.hpp); neither reads FIXPP_TEST_HOOKS.
+add_executable(session_538_resend_answer_store_failure
+  test_538_resend_answer_store_failure.cpp
+)
+add_executable(session_538_resend_answer_store_failure_engine
+  test_538_resend_answer_store_failure_engine.cpp
+)
 foreach(held_store_test
     session_538_cancelled_read_measured_path
     session_cancelled_outbound_store_measurement
     session_inbound_cancellation
-    session_inbound_cancellation_engine)
+    session_inbound_cancellation_engine
+    session_538_resend_answer_store_failure
+    session_538_resend_answer_store_failure_engine)
   target_link_libraries(${held_store_test} PRIVATE
     fixpp_session
     fixpp_transport

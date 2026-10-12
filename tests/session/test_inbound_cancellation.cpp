@@ -238,6 +238,166 @@ TEST(InboundCancellation, WalkReadThrowsAnotherException_EndsTheSessionAndReturn
     EXPECT_EQ(o.state_after_call, fsm_state::Disconnected) << "the state after the call";
 }
 
+// ── D-CAN-3, the calling thread after the call, both timings ─────────────────────────
+
+bool is_walk_tail_read(StoreCall const& call) {
+    return call.op == store_op::next_seqnum && call.dir == direction_t::outbound && !call.increment;
+}
+
+// What the returned timing of a cancelled read of the walk recorded, beyond the scene's
+// own outcome.
+struct LockedWalkOutcome {
+    SceneOutcome o;
+    bool hold_entered = false;
+    bool queued = false;  // the walk's read was waiting at the store's lock at the emit
+    std::size_t cancel_mark = 0;
+    std::size_t release_mark = 0;
+    // The arm went on to its inbound persist after the walk: a store call it makes only
+    // when the walk returned no error.
+    bool inbound_persist_called = false;
+
+    // The window: the read returned store_cancelled between the emit and the release.
+    // Nothing but the cell's cancellation can end a wait at the lock in that interval.
+    [[nodiscard]] bool exercised() const {
+        return hold_entered && queued && o.gate && o.call.completed && !o.hold_timed_out &&
+               o.store_call.has_value() && o.store_call->returned() &&
+               o.store_call->returned_at > cancel_mark &&
+               o.store_call->returned_at < release_mark &&
+               o.store_call->error == error::store_cancelled;
+    }
+    [[nodiscard]] std::string text() const {
+        return "hold_entered=" + std::to_string(hold_entered) +
+               " read_queued=" + std::to_string(queued) +
+               " read_returned_before_the_release=" + std::to_string(o.gate) +
+               " call_completed=" + std::to_string(o.call.completed) +
+               " hold_timed_out=" + std::to_string(o.hold_timed_out) +
+               " the read: " + record_text(o.store_call);
+    }
+};
+
+// The returned timing: the same ResendRequest as run_walk's, handed over while one
+// Engine::send is held inside its store(), so the walk's first store read queues at the
+// FileStore's lock. The cell's cancellation is emitted while it waits there; the store
+// returns store_cancelled from its lock.
+LockedWalkOutcome run_walk_read_cancelled_at_the_lock() {
+    LockedWalkOutcome w;
+    auto& o = w.o;
+    HeldFileStoreScene scene;
+    auto& rig = scene.rig;
+    auto const app = std::make_shared<plain_rig::CountingApp>();
+    rig.app = app;
+    asio::cancellation_signal cancel;
+    [&] {
+        if (!scene.setup(kAppMessages)) return;
+        auto session = rig.session();
+        if (!session) {
+            scene.setup_miss = "the session is not published";
+            return;
+        }
+        // The hold: one Engine::send, caught inside its store()'s offload.
+        store_hold::arm();
+        auto held_fut = scene.send_app();
+        if (!rig.run_until([] { return store_hold::holding(); })) {
+            scene.setup_miss = "the offload hook did not enter its hold";
+            return;
+        }
+        w.hold_entered = true;
+        auto const mark = scene.log->mark();
+        auto read = [&] { return scene.log->first_after(mark, is_walk_tail_read); };
+        auto const rx_mark = rig.peer.received.size();
+        auto const bytes =
+            plain_rig::to_bytes(rig.msg("2", 2,
+                                        "7=" + std::to_string(scene.first) + "\x01" +
+                                            "16=" + std::to_string(scene.last) + "\x01"));
+        auto fut = hand_over(*session, bytes, *app, cancel, o);
+        // The gate, with no sleep: the read's body has started; the handlers that are
+        // ready then run until none is, which takes the call to the store's lock, where
+        // it queues behind the held store().
+        if (rig.run_until([&] { return read() != nullptr && read()->entered(); })) {
+            rig.ioc.poll();
+            rig.ioc.restart();
+            w.queued = !read()->returned() && store_hold::holding();
+        }
+        if (w.queued) {
+            w.cancel_mark = scene.log->mark();
+            cancel.emit(asio::cancellation_type::total);
+            // The bound: the hold is released only below, so nothing but the cell's
+            // cancellation can end the read's wait before then.
+            o.gate = rig.run_until([&] { return read()->returned(); });
+            o.store_call = *read();
+        }
+        // What the session wrote for the request reaches the peer while the hold is
+        // still in flight, so the held message is not among it.
+        rig.settle();
+        o.peer_frames = scene.peer_frames_from(rx_mark);
+        w.release_mark = scene.log->mark();
+        store_hold::release();
+        (void)rig.run_until([&] { return HeldFileStoreScene::ready(held_fut); });
+        (void)rig.run_until([&] { return HeldFileStoreScene::ready(fut); });
+        w.inbound_persist_called = scene.log->first_after(mark, [](StoreCall const& call) {
+            return call.op == store_op::next_seqnum && call.dir == direction_t::inbound &&
+                   call.increment;
+        }) != nullptr;
+        session.reset();
+    }();
+    scene.finish();
+    o.setup_miss = scene.setup_miss;
+    o.hold_timed_out = store_hold::timed_out();
+    o.stop_completed = scene.stop_completed;
+    return w;
+}
+
+// The returned twin of WalkReadCancelledBeforeItsAwait_…: the store reports the
+// cancelled read as store_cancelled, the walk returns that code unchanged (D-538-4,
+// ruling R-13), and the session ends at the arm.
+TEST(InboundCancellation, WalkReadCancelledAtTheStoresLock_EndsTheSessionAndReturnsStoreCancelled) {
+    auto const w = run_walk_read_cancelled_at_the_lock();
+    auto const& o = w.o;
+    ASSERT_TRUE(o.setup_miss.empty()) << o.setup_miss;
+    ASSERT_TRUE(o.stop_completed);
+    ASSERT_TRUE(w.exercised()) << "the path was not exercised: " << w.text();
+
+    EXPECT_TRUE(o.call.returned_error(error::store_cancelled))
+        << "on_inbound_frame " << o.call.call_text();
+    EXPECT_EQ(o.state_after_call, fsm_state::Disconnected) << "the state after the call";
+    EXPECT_EQ(o.logouts_after_call, 1) << "onLogout calls after the call";
+    EXPECT_TRUE(o.peer_frames.empty())
+        << "the peer read a frame after the ResendRequest whose read was cancelled:\n"
+        << store_hold::printable(o.peer_frames);
+    EXPECT_FALSE(w.inbound_persist_called)
+        << "the arm went on to its inbound persist after the walk's read was cancelled";
+}
+
+// The pair: one cancellation of a read of the walk, on its two timings. The readings a
+// caller of on_inbound_frame can take must not tell the timings apart.
+TEST(InboundCancellation, WalkReadCancelled_BothTimingsLeaveTheSameReadings) {
+    auto const thrown = run_walk(WalkInput::cancel_at_the_read);
+    ASSERT_TRUE(thrown.setup_miss.empty()) << thrown.setup_miss;
+    ASSERT_TRUE(thrown.stop_completed);
+    ASSERT_TRUE(thrown.gate && thrown.call.completed && thrown.store_call.has_value() &&
+                !thrown.store_call->entered())
+        << "the path was not exercised, thrown timing: the read: "
+        << record_text(thrown.store_call);
+    auto const w = run_walk_read_cancelled_at_the_lock();
+    auto const& returned = w.o;
+    ASSERT_TRUE(returned.setup_miss.empty()) << returned.setup_miss;
+    ASSERT_TRUE(returned.stop_completed);
+    ASSERT_TRUE(w.exercised()) << "the path was not exercised, returned timing: " << w.text();
+
+    // fixpp#583 questions what a lock sequence leaves on its caller's thread, which is
+    // where the returned timing gets the last two readings. Each reading below compares
+    // the two timings and names no absolute state: a change on one side alone fails it,
+    // and D-CAN-3's reset must then change with it.
+    EXPECT_EQ(thrown.call.call_text(), returned.call.call_text()) << "what the call returned";
+    EXPECT_EQ(thrown.state_after_call, returned.state_after_call) << "the state after the call";
+    EXPECT_EQ(thrown.logouts_after_call, returned.logouts_after_call)
+        << "onLogout calls after the call";
+    EXPECT_EQ(thrown.call.cancellation_recorded, returned.call.cancellation_recorded)
+        << "whether a cancellation is recorded on the calling thread after the call";
+    EXPECT_EQ(thrown.call.next_await_threw, returned.call.next_await_threw)
+        << "whether the caller's next co_await of an asio operation threw";
+}
+
 // ── D-CAN-4, the inbound persist of an in-sequence Heartbeat ─────────────────────────
 
 bool is_inbound_persist(StoreCall const& call) {

@@ -22,6 +22,13 @@
 // it: throw, return a code, or wait until the cell releases it (StoreCallLog, "What the
 // body does for one chosen call"). The call is recorded as entered in each case.
 //
+// StoreCallLog::reset_to_default_body makes the wrapper a store that does not override
+// reset_to: MessageStore's default body runs, and the inner store sees a reset() and
+// counter advances in place of its own reset_to.
+//
+// SeededMemoryStoreFactory is an inner factory for a store that already holds outbound
+// frames when its session opens.
+//
 // Threading: the log is written on the session's serialisation domain and read by the
 // test. It is for a session whose executor runs on the test's own thread
 // (tests/session/plain_engine_rig.hpp); it takes no lock.
@@ -29,6 +36,9 @@
 
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -39,6 +49,7 @@
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
+#include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
@@ -49,6 +60,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -138,6 +150,13 @@ public:
     [[nodiscard]] bool holding() const noexcept { return holding_; }
     [[nodiscard]] bool hold_timed_out() const noexcept { return hold_timed_out_; }
     void release_hold() noexcept { hold_released_ = true; }
+
+    // When set, the wrapper answers reset_to() with MessageStore's default body, as a
+    // store that does not override it: this wrapper's own reset(), then its
+    // next_seqnum(dir, true) for each target that is 2. Those calls are recorded and
+    // forwarded; no reset_to reaches the inner store, and none is recorded.
+    // HookedStore's reset_to_mode::default_body is the precedent.
+    bool reset_to_default_body = false;
 
     int stores_made = 0;
     // The wrapper the factory made last, for a cell that reads the store itself. Null
@@ -249,6 +268,9 @@ public:
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset_to(
         fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out) noexcept override {
+        if (log_->reset_to_default_body) {
+            return fixpp::session::MessageStore::reset_to(next_in, next_out);
+        }
         return reset_to_body(
             log_->call({.op = store_op::reset_to, .first = next_in, .second = next_out}), next_in,
             next_out);
@@ -378,6 +400,54 @@ public:
 
 private:
     std::shared_ptr<fixpp::session::MessageStoreFactory> inner_factory_;
+};
+
+// An inner factory for RecordingStoreFactory: the one store it makes is an unbounded
+// MemoryStore that already holds `frames` outbound, stored in order from sequence
+// number 1. It reports its store as persistent, so the session reads its sequence
+// numbers from the store when it opens or logs on, and its next outbound number is the
+// one after the last frame. A second make() fails: the frames went into the first store.
+class SeededMemoryStoreFactory final : public fixpp::session::MessageStoreFactory {
+public:
+    explicit SeededMemoryStoreFactory(std::vector<std::string> frames)
+        : frames_(std::move(frames)) {}
+
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>> make(
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
+        std::size_t /*max_store_memory_bytes*/,
+        asio::any_io_executor /*file_io_executor*/) noexcept override {
+        if (made_) return std::unexpected(fixpp::core::error::store_factory_failed);
+        made_ = true;
+        auto store =
+            std::make_unique<fixpp::session::MemoryStore>(fixpp::session::MemoryStore::Config{
+                .policy = fixpp::session::capacity_policy::unbounded});
+        bool stored = true;
+        // The seeding runs on an io_context of its own, to completion, before the
+        // session's executor ever sees the store.
+        asio::io_context seed;
+        asio::co_spawn(
+            seed,
+            [&]() -> asio::awaitable<void> {
+                fixpp::session::seqnum_t seq = 0;
+                for (auto const& text : frames_) {
+                    auto const* const data = reinterpret_cast<std::byte const*>(text.data());
+                    auto r =
+                        co_await store->store(++seq, std::span<const std::byte>{data, text.size()},
+                                              fixpp::session::direction_t::outbound);
+                    stored = stored && r.has_value();
+                }
+            },
+            asio::detached);
+        seed.run();
+        if (!stored) return std::unexpected(fixpp::core::error::store_factory_failed);
+        return fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>>{
+            std::move(store)};
+    }
+
+private:
+    std::vector<std::string> frames_;
+    bool made_ = false;
 };
 
 }  // namespace fixpp::test_support
