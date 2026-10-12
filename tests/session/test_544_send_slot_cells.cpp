@@ -345,29 +345,15 @@ TEST(B35SendSlot, Interleaved_EachSendStoresAndTransmitsItsOwnFrame) {
         << "the second transmitted frame is not the second send's";
 }
 
-// True in a build without NDEBUG. Read from a volatile so that no compiler folds the skip
-// below: folded either way, one branch is unreachable code, which MSVC reports as C4702
-// under /W4 (the precedent is tests/support/msvc_debug_arena_skip.hpp).
-bool asserts_enabled() noexcept {
-#ifndef NDEBUG
-    static volatile bool on = true;
-#else
-    static volatile bool on = false;
-#endif
-    return on;
-}
-
+// A send started inside the first send's toApp. It starts after that toApp has returned
+// (`.specify/563-564-callback-send.md` §2.1), while the outer send is suspended in its
+// store call and still holds the frame slot.
 TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
-    // The nested send's own toApp enters callback_dispatch_scope while the outer toApp's is
-    // live, and that scope asserts no nested callback entry in builds without NDEBUG. That
-    // assert is fixpp#564; this cell runs where NDEBUG is defined until #564 is resolved.
-    if (asserts_enabled()) {
-        GTEST_SKIP() << "fixpp#564: a send nested in toApp trips callback_dispatch_scope's "
-                        "assert without NDEBUG";
-    }
     SlotFixture f;
     Session sess(f.engine, f.cfg());
     ASSERT_TRUE(f.open_to_active(sess));
+    const seqnum_t seq0 = next_outbound(sess);
+    const std::size_t wire_before = f.wire.size();
     const auto one = bytes_of(kPayloadOne);
     const auto two = bytes_of(kPayloadTwo);
     const auto ex = sess.executor().underlying();
@@ -375,17 +361,24 @@ TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
     SendOutcome outer;
     SendOutcome inner;
     std::string snapshot;
-    std::string after;
     std::string inner_view;
-    bool inner_ran_inline = false;
+    const std::byte* outer_data = nullptr;
+    const std::byte* inner_data = nullptr;
+    bool outer_to_app_live = false;
+    bool inner_ran_inside_outer = false;
+    bool outer_pending_at_inner = false;
     f.app->on_to_app = [&](const MessageView<access_mode::Index>& mv) {
         if (f.app->to_app_calls == 1) {
+            outer_to_app_live = true;
             snapshot = text_of(mv.bytes());
+            outer_data = mv.bytes().data();
             asio::co_spawn(ex, sess.send(two), record_into(inner));
-            inner_ran_inline = !inner_view.empty();
-            after = text_of(mv.bytes());
+            outer_to_app_live = false;
         } else if (f.app->to_app_calls == 2) {
+            inner_ran_inside_outer = outer_to_app_live;
+            outer_pending_at_inner = !outer.done;
             inner_view = text_of(mv.bytes());
+            inner_data = mv.bytes().data();
         }
     };
     asio::co_spawn(ex, sess.send(one), record_into(outer));
@@ -396,13 +389,28 @@ TEST(B35SendSlot, Nested_ASendInsideToAppLeavesTheOuterFrameIntact) {
     }
     ASSERT_TRUE(done) << "a send did not complete";
 
-    // Positive controls: the nested send ran inline, inside the outer toApp, over a frame
-    // different from the outer one.
-    ASSERT_TRUE(inner_ran_inline) << "the nested send did not reach its toApp inline";
+    // Order: the second send's toApp runs after the outer toApp returned.
+    ASSERT_EQ(f.app->to_app_calls, 2) << "the second send did not reach its toApp";
+    EXPECT_FALSE(inner_ran_inside_outer)
+        << "the second send's toApp ran while the outer toApp was on the stack";
+
+    // Positive controls: the second send started while the outer one was in flight, and
+    // built a different frame in another buffer.
+    EXPECT_TRUE(outer_pending_at_inner)
+        << "the outer send had completed before the second send reached its toApp";
     ASSERT_FALSE(snapshot.empty());
-    EXPECT_NE(inner_view, snapshot) << "the nested send's frame equals the outer frame";
+    EXPECT_NE(inner_view, snapshot) << "the second send's frame equals the outer frame";
     EXPECT_NE(inner_view.find("11=SLOT-TWO-LONGER\x01"), std::string::npos);
-    EXPECT_EQ(after, snapshot) << "the nested send changed the bytes the outer toApp's view spans";
+    EXPECT_NE(inner_data, outer_data) << "the second send built into the outer send's buffer";
+
+    // Bytes: what the outer toApp's view spanned is what was stored and transmitted for
+    // the outer frame.
+    const auto st = f.stored(sess, seq0, seq0);
+    ASSERT_EQ(st.size(), 1U) << "the store does not hold the outer frame";
+    EXPECT_EQ(st.at(seq0), snapshot) << "the outer send stored bytes its toApp did not see";
+    ASSERT_GT(f.wire.size(), wire_before) << "nothing was transmitted";
+    EXPECT_EQ(f.wire[wire_before], snapshot)
+        << "the first transmitted frame is not the frame the outer toApp saw";
 }
 
 // Cancellation emitted from inside toApp, on a chain that accepts terminal cancellation. The

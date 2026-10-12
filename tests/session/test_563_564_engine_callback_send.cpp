@@ -21,6 +21,16 @@
 //   EngineSendFromToAppOnSessionExecutor
 //                             the same, spawned on the executor the initiator
 //                             session reports (Engine::lookup, then executor()).
+//   DeferredEngineSendCancelled_Terminal, DeferredEngineSendCancelled_Total
+//                             EngineSendFromToAppOnSessionExecutor with the
+//                             co_spawn's completion token bound to a
+//                             cancellation slot the cell owns; toApp emits on
+//                             that slot before it returns, while the send waits
+//                             to start. Terminal: the send returns
+//                             dispatch_aborted, B reaches no toApp and takes no
+//                             MsgSeqNum, and the initiator stays Active. Total:
+//                             the chain's filter drops the emission and the
+//                             send completes; a control for the first.
 //   EngineSendFromFromApp     the acceptor's fromApp for A starts
 //                             engine.send(REPLY) on the acceptor, spawned on
 //                             the io_context's executor.
@@ -46,11 +56,15 @@
 //              was still on the stack;
 //   deferred   it ran only after that callback had returned;
 //   never ran  it did not run within the cell's bound.
-// "never ran" fails a cell. The two cells that start the send in fromApp
-// (EngineSendFromFromApp, EngineSendFromFromAppOnSessionExecutor) require
-// "nested", on a build with asserts too: fromApp is not an outbound callback, so
-// the send's toApp may run inside it. In the other cells "deferred" does not
-// fail. The sequence-number assertions run for either of the first two.
+// "never ran" fails a cell, except the one whose send is cancelled before it
+// starts. The two cells that start the send in fromApp (EngineSendFromFromApp,
+// EngineSendFromFromAppOnSessionExecutor) require "nested", on a build with
+// asserts too: fromApp is not an outbound callback, so the send's toApp may run
+// inside it. The two that start it in toApp (EngineSendFromToApp,
+// EngineSendFromToAppOnSessionExecutor) require "deferred": toApp is an
+// outbound callback, so the send starts after it returned
+// (`.specify/563-564-callback-send.md` §2.1), and B is stamped and delivered
+// after A.
 //
 // What a cell asserts, per session that sent: every frame toApp saw carries its
 // own MsgSeqNum(34), the values are consecutive from 2 (each session's Logon
@@ -102,6 +116,9 @@
 #include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
@@ -420,6 +437,13 @@ struct Readings {
     SendOutcome first;
     SendOutcome second;
     std::string after_spawn = "not recorded";  // read in the callback, after co_spawn returned
+    // The cells that emit a cancellation, read in the callback between the co_spawn's
+    // return and the emission: the co_spawn installed a handler in the cell's slot, the
+    // second send had not completed, and its message had reached no toApp.
+    bool emitted = false;
+    bool slot_has_a_handler = false;
+    bool second_pending_at_emission = false;
+    bool second_to_app_ran_before_emission = false;
     std::vector<ToAppRecord> to_app;
     std::vector<FromAppRecord> from_app;
     std::vector<AdminRecord> admin;
@@ -482,7 +506,11 @@ std::string context(const Readings& o, Shape shape) {
 }
 
 // Runs one cell to a stopped engine and returns what it saw. Non-fatal only.
-Readings run_cell(Shape shape, SpawnOn spawn_on) {
+// With `emit`, the second send's co_spawn is bound to a cancellation slot of this
+// function, and the callback that started it emits `*emit` on that slot before it
+// returns.
+Readings run_cell(Shape shape, SpawnOn spawn_on,
+                  std::optional<asio::cancellation_type> emit = std::nullopt) {
     Readings o;
     const char* fd = get_fixture_dir();
     if (!fd || fd[0] == '\0') {
@@ -616,14 +644,25 @@ Readings run_cell(Shape shape, SpawnOn spawn_on) {
     };
 
     bool in_callback = false;
+    asio::cancellation_signal cancel;
     // Starts the second send from inside the calling callback: no post, the
     // co_spawn is issued synchronously in the callback's body.
     const auto start_second = [&](const char* from) {
         o.started_second = true;
         in_callback = true;
         std::fprintf(stderr, "[ B41 ] %s: starting engine.send for the second message\n", from);
-        asio::co_spawn(exec, engine.send(second_id, std::span<const std::byte>(second_payload)),
-                       record_into(o.second));
+        if (emit) {
+            asio::co_spawn(exec, engine.send(second_id, std::span<const std::byte>(second_payload)),
+                           asio::bind_cancellation_slot(cancel.slot(), record_into(o.second)));
+            o.slot_has_a_handler = cancel.slot().has_handler();
+            o.second_pending_at_emission = !o.second.done;
+            o.second_to_app_ran_before_emission = to_app_of(o, kIdB) != nullptr;
+            cancel.emit(*emit);
+            o.emitted = true;
+        } else {
+            asio::co_spawn(exec, engine.send(second_id, std::span<const std::byte>(second_payload)),
+                           record_into(o.second));
+        }
         std::fprintf(stderr, "[ B41 ] %s: co_spawn returned\n", from);
         in_callback = false;
         o.after_spawn = next_out(starter) +
@@ -684,8 +723,9 @@ Readings run_cell(Shape shape, SpawnOn spawn_on) {
         "EngineCallbackSend/snapshots");
 
     // Delivery window: until every message sent has reached the other side's
-    // fromApp, or a session left Active, or the bound.
-    const std::size_t expected_deliveries = 2;
+    // fromApp, or a session left Active, or the bound. In a cell that emits a
+    // cancellation, a second send that returned an error is not waited for.
+    const std::size_t expected_deliveries = emit && o.second.err ? 1 : 2;
     (void)fixpp::test_support::pump_until(
         ioc,
         [&] {
@@ -756,6 +796,19 @@ void expect_received(const Readings& o, Who w, const std::vector<std::string_vie
     EXPECT_EQ(got, want) << name(w) << ": fromApp deliveries, in arrival order. " << ctx;
 }
 
+// The cells that start engine.send(B) in toApp(A): A is stamped 2 and B 3, and the
+// acceptor receives them in that order.
+void expect_a_then_b(const Readings& o, const std::string& ctx) {
+    std::vector<std::string> stamped;
+    for (const auto& r : o.to_app) {
+        if (r.who == Who::initiator) stamped.push_back("11=" + r.id + " 34=" + r.seq);
+    }
+    EXPECT_EQ(stamped, (std::vector<std::string>{"11=" + std::string(kIdA) + " 34=2",
+                                                 "11=" + std::string(kIdB) + " 34=3"}))
+        << "INI: toApp must see A under MsgSeqNum 2 and then B under 3. " << ctx;
+    expect_received(o, Who::acceptor, {kIdA, kIdB}, ctx);
+}
+
 void run_and_check(Shape shape, SpawnOn spawn_on) {
     const Readings o = run_cell(shape, spawn_on);
     if (o.skipped) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
@@ -771,6 +824,9 @@ void run_and_check(Shape shape, SpawnOn spawn_on) {
     ASSERT_NE(cls, "never ran") << "PATH NOT DRIVEN: the second send's toApp never ran. " << ctx;
     if (shape == Shape::from_from_app) {
         EXPECT_EQ(cls, "nested") << "an Engine::send started in fromApp must run nested. " << ctx;
+    }
+    if (shape == Shape::from_to_app) {
+        EXPECT_EQ(cls, "deferred") << "an Engine::send started in toApp must be deferred. " << ctx;
     }
 
     EXPECT_EQ(describe(o.first), "ok") << ctx;
@@ -799,10 +855,65 @@ void run_and_check(Shape shape, SpawnOn spawn_on) {
             << "ACC: fromApp must deliver two messages with MsgSeqNum 2 then 3. " << ctx;
         EXPECT_EQ(ids, (std::vector<std::string>{std::string(kIdA), std::string(kIdB)}))
             << "ACC: fromApp must deliver each message once. " << ctx;
+        if (shape == Shape::from_to_app) expect_a_then_b(o, ctx);
     }
     const std::string active = std::to_string(static_cast<int>(fsm_state::Active));
     EXPECT_EQ(o.ini_state_end, active) << "INI must stay Active. " << ctx;
     EXPECT_EQ(o.acc_state_end, active) << "ACC must stay Active. " << ctx;
+}
+
+// EngineSendFromToAppOnSessionExecutor, with `emission` emitted from toApp(A) on the
+// slot the second send's co_spawn is bound to. An Engine::send started in toApp
+// reaches Session::send inside toApp, where it waits for the callback to return, so
+// the emission is made while it waits.
+void run_and_check_cancelled(asio::cancellation_type emission) {
+    const Readings o = run_cell(Shape::from_to_app, SpawnOn::session_executor, emission);
+    if (o.skipped) GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    ASSERT_TRUE(o.setup_ok) << "setup did not complete";
+    const std::string ctx = context(o, Shape::from_to_app);
+    const std::string cls = classify(o, Shape::from_to_app);
+    ::testing::Test::RecordProperty("classification", cls);
+    std::printf("[ MEASURED ] %s\n", ctx.c_str());
+    std::fflush(stdout);
+
+    EXPECT_TRUE(o.stopped) << "the engine must stop. " << ctx;
+    // Witness: the emission was made on a slot the chain listens on, while the send
+    // had neither completed nor reached its toApp.
+    ASSERT_TRUE(o.emitted) << "PATH NOT DRIVEN: toApp(A) never emitted. " << ctx;
+    ASSERT_TRUE(o.slot_has_a_handler)
+        << "PATH NOT DRIVEN: the co_spawn installed no handler in the cell's slot. " << ctx;
+    ASSERT_TRUE(o.second_pending_at_emission)
+        << "PATH NOT DRIVEN: the second send had completed before the emission. " << ctx;
+    ASSERT_FALSE(o.second_to_app_ran_before_emission)
+        << "PATH NOT DRIVEN: B had reached toApp before the emission, so its send was not "
+           "waiting to start. "
+        << ctx;
+
+    const std::string active = std::to_string(static_cast<int>(fsm_state::Active));
+    EXPECT_EQ(describe(o.first), "ok") << ctx;
+    EXPECT_EQ(o.ini_state_end, active) << "INI must stay Active. " << ctx;
+    EXPECT_EQ(o.acc_state_end, active) << "ACC must stay Active. " << ctx;
+    if (emission == asio::cancellation_type::terminal) {
+        // The send is refused before it starts: it has consumed nothing.
+        EXPECT_FALSE(o.second.threw) << ctx;
+        EXPECT_EQ(o.second.err, std::optional<error>{error::dispatch_aborted}) << ctx;
+        EXPECT_EQ(cls, "never ran")
+            << "a send cancelled before it starts must not reach toApp. " << ctx;
+        expect_sent(o, Who::initiator, {kIdA}, ctx);
+        for (const auto& [seq, ids] : o.ini.retained) {
+            EXPECT_EQ(ids.find(kIdB), std::string::npos)
+                << "INI: nothing of the cancelled send may be stored, but outbound 34=" << seq
+                << " holds it. " << ctx;
+        }
+        expect_received(o, Who::acceptor, {kIdA}, ctx);
+        return;
+    }
+    // Engine::send's outer frame is a chain with the terminal-only filter, which
+    // drops the emission.
+    EXPECT_EQ(cls, "deferred") << ctx;
+    EXPECT_EQ(describe(o.second), "ok") << ctx;
+    expect_sent(o, Who::initiator, {kIdA, kIdB}, ctx);
+    expect_a_then_b(o, ctx);
 }
 
 // ── Multi-threaded cells ──────────────────────────────────────────────────────
@@ -1330,6 +1441,14 @@ TEST(EngineCallbackSend, EngineSendFromToApp) {
 
 TEST(EngineCallbackSend, EngineSendFromToAppOnSessionExecutor) {
     run_and_check(Shape::from_to_app, SpawnOn::session_executor);
+}
+
+TEST(EngineCallbackSend, DeferredEngineSendCancelled_Terminal) {
+    run_and_check_cancelled(asio::cancellation_type::terminal);
+}
+
+TEST(EngineCallbackSend, DeferredEngineSendCancelled_Total) {
+    run_and_check_cancelled(asio::cancellation_type::total);
 }
 
 TEST(EngineCallbackSend, EngineSendFromFromApp) {

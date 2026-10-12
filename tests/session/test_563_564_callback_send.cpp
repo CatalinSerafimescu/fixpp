@@ -2,44 +2,42 @@
 //
 // tests/session/test_563_564_callback_send.cpp
 //
-// fixpp#563 and fixpp#564 (batch B28).
+// fixpp#563 and fixpp#564 (batch B41).
 //
 // Subject: a Session::send started from inside an Application callback, on the
 // session's own executor. co_spawn's first step is a dispatch, so when the
-// spawning thread is already running that executor the nested send runs inline
-// until its first suspension.
+// spawning thread is already running that executor the send's body begins
+// inline, inside the callback.
 //
-// #563's claim: send_impl peeks the outbound MsgSeqNum before toApp, stamps the
-// frame with the peeked value, and advances the counter after toApp. A send
-// started inside toApp peeks the same value, so two frames carry one
-// MsgSeqNum(34) while the counter moves by two.
+// #563: send_impl peeks the outbound MsgSeqNum before toApp, stamps the frame
+// with the peeked value, and advances the counter after toApp. A send that ran
+// its own body inside toApp would peek the same value. The contract
+// (`.specify/563-564-callback-send.md` §2.1): a send started inside toApp or
+// toAdmin starts after that callback has returned; a send started inside any
+// other callback runs nested.
 //
-// #564: on a build without NDEBUG the session's debug guard aborts the process
-// where a callback is entered inside another callback of the same session in a
-// way the contract does not allow, at the assertion of the site where that
-// nesting begins (`.specify/563-564-callback-send.md` §2.2). A nesting the
-// contract allows passes. A cell whose own process drives a nesting of the
-// first kind therefore ends in that abort on such a build, and what the cell
-// measures is observable only where the assertions are compiled out. No cell
-// depends on another: run each alone with --gtest_filter.
+// #564: the session's debug guard, on a build without NDEBUG. Which nesting of
+// one callback inside another it aborts is the table "Every nesting on one
+// thread, against the checks" of `.specify/563-564-callback-send.md` §2.2. No
+// cell depends on another: run each alone with --gtest_filter.
 //
 // Cells:
-//   ToAppSendsNested          #563 claim. toApp for message ONE starts a send
-//                             of message TWO. nested.
-//   ToAppSendsNestedOnStrand  the same cell with a strand as the session's
-//                             executor, which is what an Engine gives a
-//                             session. nested.
-//   ToAppSendsNested_FileStore
-//                             the claim cell on a persistent FileStore, where
-//                             a refused store() is session-fatal. nested.
+//   ToAppStartsSend           #563's shape. toApp for message ONE starts a send
+//                             of message TWO. Asserts "deferred", and that the
+//                             two frames carry consecutive MsgSeqNums in the
+//                             order they are transmitted in, ONE first.
+//   ToAppStartsSend_OnStrand  the same cell with a strand as the fixture's
+//                             executor, over which the session's strand is a
+//                             second one.
+//   ToAppStartsSend_FileStore the same cell on a persistent FileStore, where
+//                             a refused store() is session-fatal.
 //   SequentialSends           control. The same two messages, the second
 //                             started after the first completed.
 //   SequentialSends_FileStore control for the FileStore cell.
-//   ToAppSendsNested_NextSendIsRetained
-//                             characterisation of what follows the nested
-//                             pair: a third message, sent on its own after both
-//                             completed, must be transmitted and retained under
-//                             its MsgSeqNum. nested.
+//   ToAppStartsSend_NextSendIsRetained
+//                             what follows that pair: a third message, sent on
+//                             its own after both completed, must be transmitted
+//                             and retained under its MsgSeqNum.
 //   SequentialSends_NextSendIsRetained
 //                             its control.
 //   FromAppSendsReply         #564's acceptance shape. fromApp for an inbound
@@ -58,10 +56,8 @@
 //                             the next outbound MsgSeqNum before toAdmin and
 //                             advances the counter after it, so this is the
 //                             toApp cell's shape with an admin frame as the
-//                             outer one. This cell classifies the send as
-//                             nested, deferred or never ran, prints that, and
-//                             fails only on "never ran"; the sequence-number
-//                             assertions run either way.
+//                             outer one. Asserts "deferred", and that the
+//                             Heartbeat is transmitted first.
 //   TestRequestThenSend       its control: the same send started after the
 //                             TestRequest was fully processed.
 //   ToAdminStartsSend_AssignFirstSite
@@ -73,8 +69,8 @@
 //                             when toAdmin starts a send of an application
 //                             message. The question is order: whether the two
 //                             frames are transmitted, and offered to the store,
-//                             in ascending MsgSeqNum order. Classified and
-//                             printed like ToAdminStartsSend.
+//                             in ascending MsgSeqNum order. Asserts "deferred",
+//                             like ToAdminStartsSend.
 //   ToAdminStartsSend_AssignFirstSite_Sequential
 //                             its control: the same send started after the
 //                             inbound frame was fully processed.
@@ -153,22 +149,68 @@
 //                             frame retained under its own number, (d) store
 //                             and manager agree, (e) both operations report
 //                             success. The final state is not judged.
-//   ToAppSendsNested_NoStore, ToAdminStartsSend_NoStore,
+//   ToAppStartsSend_NoStore, ToAdminStartsSend_NoStore,
 //   ToAdminStartsSend_AssignFirstSite_NoStore, OverlappingSends_NoStore
-//                             batch B41. The nested-send and overlapping-send
+//                             batch B41. The callback-started and overlapping
 //                             shapes on a session with no MessageStore
 //                             (SessionConfig::store_factory left null), where
 //                             store_then_emit goes straight to the transport.
 //                             This fixture's capture is a synchronous function,
-//                             so the write is not a suspension point here; the
-//                             cells record whether the nested send transmits
-//                             before the starting callback returns. (c) and (d)
-//                             do not apply.
+//                             so the write is not a suspension point here. The
+//                             three cells that start a send in a callback
+//                             assert "deferred" and consecutive MsgSeqNums in
+//                             transmit order. (c) and (d) do not apply.
 //   the same four with _LiveWrite
 //                             the same with a live transport attached, whose
 //                             async_write records the frame and then suspends
 //                             once, so the send path goes through the write
 //                             gate and yields there.
+//   ToAppStartsSendOnAnotherSession
+//                             two sessions on one io_context. toApp of session
+//                             A starts a send on session B, on B's executor.
+//                             Asserts that B's send is not deferred: the depth
+//                             the send reads is B's own.
+//   DeferredSendCancelled_Terminal, DeferredSendCancelled_Total,
+//   DeferredSendCancelled_Terminal_ThrowIfCancelledOff
+//                             toApp starts a send by a co_spawn whose completion
+//                             token is bound to a cancellation slot the cell
+//                             owns, and emits on that slot before it returns,
+//                             while the send waits to start. Terminal: the send
+//                             returns dispatch_aborted, consumes nothing and
+//                             leaves the session Active. Total: the chain's
+//                             filter drops the emission and the send completes;
+//                             a control for the first. The third: the send is
+//                             awaited from a coroutine that turned
+//                             throw_if_cancelled off, so it is not refused
+//                             before it starts.
+//   StoreCompletingOutOfOrder_OverlappingSends,
+//   StoreCompletingOutOfOrder_SendStartedInToApp
+//                             a store that returns from its first store() call
+//                             only after a later frame has been transmitted.
+//                             The later frame goes out first. This is the
+//                             consequence of a store that breaks the ordering
+//                             requirement on MessageStore::store; it is not a
+//                             wanted behaviour.
+//   ToAppStartsSend_OverABufferItFrees
+//                             toApp starts a detached send over a heap buffer
+//                             and frees the buffer before it returns. The
+//                             transmitted frame carries the payload. The memory
+//                             checker is the witness that nothing read the
+//                             freed buffer.
+//   ToAppRunsTheIoContext_DirectExecutor_SendNestsAndThePollEnds
+//                             builds with NDEBUG only. direct_executor over the
+//                             bare io_context; toApp starts a send and then
+//                             runs the io_context itself. That setup is outside
+//                             the contract (the design note's §2.1, "When the
+//                             post does not move the send out of the
+//                             callback"), so this cell pins behaviour outside
+//                             the contract: it is there only to fail when the
+//                             deferred send defers again each time it resumes,
+//                             which keeps the callback's loop from ending.
+//   ToAppRunsTheIoContext_OverAStrand_SendIsDeferred
+//                             the same callback on a session in the default
+//                             mode, with a strand as the fixture's executor.
+//                             The send still starts after toApp returned.
 //   DISABLED_MemoryCheckerPositiveControl_UseAfterFree
 //                             a control for a memory checker, not a measurement
 //                             of fixpp: reads a heap block after deleting it.
@@ -207,26 +249,29 @@
 //                             Heartbeat begins inside toApp. Death at the
 //                             assertion of the overload that calls toApp and
 //                             toAdmin.
+//   DeferredSendResumedInsideToAppDies
+//                             direct_executor over the bare io_context: toApp
+//                             starts a send and then runs the io_context, so
+//                             the send resumes inside toApp. Death at the
+//                             assertion of the deferred path.
 //
 // Running the callback-starts-close cells under a memory checker: this fixture
 // keeps the Session on the test's stack for the whole cell, so no cell frees the
 // Session while one of its arms is running or suspended. What a sanitizer can
 // see here is a read or write of something close() itself released.
 //
-// Witness, asserted first in every nested cell: the nested send's toApp ran
-// while the outer callback was still on the stack. Without it a pass of the
-// sequence-number assertions would say nothing about the nested path, so a
-// miss is reported as PATH NOT DRIVEN, with one message for "never ran" and
-// another for "ran after the outer callback returned" (the send was deferred).
-// A change that defers nested sends moves these cells to the second message;
-// the witness then has to be re-decided together with the contract.
+// Witness, in every cell that starts a send inside a callback: where the
+// send's toApp ran. "nested": while the starting callback was on the stack.
+// "deferred": after the cell's hook had seen its co_spawn return. "never ran".
+// A cell requires one of the first two and fails on the other; "never ran" is
+// reported as PATH NOT DRIVEN, because a pass of the sequence-number
+// assertions would then say nothing about the send.
 //
 // Store: a volatile bounded MemoryStore, except in the cells named _FileStore.
 // The interleaving of the two sends depends on where a send first suspends,
 // and that is inside the store (MemoryStore::store starts with a post). A
 // session with no store has no such suspension and is not covered. A
-// persistent store turns a refused store() into a session-fatal error, so the
-// _FileStore claim cell is expected to fail differently from the volatile one.
+// persistent store turns a refused store() into a session-fatal error.
 // A store is also what assertion (c) reads.
 //
 // Not covered here: Engine::send from a callback. It hops to the engine's
@@ -245,6 +290,9 @@
 #include <algorithm>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/deferred.hpp>
 #include <asio/detached.hpp>
@@ -294,6 +342,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/hooked_store.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -777,7 +826,17 @@ std::string describe_retained(const Retained& r) {
     return out;
 }
 
-enum class Shape { nested_in_to_app, sequential };
+// What was transmitted: exactly message ONE and then message TWO, under the
+// MsgSeqNums that follow the Logon's.
+void expect_one_then_two(const std::vector<std::string>& sent, const std::string& context) {
+    ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
+    EXPECT_EQ(field(sent[0], 11), kIdOne) << "message ONE must be transmitted first. " << context;
+    EXPECT_EQ(seq_of(sent[0]), 2U) << "message ONE must carry MsgSeqNum 2. " << context;
+    EXPECT_EQ(field(sent[1], 11), kIdTwo) << "message TWO must be transmitted second. " << context;
+    EXPECT_EQ(seq_of(sent[1]), 3U) << "message TWO must carry MsgSeqNum 3. " << context;
+}
+
+enum class Shape { started_in_to_app, sequential };
 
 // What a cell asserts once ONE and TWO have been sent: (b)-(d) on that pair, or
 // that a third message, sent afterwards on its own, is transmitted and retained.
@@ -801,13 +860,13 @@ void run_two_sends(Shape shape, ExecKind kind, Then then = Then::check_pair,
     SendOutcome second;
     bool outer_live = false;
     std::optional<bool> inner_saw_outer_live;
-    // The session's NextNumOut as the nested path sees it: inside the nested
-    // send's toApp, and in the outer toApp once the nested co_spawn returned.
-    // Printed with every failure, not asserted.
-    std::string seen_in_nested_to_app = "not recorded";
+    // The session's NextNumOut inside the second send's toApp, and in the outer
+    // toApp once the second send's co_spawn returned. Printed with every
+    // failure, not asserted.
+    std::string seen_in_second_to_app = "not recorded";
     std::string seen_after_spawn = "not recorded";
 
-    if (shape == Shape::nested_in_to_app) {
+    if (shape == Shape::started_in_to_app) {
         f.app->on_to_app = [&] {
             if (f.app->to_app_calls == 1) {
                 outer_live = true;
@@ -815,14 +874,14 @@ void run_two_sends(Shape shape, ExecKind kind, Then then = Then::check_pair,
                 outer_live = false;
                 seen_after_spawn =
                     std::to_string(next_out(sess)) +
-                    (second.done ? " (nested send completed)" : " (nested send pending)");
+                    (second.done ? " (second send completed)" : " (second send pending)");
             } else if (f.app->to_app_calls == 2) {
                 inner_saw_outer_live = outer_live;
-                seen_in_nested_to_app = std::to_string(next_out(sess));
+                seen_in_second_to_app = std::to_string(next_out(sess));
             }
         };
         asio::co_spawn(ex, sess.send(one), record_into(first));
-        if (!f.pump_done([&] { return first.done && second.done; }, "CallbackSend::nested")) {
+        if (!f.pump_done([&] { return first.done && second.done; }, "CallbackSend::in_to_app")) {
             return;
         }
     } else {
@@ -835,27 +894,37 @@ void run_two_sends(Shape shape, ExecKind kind, Then then = Then::check_pair,
     // Both sends have completed: nothing below runs with a send in flight.
     const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
                                         f.wire.end());
-    const std::string context = "Transmitted, in wire order: " + describe(sent) +
-                                "; send(ONE): " + describe(first) +
-                                "; send(TWO): " + describe(second) +
-                                "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
-                                ", store=" + f.store_next_out(sess) +
-                                "; state=" + std::to_string(static_cast<int>(sess.state())) +
-                                "; NextNumOut in the nested toApp=" + seen_in_nested_to_app +
-                                ", after the nested co_spawn returned=" + seen_after_spawn + ".";
+    const std::string context =
+        "Transmitted, in wire order: " + describe(sent) + "; send(ONE): " + describe(first) +
+        "; send(TWO): " + describe(second) +
+        "; NextNumOut: manager=" + std::to_string(next_out(sess)) +
+        ", store=" + f.store_next_out(sess) +
+        "; state=" + std::to_string(static_cast<int>(sess.state())) +
+        "; NextNumOut in the second send's toApp=" + seen_in_second_to_app +
+        ", after the second send's co_spawn returned=" + seen_after_spawn + ".";
 
-    // (a) Witness.
-    if (shape == Shape::nested_in_to_app) {
+    // (a) Witness, then the classification: a send started in toApp is deferred.
+    if (shape == Shape::started_in_to_app) {
         ASSERT_TRUE(inner_saw_outer_live.has_value())
-            << "PATH NOT DRIVEN: the nested send's toApp never ran. " << context;
-        ASSERT_TRUE(*inner_saw_outer_live)
-            << "PATH NOT DRIVEN (the send was deferred): the nested send's toApp ran only after "
-               "the outer toApp had returned. "
+            << "PATH NOT DRIVEN: the second send's toApp never ran. " << context;
+        EXPECT_FALSE(*inner_saw_outer_live)
+            << "a send started in toApp must be deferred, but it ran nested: its toApp ran while "
+               "the outer toApp was on the stack. "
             << context;
+        // (e) Both sends report success.
+        EXPECT_EQ(describe(first), "ok") << "(e) " << context;
+        EXPECT_EQ(describe(second), "ok") << "(e) " << context;
     }
     EXPECT_EQ(f.app->to_app_calls, 2) << "each send must reach toApp once. " << context;
 
     if (then == Then::third_send) {
+        if (shape == Shape::started_in_to_app) {
+            // The pair itself, before the third send is started.
+            expect_one_then_two(sent, context);
+            if (::testing::Test::HasFatalFailure()) return;
+            expect_retained_as_sent(f, sess, sent[0], context);
+            expect_retained_as_sent(f, sess, sent[1], context);
+        }
         const auto three = bytes_of(kPayloadThree);
         SendOutcome third;
         asio::co_spawn(ex, sess.send(three), record_into(third));
@@ -873,6 +942,10 @@ void run_two_sends(Shape shape, ExecKind kind, Then then = Then::check_pair,
             << "the third message must carry the MsgSeqNum after the first two. " << after;
         expect_retained_as_sent(f, sess, *sent_three, after);
         EXPECT_EQ(next_out(sess), 5U) << after;
+        if (shape == Shape::started_in_to_app) {
+            EXPECT_EQ(f.store_next_out(sess), "5")
+                << "the store's NextNumOut must agree with the manager's. " << after;
+        }
         return;
     }
 
@@ -887,6 +960,7 @@ void run_two_sends(Shape shape, ExecKind kind, Then then = Then::check_pair,
     EXPECT_EQ(seqs, (std::vector<seqnum_t>{2U, 3U}))
         << "(b) the two frames must carry distinct, consecutive MsgSeqNum(34) values, 2 and 3. "
         << context;
+    if (shape == Shape::started_in_to_app) expect_one_then_two(sent, context);
 
     // (c) The store retains each frame under the MsgSeqNum it was sent with.
     expect_retained_as_sent(f, sess, *sent_one, context);
@@ -894,21 +968,26 @@ void run_two_sends(Shape shape, ExecKind kind, Then then = Then::check_pair,
 
     // (d) Two sends consume two sequence numbers.
     EXPECT_EQ(next_out(sess), 4U) << "(d) NextNumOut must have advanced by two. " << context;
+    if (shape == Shape::started_in_to_app) {
+        EXPECT_EQ(f.store_next_out(sess), "4")
+            << "(d) the store's NextNumOut must agree with the manager's. " << context;
+    }
     EXPECT_EQ(sess.state(), fsm_state::Active) << context;
 }
 
 }  // namespace
 
-TEST(CallbackSend, ToAppSendsNested) {
-    run_two_sends(Shape::nested_in_to_app, ExecKind::io_context);
+TEST(CallbackSend, ToAppStartsSend) {
+    run_two_sends(Shape::started_in_to_app, ExecKind::io_context);
 }
 
-TEST(CallbackSend, ToAppSendsNestedOnStrand) {
-    run_two_sends(Shape::nested_in_to_app, ExecKind::strand);
+TEST(CallbackSend, ToAppStartsSend_OnStrand) {
+    run_two_sends(Shape::started_in_to_app, ExecKind::strand);
 }
 
-TEST(CallbackSend, ToAppSendsNested_FileStore) {
-    run_two_sends(Shape::nested_in_to_app, ExecKind::io_context, Then::check_pair, StoreKind::file);
+TEST(CallbackSend, ToAppStartsSend_FileStore) {
+    run_two_sends(Shape::started_in_to_app, ExecKind::io_context, Then::check_pair,
+                  StoreKind::file);
 }
 
 TEST(CallbackSend, SequentialSends) { run_two_sends(Shape::sequential, ExecKind::io_context); }
@@ -917,8 +996,8 @@ TEST(CallbackSend, SequentialSends_FileStore) {
     run_two_sends(Shape::sequential, ExecKind::io_context, Then::check_pair, StoreKind::file);
 }
 
-TEST(CallbackSend, ToAppSendsNested_NextSendIsRetained) {
-    run_two_sends(Shape::nested_in_to_app, ExecKind::io_context, Then::third_send);
+TEST(CallbackSend, ToAppStartsSend_NextSendIsRetained) {
+    run_two_sends(Shape::started_in_to_app, ExecKind::io_context, Then::third_send);
 }
 
 TEST(CallbackSend, SequentialSends_NextSendIsRetained) {
@@ -1175,6 +1254,10 @@ void run_test_request_then_send(AdminShape shape) {
         << context;
     ASSERT_NE(classification, "never ran")
         << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
+    if (inside) {
+        EXPECT_EQ(classification, "deferred")
+            << "a send started in toAdmin must be deferred. " << context;
+    }
 
     EXPECT_EQ(describe(send), "ok") << context;
     EXPECT_TRUE(in_r.has_value()) << context;
@@ -1193,6 +1276,14 @@ void run_test_request_then_send(AdminShape shape) {
     EXPECT_EQ(seqs, (std::vector<seqnum_t>{2U, 3U}))
         << "the two frames must carry distinct, consecutive MsgSeqNum(34) values, 2 and 3. "
         << context;
+    if (inside) {
+        EXPECT_EQ(field(sent[0], 35), "0")
+            << "the Heartbeat must be transmitted first. " << context;
+        EXPECT_EQ((std::vector<seqnum_t>{seq_of(sent[0]), seq_of(sent[1])}),
+                  (std::vector<seqnum_t>{2U, 3U}))
+            << "the two frames must be transmitted in ascending MsgSeqNum(34) order, 2 then 3. "
+            << context;
+    }
     expect_retained_as_sent(f, sess, *hb_it, context);
     expect_retained_as_sent(f, sess, *sent_order, context);
 
@@ -1297,6 +1388,10 @@ void run_poss_dup_reject_then_send(AdminShape shape, StoreKind store = StoreKind
         << context;
     ASSERT_NE(classification, "never ran")
         << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
+    if (inside) {
+        EXPECT_EQ(classification, "deferred")
+            << "a send started in toAdmin must be deferred. " << context;
+    }
 
     ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
     const auto rj_it =
@@ -1314,6 +1409,10 @@ void run_poss_dup_reject_then_send(AdminShape shape, StoreKind store = StoreKind
               (std::vector<seqnum_t>{2U, 3U}))
         << "(b) the two frames must be transmitted in ascending MsgSeqNum(34) order, 2 then 3. "
         << context;
+    if (inside) {
+        EXPECT_EQ(field(sent[0], 35), "3")
+            << "(b) the Reject must be transmitted first. " << context;
+    }
     // (c) The store holds each frame under its own number.
     expect_retained_as_sent(f, sess, *rj_it, context);
     expect_retained_as_sent(f, sess, *sent_order, context);
@@ -2047,6 +2146,15 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     if (starts == Starts::send) {
         ASSERT_NE(classification, "never ran")
             << "PATH NOT DRIVEN: the inner send's toApp never ran. " << context;
+        EXPECT_EQ(classification, "deferred")
+            << "a send started in toApp or toAdmin must be deferred. " << context;
+        // The outer frame, then the send's, under consecutive numbers.
+        ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
+        EXPECT_EQ(field(sent[1], 11), "B41-INNER")
+            << "the frame of the send started in the callback must be transmitted second. "
+            << context;
+        EXPECT_EQ(wire_seqs, (std::vector<seqnum_t>{2U, 3U}))
+            << "the two frames must carry MsgSeqNum(34) 2 then 3. " << context;
     }
     EXPECT_TRUE(distinct) << "(a) " << context;
     EXPECT_TRUE(ascending) << "(b) " << context;
@@ -2083,7 +2191,7 @@ TEST(CallbackSend, ToAdminStartsClose_Graceful_AssignFirstSite) {
                                  StoreKind::memory);
 }
 
-TEST(CallbackSend, ToAppSendsNested_NoStore) {
+TEST(CallbackSend, ToAppStartsSend_NoStore) {
     run_outbound_callback_starts(OuterSite::app_send, Starts::send, StoreKind::none);
 }
 
@@ -2095,7 +2203,7 @@ TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_NoStore) {
     run_outbound_callback_starts(OuterSite::poss_dup_reject, Starts::send, StoreKind::none);
 }
 
-TEST(CallbackSend, ToAppSendsNested_NoStore_LiveWrite) {
+TEST(CallbackSend, ToAppStartsSend_NoStore_LiveWrite) {
     run_outbound_callback_starts(OuterSite::app_send, Starts::send, StoreKind::none,
                                  TransportKind::live_suspending_write);
 }
@@ -2108,6 +2216,512 @@ TEST(CallbackSend, ToAdminStartsSend_NoStore_LiveWrite) {
 TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_NoStore_LiveWrite) {
     run_outbound_callback_starts(OuterSite::poss_dup_reject, Starts::send, StoreKind::none,
                                  TransportKind::live_suspending_write);
+}
+
+namespace {
+
+// How a cell classifies a send it started in a callback (the file header, "Witness").
+std::string classify(const std::optional<bool>& to_app_ran_inside_the_callback) {
+    return !to_app_ran_inside_the_callback.has_value() ? "never ran"
+           : *to_app_ran_inside_the_callback           ? "nested"
+                                                       : "deferred";
+}
+
+}  // namespace
+
+// Two sessions, A and B, on one io_context; each has its own strand, Application
+// and capture. A's toApp starts a send on B by a co_spawn onto B's executor, which
+// is idle, so B's send begins inline. The depth that Session::send reads belongs to
+// the session, so B's send does not wait for A's toApp to return.
+TEST(CallbackSend, ToAppStartsSendOnAnotherSession) {
+    Fixture f{ExecKind::io_context};
+    const auto app_b = std::make_shared<CallbackApp>();
+    fixpp::core::EngineConfig engine_b;
+    engine_b.clock = f.clock;
+    engine_b.executor = f.exec;
+    engine_b.application = app_b;
+    std::vector<std::string> wire_b;
+    auto cfg_b = f.cfg();
+    cfg_b.transport_send = [&wire_b](std::span<const std::byte> fr) {
+        wire_b.push_back(text_of(fr));
+    };
+    Session a{f.engine, f.cfg()};
+    Session b{engine_b, cfg_b};
+    ASSERT_TRUE(f.open_to_active(a)) << "setup: session A did not reach Active";
+    ASSERT_TRUE(f.open_to_active(b)) << "setup: session B did not reach Active";
+    ASSERT_EQ(next_out(a), 2U) << "setup: A's Logon must have consumed outbound MsgSeqNum 1";
+    ASSERT_EQ(next_out(b), 2U) << "setup: B's Logon must have consumed outbound MsgSeqNum 1";
+
+    const auto ex_a = a.executor().underlying();
+    const auto ex_b = b.executor().underlying();
+    const auto one = bytes_of(kPayloadOne);
+    const auto two = bytes_of(kPayloadTwo);
+    const std::size_t wire_a_before = f.wire.size();
+    const std::size_t wire_b_before = wire_b.size();
+
+    SendOutcome on_a;
+    SendOutcome on_b;
+    bool a_to_app_live = false;
+    std::optional<bool> b_to_app_saw_a_live;
+    f.app->on_to_app = [&] {
+        a_to_app_live = true;
+        asio::co_spawn(ex_b, b.send(two), record_into(on_b));
+        a_to_app_live = false;
+    };
+    app_b->on_to_app = [&] { b_to_app_saw_a_live = a_to_app_live; };
+    asio::co_spawn(ex_a, a.send(one), record_into(on_a));
+    if (!f.pump_done([&] { return on_a.done && on_b.done; }, "CallbackSend::another_session")) {
+        return;
+    }
+
+    const std::vector<std::string> sent_a(
+        f.wire.begin() + static_cast<std::ptrdiff_t>(wire_a_before), f.wire.end());
+    const std::vector<std::string> sent_b(
+        wire_b.begin() + static_cast<std::ptrdiff_t>(wire_b_before), wire_b.end());
+    const std::string context =
+        "B's send, relative to A's toApp: " + classify(b_to_app_saw_a_live) +
+        ". A transmitted: " + describe(sent_a) + "; B transmitted: " + describe(sent_b) +
+        "; A's send: " + describe(on_a) + "; B's send: " + describe(on_b) +
+        "; NextNumOut: A=" + std::to_string(next_out(a)) + ", B=" + std::to_string(next_out(b)) +
+        ".";
+
+    ASSERT_EQ(f.app->to_app_calls, 1) << "PATH NOT DRIVEN: A's toApp must run once. " << context;
+    ASSERT_TRUE(b_to_app_saw_a_live.has_value())
+        << "PATH NOT DRIVEN: B's toApp never ran. " << context;
+    EXPECT_TRUE(*b_to_app_saw_a_live)
+        << "a send on session B started in session A's toApp must not be deferred: B's toApp "
+           "must run before A's toApp returns. "
+        << context;
+
+    EXPECT_EQ(describe(on_a), "ok") << context;
+    EXPECT_EQ(describe(on_b), "ok") << context;
+    ASSERT_EQ(sent_a.size(), 1U) << context;
+    ASSERT_EQ(sent_b.size(), 1U) << context;
+    EXPECT_EQ(field(sent_a.front(), 11), kIdOne) << context;
+    EXPECT_EQ(seq_of(sent_a.front()), 2U) << context;
+    EXPECT_EQ(field(sent_b.front(), 11), kIdTwo) << context;
+    EXPECT_EQ(seq_of(sent_b.front()), 2U) << context;
+    EXPECT_EQ(a.state(), fsm_state::Active) << context;
+    EXPECT_EQ(b.state(), fsm_state::Active) << context;
+}
+
+namespace {
+
+enum class Emission { terminal, total, terminal_with_throw_if_cancelled_off };
+
+// Session::send awaited from a coroutine that first turns throw_if_cancelled off.
+asio::awaitable<expected_t<void>> send_with_throw_if_cancelled_off(
+    Session& s, std::span<const std::byte> payload) {
+    co_await asio::this_coro::throw_if_cancelled(false);
+    co_return co_await s.send(payload);
+}
+
+// toApp for ONE starts send(TWO) by a co_spawn whose completion token is bound to
+// `signal`'s slot, and emits on that signal before it returns. A send started in
+// toApp waits for the callback to return before it starts, so the emission reaches
+// it while it waits. A detached co_spawn has no slot, and an emission would then
+// reach nothing.
+void run_deferred_send_cancelled(Emission emission) {
+    Fixture f{ExecKind::io_context};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+
+    const auto ex = sess.executor().underlying();
+    const auto one = bytes_of(kPayloadOne);
+    const auto two = bytes_of(kPayloadTwo);
+    const std::size_t wire_before = f.wire.size();
+
+    asio::cancellation_signal signal;
+    SendOutcome first;
+    SendOutcome second;
+    bool outer_live = false;
+    std::optional<bool> inner_saw_outer_live;
+    // Read in toApp(ONE), between the co_spawn's return and the emission.
+    bool emitted = false;
+    bool slot_has_a_handler = false;
+    bool second_pending_at_emission = false;
+    int to_app_calls_at_emission = 0;
+    f.app->on_to_app = [&] {
+        if (f.app->to_app_calls != 1) {
+            if (!inner_saw_outer_live.has_value()) inner_saw_outer_live = outer_live;
+            return;
+        }
+        outer_live = true;
+        const auto token = asio::bind_cancellation_slot(signal.slot(), record_into(second));
+        if (emission == Emission::terminal_with_throw_if_cancelled_off) {
+            asio::co_spawn(ex, send_with_throw_if_cancelled_off(sess, two), token);
+        } else {
+            asio::co_spawn(ex, sess.send(two), token);
+        }
+        slot_has_a_handler = signal.slot().has_handler();
+        second_pending_at_emission = !second.done;
+        to_app_calls_at_emission = f.app->to_app_calls;
+        signal.emit(emission == Emission::total ? asio::cancellation_type::total
+                                                : asio::cancellation_type::terminal);
+        emitted = true;
+        outer_live = false;
+    };
+    asio::co_spawn(ex, sess.send(one), record_into(first));
+    if (!f.pump_done([&] { return first.done && second.done; }, "CallbackSend::cancelled")) {
+        return;
+    }
+
+    const std::string classification = classify(inner_saw_outer_live);
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    const std::string store_out = f.store_next_out(sess);
+    const Retained under_three = f.retained(sess, 3);
+    const std::string context =
+        "send(TWO)'s toApp: " + classification + ". Transmitted, in wire order: " + describe(sent) +
+        "; send(ONE): " + describe(first) + "; send(TWO): " + describe(second) +
+        "; NextNumOut: manager=" + std::to_string(next_out(sess)) + ", store=" + store_out +
+        "; the store holds under outbound 34=3: " + describe_retained(under_three) +
+        "; state=" + std::to_string(static_cast<int>(sess.state())) +
+        "; toApp calls: " + std::to_string(f.app->to_app_calls) + ".";
+
+    // Witness: the emission was made on a slot the chain listens on, while the send
+    // had neither completed nor reached its own toApp.
+    ASSERT_TRUE(emitted) << "PATH NOT DRIVEN: toApp(ONE) never ran. " << context;
+    ASSERT_TRUE(slot_has_a_handler)
+        << "PATH NOT DRIVEN: the co_spawn installed no handler in the cell's slot. " << context;
+    ASSERT_TRUE(second_pending_at_emission)
+        << "PATH NOT DRIVEN: send(TWO) had completed before the emission. " << context;
+    ASSERT_EQ(to_app_calls_at_emission, 1)
+        << "PATH NOT DRIVEN: send(TWO) had reached its own toApp before the emission, so it was "
+           "not waiting to start. "
+        << context;
+
+    EXPECT_EQ(describe(first), "ok") << context;
+    if (emission == Emission::terminal) {
+        // The send is refused before it starts: it has consumed nothing.
+        EXPECT_FALSE(second.threw) << context;
+        EXPECT_EQ(second.err, std::optional<error>{error::dispatch_aborted}) << context;
+        EXPECT_EQ(classification, "never ran")
+            << "a send cancelled before it starts must not reach its toApp. " << context;
+        EXPECT_EQ(sess.state(), fsm_state::Active) << "the session must stay Active. " << context;
+        ASSERT_EQ(sent.size(), 1U) << "nothing of send(TWO) may be transmitted. " << context;
+        EXPECT_EQ(field(sent.front(), 11), kIdOne) << context;
+        EXPECT_EQ(seq_of(sent.front()), 2U) << context;
+        EXPECT_EQ(next_out(sess), 3U) << "send(TWO) must consume no MsgSeqNum. " << context;
+        EXPECT_EQ(store_out, "3") << "send(TWO) must consume no MsgSeqNum. " << context;
+        EXPECT_TRUE(under_three.frames.empty())
+            << "nothing of send(TWO) may be stored. " << context;
+        return;
+    }
+    // The send is not refused before it starts: its own toApp runs, after toApp(ONE)
+    // returned. With a total emission the chain's terminal-only filter dropped it.
+    // With throw_if_cancelled off the cancellation is recorded, and the test the
+    // deferred path applies before it starts the send does not hold.
+    EXPECT_EQ(classification, "deferred") << context;
+    // What the send does from there on. For the throw_if_cancelled arm the design
+    // note does not say what the send returns after its toApp; these lines pin it.
+    EXPECT_EQ(describe(second), "ok") << context;
+    expect_one_then_two(sent, context);
+    EXPECT_EQ(next_out(sess), 4U) << context;
+    EXPECT_EQ(sess.state(), fsm_state::Active) << context;
+}
+
+}  // namespace
+
+TEST(CallbackSend, DeferredSendCancelled_Terminal) {
+    run_deferred_send_cancelled(Emission::terminal);
+}
+
+TEST(CallbackSend, DeferredSendCancelled_Total) { run_deferred_send_cancelled(Emission::total); }
+
+TEST(CallbackSend, DeferredSendCancelled_Terminal_ThrowIfCancelledOff) {
+    run_deferred_send_cancelled(Emission::terminal_with_throw_if_cancelled_off);
+}
+
+namespace {
+
+enum class SecondSend { overlapping, started_in_to_app };
+
+// A store that breaks the ordering requirement on MessageStore::store: its first
+// store() call after the session is Active completes in the store and then does not
+// return to the session until message TWO has been transmitted. The session
+// transmits a frame when that frame's store() call returns, so TWO goes out before
+// ONE although ONE was started, and numbered, first. This is what such a store
+// costs; it is not a wanted behaviour.
+void run_store_completing_out_of_order(SecondSend shape) {
+    Fixture f{ExecKind::io_context, StoreKind::none};
+    bool armed = false;
+    int stores_while_armed = 0;
+    const auto factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+    factory->hooks.on_outbound_store = [&] { return armed && ++stores_while_armed == 1; };
+    factory->hooks.release_when = [&] { return frame_with_id(f.wire, kIdTwo) != nullptr; };
+    auto cfg = f.cfg();
+    cfg.store_factory = factory;
+    Session sess{f.engine, cfg};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+    armed = true;
+
+    const auto ex = sess.executor().underlying();
+    const auto one = bytes_of(kPayloadOne);
+    const auto two = bytes_of(kPayloadTwo);
+    const std::size_t wire_before = f.wire.size();
+
+    SendOutcome first;
+    SendOutcome second;
+    bool outer_live = false;
+    std::optional<bool> inner_saw_outer_live;
+    if (shape == SecondSend::started_in_to_app) {
+        f.app->on_to_app = [&] {
+            if (f.app->to_app_calls == 1) {
+                outer_live = true;
+                asio::co_spawn(ex, sess.send(two), record_into(second));
+                outer_live = false;
+            } else if (f.app->to_app_calls == 2) {
+                inner_saw_outer_live = outer_live;
+            }
+        };
+        asio::co_spawn(ex, sess.send(one), record_into(first));
+    } else {
+        asio::post(ex, [&] {
+            asio::co_spawn(ex, sess.send(one), record_into(first));
+            asio::co_spawn(ex, sess.send(two), record_into(second));
+        });
+    }
+    if (!f.pump_done([&] { return first.done && second.done; }, "CallbackSend::out_of_order")) {
+        return;
+    }
+
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    const std::string context =
+        "Transmitted, in wire order: " + describe(sent) + "; send(ONE): " + describe(first) +
+        "; send(TWO): " + describe(second) +
+        "; outbound store() calls after Active: " + std::to_string(stores_while_armed) +
+        "; the held call was released by its bound: " +
+        (factory->log->hold_timed_out ? "yes" : "no") +
+        "; NextNumOut=" + std::to_string(next_out(sess)) +
+        "; state=" + std::to_string(static_cast<int>(sess.state())) + ".";
+
+    // Witness: the first store() call was held and released by TWO's transmit, and
+    // in the second shape TWO was started in ONE's toApp and deferred.
+    ASSERT_EQ(stores_while_armed, 2)
+        << "PATH NOT DRIVEN: each send must make one store() call. " << context;
+    ASSERT_FALSE(factory->log->hold_timed_out)
+        << "PATH NOT DRIVEN: the held store() call was released by its bound, not by the "
+           "transmit of message TWO. "
+        << context;
+    if (shape == SecondSend::started_in_to_app) {
+        ASSERT_EQ(classify(inner_saw_outer_live), "deferred")
+            << "PATH NOT DRIVEN: send(TWO) was not deferred out of toApp(ONE). " << context;
+    }
+
+    EXPECT_EQ(describe(first), "ok") << context;
+    EXPECT_EQ(describe(second), "ok") << context;
+    ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
+    EXPECT_EQ(field(sent[0], 11), kIdTwo)
+        << "message TWO, whose store() call returned first, is transmitted first. " << context;
+    EXPECT_EQ(seq_of(sent[0]), 3U) << "message TWO was numbered second. " << context;
+    EXPECT_EQ(field(sent[1], 11), kIdOne) << context;
+    EXPECT_EQ(seq_of(sent[1]), 2U) << "message ONE was numbered first. " << context;
+    EXPECT_EQ(next_out(sess), 4U) << context;
+}
+
+}  // namespace
+
+TEST(CallbackSend, StoreCompletingOutOfOrder_OverlappingSends) {
+    run_store_completing_out_of_order(SecondSend::overlapping);
+}
+
+TEST(CallbackSend, StoreCompletingOutOfOrder_SendStartedInToApp) {
+    run_store_completing_out_of_order(SecondSend::started_in_to_app);
+}
+
+// toApp for ONE starts a detached send over a heap buffer and frees the buffer
+// before it returns. A send started in toApp builds its frame after toApp returned,
+// so it must have taken its own copy of the payload first. The buffer is on the
+// heap because a memory checker sees a read of a freed heap block without further
+// options.
+TEST(CallbackSend, ToAppStartsSend_OverABufferItFrees) {
+    Fixture f{ExecKind::io_context};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    ASSERT_EQ(next_out(sess), 2U) << "setup: the Logon must have consumed outbound MsgSeqNum 1";
+
+    const auto ex = sess.executor().underlying();
+    const auto one = bytes_of(kPayloadOne);
+    constexpr std::string_view kHeapId = "B41-HEAP";
+    constexpr std::string_view kHeapPayload =
+        "35=D\x01"
+        "11=B41-HEAP\x01"
+        "55=HHH\x01";
+    const std::size_t wire_before = f.wire.size();
+
+    SendOutcome first;
+    bool outer_live = false;
+    std::optional<bool> inner_saw_outer_live;
+    f.app->on_to_app = [&] {
+        if (f.app->to_app_calls != 1) {
+            if (!inner_saw_outer_live.has_value()) inner_saw_outer_live = outer_live;
+            return;
+        }
+        outer_live = true;
+        auto heap = std::make_unique<std::vector<std::byte>>(bytes_of(kHeapPayload));
+        asio::co_spawn(ex, sess.send(std::span<const std::byte>{*heap}), asio::detached);
+        heap.reset();
+        outer_live = false;
+    };
+    asio::co_spawn(ex, sess.send(one), record_into(first));
+    // The detached send has no completion to wait for: its frame on the wire ends
+    // the wait.
+    if (!f.pump_done([&] { return first.done && frame_with_id(f.wire, kHeapId) != nullptr; },
+                     "CallbackSend::freed_buffer")) {
+        return;
+    }
+
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    const std::string context = "The detached send's toApp: " + classify(inner_saw_outer_live) +
+                                ". Transmitted, in wire order: " + describe(sent) +
+                                "; send(ONE): " + describe(first) +
+                                "; NextNumOut=" + std::to_string(next_out(sess)) + ".";
+
+    // Witness: the send built its frame after toApp(ONE) had freed the buffer.
+    ASSERT_EQ(classify(inner_saw_outer_live), "deferred")
+        << "PATH NOT DRIVEN: the send did not start after toApp(ONE) returned, so it read the "
+           "buffer before the buffer was freed. "
+        << context;
+
+    const std::string* heap_frame = frame_with_id(sent, kHeapId);
+    ASSERT_NE(heap_frame, nullptr) << context;
+    EXPECT_EQ(field(*heap_frame, 35), "D") << context;
+    // The payload's fields after MsgType, contiguous and in order.
+    EXPECT_NE(heap_frame->find("\x01"
+                               "11=B41-HEAP\x01"
+                               "55=HHH\x01"),
+              std::string::npos)
+        << "the transmitted frame must carry the payload's bytes. " << context;
+    EXPECT_EQ(seq_of(*heap_frame), 3U) << context;
+    EXPECT_EQ(describe(first), "ok") << context;
+}
+
+namespace {
+
+// The most handlers the callback's loop below runs. A loop that ends because no
+// handler is ready ends below it. A deferred send that posted itself again each
+// time it resumed would keep one handler ready for ever, and the loop would end
+// here instead.
+constexpr std::size_t kPollBound = 64;
+
+struct PollInsideToApp {
+    bool entered = false;
+    // The handler the callback posts onto the bare io_context: whether it ran while
+    // the callback was on the stack. It is the control of the callback's loop.
+    std::optional<bool> control_ran_inside;
+    std::size_t polled = 0;
+    bool bound_hit = false;
+    std::optional<bool> inner_saw_outer_live;
+    SendOutcome first;
+    SendOutcome second;
+    // Called by the callback around its loop.
+    std::function<void()> before_poll;
+    std::function<void()> after_poll;
+};
+
+// send(ONE) on the session's executor. Its toApp starts send(TWO) there, posts a
+// handler onto the bare io_context, and then runs the io_context one handler at a
+// time until none is ready or kPollBound have run. The second send's own toApp
+// starts nothing and runs nothing. Returns once both sends completed or the pump's
+// budget ran out.
+[[nodiscard]] bool start_a_send_in_to_app_then_run_the_io_context(Fixture& f, Session& sess,
+                                                                  PollInsideToApp& r) {
+    const auto ex = sess.executor().underlying();
+    const auto one = bytes_of(kPayloadOne);
+    const auto two = bytes_of(kPayloadTwo);
+    bool outer_live = false;
+    f.app->on_to_app = [&] {
+        if (f.app->to_app_calls != 1) {
+            if (!r.inner_saw_outer_live.has_value()) r.inner_saw_outer_live = outer_live;
+            return;
+        }
+        r.entered = true;
+        outer_live = true;
+        asio::co_spawn(ex, sess.send(two), record_into(r.second));
+        asio::post(f.ioc.get_executor(), [&] { r.control_ran_inside = outer_live; });
+        if (r.before_poll) r.before_poll();
+        while (r.polled < kPollBound && f.ioc.poll_one() != 0) ++r.polled;
+        r.bound_hit = r.polled >= kPollBound;
+        if (r.after_poll) r.after_poll();
+        outer_live = false;
+    };
+    asio::co_spawn(ex, sess.send(one), record_into(r.first));
+    return f.pump_done([&] { return r.first.done && r.second.done; },
+                       "CallbackSend::poll_in_to_app");
+}
+
+std::string describe(const PollInsideToApp& r) {
+    return "send(TWO)'s toApp: " + classify(r.inner_saw_outer_live) +
+           "; the handler posted onto the bare io_context: " + classify(r.control_ran_inside) +
+           "; the callback's loop ran " + std::to_string(r.polled) + " handler(s), bound " +
+           std::to_string(kPollBound) + "; send(ONE): " + describe(r.first) +
+           "; send(TWO): " + describe(r.second) + ".";
+}
+
+}  // namespace
+
+// direct_executor, attested, over the bare io_context executor: a handler posted to
+// the session's executor is one the callback's own run of the io_context can run. So
+// the send started in toApp resumes inside toApp and, with the assertions compiled
+// out, runs nested. This cell pins behaviour outside the contract (the file header
+// has the pointer). It is there only so that a deferred send which defers again each
+// time it resumes fails a cell: the callback's loop then ends at its bound.
+TEST(CallbackSend, ToAppRunsTheIoContext_DirectExecutor_SendNestsAndThePollEnds) {
+#ifndef NDEBUG
+    GTEST_SKIP() << "on a build with assertions this setup aborts: "
+                    "CallbackGuard.DeferredSendResumedInsideToAppDies";
+#else
+    Fixture f{ExecKind::io_context};
+    f.direct_executor = true;
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    PollInsideToApp r;
+    if (!start_a_send_in_to_app_then_run_the_io_context(f, sess, r)) return;
+    const std::string context = describe(r);
+
+    ASSERT_TRUE(r.entered) << "PATH NOT DRIVEN: toApp(ONE) never ran. " << context;
+    ASSERT_EQ(classify(r.control_ran_inside), "nested")
+        << "PATH NOT DRIVEN: the callback's loop did not run a handler posted onto the "
+           "io_context. "
+        << context;
+    EXPECT_FALSE(r.bound_hit) << "the callback's loop must end below its bound. " << context;
+    EXPECT_EQ(classify(r.inner_saw_outer_live), "nested") << context;
+#endif
+}
+
+// The same callback on a session in the default mode, with a strand as the
+// fixture's executor: the session's strand is a second strand, made over that one.
+// A post onto the session's strand is not a handler the callback's run of the
+// io_context can run while the strand's own handler holds the callback.
+TEST(CallbackSend, ToAppRunsTheIoContext_OverAStrand_SendIsDeferred) {
+    Fixture f{ExecKind::strand};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    const std::size_t wire_before = f.wire.size();
+    PollInsideToApp r;
+    if (!start_a_send_in_to_app_then_run_the_io_context(f, sess, r)) return;
+    const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
+                                        f.wire.end());
+    const std::string context =
+        describe(r) + " Transmitted, in wire order: " + describe(sent) + ".";
+
+    ASSERT_TRUE(r.entered) << "PATH NOT DRIVEN: toApp(ONE) never ran. " << context;
+    ASSERT_EQ(classify(r.control_ran_inside), "nested")
+        << "PATH NOT DRIVEN: the callback's loop did not run a handler posted onto the "
+           "io_context, so it cannot show that it does not run the send. "
+        << context;
+    EXPECT_FALSE(r.bound_hit) << context;
+    EXPECT_EQ(classify(r.inner_saw_outer_live), "deferred")
+        << "the send must start after toApp(ONE) returned. " << context;
+    EXPECT_EQ(describe(r.first), "ok") << context;
+    EXPECT_EQ(describe(r.second), "ok") << context;
+    expect_one_then_two(sent, context);
+    EXPECT_EQ(sess.state(), fsm_state::Active) << context;
 }
 
 // ── Suite CallbackGuard: the debug guard (`.specify/563-564-callback-send.md` §2.2) ──
@@ -2142,6 +2756,8 @@ constexpr const char* kParseSiteText = "inbound parse begun inside a callback";
 constexpr const char* kOutboundEntryText = "toApp or toAdmin entered inside toApp or toAdmin";
 // The assertion at the onLogon and onLogout sites.
 constexpr const char* kLifecycleEntryText = "onLogon or onLogout entered inside toApp or toAdmin";
+// The assertion of the deferred path of Session::send, where it resumes after its post.
+constexpr const char* kDeferredSendText = "deferred send resumed inside toApp or toAdmin";
 
 // Lines a statement writes to stderr around the step that is expected to abort.
 constexpr const char* kLeftNestedScopeLine = "[ B41 ] the first thread has left its nested scope";
@@ -2352,6 +2968,28 @@ enum class FedFrame {
     // NOLINTEND(concurrency-mt-unsafe)
 }
 
+// ── NC-16: a deferred send that resumes inside the callback that started it ────
+
+// direct_executor, attested, over the bare io_context executor. A send from the
+// statement; its toApp starts a second send and then runs the io_context, so the
+// second send resumes after its post with toApp on the stack.
+// Exit codes: 2 = setup failed; 3 = toApp never ran; 0 = the callback's loop
+// returned without an abort.
+[[noreturn]] void run_the_io_context_inside_to_app_after_starting_a_send() {
+    Fixture f{ExecKind::io_context};
+    f.direct_executor = true;
+    Session sess{f.engine, f.cfg()};
+    // std::exit reports this death-test child's verdict as its exit code.
+    // NOLINTBEGIN(concurrency-mt-unsafe)
+    if (!f.open_to_active(sess)) std::exit(2);
+    PollInsideToApp r;
+    r.before_poll = [] { mark(kStepBeginsLine); };
+    r.after_poll = [] { mark(kStepReturnedLine); };
+    (void)start_a_send_in_to_app_then_run_the_io_context(f, sess, r);
+    std::exit(r.entered ? 0 : 3);
+    // NOLINTEND(concurrency-mt-unsafe)
+}
+
 }  // namespace
 #endif  // !NDEBUG
 
@@ -2458,6 +3096,18 @@ TEST(CallbackGuard, ToAdminEnteredInsideToAppDies) {
 #else
     EXPECT_DEATH(run_the_io_context_inside_to_app_after_the_heartbeat_interval(),
                  died_inside_the_step_at(kOutboundEntryText));
+#endif
+}
+
+// NC-16, first arm. The abort must come from the deferred path's own assertion,
+// inside the callback's loop. If the send went on from there to its own toApp, the
+// process would abort with the outbound-entry text, which this cell does not accept.
+TEST(CallbackGuard, DeferredSendResumedInsideToAppDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the deferred path's assertion is compiled out under NDEBUG";
+#else
+    EXPECT_DEATH(run_the_io_context_inside_to_app_after_starting_a_send(),
+                 died_inside_the_step_at(kDeferredSendText));
 #endif
 }
 
