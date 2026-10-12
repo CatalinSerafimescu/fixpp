@@ -51,8 +51,9 @@ struct session_engine_access {
     // A frame over L was refused at framing (FR-013): the log record. The pump then
     // closes the session terminally. Session strand.
     static void note_frame_too_large(Session& s) noexcept { s.note_frame_too_large_(); }
-    // Engine::stop()'s step 1 has reached the session's strand (data-model E-13): the
-    // engine-stop flag Logon arms test. Session strand, before the stop's emit.
+    // Engine::stop()'s step 1 has reached the session's strand (data-model E-13): sets
+    // the engine-stop flag, which the Logon arms test and engine_stop_noted() below
+    // reads. Session strand, before the stop's emit.
     static void note_engine_stop(Session& s) noexcept { s.note_engine_stop_(); }
     // Whether note_engine_stop has run for this session. Engine::send's session-strand
     // body tests it before it admits a send to a published session

@@ -49,6 +49,10 @@ public:
 
     // ── Lifecycle callbacks (notifications; no reject) ────────────────────────
     // All three run on the engine's exec_ (single-thread confinement); a throw ⇒ terminal close.
+    // A send started in onLogon runs inline, inside the callback; in onCreate or
+    // onLogout the session is not Active and a send is refused
+    // (session_invalid_state_for_send). A Session::close() started in any of the
+    // three begins after the callback returns (session.hpp, send() and close()).
 
     // onCreate: session object constructed and exec_ initialized by open(),
     //   BEFORE the first Logon is sent or received (FR-009). Use for per-session
@@ -66,6 +70,9 @@ public:
 
     // ── Inbound delivery callbacks (after engine FSM processing) ─────────────
     // Both run on the engine's exec_ after the FSM accepts the frame (INV-6).
+    // A send started in either runs inline: it is numbered, and its toApp runs,
+    // inside the callback. A Session::close() started in either begins after the
+    // callback returns (session.hpp, send() and close()).
 
     // fromAdmin: inbound admin message (MsgType 0/1/2/3/4/5), after FSM
     //   processing (FR-004). Default: accept.
@@ -88,6 +95,9 @@ public:
     }  // FR-003/FR-005
 
     // ── Outbound interception callbacks (before transmit) ─────────────────────
+    // A send or a Session::close() started in either begins after the callback
+    // returns: the send is numbered after the message this callback is for, and
+    // is built from a copy of its payload (session.hpp, send() and close()).
 
     // toAdmin: engine about to emit an admin message; inspect only — the
     //   message is ALWAYS sent regardless of the return (admin not vetoable,

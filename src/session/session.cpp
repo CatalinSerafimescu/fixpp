@@ -2674,6 +2674,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // PRECONDITIONS (callers guard):
 //   • cfg_.validate_inbound_messages && validator_ must hold
 //   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
+//   • no callback of this session is on the stack: this is a parse site over the
+//     session's parse buffer, and on a build with assertions it asserts that before
+//     it builds the resource (fixpp#564, `.specify/563-564-callback-send.md` §2.2)
 // [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
 Session::InboundValidation Session::validate_inbound_(
     std::span<const std::byte> frame,
@@ -4127,9 +4130,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // [research D3/D4; FR-004; INV-6]
             if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
                 // The session's parse buffer B(L): any admitted frame parses (093).
-                // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-                // before returning, so onLogout in record_state_transition_ below
-                // can acquire its own scope.
+                // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
+                // before it returns, so the depth of all callbacks is back to its
+                // entry value when record_state_transition_ below enters onLogout.
                 auto cb_r = parse_and_dispatch_(
                     frame, inbound_parse_buffer,
                     [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
@@ -4253,8 +4256,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // open() allocated, 093).
             if (engine_.application != nullptr) {
                 // The session's parse buffer B(L): any admitted frame parses (093).
-                // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-                // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
+                // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
+                // before it returns, so the depth of all callbacks is back to its
+                // entry value. (FR-003; research D3/D4/D8; [const §VIII.5])
                 auto cb_r = parse_and_dispatch_(
                     frame, inbound_parse_buffer,
                     [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
@@ -4789,9 +4793,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // but the session still disconnects (Logout has been confirmed).
     if (engine_.application != nullptr) {
         // The session's parse buffer B(L): any admitted frame parses (093).
-        // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-        // before returning, so onLogout in record_state_transition_ below
-        // can acquire its own scope.
+        // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
+        // before it returns, so the depth of all callbacks is back to its
+        // entry value when record_state_transition_ below enters onLogout.
         auto cb_r = parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
             return engine_.application->fromAdmin(mv, sid);
         });

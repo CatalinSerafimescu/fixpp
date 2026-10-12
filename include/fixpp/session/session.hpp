@@ -176,16 +176,31 @@ public:
     // the Logout async_write); terminal skips phase 1 entirely (hook NOT
     // invoked). partial excluded (N-P1-3).
     //
+    // Started inside a callback of this session (fixpp#563;
+    // `.specify/563-564-callback-send.md` §2.1a, ruling R-4): a close in either
+    // mode waits, by one post onto the session's executor, while a callback
+    // that runs under callback_dispatch_scope is on the stack, and tests the
+    // lifecycle only when it resumes. So it begins after the callback returns:
+    // inside the callback, after the start, the session is as it was, with no
+    // Logout emitted and onLogout not run. It then meets the arm that called
+    // the callback as a close from another thread does: while that arm is
+    // suspended, or after it has finished. Another close can run during the
+    // wait; this one then joins it or returns session_already_closed, as a
+    // repeated close does. The wait is one post, so it holds only where the
+    // callback does not run the session's own executor (the reentrancy
+    // contract below).
+    //
     // PRECONDITION — v1.0 caller model (gate-b/r1 RC#2, P1.3→P2):
     //   close() is called from within the session's serialisation domain
     //   (strand under per_session_strand mode; attested executor under
     //   direct_executor). Concurrent foreign-thread invocation is UNDEFINED
     //   in v1.0; the C-ABI thunk (2i) is responsible for serialising user-
     //   thread invocations onto the session domain before calling close().
-    //   The `closing` re-entry polling loop is a future-proof barrier; under
-    //   the v1.0 caller model it is effectively empty (the first close runs
-    //   to completion within the serialisation domain before any second
-    //   close() call can reach the `closing` branch).
+    //   Inside that domain a second close() can reach the `closing` branch:
+    //   close() suspends after it has written `closing` (its Logout
+    //   exchange, its drains), and a close made meanwhile, or one that
+    //   resumes then from its wait above, finds the first in flight and
+    //   joins it by that branch's polling loop.
     //   TODO(005): when the C-ABI thunk (2i) wires real concurrent callers,
     //   harden with atomic<lifecycle> + atomic_shared_ptr/mutex to make
     //   foreign-thread concurrent close safe.
@@ -275,9 +290,30 @@ public:
     //                        completes BEFORE fromAdmin/fromApp is dispatched.
     //   send()             — session-strand; durable-before-transmit (I-3):
     //                        store(seq, committed, outbound) BEFORE transport write.
+    //                        Started inside toApp or toAdmin of this session it
+    //                        begins after that callback returns; started in any
+    //                        other callback, or outside one, it runs inline
+    //                        (fixpp#563; send()'s comment below).
+    //   close()            — session-strand; started inside any callback of this
+    //                        session it begins after that callback returns
+    //                        (fixpp#563; close()'s comment above).
     //   state()            — session-strand; single-writer on the per-session strand.
     //   fromAdmin/fromApp  — user callbacks dispatched via cancellable_dispatch
     //                        ([2d §6.5]) on the per-session strand (default mode).
+    //   every callback     — must not run the session's own executor before it
+    //                        returns (poll, run_one, run_for on the context that
+    //                        executor belongs to). send()'s and close()'s waits
+    //                        are one post onto that executor and rely on it. A
+    //                        strand never runs a second handler of the session
+    //                        inside the first, so per_session_strand, a session
+    //                        under the Engine and direct_executor attested over
+    //                        a strand cannot break this; direct_executor attested
+    //                        over a bare io_context executor can, and there the
+    //                        behaviour is undefined; debug builds assert on some
+    //                        of its routes, not on all
+    //                        (`.specify/563-564-callback-send.md` §2.1 and §2.2,
+    //                        ruling R-7; spec/behaviors-and-limitations.md
+    //                        L-007-2).
     // All public surfaces noexcept across the inbound-process / timer-fire window;
     // a throwing user callback TRAPS (core::detail::trap_throw) — FR-015.
 
@@ -291,6 +327,26 @@ public:
     // MsgSeqNum(34), Writer::commit, store(seq, committed, outbound) BEFORE
     // transport::async_write (durable-before-transmit, I-3).
     // PLACEHOLDER — body wired per US1/T023 (Phase 3).
+    //
+    // Started inside a callback of this session (fixpp#563;
+    // `.specify/563-564-callback-send.md` §2.1, ruling R-1). No emit body begins
+    // while this session has toApp or toAdmin on the stack:
+    //   - in fromApp, fromAdmin or onLogon the send runs inline: it is numbered,
+    //     and its toApp runs, inside the callback;
+    //   - in toApp or toAdmin it waits, by one post onto the session's executor,
+    //     and starts after that callback returns. It is then numbered after the
+    //     frame whose callback started it and, on a store that completes its
+    //     store() calls in the order they were made (message_store.hpp),
+    //     transmitted after it. The payload is copied before the wait, so
+    //     `app_payload` need not outlive the callback;
+    //   - in onLogout or onCreate the session is not Active, and the send is
+    //     refused as any send outside Active is.
+    // Results a send that waited can return, beside those of a send that did not:
+    //   - session_invalid_state_for_send: by the time it starts, the session has
+    //     left Active or a close() has begun;
+    //   - dispatch_aborted with the session's state untouched: it was cancelled
+    //     before it started. So dispatch_aborted from send() does not by itself
+    //     mean Disconnected; read state() to tell the two apart.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send(
         std::span<const std::byte> app_payload) noexcept;
 
@@ -1419,8 +1475,11 @@ private:
 
     // 093-inbound-frame-dispositions (data-model E-13; contract C-6) — the engine-stop
     // flag: Engine::stop()'s step 1 sets it on the session strand, through
-    // session_engine_access, before it emits its cancellation. logon_arm_superseded
-    // reads it, so every later predicate check on this strand stops a Logon arm.
+    // session_engine_access, before it emits its cancellation. It has two readers.
+    // logon_arm_superseded reads it, so every later predicate check on this strand
+    // stops a Logon arm. Engine::send's body for a published session reads it, through
+    // session_engine_access, before it admits the send
+    // (`.specify/563-564-callback-send.md` §6, OD-3).
     // Written and read only on the session strand.
     // Placement condition: as garbled_frames_; a Session reused for a second connection
     // would need it reset when the transport is installed.
@@ -1560,7 +1619,7 @@ private:
         std::span<const std::byte> app_payload);
 
     // send_impl: the actual send pipeline (frame building + store_then_emit).
-    // Called from the noexcept send() wrapper which catches asio::system_error
+    // Called under the try of the noexcept send_body_, which catches asio::system_error
     // thrown on async cancellation. May throw on store awaitable cancellation.
     // [F5 Round-A drift fix: noexcept-throw trap separation]
     // disconnect_required (gate-b/r2 FQ-1): out-param set true ONLY at the two
@@ -1595,7 +1654,7 @@ private:
         std::span<const std::byte> app_payload, std::span<std::byte> out);
 
     // fixpp#544 §2.5 (R-10): the fallback for a send that finds the frame slot held (a send
-    // nested in toApp, or overlapping one suspended in its store or its write). Its frame
+    // deferred from toApp, or overlapping one suspended in its store or its write). Its frame
     // owns a frame buffer, so it is over asio's recycler limit and allocates; it never
     // writes the slot flag. Its first statement is FIXPP_INBOUND_SPLIT_ENTRY(tic), the
     // callee half of the b3 boundary Session::send awaits it through.
