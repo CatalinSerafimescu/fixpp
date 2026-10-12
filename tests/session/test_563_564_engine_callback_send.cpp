@@ -645,6 +645,13 @@ Readings run_cell(Shape shape, SpawnOn spawn_on,
 
     bool in_callback = false;
     asio::cancellation_signal cancel;
+    // The completion token of a send the cell can cancel. A closure call produces it,
+    // so that the call is a direct argument of co_spawn: both co_spawn census
+    // instruments (tools/audit_co_spawn_named_closure.py and
+    // tools/reconcile_co_spawn_census.py) must list the site.
+    const auto record_into_with_slot = [&](SendOutcome& out) {
+        return asio::bind_cancellation_slot(cancel.slot(), record_into(out));
+    };
     // Starts the second send from inside the calling callback: no post, the
     // co_spawn is issued synchronously in the callback's body.
     const auto start_second = [&](const char* from) {
@@ -653,7 +660,7 @@ Readings run_cell(Shape shape, SpawnOn spawn_on,
         std::fprintf(stderr, "[ B41 ] %s: starting engine.send for the second message\n", from);
         if (emit) {
             asio::co_spawn(exec, engine.send(second_id, std::span<const std::byte>(second_payload)),
-                           asio::bind_cancellation_slot(cancel.slot(), record_into(o.second)));
+                           record_into_with_slot(o.second));
             o.slot_has_a_handler = cancel.slot().has_handler();
             o.second_pending_at_emission = !o.second.done;
             o.second_to_app_ran_before_emission = to_app_of(o, kIdB) != nullptr;
