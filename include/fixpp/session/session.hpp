@@ -1375,6 +1375,13 @@ private:
     bool close_escalated_ = false;
     std::function<void()> close_grace_wake_;
 
+    // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-3) — the logout
+    // wait's wake. run_logout_phase1 sets it while it waits for the peer's confirming
+    // Logout and clears it on every exit from that wait; the LogoutSent arm calls it
+    // when that Logout arrives. It supersedes the Clock::cancel_sleeps() call that
+    // ended the wait. Session strand only.
+    std::function<void()> logout_wait_wake_;
+
     // 093-inbound-frame-dispositions (data-model E-13; contract C-6) — the engine-stop
     // flag: Engine::stop()'s step 1 sets it on the session strand, through
     // session_engine_access, before it emits its cancellation. logon_arm_superseded

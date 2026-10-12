@@ -450,7 +450,7 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
 
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
 
-    // The peer's confirming Logout wakes phase 1 via `cancel_sleeps()`, but
+    // The peer's confirming Logout wakes phase 1 through the session's own wake, but
     // whether `close_fut` is READY when `feed`'s window returns is a scheduling
     // question, not a guarantee. Guard the `get()` so a lost wake FAILS instead
     // of wedging the binary -- and bound it under the real `close_grace` timer

@@ -1833,8 +1833,8 @@ TEST(HookedStoreResetTo, ForwardModeForwardsToTheInnerStoreAndFiresItsHook) {
 //   - Expiry: once the clock reaches the bound, close() records
 //     session_event_close_reset_wait_expired and proceeds; its teardown reset queues on
 //     the FileStore's writer lock behind the unit, so a restart reads (1, 1).
-//   - Re-arm: a clock-wide cancel_sleeps() during the wait (close()'s own sweep comes
-//     before its teardown reset, so only another sweep reaches it) records no expiry,
+//   - Re-arm: a clock-wide cancel_sleeps() during the wait (close() does not sweep the
+//     clock, so the sweep is another caller's) records no expiry,
 //     and close() is still waiting, until the clock reaches the bound.
 // Time moves only by the cell's advance; drain_ready runs what an advance made ready.
 namespace {

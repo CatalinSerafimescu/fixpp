@@ -1787,7 +1787,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // awaits a result nobody will ever set → hang. Disable cancellation on this
     // coroutine for the whole of close() so it is immune to the caller's signal. This
     // shields close()'s OWN co_awaits only; the session work it tears down is still
-    // cancelled via root_cancel_.emit(total) + cancel_sleeps() fired in phase 2.
+    // cancelled via root_cancel_.emit(total), fired in phase 2.
     // (Engine::stop() also drives a fresh close() for sessions whose role-loop close()
     // was cancelled BEFORE entry — the two fixes are complementary.) [Codex P1]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
@@ -1915,18 +1915,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // acquire, cancellable_dispatch, parser→fromApp — all 005-owned) unwinds
     // here. terminal reaches phase 2 immediately (phase 1 skipped).
     //
-    // US4 (T047): cancel any mock_clock (or real clock) sleepers BEFORE
-    // emitting the ASIO total-cancellation signal. The liveness loop's
-    // sleep_until is waiting on the mock_clock timer (not an ASIO channel),
-    // so root_cancel_.emit() alone cannot wake it up — mock_clock::cancel_sleeps()
-    // must be called first so the liveness loop exits its try/catch and the
-    // coroutine can be collected by ioc.run_for() after close() returns.
-    // Real asio::steady_timer sleeps are also cancelled by the ASIO slot, so
-    // this call is safe for non-mock clocks too (cancel_sleeps() is a no-op
-    // when no sleepers are registered).
-    if (effective_clock_) {
-        effective_clock_->cancel_sleeps();
-    }
+    // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-1 and D-536-2),
+    // superseding US4 (T047)'s Clock::cancel_sleeps() call here. close() does not
+    // sweep the clock: the sessions of an engine share it, so the sweep also ended
+    // the liveness loop of every other session. The emit below is what ends this
+    // session's liveness loop. The Clock contract has sleep_until honour its
+    // awaiter's cancellation slot (clock.hpp), and the loop accepts total
+    // cancellation at each of its sleeps (run_liveness_loop). Disconnected is written
+    // above with no suspension before the emit, so a loop that is not in a sleep now
+    // finds the state changed when it next reaches one.
     root_cancel_.emit(asio::cancellation_type::total);
     if (auto live = live_transport_shared_()) {
         // #348 — close_async(), not close(). The emit above cancels the read
@@ -1951,7 +1948,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
 
     // FQ-A (gate-b/r2): wait for the liveness loop to exit before the seqnum drain.
     // root_cancel_.emit() above has already fired total cancellation (which cancels
-    // the liveness sleep_until via cancel_sleeps() + root cancel propagation), and
+    // the liveness loop's sleep_until through its cancellation slot; fixpp#536), and
     // the live transport is synchronously closed above so any in-progress liveness
     // write completes with error before the drain waits on write_gate_. We yield the
     // executor until liveness_counter_ reaches 0, meaning the liveness coroutine has
@@ -4966,10 +4963,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logout_sent_(
     if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
         record_state_transition_(fsm_state::Disconnected);
         logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
-        // Wake up the sleep_until in run_logout_phase1 so it can
-        // detect the confirmation and return early (before the 2s timeout).
-        if (effective_clock_) {
-            effective_clock_->cancel_sleeps();
+        // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-3), superseding
+        // the Clock::cancel_sleeps() call that stood here: end run_logout_phase1's
+        // wait through this session's own wake, which is non-null only while that
+        // wait is in flight. A sweep of the clock also ended the liveness loop of
+        // every other session on it.
+        if (logout_wait_wake_) {
+            logout_wait_wake_();
         }
     }
     // All other inbound frames: drained (no FSM change, no seqnum advance).
@@ -6083,6 +6083,21 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             const auto deadline =
                 outbound_deadline < inbound_deadline ? outbound_deadline : inbound_deadline;
 
+            // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-2): before each
+            // of its two sleeps the loop leaves if the session is no longer Active, and
+            // then resets its cancellation filter to total. Here the state test is the
+            // loop condition above; nothing suspends between it and this sleep.
+            //   The reset. close() emits total. The reset at the top of this function
+            //   does not last: every emit below takes the sequence-number lock, and the
+            //   lock sequence leaves the whole coroutine thread with a terminal filter
+            //   (FIXPP_DETAIL_CO_AWAIT_LOCK, part 4, async_mutex.hpp). Whether the lock
+            //   should restore its caller's filter is fixpp#583; this reset stands on
+            //   what the lock does today.
+            //   The state test. close() writes Disconnected and then emits, with no
+            //   suspension between the two, and an emit that meets a terminal filter is
+            //   not recorded. A loop that was inside an emit then finds the state
+            //   changed when it reaches a sleep.
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
             // Sleep until that deadline (or until cancellation fires).
             co_await effective_clock_->sleep_until(deadline);
 
@@ -6194,6 +6209,13 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
             // [T018 Cell C grace_deadline bug fix; admin_builder_distinct_now_test compat]
             const auto grace_deadline =
                 inbound_deadline + heartbt_int + std::chrono::nanoseconds{1};
+            // fixpp#536 (D-536-2): the state test and the filter reset, as before the
+            // main sleep. The TestRequest's emit above suspended, so the state is
+            // tested again here.
+            if (fsm_state_ != fsm_state::Active) {
+                co_return;
+            }
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
             co_await effective_clock_->sleep_until(grace_deadline);
 
             if (fsm_state_ != fsm_state::Active) {
@@ -6463,9 +6485,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 // Two-phase graceful Logout (D-6 / [2d §6.5] / I-9):
 //   1. Build Logout frame (build_logout) + store_then_emit (I-3 outbound half).
 //   2. Transition FSM to LogoutSent.
-//   3. Sleep up to 2 s (D-8: session_logout_timeout default) under a CHILD
-//      cancellation_state, waking early if logout_confirmed_ is set by
-//      on_inbound_frame() when the peer's confirming Logout arrives.
+//   3. Wait up to cfg_.logout_disconnect_timeout_ms on the session's clock for the
+//      peer's confirming Logout. fixpp#536 (.specify/536-537-538-recovery-liveness.md,
+//      D-536-3), superseding the bare Clock::sleep_until that the LogoutSent arm ended
+//      with Clock::cancel_sleeps(): the wait is a race between this session's own
+//      wake (logout_wait_wake_, which the LogoutSent arm calls) and
+//      detail::await_deadline, which re-arms on a sweep of the clock that is not its
+//      own cancellation.
 //   4. If confirmed → ok.
 //      If timeout → transition to Disconnected, return session_logout_timeout.
 //
@@ -6530,25 +6556,47 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         co_return std::unexpected(fixpp::core::error::session_logout_timeout);
     }
 
-    // Sleep until the configurable graceful-close timeout (cfg_.logout_disconnect_timeout_ms).
-    // Default 2000 ms (matching QuickFIX/J SessionState.logoutTimeoutMs). Wired from
-    // SessionConfig per FR-008 / RC#D (gate-b/r1); previously hardcoded seconds{2}.
-    // on_inbound_frame() will set logout_confirmed_=true AND call
-    // effective_clock_->cancel_sleeps() when the peer's confirming Logout arrives,
-    // waking us up early. When cancel_sleeps fires, sleep_until throws
-    // system_error(operation_aborted); we catch it and check logout_confirmed_.
+    // Wait until the configurable graceful-close timeout (cfg_.logout_disconnect_timeout_ms)
+    // for the peer's confirming Logout. Default 2000 ms (matching QuickFIX/J
+    // SessionState.logoutTimeoutMs). Wired from SessionConfig per FR-008 / RC#D.
+    //
+    // fixpp#536 (D-536-3): the wait is a race between a wake of this session's own and
+    // the deadline, the pattern close() uses for the reset unit (reset_unit_wake_).
+    //   - `confirmed` never expires by itself. The LogoutSent arm cancels it through
+    //     logout_wait_wake_, and as_tuple turns that cancel into the arm's completion.
+    //   - The deadline arm is await_deadline, so a Clock::cancel_sleeps() by anyone
+    //     re-arms it and does not read as a logout timeout.
+    //   - The outcome is read from logout_confirmed_, before the race is armed and
+    //     after it, never from which arm won: a cancelled wake completes as a fired
+    //     one does.
+    //   - The wake is cleared on every exit from the wait, a throw and the destruction
+    //     of this frame included, so the LogoutSent arm cannot call into a wait that
+    //     has ended.
+    //   - The race sits inside a try. When this coroutine was cancelled while its
+    //     Logout emit was in flight and the emit still succeeded, the co_await of the
+    //     race throws operation_aborted before either arm starts, and the exits of the
+    //     wait below must still run.
     auto deadline = effective_clock_->steady_now() +
                     std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms};
-    try {
-        co_await effective_clock_->sleep_until(deadline);
-    } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — wake-early signal: the
-                                          // `logout_confirmed_` flag check after this block is the
-                                          // actual control-flow decision; no action needed in the
-                                          // handler itself.
-        // Woken early: either peer confirmed (logout_confirmed_=true)
-        // or root cancellation fired (phase 2). Check the flag.
-    } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15.
-        // Any other exception: absorb (noexcept window).
+    if (!logout_confirmed_) {
+        using namespace asio::experimental::awaitable_operators;
+        asio::steady_timer confirmed{co_await asio::this_coro::executor,
+                                     asio::steady_timer::time_point::max()};
+        struct wake_clear {
+            std::function<void()>& wake;
+            ~wake_clear() { wake = nullptr; }
+        } const clear_on_exit{logout_wait_wake_};
+        logout_wait_wake_ = [&confirmed] { confirmed.cancel(); };
+        try {
+            (void)co_await (confirmed.async_wait(asio::as_tuple(asio::use_awaitable)) ||
+                            detail::await_deadline(*effective_clock_, deadline));
+        } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch) — this coroutine's
+                                              // own cancellation, met at the co_await above. The
+                                              // `logout_confirmed_` test after this block is the
+                                              // control-flow decision.
+        } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption per FR-15.
+            // Any other exception: absorb (noexcept window).
+        }
     }
 
     if (logout_confirmed_) {

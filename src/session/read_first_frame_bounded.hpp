@@ -147,13 +147,16 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
         //   (b) somebody called `Clock::cancel_sleeps()`, which is GLOBAL over the
         //       whole clock and sweeps EVERY registered sleeper.
         //
-        // (b) is not exotic and it is not a teardown path. A Session in LogoutSent
-        // that receives the peer's confirming 35=5 calls cancel_sleeps() to wake
-        // its own logout wait (src/session/session.cpp, the LogoutSent case), and
-        // absent a per-session clock_override that Session's clock IS this engine
-        // clock (session.cpp: `effective_clock_ = cfg_.clock_override ? ... :
-        // engine_.clock`). So one routine Logout on ANY session would sweep the
-        // accept path's deadline here.
+        // (b) is open to every holder of the clock. cancel_sleeps() is a public
+        // call, Engine::clock() hands the engine clock to any caller, and absent a
+        // per-session clock_override a Session's clock IS this engine clock
+        // (session.cpp: `effective_clock_ = cfg_.clock_override ? ... :
+        // engine_.clock`). A Session does not make the call (fixpp#536,
+        // .specify/536-537-538-recovery-liveness.md, D-536-1, superseding the sweeps
+        // of the LogoutSent arm and of close()'s phase 2, which made one routine
+        // Logout on ANY session sweep the accept path's deadline here). A caller's
+        // own sweep still arrives here, and run_logout_phase1's wait for the peer's
+        // Logout stands on this loop for the same reason (D-536-3).
         //
         // Treating (b) as (a) is a SILENT DROPPED LOGON: this arm completes, the
         // join reports outcome.index() == 1, and the caller rejects a perfectly
@@ -164,7 +167,7 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
         // asio::steady_timer built inside this helper and registered with no
         // Clock, so cancel_sleeps() could not reach it. Putting the deadline on
         // the shared engine clock is what made the accept path reachable from
-        // every other session's traffic. Do not "simplify" this back to a single
+        // a sweep of that clock. Do not "simplify" this back to a single
         // sleep.
         //
         // The exception cannot tell (a) from (b) — both are operation_aborted —
@@ -194,11 +197,12 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
         // ⚠️ THIS LOOP DOES NOT DELAY Engine::stop(), and that is an ORDERING
         // property worth stating because it is the obvious worry. stop()
         // total-cancels every loop in its STEP 1 (entry.session_cancel.emit),
-        // whereas Session::close(terminal) — the other cancel_sleeps() caller —
-        // runs in STEP 4, AFTER the join. So during teardown branch (1) has
-        // already fired and this arm retires; a sweep cannot reach it first.
-        // If that ordering ever changes, this loop is a place stop() could
-        // start waiting, so re-derive it rather than trusting this note.
+        // and no step of stop() sweeps the clock: Session::close(terminal), which
+        // runs in STEP 4, AFTER the join, does not call cancel_sleeps() (fixpp#536,
+        // D-536-1). So during teardown branch (a) has already fired and this arm
+        // retires. If a step of stop() ever sweeps the clock ahead of STEP 1's
+        // emit, this loop is a place stop() could start waiting, so re-derive it
+        // rather than trusting this note.
     }
 }
 

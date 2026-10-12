@@ -1152,10 +1152,10 @@ TEST(ReadFirstFrameBounded, T2a) {
 // registered sleeper, with no session scoping. Before #377 the first-frame
 // deadline was a private asio::steady_timer registered with no Clock, so nothing
 // could reach it. Putting it on the shared engine clock made the accept path
-// reachable from every other session's ROUTINE traffic: a Session in LogoutSent
-// receiving the peer's confirming 35=5 calls cancel_sleeps() to wake its own
-// logout wait (src/session/session.cpp, LogoutSent case), and absent a
-// per-session clock_override that Session's clock IS the engine clock.
+// reachable from a sweep of that clock by any holder of it. Until fixpp#536 a
+// Session in LogoutSent swept it on the peer's confirming 35=5, to wake its own
+// logout wait; a Session no longer does (D-536-1), and a caller's own sweep of
+// the engine clock, which Engine::clock() hands out, still arrives here.
 //
 // Without the disambiguation in await_deadline, that sweep completes the deadline
 // arm, the join reports outcome.index() == 1, and the engine rejects a HEALTHY
@@ -1212,8 +1212,8 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
     expected_t<first_frame_read> const result = fut.get();
 
     ASSERT_TRUE(result.has_value())
-        << "CovSharedClockSweep (#377): a global Clock::cancel_sleeps() — which routine "
-        << "traffic on an UNRELATED session performs — aborted this first-frame read and the "
+        << "CovSharedClockSweep (#377): a global Clock::cancel_sleeps() — which any holder "
+        << "of the shared clock can perform — aborted this first-frame read and the "
         << "connection would have been closed as a handshake timeout. The deadline arm must "
         << "distinguish `the join cancelled me` from `the whole clock was swept`; both arrive "
         << "as operation_aborted, so the clock itself is the oracle. Got " << describe(result);

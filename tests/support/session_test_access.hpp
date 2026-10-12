@@ -115,6 +115,14 @@ struct session_test_access {
     // strand.
     [[nodiscard]] static bool hydrating(Session const& s) noexcept { return s.hydrating_; }
 
+    // run_logout_phase1's wake for the peer's confirming Logout
+    // (.specify/536-537-538-recovery-liveness.md, D-536-3): non-null only while that
+    // wait is in flight. A cell reads whether it is set, or wraps it to count its
+    // calls. Session strand only.
+    [[nodiscard]] static std::function<void()>& logout_wait_wake(Session& s) noexcept {
+        return s.logout_wait_wake_;
+    }
+
     // The session's store, or null before open() (093 plan OD-25: a cell issues a
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }

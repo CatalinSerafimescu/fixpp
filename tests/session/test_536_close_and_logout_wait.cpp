@@ -447,6 +447,24 @@ private:
     return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
 }
 
+// The wake of the logout wait (Session::logout_wait_wake_) is set only while that wait
+// is in flight.
+[[nodiscard]] bool wake_is_set(Session& session) {
+    return static_cast<bool>(session_test_access::logout_wait_wake(session));
+}
+
+// Counts, from now on, the calls of that wake, by wrapping it. False when the wake is
+// not set.
+[[nodiscard]] bool count_wake_calls(Session& session, std::shared_ptr<int> const& calls) {
+    auto& wake = session_test_access::logout_wait_wake(session);
+    if (!wake) return false;
+    wake = [calls, inner = std::move(wake)] {
+        ++*calls;
+        inner();
+    };
+    return true;
+}
+
 }  // namespace
 
 // ── D-536-1: no session issues a cancel_sleeps() call ───────────────────────────────
@@ -651,6 +669,9 @@ TEST(LogoutWaitLifetime, GraceTimerWinsWhileTheWaitIsPending_CloseCompletes) {
     auto closed = s.spawn_close(close_mode::graceful);
     ASSERT_TRUE(s.run_until([&] { return s.session->state() == fsm_state::LogoutSent; }))
         << "setup: the session did not reach LogoutSent";
+    const auto wake_calls = std::make_shared<int>(0);
+    ASSERT_TRUE(count_wake_calls(*s.session, wake_calls))
+        << "setup: the logout wait's wake is not set, so the wait is not in flight";
     ASSERT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
         << "close(graceful) did not complete when its grace timer expired";
     const auto took = std::chrono::steady_clock::now() - began;
@@ -660,6 +681,10 @@ TEST(LogoutWaitLifetime, GraceTimerWinsWhileTheWaitIsPending_CloseCompletes) {
                              << " ms): something else ended the wait";
     EXPECT_EQ(s.session->state(), fsm_state::Disconnected);
     EXPECT_EQ(s.count("5"), 1) << "the session's Logout was not written exactly once";
+    EXPECT_FALSE(wake_is_set(*s.session))
+        << "the logout wait's wake is still set after the wait ended: a Logout that "
+           "arrived now would call into a wait that has ended";
+    EXPECT_EQ(*wake_calls, 0) << "the wake was called although no Logout confirmed the close";
 }
 
 // A terminal close escalates the graceful one during its wait. Both return, well inside
@@ -676,6 +701,9 @@ TEST(LogoutWaitLifetime, TerminalCloseEscalatesDuringTheWait_BothClosesComplete)
         << "setup: the session did not reach LogoutSent";
     s.settle();
     ASSERT_FALSE(Scene::ready(graceful)) << "setup: the graceful close did not wait";
+    const auto wake_calls = std::make_shared<int>(0);
+    ASSERT_TRUE(count_wake_calls(*s.session, wake_calls))
+        << "setup: the logout wait's wake is not set, so the wait is not in flight";
 
     auto terminal = s.spawn_close(close_mode::terminal);
     ASSERT_TRUE(s.run_until([&] { return Scene::ready(graceful) && Scene::ready(terminal); }))
@@ -688,6 +716,10 @@ TEST(LogoutWaitLifetime, TerminalCloseEscalatesDuringTheWait_BothClosesComplete)
                                  << " ms, so the timer may have ended the wait";
     EXPECT_EQ(s.session->state(), fsm_state::Disconnected);
     EXPECT_EQ(s.count("5"), 1) << "the session's Logout was not written exactly once";
+    EXPECT_FALSE(wake_is_set(*s.session))
+        << "the logout wait's wake is still set after the wait ended: a Logout that "
+           "arrived now would call into a wait that has ended";
+    EXPECT_EQ(*wake_calls, 0) << "the wake was called although no Logout confirmed the close";
 }
 
 // Control. The peer's Logout arrives while the session's own Logout emit is still held
@@ -708,6 +740,9 @@ TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToI
     ASSERT_TRUE(s.run_until([&] { return s.hold->holding; }))
         << "setup: the store() of the session's Logout was not held";
     ASSERT_EQ(s.count("5"), 0) << "setup: the Logout was transmitted before its store()";
+    // The wait has not begun, so the peer's Logout finds no wake to call.
+    ASSERT_FALSE(wake_is_set(*s.session))
+        << "setup: the logout wait's wake is set while the Logout emit is still held";
 
     (void)s.feed(s.peer_frame("5", 2));
     ASSERT_EQ(s.session->state(), fsm_state::Disconnected)
@@ -721,6 +756,9 @@ TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToI
         << "phase 1 did not record LogoutSent after the store was released";
     EXPECT_EQ(s.count("5"), 2) << "the two Logouts were not both written";
     EXPECT_FALSE(s.hold->timed_out) << "the hold reached its bound";
+    const auto wake_calls = std::make_shared<int>(0);
+    ASSERT_TRUE(count_wake_calls(*s.session, wake_calls))
+        << "setup: the logout wait's wake is not set, so the wait is not in flight";
 
     // No confirmation was recorded, so the wait stands until its deadline.
     s.settle(timeout / 8);
@@ -735,6 +773,10 @@ TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToI
                              << " ms of real time passed, so close's real grace timer ("
                              << timeout.count() << " ms) may have ended the wait";
     EXPECT_EQ(s.session->state(), fsm_state::Disconnected);
+    EXPECT_FALSE(wake_is_set(*s.session))
+        << "the logout wait's wake is still set after the wait ended: a Logout that "
+           "arrived now would call into a wait that has ended";
+    EXPECT_EQ(*wake_calls, 0) << "the wake was called on a trace that records no confirmation";
 }
 
 // Controls for the `try` around the wait. Phase 1 is cancelled while its Logout emit is
@@ -771,6 +813,7 @@ TEST(LogoutWaitLifetime, Control_GraceTimerWinsWhileTheLogoutEmitIsHeld_CloseCom
     EXPECT_TRUE(completed) << "close(graceful) did not complete with the clock not advanced: "
                               "phase 1 entered its wait although it was already cancelled";
     EXPECT_EQ(s.session->state(), fsm_state::Disconnected);
+    EXPECT_FALSE(wake_is_set(*s.session)) << "the wait's exit left the logout wait's wake set";
 }
 
 // The cancellation comes from a terminal close that escalates.
@@ -808,6 +851,7 @@ TEST(LogoutWaitLifetime, Control_TerminalCloseEscalatesWhileTheLogoutEmitIsHeld_
     EXPECT_TRUE(completed) << "the closes did not both complete with the clock not advanced: "
                               "phase 1 entered its wait although it was already cancelled";
     EXPECT_EQ(s.session->state(), fsm_state::Disconnected);
+    EXPECT_FALSE(wake_is_set(*s.session)) << "the wait's exit left the logout wait's wake set";
 }
 
 // ── D-536-4: a caller's own cancel_sleeps() still ends a liveness loop ──────────────

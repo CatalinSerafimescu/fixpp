@@ -962,7 +962,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
 //
 // The test uses a real system_clock_source with a 1s heartbeat so the liveness
 // loop actually spawns, acquires liveness_done_, and enters its sleep cycle.
-// close() fires root_cancel_.emit(total) + cancel_sleeps() which cancels the
+// close() fires root_cancel_.emit(total), which cancels the
 // sleep, causing the liveness loop to exit and release liveness_done_.
 //
 // [feedback_detached_cospawn_write_not_in_join_counter; FQ-A D-6 F3/F4; gate-b/r2]
@@ -1093,7 +1093,7 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
         asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
 
     // Bounded: close() must complete within 5s.
-    // root_cancel_.emit(total) + cancel_sleeps() should cancel the liveness sleep
+    // root_cancel_.emit(total) should cancel the liveness sleep
     // (at most 1s remaining), causing the loop to exit and release liveness_done_.
     ioc.run_for(5s);
     ioc.restart();
@@ -1103,7 +1103,7 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
         << "FQ-A Cell D: Session::close() must complete after draining liveness "
         << "and write gate. If still pending, a drain deadlock exists. "
         << "Check that liveness_done_.cancel_and_drain() is called AFTER "
-        << "root_cancel_.emit(total) + cancel_sleeps() in Session::close().";
+        << "root_cancel_.emit(total) in Session::close().";
 
     // If we reach here without crash, the drain invariant holds.
     // Under ASan, a UAF from a post-close liveness write would have been caught.
