@@ -328,6 +328,14 @@ const void* Session::callback_thread_tag_() noexcept {
     assert(outbound_callback_depth_ == 0 &&                                     \
            "deferred send resumed inside toApp or toAdmin of the same session " \
            "(a callback ran the session's executor?)")
+// Session::close evaluates this when it resumes after the wait it makes for the
+// callbacks of the session to return, before it reads the lifecycle (§2.1a,
+// "`Session::close`, both modes (R-4)").
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_CLOSE()                \
+    assert(callback_depth_ == 0 &&                                \
+           "close resumed inside a callback of the same session " \
+           "(a callback ran the session's executor?)")
 
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
 // record_state_transition_: write new_state into the 16-slot ring and advance
@@ -1861,6 +1869,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // (Engine::stop() also drives a fresh close() for sessions whose role-loop close()
     // was cancelled BEFORE entry — the two fixes are complementary.) [Codex P1]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+
+    // fixpp#563 (`.specify/563-564-callback-send.md` §2.1a "`Session::close`, both modes
+    // (R-4)"): a close started while a callback of this session is on the stack waits by
+    // one post onto the session's executor and then proceeds as it does without the wait.
+    // §2.1 "When the post does not move the send out of the callback (R-7)" names the
+    // setup in which the post does not take it off the callback's stack. The wait sits
+    // after the reset above, so a cancellation emitted during it is not recorded
+    // ("Cancellation and the wait"), and before the three-state test below, so that test
+    // reads the state the close finds when it resumes. It is one post and not a loop:
+    // where the assertion is compiled out and the depth is still non-zero, a close that
+    // waited again would post again each time it resumed.
+    if (callback_depth_ != 0) {
+        co_await asio::post(exec_.underlying(), asio::deferred);
+        FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_CLOSE();
+    }
 
     // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]'s "Idempotency" note) ──
     // never-opened OR already-closed(drained) → session_already_closed
