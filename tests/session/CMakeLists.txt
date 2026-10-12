@@ -621,8 +621,17 @@ add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 # install_store_offload_exit_probe seams (file_store.hpp).
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 
-# fixpp#536 (B28) — reproduction: one session's close vs another session's liveness on a shared clock.
+# fixpp#536 (B28), D-536-1 — one session's close vs another session's liveness on a shared clock,
+# and D-536-4's pin. Standalone, not a grouped bucket ([const §VII.8]): its cells run two
+# Sessions on the real clock and wait in real time.
 add_threading_test(session_536_shared_clock_liveness test_536_shared_clock_liveness.cpp)
+set_tests_properties(session_536_shared_clock_liveness PROPERTIES LABELS "session;536")
+# fixpp#536 (B28), D-536-1 to D-536-4 — a session's close, its liveness loop and its logout wait.
+# Standalone, not a grouped bucket ([const §VII.8]): not the class the clause groups. Its cells
+# open Sessions and drive their coroutines and timers on an io_context with a mock clock, and
+# some of them wait on a real asio::steady_timer.
+add_threading_test(session_536_close_and_logout_wait test_536_close_and_logout_wait.cpp)
+set_tests_properties(session_536_close_and_logout_wait PROPERTIES LABELS "session;536")
 # fixpp#537 (B28) — reproduction: a second non-PossDup too-high frame while awaiting a replay.
 add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
 # fixpp#538 (B28), D-538-1 — the resend answer after a 141=Y Logon exchange (MemoryStore and FileStore).

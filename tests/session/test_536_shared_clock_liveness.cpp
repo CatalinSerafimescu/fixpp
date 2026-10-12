@@ -2,11 +2,10 @@
 //
 // tests/session/test_536_shared_clock_liveness.cpp
 //
-// fixpp#536 (batch B28) — reproduction only, no fix.
-//
-// Claim under test: `Clock::cancel_sleeps()` is clock-wide, and sessions on one
-// engine share that clock, so one session's close (or its LogoutSent
-// confirmation) ends the liveness loop of every OTHER session on the clock.
+// fixpp#536 (.specify/536-537-538-recovery-liveness.md §3; decision D-536-1, and D-536-4
+// for the last cell): sessions on one engine share its clock, and one session's close
+// must leave the liveness loop of every OTHER session on that clock running.
+// `Clock::cancel_sleeps()` is clock-wide, so a close that called it would end them all.
 //
 // Shape (the issue's first acceptance item):
 //   Two sessions, A and B, both Active with HeartBtInt = 1 s, both peers quiet.
@@ -21,9 +20,12 @@
 //   NoClose_SharedClock             control: no trigger; B must beat.
 //   TerminalClose_OwnClock          control: A closes on its OWN clock; B must beat.
 //   GracefulConfirmed_OwnClock      control: as above, graceful + peer 35=5.
-//   TerminalClose_SharedClock       claim: close(terminal) → phase-2 sweep only.
-//   GracefulConfirmed_SharedClock   claim: graceful close + peer 35=5 → the
-//                                   LogoutSent sweep, then the phase-2 sweep.
+//   TerminalClose_SharedClock       close(terminal) on the shared clock; B must beat.
+//   GracefulConfirmed_SharedClock   graceful close + peer 35=5 on the shared clock: the
+//                                   LogoutSent arm runs, then close's phase 2; B must beat.
+//   Pin_ExplicitSweep_SharedClock_BothStayActiveAndSendNoMore
+//                                   the disclosed limitation (D-536-4): a caller's own
+//                                   cancel_sleeps() on the shared clock.
 // The two own-clock controls attribute any silence in B to the clock being
 // SHARED, not to anything else A's close does on the shared io_context.
 //
@@ -274,11 +276,12 @@ void expect_b_beats(const Outcome& o, const char* cell) {
         << ": harness miss — B had already beaten (or left Active) before A's close "
            "completed, so this run says nothing about the trigger";
     EXPECT_TRUE(o.beat)
-        << cell << ": session B sent no Heartbeat and/or TestRequest within "
+        << cell << ": the cell requires a Heartbeat and a TestRequest from session B within "
         << std::chrono::duration_cast<std::chrono::milliseconds>(kObserveBudget).count()
         << " ms of A's close (HeartBtInt = " << kHeartBtInt.count()
-        << " s, peer quiet). heartbeats=" << o.heartbeats << " test_requests=" << o.test_requests
-        << " B.state=" << static_cast<int>(o.b_state) << " — B's liveness loop no longer runs.";
+        << " s, peer quiet); B sent heartbeats=" << o.heartbeats
+        << " test_requests=" << o.test_requests << ", B.state=" << static_cast<int>(o.b_state)
+        << ": B's liveness loop did not run through its first pass.";
 }
 
 }  // namespace
@@ -305,6 +308,48 @@ TEST_F(SharedClockLiveness, TerminalClose_SharedClock) {
 TEST_F(SharedClockLiveness, GracefulConfirmed_SharedClock) {
     expect_b_beats(run_cell(Trigger::graceful_confirmed, /*a_on_own_clock=*/false),
                    "GracefulConfirmed_SharedClock");
+}
+
+// Pin of the limitation D-536-4 discloses: a caller's own cancel_sleeps() on the clock
+// that open sessions share ends each session's liveness loop, and nothing restarts it.
+// Each session stays Active and sends no further Heartbeat and no TestRequest. The clock
+// swept here is the EngineConfig's, which is what Engine::clock() hands a caller.
+// NoClose_SharedClock is the positive control: the same two sessions, the same budget,
+// no sweep, and B beats.
+TEST_F(SharedClockLiveness, Pin_ExplicitSweep_SharedClock_BothStayActiveAndSendNoMore) {
+    Capture cap_a;
+    Capture cap_b;
+    auto cfg_a = make_cfg("A_US", "A_PEER", cap_a);
+    auto cfg_b = make_cfg("B_US", "B_PEER", cap_b);
+    Session a{shared_engine, cfg_a};
+    Session b{shared_engine, cfg_b};
+    const bool active = drive_to_active(a, "A_US", "A_PEER", *shared_clock) &&
+                        drive_to_active(b, "B_US", "B_PEER", *shared_clock);
+    EXPECT_TRUE(active) << "setup: a session did not reach Active";
+
+    auto beats = [&] {
+        return cap_a.count("0") + cap_a.count("1") + cap_b.count("0") + cap_b.count("1");
+    };
+    if (active) {
+        cap_a.frames.clear();  // drop the Logons
+        cap_b.frames.clear();
+        shared_clock->cancel_sleeps();
+        const bool any = fixpp::test_support::pump_until(
+            ioc, [&] { return beats() > 0; }, kObserveBudget, fixpp::test_support::kPumpSlice,
+            "SharedClockLiveness::observe_after_sweep");
+        EXPECT_FALSE(any)
+            << "a session sent a Heartbeat or a TestRequest within "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(kObserveBudget).count()
+            << " ms of an explicit cancel_sleeps() on the shared clock: A sent "
+            << "heartbeats=" << cap_a.count("0") << " test_requests=" << cap_a.count("1")
+            << ", B sent heartbeats=" << cap_b.count("0") << " test_requests=" << cap_b.count("1");
+        EXPECT_EQ(a.state(), fsm_state::Active);
+        EXPECT_EQ(b.state(), fsm_state::Active);
+    }
+
+    // Teardown: close both so no liveness frame outlives its Session.
+    (void)run_sync(a.close(close_mode::terminal), *shared_clock, "SharedClockLiveness::pin_a");
+    (void)run_sync(b.close(close_mode::terminal), *shared_clock, "SharedClockLiveness::pin_b");
 }
 
 }  // namespace fixpp::session::test
