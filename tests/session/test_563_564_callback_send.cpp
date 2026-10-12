@@ -2881,18 +2881,13 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
         return std::string(!applies ? "n/a (no store)" : holds ? "holds" : "FAILS");
     };
 
-    const std::string classification = starts != Starts::send ? std::string("n/a (a close)")
-                                       : !inner_to_app_in_callback.has_value()
-                                           ? std::string("never ran")
-                                       : *inner_to_app_in_callback ? std::string("nested")
-                                                                   : std::string("deferred");
+    const std::string classification = !inner_to_app_in_callback.has_value() ? "never ran"
+                                       : *inner_to_app_in_callback           ? "nested"
+                                                                             : "deferred";
     std::string event_text;
     for (const auto& e : events) event_text += " [" + e + "]";
     const std::string context =
         std::string("Outer: ") + outer_name + "; started inside its callback: " + inner_name +
-        (starts == Starts::close_graceful   ? " (graceful)"
-         : starts == Starts::close_terminal ? " (terminal)"
-                                            : "") +
         "; the inner send's toApp: " + classification +
         ". Transmitted, in wire order: " + describe(sent) + "; the store holds under" +
         (store_text.empty() ? " (nothing read)" : store_text) + "; outer " + outer_name + ": " +
@@ -2917,19 +2912,16 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     }
 
     ASSERT_TRUE(started) << "PATH NOT DRIVEN: the starting callback never ran. " << context;
-    if (starts == Starts::send) {
-        ASSERT_NE(classification, "never ran")
-            << "PATH NOT DRIVEN: the inner send's toApp never ran. " << context;
-        EXPECT_EQ(classification, "deferred")
-            << "a send started in toApp or toAdmin must be deferred. " << context;
-        // The outer frame, then the send's, under consecutive numbers.
-        ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
-        EXPECT_EQ(field(sent[1], 11), "B41-INNER")
-            << "the frame of the send started in the callback must be transmitted second. "
-            << context;
-        EXPECT_EQ(wire_seqs, (std::vector<seqnum_t>{2U, 3U}))
-            << "the two frames must carry MsgSeqNum(34) 2 then 3. " << context;
-    }
+    ASSERT_NE(classification, "never ran")
+        << "PATH NOT DRIVEN: the inner send's toApp never ran. " << context;
+    EXPECT_EQ(classification, "deferred")
+        << "a send started in toApp or toAdmin must be deferred. " << context;
+    // The outer frame, then the send's, under consecutive numbers.
+    ASSERT_EQ(sent.size(), 2U) << "exactly two frames must be transmitted. " << context;
+    EXPECT_EQ(field(sent[1], 11), "B41-INNER")
+        << "the frame of the send started in the callback must be transmitted second. " << context;
+    EXPECT_EQ(wire_seqs, (std::vector<seqnum_t>{2U, 3U}))
+        << "the two frames must carry MsgSeqNum(34) 2 then 3. " << context;
     EXPECT_TRUE(distinct) << "(a) " << context;
     EXPECT_TRUE(ascending) << "(b) " << context;
     if (has_store) {
@@ -2938,9 +2930,7 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     }
     EXPECT_TRUE(outcomes_ok) << "(e) " << context;
     EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << context;
-    if (starts == Starts::send) {
-        EXPECT_EQ(manager_out, "4") << "two frames must take two numbers. " << context;
-    }
+    EXPECT_EQ(manager_out, "4") << "two frames must take two numbers. " << context;
 }
 
 TEST(CallbackSend, ToAppStartsClose_Graceful) {
