@@ -5628,6 +5628,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_deferred_(
         co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
     FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_DEFERRED_SEND();
+    // Step 5: a close() has begun. fsm_state_ stays Active while a graceful close emits
+    // its Logout, so the Active check of send_body_ would admit this send behind that
+    // Logout. A close that has finished is refused by that check.
+    if (state_ == lifecycle::closing) {
+        co_return std::unexpected(fixpp::core::error::session_invalid_state_for_send);
+    }
     // The depth test is skipped: where the assertion above is compiled out and the depth
     // is still non-zero, a send that deferred again would post again each time it resumed.
     co_return co_await send_body_(payload, send_depth_test::skip);

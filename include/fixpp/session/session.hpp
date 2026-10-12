@@ -1555,7 +1555,7 @@ private:
 
     // fixpp#563 (§2.1 "The deferred path"): copies the payload, posts once onto the
     // session's executor, applies the cancellation test of §2.1 "Cancellation at the hop
-    // (OD-1)", and then awaits send_body_ over the copy.
+    // (OD-1)", refuses the send if a close() has begun, then awaits send_body_ over the copy.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_deferred_(
         std::span<const std::byte> app_payload);
 
