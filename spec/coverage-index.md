@@ -1013,3 +1013,19 @@ Latent-correctness hardening on the doubly-nested-group surface; all inert on sh
 **B&L rows resolved:** L-063-4 (pinned + load-guarded), L-062-3 (census-pinned), L-065-1 (fixed + depth-3 model corrected), L-063-3(a) flat-walk/nesting FIXED; L-063-3(b) per-context delimiter REMAINS (shipped-reachable, opt-in-validator-only, pre-existing — follow-up). Recorded residuals: FR-005a/b (guard scope), FR-004 (scalar not load-enforced), census reach bound (FR-013e).
 
 **Sanitizer/coverage.** Debug legs green; full ASan/UBSan/TSan + coverage + clean-reconfigure-across-configs matrix (SC-005) re-confirmed at `/speckit-verify`.
+
+## fixpp#563 / fixpp#564 — a send or a close started inside an application callback (issue mode; branch `563-564-callback-send`)
+
+Catalogue row **APP-002**. Issue mode: there is no `specs/` bundle; the plan is `.specify/563-564-callback-send.md`, whose §3 lists every cell with the assertion it carries and the mutant that must turn it RED. The measurements, the mutant runs and the gate results are in the parent repository (`decisions/speckit/b41-563-564-measurement.md`, `decisions/speckit/563-564-callback-send-verify.md`); none is copied here.
+
+| B&L row | What it states | Where it is witnessed |
+|---|---|---|
+| `B-563-1` | `Session::send` started inside a callback (R-1), the payload copy, the two results of a send that waited | `tests/session/test_563_564_callback_send.cpp` (suite `CallbackSend`): the `…StartsSend*`, `DeferredSendCancelled*`, `…StartsCloseThenSend*` and `…StartsSendThenClose*` cells; `tests/session/test_544_send_slot_cells.cpp`, `B35SendSlot.Nested_ASendInsideToAppLeavesTheOuterFrameIntact` |
+| `B-563-2`, `L-563-1` | `Session::close` started inside a callback (R-4), and what one post does not deliver | the same suite: the `…StartsClose*` cells, one cell per transport and store arm, `CloseCancelledWhileItWaits*`, `FromAppStartsCloseBehindAnotherClose*`; `tests/session/test_563_564_engine_callback_send.cpp`, the `TwoEngines*` cells |
+| `B-563-3` | `Engine::send` through the snapshot (R-2), the stop check (OD-3), the miss path | `tests/session/test_563_564_engine_callback_send.cpp` (suite `EngineCallbackSend`); `EngineSessionStrand.V15_SendCounterEnrolledBeforeControlHop_NoUAF` for sends queued on the session strand when `stop()` drains; `bench/session/engine_send_bench.cpp` for the route's cost |
+| `B-563-4` | `MessageStore::store` completes its calls in order (R-6) | `CallbackSend.StoreCompletingOutOfOrder*` |
+| `B-564-1`, `L-007-2` | the debug guard: the owner token, the two depths, the assertions | suite `CallbackSend`, the death arms, each matched to one assertion's text; `InboundFrameDispositionsI3.AnInboundParseReenteredFromACallbackDies`; the `AFrameFedFromFromAdminDies` cell of `tests/session/test_validate_gate_inbound.cpp`; `CallbackSend.ToAppRunsTheIoContext*` for the setup R-7 excludes |
+| `L-563-2` | a send started in the confirming Logout's `toAdmin` of a logout the peer started | `CallbackSend.LogoutToAdminStartsSend_PeerLogout*` |
+| `L-563-3`, `L-563-4`, `L-563-5` | read, not run: no cell (`L-563-4`'s route has the shipped cell `ApplicationEngineSend.SendDrainRaceNoUAF`) | — |
+
+Re-derive the cell list from the binaries, not from this table: `bin/session_563_564_callback_send --gtest_list_tests` and `bin/session_563_564_engine_callback_send --gtest_list_tests`.

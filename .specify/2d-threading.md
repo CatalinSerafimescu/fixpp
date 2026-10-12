@@ -1727,3 +1727,41 @@ the **type the session strand stores**:
 `make_session_strand` returns. That item's behavioural conclusion (the accept loop still misses the
 `session_executor` wrapper and falls through to the engine snapshot) is not affected by the type, and
 was not re-verified here. Re-derive the spawn sites with the recipe that amendment gives.
+
+## ⚠️ Document-level amendment, 2026-10-13 (fixpp#563, fixpp#564) — read before citing "Non-reentrant from inside a callback" or the `direct_executor` attestation
+
+Placed at the end for the same reason as the amendments above: line-number citations point into this
+document. The individual sites are **not** rewritten.
+
+**1. "Non-reentrant from inside a callback" (§6.1 "Strand semantics") is superseded.** That bullet says
+that a `fromApp` which calls `Session::send(...)` schedules the send on the serialisation domain, and
+that the send "does *not* run before `fromApp` returns", by the strand's reentrancy guarantee. Neither
+half describes the code. A `Session::send` awaited or `co_spawn`ed on the session's executor from
+inside a callback starts inline, because the executor is already running in that thread; nothing
+schedules it behind the callback. Since fixpp#563 (`.specify/563-564-callback-send.md` §2.1, owner
+ruling R-1) the behaviour is a rule and not an accident of the spawn:
+
+- started in `fromApp`, `fromAdmin` or `onLogon`, the send runs inside the callback: it is numbered,
+  and its `toApp` runs, before the callback returns;
+- started in `toApp` or `toAdmin`, it waits by one post onto the session's executor and starts after
+  that callback returns;
+- a `Session::close` started in any callback of the session begins after that callback returns
+  (ruling R-4).
+
+The first bullet of that passage, "Reentrancy guarantees the application sees" (`fromApp` for message
+N+1 cannot run before `fromApp` for message N has returned), is not changed.
+
+**2. The `direct_executor` attestation (§4.5, the "`direct_executor` attestation" note, and wherever
+this document says the attested executor is used "as if it were running under a strand") gains a
+condition (ruling R-7).** The attestation is about one thread too: an Application callback of the
+session must not run the session's own executor before it returns (`poll`, `run_one`, `run_for` on the
+`io_context`). A strand never runs a second handler of the session inside the first; a bare
+`io_context` executor does when a callback runs the context. An executor attested with such a callback
+is a false attestation, with the disposition this document already gives one: undefined in release,
+asserted in debug on the routes B&L `B-564-1` lists. The waits of rulings R-1 and R-4 are one post onto
+that executor and do not hold there. `per_session_strand`, a session under the Engine whatever its
+mode, and `direct_executor` attested over a strand or a one-worker pool cannot reach the case.
+
+Where to read the current contract: the reentrancy contract in `include/fixpp/session/session.hpp`,
+the comment on choosing a threading mode in `include/fixpp/core/session_executor.hpp`, and B&L
+`B-563-1`, `B-563-2` and `L-007-2`.
