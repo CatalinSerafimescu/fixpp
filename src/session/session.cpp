@@ -18,6 +18,7 @@
 #include <asio/cancellation_state.hpp>
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used to spawn run_liveness_loop(); clang-tidy doesn't see the use through templates
+#include <asio/deferred.hpp>
 #include <asio/detached.hpp>
 #include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/experimental/awaitable_operators.hpp>
@@ -105,6 +106,7 @@
 #include <system_error>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace fixpp::session {
 
@@ -318,6 +320,14 @@ const void* Session::callback_thread_tag_() noexcept {
     assert(outbound_callback_depth_ == 0 &&                                   \
            "onLogon or onLogout entered inside toApp or toAdmin of the same " \
            "session (the session entered or left Active inside an emit)")
+// The deferred path of Session::send evaluates this when it resumes after its post,
+// before it starts the send (§2.1, "When the post does not move the send out of the
+// callback").
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_DEFERRED_SEND()                    \
+    assert(outbound_callback_depth_ == 0 &&                                     \
+           "deferred send resumed inside toApp or toAdmin of the same session " \
+           "(a callback ran the session's executor?)")
 
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
 // record_state_transition_: write new_state into the 16-slot ring and advance
@@ -5481,8 +5491,16 @@ private:
 };
 }  // namespace
 
+// fixpp#563 (`.specify/563-564-callback-send.md` §2.1 "Reader"): send is a non-coroutine
+// and adds no frame. It returns the awaitable of its body, send_body_, with the depth
+// test applied.
 asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
+    return send_body_(app_payload, send_depth_test::apply);
+}
+
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
+    std::span<const std::byte> app_payload, send_depth_test depth_test) noexcept {
     using fixpp::core::error;
 
     // FR-005 / D-3: FSM precondition — Session::send is only valid in Active.
@@ -5492,6 +5510,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     // to give the caller a semantically distinct diagnosis. [FR-005 / D-3]
     if (fsm_state_ != fsm_state::Active) {
         co_return std::unexpected(error::session_invalid_state_for_send);
+    }
+
+    // fixpp#563 (§2.1 "Reader"; ruling R-1): no emit body begins while this session has
+    // toApp or toAdmin on the stack, so a send started there takes the deferred path. The
+    // test sits before the frame slot is taken. The await sits outside the try below, so
+    // nothing the deferred path returns is converted to Disconnected here.
+    if (depth_test == send_depth_test::apply && outbound_callback_depth_ != 0) {
+        co_return co_await send_deferred_(app_payload);
     }
 
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
@@ -5555,6 +5581,33 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
         record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(error::dispatch_aborted);
     }
+}
+
+// fixpp#563 (`.specify/563-564-callback-send.md` §2.1 "The deferred path"): the path of a
+// send started inside toApp or toAdmin. It is one coroutine whose frame owns the payload
+// copy and awaits the send, so the copy outlives the send. No step tests Active or takes
+// the frame slot: send_body_ does both after the hop.
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_deferred_(
+    std::span<const std::byte> app_payload) {
+    // "The payload": the build runs after the callback has returned, when the buffer the
+    // caller's span points into may be gone.
+    const std::vector<std::byte> payload(app_payload.begin(), app_payload.end());
+    // The hop that takes the send off the callback's stack: a post onto the session's
+    // executor ("When the post does not move the send out of the callback (R-7)").
+    co_await asio::post(exec_.underlying(), asio::deferred);
+    // "Cancellation at the hop (OD-1)": a cancellation emitted during the post is recorded
+    // and not thrown there. This is the test a co_await applies when it begins, applied by
+    // hand, so that a send which has consumed nothing returns an error and leaves the
+    // session's state as it was.
+    if ((co_await asio::this_coro::throw_if_cancelled()) &&
+        (co_await asio::this_coro::cancellation_state).cancelled() !=
+            asio::cancellation_type::none) {
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+    }
+    FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_DEFERRED_SEND();
+    // The depth test is skipped: where the assertion above is compiled out and the depth
+    // is still non-zero, a send that deferred again would post again each time it resumed.
+    co_return co_await send_body_(payload, send_depth_test::skip);
 }
 
 // ── 020 T010: Opaque-payload validation (FR-016; INV-8; research.md D1) ──────

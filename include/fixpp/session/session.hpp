@@ -1544,6 +1544,21 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> apply_inbound_sequence_reset(
         seqnum_t new_seqno, seqnum_t ref_seq) noexcept;
 
+    // fixpp#563 (`.specify/563-564-callback-send.md` §2.1 "Reader"): the body of send(),
+    // and whether it tests the outbound-callback depth. send() passes `apply`: a send
+    // that finds toApp or toAdmin of this session on the stack awaits send_deferred_ and
+    // returns its result. send_deferred_ passes `skip`. The choice is an argument and not
+    // a member, so nothing is left set when the send returns early.
+    enum class send_depth_test : std::uint8_t { skip, apply };
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_body_(
+        std::span<const std::byte> app_payload, send_depth_test depth_test) noexcept;
+
+    // fixpp#563 (§2.1 "The deferred path"): copies the payload, posts once onto the
+    // session's executor, applies the cancellation test of §2.1 "Cancellation at the hop
+    // (OD-1)", and then awaits send_body_ over the copy.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_deferred_(
+        std::span<const std::byte> app_payload);
+
     // send_impl: the actual send pipeline (frame building + store_then_emit).
     // Called from the noexcept send() wrapper which catches asio::system_error
     // thrown on async cancellation. May throw on store awaitable cancellation.
@@ -1558,7 +1573,7 @@ private:
     // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; rulings R-9, R-10):
     // send_impl is the send tail. It builds into `frame_buf` through build_send_frame_,
     // then runs toApp, assign_outbound and store_then_emit over it, so `frame_buf` must
-    // outlive the call. Its callers must be Session::send (over the session's frame slot) or
+    // outlive the call. Its callers must be send_body_ (over the session's frame slot) or
     // send_fallback_leaf_ (over the leaf's own buffer); re-check with
     // `git grep -n "send_impl(" -- src include`.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
