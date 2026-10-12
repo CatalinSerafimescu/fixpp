@@ -127,6 +127,14 @@ public:
     // mutation is detected and the next visitor call observes the new state
     // without UB; already-visited frames are not re-visited; iteration stops
     // at the original end.
+    //
+    // After a reset (fixpp#538; .specify/536-537-538-recovery-liveness.md, D-538-2).
+    // A frame stored after reset() or reset_to() is retrievable under its own
+    // sequence number, whatever number the direction's first retained frame has. A
+    // sequence number below the first retained one is a gap, and so is every number
+    // of a direction that holds no frame. A store that inherits the default reset_to
+    // body below is bound by this too: its lookup must not assume that the first
+    // retained frame is number 1.
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> retrieve(
         seqnum_t begin, seqnum_t end, direction_t dir,
         retrieve_visitor& visitor [[clang::lifetimebound]]) noexcept = 0;

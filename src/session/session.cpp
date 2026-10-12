@@ -6578,9 +6578,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
 // the caller can detect and handle them.
 //
 // Returns:
-//   expected_t<void>{}                          — success (resend complete)
+//   replay_outcome::completed                   — success (resend complete)
+//   replay_outcome::superseded                  — `arm` was superseded before an effect
 //   unexpected(app_callback_threw)              — a GapFill toAdmin threw
-//   unexpected(dispatch_aborted)                — transport write error
+//   unexpected(dispatch_aborted)                — transport write error; a stored frame
+//                                                 too large to capture; a GapFill that
+//                                                 could not be built
+//   unexpected(<the store's own code>)          — fixpp#538 (D-538-4): a store read of
+//                                                 the walk failed. The tail read: any
+//                                                 error. A slot's retrieve: any code but
+//                                                 store_seqnum_gap, store_seqnum_invalid
+//                                                 and store_invalid_range, which fold.
 
 asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::replay_outbound_range_(
     seqnum_t begin, seqnum_t requested_end, bool end_is_through_current,
@@ -6653,7 +6661,15 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     seqnum_t our_last = 0;
     if (store_) {
         auto ns = co_await store_->next_seqnum(direction_t::outbound, false);
-        if (ns) our_last = (*ns > 0) ? (*ns - 1U) : 0;
+        // fixpp#538 (.specify/536-537-538-recovery-liveness.md, D-538-4, "The tail
+        // read"; rulings R-7, R-13): this read has no argument to refuse, so its failure
+        // is a read the store did not make, a cancelled one among them. The walk
+        // returns the store's code before it writes anything. Superseded: the failure
+        // was dropped, and the whole range became one GapFill.
+        if (!ns) {
+            co_return std::unexpected(ns.error());
+        }
+        our_last = (*ns > 0) ? (*ns - 1U) : 0;
     }
     const seqnum_t eff_end = (end_is_through_current || (our_last > 0 && requested_end > our_last))
                                  ? our_last
@@ -6679,6 +6695,21 @@ asio::awaitable<fixpp::core::expected_t<Session::replay_outcome>> Session::repla
     for (seqnum_t k = begin; k <= eff_end; ++k) {
         CaptureVisitor cv;
         auto rr = co_await store_->retrieve(k, k, direction_t::outbound, cv);
+
+        // fixpp#538 (.specify/536-537-538-recovery-liveness.md, D-538-4; rulings R-7,
+        // R-10, R-13), by the code the read returned. A number the store does not
+        // retain (store_seqnum_gap), and an argument it refused (store_seqnum_invalid,
+        // store_invalid_range: the codes retrieve()'s contract assigns to the request),
+        // join the GapFill run below. Every other code is a read the store did not
+        // make, store_cancelled among them: the answer stops here, an open GapFill run
+        // is not flushed, and the caller gets the store's own code. Superseded: every
+        // failed read was folded. Rejected: gap-filling a slot the store failed to read
+        // and recording an event (a GapFill is permanent on the wire).
+        if (!rr && rr.error() != fixpp::core::error::store_seqnum_gap &&
+            rr.error() != fixpp::core::error::store_seqnum_invalid &&
+            rr.error() != fixpp::core::error::store_invalid_range) {
+            co_return std::unexpected(rr.error());
+        }
 
         // Truncated frame: disconnect rather than silently losing data. [RC#B]
         if (cv.truncated) {

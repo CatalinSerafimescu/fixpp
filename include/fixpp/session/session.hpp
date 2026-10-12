@@ -1607,7 +1607,13 @@ private:
     //   held before one of the walk's effects (093 plan OD-25): the walk stopped there.
     // Returns std::unexpected(app_callback_threw) when a GapFill toAdmin threw.
     // Returns std::unexpected(dispatch_aborted) on transport write error.
-    //   In BOTH unexpected cases the CALLER owns record_state_transition_(Disconnected).
+    // Returns std::unexpected(<the store's own code>) when a store read of the walk
+    //   failed (fixpp#538; .specify/536-537-538-recovery-liveness.md, D-538-4): the
+    //   read of the store's next outbound number, with any error; or a slot's
+    //   retrieve, with any code but store_seqnum_gap, store_seqnum_invalid and
+    //   store_invalid_range, which fold into the GapFill run. The walk stops there
+    //   and writes nothing more.
+    //   In every unexpected case the CALLER owns record_state_transition_(Disconnected).
     //   The helper NEVER calls record_state_transition_ directly (D-5).
     //
     // Callers:

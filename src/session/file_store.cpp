@@ -820,7 +820,9 @@ struct FileStoreImpl {
     std::uint64_t generation_{0};
 
     // Per-direction frame index (rebuilt during open/restart scan).
-    // entries are in insertion order (seq ascending, starting from 1).
+    // entries are in insertion order: seq ascending and contiguous from the first entry
+    // retained, whose number is the direction's counter at the last reset (fixpp#538,
+    // D-538-3: reset_to can leave that counter above 1).
     std::vector<IndexEntry> inbound_index;
     std::vector<IndexEntry> outbound_index;
 
@@ -1444,7 +1446,19 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 
         snap.reserve(static_cast<std::size_t>(tail_end - begin + 1));
         for (seqnum_t s = begin; s <= tail_end; ++s) {
-            const std::size_t i = static_cast<std::size_t>(s - 1);
+            // fixpp#538 (.specify/536-537-538-recovery-liveness.md, D-538-1): a sequence
+            // is looked up relative to the first entry this direction retains, which the
+            // open scan rebuilds from the record headers; the log's format is unchanged.
+            // An empty direction, and a number below the first retained one, is a gap.
+            // The emptiness test precedes any read of the first entry, and the
+            // comparison precedes the subtraction. Rejected: a base stored in the
+            // sentinel, which needs a format version old and new builds refuse of each
+            // other.
+            if (idx.empty() || s < idx.front().seq) {
+                gap_hit = true;
+                break;
+            }
+            const std::size_t i = static_cast<std::size_t>(s - idx.front().seq);
             if (i >= idx.size() || idx[i].seq != s) {
                 gap_hit = true;
                 break;
