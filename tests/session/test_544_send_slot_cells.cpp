@@ -13,10 +13,12 @@
 //   - Interleaved: two sends spawned back to back from the session strand; the second runs
 //     while the first is suspended in its store. Each send's stored and transmitted bytes
 //     must equal a frame built here, by hand, from the same payload, seq and mock-clock time.
-//   - Nested: a send started from inside the first send's toApp runs inline, because a
-//     co_spawn onto a strand already running on this thread dispatches inline. The bytes toApp's
-//     view spans must not change across that send. Neither result is asserted: both sends can carry
-//     one MsgSeqNum (fixpp#563, out of scope).
+//   - Nested: a send started from inside the first send's toApp. It starts after that toApp
+//     has returned (`.specify/563-564-callback-send.md` §2.1), while the outer send is suspended
+//     in its store call and still holds the slot. The bytes the outer toApp's view spanned must
+//     be the bytes stored and transmitted for the outer frame, and the second send must build
+//     a different frame in another buffer. The cell's order assertion needs fixpp#563's
+//     deferral: on a base without it that send runs inline, inside the outer toApp.
 //   - Cancelled inside toApp, on the primary path: the cancellation check after toApp stays
 //     where it is today.
 // Part 2 needs the slot flag (tests/support/session_test_access.hpp), so it has no base form:

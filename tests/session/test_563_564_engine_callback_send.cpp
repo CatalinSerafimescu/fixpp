@@ -5,12 +5,14 @@
 // fixpp#563 and fixpp#564 (batch B41).
 //
 // Subject: an Engine::send started from inside an Application callback, with no
-// asio::post between the callback and the co_spawn. Engine::send hops to the
-// engine's control strand and from there to the session's strand; each hop is a
-// co_spawn, whose first step is a dispatch. Whether the send's toApp then runs
-// while the calling callback is still on the stack, or only after it returned,
-// is what each cell classifies. tests/session/test_563_564_callback_send.cpp
-// holds the Session::send cells.
+// asio::post between the callback and the co_spawn. Engine::send reaches a
+// published session through the engine's snapshot and one co_spawn onto that
+// session's strand; an id the snapshot does not hold goes through the engine's
+// control strand first (`.specify/563-564-callback-send.md` §2.3). A co_spawn's
+// first step is a dispatch. Whether the send's toApp then runs while the
+// calling callback is still on the stack, or only after it returned, is what
+// each cell classifies. tests/session/test_563_564_callback_send.cpp holds the
+// Session::send cells.
 //
 // Cells (suite EngineCallbackSend), each to be run alone with --gtest_filter:
 //   SequentialEngineSends     control. Message A, then message B once A's send

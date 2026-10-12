@@ -88,8 +88,8 @@ void run_combo(asio::any_io_executor ex, threading_mode mode, bool attested,
     // Drain the session's serialisation domain BEFORE `s` (stack-local) is
     // destroyed. drive_script signals completion (`last.set_value()`) from
     // INSIDE the last callback body, but `dispatch_app_callback`'s debug
-    // re-entrancy `dispatch_guard` dtor (session.hpp, an atomic store to
-    // the session's `in_dispatch_` member) runs AFTER the body returns — so
+    // `callback_owner_hold` dtor (session.hpp, an atomic store to the
+    // session's `callback_owner_` member) runs AFTER the body returns — so
     // `fut.wait()` can release the main thread while a worker is still inside
     // that dtor, touching `s` after its scope ends. A plain post onto `exec_`
     // (`s.executor()`) is FIFO-ordered strictly after every prior callback's
