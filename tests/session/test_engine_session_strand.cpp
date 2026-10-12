@@ -2388,7 +2388,7 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
 //   keeps the counter object alive past Engine destruction so the guard's
 //   decrement is always safe.
 //
-// ── What this cell drives since fixpp#563 ────────────────────────────────────
+// ── What this cell drives (the route of fixpp#563) ───────────────────────────
 //   Its sends target an Active, published session, so they reach it through the
 //   snapshot and queue on the SESSION strand; none crosses control_strand_
 //   (`.specify/563-564-callback-send.md` §2.3). The subject is therefore sends
@@ -2465,7 +2465,7 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     // Post N send coroutines concurrently onto the ioc.  Each is co_spawn'd
     // onto the ioc executor; their bodies queue up on the session's strand.
     // The goal: maximize the number of sends that are POSTED (send_counter_
-    // already bumped) but NOT YET RUN on that strand when stop() fires.
+    // incremented) and still queued on that strand when stop() fires.
     constexpr int kNumSends = 32;
     const std::array<std::byte, 4> dummy{};
     const std::span<const std::byte> payload_view{dummy};

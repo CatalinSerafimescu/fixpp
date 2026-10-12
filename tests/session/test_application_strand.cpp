@@ -142,10 +142,10 @@ std::vector<std::byte> make_app_payload() {
 // ── StrandApplication — tracks concurrent callback entries ───────────────────
 //
 // In debug builds, callback_dispatch_scope takes the session's owner token and
-// asserts that no other thread holds it. If two threads ran callbacks of one
-// session at once, the assert would fire. The token is atomic, so the check is
-// not itself a data race; under TSan the callbacks' own unsynchronized accesses
-// would be reported.
+// asserts that another thread does not hold it. If a second thread ran a callback of
+// the session while a first was inside one, the assert would fire. The token is
+// atomic, so the check is not itself a data race; under TSan the callbacks' own
+// unsynchronized accesses would be reported.
 //
 // This application records whether any callback was ever entered while
 // another was already in progress (concurrency_detected flag).
@@ -466,7 +466,7 @@ TEST(ApplicationStrand, EngineSendKeepAliveNoUAF) {
 //
 // The cell sends from the test body, after the fromApp callback has returned.
 // It does not start a send inside the callback: what a send started there does
-// (inline in fromApp, since fixpp#563) is the subject of
+// (inline in fromApp; fixpp#563) is the subject of
 // tests/session/test_563_564_callback_send.cpp.
 //
 // This test uses the direct Session::send path (the one Engine::send's body
