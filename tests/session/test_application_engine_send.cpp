@@ -10,8 +10,8 @@
 //      FIX-1 — exec_ first-hop.)
 //   2. ReentrantSendFromToAppNoDeadlock: an engine.send() that a toApp
 //      callback posts does not deadlock. (FR-006 re-entrant edge; toApp edge.)
-//   3. ReentrantSendFromFromAppNoDeadlock: engine.send() called from inside a
-//      fromApp callback (inbound app message arrives, callback issues a send)
+//   3. ReentrantSendFromFromAppNoDeadlock: an engine.send() that a fromApp
+//      callback posts (inbound app message arrives, callback posts a send)
 //      does not deadlock. (FR-006 re-entrant edge; fromApp edge.)
 //   4. SendDrainRaceNoUAF: engine.send() is in flight (its toApp starts stop()),
 //      stop() must wait on send_counter_ > 0 before completing, then
@@ -358,7 +358,7 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
     EXPECT_TRUE(engine.stopped());
 }
 
-// ── Test 2: engine.send() from inside a toApp callback does not deadlock ───────
+// ── Test 2: an engine.send() posted from a toApp callback does not deadlock ────
 //
 // When toApp fires for the first message, its hook posts a handler that starts a
 // second engine.send(). The deferral in this cell is the test's own asio::post:
@@ -417,7 +417,7 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
         EXPECT_TRUE(sf.get().has_value()) << "first engine.send() must succeed";
     }
 
-    // Wait for re-entrant send to complete.
+    // Wait for the posted send to complete.
     bool reentrant_ok = wait_until(ioc, [&] { return reentrant_done.load(); }, 2000ms);
     EXPECT_TRUE(reentrant_ok)
         << "re-entrant engine.send() from inside toApp must complete without deadlock";
