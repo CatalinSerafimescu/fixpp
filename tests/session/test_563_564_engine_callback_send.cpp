@@ -50,6 +50,16 @@
 //                             registered. Such a call runs on the engine's
 //                             control strand up to its registry lookup and
 //                             touches no session.
+//   TwoEngines_FromAppStartsClose_Terminal, TwoEngines_FromAppStartsClose_Graceful,
+//   TwoEngines_ToAppStartsClose_Terminal, TwoEngines_ToAppStartsClose_Graceful
+//                             two Engines, an acceptor's and an initiator's,
+//                             over plain loopback TCP. The initiator's fromApp
+//                             for a message the acceptor sent, or its toApp for
+//                             a message of its own Engine::send, starts a close
+//                             of the initiator's session. The cell holds no
+//                             handle to that session outside the callback, so
+//                             the session is freed by its owners: the role
+//                             loop, then stop().
 //
 // Classification, printed by every cell and attached to every failure:
 //   nested     the second send's toApp ran while the callback that started it
@@ -109,6 +119,14 @@
 // io_context is not covered. No fatal assertion sits between Engine::start()
 // and a completed stop(): a cell collects into `Readings`, stops the engine,
 // and asserts afterwards.
+//
+// The TwoEngines_ cells have a fixture of their own, run_two_engines_cell: one
+// Engine per session, each with its own Application and mock clock, on one
+// io_context run by the test thread, over plain TCP
+// (SecurityProfile::kind::insecure_plain_tcp), with a heartbeat interval that no
+// clock advance reaches and a logout timeout that no run of a cell reaches. They
+// keep the rule on fatal assertions: both Engines are stopped before a cell
+// asserts.
 
 #include <gtest/gtest.h>
 
@@ -167,6 +185,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_test_access.hpp"
@@ -923,6 +942,450 @@ void run_and_check_cancelled(asio::cancellation_type emission) {
     expect_a_then_b(o, ctx);
 }
 
+// ── Two Engines over loopback TCP: a close started in a callback ─────────────
+//
+// `.specify/563-564-callback-send.md` §3, "New cells", the row of two Engines over
+// loopback TCP; §2.5 "Not a memory-safety defect, as far as reading goes".
+
+// The logout timeout of these cells. Their clocks are mock clocks that nothing
+// advances, so no heartbeat interval elapses and no wait on the session's clock
+// ends; close() also arms a timer on real time for this duration, and the value is
+// one that no run of a cell reaches.
+constexpr std::uint32_t kOutOfReachMs = 60000;
+
+// SecurityProfile::kind::insecure_plain_tcp is [[deprecated]] at every selection
+// site; these cells select it on purpose, for a plain loopback TCP transport.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+SessionConfig make_plain_session_cfg(asio::io_context& ioc, const char* sender, const char* target,
+                                     session_role role, uint16_t port) {
+    SessionConfig c;
+    c.sender_comp_id = sender;
+    c.target_comp_id = target;
+    c.begin_string = "FIX.4.2";
+    c.role = role;
+    c.executor_override = ioc.get_executor();
+    c.security_profile = SecurityProfile{SecurityProfile::kind::insecure_plain_tcp};
+    c.dictionary = fixpp::test_support::make_minimal_dictionary();
+    c.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
+    c.heartbeat_interval = std::chrono::seconds{30};
+    c.logout_disconnect_timeout_ms = kOutOfReachMs;
+    c.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
+    c.transport_send = [](std::span<const std::byte>) {};
+    MemoryStore::Config sc;
+    sc.inbound_capacity = 16;
+    sc.outbound_capacity = 16;
+    sc.max_frame_bytes = 4096;
+    c.store_factory = std::make_shared<MemoryStoreFactory>(sc);
+    return c;
+}
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+
+// The Application of one Engine of a cell with two.
+class OneEngineApp final : public Application {
+public:
+    std::function<void(const View&)> on_from_app;
+    std::function<void(const View&)> on_to_app;
+    std::function<void(const char*, const View&)> on_admin;
+    std::function<void()> on_logout;
+
+    expected_t<void> fromApp(const View& mv, const SessionId& /*id*/) override {
+        if (on_from_app) on_from_app(mv);
+        return {};
+    }
+    expected_t<void> toApp(const View& mv, const SessionId& /*id*/) override {
+        if (on_to_app) on_to_app(mv);
+        return {};
+    }
+    expected_t<void> fromAdmin(const View& mv, const SessionId& /*id*/) override {
+        if (on_admin) on_admin("fromAdmin", mv);
+        return {};
+    }
+    void toAdmin(const View& mv, const SessionId& /*id*/) override {
+        if (on_admin) on_admin("toAdmin", mv);
+    }
+    void onLogout(const SessionId& /*id*/) override {
+        if (on_logout) on_logout();
+    }
+};
+
+// A session's FSM state and lifecycle, read together.
+std::string where_is(const Session& s) {
+    const char* state = "unknown";
+    switch (s.state()) {
+        case fsm_state::NotConnected:
+            state = "NotConnected";
+            break;
+        case fsm_state::LogonSent:
+            state = "LogonSent";
+            break;
+        case fsm_state::LogonReceived:
+            state = "LogonReceived";
+            break;
+        case fsm_state::Active:
+            state = "Active";
+            break;
+        case fsm_state::LogoutSent:
+            state = "LogoutSent";
+            break;
+        case fsm_state::Disconnected:
+            state = "Disconnected";
+            break;
+    }
+    const char* lifecycle = "unknown";
+    switch (session_test_access::lifecycle_value(s)) {
+        case 0:
+            lifecycle = "never_opened";
+            break;
+        case 1:
+            lifecycle = "open";
+            break;
+        case 2:
+            lifecycle = "closing";
+            break;
+        case 3:
+            lifecycle = "closed_drained";
+            break;
+        default:
+            break;
+    }
+    return std::string(state) + " " + lifecycle;
+}
+
+enum class CloseStartedIn { from_app, to_app };
+
+struct TwoEngineReadings {
+    bool setup_ok = false;
+    std::string setup_failure;
+    // The initiator's callback under test reached its co_spawn of close().
+    bool started = false;
+    // The initiator's session on entry to that callback, and after the co_spawn
+    // returned.
+    std::string entered = "not recorded";
+    std::string inside = "not recorded";
+    bool inside_close_done = false;
+    int inside_on_logout_calls = 0;
+    // The Engine::send that carries message A, and the close the callback started.
+    SendOutcome send;
+    SendOutcome close;
+    // Each side's callbacks and completions from the start of the send on, in the
+    // order that side saw them. The two lists are not ordered against each other:
+    // a socket lies between them.
+    std::vector<std::string> ini_events;
+    std::vector<std::string> acc_events;
+    int ini_on_logout_calls = 0;
+    int acc_on_logout_calls = 0;
+    int acc_from_app_calls = 0;
+    // The initiator's role loop unpublished its transport.
+    bool role_loop_ended = false;
+    bool completed = false;
+    std::string pending_at_the_bound;
+    std::string ini_at_the_end = "not read";
+    bool ini_stopped = false;
+    bool acc_stopped = false;
+    bool ini_published_after_stop = true;
+};
+
+std::string list_of(const std::vector<std::string>& v) {
+    std::string out;
+    for (const auto& e : v) out += " [" + e + "]";
+    return out.empty() ? " (none)" : out;
+}
+
+// Two Engines on one io_context, an acceptor and an initiator, each with its own
+// Application and mock clock, one session each, over plain loopback TCP. Message A
+// is sent by the initiator (to_app) or by the acceptor (from_app), and the
+// initiator's callback for it starts a close of the initiator's session. The cell
+// holds no handle to that session outside the callback, so the session's owners
+// are the Engine's: its role loop, and its registry until stop(). Non-fatal only:
+// both Engines are stopped before this returns.
+TwoEngineReadings run_two_engines_cell(CloseStartedIn started_in, close_mode mode) {
+    TwoEngineReadings o;
+    asio::io_context ioc;
+    auto ini_app = std::make_shared<OneEngineApp>();
+    auto acc_app = std::make_shared<OneEngineApp>();
+    const auto engine_cfg = [&](const std::shared_ptr<OneEngineApp>& app) {
+        fixpp::core::EngineConfig c;
+        c.executor = ioc.get_executor();
+        c.application = app;
+        c.clock = make_mock_clock(ioc);
+        return c;
+    };
+    Engine acc_engine{ioc.get_executor(), engine_cfg(acc_app)};
+    Engine ini_engine{ioc.get_executor(), engine_cfg(ini_app)};
+    bool acc_started = false;
+    bool ini_started = false;
+
+    const auto stop = [&](Engine& engine, bool& stopped, const char* site) {
+        auto sf = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(ioc, sf, 3s, site)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *engine.clock(), site);
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
+            return;
+        }
+        sf.get();
+        stopped = engine.stopped();
+    };
+    const auto stop_both = [&] {
+        if (ini_started) stop(ini_engine, o.ini_stopped, "EngineCallbackSend/two_engines_stop_ini");
+        if (acc_started) stop(acc_engine, o.acc_stopped, "EngineCallbackSend/two_engines_stop_acc");
+    };
+
+    // The acceptor's Engine first: the initiator connects once, to a port that is
+    // already listening.
+    auto acc_cfg = make_plain_session_cfg(ioc, "ACCEPTOR", "INITIATOR", session_role::acceptor, 0);
+    const SessionId acc_id = SessionId::from_config(acc_cfg);
+    if (!acc_engine.register_session(std::move(acc_cfg)).has_value() ||
+        !acc_engine.start().has_value()) {
+        o.setup_failure = "the acceptor's Engine did not register or start";
+        return o;
+    }
+    acc_started = true;
+    uint16_t port = 0;
+    if (!fixpp::test_support::pump_until(
+            ioc,
+            [&] {
+                port = acc_engine.acceptor_bound_endpoint(acc_id).port;
+                return port != 0;
+            },
+            5s, fixpp::test_support::kPumpSlice, "EngineCallbackSend/two_engines_bind")) {
+        o.setup_failure = "the acceptor's listener was not bound";
+        stop_both();
+        return o;
+    }
+    auto ini_cfg =
+        make_plain_session_cfg(ioc, "INITIATOR", "ACCEPTOR", session_role::initiator, port);
+    const SessionId ini_id = SessionId::from_config(ini_cfg);
+    if (!ini_engine.register_session(std::move(ini_cfg)).has_value() ||
+        !ini_engine.start().has_value()) {
+        o.setup_failure = "the initiator's Engine did not register or start";
+        stop_both();
+        return o;
+    }
+    ini_started = true;
+    const auto active = [&](const Engine& engine, const SessionId& id) {
+        const auto h = engine.lookup(id);
+        return h && h->state() == fsm_state::Active;
+    };
+    if (!fixpp::test_support::pump_until(
+            ioc, [&] { return active(acc_engine, acc_id) && active(ini_engine, ini_id); }, 5s,
+            fixpp::test_support::kPumpSlice, "EngineCallbackSend/two_engines_active")) {
+        o.setup_failure = "the sessions did not reach Active";
+        stop_both();
+        return o;
+    }
+    o.setup_ok = true;
+
+    const auto payload_a = bytes_of(kPayloadA);
+    // The initiator's session, looked up for the length of one statement.
+    const auto ini_now = [&] {
+        const auto h = ini_engine.lookup(ini_id);
+        return h ? where_is(*h) : std::string("not published");
+    };
+    const auto note_ini = [&](const std::string& what) {
+        o.ini_events.push_back(what + " (" + ini_now() + ")");
+    };
+    const auto completes = [&](SendOutcome& out, const char* what) {
+        return [&, what](std::exception_ptr ep, expected_t<void> r) {
+            out.done = true;
+            out.threw = static_cast<bool>(ep);
+            if (!ep && !r) out.err = r.error();
+            note_ini(std::string(what) + " completes: " + describe(out));
+        };
+    };
+    const auto start_close = [&](const char* from) {
+        o.started = true;
+        // The handle lives until this closure returns.
+        const auto h = ini_engine.lookup(ini_id);
+        if (!h) return;
+        o.entered = where_is(*h);
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] %s: starting Session::close\n", from);
+        asio::co_spawn(h->executor().underlying(), h->close(mode), completes(o.close, "the close"));
+        std::fprintf(stderr, "[ B41 ] %s: co_spawn returned\n", from);
+        o.inside = where_is(*h);
+        o.inside_close_done = o.close.done;
+        o.inside_on_logout_calls = o.ini_on_logout_calls;
+    };
+
+    ini_app->on_to_app = [&](const View& mv) {
+        const std::string id11 = value(mv, 11);
+        note_ini("toApp 11=" + id11);
+        if (started_in == CloseStartedIn::to_app && id11 == kIdA && !o.started) {
+            start_close("toApp(A)");
+        }
+    };
+    ini_app->on_from_app = [&](const View& mv) {
+        const std::string id11 = value(mv, 11);
+        note_ini("fromApp 11=" + id11);
+        if (started_in == CloseStartedIn::from_app && id11 == kIdA && !o.started) {
+            start_close("fromApp(A)");
+        }
+    };
+    ini_app->on_admin = [&](const char* callback, const View& mv) {
+        note_ini(std::string(callback) + " 35=" + value(mv, 35));
+    };
+    ini_app->on_logout = [&] {
+        ++o.ini_on_logout_calls;
+        note_ini("onLogout");
+    };
+    acc_app->on_from_app = [&](const View& mv) {
+        ++o.acc_from_app_calls;
+        o.acc_events.push_back("fromApp 11=" + value(mv, 11));
+    };
+    acc_app->on_to_app = [&](const View& mv) {
+        o.acc_events.push_back("toApp 11=" + value(mv, 11));
+    };
+    acc_app->on_admin = [&](const char* callback, const View& mv) {
+        o.acc_events.push_back(std::string(callback) + " 35=" + value(mv, 35));
+    };
+    acc_app->on_logout = [&] {
+        ++o.acc_on_logout_calls;
+        o.acc_events.emplace_back("onLogout");
+    };
+
+    if (started_in == CloseStartedIn::to_app) {
+        asio::co_spawn(ioc, ini_engine.send(ini_id, std::span<const std::byte>(payload_a)),
+                       completes(o.send, "the send"));
+    } else {
+        asio::co_spawn(ioc, acc_engine.send(acc_id, std::span<const std::byte>(payload_a)),
+                       completes(o.send, "the acceptor's send"));
+    }
+
+    // Until both operations completed, the initiator's role loop unpublished its
+    // transport, and the acceptor saw its session leave Active: from then on
+    // nothing more of this connection reaches the acceptor. Bounded: what is
+    // missing at the bound is reported by the caller from `o`.
+    const auto role_loop_ended = [&] {
+        return engine_test_access::live_transport_published(ini_engine, ini_id) ==
+               std::optional<bool>{false};
+    };
+    o.completed = fixpp::test_support::pump_until(
+        ioc,
+        [&] {
+            return o.send.done && o.close.done && role_loop_ended() && o.acc_on_logout_calls > 0;
+        },
+        10s, fixpp::test_support::kPumpSlice, "EngineCallbackSend/two_engines_close");
+    o.role_loop_ended = role_loop_ended();
+    if (!o.completed) {
+        o.pending_at_the_bound =
+            std::string(o.send.done ? "" : "the send had not completed; ") +
+            (o.close.done ? "" : "the close had not completed; ") +
+            (o.role_loop_ended ? "" : "the initiator's role loop had not ended; ") +
+            (o.acc_on_logout_calls > 0 ? "" : "the acceptor had not seen its session disconnect; ");
+    }
+    o.ini_at_the_end = ini_now();
+
+    ini_app->on_to_app = nullptr;
+    ini_app->on_from_app = nullptr;
+    ini_app->on_admin = nullptr;
+    ini_app->on_logout = nullptr;
+    acc_app->on_from_app = nullptr;
+    acc_app->on_to_app = nullptr;
+    acc_app->on_admin = nullptr;
+    acc_app->on_logout = nullptr;
+    stop_both();
+    o.ini_published_after_stop = ini_engine.lookup(ini_id) != nullptr;
+    return o;
+}
+
+void run_and_check_two_engines(CloseStartedIn started_in, close_mode mode) {
+    const TwoEngineReadings o = run_two_engines_cell(started_in, mode);
+    ASSERT_TRUE(o.setup_ok) << "setup: " << o.setup_failure;
+    const char* callback = started_in == CloseStartedIn::to_app ? "toApp" : "fromApp";
+    const std::string reading =
+        std::string("The initiator's ") + callback + " starts a " +
+        (mode == close_mode::terminal ? "terminal" : "graceful") +
+        " close. On entry: " + o.entered + "; after the start: " + o.inside + ", the close " +
+        (o.inside_close_done ? "completed" : "not completed") + ", onLogout calls " +
+        std::to_string(o.inside_on_logout_calls) + "; the send: " + describe(o.send) +
+        "; the close: " + describe(o.close) +
+        "; the initiator's side, in order:" + list_of(o.ini_events) +
+        "; the acceptor's side, in order:" + list_of(o.acc_events) +
+        "; the initiator's role loop " + (o.role_loop_ended ? "ended" : "had not ended") +
+        "; the initiator's session at the end: " + o.ini_at_the_end +
+        "; Engines stopped: initiator " + (o.ini_stopped ? "yes" : "no") + ", acceptor " +
+        (o.acc_stopped ? "yes" : "no") + "; the initiator's session after stop(): " +
+        (o.ini_published_after_stop ? "still published" : "not published") + ".";
+    std::printf("[ MEASURED ] %s\n", reading.c_str());
+    std::fflush(stdout);
+
+    ASSERT_TRUE(o.started) << "PATH NOT DRIVEN: the initiator's " << callback
+                           << " did not start its close. " << reading;
+    EXPECT_EQ(o.inside, "Active open")
+        << "inside the callback after the start, the session is Active and the lifecycle is "
+           "open. "
+        << reading;
+    EXPECT_EQ(o.inside, o.entered)
+        << "inside the callback after the start, the session is as the callback entered it. "
+        << reading;
+    EXPECT_FALSE(o.inside_close_done)
+        << "inside the callback after the start, the close it started has not completed. "
+        << reading;
+    EXPECT_EQ(o.inside_on_logout_calls, 0)
+        << "inside the callback after the start, onLogout has not run. " << reading;
+    EXPECT_TRUE(o.completed) << "every awaited event must happen within the pump's bound; "
+                             << o.pending_at_the_bound << reading;
+
+    EXPECT_EQ(describe(o.close), "ok") << "the close's result is ok. " << reading;
+    EXPECT_EQ(o.ini_at_the_end, "Disconnected closed_drained")
+        << "the initiator's session ends closed. " << reading;
+    EXPECT_EQ(o.ini_on_logout_calls, 1) << "the initiator's onLogout runs once. " << reading;
+    EXPECT_TRUE(o.role_loop_ended) << "the session's role loop ends. " << reading;
+    EXPECT_TRUE(o.ini_stopped) << "the initiator's Engine stops cleanly afterwards. " << reading;
+    EXPECT_TRUE(o.acc_stopped) << "the acceptor's Engine stops cleanly afterwards. " << reading;
+    EXPECT_FALSE(o.ini_published_after_stop)
+        << "after stop() the Engine no longer holds the session. " << reading;
+    EXPECT_GE(o.acc_on_logout_calls, 1)
+        << "the acceptor sees its session leave Active. " << reading;
+
+    const auto in_acc = [&](std::string_view what) {
+        return static_cast<std::size_t>(std::ranges::find(o.acc_events, what) -
+                                        o.acc_events.begin());
+    };
+    const auto ini_logouts = std::ranges::count_if(
+        o.ini_events, [](const std::string& e) { return e.starts_with("toAdmin 35=5"); });
+    const std::string outer = "fromApp 11=" + std::string(kIdA);
+    if (mode == close_mode::graceful) {
+        EXPECT_EQ(ini_logouts, 1) << "a graceful close sends one Logout. " << reading;
+        EXPECT_LT(in_acc("fromAdmin 35=5"), o.acc_events.size())
+            << "the acceptor receives the Logout. " << reading;
+    } else {
+        EXPECT_EQ(ini_logouts, 0) << "a terminal close sends no Logout. " << reading;
+        EXPECT_EQ(in_acc("fromAdmin 35=5"), o.acc_events.size())
+            << "the acceptor receives no Logout. " << reading;
+    }
+    if (started_in == CloseStartedIn::from_app) {
+        EXPECT_EQ(describe(o.send), "ok") << "the acceptor's send returns ok. " << reading;
+        return;
+    }
+    if (mode == close_mode::graceful) {
+        EXPECT_EQ(describe(o.send), "ok") << "the send returns ok. " << reading;
+        EXPECT_EQ(o.acc_from_app_calls, 1)
+            << "the acceptor receives the outer frame once. " << reading;
+        EXPECT_LT(in_acc(outer), in_acc("fromAdmin 35=5"))
+            << "the acceptor receives the outer frame and then the Logout. " << reading;
+    } else {
+        // The acceptor delivers every frame it read before it acts on the end of
+        // the stream, so once its session has left Active a frame that was written
+        // would have reached fromApp.
+        EXPECT_EQ(o.acc_from_app_calls, 0)
+            << "the acceptor does not receive the outer frame. " << reading;
+        EXPECT_EQ(o.send.err, std::optional<error>{error::dispatch_aborted})
+            << "the send returns dispatch_aborted. " << reading;
+    }
+}
+
 // ── Multi-threaded cells ──────────────────────────────────────────────────────
 
 constexpr std::size_t kMtReplies = 2000;
@@ -1464,6 +1927,29 @@ TEST(EngineCallbackSend, EngineSendFromFromApp) {
 
 TEST(EngineCallbackSend, EngineSendFromFromAppOnSessionExecutor) {
     run_and_check(Shape::from_from_app, SpawnOn::session_executor);
+}
+
+// fromApp starts a terminal close of its own session. On a build with a memory checker
+// this arm is the measurement of a session closed inside one of its own callbacks and then
+// freed by its owners.
+TEST(EngineCallbackSend, TwoEngines_FromAppStartsClose_Terminal) {
+    run_and_check_two_engines(CloseStartedIn::from_app, close_mode::terminal);
+}
+
+TEST(EngineCallbackSend, TwoEngines_FromAppStartsClose_Graceful) {
+    run_and_check_two_engines(CloseStartedIn::from_app, close_mode::graceful);
+}
+
+// toApp of an Engine::send starts a terminal close: the close runs while the send's frame is
+// in its store call, and the frame is not transmitted.
+TEST(EngineCallbackSend, TwoEngines_ToAppStartsClose_Terminal) {
+    run_and_check_two_engines(CloseStartedIn::to_app, close_mode::terminal);
+}
+
+// toApp of an Engine::send starts a graceful close: the frame goes out, then the Logout.
+// It is the positive control of the terminal arm's "does not receive the outer frame".
+TEST(EngineCallbackSend, TwoEngines_ToAppStartsClose_Graceful) {
+    run_and_check_two_engines(CloseStartedIn::to_app, close_mode::graceful);
 }
 
 TEST(EngineCallbackSend, MtEngineSendFromFromApp_Quiet) { run_and_check_mt(false); }

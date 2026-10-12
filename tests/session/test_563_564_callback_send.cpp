@@ -161,6 +161,38 @@
 //                             already queued behind the frame's delivery, so
 //                             the other close runs first. The graceful one with
 //                             the arms of the close cells.
+//   FromAppStartsClose_Terminal_TwoFramesInOneRead
+//                             batch B41. Two application frames delivered by
+//                             one coroutine with nothing between them; fromApp
+//                             for the first starts a terminal close. On a
+//                             MemoryStore and, with _FileStore, on a FileStore;
+//                             each also with _LiveWrite.
+//   CloseCancelledWhileItWaits_Terminal_EmitTerminal,
+//   CloseCancelledWhileItWaits_Terminal_EmitTotal,
+//   CloseCancelledWhileItWaits_Graceful_EmitTerminal,
+//   CloseCancelledWhileItWaits_Graceful_EmitTotal
+//                             batch B41. fromApp starts a close of the named
+//                             mode by a co_spawn bound to a cancellation slot
+//                             of the cell, and emits on that slot before it
+//                             returns. With the arms of the close cells.
+//   OnLogonStartsClose_<role>_<mode>, OnLogonStartsNoClose_<role>_FileStore,
+//   OnLogoutOfGracefulCloseStartsClose_Terminal,
+//   OnLogoutAfterAnotherBeginStringStartsClose_<mode>,
+//   OnCreateStartsClose_<role>_<mode>
+//                             batch B41. A close started in a lifecycle
+//                             callback; <role> is Initiator or Acceptor, <mode>
+//                             Terminal or Graceful. The onLogon cells set a
+//                             heartbeat interval, feed the peer's Logon on the
+//                             session's executor, run on a MemoryStore and,
+//                             with _FileStore, on a FileStore, and read the
+//                             liveness loop's sleep through a clock that counts
+//                             the sleeps in flight; the NoClose cells are the
+//                             positive control of that reading. The onLogout
+//                             cells have the arms of the close cells. The
+//                             onCreate cells run on each store kind. The
+//                             onLogon and onCreate cells run on the synchronous
+//                             sink only. What each callback's cells assert is
+//                             spelled out in run_lifecycle_callback_starts_close.
 //   ToAppStartsSend_NoStore, ToAdminStartsSend_NoStore,
 //   ToAdminStartsSend_AssignFirstSite_NoStore, OverlappingSends_NoStore
 //                             batch B41. The callback-started and overlapping
@@ -299,7 +331,9 @@
 //
 // mock_clock: nothing here depends on elapsed time. HeartBtInt is 0, so no
 // liveness loop runs, except in CallbackGuard.ToAdminEnteredInsideToAppDies,
-// which sets an interval and advances the mock clock itself. A cell that starts
+// which sets an interval and advances the mock clock itself, and in the
+// OnLogonStartsClose and OnLogonStartsNoClose cells, which set an interval so
+// that a started liveness loop has a sleep in flight. A cell that starts
 // a graceful close ends the close's wait for the peer's Logout by advancing the
 // mock clock (Fixture::end_logout_wait_when).
 
@@ -665,10 +699,16 @@ struct Fixture {
     // because the liveness loop is a detached coroutine over the Session.
     // The Logon arm spawns that loop on the executor the arm itself runs on, and
     // open_to_active() feeds the peer's Logon on `exec`. So in the default mode
-    // the loop then runs on `exec` and not on the session's strand; a cell that
-    // needs it on the session's strand feeds the Logon itself, on
-    // sess.executor().underlying().
+    // the loop then runs on `exec` and not on the session's strand; a
+    // default-mode cell that sets another value than zero brings the session to
+    // Active with open_to_active_on_session_executor(), or feeds the Logon with
+    // feed_peer_logon_on_session_executor().
     std::chrono::seconds heartbeat_interval{0};
+    // The peer's Logon. A member, so that it outlives a delivery a cell starts
+    // and does not wait for.
+    const std::vector<std::byte> peer_logon = peer_frame("A", 1,
+                                                         "98=0\x01"
+                                                         "108=30\x01");
     // Called with every frame the session transmits, after it is appended to `wire`.
     std::function<void(const std::string&)> on_transmit;
     LiveWrites live_writes;
@@ -774,13 +814,33 @@ struct Fixture {
     // Acceptor: open() emits nothing, and the session answers the peer's Logon.
     bool open_to_active(Session& s) {
         if (!run(s.open(), "CallbackSend::open")) return false;
-        const auto logon = peer_frame("A", 1,
-                                      "98=0\x01"
-                                      "108=30\x01");
-        if (!run(s.on_inbound_frame(std::span<const std::byte>{logon}), "CallbackSend::logon")) {
+        if (!run(s.on_inbound_frame(std::span<const std::byte>{peer_logon}),
+                 "CallbackSend::logon")) {
             return false;
         }
         return s.state() == fsm_state::Active;
+    }
+
+    // Delivers the peer's Logon to `s` on the session's own executor; `token`
+    // receives the result of on_inbound_frame. The Logon arm, and the liveness
+    // loop it spawns, then run on the session's strand in the default mode too.
+    // Call it after open(), which binds that executor.
+    template <class Token>
+    void feed_peer_logon_on_session_executor(Session& s, Token&& token) {
+        asio::co_spawn(s.executor().underlying(),
+                       s.on_inbound_frame(std::span<const std::byte>{peer_logon}),
+                       std::forward<Token>(token));
+    }
+
+    // open_to_active(), with the peer's Logon fed on the session's own executor.
+    bool open_to_active_on_session_executor(Session& s) {
+        if (!run(s.open(), "CallbackSend::open_before_logon_on_session_executor")) return false;
+        SendOutcome fed;
+        feed_peer_logon_on_session_executor(s, record_into(fed));
+        if (!pump_done([&] { return fed.done; }, "CallbackSend::logon_on_session_executor")) {
+            return false;
+        }
+        return !fed.threw && !fed.err && s.state() == fsm_state::Active;
     }
 
     // Ends a graceful close's wait for the peer's Logout without real time. Pumps
@@ -5677,6 +5737,2354 @@ TEST(CallbackSend, FromAppStartsCloseBehindAnotherClose_Graceful_NoStore_LiveWri
             .store_next_in = {},
             .writes_after_close = 0,
             .writes_refused = 0});
+}
+
+namespace {
+
+// ── A close that begins late, a close cancelled while it waits, and a close started
+//    in a lifecycle callback ────────────────────────────────────────────────────
+//
+// `.specify/563-564-callback-send.md` §3, "New cells": the rows of two application
+// frames delivered by one coroutine, of a close that waits and is cancelled
+// meanwhile, and of a close started in each lifecycle callback.
+
+// What one arm of these cells must show. Each TEST spells its arm's values out.
+struct ArmValues {
+    // The session's FSM state and lifecycle on entry to the callback that starts
+    // the close.
+    std::string entered;
+    // In the order they happen, each followed by the session's FSM state and
+    // lifecycle at that moment: what the arm's hooks note, among them every
+    // transmit, onLogout and the completion of each operation.
+    std::vector<std::string> order;
+    // As CloseExpect::callbacks.
+    std::vector<std::string> callbacks;
+    // The result of each operation of the arm, as "<operation>: <result>", with the
+    // result as result_of() spells it.
+    std::vector<std::string> results;
+    // As the members of CloseExpect with these names, with the frames counted from
+    // the construction of the arm's CloseCell.
+    std::vector<std::string> wire;
+    std::vector<std::string> retained;
+    seqnum_t next_out = 0;
+    seqnum_t next_in = 0;
+    std::optional<seqnum_t> store_next_out;
+    // Read on a FileStore only.
+    std::optional<seqnum_t> store_next_in;
+    // The session's FSM state and lifecycle when the arm's operations had completed.
+    std::string at_the_end;
+    std::size_t writes_after_close = 0;
+    std::size_t writes_refused = 0;
+};
+
+std::string literal_of(const ArmValues& v) {
+    return "ArmValues{.entered = " + in_quotes(v.entered) + ", .order = " + literal(v.order) +
+           ", .callbacks = " + literal(v.callbacks) + ", .results = " + literal(v.results) +
+           ", .wire = " + literal(v.wire) + ", .retained = " + literal(v.retained) +
+           ", .next_out = " + std::to_string(v.next_out) +
+           ", .next_in = " + std::to_string(v.next_in) +
+           ", .store_next_out = " + literal(v.store_next_out) +
+           ", .store_next_in = " + literal(v.store_next_in) +
+           ", .at_the_end = " + in_quotes(v.at_the_end) +
+           ", .writes_after_close = " + std::to_string(v.writes_after_close) +
+           ", .writes_refused = " + std::to_string(v.writes_refused) + "}";
+}
+
+// Reads an arm's values once its operations have completed, or the pump's bound
+// was reached. `full_wire` receives the transmitted frames' bytes.
+ArmValues read_arm_values(Fixture& f, Session& sess, const CloseCell& cell, std::string entered,
+                          std::vector<std::string> results, std::vector<std::string>& full_wire) {
+    ArmValues got;
+    got.entered = std::move(entered);
+    got.results = std::move(results);
+    // Read before the store reads, which run the io_context.
+    got.at_the_end = where_is(sess);
+    std::vector<std::string> retained_full;
+    got.retained = retained_frames(f, sess, retained_full);
+    got.store_next_out = store_next(f, sess, direction_t::outbound);
+    if (f.store_kind == StoreKind::file) {
+        got.store_next_in = store_next(f, sess, direction_t::inbound);
+    }
+    full_wire.assign(f.wire.begin() + static_cast<std::ptrdiff_t>(cell.wire_before), f.wire.end());
+    for (const auto& frame : full_wire) got.wire.push_back(brief(frame));
+    got.order = cell.order;
+    got.callbacks = cell.callbacks;
+    got.next_out = next_out(sess);
+    got.next_in = next_in(sess);
+    got.writes_after_close = f.live_writes.begun_after_close;
+    got.writes_refused = f.live_writes.refused_after_close;
+    return got;
+}
+
+// What the starting callback read after its co_spawn returned.
+std::string inside_text(const CloseCell& cell, const char* callback) {
+    if (!cell.inside.read) return std::string("; ") + callback + " started no close";
+    return std::string("; inside ") + callback + " after the start: " + cell.inside.state + " " +
+           cell.inside.lifecycle + ", onLogout calls " +
+           std::to_string(cell.inside.on_logout_calls) + ", Logout toAdmin calls " +
+           std::to_string(cell.inside.logout_to_admin_calls) + ", the close " +
+           (cell.inside.started_completed ? "completed" : "not completed");
+}
+
+std::string transport_text(const Fixture& f) {
+    return "; transport close() calls " + std::to_string(f.live_writes.closes) +
+           ", live writes started " + std::to_string(f.live_writes.started) + ", most in flight " +
+           std::to_string(f.live_writes.max_in_flight);
+}
+
+void expect_arm_values(const ArmValues& got, const ArmValues& want, const std::string& reading) {
+    EXPECT_EQ(got.entered, want.entered)
+        << "the session on entry to the callback that starts the close. " << reading;
+    EXPECT_EQ(got.order, want.order)
+        << "the order of what the arm notes, each with the session's FSM state and lifecycle at "
+           "that moment. "
+        << reading;
+    EXPECT_EQ(got.callbacks, want.callbacks)
+        << "the other callbacks, each with the session's FSM state and lifecycle on its entry. "
+        << reading;
+    EXPECT_EQ(got.results, want.results) << "the result of each operation. " << reading;
+    EXPECT_EQ(got.wire, want.wire) << "what was transmitted. " << reading;
+    EXPECT_EQ(got.retained, want.retained) << "what the store retained. " << reading;
+    EXPECT_EQ(got.next_out, want.next_out) << "the manager's next outbound number. " << reading;
+    EXPECT_EQ(got.next_in, want.next_in) << "the manager's next inbound number. " << reading;
+    EXPECT_EQ(got.store_next_out, want.store_next_out)
+        << "the store's next outbound number. " << reading;
+    EXPECT_EQ(got.store_next_in, want.store_next_in)
+        << "the store's next inbound number. " << reading;
+    EXPECT_EQ(got.at_the_end, want.at_the_end)
+        << "the session when the arm's operations had completed. " << reading;
+    EXPECT_EQ(got.writes_after_close, want.writes_after_close)
+        << "the writes begun after the transport's close(). " << reading;
+    EXPECT_EQ(got.writes_refused, want.writes_refused)
+        << "the writes the transport refused. " << reading;
+}
+
+// The index in `order` of the first entry that begins with `what`, or the size
+// of `order` when there is none.
+std::size_t position_of(const std::vector<std::string>& order, std::string_view what) {
+    const auto it = std::ranges::find_if(
+        order, [&](const std::string& entry) { return entry.starts_with(what); });
+    return static_cast<std::size_t>(it - order.begin());
+}
+
+// ── Two application frames delivered by one coroutine ────────────────────────
+//
+// §3, "New cells", the row of two application frames delivered by one coroutine;
+// §2.1a "The close can be late".
+
+// The first fromApp starts a terminal close. The two frames are delivered as the
+// read pump delivers the complete frames of one read (Fixture::deliver_in_one_read).
+void run_two_frames_in_one_read(StoreKind store, TransportKind transport, const ArmValues& expect) {
+    Fixture f{ExecKind::io_context, store};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "setup: session left Active";
+    ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+
+    const auto ex = sess.executor().underlying();
+    CloseCell cell{f, sess};
+    std::string entered = "not recorded";
+    int from_app_calls = 0;
+    bool delivery_threw = false;
+    std::optional<std::vector<expected_t<void>>> delivered;
+
+    f.on_transmit = [&](const std::string& frame) { cell.transmitted(frame); };
+    f.app->on_lifecycle = [&](const char* name) { cell.lifecycle_callback(name); };
+    f.app->on_to_app = [&] { cell.callback("toApp"); };
+    f.app->on_to_admin = [&](std::string_view msg_type) { cell.to_admin(msg_type); };
+    f.app->on_from_app = [&] {
+        if (++from_app_calls != 1) {
+            cell.note("fromApp for the second frame");
+            return;
+        }
+        entered = where_is(sess);
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] fromApp: starting Session::close\n");
+        asio::co_spawn(ex, sess.close(close_mode::terminal),
+                       cell.completes(cell.started, "the close"));
+        std::fprintf(stderr, "[ B41 ] fromApp: co_spawn returned\n");
+        cell.read_inside_callback();
+        cell.note("fromApp for the first frame returns");
+    };
+
+    std::vector<std::vector<std::byte>> frames;
+    frames.push_back(peer_frame("D", 2,
+                                "11=PEER-1\x01"
+                                "54=1\x01"
+                                "55=AAPL\x01"));
+    frames.push_back(peer_frame("D", 3,
+                                "11=PEER-2\x01"
+                                "54=1\x01"
+                                "55=AAPL\x01"));
+    asio::co_spawn(ex, Fixture::deliver_in_one_read(sess, std::move(frames)),
+                   [&](std::exception_ptr ep, std::vector<expected_t<void>> results) {
+                       delivery_threw = static_cast<bool>(ep);
+                       delivered = std::move(results);
+                       cell.note("the delivery completes");
+                   });
+
+    const auto pending = [&] {
+        return std::string(delivered.has_value() ? "" : "the delivery had not completed; ") +
+               (cell.started.done ? "" : "the close had not completed; ");
+    };
+    // Bounded: an operation that does not complete is reported below, not waited for.
+    const bool completed = fixpp::test_support::pump_until(
+        f.ioc, [&] { return delivered.has_value() && (cell.started.done || !cell.inside.read); },
+        std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+        "CallbackSend::two_frames_in_one_read");
+    // Recorded before the drain, which completes what it cancels.
+    const std::string pending_at_the_bound = completed ? std::string{} : pending();
+    if (!completed) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "CallbackSend::two_frames_in_one_read");
+    }
+
+    std::vector<std::string> results;
+    if (!delivered.has_value()) {
+        results.emplace_back("the delivery: not completed");
+    } else if (delivery_threw) {
+        results.emplace_back("the delivery: threw");
+    } else {
+        for (std::size_t i = 0; i < delivered->size(); ++i) {
+            const expected_t<void>& r = (*delivered)[i];
+            results.push_back(
+                "frame " + std::to_string(i + 1) + ": " +
+                (r ? std::string("ok") : "error " + std::to_string(static_cast<int>(r.error()))));
+        }
+    }
+    results.push_back("the close: " + result_of(cell.started));
+    std::vector<std::string> full_wire;
+    const ArmValues got = read_arm_values(f, sess, cell, entered, results, full_wire);
+    const std::string reading = literal_of(got) + inside_text(cell, "fromApp") +
+                                "; fromApp calls " + std::to_string(from_app_calls) +
+                                "; onLogout calls " + std::to_string(cell.on_logout_calls) +
+                                transport_text(f) + ".";
+    std::printf("[ MEASURED ] %s\n", reading.c_str());
+    std::fflush(stdout);
+
+    // A session that no close() has closed is closed here, so that nothing of it is
+    // left running when the cell returns.
+    if (session_test_access::lifecycle_value(sess) == 1) {
+        (void)f.run(sess.close(close_mode::terminal),
+                    "CallbackSend::two_frames_in_one_read_teardown");
+    }
+
+    ASSERT_TRUE(cell.inside.read) << "PATH NOT DRIVEN: fromApp did not start its close. "
+                                  << reading;
+    EXPECT_TRUE(completed) << "every operation must complete within the pump's bound; "
+                           << pending_at_the_bound << reading;
+
+    EXPECT_EQ(cell.inside.lifecycle, "open")
+        << "inside the callback after the start, the lifecycle is open. " << reading;
+    EXPECT_EQ(cell.inside.state, "Active")
+        << "inside the callback after the start, the session is Active. " << reading;
+    EXPECT_EQ(cell.inside.on_logout_calls, 0)
+        << "inside the callback after the start, onLogout has not run. " << reading;
+    EXPECT_FALSE(cell.inside.started_completed)
+        << "inside the callback after the start, the close it started has not completed. "
+        << reading;
+
+    // What the row states, spelled out apart from the arm's values.
+    EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
+    EXPECT_EQ(got.at_the_end, "Disconnected closed_drained")
+        << "the lifecycle ends closed_drained. " << reading;
+    EXPECT_EQ(result_of(cell.started), "ok") << "the close's result is ok. " << reading;
+    ASSERT_TRUE(delivered.has_value() && !delivery_threw) << reading;
+    const std::size_t second_from_app = position_of(got.order, "fromApp for the second frame");
+    const std::size_t on_logout = position_of(got.order, "onLogout");
+    if (store == StoreKind::file) {
+        EXPECT_EQ(from_app_calls, 1)
+            << "on a persistent store the second fromApp does not run. " << reading;
+        ASSERT_EQ(delivered->size(), 2U)
+            << "the second frame's on_inbound_frame must have been awaited. " << reading;
+        EXPECT_TRUE((*delivered)[1].has_value())
+            << "the second frame's on_inbound_frame returns ok. " << reading;
+        EXPECT_LT(on_logout, position_of(got.order, "the delivery completes"))
+            << "the close has begun when the second frame's on_inbound_frame returns. " << reading;
+    } else {
+        EXPECT_EQ(from_app_calls, 2) << "on a volatile store the second fromApp runs. " << reading;
+        EXPECT_LT(second_from_app, on_logout)
+            << "the second fromApp runs before onLogout. " << reading;
+    }
+
+    // The arm's values.
+    expect_arm_values(got, expect, reading);
+}
+
+}  // namespace
+
+// The MemoryStore arms pin a disclosed limitation, not a wanted behaviour: on a volatile
+// store the Active arm does not suspend after fromApp, so the second frame of the read is
+// delivered, fromApp included, before the close that the first fromApp started begins
+// (`.specify/563-564-callback-send.md` §2.1a, "The close can be late").
+TEST(CallbackSend, FromAppStartsClose_Terminal_TwoFramesInOneRead) {
+    run_two_frames_in_one_read(
+        StoreKind::memory, TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp for the first frame returns [Active open]",
+                      "fromApp for the second frame [Active open]",
+                      "the delivery completes [Active open]", "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"frame 1: ok", "frame 2: ok", "the close: ok"},
+            .wire = {},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 4,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, FromAppStartsClose_Terminal_TwoFramesInOneRead_LiveWrite) {
+    run_two_frames_in_one_read(
+        StoreKind::memory, TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp for the first frame returns [Active open]",
+                      "fromApp for the second frame [Active open]",
+                      "the delivery completes [Active open]", "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"frame 1: ok", "frame 2: ok", "the close: ok"},
+            .wire = {},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 4,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// The FileStore arms pin where that limitation stops: the Active arm suspends in its persist
+// of the first frame's inbound number, the close runs meanwhile, and the second frame reaches
+// a session that is no longer Active, so its fromApp does not run.
+TEST(CallbackSend, FromAppStartsClose_Terminal_TwoFramesInOneRead_FileStore) {
+    run_two_frames_in_one_read(
+        StoreKind::file, TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp for the first frame returns [Active open]",
+                            "onLogout [Disconnected closing]",
+                            "the close completes [Disconnected closed_drained]",
+                            "the delivery completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"frame 1: ok", "frame 2: ok", "the close: ok"},
+                  .wire = {},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 3,
+                  .store_next_out = 2,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, FromAppStartsClose_Terminal_TwoFramesInOneRead_FileStore_LiveWrite) {
+    run_two_frames_in_one_read(
+        StoreKind::file, TransportKind::live_suspending_write,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp for the first frame returns [Active open]",
+                            "onLogout [Disconnected closing]",
+                            "the close completes [Disconnected closed_drained]",
+                            "the delivery completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"frame 1: ok", "frame 2: ok", "the close: ok"},
+                  .wire = {},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 3,
+                  .store_next_out = 2,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+namespace {
+
+// ── A close that waits, cancelled meanwhile ──────────────────────────────────
+//
+// §3, "New cells", the row of a close that waits, in each mode, cancelled
+// meanwhile; §2.1a "Cancellation and the wait".
+
+// fromApp for an inbound 35=D starts a close of mode `mode` by a co_spawn whose
+// completion token is bound to a slot of the cell, and emits `emission` on that
+// slot before it returns. The row names "a callback"; the cell takes fromApp.
+void run_waiting_close_cancelled(close_mode mode, asio::cancellation_type emission, StoreKind store,
+                                 TransportKind transport, const ArmValues& expect) {
+    Fixture f{ExecKind::io_context, store};
+    auto cfg = f.cfg();
+    cfg.logout_disconnect_timeout_ms = kLogoutWaitMs;
+    Session sess{f.engine, cfg};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active) << "setup: session left Active";
+    ASSERT_EQ(next_in(sess), 2U) << "setup: the peer's Logon must have been consumed";
+
+    const auto ex = sess.executor().underlying();
+    CloseCell cell{f, sess};
+    asio::cancellation_signal signal;
+    std::string entered = "not recorded";
+    std::string after_the_emission = "not recorded";
+    bool emitted = false;
+    bool slot_has_a_handler = false;
+    // The completion token of the close the cell cancels. A closure call produces
+    // it, so that the call is a direct argument of co_spawn: both co_spawn census
+    // instruments (tools/audit_co_spawn_named_closure.py and
+    // tools/reconcile_co_spawn_census.py) must list the site.
+    const auto completes_with_slot = [&](SendOutcome& o) {
+        return asio::bind_cancellation_slot(signal.slot(), cell.completes(o, "the close"));
+    };
+
+    f.on_transmit = [&](const std::string& frame) { cell.transmitted(frame); };
+    f.app->on_lifecycle = [&](const char* name) { cell.lifecycle_callback(name); };
+    f.app->on_to_app = [&] { cell.callback("toApp"); };
+    f.app->on_to_admin = [&](std::string_view msg_type) { cell.to_admin(msg_type); };
+    f.app->on_from_app = [&] {
+        if (cell.inside.read) return;
+        entered = where_is(sess);
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] fromApp: starting Session::close\n");
+        asio::co_spawn(ex, sess.close(mode), completes_with_slot(cell.started));
+        std::fprintf(stderr, "[ B41 ] fromApp: co_spawn returned\n");
+        slot_has_a_handler = signal.slot().has_handler();
+        cell.read_inside_callback();
+        signal.emit(emission);
+        emitted = true;
+        after_the_emission = where_is(sess);
+        cell.note("fromApp returns");
+    };
+
+    const auto inbound = peer_frame("D", 2,
+                                    "11=PEER-1\x01"
+                                    "54=1\x01"
+                                    "55=AAPL\x01");
+    asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{inbound}),
+                   cell.completes(cell.outer, "on_inbound_frame"));
+
+    const auto pending = [&] {
+        return std::string(cell.outer.done ? "" : "on_inbound_frame had not completed; ") +
+               (cell.started.done ? "" : "the close had not completed; ");
+    };
+    // A graceful close waits for a peer Logout; everything the arm expects before
+    // the end of that wait has happened once on_inbound_frame completed and
+    // onLogout ran. A close that has completed is in no wait.
+    bool completed = true;
+    if (mode == close_mode::graceful) {
+        completed = f.end_logout_wait_when(
+            [&] { return cell.started.done || (cell.outer.done && cell.on_logout_calls > 0); },
+            [&] { return pending() + (cell.on_logout_calls > 0 ? "" : "onLogout had not run"); },
+            std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            "CallbackSend::waiting_close_cancelled_logout_wait");
+    }
+    // Bounded: an operation that does not complete is reported below, not waited for.
+    completed =
+        completed &&
+        fixpp::test_support::pump_until(
+            f.ioc, [&] { return cell.outer.done && (cell.started.done || !cell.inside.read); },
+            std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+            "CallbackSend::waiting_close_cancelled");
+    // Recorded before the drain, which completes what it cancels.
+    const std::string pending_at_the_bound = completed ? std::string{} : pending();
+    if (!completed) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "CallbackSend::waiting_close_cancelled");
+    }
+
+    std::vector<std::string> full_wire;
+    const ArmValues got = read_arm_values(
+        f, sess, cell, entered,
+        {"on_inbound_frame: " + result_of(cell.outer), "the close: " + result_of(cell.started)},
+        full_wire);
+    const std::string reading =
+        literal_of(got) + inside_text(cell, "fromApp") + ", the cell's slot " +
+        (slot_has_a_handler ? "has a handler" : "has no handler") +
+        "; after the emission: " + after_the_emission + "; onLogout calls " +
+        std::to_string(cell.on_logout_calls) + transport_text(f) +
+        ". Close mode: " + (mode == close_mode::terminal ? "terminal" : "graceful") +
+        "; emission: " + (emission == asio::cancellation_type::terminal ? "terminal" : "total") +
+        ".";
+    std::printf("[ MEASURED ] %s\n", reading.c_str());
+    std::fflush(stdout);
+
+    // A session that no close() has closed is closed here, so that nothing of it is
+    // left running when the cell returns.
+    if (session_test_access::lifecycle_value(sess) == 1) {
+        (void)f.run(sess.close(close_mode::terminal),
+                    "CallbackSend::waiting_close_cancelled_teardown");
+    }
+
+    ASSERT_TRUE(cell.inside.read) << "PATH NOT DRIVEN: fromApp did not start its close. "
+                                  << reading;
+    ASSERT_TRUE(emitted) << "PATH NOT DRIVEN: fromApp made no emission. " << reading;
+    EXPECT_EQ(cell.inside.lifecycle, "open")
+        << "inside the callback after the start, the lifecycle is open. " << reading;
+    EXPECT_EQ(cell.inside.state, "Active")
+        << "inside the callback after the start, the session is Active. " << reading;
+    EXPECT_EQ(cell.inside.on_logout_calls, 0)
+        << "inside the callback after the start, onLogout has not run. " << reading;
+    EXPECT_EQ(cell.inside.logout_to_admin_calls, 0)
+        << "inside the callback after the start, the Logout's toAdmin has not run. " << reading;
+    // Witness: the emission was made on a slot the close's chain listens on, while
+    // the close had not completed.
+    ASSERT_FALSE(cell.inside.started_completed)
+        << "PATH NOT DRIVEN: the close had completed before the emission, so it was not waiting. "
+        << reading;
+    ASSERT_TRUE(slot_has_a_handler)
+        << "PATH NOT DRIVEN: the co_spawn left no handler in the cell's slot, so the emission "
+           "reached nothing. "
+        << reading;
+    EXPECT_EQ(after_the_emission, "Active open")
+        << "the emission changes nothing inside the callback. " << reading;
+    EXPECT_TRUE(completed) << "every operation must complete within the pump's bound; "
+                           << pending_at_the_bound << reading;
+
+    // What the row states, spelled out apart from the arm's values.
+    EXPECT_EQ(got.at_the_end, "Disconnected closed_drained")
+        << "the session reaches closed_drained. " << reading;
+    EXPECT_FALSE(cell.started.threw) << reading;
+    EXPECT_EQ(result_of(cell.started), "ok") << "the close's result is ok. " << reading;
+    EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
+
+    // The arm's values.
+    expect_arm_values(got, expect, reading);
+    EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << reading;
+}
+
+}  // namespace
+
+// A terminal and a graceful close, each with a `terminal` and with a `total` emission made
+// while the close waits for fromApp to return.
+//
+// A terminal close; the emission is `terminal`. close() resets its cancellation state to
+// one that records nothing before it waits, so the emission is not recorded and the close
+// runs. A wait in front of that reset would record the emission.
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTerminal) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::terminal, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTerminal_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::terminal, StoreKind::memory,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTerminal_FileStore) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::terminal, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]", "onLogout [Disconnected closing]",
+                            "the close completes [Disconnected closed_drained]",
+                            "on_inbound_frame completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 3,
+                  .store_next_out = 2,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTerminal_FileStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::terminal, StoreKind::file,
+        TransportKind::live_suspending_write,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]", "onLogout [Disconnected closing]",
+                            "the close completes [Disconnected closed_drained]",
+                            "on_inbound_frame completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 3,
+                  .store_next_out = 2,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTerminal_NoStore) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::terminal, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTerminal_NoStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::terminal, StoreKind::none,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// A terminal close; the emission is `total`.
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTotal) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::total, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTotal_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::total, StoreKind::memory,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTotal_FileStore) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::total, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]", "onLogout [Disconnected closing]",
+                            "the close completes [Disconnected closed_drained]",
+                            "on_inbound_frame completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 3,
+                  .store_next_out = 2,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTotal_FileStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::total, StoreKind::file,
+        TransportKind::live_suspending_write,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]", "onLogout [Disconnected closing]",
+                            "the close completes [Disconnected closed_drained]",
+                            "on_inbound_frame completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 3,
+                  .store_next_out = 2,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTotal_NoStore) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::total, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Terminal_EmitTotal_NoStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::terminal, asio::cancellation_type::total, StoreKind::none,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "onLogout [Disconnected closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {},
+            .retained = {},
+            .next_out = 2,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// A graceful close; the emission is `terminal`. The cell ends the close's wait for the
+// peer's Logout by advancing the mock clock.
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTerminal) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::terminal, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTerminal_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::terminal, StoreKind::memory,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTerminal_FileStore) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::terminal, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]",
+                            "on_inbound_frame completes [Active closing]",
+                            "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                            "the close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=5 [Active closing]"},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {"35=5 34=2"},
+                  .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+                  .next_out = 3,
+                  .next_in = 3,
+                  .store_next_out = 3,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTerminal_FileStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::terminal, StoreKind::file,
+        TransportKind::live_suspending_write,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]",
+                            "on_inbound_frame completes [Active closing]",
+                            "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                            "the close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=5 [Active closing]"},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {"35=5 34=2"},
+                  .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+                  .next_out = 3,
+                  .next_in = 3,
+                  .store_next_out = 3,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTerminal_NoStore) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::terminal, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTerminal_NoStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::terminal, StoreKind::none,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// A graceful close; the emission is `total`.
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTotal) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::total, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTotal_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::total, StoreKind::memory,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTotal_FileStore) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::total, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]",
+                            "on_inbound_frame completes [Active closing]",
+                            "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                            "the close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=5 [Active closing]"},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {"35=5 34=2"},
+                  .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+                  .next_out = 3,
+                  .next_in = 3,
+                  .store_next_out = 3,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTotal_FileStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::total, StoreKind::file,
+        TransportKind::live_suspending_write,
+        ArmValues{.entered = "Active open",
+                  .order = {"fromApp returns [Active open]",
+                            "on_inbound_frame completes [Active closing]",
+                            "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                            "the close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=5 [Active closing]"},
+                  .results = {"on_inbound_frame: ok", "the close: ok"},
+                  .wire = {"35=5 34=2"},
+                  .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+                  .next_out = 3,
+                  .next_in = 3,
+                  .store_next_out = 3,
+                  .store_next_in = 3,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTotal_NoStore) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::total, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, CloseCancelledWhileItWaits_Graceful_EmitTotal_NoStore_LiveWrite) {
+    run_waiting_close_cancelled(
+        close_mode::graceful, asio::cancellation_type::total, StoreKind::none,
+        TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"fromApp returns [Active open]", "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the close: ok"},
+            .wire = {"35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 3,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+namespace {
+
+// ── A close started in a lifecycle callback ──────────────────────────────────
+//
+// §3, "New cells", the row of a close started in each lifecycle callback; §2.1a
+// "The lifecycle callbacks".
+
+// Forwards to the fixture's mock clock and counts the sleeps in flight, in two
+// classes: those whose deadline lies exactly `interval` ahead of the clock when
+// the sleep begins, and all others. With `interval` the session's heartbeat
+// interval and a clock that nobody has advanced since the session last sent and
+// last received a frame, the first class is the liveness loop's sleep. The wait
+// of a graceful close for the peer's Logout is in the second.
+class SleepCountingClock final : public fixpp::core::Clock {
+public:
+    struct Counts {
+        std::size_t interval_begun = 0;
+        std::size_t interval_in_flight = 0;
+        std::size_t other_in_flight = 0;
+    };
+
+    SleepCountingClock(std::shared_ptr<fixpp::core::mock_clock> inner,
+                       std::chrono::milliseconds interval)
+        : inner_{std::move(inner)}, interval_{interval} {}
+
+    // Called when a sleep of the first class begins.
+    std::function<void()> on_interval_sleep;
+
+    [[nodiscard]] const Counts& counts() const noexcept { return *counts_; }
+
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override {
+        return inner_->now();
+    }
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
+        return inner_->steady_now();
+    }
+    [[nodiscard]] asio::awaitable<void> sleep_until(
+        fixpp::core::steady_time_point deadline) override {
+        // Counted in a coroutine of its own, so that a sleep that ends by an
+        // exception, or whose frame is destroyed, is counted out too.
+        struct InFlight {
+            std::shared_ptr<Counts> counts;
+            bool of_interval;
+            InFlight(std::shared_ptr<Counts> c, bool i) : counts{std::move(c)}, of_interval{i} {
+                ++(of_interval ? counts->interval_in_flight : counts->other_in_flight);
+            }
+            InFlight(const InFlight&) = delete;
+            InFlight& operator=(const InFlight&) = delete;
+            ~InFlight() { --(of_interval ? counts->interval_in_flight : counts->other_in_flight); }
+        };
+        const bool of_interval = deadline - inner_->steady_now() == interval_;
+        const InFlight in_flight{counts_, of_interval};
+        if (of_interval) {
+            ++counts_->interval_begun;
+            if (on_interval_sleep) on_interval_sleep();
+        }
+        co_await inner_->sleep_until(deadline);
+    }
+    void cancel_sleeps() noexcept override { inner_->cancel_sleeps(); }
+    void forget_session(Session* s) noexcept override { inner_->forget_session(s); }
+
+private:
+    std::shared_ptr<fixpp::core::mock_clock> inner_;
+    std::chrono::milliseconds interval_;
+    std::shared_ptr<Counts> counts_ = std::make_shared<Counts>();
+};
+
+enum class LifecycleArm {
+    // onLogon starts the close, inside the Logon arm.
+    on_logon,
+    // The setup of on_logon with no close started: the positive control of the
+    // readings "no sleep of the heartbeat interval". `mode` is not read.
+    on_logon_no_close,
+    // The test body starts a graceful close; its onLogout starts a close.
+    on_logout_of_a_graceful_close,
+    // The test body delivers a frame under another BeginString, at which the
+    // Active arm writes Disconnected without a close(); that write's onLogout
+    // starts a close.
+    on_logout_after_another_begin_string,
+    // onCreate starts the close, inside open().
+    on_create,
+};
+
+// The heartbeat interval of the arms that run the Logon arm. It is the 108= of
+// the peer's Logon the fixture feeds.
+constexpr std::chrono::seconds kLifecycleHeartbeat{30};
+
+void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, close_mode mode,
+                                         StoreKind store, TransportKind transport,
+                                         const ArmValues& expect) {
+    const bool logon_arm = arm == LifecycleArm::on_logon || arm == LifecycleArm::on_logon_no_close;
+    const bool starts_a_close = arm != LifecycleArm::on_logon_no_close;
+    const char* starting = arm == LifecycleArm::on_create ? "onCreate"
+                           : logon_arm                    ? "onLogon"
+                                                          : "onLogout";
+    Fixture f{ExecKind::io_context, store};
+    f.role = role;
+    // Elsewhere the interval stays zero and no liveness loop runs.
+    if (logon_arm) f.heartbeat_interval = kLifecycleHeartbeat;
+    auto cfg = f.cfg();
+    cfg.logout_disconnect_timeout_ms = kLogoutWaitMs;
+    const auto clock = std::make_shared<SleepCountingClock>(f.clock, kLifecycleHeartbeat);
+    cfg.clock_override = clock;
+    const bool validate_gate = cfg.validate_inbound_messages;
+    Session sess{f.engine, cfg};
+    // Before open(), so that the arm's wire holds an initiator's Logon too.
+    CloseCell cell{f, sess};
+    std::string entered = starts_a_close ? "not recorded" : "no close started";
+    int from_app_calls = 0;
+
+    const auto start_close = [&] {
+        entered = where_is(sess);
+        // A build with asserts may stop inside the co_spawn; these two lines
+        // bracket it.
+        std::fprintf(stderr, "[ B41 ] %s: starting Session::close\n", starting);
+        asio::co_spawn(sess.executor().underlying(), sess.close(mode),
+                       cell.completes(cell.started, "the callback's close"));
+        std::fprintf(stderr, "[ B41 ] %s: co_spawn returned\n", starting);
+        cell.read_inside_callback();
+        cell.note(std::string(starting) + " returns");
+    };
+    clock->on_interval_sleep = [&] { cell.note("a sleep of the heartbeat interval begins"); };
+    f.on_transmit = [&](const std::string& frame) { cell.transmitted(frame); };
+    f.app->on_to_app = [&] { cell.callback("toApp"); };
+    f.app->on_to_admin = [&](std::string_view msg_type) { cell.to_admin(msg_type); };
+    f.app->on_from_app = [&] {
+        ++from_app_calls;
+        cell.callback("fromApp");
+    };
+    f.app->on_create = [&] {
+        if (arm != LifecycleArm::on_create) return;
+        cell.note("onCreate");
+        start_close();
+    };
+    f.app->on_lifecycle = [&](const char* name) {
+        if (std::string_view{name} == "onLogon") {
+            if (!logon_arm) return;
+            cell.note("onLogon");
+            if (starts_a_close && !cell.inside.read) start_close();
+            return;
+        }
+        cell.lifecycle_callback(name);
+        if (!logon_arm && arm != LifecycleArm::on_create && !cell.inside.read) start_close();
+    };
+
+    const auto other_begin = peer_frame_with_begin("FIX.4.4", "D", 2,
+                                                   "11=PEER-1\x01"
+                                                   "54=1\x01"
+                                                   "55=AAPL\x01");
+    const char* outer_name = "on_inbound_frame";
+    bool setup_ok = true;
+    if (arm == LifecycleArm::on_create) {
+        outer_name = "open";
+        asio::co_spawn(f.exec, sess.open(), cell.completes(cell.outer, outer_name));
+    } else if (logon_arm) {
+        setup_ok = f.run(sess.open(), "CallbackSend::lifecycle_open").has_value();
+        if (setup_ok) {
+            f.feed_peer_logon_on_session_executor(sess, cell.completes(cell.outer, outer_name));
+        }
+    } else {
+        setup_ok = f.open_to_active(sess);
+        if (setup_ok && transport == TransportKind::live_suspending_write) {
+            f.attach_live_transport(sess);
+        }
+        if (setup_ok && arm == LifecycleArm::on_logout_of_a_graceful_close) {
+            outer_name = "the graceful close";
+            asio::co_spawn(sess.executor().underlying(), sess.close(close_mode::graceful),
+                           cell.completes(cell.outer, outer_name));
+        } else if (setup_ok) {
+            asio::co_spawn(sess.executor().underlying(),
+                           sess.on_inbound_frame(std::span<const std::byte>{other_begin}),
+                           cell.completes(cell.outer, outer_name));
+        }
+    }
+    const fixpp::core::steady_time_point clock_before = f.clock->steady_now();
+    // The frames on the arm's wire before the test body's operation began.
+    const std::size_t wire_at_the_start = f.wire.size() - cell.wire_before;
+
+    const auto pending = [&] {
+        return std::string(cell.outer.done ? ""
+                                           : std::string(outer_name) + " had not completed; ") +
+               (cell.started.done || !starts_a_close ? ""
+                                                     : "the callback's close had not completed; ");
+    };
+    bool completed = setup_ok;
+    if (completed && !starts_a_close) {
+        // The control: a started liveness loop has a sleep in flight while the
+        // session is Active.
+        completed = fixpp::test_support::pump_until(
+            f.ioc, [&] { return cell.outer.done && clock->counts().interval_in_flight > 0; },
+            std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+            "CallbackSend::lifecycle_control");
+    } else if (completed) {
+        // A graceful close the callback started may wait for a peer Logout; it is
+        // in that wait once a sleep that is not the liveness loop's is in flight.
+        // The arm whose test body starts the graceful close does not advance the
+        // clock: there the close onLogout starts must end the wait.
+        if (mode == close_mode::graceful) {
+            completed = f.end_logout_wait_when(
+                [&] {
+                    return cell.started.done ||
+                           (cell.outer.done && clock->counts().other_in_flight > 0);
+                },
+                [&] {
+                    return pending() + (clock->counts().other_in_flight > 0
+                                            ? ""
+                                            : "no close was in its wait for the peer's Logout");
+                },
+                std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+                "CallbackSend::lifecycle_logout_wait");
+        }
+        // Bounded: an operation that does not complete is reported below, not
+        // waited for.
+        completed =
+            completed &&
+            fixpp::test_support::pump_until(
+                f.ioc, [&] { return cell.outer.done && (cell.started.done || !cell.inside.read); },
+                std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+                "CallbackSend::lifecycle");
+    }
+    // Recorded before the drain, which completes what it cancels.
+    const std::string pending_at_the_bound = completed ? std::string{} : pending();
+    const SleepCountingClock::Counts sleeps = clock->counts();
+    const bool clock_advanced = f.clock->steady_now() != clock_before;
+    if (setup_ok && !completed) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "CallbackSend::lifecycle");
+    }
+
+    std::vector<std::string> results{std::string(outer_name) + ": " + result_of(cell.outer)};
+    if (starts_a_close) results.push_back("the callback's close: " + result_of(cell.started));
+    std::vector<std::string> full_wire;
+    const ArmValues got = read_arm_values(f, sess, cell, entered, results, full_wire);
+    const std::string reading =
+        literal_of(got) + inside_text(cell, starting) + "; onLogout calls " +
+        std::to_string(cell.on_logout_calls) + "; fromApp calls " + std::to_string(from_app_calls) +
+        "; sleeps of the heartbeat interval: begun " + std::to_string(sleeps.interval_begun) +
+        ", in flight when the arm's operations had completed " +
+        std::to_string(sleeps.interval_in_flight) + "; the mock clock was " +
+        (clock_advanced ? "advanced" : "not advanced") + transport_text(f) +
+        ". Role: " + (role == session_role::initiator ? "initiator" : "acceptor") +
+        "; the close's mode: " +
+        (!starts_a_close                ? "none"
+         : mode == close_mode::terminal ? "terminal"
+                                        : "graceful") +
+        ".";
+    std::printf("[ MEASURED ] %s\n", reading.c_str());
+    std::fflush(stdout);
+
+    // A session that no close() has closed is closed here, and a liveness loop it
+    // left asleep is waited for, so that nothing of the session is left running
+    // when the cell returns.
+    if (session_test_access::lifecycle_value(sess) == 1) {
+        (void)f.run(sess.close(close_mode::terminal), "CallbackSend::lifecycle_teardown");
+    }
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        f.ioc, [&] { return clock->counts().interval_in_flight == 0; }, std::chrono::seconds{5},
+        fixpp::test_support::kPumpSlice, "CallbackSend::lifecycle_sleeps_ended"))
+        << "a sleep of the heartbeat interval was still in flight after the session closed. "
+        << reading;
+
+    ASSERT_TRUE(setup_ok) << "setup: the session did not open or did not reach Active. " << reading;
+    EXPECT_TRUE(completed) << "every operation must complete within the pump's bound; "
+                           << pending_at_the_bound << reading;
+
+    if (!starts_a_close) {
+        // The control. Its count is the one the arms with a close are read against.
+        EXPECT_EQ(result_of(cell.outer), "ok") << reading;
+        EXPECT_EQ(got.at_the_end, "Active open")
+            << "with no close started the session is Active. " << reading;
+        EXPECT_GE(sleeps.interval_in_flight, 1U)
+            << "with no close started, the liveness loop has a sleep of the heartbeat interval "
+               "in flight while the session is Active. "
+            << reading;
+        expect_arm_values(got, expect, reading);
+        return;
+    }
+
+    ASSERT_TRUE(cell.inside.read) << "PATH NOT DRIVEN: " << starting << " did not start its close. "
+                                  << reading;
+    EXPECT_EQ(cell.inside.state + " " + cell.inside.lifecycle, entered)
+        << "inside the callback after the start, the session has the state and lifecycle the "
+           "callback entered with. "
+        << reading;
+    EXPECT_FALSE(cell.inside.started_completed)
+        << "inside the callback after the start, the close it started has not completed. "
+        << reading;
+    EXPECT_FALSE(cell.started.threw) << reading;
+    EXPECT_EQ(got.at_the_end.substr(got.at_the_end.find(' ') + 1), "closed_drained")
+        << "the session ends closed. " << reading;
+    const auto logouts_sent = std::ranges::count_if(
+        full_wire, [](const std::string& frame) { return field(frame, 35) == "5"; });
+
+    // What the row states for each callback, spelled out apart from the arm's values.
+    switch (arm) {
+        case LifecycleArm::on_logon:
+            EXPECT_EQ(cell.inside.lifecycle, "open")
+                << "inside the callback after the start, the lifecycle is open. " << reading;
+            EXPECT_EQ(cell.inside.state, "Active")
+                << "inside the callback after the start, the session is Active. " << reading;
+            EXPECT_EQ(cell.inside.on_logout_calls, 0)
+                << "inside the callback after the start, onLogout has not run. " << reading;
+            EXPECT_EQ(result_of(cell.started), "ok") << "the close's result is ok. " << reading;
+            EXPECT_EQ(sleeps.interval_in_flight, 0U)
+                << "no sleep of the heartbeat interval is in flight when the close has "
+                   "completed. "
+                << reading;
+            if (store == StoreKind::file) {
+                EXPECT_EQ(sleeps.interval_begun, 0U)
+                    << "on a persistent store no liveness loop is started: no sleep of the "
+                       "heartbeat interval begins. "
+                    << reading;
+                EXPECT_EQ(result_of(cell.outer), "ok")
+                    << "on a persistent store on_inbound_frame returns ok. " << reading;
+            } else {
+                EXPECT_GE(sleeps.interval_begun, 1U)
+                    << "on a volatile store the Logon arm finishes first, liveness loop "
+                       "included: a sleep of the heartbeat interval begins. "
+                    << reading;
+                EXPECT_LT(position_of(got.order, "a sleep of the heartbeat interval begins"),
+                          position_of(got.order, "onLogout"))
+                    << "on a volatile store the liveness loop starts before the close begins. "
+                    << reading;
+                if (mode == close_mode::graceful) {
+                    ASSERT_FALSE(full_wire.empty()) << reading;
+                    EXPECT_EQ(field(full_wire.back(), 35), "5")
+                        << "a graceful close sends its Logout after the Logon exchange. "
+                        << reading;
+                    EXPECT_EQ(logouts_sent, 1) << "the Logout is transmitted once. " << reading;
+                }
+            }
+            break;
+        case LifecycleArm::on_logout_of_a_graceful_close:
+            EXPECT_EQ(cell.inside.lifecycle, "closing")
+                << "onLogout runs inside the graceful close. " << reading;
+            EXPECT_EQ(result_of(cell.started), "ok")
+                << "the terminal close joins the graceful one and returns its result. " << reading;
+            EXPECT_EQ(result_of(cell.outer), result_of(cell.started))
+                << "the two closes return the same result. " << reading;
+            EXPECT_FALSE(clock_advanced)
+                << "the cell does not advance the mock clock: the graceful close's wait for the "
+                   "peer's Logout ends because the terminal close joined it. "
+                << reading;
+            EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
+            EXPECT_EQ(logouts_sent, 1) << "the Logout is transmitted once. " << reading;
+            break;
+        case LifecycleArm::on_logout_after_another_begin_string:
+            ASSERT_FALSE(validate_gate)
+                << "PATH NOT DRIVEN: the validate gate is on, so the frame does not reach the "
+                   "Active arm's BeginString test. "
+                << reading;
+            EXPECT_EQ(cell.inside.lifecycle, "open")
+                << "inside the callback after the start, the lifecycle is open. " << reading;
+            EXPECT_EQ(from_app_calls, 0) << "the frame is not delivered to fromApp. " << reading;
+            EXPECT_EQ(entered, "Disconnected open")
+                << "the write of Disconnected is outside close(): onLogout runs with the "
+                   "lifecycle open, so no close is in flight for the callback's close to join. "
+                << reading;
+            EXPECT_EQ(full_wire.size(), wire_at_the_start)
+                << "the route emits no frame, and neither does the callback's close. " << reading;
+            EXPECT_NE(cell.started.err, std::optional<error>{error::session_already_closed})
+                << "the callback's close does not return session_already_closed. " << reading;
+            EXPECT_EQ(result_of(cell.started), "ok")
+                << "the callback's close is the session's first and returns ok. " << reading;
+            EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
+            break;
+        case LifecycleArm::on_create:
+            EXPECT_EQ(cell.inside.lifecycle, "open")
+                << "inside the callback after the start, the lifecycle is open. " << reading;
+            EXPECT_EQ(result_of(cell.outer), "ok") << "open() returns ok. " << reading;
+            EXPECT_EQ(result_of(cell.started), "ok") << "the close's result is ok. " << reading;
+            EXPECT_EQ(cell.on_logout_calls, 0) << "onLogout does not run. " << reading;
+            EXPECT_EQ(logouts_sent, 0) << "no Logout is transmitted. " << reading;
+            if (role == session_role::initiator) {
+                EXPECT_LT(position_of(got.order, "transmit 35=A"),
+                          position_of(got.order, "onCreate"))
+                    << "an initiator's Logon is transmitted before onCreate runs. " << reading;
+            } else {
+                EXPECT_TRUE(full_wire.empty()) << "an acceptor transmits nothing. " << reading;
+            }
+            break;
+        case LifecycleArm::on_logon_no_close:
+            break;
+    }
+
+    // The arm's values.
+    expect_arm_values(got, expect, reading);
+    EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << reading;
+}
+
+}  // namespace
+
+// onLogon starts a close. On a persistent store the Logon arm is suspended in its persist
+// of the inbound number when the close runs, and stops when it resumes: it starts no
+// liveness loop. On a volatile store the arm finishes first, liveness loop included. An
+// initiator and an acceptor, a terminal and a graceful close. On the synchronous sink only:
+// the live transport double attaches to a session that is already Active.
+TEST(CallbackSend, OnLogonStartsClose_Initiator_Terminal) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::initiator, close_mode::terminal, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogon [Active open]",
+                      "onLogon returns [Active open]",
+                      "a sleep of the heartbeat interval begins [Active open]",
+                      "on_inbound_frame completes [Active open]", "onLogout [Disconnected closing]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]"},
+            .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1"},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 2,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsClose_Initiator_Terminal_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::initiator, close_mode::terminal, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogon [Active open]",
+                            "onLogon returns [Active open]", "onLogout [Disconnected closing]",
+                            "the callback's close completes [Disconnected closed_drained]",
+                            "on_inbound_frame completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsClose_Initiator_Graceful) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::initiator, close_mode::graceful, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogon [Active open]",
+                            "onLogon returns [Active open]",
+                            "a sleep of the heartbeat interval begins [Active open]",
+                            "on_inbound_frame completes [Active open]",
+                            "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1", "35=5 34=2"},
+                  .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+                  .next_out = 3,
+                  .next_in = 2,
+                  .store_next_out = 3,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsClose_Initiator_Graceful_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::initiator, close_mode::graceful, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogon [Active open]",
+                            "onLogon returns [Active open]",
+                            "on_inbound_frame completes [Active closing]",
+                            "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1", "35=5 34=2"},
+                  .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+                  .next_out = 3,
+                  .next_in = 2,
+                  .store_next_out = 3,
+                  .store_next_in = 2,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsClose_Acceptor_Terminal) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::acceptor, close_mode::terminal, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"transmit 35=A 34=1 [LogonReceived open]", "onLogon [Active open]",
+                      "onLogon returns [Active open]",
+                      "a sleep of the heartbeat interval begins [Active open]",
+                      "on_inbound_frame completes [Active open]", "onLogout [Disconnected closing]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonReceived open]"},
+            .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1"},
+            .retained = {"35=A 34=1", "none", "none", "none"},
+            .next_out = 2,
+            .next_in = 2,
+            .store_next_out = 2,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsClose_Acceptor_Terminal_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::acceptor, close_mode::terminal, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "Active open",
+                  .order = {"transmit 35=A 34=1 [LogonReceived open]", "onLogon [Active open]",
+                            "onLogon returns [Active open]", "onLogout [Disconnected closing]",
+                            "the callback's close completes [Disconnected closed_drained]",
+                            "on_inbound_frame completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonReceived open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsClose_Acceptor_Graceful) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::acceptor, close_mode::graceful, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"transmit 35=A 34=1 [LogonReceived open]", "onLogon [Active open]",
+                      "onLogon returns [Active open]",
+                      "a sleep of the heartbeat interval begins [Active open]",
+                      "on_inbound_frame completes [Active open]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonReceived open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsClose_Acceptor_Graceful_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon, session_role::acceptor, close_mode::graceful, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active open",
+            .order = {"transmit 35=A 34=1 [LogonReceived open]", "onLogon [Active open]",
+                      "onLogon returns [Active open]",
+                      "on_inbound_frame completes [Active closing]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonReceived open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = 2,
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// The positive control of the readings "no sleep of the heartbeat interval" above: the same
+// setup on a persistent store, with no close started in onLogon.
+TEST(CallbackSend, OnLogonStartsNoClose_Initiator_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon_no_close, session_role::initiator, close_mode::terminal,
+        StoreKind::file, TransportKind::sync_capture,
+        ArmValues{.entered = "no close started",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogon [Active open]",
+                            "a sleep of the heartbeat interval begins [Active open]",
+                            "on_inbound_frame completes [Active open]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Active open",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogonStartsNoClose_Acceptor_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logon_no_close, session_role::acceptor, close_mode::terminal,
+        StoreKind::file, TransportKind::sync_capture,
+        ArmValues{.entered = "no close started",
+                  .order = {"transmit 35=A 34=1 [LogonReceived open]", "onLogon [Active open]",
+                            "a sleep of the heartbeat interval begins [Active open]",
+                            "on_inbound_frame completes [Active open]"},
+                  .callbacks = {"toAdmin 35=A [LogonReceived open]"},
+                  .results = {"on_inbound_frame: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Active open",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+// The test body starts a graceful close; onLogout, which that close fires, starts a terminal
+// one. The terminal close joins the graceful one, and the wait for the peer's Logout ends
+// without the cell advancing the clock.
+TEST(CallbackSend, OnLogoutOfGracefulCloseStartsClose_Terminal) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_of_a_graceful_close, session_role::initiator, close_mode::terminal,
+        StoreKind::memory, TransportKind::sync_capture,
+        ArmValues{
+            .entered = "LogoutSent closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "transmit 35=5 34=2 [Active closing]",
+                      "onLogout [LogoutSent closing]", "onLogout returns [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutOfGracefulCloseStartsClose_Terminal_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_of_a_graceful_close, session_role::initiator, close_mode::terminal,
+        StoreKind::memory, TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "LogoutSent closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "transmit 35=5 34=2 [Active closing]",
+                      "onLogout [LogoutSent closing]", "onLogout returns [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutOfGracefulCloseStartsClose_Terminal_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_of_a_graceful_close, session_role::initiator, close_mode::terminal,
+        StoreKind::file, TransportKind::sync_capture,
+        ArmValues{
+            .entered = "LogoutSent closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "transmit 35=5 34=2 [Active closing]",
+                      "onLogout [LogoutSent closing]", "onLogout returns [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = 2,
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutOfGracefulCloseStartsClose_Terminal_FileStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_of_a_graceful_close, session_role::initiator, close_mode::terminal,
+        StoreKind::file, TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "LogoutSent closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "transmit 35=5 34=2 [Active closing]",
+                      "onLogout [LogoutSent closing]", "onLogout returns [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = 2,
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutOfGracefulCloseStartsClose_Terminal_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_of_a_graceful_close, session_role::initiator, close_mode::terminal,
+        StoreKind::none, TransportKind::sync_capture,
+        ArmValues{
+            .entered = "LogoutSent closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "transmit 35=5 34=2 [Active closing]",
+                      "onLogout [LogoutSent closing]", "onLogout returns [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutOfGracefulCloseStartsClose_Terminal_NoStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_of_a_graceful_close, session_role::initiator, close_mode::terminal,
+        StoreKind::none, TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "LogoutSent closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "transmit 35=5 34=2 [Active closing]",
+                      "onLogout [LogoutSent closing]", "onLogout returns [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]", "toAdmin 35=5 [Active closing]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// A frame under another BeginString makes the Active arm write Disconnected with no close()
+// and no emit; onLogout, which that write fires, starts a close. It is the session's first.
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Terminal) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::terminal, StoreKind::memory, TransportKind::sync_capture,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Terminal_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::terminal, StoreKind::memory, TransportKind::live_suspending_write,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Terminal_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::terminal, StoreKind::file, TransportKind::sync_capture,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Terminal_FileStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::terminal, StoreKind::file, TransportKind::live_suspending_write,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Terminal_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::terminal, StoreKind::none, TransportKind::sync_capture,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Terminal_NoStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::terminal, StoreKind::none, TransportKind::live_suspending_write,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Graceful) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::graceful, StoreKind::memory, TransportKind::sync_capture,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Graceful_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::graceful, StoreKind::memory, TransportKind::live_suspending_write,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Graceful_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::graceful, StoreKind::file, TransportKind::sync_capture,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Graceful_FileStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::graceful, StoreKind::file, TransportKind::live_suspending_write,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = 2,
+                  .store_next_in = 2,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Graceful_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::graceful, StoreKind::none, TransportKind::sync_capture,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnLogoutAfterAnotherBeginStringStartsClose_Graceful_NoStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_logout_after_another_begin_string, session_role::initiator,
+        close_mode::graceful, StoreKind::none, TransportKind::live_suspending_write,
+        ArmValues{.entered = "Disconnected open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onLogout [Disconnected open]",
+                            "onLogout returns [Disconnected open]",
+                            "on_inbound_frame completes [Disconnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"on_inbound_frame: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {},
+                  .next_out = 2,
+                  .next_in = 2,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+// onCreate starts a close, inside open(). The session never reached Active: open() returns
+// ok and the session ends closed with no onLogout and no Logout. An initiator has
+// transmitted its Logon before onCreate runs. On the synchronous sink only, as the onLogon
+// arms.
+TEST(CallbackSend, OnCreateStartsClose_Initiator_Terminal) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::initiator, close_mode::terminal, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "LogonSent open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onCreate [LogonSent open]",
+                            "onCreate returns [LogonSent open]", "open completes [LogonSent open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 1,
+                  .store_next_out = 2,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Initiator_Terminal_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::initiator, close_mode::terminal, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "LogonSent open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onCreate [LogonSent open]",
+                            "onCreate returns [LogonSent open]", "open completes [LogonSent open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 1,
+                  .store_next_out = 2,
+                  .store_next_in = 1,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Initiator_Terminal_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::initiator, close_mode::terminal, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "LogonSent open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onCreate [LogonSent open]",
+                            "onCreate returns [LogonSent open]", "open completes [LogonSent open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {},
+                  .next_out = 2,
+                  .next_in = 1,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Initiator_Graceful) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::initiator, close_mode::graceful, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "LogonSent open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onCreate [LogonSent open]",
+                            "onCreate returns [LogonSent open]", "open completes [LogonSent open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 1,
+                  .store_next_out = 2,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Initiator_Graceful_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::initiator, close_mode::graceful, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "LogonSent open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onCreate [LogonSent open]",
+                            "onCreate returns [LogonSent open]", "open completes [LogonSent open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {"35=A 34=1", "none", "none", "none"},
+                  .next_out = 2,
+                  .next_in = 1,
+                  .store_next_out = 2,
+                  .store_next_in = 1,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Initiator_Graceful_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::initiator, close_mode::graceful, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "LogonSent open",
+                  .order = {"transmit 35=A 34=1 [LogonSent open]", "onCreate [LogonSent open]",
+                            "onCreate returns [LogonSent open]", "open completes [LogonSent open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {"toAdmin 35=A [LogonSent open]"},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {"35=A 34=1"},
+                  .retained = {},
+                  .next_out = 2,
+                  .next_in = 1,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Acceptor_Terminal) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::acceptor, close_mode::terminal, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "NotConnected open",
+                  .order = {"onCreate [NotConnected open]", "onCreate returns [NotConnected open]",
+                            "open completes [NotConnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {},
+                  .retained = {"none", "none", "none", "none"},
+                  .next_out = 1,
+                  .next_in = 1,
+                  .store_next_out = 1,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Acceptor_Terminal_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::acceptor, close_mode::terminal, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "NotConnected open",
+                  .order = {"onCreate [NotConnected open]", "onCreate returns [NotConnected open]",
+                            "open completes [NotConnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {},
+                  .retained = {"none", "none", "none", "none"},
+                  .next_out = 1,
+                  .next_in = 1,
+                  .store_next_out = 1,
+                  .store_next_in = 1,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Acceptor_Terminal_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::acceptor, close_mode::terminal, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "NotConnected open",
+                  .order = {"onCreate [NotConnected open]", "onCreate returns [NotConnected open]",
+                            "open completes [NotConnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {},
+                  .retained = {},
+                  .next_out = 1,
+                  .next_in = 1,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Acceptor_Graceful) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::acceptor, close_mode::graceful, StoreKind::memory,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "NotConnected open",
+                  .order = {"onCreate [NotConnected open]", "onCreate returns [NotConnected open]",
+                            "open completes [NotConnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {},
+                  .retained = {"none", "none", "none", "none"},
+                  .next_out = 1,
+                  .next_in = 1,
+                  .store_next_out = 1,
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Acceptor_Graceful_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::acceptor, close_mode::graceful, StoreKind::file,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "NotConnected open",
+                  .order = {"onCreate [NotConnected open]", "onCreate returns [NotConnected open]",
+                            "open completes [NotConnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {},
+                  .retained = {"none", "none", "none", "none"},
+                  .next_out = 1,
+                  .next_in = 1,
+                  .store_next_out = 1,
+                  .store_next_in = 1,
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
+}
+
+TEST(CallbackSend, OnCreateStartsClose_Acceptor_Graceful_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::on_create, session_role::acceptor, close_mode::graceful, StoreKind::none,
+        TransportKind::sync_capture,
+        ArmValues{.entered = "NotConnected open",
+                  .order = {"onCreate [NotConnected open]", "onCreate returns [NotConnected open]",
+                            "open completes [NotConnected open]",
+                            "the callback's close completes [Disconnected closed_drained]"},
+                  .callbacks = {},
+                  .results = {"open: ok", "the callback's close: ok"},
+                  .wire = {},
+                  .retained = {},
+                  .next_out = 1,
+                  .next_in = 1,
+                  .store_next_out = {},
+                  .store_next_in = {},
+                  .at_the_end = "Disconnected closed_drained",
+                  .writes_after_close = 0,
+                  .writes_refused = 0});
 }
 
 // Two sessions, A and B, on one io_context; each has its own strand, Application
