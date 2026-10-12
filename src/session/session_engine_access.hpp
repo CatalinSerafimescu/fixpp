@@ -54,6 +54,12 @@ struct session_engine_access {
     // Engine::stop()'s step 1 has reached the session's strand (data-model E-13): the
     // engine-stop flag Logon arms test. Session strand, before the stop's emit.
     static void note_engine_stop(Session& s) noexcept { s.note_engine_stop_(); }
+    // Whether note_engine_stop has run for this session. Engine::send's session-strand
+    // body tests it before it admits a send to a published session
+    // (`.specify/563-564-callback-send.md` §6, OD-3). Session strand.
+    [[nodiscard]] static bool engine_stop_noted(Session const& s) noexcept {
+        return s.engine_stop_requested_;
+    }
 };
 
 }  // namespace fixpp::session

@@ -1723,6 +1723,47 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
         co_return std::unexpected(core::error::session_invalid_state_for_send);
     }
 
+    // The published snapshot first (`.specify/563-564-callback-send.md` §2.3, "The new
+    // path"). It is read here and not through lookup(), whose handle on a build with
+    // assertions is a lease that stop() does not drain. The snapshot is released before
+    // the await: only the session's keepalive crosses it.
+    std::shared_ptr<Session> published;
+    if (auto snap = reader_snapshot_.load(std::memory_order_acquire)) {
+        if (auto it = snap->sessions.find(id); it != snap->sessions.end()) {
+            published = it->second;
+        }
+    }
+    if (published) {
+        // Hit: straight onto the session's strand, with no hop through the control
+        // strand. A caller already running on that strand starts the body inline; from
+        // anywhere else the body runs under the strand's serialisation.
+        auto strand_exec = published->executor().underlying();
+        co_return co_await asio::co_spawn(
+            strand_exec,
+            // The body owns its keepalive and its payload: it holds no view into this
+            // frame, which may be destroyed first when the io_context is destroyed
+            // with sends suspended.
+            [kl = std::move(published), payload_copy]() -> asio::awaitable<core::expected_t<void>> {
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
+                // The stop check (§6, OD-3): stop()'s step 1 sets the flag on this
+                // strand, so a body that starts after that step is refused here. The
+                // control-strand read of stopped_ does this on the miss path.
+                if (session_engine_access::engine_stop_noted(*kl)) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+                if (kl->state() != fsm_state::Active) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+                co_return co_await kl->send(
+                    std::span<const std::byte>(payload_copy.data(), payload_copy.size()));
+            },
+            asio::use_awaitable);
+    }
+
+    // Miss: the id is not in the snapshot this call loaded. The control strand tells an
+    // unregistered id from a registered one with no published session, and finds a
+    // session published since.
     // T012/Step A: first-hop onto control_strand_ so registry reads and stopped_
     // check are serialized with stop()'s control-plane mutations (D0/INV-0).
     // Non-blocking co_spawn — the re-entrant case (session→control→session) is
