@@ -651,9 +651,24 @@ add_executable(session_538_cancelled_read_measured_path
 add_executable(session_cancelled_outbound_store_measurement
   test_cancelled_outbound_store_measurement.cpp
 )
+# Ruling R-14 (`.specify/536-537-538-recovery-liveness.md` §9): a cancellation, or another
+# exception, met while an inbound frame is processed. Standalone ([const §VII.8]):
+# session_inbound_cancellation is a per-`-D` variant (FIXPP_TEST_HOOKS for the offload hook,
+# FIXPP_ALLOW_MOCK_TRANSPORT for the cell that holds a write in flight) with genuine
+# concurrency (a FileStore's file I/O executor); session_inbound_cancellation_engine runs an
+# Engine with timers and coroutines over loopback TCP, and holds a FileStore.
+add_executable(session_inbound_cancellation
+  test_inbound_cancellation.cpp
+)
+target_compile_definitions(session_inbound_cancellation PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_executable(session_inbound_cancellation_engine
+  test_inbound_cancellation_engine.cpp
+)
 foreach(held_store_test
     session_538_cancelled_read_measured_path
-    session_cancelled_outbound_store_measurement)
+    session_cancelled_outbound_store_measurement
+    session_inbound_cancellation
+    session_inbound_cancellation_engine)
   target_link_libraries(${held_store_test} PRIVATE
     fixpp_session
     fixpp_transport

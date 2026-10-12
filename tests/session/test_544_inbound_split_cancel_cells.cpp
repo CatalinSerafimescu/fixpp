@@ -11,14 +11,20 @@
 //
 // Each cell drives one reply block whose user callback (toAdmin / toApp) runs before the
 // block's first original `co_await`, under a chain that the test cancels just before the
-// block. It asserts what today's code does: the callback runs, then the first original
-// `co_await` throws, and the reply is not transmitted. The LogonSent and too-high
-// build-failure cells drive the path where the reply fails to build and today's block has no
-// `co_await` at all: the frame completes with a value.
+// block. It asserts that the callback runs once and that the reply is not transmitted: the
+// cancellation is met at the block's first original `co_await`, after the callback, and not
+// at a split boundary ahead of it. The LogonSent and too-high build-failure cells drive the
+// path where the reply fails to build and the block has no `co_await` at all: the frame
+// completes with a value.
 //
-// The cells are a differential oracle: each must hold at base and after the split. Mutant:
-// reduce FIXPP_INBOUND_SPLIT_AWAIT to `auto var = co_await (call)` and
-// FIXPP_INBOUND_SPLIT_ENTRY to a no-op in src/session/session.cpp; each cell must then fail.
+// What the frame does once the cancellation is met is ruling R-14's
+// (`.specify/536-537-538-recovery-liveness.md` §9, D-CAN-1 and D-CAN-4; §9.5): the catch at
+// the inbound entry ends the session, so the frame returns `store_cancelled`, throws nothing,
+// and the session is Disconnected.
+//
+// Mutant: reduce FIXPP_INBOUND_SPLIT_AWAIT to `auto var = co_await (call)` and
+// FIXPP_INBOUND_SPLIT_ENTRY to a no-op in src/session/session.cpp; the check then moves to the
+// boundary, ahead of the callback, and each cell must fail at its callback count.
 
 #include <gtest/gtest.h>
 
@@ -48,6 +54,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -171,6 +178,8 @@ struct FeedOutcome {
     bool completed = false;  // the future became ready within the window
     bool aborted = false;    // it carried asio's operation_aborted
     bool value = false;      // it carried a value expected_t
+    // The error it carried, when the frame returned one and threw nothing.
+    std::optional<fixpp::core::error> error;
 };
 
 struct CancelFixture {
@@ -255,6 +264,7 @@ struct CancelFixture {
                         }
                     } else {
                         o.value = r.has_value();
+                        if (!r) o.error = r.error();
                     }
                     done.set_value(o);
                 }));
@@ -290,16 +300,18 @@ struct CancelFixture {
 };
 
 // The six reply blocks whose callback precedes their first original co_await. Each
-// assertion set is the same: the callback ran, the frame threw operation_aborted, the reply
-// was not sent, and the session stayed Active.
+// assertion set is the same: the callback ran, the reply was not sent, the frame returned
+// store_cancelled and threw nothing, and the session is Disconnected.
 void expect_callback_then_abort(const CancelFixture& f, const FeedOutcome& o, Session& s,
                                 int callbacks, std::string_view reply_type) {
     ASSERT_TRUE(f.emitted) << "the cell's cancellation point was never reached";
     ASSERT_TRUE(o.completed);
-    EXPECT_TRUE(o.aborted) << "the reply block's first co_await must throw operation_aborted";
     EXPECT_EQ(callbacks, 1) << "the callback before the first co_await must run exactly once";
     EXPECT_EQ(f.sent_count(reply_type), 0) << "the reply must not be transmitted";
-    EXPECT_EQ(s.state(), fsm_state::Active);
+    EXPECT_FALSE(o.aborted) << "the frame must throw nothing";
+    EXPECT_EQ(o.error, std::optional{fixpp::core::error::store_cancelled})
+        << "the frame must return store_cancelled";
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
 }
 
 // Active SendingTime(52) guard: Reject, then Logout. The chain is cancelled by the Reject's

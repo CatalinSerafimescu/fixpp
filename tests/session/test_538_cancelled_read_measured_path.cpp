@@ -36,18 +36,25 @@
 // store_cancelled only from a failed lock, so the record needs no diagnostic in library
 // source. A missing record fails the cell as "the path was not exercised".
 //
-// ── The neighbouring path: a cancellation recorded before a store call is awaited ────
+// ── The other timing: a cancellation recorded before a store call is awaited ─────────
 //
-// Measurement_StopAtNextSlotRead_WalkEndsByException and its control pin what the code
-// does today on a path the ruling's words do not cover; they are not cells of the
-// design. No store call is held. The wrapper's call hook runs in the walk's own call
-// expression for the slot after the first replayed frame, that is, after a write on the
-// plain transport has left the coroutine thread accepting a total cancellation, and
-// before the walk's co_await of that read. There the cell spawns Engine::stop. asio
-// starts a spawned coroutine by dispatch, and a dispatch to a strand from inside it
-// runs inline, so the stop's step 1 emits its cancellation before the hook returns;
-// that inline run is the cell's premise, and its window-hit record is what checks it.
-// The control installs the same hook and spawns nothing.
+// Ruling R-14 (the same note, §9: D-CAN-1, D-CAN-3; §5, the row "D-CAN-1, D-CAN-3, under
+// an `Engine`"). StopAtNextSlotRead_WalkEndsByException holds no store call. The
+// wrapper's call hook runs in the walk's own call expression for the slot after the
+// first replayed frame, that is, after a write on the plain transport has left the
+// coroutine thread accepting a total cancellation, and before the walk's co_await of
+// that read. There the cell spawns Engine::stop. asio starts a spawned coroutine by
+// dispatch, and a dispatch to a strand from inside it runs inline, so the stop's step 1
+// emits its cancellation before the hook returns; that inline run is the cell's
+// premise, and its window-hit record is what checks it. The walk's co_await then
+// throws, and the session must end there: Disconnected and onLogout when the handler
+// that ran the hook has returned, and the read pump's own close, which closes the
+// transport in that handler and has drained the session before Engine::stop reaches
+// its own close of it. Measurement_Control_HookWithoutStop_ReadEntersTheStore installs
+// the same hook and spawns nothing.
+//
+// The reading "the peer sees a hang-up" is plain_rig::peer_sees_hang_up, which waits;
+// HangUpReading_NoneBeforeAClose_OneAfterIt shows it can report both values.
 //
 // Every arm records and asserts nothing while its engine runs, and stops the engine on
 // every path: ~Engine requires a completed stop, so a fatal assertion between start and
@@ -55,24 +62,29 @@
 
 #include <gtest/gtest.h>
 
-#if defined(__linux__)
-#include <poll.h>
-#endif
-
+#include <array>
+#include <asio/awaitable.hpp>
+#include <asio/io_context.hpp>
+#include <asio/ip/tcp.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
+#include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <future>
+#include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "session/held_file_store_scene.hpp"
 #include "session/plain_engine_rig.hpp"
+#include "support/engine_test_access.hpp"
 #include "support/recording_store.hpp"
+#include "support/session_test_access.hpp"
 
 namespace {
 
@@ -283,7 +295,15 @@ TEST(CancelledReadMeasuredPath, Control_ReleaseBeforeStop_RangeReplayed) {
                                << store_hold::printable(o.after_rr);
 }
 
-// ── The neighbouring path ────────────────────────────────────────────────────────────
+// ── The other timing ─────────────────────────────────────────────────────────────────
+
+// What one moment of the session reads.
+struct Sample {
+    bool taken = false;
+    fsm_state state = fsm_state::NotConnected;
+    bool drained = false;  // Session::close has completed
+    int logouts = 0;       // onLogout calls so far
+};
 
 struct NextSlotOutcome {
     std::string setup_miss;
@@ -294,49 +314,56 @@ struct NextSlotOutcome {
     std::optional<StoreCall> next_slot_read;
     // Read inside the hook, after Engine::stop was spawned and before the hook returned.
     bool engine_stopped_in_hook = false;
-    bool peer_hang_up_in_hook = false;
     // Read by the test between the return of the handler that ran the hook and the
     // next handler.
-    fsm_state state_after_hook_handler = fsm_state::NotConnected;
+    Sample after_hook_handler;
     bool engine_stopped_after_hook_handler = false;
     bool stop_ready_after_hook_handler = false;
     bool peer_hang_up_after_hook_handler = false;
-    bool peer_hang_up_after_read_ended = false;  // the same reading, once the peer's read has ended
+    // Read inside Engine::stop, after its join of the role loops and before its own
+    // close of each session (the engine's post-send-drain test hook).
+    Sample before_stops_own_close;
     fsm_state state_after_answer = fsm_state::NotConnected;  // control arm, before teardown
     // Read from the session itself once the stop the hook spawned had completed. The
     // engine no longer publishes the session then, so the arm keeps its own reference.
     fsm_state state_after_stop = fsm_state::NotConnected;
+    int logouts_after_stop = 0;
     bool peer_read_ended = false;
+    std::error_code peer_read_ec;
     bool stop_completed = false;
     std::vector<std::string> after_rr;
 };
-
-// True when the peer's socket reports that its other end has closed, read from the
-// kernel without consuming input. Linux only; false elsewhere. The cells record it and
-// assert nothing on it: it says whether the session's transport had been closed at
-// that moment, as far as the peer's end of a loopback connection can tell.
-bool peer_sees_hang_up(plain_rig::Peer& peer) {
-#if defined(__linux__)
-    pollfd p{};
-    p.fd = peer.sock.native_handle();
-    p.events = POLLRDHUP;
-    return ::poll(&p, 1, 0) == 1 && (p.revents & (POLLRDHUP | POLLHUP)) != 0;
-#else
-    (void)peer;
-    return false;
-#endif
-}
 
 NextSlotOutcome run_next_slot_arm(bool const spawn_stop) {
     NextSlotOutcome o;
     HeldFileStoreScene scene;
     auto& rig = scene.rig;
+    auto const app = std::make_shared<plain_rig::CountingApp>();
+    rig.app = app;
+    std::shared_ptr<fixpp::session::Session> session;
+    auto sample = [&] {
+        Sample s;
+        s.taken = true;
+        s.state = session->state();
+        s.drained = fixpp::session::session_test_access::is_drained(*session);
+        s.logouts = app->logouts;
+        return s;
+    };
     [&] {
         if (!scene.setup(kAppMessages)) return;
         o.first = scene.first;
         o.last = scene.last;
         auto const next_slot = o.first + 1;
-        auto const session = rig.session();
+        session = rig.session();
+        if (!session) {
+            scene.setup_miss = "the session is not published";
+            return;
+        }
+        fixpp::session::engine_test_access::set_post_send_drain_hook(
+            *rig.engine, [&]() -> asio::awaitable<void> {
+                o.before_stops_own_close = sample();
+                co_return;
+            });
 
         scene.log->on_call = [&, next_slot](StoreCall const& call) {
             if (o.hook_ran || call.op != store_op::retrieve || call.dir != direction_t::outbound ||
@@ -347,14 +374,13 @@ NextSlotOutcome run_next_slot_arm(bool const spawn_stop) {
             if (!spawn_stop) return;
             scene.spawn_stop();
             o.engine_stopped_in_hook = rig.engine->stopped();
-            o.peer_hang_up_in_hook = peer_sees_hang_up(rig.peer);
         };
 
         auto const rr_mark = scene.log->mark();
         auto const rx_mark = rig.peer.received.size();
         scene.peer_resend_request(2, o.first, o.last);
 
-        // One handler at a time, so that the state is read after the handler that ran
+        // One handler at a time, so that the session is read after the handler that ran
         // the hook and before any other.
         auto const deadline = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
         while (!o.hook_ran && std::chrono::steady_clock::now() < deadline) {
@@ -362,17 +388,26 @@ NextSlotOutcome run_next_slot_arm(bool const spawn_stop) {
             rig.ioc.restart();
         }
         if (o.hook_ran) {
-            o.state_after_hook_handler = rig.state();
+            o.after_hook_handler = sample();
             o.engine_stopped_after_hook_handler = rig.engine->stopped();
             o.stop_ready_after_hook_handler = scene.spawned_stop_ready();
-            o.peer_hang_up_after_hook_handler = peer_sees_hang_up(rig.peer);
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+            o.peer_hang_up_after_hook_handler = plain_rig::peer_sees_hang_up(rig.peer);
+#endif
         }
 
         if (spawn_stop) {
+            // The bound: no store call is held and no real-time timer runs in this
+            // scene (the engine's clock is a mock clock that nothing advances), so
+            // nothing but the stop's own steps can complete it. finish() waits for it
+            // with one bounded pump.
             scene.finish();
-            if (session && scene.stop_completed) o.state_after_stop = session->state();
+            if (scene.stop_completed) {
+                o.state_after_stop = session->state();
+                o.logouts_after_stop = app->logouts;
+            }
             o.peer_read_ended = rig.run_until([&] { return rig.peer.read_ended; });
-            o.peer_hang_up_after_read_ended = peer_sees_hang_up(rig.peer);
+            o.peer_read_ec = rig.peer.read_ec;
         } else {
             (void)rig.run_until(
                 [&] { return answered(scene.peer_frames_from(rx_mark), kAppMessages); });
@@ -387,12 +422,15 @@ NextSlotOutcome run_next_slot_arm(bool const spawn_stop) {
     }();
     if (scene.log) scene.log->on_call = nullptr;
     scene.finish();
+    session.reset();
     o.setup_miss = scene.setup_miss;
     o.stop_completed = scene.stop_completed;
     return o;
 }
 
-TEST(CancelledReadMeasuredPath, Measurement_StopAtNextSlotRead_WalkEndsByException) {
+// R-14, under an Engine: a cancellation that the walk's co_await of a store read meets
+// ends the session at that frame.
+TEST(CancelledReadMeasuredPath, StopAtNextSlotRead_WalkEndsByException) {
     auto const o = run_next_slot_arm(/*spawn_stop=*/true);
     ASSERT_TRUE(o.setup_miss.empty()) << o.setup_miss;
 
@@ -404,36 +442,41 @@ TEST(CancelledReadMeasuredPath, Measurement_StopAtNextSlotRead_WalkEndsByExcepti
         << " engine_stopped_in_hook=" << o.engine_stopped_in_hook
         << " next_slot_read_recorded=" << o.next_slot_read.has_value()
         << " body_entered=" << (o.next_slot_read.has_value() && o.next_slot_read->entered());
-    // Whether the transport had been closed when the read threw, as far as the peer's
-    // socket could tell: printed for the reader of the run, not asserted. The reading
-    // taken after the peer's read has ended shows that the instrument can report a
-    // closed transport; it is asserted where the instrument exists.
-    std::printf(
-        "[ MEASURED ] peer_hang_up_in_hook=%d peer_hang_up_after_hook_handler=%d "
-        "peer_hang_up_after_read_ended=%d\n",
-        o.peer_hang_up_in_hook ? 1 : 0, o.peer_hang_up_after_hook_handler ? 1 : 0,
-        o.peer_hang_up_after_read_ended ? 1 : 0);
-#if defined(__linux__)
-    EXPECT_TRUE(o.peer_hang_up_after_read_ended)
-        << "the hang-up reading is not 1 after the peer's read ended, so its two earlier "
-           "readings say nothing";
-#endif
 
-    // Today: nothing on the path catches the exception. The arm records no state, so
-    // the session is still Active when the handler returns, with the engine's stop
-    // begun and not complete, and stays so until the stop's own close of the session.
-    EXPECT_EQ(o.state_after_hook_handler, fsm_state::Active);
+    // When the handler that ran the hook has returned, before the next handler runs:
+    // the session has ended at the frame, and its transport is closed.
+    ASSERT_TRUE(o.after_hook_handler.taken);
+    EXPECT_EQ(o.after_hook_handler.state, fsm_state::Disconnected)
+        << "the state when the hook's handler has returned";
+    EXPECT_EQ(o.after_hook_handler.logouts, 1)
+        << "onLogout calls when the hook's handler has returned";
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+    EXPECT_TRUE(o.peer_hang_up_after_hook_handler)
+        << "the peer sees no hang-up when the hook's handler has returned";
+#else
+    std::printf("[ NOT READ ] the peer's hang-up reading does not exist on this platform\n");
+#endif
     EXPECT_TRUE(o.engine_stopped_after_hook_handler);
     EXPECT_FALSE(o.stop_ready_after_hook_handler);
+
+    // Inside Engine::stop, before its own close of the session: the read pump's own
+    // close has already run.
+    ASSERT_TRUE(o.before_stops_own_close.taken) << "the post-send-drain hook did not run";
+    EXPECT_TRUE(o.before_stops_own_close.drained)
+        << "the session is not drained inside Engine::stop, before its own close of it, so the "
+           "read pump's close did not run";
+
     EXPECT_TRUE(o.stop_completed);
     EXPECT_EQ(o.state_after_stop, fsm_state::Disconnected);
+    EXPECT_EQ(o.logouts_after_stop, 1) << "onLogout calls once Engine::stop has completed";
 
-    // The peer read the one frame replayed before the read, and nothing after it.
+    // The peer read the one frame replayed before the read, then end-of-stream.
     auto const a = classify(o.after_rr);
     EXPECT_EQ(a.replayed_seqs, seqs(o.first, o.first)) << store_hold::printable(o.after_rr);
     EXPECT_EQ(a.gap_fills, 0U) << store_hold::printable(o.after_rr);
     EXPECT_EQ(a.other, 0U) << store_hold::printable(o.after_rr);
     EXPECT_TRUE(o.peer_read_ended);
+    EXPECT_EQ(o.peer_read_ec, asio::error::eof) << o.peer_read_ec.message();
 }
 
 // The same hook, and no stop: the gate above is told apart from its setup.
@@ -448,8 +491,8 @@ TEST(CancelledReadMeasuredPath, Measurement_Control_HookWithoutStop_ReadEntersTh
                 !o.next_slot_read->error)
         << "without a stop the read must enter the store and return a frame. entered="
         << o.next_slot_read->entered() << " error=" << error_text(*o.next_slot_read);
-    // The observation of the cell above is "Active with the engine's stop begun". Here
-    // no stop has begun.
+    // The cell above observes the session with the engine's stop begun. Here no stop
+    // has begun.
     EXPECT_FALSE(o.engine_stopped_in_hook);
     EXPECT_FALSE(o.engine_stopped_after_hook_handler);
 
@@ -459,5 +502,38 @@ TEST(CancelledReadMeasuredPath, Measurement_Control_HookWithoutStop_ReadEntersTh
     EXPECT_EQ(o.state_after_answer, fsm_state::Active);
     EXPECT_TRUE(o.stop_completed);
 }
+
+// ── The hang-up reading ──────────────────────────────────────────────────────────────
+
+#if defined(FIXPP_TEST_PEER_HANG_UP_READING)
+// plain_rig::hang_up_within on a loopback connection of the cell's own: it reads no
+// hang-up while the other end is open, and one once the other end has closed. Each
+// reading waits plain_rig::kHangUpWait, the wait of plain_rig::peer_sees_hang_up: a
+// reading ends at a hang-up or at that bound, and the io_context does not run during it.
+TEST(CancelledReadMeasuredPath, HangUpReading_NoneBeforeAClose_OneAfterIt) {
+    constexpr int kTrials = 20;
+    int read_before_a_close = 0;
+    int read_after_a_close = 0;
+    for (int i = 0; i < kTrials; ++i) {
+        asio::io_context ioc;
+        asio::ip::tcp::acceptor acceptor{
+            ioc, asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), 0}};
+        asio::ip::tcp::socket client{ioc};
+        asio::ip::tcp::socket server{ioc};
+        client.connect(acceptor.local_endpoint());
+        acceptor.accept(server);
+        read_before_a_close +=
+            plain_rig::hang_up_within(client.native_handle(), plain_rig::kHangUpWait) ? 1 : 0;
+        std::error_code ec;
+        server.close(ec);
+        read_after_a_close +=
+            plain_rig::hang_up_within(client.native_handle(), plain_rig::kHangUpWait) ? 1 : 0;
+    }
+    EXPECT_EQ(read_before_a_close, 0)
+        << "a hang-up was read on a connection whose other end is open";
+    EXPECT_EQ(read_after_a_close, kTrials)
+        << "no hang-up was read, within the wait, after the other end closed";
+}
+#endif
 
 }  // namespace

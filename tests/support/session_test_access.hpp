@@ -49,6 +49,12 @@ struct session_test_access {
         return s.state_ == Session::lifecycle::closed_drained;
     }
 
+    // True iff close() has begun and has not completed (lifecycle::closing). A cell
+    // whose hook starts a close() reads it to show the close ran to its first suspension.
+    [[nodiscard]] static bool is_closing(Session const& s) noexcept {
+        return s.state_ == Session::lifecycle::closing;
+    }
+
     // True iff live_peer_id_ holds a value. 043 T008 asserts that both transport
     // attach paths leave it empty on insecure_plain_tcp (D-10).
     [[nodiscard]] static bool live_peer_id_has_value(Session const& s) noexcept {
@@ -103,6 +109,11 @@ struct session_test_access {
     [[nodiscard]] static bool engine_stop_requested(Session const& s) noexcept {
         return s.engine_stop_requested_;
     }
+
+    // ensure_hydrated_'s re-entrancy flag (.specify/536-537-538-recovery-liveness.md,
+    // D-CAN-1, "One member the unwinding would leave set"). Read it on the session
+    // strand.
+    [[nodiscard]] static bool hydrating(Session const& s) noexcept { return s.hydrating_; }
 
     // The session's store, or null before open() (093 plan OD-25: a cell issues a
     // competing store operation on it).

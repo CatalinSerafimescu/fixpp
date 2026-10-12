@@ -32,6 +32,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -190,6 +191,9 @@ public:
     unsigned first = 0;      // MsgSeqNum(34) of the first application message of setup()
     unsigned last = 0;       // and of the last
     bool stop_completed = false;
+    // Adjusts the session's configuration after setup() has built it and before the
+    // session starts.
+    std::function<void(fixpp::session::SessionConfig&)> tweak_cfg;
 
     HeldFileStoreScene() = default;
     HeldFileStoreScene(HeldFileStoreScene const&) = delete;
@@ -231,6 +235,7 @@ public:
         auto const factory = std::make_shared<RecordingStoreFactory>(file_cfg);
         log = factory->log;
         c.store_factory = factory;
+        if (tweak_cfg) tweak_cfg(c);
 
         if (!rig.start(c)) return miss("rig.start");
         if (!rig.to_active()) return miss("rig.to_active");

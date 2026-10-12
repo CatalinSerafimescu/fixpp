@@ -5,7 +5,7 @@
 // RecordingStore: a MessageStore that forwards every call to a shipped store it owns
 // and records, in one ordered log, when each call was made, when its coroutine body
 // started, and what the inner store returned. RecordingStoreFactory makes one over a
-// FileStore.
+// FileStore, or over the store another factory makes.
 //
 // fixpp#538 (.specify/536-537-538-recovery-liveness.md §5, "A cell that needs a store
 // double"): a cell reads a shipped store's own result through this wrapper, so it
@@ -18,6 +18,10 @@
 // before that body starts (asio's await_transform tests the cancellation state first);
 // such a call is recorded as called and never entered: it did not reach the store.
 //
+// A cell can also choose one call and have the wrapper's body, in place of forwarding
+// it: throw, return a code, or wait until the cell releases it (StoreCallLog, "What the
+// body does for one chosen call"). The call is recorded as entered in each case.
+//
 // Threading: the log is written on the session's serialisation domain and read by the
 // test. It is for a session whose executor runs on the test's own thread
 // (tests/session/plain_engine_rig.hpp); it takes no lock.
@@ -25,6 +29,10 @@
 
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/post.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
@@ -40,11 +48,24 @@
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 namespace fixpp::test_support {
+
+// The text of the exception a body throws for StoreCallLog::throw_in.
+inline constexpr char const* kRecordingStoreThrown =
+    "RecordingStore: the body throws for this call";
+
+// Bound on StoreCallLog::hold_in. The hold is released by the cell, never by time; this
+// only ends a hold a cell's own pumps have missed. A hold that reached it sets
+// hold_timed_out(), and a cell that reads it fails. It is two bounded-pump budgets, so
+// a cell takes no more than one bounded pump while a hold is in flight.
+inline constexpr auto kBodyHoldBound = 2 * kPumpBudget;
 
 enum class store_op : std::uint8_t { store, retrieve, next_seqnum, reset, reset_to };
 
@@ -95,6 +116,29 @@ public:
     // members are noexcept.
     std::function<void(StoreCall const&)> on_call;
 
+    // ── What the body does for one chosen call ───────────────────────────────────────
+    //
+    // Each predicate is tested, in this order, against every recorded call when its body
+    // starts; the first call one accepts takes that action, once, and the predicate is
+    // cleared.
+    //
+    // throw_in: the body throws std::runtime_error{kRecordingStoreThrown} and the inner
+    // store is not called.
+    std::function<bool(StoreCall const&)> throw_in;
+    // fail_in: the body returns fail_code and the inner store is not called.
+    std::function<bool(StoreCall const&)> fail_in;
+    fixpp::core::error fail_code = fixpp::core::error::store_io_failure;
+    // hold_in: the body waits until release_hold(), yielding the session's executor,
+    // and then returns held_result when that is set, or forwards the call. While a hold
+    // is in flight the io_context always has a handler ready, so a cell must not run
+    // it to exhaustion (io_context::poll()) then.
+    std::function<bool(StoreCall const&)> hold_in;
+    std::optional<fixpp::core::error> held_result;
+
+    [[nodiscard]] bool holding() const noexcept { return holding_; }
+    [[nodiscard]] bool hold_timed_out() const noexcept { return hold_timed_out_; }
+    void release_hold() noexcept { hold_released_ = true; }
+
     int stores_made = 0;
     // The wrapper the factory made last, for a cell that reads the store itself. Null
     // before make() and once that wrapper is destroyed.
@@ -102,6 +146,43 @@ public:
 
 private:
     friend class RecordingStore;
+
+    enum class body_action : std::uint8_t { forward, throw_exception, fail, hold };
+
+    // The action for the call `id`, taken once. Not a coroutine: a call no predicate
+    // accepts adds no await to its body.
+    [[nodiscard]] body_action action_for(std::size_t id) {
+        if (id == 0) return body_action::forward;
+        auto const& c = calls_[id - 1];
+        auto take = [&c](std::function<bool(StoreCall const&)>& pred) {
+            if (!pred || !pred(c)) return false;
+            pred = nullptr;
+            return true;
+        };
+        if (take(throw_in)) return body_action::throw_exception;
+        if (take(fail_in)) return body_action::fail;
+        if (take(hold_in)) return body_action::hold;
+        return body_action::forward;
+    }
+
+    // The hold: yields until the cell releases it or kBodyHoldBound has passed.
+    asio::awaitable<void> wait_released() {
+        auto const ex = co_await asio::this_coro::executor;
+        auto const deadline = std::chrono::steady_clock::now() + kBodyHoldBound;
+        holding_ = true;
+        while (!hold_released_) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                hold_timed_out_ = true;
+                break;
+            }
+            co_await asio::post(ex, asio::use_awaitable);
+        }
+        holding_ = false;
+    }
+
+    bool holding_ = false;
+    bool hold_released_ = false;
+    bool hold_timed_out_ = false;
 
     // Returns the call's index plus one, or 0 when the log is not armed.
     [[nodiscard]] std::size_t call(StoreCall c) {
@@ -189,6 +270,9 @@ private:
                                                               std::span<const std::byte> frame,
                                                               fixpp::session::direction_t dir) {
         log_->enter(id);
+        if (auto const act = log_->action_for(id); act != body_action::forward) {
+            if (auto const e = co_await not_forwarded(id, act)) co_return std::unexpected(*e);
+        }
         auto r = co_await inner_->store(seq, frame, dir);
         log_->leave(id, error_of(r));
         co_return r;
@@ -197,6 +281,9 @@ private:
         std::size_t id, fixpp::session::seqnum_t begin, fixpp::session::seqnum_t end,
         fixpp::session::direction_t dir, fixpp::session::retrieve_visitor& visitor) {
         log_->enter(id);
+        if (auto const act = log_->action_for(id); act != body_action::forward) {
+            if (auto const e = co_await not_forwarded(id, act)) co_return std::unexpected(*e);
+        }
         auto r = co_await inner_->retrieve(begin, end, dir, visitor);
         log_->leave(id, error_of(r));
         co_return r;
@@ -204,12 +291,18 @@ private:
     asio::awaitable<fixpp::core::expected_t<fixpp::session::seqnum_t>> next_seqnum_body(
         std::size_t id, fixpp::session::direction_t dir, bool increment) {
         log_->enter(id);
+        if (auto const act = log_->action_for(id); act != body_action::forward) {
+            if (auto const e = co_await not_forwarded(id, act)) co_return std::unexpected(*e);
+        }
         auto r = co_await inner_->next_seqnum(dir, increment);
         log_->leave(id, error_of(r), r ? *r : fixpp::session::seqnum_t{0});
         co_return r;
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset_body(std::size_t id) {
         log_->enter(id);
+        if (auto const act = log_->action_for(id); act != body_action::forward) {
+            if (auto const e = co_await not_forwarded(id, act)) co_return std::unexpected(*e);
+        }
         auto r = co_await inner_->reset();
         log_->leave(id, error_of(r));
         co_return r;
@@ -217,9 +310,32 @@ private:
     asio::awaitable<fixpp::core::expected_t<void>> reset_to_body(
         std::size_t id, fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out) {
         log_->enter(id);
+        if (auto const act = log_->action_for(id); act != body_action::forward) {
+            if (auto const e = co_await not_forwarded(id, act)) co_return std::unexpected(*e);
+        }
         auto r = co_await inner_->reset_to(next_in, next_out);
         log_->leave(id, error_of(r));
         co_return r;
+    }
+
+    using body_action = StoreCallLog::body_action;
+
+    // The body of a call the cell chose (StoreCallLog, "What the body does for one
+    // chosen call"). It throws; or it returns the code the call returns in place of
+    // being forwarded, with the call recorded as returned; or, after a hold that ends
+    // with no held_result, it returns nullopt and the caller forwards the call.
+    asio::awaitable<std::optional<fixpp::core::error>> not_forwarded(std::size_t id,
+                                                                     body_action act) {
+        if (act == body_action::throw_exception) throw std::runtime_error{kRecordingStoreThrown};
+        std::optional<fixpp::core::error> e;
+        if (act == body_action::fail) {
+            e = log_->fail_code;
+        } else {
+            co_await log_->wait_released();
+            e = log_->held_result;
+        }
+        if (e) log_->leave(id, e);
+        co_return e;
     }
 
     template <class T>
@@ -232,25 +348,28 @@ private:
     std::shared_ptr<StoreCallLog> log_;
 };
 
-// Makes a RecordingStore over the FileStore a FileStoreFactory makes from `cfg`. A
-// cell gives `cfg` a file I/O executor of its own: the engine under
-// plain_engine_rig.hpp has none.
+// Makes a RecordingStore over the store an inner factory makes: the FileStore a
+// FileStoreFactory makes from `cfg`, or whatever `inner` makes (a MemoryStoreFactory,
+// for a volatile store). A cell gives a FileStore's `cfg` a file I/O executor of its
+// own: the engine under plain_engine_rig.hpp has none.
 class RecordingStoreFactory final : public fixpp::session::MessageStoreFactory {
 public:
     explicit RecordingStoreFactory(fixpp::session::FileStore::Config cfg)
-        : inner_factory_(std::move(cfg)) {}
+        : inner_factory_(std::make_shared<fixpp::session::FileStoreFactory>(std::move(cfg))) {}
+    explicit RecordingStoreFactory(std::shared_ptr<fixpp::session::MessageStoreFactory> inner)
+        : inner_factory_(std::move(inner)) {}
 
     std::shared_ptr<StoreCallLog> log = std::make_shared<StoreCallLog>();
 
     [[nodiscard]] bool yields_persistent_store() const noexcept override {
-        return inner_factory_.yields_persistent_store();
+        return inner_factory_->yields_persistent_store();
     }
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>> make(
         std::string_view sender, std::string_view target, std::pmr::memory_resource* mr,
         std::size_t max_store_memory_bytes,
         asio::any_io_executor file_io_executor) noexcept override {
-        auto inner = inner_factory_.make(sender, target, mr, max_store_memory_bytes,
-                                         std::move(file_io_executor));
+        auto inner = inner_factory_->make(sender, target, mr, max_store_memory_bytes,
+                                          std::move(file_io_executor));
         if (!inner) return std::unexpected(inner.error());
         ++log->stores_made;
         return fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>>{
@@ -258,7 +377,7 @@ public:
     }
 
 private:
-    fixpp::session::FileStoreFactory inner_factory_;
+    std::shared_ptr<fixpp::session::MessageStoreFactory> inner_factory_;
 };
 
 }  // namespace fixpp::test_support
