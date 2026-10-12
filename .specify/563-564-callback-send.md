@@ -5,7 +5,8 @@
 > `specs/<id>/` bundle. Branch `563-564-callback-send`. Round 3 ran on v0.5 and, after judging, left no P1
 > and no P2 (Codex had raised two P2 findings; both were judged P3). v0.6 applied that round's P3 items,
 > except the one the owner declined (Codex F-2). `/analyze` then ran over v0.6, and v0.7 applies its
-> findings. Neither v0.6's edits nor v0.7's were reviewed by Codex. Nothing is implemented. The last
+> findings. Neither v0.6's edits nor v0.7's were reviewed by Codex. The design is implemented on this
+> branch (2026-10-11 to 2026-10-13); the record has each phase. The last
 > section, "Gate A", has the tallies, the reviews, and how each round and the `/analyze` pass were applied.
 >
 > **Read, not run, with the exceptions named here.** §1's measurements were run before the design, and the
@@ -34,15 +35,17 @@
 > - `research/G19-fix-fpml-iso20022/research/probes/b41_563_564/`: the deferral-cost probe p1 and its build
 >   script; P-4's probe (`p4_post_cancellation.cpp`, `build_p4.sh`) with its output
 >   (`p4_post_cancellation.output.txt`); P-11's hook (`p11_hook.patch`) with its runs
->   (`p11_runs.output.txt`); and the temporary cells of the other measured predictions
->   (`p0b_measurements.patch`) with their runs (`p0b_runs.output.txt`).
+>   (`p11_runs.output.txt`); the temporary cells of the other measured predictions
+>   (`p0b_measurements.patch`) with their runs (`p0b_runs.output.txt`); and the evidence of each
+>   implementation phase, which the record names where it reports that phase (list the directory;
+>   this bullet does not enumerate it).
 > - `research/G19-fix-fpml-iso20022/research/reviews/analyze_563_564_callback-send.md`: the `/analyze`
 >   report over v0.6, with the orchestrator's dispositions.
 >
 > The cells are on this branch: `tests/session/test_563_564_callback_send.cpp` (suite `CallbackSend`) and
-> `tests/session/test_563_564_engine_callback_send.cpp` (suite `EngineCallbackSend`). They are measurement
-> cells today: several are RED or abort by design until this note is implemented (§3 says which way each
-> must turn).
+> `tests/session/test_563_564_engine_callback_send.cpp` (suite `EngineCallbackSend`). They were
+> measurement cells while this note was written, several RED or aborting by design; each now carries
+> the assertions §3 gives it.
 
 ## 0. Owner rulings (2026-10-11). Not reopened at Gate A; Gate A reviews whether this note implements them.
 
@@ -557,8 +560,16 @@ strand's queue. It is not the end of the arm that called the callback. So:
   first-yield table), and that post queues behind the close's. The outer frame's number is assigned by
   then: before the callback at an assign-first site, after it at a callback-first one. So on a shipped
   store a terminal close runs while the outer frame's store call is suspended, and before the frame is
-  transmitted. The table's other branches, a store that completes without yielding and no store, were
-  not measured. Measured for a close started in `toApp`, on the shipped stores, with the start posted
+  transmitted. Of the table's other branches, no store was measured during implementation (the close
+  cells' arms with no store; the record, "Phase 4, second part"): the outer frame is transmitted, on
+  an Active and open session, before the close begins, also for a terminal close and on the live
+  transport, and its operation returns ok. A store that completes without yielding was not measured.
+  So the cut is a cost on a session with a store. The orchestrator kept R-4 as Gate A approved it
+  (2026-10-12) on this comparison: after a `disconnect` inside `toApp` or `toAdmin`, QuickFIX C++ and
+  QuickFIX/J leave the message numbered, stored and not transmitted, which is the shipped-store outcome
+  here apart from when `onLogout` runs, and QuickFIX has no configuration without a store (read, not
+  run: `research/G19-fix-fpml-iso20022/research/probes/b41_563_564/ph5_quickfix_send_during_peer_logout.md` in the parent repo, second section; it names the commits it read, QuickFIX C++ `386ce46e`, QuickFIX/J
+  `149869e8`, QuickFIX/Go `eff945dd`). Measured for a close started in `toApp`, on the shipped stores, with the start posted
   (P-1; §3 names the evidence): the outer frame's store call begins before the posted close runs and
   completes after it; on a live transport the frame is retained under its number and not transmitted,
   and its send returns `dispatch_aborted`.
@@ -613,9 +624,15 @@ routes that were run). The measurement agrees in every arm, and every arm ends c
 - **`onLogout`** runs inside `record_state_transition_`, on the first transition out of Active. Where a
   `close()` made that transition, a close started in `onLogout` waits and then finds the first one in
   flight or finished: it joins it, or returns `session_already_closed`. A terminal close that joins a
-  graceful one escalates it (093 plan OD-29). Where a `Disconnected` write outside `close()` made the
-  transition (`Session::send`'s, for one), no close is in flight, and the close started in `onLogout` is
-  the session's first.
+  graceful one escalates it (093 plan OD-29). The wait is what lets that escalation take effect from
+  inside the graceful close's own callbacks. Before this PR a terminal close started in the `toAdmin`
+  of the graceful close's Logout did not escalate it on any store kind that was run, and one started
+  in its `onLogout` did not with no store on a synchronous sink: the nested call arrived before the
+  grace wait had begun, and both closes ended when `logout_disconnect_timeout_ms` elapsed. With the
+  wait both escalate at once (measured; the record, "Phase 4, fourth part" and "Phase 4, addendum").
+  It is a change of behaviour (§4, "Compatibility"). Where a `Disconnected` write outside `close()`
+  made the transition (`Session::send`'s, for one), no close is in flight, and the close started in
+  `onLogout` is the session's first.
 - **`onCreate`** runs at the end of `open()`, before the role loop connects or publishes. A close started
   there begins after `onCreate` returns. `open()` has no suspension after the callback, so it returns
   success, and the close runs at its caller's first suspension. The session never reached Active, so no
@@ -1059,7 +1076,9 @@ Also on the branch from that commit, for arms this section already specifies: a 
 the transport kind as an argument of the helper that the inbound close cells share ("The arms every
 close cell has"); the value `toApp` returns, set by the cell; and, on the live transport double, a count
 of `close()` calls and of the writes begun after the first one, with a setting that makes such a write
-fail as a write on a closed socket does. The setting is off by default.
+fail as a write on a closed socket does. The setting was off by default when this was written. The
+tests commit of the close cells turned the default on, after a comparison found no existing live-write
+cell changed by it (the record, "Phase 4, first part", "T4.5a: the comparison").
 
 Two facts about the fixture were found while measuring, and each binds the cells below (the record,
 "Fixture facts found while measuring"):
@@ -1145,8 +1164,9 @@ its date and its evidence file. The measurements of the last three bullets ran i
 tree, and not in the pull request's.
 
 A row measured with the start posted keeps its "If it disagrees" column. The post stands in for the
-mechanism, and the same outcome is read again on the mechanism itself when that mechanism is
-implemented, through the cells' own assertions. The column applies to that reading as well.
+mechanism, and the same outcome was read again on the mechanism itself once it was implemented,
+through the cells' own assertions (the record's Phase 3 and Phase 4 parts have each reading). The
+column applied to that reading as well.
 
 | Id | Predicted (read; not run unless the row says "Measured") | Measurement | If it disagrees |
 |---|---|---|---|
@@ -1157,7 +1177,7 @@ implemented, through the cells' own assertions. The column applies to that readi
 | P-2 | A terminal close started in `fromApp` on a FileStore: the close's completion still precedes `on_inbound_frame`'s; `on_inbound_frame` returns ok; the store has recorded the inbound number. | `FromAppStartsClose_Terminal_FileStore` with the start posted. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.9 (P-2)"; cells in `p0b_measurements.patch`): the close completes before `on_inbound_frame` does, `on_inbound_frame` returns ok, and the store has recorded the inbound number. | §2.5's "Left" bullet and the cell's order assertion are rewritten to what was measured. |
 | P-3 | Two application frames delivered with no yield between them, as `run_read_pump` delivers the frames of one read; a terminal close started in the first `fromApp`; `MemoryStore`. The second `fromApp` runs before `onLogout`. | NC-12's setup with the start posted. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.10 (P-3)"; cells in `p0b_measurements.patch`): on a `MemoryStore` the second `fromApp` runs before `onLogout`. The same setup on a `FileStore`, which this row did not predict: the second `fromApp` does not run. The arm suspends in its persist, the close runs there, and the second frame's `on_inbound_frame` returns ok on the closed session. So the bullet and its B&L sentence hold on a volatile store only, and both are scoped to that. | If the second `fromApp` does not run, the "close can be late" bullet of §2.1a and its B&L sentence are deleted, and NC-12 asserts the measured order. |
 | P-4 | asio's sequence at a post. A coroutine awaits `asio::post(ex, asio::deferred)`; a terminal cancellation is emitted on its slot while it waits. The exception surfaces at the coroutine's next await, not at the post. In a second arm the coroutine resets its cancellation state to `asio::disable_cancellation{}` before the post, as `close()` does; a terminal cancellation emitted while it waits surfaces at no later await. In a third arm the reset follows the post; no exception surfaces there either (the placement §3 lists as not witnessed). | A standalone probe beside p1 in the parent repo's `research/probes/b41_563_564/`, built against the pinned asio. **Measured 2026-10-11: agrees.** The probe is `p4_post_cancellation.cpp`, built by `build_p4.sh`; its output is `p4_post_cancellation.output.txt`. First arm (the probe's arms A, whose second await is a post, a timer wait or a nested awaitable): no exception at the post, the record reads `terminal` after it, and the second await throws `operation_aborted`. Second arm (the probe's arm S1): nothing is recorded and no await throws. Third arm (the probe's arms B, a reset to the default filter and a reset to total): the reset clears the record and no await throws. The positive control (a cancellation recorded before the first post throws at that post) and the null control (no emission: nothing recorded, nothing thrown) pass. The probe's other arms (C, D, E, S2, S3, S4) measured §2.1's statements about the filter, about `throw_if_cancelled`, about a chain that awaits a spawned chain, and about a recorded cancellation that a later emission erases; each agrees. | §2.1's "Cancellation at the hop" and §2.1a's "Cancellation and the wait" are wrong. The note returns to Gate A before either wait is implemented. |
-| P-5 | The lifecycle dispositions of §2.1a: a close started in `onLogon`, in `onLogout` and in `onCreate`. | NC-11's setups with the start posted. **Measured 2026-10-11: agrees in every arm, and every arm ends closed** (`p0b_runs.output.txt`, heading "T0.11 (P-5)"; cells in `p0b_measurements.patch`). The routes that were run: `onLogon`, in both roles, both close modes and both store kinds; `onLogout` fired by a graceful close, with a terminal close started in it; `onLogout` fired by a `Disconnected` write of `Session::send`, whose `toApp` returned `dispatch_aborted`, with a close of each mode started in it; `onCreate`, in both close modes. The route NC-11 names for the `Disconnected` write outside `close()`, a frame with another BeginString, is not the one that was run; it is measured when the cell is written. On a raw initiator the Logon is transmitted before `onCreate` runs, so a close started there ends the session after a Logon with no Logout. | §2.1a's bullet for that callback and NC-11's assertions are rewritten to what was measured. A disposition that leaves a session open after a close was asked for is reported to the owner. |
+| P-5 | The lifecycle dispositions of §2.1a: a close started in `onLogon`, in `onLogout` and in `onCreate`. | NC-11's setups with the start posted. **Measured 2026-10-11: agrees in every arm, and every arm ends closed** (`p0b_runs.output.txt`, heading "T0.11 (P-5)"; cells in `p0b_measurements.patch`). The routes that were run: `onLogon`, in both roles, both close modes and both store kinds; `onLogout` fired by a graceful close, with a terminal close started in it; `onLogout` fired by a `Disconnected` write of `Session::send`, whose `toApp` returned `dispatch_aborted`, with a close of each mode started in it; `onCreate`, in both close modes. The route NC-11 names for the `Disconnected` write outside `close()`, a frame with another BeginString, is not the one that was run then; it was measured when the cell was written (the record, "Phase 4, first part", the last row of its table). On a raw initiator the Logon is transmitted before `onCreate` runs, so a close started there ends the session after a Logon with no Logout. | §2.1a's bullet for that callback and NC-11's assertions are rewritten to what was measured. A disposition that leaves a session open after a close was asked for is reported to the owner. |
 | P-6 | `B35SendSlot.Nested_ASendInsideToAppLeavesTheOuterFrameIntact` after R-1: the second send is deferred, starts while the outer send is suspended in its `MemoryStore` call, and takes `send_fallback_leaf_`. | That cell with its nested `co_spawn` wrapped in `asio::post`. **Measured 2026-10-11: agrees** (`p0b_runs.output.txt`, heading "T0.12 (P-6)"; cell in `p0b_measurements.patch`): the second send is deferred, starts while the outer send is suspended in its store call, and takes the fallback leaf's buffer. | NC-17's assertions follow the measurement; the cell's subject (the outer frame's bytes are what `toApp` saw) does not depend on which buffer the second send takes. |
 | P-7 | NC-9's arm (d) under TSan. With the atomic token: the second thread's entry dies at the token's assertion and no ThreadSanitizer report is printed. With the token built as a plain member: ThreadSanitizer prints a data-race report on the token before the assertion fires. The second half rests on ThreadSanitizer's happens-before model as known, not on a run: a relaxed atomic load and store create no ordering between the two threads, where a mutex, a condition variable or a non-relaxed atomic would. | Arm (d) on `linux-clang-tsan`, once on the mechanism and once on a scratch copy with the token made plain. **Measured 2026-10-11: agrees, in both halves** (`p2a_runs.output.txt`, headings "T2.2 (P-7), first half" and "T2.2 (P-7), second half"; mechanism and cells in `p2a_scratch_mechanism.patch`, the plain token in `p2a_plain_token_mutant.patch`). It was made on a scratch build of §2.2's guard. With the atomic token the second thread's entry dies at the token's assertion and no ThreadSanitizer report is printed. With the token built as a plain member ThreadSanitizer prints a data-race report whose frames are the token's compare-and-swap. Each half was run with no `TSAN_OPTIONS` and with the `ctest` environment. On the plain token under `halt_on_error=1` the report ends the process before the assertion, so arm (d) fails there by both clauses of its matcher; with no options it fails by the second clause. | If the plain token draws no report, arm (d) cannot see the difference: it is deleted, its mutant row moves to the list of mutants with no witness, and the token's atomicity is recorded in the verification record as a property carried by reading the diff. If the atomic token draws a report, the two threads share more than the token, or a foreign thread touches a plain member before it asserts; that is a defect in §2.2's design and is fixed there. |
 | P-8 | NC-8. Arm 1: a terminal close on the cell fixture, with no send in flight and `reset_on_disconnect` off, completes without suspending, so it has reached `closed_drained` before the waiting close resumes. Read through the places it could suspend: the default `close_async` returns `close()`'s result; both drains post only while the mutex has a holder, a waiter or a resumption in flight; the liveness wait posts only while the loop is alive, and with a zero heartbeat interval it is not. Arm 2: a graceful close that finds another graceful close in flight joins it, and the scripted flush hook has run once when both complete. | The two arms on a scratch build of the wait. **Measured 2026-10-12: agrees, in both arms** (`ph4a_runs.output.txt`, heading "T4.1 (P-8)"; cells in `ph4a_measurement.patch`). Arm 1: the lifecycle reads `closed_drained` at the return of the `co_spawn` that starts the other close, and at the waiting close's resumption; the callback's close returns `session_already_closed`; `onLogout` runs once. The observable is the lifecycle at that return, and not whether the other close's completion handler has run by the resumption: `co_spawn` posts the completion handler whatever the close did, so its position reads asio and not the close. The cell's first clause read the handler, which had not run, and printed a disagreement; the clause was changed to read the lifecycle, with the mechanism and the prediction unchanged, and the first run's lines are kept in the evidence file under the same heading. Arm 2: the lifecycle reads `closing` at the resumption; both closes return ok; the flush hook ran once; one Logout is transmitted. | Arm 1: if the first close does suspend, the waiting close joins it; the arm's assertion is rewritten to arm 2's oracle, and the mutant row names arm 2 alone. Arm 2: the assertion follows the measurement; if a second run of the body cannot be told from a join there either, the mutant has no witness and is listed as such. |
@@ -1198,7 +1218,7 @@ named `…Nested` that must report "deferred" is renamed.
 | NC-8 | a close that waits while another close runs first. Before it runs the `io_context`, the cell queues the delivery of the frame and, behind it, a handler that starts the other close. That handler is then ahead of the post that the callback's close makes. **Arm 1:** the other close is terminal, on the synchronous sink, with no send in flight and `reset_on_disconnect` off, so that it cannot suspend (P-8); the callback's close is terminal. **Arm 2:** both closes are graceful, and the cell installs a counting hook with `set_close_flush_hook`. It ends the first close's wait for the peer's Logout by advancing the mock clock past `logout_disconnect_timeout_ms`, which ends `run_logout_phase1`'s sleep on the session's clock | Arm 1: the callback's close returns exactly `session_already_closed`; `onLogout` runs once; the lifecycle ends `closed_drained`. Arm 2: the callback's close joins the first: both return the same result, the Logout is transmitted once, and the hook has run once |
 | NC-9 | the guard, through test access to the scope object, so that the guard's state is the only session state the cell's threads share. Builds with assertions only. (a) A first thread enters one session's scope and stays inside; a second thread enters after the first has told it so through an ordinary handshake (a promise or a condition variable). (b) One thread enters, enters a nested scope and leaves it; a second thread then enters while the outer scope is live. (c) One thread enters a nested scope, leaves both, and enters again. (d) On `linux-clang-tsan`: as (a), but the only ordering between the two threads is a `std::atomic<bool>` that the first stores and the second reads with `memory_order_relaxed`. The first thread stays inside the scope until the process dies. The main thread starts both and then joins them, so the death statement does not return first; a join orders nothing between the two threads | (a) and (b): death at the token's assertion. (c): no assertion; a control. (d): the death's output is matched by a gmock matcher that requires the token assertion's text and the absence of the string `ThreadSanitizer` (`AllOf(HasSubstr(…), Not(HasSubstr("ThreadSanitizer")))`); P-7. **What (a) proves and does not prove:** it proves that a second thread's entry while a first is inside is detected. It does not prove that the detection is free of a data race: the handshake orders the first thread's write before the second thread's read, for ThreadSanitizer as for the hardware, so a token built as a plain member passes (a) on every preset. Arm (d) is the only witness of the token's atomicity |
 | NC-10 | the OD-3 check. The cell sets the session's engine-stop flag on the session's strand through `session_engine_access::note_engine_stop`, and then calls `Engine::send` for that session. This is a construction: the order it stands for (a send between its admission re-check and its spawn while `stop()` runs its first step) cannot be produced on demand, because no test hook sits between those two statements. The real interleaving is not driven. The cell calls C++ `Engine::send`, and no C-ABI twin is added: with OD-6 withdrawn the check changes nothing a C-ABI consumer can observe (§2.4), so there is no C-ABI effect to witness | the send returns `session_invalid_state_for_send` and nothing is transmitted |
-| NC-11 | a close started in each lifecycle callback. `onLogon`: both roles, both close modes, a persistent and a volatile store; the arm on a persistent store sets a non-zero heartbeat interval through the fixture's knob and feeds the peer's Logon on the session's own executor ("Fixture additions the cells need"), and it has a positive-control arm, the same setup with no close started in `onLogon`. `onLogout`: fired by a graceful close, with a terminal close started in it; and fired by a `Disconnected` write outside `close()`, with a close started in it. **Route of that write:** with the validate gate off, the test body delivers to the Active session a frame whose BeginString is not the session's. The Active arm writes `Disconnected` at its BeginString test, with no `close()` and no emit; it is the frame NC-19's lifecycle arm feeds from `toApp`. `onCreate`: both close modes | inside the callback after the start: the state and lifecycle the callback entered with. Then, per callback, the disposition of §2.1a (P-5): for `onLogon` on a persistent store, no liveness loop is started and `on_inbound_frame` returns ok. The observable for "no liveness loop" is the mock clock's count of parked sleeps (`inflight_count()`), read as `expect_close_from_on_logon_starts_no_liveness` in `tests/session/test_session_plaintext_roundtrip.cpp` reads it: with a non-zero heartbeat interval a started loop parks a sleep while the session is Active, and the arm asserts that none is parked. A loop started on a session that has already left Active ends at its first test of the state and parks nothing, so the reading tells "not started" from "started" only where the session is still Active when the Logon arm resumes; elsewhere the assertion is kept and claims no more than that no sleep is parked. That reading is a zero, so it counts only beside its positive control: in the same setup with no close started, the count of parked sleeps is non-zero while the session is Active. The control is run with the arm, and the arm's zero is not reported without it (added by the orchestrator, 2026-10-11; not reviewed). For `onLogout` inside a graceful close, the terminal close joins it and the grace wait ends; for `onLogout` after a `Disconnected` write outside `close()`, the close started there is the session's first: it joins no other close and does not return `session_already_closed`; for `onCreate`, `open()` returns ok and the session is closed at the end with no `onLogout` |
+| NC-11 | a close started in each lifecycle callback. `onLogon`: both roles, both close modes, a persistent and a volatile store; the arm on a persistent store sets a non-zero heartbeat interval through the fixture's knob and feeds the peer's Logon on the session's own executor ("Fixture additions the cells need"), and it has a positive-control arm, the same setup with no close started in `onLogon`. `onLogout`: fired by a graceful close, with a terminal close started in it; and fired by a `Disconnected` write outside `close()`, with a close started in it. **Route of that write:** with the validate gate off, the test body delivers to the Active session a frame whose BeginString is not the session's. The Active arm writes `Disconnected` at its BeginString test, with no `close()` and no emit; it is the frame NC-19's lifecycle arm feeds from `toApp`. `onCreate`: both close modes | inside the callback after the start: the state and lifecycle the callback entered with. Then, per callback, the disposition of §2.1a (P-5): for `onLogon` on a persistent store, no liveness loop is started and `on_inbound_frame` returns ok. The observable for "no liveness loop" is a count of `sleep_until` calls in flight, kept by a clock wrapper of the cells' fixture over `fixpp::core::mock_clock` (which has no such count; `inflight_count()` is a member of `system_clock_source`), read as `expect_close_from_on_logon_starts_no_liveness` in `tests/session/test_session_plaintext_roundtrip.cpp` reads its clock's: with a non-zero heartbeat interval a started loop parks a sleep while the session is Active, and the arm asserts that none is parked. A loop started on a session that has already left Active ends at its first test of the state and parks nothing, so the reading tells "not started" from "started" only where the session is still Active when the Logon arm resumes; elsewhere the assertion is kept and claims no more than that no sleep is parked. That reading is a zero, so it counts only beside its positive control: in the same setup with no close started, the count of parked sleeps is non-zero while the session is Active. The control is run with the arm, and the arm's zero is not reported without it (added by the orchestrator, 2026-10-11; not reviewed). For `onLogout` inside a graceful close, the terminal close joins it and the grace wait ends; for `onLogout` after a `Disconnected` write outside `close()`, the close started there is the session's first: it joins no other close and does not return `session_already_closed`; for `onCreate`, `open()` returns ok and the session is closed at the end with no `onLogout` |
 | NC-12 | two application frames delivered by one coroutine with no yield between them, a terminal close started in the first `fromApp`. First arm: `MemoryStore`. Second arm: `FileStore` | First arm: the order of P-3, the second `fromApp` before `onLogout`. This arm pins a disclosed limitation, not a wanted behaviour. Second arm, as P-3's measurement found it on a persistent store: the second `fromApp` does not run, and the second frame's `on_inbound_frame` returns ok on the closed session. This arm pins where the limitation stops |
 | NC-13 | Engine level: two Engines over loopback TCP with a non-zero heartbeat interval. A terminal and a graceful close started in `fromApp`, and in `toApp` of an `Engine::send`. The arm for a terminal close started in `fromApp` also runs on `linux-clang-asan`; it is R-3's measurement | inside the callback after the start: Active, lifecycle open. The session's role loop ends and the Engine stops cleanly afterwards. Graceful from `toApp`: the peer receives the outer frame and then the Logout. Terminal from `toApp`: the peer does not receive the outer frame (P-1). This is the cell in which an owner (the role loop, then `stop()`) frees the Session after the close |
 | NC-14 | R-6. A test-double store that holds its first `store()` call and completes the second one first. Two overlapping sends; then the same with the second send started in the first one's `toApp` | the second frame is transmitted before the first, in both shapes. This cell shows the consequence of a store that breaks the requirement, as the B&L row states it; it is not a wanted behaviour |
@@ -1653,6 +1673,12 @@ and quickstart, which repeat the same statements; the flag is on the bundle and 
 
 `L-023-2` is not a new row: the table above has what goes, what is added and what remains.
 
+The rows as they were written: `B-563-1` (R-1), `B-563-2` (R-4), `B-563-3` (R-2), `B-563-4` (R-6),
+`B-564-1` (the guard), `L-563-1` (the limitation of R-4's rule), `L-563-3` (a nested send that
+disconnects) and `L-563-4` (R-5). Two rows are not in the list above: `L-563-2`, the send started
+while the session answers the peer's Logout, which the first bullet placed inside the R-1 row; and
+`L-563-5`, an allocation failure while a send starts (§7).
+
 **Issues.** The PR closes fixpp#563 and fixpp#564. Their acceptance item 3 (measure `Engine::send`, then
 make the `engine.hpp` sentence match) is met by the record and this section. fixpp#579 is the follow-up
 for `Engine::stop()` and stays open after this PR; the PR body and the commit messages name it only as a
@@ -1679,6 +1705,10 @@ follow-up.
   the comments on `fixpp_session_send` in `include/fix/c_api/session.h` and on `fixpp_engine_destroy` in
   `include/fix/c_api/engine.h`). No version bump, and no BREAKING clause. P-11 measured the reading on
   the base tree, and it agrees (§3).
+- One change of behaviour that no ruling names, found during implementation: a terminal close started
+  in the `toAdmin` of a graceful close's Logout, or in that close's `onLogout`, escalates the graceful
+  close at once, where before it could leave both closes to end at `logout_disconnect_timeout_ms`
+  (§2.1a, the `onLogout` bullet; B&L `B-563-2`). No call that succeeded before fails.
 
 ## 5. Rejected alternatives
 
@@ -1844,12 +1874,22 @@ which gated the rest of the implementation, is measured and agrees (§3).
 - A send started while the session answers a logout the peer began. The Active arm emits the confirming
   Logout, then calls `fromAdmin` on the peer's Logout, then persists, and writes `Disconnected` only
   after that; no `close()` has begun, so step 5 does not see it. A send started in the confirming
-  Logout's `toAdmin` is deferred and then admitted, and a send started in that `fromAdmin` nests; by
-  reading, each is numbered after our Logout and, where it is transmitted, transmitted after it, every
-  time. Before this PR, on an `NDEBUG` build, the first took the Logout's own number (fixpp#563) and the
-  second behaved as it does now. Refusing both is a change to
-  `Session::send`'s admission test, which this PR does not make. NC-5 (f) pins the first as measured
-  (P-9), and the R-1 B&L row discloses both.
+  Logout's `toAdmin` is deferred. Measured (P-9 (f), and NC-5 (f)'s arms; the record, "Phase 4, first
+  part" and "Phase 4, third part"): on a `MemoryStore` and on a `FileStore` it is then admitted,
+  numbered after our Logout, retained, transmitted after it, and returns ok; the two differ in where
+  the frame goes out relative to `onLogout` (after it, with the session `Disconnected`, on a
+  `MemoryStore`; before it, with the session still Active, on a `FileStore`). With no store it is
+  refused with `session_invalid_state_for_send`: the session is `Disconnected` before the send starts,
+  and nothing holds the message. A send started in that `fromAdmin` nests; by reading, it is numbered
+  after our Logout and, where it is transmitted, transmitted after it, every time. Before this PR, on
+  an `NDEBUG` build, the first took the Logout's own number (fixpp#563) and the second behaved as it
+  does now. Refusing both is a change to `Session::send`'s admission test, which this PR does not
+  make. The owner ruled a refusal of the first on 2026-10-12; the orchestrator did not implement it,
+  under the owner's rule to keep QuickFIX's observable behaviour, because for a send started just
+  after the callback, which is what a deferred send is, QuickFIX C++ and QuickFIX/J accept it and
+  transmit it after the Logout, QuickFIX/Go stores it and drops it unsent, and none refuses (read, not
+  run: `research/G19-fix-fpml-iso20022/research/probes/b41_563_564/ph5_quickfix_send_during_peer_logout.md` in the parent repo, first section). It stays a disclosed limitation: B&L `L-563-2`. NC-5 (f) pins the
+  first as measured, per store kind.
 - What a TLS transport does with a write that begins while its `close_async` is suspended. Not decided by
   reading. Under R-4 that order is the regular one for a terminal close started in `toApp` on a TLS
   session; the cells run over plain transports. By reading, `ApplicationEngineSend.SendDrainRaceNoUAF`
@@ -1871,6 +1911,14 @@ which gated the rest of the implementation, is measured and agrees (§3).
   `L-007-2`).
 - Whether `register_session` should republish the snapshot; two comments in `engine.cpp` and `engine.hpp`
   disagree with the code about it. Noted, not changed.
+- One ending for an allocation failure while a send starts. On the deferred path a `std::bad_alloc`
+  from its frame, from the payload copy or from the post leaves `Session::send` as an exception, with
+  the session's state untouched; inside the send's body the same failure is `dispatch_aborted` with
+  the session `Disconnected`; `Engine::send`'s own copies throw too. The owner ruled one ending
+  (2026-10-12). It is not made here: the deferred path's failure points come before the hop, with
+  `toApp` or `toAdmin` on the stack, and writing `Disconnected` there would run `onLogout` inside the
+  outbound callback, which is the state this PR removes. Read, not measured. B&L `L-563-5`;
+  fixpp#587.
 
 ## Gate A
 
@@ -1882,6 +1930,7 @@ which gated the rest of the implementation, is measured and agrees (§3).
 - v0.7 (2026-10-11) applies the findings of the `/analyze` pass over v0.6 (report: research/reviews/analyze_563_564_callback-send.md, parent repo) and records the P-4 and P-11 measurements; these edits were not reviewed.
 - v0.7 also records, with no change of version, the measurements made on 2026-10-11 before any production edit: P-1 for a close started in `toApp`, P-1a, P-1b, P-1c, P-2, P-3, P-5 and P-6, and an early reading of P-10 (§3 has each with its evidence, research/probes/b41_563_564/p0b_runs.output.txt and p0b_measurements.patch, parent repo). None disagreed. It also records decisions of the orchestrator: at the stack-arena overload and at the `onLogon` and `onLogout` sites the depth assertion is evaluated after the site's scope and before its callback (§2.2), which replaces what the F1 line below says was left, and is listed in §3 as specified without a witness; and NC-11 has a positive-control arm (§3). The passages these changed are in the header, §2.1 ("Writer"), §2.1a, §2.2, §2.5, §3 and §4. None of this was reviewed.
 - On 2026-10-12 v0.7 also records, again with no change of version, the measurements made during implementation: P-7, P-10 on the mechanism, P-1 for a close started in `toAdmin`, P-8 and P-9 (§3 has each with its evidence, research/probes/b41_563_564/p2a_runs.output.txt, p3a_runs.output.txt and ph4a_runs.output.txt, parent repo); none disagreed, and none of this was reviewed.
+- On 2026-10-13, after sign-off and again with no change of version, statements that the implementation made stale were corrected in place as statuses (the header, P-5's row, NC-11's row, and two sentences of §3), and behaviours measured during implementation were recorded where their subject is: the branch with no store and the escalation the wait restores (§2.1a), the send started in the confirming Logout's `toAdmin`, per store kind, and the allocation failure (§7), with one bullet in §4 ("Compatibility") and the ids of the B&L rows (§4). No design text changed. None of this was reviewed.
 
 ### Round 1 — disagreements
 
