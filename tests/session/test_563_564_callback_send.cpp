@@ -11,10 +11,9 @@
 //
 // #563: send_impl peeks the outbound MsgSeqNum before toApp, stamps the frame
 // with the peeked value, and advances the counter after toApp. A send that ran
-// its own body inside toApp would peek the same value. The contract
-// (`.specify/563-564-callback-send.md` §2.1): a send started inside toApp or
-// toAdmin starts after that callback has returned; a send started inside any
-// other callback runs nested.
+// its own body inside toApp would peek the same value. What a send started
+// inside each callback does is the table "What an application observes" of
+// `.specify/563-564-callback-send.md` §2.1.
 //
 // #564: the session's debug guard, on a build without NDEBUG. Which nesting of
 // one callback inside another it aborts is the table "Every nesting on one
@@ -267,10 +266,10 @@
 // reported as PATH NOT DRIVEN, because a pass of the sequence-number
 // assertions would then say nothing about the send.
 //
-// Store: a volatile bounded MemoryStore, except in the cells named _FileStore.
+// Store: a volatile bounded MemoryStore, except in the cells named _FileStore,
+// _NoStore or StoreCompletingOutOfOrder_.
 // The interleaving of the two sends depends on where a send first suspends,
 // and that is inside the store (MemoryStore::store starts with a post). A
-// session with no store has no such suspension and is not covered. A
 // persistent store turns a refused store() into a session-fatal error.
 // A store is also what assertion (c) reads.
 //
