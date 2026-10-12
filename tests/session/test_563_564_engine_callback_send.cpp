@@ -1930,8 +1930,8 @@ TEST(EngineCallbackSend, EngineSendFromFromAppOnSessionExecutor) {
 }
 
 // fromApp starts a terminal close of its own session. On a build with a memory checker
-// this arm is the measurement of a session closed inside one of its own callbacks and then
-// freed by its owners.
+// this arm is R-3's measurement: `.specify/563-564-callback-send.md` §2.5, and the row of
+// NC-13 in §3, "New cells".
 TEST(EngineCallbackSend, TwoEngines_FromAppStartsClose_Terminal) {
     run_and_check_two_engines(CloseStartedIn::from_app, close_mode::terminal);
 }
