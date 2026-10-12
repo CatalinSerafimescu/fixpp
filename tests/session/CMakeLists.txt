@@ -637,6 +637,8 @@ target_link_libraries(session_563_564_engine_callback_send PRIVATE
 target_compile_definitions(session_563_564_engine_callback_send PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
+target_include_directories(session_563_564_engine_callback_send PRIVATE
+  "${CMAKE_SOURCE_DIR}/src")  # session/session_engine_access.hpp: the engine-stop flag's setter
 
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the

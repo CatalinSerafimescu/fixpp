@@ -42,14 +42,36 @@
 //                             run by three threads, repeated: the initiator
 //                             sends one message at a time and waits for its
 //                             reply; every acceptor fromApp starts
-//                             engine.send(REPLY-k) directly. Prints how many
-//                             replies were nested, deferred, never ran.
+//                             engine.send(REPLY-k) directly. Requires every
+//                             reply nested, and prints how many replies were
+//                             nested, deferred, never ran.
 //   MtEngineSendFromFromApp_BusyControlStrand
 //                             the same while two foreign threads keep calling
 //                             Engine::send for a SessionId that is not
 //                             registered. Such a call runs on the engine's
 //                             control strand up to its registry lookup and
 //                             touches no session.
+//   EngineSendFromOnLogon_Initiator, EngineSendFromOnLogon_Acceptor
+//                             onLogon of the session in that role starts
+//                             engine.send on that session. Requires: the
+//                             session is published and Active inside onLogon,
+//                             the send's toApp runs inside onLogon, and the
+//                             send succeeds
+//                             (`.specify/563-564-callback-send.md` §6, OD-4).
+//   StopNotedOnTheSessionRefusesEngineSend
+//                             the session's engine-stop flag is set on its
+//                             strand, as Engine::stop()'s first step sets it,
+//                             and then engine.send is called for that session:
+//                             the send is refused and nothing is stamped or
+//                             retained (the same note, §6, OD-3).
+//   StopNotNotedOnTheSessionAdmitsEngineSend
+//                             its positive control: the same setup without the
+//                             flag.
+//   MissPathSendsQueuedWhileStopRuns
+//                             Engine::send calls for an unregistered id and for
+//                             a registered acceptor nobody connects to, spawned
+//                             from the test thread around the start of stop(),
+//                             on three io threads; then the Engine is destroyed.
 //   TwoEngines_FromAppStartsClose_Terminal, TwoEngines_FromAppStartsClose_Graceful,
 //   TwoEngines_ToAppStartsClose_Terminal, TwoEngines_ToAppStartsClose_Graceful
 //                             two Engines, an acceptor's and an initiator's,
@@ -108,17 +130,18 @@
 // which the session's strand is meant to exclude. Per-reply records are written on one
 // session's strand each and read after the io threads are joined; what another
 // thread reads while they run is atomic or under a mutex. These cells assert
-// what must hold in every interleaving (each reply sent once, consecutive
-// MsgSeqNums on each side, both sessions Active) and print the rest. A build
-// with asserts also writes one stderr line per reply, so an abort shows how far
-// the cell got. No sanitizer build is part of these cells' procedure.
+// that every reply is nested and what must hold in every interleaving (each
+// reply sent once, consecutive MsgSeqNums on each side, both sessions Active),
+// and print the rest: the tally, and per session whether two consecutive
+// callbacks ran on different io threads. A build with asserts also writes one
+// stderr line per reply, so an abort shows how far the cell got.
 //
 // Fixture: tests/session/test_application_engine_send.cpp's, one Engine holding
 // an acceptor and an initiator over loopback mTLS on one io_context run by the
-// test thread, plus a bounded MemoryStore on each session. A multi-threaded
-// io_context is not covered. No fatal assertion sits between Engine::start()
-// and a completed stop(): a cell collects into `Readings`, stops the engine,
-// and asserts afterwards.
+// test thread, plus a bounded MemoryStore on each session. The Mt cells run
+// that io_context on three threads. No fatal assertion sits between
+// Engine::start() and a completed stop(): a cell collects into `Readings`,
+// stops the engine, and asserts afterwards.
 //
 // The TwoEngines_ cells have a fixture of their own, run_two_engines_cell: one
 // Engine per session, each with its own Application and mock clock, on one
@@ -185,6 +208,7 @@
 #include <utility>
 #include <vector>
 
+#include "session/session_engine_access.hpp"
 #include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
@@ -427,6 +451,7 @@ public:
     std::function<void(const View&, const SessionId&)> on_from_app;
     std::function<void(const View&, const SessionId&)> on_to_app;
     std::function<void(const char*, const View&, const SessionId&)> on_admin;
+    std::function<void(const SessionId&)> on_logon;
 
     expected_t<void> fromApp(const View& mv, const SessionId& id) override {
         if (on_from_app) on_from_app(mv, id);
@@ -442,6 +467,9 @@ public:
     }
     void toAdmin(const View& mv, const SessionId& id) override {
         if (on_admin) on_admin("toAdmin", mv, id);
+    }
+    void onLogon(const SessionId& id) override {
+        if (on_logon) on_logon(id);
     }
 };
 
@@ -1453,6 +1481,10 @@ struct MtReadings {
     std::vector<std::uint32_t> a_to_app_calls;
     std::vector<seqnum_t> a_seq;
     std::vector<MtDelivery> ini_deliveries;
+    // The io thread of each callback of a session, in that session's order. Each list
+    // is written on its session's strand and read after the io threads are joined.
+    std::vector<std::thread::id> acc_callback_threads;
+    std::vector<std::thread::id> ini_callback_threads;
 
     // Per reply, written by the acceptor's fromApp and read by its toApp.
     std::unique_ptr<std::atomic<MtPhase>[]> phase;
@@ -1483,8 +1515,23 @@ struct MtReadings {
         for (std::size_t k = 0; k < n; ++k) phase[k].store(MtPhase::not_started);
         acc_deliveries.reserve(n);
         ini_deliveries.reserve(n);
+        acc_callback_threads.reserve(4 * n);
+        ini_callback_threads.reserve(4 * n);
     }
 };
+
+// How one session's callbacks were spread over the io threads.
+std::string thread_use(const std::vector<std::thread::id>& ids) {
+    std::vector<std::thread::id> seen;
+    std::size_t hand_offs = 0;
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        if (std::ranges::find(seen, ids[i]) == seen.end()) seen.push_back(ids[i]);
+        if (i > 0 && ids[i] != ids[i - 1]) ++hand_offs;
+    }
+    return "callbacks=" + std::to_string(ids.size()) +
+           " io threads=" + std::to_string(seen.size()) +
+           " consecutive callbacks on different threads=" + std::to_string(hand_offs);
+}
 
 struct MtTally {
     std::size_t nested = 0;
@@ -1641,8 +1688,13 @@ void run_mt_cell(bool busy, MtReadings& o) {
     };
 
     // Installed before the io threads start and never reassigned while they run.
+    const auto note_thread = [&](const SessionId& id) {
+        (id == acc_id ? o.acc_callback_threads : o.ini_callback_threads)
+            .push_back(std::this_thread::get_id());
+    };
     app->on_from_app = [&](const View& mv, const SessionId& id) {
         if (!recording.load()) return;
+        note_thread(id);
         const std::string id11 = value(mv, 11);
         const seqnum_t seq = to_seq(value(mv, 34));
         if (id == acc_id) {
@@ -1676,6 +1728,7 @@ void run_mt_cell(bool busy, MtReadings& o) {
     };
     app->on_to_app = [&](const View& mv, const SessionId& id) {
         if (!recording.load()) return;
+        note_thread(id);
         const std::string id11 = value(mv, 11);
         const seqnum_t seq = to_seq(value(mv, 34));
         if (id == acc_id) {
@@ -1706,6 +1759,7 @@ void run_mt_cell(bool busy, MtReadings& o) {
     };
     app->on_admin = [&](const char* callback, const View& mv, const SessionId& id) {
         if (!recording.load()) return;
+        note_thread(id);
         std::string line = std::string(id == ini_id ? "INI " : "ACC ") + callback +
                            " 35=" + value(mv, 35) + " 34=" + value(mv, 34);
         const std::string text = value(mv, 58);
@@ -1847,7 +1901,14 @@ void run_and_check_mt(bool busy) {
     ::testing::Test::RecordProperty("overlapped", static_cast<int>(t.overlapped));
     ::testing::Test::RecordProperty("never_ran", static_cast<int>(t.never_ran));
     std::printf("[ MEASURED ] %s\n", ctx.c_str());
+    // Printed and not asserted: which thread runs a strand's next handler is the
+    // scheduler's choice.
+    std::printf("[ THREADS ] ACC %s; INI %s.\n", thread_use(o.acc_callback_threads).c_str(),
+                thread_use(o.ini_callback_threads).c_str());
     std::fflush(stdout);
+
+    EXPECT_EQ(t.deferred, 0U) << "no reply may be deferred. " << ctx;
+    EXPECT_EQ(t.nested, o.requested) << "every reply must be nested. " << ctx;
 
     EXPECT_TRUE(o.stopped) << "the engine must stop. " << ctx;
     if (busy) {
@@ -1897,6 +1958,521 @@ void run_and_check_mt(bool busy) {
     const std::string active = std::to_string(static_cast<int>(fsm_state::Active));
     EXPECT_EQ(o.ini_state_end, active) << "INI must stay Active. " << ctx;
     EXPECT_EQ(o.acc_state_end, active) << "ACC must stay Active. " << ctx;
+}
+
+// ── Engine::send through the published snapshot ──────────────────────────────
+//
+// `.specify/563-564-callback-send.md` §3, "New cells": NC-1, NC-10, NC-18; §2.3 and
+// §2.4 for the path they are on.
+
+constexpr std::string_view kIdLogon = "B41-LOGON";
+constexpr std::string_view kPayloadLogon =
+    "35=D\x01"
+    "11=B41-LOGON\x01"
+    "54=1\x01"
+    "55=AAA\x01";
+
+// One Engine holding an acceptor and an initiator over plain loopback TCP, on one
+// io_context that the test thread runs, with a mock clock that nothing advances. A
+// cell installs its hooks on `app` before start() and calls stop() before it asserts.
+struct PlainPair {
+    asio::io_context ioc;
+    std::shared_ptr<RecordingApp> app = std::make_shared<RecordingApp>();
+    Engine engine;
+    SessionId acc_id;
+    SessionId ini_id;
+    bool registered = false;
+    bool started = false;
+    bool stopped = false;
+
+    PlainPair() : engine{ioc.get_executor(), engine_cfg()} {
+        const uint16_t port = reserve_free_port(ioc);
+        auto acc_cfg =
+            make_plain_session_cfg(ioc, "ACCEPTOR", "INITIATOR", session_role::acceptor, port);
+        auto ini_cfg =
+            make_plain_session_cfg(ioc, "INITIATOR", "ACCEPTOR", session_role::initiator, port);
+        acc_id = SessionId::from_config(acc_cfg);
+        ini_id = SessionId::from_config(ini_cfg);
+        registered = engine.register_session(std::move(acc_cfg)).has_value() &&
+                     engine.register_session(std::move(ini_cfg)).has_value();
+    }
+
+    fixpp::core::EngineConfig engine_cfg() {
+        fixpp::core::EngineConfig c;
+        c.executor = ioc.get_executor();
+        c.application = app;
+        c.clock = make_mock_clock(ioc);
+        return c;
+    }
+
+    bool start() {
+        started = registered && engine.start().has_value();
+        return started;
+    }
+
+    bool active(const SessionId& id) const {
+        const auto handle = engine.lookup(id);
+        return handle && handle->state() == fsm_state::Active;
+    }
+
+    void stop() {
+        if (!started) return;
+        auto sf = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(ioc, sf, 3s,
+                                                        "EngineCallbackSend/plain_pair_stop")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *engine.clock(),
+                                                            "EngineCallbackSend/plain_pair_stop");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "EngineCallbackSend/plain_pair_stop";
+            return;
+        }
+        sf.get();
+        stopped = engine.stopped();
+    }
+};
+
+// The completion handler of a send whose outcome a cell reads.
+auto completes_into(SendOutcome& out) {
+    return [&out](std::exception_ptr ep, expected_t<void> r) {
+        out.done = true;
+        out.threw = static_cast<bool>(ep);
+        if (!ep && !r) out.err = r.error();
+    };
+}
+
+std::string list_of_deliveries(const std::vector<std::string>& v) {
+    std::string out;
+    for (const auto& e : v) out += " [" + e + "]";
+    return out.empty() ? " (none)" : out;
+}
+
+// ── NC-1: Engine::send from onLogon, per role ────────────────────────────────
+
+struct OnLogonReadings {
+    bool setup_ok = false;
+    bool stopped = false;
+    // onLogon of the session under test reached its co_spawn of engine.send.
+    bool started = false;
+    // That session as Engine::lookup returns it inside onLogon.
+    std::string inside = "not recorded";
+    int to_app_calls = 0;
+    bool to_app_inside_on_logon = false;
+    std::string to_app_seq = "not stamped";
+    SendOutcome send;
+    // What the peer session's fromApp was handed: "<ClOrdID> 34=<MsgSeqNum>".
+    std::vector<std::string> peer_deliveries;
+    std::string missing;  // empty, or what the cell's bound expired waiting for
+};
+
+// onLogon of the session in `role` starts engine.send on that session, with no post.
+// Non-fatal only: the engine is stopped before this returns.
+OnLogonReadings run_on_logon_cell(session_role role) {
+    OnLogonReadings o;
+    PlainPair p;
+    const SessionId& me = role == session_role::initiator ? p.ini_id : p.acc_id;
+    // The payload outlives the send.
+    const auto payload = bytes_of(kPayloadLogon);
+    bool in_on_logon = false;
+    p.app->on_logon = [&](const SessionId& id) {
+        if (id != me || o.started) return;
+        o.started = true;
+        {
+            const auto handle = p.engine.lookup(me);
+            o.inside = handle ? where_is(*handle) : std::string("not published");
+        }
+        in_on_logon = true;
+        asio::co_spawn(p.ioc, p.engine.send(me, std::span<const std::byte>(payload)),
+                       completes_into(o.send));
+        in_on_logon = false;
+    };
+    p.app->on_to_app = [&](const View& mv, const SessionId& id) {
+        if (id != me || value(mv, 11) != kIdLogon) return;
+        ++o.to_app_calls;
+        o.to_app_inside_on_logon = in_on_logon;
+        o.to_app_seq = value(mv, 34);
+    };
+    p.app->on_from_app = [&](const View& mv, const SessionId& id) {
+        if (id != me) o.peer_deliveries.push_back(value(mv, 11) + " 34=" + value(mv, 34));
+    };
+    if (!p.start()) {
+        ADD_FAILURE() << "setup: register_session or engine.start() failed";
+        return o;
+    }
+    o.setup_ok = true;
+    if (!fixpp::test_support::pump_until(
+            p.ioc, [&] { return o.send.done && !o.peer_deliveries.empty(); }, 5s,
+            fixpp::test_support::kPumpSlice, "EngineCallbackSend/on_logon")) {
+        o.missing = !o.started     ? "onLogon of the session under test"
+                    : !o.send.done ? "the completion of the send"
+                                   : "the peer's fromApp for the message";
+    }
+    p.app->on_logon = nullptr;
+    p.app->on_to_app = nullptr;
+    p.app->on_from_app = nullptr;
+    p.stop();
+    o.stopped = p.stopped;
+    return o;
+}
+
+void run_and_check_on_logon(session_role role) {
+    const OnLogonReadings o = run_on_logon_cell(role);
+    ASSERT_TRUE(o.setup_ok) << "setup did not complete";
+    const std::string ctx =
+        std::string("onLogon ") + (o.started ? "ran" : "did not run") +
+        "; the session inside onLogon: " + o.inside +
+        "; toApp calls for the message: " + std::to_string(o.to_app_calls) +
+        (o.to_app_inside_on_logon ? " (inside onLogon)" : " (not inside onLogon)") +
+        ", 34=" + o.to_app_seq + "; the send: " + describe(o.send) +
+        "; the peer's fromApp:" + list_of_deliveries(o.peer_deliveries) + ".";
+    std::printf("[ MEASURED ] %s\n", ctx.c_str());
+    std::fflush(stdout);
+
+    EXPECT_TRUE(o.stopped) << "the engine must stop. " << ctx;
+    EXPECT_TRUE(o.missing.empty())
+        << "the cell's bound expired while it waited for " << o.missing << ". " << ctx;
+    ASSERT_TRUE(o.started) << "PATH NOT DRIVEN: onLogon did not run for the session. " << ctx;
+    EXPECT_EQ(o.inside, "Active open")
+        << "inside onLogon the session must be published and Active. " << ctx;
+    EXPECT_EQ(o.to_app_calls, 1) << "the message must reach toApp once. " << ctx;
+    EXPECT_TRUE(o.to_app_inside_on_logon)
+        << "the send's toApp must run inside onLogon (nested). " << ctx;
+    EXPECT_EQ(describe(o.send), "ok") << "the send must succeed. " << ctx;
+    EXPECT_EQ(o.peer_deliveries, std::vector<std::string>{"B41-LOGON 34=2"})
+        << "the peer must receive the message once, after the Logon. " << ctx;
+}
+
+// ── NC-10: the stop check of the path to a published session ─────────────────
+
+struct StopNotedReadings {
+    bool setup_ok = false;
+    bool stopped = false;
+    bool flag_set = false;
+    SessionSnapshot before;  // the initiator, before the send
+    SessionSnapshot after;   // the initiator, once the send had returned
+    SendOutcome send;
+    int to_app_calls = 0;
+    std::vector<std::string> peer_deliveries;
+    std::string missing;  // empty, or what the cell's bound expired waiting for
+};
+
+// Message A sent by Engine::send on the initiator of an Active pair. With `note_stop`
+// the initiator's engine-stop flag is set first, on the strand Engine::stop()'s first
+// step sets it on, through the same call.
+//
+// This is a construction. The order it stands for is a send that passed its admission
+// re-check, with stop()'s first step reaching the session's strand before the send's
+// body starts there; no test hook sits between that re-check and the send's spawn, so
+// the real interleaving is not driven.
+StopNotedReadings run_stop_noted_cell(bool note_stop) {
+    StopNotedReadings o;
+    PlainPair p;
+    const auto payload = bytes_of(kPayloadA);
+    p.app->on_to_app = [&](const View& mv, const SessionId& id) {
+        if (id == p.ini_id && value(mv, 11) == kIdA) ++o.to_app_calls;
+    };
+    p.app->on_from_app = [&](const View& mv, const SessionId& id) {
+        if (id == p.acc_id) o.peer_deliveries.push_back(value(mv, 11) + " 34=" + value(mv, 34));
+    };
+    if (!p.start()) {
+        ADD_FAILURE() << "setup: register_session or engine.start() failed";
+        return o;
+    }
+    // Held from Active until just before stop(); a build with asserts counts it.
+    std::shared_ptr<Session> ini_h;
+    bool ok = fixpp::test_support::pump_until(
+        p.ioc, [&] { return p.active(p.acc_id) && p.active(p.ini_id); }, 5s,
+        fixpp::test_support::kPumpSlice, "EngineCallbackSend/stop_noted_active");
+    if (ok) ini_h = p.engine.lookup(p.ini_id);
+    o.setup_ok = ok && ini_h;
+    if (!o.setup_ok) o.missing = "both sessions Active and published";
+    ok = o.setup_ok;
+
+    const auto read = [&](SessionSnapshot& snap) {
+        asio::co_spawn(ini_h->executor().underlying(), read_session(*ini_h, snap),
+                       [&snap](std::exception_ptr ep) {
+                           snap.threw = static_cast<bool>(ep);
+                           snap.done = true;
+                       });
+    };
+    if (ok && note_stop) {
+        // The registry is read here while nothing runs the io_context.
+        const auto strand = engine_test_access::session_strand(p.engine, p.ini_id);
+        bool noted = false;
+        if (strand) {
+            asio::co_spawn(
+                *strand,
+                [&]() -> asio::awaitable<void> {
+                    session_engine_access::note_engine_stop(*ini_h);
+                    co_return;
+                },
+                [&](std::exception_ptr ep) {
+                    o.flag_set = !ep;
+                    noted = true;
+                });
+        }
+        ok = strand && fixpp::test_support::pump_until(
+                           p.ioc, [&] { return noted; }, 5s, fixpp::test_support::kPumpSlice,
+                           "EngineCallbackSend/stop_noted_flag");
+        if (!ok) o.missing = "the engine-stop flag set on the session's strand";
+    }
+    if (ok) {
+        read(o.before);
+        ok = fixpp::test_support::pump_until(
+            p.ioc, [&] { return o.before.done; }, 5s, fixpp::test_support::kPumpSlice,
+            "EngineCallbackSend/stop_noted_before");
+        if (!ok) o.missing = "the initiator's numbers before the send";
+    }
+    if (ok) {
+        asio::co_spawn(p.ioc, p.engine.send(p.ini_id, std::span<const std::byte>(payload)),
+                       completes_into(o.send));
+        ok = fixpp::test_support::pump_until(
+            p.ioc, [&] { return o.send.done; }, 5s, fixpp::test_support::kPumpSlice,
+            "EngineCallbackSend/stop_noted_send");
+        if (!ok) o.missing = "the completion of the send";
+    }
+    // The control waits for the peer's delivery, which is what "transmitted" means
+    // there. The arm with the flag reads the sender's side only: a refused send leaves
+    // nothing to wait for.
+    if (ok && !note_stop) {
+        ok = fixpp::test_support::pump_until(
+            p.ioc, [&] { return !o.peer_deliveries.empty(); }, 5s, fixpp::test_support::kPumpSlice,
+            "EngineCallbackSend/stop_noted_delivery");
+        if (!ok) o.missing = "the peer's fromApp for the message";
+    }
+    if (ok) {
+        read(o.after);
+        ok = fixpp::test_support::pump_until(
+            p.ioc, [&] { return o.after.done; }, 5s, fixpp::test_support::kPumpSlice,
+            "EngineCallbackSend/stop_noted_after");
+        if (!ok) o.missing = "the initiator's numbers after the send";
+    }
+    p.app->on_to_app = nullptr;
+    p.app->on_from_app = nullptr;
+    ini_h.reset();
+    p.stop();
+    o.stopped = p.stopped;
+    return o;
+}
+
+void run_and_check_stop_noted(bool note_stop) {
+    const StopNotedReadings o = run_stop_noted_cell(note_stop);
+    ASSERT_TRUE(o.setup_ok) << "setup did not complete: " << o.missing;
+    const std::string ctx = std::string("The engine-stop flag ") +
+                            (o.flag_set ? "set" : "not set") + "; the send: " + describe(o.send) +
+                            "; toApp calls for the message: " + std::to_string(o.to_app_calls) +
+                            "; the peer's fromApp:" + list_of_deliveries(o.peer_deliveries) +
+                            "; INI before the send: " + describe(o.before) +
+                            "; INI after it: " + describe(o.after) + ".";
+    std::printf("[ MEASURED ] %s\n", ctx.c_str());
+    std::fflush(stdout);
+
+    EXPECT_TRUE(o.stopped) << "the engine must stop. " << ctx;
+    EXPECT_TRUE(o.missing.empty())
+        << "the cell's bound expired while it waited for " << o.missing << ". " << ctx;
+    const std::string active = std::to_string(static_cast<int>(fsm_state::Active));
+    const std::string first_app_seq = std::to_string(kFirstAppSeq);
+    EXPECT_EQ(o.before.state, active) << "INI must be Active before the send. " << ctx;
+    EXPECT_EQ(o.before.mgr_next_out, first_app_seq)
+        << "INI's next outbound number before the send must be the first after its Logon. " << ctx;
+    // Active in both arms: what refuses the send is the flag, not the Active check.
+    EXPECT_EQ(o.after.state, active) << "INI must stay Active. " << ctx;
+    const auto held = [&](const SessionSnapshot& snap) {
+        const auto it = snap.retained.find(kFirstAppSeq);
+        return it == snap.retained.end() ? std::string("(not read)") : it->second;
+    };
+    if (note_stop) {
+        EXPECT_TRUE(o.flag_set) << "PATH NOT DRIVEN: the flag was not set. " << ctx;
+        EXPECT_EQ(o.send.err, std::optional<error>{error::session_invalid_state_for_send})
+            << "the send must return session_invalid_state_for_send. " << ctx;
+        EXPECT_EQ(o.to_app_calls, 0) << "the message must reach no toApp. " << ctx;
+        EXPECT_EQ(o.after.mgr_next_out, o.before.mgr_next_out)
+            << "the manager's NextNumOut must not move. " << ctx;
+        EXPECT_EQ(o.after.store_next_out, o.before.store_next_out)
+            << "the store's NextNumOut must not move. " << ctx;
+        EXPECT_EQ(held(o.after), held(o.before))
+            << "the store must hold nothing new under the number the message would take. " << ctx;
+        EXPECT_TRUE(o.peer_deliveries.empty()) << "the peer must receive nothing. " << ctx;
+    } else {
+        EXPECT_EQ(describe(o.send), "ok") << "the send must succeed. " << ctx;
+        EXPECT_EQ(o.to_app_calls, 1) << "the message must reach toApp once. " << ctx;
+        const std::string next = std::to_string(kFirstAppSeq + 1);
+        EXPECT_EQ(o.after.mgr_next_out, next)
+            << "the manager's NextNumOut must have advanced once. " << ctx;
+        EXPECT_EQ(o.after.store_next_out, next)
+            << "the store's NextNumOut must have advanced once. " << ctx;
+        EXPECT_EQ(held(o.after), std::string(kIdA))
+            << "the store must hold the message under its number. " << ctx;
+        EXPECT_EQ(o.peer_deliveries, std::vector<std::string>{"B41-A 34=2"})
+            << "the peer must receive the message once. " << ctx;
+    }
+}
+
+// ── NC-18: the path of an id that is not in the snapshot, while stop() runs ──
+
+constexpr int kMissSendsPerId = 32;
+
+struct MissReadings {
+    bool setup_ok = false;
+    // Engine::lookup of the registered acceptor returned null just before the sends.
+    bool unpublished_before = false;
+    bool stop_done = false;
+    bool stopped = false;
+    // Per id: sends whose future was ready once the io threads were joined, and their
+    // results by kind.
+    struct PerId {
+        int ready = 0;
+        int ok = 0;
+        int invalid_argument = 0;
+        int invalid_state = 0;
+        int other = 0;
+        int threw = 0;
+    };
+    PerId unregistered;
+    PerId registered;
+};
+
+std::string describe(const MissReadings::PerId& r) {
+    return "ready=" + std::to_string(r.ready) + " of " + std::to_string(kMissSendsPerId) +
+           ": session_invalid_argument=" + std::to_string(r.invalid_argument) +
+           " session_invalid_state_for_send=" + std::to_string(r.invalid_state) +
+           " ok=" + std::to_string(r.ok) + " other=" + std::to_string(r.other) +
+           " threw=" + std::to_string(r.threw);
+}
+
+// The twin of EngineSessionStrand.V15_SendCounterEnrolledBeforeControlHop_NoUAF on the
+// path that keeps the control-strand hop, with V-15's numbers: three io threads, and
+// per id as many sends as V-15 starts. One Engine with one acceptor that nobody
+// connects to, so its id is registered and never published. Sends for it and for an
+// unregistered id are started around the start of stop(), then the Engine is destroyed
+// while the io_context is still alive. Which sends are on the control strand's queue
+// when stop() drains is up to the scheduler: the cell claims nothing about any single
+// send.
+MissReadings run_miss_path_cell() {
+    MissReadings o;
+    asio::io_context ioc;
+    fixpp::core::EngineConfig ecfg;
+    ecfg.executor = ioc.get_executor();
+    ecfg.application = std::make_shared<RecordingApp>();
+    ecfg.clock = make_mock_clock(ioc);
+    auto engine = std::make_unique<Engine>(ioc.get_executor(), std::move(ecfg));
+
+    auto acc_cfg = make_plain_session_cfg(ioc, "ACCEPTOR", "INITIATOR", session_role::acceptor,
+                                          reserve_free_port(ioc));
+    const SessionId registered_id = SessionId::from_config(acc_cfg);
+    SessionConfig nobody_cfg;
+    nobody_cfg.sender_comp_id = "NOBODY";
+    nobody_cfg.target_comp_id = "NOWHERE";
+    nobody_cfg.begin_string = "FIX.4.2";
+    const SessionId unregistered_id = SessionId::from_config(nobody_cfg);
+    if (!engine->register_session(std::move(acc_cfg)).has_value() || !engine->start().has_value()) {
+        ADD_FAILURE() << "setup: register_session or engine.start() failed";
+        return o;
+    }
+    o.setup_ok = true;
+
+    auto work = asio::make_work_guard(ioc);
+    std::vector<std::thread> io_threads;
+    for (std::size_t i = 0; i < kMtIoThreads; ++i) {
+        io_threads.emplace_back([&ioc] { ioc.run(); });
+    }
+
+    const auto payload = bytes_of(kPayloadA);
+    o.unpublished_before = engine->lookup(registered_id) == nullptr;
+    std::vector<std::future<expected_t<void>>> unregistered;
+    std::vector<std::future<expected_t<void>>> registered;
+    unregistered.reserve(kMissSendsPerId);
+    registered.reserve(kMissSendsPerId);
+    const auto start_sends = [&](int count) {
+        for (int i = 0; i < count; ++i) {
+            unregistered.push_back(asio::co_spawn(
+                ioc, engine->send(unregistered_id, std::span<const std::byte>(payload)),
+                asio::use_future));
+            registered.push_back(asio::co_spawn(
+                ioc, engine->send(registered_id, std::span<const std::byte>(payload)),
+                asio::use_future));
+        }
+    };
+    // Half the sends before stop() is started and half after, so that sends are on
+    // their way on both sides of stop()'s write of its flag.
+    start_sends(kMissSendsPerId / 2);
+    auto stop_fut = asio::co_spawn(ioc, engine->stop(), asio::use_future);
+    start_sends(kMissSendsPerId - kMissSendsPerId / 2);
+    o.stop_done = stop_fut.wait_for(12s) == std::future_status::ready;
+
+    // Once stop() has completed the io threads run out of work and return, having run
+    // every send's completion handler. If it has not, they would stay: the io_context
+    // is stopped so that the cell reports instead of hanging.
+    work.reset();
+    if (!o.stop_done) ioc.stop();
+    for (auto& t : io_threads) t.join();
+
+    if (o.stop_done) {
+        stop_fut.get();
+        o.stopped = engine->stopped();
+    }
+    const auto collect = [](std::vector<std::future<expected_t<void>>>& futs,
+                            MissReadings::PerId& out) {
+        for (auto& f : futs) {
+            if (f.wait_for(0s) != std::future_status::ready) continue;
+            ++out.ready;
+            try {
+                const auto r = f.get();
+                if (r) {
+                    ++out.ok;
+                } else if (r.error() == error::session_invalid_argument) {
+                    ++out.invalid_argument;
+                } else if (r.error() == error::session_invalid_state_for_send) {
+                    ++out.invalid_state;
+                } else {
+                    ++out.other;
+                }
+            } catch (...) {
+                ++out.threw;
+            }
+        }
+    };
+    collect(unregistered, o.unregistered);
+    collect(registered, o.registered);
+
+    // A send that is not ready here still holds the Engine: destroying it would be the
+    // fault the cell exists to find, reported as a crash instead of a failure.
+    if (o.stop_done && o.unregistered.ready == kMissSendsPerId &&
+        o.registered.ready == kMissSendsPerId) {
+        engine.reset();
+    } else {
+        ADD_FAILURE() << "stop() or a send did not complete: the Engine is leaked, not destroyed";
+        (void)engine.release();
+    }
+    return o;
+}
+
+void run_and_check_miss_path() {
+    const MissReadings o = run_miss_path_cell();
+    ASSERT_TRUE(o.setup_ok) << "setup did not complete";
+    const std::string ctx = "Unregistered id: " + describe(o.unregistered) +
+                            "; registered, unpublished id: " + describe(o.registered) +
+                            "; io threads=" + std::to_string(kMtIoThreads) + ".";
+    std::printf("[ MEASURED ] %s\n", ctx.c_str());
+    std::fflush(stdout);
+
+    EXPECT_TRUE(o.unpublished_before)
+        << "PATH NOT DRIVEN: the registered acceptor was published before the sends. " << ctx;
+    EXPECT_TRUE(o.stop_done) << "stop() must complete. " << ctx;
+    EXPECT_TRUE(o.stopped) << "the engine must be stopped. " << ctx;
+    EXPECT_EQ(o.unregistered.ready, kMissSendsPerId)
+        << "every send for the unregistered id must have completed. " << ctx;
+    EXPECT_EQ(o.registered.ready, kMissSendsPerId)
+        << "every send for the registered id must have completed. " << ctx;
+    // Each send: session_invalid_argument or session_invalid_state_for_send. An id
+    // that is registered never yields the first.
+    EXPECT_EQ(o.unregistered.ok + o.unregistered.other + o.unregistered.threw, 0)
+        << "a send for the unregistered id returned something else. " << ctx;
+    EXPECT_EQ(
+        o.registered.ok + o.registered.other + o.registered.threw + o.registered.invalid_argument,
+        0)
+        << "a send for the registered, unpublished id returned something other than "
+           "session_invalid_state_for_send. "
+        << ctx;
 }
 
 }  // namespace
@@ -1955,5 +2531,22 @@ TEST(EngineCallbackSend, TwoEngines_ToAppStartsClose_Graceful) {
 TEST(EngineCallbackSend, MtEngineSendFromFromApp_Quiet) { run_and_check_mt(false); }
 
 TEST(EngineCallbackSend, MtEngineSendFromFromApp_BusyControlStrand) { run_and_check_mt(true); }
+
+TEST(EngineCallbackSend, EngineSendFromOnLogon_Initiator) {
+    run_and_check_on_logon(session_role::initiator);
+}
+
+TEST(EngineCallbackSend, EngineSendFromOnLogon_Acceptor) {
+    run_and_check_on_logon(session_role::acceptor);
+}
+
+TEST(EngineCallbackSend, StopNotedOnTheSessionRefusesEngineSend) { run_and_check_stop_noted(true); }
+
+// The positive control of the cell above: the same setup without the flag.
+TEST(EngineCallbackSend, StopNotNotedOnTheSessionAdmitsEngineSend) {
+    run_and_check_stop_noted(false);
+}
+
+TEST(EngineCallbackSend, MissPathSendsQueuedWhileStopRuns) { run_and_check_miss_path(); }
 
 }  // namespace fixpp::session::test
