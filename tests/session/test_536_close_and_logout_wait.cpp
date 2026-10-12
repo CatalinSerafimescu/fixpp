@@ -338,13 +338,12 @@ public:
         return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
     }
     template <class Pred>
-    [[nodiscard]] bool run_until(Pred pred,
-                                 std::chrono::steady_clock::duration budget = kPumpBudget) {
+    [[nodiscard]] bool pump(Pred pred, std::chrono::steady_clock::duration budget = kPumpBudget) {
         return fixpp::test_support::pump_until(ioc, std::move(pred), budget, kPumpSlice, nullptr);
     }
     // Runs the handlers that become ready during `window`, in real time.
     void settle(std::chrono::steady_clock::duration window = 20ms) {
-        (void)run_until([] { return false; }, window);
+        (void)pump([] { return false; }, window);
     }
 
     [[nodiscard]] std::chrono::milliseconds logout_timeout() const {
@@ -389,7 +388,7 @@ public:
     fixpp::core::expected_t<void> feed(std::vector<std::byte> frame) {
         fed_.push_back(std::move(frame));
         auto fut = asio::co_spawn(ioc, session->on_inbound_frame(fed_.back()), asio::use_future);
-        if (!run_until([&] { return ready(fut); })) {
+        if (!pump([&] { return ready(fut); })) {
             ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "536 Scene::feed";
             return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
@@ -400,7 +399,7 @@ public:
     // parked in its first sleep.
     [[nodiscard]] bool open_to_active() {
         auto fut = asio::co_spawn(ioc, session->open(), asio::use_future);
-        if (!run_until([&] { return ready(fut); }) || !fut.get().has_value()) return false;
+        if (!pump([&] { return ready(fut); }) || !fut.get().has_value()) return false;
         const std::string extra =
             "98=0\x01"
             "108=" +
@@ -488,8 +487,12 @@ TEST(SessionNeverSweepsTheClock, Traffic) {
     (void)s.feed(s.peer_frame("1", 2, "112=PEER-1\x01"));
     ASSERT_EQ(s.count("0"), 1) << "setup: the peer's TestRequest drew no Heartbeat";
     // One pass of the liveness loop: a Heartbeat and a TestRequest of its own.
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D. The loop arms its sleep from
+    // stored anchors, the last inbound and the last outbound instant. Both were stamped
+    // above with the clock not yet moved, so they predate this advance, and a sleep
+    // armed late would name an instant already passed.
     s.mock->advance(kHeartBtInt + 1s);
-    ASSERT_TRUE(s.run_until([&] { return s.count("1") == 1; }))
+    ASSERT_TRUE(s.pump([&] { return s.count("1") == 1; }))
         << "setup: the liveness loop sent no TestRequest";
     ASSERT_EQ(s.count("0"), 2) << "setup: the liveness loop sent no Heartbeat";
     // The peer's answer to it.
@@ -506,13 +509,13 @@ TEST(SessionNeverSweepsTheClock, GracefulCloseThePeerConfirms) {
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
 
     auto closed = s.spawn_close(close_mode::graceful);
-    ASSERT_TRUE(s.run_until([&] { return s.session->state() == fsm_state::LogoutSent; }))
+    ASSERT_TRUE(s.pump([&] { return s.session->state() == fsm_state::LogoutSent; }))
         << "setup: the session did not reach LogoutSent";
     // The peer's Logout is delivered in LogoutSent, so it meets the LogoutSent arm.
     (void)s.feed(s.peer_frame("5", 2));
     ASSERT_EQ(s.session->state(), fsm_state::Disconnected)
         << "setup: the LogoutSent arm did not take the peer's Logout as the confirmation";
-    ASSERT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
+    ASSERT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "setup: close(graceful) did not complete";
 
     EXPECT_EQ(s.counting->sweeps(), 0)
@@ -525,7 +528,7 @@ TEST(SessionNeverSweepsTheClock, TerminalClose) {
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
 
     auto closed = s.spawn_close(close_mode::terminal);
-    ASSERT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
+    ASSERT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "setup: close(terminal) did not complete";
 
     EXPECT_EQ(s.counting->sweeps(), 0)
@@ -548,17 +551,24 @@ TEST(CloseAfterTheLoopSent, AHeartbeat_CloseCompletesWithoutTheClock) {
 
     // Inbound traffic at 20 s keeps the inbound side fresh, so at HeartBtInt the loop
     // owes a Heartbeat and no TestRequest.
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND A. This advance is a time stamp:
+    // what reads it is the delivery below, on this thread, which stamps the last
+    // inbound instant and the frame's SendingTime from the clock. The loop's sleep is
+    // not due before HeartBtInt, so no waiter depends on it.
     s.mock->advance(20s);
     (void)s.feed(s.peer_frame("0", 2));
+    // Staging: KIND D. The sleep this advance fires was armed from the Logon's anchors,
+    // which predate both advances; the delivery above moved the inbound anchor, and
+    // the sleep the loop arms next reads it only after this one has fired.
     s.mock->advance(11s);
-    ASSERT_TRUE(s.run_until([&] { return s.count("0") == 1; }))
+    ASSERT_TRUE(s.pump([&] { return s.count("0") == 1; }))
         << "setup: the liveness loop sent no Heartbeat";
     s.settle();
     ASSERT_EQ(s.count("1"), 0)
         << "setup: the loop also sent a TestRequest, so it is not parked in its main sleep";
 
     auto closed = s.spawn_close(close_mode::terminal);
-    EXPECT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
+    EXPECT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "close(terminal) did not complete, with the clock not advanced, for a session "
            "whose liveness loop had sent a Heartbeat: close did not end the loop's main sleep";
 }
@@ -569,12 +579,14 @@ TEST(CloseAfterTheLoopSent, ATestRequest_CloseCompletesWithoutTheClock) {
     ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
     s.sent.clear();
 
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D. The loop's sleep is armed from
+    // the Logon's anchors, which predate this advance; nothing was delivered since.
     s.mock->advance(kHeartBtInt + 1s);
-    ASSERT_TRUE(s.run_until([&] { return s.count("1") == 1; }))
+    ASSERT_TRUE(s.pump([&] { return s.count("1") == 1; }))
         << "setup: the liveness loop sent no TestRequest";
 
     auto closed = s.spawn_close(close_mode::terminal);
-    EXPECT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
+    EXPECT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "close(terminal) did not complete, with the clock not advanced, for a session "
            "whose liveness loop had sent a TestRequest: close did not end the loop's grace "
            "sleep";
@@ -594,13 +606,15 @@ TEST(CloseDuringTheLoopsEmit, TestRequestHeldInTheStore_CloseCompletesWithoutThe
     s.sent.clear();
 
     s.hold->msg_type = "1";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D. The loop's sleep is armed from
+    // the Logon's anchors, which predate this advance; nothing was delivered since.
     s.mock->advance(kHeartBtInt + 1s);
-    ASSERT_TRUE(s.run_until([&] { return s.hold->holding; }))
+    ASSERT_TRUE(s.pump([&] { return s.hold->holding; }))
         << "setup: no TestRequest store() was held";
     ASSERT_EQ(s.count("1"), 0) << "setup: the TestRequest was transmitted before its store()";
 
     auto closed = s.spawn_close(close_mode::terminal);
-    ASSERT_TRUE(s.run_until([&] {
+    ASSERT_TRUE(s.pump([&] {
         return session_test_access::is_closing(*s.session) &&
                s.session->state() == fsm_state::Disconnected;
     })) << "setup: close(terminal) did not run to its wait for the liveness loop";
@@ -609,7 +623,7 @@ TEST(CloseDuringTheLoopsEmit, TestRequestHeldInTheStore_CloseCompletesWithoutThe
     ASSERT_FALSE(Scene::ready(closed)) << "setup: close completed while the emit was held";
 
     s.hold->released = true;
-    const bool completed = s.run_until([&] { return Scene::ready(closed); });
+    const bool completed = s.pump([&] { return Scene::ready(closed); });
 
     EXPECT_FALSE(s.hold->timed_out) << "the hold reached its bound";
     // The note reads that close's total emit does not pass the loop's filter during the
@@ -638,14 +652,13 @@ TEST(LogoutWaitWake, ClockWhoseSweepDoesNothing_GracefulCloseReturnsAtThePeersLo
 
     const auto began = std::chrono::steady_clock::now();
     auto closed = s.spawn_close(close_mode::graceful);
-    ASSERT_TRUE(s.run_until([&] { return s.session->state() == fsm_state::LogoutSent; }))
+    ASSERT_TRUE(s.pump([&] { return s.session->state() == fsm_state::LogoutSent; }))
         << "setup: the session did not reach LogoutSent";
     s.settle();
     (void)s.feed(s.peer_frame("5", 2));
     ASSERT_EQ(s.session->state(), fsm_state::Disconnected)
         << "setup: the LogoutSent arm did not take the peer's Logout as the confirmation";
-    ASSERT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
-        << "close(graceful) did not complete";
+    ASSERT_TRUE(s.pump([&] { return Scene::ready(closed); })) << "close(graceful) did not complete";
     const auto took = std::chrono::steady_clock::now() - began;
 
     EXPECT_LT(took, timeout / 2) << "close(graceful) returned " << millis(took)
@@ -667,12 +680,12 @@ TEST(LogoutWaitLifetime, GraceTimerWinsWhileTheWaitIsPending_CloseCompletes) {
 
     const auto began = std::chrono::steady_clock::now();
     auto closed = s.spawn_close(close_mode::graceful);
-    ASSERT_TRUE(s.run_until([&] { return s.session->state() == fsm_state::LogoutSent; }))
+    ASSERT_TRUE(s.pump([&] { return s.session->state() == fsm_state::LogoutSent; }))
         << "setup: the session did not reach LogoutSent";
     const auto wake_calls = std::make_shared<int>(0);
     ASSERT_TRUE(count_wake_calls(*s.session, wake_calls))
         << "setup: the logout wait's wake is not set, so the wait is not in flight";
-    ASSERT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
+    ASSERT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "close(graceful) did not complete when its grace timer expired";
     const auto took = std::chrono::steady_clock::now() - began;
 
@@ -697,7 +710,7 @@ TEST(LogoutWaitLifetime, TerminalCloseEscalatesDuringTheWait_BothClosesComplete)
 
     const auto began = std::chrono::steady_clock::now();
     auto graceful = s.spawn_close(close_mode::graceful);
-    ASSERT_TRUE(s.run_until([&] { return s.session->state() == fsm_state::LogoutSent; }))
+    ASSERT_TRUE(s.pump([&] { return s.session->state() == fsm_state::LogoutSent; }))
         << "setup: the session did not reach LogoutSent";
     s.settle();
     ASSERT_FALSE(Scene::ready(graceful)) << "setup: the graceful close did not wait";
@@ -706,7 +719,7 @@ TEST(LogoutWaitLifetime, TerminalCloseEscalatesDuringTheWait_BothClosesComplete)
         << "setup: the logout wait's wake is not set, so the wait is not in flight";
 
     auto terminal = s.spawn_close(close_mode::terminal);
-    ASSERT_TRUE(s.run_until([&] { return Scene::ready(graceful) && Scene::ready(terminal); }))
+    ASSERT_TRUE(s.pump([&] { return Scene::ready(graceful) && Scene::ready(terminal); }))
         << "the two closes did not both complete after the escalation";
     const auto took = std::chrono::steady_clock::now() - began;
 
@@ -737,7 +750,7 @@ TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToI
     s.hold->msg_type = "5";
     const auto began = std::chrono::steady_clock::now();
     auto closed = s.spawn_close(close_mode::graceful);
-    ASSERT_TRUE(s.run_until([&] { return s.hold->holding; }))
+    ASSERT_TRUE(s.pump([&] { return s.hold->holding; }))
         << "setup: the store() of the session's Logout was not held";
     ASSERT_EQ(s.count("5"), 0) << "setup: the Logout was transmitted before its store()";
     // The wait has not begun, so the peer's Logout finds no wake to call.
@@ -752,7 +765,7 @@ TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToI
     ASSERT_FALSE(Scene::ready(closed)) << "close completed before the store was released";
 
     s.hold->released = true;
-    ASSERT_TRUE(s.run_until([&] { return s.session->state() == fsm_state::LogoutSent; }))
+    ASSERT_TRUE(s.pump([&] { return s.session->state() == fsm_state::LogoutSent; }))
         << "phase 1 did not record LogoutSent after the store was released";
     EXPECT_EQ(s.count("5"), 2) << "the two Logouts were not both written";
     EXPECT_FALSE(s.hold->timed_out) << "the hold reached its bound";
@@ -765,8 +778,13 @@ TEST(LogoutWaitLifetime, Control_PeersLogoutWhileTheLogoutEmitIsHeld_WaitRunsToI
     ASSERT_FALSE(Scene::ready(closed))
         << "close completed before the logout deadline, with the mock clock not advanced";
 
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND E. The deadline this advance must
+    // reach is armed relative to the instant phase 1 began its wait, so it must be
+    // armed before the clock moves. The wake was read as set above, and phase 1 arms
+    // the deadline in the same run that sets it. KIND F as well: a lost advance leaves
+    // close to its real grace timer, which the assertion on real time below reports.
     s.mock->advance(timeout);
-    ASSERT_TRUE(s.run_until([&] { return Scene::ready(closed); }))
+    ASSERT_TRUE(s.pump([&] { return Scene::ready(closed); }))
         << "close did not complete at the logout deadline";
     const auto took = std::chrono::steady_clock::now() - began;
     ASSERT_LT(took, timeout) << "inconclusive: " << millis(took)
@@ -795,16 +813,16 @@ TEST(LogoutWaitLifetime, Control_GraceTimerWinsWhileTheLogoutEmitIsHeld_CloseCom
     s.hold->msg_type = "5";
     s.hold->kind = hold_kind::outlasts_cancellation;
     auto closed = s.spawn_close(close_mode::graceful);
-    ASSERT_TRUE(s.run_until([&] { return s.hold->holding; }))
+    ASSERT_TRUE(s.pump([&] { return s.hold->holding; }))
         << "setup: the store() of the session's Logout was not held";
-    ASSERT_TRUE(s.run_until([&] { return s.hold->cancelled_while_holding; }))
+    ASSERT_TRUE(s.pump([&] { return s.hold->cancelled_while_holding; }))
         << "setup: the grace timer's expiry did not cancel phase 1 while its emit was held";
     ASSERT_TRUE(s.hold->holding) << "setup: the cancellation ended the hold";
     ASSERT_EQ(s.count("5"), 0) << "setup: the Logout was transmitted during the hold";
     ASSERT_FALSE(Scene::ready(closed)) << "setup: close completed while the emit was held";
 
     s.hold->released = true;
-    const bool completed = s.run_until([&] { return Scene::ready(closed); });
+    const bool completed = s.pump([&] { return Scene::ready(closed); });
 
     EXPECT_FALSE(s.hold->timed_out) << "the hold reached its bound";
     ASSERT_EQ(s.count("5"), 1)
@@ -827,11 +845,11 @@ TEST(LogoutWaitLifetime, Control_TerminalCloseEscalatesWhileTheLogoutEmitIsHeld_
     s.hold->kind = hold_kind::outlasts_cancellation;
     const auto began = std::chrono::steady_clock::now();
     auto graceful = s.spawn_close(close_mode::graceful);
-    ASSERT_TRUE(s.run_until([&] { return s.hold->holding; }))
+    ASSERT_TRUE(s.pump([&] { return s.hold->holding; }))
         << "setup: the store() of the session's Logout was not held";
 
     auto terminal = s.spawn_close(close_mode::terminal);
-    ASSERT_TRUE(s.run_until([&] { return s.hold->cancelled_while_holding; }))
+    ASSERT_TRUE(s.pump([&] { return s.hold->cancelled_while_holding; }))
         << "setup: the escalation did not cancel phase 1 while its emit was held";
     ASSERT_LT(s.hold->cancelled_at - began, timeout)
         << "setup: phase 1 was cancelled " << millis(s.hold->cancelled_at - began)
@@ -841,8 +859,7 @@ TEST(LogoutWaitLifetime, Control_TerminalCloseEscalatesWhileTheLogoutEmitIsHeld_
     ASSERT_EQ(s.count("5"), 0) << "setup: the Logout was transmitted during the hold";
 
     s.hold->released = true;
-    const bool completed =
-        s.run_until([&] { return Scene::ready(graceful) && Scene::ready(terminal); });
+    const bool completed = s.pump([&] { return Scene::ready(graceful) && Scene::ready(terminal); });
 
     EXPECT_FALSE(s.hold->timed_out) << "the hold reached its bound";
     ASSERT_EQ(s.count("5"), 1)
@@ -873,12 +890,19 @@ TEST(ExplicitSweep, Control_EndsAnUnclosedSessionsLivenessLoop) {
     swept.settle();
 
     for (Scene* s : {&swept, &other}) {
+        // Staging (ci/mock-clock-staging-sweep.sh), one statement for two sessions.
+        // The swept one: KIND C, the advance must fire nothing, and that is this
+        // cell's oracle. The other: KIND D, its loop's sleep is armed from the Logon's
+        // anchors, which predate this advance.
         s->mock->advance(kHeartBtInt + 1s);
         s->settle();
     }
     ASSERT_EQ(other.count("0"), 1) << "control: a running loop sent no Heartbeat in the window";
     ASSERT_EQ(other.count("1"), 1) << "control: a running loop sent no TestRequest in the window";
     for (Scene* s : {&swept, &other}) {
+        // Staging. The swept one: KIND C, as above. The other: KIND E, its loop is in
+        // its grace sleep, armed in the run that wrote the TestRequest the assertion
+        // above read; and the grace deadline is a stored instant, so KIND D as well.
         s->mock->advance(kHeartBtInt);
         s->settle();
     }
