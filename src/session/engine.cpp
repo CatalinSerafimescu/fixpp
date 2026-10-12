@@ -1665,8 +1665,8 @@ asio::awaitable<void> Engine::stop() {
 //
 // The route is `.specify/563-564-callback-send.md` §2.3 (ruling R-2): a published
 // session is reached through the reader snapshot, with no hop through the control
-// strand. It supersedes T012's two-hop design for that case (research D0/D4/R1/R7;
-// data-model E-0; contract C-2; FR-012), which stays as the miss path. §2.4 of the
+// strand. It supersedes T012's two-hop design for that case (023's research D0 and
+// D4; data-model E-0; contract C-2; FR-012), which stays as the miss path. §2.4 of the
 // note has what stop() relied on in the two-hop design and what carries each
 // guarantee on the hit path.
 //   Enroll: bump send_counter_ + RAII counter_guard in the OUTER coroutine frame
@@ -1697,19 +1697,18 @@ asio::awaitable<void> Engine::stop() {
 //           single-writer on session strand C-1). If stopped_ → fail-fast
 //           (session_invalid_state_for_send). [gate-b/r2 P1: bump no longer here]
 //   Step C: hop to session_strand for Active check (fsm_state_ owned here, C-1),
-//           toApp + Session::send. [gate-b/r1 #1: Active check moved here]
+//           toApp + Session::send.
 //
 //   counter_guard's dtor decrements after the send completes (or unwinds), on
 //   either path.
 //   Every hop is a co_spawn(strand, use_awaitable) and none is a blocking wait, so
 //   a callback-issued send cannot deadlock on either path (FR-006/C-2).
-//   [research R1]
 //
 //   stop() stores stopped_=true (seq_cst) BEFORE draining send_counter_ (seq_cst)
 //   and BEFORE registry_.clear(). A send either enrolls before the drain load
 //   and is waited out, or enrolls after that load and then sees stopped_=true
 //   on the outer admission re-check, so it returns without queueing any
-//   [this]-capturing work. [R7]
+//   [this]-capturing work.
 //   Backpressure = the awaited result ([const §XV.15]).
 asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                                                      std::span<const std::byte> app_payload) {
@@ -1717,7 +1716,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // (potentially stack-allocated) stays valid across all co_await suspensions.
     std::vector<std::byte> payload_copy(app_payload.begin(), app_payload.end());
 
-    // gate-b/r2 [P1]: enroll this send in the send-drain domain BEFORE any
+    // Enroll this send in the send-drain domain BEFORE any
     // hop.  If the bump occurred inside the control-strand lambda (Step B of the
     // miss path), a send POSTED to control_strand_ but not-yet-run would be
     // invisible to stop()'s send_counter_ drain: stop() could drain (sees 0),
@@ -1790,7 +1789,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // Non-blocking co_spawn — a miss issued from a session's callback
     // (session→control→session) is safe because the session strand and control
     // strand are distinct: a co_spawn from the session strand onto the control
-    // strand never blocks. [C-2/R1]
+    // strand never blocks. [C-2]
     core::expected_t<void> result = co_await asio::co_spawn(
         control_strand_,
         [this, id,
