@@ -621,11 +621,13 @@ add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 # install_store_offload_exit_probe seams (file_store.hpp).
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 
-# fixpp#563 / fixpp#564 (B41) — reproduction: a Session::send started inside an Application callback.
+# fixpp#563 / fixpp#564 (B41) — a Session::send or a Session::close started inside an Application
+# callback of that session, and the session's debug guard (`.specify/563-564-callback-send.md` §3).
 add_threading_test(session_563_564_callback_send test_563_564_callback_send.cpp)
-# fixpp#563 / fixpp#564 (B41) — measurement: an Engine::send started inside an Application callback.
+# fixpp#563 / fixpp#564 (B41) — an Engine::send started inside an Application callback or around
+# Engine::stop(), and a close started inside a callback of a session that a running Engine owns.
 # Real loopback TLS, so it carries application_engine_send_019_test's link set and fixture directory.
-# Its own binary: on a build with asserts one cell's abort ends the process.
+# Its own binary: on a build with asserts, an abort in one cell ends the process for the rest.
 add_threading_test(session_563_564_engine_callback_send test_563_564_engine_callback_send.cpp)
 target_link_libraries(session_563_564_engine_callback_send PRIVATE
   fixpp_transport
