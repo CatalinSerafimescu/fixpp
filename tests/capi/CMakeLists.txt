@@ -641,3 +641,33 @@ add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_disposi
 # lane /speckit-verify runs and on MSVC debug and msvc-asan (re-measure on msvc-asan,
 # under the same -j the lane uses), and size from the slowest.
 set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 1200)
+
+# fixpp#536, fixpp#537, fixpp#538 (.specify/536-537-538-recovery-liveness.md §6.2, owner
+# ruling R-8): the C-ABI witnesses of the 1.12 clause, one cell per witness of that
+# section's table. Standalone, not a grouped bucket ([const §VII.8]): every cell runs a
+# live C-ABI engine, which owns a worker thread of its own, on a real-time clock over
+# loopback sockets; the cells of fixpp#536 call fixpp_session_close from another thread,
+# because the call blocks; and the binary is selected by name
+# (`-R '^capi_recovery_liveness$'`) for as long as a witness waits for its mechanism.
+# The witness file and its support header name no symbol the 1.12 clause adds, so they
+# compile on a tree without the change. FIXPP_DICT_DIR locates FIX44.xml.
+add_executable(capi_recovery_liveness_test recovery_liveness_capi_witness_test.cpp)
+target_link_libraries(capi_recovery_liveness_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_recovery_liveness_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_recovery_liveness_test PRIVATE
+  "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_recovery_liveness COMMAND capi_recovery_liveness_test)
+# TIMEOUT is explicit. The cells wait on real timers, so the binary's duration is the
+# sum of its cells' waits and does not shrink on a faster machine; a cell whose
+# assertion fails runs to its bound, which is longer than the wait of a cell that
+# passes. Re-derive by timing
+# `ctest --test-dir build/<preset> -R '^capi_recovery_liveness$'` on every lane
+# /speckit-verify runs, with the witnesses failing and with them passing, and keep
+# TIMEOUT at several times the slowest.
+set_tests_properties(capi_recovery_liveness PROPERTIES
+  LABELS "capi;536;537;538" TIMEOUT 1200)
