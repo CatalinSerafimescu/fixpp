@@ -193,6 +193,15 @@
 //                             onLogon and onCreate cells run on the synchronous
 //                             sink only. What each callback's cells assert is
 //                             spelled out in run_lifecycle_callback_starts_close.
+//   ToAdminOfGracefulCloseStartsClose_Terminal,
+//   ToAdminOfGracefulCloseStartsNoClose
+//                             batch B41. The test body starts a graceful
+//                             close; the toAdmin of its Logout starts a
+//                             terminal one, which joins it and ends its wait
+//                             for the peer's Logout. The NoClose cells are the
+//                             positive control: with no close started there,
+//                             the wait ends when the cell advances the mock
+//                             clock. Both with the arms of the close cells.
 //   ToAppStartsSend_NoStore, ToAdminStartsSend_NoStore,
 //   ToAdminStartsSend_AssignFirstSite_NoStore, OverlappingSends_NoStore
 //                             batch B41. The callback-started and overlapping
@@ -6891,6 +6900,10 @@ enum class LifecycleArm {
     on_logon_no_close,
     // The test body starts a graceful close; its onLogout starts a close.
     on_logout_of_a_graceful_close,
+    // The test body starts a graceful close; the toAdmin of its Logout starts a
+    // close. toAdmin is not a lifecycle callback: the arm is here because its
+    // setup and its readings are those of the arm above.
+    to_admin_of_a_graceful_closes_logout,
     // The test body delivers a frame under another BeginString, at which the
     // Active arm writes Disconnected without a close(); that write's onLogout
     // starts a close.
@@ -6908,8 +6921,21 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
                                          const ArmValues& expect) {
     const bool logon_arm = arm == LifecycleArm::on_logon || arm == LifecycleArm::on_logon_no_close;
     const bool starts_a_close = arm != LifecycleArm::on_logon_no_close;
+    const bool to_admin_arm = arm == LifecycleArm::to_admin_of_a_graceful_closes_logout;
+    const bool on_logout_arm = arm == LifecycleArm::on_logout_of_a_graceful_close ||
+                               arm == LifecycleArm::on_logout_after_another_begin_string;
+    // The toAdmin arm on a FileStore and a live transport. The completion of the
+    // Logout's store call, which the file executor posts, and the end of the Logout step,
+    // which the terminal close's escalation brings about by cancelling the grace timer,
+    // race for the session's executor: the Logout is transmitted only where the
+    // completion is first. The arm asserts what holds in both orders; fixpp#590 owns the
+    // one ending. A MemoryStore, and a session with no store, run that path on the
+    // session's executor alone.
+    const bool logout_write_races = to_admin_arm && store == StoreKind::file &&
+                                    transport == TransportKind::live_suspending_write;
     const char* starting = arm == LifecycleArm::on_create ? "onCreate"
                            : logon_arm                    ? "onLogon"
+                           : to_admin_arm                 ? "toAdmin(Logout)"
                                                           : "onLogout";
     Fixture f{ExecKind::io_context, store};
     f.role = role;
@@ -6940,7 +6966,14 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
     clock->on_interval_sleep = [&] { cell.note("a sleep of the heartbeat interval begins"); };
     f.on_transmit = [&](const std::string& frame) { cell.transmitted(frame); };
     f.app->on_to_app = [&] { cell.callback("toApp"); };
-    f.app->on_to_admin = [&](std::string_view msg_type) { cell.to_admin(msg_type); };
+    f.app->on_to_admin = [&](std::string_view msg_type) {
+        if (to_admin_arm && msg_type == "5" && !cell.inside.read) {
+            cell.note("toAdmin(Logout)");
+            start_close();
+            return;
+        }
+        cell.to_admin(msg_type);
+    };
     f.app->on_from_app = [&] {
         ++from_app_calls;
         cell.callback("fromApp");
@@ -6958,7 +6991,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
             return;
         }
         cell.lifecycle_callback(name);
-        if (!logon_arm && arm != LifecycleArm::on_create && !cell.inside.read) start_close();
+        if (on_logout_arm && !cell.inside.read) start_close();
     };
 
     const auto other_begin = peer_frame_with_begin("FIX.4.4", "D", 2,
@@ -6980,7 +7013,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
         if (setup_ok && transport == TransportKind::live_suspending_write) {
             f.attach_live_transport(sess);
         }
-        if (setup_ok && arm == LifecycleArm::on_logout_of_a_graceful_close) {
+        if (setup_ok && (arm == LifecycleArm::on_logout_of_a_graceful_close || to_admin_arm)) {
             outer_name = "the graceful close";
             asio::co_spawn(sess.executor().underlying(), sess.close(close_mode::graceful),
                            cell.completes(cell.outer, outer_name));
@@ -7011,8 +7044,8 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
     } else if (completed) {
         // A graceful close the callback started may wait for a peer Logout; it is
         // in that wait once a sleep that is not the liveness loop's is in flight.
-        // The arm whose test body starts the graceful close does not advance the
-        // clock: there the close onLogout starts must end the wait.
+        // An arm whose test body starts the graceful close does not advance the
+        // clock: there the close the callback starts must end the wait.
         if (mode == close_mode::graceful) {
             completed = f.end_logout_wait_when(
                 [&] {
@@ -7161,6 +7194,39 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
             EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
             EXPECT_EQ(logouts_sent, 1) << "the Logout is transmitted once. " << reading;
             break;
+        case LifecycleArm::to_admin_of_a_graceful_closes_logout:
+            EXPECT_EQ(cell.inside.lifecycle, "closing")
+                << "the Logout's toAdmin runs inside the graceful close. " << reading;
+            EXPECT_EQ(cell.inside.state, "Active")
+                << "inside the callback after the start, the session is Active: the Logout has "
+                   "not been sent. "
+                << reading;
+            EXPECT_EQ(cell.inside.on_logout_calls, 0)
+                << "inside the callback after the start, onLogout has not run. " << reading;
+            EXPECT_EQ(result_of(cell.started), "ok")
+                << "the terminal close joins the graceful one and returns its result. " << reading;
+            EXPECT_EQ(result_of(cell.outer), result_of(cell.started))
+                << "the two closes return the same result. " << reading;
+            // The reading "not advanced" has its positive control in the
+            // ToAdminOfGracefulCloseStartsNoClose cells: with no close started in the
+            // callback, the graceful close stays in its wait until the clock is advanced.
+            EXPECT_FALSE(clock_advanced)
+                << "the cell does not advance the mock clock: the graceful close's wait for the "
+                   "peer's Logout ends because the terminal close joined it. "
+                << reading;
+            EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
+            if (logout_write_races) {
+                EXPECT_LE(logouts_sent, 1) << "the Logout is transmitted at most once. " << reading;
+                ASSERT_EQ(got.retained.size(), kRetainedThrough) << reading;
+                EXPECT_EQ(got.retained[1], "35=5 34=2")
+                    << "the Logout is retained under its number, transmitted or not. " << reading;
+            } else {
+                EXPECT_EQ(logouts_sent, 1) << "the Logout is transmitted once. " << reading;
+                EXPECT_LT(position_of(got.order, "toAdmin(Logout) returns"),
+                          position_of(got.order, "transmit 35=5"))
+                    << "the Logout is transmitted after its toAdmin returned. " << reading;
+            }
+            break;
         case LifecycleArm::on_logout_after_another_begin_string:
             ASSERT_FALSE(validate_gate)
                 << "PATH NOT DRIVEN: the validate gate is on, so the frame does not reach the "
@@ -7200,8 +7266,18 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
             break;
     }
 
-    // The arm's values.
-    expect_arm_values(got, expect, reading);
+    // The arm's values. Where the Logout's write races, they are compared without what
+    // the two orders differ in: the Logout's transmit, and the FSM state onLogout runs in.
+    ArmValues compared = got;
+    if (logout_write_races) {
+        std::erase_if(compared.order,
+                      [](const std::string& e) { return e.starts_with("transmit 35=5"); });
+        for (auto& e : compared.order) {
+            if (e.starts_with("onLogout [")) e = "onLogout";
+        }
+        std::erase_if(compared.wire, [](const std::string& w) { return w.starts_with("35=5"); });
+    }
+    expect_arm_values(compared, expect, reading);
     EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << reading;
 }
 
@@ -7583,6 +7659,284 @@ TEST(CallbackSend, OnLogoutOfGracefulCloseStartsClose_Terminal_NoStore_LiveWrite
             .at_the_end = "Disconnected closed_drained",
             .writes_after_close = 0,
             .writes_refused = 0});
+}
+
+namespace {
+
+// The positive control of the ToAdminOfGracefulCloseStartsClose cells' reading "the mock
+// clock was not advanced": their setup with no close started in the Logout's toAdmin.
+// The graceful close then stays in its wait for the peer's Logout, and ends when the
+// cell advances the mock clock.
+void run_graceful_close_with_no_close_started(StoreKind store, TransportKind transport) {
+    Fixture f{ExecKind::io_context, store};
+    auto cfg = f.cfg();
+    cfg.logout_disconnect_timeout_ms = kLogoutWaitMs;
+    const auto clock = std::make_shared<SleepCountingClock>(f.clock, kLifecycleHeartbeat);
+    cfg.clock_override = clock;
+    Session sess{f.engine, cfg};
+    // Before open(), as in the cells this one is the control of.
+    CloseCell cell{f, sess};
+    f.on_transmit = [&](const std::string& frame) { cell.transmitted(frame); };
+    f.app->on_to_admin = [&](std::string_view msg_type) { cell.to_admin(msg_type); };
+    f.app->on_lifecycle = [&](const char* name) { cell.lifecycle_callback(name); };
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
+
+    const fixpp::core::steady_time_point clock_before = f.clock->steady_now();
+    asio::co_spawn(sess.executor().underlying(), sess.close(close_mode::graceful),
+                   cell.completes(cell.outer, "the graceful close"));
+    // The close is in its wait once onLogout has run and a sleep is in flight on the
+    // session's clock. HeartBtInt is 0, so no liveness loop sleeps there.
+    const auto in_its_wait = [&] {
+        return cell.on_logout_calls > 0 && clock->counts().other_in_flight > 0;
+    };
+    const bool reached_the_wait = fixpp::test_support::pump_until(
+        f.ioc, [&] { return cell.outer.done || in_its_wait(); }, std::chrono::seconds{5},
+        fixpp::test_support::kPumpSlice, "CallbackSend::no_close_started_reaches_the_wait");
+    // Read before the clock is advanced.
+    const bool done_in_the_wait = cell.outer.done;
+    const std::string where_in_the_wait = where_is(sess);
+    const std::size_t noted_in_the_wait = cell.order.size();
+    const bool advanced_in_the_wait = f.clock->steady_now() != clock_before;
+
+    bool completed =
+        reached_the_wait && !done_in_the_wait &&
+        f.end_logout_wait_when(
+            in_its_wait, [] { return std::string("the graceful close had left its wait"); },
+            std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms},
+            "CallbackSend::no_close_started_logout_wait");
+    // Bounded: a close that does not complete is reported below, not waited for.
+    completed = completed && fixpp::test_support::pump_until(
+                                 f.ioc, [&] { return cell.outer.done; }, std::chrono::seconds{5},
+                                 fixpp::test_support::kPumpSlice, "CallbackSend::no_close_started");
+    const bool clock_advanced = f.clock->steady_now() != clock_before;
+    if (!completed && !cell.outer.done) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
+                                                        "CallbackSend::no_close_started");
+    }
+
+    const std::string at_the_end = where_is(sess);
+    const std::vector<std::string> wire(
+        f.wire.begin() + static_cast<std::ptrdiff_t>(cell.wire_before), f.wire.end());
+    const auto logouts_sent = std::ranges::count_if(
+        wire, [](const std::string& frame) { return field(frame, 35) == "5"; });
+    const std::string reading =
+        std::string("no close started in the Logout's toAdmin; in the wait: ") + where_in_the_wait +
+        ", the graceful close " + (done_in_the_wait ? "completed" : "not completed") +
+        ", the mock clock " + (advanced_in_the_wait ? "advanced" : "not advanced") +
+        "; at the end: " + at_the_end + ", the mock clock " +
+        (clock_advanced ? "advanced" : "not advanced") + "; .order = " + literal(cell.order) +
+        "; entries of .order noted before the clock was advanced: " +
+        std::to_string(noted_in_the_wait) + "; .callbacks = " + literal(cell.callbacks) +
+        "; the graceful close: " + result_of(cell.outer) + "; onLogout calls " +
+        std::to_string(cell.on_logout_calls) + transport_text(f) + ".";
+    std::printf("[ MEASURED ] %s\n", reading.c_str());
+    std::fflush(stdout);
+
+    if (session_test_access::lifecycle_value(sess) == 1) {
+        (void)f.run(sess.close(close_mode::terminal), "CallbackSend::no_close_started_teardown");
+    }
+
+    ASSERT_TRUE(reached_the_wait)
+        << "PATH NOT DRIVEN: the graceful close neither completed nor reached its wait for the "
+           "peer's Logout. "
+        << reading;
+    EXPECT_FALSE(done_in_the_wait)
+        << "with no close started in the Logout's toAdmin, the graceful close does not complete "
+           "while the mock clock stands. "
+        << reading;
+    EXPECT_EQ(where_in_the_wait, "LogoutSent closing")
+        << "in its wait the graceful close has sent the Logout and has not finished. " << reading;
+    EXPECT_TRUE(completed) << "the graceful close must complete once the mock clock has passed "
+                              "logout_disconnect_timeout_ms. "
+                           << reading;
+    EXPECT_TRUE(clock_advanced) << reading;
+    EXPECT_EQ(position_of(cell.order, "the graceful close completes"), noted_in_the_wait)
+        << "the graceful close's completion is the first thing noted after the clock was "
+           "advanced. "
+        << reading;
+    EXPECT_EQ(result_of(cell.outer), "ok") << reading;
+    EXPECT_EQ(at_the_end, "Disconnected closed_drained") << reading;
+    EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
+    EXPECT_EQ(logouts_sent, 1) << "the Logout is transmitted once. " << reading;
+    EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << reading;
+}
+
+}  // namespace
+
+// The test body starts a graceful close; the toAdmin of that close's Logout starts a terminal
+// one. The terminal close begins after toAdmin returns, joins the graceful one, and the wait
+// for the peer's Logout ends without the cell advancing the clock (B&L B-563-2).
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::to_admin_of_a_graceful_closes_logout, session_role::initiator,
+        close_mode::terminal, StoreKind::memory, TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "toAdmin(Logout) [Active closing]",
+                      "toAdmin(Logout) returns [Active closing]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::to_admin_of_a_graceful_closes_logout, session_role::initiator,
+        close_mode::terminal, StoreKind::memory, TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "toAdmin(Logout) [Active closing]",
+                      "toAdmin(Logout) returns [Active closing]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_FileStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::to_admin_of_a_graceful_closes_logout, session_role::initiator,
+        close_mode::terminal, StoreKind::file, TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "toAdmin(Logout) [Active closing]",
+                      "toAdmin(Logout) returns [Active closing]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = 2,
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// The arm in which the Logout's write races the escalation (logout_write_races in the
+// helper; fixpp#590). Its .order has no transmit of the Logout and no state on onLogout, and
+// its .wire no Logout: the helper removes them from what it compares.
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_FileStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::to_admin_of_a_graceful_closes_logout, session_role::initiator,
+        close_mode::terminal, StoreKind::file, TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "toAdmin(Logout) [Active closing]",
+                      "toAdmin(Logout) returns [Active closing]", "onLogout",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1"},
+            .retained = {"35=A 34=1", "35=5 34=2", "none", "none"},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = 3,
+            .store_next_in = 2,
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_NoStore) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::to_admin_of_a_graceful_closes_logout, session_role::initiator,
+        close_mode::terminal, StoreKind::none, TransportKind::sync_capture,
+        ArmValues{
+            .entered = "Active closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "toAdmin(Logout) [Active closing]",
+                      "toAdmin(Logout) returns [Active closing]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_NoStore_LiveWrite) {
+    run_lifecycle_callback_starts_close(
+        LifecycleArm::to_admin_of_a_graceful_closes_logout, session_role::initiator,
+        close_mode::terminal, StoreKind::none, TransportKind::live_suspending_write,
+        ArmValues{
+            .entered = "Active closing",
+            .order = {"transmit 35=A 34=1 [LogonSent open]", "toAdmin(Logout) [Active closing]",
+                      "toAdmin(Logout) returns [Active closing]",
+                      "transmit 35=5 34=2 [Active closing]", "onLogout [LogoutSent closing]",
+                      "the graceful close completes [Disconnected closed_drained]",
+                      "the callback's close completes [Disconnected closed_drained]"},
+            .callbacks = {"toAdmin 35=A [LogonSent open]"},
+            .results = {"the graceful close: ok", "the callback's close: ok"},
+            .wire = {"35=A 34=1", "35=5 34=2"},
+            .retained = {},
+            .next_out = 3,
+            .next_in = 2,
+            .store_next_out = {},
+            .store_next_in = {},
+            .at_the_end = "Disconnected closed_drained",
+            .writes_after_close = 0,
+            .writes_refused = 0});
+}
+
+// The control of the cells above: no close is started in the Logout's toAdmin.
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsNoClose) {
+    run_graceful_close_with_no_close_started(StoreKind::memory, TransportKind::sync_capture);
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsNoClose_LiveWrite) {
+    run_graceful_close_with_no_close_started(StoreKind::memory,
+                                             TransportKind::live_suspending_write);
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsNoClose_FileStore) {
+    run_graceful_close_with_no_close_started(StoreKind::file, TransportKind::sync_capture);
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsNoClose_FileStore_LiveWrite) {
+    run_graceful_close_with_no_close_started(StoreKind::file, TransportKind::live_suspending_write);
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsNoClose_NoStore) {
+    run_graceful_close_with_no_close_started(StoreKind::none, TransportKind::sync_capture);
+}
+
+TEST(CallbackSend, ToAdminOfGracefulCloseStartsNoClose_NoStore_LiveWrite) {
+    run_graceful_close_with_no_close_started(StoreKind::none, TransportKind::live_suspending_write);
 }
 
 // A frame under another BeginString makes the Active arm write Disconnected with no close()
