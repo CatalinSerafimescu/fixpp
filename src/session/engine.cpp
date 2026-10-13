@@ -1767,8 +1767,11 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                 co_await asio::this_coro::reset_cancellation_state(
                     asio::enable_total_cancellation());
                 // The stop check (§6, OD-3): stop()'s step 1 sets the flag on this
-                // strand, so a body that starts after that step is refused here. The
-                // control-strand read of stopped_ does this on the miss path.
+                // strand, so a body that starts after that step is refused here. On the
+                // miss path the control-strand read of stopped_ refuses a send whose
+                // control-strand step runs after stop() wrote it; a miss-path body that
+                // is already queued on the session's strand is not tested again
+                // (fixpp#579).
                 if (session_engine_access::engine_stop_noted(*kl)) {
                     co_return std::unexpected(core::error::session_invalid_state_for_send);
                 }
