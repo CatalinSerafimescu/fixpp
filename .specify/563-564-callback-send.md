@@ -224,11 +224,13 @@ statement that `Engine::send` from a callback of an unpublished session cannot b
     touched.** `MessageStore` is not changed. `store_then_emit` is a private member of `Session`.
   - **So Gate A applies to v0.8.** It runs as a round scoped to the amendment. It has not run (last
     section).
-  - **Appendix A, the four controls: not determined.** Its "Session FSM" row gives as examples "state
-    additions, recovery semantics, gap-fill rules". §2.6 adds no state and changes no recovery or
-    gap-fill rule; it stops one transition on one route, and it leaves a number consumed that the peer
-    has not received, which the existing resend path then meets. Whether that falls under the row was
-    not settled by reading it; the appendix says "When in doubt, run them". Their state for v0.8:
+  - **`[const §XI.7]` and Appendix A, the four controls: treated as owed.** The appendix has a
+    "Threading / concurrency" row, and the concurrency trigger is treated as touched above, so the
+    four controls are treated as owed for v0.8 on the same ground. Its "Session FSM" row is not
+    determined: it gives as examples "state additions, recovery semantics, gap-fill rules", and §2.6
+    adds no state and changes no recovery or gap-fill rule; it stops one transition on one route, and
+    it leaves a number consumed that the peer has not received, which the existing resend path then
+    meets. The appendix says "When in doubt, run them". The four controls' state for v0.8:
     `/clarify`, by hand, with R-8 as its record; `/analyze`, not run on v0.8; Codex Gate A, the scoped
     round, not run; the owner's `/plan` sign-off of v0.8, not given. This bullet claims none of the
     four as discharged.
@@ -1317,9 +1319,13 @@ pull request.
   wait, on a build with `NDEBUG` (no store on both transports; `MemoryStore` and `FileStore` on the
   synchronous sink); `B-563-2` states it for a `FileStore` with a live transport; and for a
   `MemoryStore` with a live transport it is not determined, because this revision's author found no
-  run of that arm without the wait. On a build with assertions `main` aborts on this route
-  (fixpp#564). So against `main` the escalation is this pull request's change, and "not transmitted"
-  is this amendment's.
+  run of that arm without the wait. None of those runs was on `main` itself, and none was on a build
+  with assertions. Read, not run, on `main`'s `Session::close` (`git show
+  origin/main:src/session/session.cpp`): a terminal close that finds a close in flight sets the
+  escalation's flag and then waits on a post; it enters no callback inside `toAdmin`, so the guard's
+  assertion is not reached on this route, and a build with assertions behaves there as a build with
+  `NDEBUG`. So against `main` the escalation is this pull request's change, and "not transmitted" is
+  this amendment's.
 - **For the peer.** The connection closes with no Logout. The peer has not received the Logout's
   number. A later session meets that through the resend path, which this amendment does not change.
   Not run.
