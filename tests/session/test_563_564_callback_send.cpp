@@ -8604,7 +8604,13 @@ void run_deferred_send_cancelled(Emission emission) {
         outer_live = false;
     };
     asio::co_spawn(ex, sess.send(one), record_into(first));
-    if (!f.pump_done([&] { return first.done && second.done; }, "CallbackSend::cancelled")) {
+    // Fixture::pump_done, spelled out. tools/audit_co_spawn_named_closure.py credits a
+    // co_spawn with a drive it can read in the scope of the closure it calls, and it
+    // does not read a fixture's member as one.
+    if (!fixpp::test_support::pump_until(
+            f.ioc, [&] { return first.done && second.done; }, "CallbackSend::cancelled")) {
+        fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "CallbackSend::cancelled");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "CallbackSend::cancelled";
         return;
     }
 
