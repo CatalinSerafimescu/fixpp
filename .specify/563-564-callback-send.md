@@ -1,23 +1,34 @@
 # fixpp#563, fixpp#564 — a send started inside an application callback (B41)
 
-> **Status: v0.10 (2026-10-13) — v0.7 with one amendment, rewritten after Gate A rounds 4 and 5. No
-> Gate A round has reviewed v0.10.** The amendment is §2.6 and the passages that go with it: rulings
-> R-8 and R-9 in §0, one bullet in §0a, one pointer in §2.1a, the last block of §3, the last blocks
-> of §4, §5 and §7 (with a pointer on §4's last "Compatibility" bullet), the last block of §6, and
-> the entries for v0.8 and for rounds 4 and 5 in the last section. §0's R-8 bullet also names a
-> ruling of another note, B28's R-24, which §2.6 follows. The amendment gives one ending to the
-> condition that B&L `L-563-6` states and that fixpp#590 tracks, on the owner's ruling of 2026-10-13
-> (R-8). Gate A rounds scoped to the amendment reviewed v0.8 (round 4) and v0.9 (round 5). Neither
-> converged. Round 5 left no P1 and two P2 after judging: v0.9 wrote `Disconnected` only after the
-> Logout's store call, so the session was still Active during it; and it recorded as a limit what
-> the owner had meanwhile ruled, the bound (R-9). v0.10 writes `Disconnected` when the cut is
-> decided, records R-9 and states the bound once with what it does not cover, and applies the
-> round's other findings (last section). v0.7's design is otherwise unchanged. §2.6 is a design:
-> nothing of it is in the pull request's tree. Its outcomes were measured on scratch prototypes;
-> §2.6 and §3 name each evidence file and say what was read and what is a prediction. v0.10 is
-> submitted to round 6, which is the last this loop allows. Until the last section records that
-> round, §2.6 is not approved. The paragraphs below are v0.7's status, and they stand for
-> everything else.
+> **Status: v0.11 (2026-10-13) — v0.7 with one amendment. Gate A, in rounds scoped to the amendment,
+> converged at round 6, on v0.10. v0.11 applies that round's P3 items. No Gate A round has reviewed
+> v0.11's edits.** The amendment is §2.6 and the passages that go with it: rulings R-8 and R-9 in
+> §0, one bullet in §0a, one pointer in §2.1a, the last block of §3, the last blocks of §4, §5 and
+> §7 (with a pointer on §4's last "Compatibility" bullet), the last block of §6, and the entries for
+> v0.8, for rounds 4, 5 and 6 and for v0.11 in the last section. §0's R-8 bullet also names a ruling
+> of another note, B28's R-24, which §2.6 follows. The amendment gives one ending to the condition
+> that B&L `L-563-6` states and that fixpp#590 tracks, on the owner's ruling of 2026-10-13 (R-8).
+> The rounds, each with its two reviews in the parent repository's
+> `research/G19-fix-fpml-iso20022/research/reviews/`:
+> - Round 4, on v0.8: Codex P1=3 P2=2 P3=1; after judging P1=2 P2=3 P3=8. Not converged.
+>   `codex_563_564_4_callback-send_review.md`, `opus_563_564_4_callback-send_triage.md`.
+> - Round 5, on v0.9: Codex P1=1 P2=4 P3=2; after judging P1=0 P2=2 P3=11. Not converged.
+>   `codex_563_564_5_callback-send_review.md`, `opus_563_564_5_callback-send_triage.md`.
+> - Round 6, on v0.10: Codex P1=0 P2=1 P3=2; after judging P1=0 P2=0 P3=9. Converged, and the judge
+>   states the tally as unconditional. `codex_563_564_6_callback-send_review.md`,
+>   `opus_563_564_6_callback-send_triage.md`.
+>
+> Round 6's judge asks for no change to the mechanism's four statements. One of its items (O-3) adds
+> one test at an exit of the Logout step. v0.11 is one edit made after convergence, as v0.6's and
+> v0.7's were. It applies round 6's nine P3 items from the judge's fix shapes and from two
+> measurements made after v0.10 was written (the evidence files named `ph8d_*` and `ph8e_*`). It was
+> not reviewed. The last section has one line per item, and what v0.11 adds beside the judge's list.
+> Converged is not approved: two of Appendix A's four controls are still owed for the amendment,
+> `/analyze` on it and the owner's sign-off of it (§0a), and one question is still with the owner
+> (§6). v0.7's design is otherwise unchanged. §2.6 is a design: nothing of it is in the pull
+> request's tree. Its outcomes were measured on scratch prototypes; §2.6 and §3 name each evidence
+> file and say what was read and what is a prediction. The paragraphs below are v0.7's status, and
+> they stand for everything else.
 >
 > **Status: v0.7 — Gate A converged at round 3 (2026-10-11); owner-signed-off 2026-10-11, for Gate A and
 > for the plan; post-Gate-A `/analyze` applied.** Issue mode: this note is the plan; there is no
@@ -152,15 +163,18 @@
     set, a graceful close whose Logout was not sent makes no teardown reset: `logout_seen_` is set
     only where the Logout's emit returned success. It is recorded in
     `.specify/536-537-538-recovery-liveness.md`, §0, on the branch `536-537-538-recovery-liveness`
-    (v0.16, its part "After ruling R-24"; commit `ee7309df`; head `902630b6` when read). In
-    `run_logout_phase1` at that head the assignment of `logout_seen_` follows the early return for a
-    Logout that was not sent, and runs only when `store_then_emit` returned success for the Logout
-    (read: `git show 902630b6:src/session/session.cpp`). That note says that it has the ruling as
-    its orchestrator passed it on, and has neither the question put to the owner nor the owner's
-    words; so nothing of it is quoted here. One of the reasons that note gives for the ruling is this note's v0.8,
-    §2.6, so the two notes agree by one ruling and not by two independent findings. §2.6 states the
-    rule as R-24's: the flag is set only where the Logout was sent. It answers the first owner
-    question of Gate A round 4.
+    (v0.16, its part "After ruling R-24"; commit `ee7309df`; head `902630b6` when first read; read
+    again for v0.11 at `7a7ed633`, which is that note's v0.17). In `run_logout_phase1` at both heads
+    the assignment of `logout_seen_` follows the early return for a Logout that was not sent, and
+    runs only when `store_then_emit` returned success for the Logout (read:
+    `git show 7a7ed633:src/session/session.cpp`; the two source files are the same at both heads:
+    `git diff 902630b6 7a7ed633 -- src/session/session.cpp include/fixpp/session/session.hpp` prints
+    nothing). At v0.16 that note said that it had the ruling as its orchestrator passed it on, with
+    neither the question put to the owner nor the owner's words. Its v0.17 adds the question and the
+    label of the option the owner chose. Nothing of either is quoted here. One of the reasons that
+    note gives for the ruling is this note's v0.8, §2.6, so the two notes agree by one ruling and
+    not by two independent findings. §2.6 states the rule as R-24's: the flag is set only where the
+    Logout was sent. It answers the first owner question of Gate A round 4.
 - **R-9 — the bound: a cut Logout's store call that is still waiting when the logout timeout
   expires** (owner, 2026-10-13, after Codex's review of Gate A round 5; the date is this bullet's).
   The question, as it was put: "The cut Logout's store call is still waiting when the logout timeout
@@ -179,13 +193,36 @@
     never cancelling that store call.
   - **What the option's sentences do not cover.** §2.6, "The bound", lists it, point by point, each
     with its status. The option's last sentence is about a store that is stuck at the lock, and the
-    points are outside it. One of them is measured, and it goes against the option's first
-    sentence for its case: where the Logout's own write job is still queued in the file executor at
-    the expiry, the timer does not end the close there; the closes complete when the job is taken.
-    The others are read, not run: a write already inside
-    its system calls; `Engine::stop()` as a whole; the teardown reset with `reset_on_disconnect`
-    set; the teardown that follows the join. They are facts, told to the owner on 2026-10-13 by the
-    orchestrator. They are not new questions: each is what the head does on its own routes.
+    points are outside it. One of them is measured, and it goes against the option's first sentence
+    for its case: where the Logout's own write job is still in the file executor at the expiry, the
+    timer does not end the close there. Both `close()` calls complete when the file executor has run
+    that job (`ph8e_predictions.md`). The others are read, not run: a write already inside its
+    system calls; `Engine::stop()` as a whole; the teardown reset with `reset_on_disconnect` set;
+    the teardown that follows the join. They are not new questions: each is what the head does on
+    its own routes.
+  - **What the owner was told.** The task list that records the ruling (the next bullet) also
+    records this, in its section "What the owner was told about the bound of R-9 (2026-10-13), and a
+    correction owed to it". That section is the orchestrator's account of the session. It records
+    four things, all on 2026-10-13, and no reply of the owner.
+    - At about 18:30, the four points that are read: the bound holds for the step of
+      `Engine::stop()` that joins the close, and not for `stop()` as a whole; with
+      `reset_on_disconnect` the teardown reset waits for the store's lock with no timer; a write in
+      progress, and a store that does not give its call up, are waited for; the timeout bounds the
+      join and not the whole close.
+    - At about 19:15, after the first run of the own-write scenes: "never wait longer than the
+      logout timeout" is true for a store call waiting at the store's lock, and false when the
+      Logout's own write job is still queued in the file executor, also with the Logout not cut. The
+      same message said that on the cut route nothing is then transmitted and the store is left with
+      a number it cannot read, and it named the issue of that store state (§7).
+    - Then, before the re-run: that this store state may come from the test's gate, which let later
+      jobs pass the job it kept (round 6's O-1), while the timing stands.
+    - At about 20:05, with the re-run's result (`ph8e_predictions.md`): on a file executor of one
+      thread that keeps order, the write runs before the cancellation's job, and the Logout is
+      written and reads back, 40 of 40. The unreadable record needs the cancellation's job to run
+      first: with two threads and the write's thread delayed, 40 of 40; with two threads let go
+      together, 1 of 40. The timing is unchanged on every kind of executor.
+    §2.6, "The bound", (a), states the corrected fact. Two bullets of "The bound", the ones after
+    (e), are this note's readings; that section does not record them as told.
   - **Where it is recorded.** The task list `decisions/speckit/563-564-callback-send-tasks.md` in the
     parent repository, "Owner ruling during Phase 8 (2026-10-13): the cut Logout's store call at the
     logout timeout", which has the question and the answer.
@@ -260,7 +297,8 @@ statement that `Engine::send` from a callback of an unpublished session cannot b
   `windows-msvc-release`. Its result goes into the verification record.
 - No wire format, parser, codegen or security surface changes. The session FSM gains no state; what
   changes is when a `close()` started inside a callback begins.
-- **The amendment (§2.6, v0.10), trigger by trigger.** The bullets above are v0.7's. For §2.6 alone:
+- **The amendment (§2.6), trigger by trigger.** The bullets above are v0.7's. For §2.6 alone, as of
+  v0.11:
   - **`[const §XVII.1]`, public C++ API: touched.** No signature changes. What `Session::close` does
     with a graceful close's Logout changes on this route, against the head and against `main` (§2.6,
     "The behaviour change").
@@ -275,17 +313,23 @@ statement that `Engine::send` from a callback of an unpublished session cannot b
     amendment adds no await, no post and no lock.
   - **`[const §XVII.1]`, message store contract, wire format, parser, codegen, security: not
     touched.** `MessageStore` is not changed. `store_then_emit` is a private member of `Session`.
-  - **So Gate A applies.** It runs as rounds scoped to the amendment. Round 4 reviewed v0.8 and
-    round 5 reviewed v0.9; neither converged. Round 6, on v0.10, has not run (last section).
-  - **`[const §XI.7]` and Appendix A, the four controls: owed.** The appendix's "Threading /
-    concurrency" row is touched, as above. Its "Session FSM" row is not determined: it gives as
-    examples "state additions, recovery semantics, gap-fill rules", and §2.6 adds no state and changes
-    no recovery or gap-fill rule; it stops one transition on one route, and it leaves a number
-    consumed that the peer has not received, which the existing resend path then meets. Their state
-    for v0.10: `/clarify`, by hand, with R-8 and R-9 as its record and with one question still with the
-    owner (§6); `/analyze`, not run on the amendment; Codex Gate A, round 6, not run; the owner's
-    `/plan` sign-off of the amendment, not given. This bullet claims none of the four as discharged.
-    `/analyze` and the sign-off stay owed after Gate A converges, as round 5's judge notes.
+  - **So Gate A applies.** It ran as rounds scoped to the amendment. Round 4 reviewed v0.8 and round
+    5 reviewed v0.9; neither converged. Round 6 reviewed v0.10 and converged (last section). v0.11's
+    edits were not reviewed.
+  - **`[const §XI.7]` and Appendix A, the four controls.** The appendix's "Threading / concurrency"
+    row is touched, as above. **Its "Session FSM" row is touched too** (round 6's F-3). On this
+    route the amendment removes a transition, because `LogoutSent` is no longer recorded, and it
+    moves the edge out of Active, because `Disconnected` is written earlier, when the cut is
+    decided. It also leaves a number consumed that the peer has not received, which the existing
+    resend path then meets. v0.10 called this row not determined, because its second column gives
+    "state additions, recovery semantics, gap-fill rules" and §2.6 adds no state. That column is
+    headed "Examples" and is not a definition. The appendix says that article-level trigger clauses
+    must match it, and Article XVII §1's clause is "Touches the session FSM", which the bullet above
+    already classes as touched. No control changes by this: the concurrency row already asked for
+    all four. Their state: `/clarify`, by hand, with R-8 and R-9 as its record and with one question
+    still with the owner (§6); `/analyze`, not run on the amendment, owed; Codex Gate A, converged
+    at round 6 on v0.10, with v0.11's edits not reviewed; the owner's `/plan` sign-off of the
+    amendment, not given, owed.
   - **`[const §X.7]`: no C-ABI change.** No symbol, type or error code changes. The condition needs a
     `close()` started inside `toAdmin`, and the C ABI's close is a blocking call that deadlocks inside
     a callback (`L-054-1`), as the bullet on `[const §X.7]` above says for R-4.
@@ -301,9 +345,9 @@ statement that `Engine::send` from a callback of an unpublished session cannot b
     recycler limit allocates (the comment on `send_fallback_leaf_` in
     `include/fixpp/session/session.hpp`). So B35's gates and the send path's benches are run again on
     the tree that carries the change (§3's last block).
-  - **`[const §XVII.3]`, independence.** The amendment's text, v0.8 to v0.10, was written by a
+  - **`[const §XVII.3]`, independence.** The amendment's text, v0.8 to v0.11, was written by a
     sub-agent from the orchestrator's briefs, from the rounds' triages and from the evidence of
-    Phases 8a, 8b and 8c. The prototypes were built and measured by implementer sub-agents. Codex wrote
+    Phases 8a to 8e. The prototypes were built and measured by implementer sub-agents. Codex wrote
     none of it.
 
 ## 1. What is wrong, and the one condition behind it
@@ -760,7 +804,7 @@ routes that were run). The measurement agrees in every arm, and every arm ends c
   Logout is retained, and it is transmitted only where that completion comes first (not seen without
   a stall; seen in every run with the session's thread stalled after the hand-off). In the other
   arms it is transmitted once (B&L `L-563-6`; fixpp#590 decides the one ending).
-  §2.6 designs that ending (v0.10), and it is not implemented yet.
+  §2.6 designs that ending, and it is not implemented yet.
   It is a change of behaviour (§4, "Compatibility"). Where a `Disconnected` write outside `close()`
   made the transition (`Session::send`'s, for one), no close is in flight, and the close started in
   `onLogout` is the session's first.
@@ -1164,14 +1208,17 @@ there is one of these routes when the code before it has not suspended.
 
 ### 2.6 One ending for a terminal close started in the `toAdmin` of a graceful close's Logout (R-8)
 
-Added in v0.8, rewritten in v0.9 after Gate A round 4 and in v0.10 after round 5 (last section). This
-section is a design. Nothing of it is in the pull request's tree, and no Gate A round has reviewed
-v0.10. Its measurements were made on 2026-10-13 on prototypes, in a scratch copy of the tree at
-`f5e47486`, on a Debug build with AddressSanitizer. The evidence is in the parent repository's
+Added in v0.8, rewritten in v0.9 after Gate A round 4 and in v0.10 after round 5, and edited in
+v0.11 after round 6 converged on v0.10 (last section). This section is a design. Nothing of it is in
+the pull request's tree. Gate A reviewed v0.10's form of it; v0.11's edits were not reviewed. Its
+measurements were made on 2026-10-13 on prototypes, in a scratch copy of the tree at `f5e47486`, on
+a Debug build with AddressSanitizer. The evidence is in the parent repository's
 `research/G19-fix-fpml-iso20022/research/probes/b41_563_564/`. Open `ph8c_predictions.md` first for
-the mechanism specified here, `ph8b_predictions.md` for the prototype before it, and
-`ph8a_four_way.md` for the three earliest. The evidence names five prototypes. This section uses the
-names only where it cites them:
+the mechanism specified here; `ph8d_predictions.md` for what an application starts inside the moved
+`onLogout`; `ph8e_predictions.md` for the Logout's own write job at the grace timer's expiry, which
+corrects a part of `ph8c_predictions.md` and of `ph8c_readings.md` (both say so at their top);
+`ph8b_predictions.md` for the prototype before; and `ph8a_four_way.md` for the three earliest. The
+evidence names five prototypes. This section uses the names only where it cites them:
 
 - **S** skips the Logout's transmit and changes nothing else (`ph8a_mechanism_S.patch`).
 - **S2** is S, and the Logout step then leaves by itself after one post (`ph8a_mechanism_S2.patch`).
@@ -1305,6 +1352,13 @@ prototype is `ph8c_mechanism_S6.patch`.
      It keeps its write of `Disconnected` "when the state is not that already", which does nothing on
      this route, and returns. It arms no wait and posts nothing. `close()` discards the value it
      returns. This is the exit that B28's decision D-OUT-6 gives a Logout that was not sent.
+     **The step's exit after a failed `assign_outbound()` gets the same test** (round 6's O-3): it
+     writes `Disconnected` only when the state is not that already. `record_state_transition_`
+     appends to the state history on every call, also when the state does not change. So without the
+     test that exit would record a second visit of `Disconnected` on the cut route; `onLogout` would
+     not run again, and the state would not change. On the cut route the exit is reached only where
+     `assign_outbound()` returns an error, and no cell drives that (§3, "Specified without a
+     witness").
    - **The join's waker.** In `Session::close`, a terminal close that joins a close in flight sets
      `close_escalated_`, as today. It does not call the grace timer's wake when the Logout was cut.
      So `close()`'s join does not cancel the cut Logout's step, and nothing cancels the Logout's
@@ -1411,8 +1465,12 @@ returns, not inside it.
     test of the record removed from the wake and the rest unchanged (mutant D), the two held-lock
     cells are RED in every run: nothing is under the Logout's number, and both closes have completed
     while the other writer's persist is still held (`ph8b_predictions.md`, "Mutant D, result";
-    `ph8c_predictions.md`, Q6, on S6). The six arms cannot see that mutant. So the held-lock cell is
-    the kill cell of the waker's part, and "the Logout is retained under its number" is the
+    `ph8c_predictions.md`, Q6, on S6). The two cells of the same scene in which `onLogout` starts an
+    operation are RED under it too (`ph8d_predictions.md`). The six arms cannot see that mutant.
+    Neither can a cell that holds the Logout's own write job with the order of the file executor's
+    jobs kept: there the write runs, and the ending is the unmutated one (`ph8e_predictions.md`,
+    "Mutant D on the `FileStore` arrival cells"; "The bound", (a), below). So the held-lock cells
+    are the kill cells of the waker's part, and "the Logout is retained under its number" is the
     assertion that names the loss.
 - **The callback does not run the session's own executor** (R-7). Where it does, a close that was
   queued earlier can begin inside the window and move the count (§7).
@@ -1441,29 +1499,63 @@ closes complete, against the timer"; §3, P-18). That reading was taken on a tra
 
 *What the option's sentences do not cover.* The option the owner chose begins "the timer ends the
 close and that store call is cancelled", and ends: "A terminal close and `Engine::stop()` never wait
-longer than the logout timeout for a store that is stuck at the lock." The mechanism keeps both for a
-store call at the lock, as measured. Each point below is outside the last sentence, which is about a
-store stuck at the lock. They are facts that were told to the owner on 2026-10-13. They are not new
-questions: each is what the head does on its own routes, and no choice inside R-8 follows from them.
+longer than the logout timeout for a store that is stuck at the lock." The mechanism keeps both for
+a store call at the lock, as measured. Each point below is outside the last sentence, which is about
+a store stuck at the lock. They are not new questions: each is what the head does on its own routes,
+and no choice inside R-8 follows from them. Points (a) to (e) were told to the owner on 2026-10-13.
+§0, R-9, "What the owner was told", says when and what, from the task list's section "What the owner
+was told about the bound of R-9 (2026-10-13), and a correction owed to it". The two bullets after
+(e) are this note's readings, and that section does not record them as told.
 
-- **(a) The Logout's own write job is still queued in the file executor at the expiry. Measured, and
+- **(a) The Logout's own write job is still in the file executor at the expiry. Measured, and
   against the option's first sentence for this case: the timer does not end the close there**
-  (`ph8c_predictions.md`, "The Logout's own write job past a short timeout"; §3, P-22). The closes
-  do not complete at the expiry. They complete when the file
-  executor takes the job: in the scene, not completed 600 ms past a 300 ms expiry, and completed
-  within a millisecond of the gate's opening. The join waits for the cancelled step, and the step
-  for its job. The timing is the same on the route with the Logout not cut, which is the head's
-  code.
-  - **What the store holds there is a defect of the head: fixpp#598, batch B56.** Measured:
-    `FileStore::store` treats a cancellation that arrived before its write job started as a write
-    that completed. The write's body never runs and the store's files do not grow. The store's next
-    outbound number is advanced past the Logout's, the call returns success, and a read of the
-    Logout's number then returns `store_io_failure`. The session's next outbound number is the
-    Logout's plus one. On the cut route nothing is transmitted, because the transmit is skipped. On
-    the route with the Logout not cut the same store state is left and the Logout is transmitted. So
-    the defect needs no part of this amendment: `src/session/file_store.cpp` is as on `main`
-    (`ph8c_readings.md`). This amendment does not change it and does not present it as its ending;
-    §3's NC-29 pins what was measured, with the issue named.
+  (`ph8e_predictions.md`; §3, P-22). The case has two halves, and they do not have the same reach.
+  - **The timing, on every kind of file executor that was run.** The closes do not complete at the
+    expiry. They complete when the file executor has run the write's job: in the scene, not
+    completed 600 ms past a 300 ms expiry, and completed 0 to 9 ms after the job was let go. The
+    join waits for the cancelled step, and the step waits for its job to be run; a cancellation does
+    not take a job out of the executor. The timing is the same on the route with the Logout not cut,
+    a graceful close alone, whose code this amendment does not change. So the logout timeout does
+    not bound a graceful close whose Logout's write job is in the file executor. §4 gives that a B&L
+    row of its own (round 6's O-5).
+  - **How a cancellation reaches the write.** Read, in asio 1.38.0's `impl/co_spawn.hpp`; the cells
+    print the order as a numbered sequence of the executor's jobs. `FileStore::store` awaits its
+    write through `offload_to`, which awaits a `co_spawn` onto the file executor. asio does not
+    record a cancellation in the spawned coroutine when it is emitted. It hands a second job to the
+    file executor, and the cancellation is recorded when that job runs. So what the write's job
+    finds depends on which of the two jobs the executor runs first.
+  - **What the store holds on a file executor that keeps the order of its jobs.** The write's job
+    runs first. The write's body runs, the store's catch of `operation_aborted` does not fire, and
+    the Logout is written and reads back under its number. Measured on a pool of one thread: 40 of
+    40 runs, cut and not cut, and the record was unreadable in none. On the cut route that is R-8's
+    own ending, reached late: numbered, stored, not transmitted. A strand over a pool keeps order
+    too, by reading; it was not run.
+  - **What the store holds on a file executor with more than one thread:** that, or, as a race, a
+    counted and unreadable record. The unreadable record needs the cancellation's job to run before
+    the write's body starts. Then the write's body never runs; the store's catch fires and takes the
+    abort for a write that completed; the store's next outbound number is advanced past the
+    Logout's; the call returns success; and a read of the Logout's number returns
+    `store_io_failure`. Measured on a pool of two threads, with nothing reordered by the cell: in 40
+    of 40 runs where the thread that takes the write's job is delayed before it starts it, and in 1
+    of 40 where both threads are held and then let go together. On the route with the Logout not cut
+    the Logout is then transmitted, for a frame the store counts and cannot read. On the cut route
+    nothing is transmitted. The state is reached on both routes, so it does not come from the cut,
+    and `src/session/file_store.cpp` is as on `main` (`ph8c_readings.md`). Its issue is fixpp#598,
+    batch B56. This amendment does not change it and does not present it as its ending.
+  - **The host supplies the file executor.** The library creates none. `FileStoreFactory::make`, in
+    `src/session/file_store_factory.cpp`, takes the executor from its configuration or from its
+    caller, and returns `store_factory_failed` when both are empty. So how many threads it has is
+    the host's choice.
+  - **v0.10 stated the unreadable record as what the head does on this route, with no condition on
+    the executor. That was too wide.** Its measurement (`ph8c_predictions.md`, "The Logout's own
+    write job past a short timeout") held the write's job behind a test gate that let every later
+    job pass, and the cancellation's job is such a later job. So the gate put the two jobs in the
+    order the unreadable record needs, in every run (round 6's O-1). Both files of that evidence now
+    say so at their top.
+  - **Not run:** a write already inside its system calls at the expiry ((b), below); a pool of more
+    than two threads; a strand over a pool; a pool that is busy, as opposed to one held by the cell;
+    a restart of the store over a file with a counted and unwritten record; how often the race is
+    lost outside this fixture; ThreadSanitizer.
 - **(b) A write already inside its system calls at the expiry is waited for.** Read, not run
   (`FileStore::store` and `offload_to`; `ph8c_readings.md`, its case of a job that is running). The
   write is not interruptible there; the Logout is retained and its number stays consumed, and the
@@ -1482,22 +1574,29 @@ questions: each is what the head does on its own routes, and no choice inside R-
   for its holder, past the expiry. Read, not run.
 - **(e) The timer bounds the join, not the whole close.** After the join the close makes its
   ordinary teardown: the transport's `close_async()` up to its own timeout, and the drains.
-- **The step's other awaits at the expiry.** Read, not run (round 5's triage, O-1). A step still
-  queued at the sequence manager's lock in `assign_outbound()` returns before it has a number: the
-  Logout is not numbered and not stored. A step in the reconcile's awaits after a store failure on a
-  persistent store is cancelled there; what the number is then was not read to a conclusion.
+- **The step's other awaits at the expiry.** Read, not run (round 5's triage, O-1; corrected by
+  round 6's O-3). `assign_outbound()` is not a place where the step can be waiting at the expiry.
+  Every await of `src/session/seqnum_manager.cpp` is the manager's lock, and no function there
+  awaits anything while it holds the lock (re-derive:
+  `command grep -n co_await src/session/seqnum_manager.cpp`, and read each function to its end). On
+  the session's one serialisation domain the lock is therefore free whenever a handler runs, and no
+  step is queued at it. v0.10 listed such a step here as a case, while "What arrives after the cut
+  is decided" already had the reading that excludes it. `assign_outbound()` ends the step early only
+  where it returns an error, and that exit is statement 4's. A step in the reconcile's awaits after
+  a store failure on a persistent store is cancelled there; what the number is then was not read to
+  a conclusion.
 - **A `toAdmin` that lasts longer than the timeout.** The timer has expired before its wait is
   initiated, so the wait completes as soon as it starts, and the join's cancellation meets the
   Logout's store call wherever it is by then: at the store's lock even if it is held only for an
-  instant, or in its offload. Read, not run. So "the lock held that long", above, is the measured
-  input and not the only one.
+  instant, or in its offload, which is (a). Read, not run. So "the lock held that long", above, is
+  the measured input and not the only one.
 
 *Who rules the number where the store call is ended at the lock.* B28's rulings R-15, R-16 and R-19:
 on a tree that carries both changes the number is taken back. On this branch alone it stays
 consumed, as measured. R-9's option says the same.
 
 **What was measured, and its limits.** They are prototype measurements, made in a scratch copy and not
-in the pull request's tree. §3's rows P-12 and P-16 to P-22 name the runs and the files.
+in the pull request's tree. §3's rows P-12 and P-16 to P-23 name the runs and the files.
 
 - **The six arms** under the three settings, plain, with `reset_on_logout` set, and on a strand
   executor: the ending of this section in every run, 20 runs each and 300 on `FileStore` live with no
@@ -1519,6 +1618,14 @@ in the pull request's tree. §3's rows P-12 and P-16 to P-22 name the runs and t
 - **What arrives while the cut Logout's own store call is held** (`ph8c_in_flight_frames.md`): "What
   arrives after the cut is decided", below.
 - **The bound** in its measured cases: "The bound", above.
+- **The Logout's own write job at the expiry, on four kinds of file executor**
+  (`ph8e_predictions.md`): "The bound", (a), above, with what was not run.
+- **What the application starts inside the decision-point `onLogout`** (`ph8d_predictions.md`):
+  "What arrives after the cut is decided", below. Not run there: `Engine::send` and `Engine::stop()`
+  from that `onLogout`; a graceful close started there with the store's lock held; the live
+  transport double outside the scene of the terminal close; a real TLS transport; the stall
+  settings; ThreadSanitizer; a release build; a callback that runs the session's executor inside
+  `onLogout`, which R-7 excludes. The two mutants of that evidence ran five times per cell.
 - **With the cells as they are at the head,** exactly five cells change result, and all five are this
   condition's own arms. S5 against S6, no original cell differs (`ph8c_predictions.md`, Q7;
   `ph8c_regressions_per_cell.tsv`).
@@ -1545,14 +1652,16 @@ close (round 5's F-4). The statement now:
   coroutine is refused with `session_invalid_state_for_send`. The liveness loop, woken, emits
   nothing. This holds for a frame whose handler was queued before the terminal close's post as well;
   v0.9 said that such a frame meets Active.
-- **Measured, in the hold of the Logout's own store call** (`ph8c_in_flight_frames.md`; §3, P-20). On
-  a `FileStore` and on a store double that holds its `store` call, on the synchronous sink, each of:
-  a Logout from the peer, the same with `reset_on_logout` set, an application message, a
-  TestRequest, a `Session::send` from another coroutine, and a wake of the liveness loop. On S6, in
-  every run: no `fromApp`, `fromAdmin`, `toAdmin` or `toApp`; neither next number moves; nothing is
-  transmitted; the send returns `session_invalid_state_for_send`; with `reset_on_logout` set there
-  is no reset; after the release both closes return success and the Logout is retained under its
-  number.
+- **Measured, in the hold of the Logout's own store call** (`ph8c_in_flight_frames.md`; §3, P-20).
+  On a `FileStore` and on a store double that holds its `store` call, on the synchronous sink, each
+  of: a Logout from the peer, the same with `reset_on_logout` set, an application message, a
+  TestRequest, a `Session::send` from another coroutine, and a wake of the liveness loop. The
+  `FileStore` hold was run in two forms: behind the gate, and with the pool's one thread held, so
+  that the order of the executor's jobs is kept (`ph8e_predictions.md`, the cells named
+  `…OrderKept`). On S6 the two forms read the same. On S6, in every run: no `fromApp`, `fromAdmin`,
+  `toAdmin` or `toApp`; neither next number moves; nothing is transmitted; the send returns
+  `session_invalid_state_for_send`; with `reset_on_logout` set there is no reset; after the release
+  both closes return success and the Logout is retained under its number.
 - **On the prototype before (S5) each of those arrivals is acted on,** and those cells are RED there:
   a Logout from the peer draws a confirming Logout numbered one above the cut one, and with
   `reset_on_logout` set the teardown reset then fires; an application message reaches `fromApp`; a
@@ -1576,7 +1685,41 @@ close (round 5's F-4). The statement now:
   Read: between that test and `assign_outbound()` the frame's build and `toApp` are synchronous, and
   the sequence manager's lock is never held across a suspension, so no handler of the session can
   run between the test and the number.
-- **A close started in that `onLogout`** waits by one post and joins. Read, not run.
+- **What the application starts inside that `onLogout`** (round 6's F-1). `onLogout` now runs at the
+  decision point. Inside it the session is `Disconnected`, its lifecycle is `closing`, the Logout
+  has no number yet, and a callback is on the stack, so R-4's wait applies to a close. Each
+  operation has one outcome there:
+  - **A terminal `close()`.** Measured (`ph8d_predictions.md`, scenes 1 and 4; §3, P-23). It waits
+    by one post and joins. The count moves once more, after the step compared it, and nothing reads
+    it again. The close does not call the grace timer's wake, because the Logout was cut. All three
+    closes return success. The Logout is numbered and retained, and nothing is transmitted. With the
+    `FileStore`'s lock held by another writer, no close completes while the lock is held, and the
+    Logout is retained after the release.
+  - **A graceful `close()`.** Measured (scene 2). It waits by one post and joins. The count does not
+    move. It returns success, and the rest is as above. Not run with the lock held.
+  - **A `Session::send`.** Measured (scenes 3 and 4). It returns `session_invalid_state_for_send`,
+    with no `toApp` and no number, also with the lock held. Read: the send's body tests the state
+    before it tests the callback depth, so the send is refused at once and nothing is deferred.
+  - **`Engine::send`.** Read, not run (round 6's triage, F-1). Both of its bodies test the session's
+    state on the session's strand and return `session_invalid_state_for_send`. The state never
+    returns to Active, so when the body runs does not matter.
+  - **`Engine::stop()`.** It is ruling R-5's excluded route, as from any callback (B&L `L-563-4`,
+    fixpp#579). This note states no ending for it. Read, not run: the cut and the state were decided
+    before `onLogout` ran, and a terminal close that `stop()` later makes of this session takes
+    `close()`'s joining branch, where the record of the cut is set and the wake is not called.
+  - **What is new at this position.** Not the refused send. At the head `onLogout` on this condition
+    runs at `LogoutSent` or at `Disconnected` (measured; "The behaviour change", below), and a
+    send's test of the state refuses it there too. Two things are new. A close started there begins
+    before the Logout has a number and a store call; the close posts and then only joins, so the
+    Logout is still numbered and stored (measured). And a terminal close started there does not wake
+    the grace timer. On the route with no close in `toAdmin`, which this amendment does not change,
+    a terminal close started in a graceful close's `onLogout` does wake it
+    (`CallbackSend.OnLogoutOfGracefulCloseStartsClose_Terminal` is that route's cell; round 6's
+    triage, F-1). The suppressed wake is the waker's part of statement 4 again, on the same branch
+    as for the close started in `toAdmin`. Its kill cells are the held-lock cells (§3, mutant D).
+  - **The order of the record of the cut and the state's write has no effect a caller can see.**
+    Measured: with the two statements swapped, every cell of these scenes is green (mutant G; §3,
+    "Specified without a witness").
 
 **Compared with QuickFIX C++ and QuickFIX/J.** Read, not run (`ph8a_readings.md`, its first section,
 which names the commits and the lines): `logout()`, then `disconnect()` inside that Logout's `toAdmin`.
@@ -1600,13 +1743,38 @@ file says so), so the agreement is claimed for this sequence only.
 `toAdmin` of its own graceful close's Logout, and to its peer. It goes under "Compatibility" in the
 pull request.
 
-- **Against the head.** The five arms that transmit the Logout once stop transmitting it. On those
-  arms `onLogout` runs with the session `Disconnected` where it ran with `LogoutSent`, and it runs
-  before the Logout is numbered and stored where it ran after the Logout was transmitted; a
-  configured `reset_on_logout` no longer fires. On a `FileStore` with a live transport the ending
-  without a stall becomes the only one. Whatever arrives after `toAdmin` has returned meets a closed
-  session, where at the head it met Active during the Logout's store call and `LogoutSent` after it
-  ("What arrives after the cut is decided", above).
+- **Against the head.** What the head does on each arm is measured (`ph8a_S_arms_by_stall.md`, the
+  tables headed "unpatched head", under the three stall settings). The state in which `onLogout` ran
+  is measured. That this state is recorded after the Logout's emit has returned, or is written by
+  `close()` after its join, is read in `run_logout_phase1` and in `Session::close`.
+  - **Five arms: no store and `MemoryStore`, each on the synchronous sink and on the live transport,
+    and `FileStore` on the synchronous sink.** Today, under every setting: the Logout is transmitted
+    once; `onLogout` runs with the session at `LogoutSent`, which is after the Logout was numbered,
+    stored where there is a store, and transmitted; `LogoutSent` is recorded; a configured
+    `reset_on_logout` fires.
+  - **The sixth arm: `FileStore` on the live transport.** Today, with no stall and with the file
+    executor's jobs delayed: the Logout is retained and not transmitted; `onLogout` runs with the
+    session `Disconnected`, which `close()` writes after its join, so after the Logout was numbered
+    and stored; `LogoutSent` is not recorded; a configured `reset_on_logout` does not fire. That
+    `onLogout` runs after the Logout took its number is inferred there from that state and from the
+    retained Logout; the number was not read inside `onLogout` at the head, and §3's NC-21 calls
+    that reading predicted. Today, with the session's thread stalled after the hand-off: as the five
+    arms.
+  - **After this amendment, on all six arms and in either order:** the Logout is not transmitted.
+    `onLogout` runs once, with the session `Disconnected`, right after `toAdmin` returns and before
+    the Logout is numbered and stored. `LogoutSent` is not recorded. A configured `reset_on_logout`
+    does not fire.
+  - **So:** five arms stop transmitting a Logout that they transmit today, and the sixth stops
+    transmitting it in the one order in which it does today. On all six arms `onLogout` moves: it
+    runs before the Logout is numbered and stored, where today it runs after. That holds for the
+    `FileStore` arm on the live transport too. Where `LogoutSent` is recorded today it no longer is,
+    and where `reset_on_logout` fires today it no longer does.
+  - **What arrives after `toAdmin` has returned** meets a closed session, where at the head it met
+    Active during the Logout's store call and `LogoutSent` after it ("What arrives after the cut is
+    decided", above).
+  - **What the application starts inside `onLogout`** on this route now starts before the Logout has
+    a number, and a terminal close started there does not end the grace wait (the same paragraph,
+    its bullet on that `onLogout`).
 - **Against 093's OD-29.** For a cut Logout, a terminal close that joins does not end the grace wait.
   The difference shows only at the bound.
 - **Against `main`.** Read, not run on `main`, on its `Session::close` (`git show
@@ -1652,9 +1820,11 @@ condition (2) (read: `ph8a_readings.md`, its fourth section).
 
 **With batch B28.** Its note is `.specify/536-537-538-recovery-liveness.md` on the branch
 `536-537-538-recovery-liveness`; the note is not on this branch. Read on 2026-10-13 in that branch's
-worktree (v0.16, head `902630b6` when read; read it again before relying on this). B28 rewrites the
-same lines: `store_then_emit`'s declaration, which is no longer `noexcept` there and throws when the
-store call was cancelled, and the Logout's emit call in `run_logout_phase1`.
+worktree at `902630b6` (v0.16), and again for v0.11 at `7a7ed633` (v0.17). `src/session/session.cpp`
+and `include/fixpp/session/session.hpp` are the same at both heads (§0, R-8, has the command). Read
+it again before relying on this. B28 rewrites the same lines: `store_then_emit`'s declaration, which
+is no longer `noexcept` there and throws when the store call was cancelled, and the Logout's emit
+call in `run_logout_phase1`.
 
 v0.8 named two differences of rule and left them to the pull request that merges second. Round 4
 found that a design note may defer a shape that way and not an observable. Both are settled:
@@ -1670,16 +1840,29 @@ found that a design note may defer a shape that way and not an observable. Both 
 
 *The Logout step on a tree that carries both changes, per route.* Each cell names what rules it. R-8
 and R-9 are this note's. R-15, R-16, R-17, R-19 and R-24 are B28's, read from its note and not run
-here. "Read" marks a cell that was read and not run. Round 5's judge checked each cell against
-`902630b6` and found them to hold. **No tree carries both changes, so no row of this table can be run
-as a whole until both are merged;** what was measured on this branch alone is marked. On all three
-rows the session is already `Disconnected` when the store call is made, by statement 4; on B28's
-branch its own write of `Disconnected` on these routes then does nothing.
+here. "Read" marks a cell that was read and not run. Round 5's judge and round 6's checked each cell
+against `902630b6` and found them to hold; round 6's O-3 corrects one sentence beside the table,
+below. **No tree carries both changes, so no row of this table can be run as a whole until both are
+merged;** what was measured on this branch alone is marked. On all three rows the session is already
+`Disconnected` when the store call is made, by statement 4.
+
+**What a later write of `Disconnected` does there depends on which write it is** (round 6's O-3;
+read on the two branches). `record_state_transition_` appends to the state history on every call,
+also when the state does not change. B28's write in the step's exit for a Logout that was not sent
+has the test "when the state is not that already", and does nothing. B28's write inside
+`store_then_emit`, on its exit for a cancelled store call, goes through
+`disconnect_unless_superseded_`, which calls `record_state_transition_` with no test of the state
+when the caller passed no `arm`; the Logout step passes none. So on the second row a tree that
+carries both changes records a second visit of `Disconnected`, unless that write is guarded.
+`onLogout` does not run again and the state does not change: the effect is one more entry in
+`fsm_visit_history()`. v0.10 said that B28's own write of `Disconnected` does nothing on these
+routes. That holds for the first of the two writes only. The guard is an instruction to the pull
+request that merges second, and the cell that waits for both asserts its effect (below).
 
 | The cut Logout's store call | Transmitted | The number | The store | `logout_seen_` | The step's exit | Both closes |
 |---|---|---|---|---|---|---|
 | completes | no (R-8; measured here) | consumed (R-8; measured here) | holds it (R-8; measured here) | not set (R-24; measured here through the reset). On the merged tree this holds only if the cut route's exit stays ahead of B28's assignment of the flag, because the emit returns success here (the merge hazard, below); NC-23 pins it and is run again there | at once (R-17; statement 4; measured here) | success, success (measured here) |
-| is ended by a cancellation while it waits for the store's lock, which on the cut route happens only at the grace timer's expiry (R-9; "The bound") | no (R-15; measured here) | taken back (R-16, R-19; read). On this branch alone: consumed (measured) | holds nothing (R-15; measured here) | not set (R-24; read) | at once: `store_then_emit` leaves by its exception there (R-16, R-17; read) | success, success (B28's decision D-OUT-6; read). On this branch alone: success, success (measured) |
+| is ended by a cancellation while it waits for the store's lock, which on the cut route happens only at the grace timer's expiry (R-9; "The bound") | no (R-15; measured here) | taken back (R-16, R-19; read). On this branch alone: consumed (measured) | holds nothing (R-15; measured here) | not set (R-24; read) | at once: `store_then_emit` leaves by its exception there (R-16, R-17; read), after its own write of `Disconnected` (the paragraph above; read) | success, success (B28's decision D-OUT-6; read). On this branch alone: success, success (measured) |
 | fails, on a persistent store | no (R-8; read) | set to the store's own next number by feature 059's reconcile (read) | holds nothing (read) | not set (R-24; read) | at once (R-17; statement 4; read) | success, success (read) |
 
 The routes of R-17 that the table has no row for:
@@ -1695,9 +1878,10 @@ The routes of R-17 that the table has no row for:
   (R-17); the close returns success. Read.
 - **A Logout that is not cut and was sent** is as today on both branches: `LogoutSent`, the flag set,
   the wait.
-- **A store call that `FileStore` reports as success though nothing was written** (bound case (a);
-  fixpp#598) is on neither branch's table as an ending: B28's rulings do not see it, because the
-  store call does not report the cancellation. It is that issue's.
+- **A store call that `FileStore` reports as success though it wrote nothing** (fixpp#598; "The
+  bound", (a): it needs the cancellation's job to run before the write's body starts, on a file
+  executor with more than one thread) is on neither branch's table as an ending. B28's rulings do
+  not see it, because the store call does not report the cancellation. It is that issue's.
 
 On this branch alone, before B28 merges, a Logout that is not cut and was not sent keeps today's
 behaviour: the step ignores the emit's result, records `LogoutSent` and waits. R-17 and R-24 are
@@ -1718,9 +1902,10 @@ reset happens. They must be run on the merged tree, and they must be green there
 *The cell that waits for both.* A cut Logout whose store call is ended by a cancellation at the
 store's lock, on a tree that carries both changes: the second row above. Its assertions, named now:
 not transmitted; the next outbound number is the Logout's own, in the manager and in the store;
-nothing under that number; `logout_seen_` not set, read through `reset_on_logout`; both closes return
-success; the transport's close counts. The pull request that merges second adds it. Until then NC-28
-(§3) pins the same scene with this branch's number.
+nothing under that number; `logout_seen_` not set, read through `reset_on_logout`; both closes
+return success; the transport's close counts; and the state history holds one visit of
+`Disconnected` (round 6's O-3). The pull request that merges second adds it. Until then NC-28 (§3)
+pins the same scene with this branch's number.
 
 ## 3. Tests and gates
 
@@ -2189,13 +2374,14 @@ over the changed manifest (`ci/run-bench-suite.sh` on the candidate build), ever
 `check-comment-claims.py`, which is in the parent repo's `.claude/scripts/` and is run with the library
 as its `--root`. The `[const §XVII.7]` local build and the MSVC leg are in §0a.
 
-**§2.6's rows (v0.10).** Not reviewed at Gate A. Everything above in this section is v0.7's and is not
-changed by them. They are for the implementer of §2.6. The rule: each clause of §2.6 that changes
-behaviour has an arm that is RED in the pull request's tree before the production edit, and the record
-shows it RED there. Each row below says of each cell and arm which it is: **RED first**; a
-**control**, green at the head and after; or a **pin**, of a ruled behaviour or of a stated
-limitation. Where an arm's state at the head was not run, the row says "predicted". The scratch
-prototypes are not the pull request's tree.
+**§2.6's rows.** Gate A round 6 reviewed v0.10's form of them. v0.11's edits to them were not
+reviewed (last section). Everything above in this section is v0.7's and is not changed by them. They
+are for the implementer of §2.6. The rule: each clause of §2.6 that changes behaviour has an arm
+that is RED in the pull request's tree before the production edit, and the record shows it RED
+there. Each row below says of each cell and arm which it is: **RED first**; a **control**, green
+after the change, and at the head either green or stopped by its own path guard, which the row then
+says; or a **pin**, of a ruled behaviour or of a stated limitation. Where an arm's state at the head
+was not run, the row says "predicted". The scratch prototypes are not the pull request's tree.
 
 *Predictions and measurements,* in the form of the table above. "Measured" here always means a
 prototype, in a scratch copy at `f5e47486`, Debug with AddressSanitizer, 2026-10-13. S6 is the
@@ -2204,66 +2390,94 @@ store call; S3 is v0.8's.
 
 | Id | Predicted (read; not run unless the row says "Measured") | Measurement | If it disagrees |
 |---|---|---|---|
-| P-12 | §2.6's ending on the six arms of the condition, under the three stall settings; the same with `reset_on_logout` set, and on the strand fixture. `onLogout` runs before the Logout is numbered and stored. With the head's cells unchanged, exactly the five arms that transmit the Logout change result. | **Measured on S6: agrees** (`ph8c_S6_arms_by_stall.md`; `ph8c_predictions.md`, Q1 and Q7; the probe's positive control is `ph8c_probe-positive-control.txt`; every cell of the regression pass is in `ph8c_regressions_per_cell.tsv`). 20 runs per arm and setting, and 300 on `FileStore` live with no stall. Inside `onLogout` the next outbound number is the Logout's own in every run; on S5 it is the Logout's plus one. The same matrix was measured on S5 and on S3 before it (`ph8b_S5_arms_by_stall.md`, `ph8a_S3_arms_by_stall.md`), with the same readings apart from that one. §2.6, "What was measured, and its limits", has what the pass did not build or run. | The implementation is measured again in the pull request's tree, through NC-21 to NC-30. If an arm ends otherwise there, the implementation differs from the prototype, or the prototype was read wrongly. The difference goes to the orchestrator before any assertion is changed. |
-| P-13 | NC-22's two arms, at the head, on the clause "not on the wire". (At the reading inside `onLogout` both arms are RED at the head, as NC-21's arms are.) The arm that holds the submitting thread until the file pool is idle makes the order of the setting "the session's thread stalled", in which the head transmits the Logout: RED at the head. The arm that holds the Logout's store job until the session's executor has run dry makes the order of the setting "every job of the file executor delayed", in which the head does not transmit it: green at the head. After the change both are green. | Both arms in the pull request's tree before the production edit, and again after it. Not run. The two settings they stand on are measured at the head (`ph8a_S_arms_by_stall.md`, "unpatched head"). | If neither arm is RED at the head, the gate does not make the order it claims. The arms are rebuilt before the production edit, because without a RED arm the `FileStore` cell on the live transport has no RED state. If both are RED, the reading of which order transmits is wrong, and §2.6's "What the head does" is corrected. |
+| P-12 | §2.6's ending on the six arms of the condition, under the three stall settings; the same with `reset_on_logout` set, and on the strand fixture. `onLogout` runs before the Logout is numbered and stored. With the head's cells unchanged, exactly the five arms that transmit the Logout change result. | **Measured on S6: agrees** (`ph8c_S6_arms_by_stall.md`; `ph8c_predictions.md`, Q1 and Q7; the probe's positive control is `ph8c_probe-positive-control.txt`; every cell of the regression pass is in `ph8c_regressions_per_cell.tsv`). 20 runs per arm and setting, and 300 on `FileStore` live with no stall. Inside `onLogout` the next outbound number is the Logout's own in every run; on S5 it is the Logout's plus one. The same matrix was measured on S5 and on S3 before it (`ph8b_S5_arms_by_stall.md`, `ph8a_S3_arms_by_stall.md`), with the same readings apart from that one. §2.6, "What was measured, and its limits", has what the pass did not build or run. | The implementation is measured again in the pull request's tree, through NC-21 to NC-31. If an arm ends otherwise there, the implementation differs from the prototype, or the prototype was read wrongly. The difference goes to the orchestrator before any assertion is changed. |
+| P-13 | NC-22's two arms, at the head, on the clause "not on the wire". (At the reading inside `onLogout` both arms are RED at the head, as NC-21's arms are.) The arm that holds the submitting thread until the file pool is idle makes the order of the setting "the session's thread stalled", in which the head transmits the Logout: RED at the head. The arm that holds the Logout's store job until the session's executor has run dry makes the order of the setting "every job of the file executor delayed", in which the head does not transmit it: green at the head. That prediction is for the clause "not on the wire". The clause "retained" in that arm, at the head, holds only if the hold keeps the order of the executor's jobs: at the head a cancellation is emitted while the job is held, and what the store then holds depends on which job runs first (§2.6, "The bound", (a)). The hold is specified so (the fixture, below), and the setting it stands on reorders nothing. After the change both are green. | Both arms in the pull request's tree before the production edit, and again after it. Not run. The two settings they stand on are measured at the head (`ph8a_S_arms_by_stall.md`, "unpatched head"). | If neither arm is RED at the head, the gate does not make the order it claims. The arms are rebuilt before the production edit, because without a RED arm the `FileStore` cell on the live transport has no RED state. If both are RED, the reading of which order transmits is wrong, and §2.6's "What the head does" is corrected. |
 | P-14 | NC-24's store doubles. (a) A double whose `store` takes more hops than the shipped stores: §2.6's ending in full, the Logout retained, the mock clock not advanced. No cancellation reaches its call, because nothing cancels a cut Logout's store call before the grace timer expires. (b) Two doubles that hold their call past a short `logout_disconnect_timeout_ms` and give it up when a cancellation reaches them. One reports the cancellation and leaves the caller's cancellation state alone. The other loses the recorded cancellation, as the lock sequence of the shipped stores does. Both end alike: both closes complete inside the cell's bound with the mock clock standing; not transmitted; the number consumed; nothing retained; both closes success. | Not run. Read: `store_then_emit`, and the cut exit of statement 4, which has no await after the store call. The shipped `FileStore`'s form of (b), at its lock, is measured: P-18. | (a): the ending does not hold for a store with more hops, which is acceptance item 2 of the issue; §2.6 returns to the orchestrator. (b): if the two doubles end differently, a cancellation that is lost still changes the ending, which is round 4's O-1 returning; §2.6 returns to the orchestrator. |
 | P-15 | NC-25's two new controls. (b) A second graceful `close()` started in the Logout's `toAdmin`: it waits, then joins the first; the Logout is transmitted once; both closes return the same result when the first one's wait ends. (c) A terminal close that took the wait before the Logout step read the count: the count is non-zero and does not move inside the Logout's `toAdmin`, and the Logout is transmitted once. | Not run. Read: `Session::close` and `run_logout_phase1`; for (c), the trace in NC-25's row (round 4's O-7). | (b): if the Logout is not transmitted, the count moves for a graceful close, which is a defect of the implementation. (c): if the Logout is not transmitted in the unmutated tree, the trace is wrong; the setup is corrected before the mutant "the count is non-zero" is run. |
 | P-16 | The held-lock scene (NC-26): a second writer of the session holds the `FileStore`'s lock while the cut Logout's store call reaches it. With statement 4: while the lock is held no sleep is in flight on the session's clock and the session is `Disconnected`; after the release both closes complete with the mock clock standing, and the Logout is retained under its number. With v0.8's statement 4 (S3): RED. At the head: RED, by the reading of §2.6's "What the head does" (the Logout transmitted, `LogoutSent` recorded, the close waiting out the timeout). | **Measured on S6, S5 and S3: agrees** (`ph8c_predictions.md`, Q5, for S6; `ph8b_held_lock.md` for S5 and S3; cells in `ph8c_cell_edit_S6.patch`). S6: green, 20 of 20 on each transport, with the fatal assertion that the held `on_inbound_frame` has not returned at the snapshot. S5: green. S3: RED, 5 of 5 on each transport, at "the step is at the store's lock, not in a wait", at "both closes complete within the pump's bound with the mock clock standing" and at "the Logout is retained under its number". **Not run at the head; its row is a prediction to run.** Two earlier runs of these cells did not drive the path and are evidence of that only (`ph8b_predictions.md`, "The scenes' first two runs did not test anything"). | S6's shape RED in the pull request's tree: statement 4 does not remove the lost waker; §2.6 returns to the orchestrator. Head green: the reading of what the head does on this route is wrong. The cell is then a pin, and the clause it witnesses (nothing cancels the store call) has no arm that is RED in the pull request's tree, only the scratch mutants; that goes to the orchestrator before the production edit. |
 | P-17 | A Logout from the peer delivered after the cut Logout's store call has returned and before the closes complete (NC-27, its first two arms): it meets `Disconnected`; no `fromAdmin`, no confirming Logout, no number. | **Measured: agrees on S6 and S5; the other result on S3** (`ph8b_predictions.md`, P5; `ph8c_predictions.md`, Q6, for the same cells on S6). S3: the state is Active, `fromAdmin` runs once, and a confirming Logout with the next number is transmitted. Arms: `MemoryStore` and no store, synchronous sink. Not run at the head. | If the frame meets Active with statement 4, the step did not write `Disconnected`; the cell's delivery is checked first. |
 | P-18 | The bound at the store's lock (NC-28; ruling R-9): the lock held past a short `logout_disconnect_timeout_ms`, live transport. Both closes complete at the grace timer's expiry, with success; nothing is under the Logout's number. | **Measured on S6** (`ph8c_predictions.md`, Q5 and "When the two closes complete, against the timer"), 20 of 20, with a timeout of 300 ms and the gate opened at about 900 ms: `onLogout` at 0 ms; the transport's direct `close()`, its `close_async()` and both closes' completions at 300 ms from the start of the graceful close (smallest 300, largest 300, in whole milliseconds); both closes success; the session `Disconnected` and `closed_drained`; nothing under the Logout's number and the store's next outbound number the Logout's own; the session's next outbound number the Logout's plus one; nothing transmitted; one direct `close()` and one `close_async()`. Positive control of the reading: under mutant D the same events are at 0 to 1 ms. The transport is a double whose `close_async()` returns at once; a real TLS transport's was not measured. | Not a prediction. NC-28 pins what was measured; a different result in the pull request's tree goes to the orchestrator. |
-| P-19 | Both closes return success on the two arms with no store, where the step ends inside its own launch. The cells can report the other result. Each measured mutant has its kill cell among the final cells. | **Measured on S6's cells** (`ph8c_predictions.md`, Q6; `ph8c_failing_assertions.txt` has each failing assertion; five runs per cell; each mutant's binary has its own hash). Success and success on the six arms, 20 of 20 in every setting. The mutant table below has each result: A, no cell fails; C, the six arms and the two frame-after arms; D, the held-lock cells and the six `FileStore` arrival arms; E, which is S5, the twelve arrival arms and the reading inside `onLogout`; F, the twelve arrival arms, the two frame-after arms and that reading. | Not a prediction. |
-| P-20 | What arrives while the cut Logout's own store call is held (NC-27, its arrival arms) meets a closed session: no callback, no number, nothing transmitted, the send refused, no reset with `reset_on_logout` set. With `Disconnected` written after the store call (S5): each arrival is acted on. | **Measured on S6: agrees, 20 of 20 on each of twelve cells; on S5: the other result, 5 of 5 each, the cells RED** (`ph8c_in_flight_frames.md`; `ph8c_scenes-S6/`, `ph8c_scenes-S5/`; `ph8c_arrivals_compact.txt`). The arrivals: a Logout from the peer, the same with `reset_on_logout` set, an application message, a TestRequest, a `Session::send` from another coroutine, a wake of the liveness loop; each on a `FileStore` and on a store double that holds its `store` call. Synchronous sink only. The fatal assertions of the path hold in every run on both prototypes. Not run at the head. | If an arrival is acted on with statement 4, the state was not written at the decision point, or the arrival was delivered before `toAdmin` returned; the cell's delivery is checked first. |
+| P-19 | Both closes return success on the two arms with no store, where the step ends inside its own launch. The cells can report the other result. Each measured mutant has its kill cell among the final cells. | **Measured on S6's cells** (`ph8c_predictions.md`, Q6; `ph8c_failing_assertions.txt` has each failing assertion; five runs per cell; each mutant's binary has its own hash). Success and success on the six arms, 20 of 20 in every setting. The mutant table below has each result: A, no cell fails; C, the six arms and the two frame-after arms; D, the held-lock cells, and with them the six `FileStore` arrival arms in their gated form, whose RED came from the gate's reordering and is not a kill (the mutant table); E, which is S5, the twelve arrival arms and the reading inside `onLogout`; F, the twelve arrival arms, the two frame-after arms and that reading. | Not a prediction. |
+| P-20 | What arrives while the cut Logout's own store call is held (NC-27, its arrival arms) meets a closed session: no callback, no number, nothing transmitted, the send refused, no reset with `reset_on_logout` set. With `Disconnected` written after the store call (S5): each arrival is acted on. | **Measured on S6: agrees, 20 of 20 on each of twelve cells; on S5: the other result, 5 of 5 each, the cells RED** (`ph8c_in_flight_frames.md`; `ph8c_scenes-S6/`, `ph8c_scenes-S5/`; `ph8c_arrivals_compact.txt`). The arrivals: a Logout from the peer, the same with `reset_on_logout` set, an application message, a TestRequest, a `Session::send` from another coroutine, a wake of the liveness loop; each on a `FileStore` and on a store double that holds its `store` call. Synchronous sink only. The fatal assertions of the path hold in every run on both prototypes. The six `FileStore` cells were behind the gate in those runs. They were run again on S6 with the order of the executor's jobs kept (`ph8e_predictions.md`; the cells named `Ph8eArrivalInTheHold_…_FileStore_OrderKept`): green, 20 of 20 each. S5 was not run on that form. Not run at the head. | If an arrival is acted on with statement 4, the state was not written at the decision point, or the arrival was delivered before `toAdmin` returned; the cell's delivery is checked first. |
 | P-21 | A reading: a `Session::send` that has its number and is suspended in its own store call when the cut is decided. | **Measured on S6 and S5** (`ph8c_in_flight_frames.md`, "A reading: a send in its own store call when the cut is decided"; 20 runs on S6, 5 on S5; the cells assert the path only). The send keeps its number and is transmitted when its store call returns, and returns success; the Logout takes the next number, is retained and is not sent. On S6 the transmit comes after the session was written `Disconnected`. On the store double both closes complete while the send is still held. Synchronous sink only; not run at the head. | Not a prediction. NC-30 pins the reading. |
-| P-22 | A reading: the Logout's own write job held in the file executor past a short `logout_disconnect_timeout_ms`, with the Logout cut and with it not cut (a graceful close alone). Two predictions were written before the run: on the cut route the closes complete at the expiry, and the store then shows an unreadable record; the route that is not cut shows the same store state. | **Measured on S6** (`ph8c_predictions.md`, "The Logout's own write job past a short timeout"; `ph8c_own-write-S6/`; 20 of 20 on each cell; `FileStore`, synchronous sink; timeout 300 ms, the gate opened at about 900 ms). **The first prediction's first half did not hold:** neither close has completed 600 ms past the expiry; both complete within a millisecond of the gate's opening. The rest held, on both routes: the write's body began 0 times, the store's catch of `operation_aborted` fired once, the store's files did not grow, the store's next outbound number is past the Logout's, and a read of the Logout's number returns `store_io_failure`. Cut: nothing on the wire, `onLogout` at 0 ms. Not cut: the Logout is transmitted when the gate is opened, and `onLogout` runs then, at `LogoutSent`. It is fixpp#598's defect, at the head. Not run: a job already inside its system calls at the expiry; a pool that is busy and not gated; a restart of the store over such a file. | Not a prediction. NC-29 pins the reading. |
+| P-22 | A reading: the Logout's own write job still in the file executor past a short `logout_disconnect_timeout_ms`, with the Logout cut and with it not cut (a graceful close alone), on four kinds of file executor. Predicted before the run, from round 6's O-1 (`ph8e_predictions.md`, "Predictions"): on an executor that keeps order the write runs before the cancellation's job, and the Logout is written and reads back; behind the earlier gate the record is unreadable, as it was measured before; on two threads the cancellation's job can run first. | **Measured on S6: each held** (`ph8e_predictions.md`; `ph8e_own_write_compact.txt`, which has each run's numbered sequence of the executor's jobs; `ph8e_own-write-S6/`; cells in `ph8e_cell_edit.patch`). 20 runs per cell, cut and not cut; `FileStore`, synchronous sink; timeout 300 ms, the write's job let go at about 900 ms. **The timing, in every kind and on both routes:** no close has completed 600 ms past the expiry, and each completes 0 to 9 ms after the job is let go. **The store, by kind.** One thread with the order kept (the cell holds the pool's thread, and both jobs queue behind it): the write's body ran once, the store's catch of `operation_aborted` did not fire, and the Logout reads back under its number, 40 of 40. One thread behind the earlier gate, which lets later jobs pass the one it keeps: the cancellation's job ran first, the body never ran, the catch fired once, the store's files did not grow, the store's next outbound number is past the Logout's, and a read of the Logout's number returns `store_io_failure`, 40 of 40. Two threads, with the thread that takes the write's job delayed before it starts it and nothing reordered: that same unreadable record, 40 of 40. Two threads, both held and then let go together, with nothing reordered or delayed: the Logout readable in 39 runs and that unreadable record in 1, which was on the cut route. Cut, in every kind: nothing on the wire. Not cut, in every kind: the Logout is transmitted when the store call returns; where the body never ran, that is a frame the store counts and cannot read. **This row corrects v0.10's.** v0.10 had the second kind only (`ph8c_predictions.md`, "The Logout's own write job past a short timeout"), and it called that store state a defect at the head with no condition on the executor. Not run: a job already inside its system calls at the expiry; more than two threads; a strand over a pool; a pool that is busy, as opposed to held; a restart of the store over such a file; ThreadSanitizer; the head. | Not a prediction. NC-29 pins the reading on the executor that keeps order. The unreadable record on two threads is that store defect's own issue, and its witness is that issue's (NC-29's row). |
+| P-23 | What the application starts inside the decision-point `onLogout` (NC-31; round 6's F-1). A terminal close waits by one post and joins; the count moves once more, after the comparison; the close does not wake the grace timer; three closes return success; the Logout is numbered and retained and not transmitted. A graceful close: the same, and the count does not move. A `Session::send`: `session_invalid_state_for_send`, no `toApp`, no number. With the store's lock held by another writer, no close completes while it is held. The record of the cut and the state's write can be swapped with no difference a caller can see. Read: round 6's triage, F-1, whose trace the judge wrote before reading the run. | **Measured on S6: agrees, 20 of 20 on each of fourteen cells** (`ph8d_predictions.md`; `ph8d_scenes_compact.txt`; `ph8d_scenes-S6/`; cells in `ph8d_cell_edit.patch`). The cells: a terminal close on the three stores, each on the synchronous sink and on the live transport double; a graceful close, and a `Session::send`, on the three stores on the synchronous sink; the terminal close and the send with the `FileStore`'s lock held. Every cell asserts as its path that `onLogout` ran with the next outbound number still the Logout's own. The count of terminal closes that took the wait, read through the test access: 1 inside `onLogout` before the start; 2 after a terminal close was started there; still 1 for a graceful close and for a send. The record of the cut reads set inside `onLogout`. On the live transport: no live write, one direct `close()` and one `close_async()`. **Mutants, five runs per cell** (`ph8d_failing_assertions.txt`; `ph8d_mutant-D/`, `ph8d_mutant-G/`). Under D the two cells with the lock held are RED in every run, and the twelve others are green. Under G (`ph8d_mutant_G.patch`: the record of the cut written after the state's write) all fourteen are green; the one reading that differs is the record inside `onLogout`, which is printed and not asserted. Not run: `Engine::send` and `Engine::stop()` from that `onLogout`; a graceful close with the lock held; the live transport outside the terminal close's scene; a real TLS transport; the stall settings; ThreadSanitizer; a release build; the head. | If an operation ends otherwise in the pull request's tree, the implementation differs from the prototype or the trace is wrong; it goes to the orchestrator before any assertion is changed. If an arm that is specified as a control runs past its path guard at the head, the guard does not hold what it claims, and it is corrected first. |
 
-*Fixture additions.* Each has a default that leaves every existing cell as it is. The scratch forms are
-in `ph8c_cell_edit_S6.patch`.
+*Fixture additions.* Each has a default that leaves every existing cell as it is. The scratch forms
+are in `ph8c_cell_edit_S6.patch`, `ph8d_cell_edit.patch` and `ph8e_cell_edit.patch`; each of the two
+later patches is the whole cell edit against the head.
 
 - The live transport double counts its `close_async()` calls apart from its `close()` calls.
-- A gate on the `FileStore`'s `file_io_executor`, as a wrapper around the file pool's executor, set in
-  the cell file's fixture (the first comment on fixpp#590 describes it). It has NC-22's two modes, and
-  a third: once armed it keeps back the first job handed to the executor and lets every later job
-  through, and opening it posts the kept job. Armed before the peer's order arrives, the kept job is
-  the other writer's persist (NC-26, NC-28). Armed inside the Logout's `toAdmin`, it is the Logout's
-  own write (NC-27, NC-29). A gate that holds the pool's one thread does not drive the path: the
-  close's own flush then waits at the gate (`ph8b_held_lock.md`, "The fixture").
-- A store double that completes its `store` call in a `MemoryStore` behind it and then does not return
-  until released, built on `tests/support/hooked_store.hpp`. It gives a hold up after a time of its
-  own, and each cell that uses it asserts that it did not.
+- A gate on the `FileStore`'s `file_io_executor`, as a wrapper around the file pool's executor, set
+  in the cell file's fixture (the first comment on fixpp#590 describes it). It has three modes. Each
+  says here whether a job handed later can pass a job that is held (round 6's O-1):
+  - *NC-22's first mode* holds the submitting thread until the file pool is idle. It holds no job,
+    so no job passes another.
+  - *NC-22's second mode* holds the Logout's store job until the session's executor has run dry. It
+    is specified to keep order: a job handed to the executor after the held one stays behind it. No
+    prototype built this mode.
+  - *The third mode:* once armed it keeps back the first job handed to the executor and lets every
+    later job through, and opening it posts the kept job. **Later jobs pass.** It is armed before
+    the peer's order arrives, so that the kept job is the other writer's persist (NC-26, NC-28, and
+    NC-31's two arms with the lock held). It is needed there, because the close's own flush is a
+    later job and must get through: with the pool's one thread held from before the close, the flush
+    waits and the path is not driven (`ph8b_held_lock.md`, "The fixture"). In those scenes the
+    Logout's store call waits at the store's lock and hands no job to the executor, so no job of the
+    Logout exists for another to pass (`ph8e_predictions.md`, "Mutant D on the `FileStore` arrival
+    cells", its last bullet). **This mode is not used to hold the Logout's own write.** v0.10 used
+    it for that, in NC-27's `FileStore` hold arms and in NC-29. A cancellation of the store call
+    reaches the write as a second job on the file executor, and the gate let that job pass the write
+    (§2.6, "The bound", (a)).
+- **A hold of the Logout's own write that keeps the order of the file executor's jobs** (NC-27's
+  `FileStore` hold arms; NC-29). Inside the Logout's `toAdmin`, when the close's flush has gone
+  through the pool, the cell posts a job that holds the pool's one thread. The Logout's write job
+  and every job after it queue behind that job, and run in order when the cell lets the thread go.
+  The scratch form is in `ph8e_cell_edit.patch`: its hold named `file_store_thread_held`, and its
+  executor that records when each job is handed over, begins and ends.
+- A store double that completes its `store` call in a `MemoryStore` behind it and then does not
+  return until released, built on `tests/support/hooked_store.hpp`. It gives a hold up after a time
+  of its own, and each cell that uses it asserts that it did not.
 - A count of the sleeps in flight on the session's clock, which the clock wrapper of NC-11 keeps.
 - A recording wrapper over the store that notes when a `store` call has been made and when it has
   returned, as P-1's measurement used. NC-26 and NC-28 read it.
-- The time, from the start of the graceful close, at which `onLogout` ran, at which the transport's
-  two close calls were made and at which each close completed (NC-28, NC-29).
+- The time at which `onLogout` ran, at which the transport's two close calls were made, and at which
+  each close completed. It is read on `std::chrono::steady_clock`, counted from an instant the cell
+  reads on that clock right before it spawns the graceful close (NC-24 (b), NC-28, NC-29).
 - The store's two test seams in `src/session/file_store.cpp`, the offload probe and the count of its
   catch of `operation_aborted`, read by NC-29.
+- **Two read-only accessors in `tests/support/session_test_access.hpp`** (NC-31): the count of
+  terminal closes that took `close()`'s wait, and the record of the cut. They are readings. A cell
+  prints them and asserts effects; no cell asserts either value (below, "Specified without a
+  witness").
 - A knob for `reset_on_logout`, if the fixture has none.
-- The store doubles of NC-24, local to the cell file. `tests/support/hooked_store.hpp` and the double
-  of NC-14 are read first and used if they can do it.
+- The store doubles of NC-24, local to the cell file. `tests/support/hooked_store.hpp` and the
+  double of NC-14 are read first and used if they can do it.
 
-*Cells.* NC-21 is cells that exist and must turn. The others are new. The prototype's cells for NC-26
-to NC-30 are the ones named `Ph8b…` and `Ph8c…` in `ph8c_cell_edit_S6.patch`; they get their names
-when they are written.
+*Cells.* NC-21 is cells that exist and must turn. The others are new. The prototype's cells for
+NC-26 to NC-31 are the ones named `Ph8b…`, `Ph8c…`, `Ph8d…` and `Ph8e…` in `ph8e_cell_edit.patch`;
+they get their names when they are written.
 
 | Id | Drives | Asserts, and whether RED first |
 |---|---|---|
 | NC-21 | the six arms of `CallbackSend.ToAdminOfGracefulCloseStartsClose_Terminal` (both transports; `MemoryStore`, `FileStore`, no store) | The same assertions in every arm; no arm asserts less than another. Inside `toAdmin` after the start: as the close cells assert it ("The arms every close cell has"). Then: the Logout is not on the wire; no live write of it was begun; where there is a store, it holds the Logout under its number; the next outbound number is the Logout's plus one; both closes return success, and the terminal one returns the graceful one's result; `onLogout` ran once, with the session `Disconnected`, and the next outbound number read inside it is the Logout's own, which is the witness that it ran before the Logout was numbered and stored; `LogoutSent` was never the session's state; on a live arm the transport's `close()` was called once directly and its `close_async()` once, with no write begun after the close; the mock clock is not advanced, and the arm's real time is under a bound that is derived from the cell's `logout_disconnect_timeout_ms` and is well below it, so that the real grace timer cannot complete the close inside the pump's budget. **The count of the transport's calls is a pin of the call sequence on a double. It is not a witness of what a TLS peer reads** (§2.6, statement 4; fixpp#596). **RED first on five arms**, at "not on the wire". **The `FileStore` arm on the live transport is RED first too, at the reading inside `onLogout`** (predicted: at the head `onLogout` runs there after the Logout took its number); its "not on the wire" clause is expected green at the head without a stall (`ph8a_four_way.md`, first column), and NC-22's first arm is that clause's RED state. The cell with these assertions was not run on the head |
-| NC-22 | the `FileStore` arm on the live transport, forced into each order by the gate. First arm: the gate holds the submitting thread until the file pool is idle, so the store call's completion is queued first. Second arm: the gate holds the Logout's store job until the session's executor has run dry, so that at the head the end of the Logout step comes first | NC-21's assertions, in both arms. Each arm also asserts that the gate acted, through a count the gate keeps, so that an arm whose gate held nothing does not pass. **First arm: RED first at "not on the wire" (predicted, P-13). Second arm: predicted green at the head on that clause (P-13).** Both are green after the change |
+| NC-22 | the `FileStore` arm on the live transport, forced into each order by the gate. First arm: the gate holds the submitting thread until the file pool is idle, so the store call's completion is queued first. Second arm: the gate holds the Logout's store job until the session's executor has run dry, so that at the head the end of the Logout step comes first. This hold keeps the order of the executor's jobs: a job handed after the held one stays behind it (the fixture, above) | NC-21's assertions, in both arms. Each arm also asserts that the gate acted, through a count the gate keeps, so that an arm whose gate held nothing does not pass. **First arm: RED first at "not on the wire" (predicted, P-13). Second arm: predicted green at the head on that clause (P-13).** Both are green after the change |
 | NC-23 | NC-21's six arms with `reset_on_logout` set | NC-21's assertions. The teardown reset did not fire: the store still holds the Logout, and the next outbound number is the Logout's plus one, in the manager and in the store. **RED first on the five arms that transmit** (measured at the head: `ph8a_S_arms_by_stall.md`, "unpatched head", the `reset_on_logout` tables). On the `FileStore` arm of the live transport the RED state comes from NC-22's first arm run with the knob set. **These arms are also the pin of the merge hazard with B28** (§2.6, "With batch B28"): on a tree that carries both changes the cut Logout's emit returns success, and a step that then fell through to B28's assignment of `logout_seen_` would fire the reset. They are run again on the merged tree by the pull request that merges second |
-| NC-24 | the condition on the store doubles of P-14. (a) More hops, on both transports; how many is the implementer's choice, and the double records that its call was still suspended when the terminal close had its turn. (b) Two doubles that hold their call until a cancellation reaches them or the cell releases them, run with a short `logout_disconnect_timeout_ms`, on the live transport: one returns `store_cancelled` and leaves the caller's cancellation state alone; the other resets the caller's cancellation state before it returns, as the lock sequence of the shipped stores does. Each records that a cancellation reached it | (a): NC-21's assertions. **RED first on the synchronous sink (predicted): at the head that arm records `LogoutSent`, and transmits the Logout where the double's call completes. On the live transport: not determined at the head.** (b): the same assertions in both doubles: both closes complete with the mock clock standing, not before the short timeout has elapsed since the graceful close started and inside an upper bound derived from it; the completion time is read and recorded; a cancellation reached the double; not on the wire; nothing under the Logout's number; the next outbound number is the Logout's plus one; both closes success. **A pin of the bound (R-9) for a store of another kind; at the head: not determined.** Its second double is what sees a lost cancellation: a step that still waited after its store call would leave that arm's closes incomplete while the mock clock stands. (b)'s clause on the number is stated for this branch; B28's rulings change it (§2.6, "With batch B28") |
+| NC-24 | the condition on the store doubles of P-14. (a) More hops, on both transports; how many is the implementer's choice, and the double records that its call was still suspended when the terminal close had its turn. (b) Two doubles that hold their call until a cancellation reaches them or the cell releases them, run with a short `logout_disconnect_timeout_ms`, on the live transport: one returns `store_cancelled` and leaves the caller's cancellation state alone; the other resets the caller's cancellation state before it returns, as the lock sequence of the shipped stores does. Each records that a cancellation reached it | (a): NC-21's assertions. **RED first on the synchronous sink (predicted): at the head that arm records `LogoutSent`, and transmits the Logout where the double's call completes. On the live transport: not determined at the head.** (b): the same assertions in both doubles: both closes complete with the mock clock standing, not before the short timeout has elapsed, on the clock and from the start instant that NC-28 names, and inside an upper bound derived from it; the completion time is read and recorded; a cancellation reached the double; not on the wire; nothing under the Logout's number; the next outbound number is the Logout's plus one; both closes success. **A pin of the bound (R-9) for a store of another kind; at the head: not determined.** Its second double is what sees a lost cancellation: a step that still waited after its store call would leave that arm's closes incomplete while the mock clock stands. (b)'s clause on the number is stated for this branch; B28's rulings change it (§2.6, "With batch B28") |
 | NC-25 | controls. (a) The six arms of `CallbackSend.ToAdminOfGracefulCloseStartsNoClose`; its live arms gain a clause on the transport's calls. (b) A second graceful `close()` started in the Logout's `toAdmin`; the cell ends the wait as NC-8's second arm does. (c) A terminal close that waited earlier. `Session::open` refuses a session that is not `never_opened`, so a session has one life and no cell can reopen it. The setup, settled (round 4's O-7): in one `fromApp` the callback starts a graceful close first and then a terminal close. Both post, in that order, and the terminal one moves the count. The graceful close resumes first. On a `MemoryStore` and with no store it has no flush hook, so it runs the Logout step in that handler; the step reads a count that is non-zero and does not move, so the Logout is not cut. With no store the Logout is transmitted before the step first suspends. On a `MemoryStore` the store's leading post is queued before the terminal close has its turn, and the grace timer's handler can reach the executor only after that turn, so the store call completes and the transmit begins first, on both transports. Read, not run. The arms: `MemoryStore` and no store. Not `FileStore`: its flush hook suspends the graceful close before the Logout step, the terminal close escalates first, and no Logout is emitted | **Controls: green at the head and after.** (a): as today: the Logout on the wire, the session in its wait at `LogoutSent`, the graceful close not completed while the clock stands, then success; and on a live arm, where the step's own deadline ended the wait, the transport's `close()` was not called directly and its `close_async()` was called once (predicted green at the head; not run). (b): the Logout is transmitted once; both closes return the same result. (c): the Logout is transmitted once. That clause is positive on purpose: an arm in which no Logout is emitted cannot tell the mutant "the count is non-zero" from the correct code |
 | NC-26 | the held-lock scene, on both transports. A `FileStore` session, Active. The gate's third mode is armed. The peer's order arrives; its inbound persist takes the store's lock and its job is the one the gate keeps, so the lock stays taken while the pool stays free. The test body starts a graceful close; its flush goes through the pool and completes. The Logout's `toAdmin` starts a terminal close. The cell lets the session's executor run a bounded number of handlers, takes a snapshot, opens the gate, and pumps under a bound derived from `logout_disconnect_timeout_ms` and well below it. If that pump misses, the cell advances the mock clock past the timeout and pumps once more, so that a failing run ends | That the path was driven, each a fatal assertion before the others: one job is kept at the gate; **the held `on_inbound_frame` has not returned at the snapshot**, which makes the kept job the other writer's persist and so places the lock's holder (round 5's O-3); `toAdmin` started its close; in the snapshot the Logout's `store` call has been made (the recording wrapper) and `toAdmin` has returned. In the snapshot, as assertions of the ending and not fatal, so that the later ones are still read: no sleep is in flight on the session's clock; the session is `Disconnected` and `onLogout` has run once; the Logout's `store` call has not returned; neither close has completed while the lock is held. After the gate is opened, with the mock clock standing: both closes complete within the pump's bound. Then: the Logout is retained under its number; the store's next outbound number is the Logout's plus one; not on the wire; no live write begun; both closes success; `onLogout` once, at `Disconnected`; the held `on_inbound_frame` returns ok; on the live arm one direct `close()` and one `close_async()`. **RED first (predicted at the head, P-16; measured RED on S3 and green on S5 and S6).** It is the kill cell of statement 4's part on the join's waker (mutant D) |
-| NC-27 | what arrives after the cut is decided, on the synchronous sink. **Two arms after the store call:** `MemoryStore` and no store; the Logout's `toAdmin` starts the terminal close and posts, twice over, a handler that delivers a Logout from the peer, so that it runs after the step's store call has returned and before the closes complete. **Twelve arms in the hold of the Logout's own store call:** the hold is armed inside the Logout's `toAdmin`, on a `FileStore` by the gate, so that the kept job is the Logout's write, and on the holding store double; the cell waits until the call is held, reads the session, starts the arrival, lets the executor run a bounded number of handlers, reads again, releases the hold and pumps to the end. The arrivals, each on both stores: a Logout from the peer; the same with `reset_on_logout` set; an application message; a TestRequest; a `Session::send` from another coroutine (the send arm); a wake of the liveness loop, by advancing the mock clock by one heartbeat interval and one millisecond (the liveness arm) | That the path was driven, fatal: `toAdmin` started its close; for the hold arms, the store call was held, the Logout had taken its number, and no close had completed before the arrival; for the first two arms, a frame was delivered. Then, in every arm: the session is `Disconnected` when the arrival comes, and `onLogout` has run, with the next outbound number then the Logout's own; no `fromApp`, `fromAdmin`, `toAdmin` or `toApp` follows the arrival; neither next number moves; nothing is transmitted; an inbound delivery returns in the hold; the send returns `session_invalid_state_for_send`; after its wake the liveness loop has no sleep in flight; neither close completes in the hold. After the release: both closes success with the mock clock standing; the Logout retained under its number and nothing above it; the store's next outbound number the Logout's plus one; with `reset_on_logout` set, no reset. **Which arms are RED first.** Measured on the prototypes: the twelve hold arms are RED on S5 and the first two on S3, and all are green on S6 (P-17, P-20). Those are scratch trees, and the rule asks for RED in the pull request's tree, at the head. Predicted there, not run: **the six `FileStore` hold arms are RED at the head.** The head's terminal close cancels the grace timer, but the Logout's store call does not return while its write job is kept at the gate, so the step stays in it with the session Active, and the arrival is acted on. **The six hold arms on the store double are predicted to stop at their fatal guard "no close had completed before the arrival" at the head, which is not RED:** the head's join cancels the step, the cancellation ends the double's hold, and both closes complete before the arrival, as under mutant D. Those six are green after the change and show the ending on a store with no lock held; they are not RED-first witnesses. The first two arms are predicted RED at the head, where the frame meets `LogoutSent`. So the clause "the state is written when the cut is decided" has its RED-first arms in the six `FileStore` hold arms and in NC-21's reading inside `onLogout`. The implementer runs every arm on the head first and records what each does there. Not covered: a live transport in these arms |
-| NC-28 | the bound at the store's lock, a ruled behaviour (R-9). NC-26's scene on the live transport, with `logout_disconnect_timeout_ms` short and the gate kept closed well past it | **A pin of a ruled behaviour.** With the gate still closed and the mock clock standing: both closes have completed, with success; the session is `Disconnected` and `closed_drained`; `onLogout` ran once, when the cut was decided; not on the wire; nothing under the Logout's number, and the store's next outbound number is the Logout's own; the session's next outbound number is the Logout's plus one; one direct `close()` and one `close_async()`. **The completion time of each close is read and recorded, and asserted on both sides:** not before the timeout has elapsed since the graceful close started (the timer is armed after that instant and does not fire early), and under an upper bound that is derived from the timeout and sized from a run on the slowest lane. The prototype's cell read the time and asserted neither side; the lower side is what makes this cell see a cancellation that comes before the expiry (under mutant D the reading was 0 to 1 ms). After the gate is opened the held `on_inbound_frame` returns ok. The clause on the session's next outbound number is this branch's; the pull request that merges second changes it (§2.6, "With batch B28"). At the head: not determined |
-| NC-29 | the Logout's own write job held in the file executor past a short `logout_disconnect_timeout_ms`. `FileStore`, synchronous sink; the gate is armed inside the Logout's `toAdmin`. Two arms: the Logout cut (the terminal close started in that `toAdmin`), and the Logout not cut (a graceful close alone, the head's own route) | **A pin of a stated limitation, in the form of NC-12 and NC-14: it pins what was measured, not a wanted behaviour, and it names fixpp#598.** Path, fatal: the gate kept one job, and it is the Logout's write. With the gate still shut well past the expiry and the mock clock standing: no close has completed, in both arms. After the gate is opened: the closes complete, with success, and the completion time is read and recorded. In both arms, as measured (P-22): the write's body began no times; the store's catch of `operation_aborted` fired once; the store's files did not grow; the store's next outbound number is past the Logout's; a read of the Logout's number returns `store_io_failure`. Cut arm: nothing on the wire; `onLogout` ran when the cut was decided. Not-cut arm: the Logout is transmitted when the gate is opened. **The clauses on the store, and the not-cut arm's transmit, change when that issue is done; the change that does it rewrites this cell.** The two arms together show that the store's state there does not come from the cut. The not-cut arm is predicted green at the head, because the amendment does not change that route; it was not run there |
+| NC-27 | what arrives after the cut is decided, on the synchronous sink. **Two arms after the store call:** `MemoryStore` and no store; the Logout's `toAdmin` starts the terminal close and posts, twice over, a handler that delivers a Logout from the peer, so that it runs after the step's store call has returned and before the closes complete. **Twelve arms in the hold of the Logout's own store call:** the hold is armed inside the Logout's `toAdmin`. On a `FileStore` the cell holds the pool's one thread, so that the Logout's write job waits and the order of the executor's jobs is kept (the fixture, above); v0.10 held that job behind the gate. The other six arms use the holding store double. The cell waits until the call is held, reads the session, starts the arrival, lets the executor run a bounded number of handlers, reads again, releases the hold and pumps to the end. The arrivals, each on both stores: a Logout from the peer; the same with `reset_on_logout` set; an application message; a TestRequest; a `Session::send` from another coroutine (the send arm); a wake of the liveness loop, by advancing the mock clock by one heartbeat interval and one millisecond (the liveness arm) | The oracle is split by kind of arm (round 6's F-2). An arm asserts the common group and the groups of its own kind, and no other. **Common, all fourteen arms.** Path, fatal: `toAdmin` started its close. Then: the session is `Disconnected` when the arrival comes, and `onLogout` has run, with the next outbound number then the Logout's own; no `fromApp`, `fromAdmin`, `toAdmin` or `toApp` follows the arrival; neither next number moves at the arrival; nothing is transmitted; at the end both closes have returned success, and the mock clock was not advanced after the arrival; where there is a store, the Logout is retained under its number, nothing is above it, and the store's next outbound number is the Logout's plus one. **The two arms after the store call.** Path, fatal: a frame was delivered, after the Logout's store call had returned and before the closes completed. These arms have no hold and no release. **The twelve hold arms.** Path, fatal: the store call was held, the Logout had taken its number, and no close had completed before the arrival. Then: neither close completes in the hold; after the release both complete. **Per arrival, in the hold arms.** A Logout from the peer, an application message, a TestRequest: the inbound delivery returns in the hold. With `reset_on_logout` set: no reset, read after the release. The send arm: the send returns `session_invalid_state_for_send` in the hold. The liveness arm: after its wake the liveness loop has no sleep in flight; the wake is this arm's one advance of the mock clock, and no other arm advances it. **Which arms are RED first.** Measured on the prototypes: the twelve hold arms are RED on S5 and the first two on S3, and all are green on S6 (P-17, P-20). Those are scratch trees, and the rule asks for RED in the pull request's tree, at the head. Predicted there, not run: **the six `FileStore` hold arms are RED at the head, at "the session is `Disconnected` when the arrival comes".** The head's terminal close cancels the grace timer and the join cancels the step. The step is waiting for its own write job, and a cancellation does not end that wait. So the step stays there with the session Active, and the arrival is acted on. What the store shows at the head after the release is not predicted here: at the head a cancellation is emitted in the hold, so it depends on the order of the executor's two jobs (§2.6, "The bound", (a)); the implementer records it. **The six hold arms on the store double are predicted to stop at their fatal guard "no close had completed before the arrival" at the head, which is not RED:** the head's join cancels the step, the cancellation ends the double's hold, and both closes complete before the arrival, as under mutant D. Those six are green after the change and show the ending on a store with no lock held; they are not RED-first witnesses. The first two arms are predicted RED at the head, where the frame meets `LogoutSent`. So the clause "the state is written when the cut is decided" has its RED-first arms in the six `FileStore` hold arms and in NC-21's reading inside `onLogout`. The implementer runs every arm on the head first and records what each does there. Not covered: a live transport in these arms |
+| NC-28 | the bound at the store's lock, a ruled behaviour (R-9). NC-26's scene on the live transport, with `logout_disconnect_timeout_ms` short and the gate kept closed well past it | **A pin of a ruled behaviour.** With the gate still closed and the mock clock standing: both closes have completed, with success; the session is `Disconnected` and `closed_drained`; `onLogout` ran once, when the cut was decided; not on the wire; nothing under the Logout's number, and the store's next outbound number is the Logout's own; the session's next outbound number is the Logout's plus one; one direct `close()` and one `close_async()`. **The completion time of each close is read and recorded, and asserted on both sides:** not before the timeout has elapsed on `std::chrono::steady_clock`, counted from an instant that the cell reads on that clock right before it spawns the graceful close (round 6's O-6), and under an upper bound that is derived from the timeout and sized from a run on the slowest lane. The lower side is in real time: the grace timer is a real timer, and the session's mock clock, which stands in this cell, is not the clock that is read. `close()` arms the timer after the start instant, when its flush has completed, and a timer does not fire early, so on correct code the lower side holds. The prototype's cell read the time and asserted neither side; the lower side is what makes this cell see a cancellation that comes before the expiry (under mutant D the reading was 0 to 1 ms). After the gate is opened the held `on_inbound_frame` returns ok. The clause on the session's next outbound number is this branch's; the pull request that merges second changes it (§2.6, "With batch B28"). At the head: not determined |
+| NC-29 | the Logout's own write job still in the file executor past a short `logout_disconnect_timeout_ms`, on a file executor that keeps the order of its jobs. `FileStore` on the fixture's pool of one thread, synchronous sink. Inside the Logout's `toAdmin` the cell holds the pool's thread (the fixture, above), so the write's job, and after it the job of any cancellation, queue behind the cell's job in that order. Two arms: the Logout cut (the terminal close started in that `toAdmin`), and the Logout not cut (a graceful close alone, a route this amendment does not change) | **The cell's form was decided again in v0.11** (round 6's O-1). v0.10's cell held the write's job behind a gate that let the cancellation's job pass it, and it pinned the unreadable record which that order produces. A cell whose fixture reorders the executor's jobs is not kept. **Chosen: the order-keeping executor only, and no arm on two threads.** On it the cell can fail on what this amendment states: on the cut arm, R-8's ending reached late; on both arms, the timing of §2.6, "The bound", (a). The unreadable record needs a second thread and is reached on both routes, so it is not this amendment's. Its deterministic witness is the fixture with two threads and the write's thread delayed, which the second comment on that store defect's issue names for its first acceptance step (§7). An arm of it here would pin a state this amendment does not change, and the change made for that issue would have to rewrite the arm. Path, fatal: the cell's job holds the pool's thread, and the Logout's write job was handed to the executor while it is held. **With the thread still held well past the expiry and the mock clock standing, in both arms:** no close has completed. In the cut arm also: the session is `Disconnected`, `onLogout` ran when the cut was decided, and nothing is on the wire. **After the thread is let go, in both arms:** each close completes, with success, and its completion time is read and recorded on the clock NC-28 names; the write's body ran once and the store's catch of `operation_aborted` did not fire (the two seams); the Logout reads back under its number; the store's next outbound number and the session's are the Logout's plus one. Cut arm: nothing on the wire. Not-cut arm: the Logout is transmitted once, after its store call returned. **A pin of a stated limitation, in the form of NC-12 and NC-14:** the logout timeout does not bound a close in this scene (§4, the limitation row of round 6's O-5). Measured on S6: `ph8e_predictions.md`, kind A, 20 of 20 on each arm. At the head, not run. The not-cut arm is predicted green there, because the amendment does not change that route. The cut arm is predicted RED first at "nothing on the wire", as NC-21's `FileStore` arm on the synchronous sink is: the head transmitted the Logout on that arm with every job of the file executor delayed (`ph8a_S_arms_by_stall.md`, "unpatched head") |
 | NC-30 | a `Session::send` that has its number and is suspended in its own store call when the cut is decided. The hold is armed by the test body before the send, so the held call is the send's; then the graceful close starts and its Logout's `toAdmin` starts the terminal close. `FileStore` and the holding store double, synchronous sink | **A pin of what statement 4's state write does not cover** (§2.6, "What arrives after the cut is decided"). Path, fatal: the send's store call is held and the send has its number; the cut was decided with the send held. Then: the send keeps its number, is transmitted when its store call returns, and returns success; the Logout has the next number, is retained and is not on the wire; nothing numbered above the Logout is on the wire. Not determined at the head (not run there); the prototype's cells assert the path only. Not covered: a live transport that refuses a write after its `close()` |
+| NC-31 | what the application starts inside the decision-point `onLogout` (round 6's F-1). The condition of NC-21; inside `onLogout` the application starts one more operation. **Six arms, a terminal `close()`:** the three stores, each on the synchronous sink and on the live transport. **Three arms, a graceful `close()`,** and **three arms, a `Session::send`:** the three stores, on the synchronous sink. **Two arms with the `FileStore`'s lock held by another writer,** which is NC-26's scene on the synchronous sink, with the gate's third mode: one starts the terminal close in `onLogout`, the other the send | The oracle is split by kind of arm, as NC-27's is. **Common, all fourteen arms.** Path, fatal: `toAdmin` started its terminal close; `onLogout` ran with the next outbound number still the Logout's own, so it ran before the Logout was numbered; inside it the session was `Disconnected`. Then: the Logout takes its number and nothing else takes one; where there is a store, the Logout is retained under its number, nothing is above it, and the store's next outbound number is the Logout's plus one; nothing is transmitted; no `toAdmin` and no `toApp` follows the cut Logout's `toAdmin`; `onLogout` ran once; `LogoutSent` was never the session's state; the graceful close and the close started in `toAdmin` return success; everything completes with the mock clock standing; at the end `Disconnected`, `closed_drained`. **The arms that start a close:** the close started in `onLogout` returns success. On the live arms no live write was begun, and the transport's `close()` was called once directly and its `close_async()` once. **The send arms:** the send returns `session_invalid_state_for_send`, and no `toApp` ran for it. **The two arms with the lock held.** Path, fatal: one job is kept at the gate, and the held `on_inbound_frame` has not returned at the snapshot. In the snapshot: neither the graceful close nor the close started in `toAdmin` has completed; in the terminal-close arm the close started in `onLogout` has not completed either; in the send arm the send has returned its refusal; no sleep is in flight on the session's clock. After the gate is opened everything completes with the mock clock standing. In these two arms the common clauses "the Logout is retained under its number" and "the store's next outbound number" are what mutant D breaks, with "no close completes before the held write is released". **Printed and not asserted:** the count of terminal closes that took the wait, and the record of the cut, each read inside `onLogout` and at the end through the fixture's two accessors. **The twelve arms with no lock held are controls: green after the change.** At the head their path does not exist, because `onLogout` does not run there before the Logout is numbered. Their path guard is predicted to stop them at the head. That is not RED, and they are not RED-first witnesses, as NC-27's six arms on the store double are not. What they show is forced by the four statements and by tests of the state that exist at the head (round 6's triage, F-1). **The two arms with the lock held are a second kill of mutant D** (measured; `ph8d_failing_assertions.txt`). They cannot tell whose wake it was: under mutant D the close started in `toAdmin` already cancels the grace timer, and the send arm fails as the terminal-close arm does. What they pin is that, with statement 4, neither that close nor a close started in `onLogout` ends the grace wait. At the head they are predicted to stop at the same path guard; not run. Measured on S6: P-23. Not covered: `Engine::send` and `Engine::stop()` from that `onLogout` (§7); a graceful close with the lock held; a live transport outside the terminal-close arms |
 
 *Arms that must go RED,* each run in a scratch copy and never in the pull request's tree, as above.
 The last column says whether the row's outcome was measured. "Measured on S6's cells" means the
-prototype's final cells, five runs per cell (`ph8c_predictions.md`, Q6; `ph8c_failing_assertions.txt`).
-A cell that is not in the pull request's tree yet is named by its id; NC-22 to NC-30 are such cells. A
-row marked "not run" has its kill cell named and its run owed at implementation. The measured mutants
-are run again there, against the cells as they are written.
+prototype's final cells, five runs per cell (`ph8c_predictions.md`, Q6, with
+`ph8c_failing_assertions.txt`; for the cells added after it, `ph8d_failing_assertions.txt` and
+`ph8e_failing_assertions.txt`). A cell that is not in the pull request's tree yet is named by its
+id; NC-22 to NC-31 are such cells. A row marked "not run" has its kill cell named and its run owed
+at implementation. The measured mutants are run again there, against the cells as they are written.
 
 | Mutant | Fails | Trace | Run |
 |---|---|---|---|
@@ -2277,11 +2491,13 @@ are run again there, against the cells as they are written.
 | the transmit test placed before the store call, so a cut frame is not stored | NC-21, the four arms with a store: "the store holds the Logout under its number" | The function returns before Step 1 | not run |
 | `logout_seen_` set on the cut route | NC-23, every arm | The teardown reset fires: the store is empty and the next outbound number is 1 | measured as prototype S (`ph8a_S_arms_by_stall.md`, its `reset_on_logout` tables); not run on S6 |
 | `LogoutSent` recorded on the cut route, after the emit | NC-21, every arm: "`LogoutSent` was never the session's state" | The session goes from `Disconnected` to `LogoutSent` after the Logout's store call | not run. Prototype S recorded `LogoutSent` on this route and its arms read so (the same file, its plain tables) |
-| mutant E: the `Disconnected` write left after the Logout's store call, and not made at the decision point. It is prototype S5 | NC-27, the twelve hold arms, at the state in the hold and at what each arrival then does. NC-21, every arm, at the reading inside `onLogout` only | The session is Active while the Logout's store call is in flight. Each arrival is acted on: a callback, a number, a frame on the wire, a reset. `onLogout` runs after the Logout took its number | measured on S6's cells (`ph8c_scenes-S5/`): RED on all twelve hold arms and on the six arms |
-| mutant F: both writes of `Disconnected` removed from the step | NC-27, the twelve hold arms and the two arms after the store call. NC-21, every arm, at the reading inside `onLogout` only | `close()` writes the state itself after the join. Until then the session is Active, also after the step has left: the frame after the store call meets Active, and a confirming Logout is built and transmitted. At the six arms' other assertions the mutant is not seen, because `onLogout` still runs once at `Disconnected` | measured on S6's cells (`ph8c_mutant-F/`) |
+| mutant E: the `Disconnected` write left after the Logout's store call, and not made at the decision point. It is prototype S5 | NC-27, the twelve hold arms, at the state in the hold and at what each arrival then does. NC-21, every arm, at the reading inside `onLogout` only | The session is Active while the Logout's store call is in flight. Each arrival is acted on: a callback, a number, a frame on the wire, a reset. `onLogout` runs after the Logout took its number | measured on S6's cells (`ph8c_scenes-S5/`): RED on all twelve hold arms and on the six arms. The six `FileStore` hold arms were behind the gate in that run. Not run on the order-keeping hold. Predicted the same there: under this mutant nothing emits a cancellation in the hold, so the executor has no second job whose order could matter (read) |
+| mutant F: both writes of `Disconnected` removed from the step | NC-27, the twelve hold arms and the two arms after the store call. NC-21, every arm, at the reading inside `onLogout` only | `close()` writes the state itself after the join. Until then the session is Active, also after the step has left: the frame after the store call meets Active, and a confirming Logout is built and transmitted. At the six arms' other assertions the mutant is not seen, because `onLogout` still runs once at `Disconnected` | measured on S6's cells (`ph8c_mutant-F/`), with the six `FileStore` hold arms behind the gate. Not run on the order-keeping hold; predicted the same there, for the reason in mutant E's row |
 | the later write of `Disconnected`, in the exit, removed | none | On the cut route the state is already `Disconnected`, and that write does nothing | no witness; listed below |
+| the test at the exit after a failed `assign_outbound()` removed | none | On the cut route that exit is reached only where `assign_outbound()` returns an error. The state history would then hold a second visit of `Disconnected` | no witness; listed below |
+| mutant G: the record of the cut written after the state's write, the two statements swapped | **none, and none should** | `onLogout` runs inside the state's write, and a close started there waits by one post before it reads the record. So both statements have run before any reader of the record can | measured on S6's cells (`ph8d_mutant-G/`): all fourteen cells of NC-31 green; listed below |
 | the cut step keeps its wait (v0.8's statement 4) | NC-26: "no sleep is in flight", "both closes complete with the mock clock standing", "the Logout is retained". NC-27, its two arms after the store call | The join's one cancellation meets the store call at the lock and is lost; the step sleeps out the timeout | measured as prototype S3 (`ph8b_held_lock.md`; `ph8b_predictions.md`, P5) |
-| mutant D: the test of the record removed from the wake, so a terminal close that joins cancels the grace timer for a cut Logout too; the wait kept | **NC-26, both transports**: "the Logout is retained under its number", and "neither close has completed while the lock is held". It is the kill cell of statement 4's part on the join's waker. **NC-27's six `FileStore` hold arms**, at "the Logout is retained under its number": the read returns `store_io_failure`, which is fixpp#598's state, reached here because the join cancels the Logout's store call while its write job has not started; a kill. **NC-27's six arms on the holding double stop at their fatal guard "a close had completed before the arrival": not a kill**, because under this mutant the path of those arms does not exist. NC-28: predicted RED at the lower side of its completion time (the prototype's reading under this mutant was 0 to 1 ms; the prototype's cell asserted no lower side and stayed green). NC-21, NC-23, NC-27's two arms after the store call and NC-30 stay green: they cannot see it | The terminal close's turn comes after the join has started the timer's wait, so the cancel ends that wait. The join cancels the step, and the cancellation meets the Logout's store call: at the held lock it returns without writing; in a `FileStore`'s offload whose job has not started it is reported as written | measured on S6's cells (`ph8c_mutant-D/`): the two held-lock cells and the six `FileStore` hold arms RED |
+| mutant D: the test of the record removed from the wake, so a terminal close that joins cancels the grace timer for a cut Logout too; the wait kept | **NC-26, both transports**: "the Logout is retained under its number", and "neither close has completed while the lock is held". It is the kill cell of statement 4's part on the join's waker. **NC-31's two arms with the lock held**: "retained", "the store's next outbound number", and "no close completes before the held write is released". A second kill, which cannot tell whose wake it was (NC-31's row). NC-28: predicted RED at the lower side of its completion time (the prototype's reading under this mutant was 0 to 1 ms; the prototype's cell asserted no lower side and stayed green). **The held-lock cells are this mutant's only kill cells.** **NC-27's six `FileStore` hold arms stay green under it,** measured on the order-keeping hold: no close completes in the hold, and the Logout is retained, as without the mutant. **NC-27's six arms on the holding double stop at their fatal guard "a close had completed before the arrival": not a kill**, because under this mutant the path of those arms does not exist. NC-21, NC-23, NC-27's two arms after the store call, NC-30 and NC-31's twelve arms with no lock held stay green: they cannot see it. NC-29 was not run under it | The terminal close's turn comes after the join has started the timer's wait, so the cancel ends that wait, and the join cancels the step. Where the Logout's store call waits at a held lock, the cancellation is taken at once and the call returns without writing: that is the kill. Where the step waits for its own write job, the cancellation does not end the wait. With the order of the executor's jobs kept, the write then runs and the store call returns its result, so the ending is the one without the mutant. **v0.10 counted NC-27's `FileStore` hold arms as a kill of this mutant.** In their gated form they were RED under it, at "retained", with the read returning `store_io_failure`. That was the gate's reordering: it let the cancellation's job pass the write's job it kept (§2.6, "The bound", (a)). It is a kill in that fixture only, and it pins nothing about this mutant on an executor that keeps order | measured on S6's cells. `ph8c_mutant-D/`: NC-26's two cells RED; the gated arrival cells RED, by the gate's reordering. `ph8d_mutant-D/`: NC-31's two arms with the lock held RED, 5 of 5; its twelve others green. `ph8e_mutant-D/`: the arrival cells with the order kept green, 5 of 5 each; the gated ones RED again |
 | the direct close made only when the timer's arm won, as today | NC-21, the three live arms: the transport's close counts | With statement 4 the step's arm wins on every arm, so no direct call is made: one `close_async()` and no direct `close()` | not run. Prototype S2, which keyed the call that way, showed one call in place of two on two live arms (`ph8a_S2_arms_by_stall.md`) |
 | the direct close made on every route, cut or not | NC-25 (a), its live arms: "the transport's `close()` was not called directly" | A graceful close whose step ended by itself gets a direct close too | not run (round 5's O-5) |
 | the wake suppressed for every Logout, cut or not | the `InboundFrameDispositionsOd29.*` cells, which pin a terminal close that ends the grace wait of a Logout that was sent | The escalation of 093's OD-29 is lost for every graceful close: the terminal close waits out the timeout | not run (round 5's O-5) |
@@ -2302,8 +2518,20 @@ Specified without a witness, and claimed as such:
   stretch.** The await that follows them is `assign_outbound()`, which does not suspend on a free
   lock. No cell holds that lock there, so no cell separates "before `assign_outbound()`" from "right
   after it". The reading inside `onLogout` does separate both from "after the store call".
+- **The order of those two statements between themselves.** Measured green: with the record of the
+  cut written after the state's write (mutant G, `ph8d_mutant_G.patch`), every cell of NC-31 is
+  green, five runs each. `onLogout` runs inside the state's write, and a close started there waits
+  by one post before it reads the record, so both statements have run before any reader of the
+  record can (round 6's triage, F-1; `ph8d_predictions.md`, "Why G changes nothing a caller can
+  see"). The one reading that differs is the record's value inside `onLogout`. The cells print it
+  and do not assert it: an assertion there would pin an order that no caller can tell from the
+  other.
 - **The later write of `Disconnected`, in the step's exit.** It does nothing on the cut route and is
   kept so that the exit stays as B28's decision D-OUT-6 writes it.
+- **The test at the exit after a failed `assign_outbound()`** (statement 4, "The exit"; round 6's
+  O-3). On the cut route that exit is reached only where the sequence manager returns an error, and
+  no cell drives that. Without the test the state history would hold a second visit of
+  `Disconnected` there.
 - **The count's width.** A wrap between the two reads needs as many terminal closes started inside
   one `toAdmin` as the member can count, each holding a suspended frame. Not reachable (round 4's
   F-6), and no cell is written for it.
@@ -2329,12 +2557,14 @@ The search is trusted only while it still reports a pin known to be there
 because the function's coroutine frame can grow by the new parameter (§0a). So are the benches of
 "Cost" whose timed part reaches `store_then_emit`; by reading, `session_send_bench` does, and
 `engine_send_bench` does not, because its timed sends are refused before a frame is built. The
-sanitizer runs cover NC-21 to NC-30 as they cover the other close cells; a ThreadSanitizer run and a
+sanitizer runs cover NC-21 to NC-31 as they cover the other close cells; a ThreadSanitizer run and a
 release build of them are owed, because the prototypes had neither. The cells that pin 093's OD-29 are
 run again: `InboundFrameDispositionsOd29.EngineStopDuringAGracefulLogoutClosesAtOnce` pins a terminal
 close that arrives while a Logout that was sent is in its wait, and it must stay green, because that
 Logout is not cut. The cells that read `onLogout`'s position on a graceful close with no close in its
 `toAdmin` must stay green too: the state's write at the decision point is made on the cut route only.
+`CallbackSend.OnLogoutOfGracefulCloseStartsClose_Terminal` is one of them. Its Logout is not cut, so
+a terminal close started in its `onLogout` still ends the grace wait.
 The parent repository's task list names every run that is made again at the head that carries the
 change (its Phase 8 block; the record's "Phase 7, seventh part" says why).
 
@@ -2560,11 +2790,14 @@ follow-up.
   (§2.1a, the `onLogout` bullet; B&L `B-563-2`). No call that succeeded before fails. On the `toAdmin`
   route, on a `FileStore` with a live transport, the Logout that was transmitted before is now
   retained, and whether it is transmitted is decided by timing (B&L `L-563-6`, fixpp#590).
-  That is the head. §2.6 designs one ending for this route (v0.10); the block below lists what then
+  That is the head. §2.6 designs one ending for this route; the block below lists what then
   changes here.
 
-**What the implementation of §2.6 changes in the files of this section (v0.10).** A list for the
+**What the implementation of §2.6 changes in the files of this section.** A list for the
 implementer. None of it is done in this revision. The rows and sentences above describe the head.
+Gate A round 6 reviewed v0.10's form of the list; v0.11 added the limitation row and changed the new
+behaviour row's contents and the bullet on the pull request's body, and those edits were not
+reviewed.
 
 - **B&L `L-563-6` leaves the live file. It is deleted, not moved to the closed file.** The headers of
   both files were read for the rule. The closed file holds rows that declare themselves resolved by a
@@ -2583,20 +2816,43 @@ implementer. None of it is done in this revision. The rows and sentences above d
   escalation stays. On the `toAdmin` route the Logout is not transmitted on any store or transport,
   where on `main` it was transmitted and both closes waited out the timeout. Its sentence on where
   `onLogout` runs ("just after the callback, not inside it") stays as it is.
-- **B&L, a new behaviour row for this ending,** with the next free id of this section's rows. It has:
-  the condition, with "begins inside the callback" as part of it; §2.6's three groups, each with what
-  decides it, the session's state and `onLogout`'s position among them; what arrives after the cut is
-  decided, and the one thing the state's write does not cover; the bound, in the words of §2.6's one
-  statement of it and with ruling R-9 named, the points the ruling's last sentence does not cover
-  included; that on TLS the transport is ended abortively, as at the head; the comparison with
-  QuickFIX C++ and QuickFIX/J, with the flag and with the row on a reset on disconnect as the owner
-  has answered it by then; and what it does not cover (§7, the first bullet of its last block), with
-  the three ways to that condition. That condition's issue is fixpp#594, batch B52. The row also
-  names the three issues that §7 names for what this amendment meets and does not decide.
+- **B&L, a new behaviour row for this ending,** with the next free id of this section's rows. It
+  has: the condition, with "begins inside the callback" as part of it; §2.6's three groups, each
+  with what decides it, the session's state and `onLogout`'s position among them; what arrives after
+  the cut is decided, and the one thing the state's write does not cover; what an application starts
+  inside the moved `onLogout`, per operation; the bound, in the words of §2.6's one statement of it
+  and with ruling R-9 named, the points the ruling's last sentence does not cover included, and
+  point (a) in its two halves with its condition on the file executor; that on TLS the transport is
+  ended abortively, as at the head; the comparison with QuickFIX C++ and QuickFIX/J, with the flag
+  and with the row on a reset on disconnect as the owner has answered it by then; and what it does
+  not cover (§7, the first bullet of its last block), with the three ways to that condition. That
+  condition's issue is fixpp#594, batch B52. The row also names the three issues that §7 names for
+  what this amendment meets and does not decide.
+- **B&L, a new limitation row: the logout timeout does not bound a graceful close whose Logout's
+  write job is in the file executor** (round 6's O-5), with the next free id. It is a limit of every
+  graceful close on a `FileStore`, not of §2.6's route, so it is a row of its own, and the new
+  behaviour row points to it.
+  - **Its sentence.** On a `FileStore` session `logout_disconnect_timeout_ms` does not bound a
+    graceful `close()` while the Logout's write job is in the file executor. The close, and every
+    close that joined it, completes when the file executor has run that job, however long after the
+    timeout that is.
+  - **Its evidence.** `ph8e_predictions.md`, the four cells with the Logout not cut, 20 runs each,
+    one per kind of file executor: with a timeout of 300 ms no close had completed 600 ms past the
+    expiry, and each completed 0 to 9 ms after the job was let go. Those runs were made on the
+    prototype tree, on a route whose code the amendment does not change. The head itself was not
+    run. A write already inside its system calls was not run (§2.6, "The bound", (b)). NC-29's
+    not-cut arm pins the row.
+  - **No issue is filed for the timing alone.** It follows from two stated behaviours: `close()`
+    waits for its Logout step, and an offloaded write is drained by awaiting it and is not abandoned
+    (`offload_to`'s comment in `src/session/file_store.cpp`). The row states it. Round 6's judge
+    also names, for this item, "a line in fixpp#598 or an issue of its own". The second comment on
+    that issue has the line: on every kind of executor the two `close()` calls complete only when
+    the write's job has run. That issue's acceptance covers the store's state and not the wait.
+    Whether the wait gets an issue of its own is the orchestrator's to decide; this note files none.
 - **B&L `L-563-1`, condition (2):** its pointer to `L-563-6` becomes a pointer to the new row, with a
   sentence that the two conditions end differently on some arms (§2.6's table).
 - **`spec/feature-catalogue.md` and `spec/coverage-index.md`:** this pull request's entries. The
-  coverage row of `L-563-6` becomes the new row's, with NC-21 to NC-30.
+  coverage row of `L-563-6` becomes the new row's, with NC-21 to NC-31.
 - **B&L, the row of 093's OD-29** ("Every terminal close escalates an in-flight graceful close"). Its
   sentence that `Engine::stop()` during a graceful logout closes at once gains the exception of §2.6's
   bound: for a Logout that was cut, the terminal close does not end the grace wait. The row takes
@@ -2633,8 +2889,8 @@ implementer. None of it is done in this revision. The rows and sentences above d
   what holds in both orders, and the ones that cite the issue.
 - **This note:** §2.1a's `onLogout` bullet and the "Compatibility" bullet above are corrected in
   place as statuses when the change lands, as the earlier phases did.
-- **The pull request's body:** the change of §2.6 ("The behaviour change") under "Compatibility",
-  with the bound.
+- **The pull request's body:** under "Compatibility", the whole of "Against the head" from §2.6's
+  "The behaviour change", arm by arm, with the bound and the new limitation row.
 - **The issue of this condition** is set to completed by hand when the pull request merges; its
   comment of 2026-10-13 says so. The pull request's body and its commit messages name the issue only
   as a reference.
@@ -2746,8 +3002,8 @@ Added at Gate A round 2:
 - **Declare OD-3 a breaking C-ABI change** (the first OD-6 ruling). Withdrawn by the owner on the
   corrected premise (§0, §2.4): a BREAKING paragraph would describe a failure no consumer can observe.
 
-Added in v0.8 and rewritten in v0.9 and v0.10, for §2.6. Not reviewed at Gate A. S, S2, S3, S5 and S6
-are the prototypes §2.6 names.
+Added in v0.8 and rewritten in v0.9 and v0.10, for §2.6. Gate A round 6 reviewed v0.10's form. v0.11
+added the last entry, which was not reviewed. S, S2, S3, S5 and S6 are the prototypes §2.6 names.
 
 - **Merge with `L-563-6` stated,** and leave the one ending to a later batch. Rejected by R-8.
 - **S: skip the Logout's transmit and change nothing else.** The Logout step then sets `logout_seen_`
@@ -2845,6 +3101,10 @@ are the prototypes §2.6 names.
   taken (R-8): it is the opposite of QuickFIX's ending, and a write that hangs would then hold a
   terminal close, which exists to end such a write. The same reason is given above against R-4 read
   as "after the operation that called the callback has completed".
+- **An arm of NC-29 on a file executor of two threads, to pin the counted and unreadable record**
+  (v0.11). Not kept. That record is reached on both routes and is not this amendment's; the first
+  acceptance step of its own issue is its witness (§3, NC-29's row; §7). v0.10's form of the cell,
+  behind a gate that reorders the executor's jobs, is not kept either.
 
 Not in this list, because it is not decided: the order of a reset on disconnect on this route. It is
 with the owner (§6).
@@ -2976,8 +3236,10 @@ amendment does not touch it. The answer goes into §0 and into the comparison ta
   outbound callback, which is the state this PR removes. Read, not measured. B&L `L-563-5`;
   fixpp#587.
 
-Added in v0.8 and rewritten in v0.9 and v0.10, for §2.6. Not reviewed at Gate A. The bound is not in
-this list: it is a ruled behaviour (R-9), stated in §2.6, "The bound", with what it does not cover.
+Added in v0.8 and rewritten in v0.9 and v0.10, for §2.6. Gate A round 6 reviewed v0.10's form. v0.11
+corrected the bullet on `FileStore::store` and added the items that round 6's judge lists as not
+established; those edits were not reviewed. The bound is not in this list: it is a ruled behaviour
+(R-9), stated in §2.6, "The bound", with what it does not cover.
 
 - **A terminal close that does not begin inside the Logout's `toAdmin`,** while a graceful close's
   Logout is in its store call. There are three ways to it. The application posts the close from
@@ -2995,15 +3257,23 @@ this list: it is a ruled behaviour (R-9), stated in §2.6, "The bound", with wha
   exists on `main`, and it is not specific to a callback. Its issue is fixpp#594, batch B52. The
   evidence status of that issue: read, not run, for this condition; measured for §2.6's own
   condition.
-- **`FileStore::store` reporting success for a frame it never wrote.** When a cancellation reaches a
-  `FileStore::store` call before its write job has started, the store advances its next number and
-  returns success, and the record cannot be read (measured; §2.6, "The bound", (a); §3, P-22). It is
-  at the head and on `main`, on the route with no cut as well, and it needs no part of this
-  amendment. It is fixpp#598, batch B56. This amendment does not decide it. On its cut route the
-  bound meets it only where the grace timer expires with the Logout's write job still queued, or
-  after a `toAdmin` longer than the timeout. NC-29 pins what was measured. What would settle the
-  cases not run: a job already inside its system calls at the expiry; a pool that is busy and not
-  gated; a restart of the store over such a file.
+- **`FileStore::store` reporting success for a frame it never wrote, where the cancellation's job on
+  the file executor runs before the write's body starts.** That needs a file executor with more than
+  one thread. The store then advances its next number and returns success, and the record cannot be
+  read (measured on two threads; §2.6, "The bound", (a); §3, P-22). On an executor that keeps the
+  order of its jobs the write runs first and the record reads back (measured on one thread).
+  `src/session/file_store.cpp` is as on `main`, and the state is reached on the route with no cut
+  too. Its issue is fixpp#598, batch B56; the orchestrator corrected that issue's title and reach
+  after round 6. This amendment does not decide it. On the cut route the bound meets it only on such
+  an executor, where the grace timer expires before the Logout's write has started, or after a
+  `toAdmin` longer than the timeout. No cell of this amendment pins the unreadable record (§3,
+  NC-29's row). v0.10's bullet gave no condition on the executor; its measurement used a gate that
+  reordered the two jobs (round 6's O-1). Not established, each with what would settle it: whether,
+  on two threads, the emit of the cancellation also races the spawned coroutine's own read of its
+  cancellation state, by a ThreadSanitizer run of a cancelled `FileStore::store` on a pool of two
+  threads; a job already inside its system calls at the expiry, by a run that holds the write inside
+  its body; more than two threads, and a strand over a pool, by the same scenes on those executors;
+  a pool that is busy and not held by a cell; a restart of the store over such a file.
 - **`reset_on_disconnect` on this route: with the owner (asked 2026-10-13; not answered when this was
   written).** The two endings are in §2.6's comparison table: fixpp's teardown reset, which runs
   after the Logout step and leaves the store empty and both next numbers at 1; and QuickFIX C++'s
@@ -3070,6 +3340,22 @@ this list: it is a ruled behaviour (R-9), stated in §2.6, "The bound", with wha
   reading for F-1. It is at the head and outside this amendment, and it was not traced to a
   conclusion. What would settle it: a trace of `close()`'s awaits that take a lock, with a
   cancellation emitted on the caller's chain after each.
+- **What was said to the owner in the session about the bound.** §0, R-9, "What the owner was told",
+  gives it from the task list's section of that name. That section is the orchestrator's account of
+  the session. Round 6's judge read the record and not the session, and so did the author of this
+  revision. It records no reply of the owner. What would settle it: the owner's own word; no tracked
+  file can.
+- **`Engine::send` and `Engine::stop()` started in the decision-point `onLogout`.** Round 6's judge
+  traced both; neither was run, in the `ph8d_*` cells either (§2.6, "What arrives after the cut is
+  decided", its bullet on that `onLogout`). `stop()` from a callback is R-5's route. What would
+  settle them: an Engine-level arm for the cut route, which §3 does not specify (the bullet on the
+  Engine, above).
+- **The second visit of `Disconnected` on a tree that carries B28** (§2.6, "With batch B28"). Read
+  on two branches; no tree carries both. What would settle it: the cell that waits for both, on the
+  merged tree.
+- **NC-22's second arm and NC-27's `FileStore` hold arms at the head.** Predictions. The implementer
+  runs them at the head first. For NC-27's arms the prediction is the state clause only; what the
+  store shows there after the hold is recorded and not predicted (§3).
 - **The text of the issue, as Codex could not read it.** Codex's reviews of rounds 4 and 5 could not
   reach the issue. Both judges read it, with the command their "Method" names, and judged against
   it. Nothing is left open by it.
@@ -3090,7 +3376,9 @@ this list: it is a ruled behaviour (R-9), stated in §2.6, "The bound", with wha
 - On 2026-10-13, in Phase 7 and with no change of version, one sentence of §3 ("Cost (OD-5)", "One thread") was corrected: it said that each `co_spawn` of the bench runs as a dispatch on the bench thread. The bench thread starts the send from outside the `io_context`, so that `co_spawn` is queued and runs at the thread's next poll (the Phase 1 measurement, in the parent repository's `decisions/speckit/b41-563-564-measurement.md`). No other text of §3 changed. Not reviewed at Gate A.
 - **v0.8 — the amendment for fixpp#590** (2026-10-13). Written after convergence and after the owner's sign-off of v0.7, on ruling R-8 (§0), by a sub-agent from the orchestrator's brief and from the Phase 8a evidence (research/probes/b41_563_564/, the files named `ph8a_*`, parent repo). It added §2.6 and the passages the header lists, and changed no other design text of v0.7. It was submitted to a Gate A round scoped to the amendment, which reviews whether §2.6 and its rows implement R-8 and does not reopen v0.7. That round is round 4, below.
 - Round 4 (scoped, on v0.8) 2026-10-13: Codex P1=3 P2=2 P3=1; Opus post-judging P1=2 P2=3 P3=8. Not converged. The two P1 after judging are F-2 (§2.6 and B28 gave one class of event two rules) and O-1 (the cut step's wait can lose its only waker), and both come from v0.8's fourth statement (the triage's RC-1). Reviews: research/reviews/codex_563_564_4_callback-send_review.md, research/reviews/opus_563_564_4_callback-send_triage.md (parent repo). Before the rewrite the measurements the triage asks for were made on a prototype of the changed statement (research/probes/b41_563_564/, the files named `ph8b_*`, parent repo). v0.9 applies the round; "Round 4 (scoped, on v0.8) — applied in v0.9", at the end of this section, has one line per finding, the disagreement, and where v0.9 goes beyond or beside the triage's fix shape. v0.9 was written by a sub-agent from the triage, the orchestrator's brief and that evidence. It was submitted to round 5, below.
-- Round 5 (scoped, on v0.9) 2026-10-13: Codex P1=1 P2=4 P3=2; Opus post-judging P1=0 P2=2 P3=11. Not converged. The two P2 after judging are F-1 (the bound: the owner ruled it during the round, and v0.9 recorded it as an orchestrator's decision and a limit, with two routes on which the ruling's last sentence does not hold) and F-4 (while the cut Logout's store call is in flight the session is Active). Reviews: research/reviews/codex_563_564_5_callback-send_review.md, research/reviews/opus_563_564_5_callback-send_triage.md (parent repo). Before the rewrite the measurements the triage asks for were made on a prototype with the state's write moved (research/probes/b41_563_564/, the files named `ph8c_*`, parent repo), and one more, the Logout's own write job at the expiry, which no reviewer has seen. v0.10 applies the round; "Round 5 (scoped, on v0.9) — applied in v0.10", at the end of this section, has one line per finding, the disagreements, and where v0.10 goes beyond or beside the triage's fix shape. v0.10 was written by a sub-agent from the triage, the orchestrator's brief and that evidence. It is the last rewrite this loop allows, and it is submitted to round 6. The round's outcome is to be filled in here: its date, the Codex and Opus tallies, whether it converged, and the reviews' paths. Until then §2.6 is not approved, and nothing of it is in the pull request's tree.
+- Round 5 (scoped, on v0.9) 2026-10-13: Codex P1=1 P2=4 P3=2; Opus post-judging P1=0 P2=2 P3=11. Not converged. The two P2 after judging are F-1 (the bound: the owner ruled it during the round, and v0.9 recorded it as an orchestrator's decision and a limit, with two routes on which the ruling's last sentence does not hold) and F-4 (while the cut Logout's store call is in flight the session is Active). Reviews: research/reviews/codex_563_564_5_callback-send_review.md, research/reviews/opus_563_564_5_callback-send_triage.md (parent repo). Before the rewrite the measurements the triage asks for were made on a prototype with the state's write moved (research/probes/b41_563_564/, the files named `ph8c_*`, parent repo), and one more, the Logout's own write job at the expiry, which no reviewer has seen. v0.10 applies the round; "Round 5 (scoped, on v0.9) — applied in v0.10", at the end of this section, has one line per finding, the disagreements, and where v0.10 goes beyond or beside the triage's fix shape. v0.10 was written by a sub-agent from the triage, the orchestrator's brief and that evidence. It was the last rewrite this loop allows, and it was submitted to round 6, below.
+- Round 6 (scoped, on v0.10) 2026-10-13: Codex P1=0 P2=1 P3=2; Opus post-judging P1=0 P2=0 P3=9. Converged; the judge states the tally as unconditional. Codex's one P2 (F-1: no witness of what an application starts inside the moved `onLogout`) was judged P3: the judge traced each operation to one outcome that the source forces, and the branch such a witness would cover has a measured kill cell. The judge asks for no change to the mechanism's four statements. Reviews: research/reviews/codex_563_564_6_callback-send_review.md, research/reviews/opus_563_564_6_callback-send_triage.md (parent repo). Two measurements were made during and after the round and are not in v0.10: what an application starts inside the decision-point `onLogout` (research/probes/b41_563_564/, the files named `ph8d_*`, parent repo), which the judge read after judging; and the Logout's own write job on four kinds of file executor (the files named `ph8e_*`), which the judge's O-1 asks for and which no reviewer has seen.
+- v0.11 (2026-10-13) applies round 6's nine P3 items after convergence, from the judge's fix shapes, the orchestrator's brief and that evidence. It was written by a sub-agent. **These edits were not reviewed by a Gate A round.** "Round 6 (scoped, on v0.10) — converged; applied in v0.11", at the end of this section, has one line per item and what v0.11 adds beside the judge's list. Nothing of §2.6 is in the pull request's tree. Still owed for the amendment: `/analyze`, the owner's sign-off, and the owner's answer on `reset_on_disconnect` (§0a, §6).
 
 ### Round 1 — disagreements
 
@@ -3453,6 +3741,8 @@ One line per finding. F-n are Codex's, with the judge's verdict; O-n are the jud
 - **RC-3:** the lines of F-2, F-3, F-5, F-7 and O-1 to O-6.
 - **The four facts the owner must be told** about the ruling's last sentence: told on 2026-10-13
   (the orchestrator), and stated in §0 and in §2.6, "The bound".
+  **Marked in v0.11:** §0, R-9, "What the owner was told", now says when and what, from the task
+  list's section of that name.
 - **"Not established", the triage's items and Codex's:** each is in §7 or in §2.6, "The bound", with
   what would settle it. The triage's item on the Logout's own write at the expiry was measured for a
   job that is still queued (P-22); a job already inside its system calls stays read, not run.
@@ -3486,11 +3776,18 @@ Stated so that round 6 can judge each one. **No reviewer has seen the first two.
   does not end the close there.** The triage lists it as bound case 2, read, not run. The
   measurement (P-22): the closes do not complete at the expiry; they complete when the file executor
   takes the job. §2.6, "The bound", (a), states it as measured. The owner was told on 2026-10-13.
+  **Corrected in v0.11:** the closes complete when the file executor has run the job, which is not
+  always when it takes it; and what the owner was told, with the later correction, is in §0, R-9.
 - **A defect of the head met in that scene: fixpp#598.** `FileStore::store` reports success for a
   frame it never wrote when a cancellation reaches it before its write job starts. It is on the
   route with no cut as well, and on `main`. The note states what was measured, cites the issue, pins
   the reading in NC-29, and does not present it as this amendment's ending. Under mutant D the six
   `FileStore` hold arms of NC-27 reach the same state, which is why they are RED there.
+  **Corrected in v0.11 (round 6's O-1):** v0.10 stated this too widely. That state needs the
+  cancellation's job to run before the write's body starts, which a file executor of one thread does
+  not allow; the measurement behind this bullet used a gate that reordered the two jobs. NC-29 no
+  longer pins that state, and under mutant D the `FileStore` hold arms of NC-27 stay green on a hold
+  that keeps order (§2.6, "The bound", (a); §3).
 - **NC-28 asserts a lower side on the completion time.** The triage says a "not before" snapshot
   would race the timer. The cell does not take a snapshot: it reads the time at which each close
   completed and requires that it is not before the timeout has elapsed since the graceful close
@@ -3510,3 +3807,93 @@ Stated so that round 6 can judge each one. **No reviewer has seen the first two.
   is the Logout's number plus one on every arm, so the position of `onLogout` relative to the
   Logout's number is a change against the head on all six arms; §2.6, "The behaviour change", says
   so.
+
+### Round 6 (scoped, on v0.10) — converged; applied in v0.11
+
+Converged: Codex P1=0 P2=1 P3=2; after judging P1=0 P2=0 P3=9, and the judge states the tally as
+unconditional. Reviews: `research/reviews/codex_563_564_6_callback-send_review.md` and
+`research/reviews/opus_563_564_6_callback-send_triage.md` (parent repo). v0.11 applies the nine P3
+items. **No Gate A round reviewed these edits.** A sub-agent made them from the judge's fix shapes,
+from the orchestrator's brief, and from the evidence files named `ph8d_*` and `ph8e_*`. One line per
+item. F-n are Codex's, with the judge's verdict; O-n are the judge's own.
+
+- **F-1 (Codex P2, judged P3):** the judge's closure list is applied item by item. §2.6, "What
+  arrives after the cut is decided", has the outcome per operation, each with its status, and what
+  is new at that position. §3 has prediction row P-23, and the cells as a row of their own, NC-31:
+  twelve arms as controls, which their path guard stops at the head, and two arms with the lock held
+  as a second kill of mutant D. Mutant D's row has them. Mutant G is under "Specified without a
+  witness", as measured green. The fixture list names the two accessors as readings. "What was
+  measured, and its limits" has what was not run. `Engine::stop()` from that `onLogout` is named as
+  R-5's route, and no ending is stated for it.
+- **F-2 (P3, confirmed):** NC-27's oracle is split into the common assertions, the two arms after
+  the store call, the hold arms, and the assertions of each arrival.
+- **F-3 (P3, confirmed):** §0a marks Appendix A's "Session FSM" row touched, with the reason. The
+  four controls are the same, and `/analyze` and the sign-off stay owed.
+- **O-1:** the measurement the judge asks for was made (`ph8e_*`). §2.6, "The bound", (a), is in two
+  halves: the timing, on every kind of executor that was run; and what the store holds, by kind of
+  executor, with the gate named as the reason v0.10's statement was too wide and with where the host
+  supplies the executor. P-22, NC-29, mutant D's row and trace, the fixture's gate (each mode says
+  whether later jobs pass), P-13 and NC-22's second arm, NC-27's `FileStore` hold arms and their
+  prediction at the head, the route list of "With batch B28", and §7's bullet are rewritten from it.
+  The orchestrator corrected the issue's title and reach.
+- **O-2:** §0, R-9, has "What the owner was told", from the task list's section of that name: the
+  two messages, the doubt told before the re-run, and the re-run's result. The other sentences that
+  said "told" point there. §7 says that the section is the orchestrator's account.
+- **O-3:** statement 4's exit has the test at the exit after a failed `assign_outbound()`. "With
+  batch B28" says which of B28's two writes records a second visit of `Disconnected` on a tree with
+  both changes, and the cell that waits for both asserts one visit. "The bound" no longer lists a
+  step queued at the sequence manager's lock.
+- **O-4:** "The behaviour change", "Against the head", is written arm by arm, the sixth arm
+  included, with where `onLogout` runs today on each, from the measurements.
+- **O-5:** §4 has a limitation row for the logout timeout and a write job in the file executor, with
+  its evidence, and says why no issue is filed for the timing alone.
+- **O-6:** NC-28's lower side names the clock and the start instant, and NC-24 (b) refers to them.
+  The item's other two parts need no edit of their own: the judge found no "path not driven" stop
+  counted as a kill, and NC-22's second arm is under O-1.
+- **"Not established":** each item is in §7 with what would settle it, apart from the first, which
+  `ph8e_*` settles: on a file executor of one thread, which keeps order, the Logout is written and
+  reads back.
+
+### Round 6 — disagreements
+
+- **F-1:** Codex judged the missing witness P2 and proposed sub-arms of NC-21. The judge traced each
+  operation to one forced outcome and found the branch's kill cell measured: P3. v0.11 writes the
+  cells as a row of their own, NC-31, and not as sub-arms: NC-21 asserts the same in every arm, and
+  these arms do not.
+- **Codex's disposition audit** found the description of the store defect to agree with
+  `FileStore::store`. The judge found that the audit had not checked how the cancellation reaches
+  the spawned job (O-1). The re-run agrees with the judge.
+
+### Round 6 — what v0.11 adds beside the judge's list
+
+Stated so that a later reader can judge each one. None was reviewed.
+
+- **The test of O-3 is a production statement.** The orchestrator's brief for v0.11 says that round
+  6 changes no mechanism, and it does not list the test. The judge's fix shape for O-3 and item 6 of
+  the closing recommendation do. v0.11 specifies it, in statement 4's exit, and lists it as
+  specified without a witness.
+- **NC-27's `FileStore` hold arms are specified on the hold that keeps order.** The judge asks that
+  the text state the gate's condition. v0.11 changes the fixture, so that no arm that holds the
+  Logout's own write depends on a gate that reorders. S6 and mutant D were measured on that form. S5
+  and mutants E and F were not, and their rows say so.
+- **NC-29's form was decided again:** the order-keeping executor only. The reasons are in its row
+  and in §5.
+- **NC-22's second mode is specified to keep order.** No prototype built it.
+- **§0's bullet on B28's R-24, and "With batch B28",** name B28's head as read again for v0.11, and
+  say what that note's v0.17 added.
+- **Four sentences said "told to the owner", where the brief counts three:** in §0, in "The bound",
+  and two in "Round 5". All point at the task list's section. The two bullets of "The bound" after
+  (e) are no longer covered by "told": that section does not record them.
+- **A strand is read, not run.** The brief names a strand beside one thread as an executor that
+  keeps order. `ph8e_predictions.md` lists a strand over a pool as not covered, and §2.6 says so.
+- **`CallbackSend.OnLogoutOfGracefulCloseStartsClose_Terminal`** is named in §3's "What is run
+  again".
+- **Round 5's entries above are kept as written and marked** where v0.11 corrects what they say.
+- **A sweep for the old statement.** After the edit the note was searched for sentences that still
+  state the store defect with no condition on the file executor, or that still count NC-27's
+  `FileStore` hold arms as a kill of mutant D. The recipe: join the note's lines, split the text
+  into sentences, and search for the phrases v0.10 used for both. Run it first on v0.10
+  (`git show b9b8b788:.specify/563-564-callback-send.md`), where it must report hits, and on v0.7,
+  where it must report none; then on the head, and read every hit that is left. A hit that is left
+  must carry the condition on the executor, or be a dated record of what v0.10 said that is marked
+  as corrected.
