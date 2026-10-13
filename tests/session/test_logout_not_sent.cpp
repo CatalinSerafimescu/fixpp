@@ -196,14 +196,18 @@ struct LogoutOutcome {
     std::optional<fixpp::core::expected_t<void>> graceful_result;
     std::optional<fixpp::core::expected_t<void>> terminal_result;
     // The phase's ending, read while the write is still held (the three cancelled inputs).
-    bool ending_reached_before_release = false;  // the reading point; each input's is its own
+    bool ending_reached_before_release = false;  // the reading point: the closes returned
     bool hold_in_flight_at_that_reading = false;
     fsm_state state_before_release = fsm_state::NotConnected;
     std::vector<fsm_state> ring_before_release;
     // After the closes and the held send have returned.
     fsm_state state_after_close = fsm_state::NotConnected;
     std::vector<fsm_state> ring_after_close;
-    StoreReading store;
+    StoreReading store_before_the_close;  // read before the hold is armed
+    StoreReading store;                   // read after the closes and the held send
+    // The store's reset() was called after the close began. Read after the engine has
+    // stopped, when nothing is left that could still call it.
+    bool reset_recorded_after_the_close_began = false;
     // MsgType(35) and MsgSeqNum(34) of each frame the peer read after the hold began.
     std::vector<std::string> wire;
     std::size_t logouts_read = 0;  // by the peer, to end-of-stream
@@ -227,6 +231,7 @@ LogoutOutcome run_logout_scene(LogoutInput const input) {
     std::future<fixpp::core::expected_t<void>> close_fut;
     std::future<fixpp::core::expected_t<void>> terminal_fut;
     std::size_t rx_mark = 0;
+    std::size_t close_mark = 0;
 
     // The gate, and the readings taken with the session's clock not advanced.
     bool const reached = [&] {
@@ -240,6 +245,13 @@ LogoutOutcome run_logout_scene(LogoutInput const input) {
         o.held_seq = scene.last + 1;
         o.logout_seq = scene.last + 2;
         rx_mark = rig.peer.received.size();
+        if (auto* const store = scene.log->store; store != nullptr) {
+            auto read_fut =
+                asio::co_spawn(rig.ioc, read_store(store, o.logout_seq), asio::use_future);
+            if (rig.run_until([&] { return HeldFileStoreScene::ready(read_fut); })) {
+                o.store_before_the_close = read_fut.get();
+            }
+        }
 
         // The hold: one Engine::send, caught inside its store()'s offload.
         store_hold::arm();
@@ -251,7 +263,7 @@ LogoutOutcome run_logout_scene(LogoutInput const input) {
         o.hold_entered = true;
 
         // close(graceful), spawned as fixpp_session_close spawns it.
-        auto const close_mark = scene.log->mark();
+        close_mark = scene.log->mark();
         auto logout_store = [&] {
             return scene.log->first_after(close_mark, [&](StoreCall const& call) {
                 return call.op == store_op::store && call.dir == direction_t::outbound &&
@@ -300,31 +312,18 @@ LogoutOutcome run_logout_scene(LogoutInput const input) {
         // Disconnected for a returned dispatch_aborted with no test of the state (note
         // D-OUT-9, "A send that fails without an exception is not touched"; D-OUT-10,
         // "A value, not D-OUT-2's exception").
-        if (input == grace_timer_reset_on_logout) {
-            // This close cannot return while the write is held: its teardown reset calls
-            // the store's reset(), which queues at the store's lock behind the held
-            // write. The reading point is that call entered and not returned: the phase
-            // has left, and close() is past its own test of the state.
-            auto teardown_reset = [&] {
-                return scene.log->first_after(
-                    close_mark, [](StoreCall const& call) { return call.op == store_op::reset; });
-            };
+        // The reading point, for every cancelled input: the closes have returned while the
+        // write is still held. Nothing in a close's terminal part waits for the held
+        // write unless it runs a teardown reset, whose reset() call queues at the store's
+        // lock behind that write; a Logout that was not sent runs none, with
+        // reset_on_logout set too (ruling R-24).
+        o.ending_reached_before_release =
+            rig.run_until([&] { return HeldFileStoreScene::ready(close_fut); }, until(bound_end));
+        if (terminal_fut.valid()) {
             o.ending_reached_before_release =
-                rig.run_until(
-                    [&] { return teardown_reset() != nullptr && teardown_reset()->entered(); },
-                    until(bound_end)) &&
-                !teardown_reset()->returned();
-        } else {
-            // With no teardown reset, nothing in a close's terminal part waits for the
-            // held write: the closes return while it is held.
-            o.ending_reached_before_release = rig.run_until(
-                [&] { return HeldFileStoreScene::ready(close_fut); }, until(bound_end));
-            if (terminal_fut.valid()) {
-                o.ending_reached_before_release =
-                    rig.run_until([&] { return HeldFileStoreScene::ready(terminal_fut); },
-                                  until(bound_end)) &&
-                    o.ending_reached_before_release;
-            }
+                rig.run_until([&] { return HeldFileStoreScene::ready(terminal_fut); },
+                              until(bound_end)) &&
+                o.ending_reached_before_release;
         }
         // No poll for "no handler ready" here: while the write is held, a close that is
         // waiting posts to the session's executor again and again, so such a poll would
@@ -382,6 +381,13 @@ LogoutOutcome run_logout_scene(LogoutInput const input) {
     session.reset();
     scene.finish();
     o.peer_read_ended = rig.run_until([&] { return rig.peer.read_ended; });
+    // After the stop: a teardown reset is a statement of a close, and every close of the
+    // session has returned by now, so a reset() that is not recorded here was not made
+    // late either.
+    o.reset_recorded_after_the_close_began =
+        reached && scene.log->first_after(close_mark, [](StoreCall const& call) {
+            return call.op == store_op::reset;
+        }) != nullptr;
     for (auto const& f : scene.peer_frames_from(rx_mark)) {
         o.wire.push_back(plain_rig::field_value(f, "35") + "/" + plain_rig::field_value(f, "34"));
     }
@@ -444,7 +450,7 @@ void expect_logout_not_sent_ending(LogoutOutcome const& o) {
     // The phase's ending, read while the write was still held.
     EXPECT_TRUE(o.ending_reached_before_release)
         << "the reading point was not reached while the write was held: the closes did not "
-           "return (with reset_on_logout: the close did not reach its teardown reset)";
+           "return";
     EXPECT_TRUE(o.hold_in_flight_at_that_reading)
         << "the held send had ended when the phase's ending was read";
     EXPECT_EQ(o.state_before_release, fsm_state::Disconnected);
@@ -497,17 +503,25 @@ TEST(GracefulLogoutStoreCancelled, ByAnEscalatingTerminalClose_BothClosesReturnA
         << "the store's next outbound number is not the Logout's own: " << o.store.text();
 }
 
-// The timer input with reset_on_logout set: the teardown reset runs as after a graceful
-// close whose Logout was sent.
-TEST(GracefulLogoutStoreCancelled, ByTheGraceTimer_ResetOnLogout_TheTeardownResetStillRuns) {
+// The timer input with reset_on_logout set (ruling R-24): a graceful close whose Logout
+// was not sent does not reset. The store's numbers are the ones the same close leaves
+// without reset_on_logout, and the teardown makes no reset() call. A local graceful
+// close whose Logout was sent still resets:
+// ResetOnLifecycleTest.ResetOnLogout_LocalInitiated_Resets (test_reset_on_lifecycle.cpp).
+TEST(GracefulLogoutStoreCancelled, ByTheGraceTimer_ResetOnLogout_NoResetForALogoutThatWasNotSent) {
     auto const o = run_logout_scene(LogoutInput::grace_timer_reset_on_logout);
     ASSERT_TRUE(logout_gate(o));
     ASSERT_TRUE(logout_store_was_cancelled(o));
     expect_logout_not_sent_ending(o);
-    ASSERT_TRUE(o.store.read) << "the store was not read";
-    EXPECT_TRUE(o.store.next_outbound == std::optional<seqnum_t>{1} &&
-                o.store.next_inbound == std::optional<seqnum_t>{1})
-        << "the store's next numbers are not 1 in each direction: " << o.store.text();
+    ASSERT_TRUE(o.store.read && o.store_before_the_close.read) << "the store was not read";
+    EXPECT_TRUE(o.store.next_outbound == std::optional<seqnum_t>{o.logout_seq} &&
+                o.store.next_inbound.has_value() &&
+                o.store.next_inbound == o.store_before_the_close.next_inbound)
+        << "the store's next numbers are not the Logout's own and the inbound number as it "
+           "was before the close: "
+        << o.store.text() << "; before the close: " << o.store_before_the_close.text();
+    EXPECT_FALSE(o.reset_recorded_after_the_close_began)
+        << "the store's reset() was called after the close began";
 }
 
 // The control: the hold is released before the grace timer, so the Logout is sent. No
