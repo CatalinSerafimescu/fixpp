@@ -6626,22 +6626,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         }
     }
 
-    // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
-    // Keyed here (after emit, before LogoutSent) so logout_seen_ is true whenever
-    // the Logout frame was actually placed on the wire. The teardown reset in close()
-    // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
-    // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
-    logout_seen_ = true;
-
     // D-OUT-6: the Logout was not sent, so no reply to it can come. The phase leaves at
-    // once and arms no wait; close() goes on to its terminal part. The flag above is set
-    // first, as it is for a Logout that was sent.
+    // once and arms no wait; close() goes on to its terminal part. logout_seen_ is not
+    // set on this path (ruling R-24): for reset_on_logout, a Logout that was not sent is
+    // not a Logout, and the teardown makes no reset for it.
     if (!sent) {
         if (fsm_state_ != fsm_state::Disconnected) {
             record_state_transition_(fsm_state::Disconnected);
         }
         co_return sent;
     }
+
+    // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
+    // Keyed here (after emit, before LogoutSent) so logout_seen_ is true whenever
+    // the Logout frame was actually placed on the wire. The teardown reset in close()
+    // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
+    // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
+    logout_seen_ = true;
 
     // Transition to LogoutSent.
     record_state_transition_(fsm_state::LogoutSent);
