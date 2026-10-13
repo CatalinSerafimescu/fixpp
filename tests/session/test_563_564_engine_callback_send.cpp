@@ -176,6 +176,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -187,6 +188,7 @@
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
+#include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -194,7 +196,9 @@
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
+#include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <functional>
 #include <future>
 #include <map>

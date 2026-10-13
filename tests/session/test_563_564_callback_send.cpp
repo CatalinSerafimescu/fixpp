@@ -364,8 +364,10 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
@@ -382,6 +384,7 @@
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <functional>
 #include <future>
 #include <memory>

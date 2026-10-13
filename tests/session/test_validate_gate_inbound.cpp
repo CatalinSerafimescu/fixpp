@@ -56,6 +56,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <functional>
 #include <future>
 #include <memory>

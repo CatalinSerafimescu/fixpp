@@ -48,6 +48,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <exception>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
