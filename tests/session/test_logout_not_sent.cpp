@@ -2,12 +2,11 @@
 //
 // tests/session/test_logout_not_sent.cpp
 //
-// Ruling R-17 (.specify/536-537-538-recovery-liveness.md §10, D-OUT-6; §5, the rows
-// "D-OUT-6, the measured scene", "D-OUT-6, control" and "D-OUT-6, the other outcomes"):
-// the logout phase of a graceful close does not wait for a reply to a Logout it did not
-// send. And the cell behind the C-ABI row for fixpp_session_send (§5, "Implementation
-// steps that can send the design back": the reach of a cancelled outbound store through
-// the C ABI).
+// Ruling R-17 (.specify/536-537-538-recovery-liveness.md §10, D-OUT-6; §5, the rows of
+// D-OUT-6 in the table "The cancelled outbound store (§10)"): the logout phase of a graceful close
+// does not wait for a reply to a Logout it did not send. And the cell behind the C-ABI row for
+// fixpp_session_send (§5, "Implementation steps that can send the design back": the reach of a
+// cancelled outbound store through the C ABI).
 //
 // Two clocks run in a graceful close. The logout phase's wait for the peer's Logout is
 // on the session's clock, which is a mock clock in every cell here and is not advanced
@@ -160,7 +159,7 @@ asio::awaitable<StoreReading> read_store(fixpp::session::MessageStore* store, se
     co_return out;
 }
 
-// ── D-OUT-6, the measured scene ──────────────────────────────────────────────────────
+// ── D-OUT-6, the scene with a held write ─────────────────────────────────────────────
 //
 // A FileStore session under an Engine, with a second file I/O thread: close(graceful)
 // first runs the store's flush, which is an offload with no lock, and on one thread it
@@ -199,8 +198,9 @@ struct LogoutOutcome {
     fsm_state state_after_close = fsm_state::NotConnected;
     std::vector<fsm_state> ring_after_close;
     StoreReading store;
-    std::vector<std::string> wire;  // "35/34" of each frame the peer read after the hold began
-    std::size_t logouts_read = 0;   // by the peer, to end-of-stream
+    // MsgType(35) and MsgSeqNum(34) of each frame the peer read after the hold began.
+    std::vector<std::string> wire;
+    std::size_t logouts_read = 0;  // by the peer, to end-of-stream
     bool peer_read_ended = false;
     bool hold_timed_out = false;
     bool stop_completed = false;
