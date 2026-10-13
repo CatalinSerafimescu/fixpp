@@ -8575,17 +8575,24 @@ void run_deferred_send_cancelled(Emission emission) {
     bool slot_has_a_handler = false;
     bool second_pending_at_emission = false;
     int to_app_calls_at_emission = 0;
+    // The completion token of the send the cell cancels. A closure call produces it,
+    // so that the call is a direct argument of co_spawn: both co_spawn census
+    // instruments (tools/audit_co_spawn_named_closure.py and
+    // tools/reconcile_co_spawn_census.py) must list the site.
+    const auto record_into_on_the_slot = [&](SendOutcome& o) {
+        return asio::bind_cancellation_slot(signal.slot(), record_into(o));
+    };
     f.app->on_to_app = [&] {
         if (f.app->to_app_calls != 1) {
             if (!inner_saw_outer_live.has_value()) inner_saw_outer_live = outer_live;
             return;
         }
         outer_live = true;
-        const auto token = asio::bind_cancellation_slot(signal.slot(), record_into(second));
         if (emission == Emission::terminal_with_throw_if_cancelled_off) {
-            asio::co_spawn(ex, send_with_throw_if_cancelled_off(sess, two), token);
+            asio::co_spawn(ex, send_with_throw_if_cancelled_off(sess, two),
+                           record_into_on_the_slot(second));
         } else {
-            asio::co_spawn(ex, sess.send(two), token);
+            asio::co_spawn(ex, sess.send(two), record_into_on_the_slot(second));
         }
         slot_has_a_handler = signal.slot().has_handler();
         second_pending_at_emission = !second.done;
