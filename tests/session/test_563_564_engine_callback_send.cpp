@@ -277,7 +277,7 @@ std::string field(std::string_view frame, std::uint32_t tag) {
         frame.substr(pos, end == std::string_view::npos ? std::string_view::npos : end - pos));
 }
 
-std::string value(const View& mv, std::uint32_t tag) {
+std::string value(const View& mv, std::uint16_t tag) {
     const auto fv = mv.get(tag);
     return fv ? std::string(fv->as_string()) : std::string{};
 }
