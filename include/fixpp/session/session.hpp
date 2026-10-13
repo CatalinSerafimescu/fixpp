@@ -948,7 +948,9 @@ private:
         std::optional<fsm_state> arm = std::nullopt) noexcept;
     // consume_rejected_seqnum_(): fixpp#423 — an in-sequence message answered by a
     //   Reject before the seqnum gate consumes its MsgSeqNum (advance + persist).
-    // close_filled_resend_gap_(): exit AwaitingResend once next_inbound passes the gap end.
+    // close_filled_resend_gap_(): exit AwaitingResend once next_inbound passes the gap end;
+    //   while the resend stays outstanding, refresh the instant its deadline counts from
+    //   (fixpp#537; .specify/536-537-538-recovery-liveness.md, D-537-5).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> consume_rejected_seqnum_(
         seqnum_t seq, std::string_view msg_type) noexcept;
     void close_filled_resend_gap_() noexcept;
@@ -1152,10 +1154,15 @@ private:
     [[nodiscard]] inbound_result_t on_inbound_active_sequence_reset_(
         bool tic, std::span<const std::byte> frame,
         fixpp::session::detail::FrameHeader const& hdr) noexcept;
-    [[nodiscard]] inbound_result_t on_inbound_active_too_high_(bool tic, seqnum_t next_expected,
-                                                               seqnum_t seq) noexcept;
+    // fixpp#537 (D-537-8): `hdr` is read for a Heartbeat that opens the gap.
+    [[nodiscard]] inbound_result_t on_inbound_active_too_high_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, seqnum_t next_expected,
+        seqnum_t seq) noexcept;
     [[nodiscard]] inbound_continue_t on_inbound_active_poss_dup_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    // fixpp#537 (.specify/536-537-538-recovery-liveness.md §4.3, D-537-1 and D-537-2)
+    // supersedes this arm's ending of the session at a second frame above NextNumIn while a
+    // resend is outstanding: the frame is ignored.
     [[nodiscard]] inbound_result_t on_inbound_active_out_of_sequence_(
         bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         fixpp::core::error chk_error) noexcept;
@@ -1177,6 +1184,18 @@ private:
     [[nodiscard]] inbound_result_t on_inbound_active_from_app_failed_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr,
         fixpp::core::expected_t<dispatch_outcome> cb_r) noexcept;
+    // fixpp#537 (D-537-5; §4.7 of the same note): the deadline of an unfilled resend gap,
+    // twice HeartBtInt after NextNumIn last advanced. Called at each exit a frame above
+    // NextNumIn can take while a resend is outstanding without ending the session. nullopt:
+    // not expired, the caller goes on. Otherwise the caller returns the value at once: the
+    // session has sent a Logout with a Text(58), where it could be built, and is
+    // Disconnected. Off when HeartBtInt <= 0 or the session has no clock.
+    [[nodiscard]] inbound_continue_t resend_gap_deadline_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    // fixpp#537 (D-537-6, D-537-8): the in-sequence TestReqID(112) disposition for a
+    // Heartbeat above NextNumIn. False: the TestReqID was another one and the session is
+    // Disconnected. The caller tests that a TestRequest is pending.
+    [[nodiscard]] bool answer_pending_test_request_(std::string_view test_req_id) noexcept;
     // Reply leaves (§2.2 class 2): each owns the buffer its reply frame is built in.
     [[nodiscard]] inbound_result_t inbound_reject_leaf_(
         bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
@@ -1184,10 +1203,13 @@ private:
     [[nodiscard]] inbound_result_t inbound_reject_best_effort_leaf_(
         bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
         std::string_view sending_time) noexcept;
-    [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic,
-                                                        std::string_view sending_time) noexcept;
+    // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5).
+    [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic, std::string_view sending_time,
+                                                        std::string_view text) noexcept;
     [[nodiscard]] inbound_result_t inbound_logon_sent_logout_leaf_(
         bool tic, std::string_view text, std::string_view sending_time) noexcept;
+    // fixpp#537 (D-537-7) supersedes the success returned for a request that could not be
+    // built: Disconnected and dispatch_aborted.
     [[nodiscard]] inbound_result_t inbound_resend_request_leaf_(
         bool tic, seqnum_t begin_seqno, std::string_view sending_time) noexcept;
     [[nodiscard]] inbound_result_t inbound_heartbeat_reply_leaf_(

@@ -22,12 +22,15 @@
 // cannot be built ends the session: the peer never got the request, so a session that
 // stayed up would wait for a replay nobody was asked for.
 //
-// D-537-5. At the same boundary with NextNumIn left small, the ResendRequest is built.
-// The cell here ends at a second frame above NextNumIn before the bound, which is
-// ignored.
+// D-537-5. At the same boundary with NextNumIn left small, the ResendRequest is built, so
+// a gap opens, and the Logout that the deadline of an unfilled gap sends is not: it
+// carries a Text(58) longer than what the Logon carries beyond the header. The session
+// then ends at the bound with nothing written (ruling R-12). A control session far from
+// the boundary writes that Logout under the same traffic.
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
@@ -38,6 +41,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -123,6 +127,25 @@ struct AfterReset {
     std::string begin_seq_no;  // BeginSeqNo(7) of the first ResendRequest, when one was written
     fsm_state state = fsm_state::NotConnected;
 };
+
+// What a session did with frames above NextNumIn, from the frame that opened the gap to the
+// frame at the bound.
+struct ToTheBound {
+    std::string setup_miss;        // not empty: the gap was not opened as the cell needs
+    std::string before_the_bound;  // not empty: a frame before the bound was not ignored
+    std::string logon;             // the session's own Logon, as written
+    std::string stamp;             // SendingTime(52) of the session's ResendRequest
+    seqnum_t next_out = 0;         // the session's next outbound number at the bound
+    std::optional<fixpp::core::expected_t<void>> result;  // on_inbound_frame, at the bound
+    std::vector<std::string> written;                     // every frame written for that frame
+    fsm_state state = fsm_state::NotConnected;
+};
+
+// The spacing of the peer's frames before the bound, inside every HeartBtInt, and the
+// bound itself, spelled from the note and not read from the session.
+constexpr auto kStep = 15s;
+constexpr auto kGapBound = 60s;
+static_assert(kStep < kHeartBtInt && kGapBound == 2 * kHeartBtInt);
 
 class UnbuildableFrames : public ::testing::TestWithParam<session_role> {
 protected:
@@ -225,6 +248,84 @@ protected:
         if (!fixpp::test_support::pump_until_ready(ioc, fut)) return false;
         (void)fut.get();
         return true;
+    }
+
+    // Moves the clock forward by `d`, then runs every handler that became ready.
+    void pass(std::chrono::nanoseconds d) {
+        // Staging (ci/mock-clock-staging-sweep.sh): KIND D for the liveness loop of the
+        // Driven that is alive: each of its sleeps is armed to an instant computed from
+        // the last inbound or outbound instant, which a frame fed or written before this
+        // advance stamped, so a sleep armed late names an instant already passed. KIND A
+        // for the frame fed next, which the session reads the clock for on this thread.
+        clock->advance(d);
+        ioc.restart();
+        while (ioc.poll() > 0) ioc.restart();
+        ioc.restart();
+    }
+
+    // The "D-537-5, a Logout that cannot be built" row on a session whose SenderCompID
+    // has `comp_id_len` bytes. A TestRequest above NextNumIn opens the gap at E. The peer
+    // then sends one more at once, one at each kStep, and one a millisecond before
+    // E + kGapBound: an inbound frame inside every HeartBtInt, so the liveness loop sends
+    // no TestRequest. The last frame is at E + kGapBound. The peer's frames carry the
+    // clock's seed as SendingTime(52), which stays inside the SendingTime threshold for a
+    // clock moved by kGapBound.
+    [[nodiscard]] ToTheBound gap_to_the_bound(std::size_t comp_id_len) {
+        ToTheBound out;
+        Driven d{*this, comp_id_len};
+        if (!d.logon_written()) {
+            out.setup_miss = "the session did not reach Active";
+            return out;
+        }
+        out.logon = d.cap->of_type("A").front();
+        auto const next_in = [&] {
+            return session_test_access::seqnum_mgr(*d.session).next_inbound_unsafe();
+        };
+        auto const n = next_in();
+        std::uint32_t seq = n + 5;
+        d.cap->frames.clear();
+        (void)d.feed("1", seq, "112=PEER-TR\x01");
+        auto const requests = d.cap->of_type("2");
+        if (requests.size() != 1U || field(requests.front(), 7) != std::to_string(n) ||
+            !session_test_access::resend_outstanding(*d.session)) {
+            out.setup_miss =
+                "with NextNumIn = " + std::to_string(n) + " the ResendRequest was not built";
+            return out;
+        }
+        out.stamp = field(requests.front(), 52);
+
+        // Before the bound: ignored. The frame fed at once, with the clock not moved, is
+        // also checked for "nothing written"; later the liveness loop writes Heartbeats.
+        auto const ignored = [&](std::optional<fixpp::core::expected_t<void>> const& r) {
+            return r.has_value() && r->has_value() && d.session->state() == fsm_state::Active &&
+                   d.cap->of_type("5").empty() && d.cap->of_type("1").empty() && next_in() == n &&
+                   session_test_access::resend_outstanding(*d.session);
+        };
+        d.cap->frames.clear();
+        if (!ignored(d.feed("1", ++seq, "112=PEER-TR\x01")) || !d.cap->frames.empty()) {
+            out.before_the_bound =
+                d.session->state() == fsm_state::Active
+                    ? "a second frame above NextNumIn, before the bound, was not ignored"
+                    : "a second frame above NextNumIn, before the bound, ended the session";
+            return out;
+        }
+        const std::array<std::chrono::milliseconds, 4> steps{kStep, kStep, kStep,
+                                                             kGapBound - 3 * kStep - 1ms};
+        for (auto const step : steps) {
+            pass(step);
+            if (!ignored(d.feed("1", ++seq, "112=PEER-TR\x01"))) {
+                out.before_the_bound = "a frame above NextNumIn before the bound was not ignored";
+                return out;
+            }
+        }
+
+        pass(1ms);
+        out.next_out = session_test_access::seqnum_mgr(*d.session).peek_outbound();
+        d.cap->frames.clear();
+        out.result = d.feed("1", ++seq, "112=PEER-TR\x01");
+        out.written = d.cap->frames;
+        out.state = d.session->state();
+        return out;
     }
 
     [[nodiscard]] bool logon_written_at(std::size_t comp_id_len) {
@@ -352,34 +453,54 @@ TEST_P(UnbuildableFrames, Control_ShortCompId_EveryNewSeqNoDrawsAResendRequest) 
 }
 
 // D-537-5, a Logout that cannot be built. At the boundary, with NextNumIn left small, the
-// ResendRequest is built, so a gap opens. A second frame above NextNumIn, before the
-// bound, is ignored.
-TEST_P(UnbuildableFrames, AtTheBoundary_SecondTooHighFrameBeforeTheBoundIsIgnored) {
+// ResendRequest is built, so a gap opens, and a frame above NextNumIn before the bound is
+// ignored. At the bound the deadline's Logout cannot be built: nothing is written, the
+// session is Disconnected, and the frame returns success.
+TEST_P(UnbuildableFrames, AtTheBoundary_LogoutThatCannotBeBuilt_EndsTheSessionWithNothingWritten) {
     auto const boundary = longest_comp_id_with_logon();
     ASSERT_TRUE(boundary.has_value())
         << "no SenderCompID length was found at which the session's own Logon is written "
            "and one byte more is not";
 
-    Driven d{*this, *boundary};
-    ASSERT_TRUE(d.logon_written()) << "setup: the session at the boundary did not reach Active";
-    auto const n = session_test_access::seqnum_mgr(*d.session).next_inbound_unsafe();
+    // The control: far from the boundary, the same traffic draws the deadline's Logout.
+    // Its Text(58) is the text a session with the same NextNumIn sends at the bound.
+    auto const control = gap_to_the_bound(/*comp_id_len=*/1);
+    ASSERT_TRUE(control.setup_miss.empty()) << "short SenderCompID: " << control.setup_miss;
+    ASSERT_TRUE(control.before_the_bound.empty())
+        << "short SenderCompID: " << control.before_the_bound;
+    ASSERT_EQ(control.written.size(), 1U)
+        << "short SenderCompID: the frame at the bound drew no single frame";
+    ASSERT_EQ(field(control.written.front(), 35), "5");
+    auto const text = field(control.written.front(), 58);
+    ASSERT_FALSE(text.empty()) << "the Logout at the bound carries no Text(58)";
+    EXPECT_EQ(control.state, fsm_state::Disconnected);
 
-    d.cap->frames.clear();
-    (void)d.feed("1", n + 5, "112=PEER-TR\x01");
-    auto const requests = d.cap->of_type("2");
-    ASSERT_EQ(requests.size(), 1U)
-        << "at the boundary, with NextNumIn = " << n << ", the ResendRequest was not built";
-    ASSERT_EQ(field(requests.front(), 7), std::to_string(n));
-    ASSERT_TRUE(session_test_access::resend_outstanding(*d.session));
+    auto const at = gap_to_the_bound(*boundary);
+    ASSERT_TRUE(at.setup_miss.empty()) << "at the boundary: " << at.setup_miss;
+    ASSERT_TRUE(at.before_the_bound.empty()) << at.before_the_bound;
 
-    d.cap->frames.clear();
-    auto const second = d.feed("1", n + 6, "112=PEER-TR\x01");
-    ASSERT_TRUE(second.has_value());
-    EXPECT_TRUE(second->has_value());
-    ASSERT_EQ(d.session->state(), fsm_state::Active)
-        << "a second frame above NextNumIn, before the bound, ended the session";
-    EXPECT_EQ(d.cap->frames.size(), 0U) << "the session wrote for the ignored frame";
-    EXPECT_EQ(session_test_access::seqnum_mgr(*d.session).next_inbound_unsafe(), n);
+    // By building: the Logout with that text does not fit the session's frame buffer. The
+    // buffer's size is not written here. It is at most one byte more than the Logon the
+    // session wrote: a Logon one SenderCompID byte longer was not written, and that Logon
+    // is at most two bytes longer, one for the CompID and one where BodyLength(9) gains a
+    // digit.
+    std::vector<std::byte> buf(at.logon.size() + 1U);
+    auto const logout = fixpp::session::build_logout(std::span<std::byte>{buf}, at.next_out,
+                                                     std::string(*boundary, 'S'), kPeerCompId, text,
+                                                     "FIX.4.2", at.stamp);
+    ASSERT_FALSE(logout.has_value())
+        << "at the boundary the Logout with its Text(58) fits a buffer of " << buf.size()
+        << " bytes, so the session can build it and the cell does not reach the branch";
+
+    ASSERT_TRUE(at.result.has_value());
+    EXPECT_TRUE(at.result->has_value())
+        << "on_inbound_frame returned error " << static_cast<int>(at.result->error())
+        << " for the frame at the bound";
+    EXPECT_EQ(at.state, fsm_state::Disconnected)
+        << "the session's state after the frame at the bound is " << static_cast<int>(at.state)
+        << " (Active is " << static_cast<int>(fsm_state::Active) << ")";
+    EXPECT_TRUE(at.written.empty())
+        << "the session wrote " << at.written.size() << " frame(s) for the frame at the bound";
 }
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, UnbuildableFrames,

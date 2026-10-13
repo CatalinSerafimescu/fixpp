@@ -458,6 +458,11 @@ void ReconnectFsm::exit_awaiting_resend() noexcept {
     resend_state_.reset();
 }
 
+// fixpp#537, D-537-5: see reconnect_fsm.hpp.
+void ReconnectFsm::mark_resend_progress(std::chrono::steady_clock::time_point at) noexcept {
+    resend_state_.started_at = at;
+}
+
 // ── process_inbound_sequence_reset ───────────────────────────────────────────
 //
 // FR-013 / FR-014: advance next_expected_inbound to NewSeqNo (GapFillFlag=Y)

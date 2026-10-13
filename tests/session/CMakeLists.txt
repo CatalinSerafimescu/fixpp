@@ -800,6 +800,7 @@ target_link_libraries(session_537_gap_deadline PRIVATE
 )
 target_include_directories(session_537_gap_deadline PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # session/read_first_frame_bounded.hpp: detail::resend_gap_deadline
 )
 add_test(NAME session_537_gap_deadline COMMAND session_537_gap_deadline)
 set_tests_properties(session_537_gap_deadline PROPERTIES

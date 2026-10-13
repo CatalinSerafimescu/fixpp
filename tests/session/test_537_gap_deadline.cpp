@@ -28,6 +28,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
@@ -39,6 +41,7 @@
 #include <vector>
 
 #include "session/plain_engine_rig.hpp"
+#include "session/read_first_frame_bounded.hpp"
 #include "session/resend_gap_scene.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/session_test_access.hpp"
@@ -397,7 +400,11 @@ class GapDeadlineOutOfSequenceSite : public ::testing::TestWithParam<session_rol
 // the one at the bound draws the Logout, whose Text(58) holds the expected MsgSeqNum.
 TEST_P(GapDeadlineOutOfSequenceSite, FrameAtTheBoundDrawsTheLogoutAndTheTransportStaysOpen) {
     const auto o = run_out_of_sequence_site(GetParam());
-    expect_logout_and_open_transport(o, std::to_string(kDistinctNextNumIn));
+    ASSERT_NO_FATAL_FAILURE(
+        expect_logout_and_open_transport(o, std::to_string(kDistinctNextNumIn)));
+    // The one cell that pins the phrase. It is spelled here and not read from the session:
+    // the number is kDistinctNextNumIn in digits.
+    EXPECT_EQ(field(o.logouts.front(), 58), "ResendRequest unanswered, expecting MsgSeqNum 7341");
     EXPECT_EQ(o.rejects_for_the_bound_frame, 0U);
 }
 
@@ -820,6 +827,28 @@ TEST(GapDeadlineOff, NoClock_FrameAboveNextNumInIsIgnored) {
         EXPECT_EQ(s.sent.size(), mark) << "the session wrote " << s.written(mark);
     }
     EXPECT_TRUE(s.resend_outstanding());
+}
+
+// A negative HeartBtInt: no deadline, and no assertion where assertions are compiled in.
+// It is read on the function that computes the bound, not on a session: with a negative
+// interval run_liveness_loop's deadlines are already past, so the loop ends the session
+// before any frame could meet the deadline. The call runs in a child process, so that an
+// assertion that fires there is a failure of this cell and not the end of the binary.
+TEST(GapDeadlineOffDeathTest, NegativeHeartBtInt_TheBoundGivesNoDeadlineAndDoesNotAssert) {
+    const auto since = fixpp::core::steady_time_point{} + 1h;
+    std::chrono::seconds negative{-1};
+    EXPECT_EXIT(
+        {
+            const auto deadline = fixpp::session::detail::resend_gap_deadline(since, negative);
+            std::_Exit(deadline.has_value() ? 1 : 0);
+        },
+        ::testing::ExitedWithCode(0), "")
+        << "exit status 1: the bound gave a deadline for a negative HeartBtInt; any other "
+           "ending: the call did not return";
+    // The function can give a deadline: at a positive interval it is twice the interval on.
+    const auto on = fixpp::session::detail::resend_gap_deadline(since, kHeartBtInt);
+    ASSERT_TRUE(on.has_value());
+    EXPECT_EQ(*on, since + 60s);
 }
 
 // ── D-537-5, short GapFill ──────────────────────────────────────────────────────────

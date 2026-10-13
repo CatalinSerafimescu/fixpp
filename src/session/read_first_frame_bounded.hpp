@@ -34,6 +34,7 @@
 #include <fixpp/wire/framer.hpp>
 #include <limits>
 #include <memory_resource>
+#include <optional>
 #include <ratio>
 #include <span>
 #include <system_error>  // std::system_error — the shape Clock::sleep_until throws on cancel
@@ -241,6 +242,20 @@ template <class Rep, class Period>
     auto const result = static_cast<std::uint64_t>(now.time_since_epoch().count()) +
                         units * multiplier;
     return time_point{time_duration{static_cast<typename time_point::rep>(result)}};
+}
+
+// fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5): the instant the
+// deadline of an unfilled resend gap expires, twice `heartbt` after `since`, or nullopt
+// when the deadline is off, which is at HeartBtInt <= 0. Each of the two steps saturates
+// as deadline_after does; a product of the interval is never formed. The liveness loop is
+// off only at exactly 0; this function states its own test because deadline_after
+// requires a non-negative duration.
+[[nodiscard]] constexpr std::optional<fixpp::core::steady_time_point> resend_gap_deadline(
+    fixpp::core::steady_time_point since, std::chrono::seconds heartbt) noexcept {
+    if (heartbt <= std::chrono::seconds::zero()) {
+        return std::nullopt;
+    }
+    return deadline_after(deadline_after(since, heartbt), heartbt);
 }
 
 // The non-negative time left until `deadline`: zero once `now` has reached or

@@ -48,8 +48,12 @@ struct ResendState {
     // FR-009 — EndSeqNo we sent; 0 means "infinity" per D-2 / FIX-SL §4.3.2.
     std::uint32_t outstanding_end = 0;
 
-    // Populated on ResendRequest emit; consumed by SC-005 recovery-elapsed
-    // metric (≥ 50 % of nominal throughput on 1000-message gap).
+    // fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5) supersedes
+    // this field's first meaning, the start of a recovery for SC-005's elapsed metric.
+    // It is the steady-clock instant of the resend's last progress: written on entering
+    // AwaitingResend and again each time NextNumIn advances while the resend is
+    // outstanding (ReconnectFsm::mark_resend_progress). The deadline of an unfilled gap
+    // counts from it. Not written on a session with no clock.
     std::chrono::steady_clock::time_point started_at;
 
     // High-water-mark of what we've received in the replay; advances as

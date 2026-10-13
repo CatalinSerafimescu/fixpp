@@ -1008,11 +1008,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::consume_rejected_seqnum_
 
 // Exit AwaitingResend once the inbound counter has passed the requested gap's end.
 // reconnect_fsm_ owns AwaitingResend state per data-model §E-1 / T023 Fix1.
+// fixpp#537 (D-537-5): both callers have just advanced NextNumIn, so while the resend is
+// still outstanding the instant its deadline counts from is refreshed. The refresh stays
+// behind the "a resend is outstanding" test: a session with no gap pays that flag read
+// and nothing more ([const §VIII.5]).
 void Session::close_filled_resend_gap_() noexcept {
     if (reconnect_fsm_.is_awaiting_resend() &&
         reconnect_fsm_.current_resend_state().outstanding_end > 0 &&
         seqnum_mgr_.next_inbound_unsafe() > reconnect_fsm_.current_resend_state().outstanding_end) {
         reconnect_fsm_.exit_awaiting_resend();
+    }
+    if (reconnect_fsm_.is_awaiting_resend() && effective_clock_) {
+        reconnect_fsm_.mark_resend_progress(effective_clock_->steady_now());
     }
 }
 
@@ -2856,16 +2863,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_best_effo
     co_return fixpp::core::expected_t<void>{};
 }
 
-// Logout(35=5) with no Text; toAdmin before assign_outbound. A throwing toAdmin or a failed
-// assign disconnects and returns the error; a failed emit is logged-then-proceed (I-07).
+// Logout(35=5); toAdmin before assign_outbound. It carries Text(58) when `text` is not
+// empty, which is the deadline of an unfilled resend gap (fixpp#537, D-537-5); every other
+// caller passes an empty text and its Logout has none. A frame that cannot be built is not
+// sent, and the leaf returns success. A throwing toAdmin or a failed assign disconnects and
+// returns the error; a failed emit is logged-then-proceed (I-07).
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
-    bool tic, std::string_view sending_time) noexcept {
+    bool tic, std::string_view sending_time, std::string_view text) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     auto lo_result = fixpp::session::build_logout(
         std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, {}, cfg_.begin_string, sending_time);
+        cfg_.target_comp_id, text, cfg_.begin_string, sending_time);
     if (lo_result) {
         // 019 T014: toAdmin before transmitting Logout. [FR-008/010]
         // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
@@ -2915,6 +2925,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
 // ResendRequest(2){BeginSeqNo=begin_seqno, EndSeqNo=0}; toAdmin before assign_outbound. A
 // failed assign disconnects and returns success (the session stays in its arm per FR-009);
 // a failed emit disconnects and returns the error.
+// fixpp#537 (D-537-7) supersedes the success this leaf returned for a request it could not
+// build: the peer never got the request, so the session ends, with the disposition
+// emit_gapfill_async gives a GapFill that cannot be built.
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_resend_request_leaf_(
     bool tic, seqnum_t begin_seqno, std::string_view sending_time) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
@@ -2940,6 +2953,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_resend_request_l
                 co_return std::unexpected(emit_r.error());
             }
         }
+    } else {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -4021,11 +4037,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
                 }
                 // Stage-1 passed (or not a 43=Y non-35=4 frame). Proceed to check_inbound.
 
-                // Too-low → session-fatal (not recoverable per I-4).
-                // Exception: Heartbeat(0) with too-low seqnum is silently dropped
-                // (no echo, no disconnect) to allow liveness-warmup passes to
-                // not disrupt an otherwise healthy session. [T020-A warmup behavior]
-                // in-seq → advance; too-high-while-awaiting → advance (it's a fill).
+                // In sequence → advance. Any refusal goes to
+                // on_inbound_active_out_of_sequence_, which has the dispositions:
+                // too low without PossDup is session-fatal (not recoverable per I-4),
+                // and a frame above NextNumIn while a resend is outstanding does not
+                // advance and is ignored (fixpp#537, D-537-1 and D-537-2).
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
                     slow.k = inbound_slow_t::kind::out_of_sequence;
@@ -4285,7 +4301,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_slow_(
         case kind::sequence_reset:
             return on_inbound_active_sequence_reset_(tic, frame, hdr);
         case kind::too_high:
-            return on_inbound_active_too_high_(tic, slow.next_expected, slow.seq);
+            return on_inbound_active_too_high_(tic, hdr, slow.next_expected, slow.seq);
         case kind::out_of_sequence:
             return on_inbound_active_out_of_sequence_(tic, frame, hdr, slow.chk_error);
         case kind::gap_fill:
@@ -4333,6 +4349,71 @@ bool Session::inbound_sending_time_ok_(
     return sending_time_ok;
 }
 
+// fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5; §4.7): the deadline
+// of an unfilled resend gap. Called where a frame can leave the Active arm without ending
+// the session; the three tests are here and not at the call sites, so that a call site
+// cannot fire on a frame that is not above NextNumIn. Returns nullopt when the deadline
+// has not expired, and the caller goes on. On expiry it sends a Logout whose Text(58)
+// names the unanswered resend and the expected MsgSeqNum, records Disconnected whether or
+// not that Logout could be built (ruling R-12), and returns the result its caller returns
+// at once: success, or the Logout leaf's error, which the leaf has already recorded
+// Disconnected for. No handler stands around the leaf: a cancelled store call of the
+// Logout ends the frame at on_inbound_active_'s catch (§10, D-OUT-2 and D-OUT-4).
+asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_gap_deadline_(
+    bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept {
+    FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // 1: the frame is above NextNumIn. A MsgSeqNum(34) that does not parse reads as 0.
+    const seqnum_t next_expected = seqnum_mgr_.next_inbound_unsafe();
+    if (parse_seqnum(hdr.msg_seq_num) <= next_expected) {
+        co_return std::nullopt;
+    }
+    // 2: a resend is outstanding.
+    if (!reconnect_fsm_.is_awaiting_resend()) {
+        co_return std::nullopt;
+    }
+    // 3: the bound is on, and the clock is at or past it.
+    if (!effective_clock_) {
+        co_return std::nullopt;
+    }
+    const auto deadline =
+        detail::resend_gap_deadline(reconnect_fsm_.current_resend_state().started_at,
+                                    cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt));
+    if (!deadline || effective_clock_->steady_now() < *deadline) {
+        co_return std::nullopt;
+    }
+
+    // The text is built in this frame, which outlives the leaf's await.
+    static constexpr std::string_view kPhrase = "ResendRequest unanswered, expecting MsgSeqNum ";
+    std::array<char, 64> text_buf{};
+    static_assert(kPhrase.size() + std::numeric_limits<seqnum_t>::digits10 + 1 <= text_buf.size());
+    char* const digits = std::copy(kPhrase.begin(), kPhrase.end(), text_buf.data());
+    const char* const text_end =
+        std::to_chars(digits, text_buf.data() + text_buf.size(), next_expected).ptr;
+    const std::string_view text{text_buf.data(),
+                                static_cast<std::size_t>(text_end - text_buf.data())};
+    const auto st52 = stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
+    FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value, text));
+    if (!r) {
+        co_return r;
+    }
+    record_state_transition_(fsm_state::Disconnected);
+    co_return fixpp::core::expected_t<void>{};
+}
+
+// fixpp#537 (D-537-6, D-537-8): the in-sequence TestReqID(112) disposition, for a Heartbeat
+// above NextNumIn. An empty or matching TestReqID answers the pending TestRequest; another
+// one ends the session silently, as in sequence, and false is returned. Whether a
+// TestRequest is pending is each caller's test, not this routine's.
+bool Session::answer_pending_test_request_(std::string_view test_req_id) noexcept {
+    if (!test_req_id.empty() && test_req_id != pending_test_req_id_) {
+        record_state_transition_(fsm_state::Disconnected);
+        return false;
+    }
+    pending_test_req_id_.clear();
+    unanswered_tr_ = false;
+    return true;
+}
+
 // fixpp#544 §2.2: the Active arm's sub-arms. Each is a branch of the arm moved verbatim
 // behind a FIXPP_INBOUND_SPLIT_AWAIT boundary; `hdr` and `frame` view the arm's storage.
 
@@ -4346,6 +4427,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_valida
         co_return co_await close_on_late_parse_failure_();
     }
     if (v.outcome == validate_outcome::reject) {
+        // fixpp#537 (D-537-5): when the gap's deadline fires here, no consume and no Reject.
+        {
+            FIXPP_INBOUND_SPLIT_AWAIT(expired, tic, resend_gap_deadline_(tic, hdr));
+            if (expired) {
+                co_return *expired;
+            }
+        }
         const seqnum_t rej_seq = parse_seqnum(hdr.msg_seq_num);
         if (auto c = co_await consume_rejected_seqnum_(rej_seq, hdr.msg_type); !c) {
             co_return c;
@@ -4383,7 +4471,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sendin
     }
     // Step 2: emit Logout(35=5).
     {
-        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value));
+        FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value, {}));
         if (!r) {
             co_return r;
         }
@@ -4438,6 +4526,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequen
                     co_return r;
                 }
             }
+            // fixpp#537 (D-537-5): the gap's deadline, after the arm's own Reject.
+            {
+                FIXPP_INBOUND_SPLIT_AWAIT(expired, tic, resend_gap_deadline_(tic, hdr));
+                if (expired) {
+                    co_return *expired;
+                }
+            }
             co_return fixpp::core::expected_t<void>{};
         }
     }
@@ -4449,19 +4544,46 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_sequen
     if (!cfg_.validate_sequence_numbers) {
         co_return fixpp::core::expected_t<void>{};
     }
-    co_return co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
-                                                    parse_seqnum(hdr.msg_seq_num));
+    {
+        auto applied = co_await apply_inbound_sequence_reset(parse_seqnum(hdr.new_seqno),
+                                                             parse_seqnum(hdr.msg_seq_num));
+        if (!applied) {
+            co_return applied;
+        }
+    }
+    // fixpp#537 (D-537-5): the gap's deadline, after the arm's own outcome. The site has no
+    // test of its own for "moved nothing": a reset that moved NextNumIn has ended the
+    // resend, which the helper tests.
+    {
+        FIXPP_INBOUND_SPLIT_AWAIT(expired, tic, resend_gap_deadline_(tic, hdr));
+        if (expired) {
+            co_return *expired;
+        }
+    }
+    co_return fixpp::core::expected_t<void>{};
 }
 
 // Too-high MsgSeqNum: AwaitingResend and a ResendRequest(2); the session stays in its arm.
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_too_high_(
-    bool tic, seqnum_t next_expected, seqnum_t seq) noexcept {
+    bool tic, fixpp::session::detail::FrameHeader const& hdr, seqnum_t next_expected,
+    seqnum_t seq) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
+    // fixpp#537 (D-537-8, ruling R-9): a Heartbeat that opens the gap answers a pending
+    // TestRequest first, by the in-sequence TestReqID rule. On a mismatch the session has
+    // ended: AwaitingResend is not entered and no ResendRequest goes out.
+    if (hdr.msg_type == "0" && !pending_test_req_id_.empty() &&
+        !answer_pending_test_request_(hdr.test_req_id)) {
+        co_return fixpp::core::expected_t<void>{};
+    }
     // Too-high: enter AwaitingResend and emit ResendRequest(2).
     // reconnect_fsm_.enter_awaiting_resend() owns state; we emit
     // ResendRequest inline (requires seqnum_mgr_ + store_then_emit).
     auto enter_r = co_await reconnect_fsm_.enter_awaiting_resend(next_expected, seq - 1U);
     (void)enter_r;  // state set; emit inline below
+    // fixpp#537 (D-537-5): the instant the gap's deadline counts from.
+    if (effective_clock_) {
+        reconnect_fsm_.mark_resend_progress(effective_clock_->steady_now());
+    }
 
     // Emit ResendRequest(2){BeginSeqNo=next_expected, EndSeqNo=0}
     // via the shared admin builder into a stack buffer (no heap —
@@ -4489,6 +4611,13 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
         // Arm C (row 2): OrigSendingTime(122) absent → Reject(35=3),
         // 371=122 (RefTagID=OrigSendingTime), 373=1 (RequiredTagMissing).
         // Session survives (no disconnect). data-model INV-3; research D4.
+        // fixpp#537 (D-537-5): when the gap's deadline fires here, no consume and no Reject.
+        {
+            FIXPP_INBOUND_SPLIT_AWAIT(expired, tic, resend_gap_deadline_(tic, hdr));
+            if (expired) {
+                co_return expired;
+            }
+        }
         const seqnum_t rj_ref_c = parse_seqnum(hdr.msg_seq_num);
         if (auto c = co_await consume_rejected_seqnum_(rj_ref_c, hdr.msg_type); !c) {
             co_return c;
@@ -4530,6 +4659,13 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
         if (!parse_122) {
             // 122 is non-empty (Arm C's empty-check above already handled empty),
             // so it is present but malformed — treat as RequiredTagMissing.
+            // fixpp#537 (D-537-5): the gap's deadline, as at Arm C.
+            {
+                FIXPP_INBOUND_SPLIT_AWAIT(expired, tic, resend_gap_deadline_(tic, hdr));
+                if (expired) {
+                    co_return expired;
+                }
+            }
             const seqnum_t rj_ref_rc1 = parse_seqnum(hdr.msg_seq_num);
             if (auto c = co_await consume_rejected_seqnum_(rj_ref_rc1, hdr.msg_type); !c) {
                 co_return c;
@@ -4578,7 +4714,7 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
             }
             // Step 2: emit Logout(35=5).
             {
-                FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52_d.value));
+                FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52_d.value, {}));
                 if (!r) {
                     co_return r;
                 }
@@ -4595,7 +4731,12 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::on_inboun
     co_return std::nullopt;
 }
 
-// check_inbound refused the MsgSeqNum (too-low, overflow, or knob-off out of sequence).
+// check_inbound refused the MsgSeqNum: too low; overflow; with the knob off, any frame out
+// of sequence; above NextNumIn while a resend is outstanding (the frame that opens a gap
+// goes to on_inbound_active_too_high_ instead); or a sequence-number mutex that was drained.
+// fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-1 and D-537-2)
+// supersedes the route that ended the session, in "Arm B" below, at a second frame above
+// NextNumIn: that frame is ignored, and an unfilled gap ends by its deadline (D-537-5).
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of_sequence_(
     bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
     fixpp::core::error chk_error) noexcept {
@@ -4609,8 +4750,24 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
         record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(chk_error);
     }
+    // fixpp#537 (D-537-5): the gap's deadline, for any frame above NextNumIn that reaches
+    // this function. It does not read chk_error (§4.7), and it runs ahead of the Heartbeat
+    // and PossDup arms, so ahead of the PossDup redelivery's fromApp.
+    {
+        FIXPP_INBOUND_SPLIT_AWAIT(expired, tic, resend_gap_deadline_(tic, hdr));
+        if (expired) {
+            co_return *expired;
+        }
+    }
     if (hdr.msg_type == "0") {
-        // Too-low Heartbeat: silently ignore (preserve Active, no echo).
+        // fixpp#537 (D-537-6, ruling R-6): while a resend is outstanding, a Heartbeat above
+        // NextNumIn answers a pending TestRequest by the in-sequence TestReqID rule. A
+        // mismatch has ended the session inside the routine.
+        if (chk_error == fixpp::core::error::session_seqnum_too_high &&
+            reconnect_fsm_.is_awaiting_resend() && !pending_test_req_id_.empty()) {
+            (void)answer_pending_test_request_(hdr.test_req_id);
+        }
+        // Any out-of-sequence Heartbeat: no advance, no persist, no fromAdmin, no echo.
         co_return fixpp::core::expected_t<void>{};
     }
     // 021 T005 Stage-2 — Arm A: too-low possible-duplicate tolerance.
@@ -4677,6 +4834,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_out_of
             }
         }
         // Stay Active, counter unchanged (no advance). C2.3.
+        co_return fixpp::core::expected_t<void>{};
+    }
+    // fixpp#537 (D-537-1, D-537-2): a frame above NextNumIn while a resend is outstanding
+    // is ignored. The outstanding request runs to 0, so it covers the frame. Every other
+    // refusal stays fatal below.
+    if (chk_error == fixpp::core::error::session_seqnum_too_high) {
         co_return fixpp::core::expected_t<void>{};
     }
     // Arm B: too-low non-Heartbeat without 43=Y — fatal (row 5).
@@ -4758,7 +4921,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
                               ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                               : SendingTimeStamp{};
         {
-            FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value));
+            FIXPP_INBOUND_SPLIT_AWAIT(r, tic, inbound_logout_leaf_(tic, st52.value, {}));
             if (!r) {
                 co_return r;
             }
