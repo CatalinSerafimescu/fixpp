@@ -810,7 +810,7 @@ cells_run=$((cells_run + 1))
 # own CI run it is the only thing standing between a downgraded row and a green
 # gate. It is a FLOOR (subset), not set equality, on purpose: exact equality
 # would also redden on ADDING a paired row, which G10 establishes is permitted.
-MANDATORY_PAIRED="xml_loader_bench framer_bench parser_bench writer_bench validator_bench"
+MANDATORY_PAIRED="xml_loader_bench framer_bench parser_bench writer_bench validator_bench engine_send_bench"
 
 paired_floor() {
   # paired_floor <manifest>
