@@ -630,6 +630,11 @@ routes that were run). The measurement agrees in every arm, and every arm ends c
   in its `onLogout` did not with no store on a synchronous sink: the nested call arrived before the
   grace wait had begun, and both closes ended when `logout_disconnect_timeout_ms` elapsed. With the
   wait both escalate at once (measured; the record, "Phase 4, fourth part" and "Phase 4, addendum").
+  From `toAdmin`, on a `FileStore` with a live transport, the end of the Logout step that the
+  escalation brings about races the completion of the Logout's store call on the file executor: the
+  Logout is retained, and it is transmitted only where that completion comes first (not seen without
+  a stall; seen in every run with the session's thread stalled after the hand-off). In the other
+  arms it is transmitted once (B&L `L-563-6`; fixpp#590 decides the one ending).
   It is a change of behaviour (§4, "Compatibility"). Where a `Disconnected` write outside `close()`
   made the transition (`Session::send`'s, for one), no close is in flight, and the close started in
   `onLogout` is the session's first.
@@ -696,7 +701,11 @@ F-7; not run):
   inside the callback, as above, the engine-stop flag is set ahead of send bodies that are already
   queued on the session's strand. Today those bodies passed their control-strand step before `stopped_`
   was written, and they run; after this PR the stop check of §2.3 refuses them with
-  `session_invalid_state_for_send`. It is a C++ route only. The C ABI reaches `Engine::stop` in
+  `session_invalid_state_for_send`. That holds for the body of a send that found its session in the
+  snapshot; a body of the miss path that is already queued there is tested only for Active, as today.
+  And on several io threads a send that the callback starts after it started `stop()` is refused
+  where `control_strand_` is idle and admitted where it is busy; today it is refused in both cases
+  (fixpp#579). It is a C++ route only. The C ABI reaches `Engine::stop` in
   `fixpp_engine_destroy` alone (`grep -n "stop()" src/capi/*.cpp`), a blocking call that deadlocks inside
   a callback (`L-054-1`).
 
@@ -1669,7 +1678,9 @@ and quickstart, which repeat the same statements; the flag is on the bundle and 
 - **A limitation: `Engine::stop()` started from an application callback** (R-5). On one io thread it can
   close the session's transport before the callback returns; on several it depends on whether the control
   strand is idle. Sends already queued on that session's strand, which today are sent, are refused with
-  `session_invalid_state_for_send` after this PR (§2.1a). Status: follow-up, fixpp#579.
+  `session_invalid_state_for_send` after this PR where they found their session in the snapshot; a send
+  the callback starts after `stop()` has two endings on several io threads (§2.1a). Status: follow-up,
+  fixpp#579.
 
 `L-023-2` is not a new row: the table above has what goes, what is added and what remains.
 
@@ -1677,7 +1688,9 @@ The rows as they were written: `B-563-1` (R-1), `B-563-2` (R-4), `B-563-3` (R-2)
 `B-564-1` (the guard), `L-563-1` (the limitation of R-4's rule), `L-563-3` (a nested send that
 disconnects) and `L-563-4` (R-5). Two rows are not in the list above: `L-563-2`, the send started
 while the session answers the peer's Logout, which the first bullet placed inside the R-1 row; and
-`L-563-5`, an allocation failure while a send starts (§7).
+`L-563-5`, an allocation failure while a send starts (§7). A third was added in Phase 7:
+`L-563-6`, the Logout of a graceful close that a terminal close started in its `toAdmin`
+escalates (§2.1a, the `onLogout` bullet).
 
 **Issues.** The PR closes fixpp#563 and fixpp#564. Their acceptance item 3 (measure `Engine::send`, then
 make the `engine.hpp` sentence match) is met by the record and this section. fixpp#579 is the follow-up
@@ -1708,7 +1721,9 @@ follow-up.
 - One change of behaviour that no ruling names, found during implementation: a terminal close started
   in the `toAdmin` of a graceful close's Logout, or in that close's `onLogout`, escalates the graceful
   close at once, where before it could leave both closes to end at `logout_disconnect_timeout_ms`
-  (§2.1a, the `onLogout` bullet; B&L `B-563-2`). No call that succeeded before fails.
+  (§2.1a, the `onLogout` bullet; B&L `B-563-2`). No call that succeeded before fails. On the `toAdmin`
+  route, on a `FileStore` with a live transport, the Logout that was transmitted before is now
+  retained, and whether it is transmitted is decided by timing (B&L `L-563-6`, fixpp#590).
 
 ## 5. Rejected alternatives
 
@@ -1931,6 +1946,8 @@ which gated the rest of the implementation, is measured and agrees (§3).
 - v0.7 also records, with no change of version, the measurements made on 2026-10-11 before any production edit: P-1 for a close started in `toApp`, P-1a, P-1b, P-1c, P-2, P-3, P-5 and P-6, and an early reading of P-10 (§3 has each with its evidence, research/probes/b41_563_564/p0b_runs.output.txt and p0b_measurements.patch, parent repo). None disagreed. It also records decisions of the orchestrator: at the stack-arena overload and at the `onLogon` and `onLogout` sites the depth assertion is evaluated after the site's scope and before its callback (§2.2), which replaces what the F1 line below says was left, and is listed in §3 as specified without a witness; and NC-11 has a positive-control arm (§3). The passages these changed are in the header, §2.1 ("Writer"), §2.1a, §2.2, §2.5, §3 and §4. None of this was reviewed.
 - On 2026-10-12 v0.7 also records, again with no change of version, the measurements made during implementation: P-7, P-10 on the mechanism, P-1 for a close started in `toAdmin`, P-8 and P-9 (§3 has each with its evidence, research/probes/b41_563_564/p2a_runs.output.txt, p3a_runs.output.txt and ph4a_runs.output.txt, parent repo); none disagreed, and none of this was reviewed.
 - On 2026-10-13, after sign-off and again with no change of version, statements that the implementation made stale were corrected in place as statuses (the header, P-5's row, NC-11's row, and two sentences of §3), and behaviours measured during implementation were recorded where their subject is: the branch with no store and the escalation the wait restores (§2.1a), the send started in the confirming Logout's `toAdmin`, per store kind, and the allocation failure (§7), with one bullet in §4 ("Compatibility") and the ids of the B&L rows (§4). No design text changed. None of this was reviewed.
+- On 2026-10-13, in Phase 7 and again with no change of version, cells were added for the escalation the wait restores from the `toAdmin` of a graceful close's Logout (§2.1a, the `onLogout` bullet; B&L `B-563-2`): `CallbackSend.ToAdminOfGracefulCloseStartsClose_Terminal`, with the arms of the close cells, and its positive control `CallbackSend.ToAdminOfGracefulCloseStartsNoClose`. Until then a probe had measured that route on four of those arms and no cell covered it (the record, "Phase 4, addendum"). One arm the probe had not run differs from the others: on a `FileStore` with a live transport the escalation holds and the Logout is retained, and whether the Logout is transmitted is a race between the file executor's completion of its store call and the end of the Logout step that the escalation brings about. A first reading took that order for forced by the session executor's queue; the stall probe of Phase 4 refuted it (not transmitted without a stall, transmitted with the session's thread stalled after the hand-off). That arm's cell therefore asserts only what holds in both orders, and the other five assert that the Logout is transmitted once. The split is B&L `L-563-6`, a new row, and fixpp#590 is where the one ending is decided. §2.1a's `onLogout` bullet, §4's "Compatibility" bullet on this change of behaviour and §4's list of rows each gained a sentence for it; none of them had said that the Logout is transmitted on every store. Neither the cells nor these sentences were reviewed at Gate A.
+- On 2026-10-13, in Phase 7, two sentences on `Engine::stop()` started from a callback were made exact (§2.1a, the bullet on OD-3's refusal on that route; §4, the limitation's bullet), after a reading recorded on fixpp#579: the refusal of bodies already queued holds for sends that found their session in the snapshot and not for a queued body of the miss path, and a send the callback starts after `stop()` has two endings on several io threads where today it has one. B&L `L-563-4` and one comment in `Engine::send` say the same. Read, not run; not reviewed at Gate A.
 
 ### Round 1 — disagreements
 

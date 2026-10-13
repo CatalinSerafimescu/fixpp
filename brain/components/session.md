@@ -338,7 +338,7 @@ since fixpp#563 and fixpp#564 (the next section). Re-derive the shape from sourc
 
 The design is `.specify/563-564-callback-send.md` (issue mode: that note is the plan; its §0 has the
 owner's rulings, §5 what was rejected, §7 what it does not decide). The behaviour a user must know is
-B&L `B-563-1`…`B-563-4`, `B-564-1` and `L-563-1`…`L-563-5`, with `L-007-2` widened. The measurements
+B&L `B-563-1`…`B-563-4`, `B-564-1` and `L-563-1`…`L-563-6`, with `L-007-2` widened. The measurements
 are in the parent repository, `decisions/speckit/b41-563-564-measurement.md`. Re-derive the shape from
 source, not from here.
 
@@ -456,7 +456,8 @@ started in `toApp` "runs inline"; `Engine::send`'s two hops).
 - No version bump and no BREAKING clause.
 - One change of behaviour beyond the rulings: a terminal close started in the `toAdmin` or the
   `onLogout` of a graceful close now escalates it at once, where it could run out the logout timeout
-  (`B-563-2`).
+  (`B-563-2`). From `toAdmin`, on a `FileStore` with a live transport, the graceful close's Logout is
+  then stored, and whether it is transmitted is decided by timing (`L-563-6`, fixpp#590).
 
 **Not decided here** (note §7): a live send that interleaves with a resend replay (fixpp#588);
 `Engine::stop()` started from a callback (fixpp#579); one ending for an allocation failure while a
