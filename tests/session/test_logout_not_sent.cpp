@@ -195,6 +195,12 @@ struct LogoutOutcome {
     bool clock_advanced_for_the_closes = false;  // the cell had to advance the clock to end them
     std::optional<fixpp::core::expected_t<void>> graceful_result;
     std::optional<fixpp::core::expected_t<void>> terminal_result;
+    // The phase's ending, read while the write is still held (the three cancelled inputs).
+    bool ending_reached_before_release = false;  // the reading point; each input's is its own
+    bool hold_in_flight_at_that_reading = false;
+    fsm_state state_before_release = fsm_state::NotConnected;
+    std::vector<fsm_state> ring_before_release;
+    // After the closes and the held send have returned.
     fsm_state state_after_close = fsm_state::NotConnected;
     std::vector<fsm_state> ring_after_close;
     StoreReading store;
@@ -288,8 +294,48 @@ LogoutOutcome run_logout_scene(LogoutInput const input) {
         }
         (void)rig.run_until([&] { return logout_store()->returned(); }, until(bound_end));
         o.logout_store = *logout_store();
-        // The hold is released once the Logout's store call has returned, or the bound
-        // has passed: the closes' terminal part is not asked to wait for the held write.
+        // The phase's ending is read BEFORE the hold is released. Once it is released the
+        // held frame's own send ends too, and that is not the phase's ending: its
+        // transmit meets the transport the close has closed, and Session::send records
+        // Disconnected for a returned dispatch_aborted with no test of the state (note
+        // D-OUT-9, "A send that fails without an exception is not touched"; D-OUT-10,
+        // "A value, not D-OUT-2's exception").
+        if (input == grace_timer_reset_on_logout) {
+            // This close cannot return while the write is held: its teardown reset calls
+            // the store's reset(), which queues at the store's lock behind the held
+            // write. The reading point is that call entered and not returned: the phase
+            // has left, and close() is past its own test of the state.
+            auto teardown_reset = [&] {
+                return scene.log->first_after(
+                    close_mark, [](StoreCall const& call) { return call.op == store_op::reset; });
+            };
+            o.ending_reached_before_release =
+                rig.run_until(
+                    [&] { return teardown_reset() != nullptr && teardown_reset()->entered(); },
+                    until(bound_end)) &&
+                !teardown_reset()->returned();
+        } else {
+            // With no teardown reset, nothing in a close's terminal part waits for the
+            // held write: the closes return while it is held.
+            o.ending_reached_before_release = rig.run_until(
+                [&] { return HeldFileStoreScene::ready(close_fut); }, until(bound_end));
+            if (terminal_fut.valid()) {
+                o.ending_reached_before_release =
+                    rig.run_until([&] { return HeldFileStoreScene::ready(terminal_fut); },
+                                  until(bound_end)) &&
+                    o.ending_reached_before_release;
+            }
+        }
+        // No poll for "no handler ready" here: while the write is held, a close that is
+        // waiting posts to the session's executor again and again, so such a poll would
+        // not return. Each reading point above is a condition the bounded pump saw.
+        o.hold_in_flight_at_that_reading =
+            store_hold::holding() && !HeldFileStoreScene::ready(held_fut);
+        o.state_before_release = session->state();
+        {
+            auto const ring = session->fsm_visit_history();
+            o.ring_before_release.assign(ring.begin(), ring.end());
+        }
         o.release_mark = scene.log->mark();
         store_hold::release();
         o.graceful_returned_in_bound =
@@ -395,11 +441,35 @@ void expect_logout_not_sent_ending(LogoutOutcome const& o) {
         << o.timeout.count() << ")";
     EXPECT_TRUE(succeeded(o.graceful_result))
         << "close(graceful) " << result_text(o.graceful_result);
+    // The phase's ending, read while the write was still held.
+    EXPECT_TRUE(o.ending_reached_before_release)
+        << "the reading point was not reached while the write was held: the closes did not "
+           "return (with reset_on_logout: the close did not reach its teardown reset)";
+    EXPECT_TRUE(o.hold_in_flight_at_that_reading)
+        << "the held send had ended when the phase's ending was read";
+    EXPECT_EQ(o.state_before_release, fsm_state::Disconnected);
+    EXPECT_EQ(std::count(o.ring_before_release.begin(), o.ring_before_release.end(),
+                         fsm_state::Disconnected),
+              1)
+        << "the state ring before the hold was released: " << ring_text(o.ring_before_release);
+    // After the held send has returned. Its failed transmit may record Disconnected
+    // again (the comment at the reading point says where); a state that is not
+    // Disconnected must not appear.
+    // The ring is compared as a prefix, which holds while it has not wrapped: the scene
+    // records fewer states than the ring's capacity.
     EXPECT_EQ(o.state_after_close, fsm_state::Disconnected);
-    EXPECT_EQ(
-        std::count(o.ring_after_close.begin(), o.ring_after_close.end(), fsm_state::Disconnected),
-        1)
-        << "the state ring: " << ring_text(o.ring_after_close);
+    bool const prefix_kept = o.ring_after_close.size() >= o.ring_before_release.size() &&
+                             std::equal(o.ring_before_release.begin(), o.ring_before_release.end(),
+                                        o.ring_after_close.begin());
+    EXPECT_TRUE(prefix_kept &&
+                std::all_of(o.ring_after_close.begin() +
+                                static_cast<std::ptrdiff_t>(o.ring_before_release.size()),
+                            o.ring_after_close.end(),
+                            [](fsm_state st) { return st == fsm_state::Disconnected; }))
+        << "a state other than Disconnected was recorded after the phase's ending; the ring "
+           "before the release: "
+        << ring_text(o.ring_before_release)
+        << "and after the held send returned: " << ring_text(o.ring_after_close);
 }
 
 TEST(GracefulLogoutStoreCancelled, ByTheGraceTimer_NoLogoutIsSentAndTheCloseDoesNotWait) {
