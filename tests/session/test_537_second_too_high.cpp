@@ -2,249 +2,265 @@
 //
 // tests/session/test_537_second_too_high.cpp
 //
-// fixpp#537 (batch B28) — reproduction only, no fix.
+// fixpp#537, D-537-1 and D-537-2 (.specify/536-537-538-recovery-liveness.md §4.3 and the
+// #537 table of §5): a frame above NextNumIn that arrives while a resend is outstanding
+// is ignored. The session stays in its state, sends nothing and does not advance; the
+// outstanding ResendRequest runs to 0, so the peer's replay covers the frame.
 //
-// Claim under test: while a session awaits the replay its own ResendRequest
-// asked for, a SECOND too-high frame that is not PossDup ends the session.
+// FIX Session Layer (Nov 2020 errata), §4.8.2: "the application could ignore messages 3
+// through 5 and generate a resend request for messages 2 through 5, or, preferably 2
+// through 0"; §4.10, precedence 12, has the other approach the text allows ("Queue
+// incoming messages with MsgSeqNum(34) too high"). No document ends the session.
 //
-// Expected behaviour: FIX Session Layer (Nov 2020 errata), §4.10 "FIX session
-// state matrix", precedence 12, "Awaiting/ Processing Response to
-// ResendRequest(35=2)", Initiator Y, Acceptor Y: "Process requested
-// MsgSeqNum(34) with PossDupFlag(43)=Y resent messages and/or SequenceReset(35=4)
-// gap fill messages from counterparty. Queue incoming messages with MsgSeqNum(34)
-// too high."
-//
-// Shape (the issue's first acceptance item), run on BOTH roles:
+// Shape of every cell, on both roles:
 //   1. Session Active at NextNumIn = N.
-//   2. Peer sends 34 = N+5. Assert a ResendRequest with BeginSeqNo(7) = N.
-//   3. Before any replay, peer sends 34 = N+6, not PossDup.
-//   4. Assert the session is still Active, sent no Logout, and recovers once the
-//      peer's replay covers N..N+6.
+//   2. The peer sends 34 = N+5. A ResendRequest with BeginSeqNo(7) = N goes out.
+//   3. Before any replay, the peer sends a second frame above NextNumIn.
+//   4. The session is still Active, wrote nothing for that frame and did not advance, and
+//      it is back in step once the peer's replay covers N to the highest number sent.
 //
-// Cells per role:
-//   OneTooHigh         control: step 3 omitted. Proves the too-high frame type
-//                      reaches the seqnum guard (the ResendRequest is its
-//                      witness) and that the recovery replay works.
-//   SecondTooHigh      claim: step 3 with a TestRequest(35=1).
-//   SecondTooHighHb    characterisation: step 3 with a Heartbeat(35=0), which
-//                      takes a different arm after the seqnum check.
+// The discriminating assertion is the state after step 3. The path this issue removes
+// returned success and wrote no Logout, so neither the returned value nor a Logout count
+// tells the two outcomes apart.
 //
-// The discriminating assertion is `state() == Active`. The suspected fatal
-// path returns success and emits no Logout, so neither the return value nor a
-// Logout count can tell the two outcomes apart.
-//
-// mock_clock: nothing here depends on elapsed time. HeartBtInt is long so the
-// liveness loop stays parked for the whole cell.
+// No cell here moves the clock: HeartBtInt is the Scene's, and the liveness loop stays
+// parked in its first sleep for the whole cell.
 
 #include <gtest/gtest.h>
 
-#include <asio/co_spawn.hpp>
-#include <asio/io_context.hpp>
-#include <asio/use_future.hpp>
-#include <chrono>
-#include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/seqnum.hpp>
-#include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <future>
-#include <memory>
-#include <span>
+#include <functional>
 #include <string>
-#include <string_view>
 #include <vector>
 
-#include "support/minimal_dictionary.hpp"
-#include "support/minimal_security_profile.hpp"
-#include "support/pump_until_ready.hpp"
-#include "support/session_test_access.hpp"
-
-using namespace std::chrono_literals;
+#include "session/resend_gap_scene.hpp"
 
 namespace fixpp::session::test {
 
 namespace {
 
-constexpr std::string_view kSt52 = "20240101-00:00:00.000";
+using fixpp::test_support::resend_gap::field;
+using fixpp::test_support::resend_gap::Options;
+using fixpp::test_support::resend_gap::role_name;
+using fixpp::test_support::resend_gap::Scene;
 
-std::vector<std::byte> make_frame(std::string_view msg_type, std::uint32_t seq,
-                                  std::string_view extra = {}) {
-    std::string body;
-    body += "35=" + std::string(msg_type) + "\x01";
-    body += "34=" + std::to_string(seq) + "\x01";
-    body += "49=TW\x01";
-    body += "52=" + std::string(kSt52) + "\x01";
-    body += "56=ISLD\x01";
-    body += std::string(extra);
-    std::string full =
-        "8=FIX.4.2\x01"
-        "9=" +
-        std::to_string(body.size()) + "\x01" + body;
-    unsigned int cs = 0;
-    for (unsigned char c : full) cs += c;
-    char csbuf[8];
-    std::snprintf(csbuf, sizeof(csbuf), "%03u", cs & 0xFFU);
-    full += "10=" + std::string(csbuf) + "\x01";
-    std::vector<std::byte> out;
-    out.reserve(full.size());
-    for (char c : full) out.push_back(static_cast<std::byte>(c));
-    return out;
+// Builds the second too-high frame of a cell from its Scene and its MsgSeqNum(34).
+using SecondFrame = std::function<std::vector<std::byte>(Scene const&, std::uint32_t)>;
+
+// Steps 1 and 2: Active at N, then a too-high TestRequest at N + 5 and its ResendRequest.
+// Returns N, or 0 after a failed gate.
+seqnum_t open_gap_with_a_test_request(Scene& s) {
+    if (!s.open_to_active()) {
+        ADD_FAILURE() << "setup: the session did not reach Active";
+        return 0;
+    }
+    const seqnum_t n = s.next_in();
+    const auto mark = s.sent.size();
+    (void)s.feed(s.test_request(n + 5));
+    const auto rr = s.of_type("2", mark);
+    if (rr.size() != 1U || field(rr.front(), 7) != std::to_string(n) || !s.resend_outstanding() ||
+        s.state() != fsm_state::Active) {
+        ADD_FAILURE() << "setup: the first too-high frame must draw one ResendRequest with "
+                         "BeginSeqNo(7) = NextNumIn and leave a resend outstanding; the session "
+                         "wrote "
+                      << s.written(mark);
+        return 0;
+    }
+    return n;
 }
 
-std::vector<std::byte> test_request(std::uint32_t seq) {
-    return make_frame("1", seq, "112=PEER-TR\x01");
+// Step 4: the peer's replay covers N to `last`, and an in-sequence frame follows.
+void expect_recovery(Scene& s, seqnum_t n, std::uint32_t last) {
+    (void)s.feed(s.gap_fill(n, last + 1));
+    EXPECT_EQ(s.state(), fsm_state::Active) << "after the replay through 34=" << last;
+    EXPECT_EQ(s.next_in(), last + 1) << "NextNumIn after the replay through 34=" << last;
+    EXPECT_FALSE(s.resend_outstanding()) << "a resend is still outstanding after the replay";
+    (void)s.feed(s.heartbeat(last + 1));
+    EXPECT_EQ(s.state(), fsm_state::Active) << "an in-sequence frame after the recovery";
+    EXPECT_EQ(s.next_in(), last + 2) << "NextNumIn after the in-sequence frame";
 }
 
-// SequenceReset-GapFill from the peer's replay: 34 = begin, NewSeqNo(36) = end + 1.
-std::vector<std::byte> gap_fill(std::uint32_t begin, std::uint32_t new_seq_no) {
-    const std::string extra =
-        "43=Y\x01"
-        "122=" +
-        std::string(kSt52) +
-        "\x01"
-        "123=Y\x01"
-        "36=" +
-        std::to_string(new_seq_no) + "\x01";
-    return make_frame("4", begin, extra);
+// Steps 1 to 4 with `second` as step 3, or without step 3 when it is empty.
+void run_cell(session_role role, const char* what, SecondFrame const& second) {
+    Scene s{Options{.role = role}};
+    const seqnum_t n = open_gap_with_a_test_request(s);
+    ASSERT_NE(n, 0U);
+
+    std::uint32_t last = n + 5;
+    if (second) {
+        last = n + 6;
+        const auto mark = s.sent.size();
+        const auto r = s.feed(second(s, last));
+        EXPECT_TRUE(r.has_value())
+            << "on_inbound_frame returned error " << static_cast<int>(r.error());
+        ASSERT_EQ(s.state(), fsm_state::Active)
+            << "a second too-high frame (" << what << ", 34=" << last
+            << ") while a resend from 34=" << n << " is outstanding ended the session";
+        EXPECT_EQ(s.sent.size(), mark)
+            << "the session wrote for the ignored frame: " << s.written(mark);
+        EXPECT_EQ(s.next_in(), n) << "NextNumIn moved at the ignored frame";
+        EXPECT_TRUE(s.resend_outstanding()) << "the ignored frame ended the outstanding resend";
+    }
+    expect_recovery(s, n, last);
 }
 
-// Value of tag `tag` in a SOH-delimited frame, matched at a field boundary.
-std::string field(std::string_view frame, std::uint32_t tag) {
-    const std::string needle = "\x01" + std::to_string(tag) + "=";
-    auto pos = frame.find(needle);
-    if (pos == std::string_view::npos) return {};
-    pos += needle.size();
-    auto end = frame.find('\x01', pos);
-    return std::string(frame.substr(pos, end == std::string_view::npos ? frame.npos : end - pos));
-}
-
-struct Capture {
-    std::vector<std::string> frames;
-    [[nodiscard]] std::vector<std::string> of_type(std::string_view msg_type) const {
-        std::vector<std::string> out;
-        for (const auto& f : frames) {
-            if (field(f, 35) == msg_type) out.push_back(f);
-        }
-        return out;
-    }
-};
-
-enum class Second { none, test_request, heartbeat };
-
-class SecondTooHigh : public ::testing::TestWithParam<session_role> {
-protected:
-    asio::io_context ioc;
-    std::shared_ptr<fixpp::core::mock_clock> clock;
-    fixpp::core::EngineConfig engine;
-
-    void SetUp() override {
-        auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
-        clock = std::make_shared<fixpp::core::mock_clock>(utc, fixpp::core::steady_time_point{},
-                                                          ioc.get_executor());
-        engine.clock = clock;
-        engine.executor = ioc.get_executor();
-    }
-
-    SessionConfig make_cfg(Capture& cap) {
-        SessionConfig cfg;
-        cfg.sender_comp_id = "ISLD";
-        cfg.target_comp_id = "TW";
-        cfg.begin_string = "FIX.4.2";
-        cfg.heartbeat_interval = 30s;
-        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
-        cfg.executor_override = ioc.get_executor();
-        cfg.role = GetParam();
-        cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
-        cfg.transport_send = [&cap](std::span<const std::byte> f) {
-            cap.frames.emplace_back(reinterpret_cast<const char*>(f.data()), f.size());
-        };
-        return cfg;
-    }
-
-    template <class Coro>
-    fixpp::core::expected_t<void> run_sync(Coro coro, const char* site) {
-        auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, site)) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
-            return std::unexpected(fixpp::test_support::kWindowMissSentinel);
-        }
-        return fut.get();
-    }
-
-    fixpp::core::expected_t<void> feed(Session& s, const std::vector<std::byte>& f) {
-        return run_sync(s.on_inbound_frame(std::span<const std::byte>{f}), "SecondTooHigh::feed");
-    }
-
-    // Both roles: open, then the peer's Logon(34=1). The initiator answers it as
-    // the Logon ack; the acceptor answers with its own Logon.
-    bool drive_to_active(Session& s) {
-        if (!run_sync(s.open(), "SecondTooHigh::open")) return false;
-        (void)feed(s, make_frame("A", 1,
-                                 "98=0\x01"
-                                 "108=30\x01"));
-        return s.state() == fsm_state::Active;
-    }
-
-    void run_cell(Second second) {
-        Capture cap;
-        auto cfg = make_cfg(cap);
-        Session s{engine, cfg};
-        ASSERT_TRUE(drive_to_active(s)) << "setup: session did not reach Active";
-
-        const seqnum_t n = session_test_access::seqnum_mgr(s).next_inbound_unsafe();
-        cap.frames.clear();
-
-        // Step 2: first too-high frame → ResendRequest from N.
-        (void)feed(s, test_request(n + 5));
-        const auto rr = cap.of_type("2");
-        ASSERT_EQ(rr.size(), 1U) << "control precondition: the first too-high TestRequest must "
-                                    "produce exactly one ResendRequest";
-        ASSERT_EQ(field(rr.front(), 7), std::to_string(n))
-            << "ResendRequest BeginSeqNo(7) must be NextNumIn";
-        ASSERT_EQ(s.state(), fsm_state::Active);
-
-        // Step 3: a second too-high frame, not PossDup, before any replay.
-        std::uint32_t last = n + 5;
-        if (second != Second::none) {
-            last = n + 6;
-            (void)feed(s, second == Second::heartbeat ? make_frame("0", last) : test_request(last));
-            EXPECT_EQ(s.state(), fsm_state::Active)
-                << "second non-PossDup too-high frame (34=" << last
-                << ", 35=" << (second == Second::heartbeat ? "0" : "1")
-                << ") while awaiting the replay "
-                << "of 34=" << n << ".. ended the session: state=" << static_cast<int>(s.state())
-                << ". SL2020 §4.10 precedence 12: \"Queue incoming messages with MsgSeqNum(34) "
-                   "too high.\"";
-            EXPECT_TRUE(cap.of_type("5").empty()) << "no Logout may be sent";
-        }
-
-        // Step 4: the peer's replay covers N..last; the session must be back in step.
-        (void)feed(s, gap_fill(n, last + 1));
-        EXPECT_EQ(s.state(), fsm_state::Active) << "after the replay through 34=" << last;
-        EXPECT_EQ(session_test_access::seqnum_mgr(s).next_inbound_unsafe(), last + 1)
-            << "NextNumIn after the replay through 34=" << last;
-        (void)feed(s, make_frame("0", last + 1));
-        EXPECT_EQ(s.state(), fsm_state::Active) << "in-sequence frame after recovery";
-    }
-};
+class SecondTooHigh : public ::testing::TestWithParam<session_role> {};
+class SecondTooHighPerType : public ::testing::TestWithParam<session_role> {};
+class SecondTooHighResendRequestAndLogout : public ::testing::TestWithParam<session_role> {};
+class FrameSentDuringTheReplay : public ::testing::TestWithParam<session_role> {};
 
 }  // namespace
 
-TEST_P(SecondTooHigh, OneTooHigh) { run_cell(Second::none); }
-TEST_P(SecondTooHigh, SecondTooHigh) { run_cell(Second::test_request); }
-TEST_P(SecondTooHigh, SecondTooHighHb) { run_cell(Second::heartbeat); }
+// ── The lifted cells ────────────────────────────────────────────────────────────────
+
+// Control: step 3 omitted. The too-high frame reaches the sequence gate (the
+// ResendRequest is its witness) and the replay recovers the session.
+TEST_P(SecondTooHigh, OneTooHigh) { run_cell(GetParam(), "none", {}); }
+
+// The claim: step 3 is a TestRequest.
+TEST_P(SecondTooHigh, SecondTooHigh) {
+    run_cell(GetParam(), "a TestRequest",
+             [](Scene const& s, std::uint32_t seq) { return s.test_request(seq); });
+}
+
+// Step 3 is a Heartbeat, which leaves the out-of-sequence arm before the path this
+// issue removes.
+TEST_P(SecondTooHigh, SecondTooHighHb) {
+    run_cell(GetParam(), "a Heartbeat",
+             [](Scene const& s, std::uint32_t seq) { return s.heartbeat(seq); });
+}
+
+// ── Per message type ────────────────────────────────────────────────────────────────
+
+TEST_P(SecondTooHighPerType, TestRequest) {
+    run_cell(GetParam(), "a TestRequest",
+             [](Scene const& s, std::uint32_t seq) { return s.test_request(seq); });
+}
+
+TEST_P(SecondTooHighPerType, ApplicationMessage) {
+    run_cell(GetParam(), "an application message",
+             [](Scene const& s, std::uint32_t seq) { return s.order(seq); });
+}
+
+TEST_P(SecondTooHighPerType, Reject) {
+    run_cell(GetParam(), "a Reject",
+             [](Scene const& s, std::uint32_t seq) { return s.reject(seq); });
+}
+
+// A GapFill that is not a resent frame: it is above NextNumIn, so it is not applied.
+TEST_P(SecondTooHighPerType, GapFillWithoutPossDup) {
+    run_cell(GetParam(), "a GapFill without PossDupFlag", [](Scene const& s, std::uint32_t seq) {
+        return s.gap_fill(seq, seq + 3, /*poss_dup=*/false);
+    });
+}
+
+TEST_P(SecondTooHighPerType, Logon) {
+    run_cell(GetParam(), "a Logon", [](Scene const& s, std::uint32_t seq) { return s.logon(seq); });
+}
+
+// ── A second too-high ResendRequest, and a second too-high Logout ───────────────────
+//
+// What fixpp should send for either is fixpp#577's question, which is not decided here.
+// The two assertions below hold under either answer to it: the frame does not advance
+// NextNumIn, and the session does not end without a Logout of its own.
+
+namespace {
+
+void expect_no_advance_and_no_silent_end(session_role role, const char* what,
+                                         SecondFrame const& second) {
+    Scene s{Options{.role = role}};
+    const seqnum_t n = open_gap_with_a_test_request(s);
+    ASSERT_NE(n, 0U);
+
+    const auto mark = s.sent.size();
+    (void)s.feed(second(s, n + 6));
+    EXPECT_EQ(s.next_in(), n) << "NextNumIn moved at a too-high " << what;
+    EXPECT_FALSE(s.state() == fsm_state::Disconnected && s.count("5", mark) == 0U)
+        << "a too-high " << what << " while a resend is outstanding ended the session and no "
+        << "Logout was written; the session wrote " << s.written(mark);
+}
+
+}  // namespace
+
+TEST_P(SecondTooHighResendRequestAndLogout, ResendRequest) {
+    expect_no_advance_and_no_silent_end(
+        GetParam(), "ResendRequest",
+        [](Scene const& s, std::uint32_t seq) { return s.resend_request(seq); });
+}
+
+TEST_P(SecondTooHighResendRequestAndLogout, Logout) {
+    expect_no_advance_and_no_silent_end(
+        GetParam(), "Logout", [](Scene const& s, std::uint32_t seq) { return s.logout(seq); });
+}
+
+// ── A frame the peer sends during its replay (D-537-1) ──────────────────────────────
+//
+// The peer's messages 2 and 3 were lost. Its message 4 opens the gap. While it replays 2
+// to 4 it sends a new message, 5, which the session ignores: the request it answers was
+// made before 5 existed. So 5 is a new gap, which the next message, 6, opens, and a second
+// ResendRequest fetches it. redeliver_poss_dup is off, so each message reaches the
+// application once.
+TEST_P(FrameSentDuringTheReplay, IsIgnoredAndASecondResendRequestFetchesIt) {
+    using orig = Scene::orig_time;
+    Scene s{Options{.role = GetParam()}};
+    ASSERT_TRUE(s.open_to_active()) << "setup: the session did not reach Active";
+    ASSERT_EQ(s.next_in(), 2U);
+
+    (void)s.feed(s.order(4));
+    ASSERT_EQ(s.count("2"), 1U) << "setup: the gap drew no ResendRequest";
+    ASSERT_EQ(field(s.of_type("2").front(), 7), "2");
+
+    (void)s.feed(s.poss_dup_order(2, orig::valid));
+    ASSERT_EQ(s.next_in(), 3U) << "setup: the first replayed message was not consumed";
+    ASSERT_TRUE(s.resend_outstanding()) << "setup: the replay is not under way";
+
+    const auto mark = s.sent.size();
+    (void)s.feed(s.order(5));
+    ASSERT_EQ(s.state(), fsm_state::Active)
+        << "a new message (34=5) sent during the replay ended the session";
+    EXPECT_EQ(s.sent.size(), mark) << "the session wrote for it: " << s.written(mark);
+    EXPECT_EQ(s.next_in(), 3U) << "NextNumIn moved at the ignored message";
+
+    (void)s.feed(s.poss_dup_order(3, orig::valid));
+    (void)s.feed(s.poss_dup_order(4, orig::valid));
+    EXPECT_EQ(s.next_in(), 5U) << "NextNumIn after the replay of 2 to 4";
+    EXPECT_FALSE(s.resend_outstanding()) << "the first resend is still outstanding";
+    EXPECT_EQ(s.count("2"), 1U) << "a ResendRequest was written during the replay";
+
+    (void)s.feed(s.order(6));
+    const auto rr = s.of_type("2");
+    ASSERT_EQ(rr.size(), 2U) << "the message after the ignored one drew no second ResendRequest";
+    EXPECT_EQ(field(rr.back(), 7), "5") << "BeginSeqNo(7) of the second ResendRequest";
+
+    (void)s.feed(s.poss_dup_order(5, orig::valid));
+    (void)s.feed(s.poss_dup_order(6, orig::valid));
+    EXPECT_EQ(s.state(), fsm_state::Active);
+    EXPECT_EQ(s.next_in(), 7U) << "NextNumIn after the second replay";
+    EXPECT_FALSE(s.resend_outstanding());
+    const std::vector<std::string> want{"ORD2", "ORD3", "ORD4", "ORD5", "ORD6"};
+    EXPECT_EQ(s.app->delivered, want) << "each message once, in order";
+}
+
+namespace {
+std::string role_param_name(const ::testing::TestParamInfo<session_role>& i) {
+    return role_name(i.param);
+}
+}  // namespace
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, SecondTooHigh,
                          ::testing::Values(session_role::initiator, session_role::acceptor),
-                         [](const ::testing::TestParamInfo<session_role>& i) {
-                             return i.param == session_role::initiator ? "Initiator" : "Acceptor";
-                         });
+                         role_param_name);
+INSTANTIATE_TEST_SUITE_P(BothRoles, SecondTooHighPerType,
+                         ::testing::Values(session_role::initiator, session_role::acceptor),
+                         role_param_name);
+INSTANTIATE_TEST_SUITE_P(BothRoles, SecondTooHighResendRequestAndLogout,
+                         ::testing::Values(session_role::initiator, session_role::acceptor),
+                         role_param_name);
+INSTANTIATE_TEST_SUITE_P(BothRoles, FrameSentDuringTheReplay,
+                         ::testing::Values(session_role::initiator, session_role::acceptor),
+                         role_param_name);
 
 }  // namespace fixpp::session::test

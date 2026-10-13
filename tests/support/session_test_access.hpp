@@ -123,6 +123,27 @@ struct session_test_access {
         return s.logout_wait_wake_;
     }
 
+    // Whether a TestRequest of the liveness loop is pending: the loop wrote one and no
+    // Heartbeat has answered it (fixpp#537, .specify/536-537-538-recovery-liveness.md,
+    // D-537-6 and D-537-8). Session strand only.
+    [[nodiscard]] static bool test_request_pending(Session const& s) noexcept {
+        return !s.pending_test_req_id_.empty();
+    }
+
+    // Whether a resend is outstanding: the session sent a ResendRequest and NextNumIn has
+    // not passed the gap it recorded (fixpp#537, D-537-5). Session strand only.
+    [[nodiscard]] static bool resend_outstanding(Session const& s) noexcept {
+        return s.reconnect_fsm_.is_awaiting_resend();
+    }
+
+    // The instant of the session's clock at which the last frame reached the inbound
+    // liveness writer. A cell that moved a mock clock before it sent a frame over a socket
+    // reads it to tell when that frame reached the session. Session strand only.
+    [[nodiscard]] static fixpp::core::steady_time_point last_inbound_steady(
+        Session const& s) noexcept {
+        return s.last_inbound_steady_;
+    }
+
     // The session's store, or null before open() (093 plan OD-25: a cell issues a
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }

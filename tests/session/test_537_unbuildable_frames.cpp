@@ -2,22 +2,29 @@
 //
 // tests/session/test_537_unbuildable_frames.cpp
 //
-// fixpp#537, D-537-7 (.specify/536-537-538-recovery-liveness.md §4.3 and the D-537-7 row
-// of §5): a frame the session cannot build in its fixed frame buffer.
+// fixpp#537, D-537-7 and D-537-5 (.specify/536-537-538-recovery-liveness.md §4.3; the rows
+// "D-537-7" and "D-537-5, a Logout that cannot be built" of §5): a frame the session cannot
+// build in its fixed frame buffer.
 //
 // The fixture is a directly driven Session on the callback transport, facing hand-built
-// frames, at an ordinary HeartBtInt. The session's own Logon and its ResendRequest are
-// built in buffers of one size and share their header fields, so which of the two still
-// fits depends on the CompIDs and on the digits of the numbers each carries.
+// frames, at an ordinary HeartBtInt. The session's own Logon, its ResendRequest and its
+// Logout are built in buffers of one size and share their header fields, so which of them
+// still fits depends on the CompIDs and on what each carries beyond the header.
 //
 // Step 1, the boundary finder: the longest SenderCompID at which the session's own
 // Logon is still written. It is found by building, per role, on every run. No length is
 // written in this file: the lengths follow from the builders.
 //
-// Step 2: at that boundary the peer sends a Reset-mode SequenceReset, which raises
-// NextNumIn to its NewSeqNo(36), and then a frame above it. The ResendRequest that
-// frame draws carries NextNumIn as BeginSeqNo(7), so a NewSeqNo with enough digits
-// makes it longer than the Logon was. The NewSeqNo is found by building too.
+// D-537-7. At that boundary the peer sends a Reset-mode SequenceReset, which raises
+// NextNumIn to its NewSeqNo(36), and then a frame above it. The ResendRequest that frame
+// draws carries NextNumIn as BeginSeqNo(7), so a NewSeqNo with enough digits makes it
+// longer than the Logon was. The NewSeqNo is found by building too. A ResendRequest that
+// cannot be built ends the session: the peer never got the request, so a session that
+// stayed up would wait for a replay nobody was asked for.
+//
+// D-537-5. At the same boundary with NextNumIn left small, the ResendRequest is built.
+// The cell here ends at a second frame above NextNumIn before the bound, which is
+// ignored.
 
 #include <gtest/gtest.h>
 
@@ -284,10 +291,10 @@ protected:
 
 }  // namespace
 
-// A measurement of the code as it stands before D-537-7, and not a cell of the design:
-// it asserts that a boundary exists at which the Logon is written and the ResendRequest
-// is not, and what the session does there today. D-537-7's own cell replaces it.
-TEST_P(UnbuildableFrames, Measurement_LogonWrittenAndResendRequestNotBuilt) {
+// D-537-7: at the longest SenderCompID that still lets the Logon be written, a NewSeqNo(36)
+// with enough digits leaves no room for the ResendRequest. The frame that would draw it
+// returns dispatch_aborted, the session is Disconnected, and nothing is written.
+TEST_P(UnbuildableFrames, ResendRequestThatCannotBeBuilt_EndsTheSession) {
     auto const boundary = longest_comp_id_with_logon();
     ASSERT_TRUE(boundary.has_value())
         << "no SenderCompID length was found at which the session's own Logon is written "
@@ -317,18 +324,21 @@ TEST_P(UnbuildableFrames, Measurement_LogonWrittenAndResendRequestNotBuilt) {
            "NewSeqNo drew a ResendRequest: no boundary exists at which the Logon is written "
            "and the ResendRequest cannot be built";
 
-    // Today: success, Active, and nothing written for a request the peer never got.
     ASSERT_TRUE(unbuilt->result.has_value());
-    EXPECT_TRUE(unbuilt->result->has_value())
-        << "error " << static_cast<int>(unbuilt->result->error());
-    EXPECT_EQ(unbuilt->state, fsm_state::Active);
+    ASSERT_FALSE(unbuilt->result->has_value())
+        << "on_inbound_frame returned success for a ResendRequest the session could not "
+           "build; the session's state is "
+        << static_cast<int>(unbuilt->state) << " (Active is " << static_cast<int>(fsm_state::Active)
+        << ")";
+    EXPECT_EQ(unbuilt->result->error(), fixpp::core::error::dispatch_aborted);
+    EXPECT_EQ(unbuilt->state, fsm_state::Disconnected);
     EXPECT_EQ(unbuilt->frames_written, 0U);
 }
 
-// The same stimulus on a session whose SenderCompID is far from the boundary: every
-// NewSeqNo draws a ResendRequest from it. So a missing ResendRequest in the measurement
-// above comes from the frame's size and not from the stimulus.
-TEST_P(UnbuildableFrames, Measurement_Control_ShortCompId_EveryNewSeqNoDrawsAResendRequest) {
+// Control of the cell above: the same stimulus on a session whose SenderCompID is far
+// from the boundary draws a ResendRequest for every NewSeqNo. So a missing ResendRequest
+// there comes from the frame's size and not from the stimulus.
+TEST_P(UnbuildableFrames, Control_ShortCompId_EveryNewSeqNoDrawsAResendRequest) {
     for (auto const new_seq_no : new_seq_nos_by_digit_count()) {
         auto const r = after_reset(/*comp_id_len=*/1, new_seq_no);
         ASSERT_TRUE(r.drove) << "the Reset-mode SequenceReset to " << new_seq_no
@@ -339,6 +349,37 @@ TEST_P(UnbuildableFrames, Measurement_Control_ShortCompId_EveryNewSeqNoDrawsARes
         EXPECT_EQ(r.begin_seq_no, std::to_string(new_seq_no));
         EXPECT_EQ(r.state, fsm_state::Active);
     }
+}
+
+// D-537-5, a Logout that cannot be built. At the boundary, with NextNumIn left small, the
+// ResendRequest is built, so a gap opens. A second frame above NextNumIn, before the
+// bound, is ignored.
+TEST_P(UnbuildableFrames, AtTheBoundary_SecondTooHighFrameBeforeTheBoundIsIgnored) {
+    auto const boundary = longest_comp_id_with_logon();
+    ASSERT_TRUE(boundary.has_value())
+        << "no SenderCompID length was found at which the session's own Logon is written "
+           "and one byte more is not";
+
+    Driven d{*this, *boundary};
+    ASSERT_TRUE(d.logon_written()) << "setup: the session at the boundary did not reach Active";
+    auto const n = session_test_access::seqnum_mgr(*d.session).next_inbound_unsafe();
+
+    d.cap->frames.clear();
+    (void)d.feed("1", n + 5, "112=PEER-TR\x01");
+    auto const requests = d.cap->of_type("2");
+    ASSERT_EQ(requests.size(), 1U)
+        << "at the boundary, with NextNumIn = " << n << ", the ResendRequest was not built";
+    ASSERT_EQ(field(requests.front(), 7), std::to_string(n));
+    ASSERT_TRUE(session_test_access::resend_outstanding(*d.session));
+
+    d.cap->frames.clear();
+    auto const second = d.feed("1", n + 6, "112=PEER-TR\x01");
+    ASSERT_TRUE(second.has_value());
+    EXPECT_TRUE(second->has_value());
+    ASSERT_EQ(d.session->state(), fsm_state::Active)
+        << "a second frame above NextNumIn, before the bound, ended the session";
+    EXPECT_EQ(d.cap->frames.size(), 0U) << "the session wrote for the ignored frame";
+    EXPECT_EQ(session_test_access::seqnum_mgr(*d.session).next_inbound_unsafe(), n);
 }
 
 INSTANTIATE_TEST_SUITE_P(BothRoles, UnbuildableFrames,

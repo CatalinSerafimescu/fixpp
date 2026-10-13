@@ -634,8 +634,12 @@ set_tests_properties(session_536_shared_clock_liveness PROPERTIES LABELS "sessio
 # some of them wait on a real asio::steady_timer.
 add_threading_test(session_536_close_and_logout_wait test_536_close_and_logout_wait.cpp)
 set_tests_properties(session_536_close_and_logout_wait PROPERTIES LABELS "session;536")
-# fixpp#537 (B28) — reproduction: a second non-PossDup too-high frame while awaiting a replay.
+# fixpp#537 (B28), D-537-1 and D-537-2 — a frame above NextNumIn while a resend is outstanding
+# is ignored. Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
+# groups. Its cells open Sessions and drive their coroutines and timers on an io_context with
+# a mock clock.
 add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
+set_tests_properties(session_537_second_too_high PROPERTIES LABELS "session;537")
 # fixpp#538 (B28), D-538-1 — the resend answer after a 141=Y Logon exchange (MemoryStore and FileStore).
 add_threading_test(session_538_volatile_store_after_reset_logon
   test_538_volatile_store_after_reset_logon.cpp)
@@ -769,6 +773,40 @@ foreach(outbound_store_test
     LABELS "session;538"
     TIMEOUT 300)
 endforeach()
+
+# fixpp#537 (B28), D-537-6 and D-537-8 — a Heartbeat above NextNumIn answers a pending
+# TestRequest. Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
+# groups. Its cells open Sessions and drive their coroutines and timers on an io_context with
+# a mock clock.
+add_threading_test(session_537_too_high_heartbeat test_537_too_high_heartbeat.cpp)
+set_tests_properties(session_537_too_high_heartbeat PROPERTIES LABELS "session;537")
+# fixpp#537 (B28), D-537-5 and D-537-9 — the deadline of an unfilled gap. Standalone
+# ([const §VII.8]): not the class the clause groups. Its cells open Sessions and drive their
+# coroutines and timers on an io_context with a mock clock, and some of them run an Engine with
+# timers and coroutines over loopback TCP (plain_engine_rig.hpp), which the link line is for.
+add_executable(session_537_gap_deadline
+  test_537_gap_deadline.cpp
+)
+target_link_libraries(session_537_gap_deadline PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_537_gap_deadline PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME session_537_gap_deadline COMMAND session_537_gap_deadline)
+set_tests_properties(session_537_gap_deadline PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "session;537"
+  TIMEOUT 300)
 
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the

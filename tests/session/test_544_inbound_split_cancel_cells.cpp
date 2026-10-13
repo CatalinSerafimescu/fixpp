@@ -448,9 +448,11 @@ TEST(B35InboundSplitCancel, LogonSentLogoutBuildFailure_DisconnectsWithoutThrow)
 // Too-high MsgSeqNum, reply-build-failure path. The CompIDs are sized so the initiator's Logon
 // fits its buffer and a ResendRequest whose BeginSeqNo has ten digits does not fit its own: a
 // Reset-mode SequenceReset moves NextNumIn to a ten-digit value first. now()'s second call (the
-// ResendRequest's stamp) cancels the chain. Today the failed build reaches no co_await, so the
-// session stays Active and the frame completes with a value.
-TEST(B35InboundSplitCancel, TooHighResendRequestBuildFailure_StaysActiveWithoutThrow) {
+// ResendRequest's stamp) cancels the chain. The failed build reaches no co_await, so the frame
+// completes with a value and throws nothing. That value is dispatch_aborted, and the session
+// is Disconnected: a ResendRequest that cannot be built ends the session (fixpp#537,
+// .specify/536-537-538-recovery-liveness.md, D-537-7).
+TEST(B35InboundSplitCancel, TooHighResendRequestBuildFailure_EndsTheSessionWithoutThrow) {
     CancelFixture f;
     f.sender = std::string(88, 'S');
     f.target = std::string(88, 'T');
@@ -470,8 +472,10 @@ TEST(B35InboundSplitCancel, TooHighResendRequestBuildFailure_StaysActiveWithoutT
     ASSERT_TRUE(f.emitted) << "the cell's cancellation point was never reached";
     ASSERT_TRUE(o.completed);
     EXPECT_FALSE(o.aborted) << "a failed build reaches no co_await, so nothing may throw";
-    EXPECT_TRUE(o.value);
-    EXPECT_EQ(s.state(), fsm_state::Active);
+    ASSERT_TRUE(o.error.has_value())
+        << "the frame returned success for a ResendRequest that was not built";
+    EXPECT_EQ(*o.error, fixpp::core::error::dispatch_aborted);
+    EXPECT_EQ(s.state(), fsm_state::Disconnected);
     EXPECT_EQ(f.app->to_admin_count("2"), 0) << "the ResendRequest must have failed to build";
     EXPECT_EQ(f.sent_count("2"), 0);
 }
