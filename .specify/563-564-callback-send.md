@@ -1689,12 +1689,13 @@ close (round 5's F-4). The statement now:
   decision point. Inside it the session is `Disconnected`, its lifecycle is `closing`, the Logout
   has no number yet, and a callback is on the stack, so R-4's wait applies to a close. Each
   operation has one outcome there:
-  - **A terminal `close()`.** Measured (`ph8d_predictions.md`, scenes 1 and 4; §3, P-23). It waits
-    by one post and joins. The count moves once more, after the step compared it, and nothing reads
-    it again. The close does not call the grace timer's wake, because the Logout was cut. All three
-    closes return success. The Logout is numbered and retained, and nothing is transmitted. With the
-    `FileStore`'s lock held by another writer, no close completes while the lock is held, and the
-    Logout is retained after the release.
+  - **A terminal `close()`.** Measured (`ph8d_predictions.md`, scenes 1 and 4; §3, P-23): it takes
+    the wait and joins; the count moves once more, after the step compared it; all three closes
+    return success; the Logout is numbered and retained, and nothing is transmitted. Read: nothing
+    reads the count again. That the close does not call the grace timer's wake is measured by its
+    effect, and only with the `FileStore`'s lock held by another writer (scene 4): no close
+    completes while the lock is held, and the Logout is retained after the release. Those cells
+    cannot tell which close's wake it would have been (§3, NC-31's row).
   - **A graceful `close()`.** Measured (scene 2). It waits by one post and joins. The count does not
     move. It returns success, and the rest is as above. Not run with the lock held.
   - **A `Session::send`.** Measured (scenes 3 and 4). It returns `session_invalid_state_for_send`,
@@ -3263,17 +3264,18 @@ established; those edits were not reviewed. The bound is not in this list: it is
   read (measured on two threads; §2.6, "The bound", (a); §3, P-22). On an executor that keeps the
   order of its jobs the write runs first and the record reads back (measured on one thread).
   `src/session/file_store.cpp` is as on `main`, and the state is reached on the route with no cut
-  too. Its issue is fixpp#598, batch B56; the orchestrator corrected that issue's title and reach
-  after round 6. This amendment does not decide it. On the cut route the bound meets it only on such
-  an executor, where the grace timer expires before the Logout's write has started, or after a
-  `toAdmin` longer than the timeout. No cell of this amendment pins the unreadable record (§3,
-  NC-29's row). v0.10's bullet gave no condition on the executor; its measurement used a gate that
-  reordered the two jobs (round 6's O-1). Not established, each with what would settle it: whether,
-  on two threads, the emit of the cancellation also races the spawned coroutine's own read of its
-  cancellation state, by a ThreadSanitizer run of a cancelled `FileStore::store` on a pool of two
-  threads; a job already inside its system calls at the expiry, by a run that holds the write inside
-  its body; more than two threads, and a strand over a pool, by the same scenes on those executors;
-  a pool that is busy and not held by a cell; a restart of the store over such a file.
+  too. Its issue is fixpp#598, batch B56. After round 6 the orchestrator changed that issue's title
+  and stated the narrower reach in its second comment; the "Reach" paragraph of the issue's body is
+  as it was first written. This amendment does not decide it. On the cut route the bound meets it
+  only on such an executor, where the grace timer expires before the Logout's write has started, or
+  after a `toAdmin` longer than the timeout. No cell of this amendment pins the unreadable record
+  (§3, NC-29's row). v0.10's bullet gave no condition on the executor; its measurement used a gate
+  that reordered the two jobs (round 6's O-1). Not established, each with what would settle it:
+  whether, on two threads, the emit of the cancellation also races the spawned coroutine's own read
+  of its cancellation state, by a ThreadSanitizer run of a cancelled `FileStore::store` on a pool of
+  two threads; a job already inside its system calls at the expiry, by a run that holds the write
+  inside its body; more than two threads, and a strand over a pool, by the same scenes on those
+  executors; a pool that is busy and not held by a cell; a restart of the store over such a file.
 - **`reset_on_disconnect` on this route: with the owner (asked 2026-10-13; not answered when this was
   written).** The two endings are in §2.6's comparison table: fixpp's teardown reset, which runs
   after the Logout step and leaves the store empty and both next numbers at 1; and QuickFIX C++'s
@@ -3835,7 +3837,8 @@ item. F-n are Codex's, with the judge's verdict; O-n are the judge's own.
   supplies the executor. P-22, NC-29, mutant D's row and trace, the fixture's gate (each mode says
   whether later jobs pass), P-13 and NC-22's second arm, NC-27's `FileStore` hold arms and their
   prediction at the head, the route list of "With batch B28", and §7's bullet are rewritten from it.
-  The orchestrator corrected the issue's title and reach.
+  The orchestrator changed the issue's title and stated the narrower reach in the issue's second
+  comment; the issue's body is as it was first written.
 - **O-2:** §0, R-9, has "What the owner was told", from the task list's section of that name: the
   two messages, the doubt told before the re-run, and the re-run's result. The other sentences that
   said "told" point there. §7 says that the section is the orchestrator's account.
