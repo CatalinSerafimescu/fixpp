@@ -556,6 +556,13 @@ TEST(GracefulLogoutStoreCancelled,
 // A directly driven acceptor on the callback transport. The bound is under the timeout:
 // on these routes nothing cancels close's grace timer, so a close that waits completes
 // at the timeout, and a bound of a timeout or more would be met by a close that waited.
+//
+// The input store_returns_cancelled is a store call that returns the cancellation when
+// nothing of the session asked for it (a store that is shutting down, for example).
+// store_then_emit leaves by its exception for it (D-OUT-2). The phase's handler at its
+// emit is what keeps that exception out of close's race of the phase against the grace
+// timer: the race counts an arm that ended in an exception as failed and waits for the
+// other arm.
 
 constexpr std::uint32_t kLogoutTimeoutMs = 1000;
 
@@ -577,15 +584,21 @@ struct ThrowingSink {
 };
 
 enum class NotSentInput : std::uint8_t {
-    store_fails_closed,  // a persistent store returns store_io_failure for the Logout
-    write_fails,         // the transport callback throws on the Logout
+    store_fails_closed,       // a persistent store returns store_io_failure for the Logout
+    store_returns_cancelled,  // it returns store_cancelled, and nothing asked it to cancel
+    write_fails,              // the transport callback throws on the Logout
 };
 
 NotSentOutcome run_not_sent(NotSentInput const input) {
     NotSentOutcome o;
     auto const sink = std::make_shared<ThrowingSink>();
     DirectAcceptor::Options options{.logout_disconnect_timeout_ms = kLogoutTimeoutMs};
-    if (input == NotSentInput::store_fails_closed) {
+    bool const store_input = input != NotSentInput::write_fails;
+    // What the store returns for the Logout's call, on the two store inputs.
+    error const store_code = input == NotSentInput::store_returns_cancelled
+                                 ? error::store_cancelled
+                                 : error::store_io_failure;
+    if (store_input) {
         options.reports_persistent = true;
     } else {
         options.tweak_cfg = [sink](fixpp::session::SessionConfig& c) {
@@ -612,9 +625,9 @@ NotSentOutcome run_not_sent(NotSentInput const input) {
         return c.op == store_op::store && c.dir == direction_t::outbound && c.first == logout_seq;
     };
     f.log->arm();
-    if (input == NotSentInput::store_fails_closed) {
+    if (store_input) {
         f.log->fail_in = is_logouts_store;
-        f.log->fail_code = error::store_io_failure;
+        f.log->fail_code = store_code;
     }
     auto const mark = f.log->mark();
     auto close_fut = f.spawn_close(close_mode::graceful);
@@ -627,9 +640,9 @@ NotSentOutcome run_not_sent(NotSentInput const input) {
     o.state_after_close = f.session->state();
     std::optional<StoreCall> logouts_store;
     if (auto const* c = f.log->first_after(mark, is_logouts_store)) logouts_store = *c;
-    if (input == NotSentInput::store_fails_closed) {
+    if (store_input) {
         o.not_sent = logouts_store.has_value() && logouts_store->returned() &&
-                     logouts_store->error == error::store_io_failure;
+                     logouts_store->error == store_code;
         o.not_sent_text = "the Logout's store() " + record_text(logouts_store);
         o.logouts_transmitted = f.sent_count("5");
     } else {
@@ -656,6 +669,13 @@ void expect_close_did_not_wait(NotSentOutcome const& o) {
 
 TEST(GracefulLogoutNotSent, StoreFailsClosedForTheLogout_CloseDoesNotWait) {
     auto const o = run_not_sent(NotSentInput::store_fails_closed);
+    ASSERT_TRUE(o.active) << "setup: the session did not reach Active";
+    ASSERT_TRUE(o.not_sent) << "the path was not exercised: " << o.not_sent_text;
+    expect_close_did_not_wait(o);
+}
+
+TEST(GracefulLogoutNotSent, StoreReturnsCancelledForTheLogout_CloseDoesNotWait) {
+    auto const o = run_not_sent(NotSentInput::store_returns_cancelled);
     ASSERT_TRUE(o.active) << "setup: the session did not reach Active";
     ASSERT_TRUE(o.not_sent) << "the path was not exercised: " << o.not_sent_text;
     expect_close_did_not_wait(o);
