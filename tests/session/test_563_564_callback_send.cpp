@@ -1214,7 +1214,8 @@ void run_send_started_in(StartedIn site) {
     Fixture f{ExecKind::io_context};
     Session sess{f.engine, f.cfg()};
     if (in_on_logon) {
-        ASSERT_TRUE(f.run(sess.open(), "CallbackSend::open").has_value()) << "setup: open failed";
+        ASSERT_TRUE(f.run(sess.open(), "CallbackSend::send_started_in_open").has_value())
+            << "setup: open failed";
         ASSERT_EQ(next_in(sess), 1U) << "setup: no inbound frame may have been consumed yet";
     } else {
         ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
