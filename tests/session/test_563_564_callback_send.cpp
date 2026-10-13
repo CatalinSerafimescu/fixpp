@@ -397,6 +397,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -419,6 +420,16 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::wire::access_mode;
 using fixpp::wire::MessageView;
+
+// Two test seams of src/session/file_store.cpp, for FileStoreSeams below. Their
+// declarations in file_store.hpp are behind FIXPP_TEST_HOOKS, which this target is not
+// built with; the definitions are compiled in every build.
+#ifndef FIXPP_TEST_HOOKS
+namespace fixpp::session {
+void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexcept;
+int read_and_reset_catch_fired() noexcept;
+}  // namespace fixpp::session
+#endif
 
 namespace fixpp::session::test {
 
@@ -622,6 +633,12 @@ struct LiveWrites {
     // close() calls on the transport, the writes begun after the first one, and
     // how many of those the transport refused.
     std::size_t closes = 0;
+    // How many of `closes` were made through close_async(); the others are direct
+    // calls. A pin of the call sequence on this double: it does not say what a TLS
+    // peer reads.
+    std::size_t async_closes = 0;
+    // Called at each close() and each close_async(), with the call's name.
+    std::function<void(const char*)> on_close_call;
     std::size_t begun_after_close = 0;
     std::size_t refused_after_close = 0;
     // Set it before the transport is attached. True: a write begun after close()
@@ -674,7 +691,14 @@ public:
     [[nodiscard]] expected_t<void> cancel() noexcept override { return {}; }
     [[nodiscard]] expected_t<void> close() noexcept override {
         ++stats_.closes;
+        if (stats_.on_close_call) stats_.on_close_call("the transport's close()");
         return {};
+    }
+    // What Transport::close_async() does, counted.
+    [[nodiscard]] asio::awaitable<expected_t<void>> close_async() override {
+        ++stats_.async_closes;
+        if (stats_.on_close_call) stats_.on_close_call("the transport's close_async()");
+        co_return close();
     }
 
 private:
@@ -735,6 +759,10 @@ struct Fixture {
     // Active with open_to_active_on_session_executor(), or feeds the Logon with
     // feed_peer_logon_on_session_executor().
     std::chrono::seconds heartbeat_interval{0};
+    // SessionConfig::reset_on_logout and SessionConfig::reset_on_disconnect, read by
+    // cfg().
+    bool reset_on_logout = false;
+    bool reset_on_disconnect = false;
     // The peer's Logon. A member, so that it outlives a delivery a cell starts
     // and does not wait for.
     const std::vector<std::byte> peer_logon = peer_frame("A", 1,
@@ -782,6 +810,8 @@ struct Fixture {
             c.already_serialized_executor = true;
         }
         c.heartbeat_interval = heartbeat_interval;
+        c.reset_on_logout = reset_on_logout;
+        c.reset_on_disconnect = reset_on_disconnect;
         c.security_profile = fixpp::test_support::make_minimal_security_profile();
         c.dictionary = fixpp::test_support::make_minimal_dictionary();
         c.executor_override = exec;
@@ -930,6 +960,537 @@ struct Fixture {
             run(store->next_seqnum(direction_t::outbound, false), "CallbackSend::store_next");
         return r ? std::to_string(*r) : "error " + std::to_string(static_cast<int>(r.error()));
     }
+};
+
+// ── The fixtures of the cells of `.specify/563-564-callback-send.md` §2.6 ─────
+//
+// §3 "§2.6's rows", "Fixture additions". Each is used only by a cell that asks for it.
+
+// What happened in a cell, in order, each entry with the real time since start(), on
+// std::chrono::steady_clock. The session's mock clock stands in these cells, and
+// close()'s grace timer is a real timer, so the mock clock is not the clock that is
+// read. Written from the session's thread and from the file pool's threads.
+struct EventLog {
+    void start() {
+        const std::lock_guard<std::mutex> lock{m_};
+        from_ = std::chrono::steady_clock::now();
+        started_ = true;
+    }
+    // Milliseconds since start(); -1 before it.
+    [[nodiscard]] long long ms() const {
+        const std::lock_guard<std::mutex> lock{m_};
+        return started_ ? since_start_() : -1;
+    }
+    // Notes nothing before start(). Returns what ms() returns.
+    long long note(const std::string& what) {
+        const std::lock_guard<std::mutex> lock{m_};
+        if (!started_) return -1;
+        const long long at = since_start_();
+        events_.push_back(what + " at " + std::to_string(at) + " ms");
+        return at;
+    }
+    [[nodiscard]] std::vector<std::string> events() const {
+        const std::lock_guard<std::mutex> lock{m_};
+        return events_;
+    }
+
+private:
+    [[nodiscard]] long long since_start_() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - from_)
+            .count();
+    }
+    mutable std::mutex m_;
+    std::chrono::steady_clock::time_point from_;
+    bool started_ = false;
+    std::vector<std::string> events_;
+};
+
+// The two test seams of src/session/file_store.cpp that these cells read (declared
+// at the top of this file): the offload probe, and the store's counter of its catches
+// of operation_aborted. The store has one such counter, fed by FileStore::store and by
+// FileStore::next_seqnum: a cell reads and resets it before its scene.
+struct FileStoreSeams {
+    // The bodies of offloaded store work begun since reset_bodies().
+    [[nodiscard]] static int bodies_begun() noexcept { return bodies_.load(); }
+    static void reset_bodies() noexcept { bodies_.store(0); }
+    // Installs the offload probe, which counts a body and, where `log` is not null,
+    // notes it there. remove() takes the probe out again.
+    static void install(EventLog* log) noexcept {
+        log_.store(log);
+        install_store_offload_probe(&on_body_);
+    }
+    static void remove() noexcept {
+        install_store_offload_probe(nullptr);
+        log_.store(nullptr);
+    }
+    [[nodiscard]] static int read_and_reset_catches() noexcept {
+        return read_and_reset_catch_fired();
+    }
+
+private:
+    static void on_body_(std::thread::id /*unused*/) noexcept {
+        bodies_.fetch_add(1, std::memory_order_relaxed);
+        if (EventLog* log = log_.load()) log->note("the write's body begins");
+    }
+    static inline std::atomic<int> bodies_{0};
+    static inline std::atomic<EventLog*> log_{nullptr};
+};
+
+// The gate on the FileStore's file executor: the state a GatedFileExecutor shares with
+// the cell. Until arm() it lets every job through untouched. Once armed it numbers the
+// jobs handed to the executor and notes in `log` when each is handed over, begins and
+// ends. What else it does is its mode.
+struct FileGate : std::enable_shared_from_this<FileGate> {
+    enum class Mode {
+        // The first mode. The thread that hands a job over waits until the pool has
+        // run every job handed to it. No job is held, so no job passes another; the
+        // completion of the store call is queued on the session's executor before the
+        // submitting thread goes on.
+        submitter_waits_for_the_pool,
+        // The second mode, the order-keeping hold. arm() posts a job that holds the
+        // pool's one thread until release(). Every job handed to the executor after
+        // that queues behind it, and they run in the order they were handed over.
+        holds_the_pools_thread,
+        // The third mode. The first job handed over is kept back until release(), and
+        // every later job goes to the pool at once: later jobs pass the kept one. The
+        // condition that makes that safe is the cell's to keep and to check: no
+        // cancellation reaches the kept job's coroutine while the job is kept (§3,
+        // "Fixture additions", the bullet on the gate). It is not used to hold the
+        // Logout's own write.
+        keeps_the_first_job,
+    };
+
+    FileGate(asio::thread_pool& file_pool, Mode gate_mode) : pool{&file_pool}, mode{gate_mode} {}
+    FileGate(const FileGate&) = delete;
+    FileGate& operator=(const FileGate&) = delete;
+
+    asio::thread_pool* pool;
+    Mode mode;
+    std::shared_ptr<EventLog> log = std::make_shared<EventLog>();
+    std::atomic<bool> armed{false};
+    // Since arm(): the jobs handed to the executor, and those of them that have ended
+    // or, in the third mode, are kept.
+    std::atomic<int> handed{0};
+    std::atomic<int> ended{0};
+    // First mode: how often the submitting thread waited, and whether a wait gave up
+    // at its bound.
+    std::atomic<int> submitter_waits{0};
+    std::atomic<bool> submitter_wait_ran_out{false};
+    // Second mode: the holding job is running.
+    std::atomic<int> holding_jobs{0};
+    std::atomic<bool> let_go{false};
+    // Third mode: the kept job. Touched from the session's thread only.
+    std::atomic<int> kept_jobs{0};
+    std::function<void()> kept;
+
+    // Called from the session's thread. The gate is owned by a shared_ptr.
+    void arm() {
+        if (armed.load()) return;
+        if (mode == Mode::holds_the_pools_thread) {
+            asio::post(*pool, [g = shared_from_this()] {
+                g->log->note("a job of the cell takes the pool's thread and holds it");
+                g->holding_jobs.fetch_add(1);
+                while (!g->let_go.load()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                }
+                g->log->note("the cell's job lets the thread go");
+            });
+        }
+        armed.store(true);
+    }
+    // Lets the held thread go and hands the kept job to the pool. Called from the
+    // session's thread; a second call does nothing.
+    void release() {
+        let_go.store(true);
+        std::function<void()> job = std::move(kept);
+        kept = nullptr;
+        if (job) asio::post(*pool, std::move(job));
+    }
+    // The gate did what its mode is for: a cell whose gate held nothing must not pass.
+    [[nodiscard]] bool acted() const {
+        switch (mode) {
+            case Mode::submitter_waits_for_the_pool:
+                return submitter_waits.load() > 0 && !submitter_wait_ran_out.load();
+            case Mode::holds_the_pools_thread:
+                return holding_jobs.load() > 0 && handed.load() > 0;
+            case Mode::keeps_the_first_job:
+                return kept_jobs.load() > 0;
+        }
+        return false;
+    }
+
+    // Declared after the Fixture in a cell, so that the gate is released before the
+    // fixture joins its pool. `released` may be null.
+    struct ReleaseOnExit {
+        explicit ReleaseOnExit(std::shared_ptr<FileGate> released) : gate{std::move(released)} {}
+        ReleaseOnExit(const ReleaseOnExit&) = delete;
+        ReleaseOnExit& operator=(const ReleaseOnExit&) = delete;
+        ~ReleaseOnExit() {
+            if (gate) gate->release();
+        }
+        std::shared_ptr<FileGate> gate;
+    };
+};
+
+// The executor a cell gives the FileStore as its file_io_executor, in front of the
+// fixture's pool.
+struct GatedFileExecutor {
+    asio::thread_pool::executor_type inner;
+    std::shared_ptr<FileGate> gate;
+
+    asio::execution_context& query(asio::execution::context_t /*unused*/) const noexcept {
+        return asio::query(inner, asio::execution::context);
+    }
+    static constexpr asio::execution::blocking_t query(
+        asio::execution::blocking_t /*unused*/) noexcept {
+        return asio::execution::blocking.never;
+    }
+    GatedFileExecutor require(asio::execution::blocking_t::never_t /*unused*/) const {
+        return *this;
+    }
+    template <class F>
+    void execute(F&& f) const {
+        if (!gate->armed.load()) {
+            asio::require(inner, asio::execution::blocking.never).execute(std::forward<F>(f));
+            return;
+        }
+        const int k = gate->handed.fetch_add(1) + 1;
+        gate->log->note("job " + std::to_string(k) + " is handed to the file executor");
+        auto job = std::make_shared<std::decay_t<F>>(std::forward<F>(f));
+        std::function<void()> run = [g = gate, k, job] {
+            g->log->note("job " + std::to_string(k) + " begins");
+            std::move (*job)();
+            g->log->note("job " + std::to_string(k) + " ends");
+            g->ended.fetch_add(1);
+        };
+        if (gate->mode == FileGate::Mode::keeps_the_first_job && k == 1) {
+            gate->kept = std::move(run);
+            gate->kept_jobs.fetch_add(1);
+            return;
+        }
+        asio::require(inner, asio::execution::blocking.never).execute(std::move(run));
+        if (gate->mode != FileGate::Mode::submitter_waits_for_the_pool) return;
+        gate->submitter_waits.fetch_add(1);
+        const auto bound = std::chrono::steady_clock::now() + fixpp::test_support::kHoldBound;
+        while (gate->ended.load() < gate->handed.load()) {
+            if (std::chrono::steady_clock::now() >= bound) {
+                gate->submitter_wait_ran_out.store(true);
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+    }
+    friend bool operator==(const GatedFileExecutor& a, const GatedFileExecutor& b) noexcept {
+        return a.inner == b.inner && a.gate == b.gate;
+    }
+};
+
+// A store in front of the store another factory makes, which notes each outbound
+// store() call when it is made and when it has returned. It forwards everything,
+// the graceful close's flush included.
+struct StoreCalls {
+    struct Call {
+        seqnum_t seq = 0;
+        bool returned = false;
+    };
+    std::vector<Call> outbound;
+    [[nodiscard]] bool made(seqnum_t seq) const {
+        return std::ranges::any_of(outbound, [&](const Call& c) { return c.seq == seq; });
+    }
+    [[nodiscard]] bool returned(seqnum_t seq) const {
+        return std::ranges::any_of(outbound,
+                                   [&](const Call& c) { return c.seq == seq && c.returned; });
+    }
+};
+
+class RecordingStore final : public MessageStore {
+public:
+    RecordingStore(std::unique_ptr<MessageStore> inner, std::shared_ptr<StoreCalls> calls)
+        : MessageStore(flush_thunk_for<RecordingStore>()),
+          inner_{std::move(inner)},
+          calls_{std::move(calls)} {}
+
+    asio::awaitable<expected_t<void>> store(seqnum_t seq, std::span<const std::byte> frame,
+                                            direction_t dir) noexcept override {
+        if (dir != direction_t::outbound) co_return co_await inner_->store(seq, frame, dir);
+        const std::size_t at = calls_->outbound.size();
+        calls_->outbound.push_back({.seq = seq, .returned = false});
+        auto r = co_await inner_->store(seq, frame, dir);
+        calls_->outbound[at].returned = true;
+        co_return r;
+    }
+    asio::awaitable<expected_t<void>> retrieve(seqnum_t begin, seqnum_t end, direction_t dir,
+                                               retrieve_visitor& visitor) noexcept override {
+        return inner_->retrieve(begin, end, dir, visitor);
+    }
+    asio::awaitable<expected_t<seqnum_t>> next_seqnum(direction_t dir,
+                                                      bool increment) noexcept override {
+        return inner_->next_seqnum(dir, increment);
+    }
+    asio::awaitable<expected_t<void>> reset() noexcept override { return inner_->reset(); }
+    asio::awaitable<expected_t<void>> reset_to(seqnum_t next_in_value,
+                                               seqnum_t next_out_value) noexcept override {
+        return inner_->reset_to(next_in_value, next_out_value);
+    }
+    asio::awaitable<expected_t<void>> flush_for_session_close() {
+        if (const auto hook = inner_->flush_hook(); hook != nullptr) {
+            co_return co_await hook(*inner_);
+        }
+        co_return expected_t<void>{};
+    }
+
+private:
+    std::unique_ptr<MessageStore> inner_;
+    std::shared_ptr<StoreCalls> calls_;
+};
+
+class RecordingStoreFactory final : public fixpp::session::MessageStoreFactory {
+public:
+    explicit RecordingStoreFactory(std::shared_ptr<fixpp::session::MessageStoreFactory> inner)
+        : inner_{std::move(inner)} {}
+    std::shared_ptr<StoreCalls> calls = std::make_shared<StoreCalls>();
+
+    [[nodiscard]] bool yields_persistent_store() const noexcept override {
+        return inner_->yields_persistent_store();
+    }
+    [[nodiscard]] expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view sender, std::string_view target, std::pmr::memory_resource* mr,
+        std::size_t max_store_memory_bytes,
+        asio::any_io_executor file_io_executor) noexcept override {
+        auto made =
+            inner_->make(sender, target, mr, max_store_memory_bytes, std::move(file_io_executor));
+        if (!made) return std::unexpected(made.error());
+        return expected_t<std::unique_ptr<MessageStore>>{
+            std::make_unique<RecordingStore>(std::move(*made), calls)};
+    }
+
+private:
+    std::shared_ptr<fixpp::session::MessageStoreFactory> inner_;
+};
+
+// The store doubles of NC-24: a MemoryStore behind a store whose outbound store()
+// calls, once the cell has armed it, do one of three things.
+struct SteppedStoreState {
+    enum class Kind {
+        // More suspensions than the shipped stores make: kHops posts on the caller's
+        // executor before the frame is stored.
+        more_hops,
+        // No suspension at all: the call returns at once, and the frame is stored
+        // behind it by a call of its own. The control of more_hops: its call has
+        // returned before anything else runs on the caller's executor.
+        returns_at_once,
+        // The call waits until a cancellation reaches it or the cell releases it. On a
+        // cancellation it stores nothing and returns store_cancelled, and it leaves the
+        // caller's cancellation state as it found it.
+        holds_then_reports_the_cancellation,
+        // The same, but it resets the caller's cancellation state before it returns, as
+        // the lock sequence of the shipped stores does: the recorded cancellation is
+        // lost to the caller.
+        holds_then_loses_the_cancellation,
+    };
+    static constexpr int kHops = 8;
+
+    explicit SteppedStoreState(Kind store_kind) : kind{store_kind} {}
+    Kind kind;
+    bool armed = false;
+    // Outbound store() calls begun since arm(), and those of them that have returned.
+    int calls = 0;
+    int returned = 0;
+    int hops_done = 0;
+    // A holding call was ended by a cancellation, or by release().
+    bool reached_by_a_cancellation = false;
+    bool released = false;
+    // Set by the store while a call holds; release() cancels it.
+    asio::steady_timer* holding_on = nullptr;
+
+    void arm() { armed = true; }
+    [[nodiscard]] bool in_a_call() const { return calls > returned; }
+    void release() {
+        released = true;
+        if (holding_on != nullptr) holding_on->cancel();
+    }
+};
+
+class SteppedStore final : public MessageStore {
+public:
+    explicit SteppedStore(std::shared_ptr<SteppedStoreState> state)
+        : state_{std::move(state)},
+          inner_{MemoryStore::Config{.policy = fixpp::session::capacity_policy::unbounded}} {}
+
+    asio::awaitable<expected_t<void>> store(seqnum_t seq, std::span<const std::byte> frame,
+                                            direction_t dir) noexcept override {
+        if (dir != direction_t::outbound || !state_->armed) {
+            co_return co_await inner_.store(seq, frame, dir);
+        }
+        ++state_->calls;
+        auto ex = co_await asio::this_coro::executor;
+        if (state_->kind == SteppedStoreState::Kind::returns_at_once) {
+            asio::co_spawn(
+                ex,
+                [this, seq, dir, copy = std::vector<std::byte>(frame.begin(), frame.end())]()
+                    -> asio::awaitable<void> {
+                    (void)co_await inner_.store(seq, std::span<const std::byte>{copy}, dir);
+                },
+                asio::detached);
+            ++state_->returned;
+            co_return expected_t<void>{};
+        }
+        if (state_->kind == SteppedStoreState::Kind::more_hops) {
+            bool cancelled = false;
+            try {
+                for (int i = 0; i < SteppedStoreState::kHops; ++i) {
+                    co_await asio::post(ex, asio::use_awaitable);
+                    ++state_->hops_done;
+                }
+            } catch (const std::system_error&) {
+                cancelled = true;
+            }
+            if (cancelled) {
+                state_->reached_by_a_cancellation = true;
+                ++state_->returned;
+                co_return std::unexpected(error::store_cancelled);
+            }
+            auto r = co_await inner_.store(seq, frame, dir);
+            ++state_->returned;
+            co_return r;
+        }
+        // A holding kind. The timer never expires: the wait ends when release()
+        // cancels the timer, or when a cancellation reaches this coroutine.
+        if (!state_->released) {
+            asio::steady_timer hold{ex, std::chrono::steady_clock::time_point::max()};
+            state_->holding_on = &hold;
+            try {
+                (void)co_await hold.async_wait(asio::as_tuple(asio::use_awaitable));
+            } catch (const std::system_error&) {  // NOLINT(bugprone-empty-catch)
+                // A cancellation recorded before the wait began: the wait is not made.
+            }
+            state_->holding_on = nullptr;
+        }
+        if (state_->released) {
+            auto r = co_await inner_.store(seq, frame, dir);
+            ++state_->returned;
+            co_return r;
+        }
+        state_->reached_by_a_cancellation = true;
+        if (state_->kind == SteppedStoreState::Kind::holds_then_loses_the_cancellation) {
+            co_await asio::this_coro::reset_cancellation_state();
+        }
+        ++state_->returned;
+        co_return std::unexpected(error::store_cancelled);
+    }
+    asio::awaitable<expected_t<void>> retrieve(seqnum_t begin, seqnum_t end, direction_t dir,
+                                               retrieve_visitor& visitor) noexcept override {
+        return inner_.retrieve(begin, end, dir, visitor);
+    }
+    asio::awaitable<expected_t<seqnum_t>> next_seqnum(direction_t dir,
+                                                      bool increment) noexcept override {
+        return inner_.next_seqnum(dir, increment);
+    }
+    asio::awaitable<expected_t<void>> reset() noexcept override { return inner_.reset(); }
+
+private:
+    std::shared_ptr<SteppedStoreState> state_;
+    MemoryStore inner_;
+};
+
+class SteppedStoreFactory final : public fixpp::session::MessageStoreFactory {
+public:
+    explicit SteppedStoreFactory(SteppedStoreState::Kind kind)
+        : state{std::make_shared<SteppedStoreState>(kind)} {}
+    std::shared_ptr<SteppedStoreState> state;
+
+    // As a MemoryStore's factory answers: the session does not hydrate from it.
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
+    [[nodiscard]] expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
+        std::size_t /*max_store_memory_bytes*/,
+        asio::any_io_executor /*file_io_executor*/) noexcept override {
+        return expected_t<std::unique_ptr<MessageStore>>{std::make_unique<SteppedStore>(state)};
+    }
+};
+
+// One outbound store() call held by the cell: the first one made after arm(). Declared
+// after the Fixture and before the Session: the double's hooks point at this object,
+// and its destructor releases the hold before the fixture joins its pool.
+struct StoreCallHold {
+    enum class By {
+        // A FileStore behind the gate's second mode: the pool's one thread is held, so
+        // the call's write job and every job after it wait in the order they were
+        // handed over. The fixture is made with StoreKind::file.
+        file_store_order_kept,
+        // A FileStore behind the gate's third mode: the call's write job is kept and
+        // later jobs pass it. Only for a call whose coroutine no cancellation reaches
+        // (FileGate::Mode::keeps_the_first_job). The fixture is made with
+        // StoreKind::file.
+        file_store_first_job_kept,
+        // The holding store double, a HookedStore: the call completes in the
+        // MemoryStore behind it and then does not return until release(), or until
+        // fixpp::test_support::kHoldBound has passed, which ran_out() reports. No lock
+        // is held, so another store operation completes during the hold. The fixture
+        // is made with StoreKind::none.
+        holding_double,
+    };
+
+    StoreCallHold(By hold_by, Fixture& fixture)
+        : by{hold_by},
+          gate{std::make_shared<FileGate>(fixture.file_pool,
+                                          hold_by == By::file_store_first_job_kept
+                                              ? FileGate::Mode::keeps_the_first_job
+                                              : FileGate::Mode::holds_the_pools_thread)} {}
+    StoreCallHold(const StoreCallHold&) = delete;
+    StoreCallHold& operator=(const StoreCallHold&) = delete;
+    ~StoreCallHold() { release(); }
+
+    By by;
+    std::shared_ptr<FileGate> gate;
+    std::shared_ptr<fixpp::test_support::HookedStoreFactory> factory;
+    bool armed = false;
+    bool released = false;
+    int stores_while_armed = 0;
+
+    [[nodiscard]] const char* name() const {
+        switch (by) {
+            case By::file_store_order_kept:
+                return "FileStore, the pool's one thread held, order kept";
+            case By::file_store_first_job_kept:
+                return "FileStore, the first job kept at the gate";
+            case By::holding_double:
+                return "the holding store double";
+        }
+        return "?";
+    }
+    // Replaces the store factory of `cfg`, which the caller has from fixture.cfg().
+    void install(Fixture& fixture, SessionConfig& cfg) {
+        if (by == By::holding_double) {
+            factory = std::make_shared<fixpp::test_support::HookedStoreFactory>();
+            factory->hooks.on_outbound_store = [this] {
+                return armed && ++stores_while_armed == 1;
+            };
+            factory->hooks.release_when = [this] { return released; };
+            cfg.store_factory = factory;
+            return;
+        }
+        FileStore::Config fc;
+        fc.directory = fixture.file_dir;
+        fc.max_frame_bytes = 4096;
+        fc.file_io_executor = GatedFileExecutor{fixture.file_pool.get_executor(), gate};
+        cfg.store_factory = std::make_shared<FileStoreFactory>(fc);
+    }
+    void arm() {
+        armed = true;
+        if (by != By::holding_double) gate->arm();
+    }
+    // The call is held: its job is at the gate, or the double is in its hold.
+    [[nodiscard]] bool holding() const {
+        return by == By::holding_double ? stores_while_armed > 0 : gate->acted();
+    }
+    void release() {
+        released = true;
+        gate->release();
+    }
+    // The double gave its hold up at its bound, so what followed was not in a hold.
+    [[nodiscard]] bool ran_out() const { return factory && factory->log->hold_timed_out; }
 };
 
 seqnum_t next_out(Session& s) { return session_test_access::seqnum_mgr(s).next_outbound_unsafe(); }
@@ -1834,6 +2395,10 @@ struct CloseCell {
     std::vector<std::string> callbacks;
     int on_logout_calls = 0;
     int logout_to_admin_calls = 0;
+    // The manager's next outbound number, read inside onLogout. In a cell whose close
+    // emits a Logout it says whether onLogout ran before that Logout was numbered, and
+    // so before its store call.
+    std::optional<seqnum_t> next_out_at_on_logout;
     // The operation that called the starting callback, and the one it started.
     SendOutcome outer;
     SendOutcome started;
@@ -1861,6 +2426,7 @@ struct CloseCell {
     void lifecycle_callback(const char* name) {
         if (std::string_view{name} != "onLogout") return;
         ++on_logout_calls;
+        next_out_at_on_logout = session_test_access::seqnum_mgr(sess).next_outbound_unsafe();
         note("onLogout");
     }
     // A toAdmin other than the starting callback.
@@ -5842,7 +6408,9 @@ ArmValues read_arm_values(Fixture& f, Session& sess, const CloseCell& cell, std:
     std::vector<std::string> retained_full;
     got.retained = retained_frames(f, sess, retained_full);
     got.store_next_out = store_next(f, sess, direction_t::outbound);
-    if (f.store_kind == StoreKind::file) {
+    // The fixture's reset_on_disconnect knob is set only by an arm whose subject is what
+    // the reset left in the store.
+    if (f.store_kind == StoreKind::file || f.reset_on_disconnect) {
         got.store_next_in = store_next(f, sess, direction_t::inbound);
     }
     full_wire.assign(f.wire.begin() + static_cast<std::ptrdiff_t>(cell.wire_before), f.wire.end());
@@ -5868,6 +6436,7 @@ std::string inside_text(const CloseCell& cell, const char* callback) {
 
 std::string transport_text(const Fixture& f) {
     return "; transport close() calls " + std::to_string(f.live_writes.closes) +
+           " of which through close_async " + std::to_string(f.live_writes.async_closes) +
            ", live writes started " + std::to_string(f.live_writes.started) + ", most in flight " +
            std::to_string(f.live_writes.max_in_flight);
 }
@@ -6930,9 +7499,50 @@ enum class LifecycleArm {
 // the peer's Logon the fixture feeds.
 constexpr std::chrono::seconds kLifecycleHeartbeat{30};
 
+// What an arm of run_lifecycle_callback_starts_close() sets apart from its values. The
+// defaults are the fixture's.
+struct ArmSetup {
+    // The executor the session is given: the io_context's, or a strand over it.
+    ExecKind exec = ExecKind::io_context;
+    bool reset_on_logout = false;
+    bool reset_on_disconnect = false;
+    // A FileStore arm: the gate on the store's file executor, armed inside the
+    // starting callback.
+    std::optional<FileGate::Mode> gate;
+    // In place of the arm's store: the stepped store double, armed inside the starting
+    // callback.
+    std::optional<SteppedStoreState::Kind> stepped_store;
+
+    [[nodiscard]] static ArmSetup on_a_strand() {
+        ArmSetup s;
+        s.exec = ExecKind::strand;
+        return s;
+    }
+    [[nodiscard]] static ArmSetup with_reset_on_logout() {
+        ArmSetup s;
+        s.reset_on_logout = true;
+        return s;
+    }
+    [[nodiscard]] static ArmSetup with_reset_on_disconnect() {
+        ArmSetup s;
+        s.reset_on_disconnect = true;
+        return s;
+    }
+    [[nodiscard]] static ArmSetup behind_the_gate(FileGate::Mode mode) {
+        ArmSetup s;
+        s.gate = mode;
+        return s;
+    }
+    [[nodiscard]] static ArmSetup on_the_stepped_store(SteppedStoreState::Kind kind) {
+        ArmSetup s;
+        s.stepped_store = kind;
+        return s;
+    }
+};
+
 void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, close_mode mode,
                                          StoreKind store, TransportKind transport,
-                                         const ArmValues& expect) {
+                                         const ArmValues& expect, const ArmSetup& setup = {}) {
     const bool logon_arm = arm == LifecycleArm::on_logon || arm == LifecycleArm::on_logon_no_close;
     const bool starts_a_close = arm != LifecycleArm::on_logon_no_close;
     const bool to_admin_arm = arm == LifecycleArm::to_admin_of_a_graceful_closes_logout;
@@ -6951,8 +7561,10 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
                            : logon_arm                    ? "onLogon"
                            : to_admin_arm                 ? "toAdmin(Logout)"
                                                           : "onLogout";
-    Fixture f{ExecKind::io_context, store};
+    Fixture f{setup.exec, store};
     f.role = role;
+    f.reset_on_logout = setup.reset_on_logout;
+    f.reset_on_disconnect = setup.reset_on_disconnect;
     // Elsewhere the interval stays zero and no liveness loop runs.
     if (logon_arm) f.heartbeat_interval = kLifecycleHeartbeat;
     auto cfg = f.cfg();
