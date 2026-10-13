@@ -2157,8 +2157,8 @@ implementer. None of it is done in this revision. The rows and sentences above d
   where on `main` it was transmitted and both closes waited out the timeout.
 - **B&L, a new behaviour row for this ending,** with the next free id of this section's rows: the
   condition, with "begins inside the callback" as part of it; §2.6's table; "stored" with its
-  condition; the comparison with QuickFIX C++ and QuickFIX/J, the flag included; and the terminal
-  closes it does not cover (§7), with their issue's number when it exists.
+  condition; the comparison with QuickFIX C++ and QuickFIX/J, the flag included; and what it does
+  not cover (§7, first bullet of the v0.8 block). That condition's issue is fixpp#594, batch B52.
 - **B&L `L-563-1`, condition (2):** its pointer to `L-563-6` becomes a pointer to the new row, with a
   sentence that the two conditions end differently on some arms (§2.6's table).
 - **`spec/feature-catalogue.md` and `spec/coverage-index.md`:** this pull request's entries. The
@@ -2447,8 +2447,8 @@ Added in v0.8, for §2.6. Not reviewed at Gate A.
   reset on logout. Read, not run (`ph8a_readings.md`, its fourth section): it is the race in
   `Session::close`'s join that the head's measurement shows for §2.6's own condition
   (`ph8a_S_arms_by_stall.md`, "unpatched head"). No cell drives either way. By reading it exists on
-  `main`, and it is not specific to a callback. It gets an issue of its own: to be filed by the
-  orchestrator; its number is added here when it exists.
+  `main`, and it is not specific to a callback. Its issue is fixpp#594, batch B52. The evidence
+  status of that issue: read, not run, for this condition; measured for §2.6's own condition.
 - **An inbound frame in the window of the cut route.** On that route the FSM stays Active from
   `toAdmin`'s return until the waiting terminal close runs. That close's post was queued inside
   `toAdmin`, so it runs ahead of anything queued after it. What an inbound frame delivered in that
