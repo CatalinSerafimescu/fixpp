@@ -6566,9 +6566,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     //     logout_wait_wake_, and as_tuple turns that cancel into the arm's completion.
     //   - The deadline arm is await_deadline, so a Clock::cancel_sleeps() by anyone
     //     re-arms it and does not read as a logout timeout.
-    //   - The outcome is read from logout_confirmed_, before the race is armed and
-    //     after it, never from which arm won: a cancelled wake completes as a fired
-    //     one does.
+    //   - The outcome is read from logout_confirmed_ after the race, never from which
+    //     arm won: a cancelled wake completes as a fired one does.
     //   - The wake is cleared on every exit from the wait, a throw and the destruction
     //     of this frame included, so the LogoutSent arm cannot call into a wait that
     //     has ended.
@@ -6578,7 +6577,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     //     wait below must still run.
     auto deadline = effective_clock_->steady_now() +
                     std::chrono::milliseconds{cfg_.logout_disconnect_timeout_ms};
-    if (!logout_confirmed_) {
+    {
         using namespace asio::experimental::awaitable_operators;
         asio::steady_timer confirmed{co_await asio::this_coro::executor,
                                      asio::steady_timer::time_point::max()};
