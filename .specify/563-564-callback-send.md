@@ -3,8 +3,9 @@
 > **Status: v0.9 (2026-10-13) — v0.7 with one amendment, rewritten after Gate A round 4. No Gate A
 > round has reviewed v0.9.** The amendment is §2.6 and the passages that go with it: ruling R-8 in §0,
 > one bullet in §0a, one pointer in §2.1a, the last block of §3, the last blocks of §4, §5 and §7
-> (with a pointer on §4's last "Compatibility" bullet), a paragraph in §6, and the entries for v0.8
-> and round 4 in the last section. It gives one ending to the condition that B&L `L-563-6` states and
+> (with a pointer on §4's last "Compatibility" bullet), the last block of §6, and the entries for
+> v0.8 and round 4 in the last section. §0's R-8 bullet also names a ruling of another note, B28's
+> R-24, which §2.6 follows. It gives one ending to the condition that B&L `L-563-6` states and
 > that fixpp#590 tracks, on the owner's ruling of 2026-10-13 (R-8). v0.8 was its first form. A Gate A
 > round scoped to the amendment reviewed v0.8 (round 4) and did not converge: its fourth statement
 > kept the Logout step in a wait that one cancellation had to end, and that cancellation can be lost.
@@ -1190,9 +1191,10 @@ no store call's outcome changes these.
 | `LogoutSent` | not recorded |
 | `logout_seen_` | not set by this close, so a configured `reset_on_logout` does not fire for it. It is the rule of B28's ruling R-24: the flag is set only where the Logout was sent ("With batch B28", below) |
 
-*Group 2: decided by the Logout step's exit and by `close()`'s join.* It is by construction too, where
-the Logout's store call returns within `logout_disconnect_timeout_ms`. "The bound", below, has what
-happens where it does not.
+*Group 2: decided by the Logout step's exit and by `close()`'s join.* It is by construction too,
+wherever the Logout's store call returns by itself. "The bound", below, has the one case with the
+shipped stores in which it does not: the call still waiting for the store's lock when
+`logout_disconnect_timeout_ms` has elapsed.
 
 | Observable | After this amendment |
 |---|---|
@@ -1211,7 +1213,8 @@ outbound frame does.
 | completes with success | consumed: the next outbound number is the Logout's plus one | holds the Logout under its number. Measured on every arm with a store, under the three stall settings and in the held-lock scene (§3, P-12, P-16) |
 | there is no store | consumed | nothing to hold |
 | fails, on a persistent store | not consumed: `store_then_emit` sets the next outbound number to the store's own next number, which is the Logout's when the store wrote nothing (the reconcile of feature 059, a best-effort read). Read, not run | holds nothing |
-| does not return within `logout_disconnect_timeout_ms` | consumed, on this branch. Measured (§3, P-18). On a tree that carries B28: taken back (read; "With batch B28", below) | holds nothing under the number. Measured |
+| is still waiting for the store's lock when `logout_disconnect_timeout_ms` has elapsed | consumed, on this branch. Measured (§3, P-18). On a tree that carries B28: taken back (read; "With batch B28", below) | holds nothing under the number. Measured |
+| is in its own write on the file executor when that timeout has elapsed | consumed. Read, not run ("The bound", below) | holds the Logout once the write has returned. Read, not run |
 
 Measured on S5, on all six arms under the three settings (§3, P-12). In the observables that
 `ph8a_four_way.md` tabulates, this is what the head does today on a `FileStore` with a live transport
@@ -1266,7 +1269,8 @@ It leaves the join's waker as it is, and it leaves open what the store holds whe
 cancellation meets the cut Logout's store call at a lock: its owner question 2. The third part removes
 that route: no cancellation reaches the store call before the grace timer expires. The orchestrator
 added it, under the owner's standing instruction to continue, and reported it to the owner (§6). The
-question then arises only at the timer's expiry ("The bound", below).
+question then arises only where the timer expires while the store call waits for the store's lock
+("The bound", below, its first case).
 
 Inside the callback one thing changes that did not before: the count. Nothing exposes it, so for the
 application the session is still as it was (§2.1a, R-4).
@@ -1279,8 +1283,8 @@ application the session is still as it was (§2.1a, R-4).
   how many hops a store's `store` call takes, on which thread completes it, on the transport kind, or
   on which handler reaches the executor first.
 - **Group 2's exit** is a branch of the step on the same comparison. The step returns when its store
-  call returns, whatever else is queued. No handler has to arrive for it to end, and no cancellation
-  has to be delivered.
+  call returns, whatever else is queued. No handler other than the store call's own completion has to arrive
+  for it to end, and no cancellation has to be delivered.
 - **Group 2's "both closes return the in-flight result"** rests on an order that is forced (read; the
   round's triage, F-1, checked for this revision in `Session::close` and in asio's `co_spawn.hpp` and
   `parallel_group.hpp`). The terminal close's post is made inside `toAdmin`, onto the session's
@@ -1308,49 +1312,64 @@ application the session is still as it was (§2.1a, R-4).
   §7's case.
 - **`close()` reaches the increment without suspending.** Before the block of its wait `close()` has
   one await, `reset_cancellation_state`, which does not suspend.
-- **R-4's wait in `close()` (§2.1a), for statement 4's third part.** The joining branch reads the
-  record of the cut. The record is written when `toAdmin` returns, and the terminal close reaches the
-  joining branch one post later, so it finds the record. Without the wait the close would run on
+- **R-4's wait in `close()` (§2.1a), and why statement 4's third part is needed.** The joining branch
+  reads the record of the cut. The record is written when `toAdmin` returns, and the terminal close
+  reaches the joining branch one post later, so it finds the record. That turn also comes after the
+  join has armed the grace timer's wait, so a wake called in it would cancel that wait; the third
+  part is what keeps the wake from being called. Without `close()`'s wait the close would run on
   inside `toAdmin`, reach the joining branch before the record is written, and call the wake (read:
-  `ph8b_readings.md`, (a)). Measured: with the wait's post removed (mutant A) the six arms stay green
-  (`ph8b_predictions.md`, P3), so they do not see this dependence. Two readings bear on what that
-  call would do, and they differ. `ph8b_readings.md`, (a), expects a cancelled timer, and so a join
-  that can cancel the store call at a lock. The reading that the statement about `main` rests on
-  ("The behaviour change", below) says the timer's wait does not exist yet inside `toAdmin`, because
-  the join launches its timer arm only after the step's first suspension; a cancel there does
-  nothing. What pins it is mutant A run against the held-lock cells. **Result pending: that run is in
-  progress, and the orchestrator supplies it. It is not guessed here.** Whatever it shows, the mutant
-  that tests the third part itself is the one that removes the test of the record and keeps the wait
-  (§3).
+  `ph8b_readings.md`, (a)). By the reading that the statement about `main` rests on ("The behaviour
+  change", below), that call does nothing: inside `toAdmin` the timer's wait is not armed yet. So by
+  that reading the ending does not depend on the wait. What depends on it is that the branch reads
+  the record in time, and the third part is needed because the wait puts the close's turn after the
+  timer's wait is armed. Measured: with the wait's post removed (mutant A) the six arms stay green
+  (`ph8b_predictions.md`, P3). `ph8b_readings.md`, (a), expects the other outcome for the held-lock
+  cells: a cancelled timer, and a join that cancels the store call at the lock. The run that decides
+  between the two is mutant A against NC-26 and NC-28. **Result pending: that run is in progress, and
+  the orchestrator supplies it.** From the reading this section uses, the cells would stay green
+  there; that is a prediction from a reading, not the result. Whatever the run shows, the mutant that
+  tests the third part itself is the one that removes the test of the record and keeps the wait (§3).
 - **The callback does not run the session's own executor** (R-7). Where it does, a close that was
   queued earlier can begin inside the window and move the count (§7).
 
-**The bound.** Statement 4's third part has a cost, and it is measured.
+**The bound.** Statement 4's third part has a cost. Where the cut Logout's store call does not
+return, nothing ends the join before the grace timer. With the shipped stores there are two cases,
+and they end differently.
 
-- **The condition of the bound:** the cut Logout's store call does not return within
-  `logout_disconnect_timeout_ms`. That is a second input beside R-8's condition: a store call of the
-  same session that holds the store's lock for that long, or a store that takes that long.
-- **What happens then** (measured: `ph8b_held_lock.md`, "P7"; §3, P-18). The grace timer expires. It
-  is the only thing that can end the join there, because nothing calls its wake for a cut Logout. The
-  join cancels the step, the store call ends by that cancellation, and the step leaves. The Logout is
-  not transmitted. Its number is consumed and nothing is stored under it. Both closes return success.
-  The transport sees one direct `close()` and one `close_async()`. The session reaches
-  `closed_drained` while the held store job is still in flight.
-- **So "numbered and stored" holds where the Logout's store call returns within
-  `logout_disconnect_timeout_ms`.** Past it, the three observables of group 1 still hold, and so do
-  both closes' results; the number and the store are as the last row of group 3 says.
-- **A terminal close does not end that wait.** For a Logout that was not cut, a terminal close that
+- **The store call is still waiting for the store's lock when `logout_disconnect_timeout_ms` has
+  elapsed,** because another call of the same session holds the lock that long. Measured
+  (`ph8b_held_lock.md`, "P7"; §3, P-18). The grace timer expires. It is the only thing that can end
+  the join there, because nothing calls its wake for a cut Logout. The join cancels the step, the
+  wait for the lock ends by that cancellation, and the step leaves. The Logout is not transmitted.
+  Its number is consumed and nothing is stored under it. Both closes return success. The transport
+  sees one direct `close()` and one `close_async()`. The session reaches `closed_drained` while the
+  held store job is still in flight (§7).
+- **The Logout's own write is on the file executor when that timeout has elapsed.** Read, not run
+  (`FileStore::store` and `offload_to` in `src/session/file_store.cpp`, and their comments). The
+  write is not interruptible there: teardown waits for it. The store call returns when the write has
+  returned, and a cancellation met at that await is treated as success after the write. So the
+  Logout is retained, its number stays consumed, and the join waits for the write: both closes
+  complete when the write returns, which can be after the timeout. By the same reading the head
+  waits for that write too, after any escalation whose cancellation meets it there.
+- **A store of another kind** ends as its own `store` call does when the timer's cancellation
+  reaches it (NC-24).
+- **So "numbered and stored" holds wherever the Logout's store call is not ended by a cancellation.**
+  With the shipped stores it fails in the first case only. That case is not R-8's condition alone:
+  its extra input is another store call of the same session that holds the store's lock past the
+  timeout. In it the four observables of group 1 still hold, and so do both closes' results.
+- **A terminal close does not end the join.** For a Logout that was not cut, a terminal close that
   joins ends the grace wait at once (093 plan OD-29). For a cut Logout it does not: it waits with the
-  graceful close until the store call returns or the timer expires. This narrows OD-29 on this route.
+  graceful close until the store call returns or, in the first case, until the timer expires. This
+  narrows OD-29 on this route.
 - **`Engine::stop()` joins through the same branch.** Read, not run (`ph8b_readings.md`, (b)): its
-  terminal closes of the sessions find the graceful close in flight and take the joining branch. With
-  a cut Logout whose store call does not return, `stop()` waits up to
-  `logout_disconnect_timeout_ms` for that session.
-- **Who rules the number there.** At the timer's expiry the store call is ended by a cancellation.
-  That is the event B28's rulings R-15, R-16 and R-19 rule: on a tree that carries both changes the
-  number is taken back. On this branch alone the result is the measured one. This is the judge's
-  owner question 2, as statement 4's third part leaves it. The orchestrator decided it under the
-  owner's standing instruction and reported it to the owner (§6); it is not an owner ruling.
+  terminal closes of the sessions find the graceful close in flight and take the joining branch. So
+  `stop()` waits for that session as a terminal close does: until the cut Logout's store call
+  returns, and in the first case up to `logout_disconnect_timeout_ms`.
+- **Who rules the number in the first case.** There the store call is ended by a cancellation. That
+  is the event B28's rulings R-15, R-16 and R-19 rule: on a tree that carries both changes the number
+  is taken back. On this branch alone the result is the measured one. This is the judge's owner
+  question 2, as statement 4's third part leaves it. The orchestrator decided it under the owner's
+  standing instruction and reported it to the owner (§6); it is not an owner ruling.
 
 **What was measured, and its limits.** They are prototype measurements, made in a scratch copy and not
 in the pull request's tree. §3's rows P-12 and P-16 to P-19 name the runs and the files.
@@ -1508,7 +1527,7 @@ run as a whole until both are merged;** what was measured on this branch alone i
 | The cut Logout's store call | Transmitted | The number | The store | `logout_seen_` | The step's exit | Both closes |
 |---|---|---|---|---|---|---|
 | completes | no (R-8; measured here) | consumed (R-8; measured here) | holds it (R-8; measured here) | not set (R-24; measured here through the reset) | at once (R-17; statement 4; measured here) | success, success (measured here) |
-| is ended by a cancellation, which on the cut route happens only at the grace timer's expiry (the bound) | no (R-15; measured here) | taken back (R-16, R-19; read). On this branch alone: consumed (measured) | holds nothing (R-15; measured here) | not set (R-24; read) | at once: `store_then_emit` leaves by its exception there, with `Disconnected` recorded first (R-16, R-17; read) | success, success (B28's decision D-OUT-6; read). On this branch alone: success, success (measured) |
+| is ended by a cancellation, which on the cut route happens only when the grace timer expires while the call waits for the store's lock (the bound, first case) | no (R-15; measured here) | taken back (R-16, R-19; read). On this branch alone: consumed (measured) | holds nothing (R-15; measured here) | not set (R-24; read) | at once: `store_then_emit` leaves by its exception there, with `Disconnected` recorded first (R-16, R-17; read) | success, success (B28's decision D-OUT-6; read). On this branch alone: success, success (measured) |
 | fails, on a persistent store | no (R-8; read) | set to the store's own next number by feature 059's reconcile (read) | holds nothing (read) | not set (R-24; read) | at once (R-17; statement 4; read) | success, success (read) |
 
 The routes of R-17 that the table has no row for:
@@ -2028,7 +2047,7 @@ prototype, in a scratch copy at `f5e47486`, Debug with AddressSanitizer, 2026-10
 | P-13 | NC-22's two arms, at the head. The arm that holds the submitting thread until the file pool is idle makes the order of the setting "the session's thread stalled", in which the head transmits the Logout: RED at the head. The arm that holds the Logout's store job until the session's executor has run dry makes the order of the setting "every job of the file executor delayed", in which the head does not transmit it: green at the head. After the change both are green. | Both arms in the pull request's tree before the production edit, and again after it. Not run. The two settings they stand on are measured at the head (`ph8a_S_arms_by_stall.md`, "unpatched head"). | If neither arm is RED at the head, the gate does not make the order it claims. The arms are rebuilt before the production edit, because without a RED arm the `FileStore` cell on the live transport has no RED state. If both are RED, the reading of which order transmits is wrong, and §2.6's "What the head does" is corrected. |
 | P-14 | NC-24's store doubles. (a) A double whose `store` takes more hops than the shipped stores: §2.6's ending in full, the Logout retained, the mock clock not advanced. No cancellation reaches its call, because nothing cancels a cut Logout's store call before the grace timer expires. (b) Two doubles that hold their call past a short `logout_disconnect_timeout_ms`, so that the timer's expiry cancels it. One reports the cancellation and leaves the caller's cancellation state alone. The other loses the recorded cancellation, as the lock sequence of the shipped stores does. Both end alike: at the timer's expiry, with the mock clock standing; not transmitted; the number consumed; nothing retained; both closes success. | Not run. Read: `store_then_emit`, and the cut exit of statement 4, which has no await after the store call. The shipped `FileStore`'s form of (b) is measured: P-18. | (a): the ending does not hold for a store with more hops, which is acceptance item 2 of the issue; §2.6 returns to the orchestrator. (b): if the two doubles end differently, a cancellation that is lost still changes the ending, which is the round's O-1 returning; §2.6 returns to the orchestrator. |
 | P-15 | NC-25's two new controls. (b) A second graceful `close()` started in the Logout's `toAdmin`: it waits, then joins the first; the Logout is transmitted once; both closes return the same result when the first one's wait ends. (c) A terminal close that took the wait before the Logout step read the count: the count is non-zero and does not move inside the Logout's `toAdmin`, and the Logout is transmitted once. | Not run. Read: `Session::close` and `run_logout_phase1`; for (c), the trace in NC-25's row (the round's O-7). | (b): if the Logout is not transmitted, the count moves for a graceful close, which is a defect of the implementation. (c): if the Logout is not transmitted in the unmutated tree, the trace is wrong; the setup is corrected before the mutant "the count is non-zero" is run. |
-| P-16 | The held-lock scene (NC-26): a second writer of the session holds the `FileStore`'s lock while the cut Logout's store call reaches it. With statement 4: while the lock is held no sleep is in flight on the session's clock; after the release both closes complete with the mock clock standing, and the Logout is retained under its number. With v0.8's statement 4 (S3): RED. At the head: RED, by the reading of §2.6's "What the head does" (the Logout transmitted, `LogoutSent` recorded, the close waiting out the timeout). | **Measured on S5 and on S3: agrees** (`ph8b_held_lock.md`; `ph8b_scenes2-S5.txt`, `ph8b_scenes2-S3.txt`; cells in `ph8b_cell_edit_S5.patch`). S5: green, 20 of 20 on each transport. S3: RED, 5 of 5 on each transport, at "the step is at the store's lock, not in a wait", at "both closes complete within the pump's bound with the mock clock standing" and at "the Logout is retained under its number". **Not run at the head; its row is a prediction to run.** Two earlier runs of these cells did not drive the path and are evidence of that only (`ph8b_predictions.md`, "The scenes' first two runs did not test anything"). | S5 RED: statement 4 does not remove the lost waker; §2.6 returns to the orchestrator. Head green: the reading of what the head does on this route is wrong; the cell is then a pin, and its RED-first witness is the mutant "the cut step keeps the wait". |
+| P-16 | The held-lock scene (NC-26): a second writer of the session holds the `FileStore`'s lock while the cut Logout's store call reaches it. With statement 4: while the lock is held no sleep is in flight on the session's clock; after the release both closes complete with the mock clock standing, and the Logout is retained under its number. With v0.8's statement 4 (S3): RED. At the head: RED, by the reading of §2.6's "What the head does" (the Logout transmitted, `LogoutSent` recorded, the close waiting out the timeout). | **Measured on S5 and on S3: agrees** (`ph8b_held_lock.md`; `ph8b_scenes2-S5.txt`, `ph8b_scenes2-S3.txt`; cells in `ph8b_cell_edit_S5.patch`). S5: green, 20 of 20 on each transport. S3: RED, 5 of 5 on each transport, at "the step is at the store's lock, not in a wait", at "both closes complete within the pump's bound with the mock clock standing" and at "the Logout is retained under its number". **Not run at the head; its row is a prediction to run.** Two earlier runs of these cells did not drive the path and are evidence of that only (`ph8b_predictions.md`, "The scenes' first two runs did not test anything"). | S5 RED: statement 4 does not remove the lost waker; §2.6 returns to the orchestrator. Head green: the reading of what the head does on this route is wrong. The cell is then a pin, and the clauses it witnesses (no wait on the cut route; nothing cancels the store call) have no arm that is RED in the pull request's tree, only the scratch mutants; that goes to the orchestrator before the production edit. |
 | P-17 | A Logout from the peer delivered after the cut Logout's store call has returned and before the closes complete (NC-27): it meets `Disconnected`; no `fromAdmin`, no confirming Logout, no number. | **Measured on S5: agrees; on S3: the other result** (`ph8b_predictions.md`, P5; the same scene files). S5, 20 of 20: the state at delivery is `Disconnected`, and the next outbound number is the Logout's plus one. S3, 5 of 5: the state is Active, `fromAdmin` runs once, and a confirming Logout with the next number is transmitted. Arms: `MemoryStore` and no store, synchronous sink. Not run at the head, and no `FileStore` arm was written. | If the frame meets Active with statement 4, the step did not write `Disconnected` before it returned, or the frame was delivered before the store call returned; the cell's delivery is checked first. |
 | P-18 | The bound (NC-28): the store's lock held past a short `logout_disconnect_timeout_ms`, live transport. A reading; the prototype's cell asserts nothing about the ending. | **Measured on S5** (`ph8b_held_lock.md`, "P7"), 20 of 20: about 900 ms after the graceful close started, with the gate still closed and a timeout of 300 ms, both closes have completed with success; the session is `Disconnected` and `closed_drained`; `onLogout` ran once; nothing is under the Logout's number and the store's next outbound number is the Logout's own; the session's next outbound number is the Logout's plus one; nothing was transmitted; the transport saw one direct `close()` and one `close_async()`. When inside that time the closes completed was not measured. | Not a prediction. NC-28 pins what was measured; a different result in the pull request's tree goes to the orchestrator. |
 | P-19 | Both closes return success on the two arms with no store, where the step ends inside its own launch. The cells can report the other result. | **Measured on S5: agrees** (`ph8b_predictions.md`, P3). Success and success, 20 of 20 in every setting. Mutant C (`ph8b_mutant_C.patch`, the wait posts 256 times): the terminal close returns `session_already_closed` on all six arms and each cell is RED (`ph8b_mutant-C/`, five runs per arm). Mutant A (`ph8b_mutant_A.patch`, the wait's post and its assertion removed): all six arms stay green (`ph8b_mutant-A/`, five runs per arm). The two mutant binaries differ from S5's by their hashes (`binary.txt` in each directory). | Not a prediction. |
@@ -2085,7 +2104,7 @@ tree yet is named by its id; NC-22 to NC-28 are such cells.
 | the test of the record removed from the joining branch, so the wake is called for a cut Logout; the wait kept | NC-26: "the Logout is retained under its number" | The terminal close cancels the grace timer, the join cancels the step, and the cancellation meets the Logout's store call at the held lock, which returns without writing. The step then leaves at once, so the clauses on the wait can stay green | not run. Predicted from S3's column of `ph8b_held_lock.md`, where the same cancellation left nothing under the number |
 | the direct close made only when the timer's arm won, as today | NC-21, the three live arms: the transport's close counts | With statement 4 the step's arm wins on every arm, so no direct call is made: one `close_async()` and no direct `close()` | not run. Prototype S2, which keyed the call that way, showed one call in place of two on two live arms (`ph8a_S2_arms_by_stall.md`) |
 | the record of the cut never written | NC-26: "retained", as two rows above. NC-21's close counts, on the live arms where the step's arm wins the join | Both rows above at once: the wake is called, and the direct close depends on which arm won | not run. Which live arms lose the direct call was not read to a conclusion; S2 lost it on two |
-| mutant A: the post of `close()`'s wait and its assertion removed | **the six arms of NC-21 stay green: measured** (`ph8b_mutant-A/`). Against NC-26: **result pending; the run is in progress and the orchestrator supplies it** | The close runs on inside `toAdmin`, takes the joining branch before the record of the cut is written, and calls the wake. Whether that call does anything is what the pending run shows (§2.6, "What it depends on"). v0.7's mutant "the close's wait removed" is killed by the other close cells, where the close is the session's first; on this route the lifecycle is `closing` inside `toAdmin` with or without the wait (the record, "Phase 4, addendum") | six arms: measured. NC-26: pending |
+| mutant A: the post of `close()`'s wait and its assertion removed | **the six arms of NC-21 stay green: measured** (`ph8b_mutant-A/`). Against NC-26 and NC-28: **result pending; the run is in progress and the orchestrator supplies it** | The close runs on inside `toAdmin`, takes the joining branch before the record of the cut is written, and calls the wake. Whether that call does anything is what the pending run shows (§2.6, "What it depends on"). v0.7's mutant "the close's wait removed" is killed by the other close cells, where the close is the session's first; on this route the lifecycle is `closing` inside `toAdmin` with or without the wait (the record, "Phase 4, addendum") | six arms: measured. NC-26 and NC-28: pending |
 | mutant C: `close()`'s wait posts many times | NC-21, every arm: "the terminal one returns the graceful one's result" | The terminal close's first turn comes after the graceful close has finished; it finds `closed_drained` and returns `session_already_closed`. It is a control of the cells, not a mutant of a statement of §2.6: it shows that they can report the other result | measured (`ph8b_mutant-C/`): RED on all six arms |
 
 Specified without a witness, and claimed as such:
@@ -2384,9 +2403,10 @@ implementer. None of it is done in this revision. The rows and sentences above d
   where on `main` it was transmitted and both closes waited out the timeout.
 - **B&L, a new behaviour row for this ending,** with the next free id of this section's rows. It has:
   the condition, with "begins inside the callback" as part of it; §2.6's three groups, each with what
-  decides it; the bound, in plain words (where the Logout's store call does not return within
-  `logout_disconnect_timeout_ms`: the number consumed, nothing stored, both closes success, and a
-  terminal close or `Engine::stop()` waiting up to that timeout); what an inbound frame meets; the
+  decides it; the bound, in plain words (a terminal close or `Engine::stop()` waits for the cut
+  Logout's store call; where that call is still waiting for the store's lock when
+  `logout_disconnect_timeout_ms` has elapsed, the number is consumed, nothing is stored and both
+  closes return success); what an inbound frame meets; the
   comparison with QuickFIX C++ and QuickFIX/J, with the flag and with the difference on a reset on
   disconnect; and what it does not cover (§7, the first bullet of its last block), with the three
   ways to that condition. That condition's issue is fixpp#594, batch B52.
@@ -2672,8 +2692,8 @@ and the owner can overrule either.
 - **Nothing cancels a cut Logout's store call** (§2.6, statement 4, third part). The round's owner
   question 2 asked which ruling governs a cut Logout whose store call is cancelled: R-8's "numbered,
   stored, not transmitted", or B28's "the number is taken back". With this decision the question
-  arises only at the grace timer's expiry (§2.6, "The bound"). There the store call is ended by a
-  cancellation, and B28's rulings R-15, R-16 and R-19 govern it once both pull requests are merged.
+  arises only where the grace timer expires while that call waits for the store's lock (§2.6, "The
+  bound", first case). There the store call is ended by a cancellation, and B28's rulings R-15, R-16 and R-19 govern it once both pull requests are merged.
   On this branch alone the result is the measured one: the number consumed, nothing stored.
 - **`reset_on_disconnect` on this route: fixpp's teardown reset stays as it is** (the round's owner
   question 3, O-8). The difference from QuickFIX C++ and QuickFIX/J is stated in §2.6's comparison
@@ -2754,16 +2774,18 @@ Added in v0.8 and rewritten in v0.9, for §2.6. Not reviewed at Gate A.
   exists on `main`, and it is not specific to a callback. Its issue is fixpp#594, batch B52. The
   evidence status of that issue: read, not run, for this condition; measured for §2.6's own
   condition. Its body names the first two ways; the orchestrator adds the third to it.
-- **The bound of §2.6.** Where the cut Logout's store call does not return within
-  `logout_disconnect_timeout_ms`, the grace timer ends the join: the number is consumed, nothing is
-  stored under it, nothing is transmitted, and both closes return success (measured; §3, P-18). A
-  terminal close that joins, and `Engine::stop()`, wait up to that timeout for the session (the
-  second is read, not run). It is not a second ending of R-8's condition alone: its extra input is a
-  store call of the same session that does not return within the timeout. It is stated, not removed.
-  What would remove it is a way to end the join at once that does not cancel the store call; none
-  was designed.
-- **What the store holds after the bound, on a tree that carries B28.** The store call is ended by a
-  cancellation there, and B28's rulings take the number back (§2.6, "With batch B28"). No tree can
+- **The bound of §2.6.** Nothing ends the join of a cut Logout before its store call returns or the
+  grace timer expires. Where that call is still waiting for the store's lock when
+  `logout_disconnect_timeout_ms` has elapsed, the timer ends the join: the number is consumed,
+  nothing is stored under it, nothing is transmitted, and both closes return success (measured; §3,
+  P-18). Where the Logout's own write is on the file executor that long, the closes wait for the
+  write and the Logout is retained (read, not run). A terminal close that joins, and
+  `Engine::stop()`, wait with it (the second is read, not run). The first case is not a second ending
+  of R-8's condition alone: its extra input is another store call of the same session that holds the
+  store's lock past the timeout. It is stated, not removed. What would remove it is a way to end the
+  join at once that does not cancel the store call; none was designed.
+- **What the store holds after the bound's first case, on a tree that carries B28.** The store call
+  is ended by a cancellation there, and B28's rulings take the number back (§2.6, "With batch B28"). No tree can
   run it until both are merged.
 - **The session closed while a store job is still in flight.** In the bound's measurement the session
   reached `closed_drained` while the held job was still kept at the gate (`ph8b_held_lock.md`, "P7":
@@ -3109,9 +3131,10 @@ Stated so that round 5 can judge each one:
 - **Nothing cancels the cut Logout's store call** (statement 4, third part). The triage's RC-1 leaves
   the join's waker as it is and gives the remainder to the owner as question 2. v0.9 has a terminal
   close that joins not call the grace timer's wake for a cut Logout. It removes the route on which
-  the join's cancellation meets the store call at a lock, and it costs the bound: a store call that
-  does not return within the timeout, a terminal close and `Engine::stop()` that wait for it, and a
-  narrowing of 093's OD-29 on this route. The orchestrator's addition; the judge has not reviewed it.
+  the join's cancellation meets the store call at a lock before the timer expires, and it costs the
+  bound: a terminal close and `Engine::stop()` wait for the cut Logout's store call, the route
+  returns at the timer's expiry for a call still waiting for the lock then, and 093's OD-29 is
+  narrowed on this route. The orchestrator's addition; the judge has not reviewed it.
 - **Its dependence on R-4's wait, and the pending run.** §2.6 states that the joining branch finds
   the record of the cut because `close()` posts once first, and that the six arms do not see this.
   Two readings differ on what a wake called inside `toAdmin` would do. The run that pins it, mutant A
@@ -3120,7 +3143,7 @@ Stated so that round 5 can judge each one:
 - **A mutant the triage does not name:** the test of the record removed from the joining branch, with
   the wait kept, against NC-26. It is the one that tests the third part. Not run.
 - **The bound as a pinned cell** (NC-28) and as a B&L sentence, where the triage's measurement list
-  has no item for a store call that does not return.
+  has no item for a store call that does not return in time.
 - **NC-26's recording wrapper.** The prototype's proof that the store call was at the lock is
   indirect on S5. The cell gains a direct clause: the Logout's `store` call has been made and has
   not returned.
