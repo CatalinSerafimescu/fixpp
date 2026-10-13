@@ -235,6 +235,9 @@ public:
     std::unique_ptr<asio::ip::tcp::acceptor> listener;  // initiator role only
     // BeginString(8) of the session cfg() builds and of every frame msg() builds.
     std::string begin_string = "FIX.4.2";
+    // MsgSeqNum(34) of the Logon to_active() sends: a cell that logs on to a store
+    // another session has used sets it to that store's next inbound number.
+    std::uint32_t logon_seq = 1;
     // The engine's application dictionaries (EngineConfig::dictionaries), set before
     // start(); a FIXT session's DefaultApplVerID must name one of them.
     std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> engine_dictionaries;
@@ -436,7 +439,7 @@ public:
         } else if (!connect_peer()) {
             return false;
         }
-        peer.send(logon());
+        peer.send(logon(logon_seq));
         return run_until([this] { return state() == fixpp::session::fsm_state::Active; });
     }
 

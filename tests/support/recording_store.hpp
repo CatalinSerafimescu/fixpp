@@ -5,7 +5,8 @@
 // RecordingStore: a MessageStore that forwards every call to a shipped store it owns
 // and records, in one ordered log, when each call was made, when its coroutine body
 // started, and what the inner store returned. RecordingStoreFactory makes one over a
-// FileStore, or over the store another factory makes.
+// FileStore, or over the store another factory makes; a cell can choose what the factory
+// reports as yields_persistent_store().
 //
 // fixpp#538 (.specify/536-537-538-recovery-liveness.md §5, "A cell that needs a store
 // double"): a cell reads a shipped store's own result through this wrapper, so it
@@ -21,6 +22,11 @@
 // A cell can also choose one call and have the wrapper's body, in place of forwarding
 // it: throw, return a code, or wait until the cell releases it (StoreCallLog, "What the
 // body does for one chosen call"). The call is recorded as entered in each case.
+//
+// A cell can also be told when a recorded call's result is in (StoreCallLog::on_return),
+// and can have the wrapper keep one store() call's result from its caller until the cell
+// releases it (StoreCallLog, "A store() call that returns to its caller late"): a store
+// that returns a later store() call before an earlier one.
 //
 // StoreCallLog::reset_to_default_body makes the wrapper a store that does not override
 // reset_to: MessageStore's default body runs, and the inner store sees a reset() and
@@ -128,6 +134,12 @@ public:
     // members are noexcept.
     std::function<void(StoreCall const&)> on_call;
 
+    // Runs when a recorded call's result is in: after the inner call has returned, or
+    // the body has produced the code a cell chose, with `returned_at` and the result
+    // recorded, and before the caller of the call resumes. It is given a copy. A cell
+    // samples the session there ("when the store call returns"). It must not throw.
+    std::function<void(StoreCall const&)> on_return;
+
     // ── What the body does for one chosen call ───────────────────────────────────────
     //
     // Each predicate is tested, in this order, against every recorded call when its body
@@ -150,6 +162,20 @@ public:
     [[nodiscard]] bool holding() const noexcept { return holding_; }
     [[nodiscard]] bool hold_timed_out() const noexcept { return hold_timed_out_; }
     void release_hold() noexcept { hold_released_ = true; }
+
+    // ── A store() call that returns to its caller late ───────────────────────────────
+    //
+    // late_return_in is tested against a recorded store() call when its inner call has
+    // returned; the first call it accepts is forwarded and recorded as any other, and
+    // the wrapper then keeps its result from the caller until release_late_return(),
+    // yielding the executor, with the predicate cleared. A store() call made after it
+    // can so return to its caller first. The bound is hold_in's, and a wait that reached
+    // it sets late_return_timed_out().
+    std::function<bool(StoreCall const&)> late_return_in;
+
+    [[nodiscard]] bool returning_late() const noexcept { return returning_late_; }
+    [[nodiscard]] bool late_return_timed_out() const noexcept { return late_return_timed_out_; }
+    void release_late_return() noexcept { late_return_released_ = true; }
 
     // When set, the wrapper answers reset_to() with MessageStore's default body, as a
     // store that does not override it: this wrapper's own reset(), then its
@@ -203,6 +229,34 @@ private:
     bool hold_released_ = false;
     bool hold_timed_out_ = false;
 
+    // Whether the call `id`, whose inner call has returned, is the one late_return_in
+    // chooses. Taken once.
+    [[nodiscard]] bool takes_late_return(std::size_t id) {
+        if (id == 0 || !late_return_in || !late_return_in(calls_[id - 1])) return false;
+        late_return_in = nullptr;
+        return true;
+    }
+
+    // The wait of a late return: yields until the cell releases it or kBodyHoldBound has
+    // passed.
+    asio::awaitable<void> wait_late_return_released() {
+        auto const ex = co_await asio::this_coro::executor;
+        auto const deadline = std::chrono::steady_clock::now() + kBodyHoldBound;
+        returning_late_ = true;
+        while (!late_return_released_) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                late_return_timed_out_ = true;
+                break;
+            }
+            co_await asio::post(ex, asio::use_awaitable);
+        }
+        returning_late_ = false;
+    }
+
+    bool returning_late_ = false;
+    bool late_return_released_ = false;
+    bool late_return_timed_out_ = false;
+
     // Returns the call's index plus one, or 0 when the log is not armed.
     [[nodiscard]] std::size_t call(StoreCall c) {
         if (!armed_) return 0;
@@ -222,6 +276,11 @@ private:
         c.returned_at = ++clock_;
         c.error = error;
         c.value = value;
+        if (on_return) {
+            // A copy: the hook may itself cause recorded calls.
+            auto const snapshot = c;
+            on_return(snapshot);
+        }
     }
 
     bool armed_ = false;
@@ -297,6 +356,7 @@ private:
         }
         auto r = co_await inner_->store(seq, frame, dir);
         log_->leave(id, error_of(r));
+        if (log_->takes_late_return(id)) co_await log_->wait_late_return_released();
         co_return r;
     }
     asio::awaitable<fixpp::core::expected_t<void>> retrieve_body(
@@ -382,9 +442,12 @@ public:
         : inner_factory_(std::move(inner)) {}
 
     std::shared_ptr<StoreCallLog> log = std::make_shared<StoreCallLog>();
+    // What yields_persistent_store() reports, when a cell sets it before the session
+    // opens; otherwise the inner factory's own answer.
+    std::optional<bool> reports_persistent;
 
     [[nodiscard]] bool yields_persistent_store() const noexcept override {
-        return inner_factory_->yields_persistent_store();
+        return reports_persistent.value_or(inner_factory_->yields_persistent_store());
     }
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>> make(
         std::string_view sender, std::string_view target, std::pmr::memory_resource* mr,

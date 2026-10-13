@@ -22,7 +22,8 @@
 // The session's HeartBtInt is zero, so no liveness loop runs, and its clock is a
 // mock_clock that nothing advances: no timer of the session can end a wait of a cell
 // except close(graceful)'s grace wait, which is real time and is the configured
-// logout_disconnect_timeout_ms.
+// logout_disconnect_timeout_ms. A cell that needs another configuration changes it
+// through Options::tweak_cfg, and then states its own bounds.
 #pragma once
 
 #include <gtest/gtest.h>
@@ -42,6 +43,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
@@ -51,6 +53,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -76,6 +79,15 @@ public:
         bool enable_789 = false;
         // close(graceful)'s grace wait, in real time.
         std::uint32_t logout_disconnect_timeout_ms = 200;
+        // What the store's factory reports as yields_persistent_store(), when set;
+        // otherwise the inner factory's own answer.
+        std::optional<bool> reports_persistent = std::nullopt;
+        // The session's Application, in place of `app`.
+        std::shared_ptr<fixpp::session::Application> application = nullptr;
+        // Adjusts the session's configuration after the constructor has built it and
+        // before the session is made. A transport callback it installs replaces the
+        // one that fills `sent`.
+        std::function<void(fixpp::session::SessionConfig&)> tweak_cfg = nullptr;
     };
 
     // First, so destroyed last: the session's executor is on it.
@@ -109,7 +121,8 @@ public:
             ioc.get_executor());
         engine.clock = clock;
         engine.executor = ioc.get_executor();
-        engine.application = app;
+        engine.application =
+            o.application ? o.application : std::shared_ptr<fixpp::session::Application>{app};
 
         cfg.role = fixpp::session::session_role::acceptor;
         cfg.sender_comp_id = "ISLD";
@@ -140,7 +153,9 @@ public:
                         .policy = fixpp::session::capacity_policy::unbounded}));
         }
         log = factory->log;
+        factory->reports_persistent = o.reports_persistent;
         cfg.store_factory = std::move(factory);
+        if (o.tweak_cfg) o.tweak_cfg(cfg);
         session = std::make_unique<fixpp::session::Session>(engine, cfg);
     }
 

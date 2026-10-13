@@ -482,11 +482,12 @@ set_property(TEST store_fail_reconcile APPEND PROPERTY LABELS 092)
 # FIXPP_TEST_HOOKS needed (the double is self-contained).
 
 # /speckit-verify coverage witness — the reconcile else-arm (dk.has_value()
-# ==false) and the store_cancelled false-leg (`!= store_cancelled`), which
-# W1/W3/breadth cannot reach (their reconcile read always succeeds; the
-# FileStore seam serves next_seqnum from a still-valid in-memory counter). A
-# persistent store DOUBLE additionally faults the reconcile read. No FileStore
-# / FIXPP_TEST_HOOKS needed. See 059-...-coverage-design.md Arm (a)/(b).
+# ==false), which W1/W3/breadth cannot reach (their reconcile read always
+# succeeds; the FileStore seam serves next_seqnum from a still-valid in-memory
+# counter). A persistent store DOUBLE additionally faults the reconcile read. No
+# FileStore / FIXPP_TEST_HOOKS needed. See 059-...-coverage-design.md Arm (b). The
+# same file holds the cells for a store double that returns store_cancelled from
+# store(), persistent or not (`.specify/536-537-538-recovery-liveness.md` §10, D-OUT-1).
 
 # gate-b/r1 FQ-1 (RC#1): the fatal-class predicate unification RED witness —
 # a minimal persistent store double armed to return an OUT-OF-SET store code
@@ -575,7 +576,8 @@ target_compile_definitions(store_file_concurrent_tsan PRIVATE FIXPP_TEST_HOOKS)
 # ── 005 Phase 8 /speckit-verify Step 4 coverage uplift ──────────────────────
 # Adversarial-input tests for defensive code paths that the well-formed
 # seam corpus doesn't exercise: builder buffer-too-small, parser malformed
-# field fallback, Logon-ack seq=0, Logout cancel_sleeps mid-graceful.
+# field fallback, Logon-ack seq=0, and a third party's cancel_sleeps() during the wait of a
+# graceful close, which does not end it.
 # FR-003 (010-session-cfg-lifetime): W-5 ASan skip removed. The
 # stack-use-after-scope at cfg_ is fixed by the by-value member change
 # (T008/T009). session_coverage_adversarial now runs under ASan clean.
@@ -717,6 +719,51 @@ foreach(held_store_test
   target_compile_definitions(${held_store_test} PRIVATE FIXPP_TEST_HOOKS)
   add_test(NAME ${held_store_test} COMMAND ${held_store_test})
   set_tests_properties(${held_store_test} PROPERTIES
+    ENVIRONMENT
+      "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;538"
+    TIMEOUT 300)
+endforeach()
+
+# Rulings R-15 to R-23 (`.specify/536-537-538-recovery-liveness.md` §10): a cancelled outbound
+# store, and the graceful Logout that was not sent. Standalone ([const §VII.8]):
+# session_cancelled_outbound_store is a per-`-D` variant (FIXPP_TEST_HOOKS for the offload
+# hook, FIXPP_ALLOW_MOCK_TRANSPORT for the cells that reach the Logon emission through
+# Session::drive_reconnect) with genuine concurrency (a FileStore's file I/O executor);
+# session_cancelled_outbound_store_engine and session_logout_not_sent are not the class the
+# clause groups: their cells run an Engine with timers and coroutines over loopback TCP, or
+# hold a FileStore call, which needs FIXPP_TEST_HOOKS, and wait on a real asio::steady_timer.
+add_executable(session_cancelled_outbound_store
+  test_cancelled_outbound_store.cpp
+)
+target_compile_definitions(session_cancelled_outbound_store PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_executable(session_cancelled_outbound_store_engine
+  test_cancelled_outbound_store_engine.cpp
+)
+add_executable(session_logout_not_sent
+  test_logout_not_sent.cpp
+)
+foreach(outbound_store_test
+    session_cancelled_outbound_store
+    session_cancelled_outbound_store_engine
+    session_logout_not_sent)
+  target_link_libraries(${outbound_store_test} PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${outbound_store_test} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  target_compile_definitions(${outbound_store_test} PRIVATE FIXPP_TEST_HOOKS)
+  add_test(NAME ${outbound_store_test} COMMAND ${outbound_store_test})
+  set_tests_properties(${outbound_store_test} PROPERTIES
     ENVIRONMENT
       "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
     LABELS "session;538"

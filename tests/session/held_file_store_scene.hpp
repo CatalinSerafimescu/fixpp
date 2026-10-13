@@ -14,7 +14,9 @@
 //   Scene       an acceptor session under an Engine on the plain transport, facing a
 //               raw peer, with the test thread running the I/O (plain_engine_rig.hpp).
 //               Its store is a FileStore on a file I/O executor of its own, behind a
-//               RecordingStore (tests/support/recording_store.hpp).
+//               RecordingStore (tests/support/recording_store.hpp). A cell chooses how
+//               many threads that executor has, and can open a second Scene on the
+//               directory of one whose engine has stopped (`reuse_dir`).
 //
 // The including target needs the compile definition FIXPP_TEST_HOOKS, which declares
 // install_store_offload_probe.
@@ -36,6 +38,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -169,7 +172,7 @@ class HeldFileStoreScene {
     // Declared first, destroyed last: the hook outlives the pool's offloads, the pool
     // outlives the engine and its FileStore, and the directory is removed after both.
     store_hold::scoped_hook hook_;
-    asio::thread_pool file_pool_{1};  // the FileStore's file I/O executor
+    asio::thread_pool file_pool_;  // the FileStore's file I/O executor
     store_hold::release_on_exit release_guard_;
     struct temp_dir {
         std::filesystem::path path = unique_temp_dir("b28_538_scene");
@@ -194,11 +197,24 @@ public:
     // Adjusts the session's configuration after setup() has built it and before the
     // session starts.
     std::function<void(fixpp::session::SessionConfig&)> tweak_cfg;
+    // The FileStore's configuration, as setup() built it. A cell opens a fresh FileStore
+    // from it once the engine has stopped.
+    fixpp::session::FileStore::Config file_cfg;
+    // Set before setup(): the session's store is opened in this directory, another
+    // Scene's, in place of this Scene's own. The other Scene must outlive this one, and
+    // its engine must have stopped.
+    std::optional<std::filesystem::path> reuse_dir;
 
-    HeldFileStoreScene() = default;
+    // `file_io_threads`: the threads of the FileStore's file I/O executor. With one, an
+    // offload of the store waits behind a held write; close(graceful)'s flush is such an
+    // offload and takes no lock, so a cell that closes gracefully during a hold needs two.
+    explicit HeldFileStoreScene(std::size_t file_io_threads = 1) : file_pool_{file_io_threads} {}
     HeldFileStoreScene(HeldFileStoreScene const&) = delete;
     HeldFileStoreScene& operator=(HeldFileStoreScene const&) = delete;
     ~HeldFileStoreScene() = default;
+
+    // This Scene's own store directory.
+    [[nodiscard]] std::filesystem::path const& dir() const noexcept { return dir_.path; }
 
     template <class Fut>
     [[nodiscard]] static bool ready(Fut const& fut) {
@@ -227,8 +243,7 @@ public:
             return false;
         };
         auto c = rig.cfg(fixpp::session::session_role::acceptor);
-        fixpp::session::FileStore::Config file_cfg;
-        file_cfg.directory = dir_.path;
+        file_cfg.directory = reuse_dir ? *reuse_dir : dir_.path;
         file_cfg.sender_comp_id = c.sender_comp_id;
         file_cfg.target_comp_id = c.target_comp_id;
         file_cfg.file_io_executor = file_pool_.get_executor();
