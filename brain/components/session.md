@@ -458,9 +458,9 @@ started in `toApp` "runs inline"; `Engine::send`'s two hops).
   `onLogout` of a graceful close now escalates it at once, where it could run out the logout timeout
   (`B-563-2`).
 
-**Not decided here** (note §7): a live send that interleaves with a resend replay; `Engine::stop()`
-started from a callback (fixpp#579); one ending for an allocation failure while a send starts
-(fixpp#587); the census matcher's blind spot found while the cells were written (fixpp#586).
+**Not decided here** (note §7): a live send that interleaves with a resend replay (fixpp#588);
+`Engine::stop()` started from a callback (fixpp#579); one ending for an allocation failure while a
+send starts (fixpp#587); the census matcher's blind spot found while the cells were written (fixpp#586).
 
 ## Runtime flows
 
