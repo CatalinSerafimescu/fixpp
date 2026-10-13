@@ -691,6 +691,20 @@ enum class TransportKind { sync_capture, live_suspending_write };
 // that no run of a cell reaches, so that timer does not end the wait.
 constexpr std::uint32_t kLogoutWaitMs = 60000;
 
+// The bound of a pump that waits for a close in a cell that sets kLogoutWaitMs. The
+// close's timer on real time is the competing ender of the wait for the peer's Logout: a
+// pump that outlasted it would let a close whose escalation was lost complete, and the
+// cell would read that as an escalation. So the bound is derived from the timer's
+// duration and is not written beside it; kGraceOverPumpBound is the margin, as a ratio.
+constexpr std::chrono::milliseconds kClosePumpBound{kLogoutWaitMs / 12};
+constexpr int kGraceOverPumpBound = 4;
+static_assert(kClosePumpBound * kGraceOverPumpBound <= std::chrono::milliseconds{kLogoutWaitMs},
+              "a pump that waits for a close must end well before the close's real-time timer");
+// Fixture::end_logout_wait_when pumps with the default budget before it advances the clock.
+static_assert(fixpp::test_support::kPumpBudget * kGraceOverPumpBound <=
+                  std::chrono::milliseconds{kLogoutWaitMs},
+              "the default pump budget must end well before the close's real-time timer");
+
 struct Fixture {
     asio::io_context ioc;
     // The FileStore cell's file-I/O executor. Declared after ioc, so it is
@@ -2418,7 +2432,7 @@ void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store,
         completed &&
         fixpp::test_support::pump_until(
             f.ioc, [&] { return cell.outer.done && (cell.started.done || !cell.inside.read); },
-            std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+            kClosePumpBound, fixpp::test_support::kPumpSlice,
             "CallbackSend::callback_starts_close");
     if (!completed) {
         cell.record_pending();
@@ -2970,7 +2984,7 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     const bool completed =
         logout_wait_ended &&
         fixpp::test_support::pump_until(
-            f.ioc, [&] { return outer_done && (inner_done || !started); }, std::chrono::seconds{5},
+            f.ioc, [&] { return outer_done && (inner_done || !started); }, kClosePumpBound,
             fixpp::test_support::kPumpSlice, "CallbackSend::outbound_callback_starts");
 
     if (starts != Starts::send) {
@@ -4184,8 +4198,7 @@ void run_close_and_send_in_one_callback(OneCallbackStarts shape, StoreKind store
         fixpp::test_support::pump_until(
             f.ioc,
             [&] { return outer_done() && cell.started.done && (close_op.done || !has_close); },
-            std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
-            "CallbackSend::close_and_send");
+            kClosePumpBound, fixpp::test_support::kPumpSlice, "CallbackSend::close_and_send");
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
@@ -5442,7 +5455,7 @@ void run_close_behind_another_close(close_mode mode, StoreKind store, TransportK
                                      return cell.outer.done && other_close.done &&
                                             (cell.started.done || !cell.inside.read);
                                  },
-                                 std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+                                 kClosePumpBound, fixpp::test_support::kPumpSlice,
                                  "CallbackSend::behind_another_close");
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
@@ -6221,7 +6234,7 @@ void run_waiting_close_cancelled(close_mode mode, asio::cancellation_type emissi
         completed &&
         fixpp::test_support::pump_until(
             f.ioc, [&] { return cell.outer.done && (cell.started.done || !cell.inside.read); },
-            std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
+            kClosePumpBound, fixpp::test_support::kPumpSlice,
             "CallbackSend::waiting_close_cancelled");
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
@@ -7067,8 +7080,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
             completed &&
             fixpp::test_support::pump_until(
                 f.ioc, [&] { return cell.outer.done && (cell.started.done || !cell.inside.read); },
-                std::chrono::seconds{5}, fixpp::test_support::kPumpSlice,
-                "CallbackSend::lifecycle");
+                kClosePumpBound, fixpp::test_support::kPumpSlice, "CallbackSend::lifecycle");
     }
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
@@ -7692,7 +7704,7 @@ void run_graceful_close_with_no_close_started(StoreKind store, TransportKind tra
         return cell.on_logout_calls > 0 && clock->counts().other_in_flight > 0;
     };
     const bool reached_the_wait = fixpp::test_support::pump_until(
-        f.ioc, [&] { return cell.outer.done || in_its_wait(); }, std::chrono::seconds{5},
+        f.ioc, [&] { return cell.outer.done || in_its_wait(); }, kClosePumpBound,
         fixpp::test_support::kPumpSlice, "CallbackSend::no_close_started_reaches_the_wait");
     // Read before the clock is advanced.
     const bool done_in_the_wait = cell.outer.done;
@@ -7708,7 +7720,7 @@ void run_graceful_close_with_no_close_started(StoreKind store, TransportKind tra
             "CallbackSend::no_close_started_logout_wait");
     // Bounded: a close that does not complete is reported below, not waited for.
     completed = completed && fixpp::test_support::pump_until(
-                                 f.ioc, [&] { return cell.outer.done; }, std::chrono::seconds{5},
+                                 f.ioc, [&] { return cell.outer.done; }, kClosePumpBound,
                                  fixpp::test_support::kPumpSlice, "CallbackSend::no_close_started");
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (!completed && !cell.outer.done) {
