@@ -106,6 +106,18 @@ public:
     //   Overflow at seqnum_max → return unexpected{store_seqnum_overflow=60} (I-8).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> assign_outbound() noexcept;
 
+    // take_back_outbound(k): lower the NEXT outbound counter to k when it is above k.
+    //   It never raises the counter: when two frames in flight are both taken back, the
+    //   lower number stays, whichever is handled first.
+    //   Not a coroutine, and it takes no lock: ONLY safe to call on the session strand,
+    //   under the condition peek_outbound() states.
+    //   [.specify/536-537-538-recovery-liveness.md §10, D-OUT-3; ruling R-19]
+    void take_back_outbound(seqnum_t k) noexcept {
+        if (next_outbound_ > k) {
+            next_outbound_ = k;
+        }
+    }
+
     // ── Read-only accessors (for test inspection) ─────────────────────────────
     //
     // These bypass the mutex and are ONLY safe from a single-threaded test or

@@ -1469,14 +1469,26 @@ private:
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
     //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
-    // Returns ok on success; propagates store errors per I-07; propagates transport
-    //   throws as dispatch_aborted (RC#B gate-b/r1-green transport error surface).
+    // Returns ok on success. Returns the store's own error, with nothing transmitted,
+    //   when a persistent store fails the call (059); dispatch_aborted when the transport
+    //   write fails or throws, and when the frame's number is no longer below the
+    //   session's next outbound number once its store call has returned (D-OUT-10).
+    // Throws asio::system_error{operation_aborted} when the store call was cancelled,
+    //   whether the store returned store_cancelled or let operation_aborted out: the
+    //   frame is not transmitted, its number is taken back, and Disconnected is recorded
+    //   first (not for a superseded Logon arm). The declaration is therefore not
+    //   noexcept, and every chain of callers must end at a frame that holds a handler
+    //   (recipe: `git grep -n 'store_then_emit(' -- src include bindings`, each caller
+    //   followed to the first awaiting frame with a try).
+    //   [.specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4; rulings
+    //   R-15 and R-16, superseding decision D7 of feature 059]
     // arm: a Logon arm's expected state (093 plan OD-25). When set and
     //   logon_arm_superseded_(*arm) holds after the store, the frame is not transmitted
-    //   and the call returns success; the caller's own predicate check follows.
+    //   and the call returns success; the caller's own predicate check follows. The
+    //   test of the frame's number (D-OUT-10) comes first.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
-        std::optional<fsm_state> arm = std::nullopt) noexcept;
+        std::optional<fsm_state> arm = std::nullopt);
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm
@@ -1561,7 +1573,10 @@ private:
     //     live sink (connect-then-Logon, FR-003 / E-1a).
     // On any failure (build overflow / seqnum overflow / store-or-transport
     // throw) it transitions the session to Disconnected and returns the error —
-    // the caller propagates it. Does NOT perform the LogonSent transition (the
+    // the caller propagates it. An exception that an await of its body lets out is
+    // taken inside it and returned as a value: store_cancelled for a cancellation,
+    // dispatch_aborted for any other (.specify/536-537-538-recovery-liveness.md
+    // §10, D-OUT-5; ruling R-20). Does NOT perform the LogonSent transition (the
     // caller owns that: open() before the call, install_reconnected_transport
     // before drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_initiator_logon_() noexcept;
@@ -1586,7 +1601,9 @@ private:
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
-    // CHILD cancellation_state. Called from close(graceful) phase 1.
+    // CHILD cancellation_state. Called from close(graceful) phase 1. When the Logout
+    // was not sent it returns the error at once and does not wait
+    // (.specify/536-537-538-recovery-liveness.md §10, D-OUT-6; ruling R-17).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
 
     // 027 T005 — replay_outbound_range_: extracted from the inline

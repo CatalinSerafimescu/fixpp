@@ -231,7 +231,10 @@ enum class error : std::uint8_t {
                                      //   processing, whether or not the await
                                      //   that met it was a store call
                                      //   (.specify/536-537-538-recovery-liveness.md
-                                     //   §9, D-CAN-4).
+                                     //   §9, D-CAN-4), and by Session::open and
+                                     //   Session::drive_reconnect for one that
+                                     //   ended the initiator's Logon emission
+                                     //   (§10, D-OUT-5).
                                      //   → FIXPP_ERR_CANCELLED (reused; joins
                                      //     dispatch_aborted /
                                      //     clock_sleeps_cancelled).

@@ -115,6 +115,17 @@ public:
     // capacity_policy::bounded, MemoryStore returns store_capacity_exhausted
     // when the per-direction cap is reached (I-08). FileStore returns
     // store_io_failure on disk-side faults.
+    //
+    // Cancellation (.specify/536-537-538-recovery-liveness.md §10, D-OUT-7; rulings
+    // R-15 and R-21). store_cancelled means that a cancellation ended the call before
+    // the frame was stored: the store then holds no frame for `seq`, and its next number
+    // for that direction is unchanged. The same holds when the call ends by letting
+    // operation_aborted out. The session does not transmit the frame, takes the number
+    // back and ends. The store() calls that one session makes for one direction return
+    // in the order the session made them; a call that a cancellation ended may return
+    // earlier. For every method of this interface: a call that a cancellation ends
+    // before the call has an effect returns store_cancelled (.specify/2e-msgstore.md,
+    // the cancellation table).
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame [[clang::lifetimebound]],
         direction_t dir) noexcept = 0;

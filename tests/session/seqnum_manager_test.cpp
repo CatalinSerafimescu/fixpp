@@ -35,6 +35,7 @@
 #include <fixpp/session/seqnum_manager.hpp>
 #include <future>
 #include <memory>
+#include <string>
 
 #include "support/pump_until_ready.hpp"
 #include "support/seqnum_manager_test_access.hpp"
@@ -334,6 +335,33 @@ TEST_F(SeqnumManagerTest, SetNextOutboundAfterDrainReturnsSessionAlreadyClosed) 
     auto r = run_sync(ioc, mgr.set_next_outbound(42));
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::session_already_closed);
+}
+
+// ── D-OUT-3 (R-19): take_back_outbound lowers and never raises ───────────────────────
+//
+// `.specify/536-537-538-recovery-liveness.md` §10, D-OUT-3, "The mechanism (R-19)" and "Why
+// it lowers, and is not a plain assignment". One arm per position of the next outbound
+// number against k.
+TEST_F(SeqnumManagerTest, TakeBackOutbound_LowersToKWhenAboveItAndNeverRaises) {
+    constexpr seqnum_t k = 10;
+    struct Arm {
+        const char* next_outbound_is;
+        seqnum_t before;
+        seqnum_t after;
+    };
+    for (const Arm arm : {Arm{"one above k", k + 1, k}, Arm{"more than one above k", k + 5, k},
+                          Arm{"at k", k, k}, Arm{"below k", k - 3, k - 3}}) {
+        SCOPED_TRACE(std::string{"the next outbound number is "} + arm.next_outbound_is);
+        SeqnumManager mgr;
+        constexpr seqnum_t kNextInbound = 7;
+        fixpp::session::seqnum_manager_test_access::set_counters(mgr, kNextInbound, arm.before);
+
+        mgr.take_back_outbound(k);
+
+        EXPECT_EQ(mgr.peek_outbound(), arm.after);
+        EXPECT_EQ(mgr.next_inbound_unsafe(), kNextInbound) << "the inbound number was written";
+        EXPECT_TRUE(run_sync(ioc, mgr.drain()).has_value());
+    }
 }
 
 }  // namespace fixpp::session::test

@@ -155,7 +155,7 @@ public:
         // Acquire writer mutex — FIFO-fair per async_mutex contract.
         FIXPP_DETAIL_CO_AWAIT_LOCK(lock_storage, guard_result, mutex_, nullptr);
         if (!guard_result) {
-            // Mutex was cancelled/drained (shutdown path)
+            // The lock wait was cancelled, or the mutex was drained.
             co_return std::unexpected(fixpp::core::error::store_cancelled);
         }
         auto guard = std::move(*guard_result);  // holds the mutex

@@ -1070,152 +1070,180 @@ asio::awaitable<Session::reset_unit_result> Session::run_reset_unit_(seqnum_t ne
 // body — this is a behavior-preserving extraction. The caller owns the LogonSent
 // transition (open() before the call; install_reconnected_transport before
 // drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
+//
+// Ruling R-20 (.specify/536-537-538-recovery-liveness.md §10, D-OUT-5), superseding "its
+// Disconnected-on-failure disposition" above for an exception: the whole body sits in one
+// try. Its handlers only note whether the exception was a cancellation. The statements
+// after them give the call one ending, at whichever await the exception was met: the
+// thread's cancellation state is reset, Disconnected is recorded when the state is not
+// that already, and a value is returned.
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() noexcept {
-    // Emit the initial Logon via build_logon + store_then_emit.
-    // This is the SAME admin-builder emission path used by other admin
-    // frames (build_heartbeat, build_test_request, etc.) — NOT the
-    // Session::send() path which is for opaque application payloads.
-    // [spec.md FR-004 analyze findings B1 + E1; data-model.md §E1]
-    // stamp_sending_time internal helper is defined after open() in this TU;
-    // use the public two-arg form from sending_time.hpp with a local buffer.
+    bool caught_cancellation = false;
+    try {
+        // Emit the initial Logon via build_logon + store_then_emit.
+        // This is the SAME admin-builder emission path used by other admin
+        // frames (build_heartbeat, build_test_request, etc.) — NOT the
+        // Session::send() path which is for opaque application payloads.
+        // [spec.md FR-004 analyze findings B1 + E1; data-model.md §E1]
+        // stamp_sending_time internal helper is defined after open() in this TU;
+        // use the public two-arg form from sending_time.hpp with a local buffer.
 
-    // 029 T007/T011 — call site 1 (initiator): hydrate BEFORE the reset_on_logon block
-    // so the store-recovered outbound value is in the manager when peek_outbound()
-    // is sampled below; the reset_on_logon block then overwrites it (024 reset wins,
-    // INV-H5 / C2.6). One-shot latch makes this safe for both the direct open() and
-    // engine-managed drive_reconnect() call paths.
-    // [[feedback_initiator_logon_wire_at_shared_emit_point]] T011 (RC-1 / C2.4): WITHHOLD the
-    // inbound seed when reset_on_logon is set — the reset block below owns next_inbound post-state
-    // on that path (INV-H5). [029 tasks T007/T011 call-site 1; contracts C2.4/C2.5; data-model
-    // INV-H3/H5; research D-6]
-    {
-        const bool withhold_inbound = cfg_.reset_on_logon;
-        // 025 T006 — refresh_on_logon: re-read store on each logon (store-wins, up or down).
-        // Suppressed under bilateral_strict (unconditional 141=Y + non-1 seed → malformed Logon;
-        // INV-RoL-3 / FR-008 / D-RoL-3). Default false → zero delta (byte-identical pre-025).
-        const bool refresh_active =
-            cfg_.refresh_on_logon &&
-            cfg_.reset_seqnum_policy_field != fixpp::session::reset_seqnum_policy::bilateral_strict;
-        auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound,
-                                             /*force=*/refresh_active);
-        if (!h_r) {
-            // ensure_hydrated_ already transitioned to Disconnected on failure (C2.3).
-            co_return std::unexpected(h_r.error());
+        // 029 T007/T011 — call site 1 (initiator): hydrate BEFORE the reset_on_logon block
+        // so the store-recovered outbound value is in the manager when peek_outbound()
+        // is sampled below; the reset_on_logon block then overwrites it (024 reset wins,
+        // INV-H5 / C2.6). One-shot latch makes this safe for both the direct open() and
+        // engine-managed drive_reconnect() call paths.
+        // [[feedback_initiator_logon_wire_at_shared_emit_point]] T011 (RC-1 / C2.4): WITHHOLD the
+        // inbound seed when reset_on_logon is set — the reset block below owns next_inbound
+        // post-state on that path (INV-H5). [029 tasks T007/T011 call-site 1; contracts C2.4/C2.5;
+        // data-model INV-H3/H5; research D-6]
+        {
+            const bool withhold_inbound = cfg_.reset_on_logon;
+            // 025 T006 — refresh_on_logon: re-read store on each logon (store-wins, up or down).
+            // Suppressed under bilateral_strict (unconditional 141=Y + non-1 seed → malformed
+            // Logon; INV-RoL-3 / FR-008 / D-RoL-3). Default false → zero delta (byte-identical
+            // pre-025).
+            const bool refresh_active =
+                cfg_.refresh_on_logon && cfg_.reset_seqnum_policy_field !=
+                                             fixpp::session::reset_seqnum_policy::bilateral_strict;
+            auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound,
+                                                 /*force=*/refresh_active);
+            if (!h_r) {
+                // ensure_hydrated_ already transitioned to Disconnected on failure (C2.3).
+                co_return std::unexpected(h_r.error());
+            }
         }
-    }
 
-    // 024 T007: reset_on_logon — durable reset here (the shared emission point)
-    // so BOTH open() (per-session-direct, engine_managed=false) AND drive_reconnect()
-    // (engine lazy-connect and reconnect) reset symmetrically before building the Logon.
-    // fatal disposition: a store failure propagates → record Disconnected + return error.
-    // peek_outbound() below samples the post-reset seqnum=1 (analyze B1).
-    // [[feedback_half_restructure_symmetric_api]]: fix at the shared point, not two copies.
-    // [024 data-model initiator row; C2.1; C2.6; plan.md Complexity Tracking row 1]
-    if (cfg_.reset_on_logon) {
-        auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
-        if (!rst_r) {
+        // 024 T007: reset_on_logon — durable reset here (the shared emission point)
+        // so BOTH open() (per-session-direct, engine_managed=false) AND drive_reconnect()
+        // (engine lazy-connect and reconnect) reset symmetrically before building the Logon.
+        // fatal disposition: a store failure propagates → record Disconnected + return error.
+        // peek_outbound() below samples the post-reset seqnum=1 (analyze B1).
+        // [[feedback_half_restructure_symmetric_api]]: fix at the shared point, not two copies.
+        // [024 data-model initiator row; C2.1; C2.6; plan.md Complexity Tracking row 1]
+        if (cfg_.reset_on_logon) {
+            auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
+            if (!rst_r) {
+                record_state_transition_(fsm_state::Disconnected);
+                co_return std::unexpected(rst_r.error());
+            }
+        }
+
+        std::array<std::byte, 256> logon_buf{};
+        std::array<char, 32> time_buf{};
+        std::string_view sending_time_view;
+        if (effective_clock_) {
+            auto fmt_r = fixpp::session::stamp_sending_time(
+                effective_clock_->now(), cfg_.sending_time_precision,
+                std::span<char>{time_buf.data(), time_buf.size()});
+            if (fmt_r) {
+                sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
+            }
+        }
+        const int heartbt_sec = cfg_.heartbeat_interval.has_value()
+                                    ? static_cast<int>(cfg_.heartbeat_interval->count())
+                                    : 30;  // D-8 default 30 s
+        // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
+        // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
+        // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
+        // RC#A: use seqnum_mgr_.peek_outbound() (not bare field).
+        const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
+        // RC#C: bilateral_strict → send 141=Y in our outbound Logon.
+        // 024 T007: extend to OR-of-three predicate: also emit 141=Y when any reset knob
+        // is on AND seqnums are {1,1} post-reset (QFcpp shouldSendReset / QFJ isResetNeeded).
+        // The {1,1} guard is evaluated against the LIVE post-reset manager state (peek_outbound()
+        // + next_inbound_unsafe()) — always after reset_seqnums_to_one_durable() above, so the
+        // sample is post-reset for both the open() and drive_reconnect() call sites.
+        // [spec.md FR-017; Clarifications Q1=A; 024 data-model OR-of-three predicate; C2.1]
+        const bool any_reset_knob =
+            cfg_.reset_on_logon || cfg_.reset_on_logout || cfg_.reset_on_disconnect;
+        // logon_seq already holds peek_outbound() (sampled just above on this strand, no
+        // suspension between) — reuse it rather than re-querying the manager.
+        const bool seqnums_at_one =
+            (logon_seq == seqnum_min && seqnum_mgr_.next_inbound_unsafe() == seqnum_min);
+        const bool initr_reset_seqnum =
+            (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) ||
+            (any_reset_knob && seqnums_at_one);
+        // 032 T007: unconditionally latch the emit-time 141=Y fact. Overwrites to false
+        // when fixpp does NOT emit 141=Y — ensures a stale latch cannot survive across
+        // reconnects (this is the shared open()/drive_reconnect() emit point).
+        // [032 contract C4, data-model, RC1 unconditional-assign invariant]
+        own_logon_sent_reset_flag_ = initr_reset_seqnum;
+        // 027 T013 I-NEX-1: advertise next_inbound_unsafe() when knob is on (plain, NO +1).
+        // Absent (nullopt) when knob is off ⇒ byte-identical baseline. [contract C2, I-NEX-7]
+        const std::optional<fixpp::session::seqnum_t> initr_next_expected =
+            cfg_.enable_next_expected_msg_seq_num
+                ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
+                : std::nullopt;
+        // 033 T017/T023: thread the FIXT-only Logon fields (1137 + optional 553 and 554) into
+        // the initiator emit — all-nullopt for FIX.4.x → byte-identical (INV-FIXT-1 / SC-002 / W4).
+        const auto initr_fixt = derive_logon_fixt_fields(cfg_);
+        // 070-fix44-closeout T004: empty opts ⇒ no 383/464/384 ⇒ byte-identical
+        // baseline (FR-012). Populated from cfg_ per-story (US1/US2/US3).
+        auto logon_result = fixpp::session::build_logon(
+            std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq,
+            cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
+            sending_time_view, initr_reset_seqnum, initr_next_expected,
+            initr_fixt.default_appl_ver_id, initr_fixt.username, initr_fixt.password,
+            // 070-fix44-closeout S-029: advertise 464=Y when local posture==test; unset
+            // ⇒ no 464 ⇒ byte-identical baseline (FR-012). 383 and 384 land per-story.
+            fixpp::session::logon_advertise_options{
+                .max_message_size = cfg_.advertised_max_message_size,
+                .test_message_indicator = (cfg_.posture == session_posture::test),
+                .supported_msg_types = cfg_.supported_msg_types});
+        if (!logon_result) {
+            // build_logon failed (oversized IDs → wire_frame_too_large).
+            // Session-fatal — initiator handshake never reached the wire; transition
+            // to Disconnected to match the acceptor send-throw symmetry promised by
+            // FR-009 + the "session-fatal → Disconnected" precedent set by the
+            // liveness loop (assign_outbound failure inside run_liveness_loop) and the
+            // Active send-throw witness in send_path_test.
+            // [W3.4 / /simplify B-8 fix; FR-009 "symmetric to acceptor witness";
+            //  [FIX-SL §4.3] initiator handshake failure semantics]
             record_state_transition_(fsm_state::Disconnected);
-            co_return std::unexpected(rst_r.error());
+            co_return std::unexpected(logon_result.error());
         }
-    }
-
-    std::array<std::byte, 256> logon_buf{};
-    std::array<char, 32> time_buf{};
-    std::string_view sending_time_view;
-    if (effective_clock_) {
-        auto fmt_r =
-            fixpp::session::stamp_sending_time(effective_clock_->now(), cfg_.sending_time_precision,
-                                               std::span<char>{time_buf.data(), time_buf.size()});
-        if (fmt_r) {
-            sending_time_view = std::string_view{fmt_r->data(), fmt_r->size()};
+        // Advance outbound counter through manager ONLY on build success.
+        // RC#A: was ++next_outbound_seq_; now routes through SeqnumManager.
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        if (!assign_r) {
+            // Seqnum overflow — same disposition as build_logon failure above.
+            // [W3.4 / /simplify B-8 fix]
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(assign_r.error());  // overflow (I-8)
         }
+        // 019 T014: toAdmin before transmitting the initiator Logon. [FR-008/010]
+        if (!fire_to_admin_(*logon_result)) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
+        auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
+        if (!emit_r) {
+            // store_then_emit failed (store I/O or transport throw → dispatch_aborted).
+            // Same disposition: session-fatal → Disconnected.
+            // [W3.4 / /simplify B-8 fix; F7 drift fix; spec.md FR-001(e)]
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(emit_r.error());
+        }
+        co_return fixpp::core::expected_t<void>{};
+    } catch (const asio::system_error& e) {
+        caught_cancellation = e.code() == asio::error::operation_aborted;
+    } catch (...) {  // NOLINT(bugprone-empty-catch): noted as "not a cancellation" above
     }
-    const int heartbt_sec = cfg_.heartbeat_interval.has_value()
-                                ? static_cast<int>(cfg_.heartbeat_interval->count())
-                                : 30;  // D-8 default 30 s
-    // F6+F7 (Round-A drift): peek seqnum first; only advance on success of
-    // BOTH build_logon AND store_then_emit. Prevents seqnum hole when
-    // build_logon fails (buffer overflow). [spec.md FR-001(e); F6/F7 drift fix]
-    // RC#A (gate-b/r1-green): use seqnum_mgr_.peek_outbound() (not bare field).
-    const seqnum_t logon_seq = seqnum_mgr_.peek_outbound();  // peek via manager
-    // RC#C (gate-b/r1): bilateral_strict → send 141=Y in our outbound Logon.
-    // 024 T007: extend to OR-of-three predicate: also emit 141=Y when any reset knob
-    // is on AND seqnums are {1,1} post-reset (QFcpp shouldSendReset / QFJ isResetNeeded).
-    // The {1,1} guard is evaluated against the LIVE post-reset manager state (peek_outbound()
-    // + next_inbound_unsafe()) — always after reset_seqnums_to_one_durable() above, so the
-    // sample is post-reset for both the open() and drive_reconnect() call sites.
-    // [spec.md FR-017; Clarifications Q1=A; 024 data-model OR-of-three predicate; C2.1]
-    const bool any_reset_knob =
-        cfg_.reset_on_logon || cfg_.reset_on_logout || cfg_.reset_on_disconnect;
-    // logon_seq already holds peek_outbound() (sampled just above on this strand, no
-    // suspension between) — reuse it rather than re-querying the manager.
-    const bool seqnums_at_one =
-        (logon_seq == seqnum_min && seqnum_mgr_.next_inbound_unsafe() == seqnum_min);
-    const bool initr_reset_seqnum =
-        (cfg_.reset_seqnum_policy_field == reset_seqnum_policy::bilateral_strict) ||
-        (any_reset_knob && seqnums_at_one);
-    // 032 T007: unconditionally latch the emit-time 141=Y fact. Overwrites to false
-    // when fixpp does NOT emit 141=Y — ensures a stale latch cannot survive across
-    // reconnects (this is the shared open()/drive_reconnect() emit point).
-    // [032 contract C4, data-model, RC1 unconditional-assign invariant]
-    own_logon_sent_reset_flag_ = initr_reset_seqnum;
-    // 027 T013 I-NEX-1: advertise next_inbound_unsafe() when knob is on (plain, NO +1).
-    // Absent (nullopt) when knob is off ⇒ byte-identical baseline. [contract C2, I-NEX-7]
-    const std::optional<fixpp::session::seqnum_t> initr_next_expected =
-        cfg_.enable_next_expected_msg_seq_num
-            ? std::optional<fixpp::session::seqnum_t>{seqnum_mgr_.next_inbound_unsafe()}
-            : std::nullopt;
-    // 033 T017/T023: thread the FIXT-only Logon fields (1137 + optional 553/554) into the
-    // initiator emit — all-nullopt for FIX.4.x → byte-identical (INV-FIXT-1 / SC-002 / W4).
-    const auto initr_fixt = derive_logon_fixt_fields(cfg_);
-    // 070-fix44-closeout T004: empty opts ⇒ no 383/464/384 ⇒ byte-identical
-    // baseline (FR-012). Populated from cfg_ per-story (US1/US2/US3).
-    auto logon_result = fixpp::session::build_logon(
-        std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
-        cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum,
-        initr_next_expected, initr_fixt.default_appl_ver_id, initr_fixt.username,
-        initr_fixt.password,
-        // 070-fix44-closeout S-029: advertise 464=Y when local posture==test; unset
-        // ⇒ no 464 ⇒ byte-identical baseline (FR-012). 383/384 land per-story.
-        fixpp::session::logon_advertise_options{
-            .max_message_size = cfg_.advertised_max_message_size,
-            .test_message_indicator = (cfg_.posture == session_posture::test),
-            .supported_msg_types = cfg_.supported_msg_types});
-    if (!logon_result) {
-        // build_logon failed (oversized IDs → wire_frame_too_large).
-        // Session-fatal — initiator handshake never reached the wire; transition
-        // to Disconnected to match the acceptor send-throw symmetry promised by
-        // FR-009 + the "session-fatal → Disconnected" precedent set by the
-        // liveness loop (assign_outbound failure inside run_liveness_loop) and the
-        // Active send-throw witness in send_path_test.
-        // [W3.4 / /simplify B-8 fix; FR-009 "symmetric to acceptor witness";
-        //  [FIX-SL §4.3] initiator handshake failure semantics]
+    // D-OUT-5: as after on_inbound_active_'s handlers (D-CAN-3). The thread is left as the
+    // returned timing leaves it, so open() and drive_reconnect() return to a caller whose
+    // next co_await does not throw. This await is never pre-checked, so it cannot throw.
+    co_await asio::this_coro::reset_cancellation_state();
+    if (fsm_state_ != fsm_state::Disconnected) {
         record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(logon_result.error());
     }
-    // Advance outbound counter through manager ONLY on build success.
-    // RC#A: was ++next_outbound_seq_; now routes through SeqnumManager.
-    auto assign_r = co_await seqnum_mgr_.assign_outbound();
-    if (!assign_r) {
-        // Seqnum overflow — same disposition as build_logon failure above.
-        // [W3.4 / /simplify B-8 fix]
-        record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(assign_r.error());  // overflow (I-8)
+    if (caught_cancellation) {
+        // The code that the returned timing of a cancelled hydration read, or of a
+        // cancelled store reset, passes to the caller; one handler cannot tell which
+        // await threw.
+        co_return std::unexpected(fixpp::core::error::store_cancelled);
     }
-    // 019 T014: toAdmin before transmitting the initiator Logon. [FR-008/010]
-    if (!fire_to_admin_(*logon_result)) {
-        record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(fixpp::core::error::app_callback_threw);
-    }
-    auto emit_r = co_await store_then_emit(logon_seq, *logon_result);
-    if (!emit_r) {
-        // store_then_emit failed (store I/O or transport throw → dispatch_aborted).
-        // Same disposition: session-fatal → Disconnected.
-        // [W3.4 / /simplify B-8 fix; F7 drift fix; spec.md FR-001(e)]
-        record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(emit_r.error());
-    }
-    co_return fixpp::core::expected_t<void>{};
+    co_return std::unexpected(fixpp::core::error::dispatch_aborted);
 }
 
 // ── Phase-2 linkable placeholders — REPLACED per user story ─────────────
@@ -5439,7 +5467,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_logon_sent_(
 // gate-b/r1 FQ-1 (RC#1): the persistent store-retain fatal class, matching
 // store_then_emit's durability-classified gate (is_persistent_retain_fatal) rather
 // than the closed 3-code set the pre-fix guard hard-coded. Range [56,65) is
-// EVERY store_* code except cancellation-class store_cancelled(65); sound
+// EVERY store_* code except store_cancelled(65), which is not a retain failure: a
+// cancelled store call has its own ending in store_then_emit (D-OUT-2). Sound
 // only because of error.hpp's FR-021 store_* contiguity static_assert (10 variants
 // 56..65) — an inserted 11th store code would shift store_cancelled and this
 // range must move with it. [contracts/store-then-emit-disposition.md item 3]
@@ -5520,11 +5549,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
                                       send_fallback_leaf_(tic, app_payload, disconnect_required));
             impl_r = leaf_r;
         }
-        // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
-        // into dispatch_aborted expected_t error, transition to Disconnected per US1 AC3.
+        // F9 (Round-A drift): a dispatch_aborted that send_impl RETURNS transitions to
+        // Disconnected per US1 AC3 (its sources: the `dispatch_aborted` returns of
+        // store_then_emit). A cancelled store call is not among them: store_then_emit
+        // leaves by operation_aborted for it, and the conversion to dispatch_aborted is
+        // this function's own catch, below (D-OUT-2, D-OUT-9).
         // dispatch_aborted(55) is outside is_persistent_retain_fatal's [56,65) range, so
-        // it is not covered by disconnect_required — kept as a value residual to
-        // preserve the exact pre-059 converted-cancellation disposition unchanged.
+        // it is not covered by disconnect_required — kept as a value residual.
         // Residual (documented, not fixed — out of 059's scope): a toApp returning
         // unexpected(dispatch_aborted) still spuriously disconnects here; pre-existing
         // since before 059 (the guard was always `== dispatch_aborted`), and
@@ -5535,21 +5566,22 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
                 fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix; gate-b/r2 FQ-1]
         }
         co_return impl_r;  // value un-coerced
-    } catch (const asio::system_error& e) {
-        if (e.code() == asio::error::operation_aborted) {
-            // Uncaught operation_aborted from a co_await inside send_impl —
-            // transition to Disconnected per US1 AC3. [spec.md US1 AC3; F5+F9 drift fix]
-            record_state_transition_(fsm_state::Disconnected);
-            co_return std::unexpected(error::dispatch_aborted);
-        }
-        // Unexpected system_error — still transition to Disconnected (I-09).
-        record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(error::dispatch_aborted);
-    } catch (...) {
-        // Unexpected exception from send_impl — transition to Disconnected (I-09).
-        record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(error::dispatch_aborted);
+    } catch (...) {        // NOLINT(bugprone-empty-catch): the statements below end the call
     }
+    // D-OUT-9 (.specify/536-537-538-recovery-liveness.md §10). Every exit of the try is a
+    // co_return, so these statements run only when the handler ran: for every exception that
+    // ends a send, a cancellation met at an await of send_impl among them, and
+    // store_then_emit's for a cancelled store call. The reset leaves the caller's thread as
+    // a cancelled lock wait leaves it (D-CAN-3; fixpp#583), so the two timings of a
+    // cancelled store do not differ in it. This await is never pre-checked, so it cannot
+    // throw. The state is tested because store_then_emit has recorded Disconnected on its
+    // own route, and every record adds an entry to the state ring.
+    // [spec.md US1 AC3; I-09]
+    co_await asio::this_coro::reset_cancellation_state();
+    if (fsm_state_ != fsm_state::Disconnected) {
+        record_state_transition_(fsm_state::Disconnected);
+    }
+    co_return std::unexpected(error::dispatch_aborted);
 }
 
 // ── 020 T010: Opaque-payload validation (FR-016; INV-8; research.md D1) ──────
@@ -6252,13 +6284,27 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 // Durable-before-transmit (I-3 outbound half):
 //   1. If store_ is available: co_await store_->store(stamped_seq, frame, outbound).
 //   2. AFTER store returns: call transport_send_(frame) if non-null.
-// Errors from store(): logged-then-proceed (I-07); close still completes.
+// What a store() call that did not succeed ends as:
+//   - A cancelled call, whether the store returned store_cancelled or let
+//     operation_aborted out, on any store: the frame is not transmitted, its number is
+//     taken back, Disconnected is recorded here unless the caller's Logon arm is
+//     superseded, and the function leaves by asio::system_error{operation_aborted}.
+//     Rulings R-15 and R-16 (.specify/536-537-538-recovery-liveness.md §10, D-OUT-1 to
+//     D-OUT-3), superseding decision D7 of feature 059
+//     (specs/059-outbound-store-fail-closed/research.md), under which a returned
+//     store_cancelled was transmitted over.
+//   - Any other returned error on a persistent store: fail closed (059). The number is
+//     reconciled from the store and the error is returned, with nothing transmitted.
+//   - Any other returned error on a store that is not persistent, and an exception of
+//     the store's body that is not a cancellation: logged-then-proceed (I-07).
+// A frame whose number is no longer below the session's next outbound number when its
+// store call has returned is not transmitted either (D-OUT-10, ruling R-19).
 // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
 //   explicitly (RC#A: next_outbound_seq_ removed; RC#B: transport errors surfaced).
 // [gate-b/r1-green: RC#A removes next_outbound_seq_ - 1U arithmetic;
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
-    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm) noexcept {
+    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm) {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
@@ -6307,20 +6353,26 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
 
     // Step 1: store (durable-before-transmit).
     if (store_ && !skip_store) {
-        // F5 (Round-A drift): wrap co_await store_->store() in try/catch to absorb
-        // asio::system_error{operation_aborted} thrown by the store awaitable on
-        // cancellation. Without this, the throw propagates out of the noexcept
-        // store_then_emit frame → std::terminate.
-        // [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
+        // The try takes what the store awaitable lets out: operation_aborted, when a
+        // cancellation is met before the store's lock, and any exception of a store's
+        // body.
         // 059 T006/T010: disposition on the returned store_r (contracts/
         // store-then-emit-disposition.md item 3). `fatal_err` is set ONLY on a
-        // genuine failure (excludes store_cancelled, D7) on a persistent store
-        // (store_is_persistent_); success, store_cancelled, and volatile-store
-        // failures fall through unchanged (logged-then-proceed, I-07/FR-003).
+        // genuine failure (not store_cancelled) on a persistent store
+        // (store_is_persistent_); success and volatile-store failures fall through
+        // unchanged (logged-then-proceed, I-07/FR-003).
+        // D-OUT-2: a cancelled store call only sets `store_call_cancelled`, at its
+        // returned timing in the try and at its thrown timing in the handler. The block
+        // after the try is the one ending of both.
         std::optional<fixpp::core::error> fatal_err;
+        bool store_call_cancelled = false;
         try {
             auto store_r =
                 co_await store_->store(stamped_seq, span_to_store, direction_t::outbound);
+            // Ahead of the persistence gate: the ending is the same for any store.
+            if (!store_r.has_value() && store_r.error() == fixpp::core::error::store_cancelled) {
+                store_call_cancelled = true;
+            }
             if (!store_r.has_value() && store_is_persistent_ &&
                 store_r.error() != fixpp::core::error::store_cancelled) {
                 // Genuine persistent-store failure: capture the error FIRST
@@ -6341,18 +6393,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
                     // already-captured fatal_err, and the disconnect still proceeds.
                 }
             }
-            // else: success, store_cancelled (D7 — cancellation-class, keeps
-            // today's absorb→proceed), or a volatile-store failure (FR-003) —
-            // logged-then-proceed, unchanged.
+            // else: success, a store_cancelled noted above, or a volatile-store
+            // failure (FR-003), which is logged-then-proceed, unchanged.
         } catch (const asio::system_error& e) {
             if (e.code() == asio::error::operation_aborted) {
-                // Cancellation won before the store committed. Per US1 AC3 and I-07:
-                // propagate as an error so the caller can transition to Disconnected.
-                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+                // The thrown timing of a cancelled store call: the cancellation was met
+                // before the store held its lock.
+                store_call_cancelled = true;
             }
             // Non-abort system_error: absorb (I-07 logged-then-proceed on store path).
-        } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption:
-            // any other exception from the store awaitable is absorbed (I-07).
+        } catch (...) {  // NOLINT(bugprone-empty-catch) — any other exception from the
+            // store awaitable is absorbed (I-07).
+        }
+        if (store_call_cancelled) {
+            // D-OUT-1 to D-OUT-3. The call stored nothing (the store contract's sentence
+            // on store_cancelled, message_store.hpp), so the frame's number is taken
+            // back, with no await. The function leaves by the exception the thrown timing
+            // carried, so that a caller that discards results cannot go on past a
+            // cancelled store. It does not reset the thread's cancellation state: that is
+            // the entry point's, after its handler (D-CAN-3, D-OUT-9, D-OUT-5).
+            seqnum_mgr_.take_back_outbound(stamped_seq);
+            disconnect_unless_superseded_(arm);
+            throw asio::system_error(asio::error::operation_aborted);
         }
         if (fatal_err.has_value()) {
             // Fail closed BEFORE Step 2 transmit (D3): same shape as the existing
@@ -6361,6 +6423,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             // [contracts/store-then-emit-disposition.md item 3;
             //  feedback_mirror_existing_failclosed_disposition]
             co_return std::unexpected(*fatal_err);
+        }
+        // D-OUT-10 (ruling R-19). A caller passes a number it assigned, which stays below
+        // the next outbound number unless a writer lowered that number while this frame
+        // was in its store call (the writers: `grep -n 'next_outbound_'
+        // include/fixpp/session/seqnum_manager.hpp src/session/seqnum_manager.cpp`). Such
+        // a frame is not transmitted. The test follows 059's return above, so that a
+        // frame the store refused keeps 059's code; it is inside this branch, so that a
+        // frame sent with no store call is not tested; and it is ahead of the superseded
+        // test below. It returns a value: this frame's own store call was not cancelled.
+        if (stamped_seq >= seqnum_mgr_.peek_outbound()) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
         }
     }
 
@@ -6484,6 +6557,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 //
 // Two-phase graceful Logout (D-6 / [2d §6.5] / I-9):
 //   1. Build Logout frame (build_logout) + store_then_emit (I-3 outbound half).
+//      Ruling R-17 (.specify/536-537-538-recovery-liveness.md §10, D-OUT-6), superseding
+//      "store-side errors: logged-then-proceed" for this emit: when the Logout was not
+//      sent, whatever the reason, the phase records Disconnected (when the state is not
+//      that already), returns the error at once and skips steps 2 to 4. A reply cannot
+//      come to a Logout that was not sent.
 //   2. Transition FSM to LogoutSent.
 //   3. Wait up to cfg_.logout_disconnect_timeout_ms on the session's clock for the
 //      peer's confirming Logout. fixpp#536 (.specify/536-537-538-recovery-liveness.md,
@@ -6517,9 +6595,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         std::span<std::byte>{buf.data(), buf.size()}, logout_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, {}, cfg_.begin_string, st52.value);
 
+    // D-OUT-6: what became of the Logout. It holds a value only when store_then_emit
+    // returned success for it.
+    fixpp::core::expected_t<void> sent = std::unexpected(fixpp::core::error::dispatch_aborted);
     if (!logout_result) {
-        // Build failure (unlikely): treat as no-frame-sent, proceed to timeout.
-        // The session still transitions to LogoutSent and times out.
+        // Build failure (unlikely): no call is made, and the builder's error is the
+        // outcome.
+        sent = std::unexpected(logout_result.error());
     } else {
         // Emit the Logout frame (store first, then transport_send — I-3).
         // 019 T014: toAdmin before graceful-close Logout. [FR-008/010]
@@ -6535,8 +6617,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
-        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+        // The handler takes any exception out of the emit: store_then_emit's, for a
+        // cancelled store call, among them. `sent` then keeps dispatch_aborted. Nothing
+        // is awaited in the handler, nor after it on the path that leaves early.
+        try {
+            sent = co_await store_then_emit(logout_seq, *logout_result);
+        } catch (...) {  // NOLINT(bugprone-empty-catch): the outcome is in `sent`
+        }
     }
 
     // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
@@ -6545,6 +6632,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
     // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
     logout_seen_ = true;
+
+    // D-OUT-6: the Logout was not sent, so no reply to it can come. The phase leaves at
+    // once and arms no wait; close() goes on to its terminal part. The flag above is set
+    // first, as it is for a Logout that was sent.
+    if (!sent) {
+        if (fsm_state_ != fsm_state::Disconnected) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
+        co_return sent;
+    }
 
     // Transition to LogoutSent.
     record_state_transition_(fsm_state::LogoutSent);
