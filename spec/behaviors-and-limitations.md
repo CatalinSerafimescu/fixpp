@@ -852,17 +852,21 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   **Status: by design** (R7 — never a `stop()` drain; draining on app-held leases would hang
   `stop()`). *(INV-9a; C-8; research.md R7.)*
 
-- **L-023-2 — No dedicated `Engine::send` two-hop / establish-churn perf micro-bench
-  (V-6 partial evidence).** The two-hop send (`caller→control→session`) and the D-SNAP
-  snapshot read/republish are structurally new (no `Engine::send` bench existed pre-023), so
-  there is no prior baseline to gate Article VIII ±5% against. A standalone micro-bench would
-  be dominated by TLS-loopback setup (the strand hops are µs-scale), giving low signal. What
-  IS recorded: the snapshot atomic `is_lock_free() == false` on the supported libc++/libstdc++
-  (an STL-internal lock pool — see B-023-3). The binding correctness gate for this concurrency
-  feature is TSan (full suite 388/388, exact witness set ×3 sanitizers). **Status: follow-up**
-  — a dedicated send/establish-churn bench + baseline is a low-risk bench-only carry-forward
-  (cf. the 012 RC#G handshake-bench scaffold precedent). *(V-6; research.md D7/D-SNAP;
-  Article VIII.)*
+- **L-023-2 — No establish-churn perf micro-bench (V-6 partial evidence).** No bench times
+  the D-SNAP snapshot's republish when a session is established or torn down, so there is no
+  baseline to gate Article VIII against for it. What IS recorded: the snapshot atomic
+  `is_lock_free() == false` on the supported libc++/libstdc++ (an STL-internal lock pool — see
+  B-023-3). The send route is no longer this row's subject: since fixpp#563 / fixpp#564 the
+  route of `Engine::send` is measured by `bin/engine_send_bench`, a `paired` row of
+  `bench/ci-suite.txt`, on one thread (see `B-563-3`). The wake-up of an io thread by a send
+  started on another thread is a scheduling measurement and is not timed by a gated bench; for
+  that pull request a local probe measured it on both trees, outside the gate (its source and
+  result are in the parent repository: `research/probes/b41_563_564/` and
+  `decisions/speckit/b41-563-564-measurement.md`). The binding correctness gate for this
+  concurrency feature is TSan (full suite 388/388, exact witness set ×3 sanitizers).
+  **Status: follow-up** — a dedicated establish-churn bench + baseline is a low-risk
+  bench-only carry-forward (cf. the 012 RC#G handshake-bench scaffold precedent). *(V-6;
+  research.md D7/D-SNAP; Article VIII.)*
 
 ## ResetOn{Logon,Logout,Disconnect} Lifecycle Reset Knobs (024-reset-refresh-on-logon)
 
