@@ -144,7 +144,7 @@ bool is_new_order_single(std::span<const std::byte> frame) {
         "\x01"
         "35=D\x01";
     std::string_view const text{reinterpret_cast<const char*>(frame.data()), frame.size()};
-    return text.find(kField) != std::string_view::npos;
+    return text.contains(kField);
 }
 
 // Upper bound on io_context polls for one operation to complete. Nothing in this harness
@@ -162,7 +162,7 @@ struct EngineSendBench {
     fixpp::session::SessionId id;
     bool done = false;
     bool threw = false;
-    fixpp::core::expected_t<void> result{};
+    fixpp::core::expected_t<void> result;
 
     EngineSendBench() {
         auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
@@ -225,7 +225,7 @@ struct EngineSendBench {
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER)  // NOLINT(readability-use-concise-preprocessor-directives): C++23 form
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
@@ -234,7 +234,7 @@ struct EngineSendBench {
             fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER)  // NOLINT(readability-use-concise-preprocessor-directives): C++23 form
 #pragma warning(pop)
 #endif
         cfg.dictionary = fixpp::test_support::make_fix44_dictionary();

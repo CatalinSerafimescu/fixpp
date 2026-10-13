@@ -224,6 +224,10 @@ using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 
+// printf stays: std::println needs <print>, which libstdc++ 13 (the linux-gcc-release
+// toolchain) does not ship.
+// NOLINTBEGIN(modernize-use-std-print)
+
 namespace {
 
 using View = MessageView<access_mode::Index>;
@@ -265,7 +269,8 @@ std::string field(std::string_view frame, std::uint32_t tag) {
     if (pos == std::string_view::npos) return {};
     pos += needle.size();
     const auto end = frame.find('\x01', pos);
-    return std::string(frame.substr(pos, end == std::string_view::npos ? frame.npos : end - pos));
+    return std::string(
+        frame.substr(pos, end == std::string_view::npos ? std::string_view::npos : end - pos));
 }
 
 std::string value(const View& mv, std::uint32_t tag) {
@@ -823,6 +828,7 @@ void expect_sent(const Readings& o, Who w, const std::vector<std::string_view>& 
     std::ranges::sort(stamped);
     std::vector<seqnum_t> want;
     for (std::size_t i = 0; i < ids.size(); ++i) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
         want.push_back(kFirstAppSeq + static_cast<seqnum_t>(i));
     }
     EXPECT_EQ(stamped, want) << name(w)
@@ -846,6 +852,7 @@ void expect_received(const Readings& o, Who w, const std::vector<std::string_vie
     }
     std::vector<std::string> want;
     for (std::size_t i = 0; i < ids.size(); ++i) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
         want.push_back("11=" + std::string(ids[i]) +
                        " 34=" + std::to_string(kFirstAppSeq + static_cast<seqnum_t>(i)));
     }
@@ -988,7 +995,7 @@ constexpr std::uint32_t kOutOfReachMs = 60000;
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER)  // NOLINT(readability-use-concise-preprocessor-directives): C++23 form
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
@@ -1016,7 +1023,7 @@ SessionConfig make_plain_session_cfg(asio::io_context& ioc, const char* sender, 
 }
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER)  // NOLINT(readability-use-concise-preprocessor-directives): C++23 form
 #pragma warning(pop)
 #endif
 
@@ -1050,6 +1057,7 @@ public:
 
 // A session's FSM state and lifecycle, read together.
 std::string where_is(const Session& s) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): read when the state is no enumerator
     const char* state = "unknown";
     switch (s.state()) {
         case fsm_state::NotConnected:
@@ -1424,6 +1432,7 @@ constexpr std::string_view kMtPrefixA = "B41-A-";
 constexpr std::string_view kMtPrefixReply = "B41-R-";
 
 // The reply whose starting fromApp is running on this thread, or -1.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables): a per-thread marker
 thread_local long tl_reply_being_started = -1;
 
 std::vector<std::byte> mt_payload(std::string_view prefix, std::size_t k, char side) {
@@ -1701,8 +1710,8 @@ void run_mt_cell(bool busy, MtReadings& o) {
         const seqnum_t seq = to_seq(value(mv, 34));
         if (id == acc_id) {
             const long k = mt_index(id11, kMtPrefixA);
-            o.acc_deliveries.push_back({k, seq});
-            if (k < 0 || static_cast<std::size_t>(k) >= n) return;
+            o.acc_deliveries.push_back({.k = k, .seq = seq});
+            if (k < 0 || std::cmp_greater_equal(k, n)) return;
 #ifndef NDEBUG
             std::fprintf(stderr, "[ B41 ] reply %ld: starting\n", k);
 #endif
@@ -1720,7 +1729,7 @@ void run_mt_cell(bool busy, MtReadings& o) {
 #endif
         } else {
             const long k = mt_index(id11, kMtPrefixReply);
-            o.ini_deliveries.push_back({k, seq});
+            o.ini_deliveries.push_back({.k = k, .seq = seq});
             {
                 const std::scoped_lock lk(mu);
                 ++replies_back;
@@ -1735,7 +1744,7 @@ void run_mt_cell(bool busy, MtReadings& o) {
         const seqnum_t seq = to_seq(value(mv, 34));
         if (id == acc_id) {
             const long k = mt_index(id11, kMtPrefixReply);
-            if (k < 0 || static_cast<std::size_t>(k) >= n) return;
+            if (k < 0 || std::cmp_greater_equal(k, n)) return;
             const auto i = static_cast<std::size_t>(k);
             ++o.reply_to_app_calls[i];
             o.reply_seq[i] = seq;
@@ -1754,7 +1763,7 @@ void run_mt_cell(bool busy, MtReadings& o) {
 #endif
         } else {
             const long k = mt_index(id11, kMtPrefixA);
-            if (k < 0 || static_cast<std::size_t>(k) >= n) return;
+            if (k < 0 || std::cmp_greater_equal(k, n)) return;
             ++o.a_to_app_calls[static_cast<std::size_t>(k)];
             o.a_seq[static_cast<std::size_t>(k)] = seq;
         }
@@ -1773,6 +1782,7 @@ void run_mt_cell(bool busy, MtReadings& o) {
     auto work = asio::make_work_guard(ioc);
     std::vector<std::thread> io_threads;
     for (std::size_t i = 0; i < kMtIoThreads; ++i) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
         io_threads.emplace_back([&ioc] { ioc.run(); });
     }
 
@@ -1936,6 +1946,7 @@ void run_and_check_mt(bool busy) {
     // MsgSeqNums on each side: distinct and consecutive, as stamped and as delivered.
     std::vector<seqnum_t> want;
     for (std::size_t i = 0; i < o.requested; ++i) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
         want.push_back(kFirstAppSeq + static_cast<seqnum_t>(i));
     }
     const auto sorted = [](std::vector<seqnum_t> v) {
@@ -1949,6 +1960,7 @@ void run_and_check_mt(bool busy) {
         << ctx;
     const auto arrival = [](const std::vector<MtDelivery>& d) {
         std::vector<seqnum_t> v;
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
         for (const auto& x : d) v.push_back(x.seq);
         return v;
     };
@@ -2375,6 +2387,7 @@ MissReadings run_miss_path_cell() {
     auto work = asio::make_work_guard(ioc);
     std::vector<std::thread> io_threads;
     for (std::size_t i = 0; i < kMtIoThreads; ++i) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
         io_threads.emplace_back([&ioc] { ioc.run(); });
     }
 
@@ -2398,7 +2411,7 @@ MissReadings run_miss_path_cell() {
     // their way on both sides of stop()'s write of its flag.
     start_sends(kMissSendsPerId / 2);
     auto stop_fut = asio::co_spawn(ioc, engine->stop(), asio::use_future);
-    start_sends(kMissSendsPerId - kMissSendsPerId / 2);
+    start_sends(kMissSendsPerId - (kMissSendsPerId / 2));
     o.stop_done = stop_fut.wait_for(12s) == std::future_status::ready;
 
     // Once stop() has completed the io threads run out of work and return, having run
@@ -2550,5 +2563,7 @@ TEST(EngineCallbackSend, StopNotNotedOnTheSessionAdmitsEngineSend) {
 }
 
 TEST(EngineCallbackSend, MissPathSendsQueuedWhileStopRuns) { run_and_check_miss_path(); }
+
+// NOLINTEND(modernize-use-std-print)
 
 }  // namespace fixpp::session::test

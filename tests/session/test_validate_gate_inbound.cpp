@@ -696,8 +696,9 @@ constexpr const char* kFeedReturnedLine = "[ B41 ] fromAdmin's feed returned";
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
     fix.open_to_active(sess);
-    // std::exit reports this death-test child's verdict as its exit code.
-    // NOLINTBEGIN(concurrency-mt-unsafe)
+    // std::exit reports this death-test child's verdict as its exit code. printf stays:
+    // std::println needs <print>, which libstdc++ 13 does not ship.
+    // NOLINTBEGIN(concurrency-mt-unsafe,modernize-use-std-print)
     if (sess.state() != fsm_state::Active) std::exit(2);
     const auto fed_frame = make_raw_frame("FIX.4.2", "0", 3, "TW", "ISLD",
                                           "44=99.99\x01");  // Price not in Heartbeat
@@ -713,7 +714,7 @@ constexpr const char* kFeedReturnedLine = "[ B41 ] fromAdmin's feed returned";
     };
     fix.feed(sess, make_heartbeat_frame(2));
     std::exit(fed ? 0 : 3);
-    // NOLINTEND(concurrency-mt-unsafe)
+    // NOLINTEND(concurrency-mt-unsafe,modernize-use-std-print)
 }
 #endif
 

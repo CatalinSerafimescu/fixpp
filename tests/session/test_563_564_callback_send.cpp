@@ -410,6 +410,10 @@ using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 
+// printf stays: std::println needs <print>, which libstdc++ 13 (the linux-gcc-release
+// toolchain) does not ship.
+// NOLINTBEGIN(modernize-use-std-print)
+
 namespace {
 
 constexpr std::string_view kSender = "ISLD";
@@ -478,7 +482,8 @@ std::string field(std::string_view frame, std::uint32_t tag) {
     if (pos == std::string_view::npos) return {};
     pos += needle.size();
     const auto end = frame.find('\x01', pos);
-    return std::string(frame.substr(pos, end == std::string_view::npos ? frame.npos : end - pos));
+    return std::string(
+        frame.substr(pos, end == std::string_view::npos ? std::string_view::npos : end - pos));
 }
 
 // MsgSeqNum(34) of a frame, or 0 when the field is absent or not a number.
@@ -1016,6 +1021,7 @@ void run_two_sends(Shape shape, ExecKind kind, Then then = Then::check_pair,
     if (shape == Shape::started_in_to_app) {
         ASSERT_TRUE(inner_saw_outer_live.has_value())
             << "PATH NOT DRIVEN: the second send's toApp never ran. " << context;
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above requires it
         EXPECT_FALSE(*inner_saw_outer_live)
             << "a send started in toApp must be deferred, but it ran nested: its toApp ran while "
                "the outer toApp was on the stack. "
@@ -1158,6 +1164,7 @@ TEST(CallbackSend, FromAppSendsReply) {
         << "PATH NOT DRIVEN: the inbound 35=D did not reach fromApp. " << context;
     ASSERT_TRUE(inner_saw_outer_live.has_value())
         << "PATH NOT DRIVEN: the send's toApp never ran. " << context;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above requires it
     ASSERT_TRUE(*inner_saw_outer_live)
         << "a send started in fromApp must run nested, but it was deferred: its toApp ran only "
            "after fromApp had returned. "
@@ -1554,7 +1561,7 @@ TEST(CallbackSend, ToAdminStartsSend_AssignFirstSite_FileStore) {
 void run_overlapping_sends(StoreKind store, TransportKind transport = TransportKind::sync_capture) {
     constexpr std::size_t kPairs = 200;
     Fixture f{ExecKind::io_context, store};
-    f.memory_outbound_capacity = 2 * kPairs + 16;
+    f.memory_outbound_capacity = (2 * kPairs) + 16;
     Session sess{f.engine, f.cfg()};
     ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
     if (transport == TransportKind::live_suspending_write) f.attach_live_transport(sess);
@@ -1602,7 +1609,7 @@ void run_overlapping_sends(StoreKind store, TransportKind transport = TransportK
 
         const std::vector<std::string> sent(
             f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before), f.wire.end());
-        const auto want_a = static_cast<seqnum_t>(2 + 2 * i);
+        const auto want_a = static_cast<seqnum_t>(2 + (2 * i));
         const std::string* sent_a = frame_with_id(sent, id_of('A', i));
         const std::string* sent_b = frame_with_id(sent, id_of('B', i));
         const bool wire_ok = sent.size() == 2 && sent_a == sent.data() && sent_b == sent.data() + 1;
@@ -1616,10 +1623,13 @@ void run_overlapping_sends(StoreKind store, TransportKind transport = TransportK
         if (alike) ++same_number;
         if (!ok) ++sends_failed;
         if (first_anomaly.empty() && (!wire_ok || !numbers_ok || !ok)) {
+            // Built for the first anomaly only: a diagnostic, not a string grown per pass.
+            // NOLINTBEGIN(performance-inefficient-string-concatenation)
             first_anomaly = "pair " + std::to_string(i) + ": transmitted " + describe(sent) +
                             "; send(A): " + describe(a) + "; send(B): " + describe(b) +
                             "; NextNumOut after A's co_spawn returned=" + out_after_a +
                             ", after B's=" + out_after_b;
+            // NOLINTEND(performance-inefficient-string-concatenation)
         }
         if (sess.state() != fsm_state::Active) break;
     }
@@ -1635,7 +1645,7 @@ void run_overlapping_sends(StoreKind store, TransportKind transport = TransportK
     std::string retrieve_status = "not run";
     if (MessageStore* st = session_test_access::store(sess); st != nullptr && pairs_run > 0) {
         CollectVisitor v;
-        const auto last = static_cast<seqnum_t>(1 + 2 * pairs_run);
+        const auto last = static_cast<seqnum_t>(1 + (2 * pairs_run));
         const auto r = f.run(st->retrieve(2, last, direction_t::outbound, v),
                              "CallbackSend::overlapping_retrieve");
         retrieve_status = r ? "ok" : "error " + std::to_string(static_cast<int>(r.error()));
@@ -1680,7 +1690,7 @@ void run_overlapping_sends(StoreKind store, TransportKind transport = TransportK
         EXPECT_EQ(f.store_next_out(sess), std::to_string(next_out(sess)))
             << "the store's NextNumOut must agree with the manager's. " << context;
     }
-    EXPECT_EQ(next_out(sess), 2U + 2U * kPairs) << "every send must take one number. " << context;
+    EXPECT_EQ(next_out(sess), 2U + (2U * kPairs)) << "every send must take one number. " << context;
     EXPECT_LE(f.live_writes.max_in_flight, 1) << "one live write in flight at a time. " << context;
     EXPECT_EQ(sends_failed, 0U) << context;
     EXPECT_EQ(sess.state(), fsm_state::Active) << context;
@@ -1917,6 +1927,7 @@ void check_close_arm(CloseCell& cell, const CloseExpect& want, const char* callb
     const std::vector<std::string> wire_full(
         f.wire.begin() + static_cast<std::ptrdiff_t>(cell.wire_before), f.wire.end());
     std::vector<std::string> wire;
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
     for (const auto& frame : wire_full) wire.push_back(brief(frame));
     const std::string at_the_end = where_is(sess);
 
@@ -3010,13 +3021,14 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     const std::vector<std::string> sent(f.wire.begin() + static_cast<std::ptrdiff_t>(wire_before),
                                         f.wire.end());
     std::vector<seqnum_t> wire_seqs;
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
     for (const auto& fr : sent) wire_seqs.push_back(seq_of(fr));
     std::vector<seqnum_t> unique_seqs = wire_seqs;
     std::ranges::sort(unique_seqs);
     const bool distinct = std::ranges::adjacent_find(unique_seqs) == unique_seqs.end();
     const bool ascending =
         std::ranges::adjacent_find(wire_seqs, std::greater_equal<>{}) == wire_seqs.end();
-    unique_seqs.erase(std::unique(unique_seqs.begin(), unique_seqs.end()), unique_seqs.end());
+    unique_seqs.erase(std::ranges::unique(unique_seqs).begin(), unique_seqs.end());
 
     const bool has_store = st != nullptr;
     bool all_retained = true;
@@ -4177,6 +4189,7 @@ void run_close_and_send_in_one_callback(OneCallbackStarts shape, StoreKind store
     const std::vector<std::string> wire_full(
         f.wire.begin() + static_cast<std::ptrdiff_t>(cell.wire_before), f.wire.end());
     std::vector<std::string> wire;
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
     for (const auto& frame : wire_full) wire.push_back(brief(frame));
     const std::string at_the_end = where_is(sess);
     const std::string inside = cell.inside.state + " " + cell.inside.lifecycle;
@@ -5434,6 +5447,7 @@ void run_close_behind_another_close(close_mode mode, StoreKind store, TransportK
     const std::vector<std::string> wire_full(
         f.wire.begin() + static_cast<std::ptrdiff_t>(cell.wire_before), f.wire.end());
     std::vector<std::string> wire;
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation): test bookkeeping, built once
     for (const auto& frame : wire_full) wire.push_back(brief(frame));
     const std::string at_the_end = where_is(sess);
     const std::string inbound_result = result_of(cell.outer);
@@ -5997,10 +6011,13 @@ void run_two_frames_in_one_read(StoreKind store, TransportKind transport, const 
     if (store == StoreKind::file) {
         EXPECT_EQ(from_app_calls, 1)
             << "on a persistent store the second fromApp does not run. " << reading;
+        // The ASSERT_TRUE on delivered.has_value() above returns when it is empty.
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
         ASSERT_EQ(delivered->size(), 2U)
             << "the second frame's on_inbound_frame must have been awaited. " << reading;
         EXPECT_TRUE((*delivered)[1].has_value())
             << "the second frame's on_inbound_frame returns ok. " << reading;
+        // NOLINTEND(bugprone-unchecked-optional-access)
         EXPECT_LT(on_logout, position_of(got.order, "the delivery completes"))
             << "the close has begun when the second frame's on_inbound_frame returns. " << reading;
     } else {
@@ -8146,6 +8163,7 @@ TEST(CallbackSend, ToAppStartsSendOnAnotherSession) {
     ASSERT_EQ(f.app->to_app_calls, 1) << "PATH NOT DRIVEN: A's toApp must run once. " << context;
     ASSERT_TRUE(b_to_app_saw_a_live.has_value())
         << "PATH NOT DRIVEN: B's toApp never ran. " << context;
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above requires it
     EXPECT_TRUE(*b_to_app_saw_a_live)
         << "a send on session B started in session A's toApp must not be deferred: B's toApp "
            "must run before A's toApp returns. "
@@ -8594,12 +8612,12 @@ TEST(CallbackSend, ToAppRunsTheIoContext_OverAStrand_SendIsDeferred) {
 // the exit codes its comment gives, so that a missing death is a failed assertion
 // of the cell and not a hang or a teardown over a detached coroutine.
 
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(thread_sanitizer)
 #define B41_BUILT_WITH_TSAN 1
 #endif
 #endif
-#if defined(__SANITIZE_THREAD__)
+#ifdef __SANITIZE_THREAD__
 #define B41_BUILT_WITH_TSAN 1
 #endif
 
@@ -9023,12 +9041,12 @@ TEST(CallbackGuard, WaitedCloseResumedInsideFromAppDies) {
 #endif
 }
 
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(address_sanitizer)
 #define B41_BUILT_WITH_ASAN 1
 #endif
 #endif
-#if defined(__SANITIZE_ADDRESS__)
+#ifdef __SANITIZE_ADDRESS__
 #define B41_BUILT_WITH_ASAN 1
 #endif
 
@@ -9042,14 +9060,19 @@ TEST(CallbackSend, DISABLED_MemoryCheckerPositiveControl_UseAfterFree) {
     const bool run = opt_in != nullptr && std::string_view{opt_in} == "1";
 #endif
     if (!run) GTEST_SKIP() << "not built with AddressSanitizer, and not opted in for a checker";
+    // The read of the deleted block is the fault this control plants for the memory checker.
+    // NOLINTBEGIN(cppcoreguidelines-owning-memory,clang-analyzer-cplusplus.NewDelete)
     auto* block = new int[4]{1, 2, 3, 4};
     int* volatile dangling = block;
     delete[] block;
     std::printf("[ B41 ] reading a deleted heap block: %d\n", dangling[1]);
+    // NOLINTEND(cppcoreguidelines-owning-memory,clang-analyzer-cplusplus.NewDelete)
     std::fflush(stdout);
 #ifdef B41_BUILT_WITH_ASAN
     FAIL() << "AddressSanitizer did not stop the read of a deleted heap block.";
 #endif
 }
+
+// NOLINTEND(modernize-use-std-print)
 
 }  // namespace fixpp::session::test
