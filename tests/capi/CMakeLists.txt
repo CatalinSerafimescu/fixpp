@@ -667,7 +667,9 @@ add_test(NAME capi_recovery_liveness COMMAND capi_recovery_liveness_test)
 # assertion fails runs to its bound, which is longer than the wait of a cell that
 # passes. Re-derive by timing
 # `ctest --test-dir build/<preset> -R '^capi_recovery_liveness$'` on every lane
-# /speckit-verify runs, with the witnesses failing and with them passing, and keep
-# TIMEOUT at several times the slowest.
+# /speckit-verify runs, and the same entry inside that lane's full `ctest -j4`, with the
+# witnesses failing and with them passing; set TIMEOUT to five times the slowest,
+# rounded up to the next 100 s, and keep it below the `--timeout` wedge guard of the
+# ctest steps in .github/workflows/tier1.yml.
 set_tests_properties(capi_recovery_liveness PROPERTIES
-  LABELS "capi;536;537;538" TIMEOUT 1200)
+  LABELS "capi;536;537;538" TIMEOUT 700)
