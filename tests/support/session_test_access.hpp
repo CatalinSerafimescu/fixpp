@@ -127,6 +127,16 @@ struct session_test_access {
         Session const& s) noexcept {
         return Session::callback_dispatch_scope{s};
     }
+
+    // The count of terminal close() calls that have taken close()'s wait for a callback to
+    // return, and the record that a graceful close's Logout was cut (fixpp#590;
+    // `.specify/563-564-callback-send.md` §2.6 "The mechanism", statements 1 and 4). They
+    // are readings: a cell prints them and asserts effects, not these values. Read them on
+    // the session's serialisation domain.
+    [[nodiscard]] static std::uint64_t waited_terminal_closes(Session const& s) noexcept {
+        return s.waited_terminal_closes_;
+    }
+    [[nodiscard]] static bool logout_cut(Session const& s) noexcept { return s.logout_cut_; }
 };
 
 }  // namespace fixpp::session

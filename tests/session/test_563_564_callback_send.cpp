@@ -10857,6 +10857,11 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
     SendOutcome inbound;
     bool started_in_on_logout = false;
     std::string state_in_on_logout = "onLogout did not run";
+    // Printed and not asserted (§3, NC-31): the count of terminal closes that have taken
+    // close()'s wait, and the record of the cut, each read inside onLogout and at the end.
+    std::uint64_t waited_before_the_start = 0;
+    std::uint64_t waited_after_the_start = 0;
+    bool cut_recorded_in_on_logout = false;
     f.on_transmit = [&](const std::string& frame) { cell.transmitted(frame); };
     f.app->on_from_app = [&] { cell.note("fromApp"); };
     f.app->on_to_app = [&] { cell.callback("toApp"); };
@@ -10865,6 +10870,7 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
         if (std::string_view{name} != "onLogout" || started_in_on_logout) return;
         started_in_on_logout = true;
         state_in_on_logout = where_is(sess);
+        waited_before_the_start = session_test_access::waited_terminal_closes(sess);
         switch (what) {
             case StartedInOnLogout::terminal_close:
                 asio::co_spawn(ex, sess.close(close_mode::terminal),
@@ -10879,6 +10885,8 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
                                cell.completes(third, "the send started in onLogout"));
                 break;
         }
+        waited_after_the_start = session_test_access::waited_terminal_closes(sess);
+        cut_recorded_in_on_logout = session_test_access::logout_cut(sess);
         cell.note("onLogout returns");
     };
     f.app->on_to_admin = [&](std::string_view msg_type) {
@@ -10958,6 +10966,8 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
     }
 
     const std::string at_the_end = where_is(sess);
+    const std::uint64_t waited_at_the_end = session_test_access::waited_terminal_closes(sess);
+    const bool cut_recorded_at_the_end = session_test_access::logout_cut(sess);
     const int catches = FileStoreSeams::read_and_reset_catches();
     const auto logout_sent_visits =
         std::ranges::count(sess.fsm_visit_history(), fsm_state::LogoutSent);
@@ -10978,7 +10988,13 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
         cut_store_name(store) + "; transport " +
         (transport == TransportKind::live_suspending_write ? "live" : "the synchronous sink") +
         "; onLogout ran with next outbound number " + literal(cell.next_out_at_on_logout) +
-        "; inside onLogout: " + state_in_on_logout + "; the persist was kept at the gate: " +
+        "; inside onLogout: " + state_in_on_logout +
+        "; terminal closes that took the wait, read inside onLogout: " +
+        std::to_string(waited_before_the_start) + " before the start and " +
+        std::to_string(waited_after_the_start) + " after it, and at the end " +
+        std::to_string(waited_at_the_end) + "; the cut recorded: inside onLogout " +
+        (cut_recorded_in_on_logout ? "yes" : "NO") + ", at the end " +
+        (cut_recorded_at_the_end ? "yes" : "NO") + "; the persist was kept at the gate: " +
         (lock_held ? (persist_kept ? "yes" : "NO") : "not applicable") +
         "; the snapshot: " + in_the_snapshot + "; completed without the clock " +
         (completed_without_the_clock ? "yes" : "NO") + ", the mock clock " +
