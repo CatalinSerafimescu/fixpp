@@ -774,6 +774,43 @@ foreach(outbound_store_test
     TIMEOUT 300)
 endforeach()
 
+# fixpp#598 (B28), note §11 — a FileStore call's offload is not cancelled. Standalone
+# ([const §VII.8]): session_598_store_offload is a per-`-D` variant (FIXPP_TEST_HOOKS, for
+# the offload probe) with genuine concurrency (the file I/O pools its cells construct);
+# session_598_store_offload_engine is not the class the clause groups either: its cells run
+# an Engine with timers and coroutines over loopback TCP and hold a FileStore's write job.
+add_executable(session_598_store_offload
+  test_598_store_offload.cpp
+)
+add_executable(session_598_store_offload_engine
+  test_598_store_offload_engine.cpp
+)
+foreach(store_offload_test
+    session_598_store_offload
+    session_598_store_offload_engine)
+  target_link_libraries(${store_offload_test} PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${store_offload_test} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  target_compile_definitions(${store_offload_test} PRIVATE FIXPP_TEST_HOOKS)
+  add_test(NAME ${store_offload_test} COMMAND ${store_offload_test})
+  set_tests_properties(${store_offload_test} PROPERTIES
+    ENVIRONMENT
+      "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;598"
+    TIMEOUT 300)
+endforeach()
+
 # fixpp#537 (B28), D-537-6 and D-537-8 — a Heartbeat above NextNumIn answers a pending
 # TestRequest. Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
 # groups. Its cells open Sessions and drive their coroutines and timers on an io_context with

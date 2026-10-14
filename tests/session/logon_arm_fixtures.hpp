@@ -29,6 +29,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <asio/any_io_executor.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
@@ -88,6 +89,9 @@ public:
         // before the session is made. A transport callback it installs replaces the
         // one that fills `sent`.
         std::function<void(fixpp::session::SessionConfig&)> tweak_cfg = nullptr;
+        // With file_store: the FileStore's file I/O executor, in place of the fixture's own
+        // pool of one thread. It must outlive the fixture.
+        std::optional<asio::any_io_executor> file_io_executor = std::nullopt;
     };
 
     // First, so destroyed last: the session's executor is on it.
@@ -144,7 +148,9 @@ public:
             file_cfg.directory = dir_.path;
             file_cfg.sender_comp_id = cfg.sender_comp_id;
             file_cfg.target_comp_id = cfg.target_comp_id;
-            file_cfg.file_io_executor = file_pool_.get_executor();
+            file_cfg.file_io_executor = o.file_io_executor
+                                            ? *o.file_io_executor
+                                            : asio::any_io_executor{file_pool_.get_executor()};
             factory = std::make_shared<RecordingStoreFactory>(file_cfg);
         } else {
             factory = std::make_shared<RecordingStoreFactory>(

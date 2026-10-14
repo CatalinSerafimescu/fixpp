@@ -22,6 +22,7 @@
 // install_store_offload_probe.
 #pragma once
 
+#include <asio/any_io_executor.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
@@ -32,6 +33,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <functional>
@@ -204,11 +206,18 @@ public:
     // Scene's, in place of this Scene's own. The other Scene must outlive this one, and
     // its engine must have stopped.
     std::optional<std::filesystem::path> reuse_dir;
+    // Set before setup(): the FileStore's file I/O executor is what this returns for the
+    // Scene's own pool's executor, in place of that executor itself.
+    std::function<asio::any_io_executor(asio::thread_pool::executor_type)> wrap_file_executor;
 
     // `file_io_threads`: the threads of the FileStore's file I/O executor. With one, an
     // offload of the store waits behind a held write; close(graceful)'s flush is such an
     // offload and takes no lock, so a cell that closes gracefully during a hold needs two.
     explicit HeldFileStoreScene(std::size_t file_io_threads = 1) : file_pool_{file_io_threads} {}
+    // The same, with the engine's Application.
+    HeldFileStoreScene(std::size_t file_io_threads,
+                       std::shared_ptr<fixpp::session::Application> application)
+        : file_pool_{file_io_threads}, rig{std::move(application)} {}
     HeldFileStoreScene(HeldFileStoreScene const&) = delete;
     HeldFileStoreScene& operator=(HeldFileStoreScene const&) = delete;
     ~HeldFileStoreScene() = default;
@@ -246,7 +255,9 @@ public:
         file_cfg.directory = reuse_dir ? *reuse_dir : dir_.path;
         file_cfg.sender_comp_id = c.sender_comp_id;
         file_cfg.target_comp_id = c.target_comp_id;
-        file_cfg.file_io_executor = file_pool_.get_executor();
+        file_cfg.file_io_executor = wrap_file_executor
+                                        ? wrap_file_executor(file_pool_.get_executor())
+                                        : asio::any_io_executor{file_pool_.get_executor()};
         auto const factory = std::make_shared<RecordingStoreFactory>(file_cfg);
         log = factory->log;
         c.store_factory = factory;
