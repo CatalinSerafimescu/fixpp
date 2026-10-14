@@ -12,7 +12,7 @@
 // wraps a pool of two threads, hands every job to the pool at once, and holds the pool thread
 // that takes the call's first job before that thread starts it, until the cell lets it go.
 // "Taken and not started" is three events, none of them a time:
-//   1. the executor has recorded that a pool thread took the call's write job and is held;
+//   1. a pool thread has taken the call's write job, and the executor holds that thread;
 //   2. a cancellation with the terminal bit is emitted on the call's slot, from a handler on
 //      the io_context that runs the call (the test thread), which is not a pool thread;
 //   3. the release event: the emit has returned, the count of jobs handed over for the call

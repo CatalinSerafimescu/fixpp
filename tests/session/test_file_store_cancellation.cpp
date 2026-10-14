@@ -32,7 +32,7 @@
 //     The emit carries the terminal bit and is made while the hold probe keeps the
 //     body inside the offload (fixpp#598, note §11.6); its section below says how,
 //     and what shows that the emit arrived.
-//     The catch body for reset() is driven by the gate-b/r1 A.2 fault-injection test
+//     The catch body for reset() is driven by the fault-injection cell
 //     (Reset_OperationAbortedAfterDurable_CommitsAndReturnsDurableSuccess) using
 //     arm_force_abort_after_reset_lambda().
 //

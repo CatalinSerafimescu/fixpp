@@ -102,7 +102,7 @@ public:
         return handed_;
     }
 
-    // On the pool thread that took job 1: records that it is held, and waits for the cell.
+    // On the pool thread that took job 1: notes that it is held, and waits for the cell.
     void hold_taken_job() {
         std::unique_lock lk{m_};
         held_ = true;
