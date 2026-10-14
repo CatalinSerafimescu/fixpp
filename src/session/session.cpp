@@ -1010,15 +1010,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::consume_rejected_seqnum_
 // reconnect_fsm_ owns AwaitingResend state per data-model §E-1 / T023 Fix1.
 // fixpp#537 (D-537-5): both callers have just advanced NextNumIn, so while the resend is
 // still outstanding the instant its deadline counts from is refreshed. The refresh stays
-// behind the "a resend is outstanding" test: a session with no gap pays that flag read
+// behind the "a resend is outstanding" test: a session with no gap pays one flag read
 // and nothing more ([const §VIII.5]).
 void Session::close_filled_resend_gap_() noexcept {
-    if (reconnect_fsm_.is_awaiting_resend() &&
-        reconnect_fsm_.current_resend_state().outstanding_end > 0 &&
+    if (!reconnect_fsm_.is_awaiting_resend()) {
+        return;
+    }
+    if (reconnect_fsm_.current_resend_state().outstanding_end > 0 &&
         seqnum_mgr_.next_inbound_unsafe() > reconnect_fsm_.current_resend_state().outstanding_end) {
         reconnect_fsm_.exit_awaiting_resend();
+        return;
     }
-    if (reconnect_fsm_.is_awaiting_resend() && effective_clock_) {
+    if (effective_clock_) {
         reconnect_fsm_.mark_resend_progress(effective_clock_->steady_now());
     }
 }
@@ -2481,11 +2484,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
-        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
-        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
-        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
-        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
-        // superseding I-07's logged-then-proceed for a cancelled store call).
+        // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
     // 093 plan OD-26: the Logout's store and write are suspensions.
@@ -2814,8 +2813,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // into storage that outlives the await.
 
 // Reject(35=3); assign_outbound before toAdmin. A failed assign or a throwing toAdmin
-// disconnects and returns the error; the emit's returned error is discarded (the comment
-// at the discard says which errors those are).
+// disconnects and returns the error; the emit's returned error is discarded (store_then_emit's
+// declaration in session.hpp says which errors those are).
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
     bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
     std::string_view sending_time, std::optional<fsm_state> arm) noexcept {
@@ -2838,11 +2837,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
         auto emit_r = co_await store_then_emit(rj_seq, *rj_r, arm);
-        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
-        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
-        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
-        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
-        // superseding I-07's logged-then-proceed for a cancelled store call).
+        // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
     co_return fixpp::core::expected_t<void>{};
@@ -2878,8 +2873,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_best_effo
 // empty, which is the deadline of an unfilled resend gap (fixpp#537, D-537-5); every other
 // caller passes an empty text and its Logout has none. A frame that cannot be built is not
 // sent, and the leaf returns success. A throwing toAdmin or a failed assign disconnects and
-// returns the error; the emit's returned error is discarded (the comment at the discard
-// says which errors those are).
+// returns the error; the emit's returned error is discarded (store_then_emit's declaration
+// in session.hpp says which errors those are).
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
     bool tic, std::string_view sending_time, std::string_view text) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
@@ -2901,11 +2896,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
-        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
-        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
-        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
-        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
-        // superseding I-07's logged-then-proceed for a cancelled store call).
+        // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
     co_return fixpp::core::expected_t<void>{};
@@ -2934,11 +2925,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent);
-        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
-        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
-        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
-        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
-        // superseding I-07's logged-then-proceed for a cancelled store call).
+        // What store_then_emit returns and when it throws: its declaration in session.hpp.
         (void)emit_r;
     }
     co_return fixpp::core::expected_t<void>{};
@@ -6560,9 +6547,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             // Ahead of the persistence gate: the ending is the same for any store.
             if (!store_r.has_value() && store_r.error() == fixpp::core::error::store_cancelled) {
                 store_call_cancelled = true;
-            }
-            if (!store_r.has_value() && store_is_persistent_ &&
-                store_r.error() != fixpp::core::error::store_cancelled) {
+            } else if (!store_r.has_value() && store_is_persistent_) {
                 // Genuine persistent-store failure: capture the error FIRST
                 // (NEW-P3, D2) — before the best-effort reconcile read — so a
                 // reconcile-time throw cannot pre-empt the intended error code.
@@ -6732,12 +6717,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
             }
             auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
-            // The returned error is discarded: a persistent store's refusal (059), a failed write,
-            // or a frame its number check stopped (D-OUT-10). A cancelled store call does not
-            // return here: store_then_emit leaves by operation_aborted, which the inbound entry's
-            // catch takes (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10,
-            // D-OUT-2 and D-OUT-4, superseding I-07's logged-then-proceed for a cancelled store
-            // call).
+            // What store_then_emit returns and when it throws: its declaration in session.hpp.
             (void)emit_r;
         }
         co_return fixpp::core::expected_t<void>{};
@@ -7169,12 +7149,8 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
                     auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
-                    // The returned error is discarded: a persistent store's refusal (059), a failed
-                    // write, or a frame its number check stopped (D-OUT-10). A cancelled store call
-                    // does not return here: store_then_emit leaves by operation_aborted, which the
-                    // inbound entry's catch takes (on_inbound_active_;
-                    // .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
-                    // superseding I-07's logged-then-proceed for a cancelled store call).
+                    // What store_then_emit returns and when it throws: its declaration in
+                    // session.hpp.
                     (void)emit_r;
                 }
             }
@@ -7223,12 +7199,8 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
                     auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
-                    // The returned error is discarded: a persistent store's refusal (059), a failed
-                    // write, or a frame its number check stopped (D-OUT-10). A cancelled store call
-                    // does not return here: store_then_emit leaves by operation_aborted, which the
-                    // inbound entry's catch takes (on_inbound_active_;
-                    // .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
-                    // superseding I-07's logged-then-proceed for a cancelled store call).
+                    // What store_then_emit returns and when it throws: its declaration in
+                    // session.hpp.
                     (void)emit_r;
                 }
             }
