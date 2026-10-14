@@ -14,6 +14,9 @@
 // a counting_resource, then calls retrieve() inside an alloc_guard window and checks
 // that the snapshot + frame-read allocations are routed through the store_resource.
 //
+// Test 3 (FileStore::store(), fixpp#598): a window of store() calls on a file I/O pool, a
+// measurement run by hand under the interceptor; its section below says why and how.
+//
 // The global-heap half. SC-007 / FR-027 ask these windows for zero global-heap
 // allocation. Test 1's window is fixpp#544's W-D, and its interceptor registration is
 // Release-only (tests/perf/CMakeLists.txt). ⚠️ Test 2's global-heap half is NOT CHECKED:
@@ -30,7 +33,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
@@ -321,4 +327,77 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     minted.value() = nullptr;
     fixpp::test_support::remove_temp_dir(dir);
 }
+
+// ── FileStore::store() window (fixpp#598, note §11.3 D-598-5) — a measurement ──────
+//
+// No gate drives FileStore::store; this window exists to be run by hand under the
+// interceptor (tests/perf/CMakeLists.txt shows how), on the tree before the offload's token
+// changes and on the tree after it, and the two counts compared. It is not registered under
+// the interceptor; without it the markers are no-ops and the cell checks only that every
+// store() succeeded.
+//
+// The driver is the W-D template above, one wrapper frame deep, with the file executor a
+// pool. Two arms, by the driver's cancellation slot. Bound: a connected slot that is never
+// emitted, as a session's calls run under its root slot; only then does the offload's spawn
+// see a connected slot to install a handler in. Unbound: no slot, as the retrieve window
+// above runs.
+namespace {
+void run_filestore_store_window(bool bind_slot) {
+    constexpr int kWarm = 16;
+    constexpr int kMeasured = 64;
+    constexpr int kTotal = kWarm + kMeasured;
+
+    auto dir = fixpp::test_support::unique_temp_dir("perf_filestore_store");
+    asio::thread_pool pool{2};
+    FileStore::Config cfg;
+    cfg.directory = dir;
+    cfg.sender_comp_id = "SENDER";
+    cfg.target_comp_id = "TARGET";
+    cfg.policy = {};  // commit_per_message
+    cfg.max_frame_bytes = 1024;
+    cfg.file_io_executor = pool.get_executor();
+
+    FileStoreFactory factory{cfg};
+    auto minted = factory.make("SENDER", "TARGET", std::pmr::new_delete_resource(),
+                               1024 * 1024 * 1024, pool.get_executor());
+    ASSERT_TRUE(minted.has_value()) << "FileStore open failed";
+    auto& store = *minted.value();
+
+    std::vector<std::vector<std::byte>> frames;
+    frames.reserve(static_cast<std::size_t>(kTotal));
+    for (int i = 0; i < kTotal; ++i) {
+        frames.push_back(make_frame(static_cast<seqnum_t>(i + 1)));
+    }
+    std::size_t next = 0;
+    auto store_next = [&] {
+        auto const i = next++;
+        return store.store(static_cast<seqnum_t>(i + 1), std::span<const std::byte>(frames[i]),
+                           direction_t::outbound);
+    };
+
+    namespace rd = fixpp::test_support::recycler;
+    asio::io_context ioc;
+    rd::window_outcome out;
+    asio::cancellation_signal sig;
+    auto drv =
+        rd::driver<1>(store_next, rd::window_spec{.warm = kWarm, .measured = kMeasured}, out);
+    if (bind_slot) {
+        asio::co_spawn(ioc, std::move(drv),
+                       asio::bind_cancellation_slot(sig.slot(), asio::detached));
+    } else {
+        asio::co_spawn(ioc, std::move(drv), asio::detached);
+    }
+    ioc.run();
+
+    EXPECT_TRUE(out.closed) << "the driver never reached the end of its window";
+    EXPECT_EQ(out.iterations, kTotal);
+    EXPECT_EQ(out.ok, kTotal) << "store() failed during the warm-up or the measured window";
+
+    minted.value() = nullptr;
+    fixpp::test_support::remove_temp_dir(dir);
+}
+}  // namespace
+
+TEST(StoreAllocGuard, FileStoreStoreWindow_BoundSlot) { run_filestore_store_window(true); }
+TEST(StoreAllocGuard, FileStoreStoreWindow_NoSlot) { run_filestore_store_window(false); }
 #endif  // !_WIN32}

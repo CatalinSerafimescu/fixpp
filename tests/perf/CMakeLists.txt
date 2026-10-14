@@ -57,6 +57,10 @@ endif()
 # (disclosed, not gated). To run that window by hand:
 #   GTEST_FILTER='*FileStoreRetrieve*' python3 tools/check_alloc.py \
 #       --binary <build>/bin/perf_store_alloc_guard --mallocnesia <build>/lib/libmallocnesia.so
+# The FileStore store() windows (fixpp#598) are a measurement and are not registered either.
+# Each arm is run alone, as above with GTEST_FILTER='*FileStoreStoreWindow_<arm>', and with a
+# --max-allocs above the window's size so that the run reaches its end; the interceptor prints
+# one line per allocation it counts.
 fixpp_add_store_test(perf_store_alloc_guard SOURCES test_store_alloc_guard.cpp)
 fixpp_add_release_mallocnesia_test(
   NAME perf_store_alloc_guard_wd_mallocnesia
