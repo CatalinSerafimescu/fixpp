@@ -624,6 +624,11 @@ target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 # fixpp#563 / fixpp#564 (B41) — a Session::send or a Session::close started inside an Application
 # callback of that session, and the session's debug guard (`.specify/563-564-callback-send.md` §3).
 add_threading_test(session_563_564_callback_send test_563_564_callback_send.cpp)
+# MSVC C1128: under the debug configuration this TU's section count exceeds the default
+# COFF object-format limit. /bigobj lifts the 2^16 cap.
+target_compile_options(session_563_564_callback_send PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
+)
 # fixpp#563 / fixpp#564 (B41) — an Engine::send started inside an Application callback or around
 # Engine::stop(), and a close started inside a callback of a session that a running Engine owns.
 # Real loopback TLS, so it carries application_engine_send_019_test's link set and fixture directory.
