@@ -89,9 +89,8 @@ ReconnectFsm::ReconnectFsm(fixpp::transport::TransportFactory* factory,
 //   (8) Success: call session_->install_reconnected_transport(move(t), hr)
 //       and co_return expected_t<void>{}.
 //
-// Loop exhaustion → co_return error (session_seqnum_too_high reused as
-//   transport_reconnect_limit_exceeded — exact error slot resolved by T026;
-//   FR-003 / C1 contract). [data-model §E-1; contracts C1]
+// Loop exhaustion → co_return error (FR-003 / C1 contract).
+//   [data-model §E-1; contracts C1]
 //
 // Cancellation: co_await asio::this_coro::reset_cancellation_state(
 //   asio::enable_total_cancellation()) at the top of the coroutine so that

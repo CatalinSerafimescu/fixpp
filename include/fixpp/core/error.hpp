@@ -689,7 +689,7 @@ enum class error : std::uint8_t {
     //      FIXPP_ERR_SESSION_FATAL ← { session_seqnum_too_high } (new member)
     session_seqnum_too_high = 120,  // FR-016 / E-4 — inbound seqnum > next_expected,
                                     //   returned by SeqnumManager::check_inbound,
-                                    //   and its callers read it. The Logon arms of
+                                    //   and the callers below read it. The Logon arms of
                                     //   both roles end the session on it unless
                                     //   enable_next_expected_msg_seq_num tolerates
                                     //   it. In Active, while a resend is
