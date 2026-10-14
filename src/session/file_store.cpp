@@ -78,8 +78,9 @@
 #include <crc32c/crc32c.h>
 
 #include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
-#include <asio/error.hpp>  // asio::error::operation_aborted — T012 durable catch
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -89,22 +90,6 @@
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
 
-// T012 catch-fired diagnostic counter — compiled unconditionally (like
-// g_store_offload_probe / install_store_offload_probe); declaration in
-// file_store.hpp gated by FIXPP_TEST_HOOKS so production callers cannot reach it.
-// The increment sites are unconditional (the library is compiled without
-// FIXPP_TEST_HOOKS, so gating them would make them unreachable from tests).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static std::atomic<int> g_catch_fired{0};
-
-// gate-b/r1 A.2 + #6 fault-injection seam: forces asio::system_error(operation_aborted)
-// to be thrown at the outer co_await of reset()'s offload, AFTER the pool lambda has
-// completed, exercising the durable-commit catch body (C3). Compiled unconditionally
-// (like g_catch_fired); declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
-// The arm/throw logic inside reset() is unconditional so the check fires when the
-// library is linked into test binaries that call arm_force_abort_after_reset_lambda().
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static std::atomic<bool> g_force_abort_after_reset_lambda{false};
 // gate-b/r1 A.1 fault-injection seam: hook called just before reopen in reset()'s
 // offload lambda; returns false to force the reopen to fail (tests the poison path).
 // Compiled unconditionally; the call site inside the lambda is also unconditional.
@@ -112,7 +97,7 @@ static std::atomic<bool> g_force_abort_after_reset_lambda{false};
 static std::atomic<bool (*)(void) noexcept> g_post_rename_reopen_fail_hook{nullptr};
 
 // T015 retrieve pread-attempt counter — counts each call to read_frame_payload()
-// inside retrieve()'s walk loop. Compiled unconditionally (like g_catch_fired);
+// inside retrieve()'s walk loop. Compiled unconditionally (like g_store_offload_probe);
 // the increment in the loop is gated by FIXPP_TEST_HOOKS (gate-b/r1 D: not needed
 // on the production read path). Exposed via read_and_reset_retrieve_pread_count().
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -133,12 +118,12 @@ static std::atomic<int> g_flush_datasync_count{0};
 // written — so nothing is retained and the durable counter is not advanced,
 // faithfully modelling a real early raw_pwrite_all failure. Drives the same
 // store_io_failure gate a genuine pwrite failure would take. Consumed once
-// (auto-cleared on fire). Compiled unconditionally (like g_catch_fired);
+// (auto-cleared on fire). Compiled unconditionally (like g_store_offload_probe);
 // declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_store_pwrite_fail_once{false};
 // 093 (tasks.md T079, Q-29) reset-atomicity fault seams. Compiled unconditionally (like
-// g_catch_fired); declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
+// g_store_offload_probe); declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
 //   g_force_reset_fail_before_rename: the next reset's offloaded sequence fails after
 //     its temp log is written and closed, before the rename. Consumed once.
 //   g_fail_counter_write_after_reset_commit: 0 off; 1 armed; 2 armed and a reset's
@@ -190,12 +175,19 @@ static constexpr std::size_t kAlignment = 8;
 // co_spawn pins the inner body to pool_ex; use_awaitable resumes the outer
 // coroutine on the spawner's associated executor (the session strand).
 //
-// FINAL NO-REAPER SHAPE (data-model §2 / contracts C1 / Decision 5):
-//   co_spawn defaults to terminal-only cancellation and FILTERS
-//   cancellation_type::total.  That is intentional here: teardown drains by
-//   AWAITING completion (Engine::stop() / T016), not by cancelling in-flight
-//   syscalls.  An implementer MUST NOT bolt a cancellation-slot/flag reaper
-//   onto this helper.
+// FINAL NO-REAPER SHAPE (data-model §2 / contracts C1 / Decision 5). The spawn's
+// token is fixpp#598's (.specify/536-537-538-recovery-liveness.md §11, D-598-1 and
+// D-598-2), which supersedes contract C3's sentence that the implementation MUST
+// unconditionally catch operation_aborted and return the durable success:
+//   The spawn has no cancellation slot: it completes through a token bound to an
+//   EMPTY slot, so no cancellation, of any type, reaches the spawned coroutine.
+//   Once a store call has handed its job over, the job runs its body, and the call
+//   returns the body's own result when it has. That holds on a file executor that
+//   runs the jobs handed to it; on one that does not, the call does not return (the host's
+//   precondition is stated at FileStore::Config::file_io_executor). A cancellation recorded on the
+//   caller's thread stays recorded there. Teardown drains by AWAITING completion (Engine::stop() /
+//   T016), not by cancelling in-flight syscalls. An implementer MUST NOT bolt a
+//   cancellation-slot/flag reaper onto this helper; the empty slot is not one.
 //
 // CALLABLE CONTRACT (for the call sites built in Phase 3+):
 //   'fn' MUST capture ONLY by value the raw POD syscall arguments:
@@ -281,7 +273,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
             store_offload_exit_guard exit_guard;
             co_return fn();  // raw blocking syscall runs HERE, pinned to pool_ex
         },
-        asio::use_awaitable);
+        asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
 }
 
 // ── Raw syscall helpers for the offload lambda ────────────────────────────────
@@ -373,13 +365,6 @@ void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) n
     g_store_offload_exit_probe.store(probe, std::memory_order_relaxed);
 }
 
-// Read and reset the T012 operation_aborted catch-fired counter.
-// Returns the count since the last reset; compiled unconditionally (declaration
-// in file_store.hpp gated by FIXPP_TEST_HOOKS). Production builds never call it.
-int read_and_reset_catch_fired() noexcept {
-    return g_catch_fired.exchange(0, std::memory_order_acq_rel);
-}
-
 // Read and reset the T015 retrieve pread-attempt counter.
 // Returns number of read_frame_payload() calls in retrieve()'s walk loop since
 // the last reset. Used by MidWalkReset tests to confirm the generation guard
@@ -396,12 +381,6 @@ int read_and_reset_retrieve_pread_count() noexcept {
 // FIXPP_TEST_HOOKS.
 int read_and_reset_flush_datasync_count() noexcept {
     return g_flush_datasync_count.exchange(0, std::memory_order_acq_rel);
-}
-
-// gate-b/r1 A.2: arm the one-shot flag so the NEXT reset() simulates abort after durable.
-// Compiled unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
-void arm_force_abort_after_reset_lambda() noexcept {
-    g_force_abort_after_reset_lambda.store(true, std::memory_order_relaxed);
 }
 
 // gate-b/r1 A.1: install (or clear) the post-rename reopen-fail hook.
@@ -1277,91 +1256,67 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     // frame_span (span into store_scratch_ — stable while mutex held), pad,
     // flush decision, and the (nullable) probe function pointer.
     // It touches NO impl_ field and mutates nothing in impl_. (data-model §2/§3)
-    //
-    // T012 — unconditional operation_aborted→durable catch (FR-004 / C3):
-    // Any operation_aborted surfaced at this outer co_await post-dates linearisation
-    // (the blocking syscall is non-interruptible on the pool thread; it runs to
-    // durable completion). Treat it as durable success — do NOT return store_cancelled
-    // for a frame already on disk ([const §XV.15]-adjacent silent-loss class).
-    // The co_spawn has no cancellation reaper (terminal-only default) so this catch
-    // is defensive per §C3; a non-operation_aborted exception falls through (OOM etc).
-    // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
-    bool io_ok = false;
-    try {
-        io_ok = co_await offload_to(
-            impl_->cfg.file_io_executor,
-            [raw_fd, frame_hdr, frame_span, frame_off, frame_pad, counter_hdr, counter_pl,
-             counter_off, do_flush, probe_fn]() -> bool {
-                // Call the test probe (if installed) BEFORE the first pwrite so the
-                // test can confirm the syscall ran on a pool thread ≠ strand thread.
-                // In production probe_fn is nullptr; the branch is dead-code-eliminated.
-                if (probe_fn) {
-                    probe_fn(std::this_thread::get_id());
-                }
+    const bool io_ok = co_await offload_to(
+        impl_->cfg.file_io_executor,
+        [raw_fd, frame_hdr, frame_span, frame_off, frame_pad, counter_hdr, counter_pl, counter_off,
+         do_flush, probe_fn]() -> bool {
+            // Call the test probe (if installed) BEFORE the first pwrite so the
+            // test can confirm the syscall ran on a pool thread ≠ strand thread.
+            // In production probe_fn is nullptr; the branch is dead-code-eliminated.
+            if (probe_fn) {
+                probe_fn(std::this_thread::get_id());
+            }
 
-                // T003 fault-injection: return false at the FIRST pwrite — BEFORE
-                // any durable byte — so nothing is retained and the durable counter
-                // is not advanced (faithful early-failure model; NOT a post-offload
-                // io_ok flip, which would leave the frame + counter on disk and
-                // desync the durable counter). Statics have static storage duration
-                // (not captured); reachable on the pool thread.
-                if (g_force_store_pwrite_fail_once.exchange(false, std::memory_order_relaxed)) {
-                    g_store_pwrite_fail_count.fetch_add(1, std::memory_order_relaxed);
-                    return false;
-                }
+            // T003 fault-injection: return false at the FIRST pwrite — BEFORE
+            // any durable byte — so nothing is retained and the durable counter
+            // is not advanced (faithful early-failure model; NOT a post-offload
+            // io_ok flip, which would leave the frame + counter on disk and
+            // desync the durable counter). Statics have static storage duration
+            // (not captured); reachable on the pool thread.
+            if (g_force_store_pwrite_fail_once.exchange(false, std::memory_order_relaxed)) {
+                g_store_pwrite_fail_count.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
 
-                // pwrite frame header at frame_off.
-                if (!raw_pwrite_all(raw_fd, &frame_hdr, kHeaderSize,
-                                    static_cast<off_t>(frame_off))) {
-                    return false;
-                }
-                // pwrite frame payload.
-                if (!frame_span.empty()) {
-                    if (!raw_pwrite_all(raw_fd, frame_span.data(), frame_span.size(),
-                                        static_cast<off_t>(
-                                            frame_off + static_cast<std::int64_t>(kHeaderSize)))) {
-                        return false;
-                    }
-                }
-                // pwrite frame padding.
-                if (frame_pad > 0) {
-                    const std::uint8_t zeros[8]{};
-                    if (!raw_pwrite_all(
-                            raw_fd, zeros, frame_pad,
-                            static_cast<off_t>(frame_off + static_cast<std::int64_t>(
-                                                               kHeaderSize + frame_span.size())))) {
-                        return false;
-                    }
-                }
-                // pwrite counter header.
-                if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
-                                    static_cast<off_t>(counter_off))) {
-                    return false;
-                }
-                // pwrite counter payload.
+            // pwrite frame header at frame_off.
+            if (!raw_pwrite_all(raw_fd, &frame_hdr, kHeaderSize, static_cast<off_t>(frame_off))) {
+                return false;
+            }
+            // pwrite frame payload.
+            if (!frame_span.empty()) {
                 if (!raw_pwrite_all(
-                        raw_fd, &counter_pl, kCounterPayloadSize,
-                        static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
+                        raw_fd, frame_span.data(), frame_span.size(),
+                        static_cast<off_t>(frame_off + static_cast<std::int64_t>(kHeaderSize)))) {
                     return false;
                 }
-                // datasync: linearisation point (FR-003 / C2). Blocks until durable.
-                if (do_flush && !raw_datasync(raw_fd)) {
+            }
+            // pwrite frame padding.
+            if (frame_pad > 0) {
+                const std::uint8_t zeros[8]{};
+                if (!raw_pwrite_all(
+                        raw_fd, zeros, frame_pad,
+                        static_cast<off_t>(frame_off + static_cast<std::int64_t>(
+                                                           kHeaderSize + frame_span.size())))) {
                     return false;
                 }
-                return true;
-            });
-    } catch (const asio::system_error& e) {
-        if (e.code() != asio::error::operation_aborted) {
-            // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
-            throw;  // Only operation_aborted is handled; anything else is unexpected
-                    // and propagates (noexcept coroutine → terminate). Consistent
-                    // with next_seqnum()/reset().
-        }
-        // operation_aborted post-dates linearisation: the syscall completed durably.
-        // Fall through with io_ok=true so Region 3 applies the correct mutations.
-        g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-        io_ok = true;
-    }
+            }
+            // pwrite counter header.
+            if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
+                                static_cast<off_t>(counter_off))) {
+                return false;
+            }
+            // pwrite counter payload.
+            if (!raw_pwrite_all(
+                    raw_fd, &counter_pl, kCounterPayloadSize,
+                    static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
+                return false;
+            }
+            // datasync: linearisation point (FR-003 / C2). Blocks until durable.
+            if (do_flush && !raw_datasync(raw_fd)) {
+                return false;
+            }
+            return true;
+        });
 
     // ── Region 3: STRAND — apply mutations on success (mutex still held) ──────
     //
@@ -1589,48 +1544,33 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
         const auto probe_fn = g_store_offload_probe.load(std::memory_order_relaxed);
 
         // ── Region 2: POOL — raw syscalls in the offloaded lambda ─────────────────
-        //
-        // T012 — unconditional operation_aborted→durable catch (FR-004 / C3).
-        // Same rationale as store(): any operation_aborted at this await post-dates
-        // linearisation; treat as durable success.
-        // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
-        bool io_ok = false;
-        try {
-            io_ok = co_await offload_to(
-                impl_->cfg.file_io_executor,
-                [raw_fd, counter_hdr, counter_pl, counter_off, probe_fn]() -> bool {
-                    if (probe_fn) {
-                        probe_fn(std::this_thread::get_id());
-                    }
-                    // 093 (tasks.md T079): the counter-write-after-reset-commit seam.
-                    int committed = 2;
-                    if (g_fail_counter_write_after_reset_commit.compare_exchange_strong(
-                            committed, 0, std::memory_order_relaxed)) {
-                        g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
-                        return false;
-                    }
-                    // pwrite counter header.
-                    if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
-                                        static_cast<off_t>(counter_off))) {
-                        return false;
-                    }
-                    // pwrite counter payload.
-                    if (!raw_pwrite_all(raw_fd, &counter_pl, kCounterPayloadSize,
-                                        static_cast<off_t>(counter_off + static_cast<std::int64_t>(
-                                                                             kHeaderSize)))) {
-                        return false;
-                    }
-                    // datasync: linearisation point (counter-record pwrite + datasync).
-                    return raw_datasync(raw_fd);
-                });
-        } catch (const asio::system_error& e) {
-            if (e.code() != asio::error::operation_aborted) {
-                // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
-                throw;  // Only operation_aborted is handled; anything else propagates.
-            }
-            g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-            io_ok = true;  // Post-dates linearisation: durable success.
-        }
+        const bool io_ok = co_await offload_to(
+            impl_->cfg.file_io_executor,
+            [raw_fd, counter_hdr, counter_pl, counter_off, probe_fn]() -> bool {
+                if (probe_fn) {
+                    probe_fn(std::this_thread::get_id());
+                }
+                // 093 (tasks.md T079): the counter-write-after-reset-commit seam.
+                int committed = 2;
+                if (g_fail_counter_write_after_reset_commit.compare_exchange_strong(
+                        committed, 0, std::memory_order_relaxed)) {
+                    g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                    return false;
+                }
+                // pwrite counter header.
+                if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
+                                    static_cast<off_t>(counter_off))) {
+                    return false;
+                }
+                // pwrite counter payload.
+                if (!raw_pwrite_all(
+                        raw_fd, &counter_pl, kCounterPayloadSize,
+                        static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
+                    return false;
+                }
+                // datasync: linearisation point (counter-record pwrite + datasync).
+                return raw_datasync(raw_fd);
+            });
 
         // ── Region 3: STRAND — advance write_pos on success (mutex still held) ──
         if (!io_ok) {
@@ -1770,14 +1710,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
 
     // ── Region 2: POOL — entire atomic-rename sequence in the offloaded lambda ──
     //
-    // The lambda publishes its result via two shared slots that survive even if
-    // operation_aborted is thrown at the outer co_await (C3 / gate-b/r1 A.1+A.2):
+    // The lambda publishes its result via two shared slots:
     //
     //   result_file  — shared_ptr<OsFile>. The lambda writes the opened+locked
-    //                  OsFile here BEFORE returning. On the normal (non-aborted)
-    //                  path, Region 3 moves from this slot. On operation_aborted,
-    //                  the catch reads it: if result_file->valid() the lambda
-    //                  completed durably and the catch commits (A.2).
+    //                  OsFile here BEFORE returning. On success, Region 3 moves
+    //                  from this slot.
     //   rename_done  — shared_ptr<bool>. Set to true as soon as the rename has
     //                  replaced the live name, before any later step (directory
     //                  durability, reopen, lock) can fail. Region 3 reads this to
@@ -1790,241 +1727,197 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     // Thread-safety: both shared slots are written ONLY by the pool lambda and read
     // ONLY on the strand after the co_await resumes — no concurrent access.
     //
-    // T012 — unconditional operation_aborted→durable catch (FR-004 / C3).
-    // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
     auto result_file = std::make_shared<OsFile>();
     auto rename_done = std::make_shared<bool>(false);
 
-    bool reset_ok = false;
-    try {
-        reset_ok = co_await offload_to(
-            impl.cfg.file_io_executor,
-            [path, hash, probe_fn, result_file, rename_done, next_in, next_out]() -> bool {
-                if (probe_fn) {
-                    probe_fn(std::this_thread::get_id());
-                }
+    const bool reset_ok = co_await offload_to(
+        impl.cfg.file_io_executor,
+        [path, hash, probe_fn, result_file, rename_done, next_in, next_out]() -> bool {
+            if (probe_fn) {
+                probe_fn(std::this_thread::get_id());
+            }
 
 #ifndef _WIN32
-                // ── Linux atomic-rename path ─────────────────────────────────────
-                const std::string tmp_path = path + ".reset.tmp";
+            // ── Linux atomic-rename path ─────────────────────────────────────
+            const std::string tmp_path = path + ".reset.tmp";
 
-                // Open tmp file (O_RDWR | O_CREAT | O_TRUNC)
-                OsFile tmp_file;
-                if (!tmp_file.open_wronly_creat(tmp_path.c_str())) {
-                    return false;
-                }
+            // Open tmp file (O_RDWR | O_CREAT | O_TRUNC)
+            OsFile tmp_file;
+            if (!tmp_file.open_wronly_creat(tmp_path.c_str())) {
+                return false;
+            }
 
-                // Write sentinel + initial counter to tmp file using a local tmp_impl.
-                {
-                    FileStoreImpl tmp_impl;
-                    tmp_impl.expected_hash = hash;
-                    tmp_impl.file = std::move(tmp_file);
-                    tmp_impl.write_pos = 0;
-                    tmp_impl.next_inbound = next_in;
-                    tmp_impl.next_outbound = next_out;
+            // Write sentinel + initial counter to tmp file using a local tmp_impl.
+            {
+                FileStoreImpl tmp_impl;
+                tmp_impl.expected_hash = hash;
+                tmp_impl.file = std::move(tmp_file);
+                tmp_impl.write_pos = 0;
+                tmp_impl.next_inbound = next_in;
+                tmp_impl.next_outbound = next_out;
 
-                    if (!tmp_impl.initialise_fresh(next_in, next_out)) {
-                        // Move file back so it closes properly, then unlink tmp.
-                        tmp_file = std::move(tmp_impl.file);
-                        ::unlink(tmp_path.c_str());
-                        return false;
-                    }
-                    // tmp_file.datasync() is called inside initialise_fresh()
+                if (!tmp_impl.initialise_fresh(next_in, next_out)) {
+                    // Move file back so it closes properly, then unlink tmp.
                     tmp_file = std::move(tmp_impl.file);
+                    ::unlink(tmp_path.c_str());
+                    return false;
                 }
+                // tmp_file.datasync() is called inside initialise_fresh()
+                tmp_file = std::move(tmp_impl.file);
+            }
 
-                // Close tmp file before rename (required on some POSIX implementations)
-                tmp_file = OsFile{};  // destructs: close()
+            // Close tmp file before rename (required on some POSIX implementations)
+            tmp_file = OsFile{};  // destructs: close()
 
-                // 093 (tasks.md T079): the fault-before-rename seam.
-                if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
+            // 093 (tasks.md T079): the fault-before-rename seam.
+            if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
+                g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                ::unlink(tmp_path.c_str());
+                return false;
+            }
+
+            // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
+            if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
+                ::unlink(tmp_path.c_str());
+                return false;
+            }
+            // The live name now names the fresh log and the store's open file names
+            // the replaced one, so from here every failure (directory open or fsync,
+            // reopen, lock) must take Region 3's poison branch, so the mark precedes
+            // the directory fsync (093 Gate B, fixpp#554).
+            *rename_done = true;
+
+            // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
+            {
+                const std::filesystem::path log_fs_path{path};
+                const auto dir_fs_path = log_fs_path.parent_path();
+                const std::string dir_path =
+                    dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
+                // 093 Gate B (fixpp#554): the directory-open fault seam.
+                if (g_force_reset_dir_open_fail.exchange(false, std::memory_order_relaxed)) {
                     g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
-                    ::unlink(tmp_path.c_str());
                     return false;
                 }
-
-                // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
-                if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
-                    ::unlink(tmp_path.c_str());
+                const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
+                if (dir_fd < 0) {
                     return false;
                 }
-                // The live name now names the fresh log and the store's open file names
-                // the replaced one, so from here every failure (directory open or fsync,
-                // reopen, lock) must take Region 3's poison branch, so the mark precedes
-                // the directory fsync (093 Gate B, fixpp#554).
-                *rename_done = true;
-
-                // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
-                {
-                    const std::filesystem::path log_fs_path{path};
-                    const auto dir_fs_path = log_fs_path.parent_path();
-                    const std::string dir_path =
-                        dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
-                    // 093 Gate B (fixpp#554): the directory-open fault seam.
-                    if (g_force_reset_dir_open_fail.exchange(false, std::memory_order_relaxed)) {
-                        g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
-                        return false;
-                    }
-                    const int dir_fd = ::open(dir_path.c_str(), O_RDONLY | O_DIRECTORY);
-                    if (dir_fd < 0) {
-                        return false;
-                    }
-                    int fsync_rc = ::fsync(dir_fd);
-                    // 093 Gate B (fixpp#554): the directory-fsync fault seam.
-                    if (g_force_reset_dir_fsync_fail.exchange(false, std::memory_order_relaxed)) {
-                        g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
-                        fsync_rc = -1;
-                    }
-                    ::close(dir_fd);
-                    if (fsync_rc != 0) {
-                        return false;
-                    }
+                int fsync_rc = ::fsync(dir_fd);
+                // 093 Gate B (fixpp#554): the directory-fsync fault seam.
+                if (g_force_reset_dir_fsync_fail.exchange(false, std::memory_order_relaxed)) {
+                    g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                    fsync_rc = -1;
                 }
-
-                // 093 (tasks.md T079): a reset's rename has committed; an armed
-                // counter-write-after-reset-commit seam now fires at the next write.
-                {
-                    int armed = 1;
-                    (void)g_fail_counter_write_after_reset_commit.compare_exchange_strong(
-                        armed, 2, std::memory_order_relaxed);
-                }
-
-                // Re-open the live log (replaced by rename; advisory lock must be re-taken).
-                // If this fails: post-rename failure → caller will poison the store (A.1).
-                // gate-b/r1 A.1 fault-injection: if the hook is installed and returns false,
-                // simulate a reopen failure post-rename to exercise the poison path.
-                if (auto* h = g_post_rename_reopen_fail_hook.exchange(nullptr,
-                                                                      std::memory_order_relaxed)) {
-                    if (!h()) {
-                        return false;  // forced post-rename reopen failure → poison
-                    }
-                }
-                OsFile new_file;
-                if (!new_file.open(path.c_str())) {
+                ::close(dir_fd);
+                if (fsync_rc != 0) {
                     return false;
                 }
-                if (!new_file.try_lock()) {
-                    return false;
+            }
+
+            // 093 (tasks.md T079): a reset's rename has committed; an armed
+            // counter-write-after-reset-commit seam now fires at the next write.
+            {
+                int armed = 1;
+                (void)g_fail_counter_write_after_reset_commit.compare_exchange_strong(
+                    armed, 2, std::memory_order_relaxed);
+            }
+
+            // Re-open the live log (replaced by rename; advisory lock must be re-taken).
+            // If this fails: post-rename failure → caller will poison the store (A.1).
+            // Fault-injection: if the hook is installed and returns false,
+            // simulate a reopen failure post-rename to exercise the poison path.
+            if (auto* h =
+                    g_post_rename_reopen_fail_hook.exchange(nullptr, std::memory_order_relaxed)) {
+                if (!h()) {
+                    return false;  // forced post-rename reopen failure → poison
                 }
-                // Publish to result slot; the sole owner stays here until Region 3 moves it.
-                // (On operation_aborted, catch reads result_file->valid() to confirm durable
-                // completion before committing.) [gate-b/r1 A.2]
-                *result_file = std::move(new_file);
-                return true;
+            }
+            OsFile new_file;
+            if (!new_file.open(path.c_str())) {
+                return false;
+            }
+            if (!new_file.try_lock()) {
+                return false;
+            }
+            // Publish to result slot; the sole owner stays here until Region 3 moves it.
+            *result_file = std::move(new_file);
+            return true;
 
 #else
-                // ── Windows atomic-rename path ────────────────────────────────────
-                const std::string tmp_path = path + ".reset.tmp";
-                const std::wstring wide_tmp = store_wide_path(tmp_path);
-                const std::wstring wide_live = store_wide_path(path);
+            // ── Windows atomic-rename path ────────────────────────────────────
+            const std::string tmp_path = path + ".reset.tmp";
+            const std::wstring wide_tmp = store_wide_path(tmp_path);
+            const std::wstring wide_live = store_wide_path(path);
 
-                OsFile tmp_file;
-                if (!tmp_file.open_wronly_creat(wide_tmp.c_str())) {
-                    return false;
-                }
-                {
-                    FileStoreImpl tmp_impl;
-                    tmp_impl.expected_hash = hash;
-                    tmp_impl.file = std::move(tmp_file);
-                    tmp_impl.write_pos = 0;
-                    tmp_impl.next_inbound = next_in;
-                    tmp_impl.next_outbound = next_out;
-                    if (!tmp_impl.initialise_fresh(next_in, next_out)) {
-                        tmp_file = std::move(tmp_impl.file);
-                        DeleteFileW(wide_tmp.c_str());
-                        return false;
-                    }
+            OsFile tmp_file;
+            if (!tmp_file.open_wronly_creat(wide_tmp.c_str())) {
+                return false;
+            }
+            {
+                FileStoreImpl tmp_impl;
+                tmp_impl.expected_hash = hash;
+                tmp_impl.file = std::move(tmp_file);
+                tmp_impl.write_pos = 0;
+                tmp_impl.next_inbound = next_in;
+                tmp_impl.next_outbound = next_out;
+                if (!tmp_impl.initialise_fresh(next_in, next_out)) {
                     tmp_file = std::move(tmp_impl.file);
-                }
-                tmp_file = OsFile{};  // close tmp
-                // 093 (tasks.md T079): the fault-before-rename seam.
-                if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
-                    g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
                     DeleteFileW(wide_tmp.c_str());
                     return false;
                 }
-                // POSIX-semantics rename (I-15 / RC#1): atomically replaces the
-                // live log even though FileStore's live handle is still open on
-                // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
-                // posix_rename_over_open. FlushFileBuffers inside provides the
-                // WRITE_THROUGH durability the old MoveFileEx flag gave.
-                const rename_outcome renamed = posix_rename_over_open(wide_tmp, wide_live);
-                if (renamed == rename_outcome::not_renamed) {
-                    DeleteFileW(wide_tmp.c_str());
-                    return false;
+                tmp_file = std::move(tmp_impl.file);
+            }
+            tmp_file = OsFile{};  // close tmp
+            // 093 (tasks.md T079): the fault-before-rename seam.
+            if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
+                g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                DeleteFileW(wide_tmp.c_str());
+                return false;
+            }
+            // POSIX-semantics rename (I-15 / RC#1): atomically replaces the
+            // live log even though FileStore's live handle is still open on
+            // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
+            // posix_rename_over_open. FlushFileBuffers inside provides the
+            // WRITE_THROUGH durability the old MoveFileEx flag gave.
+            const rename_outcome renamed = posix_rename_over_open(wide_tmp, wide_live);
+            if (renamed == rename_outcome::not_renamed) {
+                DeleteFileW(wide_tmp.c_str());
+                return false;
+            }
+            // Rename succeeded — mark before the flush verdict and the reopen, so
+            // every failure from here takes Region 3's poison branch. The tmp name
+            // no longer exists, so there is nothing to delete.
+            *rename_done = true;
+            if (renamed == rename_outcome::renamed_not_flushed) {
+                return false;  // the store's handle names the replaced file → poison
+            }
+            // 093 (tasks.md T079): a reset's rename has committed; an armed
+            // counter-write-after-reset-commit seam now fires at the next write.
+            {
+                int armed = 1;
+                (void)g_fail_counter_write_after_reset_commit.compare_exchange_strong(
+                    armed, 2, std::memory_order_relaxed);
+            }
+            // Fault-injection: the same forced post-rename reopen
+            // failure seam as the POSIX branch above (the cancellation/poison
+            // witnesses install this hook and must fire on Windows too).
+            if (auto* h =
+                    g_post_rename_reopen_fail_hook.exchange(nullptr, std::memory_order_relaxed)) {
+                if (!h()) {
+                    return false;  // forced post-rename reopen failure → poison
                 }
-                // Rename succeeded — mark before the flush verdict and the reopen, so
-                // every failure from here takes Region 3's poison branch. The tmp name
-                // no longer exists, so there is nothing to delete.
-                *rename_done = true;
-                if (renamed == rename_outcome::renamed_not_flushed) {
-                    return false;  // the store's handle names the replaced file → poison
-                }
-                // 093 (tasks.md T079): a reset's rename has committed; an armed
-                // counter-write-after-reset-commit seam now fires at the next write.
-                {
-                    int armed = 1;
-                    (void)g_fail_counter_write_after_reset_commit.compare_exchange_strong(
-                        armed, 2, std::memory_order_relaxed);
-                }
-                // gate-b/r1 A.1 fault-injection: same forced post-rename reopen
-                // failure seam as the POSIX branch above (the cancellation/poison
-                // witnesses install this hook and must fire on Windows too).
-                if (auto* h = g_post_rename_reopen_fail_hook.exchange(nullptr,
-                                                                      std::memory_order_relaxed)) {
-                    if (!h()) {
-                        return false;  // forced post-rename reopen failure → poison
-                    }
-                }
-                OsFile new_file;
-                if (!new_file.open(wide_live.c_str())) {
-                    return false;
-                }
-                if (!new_file.try_lock()) {
-                    return false;
-                }
-                *result_file = std::move(new_file);
-                return true;
+            }
+            OsFile new_file;
+            if (!new_file.open(wide_live.c_str())) {
+                return false;
+            }
+            if (!new_file.try_lock()) {
+                return false;
+            }
+            *result_file = std::move(new_file);
+            return true;
 #endif
-            });
-        // gate-b/r1 A.2 fault-injection: if g_force_abort_after_reset_lambda is set,
-        // simulate operation_aborted arriving at the outer resume after the lambda
-        // completed (co_spawn's terminal-only filter normally prevents this; the seam
-        // makes the catch body reachable for witness testing). The flag is consumed
-        // once (exchange to false) so subsequent resets are unaffected.
-        if (g_force_abort_after_reset_lambda.exchange(false, std::memory_order_relaxed)) {
-            throw asio::system_error(asio::error::operation_aborted);
-        }
-    } catch (const asio::system_error& e) {
-        if (e.code() != asio::error::operation_aborted) {
-            // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
-            throw;  // Unexpected (OOM, etc.) — propagate.
-        }
-        // operation_aborted: post-dates linearisation per C3 (§6.1.4 / contracts C3).
-        // The lambda may have completed durably (rename + reopen + lock all succeeded)
-        // before the exception replaced the return path. Recover via result_file slot:
-        //   • result_file->valid(): lambda completed fully → commit exactly as Region 3
-        //     would (A.2). This honours C3: a durable reset MUST return success, never
-        //     store_io_failure or store_cancelled.
-        //   • !result_file->valid(): lambda returned false (pre- or post-rename failure)
-        //     AND was also aborted → fall through to Region 3 (poison/fail-closed).
-        // [gate-b/r1 A.2] [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]
-        g_catch_fired.fetch_add(1, std::memory_order_relaxed);
-        if (result_file->valid()) {
-            // Lambda completed durably; commit the result exactly as Region 3 would.
-            impl.file = std::move(*result_file);
-            ++impl.generation_;
-            impl.inbound_index.clear();
-            impl.outbound_index.clear();
-            impl.write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
-                                                       record_disk_size(kCounterPayloadSize));
-            impl.next_inbound = next_in;
-            impl.next_outbound = next_out;
-            co_return fixpp::core::expected_t<void>{};  // durable success (C3)
-        }
-        // Lambda did not produce a valid file; fall through to Region 3.
-        // reset_ok remains false; rename_done indicates which poison branch applies.
-    }
+        });
 
     // ── Region 3: STRAND — apply mutations on success (mutex still held) ──────
     //

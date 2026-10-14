@@ -32,13 +32,10 @@
 //     The emit carries the terminal bit and is made while the hold probe keeps the
 //     body inside the offload (fixpp#598, note §11.6); its section below says how,
 //     and what shows that the emit arrived.
-//     The catch body for reset() is driven by the fault-injection cell
-//     (Reset_OperationAbortedAfterDurable_CommitsAndReturnsDurableSuccess) using
-//     arm_force_abort_after_reset_lambda().
 //
-//   CoSpawn_TerminalOnly_DoesNotSwallowTotal_NoWedge:
+//   Store_TotalCancelDuringOffload_DoesNotWedge:
 //     total cancellation emitted while a store offload is in-flight; asserts no
-//     wedge/hang. [[feedback_asio_cospawn_total_cancellation_default]]
+//     wedge/hang.
 //
 // ANTI-HANG: every live cell uses a bounded future.wait_for so a wedge FAILs
 // rather than hanging ctest. [[feedback_fail_placeholder_red_test]]
@@ -53,7 +50,8 @@
 //   pool_ = asio::thread_pool (4 threads); strand_exec_ opens the stores and reads them.
 //   pool.stop() + pool.join() in TearDown.
 //
-// FIXPP_TEST_HOOKS: required for install_store_offload_probe + read_and_reset_catch_fired.
+// FIXPP_TEST_HOOKS: required for install_store_offload_probe and
+// install_post_rename_reopen_fail_hook.
 // CMakeLists adds this flag to the target definition.
 #include <gtest/gtest.h>
 
@@ -176,7 +174,6 @@ protected:
     void TearDown() override {
 #ifdef FIXPP_TEST_HOOKS
         fixpp::session::install_store_offload_probe(nullptr);
-        fixpp::session::read_and_reset_catch_fired();  // clear counter
         reset_probe();
 #endif
         if (pool_) {
@@ -255,7 +252,6 @@ void FileStoreCancellationTest::store_cancel_at_mutex_acquire(asio::cancellation
 
     reset_probe();
     fixpp::session::install_store_offload_probe(hold_probe);
-    fixpp::session::read_and_reset_catch_fired();
 
     // Store opened on fixture strand; file_io_executor = pool_.
     auto store = open_store("SNDR1", "TGTA",
@@ -336,10 +332,6 @@ void FileStoreCancellationTest::store_cancel_at_mutex_acquire(asio::cancellation
         EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
     }).get();
     EXPECT_EQ(vis.count, 1U) << "Only seq=1 should be stored; B was cancelled at mutex";
-
-    // T012 catch must NOT have fired on the arm-(a) path (cancel before any offload).
-    EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
-        << "T012 catch fired unexpectedly during arm (a)";
 }
 
 void FileStoreCancellationTest::next_seqnum_cancel_at_mutex_acquire(
@@ -348,7 +340,6 @@ void FileStoreCancellationTest::next_seqnum_cancel_at_mutex_acquire(
 
     reset_probe();
     fixpp::session::install_store_offload_probe(hold_probe);
-    fixpp::session::read_and_reset_catch_fired();
 
     auto store = open_store("SNDR2", "TGTB");
     ASSERT_TRUE(store != nullptr);
@@ -399,9 +390,6 @@ void FileStoreCancellationTest::next_seqnum_cancel_at_mutex_acquire(
     ASSERT_TRUE(rA->has_value()) << "next_seqnum(true) A must succeed";
     EXPECT_EQ(**rA, 1U) << "first increment returns seqnum 1";
 
-    EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
-        << "T012 catch fired unexpectedly during arm (a)";
-
     // Primary path: B cancelled at mutex acquire — MANDATORY.
     ASSERT_FALSE(rB->has_value()) << "B must be cancelled; cancel was deterministic";
     EXPECT_EQ(rB->error(), error::store_cancelled)
@@ -420,7 +408,6 @@ void FileStoreCancellationTest::reset_cancel_at_mutex_acquire(asio::cancellation
     using fixpp::sync::test::yield_n;
 
     reset_probe();
-    fixpp::session::read_and_reset_catch_fired();
 
     auto store = open_store("SNDR3", "TGTC");
     ASSERT_TRUE(store != nullptr);
@@ -485,9 +472,6 @@ void FileStoreCancellationTest::reset_cancel_at_mutex_acquire(asio::cancellation
 
     ASSERT_TRUE(rA->has_value()) << "store(seq=2) A must succeed";
 
-    EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
-        << "T012 catch fired unexpectedly during arm (a)";
-
     // Primary path: reset() cancelled at the mutex acquire — MANDATORY.
     ASSERT_FALSE(rB->has_value()) << "B must be cancelled; cancel was deterministic";
     EXPECT_EQ(rB->error(), error::store_cancelled) << "Cancelled reset must return store_cancelled";
@@ -540,9 +524,6 @@ TEST_F(FileStoreCancellationTest,
 // the emit arrived: after the call has returned, the operation's own coroutine reads a
 // cancellation with the terminal bit on its thread. The pool has no recorder, so the cells
 // have no count of the jobs handed over.
-//
-// Each cell still reads the counter of the operation_aborted handler and asserts it is zero;
-// the counter is deleted with that handler (note D-598-2).
 
 #ifdef FIXPP_TEST_HOOKS
 
@@ -614,7 +595,6 @@ TEST_F(FileStoreCancellationTest, Store_CancelMidSyscall_DurableNotCancelled) {
 
     reset_probe();
     fixpp::session::install_store_offload_probe(hold_probe);
-    fixpp::session::read_and_reset_catch_fired();
 
     const auto frame1 = make_frame(1);
     asio::io_context ioc;
@@ -635,9 +615,6 @@ TEST_F(FileStoreCancellationTest, Store_CancelMidSyscall_DurableNotCancelled) {
         EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
     }).get();
     EXPECT_EQ(vis.count, 1U) << "Frame seq=1 must be durable after successful store";
-
-    EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
-        << "the operation_aborted handler fired for a body that ran";
 }
 
 TEST_F(FileStoreCancellationTest, NextSeqnum_CancelMidSyscall_DurableNotCancelled) {
@@ -647,7 +624,6 @@ TEST_F(FileStoreCancellationTest, NextSeqnum_CancelMidSyscall_DurableNotCancelle
 
     reset_probe();
     fixpp::session::install_store_offload_probe(hold_probe);
-    fixpp::session::read_and_reset_catch_fired();
 
     asio::io_context ioc;
     asio::cancellation_signal sig;
@@ -669,9 +645,6 @@ TEST_F(FileStoreCancellationTest, NextSeqnum_CancelMidSyscall_DurableNotCancelle
     const auto r2 = fut2.get();
     ASSERT_TRUE(r2.has_value());
     EXPECT_EQ(*r2, 2U) << "Counter must be 2 after one increment";
-
-    EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
-        << "the operation_aborted handler fired for a body that ran";
 }
 
 TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
@@ -689,7 +662,6 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
 
     reset_probe();
     fixpp::session::install_store_offload_probe(hold_probe);
-    fixpp::session::read_and_reset_catch_fired();
 
     asio::io_context ioc;
     asio::cancellation_signal sig;
@@ -714,9 +686,6 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
     const auto r2 = fut2.get();
     ASSERT_TRUE(r2.has_value());
     EXPECT_EQ(*r2, 1U) << "Outbound counter must be 1 after reset";
-
-    EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
-        << "the operation_aborted handler fired for a body that ran";
 }
 
 #endif  // FIXPP_TEST_HOOKS (arm (b))
@@ -725,10 +694,10 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
 // No-wedge cell: total cancellation while store offload in-flight → no hang
 // ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
 //
-// Co_spawn terminal-only default must NOT swallow total cancellation and stall
-// teardown. [[feedback_asio_cospawn_total_cancellation_default]]
+// A total cancellation emitted while a store's offload is in flight must not stall the
+// call, and so must not stall a teardown that awaits it.
 
-TEST_F(FileStoreCancellationTest, CoSpawn_TerminalOnly_DoesNotSwallowTotal_NoWedge) {
+TEST_F(FileStoreCancellationTest, Store_TotalCancelDuringOffload_DoesNotWedge) {
     auto store = open_store("SNDR7", "TGTG",
                             FileStorePolicy{.which = FileStorePolicy::kind::commit_per_message});
     ASSERT_TRUE(store != nullptr);
@@ -738,7 +707,6 @@ TEST_F(FileStoreCancellationTest, CoSpawn_TerminalOnly_DoesNotSwallowTotal_NoWed
     // Install a slow probe so the cancel signal fires while syscall is mid-flight.
     reset_probe();
     fixpp::session::install_store_offload_probe(slow_probe);
-    fixpp::session::read_and_reset_catch_fired();
 #endif
 
     asio::cancellation_signal sig;
@@ -843,75 +811,6 @@ TEST_F(FileStoreCancellationTest,
         << "Poisoned store must return store_io_failure";
 }
 
-// ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
-// gate-b/r1 A.2 — operation_aborted-after-durable witness for reset()
-// ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
-//
-// Validates that when reset() receives asio::system_error(operation_aborted) at the
-// outer co_await AFTER the lambda completed durably (rename+reopen+lock all succeeded),
-// the catch body commits the new file and returns durable success — never store_io_failure.
-//
-// This exercises the C3 contract: a durable reset must NEVER be reported as failed.
-//
-// Discriminating: pre-advance the seqnum counter to N=37 before reset. After reset,
-// assert next_seqnum==1 (counter reset to seqnum_min). If the catch body doesn't commit,
-// next_seqnum would still be 38 (not reset) — proves the commit path fired.
-
-TEST_F(FileStoreCancellationTest,
-       Reset_OperationAbortedAfterDurable_CommitsAndReturnsDurableSuccess) {
-    auto store = open_store("SNDR_PA2", "TGT_PA2");
-    ASSERT_TRUE(store != nullptr);
-    auto store_sp = std::shared_ptr<FileStore>(std::move(store));
-
-    // Advance the outbound counter to 37 by incrementing 36 times (starts at seqnum_min=1,
-    // each increment advances by 1, so 36 increments → next_seqnum=37 before the 37th call).
-    // This gives a discriminating pre-reset value well above seqnum_min.
-    for (int i = 0; i < 36; ++i) {
-        auto r = spawn_on_strand([store_sp]() mutable
-                                     -> asio::awaitable<fixpp::core::expected_t<seqnum_t>> {
-                     co_return co_await store_sp->next_seqnum(direction_t::outbound, true);
-                 }).get();
-        ASSERT_TRUE(r.has_value()) << "next_seqnum advance failed at i=" << i;
-    }
-    // Verify: next_seqnum (no increment) should be 37.
-    {
-        auto r = spawn_on_strand([store_sp]() mutable
-                                     -> asio::awaitable<fixpp::core::expected_t<seqnum_t>> {
-                     co_return co_await store_sp->next_seqnum(direction_t::outbound, false);
-                 }).get();
-        ASSERT_TRUE(r.has_value()) << "Pre-reset next_seqnum check failed";
-        ASSERT_EQ(*r, seqnum_t{37}) << "Pre-reset counter must be 37 (discrimination seed)";
-    }
-
-    // Arm the one-shot fault: next reset() will receive operation_aborted AFTER lambda.
-    fixpp::session::arm_force_abort_after_reset_lambda();
-
-    // reset() — lambda completes durably, then operation_aborted is thrown at the outer
-    // co_await. The catch body must commit (impl_ updated + durable success returned).
-    auto r_reset =
-        spawn_on_strand([store_sp]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
-            co_return co_await (*store_sp).reset();
-        }).get();
-
-    // C3: reset() must return durable success — the rename was committed on disk.
-    ASSERT_TRUE(r_reset.has_value())
-        << "reset() after durable rename + operation_aborted MUST return success (C3); "
-           "returning store_io_failure would report a durable reset as failed — silent loss";
-
-    // The catch body committed: next_seqnum must be seqnum_min (1) — not 37 (pre-reset).
-    auto r_seq =
-        spawn_on_strand([store_sp]() mutable -> asio::awaitable<fixpp::core::expected_t<seqnum_t>> {
-            co_return co_await store_sp->next_seqnum(direction_t::outbound, false);
-        }).get();
-    ASSERT_TRUE(r_seq.has_value()) << "next_seqnum after reset must succeed";
-    EXPECT_EQ(*r_seq, seqnum_t{1})
-        << "Counter must be seqnum_min=1 after reset; if it's 37 the catch body did not commit";
-
-    // g_catch_fired must be 1: the fault-injection triggered the catch exactly once.
-    EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 1)
-        << "g_catch_fired must be 1 — catch body was not exercised";
-}
-
-#endif  // FIXPP_TEST_HOOKS (gate-b/r1 A.1 + A.2 fault-injection witnesses)
+#endif  // FIXPP_TEST_HOOKS (the post-rename reopen-failure witness)
 
 }  // namespace

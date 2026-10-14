@@ -551,8 +551,8 @@ target_compile_definitions(store_file_cancellation PRIVATE FIXPP_TEST_HOOKS)
 # T001/T013: real-pool concurrent store/retrieve/reset TSan+ASan witness.
 # This target is the PRIMARY TSan gate for the 035 feature (the inert offload
 # made the concurrency surface dormant; making it genuine is the whole risk).
-# FIXPP_TEST_HOOKS exposes read_and_reset_retrieve_pread_count() and
-# read_and_reset_catch_fired() for the T013/T015 generation-guard witnesses.
+# FIXPP_TEST_HOOKS exposes read_and_reset_retrieve_pread_count() for the T013/T015
+# generation-guard witnesses.
 fixpp_add_store_test(store_file_concurrent_tsan SOURCES
   test_file_store_concurrent_tsan.cpp
 )
