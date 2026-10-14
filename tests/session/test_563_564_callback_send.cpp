@@ -404,6 +404,7 @@
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/message_store.hpp>
+#include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
@@ -995,25 +996,25 @@ struct Fixture {
 // read. Written from the session's thread and from the file pool's threads.
 struct EventLog {
     void start() {
-        const std::lock_guard<std::mutex> lock{m_};
+        const std::scoped_lock lock{m_};
         from_ = std::chrono::steady_clock::now();
         started_ = true;
     }
     // Milliseconds since start(); -1 before it.
     [[nodiscard]] long long ms() const {
-        const std::lock_guard<std::mutex> lock{m_};
+        const std::scoped_lock lock{m_};
         return started_ ? since_start_() : -1;
     }
     // Notes nothing before start(). Returns what ms() returns.
     long long note(const std::string& what) {
-        const std::lock_guard<std::mutex> lock{m_};
+        const std::scoped_lock lock{m_};
         if (!started_) return -1;
         const long long at = since_start_();
         events_.push_back(what + " at " + std::to_string(at) + " ms");
         return at;
     }
     [[nodiscard]] std::vector<std::string> events() const {
-        const std::lock_guard<std::mutex> lock{m_};
+        const std::scoped_lock lock{m_};
         return events_;
     }
 
@@ -1171,19 +1172,22 @@ struct GatedFileExecutor {
     asio::thread_pool::executor_type inner;
     std::shared_ptr<FileGate> gate;
 
-    asio::execution_context& query(asio::execution::context_t /*unused*/) const noexcept {
+    [[nodiscard]] asio::execution_context& query(
+        asio::execution::context_t /*unused*/) const noexcept {
         return asio::query(inner, asio::execution::context);
     }
     static constexpr asio::execution::blocking_t query(
         asio::execution::blocking_t /*unused*/) noexcept {
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
         return asio::execution::blocking.never;
     }
-    GatedFileExecutor require(asio::execution::blocking_t::never_t /*unused*/) const {
+    [[nodiscard]] GatedFileExecutor require(asio::execution::blocking_t::never_t /*unused*/) const {
         return *this;
     }
     template <class F>
     void execute(F&& f) const {
         if (!gate->armed.load()) {
+            // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
             asio::require(inner, asio::execution::blocking.never).execute(std::forward<F>(f));
             return;
         }
@@ -1201,6 +1205,7 @@ struct GatedFileExecutor {
             gate->kept_jobs.fetch_add(1);
             return;
         }
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
         asio::require(inner, asio::execution::blocking.never).execute(std::move(run));
         if (gate->mode != FileGate::Mode::submitter_waits_for_the_pool) return;
         gate->submitter_waits.fetch_add(1);
@@ -1260,7 +1265,7 @@ public:
                                                       bool increment) noexcept override {
         return inner_->next_seqnum(dir, increment);
     }
-    asio::awaitable<expected_t<void>> reset() noexcept override { return inner_->reset(); }
+    asio::awaitable<expected_t<void>> reset() noexcept override { return (*inner_).reset(); }
     asio::awaitable<expected_t<void>> reset_to(seqnum_t next_in_value,
                                                seqnum_t next_out_value) noexcept override {
         return inner_->reset_to(next_in_value, next_out_value);
@@ -1506,7 +1511,8 @@ struct StoreCallHold {
         FileStore::Config fc;
         fc.directory = fixture.file_dir;
         fc.max_frame_bytes = 4096;
-        fc.file_io_executor = GatedFileExecutor{fixture.file_pool.get_executor(), gate};
+        fc.file_io_executor =
+            GatedFileExecutor{.inner = fixture.file_pool.get_executor(), .gate = gate};
         cfg.store_factory = std::make_shared<FileStoreFactory>(fc);
     }
     void arm() {
@@ -7601,7 +7607,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
         FileStore::Config fc;
         fc.directory = f.file_dir;
         fc.max_frame_bytes = 4096;
-        fc.file_io_executor = GatedFileExecutor{f.file_pool.get_executor(), gate};
+        fc.file_io_executor = GatedFileExecutor{.inner = f.file_pool.get_executor(), .gate = gate};
         cfg.store_factory = std::make_shared<FileStoreFactory>(fc);
     }
     if (setup.stepped_store) {
@@ -9401,7 +9407,7 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
         FileStore::Config fc;
         fc.directory = f.file_dir;
         fc.max_frame_bytes = 4096;
-        fc.file_io_executor = GatedFileExecutor{f.file_pool.get_executor(), gate};
+        fc.file_io_executor = GatedFileExecutor{.inner = f.file_pool.get_executor(), .gate = gate};
         const auto recording =
             std::make_shared<RecordingStoreFactory>(std::make_shared<FileStoreFactory>(fc));
         store_calls = recording->calls;
@@ -10430,7 +10436,7 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         FileStore::Config fc;
         fc.directory = f.file_dir;
         fc.max_frame_bytes = 4096;
-        fc.file_io_executor = GatedFileExecutor{f.file_pool.get_executor(), gate};
+        fc.file_io_executor = GatedFileExecutor{.inner = f.file_pool.get_executor(), .gate = gate};
         cfg.store_factory = std::make_shared<FileStoreFactory>(fc);
     }
     cfg.logout_disconnect_timeout_ms = kShortLogoutMs;
