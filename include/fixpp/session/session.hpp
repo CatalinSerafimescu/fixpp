@@ -1740,6 +1740,9 @@ private:
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
     // CHILD cancellation_state. Called from close(graceful) phase 1.
+    // On the cut route (a terminal close() started inside the Logout's toAdmin;
+    // fixpp#590, `.specify/563-564-callback-send.md` §2.6) the Logout is stored
+    // and not transmitted, and the step returns without the wait.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
 
     // 027 T005 — replay_outbound_range_: extracted from the inline

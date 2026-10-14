@@ -2012,7 +2012,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
             // the socket and skips the TLS shutdown while an SSL operation is
             // suspended, and the close_async() after it finds the transport closed and
             // sends nothing, so the peer gets an abortive close with no close-notify
-            // (B&L B-348-1). On the plain transport the two calls do not differ.
+            // (B&L B-348-1 and its second amendment). On the plain transport the two
+            // calls do not differ.
             if (timer_arm_won || logout_cut_) {
                 if (auto live = live_transport_shared_()) {
                     // FQ-G: if phase 1 wedges behind write_gate_ / async_write,
@@ -6606,11 +6607,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 //      If timeout → transition to Disconnected, return session_logout_timeout.
 //
 // The cut route (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
-// mechanism", rulings R-8 and R-9) replaces stages 1 to 4 when a terminal close()
-// was started inside the Logout's toAdmin, which stage 1 calls before the Logout
-// takes its number. Then the step writes Disconnected at once, numbers the Logout,
-// stores it where the session has a store, does not transmit it, and returns
-// without LogoutSent and without the sleep.
+// mechanism", rulings R-8 and R-9) changes stage 1 and replaces stages 2 to 4 when
+// a terminal close() was started inside the Logout's toAdmin, which stage 1 calls
+// before the Logout takes its number. Then the step writes Disconnected at once,
+// then numbers the Logout and stores it as in stage 1, where the session has a
+// store, with its transmit off, and returns without LogoutSent and without the
+// sleep.
 //
 // Called from close(graceful) phase 1 ONLY. The root cancellation_state fires
 // phase-2 total AFTER this coroutine returns (either path).
