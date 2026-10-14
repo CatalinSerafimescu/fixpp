@@ -361,8 +361,8 @@
 // liveness loop runs, except in CallbackGuard.ToAdminEnteredInsideToAppDies,
 // which sets an interval and advances the mock clock itself, and in the
 // OnLogonStartsClose and OnLogonStartsNoClose cells, which set an interval so
-// that a started liveness loop has a sleep in flight. A cell that starts
-// a graceful close ends the close's wait for the peer's Logout by advancing the
+// that a started liveness loop has a sleep in flight. Where a cell itself ends
+// a graceful close's wait for the peer's Logout, it does so by advancing the
 // mock clock (Fixture::end_logout_wait_when).
 
 #include <gmock/gmock-matchers.h>
@@ -729,10 +729,12 @@ private:
 enum class TransportKind { sync_capture, live_suspending_write };
 
 // SessionConfig::logout_disconnect_timeout_ms of a cell that starts a graceful
-// close. The close waits that long, on the session's clock, for a peer Logout
-// the cell never feeds, and the cell ends that wait by advancing the mock clock.
-// close() also arms a timer on real time for the same duration; the value is one
-// that no run of a cell reaches, so that timer does not end the wait.
+// close. A close that has sent its Logout waits up to that long, on the
+// session's clock, for a peer Logout the cell never feeds; a cell that lets it
+// wait ends that wait by advancing the mock clock. A close whose Logout was cut
+// arms no such wait. close() also arms a timer on real time for the same
+// duration; the value is one that no run of a cell reaches, so that timer ends
+// nothing.
 constexpr std::uint32_t kLogoutWaitMs = 60000;
 
 // The bound of a pump that waits for a close in a cell that sets kLogoutWaitMs. The
@@ -7725,7 +7727,9 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
         // A graceful close the callback started may wait for a peer Logout; it is
         // in that wait once a sleep that is not the liveness loop's is in flight.
         // An arm whose test body starts the graceful close does not advance the
-        // clock: there the close the callback starts must end the wait.
+        // clock. There the terminal close the callback starts must bring the end:
+        // started in onLogout it ends the wait, and started in the Logout's toAdmin
+        // it cuts the Logout, so that no wait is armed.
         if (mode == close_mode::graceful) {
             completed = f.end_logout_wait_when(
                 [&] {
