@@ -441,12 +441,13 @@ using fixpp::core::expected_t;
 using fixpp::wire::access_mode;
 using fixpp::wire::MessageView;
 
-// Two test seams of src/session/file_store.cpp, for FileStoreSeams below. Their
+// Three test seams of src/session/file_store.cpp, for FileStoreSeams below. Their
 // declarations in file_store.hpp are behind FIXPP_TEST_HOOKS, which this target is not
 // built with; the definitions are compiled in every build.
 #ifndef FIXPP_TEST_HOOKS
 namespace fixpp::session {
 void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexcept;
+void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) noexcept;
 int read_and_reset_catch_fired() noexcept;
 }  // namespace fixpp::session
 #endif
@@ -1028,21 +1029,27 @@ private:
     std::vector<std::string> events_;
 };
 
-// The two test seams of src/session/file_store.cpp that these cells read (declared
-// at the top of this file): the offload probe, and the store's counter of its catches
-// of operation_aborted. The store has one such counter, fed by FileStore::store and by
-// FileStore::next_seqnum: a cell reads and resets it before its scene.
+// The test seams of src/session/file_store.cpp that these cells read (declared at the
+// top of this file): the offload probe and its exit companion, and the store's counter
+// of its catches of operation_aborted. The store has one such counter, fed by
+// FileStore::store and by FileStore::next_seqnum: a cell reads and resets it before its
+// scene. The exit probe fires on the pool thread when an offloaded callable has
+// returned, before the offload's completion is handed back to the caller's executor, and
+// for every offload of the store, whichever operation it serves.
 struct FileStoreSeams {
     // The bodies of offloaded store work begun since reset_bodies().
     [[nodiscard]] static int bodies_begun() noexcept { return bodies_.load(); }
     static void reset_bodies() noexcept { bodies_.store(0); }
     // Installs the offload probe, which counts a body and, where `log` is not null,
-    // notes it there. remove() takes the probe out again.
+    // notes it there, and the exit probe, which notes there that an offloaded callable
+    // has returned. remove() takes both out again.
     static void install(EventLog* log) noexcept {
         log_.store(log);
         install_store_offload_probe(&on_body_);
+        install_store_offload_exit_probe(&on_exit_);
     }
     static void remove() noexcept {
+        install_store_offload_exit_probe(nullptr);
         install_store_offload_probe(nullptr);
         log_.store(nullptr);
     }
@@ -1054,6 +1061,9 @@ private:
     static void on_body_(std::thread::id /*unused*/) noexcept {
         bodies_.fetch_add(1, std::memory_order_relaxed);
         if (EventLog* log = log_.load()) log->note("the write's body begins");
+    }
+    static void on_exit_(std::thread::id /*unused*/) noexcept {
+        if (EventLog* log = log_.load()) log->note("an offloaded body returns");
     }
     static inline std::atomic<int> bodies_{0};
     static inline std::atomic<EventLog*> log_{nullptr};
@@ -9324,12 +9334,19 @@ TEST(CallbackSend, FromAppStartsGracefulThenTerminalClose_NoStore) {
 namespace {
 
 // A logout timeout that close()'s grace timer, a timer on real time, reaches while a
-// cell holds a store call. The cells that set it assert when each close completed,
-// counted on std::chrono::steady_clock from an instant read right before the graceful
-// close is spawned: not before one timeout has elapsed, and before two have. They keep
-// their hold until three timeouts have elapsed, so a close that waits for the held call
-// completes at three timeouts or later.
+// cell holds a store call. The cells of NC-24 (b) and NC-28 count on
+// std::chrono::steady_clock from an instant read right before the graceful close is
+// spawned, and assert that no close completes before one timeout has elapsed. They keep
+// their hold until both closes have completed and one timeout has elapsed, or until
+// kClosePumpBound: the release waits for the closes and not for a time, so a slow run
+// only takes longer, and a close that waits for the held call meets the bound with the
+// hold still in place. The bound is the competing event's margin, as a ratio of the
+// timeout: the grace timer must end the closes well inside it.
 constexpr std::uint32_t kShortLogoutMs = 300;
+static_assert(kClosePumpBound >= std::chrono::milliseconds{kGraceOverPumpBound * kShortLogoutMs},
+              "a cell holding a store call must wait well past the short logout timeout");
+// The cells of NC-29 hold the Logout's own write job on real time until three timeouts
+// have elapsed, so a close that waits for that job completes at three timeouts or later.
 constexpr long long kHoldPastTheTimeoutMs = 3LL * kShortLogoutMs;
 
 // How many handlers a cell lets the session's executor run before it reads a snapshot.
@@ -9364,9 +9381,9 @@ enum class HeldFor { until_released, past_the_logout_timeout };
 //     cancels the Logout's store call, so the Logout is retained and both closes
 //     complete once the lock is free, with the mock clock standing.
 //   past_the_logout_timeout (NC-28, the bound of ruling R-9): logout_disconnect_timeout_ms
-//     is kShortLogoutMs and the gate stays closed for kHoldPastTheTimeoutMs. The grace
-//     timer ends the close: both closes complete at its expiry, and nothing is stored
-//     for the Logout.
+//     is kShortLogoutMs and the gate stays closed until both closes have completed and
+//     one timeout has elapsed, or until kClosePumpBound. The grace timer ends the close:
+//     both closes complete at its expiry, and nothing is stored for the Logout.
 // The kept job's coroutine is spawned with record_into(), a handler with no cancellation
 // slot, so no cancellation reaches it while its job is kept: the condition of the
 // gate's third mode. Its check is the store's count of its catches of operation_aborted.
@@ -9471,13 +9488,19 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
     const bool logout_store_made_in_the_snapshot = store_calls->made(2);
     const bool logout_store_returned_in_the_snapshot = store_calls->returned(2);
 
-    // NC-28: the gate stays closed on real time, well past the grace timer.
+    // NC-28: the gate stays closed until both closes have completed and the logout
+    // timeout has elapsed. A close that waits for the gate meets kClosePumpBound with the
+    // gate still closed.
     std::string past_the_timeout = "not applicable";
     bool closes_done_past_the_timeout = false;
     if (short_timeout) {
         (void)fixpp::test_support::pump_until(
-            f.ioc, [&] { return times.ms() >= kHoldPastTheTimeoutMs; },
-            std::chrono::milliseconds{2 * kHoldPastTheTimeoutMs}, fixpp::test_support::kPumpSlice,
+            f.ioc,
+            [&] {
+                return cell.outer.done && cell.started.done &&
+                       times.ms() >= static_cast<long long>(kShortLogoutMs);
+            },
+            kClosePumpBound, fixpp::test_support::kPumpSlice,
             "CallbackSend::held_lock_past_the_timeout");
         closes_done_past_the_timeout = cell.outer.done && cell.started.done;
         past_the_timeout = where_is(sess) + ", the graceful close " + result_of(cell.outer) +
@@ -9576,8 +9599,8 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
         << "PATH NOT DRIVEN: the Logout's store call had not been made at the snapshot. "
         << reading;
     if (short_timeout) {
-        ASSERT_GE(gate_opened_ms, kHoldPastTheTimeoutMs)
-            << "PATH NOT DRIVEN: the gate was opened before three timeouts had elapsed. "
+        ASSERT_GE(gate_opened_ms, static_cast<long long>(kShortLogoutMs))
+            << "PATH NOT DRIVEN: the gate was opened before the logout timeout had elapsed. "
             << reading;
     }
 
@@ -9641,13 +9664,9 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
     EXPECT_GE(graceful_done_ms, static_cast<long long>(kShortLogoutMs))
         << "the graceful close does not complete before the logout timeout has elapsed. "
         << reading;
-    EXPECT_LT(graceful_done_ms, 2LL * kShortLogoutMs)
-        << "the graceful close completes before two timeouts have elapsed. " << reading;
     EXPECT_GE(terminal_done_ms, static_cast<long long>(kShortLogoutMs))
         << "the terminal close does not complete before the logout timeout has elapsed. "
         << reading;
-    EXPECT_LT(terminal_done_ms, 2LL * kShortLogoutMs)
-        << "the terminal close completes before two timeouts have elapsed. " << reading;
     EXPECT_FALSE(retained[1].starts_with("35="))
         << "nothing is stored under the Logout's number. " << reading;
     EXPECT_EQ(store_out, std::optional<seqnum_t>{2})
@@ -9674,8 +9693,9 @@ namespace {
 
 // §3, NC-24 (b): the bound of ruling R-9 on a store of another kind. The Logout's store
 // call holds until a cancellation reaches it, on the live transport, with
-// logout_disconnect_timeout_ms short; the cell releases the store only after
-// kHoldPastTheTimeoutMs. The grace timer ends the close: the join cancels the Logout
+// logout_disconnect_timeout_ms short; the cell releases the store only when both closes
+// have completed and the timeout has elapsed, or at kClosePumpBound. The grace timer
+// ends the close: the join cancels the Logout
 // step, the cancellation ends the store's hold, and the step leaves at once. The second
 // kind of store loses the recorded cancellation, as the lock sequence of the shipped
 // stores does: a step that still waited after its store call would then wait on the
@@ -9728,11 +9748,16 @@ void run_cut_logout_on_a_store_that_holds(SteppedStoreState::Kind kind) {
                        graceful_done_ms = times.note("the graceful close completes");
                        cell.completes(cell.outer, "the graceful close")(ep, std::move(r));
                    });
-    // Real time: the grace timer of close() is what is waited for, with the store's
-    // call still held.
+    // The grace timer of close() is what is waited for, with the store's call still held:
+    // the call is released when both closes have completed and the timeout has elapsed. A
+    // close that waits for the release meets kClosePumpBound with the call still held.
     (void)fixpp::test_support::pump_until(
-        f.ioc, [&] { return times.ms() >= kHoldPastTheTimeoutMs; },
-        std::chrono::milliseconds{2 * kHoldPastTheTimeoutMs}, fixpp::test_support::kPumpSlice,
+        f.ioc,
+        [&] {
+            return cell.outer.done && cell.started.done &&
+                   times.ms() >= static_cast<long long>(kShortLogoutMs);
+        },
+        kClosePumpBound, fixpp::test_support::kPumpSlice,
         "CallbackSend::store_that_holds_past_the_timeout");
     const bool closes_done_before_the_release = cell.outer.done && cell.started.done;
     const int calls_before_the_release = store->calls;
@@ -9790,8 +9815,9 @@ void run_cut_logout_on_a_store_that_holds(SteppedStoreState::Kind kind) {
                                   << reading;
     ASSERT_EQ(calls_before_the_release, 1)
         << "PATH NOT DRIVEN: the Logout's store call was not made and held. " << reading;
-    ASSERT_GE(released_ms, kHoldPastTheTimeoutMs)
-        << "PATH NOT DRIVEN: the store's call was released before three timeouts had elapsed. "
+    ASSERT_GE(released_ms, static_cast<long long>(kShortLogoutMs))
+        << "PATH NOT DRIVEN: the store's call was released before the logout timeout had "
+           "elapsed. "
         << reading;
     EXPECT_TRUE(closes_done_before_the_release)
         << "both closes complete while the store's call is still held by the cell. " << reading;
@@ -9799,13 +9825,9 @@ void run_cut_logout_on_a_store_that_holds(SteppedStoreState::Kind kind) {
     EXPECT_GE(graceful_done_ms, static_cast<long long>(kShortLogoutMs))
         << "the graceful close does not complete before the logout timeout has elapsed. "
         << reading;
-    EXPECT_LT(graceful_done_ms, 2LL * kShortLogoutMs)
-        << "the graceful close completes before two timeouts have elapsed. " << reading;
     EXPECT_GE(terminal_done_ms, static_cast<long long>(kShortLogoutMs))
         << "the terminal close does not complete before the logout timeout has elapsed. "
         << reading;
-    EXPECT_LT(terminal_done_ms, 2LL * kShortLogoutMs)
-        << "the terminal close completes before two timeouts have elapsed. " << reading;
     EXPECT_TRUE(store->reached_by_a_cancellation)
         << "a cancellation reached the store's call. " << reading;
     EXPECT_EQ(logouts_sent, 0) << "the Logout is not on the wire. " << reading;
@@ -10602,8 +10624,17 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         EXPECT_EQ(logouts_sent, 0) << "nothing is on the wire. " << reading;
     } else {
         EXPECT_EQ(logouts_sent, 1) << "the Logout is transmitted once. " << reading;
-        EXPECT_LT(at("job 1 ends"), at("transmit 35=5 34=2"))
-            << "the Logout is transmitted after its store call's job has ended. " << reading;
+        // The latest point noted before the store call's completion is handed back is the
+        // exit probe's: the write's syscalls have returned there, on the pool thread, and
+        // the completion is posted after it, so it comes before the transmit causally. The
+        // gate's "job 1 ends" is noted after the job has posted that completion, so its
+        // order against the transmit is not fixed. The first offload to return after job 1
+        // begins is job 1's: the pool has one thread. That the frame is durable is shown by
+        // the readback above ("the Logout reads back under its number").
+        EXPECT_LT(at("job 1 begins"), at("an offloaded body returns"))
+            << "the first offloaded body to return is the Logout's write job's. " << reading;
+        EXPECT_LT(at("an offloaded body returns"), at("transmit 35=5 34=2"))
+            << "the Logout is transmitted after its write's syscalls have returned. " << reading;
     }
 }
 
