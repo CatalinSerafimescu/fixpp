@@ -10617,7 +10617,9 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         << "each close completes once the file executor has run the write's job. " << reading;
     EXPECT_FALSE(clock_advanced) << "the mock clock is not advanced. " << reading;
     EXPECT_EQ(result_of(cell.outer), "ok") << reading;
-    if (cut) EXPECT_EQ(result_of(cell.started), "ok") << reading;
+    if (cut) {
+        EXPECT_EQ(result_of(cell.started), "ok") << reading;
+    }
     EXPECT_EQ(bodies_at_the_end, 1) << "the write's body ran once. " << reading;
     EXPECT_EQ(catches, 0) << "the store's catch of operation_aborted did not fire. " << reading;
     ASSERT_EQ(retained.size(), kRetainedThrough) << reading;
