@@ -12,11 +12,15 @@ refs:
   - src/session/session.cpp
   - include/fixpp/core/sync/async_mutex.hpp
   - .specify/544-hot-path-zero-alloc.md
+  - .specify/536-537-538-recovery-liveness.md
+  - .specify/2e-msgstore.md
+  - specs/035-filestore-io-offload/contracts/file-offload.md
   - specs/093-inbound-frame-dispositions/spec.md
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
   - tests/session/test_file_store_crash_survival.cpp
+  - tests/session/test_598_store_offload.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
@@ -58,7 +62,11 @@ the literal reading of *"callers must drain the mutex before destroying the stor
 (`message_store.hpp`) is unsatisfiable by design. The obligation is discharged by **quiescence**:
 
 - A store method only returns **after** its `file_io_executor` pool work completes — store calls are
-  awaited, never detached.
+  awaited, never detached. ⚠️ **That holds on a file executor that runs the jobs handed to it**: on one
+  that was stopped first, or has no thread, the call never returns, and neither does a stop or a close
+  that waits for it. The host must keep the executor running until `Engine::stop()` has returned
+  (fixpp#598, D-598-8; B&L `B-598-2`). And before fixpp#598, on a pool of more than one thread, the
+  pool work could complete without running its body (the section below).
 - `Engine::stop()` **joins** every role loop (tracked by `outstanding_counter_`) **before** the step
   that clears the registry and thereby destroys the sessions and their stores.
   ⚠️ **This ordering is a RESULT, and it is the load-bearing one on this page** — the whole "no drain
@@ -167,6 +175,43 @@ sees nor can drain those awaitables. Such a caller must:
 Get it wrong and it is `std::terminate()`, not an error return. This is now disclosed as **`L-035-3`**
 — it previously lived only in a header comment on `FileStore::Config`, which is exactly the class of
 constraint an integrator must know and will not find.
+
+## The offload's cancellation line, and three signed sentences it supersedes (fixpp#598)
+
+The design is `.specify/536-537-538-recovery-liveness.md` §11 (D-598-1 to D-598-8, rulings R-25 to R-27);
+the user-facing rows are B&L `B-598-1`, `B-598-2`, `L-598-1` and `B-035-1`'s amendment.
+
+- **The line is the grant of the store's lock** (R-26). Before it, a cancellation ends the call with
+  nothing stored. After it, `offload_to` completes through a token bound to an empty cancellation
+  slot, so no cancellation reaches the write job: the job runs its body, on an executor that runs its
+  jobs, and the call returns the write's own result. Before fixpp#598 the token was plain
+  `use_awaitable`: a terminal cancellation on the awaiting thread handed the pool a second job, and on
+  a pool of more than one thread that job could run first, so asio's pre-check skipped the write's body
+  and the handler around the offload reported the skipped write as a durable success (measured on the
+  tree before the fix, `tests/session/test_598_store_offload.cpp`). The two jobs also raced on the
+  spawned coroutine's cancellation state, which ThreadSanitizer reported.
+- **The handlers were deleted, not corrected** (D-598-2), with the counter and the seam that existed
+  only for them.
+
+| Signed document | The sentence | Status |
+|---|---|---|
+| `specs/035-filestore-io-offload/contracts/file-offload.md`, C3 | "The implementation MUST **unconditionally** catch it and return the durable success", with its premise that an `operation_aborted` at the outer await "necessarily post-dates linearisation" | ⚠️ **SUPERSEDED by the note's §11, D-598-2.** asio enters that handler for a cancellation in one case only: the job's body never ran. The handler is deleted. C3's table and its one observation point, the lock, **stand**: R-26 confirms them. The bundle is frozen and not edited. |
+| `.specify/2e-msgstore.md` §6.1.4, the list "The linearisation point for each method is precisely defined", in its entries for the `FileStore` (`store`, `next_seqnum(_, true)`, `reset`), with the footnote "Linearisation-as-durability" | the durable transition, the flush's or the rename's return, as the point that splits the cancellation table's "before" from its "after" | ⚠️ **SUPERSEDED as the boundary of the cancellation table** by 035's C3 and ruling R-26, which put the line at the grant of the store's lock: a cancellation between the grant and the flush's return does not win. **Still the definition of when an effect is durable.** The table's cells stand. Not edited for it. |
+| `.specify/2e-msgstore.md` §6.2.1, step 1 | "in-flight ops complete with `store_cancelled`" | ⚠️ **SUPERSEDED (D-598-1, "Whose line it is").** A store call that is past its lock completes with its write's result, not `store_cancelled`, and the close waits for it (D-598-3, D-598-4). The close cancels its losing arm with `cancellation_type::all`, not `total`. Not edited for it. |
+
+- **Rejected** (§11.4): withdrawing the job so that the call returns at the cancellation (asio cannot
+  remove a posted job, and the job holds a descriptor and a span into the store's buffer, which the
+  next call would rewrite); the line at the moment a pool thread starts the job (R-26's other option:
+  it keeps the split decided by which pool thread runs first, and the data race); the same line drawn
+  with a flag of the store's own (an atomic and a slot handler on every call); a handler with a true
+  meaning in place of the deletion (no input reaches it, so no cell can hold it true); the handlers left
+  as they were; the whole store call made uncancellable, the wait at the lock included (it reverses
+  R-15 for a call queued at the lock); undoing a completed write by truncating the log; a store call
+  that completes on an executor that runs nothing (its completion is itself a job of that executor);
+  repairing a damaged log at open (R-27: the open scan is not changed, `L-598-1`).
+- **`retrieve` after a reset (fixpp#538).** Both stores look a number up relative to the first frame
+  the direction retains; `.specify/2e-msgstore.md` carries an erratum for it at its end, and
+  `message_store.hpp`'s `retrieve` comment binds third-party stores (B&L `B-538-1`, `B-538-3`).
 
 ## Note for reviewers
 

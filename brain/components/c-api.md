@@ -13,6 +13,7 @@ refs:
   - src/capi/config.cpp
   - .specify/2i-capi.md
   - .specify/447-458-452-capi-refusals.md
+  - .specify/536-537-538-recovery-liveness.md
   - .specify/495-493-486-dict-reify-copy.md
   - specs/090-capi-refusals/contracts/msg-clone.md
   - specs/090-capi-refusals/data-model.md
@@ -25,6 +26,7 @@ refs:
   - specs/093-inbound-frame-dispositions/plan.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
+  - tests/capi/recovery_liveness_capi_witness_test.cpp
   - tools/check_layers.py
   - .github/workflows/abi-golden.yml
 refs_external:
@@ -255,6 +257,15 @@ refused") and the 1.10 bullet on a frame the session "cannot parse for dispatch"
 frames since 093, and are amended at every site in `session.h`, marked 1.11. So is 1.9's FR-020
 sentence (a malformed Length+Data count), at its five sites and in `version.h`'s 1.9 entry.
 
+⚠️ **Amended in place by 1.12 (fixpp#537):** "a peer that replays the same bytes ends the session"
+above described the trace in which the peer's next new message, too high while the resend was
+outstanding, ended the session silently. Since 1.12 that message is ignored, and the session ends as
+a gap the peer does not fill ends: with a Logout at the deadline for a peer that keeps sending and
+answers TestRequests, silently at the grace check for one that answers nothing, and not at all with
+HeartBtInt ≤ 0 or for a peer that sends only frames that move nothing (`L-092-1`, `B-537-2`,
+`L-537-1`). The 1.10 bullets that ended "the session ends at the peer's next new message that is not
+a Heartbeat" are amended at their sites in `session.h`, marked 1.12.
+
 ## C-ABI 1.11: how the session frames inbound bytes (093, fixpp#514, #515, #516)
 
 One MINOR bump, declared BREAKING (`[const §X.7]`), plus two additions:
@@ -286,6 +297,49 @@ the headers do not state (contract C-7, plan OD-27).
   differs between LP64 and Windows, so it is witnessed only on the wheel lanes.
 
 Re-derive: `grep -n '1\.11' include/fix/c_api/*.h`.
+
+## C-ABI 1.12: recovery and liveness (fixpp#536, #537, #538)
+
+One MINOR bump, declared BREAKING (`[const §X.7]`), with no symbol, signature or error code added. The
+design is `.specify/536-537-538-recovery-liveness.md` §6.2 (D-ABI-1, ruling R-8); the user-facing row
+is B&L `B-537-5`. What follows is the half the headers do not state.
+
+- **Why BREAKING.** fixpp#537 changes documented results: the 1.10 bullets said the session ends at
+  the peer's next new message, and a second too-high frame is now ignored, with a deadline on the gap.
+  The #536 and #538 effects are corrections that no document specified, so taken alone they are
+  additive under `[const §X.7]`'s last sentence; they are declared in 1.12 because R-8 declares the
+  entry as a whole ("#536 and #538 are declared too, as the precedent did").
+- **The observer set is 1.10's, as for 1.11.** `fixpp_session_is_established`, `fixpp_session_close`,
+  `fixpp_session_send` and the two callback registrations; each carries its 1.12 clause.
+- **A C-ABI witness per effect, not per decision or per table row** (R-8, the note's reading). Each
+  witness in `tests/capi/recovery_liveness_capi_witness_test.cpp` has a mutant, the edit that turns it
+  RED; the deadline has one witness per exit of the Active arm a C session can reach.
+- **Effects with no witness, each with its reason.** The store read failure of `B-538-2` has no reach:
+  a C session runs on `MemoryStoreFactory` (`src/capi/config.cpp`), whose reads cannot fail that way.
+  The deadline's exit at the validate gate needs a gate a C session cannot turn on, and its exit at a
+  Reset-mode SequenceReset that `fromAdmin` rejects needs an application that overrides `fromAdmin`,
+  which the C ABI's does not. Their C++ cells stand.
+- **The rows for a cancellation inside the session (note §9 and §10) add no clause.** Each is recorded
+  in `version.h`'s 1.12 entry as an effect with no carrying declaration: the order of
+  `fixpp_session_is_established` against the peer's end of stream during `fixpp_engine_stop` changes,
+  which no declaration specifies (a change of output the documentation leaves unspecified); the other
+  effects are not reached by a C caller as shipped, because a C session's store lock does not queue
+  and `fixpp_session_send` and `fixpp_session_close` spawn with a token that has no cancellation slot.
+  The reach was read. The one route that could reach a cancelled store call through C, the graceful
+  Logout's store call under the close's race with its grace timer, was run by a step that would have
+  sent the design back; it did not fire.
+- **The heartbeat interval.** The deadline's sentence begins "with a heartbeat interval set", and an
+  interval of 0 turns it off. A session whose interval was never set runs at the session's default
+  interval and has the deadline (read; no cell runs it unset). **Rejected:** a clause on
+  `fixpp_session_config_set_heartbeat_seconds` (Codex's round-2 C-3); the note's `## Gate A` gives the
+  precedent.
+- **No merge-order condition on the number.** Batch B41 had declared a C-ABI change of its own and
+  withdrew it, so 1.12 is this batch's alone.
+- **Python.** The binding's version constants come from a generated file that an incremental build
+  does not regenerate when a header it includes changes (fixpp#600); read the constants from a tree
+  whose wrapper was regenerated after the last C-ABI header change.
+
+Re-derive: `grep -n '1\.12' include/fix/c_api/*.h`.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 

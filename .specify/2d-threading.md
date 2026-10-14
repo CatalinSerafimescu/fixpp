@@ -1727,3 +1727,52 @@ the **type the session strand stores**:
 `make_session_strand` returns. That item's behavioural conclusion (the accept loop still misses the
 `session_executor` wrapper and falls through to the engine snapshot) is not affected by the type, and
 was not re-verified here. Re-derive the spawn sites with the recipe that amendment gives.
+
+## ⚠️ Erratum, 2026-10-14 (fixpp#536) — read before citing what `Clock::cancel_sleeps()` does, or who calls it
+
+Appended at the end for the reason the amendments above give: line-number citations point into this
+document. The sites are not rewritten: §4.1's `Clock` sketch, item (4) of its comments; §4.1.1's list
+of what a clock must do; §6's bullet "`cancel_sleeps()` interaction with mid-flight `sleep_until`
+awaiters". The design record is `.specify/536-537-538-recovery-liveness.md` §3 (D-536-1 to D-536-5).
+
+- **Who calls it.** No library code outside the two clocks' destructors (`system_clock_source`,
+  `mock_clock`). Until fixpp#536 a `Session` called it twice: in the second phase of `close()`, and in
+  the LogoutSent arm when the peer's confirming Logout arrived. The sessions of an `Engine` share its
+  clock unless a session sets `clock_override`, so each of those calls ended the liveness loop of every
+  other session on the clock. Any holder of the clock can still call it: `Engine::clock()` hands out the
+  shared one, and the test helper `cancel_and_drain_or_report` calls it to release the sleep of a
+  session that was never closed. Re-derive: `git grep -n 'cancel_sleeps()' -- src include tests`.
+- **What it does to a waiter.** Both shipped clocks complete every in-flight `sleep_until` waiter with
+  `operation_aborted` directly. They do not signal the waiter's cancellation slot, which is what the
+  bullet in §6 says. That is why a waiter can tell a sweep from its own cancellation by reading its
+  cancellation state, which `detail::await_deadline` does (`src/session/read_first_frame_bounded.hpp`).
+  The interface's own comment says so (`include/fixpp/core/clock.hpp`, `cancel_sleeps`).
+- **What it does to open sessions.** A session's liveness loop ends at a sweep and nothing restarts
+  it: each session on the clock stays Active and sends no further Heartbeat and no TestRequest (B&L
+  `L-536-1`). A session's own close does not sweep: it ends its own liveness loop through its root
+  cancellation, which the loop accepts at each of its sleeps, and its logout wait races a wake of its
+  own against `detail::await_deadline`, which re-arms on a sweep it did not make (B&L `B-536-1`).
+- "Used at engine shutdown and at clock replacement" (item (4)) describes the clocks' destructors and
+  tests; the engine's stop does not call it either.
+
+## ⚠️ Erratum, 2026-10-14 (note §9, ruling R-14) — what `Session::on_inbound_frame` leaves on its caller's coroutine
+
+Appended after the erratum above, for the same reason. This document says what a cancellation does to
+`close()` (§4.7) and nothing of what a call of `Session` leaves on the coroutine that awaited it. The
+design record is `.specify/536-537-538-recovery-liveness.md` §9 (D-CAN-1 to D-CAN-5).
+
+- **`Session::close()`** resets its caller's cancellation state to `disable_cancellation` as its
+  first statement and does not restore it, so the coroutine that awaited it accepts no cancellation
+  after it returns. Re-derive: `git grep -n 'disable_cancellation{}' -- src/session/session.cpp`.
+- **`Session::on_inbound_frame`**, after a cancellation that ended the processing of a frame, has
+  recorded `Disconnected` (unless a `close()` or an `Engine::stop()` had superseded a Logon arm) and
+  returns `store_cancelled`, or `dispatch_aborted` for another exception; it does not throw. The
+  coroutine that awaited it is left with no cancellation recorded and asio's default filter: the state
+  a lock sequence leaves after a cancelled wait, which is what the returned timing of a cancelled store
+  call leaves. So the two timings of one cancellation leave the caller in one state. `Session::send`,
+  `Session::open` and `Session::drive_reconnect` leave their caller the same way after a cancelled
+  store call (note §10, D-OUT-5, D-OUT-9). The reset is `co_await
+  asio::this_coro::reset_cancellation_state();` after the handler of `Session::on_inbound_active_`; that
+  a lock sequence leaves the thread so is the lock's, fixpp#583.
+- **Outside it:** a cancellation already recorded when the caller awaits `on_inbound_frame` throws in
+  the caller's frame before the session starts the frame; the session cannot see it.
