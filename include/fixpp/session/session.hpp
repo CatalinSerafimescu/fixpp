@@ -190,6 +190,16 @@ public:
     // callback does not run the session's own executor (the reentrancy
     // contract below).
     //
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6, rulings R-8 and
+    // R-9): a terminal close started inside the toAdmin of a graceful close's
+    // Logout narrows OD-29 above. That Logout is cut: it is numbered, stored
+    // where the session has a store, and not transmitted, and the session is
+    // Disconnected, with onLogout run, before the Logout takes its number. The
+    // terminal close then joins without ending the grace wait: nothing cancels
+    // the cut Logout's store call before the grace timer, of
+    // logout_disconnect_timeout_ms, expires. Both callers get the in-flight
+    // result.
+    //
     // PRECONDITION — v1.0 caller model (gate-b/r1 RC#2, P1.3→P2):
     //   close() is called from within the session's serialisation domain
     //   (strand under per_session_strand mode; attested executor under
@@ -720,6 +730,27 @@ private:
     mutable std::atomic<const void*> callback_owner_{nullptr};
     mutable std::uint32_t callback_depth_ = 0;
     std::uint32_t outbound_callback_depth_ = 0;
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism", ruling
+    // R-8): the state of the one ending for a terminal close started in the toAdmin
+    // of a graceful close's Logout. Both members are written and read only on the
+    // session's serialisation domain, as the two depths above.
+    //
+    // waited_terminal_closes_: how many terminal close() calls have taken close()'s
+    // wait for a callback to return (§2.1a). It only grows. Its writer is close(),
+    // inside the block of that wait and before the post; a graceful close does not
+    // write it, and neither does a terminal close that takes no wait. Its reader is
+    // run_logout_phase1, before the Logout's toAdmin and again when the callback
+    // has returned: where the count moved, a terminal close was started inside that
+    // callback, and the Logout is cut. The test is "moved", not "non-zero".
+    //
+    // logout_cut_: the record of the cut. Its writer is run_logout_phase1, when it
+    // finds that the count moved, with no suspension since the callback returned.
+    // It is never cleared: a Session is opened once, and a second graceful close
+    // joins the first and runs no Logout step. Its reader is close(): a terminal
+    // close that joins does not end the grace wait of a Logout that was cut, and
+    // the direct transport close after the join is made for one.
+    std::uint64_t waited_terminal_closes_ = 0;
+    bool logout_cut_ = false;
     // An address that identifies the calling thread for as long as it lives: the
     // owner token's value. Defined out of line, in session.cpp, so that the inline
     // callers in every translation unit of one linked image get the same address.
@@ -1426,6 +1457,9 @@ private:
     //       (session.cpp, before record_state_transition_(LogoutSent)).
     //   (b) on_inbound_frame() Active branch: inbound peer-Logout 35=5 receipt.
     // Used by the teardown reset predicate in close() (T014).
+    // Site (a) is skipped for a Logout that was cut (fixpp#590;
+    // `.specify/563-564-callback-send.md` §2.6, ruling R-8): that Logout is
+    // stored and not transmitted, so it is not a Logout that was sent.
     //
     // NOT derived from onLogout_fired_ — that flag fires on ANY Active→!Active
     // transition (including abnormal terminal close with no Logout), so it is a
@@ -1470,6 +1504,9 @@ private:
     // while a close(graceful) is in flight sets the latch, which close(graceful) reads
     // before its phase 1 starts, and calls the wake, which is non-null only while phase
     // 1 races its grace timer and ends that wait. Session strand only.
+    // One exception (fixpp#590; `.specify/563-564-callback-send.md` §2.6, rulings
+    // R-8 and R-9): for a Logout that was cut (logout_cut_) the latch is set and the
+    // wake is not called, so the terminal close does not end the grace wait.
     bool close_escalated_ = false;
     std::function<void()> close_grace_wake_;
 
@@ -1568,9 +1605,16 @@ private:
     // arm: a Logon arm's expected state (093 plan OD-25). When set and
     //   logon_arm_superseded_(*arm) holds after the store, the frame is not transmitted
     //   and the call returns success; the caller's own predicate check follows.
+    // transmit: false for a Logout that was cut (fixpp#590;
+    //   `.specify/563-564-callback-send.md` §2.6 "The mechanism", statement 3). The
+    //   frame is then stored as with true, the store call's errors handled the same
+    //   way, and the call returns success before the transmit step: neither the live
+    //   write nor the synchronous sink runs, and the time of the last outbound frame
+    //   is not updated. Only run_logout_phase1 passes it; every other caller takes
+    //   the default.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
-        std::optional<fsm_state> arm = std::nullopt) noexcept;
+        std::optional<fsm_state> arm = std::nullopt, bool transmit = true) noexcept;
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm

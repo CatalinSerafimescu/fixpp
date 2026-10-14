@@ -102,6 +102,11 @@ public:
     // toAdmin: engine about to emit an admin message; inspect only — the
     //   message is ALWAYS sent regardless of the return (admin not vetoable,
     //   FR-008). Default: no-op.
+    //   One Logout is not transmitted (fixpp#590;
+    //   `.specify/563-564-callback-send.md` §2.6, ruling R-8): the Logout of a
+    //   graceful Session::close(), when a terminal Session::close() is started
+    //   inside this callback for it. That Logout is numbered, and stored where
+    //   the session has a store.
     virtual void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
                          const SessionId& /*id*/) {}  // FR-008
 

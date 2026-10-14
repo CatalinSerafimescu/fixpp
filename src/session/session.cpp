@@ -1881,6 +1881,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // where the assertion is compiled out and the depth is still non-zero, a close that
     // waited again would post again each time it resumed.
     if (callback_depth_ != 0) {
+        // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism",
+        // statement 1): a terminal close that takes this wait is counted, before the
+        // post, so that the caller of the callback it was started in can tell, when
+        // that callback returns, that the count moved. A graceful close is not counted.
+        if (mode == close_mode::terminal) {
+            ++waited_terminal_closes_;
+        }
         co_await asio::post(exec_.underlying(), asio::deferred);
         FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_CLOSE();
     }
@@ -1898,10 +1905,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // terminal close arrives while a graceful one is in flight. Then it ends the
     // graceful close's grace wait, or keeps its phase 1 from starting, so the
     // transport closes now; both callers still get the in-flight result.
+    // One exception (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
+    // mechanism", statement 4, "The join's waker"; rulings R-8 and R-9), which narrows
+    // OD-29 on that route: for a Logout that was cut the terminal close sets the latch
+    // and does not end the grace wait. The cut Logout's step ends by itself when its
+    // store call returns, so nothing cancels that call before the grace timer expires
+    // (§2.6 "The bound").
     if (state_ == lifecycle::closing) {
         if (mode == close_mode::terminal) {
             close_escalated_ = true;
-            if (close_grace_wake_) close_grace_wake_();
+            if (close_grace_wake_ && !logout_cut_) close_grace_wake_();
         }
         auto shared = close_result_;
         while (!shared || !shared->has_value()) {
@@ -1975,18 +1988,38 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
             // through as_tuple, so a cancel counts as the timer's completion and takes the
             // force-close arm below; through use_awaitable it would throw, which `||`
             // counts as a failure, and the join would keep waiting on phase 1.
+            // For a Logout that was cut the wake is not called (the joining branch
+            // above; fixpp#590, `.specify/563-564-callback-send.md` §2.6, rulings R-8
+            // and R-9), so no terminal close ends the timer's wait there.
             close_grace_wake_ = [&close_grace] { close_grace.cancel(); };
             auto phase1_or_timeout = co_await (
                 run_logout_phase1() || close_grace.async_wait(asio::as_tuple(asio::use_awaitable)));
             close_grace_wake_ = nullptr;
-            if (phase1_or_timeout.index() == 0) {
+            const bool timer_arm_won = phase1_or_timeout.index() != 0;
+            if (!timer_arm_won) {
                 auto phase1_r = std::get<0>(std::move(phase1_or_timeout));
                 (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)
-            } else if (auto live = live_transport_shared_()) {
-                // FQ-G: if phase 1 wedges behind write_gate_ / async_write,
-                // force-close the transport so the blocked writer unwinds and
-                // phase 2 can drain the gate without deadlocking close(graceful).
-                (void)live->close();
+            }
+            // The direct close of the transport is made when the timer's arm won, for
+            // the reason at the call below, and also for a Logout that was cut,
+            // whichever arm won (fixpp#590; `.specify/563-564-callback-send.md` §2.6
+            // "The mechanism", statement 4, "The transport's direct close"). For a cut
+            // Logout the step's arm wins unless the timer expires first, and the call
+            // is kept so that a live transport is closed on this route as it is where
+            // an escalation ends the grace wait: by this close() and by the
+            // close_async() that follows. The cut step begins no write, so nothing is
+            // unwound by the call there. What the pair is on TLS: this close() closes
+            // the socket and skips the TLS shutdown while an SSL operation is
+            // suspended, and the close_async() after it finds the transport closed and
+            // sends nothing, so the peer gets an abortive close with no close-notify
+            // (B&L B-348-1). On the plain transport the two calls do not differ.
+            if (timer_arm_won || logout_cut_) {
+                if (auto live = live_transport_shared_()) {
+                    // FQ-G: if phase 1 wedges behind write_gate_ / async_write,
+                    // force-close the transport so the blocked writer unwinds and
+                    // phase 2 can drain the gate without deadlocking close(graceful).
+                    (void)live->close();
+                }
             }
         }
     }
@@ -2077,6 +2110,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     //   - reset_on_logout: fires when a Logout occurred in either direction
     //     (local sent → run_logout_phase1 set logout_seen_; peer received →
     //      on_inbound_frame 35=5 handler set logout_seen_). [C3.1]
+    //     A Logout that was cut is stored and not transmitted, and
+    //     run_logout_phase1 does not set logout_seen_ for it (fixpp#590;
+    //     `.specify/563-564-callback-send.md` §2.6, ruling R-8).
     //   - reset_on_disconnect: fires on ANY close() — graceful, terminal, or
     //     abnormal read-pump EOF → close(terminal). [C4.1, C4.2]
     //
@@ -6327,7 +6363,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 // [gate-b/r1-green: RC#A removes next_outbound_seq_ - 1U arithmetic;
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
-    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm) noexcept {
+    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm,
+    bool transmit) noexcept {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
@@ -6437,6 +6474,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     // above may have yielded the strand; a close() or Engine::stop()'s step 1 that ran
     // there stops the transmit. The caller's own predicate check follows.
     if (arm && logon_arm_superseded_(*arm)) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism",
+    // statement 3): the caller decided, before the store call, that this frame is
+    // stored and not transmitted. The test sits after the arm test above and before
+    // Step 2, so the time of the last outbound frame is not updated either.
+    if (!transmit) {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -6560,6 +6605,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 //   4. If confirmed → ok.
 //      If timeout → transition to Disconnected, return session_logout_timeout.
 //
+// The cut route (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
+// mechanism", rulings R-8 and R-9) replaces stages 1 to 4 when a terminal close()
+// was started inside the Logout's toAdmin, which stage 1 calls before the Logout
+// takes its number. Then the step writes Disconnected at once, numbers the Logout,
+// stores it where the session has a store, does not transmit it, and returns
+// without LogoutSent and without the sleep.
+//
 // Called from close(graceful) phase 1 ONLY. The root cancellation_state fires
 // phase-2 total AFTER this coroutine returns (either path).
 //
@@ -6582,6 +6634,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         std::span<std::byte>{buf.data(), buf.size()}, logout_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, {}, cfg_.begin_string, st52.value);
 
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism", ruling R-8):
+    // set below when a terminal close was started inside this Logout's toAdmin. The
+    // Logout is then cut: numbered, stored where the session has a store, and not
+    // transmitted.
+    bool cut = false;
     if (!logout_result) {
         // Build failure (unlikely): treat as no-frame-sent, proceed to timeout.
         // The session still transitions to LogoutSent and times out.
@@ -6589,19 +6646,62 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         // Emit the Logout frame (store first, then transport_send — I-3).
         // 019 T014: toAdmin before graceful-close Logout. [FR-008/010]
         // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+        // §2.6, statement 2: the count of terminal closes that have taken close()'s wait
+        // is read here and again when toAdmin has returned. fire_to_admin_ is a plain
+        // call, so nothing suspends between the two reads. The test is "moved", not
+        // "non-zero". A toAdmin that throws leaves by the return below, before the
+        // second read.
+        const std::uint64_t waited_before = waited_terminal_closes_;
         if (!fire_to_admin_(*logout_result)) {
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
+        cut = waited_terminal_closes_ != waited_before;
+        if (cut) {
+            // §2.6, statement 4, "The record": written at once, with no suspension
+            // since toAdmin returned, so that the terminal close reads it when its
+            // turn on the session's executor comes. It is never cleared.
+            logout_cut_ = true;
+            // §2.6, statement 4, "The state, at the decision point": Disconnected is
+            // written here, before the Logout takes its number and before its store
+            // call, so that nothing that tests the state while that call is in flight
+            // finds Active. onLogout runs by this write, on the edge out of Active.
+            // The outbound callback depth is zero here, because the raise around
+            // toAdmin ends before fire_to_admin_ returns. assign_outbound() and
+            // store_then_emit with no arm do not read the state, so the Logout is
+            // still numbered and stored.
+            record_state_transition_(fsm_state::Disconnected);
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
             // Overflow or closed: session-fatal per 005 data-model.md §E3 (Sequence-number state).
             // Abort logout, force-disconnect with propagated error.
-            record_state_transition_(fsm_state::Disconnected);
+            // §2.6, statement 4, "The exit": on the cut route the state is Disconnected
+            // already, and record_state_transition_ adds an entry to the state history
+            // on every call, so the write is made only when the state is not that
+            // already.
+            if (fsm_state_ != fsm_state::Disconnected) {
+                record_state_transition_(fsm_state::Disconnected);
+            }
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
+        auto emit_r =
+            co_await store_then_emit(logout_seq, *logout_result, std::nullopt, /*transmit=*/!cut);
         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+    }
+
+    // The cut route's exit (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
+    // mechanism", statement 4, "The exit"; ruling R-8). A Logout that was stored and not
+    // transmitted is not a Logout that was sent, and no reply to it can come. So the
+    // step leaves at once: it does not set logout_seen_, does not record LogoutSent,
+    // arms no wait and posts nothing. The write of Disconnected is kept for a state
+    // that is not that already; on this route the decision point above made it.
+    // close() discards the value returned.
+    if (cut) {
+        if (fsm_state_ != fsm_state::Disconnected) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
 
     // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
@@ -6609,6 +6709,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // the Logout frame was actually placed on the wire. The teardown reset in close()
     // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
     // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
+    // A Logout that was cut is not placed on the wire and left by the exit above, so
+    // the set is skipped for it (fixpp#590; `.specify/563-564-callback-send.md` §2.6,
+    // ruling R-8).
     logout_seen_ = true;
 
     // Transition to LogoutSent.
