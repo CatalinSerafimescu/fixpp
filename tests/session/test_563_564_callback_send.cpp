@@ -7939,8 +7939,8 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
             // ToAdminOfGracefulCloseStartsNoClose cells: with no close started in the
             // callback, the graceful close stays in its wait until the clock is advanced.
             EXPECT_FALSE(clock_advanced)
-                << "the cell does not advance the mock clock: the graceful close's wait for the "
-                   "peer's Logout ends because the terminal close joined it. "
+                << "the cell does not advance the mock clock: the Logout is cut, so the graceful "
+                   "close arms no wait for the peer's Logout. "
                 << reading;
             EXPECT_EQ(cell.on_logout_calls, 1) << "onLogout runs once. " << reading;
             // The one ending of `.specify/563-564-callback-send.md` §2.6 (§3, NC-21): the
