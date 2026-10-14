@@ -309,6 +309,66 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * establishment timeout), close's result changes with it; for a session
  * established before the effect, close returns FIXPP_ERR_OK either way.
  *
+ * BREAKING (C-ABI 1.12; fixpp#536, #537): what the session does with a frame
+ * above the expected inbound sequence number, and how a gap the peer does
+ * not fill ends. Below, "too high" is said of a frame that passes the fault
+ * and third-field checks of the clauses above and whose MsgSeqNum(34) is
+ * above the expected inbound sequence number, and "a resend is outstanding"
+ * runs from the ResendRequest the session sends for a gap until the expected
+ * number passes that gap or a SequenceReset advances it:
+ *   - a too-high frame that reaches the sequence check while a resend is
+ *     outstanding is ignored: no second ResendRequest is sent, the expected
+ *     number does not advance and the session stays established, where such
+ *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
+ *     the session;
+ *   - with a heartbeat interval set, a gap the peer does not fill ends with
+ *     a Logout: once the expected number has not advanced for two heartbeat
+ *     intervals while a resend is outstanding, the next too-high frame that
+ *     neither ends the session by another check nor advances the expected
+ *     number draws a Logout carrying Text(58), and the session ends there.
+ *     The deadline is tested only when such a frame arrives. A heartbeat
+ *     interval of 0 turns it off; a session whose interval was never set
+ *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
+ *     session's default interval and has the deadline. This is the new end
+ *     of the traces the amended 1.10 bullets describe;
+ *   - where the session's CompIDs leave no room in its frame buffer for that
+ *     Logout's text, the gap ends at the same frame with no Logout: the
+ *     session ends silently;
+ *   - while a resend is outstanding and before that deadline, a too-high
+ *     Heartbeat answers a TestRequest the session has sent and is waiting
+ *     on, and the session stays established, where it ended when that wait
+ *     ran out; one that carries a TestReqID(112) other than that
+ *     TestRequest's ends the session at that Heartbeat, with no Logout,
+ *     where it ended when the wait ran out;
+ *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
+ *     same way, and the ResendRequest follows, so the session survives the
+ *     recovery, where it ended when the wait ran out; one that carries
+ *     another TestReqID(112) ends the session at that Heartbeat, with no
+ *     Logout and no ResendRequest;
+ *   - a ResendRequest the session cannot build, because its CompIDs and the
+ *     expected inbound sequence number make the frame longer than the
+ *     session's frame buffer, ends the session, and fixpp closes the
+ *     connection, where no ResendRequest was sent and the session stayed
+ *     established. A peer whose own bytes are still unread by fixpp at that
+ *     moment can observe the close as a connection reset and not as
+ *     end-of-stream.
+ * Declared with the same clause (fixpp#536): corrections of what one
+ * session's close did to the other sessions of its engine. No document
+ * specified the old result:
+ *   - a session's close, whether the application called it
+ *     (fixpp_session_close) or the engine ran it when the peer's connection
+ *     ended, no longer stops the Heartbeats and TestRequests the engine's
+ *     other sessions send;
+ *   - the peer's answer to a close's Logout on one session no longer stops
+ *     the Heartbeats and TestRequests the other sessions send;
+ *   - another session's close no longer ends this session's wait for the
+ *     peer's answer to its own Logout early.
+ * close's return code does not change with any effect of this clause: each
+ * concerns a session that has established, for which close returns
+ * FIXPP_ERR_OK as before. What changes is when a close that waits for the
+ * peer's answer to its Logout returns: another session's close no longer
+ * cuts that wait short.
+ *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
  * and BLOCKS, so a callback/strand caller deadlocks — FR-013a).
@@ -348,12 +408,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     accepted and advanced the expected inbound sequence number, is
  *     disregarded without advancing it; if the peer resends the same bytes,
  *     the session ends at the peer's next new message that is not a
- *     Heartbeat;
+ *     Heartbeat (amended in C-ABI 1.12, fixpp#537: that message is ignored
+ *     and the session stays established; with a heartbeat interval set, the
+ *     gap ends by the deadline of the 1.12 clause below);
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
  *     the gap it would have closed stays open, and the session ends at the
- *     peer's next new message that is not a Heartbeat;
+ *     peer's next new message that is not a Heartbeat (amended in C-ABI
+ *     1.12, fixpp#537: that message is ignored and the session stays
+ *     established; with a heartbeat interval set, the gap ends by the
+ *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
  *     TestRequest grace window are all faulty ends the session;
@@ -404,6 +469,65 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * Where one of these effects keeps a session up or lets it establish,
  * *out_established is true where it was false; where one ends a session or
  * keeps it from establishing, it is false where it was true.
+ *
+ * BREAKING (C-ABI 1.12; fixpp#536, #537): what the session does with a frame
+ * above the expected inbound sequence number, and how a gap the peer does
+ * not fill ends. Below, "too high" is said of a frame that passes the fault
+ * and third-field checks of the clauses above and whose MsgSeqNum(34) is
+ * above the expected inbound sequence number, and "a resend is outstanding"
+ * runs from the ResendRequest the session sends for a gap until the expected
+ * number passes that gap or a SequenceReset advances it:
+ *   - a too-high frame that reaches the sequence check while a resend is
+ *     outstanding is ignored: no second ResendRequest is sent, the expected
+ *     number does not advance and the session stays established, where such
+ *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
+ *     the session;
+ *   - with a heartbeat interval set, a gap the peer does not fill ends with
+ *     a Logout: once the expected number has not advanced for two heartbeat
+ *     intervals while a resend is outstanding, the next too-high frame that
+ *     neither ends the session by another check nor advances the expected
+ *     number draws a Logout carrying Text(58), and the session ends there.
+ *     The deadline is tested only when such a frame arrives. A heartbeat
+ *     interval of 0 turns it off; a session whose interval was never set
+ *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
+ *     session's default interval and has the deadline. This is the new end
+ *     of the traces the amended 1.10 bullets describe;
+ *   - where the session's CompIDs leave no room in its frame buffer for that
+ *     Logout's text, the gap ends at the same frame with no Logout: the
+ *     session ends silently;
+ *   - while a resend is outstanding and before that deadline, a too-high
+ *     Heartbeat answers a TestRequest the session has sent and is waiting
+ *     on, and the session stays established, where it ended when that wait
+ *     ran out; one that carries a TestReqID(112) other than that
+ *     TestRequest's ends the session at that Heartbeat, with no Logout,
+ *     where it ended when the wait ran out;
+ *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
+ *     same way, and the ResendRequest follows, so the session survives the
+ *     recovery, where it ended when the wait ran out; one that carries
+ *     another TestReqID(112) ends the session at that Heartbeat, with no
+ *     Logout and no ResendRequest;
+ *   - a ResendRequest the session cannot build, because its CompIDs and the
+ *     expected inbound sequence number make the frame longer than the
+ *     session's frame buffer, ends the session, and fixpp closes the
+ *     connection, where no ResendRequest was sent and the session stayed
+ *     established. A peer whose own bytes are still unread by fixpp at that
+ *     moment can observe the close as a connection reset and not as
+ *     end-of-stream.
+ * Where one of the fixpp#537 effects keeps a session established,
+ * *out_established stays true where it turned false; where one ends a
+ * session, it turns false where it stayed true, or at another moment than
+ * before.
+ * Declared with the same clause (fixpp#536): corrections of what one
+ * session's close did to the other sessions of its engine. No document
+ * specified the old result:
+ *   - a session's close, whether the application called it
+ *     (fixpp_session_close) or the engine ran it when the peer's connection
+ *     ended, no longer stops the Heartbeats and TestRequests the engine's
+ *     other sessions send;
+ *   - the peer's answer to a close's Logout on one session no longer stops
+ *     the Heartbeats and TestRequests the other sessions send;
+ *   - another session's close no longer ends this session's wait for the
+ *     peer's answer to its own Logout early.
  *
  * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
@@ -507,12 +631,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     accepted and advanced the expected inbound sequence number, is
  *     disregarded without advancing it; if the peer resends the same bytes,
  *     the session ends at the peer's next new message that is not a
- *     Heartbeat;
+ *     Heartbeat (amended in C-ABI 1.12, fixpp#537: that message is ignored
+ *     and the session stays established; with a heartbeat interval set, the
+ *     gap ends by the deadline of the 1.12 clause below);
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
  *     the gap it would have closed stays open, and the session ends at the
- *     peer's next new message that is not a Heartbeat;
+ *     peer's next new message that is not a Heartbeat (amended in C-ABI
+ *     1.12, fixpp#537: that message is ignored and the session stays
+ *     established; with a heartbeat interval set, the gap ends by the
+ *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
  *     TestRequest grace window are all faulty ends the session;
@@ -566,6 +695,64 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
  * (fixpp_engine_create), returns FIXPP_ERR_OK; where one ends a session or
  * keeps it from establishing, the reverse.
+ *
+ * BREAKING (C-ABI 1.12; fixpp#537, #538): what the session does with a frame
+ * above the expected inbound sequence number, and how a gap the peer does
+ * not fill ends. Below, "too high" is said of a frame that passes the fault
+ * and third-field checks of the clauses above and whose MsgSeqNum(34) is
+ * above the expected inbound sequence number, and "a resend is outstanding"
+ * runs from the ResendRequest the session sends for a gap until the expected
+ * number passes that gap or a SequenceReset advances it:
+ *   - a too-high frame that reaches the sequence check while a resend is
+ *     outstanding is ignored: no second ResendRequest is sent, the expected
+ *     number does not advance and the session stays established, where such
+ *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
+ *     the session;
+ *   - with a heartbeat interval set, a gap the peer does not fill ends with
+ *     a Logout: once the expected number has not advanced for two heartbeat
+ *     intervals while a resend is outstanding, the next too-high frame that
+ *     neither ends the session by another check nor advances the expected
+ *     number draws a Logout carrying Text(58), and the session ends there.
+ *     The deadline is tested only when such a frame arrives. A heartbeat
+ *     interval of 0 turns it off; a session whose interval was never set
+ *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
+ *     session's default interval and has the deadline. This is the new end
+ *     of the traces the amended 1.10 bullets describe;
+ *   - where the session's CompIDs leave no room in its frame buffer for that
+ *     Logout's text, the gap ends at the same frame with no Logout: the
+ *     session ends silently;
+ *   - while a resend is outstanding and before that deadline, a too-high
+ *     Heartbeat answers a TestRequest the session has sent and is waiting
+ *     on, and the session stays established, where it ended when that wait
+ *     ran out; one that carries a TestReqID(112) other than that
+ *     TestRequest's ends the session at that Heartbeat, with no Logout,
+ *     where it ended when the wait ran out;
+ *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
+ *     same way, and the ResendRequest follows, so the session survives the
+ *     recovery, where it ended when the wait ran out; one that carries
+ *     another TestReqID(112) ends the session at that Heartbeat, with no
+ *     Logout and no ResendRequest;
+ *   - a ResendRequest the session cannot build, because its CompIDs and the
+ *     expected inbound sequence number make the frame longer than the
+ *     session's frame buffer, ends the session, and fixpp closes the
+ *     connection, where no ResendRequest was sent and the session stayed
+ *     established. A peer whose own bytes are still unread by fixpp at that
+ *     moment can observe the close as a connection reset and not as
+ *     end-of-stream.
+ * Where one of the fixpp#537 effects keeps a session established, a send on
+ * that session issued after the effect, which returned
+ * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ * (fixpp_engine_create), returns FIXPP_ERR_OK; where one ends a session, the
+ * reverse.
+ * Declared with the same clause (fixpp#538): a correction of what a resend
+ * answer holds. No document specified the old result. After a Logon exchange
+ * that reset the sequence numbers (fixpp_session_config_set_reset_on_logon,
+ * acknowledged by the peer with ResetSeqNumFlag(141)=Y) and left the
+ * session's first outbound number at 2, a message sent with this call is
+ * sent again, with PossDupFlag(43)=Y, when the peer asks for it with a
+ * ResendRequest, where a GapFill was sent in its place. A resend is not
+ * surfaced to the send callback (L-019-4), so the effect is on the wire
+ * only.
  *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
@@ -622,12 +809,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     accepted and advanced the expected inbound sequence number, is
  *     disregarded without advancing it; if the peer resends the same bytes,
  *     the session ends at the peer's next new message that is not a
- *     Heartbeat;
+ *     Heartbeat (amended in C-ABI 1.12, fixpp#537: that message is ignored
+ *     and the session stays established; with a heartbeat interval set, the
+ *     gap ends by the deadline of the 1.12 clause below);
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
  *     the gap it would have closed stays open, and the session ends at the
- *     peer's next new message that is not a Heartbeat;
+ *     peer's next new message that is not a Heartbeat (amended in C-ABI
+ *     1.12, fixpp#537: that message is ignored and the session stays
+ *     established; with a heartbeat interval set, the gap ends by the
+ *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
  *     TestRequest grace window are all faulty ends the session;
@@ -681,6 +873,55 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * a disregarded frame, so an application message whose third field is not
  * MsgType(35), which was delivered to `cb`, is not.
  *
+ * BREAKING (C-ABI 1.12; fixpp#537): what the session does with a frame
+ * above the expected inbound sequence number, and how a gap the peer does
+ * not fill ends. Below, "too high" is said of a frame that passes the fault
+ * and third-field checks of the clauses above and whose MsgSeqNum(34) is
+ * above the expected inbound sequence number, and "a resend is outstanding"
+ * runs from the ResendRequest the session sends for a gap until the expected
+ * number passes that gap or a SequenceReset advances it:
+ *   - a too-high frame that reaches the sequence check while a resend is
+ *     outstanding is ignored: no second ResendRequest is sent, the expected
+ *     number does not advance and the session stays established, where such
+ *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
+ *     the session;
+ *   - with a heartbeat interval set, a gap the peer does not fill ends with
+ *     a Logout: once the expected number has not advanced for two heartbeat
+ *     intervals while a resend is outstanding, the next too-high frame that
+ *     neither ends the session by another check nor advances the expected
+ *     number draws a Logout carrying Text(58), and the session ends there.
+ *     The deadline is tested only when such a frame arrives. A heartbeat
+ *     interval of 0 turns it off; a session whose interval was never set
+ *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
+ *     session's default interval and has the deadline. This is the new end
+ *     of the traces the amended 1.10 bullets describe;
+ *   - where the session's CompIDs leave no room in its frame buffer for that
+ *     Logout's text, the gap ends at the same frame with no Logout: the
+ *     session ends silently;
+ *   - while a resend is outstanding and before that deadline, a too-high
+ *     Heartbeat answers a TestRequest the session has sent and is waiting
+ *     on, and the session stays established, where it ended when that wait
+ *     ran out; one that carries a TestReqID(112) other than that
+ *     TestRequest's ends the session at that Heartbeat, with no Logout,
+ *     where it ended when the wait ran out;
+ *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
+ *     same way, and the ResendRequest follows, so the session survives the
+ *     recovery, where it ended when the wait ran out; one that carries
+ *     another TestReqID(112) ends the session at that Heartbeat, with no
+ *     Logout and no ResendRequest;
+ *   - a ResendRequest the session cannot build, because its CompIDs and the
+ *     expected inbound sequence number make the frame longer than the
+ *     session's frame buffer, ends the session, and fixpp closes the
+ *     connection, where no ResendRequest was sent and the session stayed
+ *     established. A peer whose own bytes are still unread by fixpp at that
+ *     moment can observe the close as a connection reset and not as
+ *     end-of-stream.
+ * On a session one of these effects keeps established, `cb` is invoked for
+ * the inbound application messages after the effect, where it was not; on
+ * one it ends, the reverse. `cb` is not invoked for an application message
+ * ignored that way; it is invoked for it when the peer's answer to the
+ * ResendRequest brings it in sequence.
+ *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
@@ -730,12 +971,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     accepted and advanced the expected inbound sequence number, is
  *     disregarded without advancing it; if the peer resends the same bytes,
  *     the session ends at the peer's next new message that is not a
- *     Heartbeat;
+ *     Heartbeat (amended in C-ABI 1.12, fixpp#537: that message is ignored
+ *     and the session stays established; with a heartbeat interval set, the
+ *     gap ends by the deadline of the 1.12 clause below);
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
  *     the gap it would have closed stays open, and the session ends at the
- *     peer's next new message that is not a Heartbeat;
+ *     peer's next new message that is not a Heartbeat (amended in C-ABI
+ *     1.12, fixpp#537: that message is ignored and the session stays
+ *     established; with a heartbeat interval set, the gap ends by the
+ *     deadline of the 1.12 clause below);
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
  *     TestRequest grace window are all faulty ends the session;
@@ -787,6 +1033,53 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * for a send issued after the effect, where fixpp_session_send refused that
  * send at the engine's Active check; on one it ends or keeps from
  * establishing, the reverse.
+ *
+ * BREAKING (C-ABI 1.12; fixpp#537): what the session does with a frame
+ * above the expected inbound sequence number, and how a gap the peer does
+ * not fill ends. Below, "too high" is said of a frame that passes the fault
+ * and third-field checks of the clauses above and whose MsgSeqNum(34) is
+ * above the expected inbound sequence number, and "a resend is outstanding"
+ * runs from the ResendRequest the session sends for a gap until the expected
+ * number passes that gap or a SequenceReset advances it:
+ *   - a too-high frame that reaches the sequence check while a resend is
+ *     outstanding is ignored: no second ResendRequest is sent, the expected
+ *     number does not advance and the session stays established, where such
+ *     a frame, unless it was a Heartbeat or carried PossDupFlag(43)=Y, ended
+ *     the session;
+ *   - with a heartbeat interval set, a gap the peer does not fill ends with
+ *     a Logout: once the expected number has not advanced for two heartbeat
+ *     intervals while a resend is outstanding, the next too-high frame that
+ *     neither ends the session by another check nor advances the expected
+ *     number draws a Logout carrying Text(58), and the session ends there.
+ *     The deadline is tested only when such a frame arrives. A heartbeat
+ *     interval of 0 turns it off; a session whose interval was never set
+ *     (no call of fixpp_session_config_set_heartbeat_seconds) runs at the
+ *     session's default interval and has the deadline. This is the new end
+ *     of the traces the amended 1.10 bullets describe;
+ *   - where the session's CompIDs leave no room in its frame buffer for that
+ *     Logout's text, the gap ends at the same frame with no Logout: the
+ *     session ends silently;
+ *   - while a resend is outstanding and before that deadline, a too-high
+ *     Heartbeat answers a TestRequest the session has sent and is waiting
+ *     on, and the session stays established, where it ended when that wait
+ *     ran out; one that carries a TestReqID(112) other than that
+ *     TestRequest's ends the session at that Heartbeat, with no Logout,
+ *     where it ended when the wait ran out;
+ *   - a too-high Heartbeat that opens a gap answers such a TestRequest the
+ *     same way, and the ResendRequest follows, so the session survives the
+ *     recovery, where it ended when the wait ran out; one that carries
+ *     another TestReqID(112) ends the session at that Heartbeat, with no
+ *     Logout and no ResendRequest;
+ *   - a ResendRequest the session cannot build, because its CompIDs and the
+ *     expected inbound sequence number make the frame longer than the
+ *     session's frame buffer, ends the session, and fixpp closes the
+ *     connection, where no ResendRequest was sent and the session stayed
+ *     established. A peer whose own bytes are still unread by fixpp at that
+ *     moment can observe the close as a connection reset and not as
+ *     end-of-stream.
+ * On a session one of these effects keeps established, `cb` is invoked for
+ * a send issued after the effect, where fixpp_session_send refused that send
+ * at the engine's Active check; on one it ends, the reverse.
  *
  * Reentrancy: single-thread. THUNK: construction-time. The installed callback
  * runs on the session strand (see fixpp_send_cb typedef; [contracts/toapp-callback.md]).

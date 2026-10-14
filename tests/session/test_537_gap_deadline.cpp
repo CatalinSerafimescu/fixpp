@@ -402,8 +402,9 @@ TEST_P(GapDeadlineOutOfSequenceSite, FrameAtTheBoundDrawsTheLogoutAndTheTranspor
     const auto o = run_out_of_sequence_site(GetParam());
     ASSERT_NO_FATAL_FAILURE(
         expect_logout_and_open_transport(o, std::to_string(kDistinctNextNumIn)));
-    // The one cell that pins the phrase. It is spelled here and not read from the session:
-    // the number is kDistinctNextNumIn in digits.
+    // The phrase is pinned here: spelled out and not read from the session, so that a
+    // change of the session's text fails this cell. The number is kDistinctNextNumIn in
+    // digits.
     EXPECT_EQ(field(o.logouts.front(), 58), "ResendRequest unanswered, expecting MsgSeqNum 7341");
     EXPECT_EQ(o.rejects_for_the_bound_frame, 0U);
 }
