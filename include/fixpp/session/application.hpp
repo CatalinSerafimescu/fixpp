@@ -48,7 +48,9 @@ public:
     virtual ~Application() = default;
 
     // ── Lifecycle callbacks (notifications; no reject) ────────────────────────
-    // All three run on the engine's exec_ (single-thread confinement); a throw ⇒ terminal close.
+    // All three run on the session's executor (Session::executor()), serialised for
+    // that session; session.hpp has the modes, in the comment above
+    // dispatch_app_callback. A throw ⇒ terminal close.
     // A send started in onLogon runs inline, inside the callback; in onCreate or
     // onLogout the session is not Active and a send is refused
     // (session_invalid_state_for_send). A Session::close() started in any of the
@@ -69,7 +71,9 @@ public:
     virtual void onLogout(const SessionId& /*id*/) {}  // FR-009
 
     // ── Inbound delivery callbacks (after engine FSM processing) ─────────────
-    // Both run on the engine's exec_ after the FSM accepts the frame (INV-6).
+    // Both run on the session's executor (Session::executor()), serialised for that
+    // session, after the FSM accepts the frame (INV-6); session.hpp has the modes, in
+    // the comment above dispatch_app_callback.
     // A send started in either runs inline: it is numbered, and its toApp runs,
     // inside the callback. A Session::close() started in either begins after the
     // callback returns (session.hpp, send() and close()).
