@@ -1765,3 +1765,26 @@ mode, and `direct_executor` attested over a strand or a one-worker pool cannot r
 Where to read the current contract: the reentrancy contract in `include/fixpp/session/session.hpp`,
 the comment on choosing a threading mode in `include/fixpp/core/session_executor.hpp`, and B&L
 `B-563-1`, `B-563-2` and `L-007-2`.
+
+## ⚠️ Document-level amendment, 2026-10-14 (fixpp#590) — read before citing an erratum for 093 plan OD-29
+
+Placed at the end for the same reason as the amendments above: line-number citations point into this
+document. The individual sites are **not** rewritten.
+
+**The errata dated 2026-10-06 for 093 plan OD-29 gain an exception.** There are three: in §4.7, the
+comment on `close()` in the code block and the "Idempotency" bullet, and in §6.5 the "Idempotency"
+bullet. Each says that a terminal close which arrives while a graceful one is in flight escalates
+it: it ends its grace wait, or keeps its phase 1 from starting. Since fixpp#590
+(`.specify/563-564-callback-send.md` §2.6, owner rulings R-8 and R-9) one route is different:
+
+- a terminal close started inside the `toAdmin` of the graceful close's Logout cuts that Logout: it
+  is numbered, stored where the session has a store, and not transmitted, and the session is
+  `Disconnected` before the Logout takes its number;
+- that terminal close then joins without ending the grace wait. Nothing cancels the cut Logout's
+  store call before the grace timer, of `logout_disconnect_timeout_ms`, expires;
+- both callers still get the in-flight result.
+
+A terminal close that begins after that `toAdmin` has returned is as the errata say.
+
+Where to read the current contract: `close()`'s comment in `include/fixpp/session/session.hpp`, and
+B&L `B-563-5` and `L-563-7`.

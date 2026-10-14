@@ -99,7 +99,7 @@ The authority is therefore split three ways, and knowing the split is most of th
 | Reset & refresh on Logon | `specs/024-reset-refresh-on-logon/`, `specs/025-refresh-on-logon/` ⚠️ **025 `tasks.md` T041 (`[X]`, "the live standby-re-hydrate interop cell … capture the golden") and T002's "standby-re-hydrate live cell" are FALSE as result claims: the `StandbyRehydrate_Initiator` suite does not run live.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
 | NextExpectedMsgSeqNum | `specs/027-next-expected-msgseqnum/` ⚠️ **027 `tasks.md` T022's "+ a bidirectional-gap cell" and its `## Notes` line "T022 the live cell" are FALSE as result claims for the bidirectional suite: `NextExpectedBidirectional` does not run live. T022's "recover an at-logon gap with zero `ResendRequest`" and contract C10's "recover an at-logon gap … all missed messages delivered in order" are ALSO false as result claims for the initiator and acceptor NE cells: those cells run live but seed no gap (parent `run_interop_cell.py` NE block, "no resend"), so they witness only 789 negotiation and in-sync honour, and fixpp#503 owns the gap cells.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -e 'recover an at-logon gap' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
 | FIXT / FIX50SP2, version serviceability | `specs/033-fixt-fix50sp2-session/`, `specs/042-fixt-version-serviceability-guard/` |
-| A second `close()` while one is in flight | `Session::close` and its comment in `session.hpp`; `specs/093-inbound-frame-dispositions/plan.md` OD-29. ⚠️ **`.specify/2d-threading.md` §4.7's and §6.5's "Idempotency" bullets and §4.7's code-block comment ("functionally a no-op for the second caller", "without side effects", "returns immediately with no error") are SUPERSEDED for terminal-on-graceful by 093 plan OD-29**: a terminal close that arrives while a graceful one is in flight escalates it, ending its grace wait or keeping its Logout exchange from starting. Each carries a dated erratum in place. The code-block comment's "returns immediately" did not hold before 093 either: the join awaits the in-flight close. Graceful-on-graceful still joins with no side effect. |
+| A second `close()` while one is in flight | `Session::close` and its comment in `session.hpp`; `specs/093-inbound-frame-dispositions/plan.md` OD-29. ⚠️ **`.specify/2d-threading.md` §4.7's and §6.5's "Idempotency" bullets and §4.7's code-block comment ("functionally a no-op for the second caller", "without side effects", "returns immediately with no error") are SUPERSEDED for terminal-on-graceful by 093 plan OD-29**: a terminal close that arrives while a graceful one is in flight escalates it, ending its grace wait or keeping its Logout exchange from starting. Each carries a dated erratum in place. ⚠️ **OD-29 is itself narrowed by fixpp#590** (`.specify/563-564-callback-send.md` §2.6, rulings R-8 and R-9; B&L `B-563-5`): a terminal close started inside the `toAdmin` of the graceful close's Logout cuts that Logout and joins without ending the grace wait. `.specify/2d-threading.md` has a document-level amendment for it at its end, and the frozen 093 bundle is flagged in the section on fixpp#563 below. The code-block comment's "returns immediately" did not hold before 093 either: the join awaits the in-flight close. Graceful-on-graceful still joins with no side effect. |
 | Runtime flows | the flow pages below — no design doc carries them |
 
 ## Invariants that span features, and why they exist
@@ -338,7 +338,8 @@ since fixpp#563 and fixpp#564 (the next section). Re-derive the shape from sourc
 
 The design is `.specify/563-564-callback-send.md` (issue mode: that note is the plan; its §0 has the
 owner's rulings, §5 what was rejected, §7 what it does not decide). The behaviour a user must know is
-B&L `B-563-1`…`B-563-4`, `B-564-1` and `L-563-1`…`L-563-6`, with `L-007-2` widened. The measurements
+B&L `B-563-1`…`B-563-5`, `B-564-1`, `L-563-1`…`L-563-5` and `L-563-7`, with `L-007-2` widened. The
+measurements
 are in the parent repository, `decisions/speckit/b41-563-564-measurement.md`. Re-derive the shape from
 source, not from here.
 
@@ -380,6 +381,23 @@ it through an `Application` callback is the callback the stretch itself calls.
 - **OD-6, withdrawn.** No C-ABI change is declared. The first ruling ("declared breaking") rested on a
   sentence that reading and then a measurement showed false: outside R-5's route, the new stop check
   refuses no send that the control-strand read admitted (note §2.4).
+- **R-8, one ending for a terminal close started inside the `toAdmin` of a graceful close's
+  Logout** (note §2.6; fixpp#590; `B-563-5`). The Logout is cut: numbered, stored where the
+  session has a store, and not transmitted, which is QuickFIX's ending. The test is a count of
+  the terminal closes that have taken R-4's wait, read by `run_logout_phase1` before the
+  Logout's `toAdmin` and again when it has returned. Where the count moved, the step writes
+  `Disconnected` at once, so `onLogout` runs before the Logout takes its number, stores the
+  Logout through `store_then_emit` with its transmit switched off, and returns without
+  `LogoutSent` and without a wait.
+- **R-9, the bound.** ⚠️ This narrows 093's plan OD-29 on that route. A terminal close that joins
+  a graceful close whose Logout was cut sets the latch and does not call the grace timer's wake,
+  so nothing cancels the cut Logout's store call before the grace timer expires. Where that call
+  is still waiting for the store's lock then, the timer ends the join and nothing is stored for
+  the Logout. Note §2.6, "The bound", is the one statement of it, with what the timer does not
+  end (`L-563-7` is one of those).
+- **R-10.** With `reset_on_disconnect` set the route keeps fixpp's teardown reset, which runs
+  after the Logout step and empties the store. QuickFIX C++'s order differs; the difference is
+  stated in `B-563-5` and not removed.
 
 **The debug guard** (note §2.2) changed with it, because the old one aborted on the nesting R-1 makes
 legal. `in_dispatch_` is gone. `callback_dispatch_scope` now carries an atomic owner token (a second
@@ -417,6 +435,35 @@ likely to propose again).
 - **Refuse a send started in the confirming Logout's `toAdmin`** of a logout the peer started. Ruled,
   then not implemented: the source reading showed that no QuickFIX engine refuses it (`L-563-2`).
 
+For R-8 and R-9 (note §5, its last block, which names the prototype of each):
+
+- **Merge with the split stated** (on a `FileStore` with a live transport, timing decided whether
+  the Logout was transmitted). Rejected by R-8.
+- **Skip the Logout's transmit and change nothing else.** The step would record a Logout as sent
+  that never left, and with `reset_on_logout` set the teardown reset would fire against a peer
+  that saw no Logout.
+- **Keep the cut step in its wait and let `close()`'s join end it.** The join cancels the step
+  once, and the stores' lock sequence clears a cancellation that arrives while the Logout's
+  store call is queued at the lock; the step then waits out the logout timeout.
+- **Write `Disconnected` after the cut Logout's store call.** The session stays Active during
+  that call, and what arrives then is acted on after the application's terminal close.
+- **A separate state or gate that keeps arrivals out once the cut is decided.** Not needed: the
+  state the session already has, `Disconnected`, is written at the decision point.
+- **Let the joining terminal close cancel the grace timer for a cut Logout as well.** The join
+  would then cancel the Logout's store call, and "stored" would depend on whether the store's
+  lock is free at that instant.
+- **Never cancel the cut Logout's store call, not even at the grace timer's expiry.** Rejected by
+  R-9: a terminal close and `Engine::stop()` would wait for the store however long it takes.
+- **No direct close of the transport on the cut route,** for a clean TLS shutdown. Not taken
+  here: it is one question for every escalation, tracked in fixpp#596.
+- **A yield after `toAdmin` and then a read of the escalation's flag, or that flag set inside the
+  callback.** The first makes the decision an order between two posts; the second makes `close()`
+  act on another close before its wait, against R-4.
+- **Transmit on every arm,** by letting the Logout's store call and write finish before the
+  escalation takes effect. It is the opposite of QuickFIX's ending, and a write that hangs would
+  hold a terminal close.
+- **Match QuickFIX C++'s order of a reset on disconnect.** Rejected by R-10.
+
 **⚠️ Frozen bundles that still describe the superseded behaviour.** `specs/<id>/` bundles are
 point-in-time records and are not edited. Each flag is on the bundle and covers its plan, tasks,
 checklists and quickstart, which repeat the same statements. Re-derive the list with the last search
@@ -436,7 +483,10 @@ of the note's §4 ("The searches", the families over `specs/`).
 - **`specs/093-inbound-frame-dispositions`:** contract C-3 I-3, and the research line that "the
   callback scope asserts against nesting". I-3 still holds: no inbound parse nests inside another.
   The carrier of its assertion changed, from the callback scope to the depth assertion at the parse
-  sites.
+  sites. Its plan's OD-29 and contract C-6's note on `close()` say that a terminal close that
+  arrives while a graceful one is in flight ends its grace wait. For a Logout that was cut it
+  does not (R-8 and R-9 above). Re-derive the passages with
+  `command grep -rn 'OD-29' specs/093-inbound-frame-dispositions`.
 
 Also superseded in place, by an erratum at the END of each file: `.specify/2d-threading.md`
 ("Non-reentrant from inside a callback", and the `direct_executor` attestation), `.specify/2e-msgstore.md`
@@ -454,14 +504,21 @@ started in `toApp` "runs inline"; `Engine::send`'s two hops).
   change fails after it. A send that races `fixpp_engine_destroy` from another thread had an outcome
   that depended on timing and still has; the window in which it is admitted is wider (`B-563-3`).
 - No version bump and no BREAKING clause.
-- One change of behaviour beyond the rulings: a terminal close started in the `toAdmin` or the
-  `onLogout` of a graceful close now escalates it at once, where it could run out the logout timeout
-  (`B-563-2`). From `toAdmin`, on a `FileStore` with a live transport, the graceful close's Logout is
-  then stored, and whether it is transmitted is decided by timing (`L-563-6`, fixpp#590).
+- One change of behaviour that follows from R-4's wait: a terminal close started in the `toAdmin`
+  or the `onLogout` of a graceful close now ends it without the wait for the peer's Logout, where
+  it could run out the logout timeout (`B-563-2`). From `onLogout` it escalates the close. From
+  `toAdmin` it cuts the close's Logout, on every store and transport: the Logout is numbered,
+  stored where there is a store, and not transmitted, where before it was transmitted (R-8;
+  `B-563-5`).
+- `Session`'s layout grows by two more members, the count and the record of the cut.
 
 **Not decided here** (note §7): a live send that interleaves with a resend replay (fixpp#588);
 `Engine::stop()` started from a callback (fixpp#579); one ending for an allocation failure while a
 send starts (fixpp#587); the census matcher's blind spot found while the cells were written (fixpp#586).
+Beside R-8's route: a terminal close that begins after the Logout's `toAdmin` has returned, where
+timing still decides whether the Logout is transmitted (fixpp#594); a clean TLS shutdown for every
+escalation (fixpp#596); what a completed `close()` promises about another coroutine's store job
+(fixpp#597); a `FileStore::store` call that reports success for a frame it did not write (fixpp#598).
 
 ## Runtime flows
 
