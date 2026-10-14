@@ -7,8 +7,8 @@
 // contracts/resend_state.hpp.
 //
 // Value-typed; embedded in ReconnectFsm. No allocations on the FSM transition
-// path (Active ↔ AwaitingResend transient flag); inbound_held may grow on the
-// cold AwaitingResend path (PMR-arena-backed).
+// path (Active ↔ AwaitingResend transient flag); inbound_held has no writer
+// (see the member's comment).
 #pragma once
 
 #include <chrono>
@@ -19,7 +19,8 @@
 
 namespace fixpp::session {
 
-// Held inbound frame buffered during AwaitingResend (FR-009).
+// The shape 013 FR-009 gave an inbound frame held during AwaitingResend; nothing
+// creates one (see ResendState::inbound_held).
 // Deep-copied from the framer's transient view into PMR storage owned by the
 // parent vector's allocator. [data-model §E-2 / /speckit-analyze C1]
 struct held_inbound_msg {
@@ -38,7 +39,7 @@ struct held_inbound_msg {
 // ResendState — populated on FR-009 entry (Active → awaiting_resend=true);
 // reset on gap close (awaiting_resend=false) or session exit. Value-typed;
 // embedded in ReconnectFsm. Default-construction is alloc-free (empty vector);
-// `inbound_held` may grow during AwaitingResend (cold path, PMR-arena-backed).
+// `inbound_held` has no writer (see the member's comment).
 // Validation per data-model.md §E-2:
 //   outstanding_begin <= outstanding_end, OR outstanding_end == 0 (infinity).
 struct ResendState {
@@ -64,9 +65,12 @@ struct ResendState {
     // issued a counter-ResendRequest. When 0, no outbound replay in flight.
     std::uint32_t outbound_replay_cursor = 0;
 
-    // Inbound messages with MsgSeqNum > next_expected_inbound that arrived
-    // during AwaitingResend. Held in strict-MsgSeqNum order until gap closes.
-    // Unbounded in v1.0 per [const §XV.15] block-mode + spec.md FR-009.
+    // No writer: no frame is held (re-check: `git grep -n inbound_held -- src include`).
+    // A frame above next_expected_inbound that arrives while a resend is outstanding is
+    // ignored, and the peer's replay fetches it (fixpp#537;
+    // .specify/536-537-538-recovery-liveness.md §4.3, D-537-1 and D-537-2; §4.4 rejects
+    // holding it). 013 FR-009's queue was not built (B&L L-013-2). Removing the member
+    // changes this installed header's layout.
     std::pmr::vector<held_inbound_msg> inbound_held;
 
     // Reset to default-constructed shape on gap close. Clears inbound_held

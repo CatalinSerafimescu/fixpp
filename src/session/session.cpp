@@ -1901,8 +1901,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
         // AFTER this block resolves (peer ACK | timeout | cancellation).
         //
         // [feedback_asio_cospawn_total_cancellation_default]: we use the root
-        // slot for the child; the run_logout_phase1 coroutine resets to
-        // enable_total_cancellation internally.
+        // slot for the child; run_logout_phase1 makes no reset_cancellation_state
+        // call.
         // OD-29: a terminal close that arrived during the flush hooks above has set
         // close_escalated_, and phase 1 does not start.
         if (!close_escalated_ &&
@@ -2481,7 +2481,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
-        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
+        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
+        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
+        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
+        // superseding I-07's logged-then-proceed for a cancelled store call).
+        (void)emit_r;
     }
     // 093 plan OD-26: the Logout's store and write are suspensions.
     disconnect_unless_superseded_(arm);
@@ -2809,7 +2814,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // into storage that outlives the await.
 
 // Reject(35=3); assign_outbound before toAdmin. A failed assign or a throwing toAdmin
-// disconnects and returns the error; a failed emit is logged-then-proceed (I-07).
+// disconnects and returns the error; the emit's returned error is discarded (the comment
+// at the discard says which errors those are).
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
     bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
     std::string_view sending_time, std::optional<fsm_state> arm) noexcept {
@@ -2832,7 +2838,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_leaf_(
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
         auto emit_r = co_await store_then_emit(rj_seq, *rj_r, arm);
-        (void)emit_r;  // I-07: store-side errors logged-then-proceed
+        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
+        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
+        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
+        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
+        // superseding I-07's logged-then-proceed for a cancelled store call).
+        (void)emit_r;
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -2867,7 +2878,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_reject_best_effo
 // empty, which is the deadline of an unfilled resend gap (fixpp#537, D-537-5); every other
 // caller passes an empty text and its Logout has none. A frame that cannot be built is not
 // sent, and the leaf returns success. A throwing toAdmin or a failed assign disconnects and
-// returns the error; a failed emit is logged-then-proceed (I-07).
+// returns the error; the emit's returned error is discarded (the comment at the discard
+// says which errors those are).
 asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
     bool tic, std::string_view sending_time, std::string_view text) noexcept {
     FIXPP_INBOUND_SPLIT_ENTRY(tic);
@@ -2889,7 +2901,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logout_leaf_(
             co_return std::unexpected(assign_r.error());
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
-        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
+        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
+        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
+        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
+        // superseding I-07's logged-then-proceed for a cancelled store call).
+        (void)emit_r;
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -2917,7 +2934,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::inbound_logon_sent_logou
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
         auto emit_r = co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent);
-        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+        // The returned error is discarded: a persistent store's refusal (059), a failed write, or a
+        // frame its number check stopped (D-OUT-10). A cancelled store call does not return here:
+        // store_then_emit leaves by operation_aborted, which the inbound entry's catch takes
+        // (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
+        // superseding I-07's logged-then-proceed for a cancelled store call).
+        (void)emit_r;
     }
     co_return fixpp::core::expected_t<void>{};
 }
@@ -5684,8 +5706,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
     // asio::system_error{operation_aborted} thrown when the async_mutex awaitable
     // is cancelled (e.g. Session::close() fires root_cancel_ while a send is in flight).
-    // The noexcept window on this coroutine must never let an uncaught exception
-    // propagate (std::terminate). [F5 drift fix;
+    // The try is for the ending: any exception of the send body, store_then_emit's
+    // operation_aborted for a cancelled store call among them, ends the send with
+    // dispatch_aborted and the session Disconnected, and leaves the caller's thread as
+    // the D-OUT-9 block below says (.specify/536-537-538-recovery-liveness.md §10).
+    // [F5 drift fix;
     // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
     try {
         // gate-b/r2 FQ-1: disconnect_required carries PROVENANCE out of send_impl —
@@ -6707,7 +6732,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
             }
             auto emit_r = co_await store_then_emit(rj_seq, *rj_result);
-            (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+            // The returned error is discarded: a persistent store's refusal (059), a failed write,
+            // or a frame its number check stopped (D-OUT-10). A cancelled store call does not
+            // return here: store_then_emit leaves by operation_aborted, which the inbound entry's
+            // catch takes (on_inbound_active_; .specify/536-537-538-recovery-liveness.md §10,
+            // D-OUT-2 and D-OUT-4, superseding I-07's logged-then-proceed for a cancelled store
+            // call).
+            (void)emit_r;
         }
         co_return fixpp::core::expected_t<void>{};
     }
@@ -6742,8 +6773,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 // [feedback_asio_cospawn_total_cancellation_default]: this coroutine is called
 // via co_await from close(); the current coroutine's cancellation state is
 // already bound to the root slot. We do NOT reset here — the caller (close)
-// controls the root slot. Instead we use a loop-and-check polling pattern
-// for the logout confirmation, which is safe on the single-strand session.
+// controls the root slot. The wait for the confirmation is step 3's race
+// (D-536-3).
 asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noexcept {
     using namespace std::chrono_literals;
     using std::chrono::seconds;
@@ -7138,7 +7169,13 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
                     auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
-                    (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                    // The returned error is discarded: a persistent store's refusal (059), a failed
+                    // write, or a frame its number check stopped (D-OUT-10). A cancelled store call
+                    // does not return here: store_then_emit leaves by operation_aborted, which the
+                    // inbound entry's catch takes (on_inbound_active_;
+                    // .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
+                    // superseding I-07's logged-then-proceed for a cancelled store call).
+                    (void)emit_r;
                 }
             }
         }
@@ -7186,7 +7223,13 @@ Session::honor_peer_next_expected_(std::string_view raw_789, bool /*present_789*
                 auto assign_r = co_await seqnum_mgr_.assign_outbound();
                 if (assign_r) {
                     auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
-                    (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+                    // The returned error is discarded: a persistent store's refusal (059), a failed
+                    // write, or a frame its number check stopped (D-OUT-10). A cancelled store call
+                    // does not return here: store_then_emit leaves by operation_aborted, which the
+                    // inbound entry's catch takes (on_inbound_active_;
+                    // .specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4,
+                    // superseding I-07's logged-then-proceed for a cancelled store call).
+                    (void)emit_r;
                 }
             }
         }
