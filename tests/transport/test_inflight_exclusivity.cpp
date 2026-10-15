@@ -53,6 +53,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 // Internal transport header — needed for asio_tls_transport::timer_epochs(), the
@@ -95,19 +96,18 @@ using namespace std::chrono_literals;
 #define FIXPP_TLS_FIXTURE_DIR ""
 #endif
 
-// The host cells 7 and 9 give their FIRST attempt, which must fail in
-// RESOLUTION without any query leaving the process (#603). A name the stub
-// resolver forwards fails at the network's pace -- an RFC 6761 `.invalid` name
-// included: the TLD is reserved, but the query is still sent -- and the cell's
-// run_for window can expire before the first attempt completes. A label longer
-// than 63 octets (RFC 1035 §2.3.4) is not encodable as a DNS query, so the
-// resolver refuses this name before sending anything: its first label is that
-// cap plus one, and the name stays under `.invalid`.
+// Cells 7 and 9 need their FIRST attempt to fail in RESOLUTION with no query
+// leaving the process (#603). This host's first label is 64 octets, over the
+// 63-octet label cap of RFC 1035 §2.3.4, so it cannot be encoded as a DNS
+// query.
 //
 // Re-check: run this binary with --gtest_filter='*RetryableAfterFailedAttempt'
 // inside a network namespace whose only name server receives queries and never
 // answers (#603 describes the harness). Zero datagrams must reach it.
-const std::string kUnencodableHost = std::string(64, 'a') + ".invalid";
+constexpr char kUnencodableHost[] =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.invalid";
+static_assert(std::string_view{kUnencodableHost}.find('.') == 64,
+              "the first label must be one octet over RFC 1035's 63-octet cap");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Compile-time contract: error codes for the exclusivity contract.
@@ -606,9 +606,10 @@ TEST(InflightExclusivity, HandshakeOverlapRefusedWhileFirstInFlight) {
 // silently wedges the Transport into permanent transport_already_connected,
 // breaking FR-007's "a failed attempt stays `fresh` and is retryable".
 //
-// The first attempt fails in RESOLUTION (an RFC 6761 `.invalid` host), which
-// returns before any state write, so the Transport must stay `fresh` AND clear
-// the flag -- and the retry to the live fixture endpoint must really connect.
+// The first attempt fails in RESOLUTION (kUnencodableHost, whose over-long
+// first label cannot be encoded as a DNS query), which returns before any
+// state write, so the Transport must stay `fresh` AND clear the flag -- and the
+// retry to the live fixture endpoint must really connect.
 // (A refused CONNECT would have been the obvious choice and is not usable here;
 // the body explains why.)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -620,10 +621,9 @@ TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
     asio::io_context ioc;
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
-    // The failing first attempt is a RESOLVE failure (kUnencodableHost says why
-    // that host): async_connect returns transport_resolve_failed WITHOUT ever
-    // leaving state_ == fresh -- exactly the "failed attempt is retryable" case
-    // FR-007 names.
+    // The failing first attempt is a RESOLVE failure (kUnencodableHost states
+    // the condition), after which state_ must still be fresh -- exactly the
+    // "failed attempt is retryable" case FR-007 names.
     //
     // ⚠️ NOT a refused connect, which is the obvious choice and is not
     // constructible here: this sandbox DROPS connects to unbound loopback ports
