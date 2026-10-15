@@ -7,7 +7,7 @@
 //
 // T015 no-heap witness uses alloc_guard_start/alloc_guard_end markers.
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
-// Run under: LD_PRELOAD=tools/mallocnesia/libmallocnesia.so MALLOCNESIA_MAX_ALLOCS=0
+// Run under tools/check_alloc.py; the command is at ResetKnobs_NoHeapOnResetPath below.
 
 #include "support/alloc_guard_markers.hpp"
 //
@@ -1509,7 +1509,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_NextInitiatorLogon_Emits141) {
 //
 // Gate: mallocnesia LD_PRELOAD interceptor (global-malloc interception).
 // clang-format off
-//   Run: LD_PRELOAD=$(pwd)/tools/mallocnesia/libmallocnesia.so MALLOCNESIA_MAX_ALLOCS=0 build/linux-clang-debug/bin/session_reset_on_lifecycle --gtest_filter="*NoHeapOnResetPath*"
+//   Run: GTEST_FILTER='*NoHeapOnResetPath*' python3 tools/check_alloc.py --binary build/<preset>/bin/session_reset_on_lifecycle --mallocnesia build/<preset>/lib/libmallocnesia.so
 // clang-format on
 //
 // Why mallocnesia is the binding gate (not counting_resource alone):

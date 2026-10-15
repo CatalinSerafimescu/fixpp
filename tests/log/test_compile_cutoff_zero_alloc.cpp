@@ -25,7 +25,7 @@
 //     guard window.
 //
 //   Gate B2 — mallocnesia LD_PRELOAD (global malloc):
-//     When run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so with
+//     When run under LD_PRELOAD=build/<preset>/lib/libmallocnesia.so with
 //     MALLOCNESIA_MAX_ALLOCS=0, the interceptor exits the process with code 1
 //     if any malloc/calloc/realloc fires between alloc_guard_start() and
 //     alloc_guard_end().
