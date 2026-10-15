@@ -42,17 +42,34 @@
  * compile it with fixppPYTHON_wrap.cxx's command from compile_commands.json
  * plus `-Wall -Wextra -Wpedantic`, under each combination of
  * FIXPP_PY_GIL_CANARY and FIXPP_PY_GIL_RELEASE_CANARY. The #if keeps the
- * pragma away from MSVC, which reports an unknown one (C4068). */
+ * pragma away from MSVC, which reports an unknown one (C4068).
+ *
+ * #562: the MSVC arm does the same for C4100 (unreferenced parameter), and
+ * only for C4100. It ends with `default`, not push/pop: SWIG's runtime carries
+ * its own unbalanced `#pragma warning(disable : 4505)`, which a pop would
+ * undo for the static helpers SWIG emits after this point. Re-check whether it
+ * is still needed: delete both MSVC lines, regenerate the wrapper with the
+ * lowest SWIG the build admits (pyproject.toml's `swig>=` and
+ * find_package(SWIG) above) and with the newest, and compile each with `cl /c`
+ * under the MSVC arm of fixpp_apply_common_flags (cmake/Helpers.cmake),
+ * fixpp_py's definitions and CMake's Release C++23 flags, under each
+ * combination of the two canaries. Keep the arm while any of those reports
+ * C4100 at or before the line of the pop below; widen it only to a code
+ * reported there. */
 %begin %{
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#elif defined(_MSC_VER)
+#pragma warning(disable : 4100)
 #endif
 %}
 
 %{
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop /* opened by %begin above: SWIG's runtime ends here */
+#elif defined(_MSC_VER)
+#pragma warning(default : 4100) /* closes the %begin MSVC arm */
 #endif
 #include <string.h>  /* strlen — embedded-NUL check in the config-str typemaps */
 #include <stdint.h>  /* int64_t — captured main-interpreter id (T003 limited-API) */
