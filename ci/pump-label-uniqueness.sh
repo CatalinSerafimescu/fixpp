@@ -83,18 +83,28 @@
 #     readings. The readings that fit the arity decide: when they all put the same thing at
 #     the label's position, the call is read that way. When they disagree, when none fits,
 #     or when more pairs hold a comma than the bound on how many are enumerated, the call
-#     is listed UNLABELLED at the call -- unless even splitting
-#     every comma leaves it short of the required parameters, which no reading can reach. A
-#     forwarder's own parameter list is always read as template argument lists, which is
-#     wrong only for a comparison in a default argument.
+#     is listed UNLABELLED at the call -- unless even splitting every comma leaves it short
+#     of the required parameters, which no reading can reach.
+#   * A forwarder's own parameter list has the same readings, since a default argument can
+#     hold a comparison. It is read only when every reading gives the same label position
+#     and arity. When they differ, or there are more pairs than the bound, every call of
+#     that forwarder in scope is listed UNLABELLED at the call, and none is read.
 #   * A lambda that takes the label as its own parameter is not a function definition here;
 #     its seam call stays unlabelled. So does a constructor whose initialiser list holds the
 #     seam call, and a parameter of any other type (`std::string_view`, `std::string`).
 #   * ⚠️ THE FLOOR, AND WHERE IT STOPS: a forwarder none of whose calls was read is listed
-#     UNLABELLED at its seam call, and a call passing no literal, or whose commas are read
-#     two ways as above, is listed UNLABELLED at the call (`via`). A call OUTSIDE the scope
+#     UNLABELLED at its seam call, and a call passing no literal, whose commas are read two
+#     ways, or of a forwarder whose parameter list is not read, as above, is listed
+#     UNLABELLED at the call (`via`). A call OUTSIDE the scope
 #     in the first bullet is not covered: once any call of that forwarder was read, the
 #     out-of-scope call's label reaches neither the duplicate check nor the unlabelled list.
+#   * ⚠️ MACROS ARE NOT EXPANDED; calls are read as spelled. An invocation of a macro that
+#     makes a seam call or a forwarder call -- an object-like alias of the name, or a
+#     function-like macro whose body makes the call -- is not seen by any reader here: it is
+#     not counted, not checked for duplicates, and not listed unlabelled. A macro body that
+#     spells the name itself is read once, at the `#define`, however often it is invoked.
+#     The complement for such a call is the runtime check named below: force each label
+#     with FIXPP_FORCE_WINDOW_MISS and assert that no OTHER label fires.
 #
 # ⚠️ A NAMED CONSTANT IS STILL NOT CHASED. A label held in a variable
 # (`static constexpr const char* kSite = "..."; run_window_then_ready(ioc, fut, w, kSite)`)
@@ -432,16 +442,59 @@ def forwarded_param(view, pos, idents):
     if fn is None:
         return None
     name, lp, rp = fn
-    # A parameter list holds no comparison outside a default argument, so its angle
-    # brackets are read as template argument lists, whose commas separate no parameter.
-    params = [view.blanked[a:b]
-              for a, b in _top_args(view.blanked, lp, rp, _angles(view.blanked, lp, rp))]
+    # A comparison in a default argument makes a `<`..`>` around a comma a choice here too,
+    # so the parameter list has the same readings as a call (`_readings`). The forwarder is
+    # read only when every reading gives the same label position and arity; otherwise, or
+    # past the bound, it is still a forwarder, but none of its calls is read (`unread`).
+    readings = _readings(view.blanked, lp, rp)
+    unread = None
+    if readings is not None:
+        # Before its default `=`, a parameter holds `<`/`>` only as template brackets, so a
+        # reading that leaves one unpaired there is not a parameter list.
+        readings = [r for r in readings
+                    if all(_declares(view.blanked[a:b]) for a, b in r)] or readings
+    if readings is None:
+        readings = [_top_args(view.blanked, lp, rp),
+                    _top_args(view.blanked, lp, rp, _angles(view.blanked, lp, rp))]
+        unread = "its parameter list has too many '<'..'>' pairs to read"
+    sigs = {_signature([view.blanked[a:b] for a, b in r], idents) for r in readings}
+    if sigs == {None}:
+        return None
+    if len(sigs) > 1 and unread is None:
+        unread = "its parameter list reads more than one way at a '<' or '>'"
+    if unread is not None:
+        return {"fn": name, "lp": lp, "index": None, "unread": unread}
+    index, required, total = sigs.pop()
+    return {"fn": name, "lp": lp, "index": index, "required": required, "total": total}
+
+
+def _declares(param):
+    """Whether the part of one parameter before its default `=` pairs every `<` with a `>`
+    (outside (), [] and {}; the `>` of `->` aside)."""
+    eq = re.search(r"(?<![=!<>])=(?!=)", param)
+    head, depth, nest = param[:eq.start()] if eq else param, 0, 0
+    for k, c in enumerate(head):
+        if c in "([{":
+            nest += 1
+        elif c in ")]}":
+            nest -= 1
+        elif nest == 0 and c == "<":
+            depth += 1
+        elif nest == 0 and c == ">" and head[k - 1:k] != "-":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def _signature(params, idents):
+    """(label position, required, total) of one reading of a parameter list, or None when
+    no parameter of it is a `const char*` named by `idents`."""
     for k, p in enumerate(params):
         if any(_char_ptr_param(p, x) for x in idents):
             variadic = any("..." in q for q in params)
-            return {"fn": name, "lp": lp, "index": k,
-                    "required": sum(1 for q in params if "=" not in q and "..." not in q),
-                    "total": float("inf") if variadic else len(params)}
+            return (k, sum(1 for q in params if "=" not in q and "..." not in q),
+                    float("inf") if variadic else len(params))
     return None
 
 
@@ -471,7 +524,8 @@ def forwarder_callers(views, def_name, fw):
     position (`_read_at`), the call is read that way. If they disagree, if none fits while
     some choice exists, or if there are too many pairs to enumerate, the call is yielded
     with `why` set, so it is listed unlabelled, never dropped -- unless it has fewer
-    arguments than required under every reading (not read, as above)."""
+    arguments than required under every reading (not read, as above). Every call of a
+    forwarder whose own parameter list is not read (`unread`) is yielded that way too."""
     def_view = views[def_name]
     scope = [def_name]
     if def_name.endswith((".hpp", ".h")):
@@ -487,6 +541,9 @@ def forwarder_callers(views, def_name, fw):
         for m in rx.finditer(v.blanked):
             i = m.end() - 1
             if v is def_view and i == fw["lp"]:
+                continue
+            if fw.get("unread"):
+                yield name, v.line(m.start()), None, None, fw["unread"]
                 continue
             j = _close(v.blanked, i)
             spans = _top_args(v.blanked, i, j)
@@ -752,7 +809,8 @@ def tally(items, forwarders_out=None):
                               for w in fw["seam"])
     if forwarders_out is not None:
         forwarders_out.extend(sorted(
-            (fw["file"], fw["fn"], fw["index"], fw["callers"], fw["seam"]) for fw in fws.values()))
+            (fw["file"], fw["fn"], str(fw["index"] if fw["index"] is not None else "?"),
+             fw["callers"], fw["seam"]) for fw in fws.values()))
     return seen, unlabelled, len(views)
 
 
@@ -907,6 +965,36 @@ _fwd_case("a call none of whose readings fits the arity is unlabelled",
     (void)f.pump_done(make_pred<A, B>(), "NF", 3);
     (void)f.pump_done(pred, "UNIQUE");
 ''')], {"UNIQUE": 1}, [], ["(via pump_done: no split of its '<'..'>' commas fits)"])
+# Comparisons in a forwarder's default arguments: keeping their comma merges two parameters,
+# splitting it does not, and the two readings put the label at different positions with
+# different arities. Neither is read; every call of the forwarder is unlabelled.
+_fwd_case("a parameter list read two ways leaves every call of it unlabelled",
+          [("a.cpp", '''
+bool x, y, z, w;
+
+bool fwd(bool a = x < y,
+         bool b = z > w,
+         const char* site = "DEF") {
+    return fixpp::test_support::pump_until(
+        ioc, [&] { return a && b; }, site);
+}
+
+void test() {
+    fwd(true, "UNIQUE");
+    fwd(true, false, "DUP");
+    run_window_then_ready(ioc, fut, 1s, "DUP");
+}
+''')], {"DUP": 1}, [],
+          ["(via fwd: its parameter list reads more than one way at a '<' or '>')"] * 2)
+# Past the bound, a parameter list's readings are not enumerated, so it is not read either.
+_fwd_case("a parameter list with more '<'..'>' pairs than the bound leaves its calls unlabelled",
+          [("a.cpp", '''
+bool fwdb(int n = a<b, c>d + a<b, c>d + a<b, c>d + a<b, c>d + a<b, c>d + a<b, c>d
+                  + a<b, c>d, const char* site = "DEF") {
+    return fixpp::test_support::pump_until(ioc, pred, site);
+}
+    (void)fwdb(1, "B/one");
+''')], {}, [], ["(via fwdb: its parameter list has too many '<'..'>' pairs to read)"])
 # The readings double with each pair holding a comma, so their number is bounded; a call
 # past the bound is unlabelled, even though one reading of this one would fit.
 _fwd_case("a call with more '<'..'>' pairs than the bound is unlabelled",
