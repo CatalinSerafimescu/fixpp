@@ -955,6 +955,13 @@ add_test(NAME session_admin_emit_observation_gate
 )
 set_tests_properties(session_admin_emit_observation_gate PROPERTIES
   LABELS "036;sc002;static_gate")
+# The gate's own positive/negative test: fixtures in a temp dir, so the source tree is
+# never edited. Its flagged arms require the seeded defect's message, not only exit 1.
+add_test(NAME session_admin_emit_observation_gate_selftest
+  COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/test_check_admin_emit_observation.py"
+)
+set_tests_properties(session_admin_emit_observation_gate_selftest PROPERTIES
+  LABELS "036;sc002;static_gate")
 
 # ── 038-acceptor-sendingtime-guard T001–T008 (Group 1 witness) ───────────────
 # 14 cells: stale-past/future, malformed, absent, empty 52; toAdmin-throw;

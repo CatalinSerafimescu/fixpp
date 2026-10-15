@@ -157,27 +157,37 @@ def check_file(path: Path) -> list[str]:
         required_hook, hook_name = ALL_BUILDERS[key]
 
         # Scan forward from the builder line to find store_then_emit.
-        # Search up to 60 lines ahead (all current emit blocks are <20 lines).
-        # Use comment-stripped lines so tokens inside comments don't count.
+        # The window bounds the forward pairing, so that a builder is not paired
+        # with a later site's emit. It counts code lines (comment-stripped and
+        # non-blank): comments between a builder and its emit say nothing about the
+        # pairing, and must not push the emit out of the window. A builder whose
+        # emit lies beyond the window is flagged. Use comment-stripped lines so
+        # tokens inside comments don't count.
+        # Exercised by tools/test_check_admin_emit_observation.py.
         SEARCH_WINDOW = 60
         emit_line_no: int | None = None
         hook_found = False
 
-        for j in range(i, min(i + SEARCH_WINDOW, total_lines)):
+        j = i  # 0-based index of the line after the builder
+        code_lines = 0
+        while j < total_lines and code_lines < SEARCH_WINDOW:
             scan_line = stripped[j]  # comment-stripped; 0-based
+            if scan_line.strip():
+                code_lines += 1
             # Check for hook in the interval (before the emit).
             if emit_line_no is None and required_hook in scan_line:
                 hook_found = True
             if EMIT_TOKEN in scan_line:
                 emit_line_no = j + 1  # 1-based for reporting
                 break
+            j += 1
 
         if emit_line_no is None:
             # No store_then_emit found — the builder result is unused or outside window.
             # This would be a structural anomaly; flag it.
             violations.append(
                 f"{path}:{i}: builder '{key}' has no store_then_emit within "
-                f"{SEARCH_WINDOW} lines — check the site manually"
+                f"{SEARCH_WINDOW} code lines — check the site manually"
             )
             continue
 
