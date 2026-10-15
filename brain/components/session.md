@@ -526,7 +526,8 @@ send starts (fixpp#587); the census matcher's blind spot found while the cells w
 Beside R-8's route: a terminal close that begins after the Logout's `toAdmin` has returned, where
 timing still decides whether the Logout is transmitted (fixpp#594); a clean TLS shutdown for every
 escalation (fixpp#596); what a completed `close()` promises about another coroutine's store job
-(fixpp#597); a `FileStore::store` call that reports success for a frame it did not write (fixpp#598).
+(fixpp#597). A `FileStore::store` call that reported success for a frame it did not write
+(fixpp#598) is decided by B28 (the next section; `B-598-1`).
 
 ## Recovery, liveness, and a cancellation inside the session (fixpp#536 / #537 / #538 / #598)
 
