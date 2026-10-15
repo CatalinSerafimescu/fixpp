@@ -75,13 +75,22 @@
 #     way (a declaration in one file and the definition in another) has none read.
 #   * A call is the forwarder's only at its arity: between its parameters without a default
 #     and all of them. A same-named function of an overlapping arity in that scope is read as
-#     the forwarder; one with a template argument list holding a comma is miscounted.
+#     the forwarder.
+#   * A comma between a `<` and a `>` may separate arguments (comparisons) or not (a
+#     template argument list). A call holding one is read as template argument lists only
+#     when that fills every parameter, so that splitting any of those commas would exceed
+#     the arity. Any other such call is listed UNLABELLED at the call, unless even splitting
+#     every comma leaves it short of the required parameters, which no reading can reach. A
+#     forwarder's own parameter list is always read as template argument lists, which is
+#     wrong only for a comparison in a default argument.
 #   * A lambda that takes the label as its own parameter is not a function definition here;
 #     its seam call stays unlabelled. So does a constructor whose initialiser list holds the
 #     seam call, and a parameter of any other type (`std::string_view`, `std::string`).
-#   * ⚠️ THE FLOOR: a forwarder none of whose calls was read is listed UNLABELLED at its
-#     seam call, and a call passing no literal is listed UNLABELLED at the call (`via`). So
-#     every miss above lands in the unlabelled list, never silently in "unique".
+#   * ⚠️ THE FLOOR, AND WHERE IT STOPS: a forwarder none of whose calls was read is listed
+#     UNLABELLED at its seam call, and a call passing no literal, or whose commas are read
+#     two ways as above, is listed UNLABELLED at the call (`via`). A call OUTSIDE the scope
+#     in the first bullet is not covered: once any call of that forwarder was read, the
+#     out-of-scope call's label reaches neither the duplicate check nor the unlabelled list.
 #
 # ⚠️ A NAMED CONSTANT IS STILL NOT CHASED. A label held in a variable
 # (`static constexpr const char* kSite = "..."; run_window_then_ready(ioc, fut, w, kSite)`)
@@ -303,12 +312,14 @@ def _open(blanked, j):
     return -1
 
 
-def _top_args(blanked, i, j):
+def _top_args(blanked, i, j, pairs=()):
     """The (start, end) spans of the top-level arguments between the '(' at `i` and the ')'
     at `j`. Commas inside (), [] and {} do not split -- a lambda argument holds them.
-    ⚠️ Commas inside a template argument list DO split (`<` is not balanced: it is also
-    less-than). A forwarder call whose arguments spell `f<A, B>(...)` is therefore counted
-    at the wrong arity and its label is not read; see the header."""
+    Commas inside a template argument list split too, unless its `<`..`>` is in `pairs`
+    (from `_angles`): `<` is also less-than, so balancing it is a reading, not a fact."""
+    inside = set()
+    for a, b in pairs:
+        inside.update(range(a, b))
     spans, depth, start = [], 0, i + 1
     for k in range(i + 1, j):
         c = blanked[k]
@@ -316,12 +327,34 @@ def _top_args(blanked, i, j):
             depth += 1
         elif c in ")]}":
             depth -= 1
-        elif c == "," and depth == 0:
+        elif c == "," and depth == 0 and k not in inside:
             spans.append((start, k))
             start = k + 1
     if spans or blanked[start:j].strip():
         spans.append((start, j))
     return spans
+
+
+def _angles(blanked, i, j):
+    """The (`<`, `>`) index pairs at the top level between the '(' at `i` and the ')' at `j`
+    that could be a template argument list: each `<` matched with the next unmatched `>`,
+    nesting like brackets. `<<`, `<=`, `>=`, the `>` of `->` and a bracket with no partner
+    are not paired; none of them can delimit a template argument list."""
+    pairs, stack, depth = [], [], 0
+    for k in range(i + 1, j):
+        c = blanked[k]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif depth != 0 or c not in "<>":
+            continue
+        elif c == "<":
+            if blanked[k + 1:k + 2] not in ("<", "=") and blanked[k - 1] != "<":
+                stack.append(k)
+        elif blanked[k - 1] != "-" and blanked[k + 1:k + 2] != "=" and stack:
+            pairs.append((stack.pop(), k))
+    return pairs
 
 
 def seam_calls(view):
@@ -395,7 +428,10 @@ def forwarded_param(view, pos, idents):
     if fn is None:
         return None
     name, lp, rp = fn
-    params = [view.blanked[a:b] for a, b in _top_args(view.blanked, lp, rp)]
+    # A parameter list holds no comparison outside a default argument, so its angle
+    # brackets are read as template argument lists, whose commas separate no parameter.
+    params = [view.blanked[a:b]
+              for a, b in _top_args(view.blanked, lp, rp, _angles(view.blanked, lp, rp))]
     for k, p in enumerate(params):
         if any(_char_ptr_param(p, x) for x in idents):
             variadic = any("..." in q for q in params)
@@ -411,33 +447,58 @@ def _includes(view, header_name):
 
 
 def forwarder_callers(views, def_name, fw):
-    """Yield (name, line, label, nested) for each call of the forwarder `fw` defined in
+    """Yield (name, line, label, nested, why) for each call of the forwarder `fw` defined in
     `def_name`: `label` is the literal the caller passes at the parameter's position, else
     None; `nested` is a forwarder record when that argument is itself a `const char*`
-    parameter of the caller's enclosing function.
+    parameter of the caller's enclosing function; `why`, when not None, says why a call
+    with neither was not read.
 
     SCOPE: the defining file, and, when that file is a header, every file that #includes
     it. A call is one of THIS function's only at its arity (between the parameters without
-    a default and all of them): a same-named call of another arity, e.g. `ioc.run()` for a
-    forwarder named `run`, is not read. A declaration (`char*` in that argument) is not a
-    call. The definition's own head is excluded by position."""
+    a default and all of them): a same-named call with fewer arguments, e.g. `ioc.run()`
+    for a forwarder named `run`, is not read, and neither is one with more when none of its
+    commas is a reading (below). A declaration (`char*` in that argument) is not a call.
+    The definition's own head is excluded by position.
+
+    A top-level comma between a `<` and a `>` (`_angles`) makes the split a reading: it
+    separates arguments if they are comparisons and does not if they delimit a template
+    argument list, and each choice per pair is a reading of its own. Such a call is read
+    with every pair as a template argument list only when that split fills every parameter,
+    since a reading that splits any of those commas then has more arguments than the
+    forwarder takes. Otherwise, unless it has fewer arguments than required under every
+    reading (not read, as above), it is yielded with `why` set, so it is listed unlabelled,
+    never dropped."""
     def_view = views[def_name]
     scope = [def_name]
     if def_name.endswith((".hpp", ".h")):
         base = def_name.rsplit("/", 1)[-1]
         scope += [n for n, v in views.items() if n != def_name and _includes(v, base)]
     rx = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(fw["fn"]) + r"\s*\(")
+
+    def fits(s):
+        return fw["required"] <= len(s) <= fw["total"]
+
     for name in scope:
         v = views[name]
         for m in rx.finditer(v.blanked):
             i = m.end() - 1
             if v is def_view and i == fw["lp"]:
                 continue
-            spans = _top_args(v.blanked, i, _close(v.blanked, i))
-            if not fw["required"] <= len(spans) <= fw["total"]:
+            j = _close(v.blanked, i)
+            spans = _top_args(v.blanked, i, j)
+            if len(spans) < fw["required"]:
+                continue                       # no reading of its commas adds an argument
+            kept = _top_args(v.blanked, i, j, _angles(v.blanked, i, j))
+            if kept != spans:
+                if len(kept) != fw["total"]:
+                    yield (name, v.line(m.start()), None, None,
+                           "arguments split two ways at a '<' or '>'")
+                    continue
+                spans = kept
+            elif not fits(spans):
                 continue
             if fw["index"] >= len(spans):
-                yield name, v.line(m.start()), None, None          # the default is passed
+                yield name, v.line(m.start()), None, None, None    # the default is passed
                 continue
             a, b = spans[fw["index"]]
             if re.search(r"\bchar\s*\*", v.blanked[a:b]):
@@ -446,7 +507,7 @@ def forwarder_callers(views, def_name, fw):
             nested = None
             if label is None and _IDENT.fullmatch(v.blanked[a:b].strip()):
                 nested = forwarded_param(v, m.start(), [v.blanked[a:b].strip()])
-            yield name, v.line(m.start()), label, nested
+            yield name, v.line(m.start()), label, nested, None
 
 
 # ── SELF-TEST on SYNTHETIC fixtures, straddling the boundary this gate draws ──
@@ -596,9 +657,11 @@ def tally(items, forwarders_out=None):
     the SAME `seen` map as every direct label, so a caller's label collides with a direct
     one as it does at runtime. A caller passing no literal is unlabelled at the caller.
     ⚠️ THE FLOOR: a forwarder none of whose calls was read stays UNLABELLED at its seam
-    call. A scope or arity miss therefore shows up in the unlabelled list rather than
-    vanishing, which is the direction this gate has to fail in. `forwarders_out`, when
-    given, receives one row per forwarder for `--list-unlabelled`."""
+    call, and so does a call whose commas `forwarder_callers` reads two ways. A forwarder
+    with no call in scope therefore shows up in the unlabelled list rather than vanishing;
+    an out-of-scope call of a forwarder that has a call in scope does not -- see the
+    header. `forwarders_out`, when given, receives one row per forwarder for
+    `--list-unlabelled`."""
     views = {}
     for name, src in items:
         views[name] = View(src)
@@ -627,7 +690,7 @@ def tally(items, forwarders_out=None):
     while queue:
         key = queue.pop()
         fw = fws[key]
-        for cname, cline, label, nested in forwarder_callers(views, key[0], fw):
+        for cname, cline, label, nested, why in forwarder_callers(views, key[0], fw):
             fw["callers"] += 1
             where = f"{cname}:{cline}"
             if label is not None:
@@ -635,7 +698,7 @@ def tally(items, forwarders_out=None):
             elif nested is not None:
                 add_forwarder(cname, nested, where)
             else:
-                unlabelled.append(f"{where} (via {fw['fn']})")
+                unlabelled.append(f"{where} (via {fw['fn']}{': ' + why if why else ''})")
     for fw in fws.values():
         if fw["callers"] == 0:
             unlabelled.extend(f"{w} (forwarder {fw['fn']}: no call of it was read)"
@@ -740,6 +803,37 @@ _fwd_case("a header's forwarder is read in the files that include it, and only t
            ("c.cpp", '#include "support/fx.hpp"\n    (void)f.pump_done([&] { return a; }, "H/one");\n'),
            ("d.cpp", '    (void)g.pump_done([&] { return a; }, "H/two");\n')],
           {"H/one": 1}, [], [])
+# A comma inside a template argument list is not an argument separator. The call holding
+# one must be read at the forwarder's arity, or its label silently leaves the map while the
+# forwarder's other caller keeps it out of the unlabelled list (#591).
+_fwd_case("a template-argument comma in a forwarder call does not hide its label",
+          [("a.cpp", _FWD + '''
+    (void)f.pump_done(make_pred<A, B>(), "DUP");
+    (void)f.pump_done(pred, "UNIQUE");
+    if (!run_window_then_ready(ioc, fut, 1s, "DUP")) { return; }
+''')], {"DUP": 2, "UNIQUE": 1}, ["DUP"], [])
+# A call that splits within the arity either way: the plain split puts a literal from INSIDE
+# the first argument at the label's position. Unlabelled, never that literal.
+_FWD_DEFAULTED = '''
+bool fwd3(Pred pred, const char* site, int n = 0) {
+    return fixpp::test_support::pump_until(ioc, pred, site);
+}
+'''
+_fwd_case("a call split two ways within the arity is unlabelled, not misread",
+          [("a.cpp", _FWD_DEFAULTED + '''
+    (void)fwd3(m<A, B>("Z"), "DUP");
+    (void)fwd3(std::vector<int>{}, "OK");
+''')], {"OK": 1}, [], ["(via fwd3: arguments split two ways at a '<' or '>')"])
+# The forwarder's own parameter list is split the same way: a template-argument comma there
+# must not move the label's position or the forwarder's arity.
+_fwd_case("a template-argument comma in a forwarder's parameter list",
+          [("a.cpp", '''
+bool fwdp(std::pair<int, int> p, const char* site) {
+    return fixpp::test_support::pump_until(ioc, pred, site);
+}
+    (void)fwdp(p, "P/one");
+    (void)fwdp(std::pair<int, int>{1, 2}, "P/one");
+''')], {"P/one": 2}, ["P/one"], [])
 
 if bad:
     sys.exit("\npump-label-uniqueness: CONTROL FAILED -- this gate is not proven at its "
