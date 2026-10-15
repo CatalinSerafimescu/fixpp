@@ -167,10 +167,16 @@ consteval split_ns split_floored(std::int64_t ns) noexcept {
 
     // Decompose tp into seconds + sub-second remainder.
     const auto since_epoch = tp.time_since_epoch();
-    // Duration in seconds (floor toward negative infinity for negative epochs).
-    const auto sec_total = duration_cast<seconds>(since_epoch);
-    // Sub-second nanoseconds (always non-negative: 0 ≤ ns < 1e9).
-    const auto ns_rem = duration_cast<nanoseconds>(since_epoch - sec_total);
+    // Duration in seconds, floored toward negative infinity, so a pre-epoch
+    // instant with a fraction lands in the second that holds it.
+    const auto sec_total = floor<seconds>(since_epoch);
+    // Sub-second nanoseconds, 0 ≤ ns < 1e9 for every tp. Taken from tp itself,
+    // not as tp - sec_total: in the second that holds utc_time_point::min(), the
+    // floored second does not fit back in the nanosecond count.
+    auto ns_rem = duration_cast<nanoseconds>(since_epoch % seconds{1});
+    if (ns_rem < nanoseconds::zero()) {
+        ns_rem += seconds{1};
+    }
 
     // Days and time-of-day.
     const auto day_count = static_cast<std::int32_t>(sec_total.count() / 86400);
