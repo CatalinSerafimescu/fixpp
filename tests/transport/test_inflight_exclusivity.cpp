@@ -53,6 +53,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 // Internal transport header — needed for asio_tls_transport::timer_epochs(), the
@@ -94,6 +95,19 @@ using namespace std::chrono_literals;
 #ifndef FIXPP_TLS_FIXTURE_DIR
 #define FIXPP_TLS_FIXTURE_DIR ""
 #endif
+
+// Cells 7 and 9 need their FIRST attempt to fail in RESOLUTION with no query
+// leaving the process (#603). This host's first label is 64 octets, over the
+// 63-octet label cap of RFC 1035 §2.3.4, so it cannot be encoded as a DNS
+// query.
+//
+// Re-check: run this binary with --gtest_filter='*RetryableAfterFailedAttempt'
+// inside a network namespace whose only name server receives queries and never
+// answers (#603 describes the harness). Zero datagrams must reach it.
+constexpr char kUnencodableHost[] =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.invalid";
+static_assert(std::string_view{kUnencodableHost}.find('.') == 64,
+              "the first label must be one octet over RFC 1035's 63-octet cap");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Compile-time contract: error codes for the exclusivity contract.
@@ -592,9 +606,10 @@ TEST(InflightExclusivity, HandshakeOverlapRefusedWhileFirstInFlight) {
 // silently wedges the Transport into permanent transport_already_connected,
 // breaking FR-007's "a failed attempt stays `fresh` and is retryable".
 //
-// The first attempt fails in RESOLUTION (an RFC 6761 `.invalid` host), which
-// returns before any state write, so the Transport must stay `fresh` AND clear
-// the flag -- and the retry to the live fixture endpoint must really connect.
+// The first attempt fails in RESOLUTION (kUnencodableHost, whose over-long
+// first label cannot be encoded as a DNS query), which returns before any
+// state write, so the Transport must stay `fresh` AND clear the flag -- and the
+// retry to the live fixture endpoint must really connect.
 // (A refused CONNECT would have been the obvious choice and is not usable here;
 // the body explains why.)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -606,11 +621,9 @@ TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
     asio::io_context ioc;
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
-    // The failing first attempt is a RESOLVE failure: ".invalid" is reserved by
-    // RFC 6761 as guaranteed-NXDOMAIN, so this fails fast and deterministically,
-    // and async_connect returns transport_resolve_failed WITHOUT ever leaving
-    // state_ == fresh -- exactly the "failed attempt is retryable" case FR-007
-    // names.
+    // The failing first attempt is a RESOLVE failure (kUnencodableHost states
+    // the condition), after which state_ must still be fresh -- exactly the
+    // "failed attempt is retryable" case FR-007 names.
     //
     // ⚠️ NOT a refused connect, which is the obvious choice and is not
     // constructible here: this sandbox DROPS connects to unbound loopback ports
@@ -622,7 +635,7 @@ TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
     // -- the client's outbound socket draws from the same ephemeral range, and a
     // loopback connect whose source and destination ports coincide can
     // self-connect.
-    const fixpp::transport::Endpoint unresolvable{"no.such.host.invalid", 12345};
+    const fixpp::transport::Endpoint unresolvable{kUnencodableHost, 12345};
 
     auto client = fixture.make_client(ioc.get_executor());
     Transport* client_raw = client.get();
@@ -759,7 +772,7 @@ TEST(InflightExclusivity, PlaintextConnectRetryableAfterFailedAttempt) {
     asio::ip::tcp::acceptor acc{ioc};
     const auto bound = make_loopback_acceptor(acc);
     const fixpp::transport::Endpoint good{"127.0.0.1", bound.port()};
-    const fixpp::transport::Endpoint unresolvable{"no.such.host.invalid", 12345};
+    const fixpp::transport::Endpoint unresolvable{kUnencodableHost, 12345};
 
     auto client = make_plain_client(ioc);
     Transport* client_raw = client.get();
