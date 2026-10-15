@@ -17,9 +17,10 @@
 //   YYYYMMDD-HH:MM:SS.ssssss       (fix_time_precision::micros — where version permits)
 //   YYYYMMDD-HH:MM:SS.sssssssss    (fix_time_precision::nanos — 9-digit sub-second)
 //
-// Precision: never coarser than seconds; format→parse is lossless at the
-// emitted precision (floor toward negative infinity, not rounding, for
-// sub-second surplus; for a time point at or after the epoch this is truncation).
+// Precision: never coarser than seconds. Formatting floors sub-second surplus
+// toward negative infinity, not rounding (for a time point at or after the epoch
+// this is truncation); format→parse is lossless at the emitted precision within
+// the domain the parser's round-trip guarantee below states.
 // The out-buffer overload avoids heap allocation ([const §VIII.5] / I-7).
 //
 // No `asio::awaitable` in this header — no std::mutex in this header.
