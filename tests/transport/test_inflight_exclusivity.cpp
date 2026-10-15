@@ -95,6 +95,20 @@ using namespace std::chrono_literals;
 #define FIXPP_TLS_FIXTURE_DIR ""
 #endif
 
+// The host cells 7 and 9 give their FIRST attempt, which must fail in
+// RESOLUTION without any query leaving the process (#603). A name the stub
+// resolver forwards fails at the network's pace -- an RFC 6761 `.invalid` name
+// included: the TLD is reserved, but the query is still sent -- and the cell's
+// run_for window can expire before the first attempt completes. A label longer
+// than 63 octets (RFC 1035 §2.3.4) is not encodable as a DNS query, so the
+// resolver refuses this name before sending anything: its first label is that
+// cap plus one, and the name stays under `.invalid`.
+//
+// Re-check: run this binary with --gtest_filter='*RetryableAfterFailedAttempt'
+// inside a network namespace whose only name server receives queries and never
+// answers (#603 describes the harness). Zero datagrams must reach it.
+const std::string kUnencodableHost = std::string(64, 'a') + ".invalid";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Compile-time contract: error codes for the exclusivity contract.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -606,11 +620,10 @@ TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
     asio::io_context ioc;
     LoopbackTlsFixture fixture{FIXPP_TLS_FIXTURE_DIR, ioc.get_executor()};
 
-    // The failing first attempt is a RESOLVE failure: ".invalid" is reserved by
-    // RFC 6761 as guaranteed-NXDOMAIN, so this fails fast and deterministically,
-    // and async_connect returns transport_resolve_failed WITHOUT ever leaving
-    // state_ == fresh -- exactly the "failed attempt is retryable" case FR-007
-    // names.
+    // The failing first attempt is a RESOLVE failure (kUnencodableHost says why
+    // that host): async_connect returns transport_resolve_failed WITHOUT ever
+    // leaving state_ == fresh -- exactly the "failed attempt is retryable" case
+    // FR-007 names.
     //
     // ⚠️ NOT a refused connect, which is the obvious choice and is not
     // constructible here: this sandbox DROPS connects to unbound loopback ports
@@ -622,7 +635,7 @@ TEST(InflightExclusivity, ConnectRetryableAfterFailedAttempt) {
     // -- the client's outbound socket draws from the same ephemeral range, and a
     // loopback connect whose source and destination ports coincide can
     // self-connect.
-    const fixpp::transport::Endpoint unresolvable{"no.such.host.invalid", 12345};
+    const fixpp::transport::Endpoint unresolvable{kUnencodableHost, 12345};
 
     auto client = fixture.make_client(ioc.get_executor());
     Transport* client_raw = client.get();
@@ -759,7 +772,7 @@ TEST(InflightExclusivity, PlaintextConnectRetryableAfterFailedAttempt) {
     asio::ip::tcp::acceptor acc{ioc};
     const auto bound = make_loopback_acceptor(acc);
     const fixpp::transport::Endpoint good{"127.0.0.1", bound.port()};
-    const fixpp::transport::Endpoint unresolvable{"no.such.host.invalid", 12345};
+    const fixpp::transport::Endpoint unresolvable{kUnencodableHost, 12345};
 
     auto client = make_plain_client(ioc);
     Transport* client_raw = client.get();
