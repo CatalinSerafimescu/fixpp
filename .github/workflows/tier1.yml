@@ -919,8 +919,9 @@ jobs:
       # gate, so they cannot see a population that shrinks; the floor sees a count below
       # it, and only that. Adding a gate needs no edit here, and leaves slack a later
       # removal can use; a gate replaced by another keeps the count. WHICH gates are
-      # present is checked by name only for the checker's POSITIVE_CONTROLS and
-      # REQUIRED_GATES (fixpp#544's gates); every other gate is only counted. The command
+      # present is checked by name for the checker's POSITIVE_CONTROLS, REQUIRED_GATES
+      # (fixpp#544's gates) and REQUIRED_ZERO_GATES (every other zero-asserting gate,
+      # fixpp#574); a gate not listed in any of those sets is only counted. The command
       # is pinned verbatim in ci/test-tier1-python-policy.sh (fixpp#543), so this note
       # sits outside it.
       - name: "Assert the mallocnesia gate population (#448)"

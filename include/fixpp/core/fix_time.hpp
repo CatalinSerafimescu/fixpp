@@ -17,8 +17,10 @@
 //   YYYYMMDD-HH:MM:SS.ssssss       (fix_time_precision::micros — where version permits)
 //   YYYYMMDD-HH:MM:SS.sssssssss    (fix_time_precision::nanos — 9-digit sub-second)
 //
-// Precision: never coarser than seconds; format→parse is lossless at the
-// emitted precision (truncation, not rounding, for sub-second surplus).
+// Precision: never coarser than seconds. Formatting floors sub-second surplus
+// toward negative infinity, not rounding (for a time point at or after the epoch
+// this is truncation); format→parse is lossless at the emitted precision within
+// the domain the parser's round-trip guarantee below states.
 // The out-buffer overload avoids heap allocation ([const §VIII.5] / I-7).
 //
 // No `asio::awaitable` in this header — no std::mutex in this header.
@@ -89,7 +91,11 @@ enum class fix_time_precision : std::uint8_t {
 // refused with error::wire_invalid_field_format, never wrapped (fixpp#509).
 //
 // Round-trip guarantee: fix_string_to_utc_time(utc_time_to_fix_string(tp, P, buf))
-// == time_point_cast<duration_for(P)>(tp) — lossless at emitted precision.
+// == floor<duration_for(P)>(tp) — lossless at emitted precision — for every tp
+// whose floor<duration_for(P)>(tp) is not before utc_time_point::min(). At nanos
+// that is every tp. At a coarser P, a tp before the first whole unit of P at or
+// after min() floors to an instant before min(): it still formats, and the
+// parse refuses that text as out of range (fixpp#509).
 [[nodiscard]] expected_t<utc_time_point> fix_string_to_utc_time(std::span<const char> s) noexcept;
 
 }  // namespace fixpp::core

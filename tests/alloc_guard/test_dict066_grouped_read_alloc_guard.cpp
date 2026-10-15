@@ -51,8 +51,8 @@
 //      tests/codegen/group_entry_alloc_gate_test.cpp), guarded under
 //      `FIXPP_SANITIZER_REPLACES_NEW` so it compiles out under
 //      ASan/TSan/MSan (feedback_operator_new_witness_breaks_sanitizers).
-//  (b) mallocnesia LD_PRELOAD (tools/mallocnesia/libmallocnesia.so via
-//      tools/check_alloc.py, the `_mallocnesia` ctest below) — intercepts
+//  (b) mallocnesia LD_PRELOAD (build/<preset>/lib/libmallocnesia.so via
+//      tools/check_alloc.py, the dict066_grouped_read_alloc_guard_mallocnesia ctest) — intercepts
 //      malloc/calloc/realloc globally.
 //
 // Mutation-proof (performed manually during implementation, NOT shipped as

@@ -235,10 +235,19 @@ fi
 # real time, and the summed per-test durations. They are in different languages
 # (Python re vs awk), so they are re-derivations, not copies, and a comment
 # saying "if you change one, change both" is an instruction someone has to
-# remember. This runs the shipped awk over the REAL log the driver just produced
-# and requires the same executed count, the same real time, and summed durations
-# no more than one printed step apart. It is the version of that claim that
-# cannot rot.
+# remember. This runs the report's awk over the REAL log the driver just
+# produced and requires the same executed count, the same real time, and summed
+# durations no more than one printed step apart. It is the version of that claim
+# that cannot rot.
+#
+# ⚠️ THE AWK IS NOT RETYPED HERE (#576). This cell used to run three awk
+# programs typed again inside it: they matched the report's, and nothing kept
+# them so, so an edit to the report's awk alone left this cell green. The three
+# figures now live in ci/ctest-log-figures.awk, the one file the report runs, and
+# this cell runs that file. The grep below keeps the narrower half of the claim:
+# that the report still INVOKES that file. It proves the call exists, not that
+# the report uses its result; ci/test-peak-rss.sh drives the report end to end
+# and is where a report that dropped the result goes red.
 #
 # ⚠️ THE SUMMED DURATIONS ARE COMPARED WITHIN ONE PRINTED STEP, NOT FOR
 # EQUALITY (#552). The other two figures are READ from one line each; this one
@@ -255,7 +264,7 @@ fi
 # SHIPPED.
 
 # The printed precision of the summed durations, on both sides: the `%.1f` in
-# the awk below and the `round(…, 1)` in parse_ctest_log. S4_STEP, one unit in
+# ci/ctest-log-figures.awk and the `round(…, 1)` in parse_ctest_log. S4_STEP, one unit in
 # the last printed place, is derived from it and never written out. s4_compare
 # refuses (PRECISION) a sum that is not printed at this many decimals, so it
 # cannot drift from either side quietly.
@@ -275,9 +284,10 @@ S4_HIDDEN="$(python3 -c 'import sys; print(2 * float(sys.argv[1]))' "$S4_STEP")"
 
 # s4_compare AWK_LOG PARSER_LOG [exact|twostep]   ->   sets s4_verdict and s4_read
 #
-# THE ONE READ-AND-COMPARE EVERY S4 ARM GOES THROUGH: the shipped awk over
-# AWK_LOG, the shipped parser over PARSER_LOG. An arm that retyped the awk or
-# the comparison would be testing a copy. The real-log arm passes one log
+# THE ONE READ-AND-COMPARE EVERY S4 ARM GOES THROUGH: ci/ctest-log-figures.awk,
+# the file ci/peak-memory-report.sh runs, over AWK_LOG, and the shipped parser
+# over PARSER_LOG. An arm that retyped the awk or the comparison would be
+# testing a copy. The real-log arm passes one log
 # twice; S4b passes two, which is how "one parser lost a line" is staged without
 # editing either parser. `exact` compares the summed durations with no
 # tolerance at all, and exists so S4a can prove its fixture is on the boundary.
@@ -290,9 +300,11 @@ S4_HIDDEN="$(python3 -c 'import sys; print(2 * float(sys.argv[1]))' "$S4_STEP")"
 # AGREE": the other three would satisfy that while measuring nothing.
 s4_compare() {
   local awk_log="$1" py_log="$2" mode="${3:-step}" awk_ran awk_real awk_sum py
-  awk_ran="$(awk 'match($0, /^[0-9]+% tests passed, [0-9]+ tests failed out of [0-9]+$/) { m = $0; sub(/.* out of /, "", m); n = m } END { print n }' "$awk_log")"
-  awk_real="$(awk -F'= *' '/Total Test time \(real\)/ { t = $2 } END { gsub(/[^0-9.]/, "", t); print t }' "$awk_log")"
-  awk_sum="$(awk '/^ *[0-9]+\/[0-9]+ +Test +#[0-9]+/ && match($0, /[0-9.]+ sec$/) { s += substr($0, RSTART, RLENGTH-4) } END { if (s > 0) printf "%.1f", s }' "$awk_log")"
+  local figures
+  figures="$(awk -f "$HERE/ctest-log-figures.awk" "$awk_log")"
+  awk_ran="$(printf '%s\n' "$figures" | sed -n 's/^ran=//p')"
+  awk_real="$(printf '%s\n' "$figures" | sed -n 's/^real_s=//p')"
+  awk_sum="$(printf '%s\n' "$figures" | sed -n 's/^sum_s=//p')"
   py="$(cd "$WORK" && python3 -c '
 import pathlib, sys
 sys.path.insert(0, "ci")
@@ -314,7 +326,7 @@ print(f"{d["ran"]} {d["real_s"]} {d["sum_s"]}")' "$py_log")"
   # the two parsers read the same NUMBERS out of one log; comparing their
   # formatting is a different and worthless question.
   if [ -z "$awk_ran" ] || [ -z "$awk_real" ] || [ -z "$awk_sum" ]; then
-    s4_verdict="EMPTY the shipped awk read NOTHING from the log (ran='$awk_ran' real='$awk_real' sum='$awk_sum') — the comparison would have been vacuous"
+    s4_verdict="EMPTY ci/ctest-log-figures.awk read NOTHING from the log (ran='$awk_ran' real='$awk_real' sum='$awk_sum') — the comparison would have been vacuous"
     return
   fi
   # shellcheck disable=SC2086  # $py is three fields and MUST word-split into
@@ -363,7 +375,14 @@ hits = map(m.DUR_RX.match, pathlib.Path(sys.argv[1]).read_text().splitlines())
 durs = [float(h.group(1)) for h in hits if h]
 if durs:
     print("ABOVE" if min(durs) > float(sys.argv[2]) else f"the shortest test in the real log ran for {min(durs)} s")' "$LOG" "$S4_HIDDEN")"
-if [ "$s4_verdict" != AGREE ]; then
+# The report must still INVOKE the file this cell runs; if it stops, S4 tests an
+# awk nothing ships. The invocation form is matched, not the bare file name,
+# which the report's comments also carry, and one or more is accepted.
+# shellcheck disable=SC2016  # `${HERE}` is the report's, not this shell's — it must stay literal
+s4_invoked="$(grep -c 'awk -f "${HERE}/ctest-log-figures.awk"' "$HERE/peak-memory-report.sh")"
+if [ "${s4_invoked:-0}" -lt 1 ]; then
+  bad "S4 ci/peak-memory-report.sh no longer invokes ci/ctest-log-figures.awk (${s4_invoked:-0} matches) — this cell would be testing an awk the report does not run"
+elif [ "$s4_verdict" != AGREE ]; then
   bad "S4 $s4_verdict"
 elif [ "$s4_floor" != ABOVE ]; then
   bad "S4 ${s4_floor:-NO per-test duration could be read from the real log} — a parser that dropped a line of up to ${S4_HIDDEN} s can pass this cell, so every test must run for LONGER than that"

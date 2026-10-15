@@ -435,7 +435,12 @@ if(NOT WIN32)
       "define_macro|--define-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE=[9]"
       "undefine_macro|--undefine-macro=ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE"
       "wp|-Wp,-UASIO_RECYCLING_ALLOCATOR_CACHE_SIZE" "xpreprocessor|-Xpreprocessor"
-      "xclang|-Xclang" "msvc_fi|/FIx\\.h")
+      "xclang|-Xclang" "msvc_fi|/FIx\\.h"
+      "specs|-specs=x\\.specs" "specs_split|-specs" "long_specs|--specs=x\\.specs"
+      "long_specs_split|--specs" "config|--config" "config_joined|--config=x\\.cfg"
+      "config_system_dir|--config-system-dir" "config_system_dir_joined|--config-system-dir=cfg"
+      "config_user_dir|--config-user-dir" "config_user_dir_joined|--config-user-dir=cfg"
+      "xarch|-Xarch_arm64")
     string(REPLACE "|" ";" _pair "${_pair}")
     list(GET _pair 0 _case)
     list(GET _pair 1 _tok)
