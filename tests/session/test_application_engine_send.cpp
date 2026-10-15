@@ -8,12 +8,12 @@
 //   1. SendFromForeignThreadCrossesWire: engine.send() initiated from a
 //      std::thread crosses the wire after toApp fires. (FR-006 any-thread;
 //      FIX-1 — exec_ first-hop.)
-//   2. ReentrantSendFromToAppNoDeadlock: engine.send() called from inside a
-//      toApp callback does not deadlock. (FR-006 re-entrant edge; toApp edge.)
-//   3. ReentrantSendFromFromAppNoDeadlock: engine.send() called from inside a
-//      fromApp callback (inbound app message arrives, callback issues a send)
+//   2. ReentrantSendFromToAppNoDeadlock: an engine.send() that a toApp
+//      callback posts does not deadlock. (FR-006 re-entrant edge; toApp edge.)
+//   3. ReentrantSendFromFromAppNoDeadlock: an engine.send() that a fromApp
+//      callback posts (inbound app message arrives, callback posts a send)
 //      does not deadlock. (FR-006 re-entrant edge; fromApp edge.)
-//   4. SendDrainRaceNoUAF: engine.send() is parked (toApp triggers stop()),
+//   4. SendDrainRaceNoUAF: engine.send() is in flight (its toApp starts stop()),
 //      stop() must wait on send_counter_ > 0 before completing, then
 //      ~Engine() is UAF-safe under ASan. (FIX-2/FIX-A; post-fix exercise
 //      coverage — see NOTE in the test body for witnessing limitation.)
@@ -358,11 +358,13 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
     EXPECT_TRUE(engine.stopped());
 }
 
-// ── Test 2: engine.send() from inside a toApp callback does not deadlock ───────
+// ── Test 2: an engine.send() posted from a toApp callback does not deadlock ────
 //
-// When toApp fires for the first message, it issues a re-entrant engine.send()
-// via asio::co_spawn (non-blocking post). The re-entrant send runs after the
-// current toApp returns (posted behind the current dispatch — no recursion/deadlock).
+// When toApp fires for the first message, its hook posts a handler that starts a
+// second engine.send(). The deferral in this cell is the test's own asio::post:
+// the second send starts after the current toApp has returned. A send started
+// inside toApp with no post is deferred by Session::send itself (fixpp#563); the
+// cells for that are in tests/session/test_563_564_engine_callback_send.cpp.
 //
 // Asserts: both sends complete, toApp fires at least twice, no deadlock.
 
@@ -385,17 +387,15 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
     SessionId ini_id;
     ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
-    // Wire re-entrant hook: when toApp fires for the first message, issue another
-    // engine.send() from within the callback body. asio::co_spawn with detached
-    // is non-blocking (posts to exec_); this is the canonical re-entrant pattern.
+    // Wire the hook: when toApp fires for the first message, post a handler that
+    // issues another engine.send(). The post is what defers the send in this cell.
     std::atomic<bool> reentrant_done{false};
     auto payload = make_app_payload();
     auto exec = ioc.get_executor();
     app->to_app_hook = [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
-        // Non-blocking re-entrant send: post to exec so the send coroutine runs
-        // AFTER the current callback (toApp) returns and releases in_dispatch_.
-        // asio::post guarantees non-blocking deferred execution — no deadlock even
-        // when called from within a session strand callback.
+        // Post to exec, so the send coroutine starts AFTER the current callback
+        // (toApp) has returned. asio::post never runs its handler inline — no
+        // deadlock even when called from within a session strand callback.
         asio::post(exec, [&engine, ini_id, payload, exec, &reentrant_done]() mutable {
             asio::co_spawn(exec, engine.send(ini_id, std::span<const std::byte>(payload)),
                            [&reentrant_done](std::exception_ptr ep, expected_t<void>) {
@@ -417,7 +417,7 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
         EXPECT_TRUE(sf.get().has_value()) << "first engine.send() must succeed";
     }
 
-    // Wait for re-entrant send to complete.
+    // Wait for the posted send to complete.
     bool reentrant_ok = wait_until(ioc, [&] { return reentrant_done.load(); }, 2000ms);
     EXPECT_TRUE(reentrant_ok)
         << "re-entrant engine.send() from inside toApp must complete without deadlock";
@@ -532,17 +532,27 @@ TEST(ApplicationEngineSend, ReentrantSendFromFromAppNoDeadlock) {
 //
 // Mechanism: Engine::send is spawned with a cancellation signal. toApp fires
 // INSIDE the send_counter_ window (after ++send_counter_, before kl->send()'s
-// async write completes). From toApp, the hook emits total-cancel AND spawns
-// stop() concurrently. The test asserts that stop() completes (counter drained)
-// and ~Engine() is UAF-safe under ASan.
+// async write completes). From toApp, the hook emits a total cancellation on
+// that signal AND starts stop() by a plain co_spawn. The test asserts that
+// stop() completes (counter drained) and ~Engine() is UAF-safe under ASan.
 //
-// NOTE on witnessing the pre-FIX-A counter-leak: the P1 failure mode (total-
-// cancel unwinds past the manual --send_counter_) requires the cancel to land
-// while the inner co_spawn is suspended at a co_await AFTER it has started.
-// On loopback TLS, the async write completes synchronously before asio can
-// deliver the cancel, so the cancellation is not reliably triggered in this
-// harness. The test exercises the correct post-FIX-A behavior; a confirmed
-// failure-on-pre-FIX-A revert requires an engine-internal park seam
+// What the two actions of the hook do (`.specify/563-564-callback-send.md`):
+//   - stop() started by a plain co_spawn from inside toApp runs its first
+//     steps inside the callback when the control strand is idle (§2.1a,
+//     "`Engine::stop()` started from a callback"). That route is out of
+//     fixpp#563's scope; its follow-up, fixpp#579, inherits this cell as the
+//     route's existing witness.
+//   - the total emission does not cancel the send. The send's chain was started
+//     by a plain co_spawn, whose cancellation state passes terminal cancellation
+//     only, so a total emission is dropped (§2.1, "Cancellation at the hop").
+//
+// NOTE on witnessing the pre-FIX-A counter-leak: the P1 failure mode (a
+// cancellation unwinds past the manual --send_counter_) requires a cancellation
+// that the send's chain records while the inner co_spawn is suspended at a
+// co_await. This cell's emission is dropped, as above, so the cell does not
+// exercise a cancelled send. The test exercises the correct post-FIX-A
+// behavior; a confirmed failure-on-pre-FIX-A revert requires an
+// engine-internal park seam
 // (deferred: [[feedback_send_counter_leak_park_seam_not_closed]]). (gate-b/r2)
 //
 // After stop() returns, ~Engine() runs immediately (UAF-clean under ASan).
@@ -570,29 +580,30 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     SessionId ini_id;
     ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
-    // Cancellation signal bound to the Engine::send coroutine.
-    // Emitting total-cancel from toApp (which fires INSIDE the send_counter_
-    // window) cancels the inner co_spawn at its next co_await.
+    // Cancellation signal bound to the Engine::send coroutine's completion token.
+    // A total emission from toApp (which fires INSIDE the send_counter_ window)
+    // is dropped by the chain's terminal-only filter (block comment above).
     asio::cancellation_signal cancel_sig;
 
     // toApp hook: fires after ++send_counter_ and before kl->send()'s async write.
-    // Emits total-cancel (cancels Engine::send's inner coroutine) and posts stop().
+    // Emits total-cancel (dropped by the send's chain) and starts stop() inline.
     std::future<void> stop_fut;
     std::atomic<bool> hook_fired{false};
     auto exec = ioc.get_executor();
     app->to_app_hook = [&cancel_sig, &engine, exec, &stop_fut, &hook_fired]() mutable {
-        // Emit total-cancel: propagates to Engine::send's inner co_spawn at the
-        // next co_await (kl->send()'s async write). This triggers P1 if FIX-A
-        // is absent: operation_aborted unwinds past --send_counter_, sticking at 1.
+        // Emit total-cancel on the slot bound to the send's completion token. The
+        // chain's filter is terminal-only, so nothing is recorded and no await of
+        // the send throws.
         cancel_sig.emit(asio::cancellation_type::total);
-        // Schedule stop() — it will see send_counter_ > 0 and must drain it.
+        // Start stop() by a plain co_spawn: it begins inside this callback and
+        // is not posted. It will see send_counter_ > 0 and must drain it.
         stop_fut = asio::co_spawn(exec, engine.stop(), asio::use_future);
         hook_fired.store(true);
     };
 
-    // Spawn Engine::send with the cancellation slot so total-cancel reaches it.
-    // The slot is bound to the completion token; asio propagates it into the
-    // coroutine's cancellation state.
+    // Spawn Engine::send with the cancellation slot bound to the completion
+    // token. asio connects the slot to the chain's cancellation state, whose
+    // filter for a plain co_spawn passes terminal cancellation only.
     auto payload = make_app_payload();
     auto send_fut =
         asio::co_spawn(ioc, engine.send(ini_id, std::span<const std::byte>(payload)),
@@ -603,7 +614,7 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     ASSERT_TRUE(hooked) << "toApp hook did not fire within 3s";
 
     // Now drive ioc until stop() completes.
-    // Post-FIX-A: counter_guard dtor fires on cancel-unwind →
+    // Post-FIX-A: counter_guard dtor fires when the send completes or unwinds →
     //   send_counter_ = 0 → stop() exits drain loop and completes.
     // (A deterministic pre-FIX-A red witness would require an engine-internal
     //  park seam — see NOTE above; this assertion exercises the correct behavior.)
@@ -617,7 +628,7 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     ASSERT_TRUE(stop_done) << "stop() did not complete within 5s — send_counter_ not "
                               "drained on cancel-unwind; FIX-A RAII guard required";
 
-    // Drain send_fut (it was cancelled or completed before stop()).
+    // Drain send_fut (the send completed, with a value or an error, before stop()).
     bool send_done = wait_until(
         ioc,
         [&] {

@@ -1904,6 +1904,33 @@ other two are simply unexamined. Saying "the rest look fine" would be a coverage
 measured.
 
 
+## Appendix Z2 — post-sign-off amendment, 2026-10-13 (fixpp#563): the order of `store()` calls, and "contention is zero"
+
+*Appended at the END of the file, as Appendix Z is and for its reason: line-number citations point
+into this document. No site above is rewritten.*
+
+**1. A requirement this document did not state (owner ruling R-6;
+`.specify/563-564-callback-send.md` §2.1, "Why the wait is long enough").** Calls to
+`MessageStore::store` on one instance **complete in the order they were made**. It binds every
+implementation of the interface, the existing ones included. The reason is in the session, not in the
+store: a session transmits each outbound frame when that frame's `store()` call completes, so a store
+that completes two calls out of order has their frames transmitted out of order. §4.1's `store`
+contract says how concurrent invocations behave on the shipped stores (they "serialise against the
+per-instance writer mutex", FIFO); it did not say what an implementation must do. `MemoryStore` and
+`FileStore` meet the requirement by that FIFO mutex, taken on the session's strand. The header now
+states it on `store` (`include/fixpp/session/message_store.hpp`), and B&L `B-563-4` is the row a user
+reads.
+
+**2. "Contention is zero" does not hold (§4.1, the `store` contract's concurrency comment; §4.2, the
+`MemoryStore` "Concurrency" bullet).** Both say that under the single-session-serialisation-domain
+discipline contention on the writer mutex is zero, and describe a second arrival as a "deliberate
+violation". Two sends of one session overlap in their store calls inside that discipline: the strand
+serialises handlers between suspensions, and a `store()` call suspends. Concurrent `Engine::send`
+callers, an application that `co_spawn`s `Session::send` more than once without awaiting each, and a
+send that fixpp#563 defers from `toApp` or `toAdmin` while the outer send is in its store call all
+arrive at a held mutex. The FIFO behaviour both passages describe for the second arrival is the
+ordinary case and is what the requirement above relies on; it is not a violation.
+
 ## ⚠️ Erratum, 2026-10-14 (fixpp#538; note §10, rulings R-13 to R-16, R-20) — `retrieve` after a reset, and what the session does with `store_cancelled`
 
 Appended at the END of the file, as Appendix Z is, so that no line citation into this document moves.

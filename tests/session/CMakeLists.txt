@@ -846,6 +846,32 @@ set_tests_properties(session_537_gap_deadline PROPERTIES
   LABELS "session;537"
   TIMEOUT 300)
 
+# fixpp#563 / fixpp#564 (B41) — a Session::send or a Session::close started inside an Application
+# callback of that session, and the session's debug guard (`.specify/563-564-callback-send.md` §3).
+add_threading_test(session_563_564_callback_send test_563_564_callback_send.cpp)
+# MSVC C1128: under the debug configuration this TU's section count exceeds the default
+# COFF object-format limit. /bigobj lifts the 2^16 cap.
+target_compile_options(session_563_564_callback_send PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
+)
+# fixpp#563 / fixpp#564 (B41) — an Engine::send started inside an Application callback or around
+# Engine::stop(), and a close started inside a callback of a session that a running Engine owns.
+# Real loopback TLS, so it carries application_engine_send_019_test's link set and fixture directory.
+# Its own binary: on a build with asserts, an abort in one cell ends the process for the rest.
+add_threading_test(session_563_564_engine_callback_send test_563_564_engine_callback_send.cpp)
+target_link_libraries(session_563_564_engine_callback_send PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+)
+target_compile_definitions(session_563_564_engine_callback_send PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+target_include_directories(session_563_564_engine_callback_send PRIVATE
+  "${CMAKE_SOURCE_DIR}/src")  # session/session_engine_access.hpp: the engine-stop flag's setter
+
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
 # branch's polarity — see the file header for the documented scope limits.

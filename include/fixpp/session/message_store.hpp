@@ -116,6 +116,14 @@ public:
     // when the per-direction cap is reached (I-08). FileStore returns
     // store_io_failure on disk-side faults.
     //
+    // ORDER (a requirement on every implementation; fixpp#563,
+    // `.specify/563-564-callback-send.md` §2.1, ruling R-6): calls to store()
+    // that a cancellation does not end complete in the order they were made; a
+    // call that a cancellation ended may return earlier (D-OUT-7, below). Two sends of one session
+    // can have their store() calls in flight at once, and the session transmits each frame when its
+    // store() call completes, so a store that completes two calls out of order has their frames
+    // transmitted out of order.
+    //
     // Cancellation (.specify/536-537-538-recovery-liveness.md §10, D-OUT-7; rulings
     // R-15 and R-21). store_cancelled means that a cancellation ended the call before
     // the frame was stored: the store then holds no frame for `seq`, and its next number

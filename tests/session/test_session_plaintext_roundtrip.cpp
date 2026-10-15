@@ -632,9 +632,10 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
 // Each cell lets close(mode) land while a Logon arm is suspended. The close is posted
 // from a callback the arm fires (toAdmin or onLogon), where the application reaches the
 // session through the public Engine::lookup(), or from a store hook standing in for
-// another thread. It is posted with asio::post, not co_spawn: the vendored co_spawn
-// DISPATCHES, so on the session strand it would run close() inline inside the callback
-// instead of queueing it behind the arm's next suspension. Each cell then checks what
+// another thread. It is posted with asio::post, not started by co_spawn, so the start
+// is the cell's own. A close() started by co_spawn inside the callback would wait for
+// the callback to return before it began (fixpp#563, `.specify/563-564-callback-send.md`
+// §2.1a), and the cells do not depend on that wait. Each cell then checks what
 // it names among the outcomes the rig records: the state ring, the event ring, onLogon,
 // the admin frames passed to toAdmin, the clock's parked sleeps, and the store's counter
 // writes and final counters.

@@ -1728,6 +1728,67 @@ the **type the session strand stores**:
 `session_executor` wrapper and falls through to the engine snapshot) is not affected by the type, and
 was not re-verified here. Re-derive the spawn sites with the recipe that amendment gives.
 
+## ⚠️ Document-level amendment, 2026-10-13 (fixpp#563, fixpp#564) — read before citing "Non-reentrant from inside a callback" or the `direct_executor` attestation
+
+Placed at the end for the same reason as the amendments above: line-number citations point into this
+document. The individual sites are **not** rewritten.
+
+**1. "Non-reentrant from inside a callback" (§6.1 "Strand semantics") is superseded.** That bullet says
+that a `fromApp` which calls `Session::send(...)` schedules the send on the serialisation domain, and
+that the send "does *not* run before `fromApp` returns", by the strand's reentrancy guarantee. Neither
+half describes the code. A `Session::send` awaited or `co_spawn`ed on the session's executor from
+inside a callback starts inline, because the executor is already running in that thread; nothing
+schedules it behind the callback. Since fixpp#563 (`.specify/563-564-callback-send.md` §2.1, owner
+ruling R-1) the behaviour is a rule and not an accident of the spawn:
+
+- started in `fromApp`, `fromAdmin` or `onLogon`, the send runs inside the callback: it is numbered,
+  and its `toApp` runs, before the callback returns;
+- started in `toApp` or `toAdmin`, it waits by one post onto the session's executor and starts after
+  that callback returns;
+- a `Session::close` started in any callback of the session begins after that callback returns
+  (ruling R-4).
+
+The first bullet of that passage, "Reentrancy guarantees the application sees" (`fromApp` for message
+N+1 cannot run before `fromApp` for message N has returned), is not changed.
+
+**2. The `direct_executor` attestation (§4.5, the "`direct_executor` attestation" note, and wherever
+this document says the attested executor is used "as if it were running under a strand") gains a
+condition (ruling R-7).** The attestation is about one thread too: an Application callback of the
+session must not run the session's own executor before it returns (`poll`, `run_one`, `run_for` on the
+`io_context`). A strand never runs a second handler of the session inside the first; a bare
+`io_context` executor does when a callback runs the context. An executor attested with such a callback
+is a false attestation, with the disposition this document already gives one: undefined in release,
+asserted in debug on the routes B&L `B-564-1` lists. The waits of rulings R-1 and R-4 are one post onto
+that executor and do not hold there. `per_session_strand`, a session under the Engine whatever its
+mode, and `direct_executor` attested over a strand or a one-worker pool cannot reach the case.
+
+Where to read the current contract: the reentrancy contract in `include/fixpp/session/session.hpp`,
+the comment on choosing a threading mode in `include/fixpp/core/session_executor.hpp`, and B&L
+`B-563-1`, `B-563-2` and `L-007-2`.
+
+## ⚠️ Document-level amendment, 2026-10-14 (fixpp#590) — read before citing an erratum for 093 plan OD-29
+
+Placed at the end for the same reason as the amendments above: line-number citations point into this
+document. The individual sites are **not** rewritten.
+
+**The errata dated 2026-10-06 for 093 plan OD-29 gain an exception.** There are three: in §4.7, the
+comment on `close()` in the code block and the "Idempotency" bullet, and in §6.5 the "Idempotency"
+bullet. Each says that a terminal close which arrives while a graceful one is in flight escalates
+it: it ends its grace wait, or keeps its phase 1 from starting. Since fixpp#590
+(`.specify/563-564-callback-send.md` §2.6, owner rulings R-8 and R-9) one route is different:
+
+- a terminal close started inside the `toAdmin` of the graceful close's Logout cuts that Logout: it
+  is numbered, stored where the session has a store, and not transmitted, and the session is
+  `Disconnected` before the Logout takes its number;
+- that terminal close then joins without ending the grace wait. Nothing cancels the cut Logout's
+  store call before the grace timer, of `logout_disconnect_timeout_ms`, expires;
+- both callers still get the in-flight result.
+
+A terminal close that begins after that `toAdmin` has returned is as the errata say.
+
+Where to read the current contract: `close()`'s comment in `include/fixpp/session/session.hpp`, and
+B&L `B-563-5` and `L-563-7`.
+
 ## ⚠️ Erratum, 2026-10-14 (fixpp#536) — read before citing what `Clock::cancel_sleeps()` does, or who calls it
 
 Appended at the end for the reason the amendments above give: line-number citations point into this

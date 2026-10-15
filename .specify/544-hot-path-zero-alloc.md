@@ -2059,3 +2059,26 @@ implementation*, which holds F-1..F-7 and the orchestrator's rulings) and the ev
     (R-5's disposition; B&L `L-497-1`);
   - **fixpp#566** — the ccache flag surface does not see the guard header's N or the in-tree `asio::asio`
     definition append, so changing N alone does not rotate the ccache tag (F-4).
+
+## Erratum, 2026-10-13 (fixpp#563, fixpp#564) — three statements of this note are superseded
+
+This note is the plan of a merged pull request and is not edited in place. The passages below are
+named by section; read this before citing any of them.
+
+- **§0 (ruling R-10's row and its text), §2.5 ("Class (b) on the send path") and §4's `L-497-1` wording
+  say that a send started from inside `toApp` "runs inline", nested in the outer send** (probe r3).
+  Since fixpp#563 it does not: a `Session::send` started inside `toApp` or `toAdmin` of its own
+  session waits by one post and starts after that callback has returned
+  (`.specify/563-564-callback-send.md` §2.1, owner ruling R-1). It can still find the frame slot held, because the outer send may be suspended in its
+  store or its write by then, and it then takes the fallback leaf as R-10 decided. What §2.5 says of a
+  send started in `fromApp` or `fromAdmin`, that it runs inline on top of the inbound arm, still
+  holds.
+- **§2.4 ("What 16 does not reach") and §2.5 say that `Engine::send` makes two `co_spawn` hops, one
+  through `control_strand_`.** For a published session it makes one, onto the session's strand, after a
+  lookup in the engine's reader snapshot; the control-strand hop remains only for an id the snapshot
+  does not hold (the same note, §2.3, owner ruling R-2). Its payload copies are unchanged.
+- **§2.5, §4 and the "As built" section give fixpp#563 and fixpp#564 as open follow-ups, with B&L
+  `L-544-3` and `L-544-4`.** Both are fixed by the change that note describes, and both rows are in
+  `spec/behaviors-and-limitations-closed.md`. `engine.hpp`'s sentence that re-entrant calls are
+  "enqueued behind the current dispatch", which §2.5 quotes as contradicted by probe r3, has been
+  rewritten.

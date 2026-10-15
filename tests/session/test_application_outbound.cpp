@@ -16,7 +16,8 @@
 //   5. send on a non-established session → unexpected(session_invalid_state_for_send=77),
 //      nothing transmitted (AC4; FR-013).
 //   6. send with unknown SessionId → unexpected(session_invalid_argument=119).
-//   7. Re-entrant send issued from inside an on-strand callback does not deadlock.
+//   7. Work posted onto the session's executor from inside an on-strand callback
+//      does not deadlock (the cell posts; it starts no send inside the callback).
 //
 // TDD (T012): test file written first, confirmed FAIL before T013/T014.
 //
@@ -587,18 +588,19 @@ TEST(ApplicationOutbound, EnginesSendOnRegisteredButNotEstablishedSession) {
     stop_fut2.get();
 }
 
-// ── Test 8: Re-entrant send from on-strand callback does not deadlock ──────────
+// ── Test 8: Work posted from an on-strand callback does not deadlock ───────────
 //
-// Issue an Engine::send from inside a toApp callback (which runs on the session
-// strand). The re-entrant call must enqueue behind the current dispatch (post-only
-// model) and not deadlock.
+// From inside a toApp callback (which runs on the session's executor) the cell
+// posts a handler onto that executor through dispatch_app_callback. The deferral
+// is the test's own post: the handler runs after the toApp has returned. The
+// cell starts no send inside the callback; a send started there is the subject
+// of tests/session/test_563_564_callback_send.cpp (fixpp#563).
 //
-// We simulate this by calling Session::send from within a toApp callback.
 // The key invariant: asio::post is non-blocking — it never deadlocks even when
 // called from within a completion handler on the same executor.
 
 TEST(ApplicationOutbound, ReentrantSendFromCallbackDoesNotDeadlock) {
-    // Application that issues a Session::send from within toApp (re-entrant).
+    // Application that posts a handler onto the session's executor from toApp.
     struct ReentrantApp : public Application {
         Session* target_session = nullptr;
         std::vector<std::byte> payload;
@@ -611,10 +613,10 @@ TEST(ApplicationOutbound, ReentrantSendFromCallbackDoesNotDeadlock) {
             // Only re-enter once to avoid infinite recursion.
             if (reentrant_count.load() == 1 && target_session && !payload.empty()) {
                 did_reenter.store(true);
-                // Post a send back onto the session strand (via dispatch_app_callback
-                // pattern). This uses asio::post which is non-blocking.
-                // We don't await here — just enqueue the work.
-                // The send will run AFTER the current toApp completes.
+                // Post a handler back onto the session's executor (via the
+                // dispatch_app_callback pattern). This uses asio::post which is
+                // non-blocking. We don't await here — just enqueue the work.
+                // The handler will run AFTER the current toApp completes.
                 target_session->dispatch_app_callback([this]() {
                     // This runs on the session strand after toApp returns.
                     // We don't need to do anything meaningful — just confirm no deadlock.
@@ -637,7 +639,7 @@ TEST(ApplicationOutbound, ReentrantSendFromCallbackDoesNotDeadlock) {
 
     f.open_to_active(sess);
 
-    // Send a payload — toApp fires, which enqueues a re-entrant work item.
+    // Send a payload — toApp fires, which enqueues the posted work item.
     auto payload = make_app_payload();
     auto fut =
         asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);

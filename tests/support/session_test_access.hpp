@@ -148,10 +148,35 @@ struct session_test_access {
     // competing store operation on it).
     [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
 
+    // The numeric value of the session's Session::lifecycle (see the enum in session.hpp
+    // for the names). Read it on the session's strand.
+    [[nodiscard]] static int lifecycle_value(Session const& s) noexcept {
+        return static_cast<int>(s.state_);
+    }
+
     // The send path's frame-slot flag (fixpp#544 §2.5). Read and write it on the session
     // strand. A flag the test sets stays set: Session::send's holder clears only a flag it
     // set itself, and the fallback leaf never writes it.
     [[nodiscard]] static bool& send_slot_in_use(Session& s) noexcept { return s.send_slot_in_use_; }
+
+    // Enters a callback_dispatch_scope on `s`, as a callback site of the session does,
+    // without a callback running; the scope ends when the returned object is destroyed
+    // (fixpp#564). The scope touches the guard's state only, so a session that was never
+    // opened will do, and that state is then all that two threads holding `s` share.
+    [[nodiscard]] static Session::callback_dispatch_scope enter_callback_scope(
+        Session const& s) noexcept {
+        return Session::callback_dispatch_scope{s};
+    }
+
+    // The count of terminal close() calls that have taken close()'s wait for a callback to
+    // return, and the record that a graceful close's Logout was cut (fixpp#590;
+    // `.specify/563-564-callback-send.md` §2.6 "The mechanism", statements 1 and 4). They
+    // are readings: a cell prints them and asserts effects, not these values. Read them on
+    // the session's serialisation domain.
+    [[nodiscard]] static std::uint64_t waited_terminal_closes(Session const& s) noexcept {
+        return s.waited_terminal_closes_;
+    }
+    [[nodiscard]] static bool logout_cut(Session const& s) noexcept { return s.logout_cut_; }
 };
 
 }  // namespace fixpp::session

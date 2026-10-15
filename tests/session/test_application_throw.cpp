@@ -17,8 +17,9 @@
 //   7. Throwing onLogout  → same (via graceful-close or terminal close path).
 //
 // After each throw-induced terminal close:
-//   - The re-entrancy guard (in_dispatch_) must be cleared (callback_dispatch_scope
-//     dtor fires on unwind through invoke_callback_safe).
+//   - The debug guard's state must be restored (callback_dispatch_scope's dtor
+//     lowers the callback depth and releases the owner token on unwind through
+//     invoke_callback_safe).
 //   - A subsequent callback on a NEW session must work (engine not corrupted).
 //   - error::app_callback_threw must have been recorded in the session's
 //     recent_events() or verifiable via the session's state (Disconnected).

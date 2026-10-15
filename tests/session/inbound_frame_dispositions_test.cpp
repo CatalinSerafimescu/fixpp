@@ -2918,12 +2918,13 @@ TEST(InboundFrameDispositionsQ33, UnknownFieldsAtHeadroomExhaustion) {
 // ── C-3 I-3 (T063): an inbound parse never nests inside another ─────────────
 //
 // One parse buffer per session is safe because no inbound parse runs inside another:
-// callbacks are synchronous, and callback_dispatch_scope asserts that no second
-// callback enters while one runs. A fromApp that starts the session's inbound path
-// again on the running executor (co_spawn dispatches inline there) re-enters
-// parse_and_dispatch_ and trips that assertion. The nested frame is the next expected
-// one, so it is in sequence and reaches the parse. Debug builds only: NDEBUG compiles
-// the assertion out.
+// callbacks are synchronous, and each parse site over the buffer asserts that no
+// callback of the session is on the stack (fixpp#564,
+// `.specify/563-564-callback-send.md` §2.2). A fromApp that starts the session's
+// inbound path again on the running executor (co_spawn dispatches inline there)
+// re-enters parse_and_dispatch_ and trips that assertion. The nested frame is the next
+// expected one, so it is in sequence and reaches the parse. Debug builds only: NDEBUG
+// compiles the assertion out.
 #ifndef NDEBUG
 // Exit codes: 2 = setup failed; 0 = the nested parse did not trip the assertion.
 [[noreturn]] void reenter_an_inbound_parse_from_from_app() {
@@ -2946,9 +2947,9 @@ TEST(InboundFrameDispositionsQ33, UnknownFieldsAtHeadroomExhaustion) {
 
 TEST(InboundFrameDispositionsI3, AnInboundParseReenteredFromACallbackDies) {
 #ifdef NDEBUG
-    GTEST_SKIP() << "callback_dispatch_scope's assertion is compiled out under NDEBUG";
+    GTEST_SKIP() << "the parse-site assertion is compiled out under NDEBUG";
 #else
-    EXPECT_DEATH(reenter_an_inbound_parse_from_from_app(), "concurrent session callback entry");
+    EXPECT_DEATH(reenter_an_inbound_parse_from_from_app(), "inbound parse begun inside a callback");
 #endif
 }
 

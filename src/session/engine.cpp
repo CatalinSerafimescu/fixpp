@@ -10,6 +10,10 @@
 //   build asio_listener → loop: async_accept → async_handshake → bounded first-
 //   frame read → reversed-CompID resolve → attach → deliver first Logon → stub pump.
 // US2 (T015/T016) will replace the read-pump stub.
+//
+// Engine::send's route: `.specify/563-564-callback-send.md` §2.3 and §2.4 (fixpp#563,
+// fixpp#564; ruling R-2). It supersedes 023-engine-session-strand's two-hop send for a
+// published session; the block comment above Engine::send has both routes.
 
 #include <algorithm>
 #include <array>
@@ -1436,12 +1440,14 @@ asio::awaitable<void> Engine::stop() {
             // [gate-b/r5 P1: dangling-&entry UAF fix — Codex 2nd-opinion]
             //
             // 093 (data-model E-13; contract C-6; plan OD-15): before the emit, on the
-            // session strand, set the Session's engine-stop flag, which Logon arms test
-            // (logon_arm_superseded). entry.session is read here, on the control strand
-            // that publish_entry writes it on. A null session has nothing to set: both
-            // role loops publish it before any frame is delivered, and a publish refused
-            // because stop began delivers none (re-derive by reading what follows the
-            // publish_entry calls in run_accept_loop and run_connect_loop).
+            // session strand, set the Session's engine-stop flag. It has two readers on
+            // that strand: the Logon arms (logon_arm_superseded), and Engine::send's body
+            // for a published session, which refuses a send that starts after this step
+            // (`.specify/563-564-callback-send.md` §6, OD-3). entry.session is read here,
+            // on the control strand that publish_entry writes it on. A null session has
+            // nothing to set: both role loops publish it before any frame is delivered,
+            // and a publish refused because stop began delivers none (re-derive by reading
+            // what follows the publish_entry calls in run_accept_loop and run_connect_loop).
             for (auto& [id, entry] : registry_) {
                 if (entry.session_strand.has_value()) {
                     std::shared_ptr<Session> sess = entry.session;
@@ -1661,20 +1667,34 @@ asio::awaitable<void> Engine::stop() {
 #endif  // FIXPP_BUILD_OTEL
 }
 
-// ── Engine::send — T012 (023-engine-session-strand US1) ───────────────────────
+// ── Engine::send — T012 (023-engine-session-strand US1); fixpp#563, fixpp#564 ─
 //
 // Any-thread-safe public outbound send entry point. [FR-006/007/013; research D6]
 //
-// T012 two-hop design (research D0/D4/R1/R7; data-model E-0; contract C-2; FR-012):
+// The route is `.specify/563-564-callback-send.md` §2.3 (ruling R-2): a published
+// session is reached through the reader snapshot, with no hop through the control
+// strand. It supersedes T012's two-hop design for that case (023's research D0 and
+// D4; data-model E-0; contract C-2; FR-012), which stays as the miss path. §2.4 of the
+// note has what stop() relied on in the two-hop design and what carries each
+// guarantee on the hit path.
 //   Enroll: bump send_counter_ + RAII counter_guard in the OUTER coroutine frame
 //           (before the first co_await), so a send is counted the instant the
 //           coroutine body starts.
 //   Admission gate: immediately recheck stopped_ AFTER enroll. If stop() has
-//           already started, fast-fail WITHOUT posting the control-strand lambda.
-//           Otherwise continue to Step A. This closes the post-drain enrollment
+//           already started, fast-fail WITHOUT queueing any work. Otherwise
+//           continue to the lookup. This closes the post-drain enrollment
 //           window: a send that begins after stop()'s drain observed zero sees
 //           stopped_=true under seq_cst and queues no [this]-capturing work.
 //           [gate-b/r3 P1; R7]
+//   Lookup: load reader_snapshot_ and find the id in it. The snapshot is replaced
+//           atomically and never mutated, so the read needs no strand.
+//   Hit:    co_spawn one body onto the session's strand, with a keepalive copied
+//           from the snapshot. On that strand: the stop check (the session's
+//           engine-stop flag, which stop()'s step 1 sets there; §6, OD-3), the
+//           Active check (fsm_state_ owned here, C-1), toApp + Session::send.
+//           A caller already running on that strand, such as a callback of the
+//           session, starts the body inline, whatever the control strand is doing.
+//   Miss:   the id is not in the snapshot this call loaded. Steps A to C, T012's:
 //   Step A: hop onto control_strand_ (NOT bare exec_) so registry reads + stopped_
 //           check are serialized with stop()'s mutations on the control strand
 //           (D0/INV-0). Using exec_ would leave stop()'s registry_.clear() racing
@@ -1685,18 +1705,18 @@ asio::awaitable<void> Engine::stop() {
 //           single-writer on session strand C-1). If stopped_ → fail-fast
 //           (session_invalid_state_for_send). [gate-b/r2 P1: bump no longer here]
 //   Step C: hop to session_strand for Active check (fsm_state_ owned here, C-1),
-//           toApp + Session::send. counter_guard dtor decrements after the hop
-//           completes (or unwinds). [gate-b/r1 #1: Active check moved here]
+//           toApp + Session::send.
 //
-//   Both hops are non-blocking co_spawn(strand, use_awaitable) — never dispatch or
-//   blocking wait — so a callback-issued send (session→control→session) cannot
-//   deadlock (FR-006/C-2). [research R1]
+//   counter_guard's dtor decrements after the send completes (or unwinds), on
+//   either path.
+//   Every hop is a co_spawn(strand, use_awaitable) and none is a blocking wait, so
+//   a callback-issued send cannot deadlock on either path (FR-006/C-2).
 //
 //   stop() stores stopped_=true (seq_cst) BEFORE draining send_counter_ (seq_cst)
 //   and BEFORE registry_.clear(). A send either enrolls before the drain load
 //   and is waited out, or enrolls after that load and then sees stopped_=true
-//   on the outer admission re-check, so it returns without posting any
-//   [this]-capturing control-strand work. [R7]
+//   on the outer admission re-check, so it returns without queueing any
+//   [this]-capturing work.
 //   Backpressure = the awaited result ([const §XV.15]).
 asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
                                                      std::span<const std::byte> app_payload) {
@@ -1704,9 +1724,9 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // (potentially stack-allocated) stays valid across all co_await suspensions.
     std::vector<std::byte> payload_copy(app_payload.begin(), app_payload.end());
 
-    // gate-b/r2 [P1]: enroll this send in the send-drain domain BEFORE the
-    // control-strand hop.  If the bump occurred inside the control-strand lambda
-    // (Step B), a send POSTED to control_strand_ but not-yet-run would be
+    // Enroll this send in the send-drain domain BEFORE any
+    // hop.  If the bump occurred inside the control-strand lambda (Step B of the
+    // miss path), a send POSTED to control_strand_ but not-yet-run would be
     // invisible to stop()'s send_counter_ drain: stop() could drain (sees 0),
     // clear registry_, destroy Engine, and then the still-queued lambda would
     // run and dereference freed `this` (stopped_/registry_) — UAF.
@@ -1714,7 +1734,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // By bumping here (synchronously, in the outer coroutine frame), the send
     // is enrolled the instant the coroutine body starts.  stop()'s drain now
     // waits for any posted-but-not-yet-run send, keeping Engine alive until the
-    // full two-hop completes.
+    // send completes, on the hit path and on the miss path.
     //
     // Capture send_counter_ by value (shared_ptr copy): this keeps the counter
     // object alive even after Engine destruction so the guard's decrement is
@@ -1725,17 +1745,62 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     counter_guard send_guard{sc};
 
     // gate-b/r3 P1: admission re-check after enroll. If stop() already set the
-    // seq_cst stopped_ flag, fail here and queue no control-strand work. The
+    // seq_cst stopped_ flag, fail here and queue no work on either strand. The
     // counter guard still decrements on this early return.
     if (stopped_.load(std::memory_order_seq_cst)) {
         co_return std::unexpected(core::error::session_invalid_state_for_send);
     }
 
+    // The published snapshot first (`.specify/563-564-callback-send.md` §2.3, "The new
+    // path"). It is read here and not through lookup(), whose handle on a build with
+    // assertions is a lease that stop() does not drain. The snapshot is released before
+    // the await: only the session's keepalive crosses it.
+    std::shared_ptr<Session> published;
+    if (auto snap = reader_snapshot_.load(std::memory_order_acquire)) {
+        if (auto it = snap->sessions.find(id); it != snap->sessions.end()) {
+            published = it->second;
+        }
+    }
+    if (published) {
+        // Hit: straight onto the session's strand, with no hop through the control
+        // strand. A caller already running on that strand starts the body inline; from
+        // anywhere else the body runs under the strand's serialisation.
+        auto strand_exec = published->executor().underlying();
+        co_return co_await asio::co_spawn(
+            strand_exec,
+            // The body owns its keepalive and its payload: it holds no view into this
+            // frame, which may be destroyed first when the io_context is destroyed
+            // with sends suspended.
+            [kl = std::move(published), payload_copy]() -> asio::awaitable<core::expected_t<void>> {
+                co_await asio::this_coro::reset_cancellation_state(
+                    asio::enable_total_cancellation());
+                // The stop check (§6, OD-3): stop()'s step 1 sets the flag on this
+                // strand, so a body that starts after that step is refused here. On the
+                // miss path the control-strand read of stopped_ refuses a send whose
+                // control-strand step runs after stop() wrote it; a miss-path body that
+                // is already queued on the session's strand is not tested again
+                // (fixpp#579).
+                if (session_engine_access::engine_stop_noted(*kl)) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+                if (kl->state() != fsm_state::Active) {
+                    co_return std::unexpected(core::error::session_invalid_state_for_send);
+                }
+                co_return co_await kl->send(
+                    std::span<const std::byte>(payload_copy.data(), payload_copy.size()));
+            },
+            asio::use_awaitable);
+    }
+
+    // Miss: the id is not in the snapshot this call loaded. The control strand tells an
+    // unregistered id from a registered one with no published session, and finds a
+    // session published since.
     // T012/Step A: first-hop onto control_strand_ so registry reads and stopped_
     // check are serialized with stop()'s control-plane mutations (D0/INV-0).
-    // Non-blocking co_spawn — the re-entrant case (session→control→session) is
-    // safe because the session strand and control strand are distinct: posting
-    // from the session strand onto the control strand never blocks. [C-2/R1]
+    // Non-blocking co_spawn — a miss issued from a session's callback
+    // (session→control→session) is safe because the session strand and control
+    // strand are distinct: a co_spawn from the session strand onto the control
+    // strand never blocks. [C-2]
     core::expected_t<void> result = co_await asio::co_spawn(
         control_strand_,
         [this, id,
