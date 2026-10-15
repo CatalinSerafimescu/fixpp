@@ -48,12 +48,12 @@
  * only for C4100. It ends with `default`, not push/pop: SWIG's runtime carries
  * its own unbalanced `#pragma warning(disable : 4505)`, which a pop would
  * undo for the static helpers SWIG emits after this point. Re-check whether it
- * is still needed: delete both MSVC lines, regenerate the wrapper with the
- * lowest SWIG the build admits (pyproject.toml's `swig>=` and
- * find_package(SWIG) above) and with the newest, and compile each with `cl /c`
- * under the MSVC arm of fixpp_apply_common_flags (cmake/Helpers.cmake),
- * fixpp_py's definitions and CMake's Release C++23 flags, under each
- * combination of the two canaries. Keep the arm while any of those reports
+ * is still needed: delete both `_MSC_VER` arms, regenerate the wrapper with the
+ * lowest SWIG the build admits (`swig>=` in pyproject.toml, find_package(SWIG)
+ * in bindings/python/CMakeLists.txt) and with the newest, and compile each
+ * with `cl /c` under the MSVC arm of fixpp_apply_common_flags
+ * (cmake/Helpers.cmake), fixpp_py's definitions and CMake's Release C++23
+ * flags, under each combination of the two canaries. Keep the arm while any of those reports
  * C4100 at or before the line of the pop below; widen it only to a code
  * reported there. */
 %begin %{
