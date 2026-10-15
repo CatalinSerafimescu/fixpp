@@ -77,9 +77,13 @@
 #     and all of them. A same-named function of an overlapping arity in that scope is read as
 #     the forwarder.
 #   * A comma between a `<` and a `>` may separate arguments (comparisons) or not (a
-#     template argument list). A call holding one is read as template argument lists only
-#     when that fills every parameter, so that splitting any of those commas would exceed
-#     the arity. Any other such call is listed UNLABELLED at the call, unless even splitting
+#     template argument list), so each such `<`..`>` is a choice, and every combination of
+#     choices is a reading of the call. The pairs are matched as brackets nest (each `<` with
+#     the next unmatched `>`); a list that would pair them otherwise is not among the
+#     readings. The readings that fit the arity decide: when they all put the same thing at
+#     the label's position, the call is read that way. When they disagree, when none fits,
+#     or when more pairs hold a comma than the bound on how many are enumerated, the call
+#     is listed UNLABELLED at the call -- unless even splitting
 #     every comma leaves it short of the required parameters, which no reading can reach. A
 #     forwarder's own parameter list is always read as template argument lists, which is
 #     wrong only for a comparison in a default argument.
@@ -462,12 +466,12 @@ def forwarder_callers(views, def_name, fw):
 
     A top-level comma between a `<` and a `>` (`_angles`) makes the split a reading: it
     separates arguments if they are comparisons and does not if they delimit a template
-    argument list, and each choice per pair is a reading of its own. Such a call is read
-    with every pair as a template argument list only when that split fills every parameter,
-    since a reading that splits any of those commas then has more arguments than the
-    forwarder takes. Otherwise, unless it has fewer arguments than required under every
-    reading (not read, as above), it is yielded with `why` set, so it is listed unlabelled,
-    never dropped."""
+    argument list, and each choice per pair is a reading of its own (`_readings`). The
+    readings within the arity decide: if they all pass the same thing at the parameter's
+    position (`_read_at`), the call is read that way. If they disagree, if none fits while
+    some choice exists, or if there are too many pairs to enumerate, the call is yielded
+    with `why` set, so it is listed unlabelled, never dropped -- unless it has fewer
+    arguments than required under every reading (not read, as above)."""
     def_view = views[def_name]
     scope = [def_name]
     if def_name.endswith((".hpp", ".h")):
@@ -488,26 +492,69 @@ def forwarder_callers(views, def_name, fw):
             spans = _top_args(v.blanked, i, j)
             if len(spans) < fw["required"]:
                 continue                       # no reading of its commas adds an argument
-            kept = _top_args(v.blanked, i, j, _angles(v.blanked, i, j))
-            if kept != spans:
-                if len(kept) != fw["total"]:
-                    yield (name, v.line(m.start()), None, None,
-                           "arguments split two ways at a '<' or '>'")
-                    continue
-                spans = kept
-            elif not fits(spans):
+            line = v.line(m.start())
+            readings = _readings(v.blanked, i, j)
+            if readings is None:
+                yield name, line, None, None, "too many '<'..'>' pairs to read"
                 continue
-            if fw["index"] >= len(spans):
-                yield name, v.line(m.start()), None, None, None    # the default is passed
+            viable = [s for s in readings if fits(s)]
+            if not viable:
+                if len(readings) > 1:
+                    yield name, line, None, None, "no split of its '<'..'>' commas fits"
+                continue                       # one certain split, another arity
+            what = {_read_at(v, s, fw["index"]) for s in viable}
+            if len(what) > 1:
+                yield name, line, None, None, "arguments split two ways at a '<' or '>'"
                 continue
-            a, b = spans[fw["index"]]
-            if re.search(r"\bchar\s*\*", v.blanked[a:b]):
-                continue                                           # a declaration
-            label = v.label_in(a, b)
-            nested = None
-            if label is None and _IDENT.fullmatch(v.blanked[a:b].strip()):
-                nested = forwarded_param(v, m.start(), [v.blanked[a:b].strip()])
-            yield name, v.line(m.start()), label, nested, None
+            kind, text = what.pop()
+            if kind == "declaration":
+                continue
+            if kind == "label":
+                yield name, line, text, None, None
+            elif kind == "ident":
+                yield name, line, None, forwarded_param(v, m.start(), [text]), None
+            else:                              # the default is passed, or not a literal
+                yield name, line, None, None, None
+
+
+# A bound on the pairs whose keep-or-split choice is enumerated: the readings double with
+# each one, and a call past it is listed unlabelled rather than enumerated.
+_MAX_READING_PAIRS = 6
+
+
+def _readings(blanked, i, j):
+    """Every distinct split of the arguments between the '(' at `i` and the ')' at `j`: each
+    `_angles` pair whose `<`..`>` holds a top-level comma is either kept whole (a template
+    argument list) or split (comparisons), independently. The plain split is the first.
+    None when more pairs than `_MAX_READING_PAIRS` hold a comma."""
+    plain = _top_args(blanked, i, j)
+    holding = [p for p in _angles(blanked, i, j) if _top_args(blanked, i, j, [p]) != plain]
+    if len(holding) > _MAX_READING_PAIRS:
+        return None
+    out = [plain]
+    for mask in range(1, 1 << len(holding)):
+        s = _top_args(blanked, i, j, [p for b, p in enumerate(holding) if mask >> b & 1])
+        if s not in out:
+            out.append(s)
+    return out
+
+
+def _read_at(view, spans, index):
+    """What one split passes at the label's position, as (kind, text): a `label` literal, an
+    `ident` that may be the caller's own parameter, a `declaration` (`char*` there), the
+    `default` (no argument there), or `other`."""
+    if index >= len(spans):
+        return "default", ""
+    a, b = spans[index]
+    arg = view.blanked[a:b].strip()
+    if re.search(r"\bchar\s*\*", arg):
+        return "declaration", ""
+    label = view.label_in(a, b)
+    if label is not None:
+        return "label", label
+    if _IDENT.fullmatch(arg):
+        return "ident", arg
+    return "other", arg
 
 
 # ── SELF-TEST on SYNTHETIC fixtures, straddling the boundary this gate draws ──
@@ -834,6 +881,39 @@ bool fwdp(std::pair<int, int> p, const char* site) {
     (void)fwdp(p, "P/one");
     (void)fwdp(std::pair<int, int>{1, 2}, "P/one");
 ''')], {"P/one": 2}, ["P/one"], [])
+# The other direction: a `<` and a later `>` that are two comparisons. Keeping their comma
+# leaves too few arguments for the forwarder, so the plain split is the only reading that
+# fits, and its label must reach the duplicate check.
+_fwd_case("comparisons around a comma are read by the split that fits the arity",
+          [("a.cpp", '''
+bool fwdc(bool p, bool q, const char* site) {
+    return fixpp::test_support::pump_until(ioc, pred, site);
+}
+    (void)fwdc(a < b, c > d, "DUP");
+    if (!run_window_then_ready(ioc, fut, 1s, "DUP")) { return; }
+''')], {"DUP": 2}, ["DUP"], [])
+# Two readings fit the arity and put the same literal at the label's position: read it.
+_fwd_case("readings that fit the arity and agree on the label are read",
+          [("a.cpp", '''
+bool fwd4(Pred pred, const char* site, int n = 0, int k = 0) {
+    return fixpp::test_support::pump_until(ioc, pred, site);
+}
+    (void)fwd4(p, "AG", f<A, B>());
+''')], {"AG": 1}, [], [])
+# No reading fits, but which split is the call's own depends on a choice: unlabelled, not
+# skipped like a call whose single split has another arity.
+_fwd_case("a call none of whose readings fits the arity is unlabelled",
+          [("a.cpp", _FWD + '''
+    (void)f.pump_done(make_pred<A, B>(), "NF", 3);
+    (void)f.pump_done(pred, "UNIQUE");
+''')], {"UNIQUE": 1}, [], ["(via pump_done: no split of its '<'..'>' commas fits)"])
+# The readings double with each pair holding a comma, so their number is bounded; a call
+# past the bound is unlabelled, even though one reading of this one would fit.
+_fwd_case("a call with more '<'..'>' pairs than the bound is unlabelled",
+          [("a.cpp", _FWD + '''
+    (void)f.pump_done(a<b, c>d + a<b, c>d + a<b, c>d + a<b, c>d + a<b, c>d + a<b, c>d
+                      + a<b, c>d, "X");
+''')], {}, [], ["(via pump_done: too many '<'..'>' pairs to read)"])
 
 if bad:
     sys.exit("\npump-label-uniqueness: CONTROL FAILED -- this gate is not proven at its "
