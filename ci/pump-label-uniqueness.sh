@@ -54,38 +54,53 @@
 # introduce a label if it TAKES one, and one that takes one is itself a labelled call this
 # gate reads." #405 refuted it by writing the counterexample. A wrapper that takes a
 # `const char* site` and FORWARDS it to the seam leaves a NON-LITERAL in the seam call's
-# extent: the wrapper reads as one UNLABELLED site, and every label its callers pass is
+# extent: the wrapper read as one UNLABELLED site, and every label its callers pass was
 # invisible here. Taking a label and being readable as labelled are different properties,
-# and the old sentence conflated them.
+# and the old sentence conflated them. A duplicate seeded through such a wrapper left this
+# gate green, and a real one shipped before it was found by reading (#591).
 #
-# ⚠️ SO THE SHAPE THIS GATE CANNOT SEE IS REACHABLE, not hypothetical. A label that is a
-# non-literal AT THE SEAM CALL -- a named constant
+# ⚠️ SO FORWARDERS ARE NOW DERIVED, NOT LISTED (#591). When a seam call's label is not a
+# literal, and one of its arguments is a bare identifier naming a `const char*` parameter of
+# the innermost function DEFINITION enclosing the call, that function is a forwarder: each
+# CALL of it becomes a site, carrying the literal that call passes at the parameter's
+# position, in the same label namespace as every direct site. A caller that passes its OWN
+# such parameter makes its function a forwarder too, to a fixpoint. No forwarder is named
+# anywhere in this file, because a hand-kept list is a private copy of the population, and
+# it rots the first time a fixture grows a helper.
+#
+# What the derivation reads, and what it cannot -- the CONDITION, re-checked by reading
+# `--list-unlabelled` (below), never a count:
+#   * The callers of a forwarder are read in its own file and, when it is a header, in every
+#     file that #includes that header by name. A forwarder whose callers reach it some other
+#     way (a declaration in one file and the definition in another) has none read.
+#   * A call is the forwarder's only at its arity: between its parameters without a default
+#     and all of them. A same-named function of an overlapping arity in that scope is read as
+#     the forwarder; one with a template argument list holding a comma is miscounted.
+#   * A lambda that takes the label as its own parameter is not a function definition here;
+#     its seam call stays unlabelled. So does a constructor whose initialiser list holds the
+#     seam call, and a parameter of any other type (`std::string_view`, `std::string`).
+#   * ⚠️ THE FLOOR: a forwarder none of whose calls was read is listed UNLABELLED at its
+#     seam call, and a call passing no literal is listed UNLABELLED at the call (`via`). So
+#     every miss above lands in the unlabelled list, never silently in "unique".
+#
+# ⚠️ A NAMED CONSTANT IS STILL NOT CHASED. A label held in a variable
 # (`static constexpr const char* kSite = "..."; run_window_then_ready(ioc, fut, w, kSite)`)
-# or a forwarded parameter -- is recorded as UNLABELLED rather than rejected.
+# is recorded as UNLABELLED rather than rejected. Resolving an identifier needs a symbol
+# table, and a detector that resolves the spellings its author thought of is the failure
+# mode ci/pump-get-sweep.sh's header already warns against. Disclosed instead. For such a
+# site the check to prefer is the RUNTIME one -- force each label with
+# FIXPP_FORCE_WINDOW_MISS and assert that no OTHER label fires.
 #
-# ⚠️ NO COUNT OF SUCH SITES IS WRITTEN HERE, ON PURPOSE. The previous revision said "no
+# ⚠️ NO COUNT OF SUCH SITES IS WRITTEN HERE, ON PURPOSE. An earlier revision said "no
 # migrated site uses that shape today" and one commit falsified it. RE-DERIVE instead:
 #
 #     bash ci/pump-label-uniqueness.sh --list-unlabelled
 #
-# and read each hit -- a seam call with no label literal in its extent is either genuinely
-# unlabelled or a FORWARDER whose labels live at ITS callers, and this scanner cannot tell
-# the two apart. Use the flag rather than a hand-written grep: a line-oriented
-# `grep ... | grep -v '"'` calls every labelled MULTI-LINE call unlabelled, because the
-# literal sits on a following line. That over-count was measured before the flag existed
-# and it was not marginal -- it was most of the file population.
-#
-# WHAT THAT COSTS, stated plainly: for a forwarder, uniqueness of the caller-side labels is
-# NOT gated here. It has to be checked where the forwarder lives, and the check to prefer is
-# the RUNTIME one, not a grep -- force each label with FIXPP_FORCE_WINDOW_MISS and assert
-# that no OTHER label fires. That tests the behaviour; a grep tests the spelling.
-#
-# Deliberately NOT "fixed" by chasing the constant: resolving an identifier needs a symbol
-# table, and a detector that resolves the spellings its author thought of is the failure
-# mode ci/pump-get-sweep.sh's header already warns against. Disclosed instead.
-#
-# What a wrapper distorts either way is the UNLABELLED figure, which is a count of lexical
-# call sites and not of reaching paths.
+# which prints every forwarder found, with the number of its calls read, and then every
+# unlabelled site; read each one. Use the flag rather than a hand-written grep: a
+# line-oriented `grep ... | grep -v '"'` calls every labelled MULTI-LINE call unlabelled,
+# because the literal sits on a following line. That over-count was measured before the
+# flag existed and it was not marginal -- it was most of the file population.
 #
 # An UNLABELLED call (`run_window_then_ready(ioc, fut, 100ms)`) is legal -- it is a
 # site the forcing seam cannot reach. Those are counted and reported, never failed:
@@ -94,8 +109,9 @@
 # Usage:  bash ci/pump-label-uniqueness.sh [--root DIR] [--list-unlabelled]
 # Exit 1 on a duplicate label, or on a failed self-test control.
 #
-# --list-unlabelled prints every seam call this scanner could not read a label from, as
-# `file:line`. That is the enumeration the "re-derive it" note above calls for; it uses the
+# --list-unlabelled prints every forwarder found (#591), then every site this scanner could
+# not read a label for, as `file:line`. That is the enumeration the "re-derive it" note
+# above calls for; it uses the
 # scanner's own extent and comment/string blanking, so it does NOT have the failure mode of
 # a hand-written `grep ... | grep -v '\"'`, which reports a labelled MULTI-LINE call as
 # unlabelled because the literal sits on the next line.
@@ -219,11 +235,100 @@ def calls(text):
     an equal-length filler and blank THAT -- with no literals left, whatever `blank_non_code`
     removes is a comment. `//` and `/*` inside a real literal are neutralised by the filler,
     so the comment boundaries come out right without a second lexer."""
-    blanked = blank_non_code(text)
-    filled = _STR.sub(lambda m: "Z" * len(m.group(0)), text)
-    comment_blanked = blank_non_code(filled)
-    is_comment = [comment_blanked[k] != filled[k] for k in range(len(text))]
-    out = []
+    return sorted((s["line"], s["label"]) for s in seam_calls(View(text)))
+
+
+class View:
+    """One source text and the derived views every reader below shares: the blanked copy
+    (comments AND literals blanked, for balancing), the comment-only blanked copy (for the
+    literal-adjacency gap) and a per-offset is-comment map (to drop commented literals).
+    Built once per file, so a forwarder's callers are read without re-lexing."""
+
+    def __init__(self, text):
+        self.text = text
+        self.blanked = blank_non_code(text)
+        filled = _STR.sub(lambda m: "Z" * len(m.group(0)), text)
+        self.comment_blanked = blank_non_code(filled)
+        self.is_comment = [self.comment_blanked[k] != filled[k] for k in range(len(text))]
+        self._braces = None
+
+    def line(self, pos):
+        return self.blanked.count("\n", 0, pos) + 1
+
+    def label_in(self, start, end):
+        """The label a span of source carries: its trailing run of adjacent literals."""
+        lits = [(lm.start(), lm.end(), lm.group(0)[1:-1])
+                for lm in _STR.finditer(self.text, start, end)
+                if not self.is_comment[lm.start()]]
+        return _join_adjacent(lits, self.text, self.comment_blanked)
+
+    def braces(self):
+        """[(open, close)] of every brace pair, innermost-last for a given position."""
+        if self._braces is None:
+            pairs, stack = [], []
+            for k, c in enumerate(self.blanked):
+                if c == "{":
+                    stack.append(k)
+                elif c == "}" and stack:
+                    pairs.append((stack.pop(), k))
+            self._braces = sorted(pairs)
+        return self._braces
+
+
+def _close(blanked, i):
+    """The index of the bracket closing the one at `i`, balancing (), [] and {}."""
+    depth = 0
+    for j in range(i, len(blanked)):
+        c = blanked[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return j
+    return len(blanked)
+
+
+def _open(blanked, j):
+    """The index of the '(' that the ')' at `j` closes, or -1."""
+    depth = 0
+    for k in range(j, -1, -1):
+        c = blanked[k]
+        if c in ")]}":
+            depth += 1
+        elif c in "([{":
+            depth -= 1
+            if depth == 0:
+                return k
+    return -1
+
+
+def _top_args(blanked, i, j):
+    """The (start, end) spans of the top-level arguments between the '(' at `i` and the ')'
+    at `j`. Commas inside (), [] and {} do not split -- a lambda argument holds them.
+    ⚠️ Commas inside a template argument list DO split (`<` is not balanced: it is also
+    less-than). A forwarder call whose arguments spell `f<A, B>(...)` is therefore counted
+    at the wrong arity and its label is not read; see the header."""
+    spans, depth, start = [], 0, i + 1
+    for k in range(i + 1, j):
+        c = blanked[k]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            spans.append((start, k))
+            start = k + 1
+    if spans or blanked[start:j].strip():
+        spans.append((start, j))
+    return spans
+
+
+def seam_calls(view):
+    """Every call into the forcing seam in one file, as a dict: `line`, `label` (or None),
+    and `idents`, the arguments that are a bare identifier -- one of which may be a
+    `const char*` parameter the enclosing function forwards (see `forwarded_param`)."""
+    blanked, out = view.blanked, []
     for call in CALLS:
         for m in re.finditer(re.escape(call), blanked):
             i = m.end() - 1                      # at the '('
@@ -237,12 +342,111 @@ def calls(text):
                     if depth == 0:
                         break
                 j += 1
-            lits = [(lm.start(), lm.end(), lm.group(0)[1:-1])
-                    for lm in _STR.finditer(text, i, j)
-                    if not is_comment[lm.start()]]
-            line = blanked.count("\n", 0, m.start()) + 1
-            out.append((line, _join_adjacent(lits, text, comment_blanked)))
-    return sorted(out)
+            idents = [blanked[a:b].strip() for a, b in _top_args(blanked, i, j)]
+            out.append({"pos": m.start(), "line": view.line(m.start()),
+                        "label": view.label_in(i, j),
+                        "idents": [x for x in idents if _IDENT.fullmatch(x)]})
+    return out
+
+
+# ── FORWARDERS (#591) ────────────────────────────────────────────────────────
+# A function that takes the label as a `const char*` parameter and hands it to a seam call
+# leaves a NON-LITERAL at that call; the labels live at the function's own callers. These
+# readers find such a function from the seam call itself -- nothing names it -- and read
+# the literal each caller passes at the parameter's position, to a fixpoint, so a forwarder
+# that is called with ITS caller's parameter is followed one level further.
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_NOT_A_FUNCTION = {"if", "for", "while", "switch", "catch", "return", "sizeof", "decltype",
+                   "alignof", "noexcept", "static_assert", "requires", "co_return"}
+# What may stand between a function's ')' and its body's '{': cv/ref/exception qualifiers,
+# override/final, a lambda's `mutable`, and a trailing return type.
+_HEAD_TAIL = re.compile(r"(?:\s|const\b|volatile\b|noexcept\b|override\b|final\b|mutable\b|&|"
+                        r"->[\w\s:<>,*&]*)*")
+
+
+def _char_ptr_param(param, name):
+    return re.fullmatch(r"\s*(?:const\s+char|char\s+const)\s*\*\s*(?:const\s+)?"
+                        + re.escape(name) + r"\s*(?:=.*)?", param, re.S) is not None
+
+
+def enclosing_function(view, pos):
+    """(name, '(' index, ')' index) of the innermost function DEFINITION whose body holds
+    `pos`, or None. A lambda body or a control-flow block is stepped over, so a label
+    captured by a lambda inside the function is still that function's parameter."""
+    blanked = view.blanked
+    for o, c in reversed(view.braces()):
+        if not o < pos < c:
+            continue
+        rp = blanked.rfind(")", 0, o)
+        if rp < 0 or not _HEAD_TAIL.fullmatch(blanked[rp + 1:o]):
+            continue
+        lp = _open(blanked, rp)
+        nm = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", blanked[:max(lp, 0)])
+        if lp < 0 or nm is None or nm.group(1) in _NOT_A_FUNCTION:
+            continue
+        return nm.group(1), lp, rp
+    return None
+
+
+def forwarded_param(view, pos, idents):
+    """When the seam-side call at `pos` passes, as a bare identifier, a `const char*`
+    parameter of its enclosing function, -> the forwarder record; else None."""
+    fn = enclosing_function(view, pos)
+    if fn is None:
+        return None
+    name, lp, rp = fn
+    params = [view.blanked[a:b] for a, b in _top_args(view.blanked, lp, rp)]
+    for k, p in enumerate(params):
+        if any(_char_ptr_param(p, x) for x in idents):
+            variadic = any("..." in q for q in params)
+            return {"fn": name, "lp": lp, "index": k,
+                    "required": sum(1 for q in params if "=" not in q and "..." not in q),
+                    "total": float("inf") if variadic else len(params)}
+    return None
+
+
+def _includes(view, header_name):
+    return re.search(r'^\s*#\s*include\s*[<"](?:[^>"]*/)?' + re.escape(header_name) + r'[>"]',
+                     view.text, re.M) is not None
+
+
+def forwarder_callers(views, def_name, fw):
+    """Yield (name, line, label, nested) for each call of the forwarder `fw` defined in
+    `def_name`: `label` is the literal the caller passes at the parameter's position, else
+    None; `nested` is a forwarder record when that argument is itself a `const char*`
+    parameter of the caller's enclosing function.
+
+    SCOPE: the defining file, and, when that file is a header, every file that #includes
+    it. A call is one of THIS function's only at its arity (between the parameters without
+    a default and all of them): a same-named call of another arity, e.g. `ioc.run()` for a
+    forwarder named `run`, is not read. A declaration (`char*` in that argument) is not a
+    call. The definition's own head is excluded by position."""
+    def_view = views[def_name]
+    scope = [def_name]
+    if def_name.endswith((".hpp", ".h")):
+        base = def_name.rsplit("/", 1)[-1]
+        scope += [n for n, v in views.items() if n != def_name and _includes(v, base)]
+    rx = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(fw["fn"]) + r"\s*\(")
+    for name in scope:
+        v = views[name]
+        for m in rx.finditer(v.blanked):
+            i = m.end() - 1
+            if v is def_view and i == fw["lp"]:
+                continue
+            spans = _top_args(v.blanked, i, _close(v.blanked, i))
+            if not fw["required"] <= len(spans) <= fw["total"]:
+                continue
+            if fw["index"] >= len(spans):
+                yield name, v.line(m.start()), None, None          # the default is passed
+                continue
+            a, b = spans[fw["index"]]
+            if re.search(r"\bchar\s*\*", v.blanked[a:b]):
+                continue                                           # a declaration
+            label = v.label_in(a, b)
+            nested = None
+            if label is None and _IDENT.fullmatch(v.blanked[a:b].strip()):
+                nested = forwarded_param(v, m.start(), [v.blanked[a:b].strip()])
+            yield name, v.line(m.start()), label, nested
 
 
 # ── SELF-TEST on SYNTHETIC fixtures, straddling the boundary this gate draws ──
@@ -379,22 +583,67 @@ for name, src, want in _CASES:
 # re-implemented the same accumulate-and-filter inline -- so both controls proved a
 # function that produced no shipped verdict. Taking an iterable of (name, text) lets the
 # synthetic trees and the real files go through the SAME code.
-def tally(items):
+def tally(items, forwarders_out=None):
     """-> (seen, unlabelled, files) over an iterable of (display_name, source).
 
     `seen` maps label -> [where...]; a label with more than one entry is a duplicate.
     `unlabelled` is a LIST of `file:line`, not a count -- `--list-unlabelled` prints it,
     because "re-derive the population yourself" is only honest advice if the population
-    can actually be enumerated with this scanner rather than with a hand-rolled grep."""
-    seen, unlabelled, files = {}, [], 0
+    can actually be enumerated with this scanner rather than with a hand-rolled grep.
+
+    A seam call whose label is a forwarded `const char*` parameter (#591) is not a site of
+    its own: each CALL of the forwarder is, carrying the literal that caller passes, into
+    the SAME `seen` map as every direct label, so a caller's label collides with a direct
+    one as it does at runtime. A caller passing no literal is unlabelled at the caller.
+    ⚠️ THE FLOOR: a forwarder none of whose calls was read stays UNLABELLED at its seam
+    call. A scope or arity miss therefore shows up in the unlabelled list rather than
+    vanishing, which is the direction this gate has to fail in. `forwarders_out`, when
+    given, receives one row per forwarder for `--list-unlabelled`."""
+    views = {}
     for name, src in items:
-        files += 1
-        for ln, lab in calls(src):
-            if lab is None:
-                unlabelled.append(f"{name}:{ln}")
+        views[name] = View(src)
+    seen, unlabelled = {}, []
+    fws = {}                                 # (file, lp) -> record + "seam": [where...]
+    queue = []
+
+    def add_forwarder(name, fw, where):
+        key = (name, fw["lp"])
+        if key not in fws:
+            fws[key] = dict(fw, file=name, seam=[], callers=0)
+            queue.append(key)
+        fws[key]["seam"].append(where)
+
+    for name, v in views.items():
+        for s in seam_calls(v):
+            where = f"{name}:{s['line']}"
+            if s["label"] is not None:
+                seen.setdefault(s["label"], []).append(where)
+                continue
+            fw = forwarded_param(v, s["pos"], s["idents"])
+            if fw is None:
+                unlabelled.append(where)
             else:
-                seen.setdefault(lab, []).append(f"{name}:{ln}")
-    return seen, unlabelled, files
+                add_forwarder(name, fw, where)
+    while queue:
+        key = queue.pop()
+        fw = fws[key]
+        for cname, cline, label, nested in forwarder_callers(views, key[0], fw):
+            fw["callers"] += 1
+            where = f"{cname}:{cline}"
+            if label is not None:
+                seen.setdefault(label, []).append(f"{where} (via {fw['fn']})")
+            elif nested is not None:
+                add_forwarder(cname, nested, where)
+            else:
+                unlabelled.append(f"{where} (via {fw['fn']})")
+    for fw in fws.values():
+        if fw["callers"] == 0:
+            unlabelled.extend(f"{w} (forwarder {fw['fn']}: no call of it was read)"
+                              for w in fw["seam"])
+    if forwarders_out is not None:
+        forwarders_out.extend(sorted(
+            (fw["file"], fw["fn"], fw["index"], fw["callers"], fw["seam"]) for fw in fws.values()))
+    return seen, unlabelled, len(views)
 
 
 def duplicates(seen):
@@ -408,6 +657,89 @@ if not duplicates(tally([("a.cpp", _ONE_LINE), ("b.cpp", _ONE_LINE)])[0]):
 if duplicates(tally([("a.cpp", _ONE_LINE), ("b.cpp", _WRAPPED)])[0]):
     bad.append("control: a tree with two distinct labels reported a duplicate")
 print(f"  {'ok   ' if not bad else 'WRONG'} verdict fires on a duplicate tree and is silent on a unique one")
+
+# ── FORWARDER controls (#591), through the same `tally` the reading calls ──
+# A fixture method forwarding its `const char* site` to a seam primitive. Nothing below
+# names it to the gate: each control proves the derivation, not a list.
+_FWD = '''
+struct Fixture {
+    template <class Pred>
+    [[nodiscard]] bool pump_done(Pred pred, const char* site) {
+        if (fixpp::test_support::pump_until(ioc, pred, site)) return true;
+        ADD_FAILURE() << site;
+        return false;
+    }
+};
+'''
+_FWD_RUN = '''
+template <class T>
+expected_t<T> run(asio::awaitable<expected_t<T>> a, const char* site) {
+    auto fut = asio::co_spawn(exec, std::move(a), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site)) return {};
+    return fut.get();
+}
+bool run(int x, const char* site);
+'''
+_FWD_NESTED = _FWD + '''
+bool outer(int n, const char* where) {
+    return f.pump_done([&] { return n > 0; }, where);
+}
+'''
+
+
+def _fwd_case(name, tree, want_labels, want_dups, want_unlabelled):
+    """One control: the labels read, the duplicates and the unlabelled sites must be exactly
+    these. `want_unlabelled` is a list of substrings, one per expected unlabelled entry."""
+    seen, unl, _ = tally(tree)
+    got_labels = {k: len(v) for k, v in seen.items()}
+    got_dups = sorted(duplicates(seen))
+    ok_unl = len(unl) == len(want_unlabelled) and all(
+        w in u for w, u in zip(want_unlabelled, sorted(unl)))
+    if got_labels != want_labels or got_dups != want_dups or not ok_unl:
+        print(f"  WRONG forwarder: {name}")
+        bad.append(f"forwarder control '{name}': labels {got_labels} (want {want_labels}), "
+                   f"duplicates {got_dups} (want {want_dups}), unlabelled {unl} "
+                   f"(want one entry containing each of {want_unlabelled})")
+    else:
+        print(f"  ok    forwarder: {name}")
+
+
+_fwd_case("two calls of a forwarder passing one literal are a DUPLICATE",
+          [("a.cpp", _FWD + '''
+    if (!f.pump_done([&] { return a; }, "FW/one")) return;
+    if (!f.pump_done([&] { return b; }, "FW/one")) return;
+''')], {"FW/one": 2}, ["FW/one"], [])
+_fwd_case("distinct literals through a forwarder are read, and it is not unlabelled",
+          [("a.cpp", _FWD + '''
+    if (!f.pump_done([&] { return a; }, "FW/one")) return;
+    if (!f.pump_done([&] { return b; },
+                     "FW/two")) return;
+''')], {"FW/one": 1, "FW/two": 1}, [], [])
+_fwd_case("a forwarder's label COLLIDES with a direct label in another file",
+          [("a.cpp", _FWD + '''
+    if (!f.pump_done([&] { return a; }, "A/open")) return;
+'''), ("b.cpp", _ONE_LINE)], {"A/open": 2}, ["A/open"], [])
+_fwd_case("a same-named call of another arity, and a declaration, are not calls of it",
+          [("a.cpp", _FWD_RUN + '''
+    ioc.run();
+    (void)run(sess.open(), "R/one");
+''')], {"R/one": 1}, [], [])
+_fwd_case("a forwarder called with ITS caller's parameter is followed to the literal",
+          [("a.cpp", _FWD_NESTED + '''
+    (void)outer(1, "N/one");
+    (void)outer(2, "N/two");
+''')], {"N/one": 1, "N/two": 1}, [], [])
+_fwd_case("FLOOR: a forwarder none of whose calls is read stays unlabelled",
+          [("a.cpp", _FWD)], {}, [], ["no call of it was read"])
+_fwd_case("a call passing a NAMED CONSTANT is unlabelled at the call",
+          [("a.cpp", _FWD + '''
+    if (!f.pump_done([&] { return a; }, kSite)) return;
+''')], {}, [], ["a.cpp:11 (via pump_done)"])
+_fwd_case("a header's forwarder is read in the files that include it, and only there",
+          [("support/fx.hpp", _FWD),
+           ("c.cpp", '#include "support/fx.hpp"\n    (void)f.pump_done([&] { return a; }, "H/one");\n'),
+           ("d.cpp", '    (void)g.pump_done([&] { return a; }, "H/two");\n')],
+          {"H/one": 1}, [], [])
 
 if bad:
     sys.exit("\npump-label-uniqueness: CONTROL FAILED -- this gate is not proven at its "
@@ -423,7 +755,8 @@ def sources():
         yield str(p.relative_to(root)), p.read_text(encoding="utf-8", errors="replace")
 
 
-seen, unlabelled, files = tally(sources())
+forwarders = []
+seen, unlabelled, files = tally(sources(), forwarders)
 dups = duplicates(seen)
 
 # ⚠️ A GATE THAT SCANNED NOTHING MUST NOT REPORT CLEAN, and the population is SEAM SITES,
@@ -440,9 +773,13 @@ if labelled == 0:
              "cannot report clean")
 
 if sys.argv[2] == "1":
-    print("\nUNLABELLED seam sites (no label literal in the call's extent) --")
-    print("a hit here is EITHER a genuinely unlabelled call OR a FORWARDER whose labels")
-    print("live at its own callers; this scanner cannot tell them apart, read each one:")
+    print("\nFORWARDERS (#591) -- a function passing its own `const char*` parameter to a seam")
+    print("call; its labels are read at its calls, which are counted as the sites:")
+    for fname, fn, index, ncallers, seam in forwarders:
+        print(f"  {fname}: {fn}(parameter {index}) at {', '.join(seam)} -- {ncallers} call(s) read")
+    print("\nUNLABELLED seam sites (no label literal reached) -- a seam call with no literal")
+    print("that is not a forwarder, a forwarder call passing no literal (`via`), or a forwarder")
+    print("none of whose calls was read; read each one:")
     for where in unlabelled:
         print(f"  {where}")
 
