@@ -98,7 +98,7 @@ TEST(SeamDirectExecutorReentrancy, CorrectAttestationDoesNotTripGuard) {
 
 // The debug strand-invariant assert on a DETECTED concurrent FSM entry
 // (direct_executor attested over a genuinely non-serialised executor) is
-// implemented in Session::dispatch_app_callback (in_dispatch_ exchange +
+// implemented in Session::dispatch_app_callback (the owner token's swap +
 // assert, compiled out under NDEBUG — release is documented UB per the spec
 // Edge Case). Exercising the abort path needs the project's special
 // release-/death-linkage harness (sync seam #5 precedent: a dedicated

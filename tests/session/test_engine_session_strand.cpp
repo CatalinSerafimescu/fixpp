@@ -52,8 +52,10 @@
 //        (no FIXPP_TEST_SEAMS needed). [SC-002/C-8/V-8/V-11; research D-SNAP]
 //
 //   V-9  ReentrantSend_FromCallback_NoDeadlock_AndPostStopFastFails
-//        a) Re-entrant Engine::send from inside fromApp (session→control→session)
-//           under ≥3-thread executor. Pre-T012 the send path does NOT hop through
+//        a) An Engine::send that fromApp posts, targeting the other session, under
+//           a ≥3-thread executor. The target is published, so the send reaches it
+//           through the snapshot (`.specify/563-564-callback-send.md` §2.3).
+//           Pre-T012 the send path does NOT hop through
 //           control_strand_; records whether it deadlocks, races, or passes-by-luck.
 //        b) A send issued after stop() has begun fast-fails with
 //           session_invalid_state_for_send (77) or session_invalid_argument (119)
@@ -595,8 +597,13 @@ TEST(EngineSessionStrand, V3_TwoSessionsMT_IndependentProgress) {
 
 // ── V-9: ReentrantSend_FromCallback_NoDeadlock_AndPostStopFastFails ──────────
 //
-// Sub-cell (a): Re-entrant Engine::send from inside fromApp under ≥3 threads.
-//   fromApp fires on the acceptor → posts Engine::send targeting the initiator.
+// Sub-cell (a): an Engine::send that fromApp posts, under ≥3 threads.
+//   fromApp fires on the acceptor → posts; the posted handler starts Engine::send
+//   targeting the initiator, so the send begins after the callback has returned.
+//   The initiator is published, so the send reaches it through the snapshot, with
+//   no hop through control_strand_ (`.specify/563-564-callback-send.md` §2.3). A
+//   send started inside the callback is the subject of
+//   tests/session/test_563_564_engine_callback_send.cpp, not of this sub-cell.
 //   Pre-T012, send does NOT route through control_strand_; the hop goes directly
 //   to exec_. T008 mandates recording whether this deadlocks, races, or
 //   passes-by-luck.
@@ -618,7 +625,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
-    // Application for sub-cell (a): re-entrant send from inside fromApp.
+    // Application for sub-cell (a): fromApp posts an Engine::send.
     struct ReentrantApp : public Application {
         fixpp::session::Engine* engine_ptr = nullptr;
         asio::any_io_executor exec;  // engine executor (same as ioc.get_executor())
@@ -631,10 +638,9 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
         expected_t<void> fromApp(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>&,
                                  const SessionId&) override {
             int call = ++from_app_count;
-            // Issue re-entrant Engine::send on the FIRST fromApp call.
-            // Use asio::post to hop off the current callback context before calling
-            // send() — this avoids blocking the current dispatch chain and mirrors
-            // the T012 "non-blocking post" guarantee.
+            // Start an Engine::send on the FIRST fromApp call, by asio::post: the
+            // send begins after this callback has returned, on the io_context's
+            // executor. The post is the test's own; Engine::send does not need it.
             if (call == 1 && engine_ptr) {
                 auto& eng = *engine_ptr;
                 auto ex = exec;
@@ -698,7 +704,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     std::thread t1{[&ioc] { ioc.run(); }};
     std::thread t2{[&ioc] { ioc.run(); }};
 
-    // Wire the re-entrant application.
+    // Wire the posting application.
     static const char kPayload[] =
         "35=D\x01"
         "11=ORD001\x01"
@@ -710,7 +716,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     for (const char* p = kPayload; *p; ++p) payload.push_back(static_cast<std::byte>(*p));
     app->engine_ptr = engine.get();
     app->exec = ioc.get_executor();
-    // Send the re-entrant send from the ACCEPTOR's fromApp back to the INITIATOR.
+    // The send posted from the ACCEPTOR's fromApp goes back to the INITIATOR.
     // (fromApp fires on the acceptor when initiator sends to it.)
     app->send_to_id = ini_id;
     app->payload = payload;
@@ -741,7 +747,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     EXPECT_TRUE(fa_fired) << "V-9(a): fromApp must fire on the acceptor after initiator send";
 
     if (fa_fired) {
-        // Wait for re-entrant send to resolve (done OR error; MUST NOT hang).
+        // Wait for the posted send to resolve (done OR error; MUST NOT hang).
         bool re_resolved = wait_until_observed(
             [&] {
                 return app->reentrant_done.load(std::memory_order_acquire) ||
@@ -749,7 +755,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
             },
             5000ms);
 
-        // V-9(a) primary assertion: re-entrant send MUST NOT deadlock.
+        // V-9(a) primary assertion: the posted send MUST NOT deadlock.
         // Pre-T012: send does NOT route through control_strand_; bare exec_ is used.
         // T008 mandate: record pass-by-luck vs deadlock vs race — not premature GREEN.
         //
@@ -2378,13 +2384,22 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
 // ── Current GREEN mechanism (post-fix, gate-b/r2 P1) ─────────────────────────
 //   send_counter_ is bumped in the outer coroutine frame before the co_spawn.
 //   stop()'s drain therefore waits for any posted-but-not-yet-run send, keeping
-//   Engine alive until the full two-hop completes.  The captured shared_ptr<sc>
+//   Engine alive until the send completes.  The captured shared_ptr<sc>
 //   keeps the counter object alive past Engine destruction so the guard's
 //   decrement is always safe.
 //
+// ── What this cell drives (the route of fixpp#563) ───────────────────────────
+//   Its sends target an Active, published session, so they reach it through the
+//   snapshot and queue on the SESSION strand; none crosses control_strand_
+//   (`.specify/563-564-callback-send.md` §2.3). The subject is therefore sends
+//   queued on the session strand when stop() drains. The path that keeps the
+//   control-strand hop, the one of the historical mechanism above, is driven by
+//   EngineCallbackSend.MissPathSendsQueuedWhileStopRuns
+//   (tests/session/test_563_564_engine_callback_send.cpp).
+//
 // Mechanism:
 //   1. Establish a session pair on a ≥3-thread executor.
-//   2. Spawn many sender coroutines concurrently (saturates the control strand
+//   2. Spawn many sender coroutines concurrently (fills the session strand's
 //      queue — maximizes the probability that some sends are posted but not run
 //      when stop() drains).
 //   3. Concurrently call Engine::stop() immediately after the sends are posted.
@@ -2448,9 +2463,9 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     std::thread t3{[&ioc] { ioc.run(); }};
 
     // Post N send coroutines concurrently onto the ioc.  Each is co_spawn'd
-    // onto the ioc executor; they will queue up on the control_strand_.
+    // onto the ioc executor; their bodies queue up on the session's strand.
     // The goal: maximize the number of sends that are POSTED (send_counter_
-    // already bumped) but NOT YET RUN on the control strand when stop() fires.
+    // incremented) and still queued on that strand when stop() fires.
     constexpr int kNumSends = 32;
     const std::array<std::byte, 4> dummy{};
     const std::span<const std::byte> payload_view{dummy};
@@ -2462,7 +2477,7 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
                                            asio::use_future));
     }
 
-    // Immediately call stop() — races the queued control-strand sends.
+    // Immediately call stop() — races the queued sends.
     // Pre-fix: stop() drains (sees counter 0 because bumps are still queued),
     //          clears registry, returns; caller destroys engine; queued lambdas
     //          run and dereference freed `this` → UAF.

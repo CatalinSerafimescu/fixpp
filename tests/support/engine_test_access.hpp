@@ -42,6 +42,16 @@ struct engine_test_access {
         if (it == e.registry_.end()) return std::nullopt;
         return it->second.session_strand;
     }
+
+    // Whether a registered session's role loop has its transport published: true from
+    // the loop's publish of the session until the loop unpublishes it on its way out.
+    // nullopt for an unknown id, which every id is once stop() has cleared the
+    // registry. It reads the registry unsynchronised, as session_strand() does.
+    static std::optional<bool> live_transport_published(Engine const& e, SessionId const& id) {
+        auto const it = e.registry_.find(id);
+        if (it == e.registry_.end()) return std::nullopt;
+        return it->second.live_transport != nullptr;
+    }
 };
 
 }  // namespace fixpp::session

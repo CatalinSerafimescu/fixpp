@@ -240,28 +240,47 @@ public:
 
     /// FR-006/007/013 (019-app-callbacks T013): any-thread outbound send.
     ///
-    /// Looks up `id` in the registry; if found and the session is established
-    /// (Active), posts onto the session's strand, runs `toApp` (from
-    /// EngineConfig::application) to inspect/veto, then delegates to
-    /// Session::send (durable-before-transmit path).
+    /// Route: `.specify/563-564-callback-send.md` §2.3, which supersedes 023's
+    /// route through the control strand for a published session.
+    ///
+    /// Looks `id` up in the published session snapshot. On a hit it starts one
+    /// body on that session's executor; the body checks that the session is
+    /// established (Active) and delegates to Session::send, which runs `toApp`
+    /// (from EngineConfig::application) to inspect/veto and then the
+    /// durable-before-transmit path. On a miss (the snapshot does not hold `id`)
+    /// it goes through the control strand, which tells an unregistered id from a
+    /// registered one whose session is not published.
     ///
     /// Returns:
     ///   {}                              — sent successfully (AC1)
     ///   unexpected(app_do_not_send=129) — toApp veto (AC2/FR-007)
     ///   unexpected(app_callback_threw)  — toApp threw (FR-011)
     ///   unexpected(session_invalid_state_for_send=77)
-    ///                                   — id registered but session not Active (AC4/FR-013)
+    ///                                   — id registered but session not Active
+    ///                                     (AC4/FR-013), or the Engine is stopping
     ///   unexpected(session_invalid_argument=119) — id not registered (FR-013)
+    ///   Any other result is Session::send's (see its doc comment).
     ///
-    /// Admission gate: enrolls in send_counter_ before the first hop, then
+    /// Admission gate: enrolls in send_counter_ before any await, then
     /// rechecks stopped_. A send that starts after stop() has already set
-    /// stopped_=true fast-fails without posting any control-strand work, while
-    /// a send that enrolled before stop()'s drain is waited out by stop().
+    /// stopped_=true fast-fails without queueing any work, while a send that
+    /// enrolled before stop()'s drain is waited out by stop(). A send whose
+    /// body starts on the session's executor after stop()'s first step ran
+    /// there is refused with session_invalid_state_for_send.
     ///
-    /// Any-thread safe: captures a shared_ptr keepalive from the registry
-    /// that outlives the posted work (prevents UAF when stop() races the post).
-    /// Re-entrant calls from on-strand callbacks are enqueued behind the
-    /// current dispatch (asio::post is non-blocking → no deadlock).
+    /// Any-thread safe: the body owns a shared_ptr keepalive of the Session
+    /// (copied from the snapshot; from the registry on a miss) and its own copy
+    /// of the payload, so neither depends on the caller's frame. From a thread
+    /// that is not running the session's executor, the body runs under that
+    /// executor's serialisation.
+    ///
+    /// From inside a callback of session `id`: when the caller starts this
+    /// coroutine so that its body runs at once (a co_spawn onto an executor
+    /// already running in that thread), the send reaches Session::send nested
+    /// in the callback, whatever the number of io threads, and Session::send's
+    /// rule for a send started inside a callback applies (inline in an inbound
+    /// callback or onLogon; after the callback returns in toApp or toAdmin). A
+    /// caller that posts first gets a send that begins after the callback.
     /// Backpressure = the awaited result ([const §XV.15]).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send(
         SessionId const& id, std::span<const std::byte> app_payload);
@@ -439,7 +458,8 @@ private:
     std::shared_ptr<std::atomic<int>> send_counter_;
 
     // T023 (E-7 / D-SNAP / INV-9): atomic immutable snapshot for the synchronous
-    // public readers lookup() and acceptor_bound_endpoint().
+    // public readers lookup() and acceptor_bound_endpoint(), and for send()'s
+    // lookup of a published session (`.specify/563-564-callback-send.md` §2.3).
     //
     // Published (via atomic_store/store(release)) on the control strand after
     // EVERY control-plane mutation: registry inserts/erases (register_session,

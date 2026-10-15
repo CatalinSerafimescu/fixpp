@@ -173,7 +173,12 @@ static_assert(!std::is_trivially_copyable_v<session_executor>,
 //     attestation path — use ONLY when the foreign executor is intrinsically
 //     serialized (a single-thread `io_context`, an explicit `strand`, a
 //     1-worker `thread_pool`). `direct_executor && !attested` returns
-//     `error::executor_not_serialised` (slot 48).
+//     `error::executor_not_serialised` (slot 48). The attestation also
+//     covers one thread: an Application callback of the session must not
+//     run that executor before it returns (`poll`, `run_one`, `run_for` on
+//     the `io_context`). A strand and a 1-worker pool cannot do it; a bare
+//     `io_context` executor can, and the session's behaviour is then
+//     undefined (the reentrancy contract in `fixpp/session/session.hpp`).
 //
 // Cf. the book chapter `book/concurrency_model.md` for the full topology
 // + worked examples + A-vs-B selection guidance.

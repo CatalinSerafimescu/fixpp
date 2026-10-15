@@ -18,6 +18,7 @@
 #include <asio/cancellation_state.hpp>
 #include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>  // NOLINT(misc-include-cleaner) — asio::co_spawn used to spawn run_liveness_loop(); clang-tidy doesn't see the use through templates
+#include <asio/deferred.hpp>
 #include <asio/detached.hpp>
 #include <asio/error.hpp>  // asio::error::operation_aborted — F5 noexcept-throw absorption
 #include <asio/experimental/awaitable_operators.hpp>
@@ -105,6 +106,7 @@
 #include <system_error>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace fixpp::session {
 
@@ -280,6 +282,61 @@ fixpp::dict::version_profile Session::negotiated_version_profile() const noexcep
                                         ._reserved = 0};
 }
 
+// ── fixpp#564 (`.specify/563-564-callback-send.md` §2.2) — the debug guard ────
+//
+// The owner token's value for the calling thread: the address of an object with
+// thread storage duration. Each live thread has its own.
+const void* Session::callback_thread_tag_() noexcept {
+    thread_local char tag = 0;
+    return &tag;
+}
+
+// The same-thread assertions of §2.2. The owner token (callback_owner_hold in
+// session.hpp) lets a nested entry on the owner's thread pass; these name the
+// nestings that are outside the contract, each where it begins. Each kind has
+// one text, whichever site evaluates it, and no text contains another's or the
+// token's, so a death test can match the assertion it is written for. They are
+// macros so that an abort names the function and line of the site.
+//
+// A parse site is a function that builds a memory resource over
+// inbound_parse_buf_ (re-derive: `grep -n "inbound_parse_buf_" src/session/session.cpp`).
+// It evaluates this before it builds the resource, ahead of any scope.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE()                        \
+    assert(callback_depth_ == 0 &&                                      \
+           "inbound parse begun inside a callback of the same session " \
+           "(on_inbound_frame() called from an application callback?)")
+// The stack-arena overload of parse_and_dispatch_ evaluates this after its
+// callback_dispatch_scope is constructed and before it raises the outbound depth.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_OUTBOUND_ENTRY()              \
+    assert(outbound_callback_depth_ == 0 &&                                \
+           "toApp or toAdmin entered inside toApp or toAdmin of the same " \
+           "session (a callback ran the session's executor?)")
+// The onLogon and onLogout sites evaluate this after the site's
+// callback_dispatch_scope is constructed and before the callback is called.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_LIFECYCLE_ENTRY()                \
+    assert(outbound_callback_depth_ == 0 &&                                   \
+           "onLogon or onLogout entered inside toApp or toAdmin of the same " \
+           "session (the session entered or left Active inside an emit)")
+// The deferred path of Session::send evaluates this when it resumes after its post,
+// before it starts the send (§2.1, "When the post does not move the send out of the
+// callback").
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_DEFERRED_SEND()                    \
+    assert(outbound_callback_depth_ == 0 &&                                     \
+           "deferred send resumed inside toApp or toAdmin of the same session " \
+           "(a callback ran the session's executor?)")
+// Session::close evaluates this when it resumes after the wait it makes for the
+// callbacks of the session to return, before it reads the lifecycle (§2.1a,
+// "`Session::close`, both modes (R-4)").
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_CLOSE()                \
+    assert(callback_depth_ == 0 &&                                \
+           "close resumed inside a callback of the same session " \
+           "(a callback ran the session's executor?)")
+
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
 // record_state_transition_: write new_state into the 16-slot ring and advance
 // fsm_state_. The write index (fsm_visit_write_idx_) is a separate uint32 that
@@ -314,6 +371,7 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         onLogon_fired_ = true;
         const SessionId sid = SessionId::from_config(cfg_);
         callback_dispatch_scope cs{*this};
+        FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_LIFECYCLE_ENTRY();
         auto r = invoke_callback_safe([&]() { engine_.application->onLogon(sid); });
         (void)cs;
         if (!r) lifecycle_cb_threw_ = true;
@@ -326,6 +384,7 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
         onLogout_fired_ = true;
         const SessionId sid = SessionId::from_config(cfg_);
         callback_dispatch_scope cs{*this};
+        FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_LIFECYCLE_ENTRY();
         auto r = invoke_callback_safe([&]() { engine_.application->onLogout(sid); });
         (void)cs;
         // A throw from onLogout is absorbed: the session is already leaving Active.
@@ -457,6 +516,26 @@ void Session::note_frame_too_large_() noexcept {
 namespace {
 constexpr std::size_t kAdminParseArena = 8192;  // admin frames: bounded small
 constexpr std::size_t kSendParseArena = 16384;  // outbound app frames: larger payloads
+
+// Raises the outbound-callback depth for one toApp or toAdmin call and restores the
+// value it found, on every exit (`.specify/563-564-callback-send.md` §2.1 "Writer").
+class outbound_callback_raise {
+public:
+    explicit outbound_callback_raise(std::uint32_t& depth) noexcept
+        : depth_(depth), previous_(depth) {
+        ++depth_;
+    }
+    ~outbound_callback_raise() noexcept { depth_ = previous_; }
+    outbound_callback_raise(const outbound_callback_raise&) = delete;
+    outbound_callback_raise(outbound_callback_raise&&) = delete;
+    outbound_callback_raise& operator=(const outbound_callback_raise&) = delete;
+    outbound_callback_raise& operator=(outbound_callback_raise&&) = delete;
+
+private:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+    std::uint32_t& depth_;
+    std::uint32_t previous_;
+};
 }  // namespace
 
 template <class CB>
@@ -492,7 +571,13 @@ template <class CB>
     if (!mv_r) return dispatch_outcome::parse_failed;
 
     const SessionId sid = SessionId::from_config(cfg_);
+    // fixpp#563/#564 (`.specify/563-564-callback-send.md` §2.1 "Writer", §2.2): this
+    // overload is the one route to toApp and toAdmin, so it is the one writer of the
+    // outbound depth. The order is: the scope, the assertion, the raise, the callback.
+    // The raise is declared after the scope, so it is restored before the scope exits.
     callback_dispatch_scope cs{*this};
+    FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_OUTBOUND_ENTRY();
+    const outbound_callback_raise outbound{outbound_callback_depth_};
     auto result = invoke_callback_safe([&]() { return std::forward<CB>(cb)(*mv_r, sid); });
     (void)cs;
     if (!result) return std::unexpected(result.error());
@@ -505,10 +590,13 @@ template <class CB>
 // recorded (and refused where the witness's upstream is null). The entry cap is N(L),
 // and the entries are reserved up front for the most fields the frame can hold, which
 // B(L) budgets. One buffer serves every inbound parse because none nests inside
-// another: callbacks are synchronous, and callback_dispatch_scope asserts it.
+// another: callbacks are synchronous, and no parse over the buffer begins while a
+// callback of the session is on the stack. On a build with assertions each parse
+// site asserts that (fixpp#564, `.specify/563-564-callback-send.md` §2.2).
 template <class CB>
 [[nodiscard]] fixpp::core::expected_t<Session::dispatch_outcome> Session::parse_and_dispatch_(
     std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept {
+    FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE();
     std::pmr::monotonic_buffer_resource pa_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
                                               &parse_spill_witness_};
     std::array<std::byte, 512> carry_store{};
@@ -1750,12 +1838,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         const SessionId create_id = SessionId::from_config(cfg_);
         fixpp::core::expected_t<void> cb_r{};
         {
-            // T019: scope the guard BEFORE close(terminal) so onLogout (fired
-            // inside close → record_state_transition_) can acquire its own
-            // callback_dispatch_scope without hitting the re-entrancy assert.
+            // T019: the scope ends BEFORE close(terminal), so the close below and
+            // the onLogout it fires (inside close → record_state_transition_) do
+            // not run with onCreate counted as on the stack.
             callback_dispatch_scope cs{*this};
             cb_r = invoke_callback_safe([&]() { engine_.application->onCreate(create_id); });
-        }  // cs drops here — in_dispatch_ = false
+        }  // cs drops here
         if (!cb_r) {
             (void)co_await close(fixpp::session::close_mode::terminal);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
@@ -1782,6 +1870,28 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // was cancelled BEFORE entry — the two fixes are complementary.) [Codex P1]
     co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
+    // fixpp#563 (`.specify/563-564-callback-send.md` §2.1a "`Session::close`, both modes
+    // (R-4)"): a close started while a callback of this session is on the stack waits by
+    // one post onto the session's executor and then proceeds as it does without the wait.
+    // §2.1 "When the post does not move the send out of the callback (R-7)" names the
+    // setup in which the post does not take it off the callback's stack. The wait sits
+    // after the reset above, so a cancellation emitted during it is not recorded
+    // ("Cancellation and the wait"), and before the three-state test below, so that test
+    // reads the state the close finds when it resumes. It is one post and not a loop:
+    // where the assertion is compiled out and the depth is still non-zero, a close that
+    // waited again would post again each time it resumed.
+    if (callback_depth_ != 0) {
+        // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism",
+        // statement 1): a terminal close that takes this wait is counted, before the
+        // post, so that the caller of the callback it was started in can tell, when
+        // that callback returns, that the count moved. A graceful close is not counted.
+        if (mode == close_mode::terminal) {
+            ++waited_terminal_closes_;
+        }
+        co_await asio::post(exec_.underlying(), asio::deferred);
+        FIXPP_ASSERT_NO_CALLBACK_AT_WAITED_CLOSE();
+    }
+
     // ── T038: idempotent THREE-STATE model (I-10 / [2d §4.7]'s "Idempotency" note) ──
     // never-opened OR already-closed(drained) → session_already_closed
     // (slot 52); no side effects.
@@ -1795,10 +1905,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     // terminal close arrives while a graceful one is in flight. Then it ends the
     // graceful close's grace wait, or keeps its phase 1 from starting, so the
     // transport closes now; both callers still get the in-flight result.
+    // One exception (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
+    // mechanism", statement 4, "The join's waker"; rulings R-8 and R-9), which narrows
+    // OD-29 on that route: for a Logout that was cut the terminal close sets the latch
+    // and does not end the grace wait. The cut Logout's step ends by itself when its
+    // store call returns, so nothing cancels that call before the grace timer expires
+    // (§2.6 "The bound").
     if (state_ == lifecycle::closing) {
         if (mode == close_mode::terminal) {
             close_escalated_ = true;
-            if (close_grace_wake_) close_grace_wake_();
+            if (close_grace_wake_ && !logout_cut_) close_grace_wake_();
         }
         auto shared = close_result_;
         while (!shared || !shared->has_value()) {
@@ -1872,18 +1988,39 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
             // through as_tuple, so a cancel counts as the timer's completion and takes the
             // force-close arm below; through use_awaitable it would throw, which `||`
             // counts as a failure, and the join would keep waiting on phase 1.
+            // For a Logout that was cut the wake is not called (the joining branch
+            // above; fixpp#590, `.specify/563-564-callback-send.md` §2.6, rulings R-8
+            // and R-9), so no terminal close ends the timer's wait there.
             close_grace_wake_ = [&close_grace] { close_grace.cancel(); };
             auto phase1_or_timeout = co_await (
                 run_logout_phase1() || close_grace.async_wait(asio::as_tuple(asio::use_awaitable)));
             close_grace_wake_ = nullptr;
-            if (phase1_or_timeout.index() == 0) {
+            const bool timer_arm_won = phase1_or_timeout.index() != 0;
+            if (!timer_arm_won) {
                 auto phase1_r = std::get<0>(std::move(phase1_or_timeout));
                 (void)phase1_r;  // timeout is logged-then-proceed (I-07; force-disconnect)
-            } else if (auto live = live_transport_shared_()) {
-                // FQ-G: if phase 1 wedges behind write_gate_ / async_write,
-                // force-close the transport so the blocked writer unwinds and
-                // phase 2 can drain the gate without deadlocking close(graceful).
-                (void)live->close();
+            }
+            // The direct close of the transport is made when the timer's arm won, for
+            // the reason at the call below, and also for a Logout that was cut,
+            // whichever arm won (fixpp#590; `.specify/563-564-callback-send.md` §2.6
+            // "The mechanism", statement 4, "The transport's direct close"). For a cut
+            // Logout the step's arm wins unless the timer expires first, and the call
+            // is kept so that a live transport is closed on this route as it is where
+            // an escalation ends the grace wait: by this close() and by the
+            // close_async() that follows. The cut step begins no write, so nothing is
+            // unwound by the call there. What the pair is on TLS: this close() closes
+            // the socket and skips the TLS shutdown while an SSL operation is
+            // suspended, and the close_async() after it finds the transport closed and
+            // sends nothing, so the peer gets an abortive close with no close-notify
+            // (B&L B-348-1 and its second amendment). On the plain transport the two
+            // calls do not differ.
+            if (timer_arm_won || logout_cut_) {
+                if (auto live = live_transport_shared_()) {
+                    // FQ-G: if phase 1 wedges behind write_gate_ / async_write,
+                    // force-close the transport so the blocked writer unwinds and
+                    // phase 2 can drain the gate without deadlocking close(graceful).
+                    (void)live->close();
+                }
             }
         }
     }
@@ -1974,6 +2111,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::close(close_mode mode) {
     //   - reset_on_logout: fires when a Logout occurred in either direction
     //     (local sent → run_logout_phase1 set logout_seen_; peer received →
     //      on_inbound_frame 35=5 handler set logout_seen_). [C3.1]
+    //     A Logout that was cut is stored and not transmitted, and
+    //     run_logout_phase1 does not set logout_seen_ for it (fixpp#590;
+    //     `.specify/563-564-callback-send.md` §2.6, ruling R-8).
     //   - reset_on_disconnect: fires on ANY close() — graceful, terminal, or
     //     abnormal read-pump EOF → close(terminal). [C4.1, C4.2]
     //
@@ -2571,10 +2711,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // PRECONDITIONS (callers guard):
 //   • cfg_.validate_inbound_messages && validator_ must hold
 //   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
+//   • no callback of this session is on the stack: this is a parse site over the
+//     session's parse buffer, and on a build with assertions it asserts that before
+//     it builds the resource (fixpp#564, `.specify/563-564-callback-send.md` §2.2)
 // [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
 Session::InboundValidation Session::validate_inbound_(
     std::span<const std::byte> frame,
     fixpp::session::detail::FrameHeader const& /*hdr*/) const noexcept {
+    FIXPP_ASSERT_NO_CALLBACK_AT_PARSE_SITE();
     // 093 (data-model E-2): over the session's parse buffer B(L), upstream the spill
     // witness, as the inbound dispatch sites parse.
     std::pmr::monotonic_buffer_resource vg_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
@@ -4023,9 +4167,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // [research D3/D4; FR-004; INV-6]
             if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
                 // The session's parse buffer B(L): any admitted frame parses (093).
-                // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-                // before returning, so onLogout in record_state_transition_ below
-                // can acquire its own scope.
+                // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
+                // before it returns, so the depth of all callbacks is back to its
+                // entry value when record_state_transition_ below enters onLogout.
                 auto cb_r = parse_and_dispatch_(
                     frame, inbound_parse_buffer,
                     [&](auto& mv, auto& sid) { return engine_.application->fromAdmin(mv, sid); });
@@ -4149,8 +4293,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_(
             // open() allocated, 093).
             if (engine_.application != nullptr) {
                 // The session's parse buffer B(L): any admitted frame parses (093).
-                // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-                // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
+                // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
+                // before it returns, so the depth of all callbacks is back to its
+                // entry value. (FR-003; research D3/D4/D8; [const §VIII.5])
                 auto cb_r = parse_and_dispatch_(
                     frame, inbound_parse_buffer,
                     [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
@@ -4685,9 +4830,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_active_logout
     // but the session still disconnects (Logout has been confirmed).
     if (engine_.application != nullptr) {
         // The session's parse buffer B(L): any admitted frame parses (093).
-        // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
-        // before returning, so onLogout in record_state_transition_ below
-        // can acquire its own scope.
+        // T019 note: parse_and_dispatch_'s callback_dispatch_scope ends
+        // before it returns, so the depth of all callbacks is back to its
+        // entry value when record_state_transition_ below enters onLogout.
         auto cb_r = parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
             return engine_.application->fromAdmin(mv, sid);
         });
@@ -5410,8 +5555,16 @@ private:
 };
 }  // namespace
 
+// fixpp#563 (`.specify/563-564-callback-send.md` §2.1 "Reader"): send is a non-coroutine
+// and adds no frame. It returns the awaitable of its body, send_body_, with the depth
+// test applied.
 asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
+    return send_body_(app_payload, send_depth_test::apply);
+}
+
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_body_(
+    std::span<const std::byte> app_payload, send_depth_test depth_test) noexcept {
     using fixpp::core::error;
 
     // FR-005 / D-3: FSM precondition — Session::send is only valid in Active.
@@ -5421,6 +5574,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     // to give the caller a semantically distinct diagnosis. [FR-005 / D-3]
     if (fsm_state_ != fsm_state::Active) {
         co_return std::unexpected(error::session_invalid_state_for_send);
+    }
+
+    // fixpp#563 (§2.1 "Reader"; ruling R-1): no emit body begins while this session has
+    // toApp or toAdmin on the stack, so a send started there takes the deferred path. The
+    // test sits before the frame slot is taken. The await sits outside the try below, so
+    // nothing the deferred path returns is converted to Disconnected here.
+    if (depth_test == send_depth_test::apply && outbound_callback_depth_ != 0) {
+        co_return co_await send_deferred_(app_payload);
     }
 
     // F5 (Round-A drift): wrap the entire send body in try/catch to absorb
@@ -5484,6 +5645,39 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
         record_state_transition_(fsm_state::Disconnected);
         co_return std::unexpected(error::dispatch_aborted);
     }
+}
+
+// fixpp#563 (`.specify/563-564-callback-send.md` §2.1 "The deferred path"): the path of a
+// send started inside toApp or toAdmin. It is one coroutine whose frame owns the payload
+// copy and awaits the send, so the copy outlives the send. No step tests Active or takes
+// the frame slot: send_body_ does both after the hop.
+asio::awaitable<fixpp::core::expected_t<void>> Session::send_deferred_(
+    std::span<const std::byte> app_payload) {
+    // "The payload": the build runs after the callback has returned, when the buffer the
+    // caller's span points into may be gone.
+    const std::vector<std::byte> payload(app_payload.begin(), app_payload.end());
+    // The hop that takes the send off the callback's stack: a post onto the session's
+    // executor ("When the post does not move the send out of the callback (R-7)").
+    co_await asio::post(exec_.underlying(), asio::deferred);
+    // "Cancellation at the hop (OD-1)": a cancellation emitted during the post is recorded
+    // and not thrown there. This is the test a co_await applies when it begins, applied by
+    // hand, so that a send which has consumed nothing returns an error and leaves the
+    // session's state as it was.
+    if ((co_await asio::this_coro::throw_if_cancelled()) &&
+        (co_await asio::this_coro::cancellation_state).cancelled() !=
+            asio::cancellation_type::none) {
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+    }
+    FIXPP_ASSERT_NO_OUTBOUND_CALLBACK_AT_DEFERRED_SEND();
+    // Step 5: a close() has begun. fsm_state_ stays Active while a graceful close emits
+    // its Logout, so the Active check of send_body_ would admit this send behind that
+    // Logout. A close that has finished is refused by that check.
+    if (state_ == lifecycle::closing) {
+        co_return std::unexpected(fixpp::core::error::session_invalid_state_for_send);
+    }
+    // The depth test is skipped: where the assertion above is compiled out and the depth
+    // is still non-zero, a send that deferred again would post again each time it resumed.
+    co_return co_await send_body_(payload, send_depth_test::skip);
 }
 
 // ── 020 T010: Opaque-payload validation (FR-016; INV-8; research.md D1) ──────
@@ -6170,7 +6364,8 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
 // [gate-b/r1-green: RC#A removes next_outbound_seq_ - 1U arithmetic;
 //  gate-b/r1-green: RC#B surfaces transport throws as dispatch_aborted]
 asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
-    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm) noexcept {
+    seqnum_t stamped_seq, std::span<const std::byte> frame, std::optional<fsm_state> arm,
+    bool transmit) noexcept {
     // 034 T006 (C2 / R4): credential redaction at the single store boundary.
     // Mask the Password(554) value in a PRIVATE copy before it is persisted; the
     // wire path (Step 2) transmits the caller's ORIGINAL unmasked `frame`.
@@ -6280,6 +6475,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     // above may have yielded the strand; a close() or Engine::stop()'s step 1 that ran
     // there stops the transmit. The caller's own predicate check follows.
     if (arm && logon_arm_superseded_(*arm)) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism",
+    // statement 3): the caller decided, before the store call, that this frame is
+    // stored and not transmitted. The test sits after the arm test above and before
+    // Step 2, so the time of the last outbound frame is not updated either.
+    if (!transmit) {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -6403,6 +6606,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::apply_inbound_sequence_r
 //   4. If confirmed → ok.
 //      If timeout → transition to Disconnected, return session_logout_timeout.
 //
+// The cut route (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
+// mechanism", rulings R-8 and R-9) changes stage 1 and replaces stages 2 to 4 when
+// a terminal close() was started inside the Logout's toAdmin, which stage 1 calls
+// before the Logout takes its number. Then the step writes Disconnected at once,
+// then numbers the Logout and stores it as in stage 1, where the session has a
+// store, with its transmit off, and returns without LogoutSent and without the
+// sleep.
+//
 // Called from close(graceful) phase 1 ONLY. The root cancellation_state fires
 // phase-2 total AFTER this coroutine returns (either path).
 //
@@ -6425,6 +6636,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         std::span<std::byte>{buf.data(), buf.size()}, logout_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, {}, cfg_.begin_string, st52.value);
 
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism", ruling R-8):
+    // set below when a terminal close was started inside this Logout's toAdmin. The
+    // Logout is then cut: numbered, stored where the session has a store, and not
+    // transmitted.
+    bool cut = false;
     if (!logout_result) {
         // Build failure (unlikely): treat as no-frame-sent, proceed to timeout.
         // The session still transitions to LogoutSent and times out.
@@ -6432,19 +6648,62 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         // Emit the Logout frame (store first, then transport_send — I-3).
         // 019 T014: toAdmin before graceful-close Logout. [FR-008/010]
         // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
+        // §2.6, statement 2: the count of terminal closes that have taken close()'s wait
+        // is read here and again when toAdmin has returned. fire_to_admin_ is a plain
+        // call, so nothing suspends between the two reads. The test is "moved", not
+        // "non-zero". A toAdmin that throws leaves by the return below, before the
+        // second read.
+        const std::uint64_t waited_before = waited_terminal_closes_;
         if (!fire_to_admin_(*logout_result)) {
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
+        cut = waited_terminal_closes_ != waited_before;
+        if (cut) {
+            // §2.6, statement 4, "The record": written at once, with no suspension
+            // since toAdmin returned, so that the terminal close reads it when its
+            // turn on the session's executor comes. It is never cleared.
+            logout_cut_ = true;
+            // §2.6, statement 4, "The state, at the decision point": Disconnected is
+            // written here, before the Logout takes its number and before its store
+            // call, so that nothing that tests the state while that call is in flight
+            // finds Active. onLogout runs by this write, on the edge out of Active.
+            // The outbound callback depth is zero here, because the raise around
+            // toAdmin ends before fire_to_admin_ returns. assign_outbound() and
+            // store_then_emit with no arm do not read the state, so the Logout is
+            // still numbered and stored.
+            record_state_transition_(fsm_state::Disconnected);
         }
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
             // Overflow or closed: session-fatal per 005 data-model.md §E3 (Sequence-number state).
             // Abort logout, force-disconnect with propagated error.
-            record_state_transition_(fsm_state::Disconnected);
+            // §2.6, statement 4, "The exit": on the cut route the state is Disconnected
+            // already, and record_state_transition_ adds an entry to the state history
+            // on every call, so the write is made only when the state is not that
+            // already.
+            if (fsm_state_ != fsm_state::Disconnected) {
+                record_state_transition_(fsm_state::Disconnected);
+            }
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(logout_seq, *logout_result);
+        auto emit_r =
+            co_await store_then_emit(logout_seq, *logout_result, std::nullopt, /*transmit=*/!cut);
         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+    }
+
+    // The cut route's exit (fixpp#590; `.specify/563-564-callback-send.md` §2.6 "The
+    // mechanism", statement 4, "The exit"; ruling R-8). A Logout that was stored and not
+    // transmitted is not a Logout that was sent, and no reply to it can come. So the
+    // step leaves at once: it does not set logout_seen_, does not record LogoutSent,
+    // arms no wait and posts nothing. The write of Disconnected is kept for a state
+    // that is not that already; on this route the decision point above made it.
+    // close() discards the value returned.
+    if (cut) {
+        if (fsm_state_ != fsm_state::Disconnected) {
+            record_state_transition_(fsm_state::Disconnected);
+        }
+        co_return std::unexpected(fixpp::core::error::dispatch_aborted);
     }
 
     // 024 T013 (site a): mark that a Logout was sent on the local graceful path.
@@ -6452,6 +6711,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
     // the Logout frame was actually placed on the wire. The teardown reset in close()
     // reads this flag to distinguish a graceful-Logout teardown from an abnormal drop.
     // [contracts/reset-knobs.md C3.1; plan.md Gate A convergence note (b)]
+    // A Logout that was cut is not placed on the wire and left by the exit above, so
+    // the set is skipped for it (fixpp#590; `.specify/563-564-callback-send.md` §2.6,
+    // ruling R-8).
     logout_seen_ = true;
 
     // Transition to LogoutSent.

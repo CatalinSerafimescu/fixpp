@@ -447,3 +447,39 @@ discovered later.
 | 3 — proposed per-class model | **deferred**, and #209's own n=4 caveat is the reason |
 | 5 — `FINDINGS.md` cited, never existed | **fixed by re-pointing, not by authoring.** `bench/codegen/compile_time_bench/README.md` is titled *"T046 — Compile-time bench known findings (NFR-003-2)"* and already contains the v50sp2 record; the citation was misspelled, not missing. Three sites: the script ×2 and `bench/codegen/CMakeLists.txt`'s "Known finding (T046)" comment block. |
 | 6 — decide whether this runs in CI | **decided:** runtime benches yes (per-binary allowlist), compile-time ceiling no, with the exit criteria in §6 |
+
+---
+
+## Erratum (fixpp#563, fixpp#564) — `engine_send_bench` joins the paired tier as a row born `paired`
+
+`bin/engine_send_bench` is `paired` from its first manifest row, by an owner ruling (OD-5 in
+`.specify/563-564-callback-send.md`, §0 and §3 "Cost (OD-5)"). `[const §VIII.2a]` allows it: a paired
+row absent from the merge base's manifest is a candidate-only addition. It departs from this record
+in two places.
+
+- **§6a's promotion rule was not applied.** That rule adds a binary to tier 2 when its A-vs-A spread
+  stays under the noise band across 20 `push:main` runs. This row has no such history, and could not
+  have had one: CI takes the second same-tree leg only for rows already marked `paired`. What stands
+  in its place is one local check made before the row was committed: the spread between two base runs
+  and between two candidate runs of the bench, each required to stay under half of
+  `PAIRED_NOISE_BAND_PCT` (`tools/bench_compare.py`), on one host. The procedure is that note's §3,
+  "The same-tree spread"; its result is in the pull request's verification record and is not copied
+  here.
+- **The census in "The allowlist" is not updated.** Its counts and its list of the tier-2 binaries
+  are older than this row and than rows added before it. Re-derive them with the two commands that
+  section gives; this erratum corrects neither in place.
+
+What follows from the row being `paired` without that history:
+
+- It can be neither removed nor downgraded (`[const §VIII.2a]`), and `MANDATORY_PAIRED` in
+  `ci/test-bench-gate.sh` names it. If its same-tree spread exceeds the noise band on CI, the
+  comparator reports the run as uninformative and fails; the remedy is to stabilise the bench, since
+  no path takes the row out of the tier.
+- The pull request that adds the row gets no CI timing comparison for it (`[const §VIII.2a]`, the
+  candidate-only exemption). That comparison was made locally, base against candidate; its procedure
+  is that note's §3, "This PR's evidence".
+- The bench's timed region holds system calls: the `io_context`'s zero-timeout reactor polls between
+  the handlers of a send (`bench/session/engine_send_bench.cpp`'s header says why, and how to count
+  them). They do not block, and the bench is single-threaded with no socket and no disk write, which
+  is how it meets the selection rule; they are system calls inside a paired row's timed region all
+  the same.

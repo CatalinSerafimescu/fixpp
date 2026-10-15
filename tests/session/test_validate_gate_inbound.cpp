@@ -17,6 +17,8 @@
 //  W6: conformant message               → dispatched (no Reject emitted)
 //  W7: an in-sequence reject consumes its seqnum; W7b: out of sequence, Logon and
 //      SequenceReset do not → fixpp#423 (supersedes C-3's "not advanced")
+//  AFrameFedFromFromAdminDies (fixpp#564): the gate's parse begun inside a
+//      callback of the session aborts on a build with asserts
 //
 // 075 T020a (FR-006 RefTagID delivery): W2/W3/W4 additionally assert
 // RefTagID(371) on the emitted Reject frame, proving the offending tag
@@ -34,21 +36,28 @@
 // Anchors: spec.md FR-003/FR-004; contracts/validation-gate.md C-2/C-3;
 //          data-model E-4; tasks.md T012.
 
+#include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
 #include <array>
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/wire/parser.hpp>
+#include <functional>
 #include <future>
 #include <memory>
 #include <span>
@@ -158,11 +167,31 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wa
 
 // ── Validation gate fixture ────────────────────────────────────────────────────
 
+// An Application whose fromAdmin calls a hook with the inbound admin frame's
+// MsgType(35). Every other callback keeps Application's default.
+class FromAdminHookApp final : public Application {
+public:
+    std::function<void(std::string_view)> on_from_admin;
+
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& mv,
+        const SessionId& /*id*/) override {
+        if (on_from_admin) {
+            const auto mt = mv.get(35);
+            on_from_admin(mt ? mt->as_string() : std::string_view{});
+        }
+        return {};
+    }
+};
+
 struct ValidateGateFixture {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
     fixpp::core::EngineConfig engine;
     TransportDouble transport;
+    // Null unless a cell calls attach_application(): the session then runs with no
+    // Application, as every cell written before that method does.
+    std::shared_ptr<FromAdminHookApp> app;
 
     ValidateGateFixture() {
         using namespace std::chrono;
@@ -171,6 +200,13 @@ struct ValidateGateFixture {
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
         engine.clock = clock;
         engine.executor = ioc.get_executor();
+    }
+
+    // Attaches an Application to the engine config the sessions of this fixture
+    // read. Call it before open().
+    void attach_application() {
+        app = std::make_shared<FromAdminHookApp>();
+        engine.application = app;
     }
 
     // Build a SessionConfig with validate_inbound_messages=true and the richer dict.
@@ -635,6 +671,64 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
            "threshold-independent)";
     EXPECT_EQ(sess.state(), fsm_state::Active)
         << "W8b: session must remain Active after a conformant dispatch";
+}
+
+// ── fixpp#564: the gate's parse begun inside a callback of the session ───────
+//
+// validate_inbound_ parses over the session's inbound parse buffer, as the dispatch
+// sites do, so a frame fed from inside a callback must not reach it
+// (`.specify/563-564-callback-send.md` §2.2). fromAdmin for a conformant Heartbeat
+// feeds a Heartbeat that carries a tag the dictionary does not define for it, as W2
+// does, by a co_spawn that begins inline. The gate runs before the sequence check,
+// so the fed frame's number does not matter; and the gate rejects the frame, so its
+// arm never reaches the dispatch site's parse. Builds with asserts only.
+#ifndef NDEBUG
+// A piece of ONE string literal of the parse-site assertion's text, spelled out here
+// and not taken from session.cpp: an expectation read from its subject cannot fail.
+constexpr const char* kParseSiteText = "inbound parse begun inside a callback";
+constexpr const char* kFeedBeginsLine = "[ B41 ] fromAdmin feeds a frame";
+constexpr const char* kFeedReturnedLine = "[ B41 ] fromAdmin's feed returned";
+
+// Exit codes: 2 = setup failed; 3 = fromAdmin never fed the frame; 0 = the feed
+// returned without an abort.
+[[noreturn]] void feed_an_undefined_tag_heartbeat_from_from_admin() {
+    ValidateGateFixture fix;
+    fix.attach_application();
+    auto cfg = fix.make_cfg_with_validation();
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    // std::exit reports this death-test child's verdict as its exit code. printf stays:
+    // std::println needs <print>, which libstdc++ 13 does not ship.
+    // NOLINTBEGIN(concurrency-mt-unsafe,modernize-use-std-print)
+    if (sess.state() != fsm_state::Active) std::exit(2);
+    const auto fed_frame = make_raw_frame("FIX.4.2", "0", 3, "TW", "ISLD",
+                                          "44=99.99\x01");  // Price not in Heartbeat
+    bool fed = false;
+    fix.app->on_from_admin = [&](std::string_view msg_type) {
+        if (fed || msg_type != "0") return;
+        fed = true;
+        std::fprintf(stderr, "%s\n", kFeedBeginsLine);
+        std::fflush(stderr);
+        asio::co_spawn(fix.ioc, sess.on_inbound_frame(fed_frame), asio::detached);
+        std::fprintf(stderr, "%s\n", kFeedReturnedLine);
+        std::fflush(stderr);
+    };
+    fix.feed(sess, make_heartbeat_frame(2));
+    std::exit(fed ? 0 : 3);
+    // NOLINTEND(concurrency-mt-unsafe,modernize-use-std-print)
+}
+#endif
+
+TEST(ValidateGateInbound, AFrameFedFromFromAdminDies) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "the parse-site assertion is compiled out under NDEBUG";
+#else
+    // The abort came after fromAdmin began the feed and before the feed returned.
+    EXPECT_DEATH(feed_an_undefined_tag_heartbeat_from_from_admin(),
+                 ::testing::AllOf(::testing::HasSubstr(kFeedBeginsLine),
+                                  ::testing::HasSubstr(kParseSiteText),
+                                  ::testing::Not(::testing::HasSubstr(kFeedReturnedLine))));
+#endif
 }
 
 }  // namespace

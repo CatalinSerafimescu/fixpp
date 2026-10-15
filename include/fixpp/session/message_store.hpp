@@ -115,6 +115,12 @@ public:
     // capacity_policy::bounded, MemoryStore returns store_capacity_exhausted
     // when the per-direction cap is reached (I-08). FileStore returns
     // store_io_failure on disk-side faults.
+    // ORDER (a requirement on every implementation; fixpp#563,
+    // `.specify/563-564-callback-send.md` §2.1, ruling R-6): calls to store()
+    // complete in the order they were made. Two sends of one session can have
+    // their store() calls in flight at once, and the session transmits each
+    // frame when its store() call completes, so a store that completes two
+    // calls out of order has their frames transmitted out of order.
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame [[clang::lifetimebound]],
         direction_t dir) noexcept = 0;

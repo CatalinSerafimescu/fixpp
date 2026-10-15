@@ -176,16 +176,41 @@ public:
     // the Logout async_write); terminal skips phase 1 entirely (hook NOT
     // invoked). partial excluded (N-P1-3).
     //
+    // Started inside a callback of this session (fixpp#563;
+    // `.specify/563-564-callback-send.md` §2.1a, ruling R-4): a close in either
+    // mode waits, by one post onto the session's executor, while a callback
+    // that runs under callback_dispatch_scope is on the stack, and tests the
+    // lifecycle only when it resumes. So it begins after the callback returns:
+    // inside the callback, after the start, the session is as it was, with no
+    // Logout emitted and onLogout not run. It then meets the arm that called
+    // the callback as a close from another thread does: while that arm is
+    // suspended, or after it has finished. Another close can run during the
+    // wait; this one then joins it or returns session_already_closed, as a
+    // repeated close does. The wait is one post, so it holds only where the
+    // callback does not run the session's own executor (the reentrancy
+    // contract below).
+    //
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6, rulings R-8 and
+    // R-9): a terminal close started inside the toAdmin of a graceful close's
+    // Logout narrows OD-29 above. That Logout is cut: it is numbered, stored
+    // where the session has a store, and not transmitted, and the session is
+    // Disconnected, with onLogout run, before the Logout takes its number. The
+    // terminal close then joins without ending the grace wait: nothing cancels
+    // the cut Logout's store call before the grace timer, of
+    // logout_disconnect_timeout_ms, expires. Both callers get the in-flight
+    // result.
+    //
     // PRECONDITION — v1.0 caller model (gate-b/r1 RC#2, P1.3→P2):
     //   close() is called from within the session's serialisation domain
     //   (strand under per_session_strand mode; attested executor under
     //   direct_executor). Concurrent foreign-thread invocation is UNDEFINED
     //   in v1.0; the C-ABI thunk (2i) is responsible for serialising user-
     //   thread invocations onto the session domain before calling close().
-    //   The `closing` re-entry polling loop is a future-proof barrier; under
-    //   the v1.0 caller model it is effectively empty (the first close runs
-    //   to completion within the serialisation domain before any second
-    //   close() call can reach the `closing` branch).
+    //   Inside that domain a second close() can reach the `closing` branch:
+    //   close() suspends after it has written `closing` (its Logout
+    //   exchange, its drains), and a close made meanwhile, or one that
+    //   resumes then from its wait above, finds the first in flight and
+    //   joins it by that branch's polling loop.
     //   TODO(005): when the C-ABI thunk (2i) wires real concurrent callers,
     //   harden with atomic<lifecycle> + atomic_shared_ptr/mutex to make
     //   foreign-thread concurrent close safe.
@@ -275,9 +300,30 @@ public:
     //                        completes BEFORE fromAdmin/fromApp is dispatched.
     //   send()             — session-strand; durable-before-transmit (I-3):
     //                        store(seq, committed, outbound) BEFORE transport write.
+    //                        Started inside toApp or toAdmin of this session it
+    //                        begins after that callback returns; started in any
+    //                        other callback, or outside one, it runs inline
+    //                        (fixpp#563; send()'s comment below).
+    //   close()            — session-strand; started inside any callback of this
+    //                        session it begins after that callback returns
+    //                        (fixpp#563; close()'s comment above).
     //   state()            — session-strand; single-writer on the per-session strand.
     //   fromAdmin/fromApp  — user callbacks dispatched via cancellable_dispatch
     //                        ([2d §6.5]) on the per-session strand (default mode).
+    //   every callback     — must not run the session's own executor before it
+    //                        returns (poll, run_one, run_for on the context that
+    //                        executor belongs to). send()'s and close()'s waits
+    //                        are one post onto that executor and rely on it. A
+    //                        strand never runs a second handler of the session
+    //                        inside the first, so per_session_strand, a session
+    //                        under the Engine and direct_executor attested over
+    //                        a strand cannot break this; direct_executor attested
+    //                        over a bare io_context executor can, and there the
+    //                        behaviour is undefined; debug builds assert on some
+    //                        of its routes, not on all
+    //                        (`.specify/563-564-callback-send.md` §2.1 and §2.2,
+    //                        ruling R-7; spec/behaviors-and-limitations.md
+    //                        L-007-2).
     // All public surfaces noexcept across the inbound-process / timer-fire window;
     // a throwing user callback TRAPS (core::detail::trap_throw) — FR-015.
 
@@ -291,6 +337,26 @@ public:
     // MsgSeqNum(34), Writer::commit, store(seq, committed, outbound) BEFORE
     // transport::async_write (durable-before-transmit, I-3).
     // PLACEHOLDER — body wired per US1/T023 (Phase 3).
+    //
+    // Started inside a callback of this session (fixpp#563;
+    // `.specify/563-564-callback-send.md` §2.1, ruling R-1). No emit body begins
+    // while this session has toApp or toAdmin on the stack:
+    //   - in fromApp, fromAdmin or onLogon the send runs inline: it is numbered,
+    //     and its toApp runs, inside the callback;
+    //   - in toApp or toAdmin it waits, by one post onto the session's executor,
+    //     and starts after that callback returns. It is then numbered after the
+    //     frame whose callback started it and, on a store that completes its
+    //     store() calls in the order they were made (message_store.hpp),
+    //     transmitted after it. The payload is copied before the wait, so
+    //     `app_payload` need not outlive the callback;
+    //   - in onLogout or onCreate the session is not Active, and the send is
+    //     refused as any send outside Active is.
+    // Results a send that waited can return, beside those of a send that did not:
+    //   - session_invalid_state_for_send: by the time it starts, the session has
+    //     left Active or a close() has begun;
+    //   - dispatch_aborted with the session's state untouched: it was cancelled
+    //     before it started. So dispatch_aborted from send() does not by itself
+    //     mean Disconnected; read state() to tell the two apart.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send(
         std::span<const std::byte> app_payload) noexcept;
 
@@ -387,10 +453,10 @@ public:
     //
     // LIFETIME PRECONDITION (engine-internal contract): the caller MUST keep
     // this Session alive until ALL work dispatched here has fully run — the
-    // posted handler captures `this`, and in debug builds its re-entrancy
-    // dispatch_guard dtor (~below) stores to `in_dispatch_` AFTER the user
+    // posted handler captures `this`, and in debug builds its
+    // callback_owner_hold (below) stores to `callback_owner_` AFTER the user
     // callback returns. Destroying the Session while a dispatched callback is
-    // queued or running (incl. that trailing guard store) is UB / a data race.
+    // queued or running (incl. that trailing store) is UB / a data race.
     // The Engine satisfies this on teardown via stop() → close(terminal) +
     // join-before-registry-clear; a caller that constructs a raw Session and
     // drives it directly (the seam/unit tests) MUST drain `exec_` itself before
@@ -401,8 +467,6 @@ public:
     template <class F>
     void dispatch_app_callback(F&& f) const {
         asio::post(exec_, [this, g = std::forward<F>(f)]() mutable {
-            (void)this;  // read only by the debug-only guard below
-#ifndef NDEBUG
             // Seam 16 / Edge Case: in DEBUG builds a detected
             // concurrent session-callback entry trips the
             // strand-invariant assert (the symptom of
@@ -411,43 +475,85 @@ public:
             // this out — that misuse is documented
             // user-contract-violation UB, not a runtime guard.
             //
-            // RC#2 P2.3 (gate-b/r1): RAII guard so the flag is
-            // always cleared on scope exit, even if the callback
-            // throws. Without this, a throwing callback left
-            // in_dispatch_ permanently set and false-positived the
-            // next otherwise-serial dispatch assertion.
-            struct dispatch_guard {
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) — RAII guard
-                // binds to the caller's flag for clear-on-scope-exit.
-                std::atomic<bool>& flag;
-                explicit dispatch_guard(std::atomic<bool>& f) noexcept : flag(f) {}
-                ~dispatch_guard() noexcept { flag.store(false, std::memory_order_release); }
-                dispatch_guard(const dispatch_guard&) = delete;
-                dispatch_guard(dispatch_guard&&) = delete;
-                dispatch_guard& operator=(const dispatch_guard&) = delete;
-                dispatch_guard& operator=(dispatch_guard&&) = delete;
-            };
-            const bool prev = in_dispatch_.exchange(true, std::memory_order_acq_rel);
-            assert(!prev &&
-                   "concurrent session callback entry: strand "
-                   "invariant violated (direct_executor attested "
-                   "over a non-serialised executor?)");
-            [[maybe_unused]] dispatch_guard guard{in_dispatch_};
-#endif
+            // The hold is RAII, so a token it installed is cleared on scope
+            // exit even if the callback throws. It carries the owner token
+            // only: the depth of all callbacks counts callback_dispatch_scope
+            // entries, so a caller that runs an Application callback under
+            // this function must enter one of those instead
+            // (`.specify/563-564-callback-send.md` §2.2).
+            [[maybe_unused]] const callback_owner_hold hold{*this};
             g();
         });
     }
 
-    // ── 019-app-callbacks T007 ────────────────────────────────────────────────
+private:
+    // ── fixpp#564 (`.specify/563-564-callback-send.md` §2.2) — the owner token ──
     //
-    // callback_dispatch_scope — release-safe RAII guard for direct on-strand
-    // Application callback sites (research D3). Complements the existing
-    // `dispatch_guard` which is DEBUG-only and local to dispatch_app_callback.
+    // callback_owner_hold — the debug diagnostic for a broken threading contract:
+    // a second thread entering a session's callbacks while a first is inside (the
+    // symptom of direct_executor attested over an executor that does not
+    // serialise). Supersedes the `in_dispatch_` flag, whose exchange aborted on
+    // every second entry, a nested one on the owner's own thread included.
     //
-    // In DEBUG builds: asserts that no two callbacks enter concurrently for this
-    // session (strand invariant — INV-2), then clears the flag on scope exit
-    // (even if the callback throws, so the flag is never left set on unwind).
-    // In RELEASE builds: zero overhead (the guard body compiles out entirely).
+    // In DEBUG builds, construction compares and swaps `callback_owner_` from
+    // "no owner" to the calling thread:
+    //   - the swap succeeds: this hold installed the token and clears it on exit;
+    //   - it fails and the owner is the calling thread: a nested entry, which
+    //     passes and leaves the token alone on exit;
+    //   - it fails and the owner is another thread: the assertion fires.
+    // A foreign thread therefore reads and writes only the atomic here, and
+    // asserts before its caller touches a plain member.
+    // In RELEASE builds the class is empty and does nothing.
+    class callback_owner_hold {
+    public:
+#ifndef NDEBUG
+        explicit callback_owner_hold(const Session& s) noexcept : session_(s) {
+            const void* const self = callback_thread_tag_();
+            const void* owner = nullptr;
+            installed_ = session_.callback_owner_.compare_exchange_strong(
+                owner, self, std::memory_order_acq_rel, std::memory_order_acquire);
+            assert((installed_ || owner == self) &&
+                   "concurrent session callback entry: strand "
+                   "invariant violated (direct_executor attested "
+                   "over a non-serialised executor?)");
+        }
+        ~callback_owner_hold() noexcept {
+            if (installed_) session_.callback_owner_.store(nullptr, std::memory_order_release);
+        }
+#else
+        explicit callback_owner_hold(const Session& /*s*/) noexcept {}
+        ~callback_owner_hold() = default;
+#endif
+        callback_owner_hold(const callback_owner_hold&) = delete;
+        callback_owner_hold(callback_owner_hold&&) = delete;
+        callback_owner_hold& operator=(const callback_owner_hold&) = delete;
+        callback_owner_hold& operator=(callback_owner_hold&&) = delete;
+
+    private:
+#ifndef NDEBUG
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+        const Session& session_;
+        bool installed_ = false;
+#endif
+    };
+
+public:
+    // ── 019-app-callbacks T007; fixpp#564 ─────────────────────────────────────
+    //
+    // callback_dispatch_scope — RAII scope for direct on-strand Application
+    // callback sites (research D3). It does two things, in this order:
+    //
+    //   1. the owner token (callback_owner_hold above; DEBUG builds only);
+    //   2. the depth of all callbacks, `callback_depth_`, in every build type:
+    //      incremented on entry, decremented on exit.
+    //
+    // The hold is the first member, so the swap is the scope's first action and
+    // the clear its last: the depth is incremented after the swap and
+    // decremented before the clear, on any exit path (a throwing callback
+    // included). A nested entry on the owner's thread is not an error here. The
+    // nestings that are outside the contract are asserted where they begin: at
+    // the parse sites, in the stack-arena overload of parse_and_dispatch_ and at
+    // the onLogon and onLogout sites (src/session/session.cpp).
     //
     // Usage at a direct on-strand call site (T011/T014/T016 sites):
     //   callback_dispatch_scope cs{*this};
@@ -458,33 +564,24 @@ public:
     // (below) wraps the call for the terminal-close disposition (FR-011; D5).
     //
     // Anchor: specs/019-app-callbacks/research.md D3/D5; data-model.md INV-2;
-    //         tasks.md T007. [const §XV.9] — no std::mutex, no exception paths.
+    //         tasks.md T007; `.specify/563-564-callback-send.md` §2.2.
+    //         [const §XV.9] — no std::mutex, no exception paths.
     struct callback_dispatch_scope {
-#ifndef NDEBUG
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-        std::atomic<bool>& flag;
-        explicit callback_dispatch_scope(const Session& s) noexcept : flag(s.in_dispatch_) {
-            const bool prev = flag.exchange(true, std::memory_order_acq_rel);
-            assert(!prev &&
-                   "concurrent session callback entry: strand "
-                   "invariant violated (direct_executor attested "
-                   "over a non-serialised executor?)");
+        explicit callback_dispatch_scope(const Session& s) noexcept
+            : owner_(s), depth_(s.callback_depth_) {
+            ++depth_;
         }
-        ~callback_dispatch_scope() noexcept { flag.store(false, std::memory_order_release); }
+        ~callback_dispatch_scope() noexcept { --depth_; }
         callback_dispatch_scope(const callback_dispatch_scope&) = delete;
         callback_dispatch_scope(callback_dispatch_scope&&) = delete;
         callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
         callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
-#else
-        explicit callback_dispatch_scope(const Session& /*s*/) noexcept {}
-        // All special members are defaulted — the debug body is a no-op.
-        // No fields ⇒ EBO applies; the guard adds zero size/overhead in release.
-        callback_dispatch_scope(const callback_dispatch_scope&) = delete;
-        callback_dispatch_scope(callback_dispatch_scope&&) = delete;
-        callback_dispatch_scope& operator=(const callback_dispatch_scope&) = delete;
-        callback_dispatch_scope& operator=(callback_dispatch_scope&&) = delete;
-        ~callback_dispatch_scope() = default;
-#endif
+
+    private:
+        // Declared first: constructed before the depth is touched, destroyed after.
+        [[no_unique_address]] callback_owner_hold owner_;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::uint32_t& depth_;
     };
 
     // invoke_callback_safe — throw→terminal-close wrapper scaffold (FR-011; D5).
@@ -615,7 +712,49 @@ private:
 
     fixpp::core::session_executor exec_;                   // bound at open() (T020)
     std::shared_ptr<fixpp::core::Clock> effective_clock_;  // resolved at open() (T030)
-    mutable std::atomic<bool> in_dispatch_{false};         // debug strand-invariant guard (seam 16)
+    // fixpp#564 (`.specify/563-564-callback-send.md` §2.2): the debug guard's state.
+    // The members exist in every build type, so the class has one definition.
+    //
+    // callback_owner_: the owner token (seam 16). Null: no owner. Otherwise the
+    // callback_thread_tag_() of the thread whose callback_owner_hold installed it.
+    // Atomic because the misuse it detects is two threads here at once; its
+    // operations compile out under NDEBUG. mutable: dispatch_app_callback is const.
+    //
+    // The two depths are plain integers, written and read only on the session's
+    // serialisation domain, and maintained in every build type.
+    // callback_depth_: how many callback_dispatch_scope objects are live, that is,
+    // how many callbacks of this session are on the stack. mutable: the scope takes
+    // the session by const reference.
+    // outbound_callback_depth_: how many of them are toApp or toAdmin. Its one
+    // writer is the stack-arena overload of parse_and_dispatch_.
+    mutable std::atomic<const void*> callback_owner_{nullptr};
+    mutable std::uint32_t callback_depth_ = 0;
+    std::uint32_t outbound_callback_depth_ = 0;
+    // fixpp#590 (`.specify/563-564-callback-send.md` §2.6 "The mechanism", ruling
+    // R-8): the state of the one ending for a terminal close started in the toAdmin
+    // of a graceful close's Logout. Both members are written and read only on the
+    // session's serialisation domain, as the two depths above.
+    //
+    // waited_terminal_closes_: how many terminal close() calls have taken close()'s
+    // wait for a callback to return (§2.1a). It only grows. Its writer is close(),
+    // inside the block of that wait and before the post; a graceful close does not
+    // write it, and neither does a terminal close that takes no wait. Its reader is
+    // run_logout_phase1, before the Logout's toAdmin and again when the callback
+    // has returned: where the count moved, a terminal close was started inside that
+    // callback, and the Logout is cut. The test is "moved", not "non-zero".
+    //
+    // logout_cut_: the record of the cut. Its writer is run_logout_phase1, when it
+    // finds that the count moved, with no suspension since the callback returned.
+    // It is never cleared: a Session is opened once, and a second graceful close
+    // joins the first and runs no Logout step. Its reader is close(): a terminal
+    // close that joins does not end the grace wait of a Logout that was cut, and
+    // the direct transport close after the join is made for one.
+    std::uint64_t waited_terminal_closes_ = 0;
+    bool logout_cut_ = false;
+    // An address that identifies the calling thread for as long as it lives: the
+    // owner token's value. Defined out of line, in session.cpp, so that the inline
+    // callers in every translation unit of one linked image get the same address.
+    [[nodiscard]] static const void* callback_thread_tag_() noexcept;
     fixpp::core::session_local<fixpp::otel::trace_context> trace_slot_;  // [2d §4.6]
 
     // Lifecycle state for the idempotent three-state close model (I-10);
@@ -1318,6 +1457,9 @@ private:
     //       (session.cpp, before record_state_transition_(LogoutSent)).
     //   (b) on_inbound_frame() Active branch: inbound peer-Logout 35=5 receipt.
     // Used by the teardown reset predicate in close() (T014).
+    // Site (a) is skipped for a Logout that was cut (fixpp#590;
+    // `.specify/563-564-callback-send.md` §2.6, ruling R-8): that Logout is
+    // stored and not transmitted, so it is not a Logout that was sent.
     //
     // NOT derived from onLogout_fired_ — that flag fires on ANY Active→!Active
     // transition (including abnormal terminal close with no Logout), so it is a
@@ -1362,13 +1504,19 @@ private:
     // while a close(graceful) is in flight sets the latch, which close(graceful) reads
     // before its phase 1 starts, and calls the wake, which is non-null only while phase
     // 1 races its grace timer and ends that wait. Session strand only.
+    // One exception (fixpp#590; `.specify/563-564-callback-send.md` §2.6, rulings
+    // R-8 and R-9): for a Logout that was cut (logout_cut_) the latch is set and the
+    // wake is not called, so the terminal close does not end the grace wait.
     bool close_escalated_ = false;
     std::function<void()> close_grace_wake_;
 
     // 093-inbound-frame-dispositions (data-model E-13; contract C-6) — the engine-stop
     // flag: Engine::stop()'s step 1 sets it on the session strand, through
-    // session_engine_access, before it emits its cancellation. logon_arm_superseded
-    // reads it, so every later predicate check on this strand stops a Logon arm.
+    // session_engine_access, before it emits its cancellation. It has two readers.
+    // logon_arm_superseded reads it, so every later predicate check on this strand
+    // stops a Logon arm. Engine::send's body for a published session reads it, through
+    // session_engine_access, before it admits the send
+    // (`.specify/563-564-callback-send.md` §6, OD-3).
     // Written and read only on the session strand.
     // Placement condition: as garbled_frames_; a Session reused for a second connection
     // would need it reset when the transport is installed.
@@ -1457,9 +1605,16 @@ private:
     // arm: a Logon arm's expected state (093 plan OD-25). When set and
     //   logon_arm_superseded_(*arm) holds after the store, the frame is not transmitted
     //   and the call returns success; the caller's own predicate check follows.
+    // transmit: false for a Logout that was cut (fixpp#590;
+    //   `.specify/563-564-callback-send.md` §2.6 "The mechanism", statement 3). The
+    //   frame is then stored as with true, the store call's errors handled the same
+    //   way, and the call returns success before the transmit step: neither the live
+    //   write nor the synchronous sink runs, and the time of the last outbound frame
+    //   is not updated. Only run_logout_phase1 passes it; every other caller takes
+    //   the default.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
-        std::optional<fsm_state> arm = std::nullopt) noexcept;
+        std::optional<fsm_state> arm = std::nullopt, bool transmit = true) noexcept;
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm
@@ -1492,8 +1647,23 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> apply_inbound_sequence_reset(
         seqnum_t new_seqno, seqnum_t ref_seq) noexcept;
 
+    // fixpp#563 (`.specify/563-564-callback-send.md` §2.1 "Reader"): the body of send(),
+    // and whether it tests the outbound-callback depth. send() passes `apply`: a send
+    // that finds toApp or toAdmin of this session on the stack awaits send_deferred_ and
+    // returns its result. send_deferred_ passes `skip`. The choice is an argument and not
+    // a member, so nothing is left set when the send returns early.
+    enum class send_depth_test : std::uint8_t { skip, apply };
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_body_(
+        std::span<const std::byte> app_payload, send_depth_test depth_test) noexcept;
+
+    // fixpp#563 (§2.1 "The deferred path"): copies the payload, posts once onto the
+    // session's executor, applies the cancellation test of §2.1 "Cancellation at the hop
+    // (OD-1)", refuses the send if a close() has begun, then awaits send_body_ over the copy.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_deferred_(
+        std::span<const std::byte> app_payload);
+
     // send_impl: the actual send pipeline (frame building + store_then_emit).
-    // Called from the noexcept send() wrapper which catches asio::system_error
+    // Called under the try of the noexcept send_body_, which catches asio::system_error
     // thrown on async cancellation. May throw on store awaitable cancellation.
     // [F5 Round-A drift fix: noexcept-throw trap separation]
     // disconnect_required (gate-b/r2 FQ-1): out-param set true ONLY at the two
@@ -1506,7 +1676,7 @@ private:
     // fixpp#544 (B35, `.specify/544-hot-path-zero-alloc.md` §2.5; rulings R-9, R-10):
     // send_impl is the send tail. It builds into `frame_buf` through build_send_frame_,
     // then runs toApp, assign_outbound and store_then_emit over it, so `frame_buf` must
-    // outlive the call. Its callers must be Session::send (over the session's frame slot) or
+    // outlive the call. Its callers must be send_body_ (over the session's frame slot) or
     // send_fallback_leaf_ (over the leaf's own buffer); re-check with
     // `git grep -n "send_impl(" -- src include`.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
@@ -1528,7 +1698,7 @@ private:
         std::span<const std::byte> app_payload, std::span<std::byte> out);
 
     // fixpp#544 §2.5 (R-10): the fallback for a send that finds the frame slot held (a send
-    // nested in toApp, or overlapping one suspended in its store or its write). Its frame
+    // deferred from toApp, or overlapping one suspended in its store or its write). Its frame
     // owns a frame buffer, so it is over asio's recycler limit and allocates; it never
     // writes the slot flag. Its first statement is FIXPP_INBOUND_SPLIT_ENTRY(tic), the
     // callee half of the b3 boundary Session::send awaits it through.
@@ -1570,6 +1740,9 @@ private:
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
     // CHILD cancellation_state. Called from close(graceful) phase 1.
+    // On the cut route (a terminal close() started inside the Logout's toAdmin;
+    // fixpp#590, `.specify/563-564-callback-send.md` §2.6) the Logout is stored
+    // and not transmitted, and the step returns without the wait.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
 
     // 027 T005 — replay_outbound_range_: extracted from the inline

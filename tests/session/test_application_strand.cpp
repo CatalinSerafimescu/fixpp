@@ -8,22 +8,23 @@
 //
 // Tests:
 //   1. No concurrent callbacks for one session — concurrent inbound + send
-//      does NOT trigger the callback_dispatch_scope debug assert (dispatch_guard
-//      never fires concurrently on the exec_ strand). (FR-010/INV-2)
+//      does NOT trigger the callback_dispatch_scope debug assert (its owner token
+//      is never taken by a second thread on the exec_ strand). (FR-010/INV-2)
 //   2. Drain before destroy — engine.stop() completes before the Session is
 //      freed; no callback runs against a freed Session. (FR-012/INV-3/SC-005)
 //   3. Engine::send keepalive — stop() racing Engine::send posted work is
 //      UAF-safe because the shared_ptr<Session> keepalive holds the Session
 //      alive. (FR-012/INV-3)
-//   4. Re-entrant send from inside an on-strand callback completes without
-//      deadlock. (spec.md Edge Cases "Re-entrant send from within a callback")
+//   4. A send issued on the session's executor after an inbound callback has
+//      returned completes without deadlock. (spec.md Edge Cases "Re-entrant
+//      send from within a callback"; the cell does not send inside the callback)
 //
 // Note on sanitizer gating:
 //   - Test 1 (no concurrent callbacks) is primarily a TSan assertion — the
 //     strand invariant means no data race; debug assert is the in-process check.
 //   - Tests 2 and 3 (drain/keepalive) are primarily ASan assertions; logic
 //     is verifiable under debug by checking no crash + clean ioc.run() exit.
-//   - Test 4 (re-entrant send) is logic-verifiable under debug.
+//   - Test 4 (send after a callback) is logic-verifiable under debug.
 //
 // All tests carry an internal self-deadline via ioc.run_for() so they never
 // hang. [[feedback_fail_placeholder_red_test]]
@@ -140,10 +141,11 @@ std::vector<std::byte> make_app_payload() {
 
 // ── StrandApplication — tracks concurrent callback entries ───────────────────
 //
-// In debug builds, callback_dispatch_scope asserts !in_dispatch_ before
-// setting it. If two callbacks ran concurrently, the assert would fire.
-// Under TSan, the shared flag access without synchronization would produce
-// a data race report.
+// In debug builds, callback_dispatch_scope takes the session's owner token and
+// asserts that another thread does not hold it. If a second thread ran a callback of
+// the session while a first was inside one, the assert would fire. The token is
+// atomic, so the check is not itself a data race; under TSan the callbacks' own
+// unsynchronized accesses would be reported.
 //
 // This application records whether any callback was ever entered while
 // another was already in progress (concurrency_detected flag).
@@ -250,7 +252,7 @@ struct StrandFixture {
 // entry) and concurrency_detected stays false.
 //
 // Under TSan this additionally proves no data race on any Session member
-// accessed from callbacks. Under debug, callback_dispatch_scope asserts.
+// accessed from callbacks. Under debug, callback_dispatch_scope's token asserts.
 
 TEST(ApplicationStrand, NoConcurrentCallbacksForOneSession) {
     auto app = std::make_shared<StrandApplication>();
@@ -460,19 +462,19 @@ TEST(ApplicationStrand, EngineSendKeepAliveNoUAF) {
     // was alive during the lambda, freed after lambda exited.
 }
 
-// ── Test 4: Re-entrant send from inside an on-strand callback (no deadlock) ───
+// ── Test 4: A send after an on-strand callback has returned (no deadlock) ─────
 //
-// Spec Edge Case: a call to Engine::send from inside a fromApp callback is
-// enqueued behind the current dispatch (asio::post is non-blocking). The
-// outer callback returns, the posted send runs next — no deadlock.
+// The cell sends from the test body, after the fromApp callback has returned.
+// It does not start a send inside the callback: what a send started there does
+// (inline in fromApp; fixpp#563) is the subject of
+// tests/session/test_563_564_callback_send.cpp.
 //
-// This test uses the direct Session::send path (which is what Engine::send
-// posts onto the strand) to prove the non-deadlock property.
+// This test uses the direct Session::send path (the one Engine::send's body
+// awaits on the session's strand) to prove the non-deadlock property.
 
-// Re-entrant send application: records when fromApp fires, so the test
-// can then drive a re-entrant Engine::send from the test body (simulating
-// the "re-entrant send from inside a callback" scenario by issuing the
-// send immediately after the callback returns — same strand, same frame).
+// Records when fromApp fires, so the test can then drive a Session::send from
+// the test body, immediately after the callback has returned, on the same
+// executor.
 class ReentrantApplication : public Application {
 public:
     std::atomic<bool> from_app_fired{false};
@@ -485,15 +487,11 @@ public:
 };
 
 TEST(ApplicationStrand, ReentrantSendNoDeadlock) {
-    // Proves: a send() issued on the session strand immediately after an
-    // inbound callback returns (simulating a "re-entrant" send from within the
-    // callback's execution context) does not deadlock.
+    // Proves: a send() issued on the session's executor immediately after an
+    // inbound callback returns does not deadlock.
     //
-    // The spec says Engine::send posts onto the strand — the posted work is
-    // enqueued behind the current dispatch. A send issued from inside a fromApp
-    // callback is enqueued behind the callback, runs after the callback returns,
-    // and does not deadlock. We simulate this by driving the send immediately
-    // after the callback fires (both on the same strand/executor).
+    // The send is issued by the test body once the inbound future is ready, so
+    // the callback is no longer on the stack when the send starts.
     auto app = std::make_shared<ReentrantApplication>();
     StrandFixture f;
     f.engine_cfg.application = app;
@@ -515,10 +513,9 @@ TEST(ApplicationStrand, ReentrantSendNoDeadlock) {
 
     ASSERT_TRUE(app->from_app_fired.load()) << "fromApp must have fired";
 
-    // Now issue a send on the same executor, simulating a re-entrant send that
-    // would have been posted from inside the callback. Since the callback is
-    // complete (from_app_fired is set), in_dispatch_ is false, and the send
-    // must complete without deadlock.
+    // Now issue a send on the same executor. The callback is complete
+    // (from_app_fired is set), so no callback of the session is on the stack,
+    // and the send must complete without deadlock.
     auto payload = make_app_payload();
     auto send_fut =
         asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload.data(), payload.size())),

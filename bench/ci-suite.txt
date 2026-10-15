@@ -128,3 +128,18 @@ bin/bench_compid_authorize                  none:no-gb-baseline-recorded        
 # timing). Tier 2 stays `no`: `paired` is irreversible (Article VIII §2a).
 bin/scan_frame_header_bench                 none:no-gb-baseline-recorded                     no
 bin/on_inbound_frame_bench                  none:no-gb-baseline-recorded                     no
+# engine_send_bench (fixpp#563, fixpp#564; `.specify/563-564-callback-send.md`
+# §3 "Cost (OD-5)"): the route of Engine::send on one Active engine-managed
+# session, from the call to the refusal of a malformed payload inside
+# Session::send, before a sequence number is read, a frame is built or a callback
+# runs. One Engine on one io_context that the bench thread polls, on a mock clock,
+# over a scripted transport double: no socket, no TLS, no file. The bench thread
+# starts each send from outside the io_context, so its co_spawn is queued and runs
+# at that thread's next poll; the io_context's zero-timeout reactor polls between
+# the handlers of a send are inside the timed region (the source's header has the
+# recipe that counts them). It does not time the wake-up of an io thread by a send
+# started on another thread. Each run checks that it reached its path before and
+# after timing. `paired` from its first manifest row, by that note's OD-5
+# (Article VIII §2a: the row can be neither removed nor downgraded); the erratum
+# at the end of `.specify/ci209-bench-gate.md` records what that skipped.
+bin/engine_send_bench                       none:no-gb-baseline-recorded                     paired
