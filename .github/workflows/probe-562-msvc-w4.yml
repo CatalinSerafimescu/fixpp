@@ -2,7 +2,8 @@
 # Compiles SWIG's generated Python wrapper (fixppPYTHON_wrap.cxx) with MSVC
 # under fixpp_py's warning flags, as one TU, and attributes every warning to
 # SWIG's runtime section (at or before the "SWIG's runtime ends here" marker)
-# or to this project's code (after it).
+# or to this project's code (after it). Round 2 witnesses fixpp.i's MSVC arm
+# two-sided against origin/main's fixpp.i (no arm).
 name: "probe-562 MSVC /W4 on the SWIG wrapper"
 
 on:
@@ -20,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        swig: ["latest", "4.2.0"]
+        swig: ["latest", "4.3.0", "4.2.1", "4.2.0"]
     steps:
       - uses: actions/checkout@v6
 
@@ -87,13 +88,15 @@ jobs:
           print("base flags:", " ".join(keep))
           (pathlib.Path(os.environ["RUNNER_TEMP"]) / "base_flags.json").write_text(json.dumps(keep))
 
-      - name: Generate, compile and attribute
+      - name: Generate, compile, attribute and witness
         shell: python
         env:
           SWIG_LABEL: ${{ matrix.swig }}
         run: |
           import json, os, pathlib, re, subprocess, sys, sysconfig, collections
 
+          LABEL = os.environ["SWIG_LABEL"]
+          IS_42 = LABEL.startswith("4.2.")
           repo = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
           tmp = pathlib.Path(os.environ["RUNNER_TEMP"]) / "p562"
           tmp.mkdir(parents=True, exist_ok=True)
@@ -103,56 +106,74 @@ jobs:
           failures = []
 
           def fail(msg):
-              print("PROBE FAILURE:", msg)
+              print("PROBE FAILURE:", msg, flush=True)
               failures.append(msg)
+
+          def out(text):
+              print(text, flush=True)
+              summary.write(text + "\n")
+
+          # ── the two interface files: the committed one (ARM) and origin/main's
+          # (NOARM, written next to it so every relative lookup is identical) ──
+          arm_src = (repo / "bindings/python/fixpp.i").read_text(encoding="utf-8")
+          r = subprocess.run(["git", "-C", str(repo), "fetch", "--depth=1", "origin", "main"])
+          if r.returncode != 0:
+              sys.exit("git fetch origin main failed")
+          noarm_src = subprocess.run(["git", "-C", str(repo), "show", "FETCH_HEAD:bindings/python/fixpp.i"],
+                                     capture_output=True, text=True, encoding="utf-8", check=True).stdout
+          if noarm_src == arm_src:
+              sys.exit("origin/main's fixpp.i is identical to the committed one: no no-arm variant")
+          if "_MSC_VER" in noarm_src.split("%begin", 1)[1].split("SWIG's runtime ends here", 1)[0]:
+              sys.exit("origin/main's fixpp.i already has an MSVC arm")
+          if "pragma warning(disable : 4100)" not in arm_src:
+              sys.exit("committed fixpp.i has no MSVC arm")
+
+          SEED_C4100 = "\n%inline %{\nint fixpp_probe562_witness(int probe562_unused_param) { return 0; }\n%}\n"
+          SEED_C4505 = "\n%{\nstatic int fixpp_probe562_unref(void) { return 0; }\n%}\n"
+          SEED_C4505_CTL = ("\n%{\n#pragma warning(default : 4505)\n"
+                            "static int fixpp_probe562_unref_ctl(void) { return 0; }\n%}\n")
 
           # ── SWIG command: what UseSWIG builds for fixpp.i (CPLUSPLUS ON,
           # USE_TARGET_INCLUDE_DIRECTORIES ON -> the target's own include dir,
           # python proxy -> -interface <PREFIX><OUTPUT_NAME> = _fixpp). ─────────
-          def swig(ifile, outdir):
+          def gen(name, src):
+              ifile = repo / f"bindings/python/fixpp_probe562_{name}.i"
+              ifile.write_text(src, encoding="utf-8")
+              outdir = tmp / name
               outdir.mkdir(parents=True, exist_ok=True)
-              out = outdir / "fixppPYTHON_wrap.cxx"
+              wrap = outdir / "fixppPYTHON_wrap.cxx"
               cmd = ["swig", "-python", "-outdir", str(outdir), "-c++",
                      "-interface", "_fixpp", "-I" + str(repo / "include"),
-                     "-o", str(out), str(ifile)]
+                     "-o", str(wrap), str(ifile)]
               print("SWIG:", subprocess.list2cmdline(cmd), flush=True)
               r = subprocess.run(cmd)
-              if r.returncode != 0 or not out.exists():
-                  sys.exit("swig failed")
-              return out
-
-          def landmarks(wrap):
+              if r.returncode != 0 or not wrap.exists():
+                  sys.exit(f"swig failed for {name}")
               lines = wrap.read_text(encoding="utf-8", errors="replace").splitlines()
               marker = [i + 1 for i, l in enumerate(lines) if "SWIG's runtime ends here" in l]
               p4505 = [i + 1 for i, l in enumerate(lines)
                        if re.search(r"pragma\s+warning\s*\(\s*disable\s*:\s*4505", l)]
-              return lines, marker, p4505
+              if len(marker) != 1:
+                  sys.exit(f"{name}: marker must be found exactly once, found {marker}")
+              if not p4505:
+                  sys.exit(f"{name}: C4505 pragma not found")
+              print(f"{name}: marker line {marker[0]}; C4505 pragma line(s) {p4505}; {len(lines)} lines")
+              return {"wrap": wrap, "lines": lines, "mark": marker[0], "p4505": p4505}
 
-          # Base wrapper from the committed fixpp.i.
-          base_wrap = swig(repo / "bindings/python/fixpp.i", tmp / "base")
-          base_lines, marker, p4505 = landmarks(base_wrap)
-          print(f"marker lines: {marker}; C4505 pragma lines: {p4505}; total lines: {len(base_lines)}")
-          if len(marker) != 1:
-              sys.exit(f"marker must be found exactly once, found {marker}")
-          if not p4505:
-              sys.exit("C4505 pragma not found")
-          MARK = marker[0]
-          for n in p4505:
-              print(f"  C4505 pragma at {n} ({'before' if n <= MARK else 'after'} marker): {base_lines[n-1].strip()}")
+          def line_of(v, needle):
+              hits = [i + 1 for i, l in enumerate(v["lines"]) if needle in l]
+              if len(hits) != 1 or hits[0] <= v["mark"]:
+                  sys.exit(f"seed {needle!r} must be found once after the marker, got {hits}")
+              return hits[0]
 
-          # Seeded wrapper: a scratch %inline after the marker (never committed).
-          seeded_i = repo / "bindings/python/fixpp_probe562_seeded.i"
-          seeded_i.write_text(
-              (repo / "bindings/python/fixpp.i").read_text(encoding="utf-8")
-              + "\n%inline %{\nint fixpp_probe562_witness(int probe562_unused_param) { return 0; }\n%}\n",
-              encoding="utf-8")
-          seeded_wrap = swig(seeded_i, tmp / "seeded")
-          s_lines, s_marker, _ = landmarks(seeded_wrap)
-          seed_line = [i + 1 for i, l in enumerate(s_lines)
-                       if "int fixpp_probe562_witness(int probe562_unused_param)" in l]
-          print(f"seeded: marker {s_marker}, seed definition at {seed_line}")
-          if len(s_marker) != 1 or len(seed_line) != 1 or seed_line[0] <= s_marker[0]:
-              sys.exit("seed must be found exactly once, after the marker")
+          V = {
+              "arm": gen("arm", arm_src),
+              "noarm": gen("noarm", noarm_src),
+              "arm_s4100": gen("arm_s4100", arm_src + SEED_C4100),
+              "arm_s4505": gen("arm_s4505", arm_src + SEED_C4505),
+              "noarm_s4505": gen("noarm_s4505", noarm_src + SEED_C4505),
+              "arm_s4505ctl": gen("arm_s4505ctl", arm_src + SEED_C4505_CTL),
+          }
 
           PROJECT = ["/W4", "/permissive-", "/Zc:__cplusplus", "/wd5030", "/wd4324"]
           DEFINES = ["/D_CRT_SECURE_NO_WARNINGS", "/D_CRT_NONSTDC_NO_WARNINGS",
@@ -162,84 +183,125 @@ jobs:
                      "/DPy_LIMITED_API=0x030C0000", "/Dfixpp_py_EXPORTS"]
           INCLUDES = ["/I" + str(repo / "include"), "/I" + py_inc]
           WRE = re.compile(r"^(.+?)\((\d+)(?:,\d+)?\)\s*:\s*warning (C\d{4}):\s*(.*)$")
+          CANARIES = [(g, r) for g in (0, 1) for r in (0, 1)]
 
-          def compile_(wrap, extra, tag):
+          def canary_flags(g, r):
+              f = []
+              if g: f.append("/DFIXPP_PY_GIL_CANARY=1")
+              if r: f.append("/DFIXPP_PY_GIL_RELEASE_CANARY=1")
+              return f
+
+          def compile_(vname, extra, tag):
+              v = V[vname]
               obj = tmp / f"{tag}.obj"
               if obj.exists():
                   obj.unlink()
               cmd = ["cl"] + base_flags + PROJECT + DEFINES + extra + INCLUDES + \
-                    ["/c", str(wrap), "/Fo" + str(obj)]
-              print(f"\n===== cl [{tag}] =====\n" + subprocess.list2cmdline(cmd), flush=True)
+                    ["/c", str(v["wrap"]), "/Fo" + str(obj)]
+              print(f"\n===== cl [{tag}] ({vname}) =====\n" + subprocess.list2cmdline(cmd), flush=True)
               r = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-              out = r.stdout + r.stderr
-              print(out, flush=True)  # full, unfiltered
-              print(f"[{tag}] exit={r.returncode} obj_exists={obj.exists()}")
-              if r.returncode != 0 or not obj.exists():
-                  fail(f"[{tag}] compile failed (exit {r.returncode}, obj {obj.exists()})")
+              text = r.stdout + r.stderr
+              print(text, flush=True)  # full, unfiltered
+              print(f"[{tag}] exit={r.returncode} obj_exists={obj.exists()}", flush=True)
               ws = []
-              for l in out.splitlines():
+              for l in text.splitlines():
                   m = WRE.match(l.strip())
                   if m:
-                      ws.append((m.group(1), int(m.group(2)), m.group(3), m.group(4), l.strip()))
-              return ws
+                      f, ln, code, msg = m.group(1), int(m.group(2)), m.group(3), m.group(4)
+                      if pathlib.Path(f).name == "fixppPYTHON_wrap.cxx":
+                          where = "before" if ln <= v["mark"] else "after"
+                      elif "/include/fix/" in f.replace("\\", "/").lower():
+                          where = "after (fix/ header)"
+                      else:
+                          where = "header: " + pathlib.Path(f).name
+                      ws.append({"file": f, "line": ln, "code": code, "msg": msg,
+                                 "where": where, "raw": l.strip()})
+              return {"rc": r.returncode, "obj": obj.exists(), "ws": ws}
 
-          def side(f, line, wrap, mark):
-              p = pathlib.Path(f)
-              try:
-                  same = p.resolve() == wrap.resolve()
-              except OSError:
-                  same = False
-              if same or p.name == "fixppPYTHON_wrap.cxx":
-                  return "before" if line <= mark else "after"
-              norm = f.replace("\\", "/").lower()
-              if "/include/fix/" in norm:
-                  return "after (fix/ header, included after marker)"
-              return "header: " + p.name
+          def must_build(res, tag):
+              if res["rc"] != 0 or not res["obj"]:
+                  fail(f"[{tag}] expected a clean build (exit {res['rc']}, obj {res['obj']})")
 
-          def table(tag, ws, wrap, mark):
+          def table(title, res, mark):
               agg = collections.OrderedDict()
-              for f, ln, code, msg, raw in ws:
-                  s = side(f, ln, wrap, mark)
-                  k = (code, s)
-                  if k not in agg:
-                      agg[k] = [0, raw]
+              for w in res["ws"]:
+                  k = (w["code"], w["where"])
+                  agg.setdefault(k, [0, w["raw"]])
                   agg[k][0] += 1
-              hdr = f"\n### swig {os.environ['SWIG_LABEL']} — {tag}: {len(ws)} warning(s), marker line {mark}\n"
-              rows = ["| code | where | count | example |", "|---|---|---|---|"]
-              for (code, s), (n, raw) in agg.items():
-                  rows.append(f"| {code} | {s} | {n} | `{raw[:200]}` |")
+              rows = [f"\n### swig {LABEL} — {title}: {len(res['ws'])} warning(s), marker line {mark}",
+                      "| code | where | count | example |", "|---|---|---|---|"]
+              for (code, where), (n, raw) in agg.items():
+                  rows.append(f"| {code} | {where} | {n} | `{raw[:200]}` |")
               if not agg:
                   rows.append("| — | — | 0 | — |")
-              text = hdr + "\n".join(rows) + "\n"
-              print(text)
-              summary.write(text)
-              return agg
+              out("\n".join(rows))
 
-          before_any = False
-          for gil in (0, 1):
-              for rel in (0, 1):
-                  extra = []
-                  if gil: extra.append("/DFIXPP_PY_GIL_CANARY=1")
-                  if rel: extra.append("/DFIXPP_PY_GIL_RELEASE_CANARY=1")
-                  tag = f"GIL_CANARY={gil} RELEASE_CANARY={rel}"
-                  ws = compile_(base_wrap, extra, tag.replace(" ", "_").replace("=", ""))
-                  agg = table(tag, ws, base_wrap, MARK)
-                  if any(s == "before" or s.startswith("header") for (_, s) in agg):
-                      before_any = True
+          def sig(res):
+              return collections.Counter((w["where"], w["code"], w["msg"]) for w in res["ws"])
 
-          # Witness: C4100 at the seeded line, after the marker, naming the param.
-          ws = compile_(seeded_wrap, [], "witness_seeded")
-          table("WITNESS (seeded, canaries off)", ws, seeded_wrap, s_marker[0])
-          hit = [w for w in ws if w[2] == "C4100" and w[1] == seed_line[0]
-                 and "probe562_unused_param" in w[3]
-                 and pathlib.Path(w[0]).name == "fixppPYTHON_wrap.cxx"]
-          if hit:
-              print(f"WITNESS OK: {hit[0][4]}")
-              summary.write(f"\nWITNESS OK (seed line {seed_line[0]} > marker {s_marker[0]}): `{hit[0][4]}`\n")
-          else:
-              fail("WITNESS SILENT: no C4100 naming probe562_unused_param at the seeded line")
+          # ── A. attribution, no /WX: ARM and NOARM under every canary ─────────
+          for g, r in CANARIES:
+              tag = f"GIL_CANARY={g} RELEASE_CANARY={r}"
+              a = compile_("arm", canary_flags(g, r), f"arm_g{g}r{r}")
+              n = compile_("noarm", canary_flags(g, r), f"noarm_g{g}r{r}")
+              must_build(a, f"arm {tag}")
+              must_build(n, f"noarm {tag}")
+              table(f"NO ARM (origin/main fixpp.i), {tag}", n, V["noarm"]["mark"])
+              table(f"WITH ARM (committed fixpp.i), {tag}", a, V["arm"]["mark"])
+              removed = sig(n) - sig(a)
+              added = sig(a) - sig(n)
+              out(f"diff {tag}: suppressed by the arm = {dict(removed)}; introduced by the arm = {dict(added)}")
+              if added:
+                  fail(f"[{tag}] the arm introduced warnings: {dict(added)}")
+              if any(k[0] != "before" or k[1] != "C4100" for k in removed):
+                  fail(f"[{tag}] the arm suppressed something other than C4100 before the marker: {dict(removed)}")
+              if any(w["where"] == "before" for w in a["ws"]):
+                  fail(f"[{tag}] warnings remain before the marker with the arm")
+              if IS_42 and not removed:
+                  fail(f"[{tag}] expected the arm to suppress a runtime C4100 on SWIG {LABEL}")
 
-          summary.write(f"\nwarnings in the runtime section or headers under any combination: {before_any}\n")
-          print(f"warnings in the runtime section or headers under any combination: {before_any}")
+          # ── B. two-sided /WX witness. /wd4127 is PROBE-ONLY: it isolates the
+          # arm's code from the after-marker C4127 project-code finding. ─────────
+          WX = ["/WX", "/wd4127"]
+          for g, r in CANARIES:
+              tag = f"WX arm g{g}r{r}"
+              res = compile_("arm", WX + canary_flags(g, r), f"wx_arm_g{g}r{r}")
+              must_build(res, tag)
+              out(f"[{tag}] exit={res['rc']} obj={res['obj']} (W1: must be clean)")
+          res = compile_("noarm", WX, "wx_noarm")
+          red = [w for w in res["ws"] if w["code"] == "C4100" and w["where"] == "before"]
+          out(f"[WX noarm] exit={res['rc']} obj={res['obj']} runtime C4100: {[w['raw'] for w in red]} (W2)")
+          if IS_42 and (res["rc"] == 0 or not red):
+              fail("W2: without the arm, /WX must fail with a C4100 at or before the marker")
+          if not IS_42 and res["rc"] != 0:
+              out(f"W2 note: no-arm /WX build failed on SWIG {LABEL}")
+          sl = line_of(V["arm_s4100"], "int fixpp_probe562_witness(int probe562_unused_param)")
+          res = compile_("arm_s4100", WX, "wx_arm_seed4100")
+          hit = [w for w in res["ws"] if w["code"] == "C4100" and w["line"] == sl
+                 and "probe562_unused_param" in w["msg"] and w["where"] == "after"]
+          out(f"[WX arm + seeded C4100] exit={res['rc']} seed line {sl} > marker {V['arm_s4100']['mark']}: "
+              f"{[w['raw'] for w in hit]} (W3)")
+          if res["rc"] == 0 or not hit:
+              fail("W3: a seeded unused parameter after the marker must still fail with C4100")
+
+          # ── C. C4505: same with and without the arm; control proves visibility ─
+          cl_ = line_of(V["arm_s4505ctl"], "static int fixpp_probe562_unref_ctl(void)")
+          res = compile_("arm_s4505ctl", [], "c4505_ctl")
+          must_build(res, "C4505 control")
+          ctl = [w for w in res["ws"] if w["code"] == "C4505" and w["line"] == cl_]
+          out(f"[C4505 control] line {cl_}: {[w['raw'] for w in ctl]} (must report C4505)")
+          if not ctl:
+              fail("C4505 control: the probe cannot see C4505")
+          seen = {}
+          for vname in ("arm_s4505", "noarm_s4505"):
+              ln = line_of(V[vname], "static int fixpp_probe562_unref(void)")
+              res = compile_(vname, [], f"c4505_{vname}")
+              must_build(res, f"C4505 {vname}")
+              seen[vname] = [w["raw"] for w in res["ws"] if w["code"] == "C4505" and w["line"] == ln]
+              out(f"[C4505 {vname}] seed line {ln}: {seen[vname]}")
+          if bool(seen["arm_s4505"]) != bool(seen["noarm_s4505"]):
+              fail("C4505 behaves differently with and without the arm")
+
           if failures:
               sys.exit("; ".join(failures))
+          out(f"\nALL ASSERTIONS PASSED on SWIG {LABEL}")
