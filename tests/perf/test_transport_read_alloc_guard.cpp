@@ -11,7 +11,7 @@
 //   (a) counting_resource — PMR-routed accounting for allocations through
 //       the provided memory_resource.
 //   (b) mallocnesia LD_PRELOAD — intercepts global operator new / malloc.
-//       LD_PRELOAD=tools/mallocnesia/libmallocnesia.so at ctest level.
+//       perf_transport_read_alloc_guard_mallocnesia ctest, via tools/check_alloc.py.
 //
 // 10^4-frame test. Gate: ZERO global new/delete/malloc while the read buffer
 // is arena-backed and passed as span to async_read_some.
@@ -22,7 +22,7 @@
 //
 // Run:
 // clang-format off
-//   LD_PRELOAD=tools/mallocnesia/libmallocnesia.so build/linux-clang-debug/tests/perf/perf_transport_read_alloc_guard
+//   ctest --test-dir build/<preset> -R perf_transport_read_alloc_guard_mallocnesia
 // clang-format on
 //
 // Phase 3a — DISABLED tests require asio_tls_transport (T026).

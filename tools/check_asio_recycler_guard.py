@@ -21,11 +21,25 @@ include/fixpp/core/detail/asio_recycler_config.hpp. Two checks:
            clears what the -D before it set. It fails closed when no entry carries asio's
            directory, when a --require-source file is not among the entries that do, when an
            entry carries a response file other than a .modmap, or when an entry carries an
-           option the census cannot read the macro's state through (REFUSED_OPTIONS:
-           -include, -imacros and their -- forms, --define-macro, --undefine-macro, /FI,
-           -Wp, and the -Xpreprocessor and -Xclang pass-throughs). With --positive-control
-           <source>, it strips the definition from that entry in memory and passes only if
-           the check then reports exactly that entry.
+           option the census cannot read the macro's state through (REFUSED_OPTIONS and
+           REFUSED_SPLIT_OPTIONS: -include, -imacros and their -- forms, --define-macro,
+           --undefine-macro, /FI, -Wp, the -Xpreprocessor and -Xclang pass-throughs, a GCC
+           spec file (-specs, --specs), a Clang config file (--config), the directories Clang
+           searches for its default config file (--config-system-dir, --config-user-dir) and
+           -Xarch_<arch>).
+           With --positive-control <source>, it strips the definition from that entry in
+           memory and passes only if the check then reports exactly that entry.
+
+           What the census cannot see at all, because it reads only the command line: a
+           channel that reaches the compiler from outside it. That covers the environment
+           (CPATH, C_INCLUDE_PATH and CPLUS_INCLUDE_PATH, which add include directories that
+           can shadow a header; CL and _CL_, which add any option to MSVC's cl), the
+           compiler's built-in definitions, and a
+           config or spec file the driver loads by default (Clang's <triple>-clang++.cfg,
+           from the config directories it was built with or its own binary's directory; GCC's
+           built-in specs). A pass therefore holds only for a toolchain whose defaults and
+           environment do not touch the macro. Re-check that one with
+           `<compiler> <entry's flags> -dM -E -x c++ /dev/null | grep <macro>`.
 
 Exit status: 0 the check holds; 1 it does not; 2 the instrument could not run.
 """
@@ -142,7 +156,20 @@ UNDEFINE_FLAGS = ("-U", "/U")
 # hand a -D/-U to the preprocessor unread. A token that starts with one is refused (exit 2),
 # like an unreadable response file, rather than modelled.
 REFUSED_OPTIONS = ("-include", "-imacros", "--include", "--imacros", "--define-macro",
-                   "--undefine-macro", "/FI", "-Wp,", "-Xpreprocessor", "-Xclang")
+                   "--undefine-macro", "/FI", "-Wp,", "-Xpreprocessor", "-Xclang",
+                   # fixpp#573: a GCC spec file and a Clang config file can add -D/-U the
+                   # census never reads, and -Xarch_<arch> applies its option only when
+                   # compiling for <arch>, so the census cannot know whether it applies.
+                   "-specs=", "--specs=", "--config=", "-Xarch_",
+                   # The directories Clang searches for its default config file: pointing one
+                   # elsewhere loads a config the census never reads, with any -include/-D/-U.
+                   "--config-system-dir=", "--config-user-dir=")
+# The same options in their separate-argument spelling (`--config <file>`), matched as the
+# whole token, not as a prefix, so that a token is refused only by the entry naming its own
+# spelling: a prefix `--config` would also refuse the directory options above, and dropping
+# their entries would then go unnoticed.
+REFUSED_SPLIT_OPTIONS = ("-specs", "--specs", "--config", "--config-system-dir",
+                         "--config-user-dir")
 
 
 def entry_includes_and_values(tokens: list[str], base: str) -> tuple[set[str], list[str]]:
@@ -201,7 +228,7 @@ def census(entries: list[dict], asio_dirs: set[str], n: str) -> tuple[list[dict]
             if tok.startswith("@") and not tok.endswith(".modmap"):
                 raise InstrumentError(f"response file {tok} in {entry['file']}: its flags "
                                       "cannot be read")
-            if tok.startswith(REFUSED_OPTIONS):
+            if tok.startswith(REFUSED_OPTIONS) or tok in REFUSED_SPLIT_OPTIONS:
                 raise InstrumentError(f"option {tok} in {entry['file']}: the census cannot "
                                       f"read {MACRO} through it")
         dirs, values = entry_includes_and_values(tokens, entry.get("directory", "."))

@@ -23,9 +23,9 @@
 //      std::pmr::monotonic_buffer_resource with a NULL upstream (any overrun
 //      is a hard failure — mirrors tests/alloc_guard/wire_alloc_guard_test.cpp).
 //  (b) global-malloc interception: mallocnesia via
-//      tools/mallocnesia/libmallocnesia.so + tools/check_alloc.py, gated by
-//      the `_mallocnesia` ctest registered in tests/codegen/CMakeLists.txt
-//      (skipped if the .so is absent).
+//      build/<preset>/lib/libmallocnesia.so + tools/check_alloc.py, gated by
+//      the ctest registered in tests/codegen/CMakeLists.txt; run it with
+//      `ctest --test-dir build/<preset> -R codegen_group_entry_alloc_gate_test_mallocnesia`.
 //
 // The measured window (between alloc_guard_start()/alloc_guard_end()) is
 // placed strictly around the READ path; the frame + arenas + top-level

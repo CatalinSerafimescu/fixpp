@@ -296,8 +296,8 @@ int main() {
     std::printf("  If run WITHOUT LD_PRELOAD: guards are null-checked no-ops; ");
     std::printf("zero-alloc not verified by this run.\n");
     std::printf(
-        "  Run: LD_PRELOAD=tools/mallocnesia/libmallocnesia.so "
-        "MALLOCNESIA_MAX_ALLOCS=0 ./log_spike\n");
+        "  Run: python3 tools/check_alloc.py --binary build/<preset>/bench/log/log_spike "
+        "--mallocnesia build/<preset>/lib/libmallocnesia.so\n");
     std::printf("  Expected: process exits 0 (zero allocs on producer path).\n\n");
 
     std::printf("--- Criterion B note (WSL2 debug) ---\n");

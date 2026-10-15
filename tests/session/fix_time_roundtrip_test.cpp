@@ -54,21 +54,23 @@ RoundTripResult roundtrip(utc_time_point tp, fix_time_precision prec) {
     r.parsed_tp = *parseres;
 
     // Lossless at emitted precision: the parsed value must equal the original
-    // truncated to the emitted precision.
-    auto trunc = [&](utc_time_point t) -> utc_time_point {
+    // floored to the emitted precision (fixpp#520: toward negative infinity, so
+    // a pre-epoch fraction lands in the unit that holds it). Valid only where the
+    // floored value is not before utc_time_point::min().
+    auto floor_to_prec = [&](utc_time_point t) -> utc_time_point {
         switch (prec) {
             case fix_time_precision::seconds:
-                return time_point_cast<seconds>(t);
+                return floor<seconds>(t);
             case fix_time_precision::millis:
-                return time_point_cast<milliseconds>(t);
+                return floor<milliseconds>(t);
             case fix_time_precision::micros:
-                return time_point_cast<microseconds>(t);
+                return floor<microseconds>(t);
             case fix_time_precision::nanos:
-                return time_point_cast<utc_time_point::duration>(t);
+                return floor<utc_time_point::duration>(t);
         }
         return t;
     };
-    r.equal = (r.parsed_tp == trunc(tp));
+    r.equal = (r.parsed_tp == floor_to_prec(tp));
     return r;
 }
 
@@ -753,6 +755,68 @@ TEST(FixTimeRange, GrammarExtremesAreRefused) {
 
 // The SendingTime of the fuzz seed seed_509_sendingtime_year_4048.
 TEST(FixTimeRange, Year4048IsRefused) { expect_refused("40480202-00:00:00.000"); }
+
+// ── fixpp#520: a pre-epoch time point with a fraction is floored ─────────────
+//
+// Each value lies before the epoch and is not a whole second, so truncation
+// toward zero and floor put it in different seconds.
+
+void expect_roundtrips(utc_time_point tp, fix_time_precision prec) {
+    SCOPED_TRACE(tp.time_since_epoch().count());
+    auto r = roundtrip(tp, prec);
+    ASSERT_TRUE(r.format_ok);
+    ASSERT_TRUE(r.parse_ok) << r.formatted;
+    EXPECT_TRUE(r.equal) << r.formatted << " parsed to "
+                         << r.parsed_tp.time_since_epoch().count();
+}
+
+TEST(FixTimePreEpoch, SubSecondRoundTripsAtSeconds) {
+    expect_roundtrips(utc_time_point{nanoseconds{-1}}, fix_time_precision::seconds);
+}
+
+TEST(FixTimePreEpoch, SubSecondRoundTripsAtMillis) {
+    expect_roundtrips(utc_time_point{milliseconds{-1500}}, fix_time_precision::millis);
+}
+
+TEST(FixTimePreEpoch, SubSecondRoundTripsAtMicros) {
+    expect_roundtrips(utc_time_point{microseconds{-1} - nanoseconds{1}},
+                      fix_time_precision::micros);
+}
+
+TEST(FixTimePreEpoch, SubSecondRoundTripsAtNanos) {
+    expect_roundtrips(utc_time_point{nanoseconds{-1'500'000'001}}, fix_time_precision::nanos);
+}
+
+// The instant 1.5 s before the epoch, from the issue.
+TEST(FixTimePreEpoch, IssueReproFormatsFlooredText) {
+    auto r = roundtrip(utc_time_point{milliseconds{-1500}}, fix_time_precision::millis);
+    ASSERT_TRUE(r.format_ok);
+    EXPECT_EQ(r.formatted, "19691231-23:59:58.500");
+}
+
+// min() itself: the formatter must not widen its floored second back to
+// nanoseconds, which does not fit (run under UBSan to see that overflow).
+TEST(FixTimePreEpoch, MinFormatsAndRoundTripsAtNanos) {
+    auto r = roundtrip(utc_time_point::min(), fix_time_precision::nanos);
+    ASSERT_TRUE(r.format_ok);
+    EXPECT_EQ(r.formatted, "16770921-00:12:43.145224192");
+    EXPECT_TRUE(r.parse_ok);
+    EXPECT_TRUE(r.equal);
+}
+
+// The round-trip domain's lower edge at seconds: the first whole second after
+// min() round-trips; one nanosecond earlier floors to a second before min(),
+// which formats and is then refused by the parse.
+TEST(FixTimePreEpoch, SecondsDomainEndsAtFirstWholeSecondAfterMin) {
+    const utc_time_point first{nanoseconds{-9'223'372'036'000'000'000LL}};
+    expect_roundtrips(first, fix_time_precision::seconds);
+
+    std::array<char, 32> buf{};
+    auto fmtres = utc_time_to_fix_string(first - nanoseconds{1}, fix_time_precision::seconds,
+                                         std::span<char>{buf});
+    ASSERT_TRUE(fmtres.has_value());
+    expect_refused(std::string_view(fmtres->data(), fmtres->size()));
+}
 
 }  // namespace
 }  // namespace fixpp::core::test

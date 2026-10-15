@@ -808,6 +808,19 @@ wheel_arm rotate 'cibw-conan-cxxflags' bindings/python/cibw-before-all.sh \
   "  --build=missing" "  -c tools.build:cxxflags='[\"-O0\"]' \\${NL}  --build=missing"
 wheel_arm rotate 'cibw-environment' .github/workflows/tier1.yml \
   'CCACHE_COMPRESSLEVEL=5"' 'CCACHE_COMPRESSLEVEL=5 CXXFLAGS=-O0"'
+# #566: asio's recycler slot count N is written once in a header, read by a
+# CMake function with file(STRINGS ... REGEX) and handed to a -D. A change to N
+# alone must rotate every lane kind. The edit is built from the header's own
+# line, so the arm does not restate the value; an empty read fails here.
+RECYCLER_HDR=include/fixpp/core/detail/asio_recycler_config.hpp
+RECYCLER_LINE="$(grep -m1 '^#define FIXPP_ASIO_RECYCLING_ALLOCATOR_CACHE_SIZE [0-9][0-9]*$' "$FS_BASE/$RECYCLER_HDR")" \
+  || fail "flag-arm 'asio-recycler-slot-count': no slot-count #define in the sandbox copy of $RECYCLER_HDR — is it still in --list-inputs?"
+RECYCLER_NEW="${RECYCLER_LINE% *} $(( ${RECYCLER_LINE##* } + 1 ))"
+host_arm rotate 'asio-recycler-slot-count' "$RECYCLER_HDR" "$RECYCLER_LINE" "$RECYCLER_NEW"
+wheel_arm rotate 'asio-recycler-slot-count-wheel' "$RECYCLER_HDR" "$RECYCLER_LINE" "$RECYCLER_NEW"
+# The same value appended to the imported asio::asio as an INTERFACE definition.
+host_arm rotate 'interface-compile-definitions' CMakeLists.txt \
+  'APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS' 'APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS FIXPP_X=1'
 
 # ── KEEP: comments, layout and non-flag code ──
 host_arm keep 'comment-inside-argument-list' cmake/Helpers.cmake \
@@ -845,6 +858,10 @@ wheel_arm keep 'cibw-comment' bindings/python/cibw-before-all.sh \
   '# before any wheel build.' '# before the first wheel build.'
 wheel_arm keep 'tier1-outside-cibw-environment' .github/workflows/tier1.yml \
   'mkdir -p /tmp/wheel-conan2' 'mkdir -p /tmp/wheel-conan2 /tmp/unrelated'
+# #566: the header is read for the lines the reader's regex matches, not hashed
+# whole, so a comment elsewhere in it keeps every lane kind's digest.
+host_arm keep 'asio-recycler-header-comment' "$RECYCLER_HDR" '// ONE SOURCE.' '// THE ONE SOURCE.'
+wheel_arm keep 'asio-recycler-header-comment-wheel' "$RECYCLER_HDR" '// ONE SOURCE.' '// THE ONE SOURCE.'
 
 # ── #513: subtrees a lane provably does not configure are pruned ──
 # fs_variant <name> <file> <old (exactly once)> <new>: a copy of FS_BASE with

@@ -10,8 +10,9 @@ Run from the library root. Prints a normalized text; ci/ccache-cache-key.sh
 stderr, when any input cannot be read or parsed. A partial surface would be a
 STABLE WRONG key that restore and seed agree on, so there is no fallback.
 `--list-inputs` prints the files the CMake surface can be built from, the
-unpruned union over all lanes, plus the wheel's inputs (the per-lane preset
-and Conan profile are not in it), so a harness can copy exactly those. It is
+unpruned union over all lanes and the files a FILE READER's calls name (below),
+plus the wheel's inputs (the per-lane preset and Conan profile are not in it),
+so a harness can copy exactly those. It is
 NOT every file an extract reads: the #513 prune also lists, through git, and
 parses every tracked CMakeLists.txt and *.cmake to find writes, and a file
 there that cannot be listed or parsed turns pruning off rather than failing
@@ -39,6 +40,18 @@ only the commands that can change a compile command line are kept:
     calls another flag-bearing one (fixpoint); its WHOLE normalized body is
     emitted, because control flow inside it (`return()`, `continue()`, an
     exemption check) decides where its flags land.
+    FILE READERS (#566): a function or macro whose body reads one of its own
+    parameters with `file(STRINGS "${<param>}" <var> ... REGEX <regex>)` is
+    found from its body, never named here. It counts as flag-bearing, and
+    each directory-scope call of it also emits the file it names and that
+    file's lines the function's OWN regex matches, as file(STRINGS) selects
+    them. So a value written once in a header and read into a -D (asio's
+    recycler slot count) rotates the tag when the value moves, and a comment
+    elsewhere in that header does not. The path must be literal, optionally
+    under ${CMAKE_SOURCE_DIR}, ${PROJECT_SOURCE_DIR}, ${CMAKE_CURRENT_LIST_DIR}
+    or, in a CMakeLists.txt, ${CMAKE_CURRENT_SOURCE_DIR}; any other variable,
+    a regex using `{`, `}` or a backslash before a letter or digit, or an
+    unreadable file fails the extract.
     VARIABLE CLOSURE: every variable a kept line reads — as `${VAR}`, or as a
     bare name in an if/elseif/while head — pulls in each directory-scope
     `set`/`unset`/`option` of VAR and each `string`/`list` naming VAR, and so
@@ -76,11 +89,12 @@ A variable written other than by `set`/`unset`/`option`/`string`/`list` (a
 value computed by another command, or inside a function that is not itself
 kept), a CMake file reached other than through `include()` of cmake/*.cmake or
 an `add_subdirectory()` in a CMakeLists.txt (one in a cmake/*.cmake module is
-not followed), `-D`/environment passed by a workflow step other than the
+not followed), a file reader called only from inside another function's body
+(that body is emitted, the value its call reads is not), `-D`/environment passed by a workflow step other than the
 wheel's `CIBW_ENVIRONMENT` (so a lane that turns on, by `-D`, a subtree its
 preset leaves OFF builds a subtree its tag is not keyed on), a write to VAR
 through a computed name (`set(${name} ...)`, cmake_parse_arguments), and
-header CONTENT.
+header CONTENT other than the lines a file reader selects.
 A trailing comment on a cibw-before-all.sh command line is hashed as part of
 that line, which only over-rotates. When a floored lane breaches on a HIT,
 check whether its cause lies in one of those; if it does, widen the surface
@@ -105,7 +119,7 @@ FLAG_VAR = re.compile(
     r"VISIBILITY_PRESET|SCAN_FOR_MODULES)|POSITION_INDEPENDENT_CODE|"
     r"VISIBILITY_INLINES_HIDDEN|INTERPROCEDURAL_OPTIMIZATION\w*|BUILD_TYPE)$")
 FLAG_PROPERTY = re.compile(
-    r"^(?:COMPILE_OPTIONS|COMPILE_DEFINITIONS|COMPILE_FLAGS|"
+    r"^(?:(?:INTERFACE_)?(?:COMPILE_OPTIONS|COMPILE_DEFINITIONS)|COMPILE_FLAGS|"
     r"POSITION_INDEPENDENT_CODE|(?:C|CXX)_(?:STANDARD|EXTENSIONS))$")
 PROPERTY_COMMANDS = {"set_property", "set_target_properties",
                      "set_directory_properties", "set_source_files_properties"}
@@ -384,8 +398,8 @@ def cmake_files(pruned=lambda head: False):
     return trees
 
 
-def cmake_surface(trees):
-    # Every function/macro definition, wherever it sits.
+def function_defs(trees):
+    """{name: block} for every function/macro definition, wherever it sits."""
     defs = {}
 
     def collect(items):
@@ -396,8 +410,129 @@ def cmake_surface(trees):
                 collect(it["items"])
     for _, tree in trees:
         collect(tree)
+    return defs
 
-    flagfns = set()
+
+# ── #566: a value a CMake function reads out of a file ──────────────────────
+
+def unquote(token):
+    """A CMake argument's value with its quotes and escapes removed. Variable
+    references are left in place for the caller to resolve or refuse."""
+    if not (len(token) >= 2 and token[0] == '"' and token[-1] == '"'):
+        return token
+    body, out, i = token[1:-1], [], 0
+    while i < len(body):
+        if body[i] == "\\" and i + 1 < len(body):
+            out.append({"n": "\n", "t": "\t", "r": "\r"}.get(body[i + 1], body[i + 1]))
+            i += 2
+        else:
+            out.append(body[i])
+            i += 1
+    return "".join(out)
+
+
+def file_readers(defs):
+    """{function name: (argument index, REGEX token)} for every function or
+    macro whose body reads one of its own parameters as a file with
+    `file(STRINGS "${<param>}" <var> ... REGEX <regex> ...)`. A call of one
+    hands it a path, and the lines of that file the regex matches are the
+    value. Derived from the bodies, so no reader is named here and the regex
+    is CMake's own, never a second copy of it."""
+    readers = {}
+    for fname, block in defs.items():
+        params = block["head"][1][1:]
+        for name, args in flat_commands(block["items"]):
+            if name != "file" or len(args) < 2 or args[0] != "STRINGS":
+                continue
+            if "REGEX" not in args[2:]:
+                continue
+            src = unquote(args[1])
+            for k, param in enumerate(params):
+                if src == "${" + param + "}":
+                    r = args.index("REGEX", 2)
+                    if r + 1 >= len(args):
+                        raise SurfaceError(f"function {fname}: file(STRINGS ... REGEX) has no regex")
+                    readers[fname] = (k, args[r + 1])
+    return readers
+
+
+def reader_path(path, cmd, readers):
+    """The tree-relative file a call of a reader names, or SurfaceError. Only a
+    literal path, optionally under a variable naming the calling file's own
+    directory or the source root, can be resolved without configuring."""
+    k = readers[cmd[0]][0]
+    if k >= len(cmd[1]):
+        raise SurfaceError(f"{path}: {cmd[0]}() passes no argument {k + 1}, the file it reads")
+    raw = unquote(cmd[1][k])
+    here = posixpath.dirname(path) or "."
+    subs = {"CMAKE_SOURCE_DIR": ".", "PROJECT_SOURCE_DIR": ".", "CMAKE_CURRENT_LIST_DIR": here}
+    # CMAKE_CURRENT_SOURCE_DIR is the calling file's directory only in a
+    # CMakeLists.txt; in an include()d module it is the includer's.
+    if path == "CMakeLists.txt" or path.endswith("/CMakeLists.txt"):
+        subs["CMAKE_CURRENT_SOURCE_DIR"] = here
+    rel = VAR_REF.sub(lambda m: subs.get(m.group(1), m.group(0)), raw)
+    if "$" in rel:
+        raise SurfaceError(
+            f"{path}: {cmd[0]}({cmd[1][k]}) names its file through a variable this "
+            "extract cannot resolve, so the value it reads cannot be hashed")
+    if posixpath.isabs(rel) or posixpath.normpath(rel).startswith("../"):
+        raise SurfaceError(f"{path}: {cmd[0]}({cmd[1][k]}) reads a file outside the tree")
+    return posixpath.normpath(rel)
+
+
+def reader_value(path, cmd, readers):
+    """The line the surface carries for a call of a reader: the file it names
+    and the lines of it the function's own regex matches, as CMake's
+    file(STRINGS ... REGEX) selects them (a search, line by line)."""
+    rel = reader_path(path, cmd, readers)
+    token = readers[cmd[0]][1]
+    rx_text = unquote(token)
+    # CMake's regex syntax is a subset of Python's except for these: `{`/`}`
+    # are literal there and quantifiers here, and a backslash before a letter
+    # or digit means different things in each. Refused rather than guessed.
+    if re.search(r"[{}]|\\[A-Za-z0-9]", rx_text):
+        raise SurfaceError(
+            f"{path}: {cmd[0]}()'s REGEX {token} uses syntax this extract does not translate")
+    try:
+        rx = re.compile(rx_text)
+    except re.error as e:
+        raise SurfaceError(f"{path}: {cmd[0]}()'s REGEX {token} does not compile: {e}") from None
+    hits = [line for line in read_text(rel).splitlines() if rx.search(line)]
+    return f"{rel}: " + (" | ".join(hits) if hits else "<no line matches>")
+
+
+def directory_commands(items):
+    """Every command at directory scope: inside if/foreach/while/block bodies,
+    never inside a function or macro body."""
+    for it in items:
+        if isinstance(it, dict):
+            if it["head"][0] not in ("function", "macro"):
+                yield from directory_commands(it["items"])
+        elif it[0] != "__branch__":
+            yield it
+
+
+def reader_inputs(trees):
+    """The files the readers' directory-scope calls name, for --list-inputs."""
+    readers = file_readers(function_defs(trees))
+    out = []
+    for path, tree in trees:
+        for cmd in directory_commands(tree):
+            if cmd[0] in readers:
+                rel = reader_path(path, cmd, readers)
+                if rel not in out:
+                    out.append(rel)
+    return out
+
+
+def cmake_surface(trees):
+    defs = function_defs(trees)
+    readers = file_readers(defs)
+
+    # A reader counts as flag-bearing: its body is emitted whole and every call
+    # of it is kept, with the value it reads (#566). That over-rotates for a
+    # call whose result reaches no flag, and never under-rotates.
+    flagfns = set(readers)
     changed = True
     while changed:
         changed = False
@@ -458,6 +593,8 @@ def cmake_surface(trees):
                         reads(c, refs)
                     out.append(f"{path}: " + " > ".join(
                         fmt(c) for c in ctx + heads + [it]))
+                    if it[0] in readers:
+                        out.append(f"{path}: {it[0]} reads " + reader_value(path, it, readers))
 
     # The variable closure: walk, collect every variable the kept lines read,
     # walk again keeping the writes to those, until no new variable appears.
@@ -704,7 +841,8 @@ def main(argv):
     try:
         if listing:
             trees = cmake_files()
-            lines = [p for p, _ in trees] + [PYPROJECT, CIBW_BEFORE_ALL, WHEEL_WORKFLOW]
+            lines = ([p for p, _ in trees] + reader_inputs(trees)
+                     + [PYPROJECT, CIBW_BEFORE_ALL, WHEEL_WORKFLOW])
         else:
             kind, name = argv[1], argv[2]
             if kind == "host":

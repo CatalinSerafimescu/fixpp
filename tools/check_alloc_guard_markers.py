@@ -2,7 +2,7 @@
 """Recurrence guard for the inert alloc-guard marker bug (item 13, 2026-06-19).
 
 The mallocnesia no-alloc gates rely on alloc_guard_start() / alloc_guard_end()
-being WEAK UNDEFINED symbols so that LD_PRELOAD=tools/mallocnesia/libmallocnesia.so
+being WEAK UNDEFINED symbols so that LD_PRELOAD=build/<preset>/lib/libmallocnesia.so
 can interpose them at runtime.
 
 A LOCAL definition WITH A BODY — e.g. `__attribute__((weak)) void alloc_guard_start() {}`
