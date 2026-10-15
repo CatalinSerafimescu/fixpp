@@ -24,7 +24,9 @@ include/fixpp/core/detail/asio_recycler_config.hpp. Two checks:
            option the census cannot read the macro's state through (REFUSED_OPTIONS and
            REFUSED_SPLIT_OPTIONS: -include, -imacros and their -- forms, --define-macro,
            --undefine-macro, /FI, -Wp, the -Xpreprocessor and -Xclang pass-throughs, a GCC
-           spec file (-specs, --specs), a Clang config file (--config) and -Xarch_<arch>).
+           spec file (-specs, --specs), a Clang config file (--config), the directories Clang
+           searches for its default config file (--config-system-dir, --config-user-dir) and
+           -Xarch_<arch>).
            With --positive-control <source>, it strips the definition from that entry in
            memory and passes only if the check then reports exactly that entry.
 
@@ -34,7 +36,7 @@ include/fixpp/core/detail/asio_recycler_config.hpp. Two checks:
            can shadow a header; CL and _CL_, which add any option to MSVC's cl), the
            compiler's built-in definitions, and a
            config or spec file the driver loads by default (Clang's <triple>-clang++.cfg,
-           whose search directories --config-system-dir and --config-user-dir set; GCC's
+           from the config directories it was built with or its own binary's directory; GCC's
            built-in specs). A pass therefore holds only for a toolchain whose defaults and
            environment do not touch the macro. Re-check that one with
            `<compiler> <entry's flags> -dM -E -x c++ /dev/null | grep <macro>`.
@@ -158,13 +160,16 @@ REFUSED_OPTIONS = ("-include", "-imacros", "--include", "--imacros", "--define-m
                    # fixpp#573: a GCC spec file and a Clang config file can add -D/-U the
                    # census never reads, and -Xarch_<arch> applies its option only when
                    # compiling for <arch>, so the census cannot know whether it applies.
-                   "-specs=", "--specs=", "--config=", "-Xarch_")
+                   "-specs=", "--specs=", "--config=", "-Xarch_",
+                   # The directories Clang searches for its default config file: pointing one
+                   # elsewhere loads a config the census never reads, with any -include/-D/-U.
+                   "--config-system-dir=", "--config-user-dir=")
 # The same options in their separate-argument spelling (`--config <file>`), matched as the
-# whole token. They are not prefixes because a prefix `--config` would also refuse Clang's
-# `--config-system-dir=` and `--config-user-dir=`. Those are deliberately NOT refused: they
-# carry no -D/-U, only where Clang looks for its default config files, which is a compiler
-# default this census cannot see either way (see the module docstring).
-REFUSED_SPLIT_OPTIONS = ("-specs", "--specs", "--config")
+# whole token, not as a prefix, so that a token is refused only by the entry naming its own
+# spelling: a prefix `--config` would also refuse the directory options above, and dropping
+# their entries would then go unnoticed.
+REFUSED_SPLIT_OPTIONS = ("-specs", "--specs", "--config", "--config-system-dir",
+                         "--config-user-dir")
 
 
 def entry_includes_and_values(tokens: list[str], base: str) -> tuple[set[str], list[str]]:
