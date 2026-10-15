@@ -554,7 +554,10 @@ MidSyscallReading run_mid_syscall(asio::io_context& ioc, asio::cancellation_sign
             } catch (...) {
                 m.threw = true;
             }
-            m.after = (co_await asio::this_coro::cancellation_state).cancelled();
+            // Read into a local first: inside a template, GCC 13 cannot type a member call on
+            // the result of a co_await written in the same expression.
+            auto const state = co_await asio::this_coro::cancellation_state;
+            m.after = state.cancelled();
             m.done = true;
         },
         asio::bind_cancellation_slot(sig.slot(), asio::detached));

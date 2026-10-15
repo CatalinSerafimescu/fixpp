@@ -213,7 +213,10 @@ asio::awaitable<void> await_and_read(
         out->threw = true;
     }
     // The next statement after the call, or the first after the handler.
-    out->after = (co_await asio::this_coro::cancellation_state).cancelled();
+    // Read into a local first: inside a template, GCC 13 cannot type a member call on the
+    // result of a co_await written in the same expression.
+    auto const state = co_await asio::this_coro::cancellation_state;
+    out->after = state.cancelled();
     out->done = true;
 }
 
