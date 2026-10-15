@@ -115,27 +115,26 @@ PCT="n/a"
 # the pass count.  RAN is empty when the line is absent (ctest died before its
 # summary), and an empty RAN can match no pin, so that degrades to
 # DIAGNOSTIC ONLY rather than to a silent pass.
+#
+# The three figures come from ci/ctest-log-figures.awk, which says how each is
+# read and why the executed count is anchored as it is. Cell S4 of
+# ci/test-parallelism-aba-seam.sh runs the same file against
+# ci/parallelism-verdict.py's parser, so this script holds no copy of it (#576).
 RAN=""
 CTEST_REAL=""
 SUM_S=""
+FIGURES_AWK="${HERE}/ctest-log-figures.awk"
 if [ -r "$CTEST_LOG" ]; then
-  # ANCHORED AT BOTH ENDS of ctest's own summary line, verified against real
-  # output: `100% tests passed, 0 tests failed out of 67` — column 0 to
-  # end-of-line, no leading or trailing whitespace.
-  #
-  # ⚠️ Both looser forms were tried and both are defeated by a DECOY, because
-  # `--output-on-failure` puts arbitrary test output in this log:
-  #   * a bare `out of [0-9]+` reads any assertion message carrying the phrase;
-  #   * the whole unanchored sentence `tests passed,.* tests failed out of N`
-  #     reads a decoy that quotes ctest's phrasing — which is what a test
-  #     asserting ON ctest output would naturally contain.
-  # Neither was caught by reading; T14b of ci/test-peak-rss.sh caught both.
-  #
-  # The last match wins — the summary is printed after the tests it summarises.
-  RAN="$(awk 'match($0, /^[0-9]+% tests passed, [0-9]+ tests failed out of [0-9]+$/) { m = $0; sub(/.* out of /, "", m); n = m } END { print n }' "$CTEST_LOG")"
-  CTEST_REAL="$(awk -F'= *' '/Total Test time \(real\)/ { t = $2 } END { gsub(/[^0-9.]/, "", t); print t }' "$CTEST_LOG")"
-  # `  12/361 Test  #7: name ......   Passed    1.42 sec`
-  SUM_S="$(awk '/^ *[0-9]+\/[0-9]+ +Test +#[0-9]+/ && match($0, /[0-9.]+ sec$/) { s += substr($0, RSTART, RLENGTH-4) } END { if (s > 0) printf "%.1f", s }' "$CTEST_LOG")"
+  if [ ! -r "$FIGURES_AWK" ]; then
+    # Without the reader every figure is empty, and an empty RAN would read only
+    # as "the count did not match" below. Say what actually happened.
+    echo "::warning::#266 peak-memory report for ${PRESET} could not read ${FIGURES_AWK}, so the executed count, the real time and the summed durations are UNREAD on this run; the figure below is DIAGNOSTIC ONLY for that reason, not because the run differed from its basis."
+  else
+    FIGURES="$(awk -f "${HERE}/ctest-log-figures.awk" "$CTEST_LOG")"
+    RAN="$(printf '%s\n' "$FIGURES" | sed -n 's/^ran=//p')"
+    CTEST_REAL="$(printf '%s\n' "$FIGURES" | sed -n 's/^real_s=//p')"
+    SUM_S="$(printf '%s\n' "$FIGURES" | sed -n 's/^sum_s=//p')"
+  fi
 fi
 
 CONCURRENCY="n/a"

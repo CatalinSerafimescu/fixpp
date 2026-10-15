@@ -50,6 +50,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # against deliberately broken copies. Default is the shipped pair.
 MEASURE="${PEAK_RSS_MEASURE:-${HERE}/measure-peak-rss.py}"
 REPORT="${PEAK_RSS_REPORT:-${HERE}/peak-memory-report.sh}"
+# The report reads its ctest-log figures from this file beside it (#576), so a
+# copy of the report is always made with a copy of this file next to it.
+FIGURES_AWK="$(dirname "$REPORT")/ctest-log-figures.awk"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 PASS=0; FAIL=0
@@ -260,7 +263,7 @@ echo "== the acceptance disposition =="
 # From here the pin is exercised for real, against a preset line this harness
 # adds to a COPY of the pin file so the shipped one is never mutated.
 PINNED_DIR="$WORK/pinned"; mkdir -p "$PINNED_DIR"
-cp "$MEASURE" "$REPORT" "$HERE/expected-sanitizer-reports.txt" "$PINNED_DIR/"
+cp "$MEASURE" "$REPORT" "$FIGURES_AWK" "$HERE/expected-sanitizer-reports.txt" "$PINNED_DIR/"
 { cat "$HERE/expected-eligible-tests.txt"; printf '%s %s\n' "$FAKE" 3; } > "$PINNED_DIR/expected-eligible-tests.txt"
 
 run_pinned() {
@@ -552,17 +555,19 @@ echo "== mutants — every cell above proven RED for its own stated reason =="
 
 MUT="$WORK/mut"; mkdir -p "$MUT"
 
-mutant() {  # <name> <file: measure|report> <sed-expr> <cell that must go RED> <why>
+mutant() {  # <name> <file: measure|report|figures> <sed-expr> <cell that must go RED> <why>
   local name="$1" which="$2" expr="$3" cell="$4" why="$5"
   local src dst out rc
   rm -rf "$MUT"; mkdir -p "$MUT"
   cp "$MEASURE" "$MUT/measure-peak-rss.py"
   cp "$REPORT"  "$MUT/peak-memory-report.sh"
+  cp "$FIGURES_AWK" "$MUT/ctest-log-figures.awk"
   cp "$HERE/expected-eligible-tests.txt" "$MUT/"
   chmod +x "$MUT/peak-memory-report.sh"
   case "$which" in
     measure) dst="$MUT/measure-peak-rss.py"; src="$MEASURE";;
     report)  dst="$MUT/peak-memory-report.sh"; src="$REPORT";;
+    figures) dst="$MUT/ctest-log-figures.awk"; src="$FIGURES_AWK";;
   esac
   sed -i "$expr" "$dst"
   if cmp -s "$src" "$dst"; then
@@ -624,14 +629,14 @@ mutant always-evidence report \
 
 # The pre-tightening form of the workload-size scan: a bare `out of N` anywhere
 # in the log. It reads a failing test's own output as the run's test count.
-mutant bare-out-of report \
-  's|^  RAN="$(awk .match($0, /\^\[0-9\]+% tests passed.*$|  RAN="$(awk '"'"'match($0, /out of [0-9]+/) { n = substr($0, RSTART+7, RLENGTH-7) } END { print n }'"'"' "$CTEST_LOG")"  # MUTANT|' \
+mutant bare-out-of figures \
+  's|^match($0, /\^\[0-9\]+% tests passed.*$|match($0, /out of [0-9]+/) { n = substr($0, RSTART+7, RLENGTH-7) }  # MUTANT|' \
   "T14b" "scans for a bare 'out of N' and so reads a failing test's output as the workload size"
 
 # The intermediate form this script actually shipped for one revision: the whole
 # sentence, but UNANCHORED. A decoy quoting ctest's phrasing walks through it.
-mutant unanchored-summary report \
-  's|^  RAN="$(awk .match($0, /\^\[0-9\]+% tests passed.*$|  RAN="$(awk '"'"'match($0, /tests passed,.* tests failed out of [0-9]+/) { m = substr($0, RSTART, RLENGTH); sub(/.* out of /, "", m); n = m } END { print n }'"'"' "$CTEST_LOG")"  # MUTANT|' \
+mutant unanchored-summary figures \
+  's|^match($0, /\^\[0-9\]+% tests passed.*$|match($0, /tests passed,.* tests failed out of [0-9]+/) { m = substr($0, RSTART, RLENGTH); sub(/.* out of /, "", m); n = m }  # MUTANT|' \
   "T14b" "matches ctest's summary sentence anywhere on a line, so a test quoting that phrasing is read as the workload size"
 
 # The form that shipped for one CI run: the count, with no attribution.
