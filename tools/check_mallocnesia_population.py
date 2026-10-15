@@ -133,6 +133,44 @@ REQUIRED_GATES = frozenset({
     "session_refresh_on_logon_w8_mallocnesia",
 })
 
+# fixpp#574: every other ZERO gate, i.e. every `*_mallocnesia` registration whose command
+# carries no --expect-violation and is not in REQUIRED_GATES. The floor cannot keep these
+# either, for the reason given above, so each is required BY NAME, spelled out rather than
+# read from the tree this checks (a set read from the tree cannot see a gate dropped from it).
+# Only gates that register on BOTH Release lanes that run this check may be rows: these
+# register wherever FIXPP_MALLOCNESIA_SUPPORTED holds, under no build-type, compiler or option
+# condition beyond FIXPP_BUILD_TESTS (and FIXPP_BUILD_CODEGEN_TOOL for the codegen one), which
+# both lanes meet. A gate registered under a narrower condition belongs in neither set without
+# a message keyed on that condition, as REQUIRED_GATES' is on Release.
+# Re-derive on a Linux Release tree with
+#   ctest --test-dir build/<preset> --show-only=json-v1 -R '_mallocnesia$' | python3 -c \
+#     'import json,sys; print("\n".join(sorted(t["name"] for t in json.load(sys.stdin)["tests"]
+#      if "--expect-violation" not in t.get("command", []))))'
+# minus REQUIRED_GATES, and confirm each one's condition by reading the `if()` blocks around its
+# fixpp_add_mallocnesia_test call and the add_subdirectory that reaches it.
+REQUIRED_ZERO_GATES = frozenset({
+    "alloc_guard_validate_gate_mallocnesia",
+    "capi_message_field_iteration_mallocnesia",
+    "capi_message_read_mallocnesia",
+    "capi_message_write_mallocnesia",
+    "capi_recv_alloc_guard_mallocnesia",
+    "capi_toapp_alloc_guard_mallocnesia",
+    "codegen_group_entry_alloc_gate_test_mallocnesia",
+    "credential_store_redaction_mallocnesia",
+    "decimal_alloc_guard_test_mallocnesia",
+    "dict066_grouped_read_alloc_guard_mallocnesia",
+    "dictionary_group_context_lookup_alloc_gate_test_mallocnesia",
+    "log_alloc_mallocnesia",
+    "perf_transport_read_alloc_guard_mallocnesia",
+    "reify_owned_alloc_guard_mallocnesia",
+    "session_length_data_scanner_mallocnesia",
+    "session_next_expected_msgseqnum_mallocnesia",
+    "session_sending_time_precision_mallocnesia",
+    "sync_alloc_guard_test_mallocnesia",
+    "tls_handshake_alloc_guard_mallocnesia",
+    "wire_alloc_guard_test_mallocnesia",
+})
+
 # CTest properties under which a test whose command fails is reported as passed or
 # skipped, or is not run at all. On a label member any of them turns `ctest -L mallocnesia`
 # green over a broken gate or control: a broken control exits 1, and SKIP_RETURN_CODE 1
@@ -233,8 +271,9 @@ def main() -> int:
             + ". Add a POSITIVE_CONTROLS row naming the allocation path it proves, or "
               "rename it: a control nobody declared is one nobody will notice losing.")
 
-    # (0b') B35'S GATES MUST EXIST, each by name and in the label. The floor sees a population
-    # that shrinks; only this sees WHICH gates are in it.
+    # (0b') THE REQUIRED GATES MUST EXIST, each by name and in the label: B35's, and every
+    # other zero gate. The floor sees a population that shrinks; only this sees WHICH gates
+    # are in it.
     for kind, have in (("by name", by_name), ("from the `mallocnesia` label", by_label)):
         missing = sorted(REQUIRED_GATES - have)
         if missing:
@@ -245,6 +284,15 @@ def main() -> int:
                   "types only (R-4): on a Debug tree run this against linux-gcc-release or "
                   "linux-clang-release instead. If the removal is deliberate, delete the row "
                   "from REQUIRED_GATES in the same commit and say why.")
+        missing = sorted(REQUIRED_ZERO_GATES - have)
+        if missing:
+            failures.append(
+                f"zero gate(s) MISSING {kind}: " + ", ".join(missing)
+                + ". Each asserts that its window allocates nothing, and the floor cannot "
+                  "see a gate replaced by another of the same count. They register on every "
+                  "configuration where the interceptor is supported. If the removal is "
+                  "deliberate, delete the row from REQUIRED_ZERO_GATES in the same commit "
+                  "and say why.")
 
     # (0c) DUPLICATES BEFORE COMMAND LOOKUP. The command pin below reads one command by
     # name, so a duplicate can stand in for a different test with the same name.

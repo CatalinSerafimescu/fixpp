@@ -136,8 +136,33 @@ REQUIRED_NAMES=(
   perf_store_alloc_guard_wd_mallocnesia
   session_refresh_on_logon_w8_mallocnesia
 )
+# Every other zero gate, which the checker also requires BY NAME (its REQUIRED_ZERO_GATES,
+# fixpp#574). SPELLED OUT for the same reason: the T11a arms assert each one's absence is
+# reported by name.
+ZERO_NAMES=(
+  alloc_guard_validate_gate_mallocnesia
+  capi_message_field_iteration_mallocnesia
+  capi_message_read_mallocnesia
+  capi_message_write_mallocnesia
+  capi_recv_alloc_guard_mallocnesia
+  capi_toapp_alloc_guard_mallocnesia
+  codegen_group_entry_alloc_gate_test_mallocnesia
+  credential_store_redaction_mallocnesia
+  decimal_alloc_guard_test_mallocnesia
+  dict066_grouped_read_alloc_guard_mallocnesia
+  dictionary_group_context_lookup_alloc_gate_test_mallocnesia
+  log_alloc_mallocnesia
+  perf_transport_read_alloc_guard_mallocnesia
+  reify_owned_alloc_guard_mallocnesia
+  session_length_data_scanner_mallocnesia
+  session_next_expected_msgseqnum_mallocnesia
+  session_sending_time_precision_mallocnesia
+  sync_alloc_guard_test_mallocnesia
+  tls_handshake_alloc_guard_mallocnesia
+  wire_alloc_guard_test_mallocnesia
+)
 REQUIRED=()
-for _r in "${REQUIRED_NAMES[@]}"; do REQUIRED+=("$_r:mallocnesia"); done
+for _r in "${REQUIRED_NAMES[@]}" "${ZERO_NAMES[@]}"; do REQUIRED+=("$_r:mallocnesia"); done
 
 # T0 — THE REAL TREES, one per Linux Release preset tier1.yml runs the gates on. Without
 # this the suite proves only that the checker can say no. Each is skipped (not failed) when
@@ -273,9 +298,12 @@ check "T7h a member carrying TIMEOUT only is accepted" 0 \
   "$(with_prop "$(mk t7h-timeout "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" \
                "$_ctl" TIMEOUT 30)"
 
-# ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
-out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" --min-gates 50 2>&1)"; rc=$?
-if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 50"; then
+# ⚠️ And the floor itself, which is what P2 showed a decoy walking past. The floor is one
+# above the fixture's own named gates, derived so that a longer required list cannot lift the
+# fixture over it.
+_t7c_floor=$(( 1 + ${#CONTROLS[@]} + ${#REQUIRED[@]} + 1 ))
+out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "${CONTROLS[@]}" "${REQUIRED[@]}" "${EXTRAS[@]}")" --min-gates "$_t7c_floor" 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is $_t7c_floor"; then
   echo "ok    T7c the --min-gates floor fires when the population SHRINKS"; pass=$((pass+1))
 else
   echo "FAIL  T7c floor did not fire: rc=$rc"; echo "$out" | sed 's/^/      /' | head -2; fail=$((fail+1))
@@ -285,9 +313,11 @@ fi
 # population a deleted gate plus a padding gate passes it. One arm per required gate, each
 # with every other required gate present and the floor met exactly, so only the identity
 # rule can fire: the arm also requires that the floor did NOT.
-_floor=$(( ${#CONTROL_NAMES[@]} + ${#REQUIRED_NAMES[@]} ))
+_floor=$(( ${#CONTROL_NAMES[@]} + ${#REQUIRED_NAMES[@]} + ${#ZERO_NAMES[@]} ))
+_zero=()
+for _z in "${ZERO_NAMES[@]}"; do _zero+=("$_z:mallocnesia"); done
 for _missing in "${REQUIRED_NAMES[@]}"; do
-  _others=()
+  _others=("${_zero[@]}")
   for _r in "${REQUIRED_NAMES[@]}"; do [ "$_r" = "$_missing" ] || _others+=("$_r:mallocnesia"); done
   out="$(python3 "$CHECK" --min-gates "$_floor" --build-dir "$(mk "t10a-$_missing" \
           "${CONTROLS[@]}" "${_others[@]}" "padding_mallocnesia:mallocnesia" "${EXTRAS[@]}")" 2>&1)"; rc=$?
@@ -300,7 +330,7 @@ for _missing in "${REQUIRED_NAMES[@]}"; do
   fi
 done
 # The label half of the same rule: every B35 gate registered, one without the label.
-_set=()
+_set=("${_zero[@]}")
 for _r in "${REQUIRED_NAMES[@]}"; do
   if [ "$_r" = "${REQUIRED_NAMES[0]}" ]; then _set+=("$_r:alloc_guard"); else _set+=("$_r:mallocnesia"); fi
 done
@@ -314,6 +344,34 @@ if [ "$rc" = 0 ] && printf '%s' "$out" | grep -qF "named gate(s), all labelled";
 else
   echo "FAIL  T10b rc=$rc (want 0)"; echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
 fi
+
+# ── T11: every other zero gate, by identity (fixpp#574). The same substitution as T10a: one
+# arm per zero gate, that gate dropped and a padding gate added so the exact floor still
+# holds, every other required gate present. Only the identity rule can fire, and the arm
+# requires that the floor did NOT.
+_b35=()
+for _r in "${REQUIRED_NAMES[@]}"; do _b35+=("$_r:mallocnesia"); done
+for _missing in "${ZERO_NAMES[@]}"; do
+  _others=("${_b35[@]}")
+  for _z in "${ZERO_NAMES[@]}"; do [ "$_z" = "$_missing" ] || _others+=("$_z:mallocnesia"); done
+  out="$(python3 "$CHECK" --min-gates "$_floor" --build-dir "$(mk "t11a-$_missing" \
+          "${CONTROLS[@]}" "${_others[@]}" "padding_mallocnesia:mallocnesia" "${EXTRAS[@]}")" 2>&1)"; rc=$?
+  if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "zero gate(s) MISSING by name: $_missing." \
+     && ! printf '%s' "$out" | grep -qF "floor is"; then
+    echo "ok    T11a a substituted zero gate is rejected BY NAME at an exact floor: $_missing"; pass=$((pass+1))
+  else
+    echo "FAIL  T11a $_missing: rc=$rc (want 1, named, floor not fired)"
+    echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
+  fi
+done
+# The label half: every zero gate registered, one without the label.
+_set=("${_b35[@]}")
+for _z in "${ZERO_NAMES[@]}"; do
+  if [ "$_z" = "${ZERO_NAMES[0]}" ]; then _set+=("$_z:alloc_guard"); else _set+=("$_z:mallocnesia"); fi
+done
+check "T11b a zero gate without the label is rejected BY NAME" 1 \
+  "zero gate(s) MISSING from the \`mallocnesia\` label: ${ZERO_NAMES[0]}." \
+  "$(mk t11b "${CONTROLS[@]}" "${_set[@]}" "${EXTRAS[@]}")"
 
 # ── T8: the raw-preload scanner under a NON-UTF-8 LOCALE ─────────────────────
 # MEASURED on windows-msvc-release: `path.read_text()` with no encoding uses the LOCALE
