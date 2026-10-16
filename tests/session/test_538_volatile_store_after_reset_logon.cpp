@@ -310,8 +310,8 @@ protected:
 
     StoreReading read_store(MessageStore& store) {
         StoreReading r;
-        r.next_out =
-            run_sync(store.next_seqnum(direction_t::outbound, false), "VolatileStore::next");
+        r.next_out = run_sync(store.next_seqnum(direction_t::outbound, false),
+                              "StoreCellBase::read_store/next");
         r.slot2 = retrieve(store, 2, 2);
         r.slot3 = retrieve(store, 3, 3);
         r.range = retrieve(store, 2, 3);
@@ -489,7 +489,8 @@ protected:
         MessageStore* store_ptr = session_test_access::store(s);
         ASSERT_NE(store_ptr, nullptr) << "setup: the session must hold a store";
         const auto next_out =
-            run_sync(store_ptr->next_seqnum(direction_t::outbound, false), "VolatileStore::next");
+            run_sync(store_ptr->next_seqnum(direction_t::outbound, false),
+                     "StoreAfterResetLogon::run_resend_before_any_send_cell/next");
         ASSERT_TRUE(next_out.has_value() && *next_out == 2U)
             << "setup: the store's NextNumOut after the 141=Y exchange: " << describe(next_out);
 

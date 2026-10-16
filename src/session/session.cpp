@@ -1001,9 +1001,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
     // Constructed after the re-entrancy test above, so a re-entrant call leaves the
     // outer call's flag set.
     struct clear_on_exit {
-        bool& flag;
-        ~clear_on_exit() { flag = false; }
-    } const clear_hydrating{hydrating_};
+        bool* flag;
+        ~clear_on_exit() { *flag = false; }
+    } const clear_hydrating{&hydrating_};
 
     // Non-persistent skip (D-10 / C2.2 / INV-H4): memory store, null store, or any
     // store whose factory returned yields_persistent_store()==false.
@@ -4547,7 +4547,7 @@ asio::awaitable<std::optional<fixpp::core::expected_t<void>>> Session::resend_ga
     static constexpr std::string_view kPhrase = "ResendRequest unanswered, expecting MsgSeqNum ";
     std::array<char, 64> text_buf{};
     static_assert(kPhrase.size() + std::numeric_limits<seqnum_t>::digits10 + 1 <= text_buf.size());
-    char* const digits = std::copy(kPhrase.begin(), kPhrase.end(), text_buf.data());
+    char* const digits = std::ranges::copy(kPhrase, text_buf.data()).out;
     const char* const text_end =
         std::to_chars(digits, text_buf.data() + text_buf.size(), next_expected).ptr;
     const std::string_view text{text_buf.data(),
@@ -7125,9 +7125,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::run_logout_phase1() noex
         asio::steady_timer confirmed{co_await asio::this_coro::executor,
                                      asio::steady_timer::time_point::max()};
         struct wake_clear {
-            std::function<void()>& wake;
-            ~wake_clear() { wake = nullptr; }
-        } const clear_on_exit{logout_wait_wake_};
+            std::function<void()>* wake;
+            ~wake_clear() { *wake = nullptr; }
+        } const clear_on_exit{&logout_wait_wake_};
         logout_wait_wake_ = [&confirmed] { confirmed.cancel(); };
         try {
             (void)co_await (confirmed.async_wait(asio::as_tuple(asio::use_awaitable)) ||
