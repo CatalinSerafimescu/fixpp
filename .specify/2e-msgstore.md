@@ -1974,3 +1974,14 @@ action" no longer describes the session.
   await that met it was a store call, and `Session::open` and `Session::drive_reconnect` return it for
   any cancellation that ended the initiator's Logon emission. `include/fixpp/core/error.hpp` states
   both at the enumerator. Its C-ABI mapping, `FIXPP_ERR_CANCELLED`, is unchanged.
+
+### Appendix Z2 §1, the order of `store()` calls (note §10, D-OUT-7; ruling R-21)
+
+Appendix Z2 §1 states that calls to `MessageStore::store` on one instance complete in the order they
+were made, and that `MemoryStore` and `FileStore` meet that requirement. B28 narrows it:
+calls to `store()` that a cancellation does not end complete in the order they were made;
+a call that a cancellation ended may return earlier. On `FileStore`, a call queued at the
+store's lock that a cancellation ends returns `store_cancelled` while the call ahead of it
+still holds the lock. Both shipped stores meet the requirement in this form.
+`MessageStore::store`'s comment in `include/fixpp/session/message_store.hpp` states it, and B&L
+`B-563-4` and `B-538-3` are the rows a user reads.

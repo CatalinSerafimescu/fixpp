@@ -16,9 +16,9 @@ refs:
   - .specify/447-458-452-capi-refusals.md
   - .specify/544-hot-path-zero-alloc.md
   - .specify/536-537-538-recovery-liveness.md
+  - .specify/563-564-callback-send.md
   - specs/059-outbound-store-fail-closed/research.md
   - specs/059-outbound-store-fail-closed/contracts/store-then-emit-disposition.md
-  - .specify/563-564-callback-send.md
   - specs/005-session-establishment-fsm/spec.md
   - specs/093-inbound-frame-dispositions/spec.md
   - specs/093-inbound-frame-dispositions/plan.md
@@ -381,6 +381,13 @@ it through an `Application` callback is the callback the stretch itself calls.
   fixpp#579.
 - **R-6.** "Calls to `store()` complete in the order they were made" is a requirement of
   `MessageStore::store`, not a disclosed limitation of send ordering (`B-563-4`).
+  ⚠️ **Narrowed by B28** (`.specify/536-537-538-recovery-liveness.md` §10, D-OUT-7; ruling R-21;
+  B&L `B-538-3`), and with it `.specify/563-564-callback-send.md` §0 (R-6), §2.1 and §4, which
+  state it unconditionally:
+  calls to `store()` that a cancellation does not end complete in the order they were made;
+  a call that a cancellation ended may return earlier. On `FileStore`, a call queued at the
+  store's lock that a cancellation ends returns `store_cancelled` while the call ahead of it
+  still holds the lock.
 - **R-7.** A callback must not run the session's own executor. The waits of R-1 and R-4 are one post
   and do not hold there; the case is outside the contract, as a false `direct_executor` attestation
   already was (`L-007-2`).
