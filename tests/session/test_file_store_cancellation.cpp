@@ -33,8 +33,11 @@
 //     body inside the offload (fixpp#598, note §11.6); its section below says how,
 //     and what shows that the emit arrived.
 //
-// ANTI-HANG: every live cell uses a bounded future.wait_for so a wedge FAILs
-// rather than hanging ctest. [[feedback_fail_placeholder_red_test]]
+// ANTI-HANG: the arm (a) cells run their operations under ioc.run_for with a bound, the
+// arm (b) cells under pump_until with its budget, and the hold probe's spin is bounded by
+// wait_until_observed, so a wedge in the operation under test FAILs rather than hanging
+// ctest. The setup, the readbacks and the post-rename reopen-failure witness wait on
+// std::future::get with no bound. [[feedback_fail_placeholder_red_test]]
 //
 // Executor topology ([[feedback_strand_in_any_executor_refcount_race]]):
 //   arm (a) and arm (b): io_context (single-threaded) as session executor + pool_ as
