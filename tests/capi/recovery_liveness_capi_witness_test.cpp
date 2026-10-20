@@ -35,6 +35,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/error.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +44,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -1051,7 +1053,7 @@ void logout_wait_cell(bool b_drops) {
 
     // The close is bounded by the session's logout timeout.
     (void)service({&t.a}, 0ms, started + kLogoutTimeout + kStepBudget,
-                  [&] { return t.close.done() && t.a.sock.eof(); });
+                  [&] { return t.close.done() && t.a.sock.ended_at().has_value(); });
     ASSERT_TRUE(t.close.done()) << "setup: fixpp_session_close(A) did not return";
     EXPECT_EQ(t.close.rc(), FIXPP_ERR_OK) << "fixpp_session_close(A)";
     EXPECT_GE(ms_between(started, t.close.returned_at()).count(),
@@ -1059,11 +1061,21 @@ void logout_wait_cell(bool b_drops) {
         << "fixpp_session_close(A) returns no earlier than its logout timeout after the call "
            "started (times in ms)"
         << after_the_drop;
-    auto const eof = t.a.sock.eof_at();
-    ASSERT_TRUE(eof.has_value()) << "A's peer reads end-of-stream";
-    EXPECT_GE(ms_between(started, *eof).count(), (kLogoutTimeout - kLogoutMargin).count())
-        << "A's peer reads end-of-stream no earlier than the logout timeout after the call "
-           "started (times in ms)"
+    // The engine's close shows to the peer as end-of-stream or as a reset, as the
+    // Capi537Witness cells accept; the property read here is when the connection ended.
+    auto const ended = t.a.sock.ended_at();
+    std::error_code const end_code = t.a.sock.end_code();
+    std::string const route =
+        !ended ? std::string{"open"}
+        : end_code == asio::error::eof
+            ? std::string{"end-of-stream"}
+            : "a read error (" + end_code.message() + ", " + std::to_string(end_code.value()) + ")";
+    ::testing::Test::RecordProperty("a_connection_end", route);
+    ASSERT_TRUE(ended.has_value())
+        << "A's connection ends (end-of-stream or a read error); A's peer read: " << route;
+    EXPECT_GE(ms_between(started, *ended).count(), (kLogoutTimeout - kLogoutMargin).count())
+        << "A's connection ends (" << route
+        << ") no earlier than the logout timeout after the call started (times in ms)"
         << after_the_drop;
 }
 
