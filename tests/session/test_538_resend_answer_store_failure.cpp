@@ -250,6 +250,29 @@ TEST(ResendAnswerStoreFailure, SlotReadFailsWithACodeNoShippedStoreReturns_Abort
     expect_aborted_at_the_slot(a, error::store_capacity_exhausted);
 }
 
+// D-538-4, class 2 (R-10), the second refused-argument code: the wrapper returns
+// store_invalid_range for the slot's retrieve. The slot joins the GapFill run between the
+// two replays and the session stays up.
+TEST(ResendAnswerStoreFailure,
+     SlotReadRefusedWithStoreInvalidRange_FoldsIntoAGapFillAndStaysActive) {
+    Answer a;
+    ASSERT_NO_FATAL_FAILURE(run_failed_slot_read(error::store_invalid_range, a));
+    EXPECT_TRUE(a.call.returned_success()) << "on_inbound_frame " << a.call.call_text();
+    EXPECT_EQ(a.state_after_call, fsm_state::Active) << "the state after the call";
+    EXPECT_EQ(replayed_numbers(a.written),
+              (std::vector<std::string>{std::to_string(kFirstApp), std::to_string(kLastApp)}))
+        << "the stored messages on both sides of the slot must be replayed:\n"
+        << printable(a.written);
+    ASSERT_EQ(a.written.size(), 3U) << printable(a.written);
+    auto const& gap_fill = a.written[1];
+    EXPECT_EQ(plain_rig::field_value(gap_fill, "35"), "4") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(gap_fill, "123"), "Y") << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(gap_fill, "34"), std::to_string(kFailedSlot))
+        << printable(a.written);
+    EXPECT_EQ(plain_rig::field_value(gap_fill, "36"), std::to_string(kFailedSlot + 1))
+        << printable(a.written);
+}
+
 // ── The tail read fails ──────────────────────────────────────────────────────────────
 
 // The wrapper returns `code` for the walk's first store call, the read of the store's
@@ -440,6 +463,56 @@ TEST(ResendAnswerStoreFailure, Control_Superseded789Arm_TailReadCancelled_Record
     EXPECT_EQ(ring_after_call, ring_before_release)
         << "ring when the call returned: " << ring_text(ring_after_call)
         << "; ring before the read was released: " << ring_text(ring_before_release);
+}
+
+// D-CAN-5's returned timing when the arm is not superseded (D-CAN-4): the peer's Logon asks
+// for a replay through NextExpectedMsgSeqNum(789), and the wrapper returns store_cancelled
+// for the walk's tail read, with no close() and no Engine::stop(). The call returns the
+// store's code, the state is Disconnected, and nothing is written after the reply Logon.
+TEST(ResendAnswerStoreFailure, NotSuperseded789Arm_TailReadCancelled_ReturnsStoreCancelled) {
+    constexpr unsigned kSeeded = 3;
+    // What the fixture's coroutines and hooks refer to is declared before it, so it
+    // outlives the drain ~DirectAcceptor runs.
+    bool reply_stored = false;
+    CallingThreadReadings call;
+    asio::cancellation_signal none;
+    fsm_state state_after_call = fsm_state::NotConnected;
+    std::vector<std::byte> logon;
+    DirectAcceptor f{DirectAcceptor::Options{.enable_789 = true}};
+    ASSERT_TRUE(f.open() && f.seed_outbound(kSeeded)) << "the fixture did not open and seed";
+    f.log->arm();
+    // The walk's tail read: the first outbound next_seqnum(_, false) after the reply
+    // Logon's store().
+    f.log->on_call = [&](StoreCall const& c) {
+        reply_stored = reply_stored || (c.op == store_op::store && c.dir == direction_t::outbound);
+    };
+    f.log->fail_in = [&reply_stored](StoreCall const& c) {
+        return reply_stored && is_tail_read(c);
+    };
+    f.log->fail_code = error::store_cancelled;
+
+    auto const mark = f.log->mark();
+    logon = f.logon("789=1\x01");
+    auto fut = f.feed(logon, call, none, [&] { state_after_call = f.session->state(); });
+    bool const call_done = f.run_until([&] { return DirectAcceptor::ready(fut); });
+    f.log->on_call = nullptr;
+    std::optional<StoreCall> read;
+    if (auto const* r = f.log->first_after(mark, [](StoreCall const& c) {
+            return is_tail_read(c) && c.error == error::store_cancelled;
+        })) {
+        read = *r;
+    }
+
+    ASSERT_TRUE(call_done && call.completed && read.has_value() && read->returned())
+        << "the path was not exercised: call_done=" << call_done
+        << " the tail read: " << record_text(read);
+
+    EXPECT_TRUE(call.returned_error(error::store_cancelled))
+        << "on_inbound_frame " << call.call_text();
+    EXPECT_EQ(state_after_call, fsm_state::Disconnected) << "the state after the call";
+    ASSERT_EQ(f.sent.size(), 1U) << "a frame was written after the reply Logon:\n"
+                                 << printable(f.sent);
+    EXPECT_EQ(plain_rig::field_value(f.sent.front(), "35"), "A") << printable(f.sent);
 }
 
 }  // namespace
