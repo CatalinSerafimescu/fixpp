@@ -330,7 +330,8 @@ is B&L `B-537-5`. What follows is the half the headers do not state.
   sent the design back; it did not fire.
 - **The heartbeat interval.** The deadline's sentence begins "with a heartbeat interval set", and an
   interval of 0 turns it off. A session whose interval was never set runs at the session's default
-  interval and has the deadline (read; no cell runs it unset). **Rejected:** a clause on
+  interval and has the deadline (the cells `GapDeadlineIntervalNeverSet.*` and
+  `Capi537Witness.IntervalNeverSet_*`). **Rejected:** a clause on
   `fixpp_session_config_set_heartbeat_seconds` (Codex's round-2 C-3); the note's `## Gate A` gives the
   precedent.
 - **No merge-order condition on the number.** Batch B41 had declared a C-ABI change of its own and

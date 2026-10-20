@@ -462,6 +462,36 @@ TEST(Capi537Witness, Deadline_CompIdsLeaveNoRoomForTheLogout_EndsSilently) {
            "closes)";
 }
 
+// The row's sentence for an interval never set: such a session runs at the session's
+// default interval, and has the deadline. A C cell of the deadline itself would wait two
+// default intervals on the real clock, so the deadline's half is the C++ cell
+// GapDeadlineIntervalNeverSet.OutOfSequenceSite_FrameAtTwiceTheDefaultIntervalDrawsTheLogout
+// (tests/session/test_537_gap_deadline.cpp). This half: a C session configured without a
+// call of fixpp_session_config_set_heartbeat_seconds has its interval unset, which its Logon
+// shows as HeartBtInt(108)=30, the session's default. The control sets the interval to 0,
+// which its Logon carries as 0: the two differ in the spec of the one session.
+void logon_heartbeat_interval_cell(bool set_to_zero, std::string_view expected_108) {
+    Dictionary dict;
+    PeerLine line{one_session()};
+    CEngine engine{dict, {set_to_zero ? line.spec(0) : line.spec_interval_never_set()}};
+    ASSERT_TRUE(engine.start()) << "setup: the engine did not start";
+    ASSERT_TRUE(line.sock.accept()) << "setup: the session did not connect";
+    auto const logon = line.read_until([](std::string const& f) { return is_type(f, "A"); },
+                                       steady::now() + kStepBudget);
+    ASSERT_TRUE(logon.has_value()) << "setup: the peer read no Logon";
+    EXPECT_EQ(field(logon->frame, 108), expected_108)
+        << "HeartBtInt(108) of the session's Logon, with the interval "
+        << (set_to_zero ? "set to 0" : "never set");
+}
+
+TEST(Capi537Witness, IntervalNeverSet_LogonCarriesTheDefaultInterval) {
+    logon_heartbeat_interval_cell(false, "30");
+}
+
+TEST(Capi537Witness, Control_IntervalSetToZero_LogonCarriesZero) {
+    logon_heartbeat_interval_cell(true, "0");
+}
+
 // ── Row: "While a resend is outstanding, a too-high Heartbeat answers" ───────
 
 // The peer opens a gap at E and goes silent. One interval later the liveness loop asks

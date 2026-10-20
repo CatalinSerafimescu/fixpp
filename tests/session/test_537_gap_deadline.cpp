@@ -220,14 +220,26 @@ void stop_and_read(plain_rig::Rig& rig, SiteRun& o) {
 // A NextNumIn whose digits no fixed phrase would hold by accident.
 constexpr seqnum_t kDistinctNextNumIn = 7341;
 
+// The HeartBtInt a session runs when heartbeat_interval is unset (D-8), spelled here and not
+// read from the session. The frames of a cell whose interval is unset are spaced against
+// kGapBound, so the two must agree.
+constexpr std::chrono::seconds kSessionDefaultHeartBtInt{30};
+static_assert(kGapBound == 2 * kSessionDefaultHeartBtInt);
+
+// Whether a site's session has its heartbeat_interval set, to the rig's kHeartBtInt, or
+// never set.
+enum class interval { set, never_set };
+
 // D-537-5, the out-of-sequence site. The peer raises NextNumIn to kDistinctNextNumIn,
 // opens a gap, and then sends application messages above NextNumIn.
-SiteRun run_out_of_sequence_site(session_role role) {
+SiteRun run_out_of_sequence_site(session_role role, interval iv = interval::set) {
     SiteRun o;
     plain_rig::Rig rig;
     auto cfg = rig.cfg(role);
-    if (cfg.heartbeat_interval != kHeartBtInt) {
-        o.setup_miss = "the rig's HeartBtInt is not the one the bound is spelled from";
+    if (iv == interval::never_set) cfg.heartbeat_interval.reset();
+    if (iv == interval::never_set ? cfg.heartbeat_interval.has_value()
+                                  : cfg.heartbeat_interval != kHeartBtInt) {
+        o.setup_miss = "the session's HeartBtInt is not the one the bound is spelled from";
         return o;
     }
     [&] {
@@ -418,6 +430,21 @@ INSTANTIATE_TEST_SUITE_P(BothRoles, GapDeadlineOutOfSequenceSite,
                          [](const ::testing::TestParamInfo<session_role>& i) {
                              return std::string{role_name(i.param)};
                          });
+
+// ── D-537-5, the interval never set ─────────────────────────────────────────────────
+
+// A session whose heartbeat_interval was never set has the deadline, at the session's
+// default interval (include/fix/c_api/session.h, the 1.12 clause): the out-of-sequence site
+// with the interval unset, its bound twice kSessionDefaultHeartBtInt. The C-ABI half, that a
+// C session configured without fixpp_session_config_set_heartbeat_seconds leaves the
+// interval unset, is Capi537Witness.IntervalNeverSet_LogonCarriesTheDefaultInterval.
+TEST(GapDeadlineIntervalNeverSet, OutOfSequenceSite_FrameAtTwiceTheDefaultIntervalDrawsTheLogout) {
+    const auto o = run_out_of_sequence_site(session_role::acceptor, interval::never_set);
+    ASSERT_NO_FATAL_FAILURE(
+        expect_logout_and_open_transport(o, std::to_string(kDistinctNextNumIn)));
+    EXPECT_EQ(field(o.logouts.front(), 58), "ResendRequest unanswered, expecting MsgSeqNum 7341");
+    EXPECT_EQ(o.rejects_for_the_bound_frame, 0U);
+}
 
 // ── D-537-5, V: the validate gate's site ────────────────────────────────────────────
 

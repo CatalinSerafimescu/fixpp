@@ -188,12 +188,13 @@ struct Dictionary {
 
 // One initiator session: its CompIDs, the port of the peer it connects to, its
 // heartbeat interval, and whether it resets the sequence numbers at its Logon, which
-// puts ResetSeqNumFlag(141)=Y on that Logon.
+// puts ResetSeqNumFlag(141)=Y on that Logon. An empty heartbeat interval is one never
+// set: fixpp_session_config_set_heartbeat_seconds is not called.
 struct SessionSpec {
     std::string sender_comp_id;
     std::string target_comp_id;
     std::uint16_t port = 0;
-    std::uint32_t heartbeat_s = 0;
+    std::optional<std::uint32_t> heartbeat_s = 0;
     bool reset_on_logon = true;
 };
 
@@ -274,7 +275,8 @@ private:
                                               spec.target_comp_id.c_str()) == FIXPP_ERR_OK &&
             fixpp_session_config_set_begin_string(sc, "FIX.4.4") == FIXPP_ERR_OK &&
             fixpp_session_config_set_role(sc, FIXPP_ROLE_INITIATOR) == FIXPP_ERR_OK &&
-            fixpp_session_config_set_heartbeat_seconds(sc, spec.heartbeat_s) == FIXPP_ERR_OK &&
+            (!spec.heartbeat_s.has_value() ||
+             fixpp_session_config_set_heartbeat_seconds(sc, *spec.heartbeat_s) == FIXPP_ERR_OK) &&
             fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
                                               nullptr) == FIXPP_ERR_OK &&
             fixpp_session_config_set_reset_on_logon(sc, spec.reset_on_logon) == FIXPP_ERR_OK &&
@@ -323,6 +325,10 @@ struct PeerLine {
 
     [[nodiscard]] SessionSpec spec(std::uint32_t heartbeat_s, bool reset_on_logon = true) const {
         return {wire.engine_comp_id, wire.peer_comp_id, sock.port(), heartbeat_s, reset_on_logon};
+    }
+    // The same session with its heartbeat interval never set.
+    [[nodiscard]] SessionSpec spec_interval_never_set(bool reset_on_logon = true) const {
+        return {wire.engine_comp_id, wire.peer_comp_id, sock.port(), std::nullopt, reset_on_logon};
     }
 
     bool write(std::string const& frame) { return sock.write(frame); }
