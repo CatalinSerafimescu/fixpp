@@ -12,11 +12,21 @@
 //
 // The executor is armed from inside the Logout's toAdmin, after close(graceful)'s flush has
 // been through the file executor, so the Logout's write job is job 1; for an application's
-// send it is armed before the send. The Scene's setup() returns once the peer has read the
-// Logon reply, without waiting for the store calls the session makes after that reply, so a
-// job of one of those, handed over before the arm, can begin its body after it. The log
-// counts a body only inside a job it numbered (recording_file_executor.hpp), and records
-// such a body apart; every assertion on the bodies or the count prints the executor's record.
+// send it is armed before the send.
+//
+// Before the arm. The Scene's setup() returns once the peer has read the Logon reply, without
+// waiting for the store calls the session makes after that reply, so one of those can still
+// be in flight at the arm: its job handed over before the arm with its body still to begin,
+// or, since FileStore's calls begin with a post onto the caller's executor, its job not yet
+// handed over at all. So before the arm the cell runs a store call of its own on the
+// session's executor to its end (the drain). Its post queues behind the post of every store
+// call already made there, and it then waits at the store's lock, which each of those that
+// takes it holds until its job has run (re-derive which calls take it with
+// `git grep -n 'mutex_.async_lock' -- src/session/file_store.cpp`). The cell
+// ApplicationSend_AStoreCallMadeBeforeTheArm_EndsBeforeIt makes such a call itself, just before the
+// drain, and asserts that it ended before the arm. Apart from the drain, the log counts a body only
+// inside a job it numbered (recording_file_executor.hpp) and records any other apart; every
+// assertion on the bodies or the count prints the executor's record.
 //
 // The release, under an Engine. The cancellation reaches the store call through further
 // handlers on the session's executor (the io_context the test thread runs), so the count of
@@ -202,10 +212,13 @@ struct EngineOutcome {
     int unattributed_bodies = 0;
     bool timed_out = false;
     bool stop_completed = false;
+    bool drained = false;
+    bool planted = false;                  // the cell made a store call of its own before the drain
+    bool planted_ended_before_arm = true;  // that call had returned when the log was armed
     std::string events;
 
     [[nodiscard]] bool exercised(SessionInput in) const {
-        bool const common = setup_miss.empty() && armed && reached && emitted &&
+        bool const common = setup_miss.empty() && drained && armed && reached && emitted &&
                             markers == kMarkerHops && !job1_began_at_count && others_ended &&
                             !timed_out && completed_after;
         bool const timer_ok =
@@ -213,8 +226,8 @@ struct EngineOutcome {
         return common && timer_ok;
     }
     [[nodiscard]] std::string text() const {
-        return "setup_miss='" + setup_miss + "' armed=" + std::to_string(armed) +
-               " reached=" + std::to_string(reached) +
+        return "setup_miss='" + setup_miss + "' drained=" + std::to_string(drained) +
+               " armed=" + std::to_string(armed) + " reached=" + std::to_string(reached) +
                " before_deadline=" + std::to_string(before_deadline) +
                " cell_timer_seen=" + std::to_string(cell_timer_seen) +
                " emitted=" + std::to_string(emitted) + " markers=" + std::to_string(markers) +
@@ -226,7 +239,15 @@ struct EngineOutcome {
     }
 };
 
-EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cell) {
+bool planted_ended(std::future<fixpp::core::expected_t<seqnum_t>> const& f) {
+    return !f.valid() || HeldFileStoreScene::ready(f);
+}
+
+// `plant`: before the drain, the cell makes a store call of its own on the session's
+// executor, next_seqnum(inbound) with increment, and does not run the executor before the
+// drain.
+EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cell,
+                                 bool plant = false) {
     using std::chrono::milliseconds;
     EngineOutcome o;
     bool const two = kind == FileExec::two_threads_write_delayed;
@@ -252,6 +273,7 @@ EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cel
     std::future<fixpp::core::expected_t<void>> graceful_fut;
     std::future<fixpp::core::expected_t<void>> terminal_fut;
     std::future<fixpp::core::expected_t<void>> send_fut;
+    std::future<fixpp::core::expected_t<seqnum_t>> planted_fut;
     std::size_t rx_mark = 0;
     bool cell_timer_ran = false;
     steady::time_point reading{};
@@ -269,12 +291,29 @@ EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cel
         auto const timeout = milliseconds{kEngineLogoutTimeoutMs};
         o.seq = session_test_access::seqnum_mgr(*session).peek_outbound();
         rx_mark = rig.peer.received.size();
+        auto* const store = scene.log->store;
+        if (store == nullptr) {
+            scene.setup_miss = "the store is not published";
+            return false;
+        }
+        if (plant) {
+            planted_fut = asio::co_spawn(strand, store->next_seqnum(direction_t::inbound, true),
+                                         asio::use_future);
+            o.planted = !HeldFileStoreScene::ready(planted_fut);
+        }
+        // The drain.
+        auto drain_fut = asio::co_spawn(strand, store->next_seqnum(direction_t::outbound, false),
+                                        asio::use_future);
+        o.drained = rig.run_until([&] { return HeldFileStoreScene::ready(drain_fut); }) &&
+                    drain_fut.get().has_value();
+        if (!o.drained) return true;
 
         if (in != SessionInput::app_send) {
             app->on_logout = [&] {
                 if (o.armed) return;
                 o.armed = true;
                 reading = steady::now();
+                o.planted_ended_before_arm = planted_ended(planted_fut);
                 log->arm();
                 if (!two) log->hold_a_thread(*pool_ex);
                 if (in == SessionInput::grace_timer) {
@@ -287,6 +326,7 @@ EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cel
             graceful_fut =
                 asio::co_spawn(strand, session->close(close_mode::graceful), asio::use_future);
         } else {
+            o.planted_ended_before_arm = planted_ended(planted_fut);
             log->arm();
             o.armed = true;
             if (!two) {
@@ -388,7 +428,9 @@ EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cel
               << " peer_frames_at_seq=" << o.peer_frames_at_seq
               << " peer_read_ended=" << o.peer_read_ended << " bodies=" << o.bodies << "/"
               << o.bodies_after_let_go << " unattributed_bodies=" << o.unattributed_bodies
-              << " stop_completed=" << o.stop_completed << "\n";
+              << " stop_completed=" << o.stop_completed << " drained=" << o.drained
+              << " planted=" << o.planted
+              << " planted_ended_before_arm=" << o.planted_ended_before_arm << "\n";
     return o;
 }
 
@@ -474,6 +516,24 @@ TEST(OffloadEngineSession, ApplicationSend_IsStoredAndNotSent) {
     auto const o = run_engine_session(SessionInput::app_send, FileExec::two_threads_write_delayed,
                                       "TFS.13 plain");
     expect_engine_gate(o, SessionInput::app_send);
+    expect_engine_send(o);
+    expect_body_once_after_let_go(o);
+    expect_no_job_beyond_the_writes_own(o);
+}
+
+// The drain's known positive: a store call made before the arm, whose job the file
+// executor has not yet been handed when the drain begins, ends before the arm. Without the
+// drain its job is handed over after the arm and numbered as the call's.
+TEST(OffloadEngineSession, ApplicationSend_AStoreCallMadeBeforeTheArm_EndsBeforeIt) {
+    auto const o = run_engine_session(SessionInput::app_send, FileExec::two_threads_write_delayed,
+                                      "TFS.13 plain, a store call before the arm",
+                                      /*plant=*/true);
+    expect_engine_gate(o, SessionInput::app_send);
+    EXPECT_TRUE(o.planted) << "the cell's own call had ended before the drain began";
+    EXPECT_TRUE(o.planted_ended_before_arm)
+        << "the store call made before the arm had not ended at the arm"
+        << "\nthe executor's record:\n"
+        << o.events;
     expect_engine_send(o);
     expect_body_once_after_let_go(o);
     expect_no_job_beyond_the_writes_own(o);
