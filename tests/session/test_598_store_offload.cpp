@@ -51,6 +51,16 @@
 //   OffloadDirectSession        the graceful Logout and an application's send on a directly
 //                               driven Session on the callback transport, and their control
 //                               on one thread.
+//   OffloadPump                 the known positive of keep_running_for, below.
+//
+// The io_contexts the test thread runs. A store call's offload completes through a work guard
+// on the caller's io_context that asio's co_spawn keeps in the offload's frame
+// (asio/impl/co_spawn.hpp, co_spawn_state::handler_work), and that frame is destroyed on the
+// pool thread after the completion has been posted. When that is the io_context's last
+// outstanding work it is stopped, from the pool thread, possibly after the test thread's pump
+// has restarted it; the next pump then runs nothing until its budget is spent. Every
+// io_context of this file that a pool thread can complete work on is held by
+// keep_running_for for as long as it is pumped.
 //
 // FS-RECORD lines on stdout carry each cell's readings, printed before any assertion of the
 // cell, so that a RED run still has its record. Re-derive them from a run's output with
@@ -68,6 +78,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/error.hpp>
+#include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/steady_timer.hpp>
@@ -138,6 +149,14 @@ using bytes = std::vector<std::byte>;
 
 constexpr char const* kSender = "ISLD";
 constexpr char const* kTarget = "TW";
+
+// Keeps `ioc` from stopping when its count of outstanding work reaches zero on another
+// thread between two pumps (this file's header, "The io_contexts the test thread runs").
+// Declare it after the io_context, so it is destroyed first.
+using keep_running = asio::executor_work_guard<asio::io_context::executor_type>;
+[[nodiscard]] keep_running keep_running_for(asio::io_context& ioc) {
+    return asio::make_work_guard(ioc);
+}
 
 // The log's record format, spelled from src/session/file_store.cpp and not read from it: a
 // 16-byte header, then the payload, padded to 8 bytes. A frame of make_frame()'s 8 bytes is
@@ -283,6 +302,7 @@ public:
     std::unique_ptr<FileStore> store;
     // After the store: destroyed first, so a coroutine destroyed with it finds the store.
     asio::io_context ioc;
+    keep_running const keep_{keep_running_for(ioc)};
     FileExec const kind;
 
     explicit BareStore(FileExec k)
@@ -985,6 +1005,63 @@ TEST(OffloadRecorder, ABodyOfAJobHandedOverBeforeTheArm_IsNotCountedAsTheCalls) 
     EXPECT_EQ(bodies_after_let_go, 1) << "the armed call's body after the release" << record;
 }
 
+// ── keep_running_for's known positive ──────────────────────────────────────────────────
+//
+// A job of the cell on a pool thread takes a work guard on the io_context, a pump runs a
+// handler to its end while that guard is held, and then the job releases the guard and ends:
+// the io_context's last outstanding work reaches zero on the pool thread, after the pump has
+// restarted the io_context. The next pump must still run a handler posted to it.
+
+TEST(OffloadPump, WorkThatReachesZeroOnAPoolThread_DoesNotStopTheNextPump) {
+    // Before the pool: its job reads them until the pool is joined.
+    asio::io_context ioc;
+    auto const keep = keep_running_for(ioc);
+    std::atomic<bool> holding{false};
+    std::atomic<bool> release{false};
+    std::atomic<bool> ended{false};
+    asio::thread_pool pool{1};
+    // After the pool: lets its job go on every exit, before the pool is joined.
+    struct release_on_exit {
+        std::atomic<bool>& r;
+        ~release_on_exit() { r.store(true); }
+    } const release_guard{release};
+    auto const spin_until = [](auto pred) {
+        auto const until = steady::now() + kPumpBudget;
+        while (!pred()) {
+            if (steady::now() >= until) return false;
+            std::this_thread::yield();
+        }
+        return true;
+    };
+    asio::post(pool, [&] {
+        auto guard = asio::make_work_guard(ioc);
+        holding.store(true);
+        auto const until = steady::now() + fe::kHoldBound;
+        while (!release.load() && steady::now() < until) std::this_thread::yield();
+        guard.reset();
+        ended.store(true);
+    });
+    bool const held = spin_until([&] { return holding.load(); });
+    bool first = false;
+    asio::post(ioc, [&first] { first = true; });
+    bool const first_ran = pump_until(ioc, [&first] { return first; });
+    release.store(true);
+    bool const job_ended = spin_until([&] { return ended.load(); });
+    bool const stopped = ioc.stopped();
+    bool second = false;
+    asio::post(ioc, [&second] { second = true; });
+    bool const second_ran = pump_until(ioc, [&second] { return second; }, std::chrono::seconds{1});
+    std::cout << "FS-RECORD pump known positive: held=" << held << " first_ran=" << first_ran
+              << " job_ended=" << job_ended << " stopped=" << stopped
+              << " second_ran=" << second_ran << "\n";
+
+    ASSERT_TRUE(held && first_ran && job_ended)
+        << "the path was not exercised: held=" << held << " first_ran=" << first_ran
+        << " job_ended=" << job_ended;
+    EXPECT_FALSE(stopped) << "the io_context stopped when the pool thread's work ended";
+    EXPECT_TRUE(second_ran) << "the pump after it ran nothing";
+}
+
 // ── D-598-1: the two jobs on two threads, let go together (TFS.15) ───────────────────
 //
 // Both threads of a pool of two are held by jobs of the cell while the write's job and the
@@ -1007,7 +1084,17 @@ struct TogetherRep {
     bool emitted = false;
     int count = 0;
     int bodies = 0;
+    bool stopped_at_pump = false;  // the io_context, read just before the wait for job 1
+    std::int64_t pump_ms = 0;      // that wait
+    int handed_after_pump = 0;
     CallReading call;
+    [[nodiscard]] std::string text() const {
+        return "reached=" + std::to_string(reached) + " emitted=" + std::to_string(emitted) +
+               " count=" + std::to_string(count) + " bodies=" + std::to_string(bodies) +
+               " stopped_at_pump=" + std::to_string(stopped_at_pump) +
+               " pump_ms=" + std::to_string(pump_ms) +
+               " handed_after_pump=" + std::to_string(handed_after_pump) + " call: " + call.text();
+    }
 };
 
 struct TogetherOutcome {
@@ -1038,6 +1125,7 @@ TogetherOutcome run_together(bool seeded, char const* cell) {
     } const go_guard{log};
     std::unique_ptr<FileStore> store;
     asio::io_context ioc;
+    keep_running const keep{keep_running_for(ioc)};
 
     FileStore::Config c;
     c.directory = dir.path;
@@ -1084,8 +1172,14 @@ TogetherOutcome run_together(bool seeded, char const* cell) {
                            },
                            call),
                        asio::bind_cancellation_slot(sig->slot(), asio::detached));
+        rep.stopped_at_pump = ioc.stopped();
+        auto const pump_from = steady::now();
         rep.reached =
             pump_until(ioc, [&] { return log.handed.load(std::memory_order_relaxed) >= 1; });
+        rep.pump_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(steady::now() - pump_from)
+                .count();
+        rep.handed_after_pump = log.handed.load(std::memory_order_relaxed);
         if (rep.reached) {
             asio::post(ioc, [&] {
                 sig->emit(asio::cancellation_type::terminal);
@@ -1130,14 +1224,14 @@ void expect_together(TogetherOutcome const& o) {
     for (std::size_t i = 0; i < o.reps.size(); ++i) {
         auto const& r = o.reps[i];
         ASSERT_TRUE(r.reached && r.emitted && r.call.done)
-            << "repetition " << i << ": the path was not exercised: reached=" << r.reached
-            << " emitted=" << r.emitted << " call: " << r.call.text();
+            << "repetition " << i << ": the path was not exercised: " << r.text();
         EXPECT_TRUE(r.call.witness())
             << "repetition " << i
             << ": the call's thread reads no cancellation with the terminal bit: " << r.call.text();
-        EXPECT_LE(r.bodies, 1) << "repetition " << i << ": the body ran more than once";
+        EXPECT_LE(r.bodies, 1) << "repetition " << i
+                               << ": the body ran more than once: " << r.text();
         EXPECT_EQ(r.count, 1) << "repetition " << i
-                              << ": a job beyond the write's own was handed over";
+                              << ": a job beyond the write's own was handed over: " << r.text();
     }
 }
 
@@ -1244,6 +1338,7 @@ PinOutcome run_pin(PinEmit where, char const* cell) {
     } const release_guard;
     std::unique_ptr<FileStore> store;
     asio::io_context ioc;
+    keep_running const keep{keep_running_for(ioc)};
 
     FileStore::Config c;
     c.directory = dir.path;
@@ -1559,6 +1654,8 @@ SessionOutcome run_direct_session(SessionInput in, FileExec kind, char const* ce
             asio::any_io_executor{fe::DelayingExecutor{pool.get_executor(), log, two}}}};
     // After the acceptor: a held thread is let go before the acceptor drains and joins.
     fe::let_go_on_exit const let_go{log};
+    // After the acceptor: released before the acceptor drains its io_context.
+    keep_running const keep{keep_running_for(f.ioc)};
     auto const payload = plain_rig::to_bytes(
         "35=D\x01"
         "11=ORD001\x01"
