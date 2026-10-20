@@ -14,6 +14,13 @@
 //                       and ended, and when the store's offloaded body began (the store's
 //                       offload probe, scoped_body_probe). It offers the wait the release
 //                       event needs: until every job other than the held one has ended.
+//                       A body is the call's only when it begins inside a job the
+//                       executor numbered: the executor records the job's number on the
+//                       pool thread around its invocation of the job, and the probe, which
+//                       runs inside that invocation, reads it there. A body that begins
+//                       while the log is armed in a job handed over before arm() is
+//                       recorded as an event and counted apart (unattributed_bodies), and
+//                       never as a body of the call.
 //   UnorderedExecutor   the second form, for the scene in which two jobs run on two pool
 //                       threads let go together (§11.5, "The measurement under
 //                       ThreadSanitizer"). It takes no lock, and its atomics are
@@ -23,7 +30,9 @@
 //                       §11.5, "The known positive": a plain int of the cell's, written
 //                       just before the second job of an armed call is invoked and read
 //                       just before the first is invoked. The pair is off unless the cell
-//                       sets UnorderedLog::seed.
+//                       sets UnorderedLog::seed. It does not attribute a body to a job: a
+//                       cell that reads its count of bodies arms the log only when no job
+//                       handed over before the arm can still begin a body.
 //
 // Where it came from. The job log, the executor that wraps a pool's executor and numbers its
 // jobs, its mode delay_first_in_its_thread, and the cell's job that takes a pool thread and
@@ -71,6 +80,22 @@ namespace fixpp::test_support::file_executor {
 // held_timed_out() fails.
 inline constexpr auto kHoldBound = 3 * kPumpBudget;
 
+// The number of the job of an armed JobLog that this thread is running, or 0 outside one.
+// Per thread, so it orders nothing between threads.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+inline thread_local int t_job_number = 0;
+
+// Sets t_job_number for one invocation of a job, and restores it on every path out.
+struct job_number_scope {
+    explicit job_number_scope(int k) noexcept : outer_{t_job_number} { t_job_number = k; }
+    ~job_number_scope() { t_job_number = outer_; }
+    job_number_scope(job_number_scope const&) = delete;
+    job_number_scope& operator=(job_number_scope const&) = delete;
+
+private:
+    int outer_;
+};
+
 // ── The first form ────────────────────────────────────────────────────────────────────
 
 class JobLog {
@@ -86,6 +111,7 @@ public:
         let_go_ = false;
         bodies_ = 0;
         bodies_after_let_go_ = 0;
+        unattributed_bodies_ = 0;
         holders_in_ = 0;
         timed_out_ = false;
         events_.clear();
@@ -124,12 +150,19 @@ public:
     }
 
     // The store's offload probe, on the pool thread, at the start of the offloaded body.
-    void body_began() {
+    // `job`: the number of the job it runs in, 0 when it runs in none.
+    void body_began(int job) {
         std::lock_guard lk{m_};
         if (!armed_) return;
+        if (job < 1) {
+            ++unattributed_bodies_;
+            events_.emplace_back(
+                "the store's body begins in a job handed over before the arm (not counted)");
+            return;
+        }
         ++bodies_;
         if (let_go_) ++bodies_after_let_go_;
-        events_.emplace_back("the store's body begins");
+        events_.push_back("the store's body begins, in job " + std::to_string(job));
     }
 
     // A job of the cell that takes a thread of `pool` and holds it until let_go().
@@ -200,6 +233,10 @@ public:
         std::lock_guard lk{m_};
         return bodies_after_let_go_;
     }
+    [[nodiscard]] int unattributed_bodies() const {
+        std::lock_guard lk{m_};
+        return unattributed_bodies_;
+    }
     [[nodiscard]] bool held_timed_out() const {
         std::lock_guard lk{m_};
         return timed_out_;
@@ -223,6 +260,7 @@ private:
     bool let_go_ = false;
     int bodies_ = 0;
     int bodies_after_let_go_ = 0;
+    int unattributed_bodies_ = 0;
     int holders_in_ = 0;
     bool timed_out_ = false;
     std::vector<std::string> events_;
@@ -257,7 +295,10 @@ struct DelayingExecutor {
         never.execute([l = log, k, delay, job = std::decay_t<F>(std::forward<F>(f))]() mutable {
             if (delay) l->hold_taken_job();
             l->began(k);
-            std::move(job)();
+            {
+                job_number_scope const in_job{k};
+                std::move(job)();
+            }
             l->ended(k);
         });
     }
@@ -273,7 +314,7 @@ struct DelayingExecutor {
 inline std::atomic<JobLog*> g_body_log{nullptr};
 
 inline void body_probe(std::thread::id /*pool_thread*/) noexcept {
-    if (JobLog* const l = g_body_log.load(std::memory_order_acquire)) l->body_began();
+    if (JobLog* const l = g_body_log.load(std::memory_order_acquire)) l->body_began(t_job_number);
 }
 
 struct scoped_body_probe {

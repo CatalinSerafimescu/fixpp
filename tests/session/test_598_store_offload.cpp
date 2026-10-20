@@ -40,6 +40,9 @@
 //                               later write (R-27's premise).
 //   OffloadOneThreadControl     the same three operations on a pool of one thread held by a
 //                               job of the cell: the order of the jobs is kept.
+//   OffloadRecorder             the executor's own known positive: a body that begins while
+//                               the log is armed, in a job handed over before the arm, is
+//                               not counted as a body of the call.
 //   OffloadTwoJobsLetGoTogether both threads held by jobs of the cell while the write's job
 //                               and the cancellation's job are queued, then let go by one
 //                               event. Two arms; the seeded one carries the known positive of
@@ -385,6 +388,7 @@ struct WindowReading {
     CallReading call;
     int bodies = 0;
     int bodies_after_let_go = 0;
+    int unattributed_bodies = 0;
     bool job2_ended_after_job1 = false;  // read from the executor's record
     bool timed_out = false;
     std::string events;
@@ -405,6 +409,7 @@ struct WindowReading {
                " returned_before_let_go=" + std::to_string(returned_before_let_go) +
                " bodies=" + std::to_string(bodies) +
                " bodies_after_let_go=" + std::to_string(bodies_after_let_go) +
+               " unattributed_bodies=" + std::to_string(unattributed_bodies) +
                " job2_ended_after_job1=" + std::to_string(job2_ended_after_job1) +
                " timed_out=" + std::to_string(timed_out) + " call: " + call.text() +
                "\nthe executor's record:\n" + events;
@@ -450,6 +455,7 @@ WindowReading run_window(BareStore& b,
     w.call = *call;
     w.bodies = b.log->bodies();
     w.bodies_after_let_go = b.log->bodies_after_let_go();
+    w.unattributed_bodies = b.log->unattributed_bodies();
     w.timed_out = b.log->held_timed_out();
     w.events = b.log->events();
     auto const e1 = w.events.find("job 1 ends");
@@ -461,14 +467,20 @@ WindowReading run_window(BareStore& b,
 // What every cell on the window asserts of the body: it began exactly once, after the cell
 // let the job go.
 void expect_body_once_after_let_go(WindowReading const& w) {
-    EXPECT_EQ(w.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(w.bodies_after_let_go, 1) << "the store's body did not begin after the release";
+    EXPECT_EQ(w.bodies, 1) << "the store's body did not begin exactly once"
+                           << "\nthe executor's record:\n"
+                           << w.events;
+    EXPECT_EQ(w.bodies_after_let_go, 1) << "the store's body did not begin after the release"
+                                        << "\nthe executor's record:\n"
+                                        << w.events;
 }
 
 // What a RED-first cell on the delaying executor asserts of the count.
 void expect_no_job_beyond_the_writes_own(WindowReading const& w) {
     EXPECT_EQ(w.count, 1) << "a job beyond the write's own was handed to the file executor "
-                             "for the call (count read when the emit had returned)";
+                             "for the call (count read when the emit had returned)"
+                          << "\nthe executor's record:\n"
+                          << w.events;
 }
 
 void expect_window_common(WindowReading const& w) {
@@ -888,6 +900,89 @@ TEST(OffloadOneThreadControl, Reset) {
     expect_window_common(o.w);
     expect_reset_op(o);
     expect_body_once_after_let_go(o.w);
+}
+
+// ── The executor's known positive: a body of a job handed over before the arm ────────
+//
+// What the cells above count as "the store's body" is the body of a job the log numbered.
+// This cell makes the other kind begin while the log is armed, by construction: the pool's
+// one thread is held by a job of the cell while the log is not armed; a first store() is
+// started, so its job is handed over unnumbered and queues behind the holder; the log is
+// armed; a second store() is started, which waits at the store's lock behind the first; the
+// holder is let go. The first call's body then begins while the log is armed. The cell
+// asserts that it did, that the log recorded it apart, and that the bodies of the armed call
+// are its own job's only. An executor that counts every body while the log is armed reads two.
+
+TEST(OffloadRecorder, ABodyOfAJobHandedOverBeforeTheArm_IsNotCountedAsTheCalls) {
+    BareStore b{FileExec::one_thread_held_by_the_cell};
+    ASSERT_TRUE(b.open().has_value()) << "setup: the store did not open";
+    auto const frame1 = make_frame(1);
+    auto const frame2 = make_frame(2);
+    auto const first = std::make_shared<CallReading>();
+    auto const second = std::make_shared<CallReading>();
+
+    b.hold_a_thread();
+    bool const held = b.log->wait_holders(1);
+    asio::co_spawn(b.ioc,
+                   await_and_read<void>(
+                       [&b, &frame1] {
+                           return b.store->store(1, std::span<const std::byte>{frame1},
+                                                 direction_t::outbound);
+                       },
+                       first),
+                   asio::detached);
+    // Every ready handler, so the first call has handed its job over and waits for it.
+    b.ioc.poll();
+    b.ioc.restart();
+    bool const first_waits = !first->done;
+    b.log->arm();
+    asio::co_spawn(b.ioc,
+                   await_and_read<void>(
+                       [&b, &frame2] {
+                           return b.store->store(2, std::span<const std::byte>{frame2},
+                                                 direction_t::outbound);
+                       },
+                       second),
+                   asio::detached);
+    b.ioc.poll();
+    b.ioc.restart();
+    b.log->let_go();
+    bool const both_done =
+        pump_until(b.ioc, [first, second] { return first->done && second->done; });
+    int const handed = b.log->handed();
+    int const bodies = b.log->bodies();
+    int const bodies_after_let_go = b.log->bodies_after_let_go();
+    int const unattributed = b.log->unattributed_bodies();
+    bool const timed_out = b.log->held_timed_out();
+    std::string const events = b.log->events();
+    auto const e_unattributed = events.find("handed over before the arm");
+    auto const e_job1 = events.find("job 1 handed over");
+    bool const unattributed_before_job1 = e_unattributed != std::string::npos &&
+                                          e_job1 != std::string::npos && e_unattributed < e_job1;
+    std::cout << "FS-RECORD recorder known positive: held=" << held
+              << " first_waits=" << first_waits << " both_done=" << both_done
+              << " first=" << first->text() << " second=" << second->text() << " handed=" << handed
+              << " bodies=" << bodies << "/" << bodies_after_let_go
+              << " unattributed_bodies=" << unattributed
+              << " unattributed_before_job1=" << unattributed_before_job1
+              << " timed_out=" << timed_out << "\n";
+
+    std::string const record = "\nthe executor's record:\n" + events;
+    ASSERT_TRUE(held && first_waits && both_done && !timed_out)
+        << "the path was not exercised: held=" << held << " first_waits=" << first_waits
+        << " both_done=" << both_done << " timed_out=" << timed_out << record;
+    EXPECT_TRUE(first->succeeded()) << "the first store() " << first->text();
+    EXPECT_TRUE(second->succeeded()) << "the second store() " << second->text();
+    EXPECT_EQ(unattributed, 1)
+        << "the first call's body was not seen beginning while the log was armed" << record;
+    EXPECT_TRUE(unattributed_before_job1)
+        << "the body recorded apart is not the first call's, which began before the second "
+           "call's job was handed over"
+        << record;
+    EXPECT_EQ(handed, 1) << "jobs numbered after the arm" << record;
+    EXPECT_EQ(bodies, 1) << "a body not of the armed call's job was counted as the call's"
+                         << record;
+    EXPECT_EQ(bodies_after_let_go, 1) << "the armed call's body after the release" << record;
 }
 
 // ── D-598-1: the two jobs on two threads, let go together (TFS.15) ───────────────────
@@ -1401,6 +1496,7 @@ struct SessionOutcome {
     std::size_t sink_frames_at_seq = 0;  // frames at `seq` the transport callback received
     int bodies = 0;
     int bodies_after_let_go = 0;
+    int unattributed_bodies = 0;
     bool timed_out = false;
     std::string events;
 
@@ -1442,7 +1538,7 @@ void print_session_record(char const* cell, SessionOutcome const& o) {
               << "] store_next_out=" << opt_text(o.store.next_out)
               << " session_next_out=" << o.session_next_out
               << " sink_frames_at_seq=" << o.sink_frames_at_seq << " bodies=" << o.bodies << "/"
-              << o.bodies_after_let_go << "\n";
+              << o.bodies_after_let_go << " unattributed_bodies=" << o.unattributed_bodies << "\n";
 }
 
 SessionOutcome run_direct_session(SessionInput in, FileExec kind, char const* cell) {
@@ -1562,6 +1658,7 @@ SessionOutcome run_direct_session(SessionInput in, FileExec kind, char const* ce
     o.send = *send;
     o.bodies = log->bodies();
     o.bodies_after_let_go = log->bodies_after_let_go();
+    o.unattributed_bodies = log->unattributed_bodies();
     o.timed_out = log->held_timed_out();
     o.events = log->events();
     if (store != nullptr) {
@@ -1615,15 +1712,29 @@ void expect_session_gate(SessionOutcome const& o, FileExec kind, SessionInput in
     ASSERT_TRUE(o.exercised(kind, in)) << "the path was not exercised: " << o.text();
 }
 
+void expect_session_body_once_after_let_go(SessionOutcome const& o) {
+    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once"
+                           << "\nthe executor's record:\n"
+                           << o.events;
+    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release"
+                                        << "\nthe executor's record:\n"
+                                        << o.events;
+}
+
+void expect_session_no_job_beyond_the_writes_own(SessionOutcome const& o) {
+    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor"
+                          << "\nthe executor's record:\n"
+                          << o.events;
+}
+
 TEST(OffloadDirectSession, GracefulLogout_ByTheGraceTimer_IsWrittenAndSent) {
     auto const o =
         run_direct_session(SessionInput::grace_timer, FileExec::two_threads_write_delayed,
                            "TFS.12 callback, grace timer");
     expect_session_gate(o, FileExec::two_threads_write_delayed, SessionInput::grace_timer);
     expect_direct_logout(o, SessionInput::grace_timer);
-    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release";
-    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor";
+    expect_session_body_once_after_let_go(o);
+    expect_session_no_job_beyond_the_writes_own(o);
 }
 
 TEST(OffloadDirectSession, GracefulLogout_ByAnEscalatingTerminalClose_IsWrittenAndSent) {
@@ -1631,9 +1742,8 @@ TEST(OffloadDirectSession, GracefulLogout_ByAnEscalatingTerminalClose_IsWrittenA
                                       "TFS.12 callback, escalation");
     expect_session_gate(o, FileExec::two_threads_write_delayed, SessionInput::escalation);
     expect_direct_logout(o, SessionInput::escalation);
-    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release";
-    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor";
+    expect_session_body_once_after_let_go(o);
+    expect_session_no_job_beyond_the_writes_own(o);
 }
 
 TEST(OffloadDirectSession, ApplicationSend_IsStoredAndSent) {
@@ -1641,9 +1751,8 @@ TEST(OffloadDirectSession, ApplicationSend_IsStoredAndSent) {
                                       "TFS.13 callback");
     expect_session_gate(o, FileExec::two_threads_write_delayed, SessionInput::app_send);
     expect_direct_send(o);
-    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release";
-    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor";
+    expect_session_body_once_after_let_go(o);
+    expect_session_no_job_beyond_the_writes_own(o);
 }
 
 TEST(OffloadDirectSession, Control_OneThread_GracefulLogout_ByTheGraceTimer) {
@@ -1652,8 +1761,7 @@ TEST(OffloadDirectSession, Control_OneThread_GracefulLogout_ByTheGraceTimer) {
                            "TFS.14 callback, grace timer");
     expect_session_gate(o, FileExec::one_thread_held_by_the_cell, SessionInput::grace_timer);
     expect_direct_logout(o, SessionInput::grace_timer);
-    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release";
+    expect_session_body_once_after_let_go(o);
 }
 
 TEST(OffloadDirectSession, Control_OneThread_GracefulLogout_ByAnEscalatingTerminalClose) {
@@ -1662,8 +1770,7 @@ TEST(OffloadDirectSession, Control_OneThread_GracefulLogout_ByAnEscalatingTermin
                            "TFS.14 callback, escalation");
     expect_session_gate(o, FileExec::one_thread_held_by_the_cell, SessionInput::escalation);
     expect_direct_logout(o, SessionInput::escalation);
-    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release";
+    expect_session_body_once_after_let_go(o);
 }
 
 TEST(OffloadDirectSession, Control_OneThread_ApplicationSend) {
@@ -1671,8 +1778,7 @@ TEST(OffloadDirectSession, Control_OneThread_ApplicationSend) {
                                       "TFS.14 callback, application send");
     expect_session_gate(o, FileExec::one_thread_held_by_the_cell, SessionInput::app_send);
     expect_direct_send(o);
-    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release";
+    expect_session_body_once_after_let_go(o);
 }
 
 }  // namespace

@@ -12,7 +12,11 @@
 //
 // The executor is armed from inside the Logout's toAdmin, after close(graceful)'s flush has
 // been through the file executor, so the Logout's write job is job 1; for an application's
-// send it is armed before the send.
+// send it is armed before the send. The Scene's setup() returns once the peer has read the
+// Logon reply, without waiting for the store calls the session makes after that reply, so a
+// job of one of those, handed over before the arm, can begin its body after it. The log
+// counts a body only inside a job it numbered (recording_file_executor.hpp), and records
+// such a body apart; every assertion on the bodies or the count prints the executor's record.
 //
 // The release, under an Engine. The cancellation reaches the store call through further
 // handlers on the session's executor (the io_context the test thread runs), so the count of
@@ -195,6 +199,7 @@ struct EngineOutcome {
     std::size_t peer_frames_at_seq = 0;  // of the scene's type at `seq`, to end-of-stream
     int bodies = 0;
     int bodies_after_let_go = 0;
+    int unattributed_bodies = 0;
     bool timed_out = false;
     bool stop_completed = false;
     std::string events;
@@ -346,6 +351,7 @@ EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cel
         if (send_fut.valid() && HeldFileStoreScene::ready(send_fut)) o.send = send_fut.get();
         o.bodies = log->bodies();
         o.bodies_after_let_go = log->bodies_after_let_go();
+        o.unattributed_bodies = log->unattributed_bodies();
         o.timed_out = log->held_timed_out();
         o.events = log->events();
         if (auto* const store = scene.log->store; store != nullptr) {
@@ -381,7 +387,8 @@ EngineOutcome run_engine_session(SessionInput in, FileExec kind, char const* cel
               << " state=" << static_cast<int>(o.state)
               << " peer_frames_at_seq=" << o.peer_frames_at_seq
               << " peer_read_ended=" << o.peer_read_ended << " bodies=" << o.bodies << "/"
-              << o.bodies_after_let_go << " stop_completed=" << o.stop_completed << "\n";
+              << o.bodies_after_let_go << " unattributed_bodies=" << o.unattributed_bodies
+              << " stop_completed=" << o.stop_completed << "\n";
     return o;
 }
 
@@ -428,8 +435,18 @@ void expect_engine_send(EngineOutcome const& o) {
 }
 
 void expect_body_once_after_let_go(EngineOutcome const& o) {
-    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once";
-    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release";
+    EXPECT_EQ(o.bodies, 1) << "the store's body did not begin exactly once"
+                           << "\nthe executor's record:\n"
+                           << o.events;
+    EXPECT_EQ(o.bodies_after_let_go, 1) << "the store's body did not begin after the release"
+                                        << "\nthe executor's record:\n"
+                                        << o.events;
+}
+
+void expect_no_job_beyond_the_writes_own(EngineOutcome const& o) {
+    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor"
+                          << "\nthe executor's record:\n"
+                          << o.events;
 }
 
 // ── D-598-1, D-598-3: the graceful Logout and an application's send (TFS.12, TFS.13) ─
@@ -441,7 +458,7 @@ TEST(OffloadEngineSession, GracefulLogout_ByTheGraceTimer_IsWrittenAndNotSent) {
     expect_engine_gate(o, SessionInput::grace_timer);
     expect_engine_logout(o, SessionInput::grace_timer);
     expect_body_once_after_let_go(o);
-    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor";
+    expect_no_job_beyond_the_writes_own(o);
 }
 
 TEST(OffloadEngineSession, GracefulLogout_ByAnEscalatingTerminalClose_IsWrittenAndNotSent) {
@@ -450,7 +467,7 @@ TEST(OffloadEngineSession, GracefulLogout_ByAnEscalatingTerminalClose_IsWrittenA
     expect_engine_gate(o, SessionInput::escalation);
     expect_engine_logout(o, SessionInput::escalation);
     expect_body_once_after_let_go(o);
-    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor";
+    expect_no_job_beyond_the_writes_own(o);
 }
 
 TEST(OffloadEngineSession, ApplicationSend_IsStoredAndNotSent) {
@@ -459,7 +476,7 @@ TEST(OffloadEngineSession, ApplicationSend_IsStoredAndNotSent) {
     expect_engine_gate(o, SessionInput::app_send);
     expect_engine_send(o);
     expect_body_once_after_let_go(o);
-    EXPECT_EQ(o.count, 1) << "a job beyond the write's own was handed to the file executor";
+    expect_no_job_beyond_the_writes_own(o);
 }
 
 // ── D-598-1, D-598-3, control: the session scenes on one thread (TFS.14) ─────────────
