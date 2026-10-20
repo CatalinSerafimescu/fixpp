@@ -931,7 +931,8 @@ TEST(OffloadOneThreadControl, Reset) {
 // armed; a second store() is started, which waits at the store's lock behind the first; the
 // holder is let go. The first call's body then begins while the log is armed. The cell
 // asserts that it did, that the log recorded it apart, and that the bodies of the armed call
-// are its own job's only. An executor that counts every body while the log is armed reads two.
+// are its own job's only, so the assertions tell a body of an unnumbered job handed over
+// before the arm from a body of the armed call.
 
 TEST(OffloadRecorder, ABodyOfAJobHandedOverBeforeTheArm_IsNotCountedAsTheCalls) {
     BareStore b{FileExec::one_thread_held_by_the_cell};
