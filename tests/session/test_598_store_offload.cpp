@@ -1010,7 +1010,9 @@ TEST(OffloadRecorder, ABodyOfAJobHandedOverBeforeTheArm_IsNotCountedAsTheCalls) 
 // A job of the cell on a pool thread takes a work guard on the io_context, a pump runs a
 // handler to its end while that guard is held, and then the job releases the guard and ends:
 // the io_context's last outstanding work reaches zero on the pool thread, after the pump has
-// restarted the io_context. The next pump must still run a handler posted to it.
+// restarted the io_context. The next pump must still run a handler posted to it. The
+// io_context is read as not stopped before the first pump: a guard released when it is
+// made is itself the last work reaching zero, and stops the io_context before any pump.
 
 TEST(OffloadPump, WorkThatReachesZeroOnAPoolThread_DoesNotStopTheNextPump) {
     // Before the pool: its job reads them until the pool is joined.
@@ -1042,6 +1044,7 @@ TEST(OffloadPump, WorkThatReachesZeroOnAPoolThread_DoesNotStopTheNextPump) {
         ended.store(true);
     });
     bool const held = spin_until([&] { return holding.load(); });
+    bool const stopped_before_first = ioc.stopped();
     bool first = false;
     asio::post(ioc, [&first] { first = true; });
     bool const first_ran = pump_until(ioc, [&first] { return first; });
@@ -1051,12 +1054,14 @@ TEST(OffloadPump, WorkThatReachesZeroOnAPoolThread_DoesNotStopTheNextPump) {
     bool second = false;
     asio::post(ioc, [&second] { second = true; });
     bool const second_ran = pump_until(ioc, [&second] { return second; }, std::chrono::seconds{1});
-    std::cout << "FS-RECORD pump known positive: held=" << held << " first_ran=" << first_ran
+    std::cout << "FS-RECORD pump known positive: held=" << held
+              << " stopped_before_first=" << stopped_before_first << " first_ran=" << first_ran
               << " job_ended=" << job_ended << " stopped=" << stopped
               << " second_ran=" << second_ran << "\n";
 
-    ASSERT_TRUE(held && first_ran && job_ended)
-        << "the path was not exercised: held=" << held << " first_ran=" << first_ran
+    ASSERT_TRUE(held && !stopped_before_first && first_ran && job_ended)
+        << "the path was not exercised: held=" << held
+        << " stopped_before_first=" << stopped_before_first << " first_ran=" << first_ran
         << " job_ended=" << job_ended;
     EXPECT_FALSE(stopped) << "the io_context stopped when the pool thread's work ended";
     EXPECT_TRUE(second_ran) << "the pump after it ran nothing";
