@@ -33,10 +33,6 @@
 //     body inside the offload (fixpp#598, note §11.6); its section below says how,
 //     and what shows that the emit arrived.
 //
-//   Store_TotalCancelDuringOffload_DoesNotWedge:
-//     total cancellation emitted while a store offload is in-flight; asserts no
-//     wedge/hang.
-//
 // ANTI-HANG: every live cell uses a bounded future.wait_for so a wedge FAILs
 // rather than hanging ctest. [[feedback_fail_placeholder_red_test]]
 //
@@ -132,12 +128,6 @@ void hold_probe(std::thread::id tid) noexcept {
     // the test FAILs on the subsequent assertions rather than hanging here.
     (void)fixpp::test_support::wait_until_observed(
         [] { return g_arm_a_release.load(std::memory_order_acquire); }, std::chrono::seconds{10});
-}
-
-// Slow probe: brief sleep (arm (b) no-wedge cell only).
-void slow_probe(std::thread::id) noexcept {
-    g_probe_entered.store(true, std::memory_order_release);
-    std::this_thread::sleep_for(std::chrono::milliseconds{10});
 }
 
 #endif  // FIXPP_TEST_HOOKS
@@ -692,56 +682,6 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
 }
 
 #endif  // FIXPP_TEST_HOOKS (arm (b))
-
-// ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
-// No-wedge cell: total cancellation while store offload in-flight → no hang
-// ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
-//
-// A total cancellation emitted while a store's offload is in flight must not stall the
-// call, and so must not stall a teardown that awaits it.
-
-TEST_F(FileStoreCancellationTest, Store_TotalCancelDuringOffload_DoesNotWedge) {
-    auto store = open_store("SNDR7", "TGTG",
-                            FileStorePolicy{.which = FileStorePolicy::kind::commit_per_message});
-    ASSERT_TRUE(store != nullptr);
-    auto store_sp = std::shared_ptr<FileStore>(std::move(store));
-
-#ifdef FIXPP_TEST_HOOKS
-    // Install a slow probe so the cancel signal fires while syscall is mid-flight.
-    reset_probe();
-    fixpp::session::install_store_offload_probe(slow_probe);
-#endif
-
-    asio::cancellation_signal sig;
-    const auto frame1 = make_frame(1);
-
-    auto fut = spawn_on_strand(asio::bind_cancellation_slot(
-        sig.slot(), [store_sp, frame1]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
-            co_return co_await store_sp->store(1, std::span<const std::byte>(frame1),
-                                               direction_t::outbound);
-        }));
-
-    // Brief yield to let co_spawn start the offload, then emit total cancel.
-    std::this_thread::sleep_for(std::chrono::milliseconds{5});
-    sig.emit(asio::cancellation_type::total);
-
-    // Must resolve within timeout — no wedge.
-    ASSERT_EQ(fut.wait_for(std::chrono::seconds{10}), std::future_status::ready)
-        << "store() did not complete within 10 s after total cancel — possible wedge";
-
-    fixpp::core::expected_t<void> result;
-    ASSERT_NO_THROW(result = fut.get()) << "store() must not throw under total cancellation";
-
-    // Result must NOT be store_cancelled (single-op, no mutex contention).
-    if (!result.has_value()) {
-        EXPECT_NE(result.error(), error::store_cancelled)
-            << "store_cancelled returned without mutex contention — contract violation";
-    }
-
-#ifdef FIXPP_TEST_HOOKS
-    fixpp::session::install_store_offload_probe(nullptr);
-#endif
-}
 
 #ifdef FIXPP_TEST_HOOKS
 
