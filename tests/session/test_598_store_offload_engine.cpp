@@ -30,10 +30,10 @@
 //   an application's send: the cell's emit, and the frames of Engine::send and Session::send
 //     between the slot and the store call.
 // A marker beyond the hops costs nothing. The markers are enough only if every cell here but
-// the controls fails at the count or at the read-back under the mutant M1, offload_to's
-// co_await with asio::use_awaitable alone (src/session/file_store.cpp), applied to the
-// current tree. Re-run that mutant after any change to the hops above: to Session::close,
-// Session::run_logout_phase1, Session::send or Engine::send.
+// the controls fails at the count (a job beyond the write's own, count 2) under the mutant
+// M1, offload_to's co_await with asio::use_awaitable alone (src/session/file_store.cpp), on
+// the current tree. Re-run M1 after any change on the path from the cancellation's emit to
+// offload_to's await; re-derive that path with the recipe above and the callers of offload_to.
 //
 // The grace timer input waits for close's own grace timer, which runs on real time; it is the
 // one wait on a clock in these cells. From inside the Logout's toAdmin the cell reads the

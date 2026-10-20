@@ -382,8 +382,9 @@ it through an `Application` callback is the callback the stretch itself calls.
 - **R-6.** "Calls to `store()` complete in the order they were made" is a requirement of
   `MessageStore::store`, not a disclosed limitation of send ordering (`B-563-4`).
   ⚠️ **Narrowed by B28** (`.specify/536-537-538-recovery-liveness.md` §10, D-OUT-7; ruling R-21;
-  B&L `B-538-3`), and with it `.specify/563-564-callback-send.md` §0 (R-6), §2.1 and §4, which
-  state it unconditionally:
+  B&L `B-538-3`), and with it `.specify/563-564-callback-send.md` §0 (R-6), §2.1 and §4, and
+  `.specify/2e-msgstore.md` Appendix Z2 §1 (B28's erratum at that file's end), which state it
+  unconditionally:
   calls to `store()` that a cancellation does not end complete in the order they were made;
   a call that a cancellation ended may return earlier. On `FileStore`, a call queued at the
   store's lock that a cancellation ends returns `store_cancelled` while the call ahead of it
