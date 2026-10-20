@@ -454,7 +454,7 @@ TEST(CancelledReadMeasuredPath, StopAtNextSlotRead_WalkEndsByException) {
     EXPECT_TRUE(o.peer_hang_up_after_hook_handler)
         << "the peer sees no hang-up when the hook's handler has returned";
 #else
-    std::printf("[ NOT READ ] the peer's hang-up reading does not exist on this platform\n");
+    std::printf("the reading \"the peer sees a hang-up\" was not made on this platform\n");
 #endif
     EXPECT_TRUE(o.engine_stopped_after_hook_handler);
     EXPECT_FALSE(o.stop_ready_after_hook_handler);

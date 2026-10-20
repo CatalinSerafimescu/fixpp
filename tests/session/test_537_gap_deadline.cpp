@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/error.hpp>
@@ -388,6 +389,9 @@ void expect_logout_and_open_transport(SiteRun const& o, std::string const& text_
     EXPECT_FALSE(o.peer_read_ended || o.peer_saw_hang_up)
         << "the transport was closed after the deadline's Logout (read ended: " << o.peer_read_ended
         << ", hang-up seen: " << o.peer_saw_hang_up << ")";
+#if !defined(FIXPP_TEST_PEER_HANG_UP_READING)
+    std::printf("the reading \"the peer sees a hang-up\" was not made on this platform\n");
+#endif
 }
 
 class GapDeadlineOutOfSequenceSite : public ::testing::TestWithParam<session_role> {};
