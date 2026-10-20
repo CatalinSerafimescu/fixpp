@@ -1316,8 +1316,11 @@ TEST(LockGrantPin, EmittedWhileQueuedAtTheLock_ReturnsStoreCancelled) {
 //     close_grace through close_grace_wake_;
 //   an application's send: the cell's emit, and Session::send's frames between the slot and
 //     the store call.
-// A marker beyond the hops costs nothing. What shows that the markers are enough is the run
-// on the tree before the fix, where the count must read one more than the write's own.
+// A marker beyond the hops costs nothing. The markers are enough only if every cell of this
+// section but the controls fails at the count or at the read-back under the mutant M1,
+// offload_to's co_await with asio::use_awaitable alone (src/session/file_store.cpp), applied
+// to the current tree. Re-run that mutant after any change to the hops above: to Session::close,
+// Session::run_logout_phase1 or Session::send.
 //
 // The grace timer input waits for close's own grace timer, which runs on real time; it is the
 // one wait on a clock in these cells. From inside the Logout's toAdmin the cell reads the
