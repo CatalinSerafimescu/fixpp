@@ -13,7 +13,7 @@
 // from the pool thread, possibly after the test thread's pump has returned and restarted it.
 // The next pump then runs nothing: pump_until spins out its budget, and
 // run_window_then_ready's window returns at once. An io_context is exposed when work tracked
-// on it can be released on another thread while nothing else keeps its count above zero
+// on it can be released on another thread while it holds no further outstanding work
 // between two pumps: no engine socket, no parked timer.
 //
 // What it costs and what it forbids, while the guard is held:
