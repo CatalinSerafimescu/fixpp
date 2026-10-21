@@ -51,16 +51,12 @@
 //   OffloadDirectSession        the graceful Logout and an application's send on a directly
 //                               driven Session on the callback transport, and their control
 //                               on one thread.
-//   OffloadPump                 the known positive of keep_running_for, below.
+//   OffloadPump                 the known positive of keep_running_for
+//                               (tests/support/keep_running.hpp).
 //
-// The io_contexts the test thread runs. A store call's offload completes through a work guard
-// on the caller's io_context that asio's co_spawn keeps in the offload's frame
-// (asio/impl/co_spawn.hpp, co_spawn_state::handler_work), and that frame is destroyed on the
-// pool thread after the completion has been posted. When that is the io_context's last
-// outstanding work it is stopped, from the pool thread, possibly after the test thread's pump
-// has restarted it; the next pump then runs nothing until its budget is spent. Every
-// io_context of this file that a pool thread can complete work on is held by
-// keep_running_for for as long as it is pumped.
+// The io_contexts the test thread runs. Every io_context of this file that a pool thread can
+// complete work on is held by keep_running_for for as long as it is pumped; the DirectAcceptor
+// of logon_arm_fixtures.hpp holds its own when it has a FileStore. Why: keep_running.hpp.
 //
 // FS-RECORD lines on stdout carry each cell's readings, printed before any assertion of the
 // cell, so that a RED run still has its record. Re-derive them from a run's output with
@@ -78,7 +74,6 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/error.hpp>
-#include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/steady_timer.hpp>
@@ -121,6 +116,7 @@
 #include "session/logon_arm_fixtures.hpp"
 #include "session/plain_engine_rig.hpp"
 #include "support/calling_thread_readings.hpp"
+#include "support/keep_running.hpp"
 #include "support/pump_until_ready.hpp"
 #include "support/recording_file_executor.hpp"
 #include "support/session_test_access.hpp"
@@ -140,6 +136,8 @@ using fixpp::session::fsm_state;
 using fixpp::session::seqnum_t;
 using fixpp::session::session_test_access;
 using fixpp::test_support::CallingThreadReadings;
+using fixpp::test_support::keep_running;
+using fixpp::test_support::keep_running_for;
 using fixpp::test_support::kPumpBudget;
 using fixpp::test_support::pump_until;
 using fixpp::test_support::logon_arm::DirectAcceptor;
@@ -149,14 +147,6 @@ using bytes = std::vector<std::byte>;
 
 constexpr char const* kSender = "ISLD";
 constexpr char const* kTarget = "TW";
-
-// Keeps `ioc` from stopping when its count of outstanding work reaches zero on another
-// thread between two pumps (this file's header, "The io_contexts the test thread runs").
-// Declare it after the io_context, so it is destroyed first.
-using keep_running = asio::executor_work_guard<asio::io_context::executor_type>;
-[[nodiscard]] keep_running keep_running_for(asio::io_context& ioc) {
-    return asio::make_work_guard(ioc);
-}
 
 // The log's record format, spelled from src/session/file_store.cpp and not read from it: a
 // 16-byte header, then the payload, padded to 8 bytes. A frame of make_frame()'s 8 bytes is
@@ -1660,8 +1650,6 @@ SessionOutcome run_direct_session(SessionInput in, FileExec kind, char const* ce
             asio::any_io_executor{fe::DelayingExecutor{pool.get_executor(), log, two}}}};
     // After the acceptor: a held thread is let go before the acceptor drains and joins.
     fe::let_go_on_exit const let_go{log};
-    // After the acceptor: released before the acceptor drains its io_context.
-    keep_running const keep{keep_running_for(f.ioc)};
     auto const payload = plain_rig::to_bytes(
         "35=D\x01"
         "11=ORD001\x01"

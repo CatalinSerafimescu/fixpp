@@ -87,6 +87,7 @@
 #include "session/mock_reconnect_factory.hpp"
 #include "session/plain_engine_rig.hpp"
 #include "support/calling_thread_readings.hpp"
+#include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -108,6 +109,8 @@ using fixpp::session::seqnum_t;
 using fixpp::session::session_test_access;
 using fixpp::test_support::await_and_read_thread;
 using fixpp::test_support::CallingThreadReadings;
+using fixpp::test_support::keep_running;
+using fixpp::test_support::keep_running_for;
 using fixpp::test_support::MockReconnectFactory;
 using fixpp::test_support::RecordingStoreFactory;
 using fixpp::test_support::store_op;
@@ -524,6 +527,10 @@ public:
     asio::io_context ioc;
 
 private:
+    // Keeps `ioc` from stopping between two pumps when the FileStore's offload work is
+    // released on the pool thread (tests/support/keep_running.hpp). Released first in the
+    // destructor, before the drain, which waits for the io_context to stop.
+    keep_running keep_{keep_running_for(ioc)};
     asio::thread_pool file_pool_{1};
     struct temp_dir {
         std::filesystem::path path = fixpp::test_support::unique_temp_dir("b28_logon_root");
@@ -584,6 +591,7 @@ public:
     // still suspended on the io_context is resumed here, over live storage.
     // cancel_and_drain_or_report carries its own catch.
     ~DirectInitiator() {
+        keep_.reset();
         try {
             log->on_call = nullptr;
             asio::co_spawn(ioc, session->close(close_mode::terminal), asio::detached);
@@ -1296,6 +1304,9 @@ OrderOutcome run_store_calls(StoreUnderOrderTest const kind, bool const cancel_t
     // Declared first, destroyed last: the hook outlives the pool's offloads.
     store_hold::scoped_hook const hook;
     asio::io_context ioc;
+    // The FileStore's offload work is released on the pool thread
+    // (tests/support/keep_running.hpp).
+    auto const keep = keep_running_for(ioc);
     asio::thread_pool file_pool{1};
     store_hold::release_on_exit const release_guard;
     struct temp_dir {

@@ -63,6 +63,7 @@
 
 #include "session/plain_engine_rig.hpp"
 #include "support/calling_thread_readings.hpp"
+#include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -98,6 +99,10 @@ public:
     asio::io_context ioc;
 
 private:
+    // With a FileStore: keeps `ioc` from stopping between two pumps when an offload's work
+    // is released on the pool thread (tests/support/keep_running.hpp). Released first in the
+    // destructor, before the drain, which waits for the io_context to stop.
+    std::optional<keep_running> keep_;
     // The FileStore's file I/O executor; it outlives the session and its store, and the
     // directory is removed after both.
     asio::thread_pool file_pool_{1};
@@ -144,6 +149,7 @@ public:
         };
         std::shared_ptr<RecordingStoreFactory> factory;
         if (o.file_store) {
+            keep_.emplace(keep_running_for(ioc));
             fixpp::session::FileStore::Config file_cfg;
             file_cfg.directory = dir_.path;
             file_cfg.sender_comp_id = cfg.sender_comp_id;
@@ -172,6 +178,7 @@ public:
     // released, and whatever is still suspended on the io_context is resumed here, over
     // live storage. cancel_and_drain_or_report carries its own catch.
     ~DirectAcceptor() {
+        keep_.reset();
         log->release_hold();
         cancel_and_drain_or_report(ioc, *clock, "logon_arm::DirectAcceptor");
     }
