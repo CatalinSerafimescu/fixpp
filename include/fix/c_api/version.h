@@ -161,8 +161,70 @@
  *  Added: fixpp_session_config_set_logon_timeout_ms and
  *  fixpp_session_garbled_frame_count (session.h).
  *  No error code is added. */
+
+/*  1.12 (BREAKING, [const §X.7]; fixpp#536, #537, #538): what the session
+ *  does with a frame above the expected inbound sequence number and how a gap
+ *  the peer does not fill ends (#537), what one session's close does to the
+ *  other sessions of its engine (#536), and what a resend answer holds after
+ *  a Logon exchange that reset the sequence numbers (#538). The observers are
+ *  the calls the 1.10 entry names: fixpp_session_is_established,
+ *  fixpp_session_close, fixpp_session_send, fixpp_session_register_callback
+ *  and fixpp_session_register_send_callback. Each carries the changes named
+ *  for it below in its 1.12 clause in session.h, where the 1.10 sentences
+ *  fixpp#537 falsifies are amended in place, marked 1.12. One line per
+ *  change:
+ *    - a frame above the expected number that arrives while a resend is
+ *      outstanding is ignored, not session-ending (every observer; the
+ *      amended 1.10 bullets);
+ *    - with a heartbeat interval set, a gap the peer does not fill ends with
+ *      a Logout once the expected number has not advanced for two heartbeat
+ *      intervals; an interval of 0 turns that deadline off, and a session
+ *      whose interval was never set has it, at the session's default
+ *      interval (every observer; the amended 1.10 bullets);
+ *    - where the session's CompIDs leave no room for that Logout's text, the
+ *      gap ends at the same point with no Logout (every observer);
+ *    - a Heartbeat above the expected number answers a TestRequest the
+ *      session is waiting on, during a resend or as the frame that opens the
+ *      gap, and one that carries another TestReqID(112) ends the session at
+ *      that frame (every observer);
+ *    - a ResendRequest the session cannot build ends the session and closes
+ *      the connection (every observer);
+ *    - a session's close, and the peer's answer to a close's Logout, no
+ *      longer stop the Heartbeats and TestRequests of the engine's other
+ *      sessions, and another session's close no longer ends a session's wait
+ *      for the answer to its own Logout early: corrections
+ *      (fixpp_session_close, fixpp_session_is_established);
+ *    - after a Logon exchange that reset the sequence numbers and left the
+ *      first outbound number at 2, a message sent is resent on the peer's
+ *      ResendRequest, not gap-filled: a correction (fixpp_session_send).
+ *  The effects with no carrying declaration are recorded here:
+ *    - a store read that fails while the session answers a ResendRequest ends
+ *      the session, where the slot was gap-filled. No reach through the C
+ *      ABI as shipped: a session opened through it runs on the in-memory
+ *      store;
+ *    - during fixpp_engine_stop, where an inbound frame's processing meets
+ *      the stop, fixpp_session_is_established turns false before the peer's
+ *      connection closes, where the connection closed first. No declaration
+ *      orders the two, and both orders occur under fixpp_engine_stop before
+ *      and after this entry: a change of output the documentation leaves
+ *      unspecified;
+ *    - the code a cancelled inbound frame returns inside the engine changes.
+ *      No reach: no C function receives it;
+ *    - an outbound frame whose store call is cancelled is not transmitted,
+ *      the send fails and the session ends, where on one timing the frame
+ *      was transmitted and the send succeeded. No reach through the C ABI as
+ *      shipped: a session opened through it runs on the in-memory store, and
+ *      neither fixpp_session_send nor fixpp_session_close can be cancelled
+ *      by its caller;
+ *    - a close whose Logout was not sent does not wait for the logout
+ *      timeout. Through the C ABI as shipped no fixpp_session_close returns
+ *      sooner for it;
+ *    - a send whose sequence number was taken back while its frame was being
+ *      stored is not transmitted and fails. No reach through the C ABI as
+ *      shipped.
+ *  No symbol, signature or error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 11 /* 1.11: inbound frame dispositions (093) */
+#define FIXPP_C_ABI_VERSION_MINOR 12 /* 1.12: recovery and liveness (#536, #537, #538) */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

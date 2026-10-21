@@ -18,6 +18,7 @@ refs:
   - src/session/sending_time.cpp
   - src/session/session_strand.cpp
   - .specify/544-hot-path-zero-alloc.md
+  - .specify/536-537-538-recovery-liveness.md
   - specs/015-runtime-engine/research.md
   - specs/092-garbled-frame-reject/spec.md
   - specs/092-garbled-frame-reject/research.md
@@ -358,10 +359,49 @@ implementation departs). The user-facing statement is B&L `B-544-1`; what stays 
   introduces goes through `FIXPP_INBOUND_SPLIT_AWAIT`, and each callee starts with
   `FIXPP_INBOUND_SPLIT_ENTRY` (`src/session/session.cpp`): the first cancellation check stays at the moved
   block's first original `co_await`, so a callback that ran before an await under a cancelled chain still
-  runs. `session_544_inbound_split_cancel` holds the differential cells.
+  runs. `session_544_inbound_split_cancel` holds the differential cells. ⚠️ **What follows such a check
+  is superseded by ruling R-14** (`.specify/536-537-538-recovery-liveness.md` §9): the cancellation no
+  longer leaves the frame as an exception; it ends at `on_inbound_active_`'s catch, below.
 - **The other changes on this path.** The session strand keeps the concrete executor type
   (`make_session_strand`; see [`session`](./session.md)), which is what removes the per-read `operator new`
   calls. `SeqnumManager::check_inbound` locks through the frameless lock op (see
   [`async-mutex`](./async-mutex.md)), and the plain and TLS transport reads are awaited as `deferred`
   operations (see [`transport`](./transport.md)); each removes a frame, which is slot headroom under the
   exported count, not what makes the arms' frames fit.
+
+## A cancellation met while a frame is processed (note §9, ruling R-14)
+
+The design is `.specify/536-537-538-recovery-liveness.md` §9 (D-CAN-1 to D-CAN-7); the user-facing
+statement is B&L `B-538-4`. The rest of the batch, which changes what the Active arm does with a frame
+above the expected number (fixpp#537) and what a resend answer does with a failed store read (fixpp#538),
+is on [`session`](./session.md), with its rejected alternatives.
+
+- **The decision.** `on_inbound_active_`, the one coroutine every inbound frame enters, has its whole
+  body in one `try`. An exception that leaves an await of the frame's processing ends the session
+  there: `Disconnected`, and `on_inbound_frame` returns `store_cancelled` for a cancellation and
+  `dispatch_aborted` for anything else; it throws nothing. Before it, a cancellation already recorded
+  on the thread was thrown by the next `co_await`'s pre-check and caught nowhere on the inbound path,
+  so the session stayed Active under an `Engine` until `Engine::stop`'s own close, and a direct driver
+  got the exception. Both timings of one cancellation, returned by a store call or thrown by a
+  `co_await`, now end the same way.
+- **The reset after the handler.** The handler ends by resetting the calling coroutine's cancellation
+  state to asio's default, so the caller is left as a returned cancellation leaves it. That this is the
+  state a lock sequence leaves is the lock's doing, and whether the lock should restore its caller's
+  filter instead is fixpp#583.
+- **A Logon arm that a close or an engine stop superseded** records nothing and returns success; the
+  close or the stop ends the session.
+- **Outside it.** A cancellation recorded when the caller awaits `on_inbound_frame` throws in the
+  caller's frame before the frame is started (the ending of every `Engine::stop` that cancels a parked
+  read). A cancellation met in a reply's transmit step, the write gate and the write, still ends in more
+  than one way by timing; that is fixpp#584 (ruling R-18).
+- **Rejected** (§9.4): making `on_inbound_frame` a coroutine with the `try` in it (one frame deeper on
+  every frame than fixpp#544's target, and no gate counts that depth); a `try` at each production
+  caller (every other caller would still get the throw, and a handler in the pump could not await the
+  pump's close); a handler for `operation_aborted` only; the catch without the reset (measured: the
+  pump still ended by exception); `throw_if_cancelled(false)` in place of the reset (it would silence
+  every later pre-check on the thread); a conversion at each store call (a `try` at every store call,
+  one on the in-sequence path); `dispatch_aborted` for a cancellation.
+- **The cost.** The `try` is on the path of every inbound frame. The zero-allocation registrations of
+  fixpp#544 that run the Active read pass with it, and the frame of `on_inbound_active_` stays under the
+  recycler's limit on both compilers. Its cost in time on the path that does not throw is the paired
+  benchmark's to read; the note's §6.3 says what was and was not measured.

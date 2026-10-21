@@ -3417,15 +3417,44 @@ std::string joined(std::vector<std::string> const& steps) {
     return out;
 }
 
+// The ending of a gap the peer does not fill while it keeps sending frames above NextNumIn
+// (fixpp#537, .specify/536-537-538-recovery-liveness.md §4.6, condition (a)): once NextNumIn
+// has not advanced for twice HeartBtInt, the next such frame draws a Logout with a
+// Text(58), and the session is Disconnected. `seq` is the MsgSeqNum(34) of that frame.
+//
+// Precondition: the cell has not moved the clock, so the gap opened at the clock's
+// present instant, and so did the last inbound frame. The liveness loop's grace check for
+// the TestRequest it writes during this advance is due one nanosecond after the instant
+// the advance reaches.
+void expect_unfilled_gap_ends_with_the_deadlines_logout(LateCell& c, std::uint32_t seq,
+                                                        std::string_view row) {
+    ASSERT_EQ(c.sess->state(), fsm_state::Active) << row << ": before the bound";
+    // Staging (ci/mock-clock-staging-sweep.sh): KIND D for the liveness loop, whose sleep
+    // is armed to an instant computed from the anchors the scripted frames stamped,
+    // before this advance. KIND A for the frame fed below, which reads the clock on this
+    // thread when the deadline is checked.
+    c.fix.clock->advance(2 * 30s);
+    drain_ready(c.fix.ioc);
+    ASSERT_EQ(c.sess->state(), fsm_state::Active)
+        << row << ": the clock reached the bound with no frame delivered";
+    c.fix.feed(*c.sess, make_raw_frame("D", seq, "11=ORD" + std::to_string(seq) + "\x01"));
+    auto const logouts = c.fix.sent_of_type("5");
+    ASSERT_EQ(logouts.size(), 1U) << row << ": the frame at the bound drew no Logout";
+    EXPECT_FALSE(extract_tag(logouts.front(), 58).empty())
+        << row << ": the Logout carries no Text(58)";
+    EXPECT_EQ(c.sess->state(), fsm_state::Disconnected) << row << ": after the Logout";
+}
+
 // L-1: the peer sends a NewOrderSingle at N = 2 whose malformed tag precedes 34 (D-7),
 // then a NewOrderSingle at 3, a Heartbeat at 4 and NewOrderSingles at 5 and 6. The
 // replay of the faulty frame carries the same fault before 34, so it is disregarded
 // again. Contract C-5 L-1 describes the first steps of the trace: the gap draws a
 // ResendRequest and the replay is disregarded. The rest of the trace pins what the
-// session does next in this scenario: AwaitingResend draws no second ResendRequest for
-// the PossDup resend or the too-high Heartbeat, and the next new message that is
-// neither a Heartbeat nor a PossDup ends the session. The durable NextNumIn after the
-// run must be 2: a reconnect resumes from 2, the number of the faulty frame.
+// session does next in this scenario: while the resend is outstanding it draws no second
+// ResendRequest, and the PossDup resend, the too-high Heartbeat and each new message
+// above NextNumIn are ignored (fixpp#537). The gap is never filled, so the session ends
+// as an unfilled gap does. The durable NextNumIn after the run must be 2: a reconnect
+// resumes from 2, the number of the faulty frame.
 TEST(UnparseableFrameDisposition, Disclosed_L1_ReplayedFaultBefore34_ResendLoop) {
     LateCell c{{.validate = false}};
     c.fix.open_to_active(*c.sess);
@@ -3445,9 +3474,14 @@ TEST(UnparseableFrameDisposition, Disclosed_L1_ReplayedFaultBefore34_ResendLoop)
     std::vector<std::string> const want{
         "35=D 34=2 -> Active",      "35=D 34=3 -> [35=2 7=2 16=0] Active",
         "35=D 34=2 43=Y -> Active", "35=D 34=3 43=Y -> Active",
-        "35=0 34=4 -> Active",      "35=D 34=5 -> Disconnected",
+        "35=0 34=4 -> Active",      "35=D 34=5 -> Active",
+        "35=D 34=6 -> Active",
     };
-    EXPECT_EQ(steps, want) << "L-1 trace:" << joined(steps);
+    ASSERT_EQ(steps, want) << "L-1 trace:" << joined(steps);
+    expect_unfilled_gap_ends_with_the_deadlines_logout(c, 7, "L-1");
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
     EXPECT_EQ(c.app->from_app, 0) << "L-1: no application message may be delivered";
     EXPECT_EQ(c.durable_next_inbound(), 2U)
         << "L-1: durable NextNumIn after the run (a reconnect resumes from it)";
@@ -3459,7 +3493,8 @@ TEST(UnparseableFrameDisposition, Disclosed_L1_ReplayedFaultBefore34_ResendLoop)
 // enters AwaitingResend and sends a ResendRequest), then a NewOrderSingle at 4 and one
 // at 5. The expected trace follows contract C-5 L-2's sequence: the faulty GapFill is
 // Rejected and not applied (D-4); the PossDup resend of 3 draws nothing (no second
-// ResendRequest while AwaitingResend); the next new message ends the session. The
+// ResendRequest while AwaitingResend); each new message above NextNumIn is ignored
+// (fixpp#537). The gap is never filled, so the session ends as an unfilled gap does. The
 // durable NextNumIn after the run must be 2, so a reconnect asks for slot 2 again and
 // the peer answers it with the same GapFill.
 TEST(UnparseableFrameDisposition, Disclosed_L2_FaultyGapFillDuringAwaitingResend_Disconnects) {
@@ -3480,9 +3515,14 @@ TEST(UnparseableFrameDisposition, Disclosed_L2_FaultyGapFillDuringAwaitingResend
         "35=D 34=3 -> [35=2 7=2 16=0] Active",
         "35=4 34=2 43=Y -> [35=3 45=2 372=4 373=0 58=Malformed field: invalid tag] Active",
         "35=D 34=3 43=Y -> Active",
-        "35=D 34=4 -> Disconnected",
+        "35=D 34=4 -> Active",
+        "35=D 34=5 -> Active",
     };
-    EXPECT_EQ(steps, want) << "L-2 trace:" << joined(steps);
+    ASSERT_EQ(steps, want) << "L-2 trace:" << joined(steps);
+    expect_unfilled_gap_ends_with_the_deadlines_logout(c, 6, "L-2");
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
     EXPECT_EQ(c.app->from_app, 0) << "L-2: no application message may be delivered";
     EXPECT_EQ(c.durable_next_inbound(), 2U)
         << "L-2: durable NextNumIn after the run (a reconnect resumes from it)";

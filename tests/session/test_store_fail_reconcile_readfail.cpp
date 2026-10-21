@@ -3,13 +3,16 @@
 // tests/session/test_store_fail_reconcile_readfail.cpp
 //
 // 059-outbound-store-fail-closed — /speckit-verify coverage witness (Arm b
-// else-arm + Arm a store_cancelled false-leg), per
-// .specify/decisions/059-outbound-store-fail-closed-coverage-design.md.
+// else-arm), per
+// .specify/decisions/059-outbound-store-fail-closed-coverage-design.md; and the cells for
+// a store that returns store_cancelled from store() (rulings R-15 and R-16,
+// .specify/536-537-538-recovery-liveness.md §10, D-OUT-1, which supersede 059's D7 for
+// the cancelled store).
 //
 // W1/W3/breadth all drive a store() failure where the subsequent reconcile
-// read next_seqnum(outbound,false) SUCCEEDS — so two branches in
+// read next_seqnum(outbound,false) SUCCEEDS — so one branch in
 // store_then_emit's fatal disposition (src/session/session.cpp's is_persistent_retain_fatal)
-// stay uncovered by those witnesses:
+// stays uncovered by those witnesses:
 //
 //   Arm (b) else-arm  — the reconcile read FAILS (dk.has_value()==false):
 //       auto dk = co_await store_->next_seqnum(direction_t::outbound, false);
@@ -22,14 +25,12 @@
 //     (which remains the ORIGINAL store() error captured before reconcile,
 //     D2/NEW-P3).
 //
-//   Arm (a) store_cancelled false-leg — store_then_emit's `!= store_cancelled` guard
-//     evaluates FALSE: a persistent store returning store_cancelled is
-//     cancellation-class (D7), excluded from the fatal branch → logged-then-
-//     proceed, unchanged (send SUCCEEDS, session stays Active, frame IS
-//     transmitted). The breadth witness covers the TRUE leg (genuine failures);
-//     this covers the FALSE leg. (Dissolves the coverage-design record's
-//     ex-ante Arm (a) risk-assessment into a real witness now that the double
-//     exists.)
+//   A store that returns store_cancelled from store() — the frame is not
+//     transmitted, the send returns dispatch_aborted, the session ends, and the
+//     frame's number is taken back, whether or not the store is persistent
+//     (note §10, D-OUT-1 and D-OUT-2: the code is tested ahead of the persistence
+//     gate). One cell per kind of store. No cancellation is emitted in these
+//     cells: the double returns the code.
 //
 // The reconcile `catch (...)` arm is NOT witnessed here and is waived
 // in the verify record as a cancellation-race branch (Article IX §1, no stable
@@ -83,6 +84,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 
@@ -160,9 +162,8 @@ using fixpp::test_support::extract_tag;
 // the reconcile signature (increment==false). That gating is precise:
 //   * the reconcile read (store_then_emit's reconcile block) is next_seqnum(outbound,
 //     increment=FALSE), the first such read after store_fired_ → faulted once.
-// yields_persistent_store() defaults to true (no factory override), so this
-// store is classified persistent (research.md D6 fallback), same as the
-// breadth double.
+// The factory reports the store as persistent unless a cell says otherwise
+// (yields_persistent_store()), same as the breadth double.
 class ReconcileFaultStore final : public MessageStore {
 public:
     ReconcileFaultStore(fixpp::core::error store_err, seqnum_t fail_at_outbound_seq,
@@ -223,14 +224,15 @@ private:
 class ReconcileFaultStoreFactory final : public MessageStoreFactory {
 public:
     ReconcileFaultStoreFactory(fixpp::core::error store_err, seqnum_t fail_at_outbound_seq,
-                               bool fail_reconcile_read)
+                               bool fail_reconcile_read, bool persistent = true)
         : store_err_(store_err),
           fail_at_(fail_at_outbound_seq),
-          fail_reconcile_read_(fail_reconcile_read) {}
+          fail_reconcile_read_(fail_reconcile_read),
+          persistent_(persistent) {}
 
     mutable ReconcileFaultStore* last_store = nullptr;
 
-    // No yields_persistent_store() override — defaults to true (persistent).
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return persistent_; }
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
         std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
@@ -245,6 +247,7 @@ private:
     fixpp::core::error store_err_;
     seqnum_t fail_at_;
     bool fail_reconcile_read_;
+    bool persistent_;
 };
 
 // ── Fixture ─────────────────────────────────────────────────────────────────
@@ -269,6 +272,8 @@ protected:
         fixpp::core::expected_t<void> send_r;
         std::vector<std::vector<std::byte>> wire;
         fsm_state state;
+        // The session's next outbound number, in memory, when the send had returned.
+        seqnum_t next_outbound_after_send = 0;
         // Captured from the store double BEFORE ~Session frees it (the store is
         // owned by the Session; reading factory->last_store after drive() returns
         // is a use-after-free).
@@ -356,6 +361,8 @@ protected:
         }
         out.send_r = send_fut.get();
         out.state = sess->state();
+        out.next_outbound_after_send =
+            fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound();
 
         // Capture the store-double flags while the store is still alive (owned
         // by sess, freed at ~Session below).
@@ -371,6 +378,10 @@ protected:
         ioc.restart();
         return out;
     }
+
+    // What a send over a store that returns store_cancelled from store() must read
+    // (defined with its two cells, below).
+    void expect_cancelled_store_ending(bool persistent);
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -414,34 +425,46 @@ TEST_F(StoreFailReconcileReadFailTest, ReconcileReadFails_StillFailsClosed_Error
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Arm (a) store_cancelled false-leg — a persistent store returning
-// store_cancelled is cancellation-class (D7), excluded from the fatal branch:
-// logged-then-proceed, send SUCCEEDS, session stays Active, frame transmitted.
+// A store that returns store_cancelled from store(), with no cancellation
+// emitted (note §10, D-OUT-1; §5, "D-OUT-1, a store that returns
+// `store_cancelled`"): the send returns dispatch_aborted, the session is
+// Disconnected, the frame is not transmitted, and the session's next outbound
+// number is the frame's own. One cell per kind of store.
 // ─────────────────────────────────────────────────────────────────────────
-TEST_F(StoreFailReconcileReadFailTest, StoreCancelled_NotFatal_StaysActiveAndTransmits) {
+void StoreFailReconcileReadFailTest::expect_cancelled_store_ending(bool persistent) {
     constexpr seqnum_t kFailAtSeq = 2;
     auto factory = std::make_shared<ReconcileFaultStoreFactory>(
-        fixpp::core::error::store_cancelled, kFailAtSeq, /*fail_reconcile_read=*/false);
+        fixpp::core::error::store_cancelled, kFailAtSeq, /*fail_reconcile_read=*/false, persistent);
 
     auto d = drive(factory);
 
     ASSERT_TRUE(d.store_fired) << "the store() fault must have fired with store_cancelled for seq "
                                << kFailAtSeq;
 
-    // store_cancelled is excluded (`!= store_cancelled` FALSE) → unchanged path.
-    EXPECT_TRUE(d.send_r.has_value())
-        << "store_cancelled is cancellation-class (D7): the fatal branch is skipped, so "
-           "send() must NOT fail closed (logged-then-proceed, unchanged)";
-    EXPECT_EQ(d.state, fsm_state::Active)
-        << "store_cancelled must leave the session Active (not the store-fatal transition)";
+    EXPECT_FALSE(d.send_r.has_value()) << "the send succeeded over a cancelled store";
+    if (!d.send_r.has_value()) {
+        EXPECT_EQ(d.send_r.error(), fixpp::core::error::dispatch_aborted);
+    }
+    EXPECT_EQ(d.state, fsm_state::Disconnected);
 
     bool frame_transmitted = false;
     for (const auto& frame : d.wire) {
         if (extract_tag(frame, 34) == std::to_string(kFailAtSeq)) frame_transmitted = true;
     }
-    EXPECT_TRUE(frame_transmitted)
-        << "store_cancelled falls through to Step 2: the frame (seq=" << kFailAtSeq
-        << ") IS transmitted, exactly as today (FR-005 cancellation parity)";
+    EXPECT_FALSE(frame_transmitted)
+        << "the frame (seq=" << kFailAtSeq << ") was transmitted over a cancelled store";
+    EXPECT_EQ(d.next_outbound_after_send, kFailAtSeq)
+        << "the session's next outbound number, in memory, is not the frame's own";
+}
+
+TEST_F(StoreFailReconcileReadFailTest,
+       StoreCancelled_PersistentStore_FailsTheSendEndsTheSessionAndTakesTheNumberBack) {
+    expect_cancelled_store_ending(/*persistent=*/true);
+}
+
+TEST_F(StoreFailReconcileReadFailTest,
+       StoreCancelled_VolatileStore_FailsTheSendEndsTheSessionAndTakesTheNumberBack) {
+    expect_cancelled_store_ending(/*persistent=*/false);
 }
 
 }  // namespace

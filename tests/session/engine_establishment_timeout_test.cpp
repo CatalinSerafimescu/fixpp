@@ -592,7 +592,7 @@ TEST(EstablishmentTimeoutQ16, TomlLoadedSession_ClosedAtTheLoadedTNotBefore) {
 
 // ── Q-18: the deadline's clock ──────────────────────────────────────────────
 
-// A clock-wide cancel_sleeps() (any session's Logout reply calls one) during phase (b)
+// A clock-wide cancel_sleeps() (any holder of the engine clock can call one) during phase (b)
 // does not end the wait early.
 TEST(EstablishmentTimeoutQ18, AClockWideCancelSleepsDoesNotEndTheWaitEarly) {
     constexpr auto kT = 2000ms;

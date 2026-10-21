@@ -15,7 +15,10 @@ refs:
   - src/session/session_strand.cpp
   - .specify/447-458-452-capi-refusals.md
   - .specify/544-hot-path-zero-alloc.md
+  - .specify/536-537-538-recovery-liveness.md
   - .specify/563-564-callback-send.md
+  - specs/059-outbound-store-fail-closed/research.md
+  - specs/059-outbound-store-fail-closed/contracts/store-then-emit-disposition.md
   - specs/005-session-establishment-fsm/spec.md
   - specs/093-inbound-frame-dispositions/spec.md
   - specs/093-inbound-frame-dispositions/plan.md
@@ -43,6 +46,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/511-test-hooks-odr-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/544-hot-path-zero-alloc-evidence.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/536-537-538-recovery-liveness-tasks.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/536-537-538-recovery-liveness-verify.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/b41-563-564-measurement.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-verify.md
@@ -100,6 +105,9 @@ The authority is therefore split three ways, and knowing the split is most of th
 | NextExpectedMsgSeqNum | `specs/027-next-expected-msgseqnum/` ⚠️ **027 `tasks.md` T022's "+ a bidirectional-gap cell" and its `## Notes` line "T022 the live cell" are FALSE as result claims for the bidirectional suite: `NextExpectedBidirectional` does not run live. T022's "recover an at-logon gap with zero `ResendRequest`" and contract C10's "recover an at-logon gap … all missed messages delivered in order" are ALSO false as result claims for the initiator and acceptor NE cells: those cells run live but seed no gap (parent `run_interop_cell.py` NE block, "no resend"), so they witness only 789 negotiation and in-sync honour, and fixpp#503 owns the gap cells.** Flagged here and not edited (frozen `specs/` are not rewritten): no harness cell selects the interop suite named in this row — its ids are in the `unregistered-tracked` group of `tests/interop/live-cells-excluded.txt`, and fixpp#503 owns making it live. Re-derive the bundles' live-cell claims with `git grep -n -i -E -e 'live [a-z -]*cell' -e 'bidirectional-gap cell' -e 'recover an at-logon gap' -- specs/025-refresh-on-logon specs/027-next-expected-msgseqnum specs/029-persistent-seqnum-hydrate`; prospective `plan.md` / `spec.md` lines are design intent, not result claims. |
 | FIXT / FIX50SP2, version serviceability | `specs/033-fixt-fix50sp2-session/`, `specs/042-fixt-version-serviceability-guard/` |
 | A second `close()` while one is in flight | `Session::close` and its comment in `session.hpp`; `specs/093-inbound-frame-dispositions/plan.md` OD-29. ⚠️ **`.specify/2d-threading.md` §4.7's and §6.5's "Idempotency" bullets and §4.7's code-block comment ("functionally a no-op for the second caller", "without side effects", "returns immediately with no error") are SUPERSEDED for terminal-on-graceful by 093 plan OD-29**: a terminal close that arrives while a graceful one is in flight escalates it, ending its grace wait or keeping its Logout exchange from starting. Each carries a dated erratum in place. ⚠️ **OD-29 is itself narrowed by fixpp#590** (`.specify/563-564-callback-send.md` §2.6, rulings R-8 and R-9; B&L `B-563-5`): a terminal close started inside the `toAdmin` of the graceful close's Logout cuts that Logout and joins without ending the grace wait. `.specify/2d-threading.md` has a document-level amendment for it at its end, and the frozen 093 bundle is flagged in the section on fixpp#563 below. The code-block comment's "returns immediately" did not hold before 093 either: the join awaits the in-flight close. Graceful-on-graceful still joins with no side effect. |
+| Recovery and liveness: a frame above the expected number while a resend is outstanding, the deadline of an unfilled gap, a too-high Heartbeat and a pending TestRequest, a resend answer whose store read fails, `retrieve` after a reset, one session's close and the other sessions' liveness | `.specify/536-537-538-recovery-liveness.md` §2 to §4 (fixpp#536, #537, #538; issue mode, no `specs/` bundle); the live B&L file's section `## fixpp#536 / #537 / #538 / #598`; why and what was rejected: [below](#recovery-liveness-and-a-cancellation-inside-the-session-fixpp536--537--538--598). ⚠️ **013's `spec.md` FR-009, a queue of inbound frames above the expected number during recovery, was never built and is now rejected** (the note's §4.4): a frame above NextNumIn while a resend is outstanding is ignored, and the peer's replay carries it (`B-537-1`). `ResendState::inbound_held` has no writer, and `L-013-2`, which said frames are held there, is corrected. 013 is frozen and not edited. |
+| A cancellation met inside the session: while an inbound frame is processed, at an outbound store call, at the graceful close's Logout, inside a `FileStore` call's offload | the note's §9, §10 and §11 (rulings R-14 to R-17, R-24 to R-27); B&L `B-538-4` to `B-538-7`, `B-598-1`, `B-598-2`, `L-598-1`; [below](#recovery-liveness-and-a-cancellation-inside-the-session-fixpp536--537--538--598) |
+| The outbound store-then-transmit step (`store_then_emit`): what a store call that did not store the frame ends as | `Session::store_then_emit` and its header comment; `specs/059-outbound-store-fail-closed/` for a failed write on a persistent store (B&L `B-059-1`); the note's §10 for a cancelled store call (`B-538-5`). ⚠️ **059's disposition of a cancelled store call is SUPERSEDED by the note's §10 (rulings R-15, R-16)**: on both timings and on any store the frame is not transmitted, its number is taken back, and `store_then_emit` records `Disconnected` and leaves by `operation_aborted`, which `Session::send` turns into `dispatch_aborted`. Superseded, the returned timing (059's D7, "absorb → proceed", "shutdown-only"): `research.md`'s grounded fact "`store_cancelled` is shutdown-only", its D7, and D3 for this route; `contracts/store-then-emit-disposition.md` items 2 and 3 ("except `store_cancelled`") and its error-channel row for a cancelled or drained mutex; `data-model.md`'s disposition table, the row for `store_cancelled`; `plan.md`'s summary, step 1; `tasks.md` T006 (1) and T013 (a); `checklists/disposition.md` CHK002 and CHK012; `quickstart.md` ("only reachable on shutdown drain"). Superseded as mechanism, the thrown timing (059 kept the old catch, which returned `dispatch_aborted` from `store_then_emit` with no state change of its own): `research.md`'s grounded fact on the thrown `operation_aborted` and its D5; the contract's item 5; `data-model.md`'s disposition row for a thrown `operation_aborted` and its invariant INV-059-5 ("no new `Disconnected`/`hydrated_` side effects"); `plan.md`'s "existing `operation_aborted` cancellation handling … preserved verbatim"; the end of `tasks.md` T006. The caller of `Session::send` still gets `dispatch_aborted`. **Not superseded:** `spec.md`'s edge case "Cancellation is not a store failure" and FR-005, which say a cancelled send already disconnects; that now holds on both timings. The bundle is frozen and not edited. |
 | Runtime flows | the flow pages below — no design doc carries them |
 
 ## Invariants that span features, and why they exist
@@ -373,6 +381,14 @@ it through an `Application` callback is the callback the stretch itself calls.
   fixpp#579.
 - **R-6.** "Calls to `store()` complete in the order they were made" is a requirement of
   `MessageStore::store`, not a disclosed limitation of send ordering (`B-563-4`).
+  ⚠️ **Narrowed by B28** (`.specify/536-537-538-recovery-liveness.md` §10, D-OUT-7; ruling R-21;
+  B&L `B-538-3`), and with it `.specify/563-564-callback-send.md` §0 (R-6), §2.1 and §4, and
+  `.specify/2e-msgstore.md` Appendix Z2 §1 (B28's erratum at that file's end), which state it
+  unconditionally:
+  calls to `store()` that a cancellation does not end complete in the order they were made;
+  a call that a cancellation ended may return earlier. On `FileStore`, a call queued at the
+  store's lock that a cancellation ends returns `store_cancelled` while the call ahead of it
+  still holds the lock.
 - **R-7.** A callback must not run the session's own executor. The waits of R-1 and R-4 are one post
   and do not hold there; the case is outside the contract, as a false `direct_executor` attestation
   already was (`L-007-2`).
@@ -518,7 +534,71 @@ send starts (fixpp#587); the census matcher's blind spot found while the cells w
 Beside R-8's route: a terminal close that begins after the Logout's `toAdmin` has returned, where
 timing still decides whether the Logout is transmitted (fixpp#594); a clean TLS shutdown for every
 escalation (fixpp#596); what a completed `close()` promises about another coroutine's store job
-(fixpp#597); a `FileStore::store` call that reports success for a frame it did not write (fixpp#598).
+(fixpp#597). A `FileStore::store` call that reported success for a frame it did not write
+(fixpp#598) is decided by B28 (the next section; `B-598-1`).
+
+## Recovery, liveness, and a cancellation inside the session (fixpp#536 / #537 / #538 / #598)
+
+The design record is `.specify/536-537-538-recovery-liveness.md` (issue mode: no `specs/` bundle; the
+owner's rulings R-1 to R-27 are its §0). What the code does is in the live B&L file's section
+`## fixpp#536 / #537 / #538 / #598`; this section keeps what that file does not: why, and what was not
+taken. Each item names the note's section that has the whole list.
+
+- **`retrieve` after a reset (#538, §2.3).** Both stores look a number up relative to the first frame
+  the direction retains (`B-538-1`). Not taken: a stored base (it can disagree with the entries, and it
+  would change `MemoryStore`'s layout or `FileStore`'s format version, which old and new builds would
+  then refuse); a search by sequence number (it would also serve a hole the session cannot make);
+  keeping (1, 1) and storing the Logon again (it changes 093's reset unit to work around a lookup).
+- **A store read that fails in a resend answer (#538, §2.3, rulings R-7, R-10, R-13).** The answer is
+  aborted with the store's own error (`B-538-2`). Not taken: gap-filling the unreadable slot and
+  recording an event (a read error can be transient; a GapFill is permanent on the wire); aborting only
+  on a persistent store; aborting on slot 0 (no frame can exist there, and any peer could end a
+  session with one frame); keeping the GapFill for a cancelled read (measured: the peer read a GapFill
+  over stored messages); clamping the walk's start to 1 (a wire change no issue asked for; fixpp#580).
+- **One session's close and the others' liveness (#536, §3.3).** No session sweeps the clock
+  (`B-536-1`). Not taken: `close` emitting terminal or `all` (it would also cancel a liveness emit in
+  flight); every sleeper re-arming on a sweep that is not its own (the issue's second option: it would
+  have to hold at three sites, breaks the test teardown helper, and a clock whose sweep does nothing
+  would never deliver the logout wake); a per-session cancellation on the `Clock` interface (a pure
+  virtual on a roster interface is a listed breaking change); session identity from the clock's slot
+  map. Why the loop resets its own filter: the lock sequence leaves every coroutine thread with a
+  terminal filter, so a loop that had sent a frame no longer accepted `close`'s total cancellation;
+  whether the lock should restore its caller's filter is fixpp#583.
+- **A second too-high frame and an unfilled gap (#537, §4.4, rulings R-2, R-6, R-9, R-11, R-12).** The
+  frame is ignored and the gap has a deadline (`B-537-1`, `B-537-2`). Not taken: holding the frame,
+  as 013 FR-009 and the three QuickFIX engines do (it needs a capacity policy, an order for held
+  administrative frames and a delivery path, and gains nothing on the wire while the request runs to
+  0); a second ResendRequest per extra frame; no longer refreshing liveness on a too-high frame (it
+  reverses ruling R-1 on fixpp#516); no deadline; a timer for the deadline; two endings for a live
+  peer; the grace check reading "any frame since the TestRequest" (it edits the liveness loop, B27's
+  surface); a Logout on the dead-peer ending; the check ahead of the BeginString, CompID and
+  SendingTime guards; the check without its own too-high test (it would end a healthy slow replay); the
+  check on every frame that does not advance (it would close `L-537-1`'s pattern; not chosen, R-11);
+  a Logout with no text where the text does not fit (one more branch; kept by R-12).
+- **A cancellation met while an inbound frame is processed (§9.4, ruling R-14).** One catch at the
+  one coroutine every frame enters (`B-538-4`). Not taken: making `on_inbound_frame` a coroutine with
+  the `try` in it (one frame deeper on every inbound frame than fixpp#544's target, and no gate counts
+  that depth); a `try` at each production caller (every other caller would still get the throw); a
+  handler for `operation_aborted` only; the catch without the reset of the caller's state (measured:
+  the pump still ended by exception); `throw_if_cancelled(false)` in place of the reset; a conversion
+  at each store call; `dispatch_aborted` for a cancellation.
+- **A cancelled outbound store call (§10.3, rulings R-15, R-16, R-19 to R-23).** Not transmitted, the
+  number taken back, the session ended (`B-538-5`). Not taken: a returned code from `store_then_emit`
+  with each discarding caller changed to return it (a list of sites; the exception needs no caller to
+  cooperate); a returned code with the caller's state reset inside `store_then_emit` (a later reply of
+  the same arm could go out); 059's reconcile read for the number; leaving the number consumed; the
+  session staying up, as in QuickFIX (R-16); keeping 059's absorb for `Engine::stop`. The two
+  boundaries: the transmit step is fixpp#584 (R-18), and a cancellation that reaches `drive_reconnect`
+  before the Logon emission is fixpp#585 (R-22).
+- **The store's offload (#598, §11.4, rulings R-25 to R-27).** Once a `FileStore` call holds the
+  store's lock, no cancellation reaches its job (`B-598-1`). Not taken: withdrawing the job so the
+  call returns at the cancellation (asio cannot remove a posted job, and the job holds a descriptor and
+  a span into the store's buffer); the line at the moment a pool thread starts the job (R-26's other
+  option: it keeps the split decided by which pool thread runs first, and the data race); the same
+  line drawn with a flag of the store's own; a handler with a true meaning in place of the deleted ones
+  (no input reaches it, so nothing can hold it true); the handlers left as they were; making the whole
+  store call uncancellable (it reverses R-15 for a call queued at the lock); undoing a completed write;
+  repairing a damaged log at open (R-27; `L-598-1`).
 
 ## Runtime flows
 

@@ -8,6 +8,7 @@ refs:
   - include/fixpp/session/session.hpp
   - src/session/session.cpp
   - src/session/engine.cpp
+  - .specify/536-537-538-recovery-liveness.md
   - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
 codegraph_entry: [run_liveness_loop, run_read_pump, drive_reconnect_attempt, drive_reconnect, ReconnectFsm]
@@ -72,6 +73,11 @@ current list with `python3 tools/brain_inventory.py --census`, never from a list
   operator expecting a default cadence gets none.
 - **`L-009-2`** — TestRequest ID uniqueness is **per-session-lifetime only** and wraps at
   `UINT32_MAX`; not unique across sessions or restarts.
+- **`B-536-1`, `L-536-1`** — a session's close no longer sweeps the clock, so it no longer stops the
+  liveness loops of the other sessions on that clock; an explicit `Clock::cancel_sleeps()` still ends
+  every loop on the clock, and nothing restarts them.
+- **`B-537-2`, `B-537-3`, `L-537-1`** — while a resend is outstanding: the deadline of an unfilled gap,
+  a too-high Heartbeat that answers a pending TestRequest, and the one pattern with no ending.
 
 ⚠️ **A limitation is open only if it is in the LIVE B&L file.** Resolved rows move to
 `spec/behaviors-and-limitations-closed.md`, so a repo-wide grep reports closed ones as open.
@@ -81,3 +87,33 @@ current list with `python3 tools/brain_inventory.py --census`, never from a list
 `drive_reconnect_attempt` is also the initiator's connect+handshake path, reused by
 `run_connect_loop` — which is why the acceptor and initiator paths converge on one
 `handshake_result`. See [`engine-accept-path`](./engine-accept-path.md) for the acceptor half.
+
+## The liveness loop, an unfilled gap, and the initiator's Logon emission (fixpp#536 / #537; note §10)
+
+The design is `.specify/536-537-538-recovery-liveness.md` (§3 for the loop, §4 for the gap, §10 for the
+Logon emission). Its rejected alternatives for #536 and #537 are on [`session`](./session.md).
+
+- **How `close()` ends this session's loop (D-536-2).** Not by sweeping the clock: by its own root
+  cancellation, which the loop accepts because it resets its cancellation filter to total
+  immediately before each of its two sleeps, and reaches its TestRequest's grace sleep only while the
+  session is Active. The reset is needed because every Heartbeat or TestRequest the loop sends takes
+  the sequence-number lock, and the lock sequence leaves the coroutine thread with a terminal filter
+  (fixpp#583). Measured before the fix: a loop that had sent a frame ignored `close`'s total
+  cancellation and `close` waited for the sweep (the note's §3.4).
+- **The deadline of an unfilled gap is not in the loop (D-537-5, ruling R-6).** It is checked when a
+  frame above the expected number arrives; no timer is added and no line of the loop changes. The
+  dead-peer ending stays the loop's: an unanswered TestRequest, then a silent `Disconnected` at the
+  grace check. A too-high Heartbeat answers a pending TestRequest (D-537-6, D-537-8), so a live peer
+  that answers is ended by the deadline's Logout and not by the grace check.
+- **The initiator's Logon emission (D-OUT-5, ruling R-20).** `emit_initiator_logon_`, which
+  `Session::open` and `Session::drive_reconnect` both await, takes any exception out of its awaits,
+  records `Disconnected`, clears `hydrating_`, leaves its caller with no cancellation recorded, and
+  returns `store_cancelled` for a cancellation, at any store call of it. Before, a cancellation thrown
+  by an await left `open()` as an exception with the state `LogonSent` and `hydrating_` set.
+  **Rejected:** `dispatch_aborted` from that handler, v0.9's code (a cancelled hydration read would
+  then return one code or the other by timing); its own batch (R-20).
+- **The boundary ruling R-22 leaves.** A cancellation that reaches `drive_reconnect` before the Logon
+  emission, in the backoff wait, the connect, the TLS handshake or just after the connection is up,
+  still ends as a returned error or a thrown exception by timing, and after a successful connect can
+  leave the session `LogonSent` with a live transport. That is fixpp#585 (batch B47), not fixed here;
+  the note's §10.5 has the routes.

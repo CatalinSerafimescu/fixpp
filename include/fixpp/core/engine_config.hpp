@@ -156,7 +156,11 @@ struct EngineConfig {
     //    file_io_executor = default-constructed empty per [2e §4.3.2]'s decision;
     //      MemoryStore impls silently discard it. FileStoreFactory rejects
     //      with store_factory_failed when both the Config-supplied executor
-    //      AND this threaded-in value are empty (FR-024 / I-13).
+    //      AND this threaded-in value are empty (FR-024 / I-13). The executor
+    //      must keep running the jobs handed to it until stop() has returned,
+    //      or a store call, and the stop that waits for it, does not return
+    //      (fixpp#598; FileStore::Config::file_io_executor in
+    //      fixpp/session/file_store.hpp states the precondition in full).
     std::size_t max_store_memory_per_session = 1ULL << 30;
     asio::any_io_executor file_io_executor;
 

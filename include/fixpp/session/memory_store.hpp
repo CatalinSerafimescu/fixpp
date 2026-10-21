@@ -155,7 +155,7 @@ public:
         // Acquire writer mutex — FIFO-fair per async_mutex contract.
         FIXPP_DETAIL_CO_AWAIT_LOCK(lock_storage, guard_result, mutex_, nullptr);
         if (!guard_result) {
-            // Mutex was cancelled/drained (shutdown path)
+            // The lock wait was cancelled, or the mutex was drained.
             co_return std::unexpected(fixpp::core::error::store_cancelled);
         }
         auto guard = std::move(*guard_result);  // holds the mutex
@@ -314,7 +314,19 @@ public:
             }
 
             for (seqnum_t s = begin; s <= tail_end; ++s) {
-                std::size_t idx = static_cast<std::size_t>(s - 1);
+                // fixpp#538 (.specify/536-537-538-recovery-liveness.md, D-538-1): a
+                // sequence is looked up relative to the first entry this direction
+                // retains, so a frame stored after reset() or reset_to() is found under
+                // its own number. An empty direction has no first entry, and a number
+                // below the first retained one has no position: each is a gap. The
+                // emptiness test precedes any read of the first entry, and the
+                // comparison precedes the subtraction. Rejected: a stored base, which
+                // could disagree with the entries and would change this class's layout.
+                if (entries.empty() || s < entries.front().seq) {
+                    gap_hit = true;
+                    break;
+                }
+                std::size_t idx = static_cast<std::size_t>(s - entries.front().seq);
                 if (idx >= entries.size() || entries[idx].seq != s) {
                     // Gap detected: stop copying, record flag, break.
                     // Frames copied so far (snapshots) will still be visited.

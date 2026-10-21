@@ -16,6 +16,9 @@
 //      store_factory_failed.
 //   E. Default MemoryStore::Config against 1 GiB cap → store_factory_failed
 //      (AC #2a — design intent per [2e §1.2]'s Storage-DoS bound).
+//   I. fixpp#538 (D-538-1, capacity): a bounded store filled to capacity after a
+//      reset whose first outbound number is 2 — every retained number is
+//      retrievable, the refused one is a gap.
 //
 // TDD: linker-RED until T020 (MemoryStore) and T030 (DoS guard) ship.
 #include <gtest/gtest.h>
@@ -43,6 +46,7 @@ using fixpp::session::direction_t;
 using fixpp::session::MemoryStore;
 using fixpp::session::MemoryStoreFactory;
 using fixpp::session::seqnum_t;
+using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_test_frame;
 using fixpp::store_test::run_on_pool;
 
@@ -297,6 +301,67 @@ TEST(MemoryStoreCapacity, EngineMrAppliedWhenConfigResourceIsNull) {
     auto result = factory.make("SND", "TGT", &mr, kCap1GiB, asio::any_io_executor{});
     EXPECT_TRUE(result.has_value()) << "engine-mr applied: expected success but got error: "
                                     << (!result.has_value() ? static_cast<int>(result.error()) : 0);
+}
+
+// ── I. fixpp#538 (D-538-1, capacity): filled to capacity after a (1, 2) reset ──
+//
+// After reset_to(1, 2) the first retained outbound number is 2. A bounded store at
+// capacity refuses the next store() and appends nothing, so its entries stay one
+// contiguous run from the first: each retained number is retrievable under its own
+// number, and the refused number, like the one below the first, is a gap.
+TEST(MemoryStoreCapacity, FilledToCapacityAfterAResetToTwo_RetainedAreRetrievableRefusedIsAGap) {
+    asio::thread_pool pool{1};
+
+    run_on_pool(pool, []() -> asio::awaitable<void> {
+        constexpr std::size_t kCap = 4;
+        constexpr seqnum_t kFirst = 2;
+        constexpr seqnum_t kRefused = kFirst + static_cast<seqnum_t>(kCap);
+        MemoryStore::Config cfg;
+        cfg.policy = capacity_policy::bounded;
+        cfg.inbound_capacity = kCap;
+        cfg.outbound_capacity = kCap;
+        cfg.max_frame_bytes = 4096;
+
+        MemoryStore store{cfg};
+        const auto dir = direction_t::outbound;
+        auto reset = co_await store.reset_to(1, kFirst);
+        EXPECT_TRUE(reset.has_value()) << "setup: reset_to(1, 2)";
+        if (!reset) {
+            co_return;
+        }
+        for (seqnum_t seq = kFirst; seq < kRefused; ++seq) {
+            auto frame = make_test_frame(seq, dir);
+            auto r = co_await store.store(seq, std::span<const std::byte>(frame), dir);
+            EXPECT_TRUE(r.has_value()) << "setup: store() failed at seq=" << seq;
+            if (!r) {
+                co_return;
+            }
+        }
+        auto refused_frame = make_test_frame(kRefused, dir);
+        auto refused =
+            co_await store.store(kRefused, std::span<const std::byte>(refused_frame), dir);
+        EXPECT_TRUE(!refused.has_value() && refused.error() == error::store_capacity_exhausted)
+            << "setup: the store at capacity must refuse seq=" << kRefused;
+
+        for (seqnum_t seq = kFirst; seq < kRefused; ++seq) {
+            byte_collecting_visitor visitor;
+            auto r = co_await store.retrieve(seq, seq, dir, visitor);
+            EXPECT_TRUE(r.has_value())
+                << "retrieve(" << seq << ", " << seq << ") of a retained "
+                << "number returned error " << (r ? 0 : static_cast<int>(r.error()));
+            EXPECT_TRUE(visitor.entries().size() == 1 && visitor.entries()[0].seq == seq &&
+                        visitor.entries()[0].bytes == make_test_frame(seq, dir))
+                << "retrieve(" << seq << ", " << seq << ") must visit the frame stored under "
+                << seq << "; it visited " << visitor.entries().size() << " frame(s)";
+        }
+        for (seqnum_t const seq : {kRefused, seqnum_t{1}}) {
+            byte_collecting_visitor visitor;
+            auto r = co_await store.retrieve(seq, seq, dir, visitor);
+            EXPECT_TRUE(!r.has_value() && r.error() == error::store_seqnum_gap)
+                << "retrieve(" << seq << ", " << seq << ") of a number that is not retained";
+            EXPECT_TRUE(visitor.entries().empty());
+        }
+    });
 }
 
 }  // namespace

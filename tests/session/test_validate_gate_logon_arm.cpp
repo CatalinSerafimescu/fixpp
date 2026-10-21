@@ -274,7 +274,7 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wa
 // match its own correction.) Nothing dangles on
 // either branch. The surviving frame is the detached liveness loop, a Session member coroutine
 // borrowing nothing from the helper's frame: a later `close()` RESUMES it, over a still-live
-// Session, via that close's own `cancel_sleeps()`, then joins it on `liveness_counter_`; with no
+// Session, by cancelling its sleep (`root_cancel_`), then joins it on `liveness_counter_`; with no
 // later close it is destroyed with the waiter map. `on_inbound_frame` — the only frame borrowing
 // the helper-local buffer — completes during the drain. See `cancel_and_drain_or_report` in
 // `pump_until_ready.hpp` (named, not line-cited: #310, and this change moved the lines the old

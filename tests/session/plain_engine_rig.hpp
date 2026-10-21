@@ -17,6 +17,10 @@
 
 #include <gtest/gtest.h>
 
+#if defined(__linux__)
+#include <poll.h>
+#endif
+
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/connect.hpp>
@@ -134,6 +138,7 @@ struct Peer {
     asio::ip::tcp::socket sock;
     std::string received;
     bool read_ended = false;
+    std::error_code read_ec;  // what the read ended with; meaningful once read_ended
     std::size_t writes_done = 0;
     std::size_t writes_issued = 0;
 
@@ -147,6 +152,7 @@ struct Peer {
                     std::size_t const n = co_await sock.async_read_some(
                         asio::buffer(buf), asio::redirect_error(asio::use_awaitable, ec));
                     if (ec) {
+                        read_ec = ec;
                         read_ended = true;
                         co_return;
                     }
@@ -178,6 +184,44 @@ struct Peer {
     }
 };
 
+#if defined(__linux__)
+// The reading "the peer sees a hang-up" exists where this macro is defined. A cell
+// compiles the reading, and each assertion on it, under the macro; elsewhere it makes
+// its other assertions and prints that the reading was not made.
+#define FIXPP_TEST_PEER_HANG_UP_READING 1
+
+// How long the hang-up reading waits. The wait is part of the instrument: a close of
+// one end of a loopback connection need not be visible to an immediate poll() of the
+// other end. Nothing but a hang-up or this bound ends the wait, and the caller's
+// io_context does not run during it, so a hang-up read here was caused before the call.
+inline constexpr std::chrono::milliseconds kHangUpWait{100};
+
+// True when `fd` reports, within `wait`, that its other end has closed. It consumes
+// no input.
+[[nodiscard]] inline bool hang_up_within(int fd, std::chrono::milliseconds wait) {
+    pollfd p{};
+    p.fd = fd;
+    p.events = POLLRDHUP;
+    return ::poll(&p, 1, static_cast<int>(wait.count())) == 1 &&
+           (p.revents & (POLLRDHUP | POLLHUP)) != 0;
+}
+
+// The reading "the peer sees a hang-up": whether the session's end of the connection
+// had been closed when this was called, as far as the peer's socket can tell within
+// kHangUpWait.
+[[nodiscard]] inline bool peer_sees_hang_up(Peer& peer) {
+    return hang_up_within(peer.sock.native_handle(), kHangUpWait);
+}
+#endif
+
+// Counts the lifecycle callbacks. A cell reads `logouts` to tell when onLogout fired.
+struct CountingApp final : fixpp::session::Application {
+    int logons = 0;
+    int logouts = 0;
+    void onLogon(const fixpp::session::SessionId& /*id*/) override { ++logons; }
+    void onLogout(const fixpp::session::SessionId& /*id*/) override { ++logouts; }
+};
+
 // One plaintext session on a mock-clock Engine. Configure through cfg(), then start().
 class Rig {
 public:
@@ -191,6 +235,9 @@ public:
     std::unique_ptr<asio::ip::tcp::acceptor> listener;  // initiator role only
     // BeginString(8) of the session cfg() builds and of every frame msg() builds.
     std::string begin_string = "FIX.4.2";
+    // MsgSeqNum(34) of the Logon to_active() sends: a cell that logs on to a store
+    // another session has used sets it to that store's next inbound number.
+    std::uint32_t logon_seq = 1;
     // The engine's application dictionaries (EngineConfig::dictionaries), set before
     // start(); a FIXT session's DefaultApplVerID must name one of them.
     std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> engine_dictionaries;
@@ -392,7 +439,7 @@ public:
         } else if (!connect_peer()) {
             return false;
         }
-        peer.send(logon());
+        peer.send(logon(logon_seq));
         return run_until([this] { return state() == fixpp::session::fsm_state::Active; });
     }
 

@@ -313,6 +313,36 @@ the source is amended, and **nothing links the two**. A "verbatim because normat
 - **Trigger:** you are about to reproduce text, a type, or a rule that something else owns.
 - **Procedure:** link, don't copy. If you must copy, name the source and the date, and expect it to rot.
 - **Scanning heuristic:** grep for `verbatim`, `normative`, `quoted`.
+- ⚠️ **WHEN A RULE IS NARROWED, A SWEEP FOR ITS WORDING FINDS THE SITES THAT STATE IT, NOT THE SITES
+  THAT CITE OR REGISTER IT.** The amendment lands where the rule is owned (a header comment, a
+  ruling), and the fix then searches for the rule's phrasing to correct the copies. A copy that
+  restates the rule is found. A surface that names the rule only by its identifier is not: a B&L
+  row's witness list, a coverage-index row's witness column, a catalogue row, a brain component
+  page's register of the documents that describe the component. Each goes on presenting the
+  unconditional rule, or the witnesses of its unconditional half only, and no grep for the old
+  wording or the new one can reach it.
+  - **Trigger:** a change narrows, qualifies or adds an exception to a rule that other documents
+    already cite: a ruling, a B&L row, a contract sentence.
+  - **Procedure:** derive the surface set from the rule's identifiers, its witnesses and its
+    registers, not from its wording. Grep every identifier it carries (the ruling, its B&L row, the
+    decision that narrows it) across `spec/`, `brain/` and `.specify/`. For each hit read the witness
+    and register columns as well as the prose, and require the exception's own witness to be named
+    wherever the rule's witnesses are listed. Keep that grep in the design record as its derivation
+    recipe, so the next narrowing reaches the same set by construction. ⚠️ One ruling number can
+    name different rulings in different notes; read which one each hit means before flagging it.
+  - **Instance (PR #609, B28, Gate B rounds 1–2).** D-OUT-7 (ruling R-21) narrowed B41's R-6: a
+    `store()` call that a cancellation ended may return earlier. The header and `B-538-3` carried the
+    narrowed form, but the note's §6.4 document set came from a grep for the 059/D7 disposition,
+    which reaches no surface that states R-6. Round 1 (`research/reviews/opus_pr609_1_triage.md`,
+    RC-1) found `B-563-4`, catalogue `APP-002`, the coverage-index row and the R-6 bullet of
+    [components/session](./components/session.md) still unconditional, and its fix searched by the
+    order phrase. Round 2 (`research/reviews/opus_pr609_2_triage.md`, RC-C) found what that phrase
+    could not reach: no witness list named the cell that witnesses the exception
+    (`LockGrantPin.EmittedWhileQueuedAtTheLock_ReturnsStoreCancelled`), and no brain page registered
+    `.specify/2e-msgstore.md` Appendix Z2 §1, which states the same rule.
+  - **Sibling.** Class 20's guard-scope form: derive a set from the artifact that defines it, not
+    from the cited case. Class 13 is the inverse key: a census keyed on a name misses a copy under a
+    different name, where this sweep, keyed on wording, misses a citer that carries only the name.
 
 ### 5. A correction can carry the same bias as the claim it corrects
 

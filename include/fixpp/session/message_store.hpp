@@ -115,12 +115,25 @@ public:
     // capacity_policy::bounded, MemoryStore returns store_capacity_exhausted
     // when the per-direction cap is reached (I-08). FileStore returns
     // store_io_failure on disk-side faults.
+    //
     // ORDER (a requirement on every implementation; fixpp#563,
     // `.specify/563-564-callback-send.md` §2.1, ruling R-6): calls to store()
-    // complete in the order they were made. Two sends of one session can have
-    // their store() calls in flight at once, and the session transmits each
-    // frame when its store() call completes, so a store that completes two
-    // calls out of order has their frames transmitted out of order.
+    // that a cancellation does not end complete in the order they were made; a
+    // call that a cancellation ended may return earlier (D-OUT-7, below). Two sends of one session
+    // can have their store() calls in flight at once, and the session transmits each frame when its
+    // store() call completes, so a store that completes two calls out of order has their frames
+    // transmitted out of order.
+    //
+    // Cancellation (.specify/536-537-538-recovery-liveness.md §10, D-OUT-7; rulings
+    // R-15 and R-21). store_cancelled means that a cancellation ended the call before
+    // the frame was stored: the store then holds no frame for `seq`, and its next number
+    // for that direction is unchanged. The same holds when the call ends by letting
+    // operation_aborted out. The session does not transmit the frame, takes the number
+    // back and ends. The store() calls that one session makes for one direction return
+    // in the order the session made them; a call that a cancellation ended may return
+    // earlier. For every method of this interface: a call that a cancellation ends
+    // before the call has an effect returns store_cancelled (.specify/2e-msgstore.md,
+    // the cancellation table).
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame [[clang::lifetimebound]],
         direction_t dir) noexcept = 0;
@@ -133,6 +146,14 @@ public:
     // mutation is detected and the next visitor call observes the new state
     // without UB; already-visited frames are not re-visited; iteration stops
     // at the original end.
+    //
+    // After a reset (fixpp#538; .specify/536-537-538-recovery-liveness.md, D-538-2).
+    // A frame stored after reset() or reset_to() is retrievable under its own
+    // sequence number, whatever number the direction's first retained frame has. A
+    // sequence number below the first retained one is a gap, and so is every number
+    // of a direction that holds no frame. A store that inherits the default reset_to
+    // body below is bound by this too: its lookup must not assume that the first
+    // retained frame is number 1.
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> retrieve(
         seqnum_t begin, seqnum_t end, direction_t dir,
         retrieve_visitor& visitor [[clang::lifetimebound]]) noexcept = 0;

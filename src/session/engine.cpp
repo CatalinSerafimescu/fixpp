@@ -427,10 +427,18 @@ using fixpp::session::detail::read_first_frame_bounded;
 //   EOF / read-error   → close session terminal, stop pump.
 //   wire_frame_too_large → close session terminal, stop pump (FR-012). In resync
 //                           mode it is the only error a feed returns.
-//   on_inbound_frame error → close session terminal, stop pump (FR-012).
-//   total-cancel (stop()) → async_read_some returns transport_read_cancelled
-//                           → error arm fires, close is a no-op on already-
-//                           closing session, pump unwinds cleanly.
+//   on_inbound_frame error → close session terminal, stop pump (FR-012). A
+//                           cancellation that a frame's processing met does not
+//                           leave on_inbound_frame as an exception: the session
+//                           catches it and returns a value, which is an error
+//                           unless a Logon arm was superseded
+//                           (`.specify/536-537-538-recovery-liveness.md` §9).
+//   total-cancel (stop()) → a parked async_read_some returns
+//                           transport_read_cancelled with the cancellation still
+//                           recorded on this thread, so the error arm's co_await of
+//                           close() throws before close() is entered and the pump ends
+//                           by that exception. Engine::stop() closes the transport
+//                           (its step 2) and the session (its step 4).
 //   establishment deadline → note_establishment_timeout, close session terminal,
 //                           stop pump (093, C-4).
 //

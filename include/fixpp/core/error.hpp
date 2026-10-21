@@ -223,9 +223,26 @@ enum class error : std::uint8_t {
     store_invalid_range = 64,        // retrieve(begin, end, ...) with
                                      //   end != 0 && end < begin.
                                      //   → FIXPP_ERR_STORE_CONSISTENCY
-    store_cancelled = 65,            // Cancellation winning before a method's
-                                     //   linearisation point per [2e §6.1.4]
-                                     //   (I-07).
+    store_cancelled = 65,            // A cancellation that ended the call before
+                                     //   the call had an effect (the wording of
+                                     //   message_store.hpp); for a FileStore
+                                     //   write, before the grant of the store's
+                                     //   lock
+                                     //   (.specify/536-537-538-recovery-liveness.md
+                                     //   §11, D-598-1, which supersedes
+                                     //   [2e §6.1.4]'s list as the boundary of the
+                                     //   cancellation table; that list stays the
+                                     //   definition of when an effect is durable).
+                                     //   Also returned by
+                                     //   Session::on_inbound_frame for a
+                                     //   cancellation that ended a frame's
+                                     //   processing, whether or not the await
+                                     //   that met it was a store call
+                                     //   (.specify/536-537-538-recovery-liveness.md
+                                     //   §9, D-CAN-4), and by Session::open and
+                                     //   Session::drive_reconnect for one that
+                                     //   ended the initiator's Logon emission
+                                     //   (§10, D-OUT-5).
                                      //   → FIXPP_ERR_CANCELLED (reused; joins
                                      //     dispatch_aborted /
                                      //     clock_sleeps_cancelled).
@@ -670,17 +687,27 @@ enum class error : std::uint8_t {
     //    C-ABI prefix-group coalescing (documented for 2i; no extern "C"
     //    surface added by this feature — contracts/error_slots.hpp):
     //      FIXPP_ERR_SESSION_FATAL ← { session_seqnum_too_high } (new member)
-    session_seqnum_too_high = 120,  // FR-016 / E-4 — inbound seqnum > next_expected
-                                    //   in LogonSent / LogonReceived states where
-                                    //   too-high is session-fatal (Active-state
-                                    //   too-high is intercepted earlier →
-                                    //   AwaitingResend per 013 FR-009). Replaces
-                                    //   the slot-74 stand-in
+    session_seqnum_too_high = 120,  // FR-016 / E-4 — inbound seqnum > next_expected,
+                                    //   returned by SeqnumManager::check_inbound,
+                                    //   and the callers below read it. The Logon arms of
+                                    //   both roles end the session on it unless
+                                    //   enable_next_expected_msg_seq_num tolerates
+                                    //   it. In Active, while a resend is
+                                    //   outstanding,
+                                    //   on_inbound_active_out_of_sequence_ reads
+                                    //   it: a Heartbeat with it answers a pending
+                                    //   TestRequest, and the frame is then ignored
+                                    //   (fixpp#537;
+                                    //   .specify/536-537-538-recovery-liveness.md
+                                    //   D-537-1, D-537-2, D-537-6).
+                                    //   In Active the first frame above the
+                                    //   expected number takes the too-high arm (a
+                                    //   ResendRequest; AwaitingResend per 013
+                                    //   FR-009) and does not reach check_inbound.
+                                    //   Replaces the slot-74 stand-in
                                     //   (session_test_request_unanswered) that was
                                     //   returned by SeqnumManager::check_inbound's
                                     //   too-high branch as a semantic misnomer.
-                                    //   Zero behavioural change — all 3 production
-                                    //   callers discard the code (session.cpp).
                                     //   → FIXPP_ERR_SESSION_FATAL
 
     // ── 015-runtime-engine: 1 session_* variant per data-model.md §E-7.

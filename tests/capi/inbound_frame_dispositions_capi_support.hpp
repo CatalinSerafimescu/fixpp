@@ -336,6 +336,17 @@ public:
         return eof_at_;
     }
 
+    // When the connection ended, stamped in the completion handler of the read that showed
+    // it: end-of-stream, or a read error other than operation_aborted (a reset among them).
+    // Empty while no read has shown it.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> ended_at() const {
+        return ended_at_;
+    }
+
+    // The code of that read: asio::error::eof for end-of-stream, otherwise the read's error.
+    // Empty (no error) while no read has shown the end.
+    [[nodiscard]] std::error_code end_code() const { return end_code_; }
+
     // True if the frame holds the whole field `tag=value` (between SOHs).
     static bool has_field(std::string_view frame, std::string_view tag_eq_value) {
         std::string const needle = "\x01" + std::string{tag_eq_value} + "\x01";
@@ -361,6 +372,10 @@ private:
             rec = e;
             n = k;
             if (e == asio::error::eof) eof_at_ = std::chrono::steady_clock::now();
+            if (e && e != asio::error::operation_aborted && !ended_at_) {
+                ended_at_ = std::chrono::steady_clock::now();
+                end_code_ = e;
+            }
         });
         run_until(until);
         if (!done) {
@@ -400,6 +415,8 @@ private:
     bool listening_ = false;
     bool eof_ = false;
     std::optional<std::chrono::steady_clock::time_point> eof_at_;
+    std::optional<std::chrono::steady_clock::time_point> ended_at_;
+    std::error_code end_code_;
     bool failed_ = false;
 };
 

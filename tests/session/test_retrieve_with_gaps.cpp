@@ -121,7 +121,8 @@ TEST(RetrieveWithGaps, InvalidRange) {
 }
 
 // retrieve over a never-persisted gap → store_seqnum_gap
-// The MemoryStore index is slot-based (seq=1 maps to index 0, seq=2 to 1, etc).
+// The MemoryStore index holds its entries in sequence order from the first one it
+// retains; a number is looked up by its distance from that first entry (fixpp#538).
 // A "gap" means: retrieve requests range [begin, end] but a seqnum in that
 // range was never stored. We simulate this by storing frames 1..5, then
 // attempting to retrieve [1, 10] — seqnums 6..10 are never stored (gap).

@@ -330,6 +330,15 @@ public:
     // Engine feeds a verified inbound FIX frame (post-Framer/Parser, [2e]
     // inbound ordering). Returns the FSM-defined disposition.
     // PLACEHOLDER — body wired per US1/T024 (Phase 3).
+    //
+    // Ruling R-14 (`.specify/536-537-538-recovery-liveness.md` §9): awaiting the result
+    // throws nothing. An exception met while the frame is processed is caught at the
+    // inbound entry, the session is recorded Disconnected, and the result is
+    // store_cancelled for a cancellation (asio's operation_aborted) and dispatch_aborted
+    // for any other exception. A Logon arm that a close() or an Engine::stop() has
+    // superseded records nothing, and returns success for a cancellation. After a caught
+    // exception no cancellation is recorded on the caller's coroutine thread, and that
+    // thread's cancellation filter is asio's default.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> on_inbound_frame(
         std::span<const std::byte> frame) noexcept;
 
@@ -962,8 +971,9 @@ private:
     //   latch; set only after both reads + SeqnumManager::hydrate() succeed — D-9 /
     //   INV-H6 / C2.1). A transient read failure leaves it false so the next
     //   reconnect retries.
-    // hydrating_: re-entrancy guard for ensure_hydrated_(); cleared on failure so a
-    //   failed hydrate is not sticky (C2.1 / D-9).
+    // hydrating_: re-entrancy guard for ensure_hydrated_(); cleared on every exit of
+    //   that function, an exception among them, so a failed hydrate is not sticky
+    //   (C2.1 / D-9; `.specify/536-537-538-recovery-liveness.md` §9, D-CAN-1).
     // store_is_persistent_: captured ONCE at open() inside the if(cfg_.store_factory)
     //   branch from cfg_.store_factory->yields_persistent_store() (C2.2 / D-10).
     //   Null-store path leaves it false (default). When false, ensure_hydrated_()
@@ -1077,7 +1087,9 @@ private:
         std::optional<fsm_state> arm = std::nullopt) noexcept;
     // consume_rejected_seqnum_(): fixpp#423 — an in-sequence message answered by a
     //   Reject before the seqnum gate consumes its MsgSeqNum (advance + persist).
-    // close_filled_resend_gap_(): exit AwaitingResend once next_inbound passes the gap end.
+    // close_filled_resend_gap_(): exit AwaitingResend once next_inbound passes the gap end;
+    //   while the resend stays outstanding, refresh the instant its deadline counts from
+    //   (fixpp#537; .specify/536-537-538-recovery-liveness.md, D-537-5).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> consume_rejected_seqnum_(
         seqnum_t seq, std::string_view msg_type) noexcept;
     void close_filled_resend_gap_() noexcept;
@@ -1281,10 +1293,15 @@ private:
     [[nodiscard]] inbound_result_t on_inbound_active_sequence_reset_(
         bool tic, std::span<const std::byte> frame,
         fixpp::session::detail::FrameHeader const& hdr) noexcept;
-    [[nodiscard]] inbound_result_t on_inbound_active_too_high_(bool tic, seqnum_t next_expected,
-                                                               seqnum_t seq) noexcept;
+    // fixpp#537 (D-537-8): `hdr` is read for a Heartbeat that opens the gap.
+    [[nodiscard]] inbound_result_t on_inbound_active_too_high_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr, seqnum_t next_expected,
+        seqnum_t seq) noexcept;
     [[nodiscard]] inbound_continue_t on_inbound_active_poss_dup_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    // fixpp#537 (.specify/536-537-538-recovery-liveness.md §4.3, D-537-1 and D-537-2)
+    // supersedes this arm's ending of the session at a second frame above NextNumIn while a
+    // resend is outstanding: the frame is ignored.
     [[nodiscard]] inbound_result_t on_inbound_active_out_of_sequence_(
         bool tic, std::span<const std::byte> frame, fixpp::session::detail::FrameHeader const& hdr,
         fixpp::core::error chk_error) noexcept;
@@ -1306,6 +1323,18 @@ private:
     [[nodiscard]] inbound_result_t on_inbound_active_from_app_failed_(
         bool tic, fixpp::session::detail::FrameHeader const& hdr,
         fixpp::core::expected_t<dispatch_outcome> cb_r) noexcept;
+    // fixpp#537 (D-537-5; §4.7 of the same note): the deadline of an unfilled resend gap,
+    // twice HeartBtInt after NextNumIn last advanced. Called at each exit a frame above
+    // NextNumIn can take while a resend is outstanding without ending the session. nullopt:
+    // not expired, the caller goes on. Otherwise the caller returns the value at once: the
+    // session has sent a Logout with a Text(58), where it could be built, and is
+    // Disconnected. Off when HeartBtInt <= 0 or the session has no clock.
+    [[nodiscard]] inbound_continue_t resend_gap_deadline_(
+        bool tic, fixpp::session::detail::FrameHeader const& hdr) noexcept;
+    // fixpp#537 (D-537-6, D-537-8): the in-sequence TestReqID(112) disposition for a
+    // Heartbeat above NextNumIn. False: the TestReqID was another one and the session is
+    // Disconnected. The caller tests that a TestRequest is pending.
+    [[nodiscard]] bool answer_pending_test_request_(std::string_view test_req_id) noexcept;
     // Reply leaves (§2.2 class 2): each owns the buffer its reply frame is built in.
     [[nodiscard]] inbound_result_t inbound_reject_leaf_(
         bool tic, seqnum_t ref_seq, int ref_tag_id, std::string_view ref_msg_type, int reason,
@@ -1313,10 +1342,13 @@ private:
     [[nodiscard]] inbound_result_t inbound_reject_best_effort_leaf_(
         bool tic, seqnum_t ref_seq, std::string_view ref_msg_type,
         std::string_view sending_time) noexcept;
-    [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic,
-                                                        std::string_view sending_time) noexcept;
+    // `text` is Text(58), or empty for a Logout without one (fixpp#537, D-537-5).
+    [[nodiscard]] inbound_result_t inbound_logout_leaf_(bool tic, std::string_view sending_time,
+                                                        std::string_view text) noexcept;
     [[nodiscard]] inbound_result_t inbound_logon_sent_logout_leaf_(
         bool tic, std::string_view text, std::string_view sending_time) noexcept;
+    // fixpp#537 (D-537-7) supersedes the success returned for a request that could not be
+    // built: Disconnected and dispatch_aborted.
     [[nodiscard]] inbound_result_t inbound_resend_request_leaf_(
         bool tic, seqnum_t begin_seqno, std::string_view sending_time) noexcept;
     [[nodiscard]] inbound_result_t inbound_heartbeat_reply_leaf_(
@@ -1510,6 +1542,13 @@ private:
     bool close_escalated_ = false;
     std::function<void()> close_grace_wake_;
 
+    // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-3) — the logout
+    // wait's wake. run_logout_phase1 sets it while it waits for the peer's confirming
+    // Logout and clears it on every exit from that wait; the LogoutSent arm calls it
+    // when that Logout arrives. It supersedes the Clock::cancel_sleeps() call that
+    // ended the wait. Session strand only.
+    std::function<void()> logout_wait_wake_;
+
     // 093-inbound-frame-dispositions (data-model E-13; contract C-6) — the engine-stop
     // flag: Engine::stop()'s step 1 sets it on the session strand, through
     // session_engine_access, before it emits its cancellation. It has two readers.
@@ -1600,11 +1639,23 @@ private:
     // store_then_emit: store(outbound) BEFORE transport_send (I-3).
     // stamped_seq: the MsgSeqNum already written into `frame` by the builder — passed
     //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
-    // Returns ok on success; propagates store errors per I-07; propagates transport
-    //   throws as dispatch_aborted (RC#B gate-b/r1-green transport error surface).
+    // Returns ok on success. Returns the store's own error, with nothing transmitted,
+    //   when a persistent store fails the call (059); dispatch_aborted when the transport
+    //   write fails or throws, and when the frame's number is no longer below the
+    //   session's next outbound number once its store call has returned (D-OUT-10).
+    // Throws asio::system_error{operation_aborted} when the store call was cancelled,
+    //   whether the store returned store_cancelled or let operation_aborted out: the
+    //   frame is not transmitted, its number is taken back, and Disconnected is recorded
+    //   first (not for a superseded Logon arm). The declaration is therefore not
+    //   noexcept, and every chain of callers must end at a frame that holds a handler
+    //   (recipe: `git grep -n 'store_then_emit(' -- src include bindings`, each caller
+    //   followed to the first awaiting frame with a try).
+    //   [.specify/536-537-538-recovery-liveness.md §10, D-OUT-2 and D-OUT-4; rulings
+    //   R-15 and R-16, superseding decision D7 of feature 059]
     // arm: a Logon arm's expected state (093 plan OD-25). When set and
     //   logon_arm_superseded_(*arm) holds after the store, the frame is not transmitted
-    //   and the call returns success; the caller's own predicate check follows.
+    //   and the call returns success; the caller's own predicate check follows. The
+    //   test of the frame's number (D-OUT-10) comes first.
     // transmit: false for a Logout that was cut (fixpp#590;
     //   `.specify/563-564-callback-send.md` §2.6 "The mechanism", statement 3). The
     //   frame is then stored as with true, the store call's errors handled the same
@@ -1614,7 +1665,7 @@ private:
     //   the default.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
         seqnum_t stamped_seq, std::span<const std::byte> frame,
-        std::optional<fsm_state> arm = std::nullopt, bool transmit = true) noexcept;
+        std::optional<fsm_state> arm = std::nullopt, bool transmit = true);
 
     // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
     // after a resume, because the session left the state the arm expects while the arm
@@ -1631,7 +1682,8 @@ private:
     // 093 plan OD-26: the Disconnected write that follows a store suspension on a Logon
     // arm (an error path, or a refusal's fail-closed write). With `arm` set and
     // logon_arm_superseded_(*arm) true, close() or Engine::stop() owns the teardown and
-    // nothing is written; otherwise it records Disconnected.
+    // nothing is written; otherwise it records Disconnected, unless the state is
+    // Disconnected already (.specify/536-537-538-recovery-liveness.md §8, B41).
     void disconnect_unless_superseded_(std::optional<fsm_state> arm) noexcept;
 
     // apply_inbound_sequence_reset: apply an inbound SequenceReset(35=4)
@@ -1714,7 +1766,10 @@ private:
     //     live sink (connect-then-Logon, FR-003 / E-1a).
     // On any failure (build overflow / seqnum overflow / store-or-transport
     // throw) it transitions the session to Disconnected and returns the error —
-    // the caller propagates it. Does NOT perform the LogonSent transition (the
+    // the caller propagates it. An exception that an await of its body lets out is
+    // taken inside it and returned as a value: store_cancelled for a cancellation,
+    // dispatch_aborted for any other (.specify/536-537-538-recovery-liveness.md
+    // §10, D-OUT-5; ruling R-20). Does NOT perform the LogonSent transition (the
     // caller owns that: open() before the call, install_reconnected_transport
     // before drive_reconnect's call). [data-model §E-1a; T016(d); FR-003/FR-004]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_initiator_logon_() noexcept;
@@ -1739,7 +1794,9 @@ private:
 
     // run_logout_phase1: emit Logout frame, then wait for peer Logout-confirm
     // OR clock-bound 2 s timeout (session_logout_timeout, slot 73) under a
-    // CHILD cancellation_state. Called from close(graceful) phase 1.
+    // CHILD cancellation_state. Called from close(graceful) phase 1. When the Logout
+    // was not sent it returns the error at once and does not wait
+    // (.specify/536-537-538-recovery-liveness.md §10, D-OUT-6; ruling R-17).
     // On the cut route (a terminal close() started inside the Logout's toAdmin;
     // fixpp#590, `.specify/563-564-callback-send.md` §2.6) the Logout is stored
     // and not transmitted, and the step returns without the wait.
@@ -1770,7 +1827,13 @@ private:
     //   held before one of the walk's effects (093 plan OD-25): the walk stopped there.
     // Returns std::unexpected(app_callback_threw) when a GapFill toAdmin threw.
     // Returns std::unexpected(dispatch_aborted) on transport write error.
-    //   In BOTH unexpected cases the CALLER owns record_state_transition_(Disconnected).
+    // Returns std::unexpected(<the store's own code>) when a store read of the walk
+    //   failed (fixpp#538; .specify/536-537-538-recovery-liveness.md, D-538-4): the
+    //   read of the store's next outbound number, with any error; or a slot's
+    //   retrieve, with any code but store_seqnum_gap, store_seqnum_invalid and
+    //   store_invalid_range, which fold into the GapFill run. The walk stops there
+    //   and writes nothing more.
+    //   In every unexpected case the CALLER owns record_state_transition_(Disconnected).
     //   The helper NEVER calls record_state_transition_ directly (D-5).
     //
     // Callers:

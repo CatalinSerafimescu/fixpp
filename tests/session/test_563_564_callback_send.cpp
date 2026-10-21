@@ -442,14 +442,13 @@ using fixpp::core::expected_t;
 using fixpp::wire::access_mode;
 using fixpp::wire::MessageView;
 
-// Three test seams of src/session/file_store.cpp, for FileStoreSeams below. Their
+// Two test seams of src/session/file_store.cpp, for FileStoreSeams below. Their
 // declarations in file_store.hpp are behind FIXPP_TEST_HOOKS, which this target is not
 // built with; the definitions are compiled in every build.
 #ifndef FIXPP_TEST_HOOKS
 namespace fixpp::session {
 void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexcept;
 void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) noexcept;
-int read_and_reset_catch_fired() noexcept;
 }  // namespace fixpp::session
 #endif
 
@@ -1031,12 +1030,9 @@ private:
 };
 
 // The test seams of src/session/file_store.cpp that these cells read (declared at the
-// top of this file): the offload probe and its exit companion, and the store's counter
-// of its catches of operation_aborted. The store has one such counter, fed by
-// FileStore::store and by FileStore::next_seqnum: a cell reads and resets it before its
-// scene. The exit probe fires on the pool thread when an offloaded callable has
-// returned, before the offload's completion is handed back to the caller's executor, and
-// for every offload of the store, whichever operation it serves.
+// top of this file): the offload probe and its exit companion. The exit probe fires on the pool
+// thread when an offloaded callable has returned, before the offload's completion is handed back to
+// the caller's executor, and for every offload of the store, whichever operation it serves.
 struct FileStoreSeams {
     // The bodies of offloaded store work begun since reset_bodies().
     [[nodiscard]] static int bodies_begun() noexcept { return bodies_.load(); }
@@ -1053,9 +1049,6 @@ struct FileStoreSeams {
         install_store_offload_exit_probe(nullptr);
         install_store_offload_probe(nullptr);
         log_.store(nullptr);
-    }
-    [[nodiscard]] static int read_and_reset_catches() noexcept {
-        return read_and_reset_catch_fired();
     }
 
 private:
@@ -4268,8 +4261,10 @@ TEST(CallbackSend, ToAppStartsClose_Terminal_ResetOnDisconnect_LiveWrite) {
                     .next_in = 1,
                     .store_next_out = 1,
                     .store_next_in = 1,
-                    .writes_after_close = 1,
-                    .writes_refused = 1},
+                    // The teardown reset lowered the next outbound number during the send's
+                    // store call, so D-OUT-10 (ruling R-19) stops the transmit.
+                    .writes_after_close = 0,
+                    .writes_refused = 0},
         ResetOnDisconnect::yes);
 }
 
@@ -4289,8 +4284,10 @@ TEST(CallbackSend, ToAppStartsClose_Terminal_ResetOnDisconnect_FileStore_LiveWri
                     .next_in = 1,
                     .store_next_out = 1,
                     .store_next_in = 1,
-                    .writes_after_close = 1,
-                    .writes_refused = 1},
+                    // The teardown reset lowered the next outbound number during the send's
+                    // store call, so D-OUT-10 (ruling R-19) stops the transmit.
+                    .writes_after_close = 0,
+                    .writes_refused = 0},
         ResetOnDisconnect::yes);
 }
 
@@ -9392,7 +9389,7 @@ enum class HeldFor { until_released, past_the_logout_timeout };
 //     both closes complete at its expiry, and nothing is stored for the Logout.
 // The kept job's coroutine is spawned with record_into(), a handler with no cancellation
 // slot, so no cancellation reaches it while its job is kept: the condition of the
-// gate's third mode. Its check is the store's count of its catches of operation_aborted.
+// gate's third mode.
 void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor held_for) {
     const bool short_timeout = held_for == HeldFor::past_the_logout_timeout;
     Fixture f{ExecKind::io_context, StoreKind::file};
@@ -9460,7 +9457,6 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
 
     // The other writer: the peer's order. Its inbound persist is kept at the gate with
     // the store's lock taken.
-    (void)FileStoreSeams::read_and_reset_catches();
     gate->arm();
     SendOutcome inbound;
     asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{order}),
@@ -9535,7 +9531,6 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
     }
 
     const std::string at_the_end = where_is(sess);
-    const int catches = FileStoreSeams::read_and_reset_catches();
     const auto logout_sent_visits =
         std::ranges::count(sess.fsm_visit_history(), fsm_state::LogoutSent);
     std::vector<std::string> retained_full;
@@ -9577,8 +9572,7 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
         "; the wire after the Logon exchange = " + literal(wire) +
         "; .retained = " + literal(retained) + "; next_out " + std::to_string(next_out(sess)) +
         ", next_in " + std::to_string(next_in(sess)) + ", store next out " + literal(store_out) +
-        ", store next in " + literal(store_in) + "; the store's catches of operation_aborted " +
-        std::to_string(catches) + "; the graceful close: " + result_of(cell.outer) +
+        ", store next in " + literal(store_in) + "; the graceful close: " + result_of(cell.outer) +
         "; the terminal close: " + result_of(cell.started) +
         "; on_inbound_frame: " + result_of(inbound) + "; onLogout calls " +
         std::to_string(cell.on_logout_calls) + "; visits of LogoutSent " +
@@ -9634,14 +9628,18 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
     EXPECT_EQ(logout_sent_visits, 0) << "LogoutSent was never the session's state. " << reading;
     EXPECT_EQ(at_the_end, "Disconnected closed_drained") << reading;
     EXPECT_EQ(result_of(inbound), "ok") << "the held on_inbound_frame returns ok. " << reading;
-    EXPECT_EQ(catches, 0)
-        << "the store caught no operation_aborted: no cancellation reached the job the gate "
-           "kept. "
-        << reading;
+    EXPECT_EQ(std::ranges::count(sess.fsm_visit_history(), fsm_state::Disconnected), 1)
+        << "the state history holds one Disconnected entry. " << reading;
+    // D-598-2 (fixpp#598) removed the store's operation_aborted handler these cells counted, so no
+    // catch exists to fire.
     EXPECT_EQ(store_in, std::optional<seqnum_t>{3})
         << "the store's next inbound number is the peer's order's plus one. " << reading;
-    EXPECT_EQ(next_out(sess), 3U) << "the session's next outbound number is the Logout's plus one. "
-                                  << reading;
+    // Past the logout timeout the cut Logout's store call was cancelled, so D-OUT-3 (rulings
+    // R-16 and R-19) takes its number back.
+    EXPECT_EQ(next_out(sess), short_timeout ? 2U : 3U)
+        << "the session's next outbound number is the Logout's plus one, or the Logout's own "
+           "where its store call was cancelled. "
+        << reading;
     if (transport == TransportKind::live_suspending_write) {
         EXPECT_EQ(f.live_writes.closes - f.live_writes.async_closes, 1U)
             << "the transport's close() is called once directly. " << reading;
@@ -9840,8 +9838,11 @@ void run_cut_logout_on_a_store_that_holds(SteppedStoreState::Kind kind) {
     ASSERT_EQ(retained.size(), kRetainedThrough) << reading;
     EXPECT_FALSE(retained[1].starts_with("35="))
         << "nothing is stored under the Logout's number. " << reading;
-    EXPECT_EQ(next_out(sess), 3U) << "the next outbound number is the Logout's plus one. "
-                                  << reading;
+    // The cut Logout's store call was cancelled, so D-OUT-3 (rulings R-16 and R-19) takes back
+    // its number.
+    EXPECT_EQ(next_out(sess), 2U) << "the next outbound number is the Logout's own. " << reading;
+    EXPECT_EQ(std::ranges::count(sess.fsm_visit_history(), fsm_state::Disconnected), 1)
+        << "the state history holds one Disconnected entry. " << reading;
     EXPECT_EQ(result_of(cell.outer), "ok") << reading;
     EXPECT_EQ(result_of(cell.started), "ok") << reading;
 }
@@ -10474,7 +10475,6 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
             // seams count this Logout's store call alone, and the gate numbers the
             // executor's jobs.
             FileStoreSeams::reset_bodies();
-            (void)FileStoreSeams::read_and_reset_catches();
             FileStoreSeams::install(&log);
             gate->arm();
             cell.note("toAdmin(Logout) returns");
@@ -10535,7 +10535,6 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         fixpp::test_support::kPumpSlice, "CallbackSend::logouts_write_held_jobs_ended");
 
     const int bodies_at_the_end = FileStoreSeams::bodies_begun();
-    const int catches = FileStoreSeams::read_and_reset_catches();
     FileStoreSeams::remove();
     const std::vector<std::string> sequence = log.events();
     std::vector<std::string> retained_full;
@@ -10574,8 +10573,7 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         std::to_string(graceful_done_ms) +
         " ms; the terminal close: " + (cut ? result_of(cell.started) : std::string("not started")) +
         " at " + std::to_string(terminal_done_ms) + " ms; write bodies begun " +
-        std::to_string(bodies_at_the_end) + "; the store's catches of operation_aborted " +
-        std::to_string(catches) + "; store next out " + literal(store_out) +
+        std::to_string(bodies_at_the_end) + "; store next out " + literal(store_out) +
         ", .retained = " + literal(retained) + "; next_out " + std::to_string(next_out(sess)) +
         "; the wire after the Logon exchange = " + literal(wire) + "; onLogout calls " +
         std::to_string(cell.on_logout_calls) + "; at the end: " + where_is(sess) +
@@ -10621,7 +10619,8 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         EXPECT_EQ(result_of(cell.started), "ok") << reading;
     }
     EXPECT_EQ(bodies_at_the_end, 1) << "the write's body ran once. " << reading;
-    EXPECT_EQ(catches, 0) << "the store's catch of operation_aborted did not fire. " << reading;
+    // D-598-2 (fixpp#598) removed the store's operation_aborted handler these cells counted, so no
+    // catch exists to fire.
     ASSERT_EQ(retained.size(), kRetainedThrough) << reading;
     EXPECT_EQ(retained[1], "35=5 34=2") << "the Logout reads back under its number. " << reading;
     EXPECT_EQ(store_out, std::optional<seqnum_t>{3})
@@ -10653,8 +10652,7 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
 // that is already past its test of the state: a pin of that.
 // On a FileStore the hold is the gate's third mode. The send is spawned with a handler
 // that has no cancellation slot, so no cancellation reaches the kept job's coroutine;
-// the checks are the store's count of its catches of operation_aborted and the
-// retrieval of the send's frame.
+// the check is the retrieval of the send's frame.
 void run_send_in_its_store_call_when_the_logout_is_cut(StoreCallHold::By by) {
     const bool file_store = by != StoreCallHold::By::holding_double;
     Fixture f{ExecKind::io_context, file_store ? StoreKind::file : StoreKind::none};
@@ -10686,7 +10684,6 @@ void run_send_in_its_store_call_when_the_logout_is_cut(StoreCallHold::By by) {
     ex = sess.executor().underlying();
 
     const fixpp::core::steady_time_point clock_before = f.clock->steady_now();
-    (void)FileStoreSeams::read_and_reset_catches();
     hold.arm();
     SendOutcome sent;
     asio::co_spawn(ex, sess.send(std::span<const std::byte>{payload}),
@@ -10733,7 +10730,6 @@ void run_send_in_its_store_call_when_the_logout_is_cut(StoreCallHold::By by) {
         }
     }
 
-    const int catches = FileStoreSeams::read_and_reset_catches();
     std::vector<std::string> retained_full;
     const std::vector<std::string> retained = retained_frames(f, sess, retained_full);
     const std::optional<seqnum_t> store_out = store_next(f, sess, direction_t::outbound);
@@ -10755,8 +10751,8 @@ void run_send_in_its_store_call_when_the_logout_is_cut(StoreCallHold::By by) {
         "; transmitted since the hold = " + literal(wire_after_the_hold) +
         "; .order = " + literal(cell.order) + "; .callbacks = " + literal(cell.callbacks) +
         "; .retained = " + literal(retained) + "; next_out " + std::to_string(next_out(sess)) +
-        ", store next out " + literal(store_out) + "; the store's catches of operation_aborted " +
-        std::to_string(catches) + "; the graceful close: " + result_of(cell.outer) +
+        ", store next out " + literal(store_out) +
+        "; the graceful close: " + result_of(cell.outer) +
         "; the terminal close: " + result_of(cell.started) + "; onLogout calls " +
         std::to_string(cell.on_logout_calls) + "; at the end: " + where_is(sess) + ".";
     std::printf("[ MEASURED ] %s\n", reading.c_str());
@@ -10802,12 +10798,8 @@ void run_send_in_its_store_call_when_the_logout_is_cut(StoreCallHold::By by) {
     EXPECT_FALSE(clock_advanced) << "the mock clock is not advanced. " << reading;
     EXPECT_EQ(result_of(cell.outer), "ok") << reading;
     EXPECT_EQ(result_of(cell.started), "ok") << reading;
-    if (file_store) {
-        EXPECT_EQ(catches, 0)
-            << "the store caught no operation_aborted: no cancellation reached the job the "
-               "gate kept. "
-            << reading;
-    }
+    // D-598-2 (fixpp#598) removed the store's operation_aborted handler these cells counted, so no
+    // catch exists to fire.
 }
 
 }  // namespace
@@ -10948,7 +10940,6 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
     ex = sess.executor().underlying();
 
     bool persist_kept = true;
-    (void)FileStoreSeams::read_and_reset_catches();
     if (lock_held) {
         hold.arm();
         asio::co_spawn(ex, sess.on_inbound_frame(std::span<const std::byte>{order}),
@@ -11011,7 +11002,6 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
     const std::string at_the_end = where_is(sess);
     const std::uint64_t waited_at_the_end = session_test_access::waited_terminal_closes(sess);
     const bool cut_recorded_at_the_end = session_test_access::logout_cut(sess);
-    const int catches = FileStoreSeams::read_and_reset_catches();
     const auto logout_sent_visits =
         std::ranges::count(sess.fsm_visit_history(), fsm_state::LogoutSent);
     std::vector<std::string> retained_full;
@@ -11051,10 +11041,10 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
         "; transmitted since the close began = " + literal(wire) +
         "; .order = " + literal(cell.order) + "; .retained = " + literal(retained) + "; next_out " +
         std::to_string(next_out(sess)) + ", store next out " + literal(store_out) +
-        ", store next in " + literal(store_in) + "; the store's catches of operation_aborted " +
-        std::to_string(catches) + "; onLogout calls " + std::to_string(cell.on_logout_calls) +
-        "; visits of LogoutSent " + std::to_string(logout_sent_visits) +
-        "; at the end: " + at_the_end + transport_text(f) + ".";
+        ", store next in " + literal(store_in) + "; onLogout calls " +
+        std::to_string(cell.on_logout_calls) + "; visits of LogoutSent " +
+        std::to_string(logout_sent_visits) + "; at the end: " + at_the_end + transport_text(f) +
+        ".";
     std::printf("[ MEASURED ] %s\n", reading.c_str());
     std::fflush(stdout);
     if (session_test_access::lifecycle_value(sess) == 1) {
@@ -11140,10 +11130,8 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
         EXPECT_EQ(sleeps_in_the_snapshot, 0U)
             << "no sleep is in flight on the session's clock while the lock is held. " << reading;
         EXPECT_EQ(result_of(inbound), "ok") << reading;
-        EXPECT_EQ(catches, 0)
-            << "the store caught no operation_aborted: no cancellation reached the job the "
-               "gate kept. "
-            << reading;
+        // D-598-2 (fixpp#598) removed the store's operation_aborted handler these cells counted, so
+        // no catch exists to fire.
         EXPECT_EQ(store_in, std::optional<seqnum_t>{3})
             << "the store's next inbound number is the peer's order's plus one. " << reading;
     }

@@ -49,6 +49,12 @@ struct session_test_access {
         return s.state_ == Session::lifecycle::closed_drained;
     }
 
+    // True iff close() has begun and has not completed (lifecycle::closing). A cell
+    // whose hook starts a close() reads it to show the close ran to its first suspension.
+    [[nodiscard]] static bool is_closing(Session const& s) noexcept {
+        return s.state_ == Session::lifecycle::closing;
+    }
+
     // True iff live_peer_id_ holds a value. 043 T008 asserts that both transport
     // attach paths leave it empty on insecure_plain_tcp (D-10).
     [[nodiscard]] static bool live_peer_id_has_value(Session const& s) noexcept {
@@ -102,6 +108,40 @@ struct session_test_access {
     // E-13).
     [[nodiscard]] static bool engine_stop_requested(Session const& s) noexcept {
         return s.engine_stop_requested_;
+    }
+
+    // ensure_hydrated_'s re-entrancy flag (.specify/536-537-538-recovery-liveness.md,
+    // D-CAN-1, "One member the unwinding would leave set"). Read it on the session
+    // strand.
+    [[nodiscard]] static bool hydrating(Session const& s) noexcept { return s.hydrating_; }
+
+    // run_logout_phase1's wake for the peer's confirming Logout
+    // (.specify/536-537-538-recovery-liveness.md, D-536-3): non-null only while that
+    // wait is in flight. A cell reads whether it is set, or wraps it to count its
+    // calls. Session strand only.
+    [[nodiscard]] static std::function<void()>& logout_wait_wake(Session& s) noexcept {
+        return s.logout_wait_wake_;
+    }
+
+    // Whether a TestRequest of the liveness loop is pending: the loop wrote one and no
+    // Heartbeat has answered it (fixpp#537, .specify/536-537-538-recovery-liveness.md,
+    // D-537-6 and D-537-8). Session strand only.
+    [[nodiscard]] static bool test_request_pending(Session const& s) noexcept {
+        return !s.pending_test_req_id_.empty();
+    }
+
+    // Whether a resend is outstanding: the session sent a ResendRequest and NextNumIn has
+    // not passed the gap it recorded (fixpp#537, D-537-5). Session strand only.
+    [[nodiscard]] static bool resend_outstanding(Session const& s) noexcept {
+        return s.reconnect_fsm_.is_awaiting_resend();
+    }
+
+    // The instant of the session's clock at which the last frame reached the inbound
+    // liveness writer. A cell that moved a mock clock before it sent a frame over a socket
+    // reads it to tell when that frame reached the session. Session strand only.
+    [[nodiscard]] static fixpp::core::steady_time_point last_inbound_steady(
+        Session const& s) noexcept {
+        return s.last_inbound_steady_;
     }
 
     // The session's store, or null before open() (093 plan OD-25: a cell issues a

@@ -36,8 +36,10 @@
 // Should the clock have been destroyed first, that is a heap-use-after-free. So the
 // owner MUST keep the clock alive until AFTER the io_context is gone (declare it so
 // it is destroyed last), and SHOULD drive every session through Session::close()
-// (which cancel_sleeps() + joins the liveness loop) so no sleep is left parked at
-// teardown. Both belts are correct; rely on neither alone. [F2; Session::close()]
+// (which cancels the session's own liveness sleep through that sleep's cancellation
+// slot and joins the loop; it does not call cancel_sleeps(), fixpp#536) so no sleep
+// is left parked at teardown. Both belts are correct; rely on neither alone.
+// [F2; Session::close()]
 #pragma once
 
 #include <asio/any_io_executor.hpp>

@@ -49,6 +49,7 @@
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -94,17 +95,22 @@ void post_terminal_emission(asio::any_io_executor const& ex, asio::cancellation_
 //
 // A terminal cancellation on the session's cancel slot lands while MemoryStore::store is
 // suspended in its leading post. The macro's part 1 throws operation_aborted, and
-// store_then_emit's `catch (const asio::system_error&)` returns dispatch_aborted, with
-// nothing stored and nothing transmitted. Without part 1, part 2 erases the cancellation:
-// the store commits and the frame is written. The cell runs with throw_if_cancelled()
-// left at its default, true, so it witnesses part 1's cancelled() conjunct.
+// store_then_emit ends the call by that exception, with nothing stored and nothing
+// transmitted (`.specify/536-537-538-recovery-liveness.md` §10, D-OUT-2, superseding the
+// returned dispatch_aborted this cell read before it). Without part 1, part 2 erases the
+// cancellation: the store commits and the frame is written. The cell runs with
+// throw_if_cancelled() left at its default, true, so it witnesses part 1's cancelled()
+// conjunct.
 
 struct pre_initiation_outcome {
     bool done = false;
     bool memory_store = false;
     std::optional<seqnum_t> next_before;
     std::optional<seqnum_t> next_after;
+    // How the call ended: it returned `result`, or threw.
     std::optional<fixpp::core::expected_t<void>> result;
+    bool threw_operation_aborted = false;
+    bool threw_another_exception = false;
 };
 
 asio::awaitable<void> cancel_while_store_posts(fixpp::session::Session& s,
@@ -119,8 +125,15 @@ asio::awaitable<void> cancel_while_store_posts(fixpp::session::Session& s,
     auto before = co_await store->next_seqnum(direction_t::outbound, false);
     if (before) out.next_before = *before;
     post_terminal_emission(co_await asio::this_coro::executor, sig);
-    out.result = co_await fixpp::session::session_test_access::store_then_emit(
-        s, out.next_before.value_or(1), frame_bytes());
+    try {
+        out.result = co_await fixpp::session::session_test_access::store_then_emit(
+            s, out.next_before.value_or(1), frame_bytes());
+    } catch (const asio::system_error& e) {
+        out.threw_operation_aborted = e.code() == asio::error::operation_aborted;
+        out.threw_another_exception = !out.threw_operation_aborted;
+    } catch (...) {
+        out.threw_another_exception = true;
+    }
     // The cancellation is still recorded in this coroutine's state; clear it, so the read
     // below runs.
     co_await asio::this_coro::reset_cancellation_state();
@@ -129,7 +142,7 @@ asio::awaitable<void> cancel_while_store_posts(fixpp::session::Session& s,
     out.done = true;
 }
 
-TEST(B35LockCells, PreInitiationCancel_StoreThenEmitReturnsDispatchAbortedAndTransmitsNothing) {
+TEST(B35LockCells, PreInitiationCancel_StoreThenEmitDoesNotSucceedAndTransmitsNothing) {
     namespace pr = fixpp::test_support::plain_rig;
     pr::Rig rig{std::make_shared<fixpp::session::Application>()};
     auto stream = std::make_shared<fixpp::session::test::ScriptedStream>();
@@ -172,12 +185,16 @@ TEST(B35LockCells, PreInitiationCancel_StoreThenEmitReturnsDispatchAbortedAndTra
     ASSERT_TRUE(up) << "the initiator did not reach Active";
     ASSERT_TRUE(finished) << "the cell's coroutine did not finish";
     EXPECT_TRUE(out.memory_store) << "the session's store is not a MemoryStore";
-    ASSERT_TRUE(out.result.has_value());
-    // NOLINTBEGIN(bugprone-unchecked-optional-access): each follows its ASSERT_TRUE(has_value())
-    ASSERT_FALSE(out.result->has_value())
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): each follows its has_value() test
+    ASSERT_FALSE(out.result.has_value() && out.result->has_value())
         << "store_then_emit succeeded: the cancellation that landed in store()'s leading "
            "post was erased before the lock";
-    EXPECT_EQ(out.result->error(), error::dispatch_aborted);
+    EXPECT_TRUE(out.threw_operation_aborted)
+        << "store_then_emit must end the call by operation_aborted; it "
+        << (out.result.has_value()
+                ? "returned error " + std::to_string(static_cast<int>(out.result->error()))
+                : std::string{out.threw_another_exception ? "threw another exception"
+                                                          : "did not end"});
     EXPECT_EQ(writes_after, writes_before) << "a frame was transmitted";
     ASSERT_TRUE(out.next_before.has_value());
     ASSERT_TRUE(out.next_after.has_value());

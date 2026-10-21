@@ -262,6 +262,12 @@ public:
     // advances past resend_state_.outstanding_end). [data-model §E-1]
     void exit_awaiting_resend() noexcept;
 
+    // fixpp#537 (`.specify/536-537-538-recovery-liveness.md` §4.3, D-537-5): write
+    // ResendState::started_at, the instant the deadline of an unfilled gap counts from.
+    // Session calls it on entering AwaitingResend and each time NextNumIn advances while
+    // the resend is outstanding; exit_awaiting_resend() clears the field with the state.
+    void mark_resend_progress(std::chrono::steady_clock::time_point at) noexcept;
+
 private:
     // NON-OWNING; owned by the Session (override or effective_transport_factory_).
     // The engine guarantees the factory outlives this FSM per [arch §5.6].

@@ -17,8 +17,8 @@
 //      disregarded (B-2). 093-inbound-frame-dispositions (contract C-2 step 1)
 //      supersedes row D-8 for this shape; see the B-2 section.
 //   C. Logon-ack with msg_seq_num=0 → Disconnected (Guard (4)'s LogonSent-row seq==0 check).
-//   D. cancel_sleeps() mid-Logout-graceful-sleep → system_error catch
-//      absorbing the operation_aborted exception (run_logout_phase1's wake-early catch).
+//   D. cancel_sleeps() by a third party during a graceful close's logout wait does
+//      not end the wait; the peer's confirming Logout does (fixpp#536, D-536-3).
 #include <gtest/gtest.h>
 
 #include <array>
@@ -386,10 +386,17 @@ TEST_F(AdversarialSessionTest, LogonAckSeqZeroForcesDisconnected) {
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
 }
 
-// ── Category D: cancel_sleeps() mid-Logout → system_error catch ──────────────
-// Exercises run_logout_phase1's catch (const std::system_error&) absorbing
-// operation_aborted thrown by sleep_until when cancel_sleeps fires during
-// the 2-second graceful-close timeout window.
+// ── Category D: a third party's cancel_sleeps() during the logout wait ───────
+// fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-3). The logout wait of a
+// graceful close is a race between the session's own wake and a deadline on the
+// session's clock. Clock::cancel_sleeps() is clock-wide, so any holder of the clock can
+// sweep that deadline's sleep; the wait must stand, and the peer's confirming Logout
+// must then end it.
+//
+// Both readings are in real time, counted from the start of close, and both lie below
+// the session's own logout_disconnect_timeout_ms. close races the wait against a real
+// asio::steady_timer armed for that period, which the mock clock does not govern: past
+// it, close has returned whatever the wait did (brain/components/graceful-logout.md).
 
 TEST_F(AdversarialSessionTest, LogoutGracefulCancelMidSleep) {
     auto cfg = make_cfg();
@@ -412,21 +419,60 @@ TEST_F(AdversarialSessionTest, LogoutGracefulCancelMidSleep) {
     ASSERT_TRUE(feed(s, wrap_frame(body)).has_value());
     ASSERT_EQ(s.state(), fsm_state::Active);
 
-    // Graceful close in background — emits Logout, enters LogoutSent, starts sleep.
+    const auto timeout = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms};
+    auto is_ready = [](auto& fut) { return fut.wait_for(0s) == std::future_status::ready; };
+
+    // Graceful close in background — emits Logout, enters LogoutSent, starts its wait.
+    const auto began = std::chrono::steady_clock::now();
     auto close_fut = asio::co_spawn(ioc, s.close(close_mode::graceful), asio::use_future);
     ioc.run_for(50ms);
     ioc.restart();
-
-    // Cancel all sleeps → sleep_until resumes with system_error(operation_aborted),
-    // which the Logout coroutine's catch block absorbs (run_logout_phase1's wake-early catch).
-    clock->cancel_sleeps();
-    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 100ms,
-                                                    "LogoutGracefulCancelMidSleep/close")) {
+    // From here close is in flight: a failed step drains it before the cell returns.
+    auto drain_and_fail = [&](const char* why) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                         "LogoutGracefulCancelMidSleep/close");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LogoutGracefulCancelMidSleep/close";
+        ADD_FAILURE() << why;
+    };
+    if (s.state() != fsm_state::LogoutSent) {
+        drain_and_fail("setup: the session did not reach LogoutSent");
         return;
     }
+
+    // The third party's sweep. For a quarter of the timeout after it, close must not
+    // have returned.
+    clock->cancel_sleeps();
+    ioc.run_for(timeout / 4);
+    ioc.restart();
+    if (is_ready(close_fut)) {
+        ADD_FAILURE() << "close(graceful) returned after a third party's cancel_sleeps(), "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - began)
+                             .count()
+                      << " ms after it began and with a logout timeout of " << timeout.count()
+                      << " ms: the sweep ended the logout wait";
+        (void)close_fut.get();
+        return;
+    }
+
+    // The peer's confirming Logout ends the wait.
+    std::string confirm =
+        "35=5\x01"
+        "34=2\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=TW\x01";
+    (void)feed(s, wrap_frame(confirm));
+    if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 100ms,
+                                                    "LogoutGracefulCancelMidSleep/close")) {
+        drain_and_fail("the peer's confirming Logout did not end the logout wait");
+        return;
+    }
+    const auto took = std::chrono::steady_clock::now() - began;
+    ASSERT_LT(took, timeout) << "inconclusive: "
+                             << std::chrono::duration_cast<std::chrono::milliseconds>(took).count()
+                             << " ms of real time passed, so close's real grace timer ("
+                             << timeout.count()
+                             << " ms) may have ended the wait in place of the peer's Logout";
 
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
     (void)close_fut.get();

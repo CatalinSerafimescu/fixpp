@@ -25,6 +25,9 @@ refs:
   - tests/interop/conversation/conversation_script.yaml
   - cmake/Helpers.cmake
   - cmake/run_fuzz_libcov_check.cmake
+  - tests/support/hooked_store.hpp
+  - tests/support/recording_store.hpp
+  - tests/support/recording_file_executor.hpp
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -906,6 +909,37 @@ mechanical `(void)` at every site (adds casts that read as decisions nobody made
 test-strength questions open rather than strengthening tests silently — setup stores nothing asserts,
 and a loop that passes vacuously on an empty capture — tracked in fixpp#436.
 
+## Store doubles and executors that cancel a store call (fixpp#536 / #537 / #538 / #598)
+
+The design is `.specify/536-537-538-recovery-liveness.md`; these are the test-side facts its sections
+§10 and §11 depend on.
+
+- **`tests/support/hooked_store.hpp`'s hold is a store that does not keep the store contract.** It
+  holds a `store` by a loop of posts after the inner store's call, so a cancellation recorded on the
+  thread during the hold leaves the wrapper's body as `operation_aborted` after the frame was stored.
+  `message_store.hpp`'s `store` comment now says that `store_cancelled`, or `operation_aborted` let
+  out, means nothing was stored (D-OUT-7), and `store_then_emit` treats either as a cancelled store
+  call: it takes the number back and ends the session. A cell that cancels a coroutine during such a
+  hold therefore drives a non-conforming store, not a real cancelled store; the phase found none whose
+  verdict changed (the note's §10.4). The control of the logout wait's `try` (D-536-3) moved to the
+  callback transport and a wrapper whose hold a cancellation cannot end, so that the store returns
+  success with the cancellation still recorded and the race's pre-check throws.
+- **`tests/support/recording_store.hpp`** is the delegating wrapper the batch uses instead of a
+  hand-written store, which would measure its own `retrieve`; its call hook runs in the call
+  expression, before the caller's `co_await`, so a cell can place a cancellation on either timing.
+- **`tests/support/recording_file_executor.hpp` (fixpp#598).** A file executor over a pool that hands
+  every job over at once and holds the thread that takes the call's first job before it starts it, so
+  a cell can make "taken and not started" an event instead of a margin of time. It counts a job when it
+  is handed over. ⚠️ **A count of zero is never the evidence that a cancellation landed:** it is also
+  what a cell reads whose emit reached nothing. Each cell asserts a witness instead, the calling
+  coroutine reading the terminal bit after the call. The 035 cells this replaced emitted on a signal
+  before spawning the call bound to it, and an asio signal does not keep an emission for a handler
+  installed later, so they cancelled nothing; their "the handler did not fire" assertion was the zero
+  of an instrument that could not read anything else. Its second form, with relaxed atomics only and
+  a seeded pair of plain accesses, is the known positive for the ThreadSanitizer run: a recorder that
+  takes a mutex in every job orders the two jobs and makes the run clean by construction.
+
+## Related
 ## Related
 
 - [`nfr-and-tooling.md`](./nfr-and-tooling.md) — the status-column caveat, and where the CI gates live.

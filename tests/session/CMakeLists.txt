@@ -482,11 +482,12 @@ set_property(TEST store_fail_reconcile APPEND PROPERTY LABELS 092)
 # FIXPP_TEST_HOOKS needed (the double is self-contained).
 
 # /speckit-verify coverage witness — the reconcile else-arm (dk.has_value()
-# ==false) and the store_cancelled false-leg (`!= store_cancelled`), which
-# W1/W3/breadth cannot reach (their reconcile read always succeeds; the
-# FileStore seam serves next_seqnum from a still-valid in-memory counter). A
-# persistent store DOUBLE additionally faults the reconcile read. No FileStore
-# / FIXPP_TEST_HOOKS needed. See 059-...-coverage-design.md Arm (a)/(b).
+# ==false), which W1/W3/breadth cannot reach (their reconcile read always
+# succeeds; the FileStore seam serves next_seqnum from a still-valid in-memory
+# counter). A persistent store DOUBLE additionally faults the reconcile read. No
+# FileStore / FIXPP_TEST_HOOKS needed. See 059-...-coverage-design.md Arm (b). The
+# same file holds the cells for a store double that returns store_cancelled from
+# store(), persistent or not (`.specify/536-537-538-recovery-liveness.md` §10, D-OUT-1).
 
 # gate-b/r1 FQ-1 (RC#1): the fatal-class predicate unification RED witness —
 # a minimal persistent store double armed to return an OUT-OF-SET store code
@@ -550,8 +551,8 @@ target_compile_definitions(store_file_cancellation PRIVATE FIXPP_TEST_HOOKS)
 # T001/T013: real-pool concurrent store/retrieve/reset TSan+ASan witness.
 # This target is the PRIMARY TSan gate for the 035 feature (the inert offload
 # made the concurrency surface dormant; making it genuine is the whole risk).
-# FIXPP_TEST_HOOKS exposes read_and_reset_retrieve_pread_count() and
-# read_and_reset_catch_fired() for the T013/T015 generation-guard witnesses.
+# FIXPP_TEST_HOOKS exposes read_and_reset_retrieve_pread_count() for the T013/T015
+# generation-guard witnesses.
 fixpp_add_store_test(store_file_concurrent_tsan SOURCES
   test_file_store_concurrent_tsan.cpp
 )
@@ -575,7 +576,8 @@ target_compile_definitions(store_file_concurrent_tsan PRIVATE FIXPP_TEST_HOOKS)
 # ── 005 Phase 8 /speckit-verify Step 4 coverage uplift ──────────────────────
 # Adversarial-input tests for defensive code paths that the well-formed
 # seam corpus doesn't exercise: builder buffer-too-small, parser malformed
-# field fallback, Logon-ack seq=0, Logout cancel_sleeps mid-graceful.
+# field fallback, Logon-ack seq=0, and a third party's cancel_sleeps() during the wait of a
+# graceful close, which does not end it.
 # FR-003 (010-session-cfg-lifetime): W-5 ASan skip removed. The
 # stack-use-after-scope at cfg_ is fixed by the by-value member change
 # (T008/T009). session_coverage_adversarial now runs under ASan clean.
@@ -620,6 +622,229 @@ add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 # FIXPP_TEST_HOOKS declares the namespace-scope install_store_offload_probe /
 # install_store_offload_exit_probe seams (file_store.hpp).
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
+
+# fixpp#536 (B28), D-536-1 — one session's close vs another session's liveness on a shared clock,
+# and D-536-4's pin. Standalone, not a grouped bucket ([const §VII.8]): its cells run two
+# Sessions on the real clock and wait in real time.
+add_threading_test(session_536_shared_clock_liveness test_536_shared_clock_liveness.cpp)
+set_tests_properties(session_536_shared_clock_liveness PROPERTIES LABELS "session;536")
+# fixpp#536 (B28), D-536-1 to D-536-4 — a session's close, its liveness loop and its logout wait.
+# Standalone, not a grouped bucket ([const §VII.8]): not the class the clause groups. Its cells
+# open Sessions and drive their coroutines and timers on an io_context with a mock clock, and
+# some of them wait on a real asio::steady_timer.
+add_threading_test(session_536_close_and_logout_wait test_536_close_and_logout_wait.cpp)
+set_tests_properties(session_536_close_and_logout_wait PROPERTIES LABELS "session;536")
+# fixpp#537 (B28), D-537-1 and D-537-2 — a frame above NextNumIn while a resend is outstanding
+# is ignored. Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
+# groups. Its cells open Sessions and drive their coroutines and timers on an io_context with
+# a mock clock.
+add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
+set_tests_properties(session_537_second_too_high PROPERTIES LABELS "session;537")
+# fixpp#538 (B28), D-538-1 — the resend answer after a 141=Y Logon exchange (MemoryStore and FileStore).
+add_threading_test(session_538_volatile_store_after_reset_logon
+  test_538_volatile_store_after_reset_logon.cpp)
+set_tests_properties(session_538_volatile_store_after_reset_logon PROPERTIES LABELS "session;538")
+# fixpp#538 (B28), D-538-1 and D-538-2 — the stores' lookup after a reset, on a bare store.
+# Standalone, not a grouped bucket ([const §VII.8]): genuine concurrency. Its FileStore
+# arms construct a file I/O thread pool, which the bucket session_store_tests excludes by
+# its own comment.
+add_threading_test(session_538_store_lookup_after_reset
+  test_538_store_lookup_after_reset.cpp)
+set_tests_properties(session_538_store_lookup_after_reset PROPERTIES LABELS "session;538")
+
+# ── fixpp#537 (B28), D-537-7 — frames the session cannot build ─────────────────────
+# Standalone, not a grouped bucket ([const §VII.8]): its cells open Sessions and drive
+# their coroutines and timers on an io_context with a mock clock, which is not the pure,
+# single-threaded, stateless class §VII.8 groups.
+add_threading_test(session_537_unbuildable_frames test_537_unbuildable_frames.cpp)
+set_tests_properties(session_537_unbuildable_frames PROPERTIES LABELS "session;537")
+
+# ── fixpp#538 (B28), D-538-4 — Engine::stop meets a resend answer on a FileStore ────
+# Standalone, not a grouped bucket ([const §VII.8]): a per-`-D` variant
+# (FIXPP_TEST_HOOKS declares install_store_offload_probe), genuine concurrency (the
+# FileStore's file I/O executor is a thread of its own), and `-R <target>` selection:
+# the batch's phase exits name this binary. Each cell runs an Engine over loopback TCP
+# (plain_engine_rig.hpp). TIMEOUT: above the sum of the bounded pumps a cell takes when
+# every one of them misses; a cell that passes takes none of them to its budget.
+add_executable(session_538_cancelled_read_measured_path
+  test_538_cancelled_read_measured_path.cpp
+)
+# The same class of binary: a measurement of Session::store_then_emit's dispositions for
+# a cancelled outbound store, on the same fixture (held_file_store_scene.hpp).
+add_executable(session_cancelled_outbound_store_measurement
+  test_cancelled_outbound_store_measurement.cpp
+)
+# Ruling R-14 (`.specify/536-537-538-recovery-liveness.md` §9): a cancellation, or another
+# exception, met while an inbound frame is processed. Standalone ([const §VII.8]):
+# session_inbound_cancellation is a per-`-D` variant (FIXPP_TEST_HOOKS for the offload hook,
+# FIXPP_ALLOW_MOCK_TRANSPORT for the cell that holds a write in flight) with genuine
+# concurrency (a FileStore's file I/O executor); session_inbound_cancellation_engine runs an
+# Engine with timers and coroutines over loopback TCP, and holds a FileStore.
+add_executable(session_inbound_cancellation
+  test_inbound_cancellation.cpp
+)
+target_compile_definitions(session_inbound_cancellation PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_executable(session_inbound_cancellation_engine
+  test_inbound_cancellation_engine.cpp
+)
+# fixpp#538 (B28), D-538-4 — a store read failure in a resend answer. Standalone
+# ([const §VII.8]), and neither is the class the clause groups:
+# session_538_resend_answer_store_failure opens Sessions and drives their coroutines and
+# timers on an io_context with a mock clock; session_538_resend_answer_store_failure_engine
+# runs an Engine with timers and coroutines over loopback TCP. They share this block for
+# its link line (plain_engine_rig.hpp); neither reads FIXPP_TEST_HOOKS.
+add_executable(session_538_resend_answer_store_failure
+  test_538_resend_answer_store_failure.cpp
+)
+add_executable(session_538_resend_answer_store_failure_engine
+  test_538_resend_answer_store_failure_engine.cpp
+)
+foreach(held_store_test
+    session_538_cancelled_read_measured_path
+    session_cancelled_outbound_store_measurement
+    session_inbound_cancellation
+    session_inbound_cancellation_engine
+    session_538_resend_answer_store_failure
+    session_538_resend_answer_store_failure_engine)
+  target_link_libraries(${held_store_test} PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${held_store_test} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  target_compile_definitions(${held_store_test} PRIVATE FIXPP_TEST_HOOKS)
+  add_test(NAME ${held_store_test} COMMAND ${held_store_test})
+  set_tests_properties(${held_store_test} PROPERTIES
+    ENVIRONMENT
+      "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;538"
+    TIMEOUT 300)
+endforeach()
+
+# Rulings R-15 to R-23 (`.specify/536-537-538-recovery-liveness.md` §10): a cancelled outbound
+# store, and the graceful Logout that was not sent. Standalone ([const §VII.8]):
+# session_cancelled_outbound_store is a per-`-D` variant (FIXPP_TEST_HOOKS for the offload
+# hook, FIXPP_ALLOW_MOCK_TRANSPORT for the cells that reach the Logon emission through
+# Session::drive_reconnect) with genuine concurrency (a FileStore's file I/O executor);
+# session_cancelled_outbound_store_engine and session_logout_not_sent are not the class the
+# clause groups: their cells run an Engine with timers and coroutines over loopback TCP, or
+# hold a FileStore call, which needs FIXPP_TEST_HOOKS, and wait on a real asio::steady_timer.
+add_executable(session_cancelled_outbound_store
+  test_cancelled_outbound_store.cpp
+)
+target_compile_definitions(session_cancelled_outbound_store PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+add_executable(session_cancelled_outbound_store_engine
+  test_cancelled_outbound_store_engine.cpp
+)
+add_executable(session_logout_not_sent
+  test_logout_not_sent.cpp
+)
+foreach(outbound_store_test
+    session_cancelled_outbound_store
+    session_cancelled_outbound_store_engine
+    session_logout_not_sent)
+  target_link_libraries(${outbound_store_test} PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${outbound_store_test} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  target_compile_definitions(${outbound_store_test} PRIVATE FIXPP_TEST_HOOKS)
+  add_test(NAME ${outbound_store_test} COMMAND ${outbound_store_test})
+  set_tests_properties(${outbound_store_test} PROPERTIES
+    ENVIRONMENT
+      "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;538"
+    TIMEOUT 300)
+endforeach()
+
+# fixpp#598 (B28), note §11 — a FileStore call's offload is not cancelled. Standalone
+# ([const §VII.8]): session_598_store_offload is a per-`-D` variant (FIXPP_TEST_HOOKS, for
+# the offload probe) with genuine concurrency (the file I/O pools its cells construct);
+# session_598_store_offload_engine is not the class the clause groups either: its cells run
+# an Engine with timers and coroutines over loopback TCP and hold a FileStore's write job.
+add_executable(session_598_store_offload
+  test_598_store_offload.cpp
+)
+add_executable(session_598_store_offload_engine
+  test_598_store_offload_engine.cpp
+)
+foreach(store_offload_test
+    session_598_store_offload
+    session_598_store_offload_engine)
+  target_link_libraries(${store_offload_test} PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(${store_offload_test} PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  target_compile_definitions(${store_offload_test} PRIVATE FIXPP_TEST_HOOKS)
+  add_test(NAME ${store_offload_test} COMMAND ${store_offload_test})
+  set_tests_properties(${store_offload_test} PROPERTIES
+    ENVIRONMENT
+      "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    LABELS "session;598"
+    TIMEOUT 300)
+endforeach()
+
+# fixpp#537 (B28), D-537-6 and D-537-8 — a Heartbeat above NextNumIn answers a pending
+# TestRequest. Standalone, not a grouped bucket ([const §VII.8]): not the class the clause
+# groups. Its cells open Sessions and drive their coroutines and timers on an io_context with
+# a mock clock.
+add_threading_test(session_537_too_high_heartbeat test_537_too_high_heartbeat.cpp)
+set_tests_properties(session_537_too_high_heartbeat PROPERTIES LABELS "session;537")
+# fixpp#537 (B28), D-537-5 and D-537-9 — the deadline of an unfilled gap. Standalone
+# ([const §VII.8]): not the class the clause groups. Its cells open Sessions and drive their
+# coroutines and timers on an io_context with a mock clock, and some of them run an Engine with
+# timers and coroutines over loopback TCP (plain_engine_rig.hpp), which the link line is for.
+add_executable(session_537_gap_deadline
+  test_537_gap_deadline.cpp
+)
+target_link_libraries(session_537_gap_deadline PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_537_gap_deadline PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # session/read_first_frame_bounded.hpp: detail::resend_gap_deadline
+)
+add_test(NAME session_537_gap_deadline COMMAND session_537_gap_deadline)
+set_tests_properties(session_537_gap_deadline PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "session;537"
+  TIMEOUT 300)
 
 # fixpp#563 / fixpp#564 (B41) — a Session::send or a Session::close started inside an Application
 # callback of that session, and the session's debug guard (`.specify/563-564-callback-send.md` §3).
@@ -729,6 +954,13 @@ add_test(NAME session_admin_emit_observation_gate
     "${CMAKE_SOURCE_DIR}/src/session/session.cpp"
 )
 set_tests_properties(session_admin_emit_observation_gate PROPERTIES
+  LABELS "036;sc002;static_gate")
+# The gate's own positive/negative test: fixtures in a temp dir, so the source tree is
+# never edited. Its flagged arms require the seeded defect's message, not only exit 1.
+add_test(NAME session_admin_emit_observation_gate_selftest
+  COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/test_check_admin_emit_observation.py"
+)
+set_tests_properties(session_admin_emit_observation_gate_selftest PROPERTIES
   LABELS "036;sc002;static_gate")
 
 # ── 038-acceptor-sendingtime-guard T001–T008 (Group 1 witness) ───────────────

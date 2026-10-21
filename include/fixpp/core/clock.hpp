@@ -49,9 +49,18 @@ public:
     // projection for callers that prefer it ([2d §6.7]), not this return type.
     [[nodiscard]] virtual asio::awaitable<void> sleep_until(steady_time_point deadline) = 0;
 
-    // Signals every in-flight sleep_until awaiter's cancellation slot.
+    // Completes every in-flight sleep_until awaiter with
+    // asio::error::operation_aborted. It completes the waiter directly and does not
+    // signal the awaiter's cancellation slot, so a waiter can tell this sweep from its
+    // own cancellation by reading its cancellation state.
     // Idempotent; safe to call concurrently AND re-entrantly (incl. from
     // inside a sleep_until completion handler) (FR-003 / E1).
+    //
+    // fixpp#536 (.specify/536-537-538-recovery-liveness.md, D-536-1, D-536-4, D-536-5):
+    // the call is clock-wide, and a Session does not make it. A caller that makes it
+    // on a clock that open sessions share ends the liveness loop of each of them: the
+    // session stays Active and sends no further Heartbeat or TestRequest, and nothing
+    // restarts the loop.
     virtual void cancel_sleeps() noexcept = 0;
 
     // Optional hook: notify the clock that a session is about to be destroyed

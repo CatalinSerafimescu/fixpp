@@ -1930,3 +1930,58 @@ callers, an application that `co_spawn`s `Session::send` more than once without 
 send that fixpp#563 defers from `toApp` or `toAdmin` while the outer send is in its store call all
 arrive at a held mutex. The FIFO behaviour both passages describe for the second arrival is the
 ordinary case and is what the requirement above relies on; it is not a violation.
+
+## ⚠️ Erratum, 2026-10-14 (fixpp#538; note §10, rulings R-13 to R-16, R-20) — `retrieve` after a reset, and what the session does with `store_cancelled`
+
+Appended at the END of the file, as Appendix Z is, so that no line citation into this document moves.
+The rows below are not rewritten in place. The design record is
+`.specify/536-537-538-recovery-liveness.md` (§2 for `retrieve`; §9 and §10 for `store_cancelled`).
+
+### `retrieve` after a reset, and for an empty direction (fixpp#538, D-538-1, D-538-2)
+
+This document does not say where a frame stored after `reset()` or `reset_to()` is found. Both shipped
+stores found sequence `s` at position `s - 1`, so after `reset_to(·, 2)`, the initiator's 141=Y reset
+unit, every frame stored afterwards was reported as a gap and a resend answer gap-filled it. Both now
+look a number up relative to the first frame the direction retains: a frame stored after a reset is
+retrievable under its own sequence number; a number below the first retained one is a gap
+(`store_seqnum_gap`); every number of a direction that holds no frame is a gap. The test for an empty
+direction comes before any read of the first entry. `MessageStore::retrieve`'s comment in
+`include/fixpp/session/message_store.hpp` states it for every store, a store that keeps the default
+`reset_to` body included. No layout and no file format changes. B&L `B-538-1`, `B-538-3`.
+
+### The cancellation table, the row for `store` (note §10, D-OUT-1)
+
+The row says that a cancelled `store` persisted nothing and that no transmission happened. Feature 059's
+decision D7 departed from it: a returned `store_cancelled` was transmitted over
+(`specs/059-outbound-store-fail-closed/research.md`). Rulings R-15 and R-16 return the session to the
+row, on both timings of the cancellation and on any store: the frame is not transmitted, its number is
+taken back, and the session ends `Disconnected`. What the session returns to its own caller for it:
+`Session::send` and `Engine::send` return `dispatch_aborted`; `Session::open` and
+`Session::drive_reconnect` return `store_cancelled` for a cancellation at a store call of the
+initiator's Logon emission. B&L `B-538-5`. The row's sentence for an inbound `store` is unchanged: the
+session stores no inbound frame.
+
+### The error taxonomy, the row for `store_cancelled` (note §9, D-CAN-4; §10, D-OUT-5)
+
+"The FSM treats this distinct from `store_io_failure`: cancellation = no state change, no recovery
+action" no longer describes the session.
+- Since ruling R-13, a resend answer whose store read is cancelled aborts the answer and ends the
+  session (B&L `B-538-2`). Under rulings R-14 to R-16 and R-20, a cancelled store call met while an
+  inbound frame is processed, a cancelled outbound store call, and a cancelled store call of the
+  initiator's Logon emission each end the session `Disconnected`.
+- The code's meaning at the session's entry points is wider than the store's. `Session::on_inbound_frame`
+  returns `store_cancelled` for any cancellation that ended a frame's processing, whether or not the
+  await that met it was a store call, and `Session::open` and `Session::drive_reconnect` return it for
+  any cancellation that ended the initiator's Logon emission. `include/fixpp/core/error.hpp` states
+  both at the enumerator. Its C-ABI mapping, `FIXPP_ERR_CANCELLED`, is unchanged.
+
+### Appendix Z2 §1, the order of `store()` calls (note §10, D-OUT-7; ruling R-21)
+
+Appendix Z2 §1 states that calls to `MessageStore::store` on one instance complete in the order they
+were made, and that `MemoryStore` and `FileStore` meet that requirement. B28 narrows it:
+calls to `store()` that a cancellation does not end complete in the order they were made;
+a call that a cancellation ended may return earlier. On `FileStore`, a call queued at the
+store's lock that a cancellation ends returns `store_cancelled` while the call ahead of it
+still holds the lock. Both shipped stores meet the requirement in this form.
+`MessageStore::store`'s comment in `include/fixpp/session/message_store.hpp` states it, and B&L
+`B-563-4` and `B-538-3` are the rows a user reads.

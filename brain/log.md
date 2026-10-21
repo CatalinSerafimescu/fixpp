@@ -6,6 +6,13 @@ status: stable
 
 # Log
 
+- **2026-10-20 — B28 (fixpp#536, #537, #538, #598) Gate B (PR #609): class 4 gains a narrowing form.**
+  `failure-classes.md` class 4 (a copy propagates a claim that is false at the new site) adds *when a
+  rule is narrowed, a sweep for its wording finds the sites that state it, not the sites that cite or
+  register it*: derive the surface set from the rule's identifiers, witnesses and registers. Filed
+  under class 4, not 9 or 20: the defect is copies that the owner's amendment left false, and the
+  form says how to find them; class 20 is the sibling for the per-round sampling. Owner-approved
+  from the rounds 1–2 triage records.
 - **2026-10-10 — B35 (fixpp#544), pre-push (pipeline step 15a): the hot-path zero allocation.**
   `components/async-mutex.md` gains the Erratum E-6 lineage row (the frameless lock op, the macro as the
   internal route, E-4's scope corrected to the scheduler call, and the failed "removing a frame is only
