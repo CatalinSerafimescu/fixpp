@@ -1305,8 +1305,9 @@ OrderOutcome run_store_calls(StoreUnderOrderTest const kind, bool const cancel_t
     store_hold::scoped_hook const hook;
     asio::io_context ioc;
     // The FileStore's offload work is released on the pool thread
-    // (tests/support/keep_running.hpp).
-    auto const keep = keep_running_for(ioc);
+    // (tests/support/keep_running.hpp). Released before the drain below, which waits for
+    // the io_context to stop.
+    auto keep = keep_running_for(ioc);
     asio::thread_pool file_pool{1};
     store_hold::release_on_exit const release_guard;
     struct temp_dir {
@@ -1380,13 +1381,17 @@ OrderOutcome run_store_calls(StoreUnderOrderTest const kind, bool const cancel_t
         (void)pump([&] { return o.completed.size() == 2 && log->returning_late(); });
         log->release_late_return();
     }
-    o.all_returned = pump([&] { return o.completed.size() == 3; });
+    // Site-labelled, so FIXPP_FORCE_WINDOW_MISS can take the drain path below.
+    o.all_returned = fixpp::test_support::pump_until(
+        ioc, [&] { return o.completed.size() == 3; }, fixpp::test_support::kPumpBudget,
+        fixpp::test_support::kPumpSlice, "StoreCallOrder::all_returned");
     o.hold_timed_out = store_hold::timed_out();
     o.late_return_timed_out = log && log->late_return_timed_out();
     if (!o.all_returned) {
         // A call still suspended refers to this frame's locals: resume it before they
         // are destroyed.
         if (log) log->release_late_return();
+        keep.reset();
         fixpp::test_support::drain_or_report(ioc, "StoreCallOrder");
     }
     return o;
