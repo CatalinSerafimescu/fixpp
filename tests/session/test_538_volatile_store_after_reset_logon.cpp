@@ -51,6 +51,11 @@
 //                                         sent. The walk asks the store for
 //                                         number 1 of a direction that holds no
 //                                         frame; the answer is one GapFill.
+//   FileStore_SlowerThanTheWindow_ResetLogon_ResendReplays
+//                                         the reset shape on a FileStore whose
+//                                         every file I/O job outlasts the window:
+//                                         the known positive of run_sync's bounded
+//                                         wait, below.
 //
 // Store cells, no session (suite MemoryStoreAfterResetTo). They replay on a
 // bare MemoryStore the calls the initiator makes on its store in the reset
@@ -77,11 +82,23 @@
 //
 // mock_clock: nothing here depends on elapsed time. HeartBtInt is long so the
 // liveness loop stays parked for the whole cell.
+//
+// run_sync runs each call in a window of kWindow, as the cells always have, and when the
+// call is not ready at the window's end, waits for it within kPumpBudget and then runs the
+// window once more, so the handlers the window would have run after the call still run. A
+// FileStore's call completes when its file I/O does, and a slow disk can outlast the window.
+// No call here can be completed by a real-time timer: the cells never close a session, and
+// the session's own steady_timers are on its close paths. Re-derive that with
+// `git grep -n steady_timer -- src/session/session.cpp`. The wait is a stop-at-ready pump,
+// so a FileStore cell holds keep_running_for (tests/support/keep_running.hpp), released
+// before the miss branch's drain.
 
 #include <gtest/gtest.h>
 
+#include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/execution.hpp>
 #include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
@@ -105,13 +122,17 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -127,6 +148,39 @@ namespace fixpp::session::test {
 namespace {
 
 constexpr std::string_view kSt52 = "20240101-00:00:00.000";
+
+// run_sync's window.
+constexpr auto kWindow = 200ms;
+// A file I/O job of the slow executor waits this long before it runs: longer than kWindow.
+constexpr auto kSlowJob = kWindow + 100ms;
+
+// A file I/O executor whose every job waits kSlowJob on its pool thread before it runs: a
+// disk slower than the window.
+struct SlowFileExecutor {
+    asio::thread_pool::executor_type inner;
+
+    asio::execution_context& query(asio::execution::context_t /*unused*/) const noexcept {
+        return asio::query(inner, asio::execution::context);
+    }
+    static constexpr asio::execution::blocking_t query(
+        asio::execution::blocking_t /*unused*/) noexcept {
+        return asio::execution::blocking.never;
+    }
+    SlowFileExecutor require(asio::execution::blocking_t::never_t /*unused*/) const {
+        return *this;
+    }
+    template <class F>
+    void execute(F&& f) const {
+        asio::require(inner, asio::execution::blocking.never)
+            .execute([job = std::decay_t<F>(std::forward<F>(f))]() mutable {
+                std::this_thread::sleep_for(kSlowJob);
+                std::move(job)();
+            });
+    }
+    friend bool operator==(SlowFileExecutor const& a, SlowFileExecutor const& b) noexcept {
+        return a.inner == b.inner;
+    }
+};
 
 constexpr std::string_view kIdA = "B28-A";
 constexpr std::string_view kIdB = "B28-B";
@@ -240,6 +294,7 @@ struct LogonShape {
     bool own_reset_on_logon = false;  // SessionConfig::reset_on_logon
     bool peer_logon_has_141 = false;  // the peer's Logon carries 141=Y
     StoreKind store = StoreKind::memory;
+    bool slow_file_io = false;  // the FileStore's file I/O executor is a SlowFileExecutor
 };
 
 // The store's own account of the outbound direction after the two sends.
@@ -258,6 +313,8 @@ struct StoreReading {
 class StoreCellBase : public ::testing::Test {
 protected:
     asio::io_context ioc;
+    // Held by a FileStore cell (this file's header, on run_sync).
+    std::optional<fixpp::test_support::keep_running> keep;
     // The FileStore cells' file-I/O executor. Declared after ioc, so it is
     // joined before ioc is destroyed.
     asio::thread_pool file_pool{1};
@@ -291,7 +348,14 @@ protected:
     template <class T>
     expected_t<T> run_sync(asio::awaitable<expected_t<T>> coro, const char* site) {
         auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, site)) {
+        bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, site);
+        if (!ready) {
+            ready = fixpp::test_support::pump_until_ready(ioc, fut,
+                                                          fixpp::test_support::kPumpBudget, site);
+            if (ready) (void)fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, site);
+        }
+        if (!ready) {
+            keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
             return std::unexpected(fixpp::test_support::kWindowMissSentinel);
@@ -365,8 +429,12 @@ protected:
             FileStore::Config fc;
             fc.directory = file_dir;
             fc.max_frame_bytes = 4096;
-            fc.file_io_executor = file_pool.get_executor();
+            fc.file_io_executor =
+                shape.slow_file_io
+                    ? asio::any_io_executor{SlowFileExecutor{file_pool.get_executor()}}
+                    : asio::any_io_executor{file_pool.get_executor()};
             cfg.store_factory = std::make_shared<FileStoreFactory>(fc);
+            keep.emplace(fixpp::test_support::keep_running_for(ioc));
         } else {
             cfg.store_factory = std::make_shared<MemoryStoreFactory>(store_cfg());
         }
@@ -607,6 +675,14 @@ TEST_F(StoreAfterResetLogon, FileStore_ResetLogon_ResendReplays) {
                      .own_reset_on_logon = true,
                      .peer_logon_has_141 = true,
                      .store = StoreKind::file});
+}
+
+TEST_F(StoreAfterResetLogon, FileStore_SlowerThanTheWindow_ResetLogon_ResendReplays) {
+    run_resend_cell({.role = session_role::initiator,
+                     .own_reset_on_logon = true,
+                     .peer_logon_has_141 = true,
+                     .store = StoreKind::file,
+                     .slow_file_io = true});
 }
 
 TEST_F(StoreAfterResetLogon, FileStore_NoResetLogon_ResendReplays) {
