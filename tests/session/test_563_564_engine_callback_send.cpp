@@ -670,10 +670,21 @@ Readings run_cell(Shape shape, SpawnOn spawn_on,
     const Who starter = shape == Shape::from_from_app ? Who::acceptor : Who::initiator;
     const SessionId& second_id = starter == Who::initiator ? ini_id : acc_id;
     const auto& second_payload = shape == Shape::from_from_app ? payload_reply : payload_b;
+    // The starting session, named by a handle initialised from the engine, so that
+    // tools/audit_co_spawn_named_closure.py can follow `exec`'s session branch to
+    // `ioc`. It must be the session session_of(starter) returns. The handle is
+    // released once `exec` holds a copy of its executor.
+    auto starter_h = engine.lookup(second_id);
+    if (!starter_h || starter_h.get() != &session_of(starter)) {
+        ADD_FAILURE() << "setup: the starting session's lookup is not session_of(starter)";
+        stop_engine();
+        return o;
+    }
     const asio::any_io_executor exec =
         spawn_on == SpawnOn::session_executor
-            ? asio::any_io_executor{session_of(starter).executor().underlying()}
+            ? asio::any_io_executor{starter_h->executor().underlying()}
             : asio::any_io_executor{ioc.get_executor()};
+    starter_h.reset();
 
     // Both sessions are read on their own strands from the completion handler of
     // whichever send completes last, so the read is queued before the test thread
