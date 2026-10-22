@@ -21,9 +21,12 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
 #include <optional>
+#include <pugixml.hpp>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -555,6 +558,79 @@ TEST(DictionaryAccessors, MovedFromDictionaryUsesNullHandleFallbacks) {
     EXPECT_TRUE(dict.group_fields(9999U).empty());
     EXPECT_TRUE(dict.message_fields("D").empty());
     EXPECT_TRUE(dict.field_name(11U).empty());
+}
+
+namespace {
+
+template <typename T>
+std::string only_in(std::set<T> const& a, std::set<T> const& b) {
+    std::ostringstream out;
+    for (auto const& v : a) {
+        if (!b.contains(v)) {
+            out << ' ' << v;
+        }
+    }
+    return out.str();
+}
+
+}  // namespace
+
+// D-001 census (094 FR-022b): every <message> MsgType and every <field> of
+// FIX42.xml is in the Dictionary XmlLoader builds from it. The expected sets
+// come from an independent pugixml walk of the same file, not from the loader.
+TEST(DictionaryCensus, Fix42AllMessagesAndFieldsLoaded) {
+    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX42.xml";
+
+    pugi::xml_document doc;
+    ASSERT_TRUE(doc.load_file(xml_path.c_str())) << xml_path;
+    auto const fix = doc.child("fix");
+
+    std::set<std::string> raw_msg_types;
+    for (auto const message : fix.child("messages").children("message")) {
+        raw_msg_types.emplace(message.attribute("msgtype").as_string());
+    }
+    std::set<std::uint32_t> raw_tags;
+    std::vector<std::pair<std::string, std::uint32_t>> raw_fields;
+    for (auto const field : fix.child("fields").children("field")) {
+        auto const number = field.attribute("number").as_uint();
+        std::string const name = field.attribute("name").as_string();
+        if (number == 0U || number > 0xFFFFU) {
+            ADD_FAILURE() << "raw field '" << name << "' has no usable number";
+            continue;
+        }
+        raw_tags.insert(number);
+        raw_fields.emplace_back(name, number);
+    }
+
+    // The walk's known positive: an empty walk cannot pass the equalities below.
+    ASSERT_FALSE(raw_msg_types.empty()) << "no <message> found in " << xml_path;
+    ASSERT_FALSE(raw_tags.empty()) << "no <field> found in " << xml_path;
+
+    auto const dict = fixpp::dict::XmlLoader{}.load(xml_path, std::pmr::new_delete_resource());
+
+    std::set<std::string> loaded_msg_types;
+    for (auto const& e : dict.messages()) {
+        loaded_msg_types.emplace(e.msg_type);
+    }
+    EXPECT_EQ(loaded_msg_types, raw_msg_types)
+        << "MsgTypes only in the raw XML:" << only_in(raw_msg_types, loaded_msg_types)
+        << "\nMsgTypes only in the loaded Dictionary:" << only_in(loaded_msg_types, raw_msg_types);
+
+    std::set<std::uint32_t> loaded_tags;
+    for (std::uint32_t t = 1U; t <= 0xFFFFU; ++t) {
+        if (!dict.field_name(static_cast<std::uint16_t>(t)).empty()) {
+            loaded_tags.insert(t);
+        }
+    }
+    EXPECT_EQ(loaded_tags, raw_tags)
+        << "field tags only in the raw XML:" << only_in(raw_tags, loaded_tags)
+        << "\nfield tags only in the loaded Dictionary:" << only_in(loaded_tags, raw_tags);
+
+    for (auto const& [name, number] : raw_fields) {
+        EXPECT_EQ(dict.field_by_name(name),
+                  std::optional<std::uint16_t>{static_cast<std::uint16_t>(number)})
+            << "field_by_name(\"" << name << "\")";
+    }
 }
 
 // ---------------------------------------------------------------------------
