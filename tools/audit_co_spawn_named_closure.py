@@ -325,14 +325,10 @@ def file_of(loc) -> str:
 def decl_key(decl) -> str:
     """Identity of a DECLARATION: file and offset of its canonical declaration.
 
-    ⚠️ IDENTITY, NOT SPELLING (#586). Every correlation in classify() -- which
-    context a site spawns on, which context a drive drives, which closure a call
-    invokes, what an executor alias stands for -- used to compare NAMES over the
-    whole TU, so two unrelated locals sharing a name in different functions were
-    one object to this tool, and the last declaration won. A verdict then turned
-    on text that has nothing to do with the site, in either direction. Both the
-    walked VarDecl and every reference to it reach this through `canonical`, so
-    the two spellings of one declaration always produce one key.
+    ⚠️ IDENTITY, NOT SPELLING (#586). Two unrelated locals that share a name in
+    different functions have different keys. Both the walked VarDecl and every
+    reference to it reach this through `canonical`, so the two spellings of one
+    declaration always produce one key.
     """
     c = decl.canonical
     return f"{file_of(c.location)}:{c.location.offset}"
@@ -488,11 +484,9 @@ class SiteWalker:
             return
         off = cursor.extent.start.offset
         # ⚠️ AN OFFSET MEANS NOTHING WITHOUT ITS FILE (#586). Offsets are per
-        # file, and an earlier version compared them across files: a drive in a
-        # header at an offset that happened to fall inside a main-file closure's
-        # extent was credited to that closure. Every event carries the file its
-        # offset is relative to, taken from the SAME location, and classify()
-        # compares offsets only within one file.
+        # file. Every event carries the file its offset is relative to, taken
+        # from the SAME location, and classify() compares offsets only within
+        # one file.
         off_file = file_of(cursor.extent.start)
 
         # (a) VarDecls: closures and io_contexts
@@ -703,8 +697,7 @@ class SiteWalker:
 
         ⚠️ A NAMED LOCAL IS FOLLOWED TO ITS INITIALIZER (#586 shape B). `const
         auto token = bind_slot(s, record_into(out)); co_spawn(ex, op(), token);`
-        is the same site as shape A with the token moved into a local. Neither
-        instrument used to list it, so both agreed about a site neither examined.
+        is the same site as shape A with the token moved into a local.
         Only a local that IS the expression's value is followed (value_local);
         a receiver (`sess` in `sess.send(x)`) or a local passed into another
         call is not, because the closure behind it has no bearing on what the

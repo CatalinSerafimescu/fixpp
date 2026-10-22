@@ -53,10 +53,8 @@ CMP="$CMP_REAL"
 # ── fixtures ─────────────────────────────────────────────────────────────────
 # Formatted as Google Benchmark writes it: two-space indent, `%.17g`-style
 # exponents, an escaped non-ASCII character. json.dump would rewrite all three.
-# The stddev rows are NONZERO on purpose: Google Benchmark writes 0.0 for
-# identical repetitions, but bench_compare.py's legacy mode divides by every
-# baseline row and raises ZeroDivisionError on a 0.0 one. That is its own
-# defect, not this pin's subject; keep it nonzero so S10 tests the key alone.
+# The stddev rows are NONZERO on purpose, so S10 tests the added key alone; a
+# baseline row of 0.0 is covered by L-ZERO in ci/test-bench-gate.sh.
 gbfix() {
   cat > "$1" <<'JSON'
 {
