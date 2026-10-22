@@ -12,11 +12,13 @@
 # bindings/python/CMakeLists.txt, taken at run time: from the first line that starts
 # `set_property(SOURCE fixpp.i` through the line before the file's one
 # `swig_add_library(` call, then makes that call itself. The statements production
-# runs before the call thus run here in production's order and under its control
-# flow; a setting placed after the call, or under a condition that is false, is
-# absent from the mock's build as it is from production's. The harness refuses (no
-# leg runs) when `swig_add_library(` does not start exactly one line, or when no
-# fixpp.i set_property line precedes it.
+# runs before the call thus run here in production's order. The slice must be
+# straight-line code at control-flow depth zero, and the harness refuses otherwise,
+# so its statements run unconditionally in the mock as they do wherever production
+# reaches the call. Variables are not carried over: a statement reading a variable
+# set above the slice or by the parent project expands empty in the mock. The harness
+# also refuses (no leg runs) when `swig_add_library(` does not start exactly one line,
+# or when no fixpp.i set_property line precedes it.
 #
 # Legs, each a cell asserting its own line of output:
 #   GREEN  the real slice: build the wrapper, change the constant in the header,
@@ -25,10 +27,10 @@
 #          wrapper must still carry the old value. It is the positive control that
 #          this observable can show a stale wrapper at all.
 # Mutants: copies of the real CMakeLists.txt with the line deleted, with TRUE turned
-# to FALSE, with the line moved below the swig_add_library call, and with the line
-# wrapped in if(FALSE); each must fail the GREEN leg as stale. A mutant whose edit
-# matched nothing is refused (cmp guard), never counted as RED. Refusal cells hand
-# each refusal a copy shaped to trip it, and require that refusal's own message.
+# to FALSE, or with the line moved below the swig_add_library call; each must fail
+# the GREEN leg as stale. Refusal cells place control flow inside or around the
+# slice, duplicate the call, or remove its properties, and require their own
+# refusal message. A mutation whose edit matched nothing is refused by the cmp guard.
 #
 # Usage: ci/test-swig-include-deps.sh [--cmakelists <file>]
 #   --cmakelists runs the two legs only, against the given file (e.g. a revision
@@ -62,7 +64,7 @@ command -v "${CXX:-c++}" >/dev/null || fail "no C++ compiler (${CXX:-c++}) on PA
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-CELLS_DECLARED=8
+CELLS_DECLARED=10
 cells_run=0
 OLD=60011
 NEW=60012
@@ -76,16 +78,36 @@ slice() {
 import re, sys
 path, drop = sys.argv[1], "--drop-deps" in sys.argv[2:]
 lines = open(path).read().splitlines(keepends=True)
-calls = [i for i, l in enumerate(lines) if re.match(r"\s*swig_add_library\(", l)]
+command = lambda pattern, line: (
+    not re.match(r"\s*#", line) and re.match(pattern, line, re.IGNORECASE)
+)
+calls = [i for i, l in enumerate(lines) if command(r"\s*swig_add_library\(", l)]
 if len(calls) != 1:
     sys.exit(f"refused: swig_add_library( starts {len(calls)} line(s) of {path}, wanted exactly 1")
-props = [i for i in range(calls[0]) if re.match(r"\s*set_property\(SOURCE fixpp\.i\b", lines[i])]
+props = [i for i in range(calls[0])
+         if command(r"\s*set_property\(SOURCE fixpp\.i\b", lines[i])]
 if not props:
     sys.exit(f"refused: no set_property(SOURCE fixpp.i line precedes swig_add_library( in {path}")
+depth = 0
+for line in lines[:props[0]]:
+    if command(r"\s*(if|foreach|while|function|macro|block)\s*\(", line):
+        depth += 1
+    elif command(r"\s*end(if|foreach|while|function|macro|block)\s*\(", line):
+        depth -= 1
+if depth != 0:
+    sys.exit(f"refused: the slice of {path} starts inside a control-flow scope opened above it")
 body = lines[props[0]:calls[0]]
+for n, line in enumerate(body, props[0] + 1):
+    match = command(
+        r"\s*(if|elseif|else|endif|foreach|endforeach|while|endwhile|function|endfunction|"
+        r"macro|endmacro|block|endblock|return|break|continue)\s*\(", line)
+    if match:
+        sys.exit(f"refused: the slice of {path} holds control flow "
+                 f"(line {n}: {match.group(1)}); it must be straight-line")
 if drop:
     deps = [i for i, l in enumerate(body)
-            if re.fullmatch(r"\s*set_property\(SOURCE fixpp\.i PROPERTY USE_SWIG_DEPENDENCIES TRUE\)\s*", l)]
+            if command(
+                r"\s*set_property\(SOURCE fixpp\.i PROPERTY USE_SWIG_DEPENDENCIES TRUE\)\s*$", l)]
     if len(deps) != 1:
         sys.exit(f"refused: the slice of {path} has {len(deps)} USE_SWIG_DEPENDENCIES TRUE line(s), wanted exactly 1")
     del body[deps[0]]
@@ -217,12 +239,24 @@ DEPS='set_property(SOURCE fixpp.i PROPERTY USE_SWIG_DEPENDENCIES TRUE)
 CALL_END='  SOURCES fixpp.i
 )
 '
+refusal M-DEPS-IF-FALSE "holds control flow" \
+  "$DEPS" "if(FALSE)
+${DEPS}endif()
+"
+refusal R-CTX-CONDITION "holds control flow" \
+  "$DEPS" 'if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+'"${DEPS}"'endif()
+'
+refusal R-OUTER-IF "starts inside a control-flow scope" \
+  'set_property(SOURCE fixpp.i PROPERTY CPLUSPLUS ON)
+' 'if(FIXPP_PY_COND)
+set_property(SOURCE fixpp.i PROPERTY CPLUSPLUS ON)
+' \
+  "$CALL_END" "${CALL_END}endif()
+"
 mutant M-DEPS-DELETED "$DEPS" ''
 mutant M-DEPS-FALSE 'PROPERTY USE_SWIG_DEPENDENCIES TRUE)' 'PROPERTY USE_SWIG_DEPENDENCIES FALSE)'
 mutant M-DEPS-AFTER "$DEPS" '' "$CALL_END" "$CALL_END$DEPS"
-mutant M-DEPS-IF-FALSE "$DEPS" "if(FALSE)
-${DEPS}endif()
-"
 refusal R-CALL-TWICE "swig_add_library( starts 2 line(s)" \
   "$CALL_END" "${CALL_END}swig_add_library(fixpp_py_twin TYPE MODULE LANGUAGE python SOURCES fixpp.i)
 "
