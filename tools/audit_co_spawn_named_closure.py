@@ -523,6 +523,26 @@ class SiteWalker:
                 # (`auto f = co_spawn(...); f.get();`), whose `.get()` blocks until
                 # that coroutine completes and is therefore a drive for THAT site.
                 own = decl_key(cursor)
+                # ⚠️ A CONDITIONAL INITIALIZER HAS ONE BASE PER BRANCH (#586).
+                # `c ? any_io_executor{a…} : any_io_executor{b…}` stands for `a` OR
+                # `b`, and root_object_of over the whole initializer returns the
+                # first variable it meets, which is the CONDITION's. Each branch
+                # is resolved with root_object_of on its own; the condition is
+                # never a base. A branch that does not resolve keeps an empty
+                # base, which ends that path unresolved, and classify() takes the
+                # worst verdict over the paths, so it cannot be driven.
+                cond = conditional_initializer(cursor)
+                if cond is not None:
+                    ops = list(cond.get_children())
+                    roots = ([root_object_of(b) for b in ops[1:3]] if len(ops) == 3
+                             else [("", "")])
+                    self.events.append(
+                        {"kind": "exec_alias", "name": cursor.spelling, "key": own,
+                         "base": " | ".join(r[0] or "?" for r in roots),
+                         "base_keys": [r[1] if r[1] != own else "" for r in roots],
+                         "off": off, "off_file": off_file, "scope": self.scope_key(stack)}
+                    )
+                    return
                 base = ("", "")
                 for ch in cursor.get_children():
                     base = root_object_of(ch)
@@ -531,7 +551,7 @@ class SiteWalker:
                 if base[1] and base[1] != own:
                     self.events.append(
                         {"kind": "exec_alias", "name": cursor.spelling, "key": own,
-                         "base": base[0], "base_key": base[1],
+                         "base": base[0], "base_keys": [base[1]],
                          "off": off, "off_file": off_file, "scope": self.scope_key(stack)}
                     )
                 return
@@ -769,6 +789,49 @@ def value_local(expr):
     return None
 
 
+_REF_KINDS = frozenset(
+    {ci.CursorKind.TYPE_REF, ci.CursorKind.TEMPLATE_REF, ci.CursorKind.NAMESPACE_REF}
+)
+
+
+def _expr_children(node) -> list:
+    """Children that are not type, template or namespace references."""
+    return [c for c in node.get_children() if kind_of(c) not in _REF_KINDS]
+
+
+def conditional_initializer(var):
+    """The `?:` a VarDecl's initializer IS, or None.
+
+    Sees through parentheses, implicit nodes, casts, a braced or functional
+    construction (`any_io_executor{c ? a : b}`) and a one-argument constructor,
+    by value_local's rule for nodes the bindings cannot name. Anything else --
+    a `?:` nested inside a call's argument, say -- is not the initializer's value.
+    """
+    kids = _expr_children(var)
+    node = kids[0] if len(kids) == 1 else None
+    while node is not None:
+        k = kind_of(node)
+        if k == ci.CursorKind.CONDITIONAL_OPERATOR:
+            return node
+        if k == ci.CursorKind.CALL_EXPR:
+            ref = node.referenced
+            args = list(node.get_arguments())
+            if ref is None or kind_of(ref) != ci.CursorKind.CONSTRUCTOR or len(args) != 1:
+                return None
+            node = args[0]
+            continue
+        if k is None or k in (ci.CursorKind.UNEXPOSED_EXPR, ci.CursorKind.PAREN_EXPR,
+                              ci.CursorKind.CXX_FUNCTIONAL_CAST_EXPR,
+                              ci.CursorKind.CSTYLE_CAST_EXPR,
+                              ci.CursorKind.CXX_STATIC_CAST_EXPR,
+                              ci.CursorKind.INIT_LIST_EXPR):
+            kids = _expr_children(node)
+            node = kids[0] if len(kids) == 1 else None
+            continue
+        return None
+    return None
+
+
 def _descend(cursor, prune_lambda_bodies: bool = False):
     """Depth-first walk. With prune_lambda_bodies, do not enter a LAMBDA_EXPR.
 
@@ -806,7 +869,6 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
         return ("MANUAL", "closure declaration not found in an enclosing block scope "
                           "(member, parameter, or captured from another TU)")
     decl = max(closures, key=lambda e: e["off"])
-    cscope = decl["scope"]
 
     # ⚠️ THE EXECUTOR MUST MATCH. Without this, ANY io_context in scope silenced a
     # real finding: a closure spawned on `a` was certified SAFE because an
@@ -820,26 +882,55 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
     # permissive direction here is what the bug was.
     # Keyed by DECLARATION (decl_key), so one name declared in two scopes is two
     # entries rather than one that the later declaration overwrites (#586).
-    alias = {e["key"]: e["base_key"] for e in events if e["kind"] == "exec_alias"}
+    alias = {e["key"]: e["base_keys"] for e in events if e["kind"] == "exec_alias"}
+    names = {e["key"]: e["name"] for e in events if "key" in e}
 
-    def resolve(key: str) -> set[str]:
-        """All declarations this one may stand for: itself plus its alias chain.
+    def resolve(key: str) -> list[list[str]]:
+        """Every declaration chain this one may stand for, one per path.
 
-        `strand1` -> {strand1, ioc}. Matching on the SET keeps the executor
-        correlation honest (an unrelated context still cannot certify a site)
-        while accepting the legitimate indirections this tree actually uses.
+        `strand1` -> [[strand1, ioc]]. Matching on a path's SET keeps the
+        executor correlation honest (an unrelated context still cannot certify a
+        site) while accepting the legitimate indirections this tree actually
+        uses. A conditional alias forks the path, one per branch; an empty base
+        (a branch that did not resolve) or a cycle ends its path where it is.
         """
-        seen, cur = {key}, key
-        while cur in alias and alias[cur] not in seen:
-            cur = alias[cur]
-            seen.add(cur)
-        return seen
+        paths: list[list[str]] = []
 
-    site_exec = site.get("exec", "")
-    exec_keys = resolve(site.get("exec_key", "")) if site.get("exec_key") else set()
-    if not exec_keys:
+        def walk(chain: list[str]) -> None:
+            bases = alias.get(chain[-1], [])
+            if not bases:
+                paths.append(chain)
+                return
+            for b in bases:
+                if not b or b in chain:
+                    paths.append(chain)
+                else:
+                    walk(chain + [b])
+
+        walk([key])
+        return paths
+
+    paths = resolve(site["exec_key"]) if site.get("exec_key") else []
+    if not paths:
         return ("MANUAL", "could not resolve which io_context/executor this site spawns on, "
                           "so no driving call or context lifetime can be matched to it")
+    # ⚠️ EVERY PATH MUST BE SAFE, so the WORST verdict over the paths stands. A
+    # conditional executor is SAFE-DRIVEN only when each branch is driven; taking
+    # the best, or the first branch, certifies a branch nothing drives.
+    results = [(p, _classify_on(site, events, decl, set(p))) for p in paths]
+    worst = min(results, key=lambda r: VERDICT_RANK[r[1][0]])[1]
+    if len(results) == 1:
+        return worst
+    return (worst[0], "; ".join(
+        f"executor branch `{' -> '.join(names.get(k, '?') for k in p)}`: {v} ({why})"
+        for p, (v, why) in results))
+
+
+def _classify_on(site: dict, events: list[dict], decl: dict,
+                 exec_keys: set[str]) -> tuple[str, str]:
+    """classify() for ONE executor path: `exec_keys` is that path's declarations."""
+    cscope = decl["scope"]
+    site_exec = site.get("exec", "")
 
     # SAFE-OUTLIVES: THIS site's io_context declared in the SAME scope AFTER the
     # closure, or in a scope the closure's scope encloses, dies first.
@@ -1451,6 +1542,86 @@ void f() {
 }
 """,
         [],
+    ),
+    (
+        # A CONDITIONAL executor alias resolves each branch, and the site is
+        # SAFE-DRIVEN only when every branch is driven. Mutant: take the
+        # condition operand as the base.
+        "a conditional executor whose branches are BOTH driven is SAFE-DRIVEN",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+void f(bool on_a) {
+  io_context ioc_a;
+  io_context ioc_b;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = on_a ? exec_t{make_exec(ioc_a)} : exec_t{make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_a.run();
+  ioc_b.run();
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        # Only the FIRST branch is driven. Mutants: resolve the first branch
+        # only; accept any driven branch; take the condition operand as the base
+        # (the condition reads the driven context).
+        "a conditional executor with one branch NOT driven stays FLAG",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+bool idle(io_context&);
+void f() {
+  io_context ioc_a;
+  io_context ioc_b;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = idle(ioc_a) ? exec_t{make_exec(ioc_a)} : exec_t{make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_a.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        # The same, with the `?:` inside a braced construction. Mutant: recognise
+        # a conditional only at the top of the initializer.
+        "a conditional executor INSIDE a construction is resolved per branch too",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+bool idle(io_context&);
+void f() {
+  io_context ioc_a;
+  io_context ioc_b;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = exec_t{idle(ioc_a) ? make_exec(ioc_a) : make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_a.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        # The condition operand is never a base: here it reads the only driven
+        # context, and neither branch is driven. Mutant: take the condition
+        # operand as the base.
+        "the condition of a conditional executor is not taken as its base",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+bool idle(io_context&);
+void f() {
+  io_context ioc_a;
+  io_context ioc_b;
+  io_context ioc_c;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = idle(ioc_c) ? exec_t{make_exec(ioc_a)} : exec_t{make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_c.run();
+}
+""",
+        [("lam", "FLAG")],
     ),
     (
         # The follow runs to a fixed point. The clang-query matcher follows one
