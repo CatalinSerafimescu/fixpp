@@ -544,7 +544,7 @@ the C-ABI manifest regenerated, and FR-013b's `conanfile.py` comment.
 AGPL comment forms added and `// SPDX-License-Identifier: Apache-2.0` removed. `tools/check_capi_freeze.sh`
 prints `PASS`.
 
-- [ ] T039a [US3] [orchestrator] **Provenance and authorship census, the precondition of C-SPDX**
+- [X] T039a [US3] [orchestrator] **Provenance and authorship census, the precondition of C-SPDX**
   (FR-013's stop rule; research R-8). Read-only, on the branch head T040 will mark. Outputs go to the
   verify record.
   - Derive the 37 unmarked files by command, not by hand:
