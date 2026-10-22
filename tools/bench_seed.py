@@ -86,18 +86,17 @@ def dirty_paths(repo: str, exempt: list[str]) -> list[str]:
     """Tracked modifications and untracked non-ignored files, minus `exempt`."""
     top = os.path.realpath(_git(repo, "rev-parse", "--show-toplevel").decode().strip())
     exempt_real = {os.path.realpath(p) for p in exempt}
-    out = _git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
-    entries = out.split(b"\0")
+    # --no-renames: a rename is then a deletion record for its source plus an
+    # addition record for its destination, in either status column, so every -z
+    # entry is one record naming one path and no source can hide behind an
+    # exempt destination.
+    out = _git(repo, "status", "--porcelain=v1", "-z", "--no-renames",
+               "--untracked-files=all")
     dirty: list[str] = []
-    i = 0
-    while i < len(entries):
-        e = entries[i]
-        i += 1
+    for e in out.split(b"\0"):
         if not e:
             continue
         status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
-        if status[0] in "RC":
-            i += 1  # -z rename/copy: the next entry is the source path
         if os.path.realpath(os.path.join(top, path)) in exempt_real:
             continue
         dirty.append(f"{status} {path}")

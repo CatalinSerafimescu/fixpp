@@ -44,7 +44,7 @@ G() { git -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
 
 # Checked at the end against what actually ran: a commented-out or early-exiting
 # cell changes the total, which is exactly why it is machine-checked.
-CELLS_DECLARED=21
+CELLS_DECLARED=27
 cells_run=0
 
 SEED="$SEED_REAL"
@@ -169,6 +169,20 @@ expect_refused() {
   [ ! -e "$OUT" ] || { echo "refused but wrote $OUT anyway"; return 1; }
 }
 
+# expect_refused_naming <listing-line> <helper args...> — exit 1, the dirty
+# listing carries <listing-line> as a whole line, and $OUT, which the cell put
+# there itself, still holds the bytes it had before the run.
+expect_refused_naming() {
+  local want="$1"; shift
+  local rc=0 before
+  before="$(sha256sum "$OUT")"
+  seedrun "$@" >"$TMP/o" 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] || { echo "exit $rc (wanted 1): $(cat "$TMP/o")"; return 1; }
+  grep -qF "working tree is dirty" "$TMP/o" || { echo "refused for the wrong reason: $(cat "$TMP/o")"; return 1; }
+  grep -qxF -- "$want" "$TMP/o" || { echo "listing does not name the line '$want': $(cat "$TMP/o")"; return 1; }
+  [ "$(sha256sum "$OUT")" = "$before" ] || { echo "refused but rewrote $OUT anyway"; return 1; }
+}
+
 # S3 RED — a tracked modification is refused.
 S3() { fresh; echo 'int c;' >> "$R/src.cpp"; expect_refused "working tree is dirty" "$R/current.json" "$OUT"; }
 
@@ -237,7 +251,29 @@ S10() {
     || { echo "--suite exit $rc: $(cat "$TMP/o")"; return 1; }
 }
 
-CELLS=(S1 S2 S3 S4 S5 S6 S7 S8 S9 S10)
+# S11 RED — a tracked source renamed INTO the output path (index column). The
+# destination is the exempt output, so the deletion of the source is what makes
+# the tree dirty, and the listing must name it.
+S11() { fresh; G -C "$R" mv src.cpp bench/baselines/alpha.json; expect_refused_naming "  D  src.cpp" "$R/current.json" "$OUT"; }
+
+# S12 RED — the same rename made in the WORKTREE column: a plain mv, then
+# `git add -N` on the destination.
+S12() {
+  fresh; mv "$R/src.cpp" "$OUT"; G -C "$R" add -N bench/baselines/alpha.json
+  expect_refused_naming "   D src.cpp" "$R/current.json" "$OUT"
+}
+
+# S13 RED — an existing baseline renamed into the output: the realistic form,
+# which hides the removal of the old baseline the same way.
+S13() {
+  fresh
+  echo '{}' > "$R/bench/baselines/old.json"
+  G -C "$R" add bench/baselines/old.json; G -C "$R" commit -qm three
+  G -C "$R" mv bench/baselines/old.json bench/baselines/alpha.json
+  expect_refused_naming "  D  bench/baselines/old.json" "$R/current.json" "$OUT"
+}
+
+CELLS=(S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13)
 
 # ── pass 1: the real helper, every cell must hold ───────────────────────────
 for c in "${CELLS[@]}"; do
@@ -247,19 +283,24 @@ for c in "${CELLS[@]}"; do
 done
 
 # ── pass 2: mutants, each must redden its own cell ──────────────────────────
-# mutant <id> <cell> <file: seed|cmp> <python old> <python new>
+# mutant <id> <cell> <file: seed|cmp> <python old> <python new> [<old> <new>]...
+# Every (old, new) pair is applied in order; each old must occur exactly once.
 mutant() {
-  local id="$1" cell="$2" which="$3" old="$4" new="$5"
+  local id="$1" cell="$2" which="$3"; shift 3
   local src dst
   if [ "$which" = seed ]; then src="$SEED_REAL"; else src="$CMP_REAL"; fi
   dst="$TMP/mut.$id.py"
-  python3 - "$src" "$dst" "$old" "$new" <<'PY'
+  python3 - "$src" "$dst" "$@" <<'PY'
 import sys
-src, dst, old, new = sys.argv[1:5]
+src, dst, pairs = sys.argv[1], sys.argv[2], sys.argv[3:]
+if not pairs or len(pairs) % 2:
+    sys.exit(f"mutant needs (old, new) pairs, got {len(pairs)} argument(s)")
 s = open(src).read()
-if s.count(old) != 1:
-    sys.exit(f"mutation anchor occurs {s.count(old)} times, wanted 1: {old!r}")
-open(dst, "w").write(s.replace(old, new, 1))
+for old, new in zip(pairs[::2], pairs[1::2]):
+    if s.count(old) != 1:
+        sys.exit(f"mutation anchor occurs {s.count(old)} times, wanted 1: {old!r}")
+    s = s.replace(old, new, 1)
+open(dst, "w").write(s)
 PY
   if cmp -s "$src" "$dst"; then fail "mutant $id did not change the file — a no-op mutant proves nothing"; fi
   local why rc=0
@@ -290,6 +331,36 @@ mutant M-READER    S10 cmp '    rows = [r for r in data.get("benchmarks", []) or
     med ='
 
 mutant M-GIT-QUIET  S8  seed 'check=True,' 'check=False,'
+
+# The rename mutants. M-RENAME-HEAD restores the parse this pin was written
+# against: renames reported as one -z record pair, and the source entry skipped
+# when the INDEX column says R or C. M-RENAME-2COL reads both columns and still
+# skips the source. M-SKIP-DELETED drops deletion records, on the theory that a
+# deleted file cannot enter the build.
+mutant M-RENAME-HEAD  S11 seed \
+  '"-z", "--no-renames",' '"-z",' \
+  '    for e in out.split(b"\0"):' '    entries = iter(out.split(b"\0"))
+    for e in entries:' \
+  '        status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
+' '        status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
+        if status[0] in "RC":
+            next(entries, None)
+'
+mutant M-RENAME-2COL  S12 seed \
+  '"-z", "--no-renames",' '"-z",' \
+  '    for e in out.split(b"\0"):' '    entries = iter(out.split(b"\0"))
+    for e in entries:' \
+  '        status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
+' '        status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
+        if status[0] in "RC" or status[1] in "RC":
+            next(entries, None)
+'
+mutant M-SKIP-DELETED S13 seed \
+  '        status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
+' '        status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
+        if "D" in status:
+            continue
+'
 
 # ── declared vs run ──────────────────────────────────────────────────────────
 if [ "$cells_run" -ne "$CELLS_DECLARED" ]; then
