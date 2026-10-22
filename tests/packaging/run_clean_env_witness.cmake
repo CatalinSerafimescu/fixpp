@@ -37,15 +37,22 @@ endforeach()
 
 # ── #529: an instrumented package is not a clean-environment package ─────────
 # FIXPP_INSTRUMENTED_BY names the options that instrumented the libraries, or is
-# empty. The consumer is built with no sanitizer runtime, and B-508-2 states that
-# such an executable cannot link these libraries, so the PASS leg could only fail
-# at link. The line below is what the registration's SKIP_REGULAR_EXPRESSION
-# matches; the FATAL_ERROR after it keeps the exit non-zero, so a registration
-# that loses that property reports Failed rather than a pass.
+# empty. The consumer is built with no sanitizer runtime, so it cannot link
+# libraries that reference a sanitizer runtime, and the PASS leg could only fail
+# at link. B-508-2 states this for the fuzz case only, so the line cites it only
+# when FIXPP_BUILD_FUZZ=ON is one of the named options. The line below is what
+# the registration's SKIP_REGULAR_EXPRESSION matches; the FATAL_ERROR after it
+# keeps the exit non-zero, so a registration that loses that property reports
+# Failed rather than a pass.
 if(NOT FIXPP_INSTRUMENTED_BY STREQUAL "")
+  set(_skip_cite "")
+  # Whole space-separated token, not a substring.
+  if(" ${FIXPP_INSTRUMENTED_BY} " MATCHES " FIXPP_BUILD_FUZZ=ON ")
+    set(_skip_cite " (B-508-2)")
+  endif()
   message(STATUS "fixpp::packaging::clean-env SKIPPED (instrumented build: "
                  "${FIXPP_INSTRUMENTED_BY}): a consumer with no sanitizer runtime "
-                 "cannot link these libraries (B-508-2)")
+                 "cannot link these libraries${_skip_cite}")
   message(FATAL_ERROR "clean-env not run: see the SKIPPED line above")
 endif()
 
