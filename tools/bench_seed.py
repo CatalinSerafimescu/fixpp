@@ -22,11 +22,12 @@ squash merge the seeding commit is off `main`, so end the range at the PR's head
 A baseline WITHOUT the field has an unknown seeding commit. Do not backfill one:
 a SHA written after the fact is a guess presented as a record.
 
-DIRTY TREE — refused. A SHA that does not describe the measured code is the
-defect this helper exists to remove, so a tree with tracked modifications or
-untracked non-ignored files (an untracked source can enter the build through a
-`file(GLOB ...)`) is refused and nothing is written. <current.json> and
-<baseline.json> themselves are exempt, since seeding necessarily creates them.
+DIRTY TREE — refused. A SHA that does not describe the code that produced the
+numbers is the defect this helper exists to remove, so a tree with tracked
+modifications or untracked non-ignored files (an untracked source can enter the
+build through a `file(GLOB ...)`) is refused and nothing is written.
+<current.json> and <baseline.json> themselves are exempt, since seeding
+necessarily creates them.
 `--allow-dirty` seeds anyway and records that it did, as `context.git_dirty:
 true` next to `git_sha`.
 

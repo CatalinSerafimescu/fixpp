@@ -2608,10 +2608,11 @@ jobs:
 
       # #276 — tools/bench_seed.py, which writes a baseline recording its
       # seeding commit as context.git_sha. Each cell runs in a scratch git
-      # repository and is proven RED against a mutant of its own: the key is
-      # the full SHA of HEAD, every other byte is Google Benchmark's, a dirty
-      # tree is refused, and tools/bench_compare.py still computes its deltas
-      # against a seeded baseline. Buildless — python3, git and coreutils.
+      # repository and has a mutant of its own that the harness applies on every
+      # run and requires to fail that cell: the key is the full SHA of HEAD,
+      # every other byte is Google Benchmark's, a dirty tree is refused, and
+      # tools/bench_compare.py still computes its deltas against a seeded
+      # baseline. Buildless — python3, git and coreutils.
       - name: Regression pin — bench baseline seeding (#276)
         run: bash ci/test-bench-seed.sh
 

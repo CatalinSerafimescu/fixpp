@@ -4,9 +4,9 @@
 # WHY THIS EXISTS. A baseline's `context.git_sha` is only worth recording if it
 # is TRUE: the full SHA of the commit the measurement was taken at, added without
 # disturbing a byte Google Benchmark wrote, and never written from a tree whose
-# HEAD does not describe the measured code. Each of those is a cell here, and the
-# readers of checked-in baselines (tools/bench_compare.py) get a cell proving the
-# added key does not change what they compute.
+# HEAD does not describe the code that produced the numbers. Each of those is a
+# cell here, and the readers of checked-in baselines (tools/bench_compare.py) get
+# a cell proving the added key does not change what they compute.
 #
 # HOW. Every cell runs in a fresh scratch repository under mktemp -d (never
 # nested in this checkout), against a hand-written fixture in Google Benchmark's
