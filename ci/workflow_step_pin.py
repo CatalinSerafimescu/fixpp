@@ -1,8 +1,8 @@
-"""ci/workflow_step_pin.py — the one rule ci/test-tier1-python-policy.sh uses to pin
-a workflow step as "runs exactly these commands, every time it is reached".
+"""ci/workflow_step_pin.py — a rule for pinning a workflow step as "runs exactly
+these commands, every time it is reached".
 
-Not a CLI: the policy harness imports it (sys.path) in each Python block that pins a
-step, so every such pin applies the same rule.
+Not a CLI: imported through sys.path; `git grep -n workflow_step_pin` lists the
+importers. A step pin that does not import it applies its own projection.
 
 The rule, per step, as two checks the caller reports separately:
   * keys — the step's raw key set must be exactly {name, run}. A step `if:`,

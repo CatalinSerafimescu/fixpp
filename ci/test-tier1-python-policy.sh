@@ -2023,8 +2023,8 @@ PY
 # The two 'Install SWIG' steps the minimum check reads must also RUN: their key
 # set is exactly {name, run} and their run: equals the commands below, through
 # ci/workflow_step_pin.py's rule. Every dotted version number in the step is read
-# as <min> first, so this check is blind to the version, which the agreement check
-# above owns, and a literal mutant reddens only that one.
+# as <min> before the compare, so this check does not read the version; the
+# agreement check above does (M146 is the GREEN control for that).
 assert_swig_install_steps() {  # <case_id> <tier1.yml> <parallelism-measure.yml>
   local case_id="$1" out
   out="$(python3 - "$repo_root/ci" "$2" "$3" <<'PY'
@@ -2124,7 +2124,9 @@ echo "PASS: SWIG install steps — $swig_steps"
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=131  # M141-M145 (a ci-script-pins harness step that stops running or
+MUTANTS_DECLARED=132  # M146 (GREEN control: the install-step check does not read the
+                     # version; fixpp#607) +
+                     # M141-M145 (a ci-script-pins harness step that stops running or
                      # gating with the call text intact, one mutant per shape; fixpp#529) +
                      # M138-M140 (the 'Install SWIG' steps' key set and run: golden,
                      # one mutant per shape; fixpp#607) +
@@ -4321,6 +4323,30 @@ old = "          pip install swig==4.5.1\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, "          exit 0\n" + old))
 '
+
+  # M146 — the GREEN control for M138-M140's check: tier1's step with every version
+  # in it moved (a minimum bump on that surface) must still pass the install-step
+  # check, which leaves the version to the agreement check.
+  local m146="$mut_dir/tier1-m146.yml" m146_out="$mut_dir/m146_out"
+  python3 - "$WORKFLOW" "$m146" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("      - name: Install SWIG 4.5.1 from PyPI (#607)\n")
+end = t.index("      - name: ", start + 1)
+step = t[start:end]
+assert step.count("4.5.1") >= 3, step.count("4.5.1")
+open(dst, "w").write(t[:start] + step.replace("4.5.1", "4.6.0") + t[end:])
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m146"; then
+    fail "M146: python literal-replace produced no change — the positive control was not applied, so it proves nothing"
+  fi
+  if ! ( assert_swig_install_steps M146 "$m146" "$SWIG_PARWF" ) >"$m146_out" 2>&1; then
+    fail "M146 (tier1's Install SWIG step with its versions moved) went RED: the install-step check reads the version, which belongs to the agreement check alone. Output: $(scrub_wf_cmds "$(cat "$m146_out")")"
+  fi
+  GREEN_CONTROLS=$((GREEN_CONTROLS + 1))
+  echo "GREEN (expected): M146 (tier1's Install SWIG step with its versions moved) — the install-step check does not read the version"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
 }
 
 run_mutant_checks
