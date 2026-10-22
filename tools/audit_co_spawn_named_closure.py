@@ -325,8 +325,7 @@ def file_of(loc) -> str:
 def decl_key(decl) -> str:
     """Identity of a DECLARATION: file and offset of its canonical declaration.
 
-    ⚠️ IDENTITY, NOT SPELLING (#586). Two unrelated locals that share a name in
-    different functions have different keys. Both the walked VarDecl and every
+    ⚠️ IDENTITY, NOT SPELLING (#586). Both the walked VarDecl and every
     reference to it reach this through `canonical`, so the two spellings of one
     declaration always produce one key.
     """

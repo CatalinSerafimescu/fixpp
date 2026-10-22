@@ -26,9 +26,10 @@
 #   fuzz       FIXPP_BUILD_FUZZ on: as above, and the line cites B-508-2;
 #   lookalike  the witness run directly: the exact FIXPP_BUILD_FUZZ=ON token gets the
 #              cite, a token that merely contains it does not.
-# Each mutant is a copy of tests/packaging/ broken one way, run against the one cell it
-# names, which must fail for that cell's own named reason. A mutant whose edit matched
-# nothing is refused, never counted as RED.
+# Each mutant is a copy of tests/packaging/'s CMakeLists.txt and
+# run_clean_env_witness.cmake broken one way, run against the one cell it names, which
+# must fail for that cell's own named reason. A mutant whose edit matched nothing is
+# refused, never counted as RED.
 #
 # Usage: ci/test-packaging-instrumented-skip.sh [--packaging-dir <dir>]
 #   --packaging-dir runs the cells only, against the given copy of tests/packaging/
@@ -179,7 +180,7 @@ if [ "$CELLS_ONLY" -eq 1 ]; then
   exit 0
 fi
 
-# ── pass 2: mutants of a copy of tests/packaging/ ───────────────────────────
+# ── pass 2: mutants of copies of tests/packaging/'s two files ──────────────
 # mutant <id> <cell> <reason> (<file> <old> <new>)... — <file> is relative to
 # tests/packaging/; every old must occur exactly once in its file.
 mutant() {
