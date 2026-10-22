@@ -23,11 +23,12 @@
 [build-system]
 # PKG-1: scikit-build-core backend. POLICY: swig>=4.5.1 with NO upper bound.
 #   Lower bound (#607): it equals `find_package(SWIG 4.5.1 REQUIRED)` in
-#   bindings/python/CMakeLists.txt and moves with it, and the in-tree CI legs
-#   install exactly this version, so every lane builds the lowest SWIG this
-#   wheel accepts — one SWIG on every lane. Below 4.3, MSVC /W4 raises C4100 in
-#   SWIG's runtime section, which fixpp.i does not suppress on MSVC (#562); a
-#   4.0 SWIG silently regresses the limited-API/abi3 mode (research D-3).
+#   bindings/python/CMakeLists.txt and moves with it. The in-tree CI legs
+#   install exactly this version, so they build the lowest SWIG this wheel
+#   accepts; a wheel build takes PyPI's latest SWIG at or above it. Below 4.3,
+#   MSVC /W4 raises C4100 in SWIG's runtime section, which fixpp.i does not
+#   suppress on MSVC (#562); a 4.0 SWIG silently regresses the limited-API/abi3
+#   mode (research D-3).
 #   SWIG-version-agnostic argout: SWIG 4.3.0 gave SWIG_Python_AppendOutput an
 #   `is_void` arg and now keeps a Py_None primary result for a NON-void fn unless
 #   is_void=1 — which would make our "consume the fixpp_error_t return, surface

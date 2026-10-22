@@ -12,10 +12,11 @@
 - **Build: CMake ≥ 3.28 + Ninja.**
 - **Deps: Conan 2.x.** Profiles live in `conan/profiles/`.
 - **Python: 3.12+, SWIG >=4.5.1 (no upper bound), pytest** (only when working on Python
-  bindings). The minimum is the wheel's `swig>=` floor and CI's in-tree legs
-  install exactly it (`pip install swig==4.5.1`), so every lane builds one SWIG,
-  the lowest the wheel accepts (#607). Install it from PyPI (`pipx install
-  swig==4.5.1`); a distro `swig` older than the minimum fails configure. A tree
+  bindings). The minimum is the wheel's `swig>=` floor. CI's in-tree legs
+  install exactly it (`pip install swig==4.5.1`), so they build the lowest SWIG
+  the wheel accepts; a wheel build takes PyPI's latest SWIG at or above it
+  (#607). Install it from PyPI (`pipx install swig==4.5.1`); a distro `swig`
+  older than the minimum fails configure. A tree
   configured with an older SWIG keeps it cached: re-point it with
   `cmake -U 'SWIG_*' build/<preset>`. There is no upper bound because #296 is not
   root-caused and a cap would leave it unfalsifiable. ⚠️ If a Python lane
