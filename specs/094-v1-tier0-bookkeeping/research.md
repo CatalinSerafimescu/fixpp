@@ -232,7 +232,7 @@ Census side-findings, recorded for the verify record:
   `SPDX-License-Identifier: Apache-2.0` (37 under `tests/`, 3 under `bench/`;
   `git grep -l "SPDX-License-Identifier: Apache-2.0" -- ':!src/' ':!include/' ':!specs/'`). The
   orchestrator files one labelled follow-up issue for them at implement time (FR-021), and its real
-  number is recorded here.
+  number is recorded here: fixpp#618.
 
 ## R-9 — Delivering PRs resolved from GitHub (`gh pr view <n> --json mergeCommit`)
 
@@ -278,9 +278,9 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
   L-022-1, L-497-1 (the open half; its resolved half moved to the closed file), L-002-4, B-043-1,
   B-005-7, B-495-3, B-544-1, L-019-4, and L-003-1 (named in D-008's Verified cell as OSS-010's scope;
   live, Status PARTIAL; added at the checklist audit, 2026-10-22).
-- **New, filed at implement:** the issue behind L-094-1 (`EngineConfig::control_plane_factory` is
-  accepted and ignored; FR-018); the 544 record's lapse, named in NFR-002's Verified cell (FR-020);
-  the 40 `Apache-2.0` files outside `src/`/`include/` (FR-021); `[const §III.4]` not met on `main`,
+- **New, filed at implement:** fixpp#616, the issue behind L-094-1 (`EngineConfig::control_plane_factory` is
+  accepted and ignored; FR-018); fixpp#617, the 544 record's lapse, named in NFR-002's Verified cell (FR-020);
+  fixpp#618, the 40 `Apache-2.0` files outside `src/`/`include/` (FR-021); fixpp#619, `[const §III.4]` not met on `main`,
   named in plan.md's Constitution Check and the FR-013b comment (FR-023). Each is written here with
   its real number. Close-out places all four, and #614, in parent repo (private)
   `phases/phase-4/issue-batches.md`.

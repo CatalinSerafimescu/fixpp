@@ -161,7 +161,7 @@ Owner approvals given after the round-3 reviews (Codex, and the Opus adversarial
   research R-13). The round-2 entry above records the ruling as it was then worded.
 - Q (Opus round 3, N3-2): the FR-013b comment's "Restore in Phase 5." points at a phase that is partly
   done and partly post-1.0. Replace it with the FR-023 issue? → A: **Approved.** The comment's last
-  line ends "Restore: fixpp#<N-III4>.", filled with the FR-023 issue's real number at implement
+  line ends "Restore: fixpp#619.", filled with the FR-023 issue's real number at implement
   (data-model §G). The comment stays four lines.
 
 ### Session 2026-10-22 (checklist audit)

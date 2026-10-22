@@ -129,7 +129,7 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
 **Purpose**: measure the base, so every later count has a "before" taken by an instrument that has been
 shown able to report non-zero.
 
-- [ ] T001 [orchestrator] **Base and tree check.**
+- [X] T001 [orchestrator] **Base and tree check.**
   - In `research/G19-fix-fpml-iso20022/library`: `rev-parse --abbrev-ref HEAD` reads
     `094-v1-tier0-bookkeeping`, and `git status --porcelain` is clean apart from this bundle.
   - Run `git fetch origin`. `git merge-base HEAD origin/main` should be `9b176090`. If `origin/main`
@@ -138,7 +138,7 @@ shown able to report non-zero.
     at `9b176090`.
   - `codegraph status --json` with `projectPath` set to this tree.
   - Record all of this under `## Base` in `.specify/decisions/094-v1-tier0-bookkeeping-verify.md`.
-- [ ] T002 [P] [orchestrator] **Catalogue census and parser baseline (R-4, R-5; FR-016)** on
+- [X] T002 [P] [orchestrator] **Catalogue census and parser baseline (R-4, R-5; FR-016)** on
   `spec/feature-catalogue.md` at the base.
   - Known positive first: a mutant copy with NFR-001 set to `done` and W-015 set to the drop form
     reads open 92 and postv1 1.
@@ -147,7 +147,7 @@ shown able to report non-zero.
   - Run R-5's `_status_header` one-liner (`python3 -I -c …`, research R-5) on the base. Known positive:
     done 158, backlog 112, one `dropped(duplicate: …)`.
   - Record everything in the verify record, with the census script's text.
-- [ ] T003 [P] [orchestrator] **Licence and sweep baselines** on `origin/main`, read-only. Raw outputs
+- [X] T003 [P] [orchestrator] **Licence and sweep baselines** on `origin/main`, read-only. Raw outputs
   go to the verify record.
   - quickstart §3's two `git ls-files src include | … | xargs /usr/bin/grep …` censuses list 53 and 16
     files. Use the system `grep`: `xargs` cannot run a shell function.
@@ -157,7 +157,7 @@ shown able to report non-zero.
     (b) and (c)), with its known positives: (a) reports
     `README.md`'s tagline and `.specify/constitution.md` §I.2; (b) reports `brain/components/dictionary.md`'s D-007 table row.
     Record the counts beside R-12's.
-- [ ] T004 [P] [orchestrator] **Residuals on record (R-10; Edge Cases).**
+- [X] T004 [P] [orchestrator] **Residuals on record (R-10; Edge Cases).**
   - Read the state and labels of #555, #565, #569, #580, #588, #612, #263 and #614 with
     `gh issue view <n> --repo CatalinSerafimescu/fixpp --json state,labels,createdAt`. Snapshot #614 into
     the verify record (FR-015).
@@ -166,7 +166,7 @@ shown able to report non-zero.
     L-003-1 (named in D-008's Verified cell) and L-005-1 is defined.
   - If an issue is closed or an entry missing, the row citing it does not flip as worded. Record it and
     tell the owner before Phase 4.
-- [ ] T005 [P] [orchestrator] **Cited-test existence (R-11).** Re-run R-11's check over `tests/` with
+- [X] T005 [P] [orchestrator] **Cited-test existence (R-11).** Re-run R-11's check over `tests/` with
   both negative controls (`InboundPossResendTest.NoSuchCellXyz`, `RecoveryAdminSpanGapfillTest.NoSuchPrefixXyz*`),
   which must report MISSING. Result: 53 distinct entries, 51 exist, and the 2 MISSING are the FR-022
   cells. Record it in the verify record.
@@ -179,9 +179,9 @@ shown able to report non-zero.
 names it. **⚠️ CRITICAL**: T025 (L-094-1), T032 (NFR-002), T041 (C-607) and any research.md / plan.md
 record of these numbers wait on this phase.
 
-- [ ] T006 [orchestrator] Run `gh label list --repo CatalinSerafimescu/fixpp --limit 200` and save the
+- [X] T006 [orchestrator] Run `gh label list --repo CatalinSerafimescu/fixpp --limit 200` and save the
   output. Choose each issue's labels from it at creation (the owner triages by label).
-- [ ] T007 [orchestrator] **FR-018 issue** (the silently ignored `EngineConfig::control_plane_factory`).
+- [X] T007 [orchestrator] **FR-018 issue** (the silently ignored `EngineConfig::control_plane_factory`).
   - First run `grep -rn control_plane_factory src/`, which must be empty. Its known positive is
     `grep -rn control_plane_factory include/`, which hits `include/fixpp/core/engine_config.hpp`.
   - Then, before the body is written, run FR-017's wide grep,
@@ -197,15 +197,15 @@ record of these numbers wait on this phase.
   - The body names the field, the re-derive grep and its output, and the two options: refuse a non-null
     factory in v1.0, or document the field as reserved.
   - Labelled at creation. Record the number in the verify record.
-- [ ] T008 [orchestrator] **FR-020 issue** (the 544 record's lapse).
+- [X] T008 [orchestrator] **FR-020 issue** (the 544 record's lapse).
   - The body says that `544-hot-path-zero-alloc-verify.md` (parent repo (private)) "reported 81.73 %
     branch and assessed added lines only", short of `[const §IX.1]`'s "every uncovered line/branch".
   - It asks for the untaken branches to be assessed, or each disposition recorded.
   - Labelled at creation. Record the number.
-- [ ] T009 [orchestrator] **FR-021 issue** (the 40 `Apache-2.0` files outside `src/`/`include/`). The
+- [X] T009 [orchestrator] **FR-021 issue** (the 40 `Apache-2.0` files outside `src/`/`include/`). The
   body carries R-8's re-derive grep and T003's output (37 under `tests/`, 3 under `bench/`), and says
   094 does not change them. Labelled at creation. Record the number.
-- [ ] T010 [orchestrator] **FR-023 issue** (`[const §III.4]` not met on `main`).
+- [X] T010 [orchestrator] **FR-023 issue** (`[const §III.4]` not met on `main`).
   - First run plan.md's §III.4 re-derive recipe (Constitution Check, row §III.4) and paste the output:
     - `git log -S'tool_requires = []' -- conanfile.py` finds `629f2170`;
     - the `tool_requires|…§III\.4` grep over `.specify/constitution.md`, `CHANGELOG.md`, both B&L files
@@ -215,7 +215,7 @@ record of these numbers wait on this phase.
     asks the owner to choose between restoring Conan-pinned `cmake`/`ninja` `tool_requires` and
     amending §III.4 to the host-provisioned model with its reproducibility requirement.
   - Labelled at creation. Record the number.
-- [ ] T011 [orchestrator] **Fill the real numbers into the bundle** (FR-018, FR-020, FR-021, FR-023).
+- [X] T011 [orchestrator] **Fill the real numbers into the bundle** (FR-018, FR-020, FR-021, FR-023).
   - Before editing, run the placeholder grep from the Execution rules (with both exclusions). It must
     list the bundle's current sites in `spec.md`, `plan.md` and `data-model.md`, exactly the sites below (one grep line
     each; L-094-1's two tokens share one line); that is its known positive.
