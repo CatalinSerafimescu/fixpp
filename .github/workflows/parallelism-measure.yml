@@ -273,8 +273,9 @@ jobs:
       # If they do not, this step fails here, before the 4.5.1 floor would fail
       # Configure for a less legible reason. The Configure log's
       # `Found SWIG: … (found suitable version "4.5.1", …)` line is the reading.
-      # The `swig` wheel ships only the two console scripts below and no pytest
-      # plugin, so installing it here does not change what the pytest steps run.
+      # Installing it must not change what the pytest steps run, so the `swig`
+      # wheel must add no `pytest11` entry point and no `.pth` file: check its
+      # dist-info when this version moves.
       - name: Install SWIG 4.5.1 from PyPI (#607)
         run: |
           set -euo pipefail
