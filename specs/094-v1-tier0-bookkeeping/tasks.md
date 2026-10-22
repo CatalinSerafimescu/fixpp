@@ -10,7 +10,7 @@
 - data-model.md (§A…§H, the exact target text of every changed row, clause and surface);
 - quickstart.md (§1…§5, the re-verification recipe).
 
-**Gate A**: converged 2026-10-22 (record `.specify/decisions/094-v1-tier0-bookkeeping-gatea.md`). The
+**Gate A**: converged 2026-10-22 (record `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private)). The
 v4.0 amendment stays **PENDING** until the owner's own Art. XX §2 sign-off (T061).
 
 **Preconditions (pipeline steps 6–9, not tasks of this file)**: `/speckit-analyze` has run over spec,
@@ -62,7 +62,7 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
     CHANGELOG entry) shifts a guide.
 - **No placeholder number is ever committed.** Before every commit (tasks.md excluded, since it names
   what it replaces), `git grep -nE 'fixpp#<|<N-' -- ':!specs/094-v1-tier0-bookkeeping/tasks.md'` must
-  print nothing once T011 has run. The RATIFIED templates of data-model §E.1/§E.2/§E.8 (`#<n>`,
+  print nothing once T011 has run. The RATIFIED templates of data-model §E.1/§E.2/§E.8 (`#<pr>`,
   `<sign-off date>`, `<date>`, `<tally>`) stay in the bundle as templates. They must never appear in
   `.specify/constitution.md` or `CHANGELOG.md` (T063 checks this).
 - **No closing keyword.** No commit message, issue body or PR body puts "close", "fix" or "resolve"
@@ -321,7 +321,8 @@ is byte-unchanged.
     and `python3 "$W/.claude/scripts/check_bl_citations.py" gate`. Record both.
 - [ ] T026 [US1] [orchestrator] **US1 check, then commit.**
   - quickstart §4's `grep -niE "grpc|iceoryx|service wrapper|service[- ]mode|out-of-process" .specify/constitution.md`:
-    every hit is the v4.0 SIR, a clause that says post-1.0, an earlier SIR, or §I.2 / §IV.2 / §XIII.3.
+    every hit is the v4.0 SIR, the Status line (its v4.0 PENDING text names the post-1.0 scope), a
+    clause that says post-1.0, an earlier SIR, or §I.2 / §IV.2 / §XIII.3.
   - `git diff --quiet origin/main -- include/fixpp/service/control_plane_factory.hpp` exits 0
     (FR-003b; US1 scenario 4).
   - Commit the US1 docs (no closing keyword), and re-run T019's shift audit over the docs commits if
@@ -630,12 +631,16 @@ prints `PASS`.
     - that the C-ABI change is comment-only (FR-014);
     - the relicensing basis (R-8: one author; versions already published under Apache-2.0 keep that
       grant).
-  - The disclosed RATIFIED-flip re-run cost (plan.md Risks); a `## Gates` section citing the Gate A and
-    verify records.
-  - A `## Gate A outcome` section: Gate A converged (loop instance 2, round 1), linking
-    `.specify/decisions/094-v1-tier0-bookkeeping-gatea.md` (parent repo (private)).
-  - A `## Gate B outcome` section, held in the draft as a placeholder (`Gate B: pending.`). T064 replaces
-    it with Gate B's outcome and the link to the Gate B record (`[const §XVII.4]`).
+  - The disclosed RATIFIED-flip re-run cost (plan.md Risks).
+  - The gate records are cited in the two outcome sections only; the body has no separate `## Gates`
+    section:
+    - a `## Gate A outcome` section: Gate A converged (loop instance 2, round 1), linking
+      `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private);
+    - a `## Gate B outcome` section, held in the draft as a placeholder (`Gate B: pending.`) under
+      which the verify record `.specify/decisions/094-v1-tier0-bookkeeping-verify.md` (parent repo
+      (private)) is linked, because `/speckit-verify` is Gate B's precondition. T064 replaces the
+      placeholder line with Gate B's outcome and the link to the Gate B record (`[const §XVII.4]`) and
+      keeps the verify-record link.
   - `local build: green on linux-clang-debug @ <sha>`, with the SHA of T049's full `ctest` cycle.
   - Run T048's grep over the body, with its positive control. No closing keyword, so
     `closingIssuesReferences` must come back empty.
@@ -672,6 +677,11 @@ prints `PASS`.
   - The loop follows `/gate-b`: the Claude fixer is `phase-implementer` for code and test findings, and
     the orchestrator for docs findings.
   - After any fix commit, re-run the affected T044–T048 gates and, for a cell change, T029.
+  - If any Gate B fix (or T054's `origin/main` merge) touches a path outside `spec/`, `.specify/`,
+    `brain/`, `specs/`, `CHANGELOG.md`, `README.md` and `docs/src/`, re-run T049's full `ctest` cycle
+    as the last run, under the same pre-checks, and update the SHA T052's `local build: green` line
+    cites. Otherwise record in the verify record that the delta since T049's run is docs-only
+    (`git diff --name-only <T049 SHA>..HEAD` as the evidence).
   - Gate B also reviews the PENDING amendment text, which the owner signs off in T061.
   - In the Gate B record (`.specify/decisions/094-v1-tier0-bookkeeping-gateb.md`), record the feature's
     B&L delta as "B&L delta: one new limitation (L-094-1), no behaviour change" (FR-017).
@@ -684,6 +694,9 @@ prints `PASS`.
   T046, T047 and T048 at the head about to be pushed. Commit the `tasks.md` ticks of T054, T055 and
   T070 first (T001–T053 and T069 were committed by T069), so the head the gates ran on is the head
   that is pushed.
+  - Read `git diff --name-only <T049 full-ctest SHA>..HEAD`. If it lists a non-docs path (the T054
+    rule), T049's full `ctest` re-runs last and the cited SHA is updated before the push; otherwise
+    the verify record states that the delta is docs-only.
   - *Open at the audit — waiver: after Gate B.*
 - [ ] T057 [orchestrator] **Push and open the PR without gate labels** (pipeline step 16).
   - `git push -u origin 094-v1-tier0-bookkeeping`, then `gh pr create` with T052's title and body. The
@@ -697,7 +710,7 @@ prints `PASS`.
   - the six amended clauses, the PENDING SIR and the Status line as they stand on the PR head
     (`.specify/constitution.md`);
   - the `CHANGELOG.md` entry;
-  - the Gate A tallies from `.specify/decisions/094-v1-tier0-bookkeeping-gatea.md` (instance 1 rounds
+  - the Gate A tallies from `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private) (instance 1 rounds
     1–3; instance 2 round 1, converged);
   - Gate B's rounds;
   - the RATIFIED-form text T063 will write.
@@ -716,6 +729,9 @@ prints `PASS`.
     is amendment text Codex has not reviewed. It runs under the owner's own `/gate-a` invocation,
     because no agent starts Codex on its own initiative (`[const §XVII.4]`). Record it in the Gate A
     record and in plan.md `## Gate A`.
+  - **After a scoped Gate A round converges, return to T061** and ask the owner again for the
+    Art. XX §2 sign-off, on the text that round reviewed. An earlier sign-off covered other text. The
+    date of that fresh sign-off is the one T063 writes.
   - **A change to the Status line, the SIR's status or tally wording, or the CHANGELOG status wording**
     is metadata, not clause text. It needs only Gate B's re-check, with no Gate A round (plan.md
     `## Gate A`, the post-convergence metadata rule).
@@ -729,21 +745,30 @@ prints `PASS`.
 - [ ] T063 [orchestrator] (after owner sign-off) **Commit C-RATIFY, the RATIFIED flip, as the LAST
   commit before merge** (FR-003a).
   - `.specify/constitution.md`: the SIR goes to data-model §E.1's RATIFIED form. The header line reads
-    `Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`. The first paragraph (it opens
-    `Gate A converged 2026-10-22`) becomes §E.1's "Article XX §2 sequence observed in order: …"
-    sentence. In the last paragraph, the `Gate B: pending, …` and `Owner sign-off: pending, …` clauses
-    take Gate B's round tally, the sign-off date and `Amendment PR #<n>`; the Gate A tally stays.
-    Nothing else in the block changes.
-  - The Status line goes to §E.2's RATIFIED form (its find-string is the PENDING `not ratified: Gate A
-    converged 2026-10-22 …` clause).
+    `Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`. The first paragraph becomes
+    §E.1's "Article XX §2 sequence observed in order: …" sentence. Anchor it by position: it is the
+    lines directly after the SIR header line, up to the line before `  Bump:`, and it opens
+    `Gate A converged 2026-10-22`. This is a multi-line replacement (the PENDING paragraph is wrapped
+    over several lines), so a single-line `grep -F` of it cannot match; print the range with
+    `sed -n '<header+1>,<Bump-1>p'` and confirm it before replacing it. In the last paragraph, the
+    `Gate B: pending, …` and `Owner sign-off: pending, …` clauses take Gate B's round tally, the
+    sign-off date and `Amendment PR #<pr>`; the Gate A tally stays. Nothing else in the block changes.
+  - The Status line goes to §E.2's RATIFIED form. Its find-string is the PENDING `not ratified: Gate A
+    converged 2026-10-22 …` clause, but after T017 the phrase `Gate A converged 2026-10-22` occurs
+    twice in the file (the SIR's first paragraph and the Status line), so apply the non-unique rule
+    (Execution rules): `grep -n '^> \*\*Status:\*\*'` gives the line, and `sed -n '<N>p'` must print
+    the find-string.
   - `CHANGELOG.md` goes to §E.8's flip form: the heading `## Constitution v4.0 — <sign-off date>`, and
     the paragraph that opens "Gate A converged 2026-10-22" replaced by the "Ratified …" sentence.
   - Each find-string is matched with `grep -F` first (Execution rules); a miss stops the flip.
   - **Before writing it**, `git fetch origin`. If `origin/main` moved since T054's integration, repeat
     that integration first, so that C-RATIFY stays the last commit.
-  - Every template is filled from T057 (PR number), T059 (tallies) and T061 (date).
+  - Fill the templates: `<pr>` from T057 (the PR number); `<tally>` from T059 (the Gate A tally of
+    loop instance 2, round 1, and Gate B's rounds); `<sign-off date>` and `<date>` from T061 (the date
+    of the last sign-off, the fresh one if a scoped Gate A round ran). The Gate A round is written in
+    the templates as the literal "loop instance 2, round 1" and needs no fill.
   - Checks on the flip head:
-    - `grep -nE '<n>|<sign-off date>|<date>|<tally>' .specify/constitution.md CHANGELOG.md` prints
+    - `grep -nE '<n>|<pr>|<sign-off date>|<date>|<tally>' .specify/constitution.md CHANGELOG.md` prints
       nothing new. Its baseline is the same grep over `git show origin/main:<file>` for both files,
       and only hits absent from the baseline count. Its positive control is the same grep run on
       data-model.md first;
@@ -760,12 +785,14 @@ prints `PASS`.
     `.specify/decisions/094-v1-tier0-bookkeeping-verify.md` at this head, never by default
     (`[const §XVII.8]`, label evidence rule):
     - **GREEN** → `gate-a-done` and `gate-b-done`, each paired with its convergence record
-      (`094-v1-tier0-bookkeeping-gatea.md`, `094-v1-tier0-bookkeeping-gateb.md`), unless that record
+      (`decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private), `094-v1-tier0-bookkeeping-gateb.md`), unless that record
       carries gate-level waivers.
     - **GREEN, but a gate's convergence record carries gate-level (Codex-side) waivers** → that gate's
       `-waived` label (`[const §XVII.8]`: "`YELLOW` (or `GREEN` with explicit Codex-side waivers)"),
-      treated as YELLOW below: rationales under that gate's literal heading, and the awk run locally.
-      Applying `-done` over recorded waivers is the violation the clause names.
+      treated as YELLOW below: copy the waivers into the verify record as well as into the PR body
+      under that gate's literal heading (the clause asks for rationales "recorded both in the verify
+      record and the PR body"), and run the awk locally. This bundle reads `[const §XVII.8]` as
+      forbidding `-done` over recorded waivers.
     - **YELLOW** → `gate-a-waived` and `gate-b-waived`. `[const §XVII.8]` allows `-done` only on GREEN,
       and a `-waived` label needs its waiver rationales "recorded both in the verify record and the PR
       body". Copy every waiver rationale from the verify record into the body, under a literal
@@ -782,8 +809,11 @@ prints `PASS`.
     the one in `.github/workflows/gate-b.yml`, mirrored in `tier1.yml`, `tier2.yml` and
     `tier3-libcxx.yml`: a heading matching `/^##+[[:space:]]*[Gg]ate[[:space:]]*[Bb]/` followed by a
     non-blank line. `.github/workflows/gate-a.yml` runs the same check with `[Aa]`. Copy each awk from
-    the workflow at this head, not from here, and run it on the body. Each must exit 0, and the body
-    with the heading removed must exit 1 (the known positive).
+    the workflow at this head, not from here, and run it on the body. Each must exit 0. The known
+    positive: the same body with every Gate A and Gate B heading removed (`## Gate A outcome`,
+    `## Gate B outcome` and any other heading either awk matches) must make each awk exit 1.
+  - **Whatever the labels, assert the placeholder is gone:** `grep -cF 'Gate B: pending.'` over the
+    final body prints 0. Its known positive is T052's draft, where it prints 1.
   - Then apply the chosen pair in ONE `"$W/.claude/scripts/gh-pr-meta.sh"` REST call and read them
     back.
   - Then push C-RATIFY.

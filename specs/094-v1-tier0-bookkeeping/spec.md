@@ -379,8 +379,9 @@ in those files are licence comment lines.
   The other versions the old columns named (4.0, 4.1, 4.3, 5.0, 5.0SP1) are outside FIX-TC §4.1's
   scope, and each TC Verified cell says so.
 - **FR-010**: Every flipped row's cells MUST cite tests that exist literally in the tree, except the
-  process row (FR-007) and the pre-PR-infra rows (NFR-001, NFR-003), whose cells cite CI or records as
-  data-model §C states. Its PR cell MUST cite the PR and squash SHA, resolved from git, not copied from
+  process row (FR-007) and FR-015's CI rows (NFR-001, NFR-003, NFR-005, NFR-013), whose cells cite CI
+  or records as data-model §C states. NFR-005 and NFR-013 also cite tests, and every test they cite
+  MUST exist literally. Its PR cell MUST cite the PR and squash SHA, resolved from git, not copied from
   a note. Its /specify cell MUST
   read `094-v1-tier0-bookkeeping (reconciliation; delivered by <feature or PR>)`, following D-002's
   `070-… (bookkeeping; …)` form, so that 094 is the `/specify` artifact `[const §VI.6]`(a) requires.

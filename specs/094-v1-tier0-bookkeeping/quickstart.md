@@ -95,8 +95,9 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
 - On the branch, every hit must fall in a "keep", "header", "other concept" or "pattern FP" class of
   R-12, or be an edited line. Record the count per class.
 - `grep -niE "grpc|iceoryx|service wrapper|service[- ]mode|out-of-process" .specify/constitution.md`:
-  every hit is the v4.0 Sync Impact Report, a clause that says post-1.0, an earlier Sync Impact Report,
-  or §I.2 / §IV.2 / §XIII.3, none of which states v1.0 scope.
+  every hit is the v4.0 Sync Impact Report, the Status line (its v4.0 text names the post-1.0 scope), a
+  clause that says post-1.0, an earlier Sync Impact Report, or §I.2 / §IV.2 / §XIII.3, none of which
+  states v1.0 scope.
 
 ## 5. Line citations and comment claims
 

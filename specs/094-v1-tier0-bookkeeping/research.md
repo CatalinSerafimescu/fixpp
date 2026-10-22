@@ -561,9 +561,12 @@ Three traps the recipe hit, each of which a plain basename grep gets wrong:
 `ctest --preset <preset> --output-on-failure -LE packaging --no-tests=error` step, which runs on every
 leg (`linux-clang-{debug,release,asan,ubsan,tsan}`, `linux-gcc-release`); tier2.yml job `windows`
 runs the same `-LE packaging` selection. Verify runs each entry locally on `linux-clang-debug`, selected
-as `-R '^<NAME>$'` (anchored: several NAMEs are prefixes of others). `[const §VII.8]` prefers label
-selection, but several of these entries carry no LABELS and the rest share labels with entries no row
-cites, so a label would run a different set. Verify also reads which of them
+as `-R '^<NAME>$'` (anchored: several NAMEs are prefixes of others). `[const §VII.8]` reads "Tests
+are selected by `ctest -L <label>`, never `-R <exe-name>`" (`.specify/constitution.md`, Article VII
+§8). This bundle reads that rule as governing test registration and CI/ctest selection, not a
+verify-time evidence run of one named entry (plan.md Constitution Check, row §VII.8). Several of these
+entries carry no LABELS, and the rest share labels with entries no row cites, so a label would run a
+different set. Verify also reads which of them
 register on the Windows presets from tier2's run. The one exception is NFR-005's mallocnesia gates, below.
 
 | Source file (data-model §C) | Rows | Target (registration) | ctest NAME | Notes |
@@ -606,6 +609,13 @@ register on the Windows presets from tier2's run. The one exception is NFR-005's
 | `tests/interop/parity/fix_tc_coverage_gaps_test.cpp` | TC-015 | `interop_parity_us3_tests` | `interop_parity_us3_tests` | |
 | `tests/session/test_interpret_logon_encrypt_method.cpp` | TC-017 | `session_interpret_logon_encrypt_method` (`add_threading_test`) | `session_interpret_logon_encrypt_method` | |
 | `tests/session/test_enum_validation_logon.cpp` | TC-017 | `session_pure_tests` | `session_pure_tests` | holds FR-022's acceptor cell |
+
+**D-008's "opt-in build flag".** D-008's FIX version(s) wording, `(+ FIX Latest, opt-in build flag)`,
+is owner-approved and stays. The flag, `FIXPP_CODEGEN_FIX_LATEST`, defaults ON (`option(…  ON)` in
+`cmake/Codegen.cmake`), and the constitution itself calls it "the opt-in `FIXPP_CODEGEN_FIX_LATEST`
+build flag, default ON" (`.specify/constitution.md`, Article I §1's FIX Latest bullet). So "opt-in" in
+the row means opt-in in the constitution's sense: a build flag a consumer can switch off, ON by
+default. It does not mean off unless requested.
 
 **The distinct ctest entries**, in the order T030 names them: `wire_pure_tests`,
 `store_memory_zero_allocator_calls`, `store_memory_capacity`, `dictionary_pmr_allocation_test`,

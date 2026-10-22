@@ -256,8 +256,8 @@ PENDING form (lands with the amendment):
 ```
 <!--
 Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
-  Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo
-    (private)); Gate B pending; pending the owner's Article XX §2 sign-off. This header reads PENDING
+  Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent
+    repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. This header reads PENDING
     until the owner has signed off. The flip to RATIFIED, with Gate B's rounds and the sign-off date
     filled in below, is the last commit before merge, not a claim made in advance (the v1.0
     precedent).
@@ -329,26 +329,30 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
 ```
 
 RATIFIED form (the last commit before merge): the header line reads
-`Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`; the first paragraph (the one that
-opens `Gate A converged 2026-10-22`) is replaced by
-`Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (round <n>: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
+`Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`; the first paragraph (the five lines
+directly after the header line, the one that opens `Gate A converged 2026-10-22`; a multi-line
+replacement) is replaced by
+`Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (loop instance 2, round 1: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
 and in the last paragraph, the clauses `Gate B: pending, recorded at the flip.` and
 `Owner sign-off: pending, recorded at the flip.` are replaced by Gate B's round tally, the sign-off
-date and `Amendment PR #<n>`. The Gate A tally stays as written. Nothing else in the block changes.
+date and `Amendment PR #<pr>`. The Gate A tally stays as written. Nothing else in the block changes.
 
 ### E.2 Status line (`> **Status:**`, line 357 at `9b176090`)
 
 PENDING form — the line's current opening `> **Status:** user-ratified **v3.0** (2026-09-23) — ` is
 replaced by:
 
-`> **Status:** **v4.0 — PENDING** (2026-10-22) — **backwards-incompatible** (Article XX §4 v-major, with a `CHANGELOG.md` entry); not ratified: Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo (private)); Gate B pending; pending the owner's Article XX §2 sign-off. The service wrapper — the gRPC control plane, the pluggable control-plane interface and the iceoryx2 SHM data plane — leaves v1.0 scope and becomes unscheduled post-1.0 (Articles IV §4, XIV §1, XIV §3, XVIII §1–§2); v1.0 keeps only the `ControlPlaneFactory` ABI anchor and the C-ABI codes 900/901, with no behavioural commitment. Article VI §6 lets a process row close on the records its rule names. Rides feature 094; its PR is titled in Article XX §2 form. Prior: user-ratified **v3.0** (2026-09-23) — `
+`> **Status:** **v4.0 — PENDING** (2026-10-22) — **backwards-incompatible** (Article XX §4 v-major, with a `CHANGELOG.md` entry); not ratified: Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. The service wrapper — the gRPC control plane, the pluggable control-plane interface and the iceoryx2 SHM data plane — leaves v1.0 scope and becomes unscheduled post-1.0 (Articles IV §4, XIV §1, XIV §3, XVIII §1–§2); v1.0 keeps only the `ControlPlaneFactory` ABI anchor and the C-ABI codes 900/901, with no behavioural commitment. Article VI §6 lets a process row close on the records its rule names. Rides feature 094; its PR is titled in Article XX §2 form. Prior: user-ratified **v3.0** (2026-09-23) — `
 
 and the rest of the line (from `**backwards-incompatible** (Article XX §4 v-major, with a
 `CHANGELOG.md` entry). The orchestrator does not implement, …`) is unchanged.
 
 RATIFIED form: `**v4.0 — PENDING** (2026-10-22)` becomes `user-ratified **v4.0** (<sign-off date>)`,
-and `not ratified: Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo (private)); Gate B pending; pending the owner's Article XX §2 sign-off`
-becomes `Codex Gate A on feature 094 converged at round <n>, then owner sign-off <date>; amendment PR #<n>`.
+and `not ratified: Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo, private); Gate B pending; pending the owner's Article XX §2 sign-off`
+becomes `Codex Gate A on feature 094 converged at loop instance 2, round 1, then owner sign-off <date>; amendment PR #<pr>`.
+After T017 the phrase `Gate A converged 2026-10-22` occurs twice in `.specify/constitution.md` (the
+SIR's first paragraph and the Status line), so locate the Status line by line (`grep -n '^> \*\*Status:\*\*'`, then `sed -n '<N>p'`;
+tasks.md Execution rules, non-unique before-texts).
 
 ### E.3 Article IV §4
 
@@ -421,8 +425,8 @@ v4.0 both are post-1.0 roadmap items, and Article XVIII §5 reads "No early ship
 protocols into v1.0", so the same PR does not conform. This is the constitution's version: it is not a C-ABI or
 library version.
 
-Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo
-(private)); Gate B pending; pending the owner's Article XX §2 sign-off. This heading reads
+Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent
+repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. This heading reads
 `Unreleased` until the owner has signed off.
 
 ### Changed
@@ -446,7 +450,7 @@ Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md
 Flip form (the last commit before merge): the heading becomes
 `## Constitution v4.0 — <sign-off date>`, and the paragraph that opens "Gate A converged 2026-10-22"
 becomes
-`Ratified <date> (PR #<n>, feature 094), after Codex Gate A converged at round <n> and the owner signed off.`
+`Ratified <date> (PR #<pr>, feature 094), after Codex Gate A converged at loop instance 2, round 1 and the owner signed off.`
 
 ## F. Other surfaces (FR-004, FR-017, FR-018)
 
