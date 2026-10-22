@@ -1810,7 +1810,7 @@ def includers_of(header_rel: str, build_dir: str, repo_root: str) -> list[dict]:
 
 
 def screen_headers(repo_root: str) -> dict[str, list[int]]:
-    """Every tracked header carrying the named-closure shape. Empty == none."""
+    """Every tracked `*.hpp`/`*.h` holding a real-code `co_spawn(` call, by line. Empty == none."""
     try:
         listing = subprocess.run(
             ["git", "grep", "-l", "co_spawn", "--", "*.hpp", "*.h"],
@@ -2182,8 +2182,7 @@ def main() -> int:
     # rather than a miss. Re-derive with that pair; a single-sided seed cannot
     # tell this gate from the one it replaced.
     #
-    # So the screen NOMINATES and the walker CONFIRMS: a hit is a finding only
-    # where the sweep reported no site in that header. That also demotes the
+    # So the screen NOMINATES and the walker CONFIRMS. That also demotes the
     # regex from an authority to a candidate generator — it may over-approximate
     # loudly without costing a false CI failure, and it stops being a second
     # definition of "what is a site" competing with the AST walker's.
@@ -2226,7 +2225,7 @@ def main() -> int:
             if os.path.realpath(os.path.join(repo_root, rel)) not in parsed_files
         }
         if unseen:
-            print("ERROR: a header carries the named-closure co_spawn shape and the sweep "
+            print("ERROR: a header holds a real-code `co_spawn(` call and the sweep "
                   "NEVER PARSED it (#363).")
             for rel, lines in sorted(unseen.items()):
                 print(f"  {rel}: lines {', '.join(str(n) for n in lines)}")

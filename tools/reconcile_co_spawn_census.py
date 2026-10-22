@@ -71,8 +71,7 @@ import tempfile
 # IS a non-parameter VarDecl -- the argument itself, or the operand of
 # `std::move` / `std::forward` -- the local is followed to its initializer, where
 # the same closure-call test runs with the prune anchored to that VarDecl.
-# Without it, `const auto token = …record_into(out)…; co_spawn(ex, op(), token)`
-# was listed by neither instrument. A receiver or a local passed into another
+# A receiver or a local passed into another
 # call is not followed, by the walker's same rule (value_local). The walker
 # chains to a fixed point; a chain longer than one hop therefore shows up here as
 # ONLY LIBCLANG, never as agreement.
