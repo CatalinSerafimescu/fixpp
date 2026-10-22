@@ -697,6 +697,28 @@ TEST_F(FsmMatrixWitness, LS_InvalidMsgType_TransitionsToDisconnected) {
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 }
 
+// S1×E03 (TC-017): inbound Logon with EncryptMethod(98)=2 → refused → Disconnected,
+// nothing sent.
+TEST_F(FsmMatrixWitness, LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing) {
+    auto cfg = make_initiator_cfg();
+    Session sess(engine, cfg);
+    (void)open_sync(sess);
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    // Known positive: the capture holds the initiator's own outbound Logon.
+    const auto before = captured_frames.size();
+    ASSERT_GE(before, 1U) << "transport_send capture must hold the initiator's Logon";
+
+    auto logon = build_frame("A", 1, kTarget, kSender, kBeginStr,
+                             "98=2\x01"
+                             "108=30\x01");
+    (void)feed_sync(sess, logon);
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    EXPECT_EQ(captured_frames.size(), before)
+        << "a refused Logon with EncryptMethod(98)=2 must send nothing";
+}
+
 // S1×E15: close(terminal) → Disconnected.
 TEST_F(FsmMatrixWitness, LS_CloseTerminal_TransitionsToDisconnected) {
     // FR-006: E15 from LogonSent → Disconnected.

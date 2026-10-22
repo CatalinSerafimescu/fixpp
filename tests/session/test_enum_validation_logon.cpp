@@ -266,5 +266,24 @@ TEST_F(EnumValidationLogonTest, InDomainEncryptMethod_EstablishesAsToday) {
         << "session with a fully in-domain Logon must establish exactly as today";
 }
 
+// TC-017 (acceptor): EncryptMethod(98)=2 is in-domain, so the enum check passes;
+// interpret_logon refuses any 98 other than 0, so the session ends Disconnected
+// and sends nothing.
+TEST_F(EnumValidationLogonTest, InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing) {
+    auto cfg = make_cfg();
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(open_sync(sess).has_value()) << "Session::open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected)
+        << "acceptor must stay NotConnected after open() (no outbound Logon)";
+
+    auto frame = make_fix44_logon_frame(1, "TW", "ISLD", 30, /*encrypt_method=*/2);
+    (void)feed_sync(sess, std::span<const std::byte>{frame});
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "a Logon with EncryptMethod(98)=2 must be refused: session ends Disconnected";
+    EXPECT_TRUE(transport.sent_frames().empty())
+        << "a refused Logon with EncryptMethod(98)=2 must send nothing";
+}
+
 }  // namespace
 }  // namespace fixpp::session::test
