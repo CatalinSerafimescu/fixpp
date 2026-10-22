@@ -370,6 +370,8 @@ dropped-scope terms and the io_uring grep), then (b) and (c):
 # (a) dropped-scope terms (service[- ]mode|out-of-process added at Gate A round 2, N2-4)
 git grep -n -i -I -E "grpc|iceoryx|service wrapper|fixppd|sidecar|control[- ]plane|service[- ]mode|out-of-process" -- ':!specs/'
 git grep -n -i -I -E "io_uring|liburing" -- ':!specs/'
+# (a) widened at Gate B round 1 (Codex C-2): the 2l type names
+git grep -n -i -I -E "Iox2Tap|TapShmRecord|iox2" -- ':!specs/'
 # (b) every changed or added row ID (25 changed + NFR-019)
 git grep -n -w -I -E "W-015|W-016|SVC-00[1-5]|NFR-00[1235]|NFR-01[139]|D-00[1378]|TC-00[3568]|TC-01[2457]" -- ':!specs/'
 # (c) licence metadata
@@ -389,6 +391,15 @@ repository's most common instrument defect.
 - (b): `brain/components/dictionary.md`'s D-007 table row (`D-007` … `backlog`).
 - (a)'s widened terms: `.specify/constitution.md` §I.2 ("the out-of-process service mode"). The
   round-1 terms did not reach it.
+- (a)'s Gate B round 1 terms: `.specify/api-contract.md` §5's `fixpp::tap` row (`Iox2Tap`,
+  `TapShmRecord`). None of the earlier terms reaches it.
+
+**Blind spot, named (FR-004; found by Gate B round 1, Codex C-2).** (a)'s first two command lines
+do not match the 2l type names `Iox2Tap`, `TapShmRecord` or the `iox2` prefix, so a line that
+carries only those was unreachable. api-contract §5's `fixpp::tap` row and its §9 `TapConsumer`
+trailer are such lines: they kept `Iox2Tap` inside a closed variant that §3.1 calls Stable from
+v1.0. The third (a) line closes it; its hits that the other terms do not also match are
+dispositioned under "Hits kept, by file group" and in the table below.
 - Counts at `9b176090` (the branch carries only `specs/` commits): (a) **664** lines in 79 files (the
   round-1 terms gave 647 in 77; the 17 lines only the widened terms add are dispositioned below),
   plus **4** io_uring lines; (b) **330** lines in 64 files; (c) the two licence lines below.
@@ -428,7 +439,8 @@ repository's most common instrument defect.
 | `.specify/architecture.md` §11 | §11 row 5, ControlPlane shape "Phase 2" | edit (§F.1) |
 | `.specify/architecture.md` Appendix Z-3 body | Z-3 "a live decision … do not read Z-3 as dropped" | edit (§F.1); new Z-9 at the end |
 | `.specify/api-contract.md` §3.1, §3.2 | §3.1 Stable from v1.0: `ControlPlane`, `ControlPlaneFactory`, the proto; §3.2 iceoryx2 topic | edit (§F.2) |
-| `.specify/api-contract.md` §5, §8, §9, §10 | `fixpp::service` row, `fixppd` "Stable from v1.0", interface rows, 2j/2l rows | edit (§F.2) |
+| `.specify/api-contract.md` §5, §8, §9, §10 | §5 `fixpp::service` row, §8 `fixppd` row ("Stable from v1.0"), §9 `ControlPlane` and `ControlPlaneFactory` rows, §10 2j and 2l rows | edit (§F.2) |
+| `.specify/api-contract.md` §3.1 `TapConsumer` clause, §5 `fixpp::tap` row, §9 `TapConsumer` trailer | `Iox2Tap` inside a closed variant called Stable from v1.0 | edit (§F.2), found by Gate B round 1 (Codex C-2): the (a) blind spot above |
 | `.specify/2j-controlplane.md` (225 lines) | the control-plane design, "v1.0 RPC surface" (§1 goal 4) | header (§F.3) |
 | `.specify/2l-tap.md` §2 | non-goal 7: non-C++ tools use iceoryx2 or gRPC in v1.0 | edit (§F.3) |
 | `.specify/2l-tap.md` §4.5, §6.4, §7.4, the RC#2 root-cause row | "binding v1.0 `fixppd` path" | header (§F.3) |
@@ -464,6 +476,10 @@ repository's most common instrument defect.
 | `.specify/2b-wire.md` §2 | W-015, W-016 post-v1 | keep: already post-1.0 |
 | `.specify/architecture.md` scope rule, §2.1 `tap` row, §2.2 diagram, §4.11 body, §6 `TapConsumer` row, §7.1, §7.4 and §8 `fixppd` text, §8.1/§8.2 bodies, §10 2j/2l rows | the service design, the boundary rule, `fixppd` "not yet built" | keep: design, covered by the edited headings and Z-9; the AGPL boundary rule still governs the installed `fixpp::service` |
 | `.specify/api-contract.md` §11 | how a Provisional iceoryx2 shape may change | keep: a change rule, no timing |
+| Gate B round 1 terms only (`Iox2Tap`, `TapShmRecord`, `iox2`): `.specify/2l-tap.md` | the 2l design of `Iox2Tap` / `TapShmRecord` | header: 2l's §F.3 Status note puts the iceoryx2 data plane post-1.0 |
+| Gate B round 1 terms only: `.specify/architecture.md` §3 `fixpp::tap` row, the §4.9 `TapConsumer` bullet, the §7.3 header-layout tree comment, Z-7 | the tap surface as design; Z-7's not-implemented record | keep: covered by Z-7 and Z-9 (Appendix Z supersedes body text) |
+| Gate B round 1 terms only: `.specify/api-contract.md` §6 header-layout tree comment (`tap/ # NoTap / RingBufferTap / Iox2Tap / SyncCallbackTap`) | a directory sketch | keep: layout sketch, no tier |
+| Gate B round 1 terms only: `.specify/api-contract.md` §7.4 error-block table, the 2l row (`tap_iox2_not_running=1101`) | reserved codes | keep: "0 published in v1.0", pinned for v1.x |
 | Widened terms only (14 of the 17 lines): `.specify/2i-capi.md` B.3; `.specify/2j-controlplane.md` §3.2, §10 question 10, B.3, the v0.1 → v0.2 changelog, Appendix D's `EngineConfig` §4.4 drop-in; `.specify/2l-tap.md` v0.2 → v0.3 net-effect summary; `.specify/2m-pybind.md` §3.4, B.2; `.specify/2k-log-otel.md` B.2; `.specify/architecture.md` TOC, §8 heading and its `tools/check_layers.py` note, Appendix A | the `[arch §8]` service-mode boundary rule: its heading, TOC entry, lint note and cross-references | keep: the AGPL boundary rule, no timing; it still governs the installed `fixpp::service` (2i/2j/2l/2m also carry their §F.3 timing header) |
 | `.specify/constitution.md` §I.2 (widened terms only) | §I.2, above | keep |
 | `.specify/codex-review.md` (widened terms only) | "an out-of-process Codex CLI call" | other concept |

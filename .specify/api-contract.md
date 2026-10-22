@@ -57,7 +57,7 @@ Three tiers per `[arch §9.3]`:
 
 - The C++ public API enumerated by namespace in §5 (every row marked Stable from v1.0).
 - The C ABI (`<fix/c_api.h>` + the split sub-headers enumerated in §6).
-- Each pluggable interface enumerated in §9 (`Transport`, `TlsTransport`, `Listener`, `TransportFactory`, `cert_source`, `MessageStore`, `MessageStoreFactory`, `Sink`, `ControlPlane`, `ControlPlaneFactory`, `Clock`, plus the `Application` callback interface) — individually Stable from v1.0; `TapConsumer` is the closed `std::variant` per §9 trailer. *(Except `ControlPlane`: the control plane is post-1.0 (constitution v4.0). `ControlPlaneFactory` is Stable from v1.0 as an empty polymorphic base; the post-1.0 control plane extends it by derivation and adds no member to it.)*
+- Each pluggable interface enumerated in §9 (`Transport`, `TlsTransport`, `Listener`, `TransportFactory`, `cert_source`, `MessageStore`, `MessageStoreFactory`, `Sink`, `ControlPlane`, `ControlPlaneFactory`, `Clock`, plus the `Application` callback interface) — individually Stable from v1.0; `TapConsumer` is the closed `std::variant` per §9 trailer. *(Except `ControlPlane`: the control plane is post-1.0 (constitution v4.0). `ControlPlaneFactory` is Stable from v1.0 as an empty polymorphic base; the post-1.0 control plane extends it by derivation and adds no member to it.)* *(Not `TapConsumer`'s membership: see the §9 trailer.)*
 - The gRPC control-plane proto schema (`service/proto/fixpp_control.proto`) per `[arch §9.3]` / `[2j §4.7]`. *(Post-1.0 with the service wrapper, constitution v4.0; not a v1.0 surface.)*
 
 ### 3.2 Provisional (early v1.x)
@@ -109,7 +109,7 @@ Per `[arch §3]`. All Stable from v1.0 unless noted.
 | `fixpp::tls` | `cert_source`, `Pinset`, `CipherPolicy`, file-backed default impl. | `[arch §4.6]`, `[2g]` |
 | `fixpp::log` | `Logger`, `Sink` interface, `Record`, `Level`, `LogConfig`. Default sinks: `FileSink`, `OtlpLogSink`, `SyslogSink`. | `[arch §4.7]`, `[2k]` |
 | `fixpp::otel` | `TracerProvider`, `MeterProvider`, span helpers, exporter setup. | `[arch §4.8]`, `[2k]` |
-| `fixpp::tap` | `NoTap`, `RingBufferTap`, `Iox2Tap`, `SyncCallbackTap`, `TapConfig`, `TapRecord`, `TapShmRecord`, `TapConsumer = std::variant<...>`. | `[arch §4.9]`, `[2l]` |
+| `fixpp::tap` | `NoTap`, `RingBufferTap`, `Iox2Tap`, `SyncCallbackTap`, `TapConfig`, `TapRecord`, `TapShmRecord`, `TapConsumer = std::variant<...>`. `Iox2Tap` and `TapShmRecord` are post-1.0 (constitution v4.0). Build state: architecture.md Appendix Z-7. | `[arch §4.9]`, `[2l]` |
 | `fixpp::service` | Plugin interfaces only: `ControlPlane`, `ControlPlaneConfig`, `ControlPlaneFactory`. Default impl (`grpc_control_plane`) lives downstream of the C ABI. v1.0 installs only `ControlPlaneFactory`, an empty anchor; `ControlPlane`, `ControlPlaneConfig` and `grpc_control_plane` are post-1.0 (constitution v4.0). | `[arch §4.11]`, `[2j]` |
 | `fixpp::current_trace_context` (free awaitable) | Returns the current `trace_context` from a strand-stored slot. **Not** `thread_local`. | `[const §XIII.3]`, `[2d]`, `[2k]` |
 | `fixpp::detail` | Internal-only. Never user-callable. | `[arch §9.1]` |
@@ -250,7 +250,7 @@ Discipline: **≤5 pure-virtual methods per interface** per `[const §XIV.2]`, w
 | `Clock` | core | 4 (`now`, `steady_now`, `sleep_until`, `cancel_sleeps`) | `system_clock_source` | `[2d]` |
 | `Application` (callback) | session | **6** (`onLogon`, `onLogout`, `toAdmin`, `fromAdmin`, `toApp`, `fromApp`) | (user-implemented) | `[arch §6]` (Gate-A-justified exception over `[const §XIV.2]`) |
 
-**`TapConsumer` is a closed `std::variant` (not a virtual interface)** per `[2l]` / `[arch §4.9]` — `std::variant<NoTap, RingBufferTap, Iox2Tap, SyncCallbackTap>` — to keep the hot path free of virtual dispatch.
+**`TapConsumer` is a closed `std::variant` (not a virtual interface)** per `[2l]` / `[arch §4.9]` — `std::variant<NoTap, RingBufferTap, Iox2Tap, SyncCallbackTap>` — to keep the hot path free of virtual dispatch. *(Constitution v4.0: `Iox2Tap` is post-1.0, so the four-member list above is the 2l design, not a v1.0 promise, and a closed variant cannot gain an alternative later without changing its type. Which alternatives v1.0 ships, and how a post-1.0 `Iox2Tap` joins, is decided by the feature that builds 2l (S-036, NFR-014) at its Gate A. Until then no `TapConsumer` membership is Stable.)*
 
 ---
 

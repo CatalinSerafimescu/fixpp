@@ -558,16 +558,24 @@ section, row or quoted text) are at `9b176090`; every edit is same-line unless i
   ` *(Except \`ControlPlane\`: the control plane is post-1.0 (constitution v4.0). \`ControlPlaneFactory\` is Stable from v1.0 as an empty polymorphic base; the post-1.0 control plane extends it by derivation and adds no member to it.)*`
   (Gate A round 2, N2-2: the tier is stated once, here, and the §8 `fixpp::service` target row and the §9 `ControlPlaneFactory` row agree with it. It matches
   the shipped header's own comment, "Full control-plane surface owned by 2j (extends this base)".)
+- **§3.1 pluggable-interface bullet**, second append (Gate B round 1, Codex C-2), after the `ControlPlane` parenthetical above:
+  ` *(Not \`TapConsumer\`'s membership: see the §9 trailer.)*`
 - **§3.1 gRPC proto bullet** — append: ` *(Post-1.0 with the service wrapper, constitution v4.0; not a v1.0 surface.)*`
 - **§3.2 iceoryx2 topic shape bullet** — append: ` *(Post-1.0, constitution v4.0.)*`
 - **§5 `fixpp::service` namespace row** — append to its second cell:
   ` v1.0 installs only \`ControlPlaneFactory\`, an empty anchor; \`ControlPlane\`, \`ControlPlaneConfig\` and \`grpc_control_plane\` are post-1.0 (constitution v4.0).`
+- **§5 `fixpp::tap` namespace row** (Gate B round 1, Codex C-2) — append to its second cell:
+  ` \`Iox2Tap\` and \`TapShmRecord\` are post-1.0 (constitution v4.0). Build state: architecture.md Appendix Z-7.`
+  (A pointer only: Z-7 holds the condition and its re-derive recipe.)
 - **§8 `fixppd` row** — the last cell `Stable from v1.0` becomes `Post-1.0 (constitution v4.0)`.
 - **§9 `ControlPlane` interface row** — append to its third cell: ` — post-1.0 (constitution v4.0)`.
 - **§8 `fixpp::service` target row** (`Stable from v1.0`) — **no change**. The target installs
   exactly the `ControlPlaneFactory` header, and that header is Stable from v1.0 per the §3.1 pluggable-interface bullet edit.
 - **§9 `ControlPlaneFactory` row** — the third cell `1 (\`make\`)` becomes
   `1 (\`make\`) — post-1.0, on a type derived from the v1.0 anchor (constitution v4.0)`.
+- **§9 trailer** (the "`TapConsumer` is a closed `std::variant`" paragraph; Gate B round 1, Codex C-2) — append:
+  ` *(Constitution v4.0: \`Iox2Tap\` is post-1.0, so the four-member list above is the 2l design, not a v1.0 promise, and a closed variant cannot gain an alternative later without changing its type. Which alternatives v1.0 ships, and how a post-1.0 \`Iox2Tap\` joins, is decided by the feature that builds 2l (S-036, NFR-014) at its Gate A. Until then no \`TapConsumer\` membership is Stable.)*`
+- **§6 header-layout tree** (`tap/ # NoTap / RingBufferTap / Iox2Tap / SyncCallbackTap`) — **no change**: a directory sketch with no tier.
 - **§10 2j row** — append to its third cell:
   ` (post-1.0, constitution v4.0; v1.0 ships only \`ControlPlaneFactory\` as an empty anchor, and the codes 900/901)`.
 - **§10 2l row** — append to its third cell:
