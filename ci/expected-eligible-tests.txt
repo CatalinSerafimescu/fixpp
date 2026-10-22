@@ -67,12 +67,11 @@
 # eligible on every lane. Re-derive rather than trusting this paragraph:
 #     cmake --build <preset-dir> && ctest --test-dir <preset-dir> -N -LE packaging | tail -1
 #
-# ⚠️ THE SEVEN TIER 1 LINES BELOW (linux-clang-debug/-release/-asan/-ubsan/-tsan,
-# linux-gcc-release, linux-clang-coverage) WERE RE-READ FROM ONE CI RUN UNDER #561.
-# The run, its commit and the per-lane log line each value was taken from are in
+# ⚠️ EVERY LANE LINE BELOW WAS RE-READ UNDER #561, from the Tier 1, Tier 3 and Tier 2
+# workflows' CI logs for one push to `main` (one commit, so every line describes one tree).
+# The runs, the commit and the per-lane log line each value was taken from are in
 # ci/ctest-parallelism-probe.md, section "RE-RECORD — #561". Every earlier value
-# for those lanes in the comments below is history. The Tier 3 libc++ and Tier 2
-# MSVC lines come from other workflows and were not re-read with them.
+# in the comments below is history.
 #
 # ── WHY IT IS PER-LANE, AND NOT ONE NUMBER ───────────────────────────────────
 #
@@ -249,10 +248,10 @@ linux-gcc-release     527
 # phase 3. ⚠️ RE-RECORDED 2026-09-08 in the suite-wide +1 (was 358/357/357/357);
 # provenance now Tier 3 run 34160147444 at `d66b4351`, replacing the original
 # Tier 3 run 31737273304 at `5c56a17e`.
-linux-clang-libc++        360
-linux-clang-libc++-asan   359
-linux-clang-libc++-ubsan  359
-linux-clang-libc++-tsan   359
+linux-clang-libc++        481
+linux-clang-libc++-asan   450
+linux-clang-libc++-ubsan  450
+linux-clang-libc++-tsan   450
 
 # The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
 # count is not comparable to any lane above and had never been read off a CI log
@@ -290,6 +289,6 @@ linux-clang-coverage  493
 #
 # Provenance: Tier 2 run 33995191253, `push:main` at `9e03680d` — the same
 # commit as the Tier 1 basis above, so all fourteen lines describe one tree.
-windows-msvc-debug    353
-windows-msvc-release  361
-windows-msvc-asan     352
+windows-msvc-debug    411
+windows-msvc-release  419
+windows-msvc-asan     410

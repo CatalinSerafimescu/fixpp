@@ -110,17 +110,22 @@ condition assumed:
   cannot reset it. Sampling around `ctest` needs no such concession — but it also
   means the new figures are **not** comparable to a cgroup one, had any existed.
 
-#### RE-RECORD — #561 (2026-10-22): the seven Tier 1 lanes, from one run
+#### RE-RECORD — #561 (2026-10-22): every pinned lane, from one push to `main`
 
 Every Tier 1 lane had rendered `DIAGNOSTIC ONLY` on `main` since at least run `37749128892`
 (2026-10-08, `linux-clang-debug`: executed 424 against a pin of 365): the executed counts
 had moved past the pins.
 
-**Basis:** Tier 1 run `39594667883`, `push` to `main` at `9b176090`, created
-2026-10-21, conclusion success, the current `origin/main`. **Method:** each lane's executed count is the `ran:` value of the
-`ci/peak-memory-report.sh` line that lane printed (the count the script compares against this
-file), cross-checked against ctest's own `… tests failed out of <N>` summary for the step it
-sampled. Every lane's report read `DIAGNOSTIC ONLY` at the old pin.
+**Basis:** the three workflow runs of one `push` to `main` at `9b176090` (the current
+`origin/main`), all created 2026-10-21 and all conclusion success: Tier 1 run `39594667883`,
+Tier 3 libc++ run `39594667825`, Tier 2 Windows run `39594667975`. **Method:** on the Linux
+lanes, each lane's executed count is the `ran:` value of the `ci/peak-memory-report.sh` line
+that lane printed (the count the script compares against this file), cross-checked against
+ctest's own `… tests failed out of <N>` summary for the step it sampled. Every Linux lane's
+report read `DIAGNOSTIC ONLY` at the old pin. The Windows lanes print no such report line;
+their pins are read by `ci/parallelism-verdict.py`, which compares a measured pass's count
+against the lane's production suite, so each Windows value is the `out of <N>` of that lane's
+suite step (`ctest --preset <lane> … --timeout 1800`).
 
 | lane | was | now | log line (`ci/peak-memory-report.sh`, then ctest) |
 |---|---:|---:|---|
@@ -131,22 +136,30 @@ sampled. Every lane's report read `DIAGNOSTIC ONLY` at the old pin.
 | `linux-clang-tsan` | 364 | **455** | `[ran: 455/364]`; `100% tests passed, 0 tests failed out of 455` |
 | `linux-gcc-release` | 373 | **527** | `[ran: 527/373]`; `100% tests passed, 0 tests failed out of 527` |
 | `linux-clang-coverage` | 372 | **493** | `[ran: 493/372]`; `100% tests passed, 0 tests failed out of 493` |
+| `linux-clang-libc++` | 360 | **481** | `[ran: 481/360]`; `100% tests passed, 0 tests failed out of 481` |
+| `linux-clang-libc++-asan` | 359 | **450** | `[ran: 450/359]`; `100% tests passed, 0 tests failed out of 450` |
+| `linux-clang-libc++-ubsan` | 359 | **450** | `[ran: 450/359]`; `100% tests passed, 0 tests failed out of 450` |
+| `linux-clang-libc++-tsan` | 359 | **450** | `[ran: 450/359]`; `100% tests passed, 0 tests failed out of 450` |
+| `windows-msvc-debug` | 353 | **411** | step `ctest --preset windows-msvc-debug --output-on-failure -LE packaging --timeout 1800`: `100% tests passed, 0 tests failed out of 411` |
+| `windows-msvc-release` | 361 | **419** | step `ctest --preset windows-msvc-release --output-on-failure --timeout 1800`: `100% tests passed, 0 tests failed out of 419` |
+| `windows-msvc-asan` | 352 | **410** | step `ctest --preset windows-msvc-asan --output-on-failure -LE packaging --timeout 1800`: `100% tests passed, 0 tests failed out of 410` |
 
-The release and gcc-release logs also hold earlier, smaller `out of` lines (separate ctest
-invocations in the same job); the row uses the one the report line's `ran:` names.
-
-**Not re-recorded:** the four Tier 3 libc++ lanes and the three Tier 2 MSVC lanes. Their basis
-comes from runs of other workflows, and this run does not contain them, so their lines still
-carry their earlier basis and can still render `DIAGNOSTIC ONLY`.
+Some logs (`linux-clang-release`, `linux-gcc-release`, `linux-clang-libc++`,
+`windows-msvc-release`) also hold smaller `out of` lines from other ctest invocations in the
+same job; each row uses the one the report line's `ran:` names, or on Windows the suite step's.
 
 **Batched with a branch, deliberately, under the rule below:** the branch this lands on adds no
 ctest registration. Re-check with
 `git diff origin/main HEAD -- '*CMakeLists.txt' '*.cmake' | grep -E '^[+-].*(add_test|gtest_discover_tests|fixpp_add_[a-z_]*test)'`,
 which must print nothing. Its `fixpp::packaging::clean-env` change (#529) turns that test
 Skipped on an ASan/UBSan/TSan or fuzz configuration; ctest counts a skipped test in its total,
-and neither Tier 1 lane that runs the packaging tier (`linux-gcc-release`,
-`linux-clang-coverage`) is such a configuration. Per this document's rule the criterion closes
-on the run **after** this commit, lane by lane, when it renders the evidence heading.
+and in these runs the test executes only on `linux-gcc-release`, `linux-clang-coverage` and
+`windows-msvc-release` (re-check: grep each job log for `Test #…: fixpp::packaging::clean-env`),
+none of which is such a configuration: the first sets no sanitizer, the coverage lane sets only
+`FIXPP_ENABLE_COVERAGE`, and the guard reads the sanitizer options on Clang or GCC only.
+
+Per this document's rule the criterion closes on the run **after** this commit, lane by lane,
+when it renders the evidence heading.
 
 #### RE-RECORD 2026-09-08 — every Linux lane had drifted by exactly +1
 
