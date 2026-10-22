@@ -1,4 +1,4 @@
-# Data model: 094 — the target text of every row it changes
+# Data model: 094 — the target text of every row, clause and surface it changes
 
 Schema (`spec/feature-catalogue.md` header): `ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified`.
 
@@ -10,7 +10,13 @@ Rules applied to every row below:
   cited, because its number does not exist until the PR is opened, and close-out does not re-edit rows.
 - **Verified** opens with `Reconciled by 094 (2026-10-22) — not a delivery claim.`, then gives the
   evidence and every residual on record.
+- **Every cited path resolves in this (public) repository**, or is labelled `parent repo (private)`.
+  The library is public and the owner's research repository is private, so an unlabelled pointer into
+  the parent is evidence no reader can open.
 - A cell holding a backtick span keeps it as written here. No cell contains a bare `|`.
+- Where the text says "same-line", the edit replaces or appends text inside an existing line and adds
+  no line. `.specify/architecture.md` requires this above its Appendix Z, and the other design docs are
+  edited the same way so no line citation moves.
 
 ## A. Post-v1.0 drops (FR-001)
 
@@ -27,25 +33,34 @@ Only the Status cell changes.
 The definition is **appended to the existing `> **Status** ∈ {…}` line**, not added as a new line, so
 no catalogue line moves:
 
-`> **Status** ∈ {backlog, planning, implementing, done, dropped(reason)} — **`dropped(post-v1.0, planned, not abandoned: <reason>)`** is an explicit drop for `[const §I.3]` (v1.0 ships when every OFFICIAL row is `done` or explicitly `dropped` with user-signed rationale) **and nothing more**: the row stays planned, keeps its entry and rationale, and returns to `backlog` when the release that builds it opens. User-signed: W-015, W-016, SVC-001..005 by DECISION 1 (owner, 2026-10-21); NFR-019 by the NFR-013 split ruling (owner, 2026-10-21). Recorded by feature 094.`
+`> **Status** ∈ {backlog, planning, implementing, done, dropped(reason)} — **`dropped(post-v1.0, planned, not abandoned: <reason>)`** is an explicit drop for `[const §I.3]` (v1.0 ships when every OFFICIAL row is `done` or explicitly `dropped` with user-signed rationale) **and nothing more**: the row stays planned, keeps its entry and rationale, and returns to `backlog` when the release that builds it opens. User-signed: W-015, W-016, SVC-001..005 by DECISION 1 (owner, 2026-10-21; quoted in `specs/094-v1-tier0-bookkeeping/spec.md` §Context and recorded in the constitution v4.0 Sync Impact Report); NFR-019 by the NFR-013 split ruling (owner, 2026-10-21; `specs/094-v1-tier0-bookkeeping/spec.md` §Context). Recorded by feature 094.`
 
 ## C. Reconciliation flips (FR-005 … FR-009)
 
 ### NFR-001 (clean)
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by Phase 3 CI infra a476bd30)`
-- PR `— (pre-PR infra a476bd30; Tier 2 later made a required merge gate)`
+- PR `— (pre-PR infra a476bd30; tier1-required 96dd8aed, tier2-required #166 ff19ae58, PR-context gating 27f8701d)`
 - Tests `CMakeLists.txt` `CMAKE_CXX_STANDARD 23` + `CMAKE_CXX_STANDARD_REQUIRED ON`; `.github/workflows/tier1.yml` job `linux` (legs linux-clang-{debug,release,asan,ubsan,tsan}, linux-gcc-release) + job `coverage`; `.github/workflows/tier2.yml` job `windows` (windows-msvc-{debug,release,asan})
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Enforced by the required checks tier1-required and tier2-required on main. clang-cl is prohibited ([const §II.2]); the GCC leg is a Release sanity leg only. CI evidence: Tier 1 run 39594667883 and Tier 2 run 39594667975 (push:main at 9b176090, both success). QuickFIX interop: not applicable.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Enforced by main's branch protection, which lists tier1-required, tier2-required and tier3-required as required status checks (gh api repos/CatalinSerafimescu/fixpp/branches/main/protection/required_status_checks, read 2026-10-22). clang-cl is prohibited ([const §II.2]); the GCC leg is a Release sanity leg only. CI evidence: Tier 1 run 39594667883 and Tier 2 run 39594667975 (push:main at 9b176090, both success). QuickFIX interop: not applicable.`
+
+  (`96dd8aed` and `27f8701d` are direct pushes with no PR; `ff19ae58` is PR #166, the oldest commit
+  whose diff adds `tier2-required`. Resolved with `git log --reverse -S tier1-required` / `-S
+  tier2-required` over the two workflows.)
 
 ### NFR-002 (reworded)
-- Title `Per-PR coverage obligation of [const §IX.1] — ≥95% line / ≥85% branch on touched modules, or a recorded assessment for every uncovered line (tested / waived / escalated to an issue); checked in /speckit-verify, not a CI threshold`
+- Title `Per-PR coverage obligation of [const §IX.1] — ≥95% line / ≥85% branch on touched modules, or a recorded assessment for every uncovered line/branch the PR adds or newly makes reachable (tested / waived / escalated to an issue); checked in the per-feature verify record, not a CI threshold`
 - Spec ref `[const §IX.1] Coverage thresholds`
 - Status `done`
-- /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by the /speckit-verify coverage step)`
-- PR `— (process gate; [const §IX.1] raised 2026-05-17)`
-- Tests `.claude/skills/speckit-verify/SKILL.md` coverage step; per-feature records `.specify/decisions/<feature>-verify.md` (e.g. 544-hot-path-zero-alloc-verify.md, 563-564-callback-send-verify.md, 536-537-538-recovery-liveness-verify.md)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. The row's former 90/80 figure was superseded by [const §IX.1]; reworded to the obligation that rule states (owner, 2026-10-21). It is a recorded per-PR assessment, not a threshold CI enforces: tier1.yml job coverage's merge/LCOV steps are continue-on-error and Codecov is not a required check. The global ≥95% bullet of [const §IX.1] is a separate release question (parent REMAINING-WORK row 11), not covered by this row. Evidence form: the three cited verify records. QuickFIX interop: not applicable.`
+- /specify `094-v1-tier0-bookkeeping (reconciliation; delivered as the per-feature verify obligation of [const §IX.1], raised 2026-05-17)`
+- PR `— (process obligation; [const §IX.1] raised 2026-05-17)`
+- Tests `[const §IX.1] names the record: .specify/decisions/<feature>-verify.md. In this repository that path is a gitignored link into the owner's research repository — parent repo (private): decisions/speckit/563-564-callback-send-verify.md section "Coverage (T7.7)" and decisions/speckit/536-537-538-recovery-liveness-verify.md section "T6.7", each assessing every uncovered changed line and every untaken branch on the diff`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. The row's former 90/80 figure was superseded by [const §IX.1]; reworded to the obligation that rule states (owner, 2026-10-21). It is a per-PR assessment the verifying agent records, not a threshold CI enforces: tier1.yml job coverage's merge/LCOV steps are continue-on-error and Codecov is not a required check. The records live in the owner's private repository, so this cell is a pointer, not evidence a reader of this repository can reproduce. The global ≥95% bullet of [const §IX.1] is a separate release question (parent repo (private) REMAINING-WORK row 11), not covered by this row. QuickFIX interop: not applicable.`
+
+  The earlier draft cited `.claude/skills/speckit-verify/SKILL.md`. That file is not in this
+  repository (it is tracked in the parent), and its Step 4 treats a metric below threshold as a FAIL,
+  which is not `[const §IX.1]`'s rule. It is no longer cited. The earlier draft also cited
+  `544-hot-path-zero-alloc-verify.md`, which assesses added lines only; it is dropped (research R-13).
 
 ### NFR-003 (reworded)
 - Title `Sanitizers: the ASan, UBSan and TSan legs run the non-packaging ctest suite (ctest -LE packaging) before every merge (required check tier1-required), and any sanitizer report not on the allowlist fails the leg; the allocation-failure cells listed in ci/expected-preset-conditional-tests.txt are not built there; MSVC ASan on Tier 2 (required check tier2-required)`
@@ -61,18 +76,18 @@ no catalogue line moves:
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 008-message-store, #448 gates, 544-hot-path-zero-alloc)`
 - PR `#77 (squash 718195f9, slab-PMR MemoryStore) + #478 (squash a8fe9f79, mallocnesia gates enforced) + #572 (squash 2e4d15c6, B-544-1)`
 - Tests `ctest -L mallocnesia` (tier1.yml steps "Assert the mallocnesia gate population (#448)" + "Run the allocation-discipline gates (#448)"); `tests/alloc_guard/CMakeLists.txt` positive controls `alloc_guard_*_positive_control_mallocnesia`
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Zero allocation holds only on the gated windows; outside them see L-497-1; ungated windows #569; TLS per-record allocation inside OpenSSL #565. The mallocnesia gates run on linux-clang-release (#478); CI evidence: Tier 1 run 39594667883 (push:main at 9b176090, success). QuickFIX interop: not applicable.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Zero allocation holds only on the gated windows; outside them see L-497-1; ungated windows #569; TLS per-record allocation inside OpenSSL #565. The mallocnesia steps run on linux-gcc-release and linux-clang-release (the if: of the three #448 steps in tier1.yml; #478). CI evidence: Tier 1 run 39594667883 (push:main at 9b176090, success). QuickFIX interop: not applicable.`
 
 ### NFR-011 (reworded)
-- Title `PMR allocator support — std::pmr::memory_resource accepted by the dictionary loaders, the parse arena, MemoryStore and the typed decimal accessors`
+- Title `PMR allocator support — std::pmr::memory_resource accepted by the dictionary loaders (XmlLoader, OrchestraLoader), the parse arena, MemoryStore and the typed decimal accessors`
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 002, 004, 008, 003 — dictionary loaders, wire codec, message store, codegen)`
 - PR `#66 (merge ae4c9a56, loaders) + #68 (merge 2a6f76c7, parse arena) + #77 (squash 718195f9, MemoryStore) + #67 (merge b8a3b251, decimal accessor)`
 
   (Resolved from git: each witness file and test was added in the PR named after it, found with
   `git log --diff-filter=A` and `git log -S`.)
-- Tests `tests/dictionary/pmr_allocation_test.cpp` (PmrAllocation.EveryByteFromMr); `tests/wire/three_arena_pinning_test.cpp` (WireThreeArenaPinning.*); `tests/session/test_memory_store_zero_allocator_calls.cpp` (MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr), `tests/session/test_memory_store_capacity.cpp` (MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull); `tests/codegen/typed_accessor_test.cpp` (CodegenTypedAccessor.DecimalAccessorTakesMemoryResource)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Narrowed from "throughout" and the stale "C++17" label (the project is C++23). Not on third-party internals or by design: pugixml's transient DOM (L-002-4), OpenSSL's per-record buffers (#565), the C dictionary entry point's new_delete_resource (B-495-3). QuickFIX interop: not applicable.`
+- Tests `tests/dictionary/pmr_allocation_test.cpp` (PmrAllocation.EveryByteFromMr); `include/fixpp/dict/orchestra_loader.hpp` (OrchestraLoader::load / load_from_string take a std::pmr::memory_resource*) + `tests/dictionary/orchestra_loader_test.cpp`; `tests/wire/three_arena_pinning_test.cpp` (WireThreeArenaPinning.*); `tests/session/test_memory_store_zero_allocator_calls.cpp` (MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr), `tests/session/test_memory_store_capacity.cpp` (MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull); `tests/codegen/typed_accessor_test.cpp` (CodegenTypedAccessor.DecimalAccessorTakesMemoryResource)
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Narrowed from "throughout" and the stale "C++17" label (the project is C++23). Routing through the resource is asserted for XmlLoader (every byte from the resource); OrchestraLoader takes the resource and its tests pass one, but no cell asserts that its allocations route through it. Not on third-party internals or by design: pugixml's transient DOM (L-002-4), OpenSSL's per-record buffers (#565), the C dictionary entry point's new_delete_resource (B-495-3). QuickFIX interop: not applicable.`
 
 ### NFR-013 (reworded; io_uring split to NFR-019)
 - Title `ASIO async I/O transport (epoll on Linux, IOCP on Windows)`
@@ -115,20 +130,26 @@ no catalogue line moves:
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 003-dictionary-codegen)`
 - PR `#67 (merge b8a3b251)`
 - Tests `tests/codegen/vlatest_compile_smoke_test.cpp` (static_assert over Fields.hpp), `tests/codegen/typed_accessor_test.cpp` (CodegenTypedAccessor.MsgTypeAndVersionAreConstexpr), `tests/dictionary/ref_shape_test.cpp`, `tests/codegen/read_tier_byte_diff_test.cmake`, `tests/codegen/determinism_test.cpp` (DeterminismTest.GeneratedMatchesGolden)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Emitted as inline constexpr FieldRef arrays per version. The compile-time read is witnessed on vlatest; v42/v44/v50sp2 are witnessed by shape asserts and byte pins. The reify round-trip (L-003-1) is OSS-010's scope, not this row's. QuickFIX interop: not applicable (the dictionaries are QuickFIX-verbatim).`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Emitted as inline constexpr FieldRef arrays per version. The compile-time read is witnessed on vlatest; v42, v44, v50sp2 and vt11 are witnessed by shape asserts and by byte pins (read_tier_byte_diff_test.cmake pins each version's Fields/Messages/Reify/Validator.hpp). The reify round-trip (L-003-1) is OSS-010's scope, not this row's. QuickFIX interop: not applicable (the dictionaries are QuickFIX-verbatim).`
 
   The existing HTML comment under the row stays.
 
-### TC rows — version columns from research R-3
+### TC rows — version columns and the scope clause
 
-The FIX version(s) cell of every TC row becomes the "Column written" value in research R-3.
+- The FIX version(s) cell of every TC row becomes the "Column written" value in research R-3.
+- Every TC Verified cell ends with the same scope sentence, written below as `<TC-SCOPE>`:
+
+  `Versions not witnessed: #614. FIX-TC §4.1 makes the scenarios applicable to the session layer of 4.2, 4.4 and FIXT, so the other versions the former column named (4.0, 4.1, 4.3, 5.0, 5.0SP1) are not required by FIX-TC.`
+
+  (Checked against `FIX_Session_Testcases_June_2020.pdf` §4.1, parent repo (private) `research/`:
+  "applicable to all supported versions of the FIX session layer (4.2, 4.4, FIXT)".)
 
 ### TC-003 (version column)
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 093-inbound-frame-dispositions)`
 - PR `#554 (squash e84991bf)`
 - Tests `tests/session/inbound_frame_dispositions_test.cpp` (InboundFrameDispositionsTc.TC003_3b_*, TC003_3c_*, TC003_3e_*; ctest session_inbound_frame_dispositions)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. 3b/3c/3e: each garbled frame on an Active session is disregarded, counted and logged (the "warning"), NextNumIn unchanged, connection open; 3a/3d are the accept arm of the same cells (the following good frame is delivered). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. 3b/3c/3e: each garbled frame on an Active session is disregarded, counted and logged (the "warning"), NextNumIn unchanged, connection open; 3a/3d are the accept arm of the same cells (the following good frame is delivered). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
   This replaces the old Verified text, which contained "Feature 093 does not own this row … stays
   backlog".
@@ -139,21 +160,21 @@ The FIX version(s) cell of every TC row becomes the "Column written" value in re
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 005-session-establishment-fsm + 093)`
 - PR `#82 (squash ba2222d6) + #554 (squash e84991bf, C-ABI Row6 witness)`
 - Tests `tests/capi/inbound_frame_dispositions_c7_witness_test.cpp` (CapiC7Witness.Row6_InboundRejectTrafficKeepsTheSessionUp), `tests/session/conformance/tc_reject_test.cpp` (TC005Reject.Fix42_7_ReceiveReject_NoLoop, TC005Reject.Fix44_7_ReceiveReject_NoLoop; ctest -R session_tc_reject), `tests/session/session_reject_test.cpp` (SessionReject.NoRejectLoopOnInboundReject), `tests/session/fsm_matrix_witness_test.cpp` (FsmMatrixWitness.Active_InboundReject_LogOnly_StaysActive)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Narrowed from "log RefSeqNum/SessionRejectReason": an inbound Reject is neither delivered to fromAdmin nor logged, which QuickFIX C++/J/Go both do — fixpp#612 (batch B65). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. NextNumIn incremented: witnessed on FIX.4.4 by CapiC7Witness.Row6_InboundRejectTrafficKeepsTheSessionUp, which sends in-sequence Rejects with rising MsgSeqNum and then an order at the next number, and asserts the order is delivered (expect_kept_up: o.received); a NextNumIn that did not advance would hold that order as too high. No Reject of a Reject and session continues: TC005Reject and SessionReject assert that nothing is sent in reply and the session stays Active; FsmMatrixWitness.Active_InboundReject_LogOnly_StaysActive asserts the Active state only. Narrowed from "log RefSeqNum/SessionRejectReason": an inbound Reject is neither delivered to fromAdmin nor logged, which QuickFIX C++/J/Go all do — fixpp#612 (batch B65). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ### TC-006 (version column; residuals)
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 013-session-reconnect-binding + 037 + B28)`
 - PR `#86 (squash bd84e086) + #121 (squash 795cde1b) + #609 (squash 9b176090)`
 - Tests `tests/session/test_recovery_store_horizon.cpp` (RecoveryStoreHorizonTest.AvailableRangeReplaysCarryPossDupFlag, .ReplayFramesCarryOrigSendingTime, .LargeAppFrameReplayed_NotGapFilled, .PreHorizonGapCollapsedToGapFill), `tests/session/test_recovery_admin_span_gapfill.cpp` (RecoveryAdminSpanGapfillTest.*), `tests/session/test_resend_reply_possdup.cpp` (ResendReplyPossDup.Cell1_GapFill_Carries_43Y_And_122_EqOwn52), `tests/session/test_538_store_lookup_after_reset.cpp` (Stores/StoreLookupAfterReset.*)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Application messages are resent with PossDupFlag=Y and OrigSendingTime; admin spans collapse to one SequenceReset-GapFill carrying 43=Y/122. Residuals on record: a live send can interleave with a replay (#588, open); BeginSeqNo(7)=0 is answered with a GapFill whose 34=0 (#580); no per-message DoNotSend veto on replay (L-019-4). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Application messages are resent with PossDupFlag=Y and OrigSendingTime; admin spans collapse to one SequenceReset-GapFill carrying 43=Y/122. Residuals on record: a live send can interleave with a replay (#588, open); BeginSeqNo(7)=0 is answered with a GapFill whose 34=0 (#580); no per-message DoNotSend veto on replay (L-019-4). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ### TC-008 (version column)
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by fix/inbound-sequencereset-s023)`
 - PR `#90 (squash 13c49f88)`
 - Tests `tests/session/test_inbound_sequence_reset.cpp` (InboundSequenceResetTest.ResetModeHardResetsAndBypassesOrdering, .NewSeqNoEqualExpectedIsNoOp, .NewSeqNoBelowExpectedRejects), `tests/interop/parity/inbound_sequencereset_arms_test.cpp` (InboundSequenceResetArms.NewSeqNoAboveExpectedAdvances, .NewSeqNoEqualExpectedIsNoOp, .NewSeqNoBelowExpectedRejects)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. 11a NewSeqNo > NextNumIn sets it regardless of the frame's own 34; 11b equal is accepted; 11c lower is rejected with SessionRejectReason 5 (RefTagID 36), NextNumIn unchanged. Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. 11a NewSeqNo > NextNumIn sets it regardless of the frame's own 34; 11b equal is accepted; 11c lower is rejected with SessionRejectReason 5 (RefTagID 36), NextNumIn unchanged. Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ### TC-012 (reworded)
 - Title `Session conformance: PossResend (test 19, sub-cases 19a–19b) — PossResend(97)=Y delivered to the application with the flag intact; the 19a/19b message-ID duplicate check is the application's`
@@ -161,7 +182,7 @@ The FIX version(s) cell of every TC row becomes the "Column written" value in re
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 022-possresend-allowpossdup-send)`
 - PR `#103 (squash 97e2e3d9)`
 - Tests `tests/session/test_inbound_poss_resend.cpp` (InboundPossResendTest.DeliverInSeq_97Y, .Combo_43Y_97Y, .PossResend_No122_NoReject)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. FIX-TC 19 itself calls the check an "application layer check of message-specific ID"; fixpp does no session-level duplicate detection (L-022-1, as QuickFIX C++/J). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. FIX-TC 19 itself calls the check an "application layer check of message-specific ID"; fixpp does no session-level duplicate detection (L-022-1, as QuickFIX C++/J). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ### TC-014 (reworded)
 - Title `Session conformance (optional): Sequence number synchronization after failure (test 9) — via ResetSeqNumFlag(141)=Y (FIX-TC option 2); outbound SequenceReset-Reset (option 1) not offered`
@@ -169,90 +190,419 @@ The FIX version(s) cell of every TC row becomes the "Column written" value in re
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 024-reset-refresh-on-logon + 030 + 032)`
 - PR `#106 (squash f3159075) + #113 (squash 3c5ee658) + #115 (squash 9417454f)`
 - Tests `tests/session/test_reset_on_lifecycle.cpp` (ResetOnLifecycleTest.ResetOnLogon_Initiator_ResetsAndEmits141, .ResetOnLogon_Acceptor_ResetsIdempotentWith141, .ResetOnLogon_BothRoles_Resets, .Initiator_Received141Ack_NextInboundTwo_NoResend)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. FIX-TC 9 is satisfied by either option; fixpp originates no outbound Reset-mode SequenceReset (outbound is GapFill only). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. FIX-TC 9 is satisfied by either option; fixpp originates no outbound Reset-mode SequenceReset (outbound is GapFill only). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ### TC-015 (version column)
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by tests/fix-tc-coverage-gaps-2)`
 - PR `#139 (squash fb043752)`
 - Tests `tests/interop/parity/fix_tc_coverage_gaps_test.cpp` (FixTcCoverageGaps.BodyFieldsArbitraryOrder_Accepted; ctest interop_parity_us3_tests)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Fields in non-canonical order (body and header after the first three) are accepted and later MsgSeqNums are accepted (B-005-7). Accepting is what scenario 15 asks for; the same leniency is why 14g is not met (TC-010, backlog). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Fields in non-canonical order (body and header after the first three) are accepted and later MsgSeqNums are accepted (B-005-7). Accepting is what scenario 15 asks for; the same leniency is why 14g is not met (TC-010, backlog). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ### TC-017 (reworded; not supported by design)
 - Title `Session conformance (optional): EncryptMethod(98) (test 17) — 0 accepted; ≠0 refused at Logon (B-043-1); no application-layer encryption ([const §XII.7], [const §XV.10]), so 17c–17j do not apply`
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 043-plaintext-tcp-transport)`
 - PR `#134 (squash 95aa1c38)`
-- Tests `tests/session/test_interpret_logon_encrypt_method.cpp` (InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted, .AbsentEncryptMethodAccepted, .NonZeroEncryptMethodRejected)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Not supported by design (owner, 2026-10-21): FIX deprecated EncryptMethod in 4.3 (TLS/FIXS replaces it, and fixpp ships TLS); QuickFIX C++/J/Go each send 98=0 and implement none of 17c–17j. 98≠0 is a Logon refusal, not FIX-TC 17b's Reject 373=7 + Logout. Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. Versions not witnessed: #614.`
+- Tests `tests/session/test_interpret_logon_encrypt_method.cpp` (InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted, .AbsentEncryptMethodAccepted, .NonZeroEncryptMethodRejected; ctest session_interpret_logon_encrypt_method), `tests/session/fsm_matrix_witness_test.cpp` (FsmMatrixWitness.NC_InboundRefusedLogon_BeginStringMismatch_TransitionsToDisconnected, .LS_InboundRefusedLogon_TransitionsToDisconnected), `tests/session/test_enum_validation_logon.cpp` (EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished; both in ctest session_pure_tests)
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Not supported by design (owner, 2026-10-21): FIX deprecated EncryptMethod in 4.3 (TLS/FIXS replaces it, and fixpp ships TLS); QuickFIX C++/J/Go each send 98=0 and implement none of 17c–17j; FIX-TC marks scenario 17 optional, so 17b's Reject 373=7 + Logout is not required. ≠0 has two refusal endings. (1) In the dictionary's domain (FIX44 declares 0–6), or with validation off: interpret_logon returns session_invalid_logon (InterpretLogonEncryptMethod.NonZeroEncryptMethodRejected, 98=2), and the Logon arm goes to Disconnected and sends nothing. The Disconnected ending is the arm FsmMatrixWitness.NC_InboundRefusedLogon_* and LS_InboundRefusedLogon_* drive with another refusal cause (a BeginString or CompID mismatch, on a FIX.4.2 session); the arm does not branch on the cause, and "sends nothing" is read from src/session/session.cpp, not asserted. Those two cells witness the ending, not EncryptMethod, so they add no version to this row's column. No session-level cell drives 98=1..6. (2) Outside the domain with validate_inbound_messages on: Reject 373=5 RefTagID 98, and the session does not establish (EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
-## D. Coverage index (FR-011)
+## D. Coverage index (FR-011, FR-004)
 
-- **§4 row 3:** the note's opener changes from `**093 (partial; TC-003 stays backlog):**` to
+Line numbers are at `9b176090`. Each edit is same-line except the NFR-019 paragraph.
+
+- **§4 row 3 (:405):** the note's opener changes from `**093 (partial; TC-003 stays backlog):**` to
   `**093; TC-003 done (094 reconciliation):**`. The rest of the note stays, including its
   re-derivation grep.
-- **§4 rows 8, 9, 10, 11:** `005-defer: recovery-dependent — …` is replaced with:
+- **§4 rows 8, 9, 10, 11 (:410–:413):** `005-defer: recovery-dependent — …` is replaced with:
   - 8 → `TC-006 done (094 reconciliation): recovery delivered by 013 (#86), 037 (#121), B28 (#609).`
   - 9 → `TC-014 done (094 reconciliation): option 2 (141=Y) delivered by 024/030/032.`
-  - 10 → `TC-007 stays backlog: only 10b has a GapFill-mode witness; 10a/10c/10d/10e unwitnessed (findings v1-tier0-flip-verification-2026-10-21).`
+  - 10 → `TC-007 stays backlog: only 10b has a GapFill-mode witness; 10a/10c/10d/10e unwitnessed (094 row-by-row verification, 2026-10-21; parent repo (private)).`
   - 11 → `TC-008 done (094 reconciliation): Reset-mode SequenceReset delivered by S-023 (#90).`
-- **The 005 deferral ledger** (§FIX-TC, row "ResendRequest / SequenceReset-GapFill / SequenceReset-Reset
-  / synchronize-seqnums"): the last cell is replaced with
+- **§4 row 19 (:421):** the sentence `The formal \`[FIX-TC]\` scenario-19 conformance cell (TC-012)
+  remains backlog (conformance-harness scope, see 005 ledger below).` is replaced with
+  `TC-012 done (094 reconciliation): delivered by 022 (#103); the 19a/19b message-ID duplicate check is the application's (L-022-1).`
+- **005 deferral ledger, row "ResendRequest / SequenceReset-GapFill / SequenceReset-Reset /
+  synchronize-seqnums" (:435):** the last cell is replaced with
   `discharged by 013/S-023/024 — TC-006, TC-008, TC-014 done (094); TC-007 backlog`.
+- **005 deferral ledger, row "PossDup / PossResend duplicate semantics (S-010)" (:436):** the
+  fragment `only the formal \`[FIX-TC]\` scenario-19 conformance cell (TC-012) remains → later
+  conformance-harness work` is replaced with
+  `TC-012 done (094 reconciliation): delivered by 022 (#103); the 19a/19b message-ID duplicate check is the application's (L-022-1)`.
+- **SVC-005 supplemental (:652):** directly after `**SVC-005 supplemental:**` insert
+  ` *(Post-1.0 — constitution v4.0, feature 094: SVC-005 is \`dropped(post-v1.0, planned, not abandoned)\`; the design below, its "Stable from v1.0" proto tier and its "v1.0 RPC surface" describe the post-1.0 release that builds it. v1.0 installs only the empty \`ControlPlaneFactory\` anchor and the codes 900/901.)*`
 - **NFR-019 supplemental** (new paragraph, after the NFR-016 supplemental):
   `**NFR-019 supplemental:** io_uring async I/O backend (Linux, opt-in) — a design choice split from NFR-013 (owner 2026-10-21), not a FIX spec section ([const §VI.3]). No constitution clause or design doc requires it; to be measured in the row-16 perf pass. Status: dropped(post-v1.0, planned, not abandoned).`
-- **No change** to the existing W-015/W-016/SVC-005 entries: they already read post-1.0.
+- **No change** to the W-015 / W-016 entries (:112, :634, :701, :705): they already read post-1.0.
+  The earlier draft also said SVC-005's entry already read post-1.0; it did not (Gate A round 1),
+  hence the :652 edit above.
 
-## E. Constitution (FR-003, FR-003a)
+## E. Constitution and CHANGELOG (FR-003, FR-003a, FR-003c)
 
-Each item is in the same edit.
+Five clauses change: §IV.4, §XIV.1 (its lead-in and its control-plane bullet), §XIV.3, §XVIII.1 and
+§XVIII.2. The Status line and a new Sync Impact Report change with them. §IV.2, §XIII.3 and §XVIII.5
+are read and left as they are (research R-2, R-12).
 
-- **Sync Impact Report:** a new block at the top, `v3.0 → v3.1 (2026-10-22)`. It records the bump
-  and the R-2 argument, the clauses modified, the rationale (DECISION 1, owner 2026-10-21; roadmap
-  placement, owner 2026-10-22), the affected rows (W-015, W-016, SVC-001..005; NFR-013 → NFR-019),
-  the kept-as-shipped surfaces (FR-003b), the process (rides feature 094, a recorded deviation from
-  §XX.2's standalone-PR form, precedents 035/043/069), and the review (Gate A on 094) and sign-off
-  (owner).
-- **Status line:** the `> **Status:**` line gains a `v3.1` lead clause, and the v3.0 text moves into
-  its "Prior:" chain.
-- **§IV.4:** `**Service wrapper** (\`service/\`) is opt-in and **post-1.0** (Article XVIII §2). When
-  built, gRPC is the control-plane transport and iceoryx2 SHM the optional data plane (Article XIV
-  §3).`
-- **§XIV.1:** the control-plane bullet becomes `**Control plane** (interface in v1.0 —
-  \`include/fixpp/service/control_plane_factory.hpp\`; its default gRPC-over-Unix-socket / named-pipe
-  implementation is post-1.0, Article XVIII §2).` The lead-in stays "each with one default impl in
-  v1.0", plus an exception clause naming the control plane.
-- **§XIV.3:** `**Data-plane SHM via iceoryx2** is opt-in for sidecar mode, which is post-1.0 (Article
-  XVIII §2). The control plane works without it.`
-- **§XVIII.1:** `**v1.0 scope is locked:** FIX 4.0–5.0SP2 + FIXT.1.1 session + application layers,
-  FIXS over TLS, the C ABI, Python bindings. The gRPC service wrapper and the iceoryx2 SHM data plane
-  are post-1.0 (§2; amended v3.1).`
-- **§XVIII.2:** a final bullet `**Unscheduled — service wrapper** (\`fixppd\`: gRPC control plane,
-  iceoryx2 SHM data plane). Planned post-1.0; no version assigned (owner, 2026-10-22). Not
-  abandoned.`
+### E.1 Sync Impact Report — new block at line 1, above the v2.0 → v3.0 block
 
-## F. Other surfaces (FR-004)
+PENDING form (lands with the amendment):
 
-- **`.specify/architecture.md`:** the "Stable from v1.0: … the gRPC control-plane proto" bullet gains
-  `(post-1.0 — constitution v3.1, feature 094)` after the proto item. §8.1's heading gains
-  `— post-1.0 (constitution v3.1)`.
-- **`.specify/2j-controlplane.md`:** a status-line note: `**Timing (constitution v3.1, feature 094):**
-  the default gRPC implementation designed here is post-1.0 (Article XVIII §2, unscheduled); the
-  interface header ships in v1.0.`
-- **`brain/components/service.md`:** the sentence "Whether the service rows are deferred or formally
+```
+<!--
+Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
+  This header reads PENDING until Codex Gate A on feature 094 has converged AND the owner has signed
+    off. The flip to RATIFIED, with the review rounds and the sign-off date filled in below, is the
+    last commit before merge, not a claim made in advance (the v1.0 precedent).
+  Bump: MAJOR, per Article XX §4, with a CHANGELOG.md entry. Under v3.0 a PR that shipped the gRPC
+    control plane or the iceoryx2 SHM data plane before the v1.0 tag shipped required scope
+    (Article XVIII §1) and conformed. Under v4.0 the same PR does not: Article IV §4 and Article XIV
+    §1 place the control plane post-1.0, and the service wrapper is now an Article XVIII §2 roadmap
+    item, to which §5's "no early shipping of post-1.0 protocols into v1.0" applies. A previously
+    mergeable PR that now fails is a backwards-incompatible tightening even when the same amendment
+    also loosens (here, a v1.0 tag with no service wrapper becomes conformant): the reading v1.0,
+    v2.0 and v3.0 set. The first draft of this amendment classified itself MINOR (v3.1) by asking
+    whether any EXISTING PR stops conforming, the narrower reading those three reports rejected; it
+    was corrected at Gate A round 1 (P1), as v1.0's, v2.0's and v3.0's drafts were.
+    NOTE: the constitution's version is independent of the library's and of the C ABI's.
+  Modified: Article IV §4 — the service wrapper is opt-in and post-1.0; when built, gRPC is the
+    control-plane transport and iceoryx2 SHM the optional data plane.
+  Modified: Article XIV §1 — the lead-in excepts the control plane. The control-plane bullet places
+    both the pluggable interface and its default gRPC implementation post-1.0 (SVC-005), and states
+    that v1.0 installs only the ABI anchor fixpp::service::ControlPlaneFactory
+    (include/fixpp/service/control_plane_factory.hpp, an empty polymorphic base that
+    EngineConfig::control_plane_factory holds) and reserves the C-ABI codes 900/901, with no
+    behavioural commitment for either.
+  Modified: Article XIV §3 — iceoryx2 SHM and sidecar mode are post-1.0.
+  Modified: Article XVIII §1 — the gRPC service wrapper and the iceoryx2 SHM data plane leave the
+    locked v1.0 scope.
+  Modified: Article XVIII §2 — adds the service wrapper as an unscheduled post-1.0 item with no
+    version slot. v1.1–v1.8 are not re-ordered.
+  Read and unchanged: Article IV §2 ("the foundation for language bindings and the service
+    wrapper") and Article XIII §3 ("control-plane handlers", an example) state no v1.0 scope.
+    Article XVIII §5 is unchanged; it reaches the service wrapper through §2.
+  Rationale: DECISION 1 (owner, 2026-10-21) takes W-015, W-016 and SVC-001..005 out of the v1.0 tag
+    gate and abandons none of them: "We don't want to drop them forever, we want them to implement
+    post-v1.0". Roadmap placement (owner, 2026-10-22): unscheduled post-1.0, no version slot.
+    Interface timing (owner, 2026-10-22): the control-plane interface goes post-1.0 with its default
+    implementation and with SVC-005. The installed header holds only an empty anchor with no
+    operations, no fixpp::service::ControlPlane type exists, and nothing in src/ reads
+    EngineConfig::control_plane_factory (spec/behaviors-and-limitations.md L-094-1), so no v1.0
+    interface existed to keep.
+  Affected catalogue rows: W-015, W-016, SVC-001..005 → dropped(post-v1.0, planned, not abandoned);
+    NFR-013 split, its io_uring half → new row NFR-019 (dropped(post-v1.0, …)).
+  Affected feature specs: none (merged specs/<id>/ bundles stay as written). Companion documents
+    annotated by feature 094: .specify/architecture.md (Appendix Z-9), .specify/api-contract.md,
+    .specify/2i-capi.md, .specify/2j-controlplane.md, .specify/2l-tap.md, .specify/2m-pybind.md,
+    spec/coverage-index.md, spec/behaviors-and-limitations.md (L-094-1), CHANGELOG.md.
+  Kept as shipped: include/fixpp/service/control_plane_factory.hpp, and FIXPP_ERR_CTRL_CONFIG (900)
+    / FIXPP_ERR_CTRL_RUNTIME (901). Removing a frozen code would be a break for nothing.
+  Process: rides feature 094 (specs/094-v1-tier0-bookkeeping). Its PR is titled in Article XX §2
+    form, "Constitution: amend §IV.4, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0
+    (+ 094 Tier-0 bookkeeping)", and its description states the change, the rationale and the
+    affected rows and specs, so §2's four steps are met in order.
+  Review and sign-off: Codex Gate A on feature 094 (round 1: NOT CONVERGED, 3 P1 / 5 P2 / 1 P3;
+    later rounds recorded at the flip). Owner sign-off: recorded at the flip.
+-->
+```
+
+RATIFIED form (the last commit before merge): the header line reads
+`Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`; the first paragraph is replaced by
+`Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (round <n>: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
+and the last paragraph's two clauses carry every round's tally, the sign-off date and
+`Amendment PR #<n>`. Nothing else in the block changes.
+
+### E.2 Status line (`> **Status:**`, line 357 at `9b176090`)
+
+PENDING form — the line's current opening `> **Status:** user-ratified **v3.0** (2026-09-23) — ` is
+replaced by:
+
+`> **Status:** **v4.0 — PENDING** (2026-10-22) — **backwards-incompatible** (Article XX §4 v-major, with a `CHANGELOG.md` entry); not ratified until Codex Gate A on feature 094 converges and the owner signs off. The service wrapper — the gRPC control plane, the pluggable control-plane interface and the iceoryx2 SHM data plane — leaves v1.0 scope and becomes unscheduled post-1.0 (Articles IV §4, XIV §1, XIV §3, XVIII §1–§2); v1.0 keeps only the `ControlPlaneFactory` ABI anchor and the C-ABI codes 900/901, with no behavioural commitment. Rides feature 094; its PR is titled in Article XX §2 form. Prior: user-ratified **v3.0** (2026-09-23) — `
+
+and the rest of the line (from `**backwards-incompatible** (Article XX §4 v-major, with a
+`CHANGELOG.md` entry). The orchestrator does not implement, …`) is unchanged.
+
+RATIFIED form: `**v4.0 — PENDING** (2026-10-22)` becomes `user-ratified **v4.0** (<sign-off date>)`,
+and `not ratified until Codex Gate A on feature 094 converges and the owner signs off` becomes
+`Codex Gate A on feature 094 converged at round <n>, then owner sign-off <date>; amendment PR #<n>`.
+
+### E.3 Article IV §4
+
+Before:
+`4. **Service wrapper** (`service/`) is opt-in. gRPC is the control-plane transport; iceoryx2 SHM is the optional data-plane (Article XIV §3).`
+
+After:
+`4. **Service wrapper** (`service/`) is opt-in and **post-1.0** (Article XVIII §2, unscheduled). When it is built, gRPC is the control-plane transport and iceoryx2 SHM the optional data plane (Article XIV §3).`
+
+### E.4 Article XIV §1 — lead-in and control-plane bullet
+
+Before (lead-in):
+`1. **The following are pluggable, each with one default impl in v1.0:**`
+
+After (lead-in):
+`1. **The following are pluggable, each with one default impl in v1.0, except the control plane, which is post-1.0:**`
+
+Before (bullet):
+`   - **Control plane** (default: gRPC over Unix socket / named pipe).`
+
+After (bullet):
+`   - **Control plane** — post-1.0: both the pluggable interface and its default implementation (gRPC over Unix socket / named pipe) (Article XVIII §2; SVC-005). v1.0 installs only the ABI anchor `fixpp::service::ControlPlaneFactory` (`include/fixpp/service/control_plane_factory.hpp`, an empty polymorphic base that `EngineConfig::control_plane_factory` holds) and reserves the C-ABI codes 900/901. It makes no behavioural commitment for either.`
+
+The other four bullets (Transport, Cert source, Logger sinks, MessageStore) are unchanged. The bullet
+is a scope statement, not a description of current behaviour, so it stays true when 2j lands.
+
+### E.5 Article XIV §3
+
+Before:
+`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.`
+
+After:
+`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and both are post-1.0 (Article XVIII §2). The control plane (gRPC) works without it.`
+
+### E.6 Article XVIII §1
+
+Before:
+`1. **v1.0 scope is locked:** FIX 4.0–5.0SP2 + FIXT.1.1 session + application layers, FIXS over TLS, the C ABI, Python bindings, the gRPC service wrapper, iceoryx2 SHM data plane (opt-in).`
+
+After:
+`1. **v1.0 scope is locked:** FIX 4.0–5.0SP2 + FIXT.1.1 session + application layers, FIXS over TLS, the C ABI, Python bindings. The gRPC service wrapper and the iceoryx2 SHM data plane are post-1.0 (§2; amended v4.0).`
+
+### E.7 Article XVIII §2 — one bullet added after `**v1.8 — FIX MMT**`
+
+`   - **Unscheduled — service wrapper** (`fixppd`: the gRPC control plane, the pluggable control-plane interface, the iceoryx2 SHM data plane). Planned post-1.0 with no version assigned (owner, 2026-10-22); not abandoned. *(Added v4.0, feature 094.)*`
+
+### E.8 `CHANGELOG.md` — new entry, newest first (directly after the `---` that follows the "Format follows" line)
+
+Pending form:
+
+```
+## Constitution v4.0 — Unreleased
+
+**Backwards-incompatible.** Article XX §4 major bump. Under v3.0 a PR that shipped the gRPC control
+plane or the iceoryx2 SHM data plane before the v1.0 tag shipped required scope and conformed. Under
+v4.0 both are post-1.0 roadmap items, and Article XVIII §5 reads "No early shipping of post-1.0
+protocols into v1.0", so the same PR does not conform. This is the constitution's version: it is not a C-ABI or
+library version.
+
+Pending Codex Gate A on feature 094 and the owner's sign-off. This heading reads `Unreleased` until
+both have happened.
+
+### Changed
+
+- **Article XVIII §1** — the gRPC service wrapper and the iceoryx2 SHM data plane leave the locked
+  v1.0 scope.
+- **Article XVIII §2** — the service wrapper becomes an unscheduled post-1.0 item with no version
+  slot. v1.1–v1.8 are unchanged.
+- **Article XIV §1** — the control plane, both its pluggable interface and its default gRPC
+  implementation, is post-1.0. v1.0 installs only the `ControlPlaneFactory` ABI anchor and the C-ABI
+  codes 900/901, with no behavioural commitment.
+- **Article XIV §3** — iceoryx2 SHM and sidecar mode are post-1.0.
+- **Article IV §4** — the service wrapper is opt-in and post-1.0.
+
+---
+```
+
+Flip form (the last commit before merge): the heading becomes
+`## Constitution v4.0 — <sign-off date>`, and the "Pending …" paragraph becomes
+`Ratified <date> (PR #<n>, feature 094), after Codex Gate A converged at round <n> and the owner signed off.`
+
+## F. Other surfaces (FR-004, FR-017, FR-018)
+
+Every edit here comes from the research R-12 sweep, where each hit has its disposition. Line numbers
+are at `9b176090`; every edit is same-line unless it says otherwise.
+
+### F.1 `.specify/architecture.md`
+
+- **:32** — append to the bullet: ` *(The gRPC service is post-1.0: Appendix Z-9.)*`
+- **:64** (module table, row 11) — the last cell `Yes (binary + gRPC schema)` becomes
+  `Yes (binary + gRPC schema) — post-1.0, Z-9`.
+- **:161** (namespace inventory, `fixpp::service`) — append to its third cell:
+  ` Post-1.0 except the installed \`ControlPlaneFactory\` anchor (Z-9).`
+- **:343** (§4.11 opening paragraph) — append:
+  ` ⚠️ **Post-1.0 (Z-9):** the whole module is on the post-1.0 roadmap; v1.0 installs only the \`ControlPlaneFactory\` anchor.`
+- **:357** — `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005.` becomes
+  `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005 (each \`dropped(post-v1.0, …)\`, Z-9).`
+- **:450** (§6 plugin table, `ControlPlane` row) — append to its last cell: ` Post-1.0 (Z-9).`
+- **:611** — `### 8.1 Control plane (gRPC, default)` becomes
+  `### 8.1 Control plane (gRPC, default) — post-1.0 (Z-9)`.
+- **:617** — `### 8.2 Data plane (iceoryx2, opt-in)` becomes
+  `### 8.2 Data plane (iceoryx2, opt-in) — post-1.0 (Z-9)`.
+- **:642** (§9.3) — `…, the C ABI, the gRPC control-plane proto.` becomes
+  `…, the C ABI. The gRPC control-plane proto is post-1.0 (Z-9).`
+- **:643** (§9.3) — `the iceoryx2 topic shape,` becomes
+  `the iceoryx2 topic shape (post-1.0 with the data plane, Z-9),`.
+- **:686** (§11 row 5) — append to its last cell: ` ⚠️ **Z-9: post-1.0 (constitution v4.0).**`
+- **:815–:816** (Z-3 body; same two lines, the line count is kept). Before:
+
+  ```
+  the surrounding scope has been revisited more than once since. ⚠️ **The disposition of the service
+  rows is a live decision that is not this file's to make** — do not read Z-3 as "dropped". It records
+  ```
+  After:
+  ```
+  the surrounding scope has been revisited more than once since. ⚠️ **Superseded by Z-9: the service
+  rows are post-1.0 and not abandoned (constitution v4.0, feature 094).** It records
+  ```
+- **New entry at the end of the file** (after "Provenance of Z-6..Z-8"; Appendix Z's rule puts
+  everything new there):
+
+  ```
+  ### Z-9 — the service module, §8.1/§8.2, §9.3's proto and the iceoryx2 tap are post-1.0
+
+  Constitution v4.0 (feature 094) places the service wrapper on the post-1.0 roadmap, unscheduled:
+  the `fixppd` daemon, the gRPC control plane, the pluggable `ControlPlane` interface and the iceoryx2
+  SHM data plane, with the iceoryx2 tap consumer (`Iox2Tap`, §4.9 / 2l) that rides it (Article IV §4,
+  Article XIV §1 and §3, Article XVIII §1–§2). The design in §4.11, §6, §8.1, §8.2 and §10 row 2j
+  stands as design; its timing is post-1.0. Catalogue rows SVC-001..005 read
+  `dropped(post-v1.0, planned, not abandoned: …)`. This supersedes Z-3's "live decision" sentence.
+
+  What v1.0 installs is the `ControlPlaneFactory` anchor, an empty polymorphic base with no
+  operations, and the C-ABI codes 900/901. `EngineConfig::control_plane_factory` holds one, and
+  nothing in `src/` reads it (L-094-1 in `spec/behaviors-and-limitations.md`).
+
+  **Re-derive:** `grep -n "service wrapper" .specify/constitution.md` for the timing;
+  `grep -rn control_plane_factory src/` (empty means the field is still unread);
+  `grep -rn "class ControlPlane\b" include/ src/` (empty means the interface still does not exist).
+  ```
+
+### F.2 `.specify/api-contract.md`
+
+- **:60** (§3.1 pluggable-interface bullet) — append:
+  ` *(Except \`ControlPlane\` and \`ControlPlaneFactory\`: the control plane is post-1.0 (constitution v4.0); v1.0 installs only the empty \`ControlPlaneFactory\` anchor, with no behavioural commitment.)*`
+- **:61** (gRPC proto bullet) — append: ` *(Post-1.0 with the service wrapper, constitution v4.0; not a v1.0 surface.)*`
+- **:67** (iceoryx2 topic shape bullet) — append: ` *(Post-1.0, constitution v4.0.)*`
+- **:113** (`fixpp::service` namespace row) — append to its second cell:
+  ` v1.0 installs only \`ControlPlaneFactory\`, an empty anchor; \`ControlPlane\`, \`ControlPlaneConfig\` and \`grpc_control_plane\` are post-1.0 (constitution v4.0).`
+- **:222** (`fixppd` row) — the last cell `Stable from v1.0` becomes `Post-1.0 (constitution v4.0)`.
+- **:248** (`ControlPlane` interface row) — append to its third cell: ` — post-1.0 (constitution v4.0)`.
+- **:249** (`ControlPlaneFactory` row) — the third cell `1 (\`make\`)` becomes
+  `1 (\`make\`) — post-1.0; v1.0 installs an empty anchor with no \`make\` (constitution v4.0)`.
+- **:272** (2j row) — append to its third cell:
+  ` (post-1.0, constitution v4.0; v1.0 ships only \`ControlPlaneFactory\` as an empty anchor, and the codes 900/901)`.
+- **:274** (2l row) — append to its third cell:
+  ` (\`Iox2Tap\`, \`TapShmRecord\` and the iceoryx2 service name are post-1.0, constitution v4.0)`.
+
+### F.3 Design-doc status headers (one same-line note each)
+
+- **`.specify/2j-controlplane.md:3`** (`**Status:**` line) — append:
+  ` **Timing (constitution v4.0, feature 094):** this design — the \`ControlPlane\` interface, its default gRPC implementation, the proto and \`fixppd\` — is post-1.0, unscheduled (Article XIV §1, Article XVIII §2). v1.0 installs only the \`ControlPlaneFactory\` anchor and the C-ABI codes 900/901, so read every "v1.0" statement below as a post-1.0 design statement.`
+- **`.specify/2l-tap.md:5`** (Status row) — the cell `Draft v0.4 — Gate A round 3 converged (Phase A)`
+  becomes `Draft v0.4 — Gate A round 3 converged (Phase A). **Timing (constitution v4.0, feature 094):** the iceoryx2 data plane (\`Iox2Tap\`, SVC-002), the gRPC-only mode (SVC-003) and every \`fixppd\` path below are post-1.0, unscheduled (Article XIV §3, Article XVIII §2); read each "binding v1.0 \`fixppd\`" statement as a post-1.0 design statement. The in-process tap (S-036, NFR-014) is not affected.`
+- **`.specify/2l-tap.md:54`** (non-goal 7) — append:
+  ` *(Both routes are post-1.0 — see Status. v1.0 has no cross-process route for a non-C++ tap consumer.)*`
+- **`.specify/2m-pybind.md:5`** (Status row) — append to the cell:
+  ` **Timing (constitution v4.0, feature 094):** \`fixppd\`, the gRPC control plane and the iceoryx2 tap are post-1.0, unscheduled; every route below that runs through them (§1.2, §7.10, §7.12, Q4, the tap docstring) is a post-1.0 design statement.`
+- **`.specify/2i-capi.md:3`** (`**Status:**` line) — append:
+  ` **Timing (constitution v4.0, feature 094):** 2j's control plane is post-1.0, unscheduled. The codes 900/901 stay reserved, and every route below that runs through 2j's control plane (cert/pinset rotation via \`ReloadCertSource\`, the gRPC control-plane registration on \`fixpp_engine_create\`) is a post-1.0 design statement.`
+
+### F.4 Public prose (`README.md`, `docs/src/intro.md`)
+
+- **`README.md:15`** — before:
+  `A modern C++23 FIX protocol library. Zero-copy parsing, lock-free hot paths, ABI-agnostic C interface, Python bindings (SWIG), and a gRPC+iceoryx2 service wrapper. Targets FIX 4.0 through 5.0SP2/FIXT.1.1 with ≥90% test coverage via TDD.`
+  After:
+  `A modern C++23 FIX protocol library. Zero-copy parsing, lock-free hot paths, ABI-agnostic C interface and Python bindings (SWIG); a gRPC+iceoryx2 service wrapper is planned after v1.0. Targets FIX 4.0 through 5.0SP2/FIXT.1.1, test-driven, under the per-PR coverage rule of constitution Article IX §1.`
+  (The "≥90%" figure is NFR-002's former 90/80, which `[const §IX.1]` superseded.)
+- **`docs/src/intro.md:3`** — `…, Python bindings, and a gRPC + iceoryx2 service wrapper. It covers …`
+  becomes `…, and Python bindings, with a gRPC + iceoryx2 service wrapper planned after v1.0. It covers …`.
+
+### F.5 Brain pages
+
+- **`brain/components/service.md`** — the paragraph "Whether the service rows are deferred or formally
   dropped is a **live decision recorded outside this repo** — this page deliberately does **not**
-  answer it." is replaced with the decision: SVC-001..005 are
-  `dropped(post-v1.0, planned, not abandoned)` (owner, 2026-10-21), and the constitution names the
-  wrapper unscheduled post-1.0 (v3.1, feature 094). The page cites the catalogue rows and the
-  constitution clause, not line numbers.
+  answer it. It records only that nothing is implemented." is replaced with:
+  `The decision is made: SVC-001..005 are \`dropped(post-v1.0, planned, not abandoned)\` (owner, 2026-10-21), and the constitution places the service wrapper and the control-plane interface unscheduled post-1.0 (Article XIV §1, Article XVIII §2; v4.0, feature 094). Nothing is implemented. The one v1.0 surface is the \`ControlPlaneFactory\` anchor, and \`EngineConfig::control_plane_factory\` is accepted and ignored (L-094-1).`
+  The paragraph above it ("Precisely: the public interface header exists …") stays. The page cites the
+  catalogue rows and the constitution clauses, not line numbers.
+- **`brain/components/dictionary.md`**:
+  - frontmatter `description:` becomes
+    `A substantial shipped subsystem whose catalogue status under-reported it until feature 094 reconciled D-001, D-003, D-007 and D-008 to done.`
+  - the title `dictionary — two loaders, a version registry, and a catalogue row that disagrees with the tree`
+    becomes `dictionary — two loaders, a version registry, and a catalogue that under-reported them`.
+  - the section heading `## ⚠️ The catalogue under-reports this family — a LEAD, not a verdict` stays,
+    and a line is added directly under it:
+    `> **Resolved 2026-10-22 by feature 094:** D-001, D-003, D-007 and D-008 now read \`done\`, each with its delivering PR and witnessing tests (\`spec/feature-catalogue.md\`). The table below is the 2026-08-29 observation that led there, kept as history.`
+  - the table and the notes under it stay as written (they are dated observations).
+- **`brain/components/nfr-and-tooling.md`** frontmatter — the `description:` clause
+  `and so nfr's uniform backlog is not mistaken for fact.` becomes
+  `and so a backlog cell in nfr is read as a lead, not as fact (feature 094 reconciled the rows that had shipped).`
+  The title stays: the ⭐ caution under it still applies to the rows left at `backlog`.
+- **`brain/components/nfr-and-tooling.md:57`** — the bullet "An out-of-repo planning tracker names a
+  set of these rows as *delivered practice, never flipped*, and schedules the flip as a catalogue edit
+  with **zero code**." is replaced with:
+  `- Feature 094 (2026-10-22) re-verified each candidate row against the tree and flipped the rows that shipped to \`done\`, worded to what shipped; the rows it left at \`backlog\` were checked and are not delivered (its \`spec.md\` FR-012 lists them).`
 
-## G. Licence marking (FR-013, FR-013a, FR-014)
+### F.6 `spec/behaviors-and-limitations.md` — new section at the end of the live file (FR-017, FR-018)
+
+`fixpp#<N>` is the issue FR-018 files before this edit is written; the entry is written with the real
+number, never with a placeholder.
+
+```
+## 094-v1-tier0-bookkeeping — the service wrapper is post-1.0; v1.0 installs only the control-plane anchor (2026-10-22)
+
+### Limitations
+
+- **L-094-1 — `EngineConfig::control_plane_factory` is accepted and ignored: nothing in the library reads it (fixpp#<N>).** The field is a `std::unique_ptr<fixpp::service::ControlPlaneFactory>`, null permitted (`include/fixpp/core/engine_config.hpp`). `ControlPlaneFactory` (`include/fixpp/service/control_plane_factory.hpp`) is an empty polymorphic base with no operations, and no code under `src/` reads the field, so a factory set there has no effect: no control plane starts, and nothing reports that none did. The control plane, its interface and its default gRPC implementation are post-1.0 (constitution v4.0, Article XIV §1; SVC-001..005 are `dropped(post-v1.0, planned, not abandoned)`); v1.0 keeps the type and the field as an ABI anchor with no behavioural commitment. **Re-derive:** `grep -rn control_plane_factory src/` (empty means still unread). **Status: follow-up** (fixpp#<N>: whether v1.0 should refuse a non-null factory, or document the field as reserved).
+```
+
+## G. Licence marking and the build files (FR-013, FR-013a, FR-013b, FR-014)
+
+All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuration files).
 
 - **The script:** `spdx_mark.py`, written in the orchestrator's scratchpad and dry-run against a
   scratch clone (research R-6). The phase-implementer copies it into its own working space and runs
   it on the branch. The script is not committed.
 - **C headers:** `include/fix/**/*.h` get `/* SPDX-License-Identifier: AGPL-3.0-or-later */` as line 1.
   All other files get `// SPDX-License-Identifier: AGPL-3.0-or-later`.
-- **`conanfile.py`:** `license = "AGPL-3.0-only"` becomes `license = "AGPL-3.0-or-later"`.
+- **`conanfile.py:8`:** `license = "AGPL-3.0-only"` becomes `license = "AGPL-3.0-or-later"` (in the
+  SPDX commit).
+- **`cmake/FixppPackaging.cmake:408`:** `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")` becomes
+  `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0-or-later")` (in the SPDX commit). `AGPL-3.0` is the
+  deprecated SPDX short id for AGPL-3.0-only and is the `License:` tag of the RPM the packaging lane
+  builds. No test, CI script or tool pins either string (research R-12).
+- **`conanfile.py:97–98` (owner, 2026-10-22; FR-013b) — a separate commit, message referencing
+  `Refs #607` with no closing keyword.** Before:
+
+  ```
+      # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
+      # collide with system versions and add resolution time. Restore in Phase 5.
+  ```
+  After (three lines; `tool_requires = []` moves from line 99 to line 100):
+  ```
+      # cmake and ninja come from the system (apt in CI); swig is provisioned by each
+      # workflow at the minimum bindings/python/CMakeLists.txt requires. Conan-pinned
+      # tools collide with system versions and add resolution time. Restore in Phase 5.
+  ```
+  `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no line citation of the file, so the
+  moved line breaks no citation.
 - **`tools/capi_freeze.sha256`:** regenerated with `sha256sum` over the same 12-file set, in the
   manifest's existing order and two-space format.
+- `include/fixpp/service/control_plane_factory.hpp` already carries the AGPL identifier, so it is not
+  in the 53-file set and stays byte-unchanged (FR-003b).
+
+## H. Claim → witness map (FR-015b)
+
+The verify record carries this table in full, one row per clause of each flipped row's Title or
+version column, and fills the last column with the `file:line` of the `EXPECT`/`ASSERT` (or the CI
+step's `if:` and command) it ran. A clause with no mapped assertion does not flip as worded: it is
+narrowed, and the narrowing goes into the owner report. Rows read during Gate A round 1 are filled in
+here; the others carry the witness to read.
+
+| Row | Clause | Witness | Assertion / step |
+|---|---|---|---|
+| NFR-001 | C++23 | `CMakeLists.txt` | `CMAKE_CXX_STANDARD 23` + `CMAKE_CXX_STANDARD_REQUIRED ON` |
+| NFR-001 | CI on the platform matrix, required before merge | tier1/tier2 workflows; branch protection | job/leg names; `required_status_checks` lists tier1/2/3-required |
+| NFR-002 | the obligation is recorded per PR | parent repo (private) 563-564 / 536-537-538 verify records | the T7.7 / T6.7 tables (lines and branches) |
+| NFR-003 | ASan/UBSan/TSan legs run `-LE packaging` | tier1.yml `linux` legs | the ctest step's command, read at verify |
+| NFR-003 | an unexplained report fails the leg | tier1.yml step "Peak memory + unexplained-sanitizer gate" | `ci/peak-memory-report.sh` exit status, read at verify |
+| NFR-005 | zero allocation on the gated windows | tier1.yml #448 steps | `if: matrix.preset == 'linux-gcc-release' \|\| matrix.preset == 'linux-clang-release'`; `ctest … -L mallocnesia --no-tests=error` |
+| NFR-011 | XmlLoader routes through the resource | PmrAllocation.EveryByteFromMr | read at verify |
+| NFR-011 | OrchestraLoader accepts a resource | `include/fixpp/dict/orchestra_loader.hpp` | `load(path, std::pmr::memory_resource* mr, …)` signature |
+| NFR-011 | parse arena / MemoryStore / decimal accessor | the cells in the Tests cell | read at verify |
+| NFR-013 | ASIO transport on Linux and Windows | `tests/transport/` on tier1 `linux` and tier2 `windows` | read at verify |
+| D-001 / D-003 / D-007 / D-008 | each Title clause | the cells in each Tests cell | read at verify |
+| TC-003 | 3b/3c/3e disregarded, NextNumIn unchanged, connection open | InboundFrameDispositionsTc.TC003_3* | read at verify |
+| TC-005 | NextNumIn incremented (FIX.4.4) | CapiC7Witness.Row6_InboundRejectTrafficKeepsTheSessionUp | `row6_cell` writes Rejects at rising `seq`, then `order(seq, …)`; `expect_kept_up`: `EXPECT_TRUE(o.received)` |
+| TC-005 | no Reject of a Reject; session continues | TC005Reject.Fix42_7_* / Fix44_7_*; SessionReject.NoRejectLoopOnInboundReject; FsmMatrixWitness.Active_InboundReject_LogOnly_StaysActive | `tc_reject_test.cpp`: "must not trigger outbound Reject (I-5)", "must stay Active"; `session_reject_test.cpp`: `EXPECT_EQ(f.transport.sent_count(), before)`, `EXPECT_EQ(sess.state(), fsm_state::Active)`; `fsm_matrix_witness_test.cpp`: `EXPECT_EQ(sess.state(), fsm_state::Active)` only |
+| TC-006 / TC-008 / TC-012 / TC-014 / TC-015 | each Title clause | the cells in each Tests cell | read at verify |
+| TC-017 | 0 and absent accepted | InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted, .AbsentEncryptMethodAccepted | read at verify |
+| TC-017 | ≠0 refused, in-domain | InterpretLogonEncryptMethod.NonZeroEncryptMethodRejected (98=2) + FsmMatrixWitness.NC_InboundRefusedLogon_* / LS_InboundRefusedLogon_* | parser: `session_invalid_logon`; session arm: `EXPECT_EQ(sess.state(), fsm_state::Disconnected)` |
+| TC-017 | ≠0 refused, out of domain | EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished | `EXPECT_TRUE(has_reject_with_reason(5))`, `EXPECT_EQ(reject_ref_tag_id(5), 98)`, `EXPECT_NE(s, fsm_state::Active)` |

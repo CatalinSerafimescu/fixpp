@@ -4,6 +4,9 @@ Every decision below is either an owner ruling (dated) or a measurement with its
 measurement contradicts the verification file or an owner wording, the measurement is stated, and the
 deviation goes into the owner report (R-3).
 
+Paths into the owner's research repository are labelled **parent repo (private)**: the library is
+public, so a reader of it cannot open them.
+
 ## R-1 — Gate A runs, although the brief said "short spec + Gate B"
 
 - **Decision:** run `/gate-a` on the bundle, which includes the amendment.
@@ -11,28 +14,36 @@ deviation goes into the owner report (R-3).
   precedent covered only an additive amendment outside every Appendix A trigger. This one narrows a
   *locked* scope (`[const §XVIII.1]`, `[const §XVIII.4]`: "Roadmap changes are constitution
   amendments"), so Gate A is not optional.
-- **Alternatives:** a standalone `Constitution: amend …` PR. Rejected: the owner wanted one docs PR,
-  and the 035/043/069 precedents rode feature branches with the deviation recorded (FR-003a).
+- **PR form (owner, 2026-10-22):** the 094 PR is titled in `[const §XX.2]` form,
+  `Constitution: amend §IV.4, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0 (+ 094 Tier-0 bookkeeping)`,
+  and its description states the change, the rationale and the affected rows and specs. §XX.2's four
+  steps are then met literally, so there is no deviation to record (FR-003c).
+- **Rejected:** a standalone `Constitution: amend …` PR, because the owner wanted one PR carrying
+  DECISION 1 and the flips. Also rejected: riding a feature branch as a recorded §XX.2 deviation, the
+  first draft's form. Its precedents (035, 043, 069, and 068, 074–082) were all MINOR, while every
+  MAJOR amendment so far was a standalone PR (v1.0 #285, v2.0 #451, v3.0 #500), so they did not cover
+  a MAJOR amendment (Gate A round 1, N-3).
 
-## R-2 — Amendment classification (`[const §XX.4]`): MINOR, v3.0 → v3.1 (proposed; Gate A decides)
+## R-2 — Amendment classification (`[const §XX.4]`): MAJOR, v3.0 → v4.0
 
-- **Test applied:** the reading recorded in v1.0's and v3.0's Sync Impact Reports. An amendment is
-  backwards-incompatible when a PR that conformed under the old text does not conform under the new
-  one (a tightening). §4 names two such classes: banned-pattern additions and perf-budget tightening.
-- **Argument:**
-  - The amendment removes items from v1.0 scope and adds one unscheduled roadmap line. No banned
-    pattern is added and no budget changes.
-  - No PR that conformed under v3.0 stops conforming: nothing in the tree implements the service
-    wrapper (`src/service/` is an INTERFACE stub), and the installed interface header and C-ABI codes
-    900/901 are kept (FR-003b).
-  - The change loosens in one direction only: a v1.0 tag without a gRPC service, non-conformant under
-    v3.0, becomes conformant.
-- **Counter-argument recorded, for Gate A to weigh:** a reader of v3.0 was promised a v1.0 service
-  wrapper, and withdrawing a promise could be called incompatible for that reader. It is not a §4
-  class. No downstream consumer exists before the first public release (`[const §X.7]`'s pre-release
-  posture), so nothing outside the project depended on the promise.
-- **Consequence:** MINOR needs no `CHANGELOG.md` entry. If Gate A reclassifies it MAJOR, the bump
-  becomes v4.0 and an entry is added. Either outcome is mechanical.
+- **Test applied:** the reading the v1.0, v2.0 and v3.0 Sync Impact Reports set. It asks whether a
+  *hypothetical* PR that was mergeable under the old text fails under the new one, not whether an
+  existing PR stops conforming. Making a previously mergeable change fail is a tightening even when
+  the same amendment also loosens.
+- **The hypothetical PR:** under v3.0, a PR that ships SVC-001's gRPC control plane before the tag
+  ships required scope (`[const §XVIII.1]`) and conforms. Under v4.0 it fails twice:
+  - §IV.4 and §XIV.1 place the control plane post-1.0 outright;
+  - the wrapper becomes a §XVIII.2 roadmap item, and `[const §XVIII.5]` reads "**No early
+    shipping** of post-1.0 protocols into v1.0 to 'get them done.'"
+- **Is there a MINOR wording?** Only a carve-out such as "may ship in any release, §5 does not
+  apply". That contradicts the owner's ruling, which places the wrapper post-1.0. So no faithful MINOR
+  wording exists.
+- **Consequence:** v4.0, with a `CHANGELOG.md` entry (data-model §E.8). The Sync Impact Report reads
+  PENDING until Gate A converges and the owner signs off, and the flip to RATIFIED is the last commit
+  before merge (the v1.0 precedent).
+- **History, recorded in the SIR:** the first draft classified the amendment MINOR (v3.1) by the
+  existing-PR reading. Codex and the Opus judge both raised it at Gate A round 1 (P1). This is the
+  fourth consecutive amendment whose draft was corrected from MINOR to MAJOR at round 1.
 
 ## R-3 — TC version columns follow what is witnessed (FR-006a)
 
@@ -62,11 +73,17 @@ versions.
 | TC-012 | 4.2 (`PossDupTestBase::make_cfg`) | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` | narrower |
 | TC-014 | 4.4 (`ResetOnLifecycleTest` fixture) | `4.4 witnessed; 4.2, FIXT.1.1 not witnessed` | narrower |
 | TC-015 | 4.2 (`ParityAcceptorFixture`) | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` | **narrower** (owner: "4.2, 4.4 witnessed") |
-| TC-017 | 4.4 (`interpret_logon` called with `expected_begin = "FIX.4.4"`; pure parser test) | `4.4 witnessed; 4.2, FIXT.1.1 not witnessed` (FIX-TC 17 is optional) | narrower |
+| TC-017 | 4.4 (`interpret_logon` called with `expected_begin = "FIX.4.4"`; the enum-validation cell feeds a FIX44 Logon). The two `FsmMatrixWitness` refused-Logon cells run on a FIX.4.2 session (`kBeginStr = "FIX.4.2"`) but refuse for a non-98 cause, so they witness the Disconnected ending, not EncryptMethod, and add no BeginString to the 98 claim | `4.4 witnessed; 4.2, FIXT.1.1 not witnessed` (FIX-TC 17 is optional) | narrower |
 
-**On record:** the unwitnessed versions are required by FIX-TC §4.1. They are filed as **fixpp#614**
-(labels `enhancement`, `follow-up`), and every TC Verified cell names it. That satisfies the owner's
-narrowing rule (owner 2026-10-21: "on record … and named in the row's Verified cell").
+**On record:** the unwitnessed versions are required by FIX-TC §4.1. They are filed as **fixpp#614**,
+and every TC Verified cell names it (R-10 has the issue's state). That satisfies the owner's narrowing
+rule (owner 2026-10-21: "on record … and named in the row's Verified cell").
+
+**Versions the old column named and FIX-TC does not require.** The old columns read "4.0–5.0SP2,
+FIXT.1.1". FIX-TC §4.1 says the document "is applicable to all supported versions of the FIX session
+layer (4.2, 4.4, FIXT)" (`FIX_Session_Testcases_June_2020.pdf`, parent repo (private) `research/`,
+read with `pdftotext` 2026-10-22). So 4.0, 4.1, 4.3, 5.0 and 5.0SP1 are not required by FIX-TC, and
+each TC Verified cell says so (data-model `<TC-SCOPE>`).
 
 The owner's text added "FIXT.1.1 shares the code path". That is a claim about the code, and this
 feature has measured it nowhere, so the columns say "not witnessed" and nothing more. A reader who
@@ -84,14 +101,16 @@ Census side-findings, recorded for the verify record:
   It parses every catalogue table row by the header's column names, and splits on unescaped `|`.
   Classes: `done`; `postv1` (Status starts `dropped(post-v1.0, planned, not abandoned`); `dropped`;
   `open` (anything else).
-- **Base (`9b176090`):** 276 rows, no duplicate IDs. OFFICIAL: done 152, dropped 1, open **94**, which
-  matches the tracker's re-derived figure. Two rows (C-002, T-042) have a literal `|` inside a cell
-  and do not split. Both are `done` and outside this feature, so the open count is complete. The
-  verify record states this rather than hiding the two SHAPE lines.
+- **Base (`9b176090`):** 276 rows, no duplicate IDs. OFFICIAL: done **152 parsed / 154 actual**,
+  dropped 1, open **94**, which matches the tracker's re-derived figure. Two rows (C-002, T-042) have
+  a literal `|` inside a cell and do not split, so the parser skips them. Both are `done` and outside
+  this feature, which is why the actual done count is two higher and the open count is complete. The
+  verify record states both figures rather than hiding the two SHAPE lines (Gate A round 1, N-9:
+  reproduced independently by a header-free split over `git show 9b176090:spec/feature-catalogue.md`).
 - **Known positive:** a mutant copy with NFR-001 set to `done` and W-015 set to the drop form reads
   open 92 and postv1 1. Each class moves by exactly the injected change.
 - **Expected after 094:** OFFICIAL open **69** (−25), postv1 **8** (7 + NFR-019), dropped 1, done
-  **170** (+18).
+  **170 parsed / 172 actual** (+18).
 
 ## R-5 — Catalogue parsers survive the drop form
 
@@ -104,19 +123,24 @@ Census side-findings, recorded for the verify record:
     yields the bundle `094-v1-tier0-bookkeeping`.
   - Verify runs it before and after.
 
-## R-6 — Line motion from the SPDX inserts (dry run, scratch clone)
+## R-6 — Line motion (dry run, scratch clone)
 
 - **Method:** `git clone --shared` of the branch into the scratchpad, apply `spdx_mark.py`, commit, run
   `tools/check_line_citations.py --shift-audit HEAD~1..HEAD`.
-- **Result:**
+- **Result for the SPDX commit:**
   - 53 files change: 37 inserts (10 `/* … */` C headers, 27 `//`) and 16 identifier replacements.
   - Post-state census: 0 files missing AGPL, 0 carrying another identifier.
   - Shift audit: **GATE PASSED**, 175 rotted citations reported and **0 charged**. All 175 are cited
     from archival `specs/<id>/` bundles, which are point-in-time records and stay as written.
-  - No `brain/`, `spec/`, `.specify/` or source-comment citation moves.
-- **Still to run at verify:** the parent's `tools/brain-external-sweep.sh` (refs_external), and the
-  shift audit again over the real branch range. The constitution edit moves `.md` lines, which check
-  [1] does cover.
+- **Not yet run, and the known trigger (Gate A round 1, N-10):** the docs edits.
+  - The new Sync Impact Report at the top of `constitution.md` shifts every line of that file.
+  - `tools/check_line_citations.py` carries fixture strings that name `constitution.md:456` (one
+    without a `citation-ok` marker), `constitution.md:335` and `2j-controlplane.md:902` / `:22`.
+  - Every other docs edit is same-line (data-model §F), so `2j-controlplane.md` and
+    `architecture.md` lines above Appendix Z do not move. The `conanfile.py` comment gains one line;
+    `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no citation of it.
+  - So the docs commits get their own `--shift-audit` on a scratch commit before the PR (quickstart
+    §5), and again over the real branch range at verify.
 
 ## R-7 — C-ABI freeze
 
@@ -126,15 +150,23 @@ Census side-findings, recorded for the verify record:
 - The exported symbol set is unchanged by construction. Verify confirms it with the repo's C-ABI
   occupancy check and a symbol diff of `libfixpp_capi` built before and after.
 
-## R-8 — Provenance of the 37 unmarked files
+## R-8 — Provenance and relicensing basis
 
 - The grep for `copyright|derived from|adapted from|ported from|licen[cs]e|BSL|boost software` across
-  the 37 files gives one hit, `peer_identity.hpp` ("value type derived from a verified peer cert").
-  That is prose, not provenance.
-- The `atomic_shared_ptr` spike in the parent (`research/G19-fix-fpml-iso20022/atomic-shared-ptr/`)
-  carries no licence or copyright text.
+  the 37 unmarked files gives one hit, `peer_identity.hpp` ("value type derived from a verified peer
+  cert"). That is prose, not provenance.
+- The `atomic_shared_ptr` spike in the parent (parent repo (private)
+  `research/G19-fix-fpml-iso20022/atomic-shared-ptr/`) carries no licence or copyright text.
 - `[const §V.4]` vendored code (`async_mutex`, BSL-1.0 attribution) is already SPDX-marked and is not
   in the set.
+- **The 16 Apache-2.0 files have one author.** `git log --format='%an <%ae>'` over them gives only
+  Catalin Serafimescu, under two addresses (123 per-file commit entries). The owner holds the copyright, so the
+  relicense is the owner's to make.
+- **The relicense applies from this commit on.** fixpp is public, so versions already published
+  under Apache-2.0 keep that grant for anyone who has them. The PR body says so (FR-019).
+- **Out of scope, on record for the owner:** 40 files outside `src/`/`include/` still carry
+  `SPDX-License-Identifier: Apache-2.0` (37 under `tests/`, 3 under `bench/`;
+  `git grep -l "SPDX-License-Identifier: Apache-2.0" -- ':!src/' ':!include/' ':!specs/'`).
 
 ## R-9 — Delivering PRs resolved from GitHub (`gh pr view <n> --json mergeCommit`)
 
@@ -142,6 +174,7 @@ Census side-findings, recorded for the verify record:
 |---|---|---|
 | #66 | `ae4c9a56` (merge commit) | 002-dictionary-xml-loader |
 | #67 | `b8a3b251` (merge commit) | 003-dictionary-codegen |
+| #68 | `2a6f76c7` (merge commit) | 004-wire-codec |
 | #77 | `718195f9` | 008-message-store |
 | #82 | `ba2222d6` | 009-session-fsm-finalize (005 FSM) |
 | #85 | `53e25b1e` | 012-2h-transport |
@@ -154,57 +187,230 @@ Census side-findings, recorded for the verify record:
 | #121 | `795cde1b` | 037-resend-reply-possdup-tags |
 | #134 | `95aa1c38` | 043-plaintext-tcp-transport |
 | #139 | `fb043752` | tests/fix-tc-coverage-gaps-2 |
+| #166 | `ff19ae58` | the oldest commit adding `tier2-required` (`git log --reverse -S tier2-required -- .github/workflows/tier2.yml`) |
 | #282 | `a776d0af` | ci/sanitizer-counter-fail-closed |
 | #478 | `a8fe9f79` | fix/448-mallocnesia-gates-in-ci |
 | #554 | `e84991bf` | 093-inbound-frame-dispositions |
 | #572 | `2e4d15c6` | 544-hot-path-zero-alloc |
 | #609 | `9b176090` | 536-537-538-recovery-liveness |
 | — | `a476bd30` | Phase 3 Step 3 CI matrix (pre-PR infra) |
+| — | `96dd8aed` | `ci(tier1): add tier1-required gate` (direct push; oldest `-S tier1-required` hit) |
+| — | `27f8701d` | `ci: restore pull_request trigger + uniform Gate A∧B gate (all 3 tiers)` (direct push) |
+
+Enforcement read 2026-10-22: `gh api repos/CatalinSerafimescu/fixpp/branches/main/protection/required_status_checks --jq .contexts`
+lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-label checks.
 
 ## R-10 — Residuals on record (checked 2026-10-22)
 
-- **Open issues:** #555, #565, #569, #580, #588, #612 (`gh issue view`).
-- **Live B&L entries** (defined in `spec/behaviors-and-limitations.md`): L-003-2, L-022-1, L-497-1 (the
-  open half; its resolved half moved to the closed file), L-002-4, B-043-1, B-005-7, B-495-3, B-544-1,
-  L-019-4.
+- **Open issues:** #555, #565, #569, #580, #588, #612, #263 (`gh issue view`).
+- **#614 snapshot** (`gh issue view 614 --repo CatalinSerafimescu/fixpp`, 2026-10-22): **OPEN**,
+  created 2026-10-22T08:46:26Z, labels `enhancement`, `follow-up`, title "FIX-TC witnesses drive one
+  BeginString per row: no FIX 4.4/4.2 or FIXT.1.1 cell for TC-003/005/006/008/012/014/015/017". The
+  verify record repeats this snapshot, since the library cannot show an issue's state. #614 is not yet
+  placed in parent repo (private) `phases/phase-4/issue-batches.md`; close-out places it (plan.md).
+- **Live B&L entries** (defined in `spec/behaviors-and-limitations.md`, the live file): L-003-2,
+  L-022-1, L-497-1 (the open half; its resolved half moved to the closed file), L-002-4, B-043-1,
+  B-005-7, B-495-3, B-544-1, L-019-4.
+- **New, filed at implement (FR-018):** the issue behind L-094-1 (`EngineConfig::control_plane_factory`
+  is accepted and ignored).
 
-## R-11 — The 47 cited tests exist
+## R-11 — The 50 cited tests exist
 
 - The grep required `TEST*(Suite, Name` with the name half. A negative control
   (`InboundPossResendTest.NoSuchCellXyz`) reported MISSING; the first version of the grep, which only
   matched the suite, had passed it.
-- 46 matched directly. `TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues` exists
-  but its `TEST(` declaration is line-wrapped.
+- 46 of the first 47 matched directly. `TC003_3c_GarbledBeginStringBeforeAGoodFrame_DisregardedAndContinues`
+  exists but its `TEST(` declaration is line-wrapped.
+- Added at Gate A round 1 for TC-017, each read in the file: `FsmMatrixWitness.NC_InboundRefusedLogon_BeginStringMismatch_TransitionsToDisconnected`
+  (`tests/session/fsm_matrix_witness_test.cpp`), `FsmMatrixWitness.LS_InboundRefusedLogon_TransitionsToDisconnected`
+  (same file), `EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished`
+  (`tests/session/test_enum_validation_logon.cpp`). Both files are sources of `session_pure_tests`.
 - **NFR-011 witnesses:**
-  - `PmrAllocation.EveryByteFromMr` (dictionary loader)
+  - `PmrAllocation.EveryByteFromMr` (XmlLoader)
+  - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,
+    `include/fixpp/dict/orchestra_loader.hpp`). Its tests pass a `std::pmr::monotonic_buffer_resource`;
+    none asserts where the allocations land.
   - `WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena` (parse arena)
   - `MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr`
   - `MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull` (MemoryStore)
   - `CodegenTypedAccessor.DecimalAccessorTakesMemoryResource` (typed decimal accessor)
 
-## R-12 — Surfaces naming the dropped scope (FR-004 sweep)
+## R-12 — The cross-surface sweep (FR-004)
 
-Command: `grep -niE "grpc|iceoryx|service wrapper|control plane|sidecar|io_uring"` over
-`.specify/constitution.md`, `.specify/architecture.md`, `.specify/2j-controlplane.md`,
-`.specify/2h-transport.md`, `README.md`, `brain/`.
+### Recipe
 
-- **Constitution (amended, FR-003):**
-  - §IV.4
-  - §XIV.1 (control-plane bullet)
-  - §XIV.3
-  - §XVIII.1
-  - §XVIII.2 (new line)
-  - §IV.2 ("foundation for … the service wrapper") and §XIII.3 ("control-plane handlers" as an example
-    of out-of-session code paths) are kept. Neither states v1.0 scope.
-- **`.specify/architecture.md`:**
-  - "Stable from v1.0: … the gRPC control-plane proto" gets an annotation.
-  - §8.1/§8.2 (design, not timing) get a one-line pointer.
-  - Row 11 of the module table and the §11 row-5 disposition are left as design records. The
-    appendix erratum pattern (Appendix Z) carries the pointer.
-- **`.specify/2j-controlplane.md`:** status header gets a pointer. The design stands, and its default
-  implementation is post-1.0.
-- **`brain/components/service.md`:** "a live decision recorded outside this repo" is replaced by the
-  decision.
-- **`.specify/2h-transport.md`:** its io_uring line is an example ("e.g., epoll-driven or
-  io_uring-driven"), not a v1.0 claim, so it is kept.
-- **`README.md`:** 0 hits.
+Over every tracked file outside `specs/`, two greps:
+
+```
+# (a) dropped-scope terms
+git grep -n -i -I -E "grpc|iceoryx|service wrapper|fixppd|sidecar|control[- ]plane" -- ':!specs/'
+git grep -n -i -I -E "io_uring|liburing" -- ':!specs/'
+# (b) every changed or added row ID (25 changed + NFR-019)
+git grep -n -w -I -E "W-015|W-016|SVC-00[1-5]|NFR-00[1235]|NFR-01[139]|D-00[1378]|TC-00[3568]|TC-01[2457]" -- ':!specs/'
+# (c) licence metadata
+git grep -n -I -E "AGPL-3\.0-only|CPACK_RPM_PACKAGE_LICENSE|license *=" -- ':!specs/'
+```
+
+`git grep` is used because it searches tracked files only and needs no `xargs`. ⚠️ The first attempt
+piped `git ls-files` into `xargs command grep`, which returned **0 lines**: `command` is a shell
+builtin, so `xargs` could not run it (`xargs: command: No such file or directory`, exit 127). A zero
+from that pipeline would have been read as "no surfaces". It is recorded here because it is this
+repository's most common instrument defect.
+
+### Proof the instrument fires
+
+- (a): `README.md:15` ("… and a gRPC+iceoryx2 service wrapper"). The first draft's sweep reported
+  "`README.md`: 0 hits" for the same file; this one reports it.
+- (b): `brain/components/dictionary.md:75` (`D-007` … `backlog`).
+- Counts at `9b176090` (the branch carries only `specs/` commits): (a) **647** lines in 77 files, plus
+  **4** io_uring lines; (b) **330** lines in 64 files; (c) the two licence lines below.
+
+### Disposition classes
+
+- **edit** — exact target text in data-model §D, §E, §F or §G.
+- **header** — covered by one same-line timing note in the document's status header (data-model
+  §F.3); the hit is a design statement about the post-1.0 release.
+- **keep** — states no v1.0 scope and no old status of a changed row; the reason is given.
+- **other concept** — the term means something else here (the engine's control strand, the OTLP gRPC
+  exporter, a capture "sidecar" file, a `.sha256` sidecar).
+- **pattern FP** — the regex matched an unrelated token (`_FixppDecimalT` for `fixppd`,
+  `kGrpClassStart` for `grpc`, base64 in a `.pem`; `-w` matching `NFR-003` in `NFR-003-3`).
+
+### Hits that state scope or status, one per row
+
+| Hit | Says | Disposition |
+|---|---|---|
+| `.specify/constitution.md:415` §IV.4 | gRPC is the control-plane transport | edit (§E.3) |
+| `.specify/constitution.md:587`, `:589` §XIV.1 | control plane, default gRPC, v1.0 | edit (§E.4) |
+| `.specify/constitution.md:594` §XIV.3 | iceoryx2 sidecar | edit (§E.5) |
+| `.specify/constitution.md:680` §XVIII.1 | the gRPC service wrapper is locked v1.0 scope | edit (§E.6) |
+| `.specify/constitution.md` §XVIII.2 | the roadmap has no wrapper line | edit (§E.7) |
+| `.specify/constitution.md:413` §IV.2 | the C ABI is "the foundation for … the service wrapper" | keep: a dependency direction, no timing |
+| `.specify/constitution.md:579` §XIII.3 | "control-plane handlers" as an example | keep: an example of out-of-session code |
+| `.specify/constitution.md` §XVIII.5 | no early shipping of post-1.0 protocols | keep: unchanged, reaches the wrapper through §2 (R-2) |
+| `.specify/architecture.md:32` | "the gRPC service" among the public surfaces | edit (§F.1) |
+| `.specify/architecture.md:64` | module row 11, `fixppd` gRPC + iceoryx2 | edit (§F.1) |
+| `.specify/architecture.md:161` | `fixpp::service` interfaces | edit (§F.1) |
+| `.specify/architecture.md:343`, `:357` | §4.11 module and its rows | edit (§F.1) |
+| `.specify/architecture.md:450` | §6 plugin table, `ControlPlane` default gRPC | edit (§F.1) |
+| `.specify/architecture.md:611`, `:617` | §8.1, §8.2 headings | edit (§F.1) |
+| `.specify/architecture.md:642` | §9.3 "Stable from v1.0 … the gRPC control-plane proto" | edit (§F.1) |
+| `.specify/architecture.md:643` | §9.3 Provisional "the iceoryx2 topic shape" | edit (§F.1) |
+| `.specify/architecture.md:686` | §11 row 5, ControlPlane shape "Phase 2" | edit (§F.1) |
+| `.specify/architecture.md:815–816` | Z-3 "a live decision … do not read Z-3 as dropped" | edit (§F.1); new Z-9 at the end |
+| `.specify/api-contract.md:60`, `:61`, `:67` | §3.1 Stable from v1.0: `ControlPlane`, `ControlPlaneFactory`, the proto; §3.2 iceoryx2 topic | edit (§F.2) |
+| `.specify/api-contract.md:113`, `:222`, `:248`, `:249`, `:272`, `:274` | `fixpp::service` row, `fixppd` "Stable from v1.0", interface rows, 2j/2l rows | edit (§F.2) |
+| `.specify/2j-controlplane.md` (225 lines) | the control-plane design, "v1.0 RPC surface" (§1 goal 4) | header (§F.3) |
+| `.specify/2l-tap.md:54` | non-goal 7: non-C++ tools use iceoryx2 or gRPC in v1.0 | edit (§F.3) |
+| `.specify/2l-tap.md:568`, `:806`, `:813`, `:977`, `:1151` | "binding v1.0 `fixppd` path" | header (§F.3) |
+| `.specify/2m-pybind.md:53`, `:917–918`, `:1394–1396`, `:1406`, `:1476` | Python reaches control plane / tap through `fixppd` in v1.0 | header (§F.3) |
+| `.specify/2i-capi.md:89`, `:1544`, `:1574`, `:1674` | rotation and engine registration through 2j's control plane | header (§F.3) |
+| `spec/coverage-index.md:652` | SVC-005 "Stable from v1.0" proto, "v1.0 RPC surface" | edit (§D) |
+| `spec/coverage-index.md:405` | "TC-003 stays backlog" | edit (§D) |
+| `spec/coverage-index.md:410–413` | `005-defer` on scenarios 8–11 | edit (§D) |
+| `spec/coverage-index.md:421`, `:436` | TC-012 "remains backlog" | edit (§D) |
+| `spec/coverage-index.md:435` | 005 ledger, scenarios 8–11 | edit (§D) |
+| `spec/feature-catalogue.md:285–289` | SVC-001..005 at `backlog` | edit (§A) |
+| `spec/feature-catalogue.md` rows of the 18 flips, NFR-013 | old Status/Title | edit (§C) |
+| `README.md:15` | "and a gRPC+iceoryx2 service wrapper"; "≥90% test coverage" (NFR-002's old figure) | edit (§F.4) |
+| `docs/src/intro.md:3` | "and a gRPC + iceoryx2 service wrapper" | edit (§F.4) |
+| `brain/components/service.md` | "a live decision recorded outside this repo" | edit (§F.5) |
+| `brain/components/dictionary.md:3–4`, `:75–77` | D-007 "says backlog"; D-003/D-008 `backlog` | edit (§F.5) |
+| `brain/components/nfr-and-tooling.md:4` (frontmatter) | "so nfr's uniform backlog is not mistaken for fact" | edit (§F.5) |
+| `brain/components/nfr-and-tooling.md:57` | "an out-of-repo planning tracker … schedules the flip" (no row ID: found by the Opus review, outside both greps) | edit (§F.5) |
+| `cmake/FixppPackaging.cmake:408` | `CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0"` (AGPL-3.0-only) | edit (§G) |
+| `conanfile.py:8` | `license = "AGPL-3.0-only"` | edit (§G) |
+| `include/fixpp/core/engine_config.hpp:171` | `control_plane_factory` member, read by nothing in `src/` | new limitation L-094-1 (§F.6) + issue (FR-018) |
+
+### Hits kept, by file group
+
+| Group | Lines | Why kept |
+|---|---|---|
+| `.specify/2j-controlplane.md:1452–1469`, `:1682`; `.specify/2k-log-otel.md:1695`, `:1703`, `:1729`, `:1737` | SVC rows at `backlog` inside the docs' Appendix D drop-in blocks | historical proposals; 2j's header note covers 2j, and 2k's copies propose nothing about timing |
+| `.specify/2k-log-otel.md` (rest of 39) | OTLP gRPC exporter; `StreamLogs` deferred to v1.x | other concept / already deferral |
+| `.specify/2d-threading.md`, `2f-async-mutex*.md`, `563-564-callback-send.md`, `2e-msgstore.md:1833` | "control-plane handlers", engine control strand | other concept |
+| `.specify/2e-msgstore.md:1132`, `:1284`; `544-hot-path-zero-alloc.md:1875` | "sidecar" audit entry / private sidecar | other concept |
+| `.specify/2g-tls.md:59`, `:1056–1058`, `:1152` | runtime cert reload owned by 2j | keep: ownership, no v1.0 timing; in-process rotation (T-040) is done, and Z-9 / 2j's header give the timing |
+| `.specify/2h-transport.md` (9), `.specify/2c-codegen.md:1795–1903`, `2a-decimal.md`, `2b-wire.md:724` | 2j cross-references, control-plane examples | keep: ownership or examples |
+| `.specify/2b-wire.md:51` | W-015, W-016 post-v1 | keep: already post-1.0 |
+| `.specify/architecture.md:6`, `:62`, `:79`, `:347–355`, `:451`, `:469`, `:518`, `:580–603`, `:614–621`, `:663`, `:665` | the service design, the boundary rule, `fixppd` "not yet built" | keep: design, covered by the edited headings and Z-9; the AGPL boundary rule still governs the installed `fixpp::service` |
+| `.specify/api-contract.md:300` | how a Provisional iceoryx2 shape may change | keep: a change rule, no timing |
+| `spec/feature-catalogue.md:226` (T-040), `:281` (section heading) | "gRPC trigger remains v1.x"; "Service (Daemon/Sidecar)" | keep: already deferral / a heading |
+| `spec/coverage-index.md:552` | T-039/T-041 full rows wait on "2j `ReloadCertSource` control-plane" | keep, and reported to the owner (plan.md §Gate A): the dependency now waits on post-1.0 work |
+| `spec/behaviors-and-limitations.md:388–390` (L-015-3) | "Bounded below the Phase-5 service wrapper" | keep: already later |
+| `spec/behaviors-and-limitations.md:470`, `:807–833`; `-closed.md:70`, `:77` | engine control strand | other concept |
+| `spec/behaviors-and-limitations.md:75`, `:78`, `:85`, `:102`, `:1542`, `:3347` | row IDs as anchors; spec-local `NFR-003-3` | keep / pattern FP |
+| `brain/components/session.md:493–495`, `engine-accept-path.md:75–76`, `test.md:881` | control-plane domain; capture sidecar | other concept |
+| `brain/index.md:64`, `brain/render-architecture.md:102` | "a stub by decision" | keep: still true |
+| `docs/src/tls-quickstart.md:83`, `docs/src/transport-quickstart.md:88` | "owned by 2j" in a not-covered list | keep: ownership, no timing |
+| `conanfile.py:29–42`, `:61`, `:118` | grpc as a Phase-5 dependency; OTel `with_otlp_grpc=False` | keep: already later |
+| `cmake/ProjectOptions.cmake:9` | `FIXPP_BUILD_SERVICE` OFF | keep: the option exists, off |
+| `src/service/CMakeLists.txt:2–3`, `src/tap/CMakeLists.txt:2` | module description comments | keep: design, no timing |
+| `include/fix/c_api/error.h:20`, `:145–150`; `src/capi/error.cpp:360–364`; `tools/abi_history/error_codes_v1.txt:73` | codes 900/901 | keep: FR-003b |
+| `include/fixpp/service/control_plane_factory.hpp:9`, `:23` | the anchor's own comment | keep: FR-003b |
+| `include/fixpp/log/*`, `include/fixpp/otel/providers.hpp`, `src/config/logger_resolver.cpp`, `tests/config/*`, `tools/otel_smoke/collector.yaml` | OTLP gRPC exporter / `use_grpc` | other concept |
+| `include/fixpp/session/engine.hpp`, `src/session/engine.cpp`, `src/capi/engine.cpp:237`, `tests/session/test_engine_session_strand.cpp`, `tests/session/CMakeLists.txt:2127` | engine control strand | other concept |
+| `tests/interop/**`, `tests/codegen/CMakeLists.txt:58` | capture / selection "sidecar" | other concept |
+| `.github/workflows/{tier2,parallelism-measure}.yml`, `ci/assert-ci-lane-policy.py:235` | `.sha256` sidecar | other concept |
+| `tests/oracle/conftest.py`, `tests/codegen/test_082_*`, `tests/codegen/vlatest_manifest_*`, `tests/tls/fixtures/ca-db/newcerts/1004.pem` | `_FixppDecimalT`, `kGrpClassStart`, base64 | pattern FP |
+| `tests/session/test_interpret_logon_encrypt_method.cpp:10` | "(TC-017 backlog)" | keep: history ("S-021 documented as …"), and a test file outside SC-005 |
+| `tests/conformance/test_transport_interop.cpp`, `tests/conformance/CMakeLists.txt:44` | `TC-001..TC-017` as DISABLED transport cells | keep: a different numbering (there TC-012 is a BodyLength/CheckSum case); the cells are still disabled, and no Verified cell claims them |
+| `tests/session/conformance/tc_reject_test.cpp`, `tests/session/conformance/CMakeLists.txt:73` | TC-005 cells | keep: the witnesses themselves |
+| `.specify/2c-codegen.md:7–8`, `:2117`; `.specify/constitution.md:447`, `:616`; `.specify/architecture.md:138`, `:189`, `:210`, `:324`, `:763`; `.specify/2h-transport.md:1393`, `:1518`; `.specify/2m-pybind.md:1806`, `:1818` | rows named as owned, cited or in rule text | keep: no status claim |
+| `src/`, `include/`, `tools/codegen/`, `cmake/templates/`, `bench/`, `tests/` other ID hits | a row ID cited as an anchor in a comment | keep: no status claim (the status-word filter `backlog|not … done|pending|deferred|remains|stays` over them finds only the two kept lines above) |
+| `bench/**`, `docs/src/dictionary/codegen.md`, `.specify/495-493-486-*.md`, `.specify/ci209-bench-gate.md` | `NFR-002-1`, `NFR-003-1..7` | pattern FP (spec-local IDs) |
+| `tools/brain_link_decisions.py:19–20` | `D-007`, `NFR-001` as examples of ids not to match | keep |
+| `.specify/2h-transport.md:837`, `.specify/544-hot-path-zero-alloc.md:170`, `tests/support/recycler_driver.hpp:54` | io_uring as an example / `ASIO_HAS_IO_URING` guard | keep: no v1.0 claim |
+
+### Licence metadata (c)
+
+`conanfile.py:8` and `cmake/FixppPackaging.cmake:408` are the only two non-or-later licence fields;
+`bindings/python/pyproject.toml:78` already reads `AGPL-3.0-or-later`. No test, CI script or tool pins
+either string (`git grep -n -E "RPM_PACKAGE_LICENSE|AGPL-3\.0\"" -- tests ci .github tools cmake`
+returns only the definition). `README.md:11` (badge), `README.md:25–26`, `NOTICE:7` and
+`LICENSE-COMMERCIAL.md:3` say "AGPL-3.0" in prose. They are not package metadata, so they are kept and
+reported to the owner (plan.md §Gate A).
+
+### Re-run after the edits
+
+At verify the three greps run again. Every remaining hit must be in a "keep", "header", "other
+concept" or "pattern FP" class above, or have its "edit" applied. The count per class goes into the
+verify record (SC-003).
+
+## R-13 — NFR-002's evidence (Gate A round 1, C-3)
+
+- `[const §IX.1]`'s binding rule: "only if every uncovered **line/branch** carries a recorded Opus risk
+  assessment in `.specify/decisions/<feature>-verify.md`". The first draft's Title said "every
+  uncovered line" and so stated less than the clause it cites. The Title now says "line/branch".
+- `.specify/decisions` is a gitignored symlink into parent repo (private)
+  `research/G19-fix-fpml-iso20022/decisions/speckit/` (library `.gitignore`, the `decisions/` entry
+  and the symlink note beside it). The records are tracked there.
+- What each candidate record assesses (read 2026-10-22):
+  - `563-564-callback-send-verify.md` §"Coverage (T7.7): the Article IX §1 assessment, line by line":
+    lines and branches ("Seven branches on added lines were never taken").
+  - `536-537-538-recovery-liveness-verify.md` §"T6.7 — coverage per changed line": lines and branches
+    ("26 untaken branches on 25 changed lines").
+  - `544-hot-path-zero-alloc-verify.md` Step 4: reports 81.73 % branch and dispositions added lines
+    only. **Dropped** as an example; whether that record met the rule is reported to the owner.
+- `.claude/skills/speckit-verify/SKILL.md` is tracked in the parent, not here, and its Step 4 reads a
+  metric below threshold as a FAIL. It is no longer cited.
+
+## R-14 — TC-017, read in source (Gate A round 1, N-1)
+
+- `interpret_logon` sets a sticky flag on any `98` whose value is not exactly `0` and returns
+  `session_invalid_logon` (`src/session/admin_messages.cpp`, the `case 98:` scan and the
+  `invalid_encrypt_method_seen` check).
+- On the acceptor (NotConnected arm) and the initiator (LogonSent arm), `src/session/session.cpp`
+  handles any refusal with `record_state_transition_(fsm_state::Disconnected); co_return`, with no
+  send and no branch on the cause. The disposer's comment states the same ending ("the Logon refusal,
+  as when interpret_logon refuses: Disconnected, nothing sent").
+- The validate-first gate runs before `interpret_logon` when `validate_inbound_messages` is on. An
+  out-of-domain `98` (FIX44 declares 0–6) is then rejected with `emit_session_reject_` (373=5,
+  371=98), witnessed by `EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished`.
+- No test drives `98=1..6` through a Session (`git grep -n -E "98=[1-9]"` over `tests/` finds only the
+  parser cells and a fuzz seed). The Verified cell states the composition: the parser cell, plus the
+  `FsmMatrixWitness` refused-Logon cells that drive the same `if (!result)` arm with another cause.
+- FIX-TC 17 is "Optional" (§4.5.16), and 17b expects Reject 373=7, NextNumIn incremented, Logout and
+  disconnect. Neither ending sends that, which the owner's "not supported by design" ruling accepts.
+- So the source supports the owner's wording "≠0 refused at Logon": both endings refuse the Logon and
+  the session does not establish. No owner question is needed for the Title.
