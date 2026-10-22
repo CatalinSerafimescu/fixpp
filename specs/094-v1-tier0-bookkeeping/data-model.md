@@ -33,7 +33,7 @@ Only the Status cell changes.
 The definition is **appended to the existing `> **Status** ∈ {…}` line**, not added as a new line, so
 no catalogue line moves:
 
-`> **Status** ∈ {backlog, planning, implementing, done, dropped(reason)} — **`dropped(post-v1.0, planned, not abandoned: <reason>)`** is an explicit drop for `[const §I.3]` (v1.0 ships when every OFFICIAL row is `done` or explicitly `dropped` with user-signed rationale) **and nothing more**: the row stays planned, keeps its entry and rationale, and returns to `backlog` when the release that builds it opens. User-signed: W-015, W-016, SVC-001..005 by DECISION 1 (owner, 2026-10-21; quoted in `specs/094-v1-tier0-bookkeeping/spec.md` §Context and recorded in the constitution v4.0 Sync Impact Report); NFR-019 by the NFR-013 split ruling (owner, 2026-10-21; `specs/094-v1-tier0-bookkeeping/spec.md` §Context). Recorded by feature 094.`
+`> **Status** ∈ {backlog, planning, implementing, done, dropped(reason)} — **`dropped(post-v1.0, planned, not abandoned: <reason>)`** is an explicit drop for `[const §I.3]` (v1.0 ships when every OFFICIAL row is `done` or explicitly `dropped` with user-signed rationale) **and nothing more**: the row stays planned, keeps its entry and rationale, and returns to `backlog` when the release that builds it opens (a row with no release yet returns when one is assigned to it; for the unscheduled service wrapper that is an Article XVIII §4 amendment). User-signed: W-015, W-016, SVC-001..005 by DECISION 1 (owner, 2026-10-21; quoted in `specs/094-v1-tier0-bookkeeping/spec.md` §Context and recorded in the constitution v4.0 Sync Impact Report); NFR-019 by the NFR-013 split ruling (owner, 2026-10-21; `specs/094-v1-tier0-bookkeeping/spec.md` §Context). Recorded by feature 094.`
 
 ## C. Reconciliation flips (FR-005 … FR-009)
 
@@ -133,13 +133,26 @@ no catalogue line moves:
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 003-dictionary-codegen)`
 - PR `#67 (merge b8a3b251)`
 - Tests `tests/codegen/vlatest_compile_smoke_test.cpp` (static_assert over Fields.hpp), `tests/codegen/typed_accessor_test.cpp` (CodegenTypedAccessor.MsgTypeAndVersionAreConstexpr), `tests/dictionary/ref_shape_test.cpp`, `tests/codegen/read_tier_byte_diff_test.cmake`, `tests/codegen/determinism_test.cpp` (DeterminismTest.GeneratedMatchesGolden)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Emitted as inline constexpr FieldRef arrays per version. The compile-time read is witnessed on vlatest; v42, v44, v50sp2 and vt11 are witnessed by shape asserts and by byte pins (read_tier_byte_diff_test.cmake pins each version's Fields/Messages/Reify/Validator.hpp). The reify round-trip (L-003-1) is OSS-010's scope, not this row's. QuickFIX interop: not applicable (the dictionaries are QuickFIX-verbatim).`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Emitted as inline constexpr FieldRef arrays per version. "Opt-in build flag" is used in Article I §1's sense: FIXPP_CODEGEN_FIX_LATEST, a flag a consumer can switch off, default ON (cmake/Codegen.cmake). The compile-time read is witnessed on vlatest; v42, v44, v50sp2 and vt11 are witnessed by shape asserts and by byte pins (read_tier_byte_diff_test.cmake pins each version's Fields/Messages/Reify/Validator.hpp). The reify round-trip (L-003-1) is OSS-010's scope, not this row's. QuickFIX interop: not applicable (the dictionaries are QuickFIX-verbatim).`
 
   The existing HTML comment under the row stays.
 
 ### TC rows — version columns and the scope clause
 
-- The FIX version(s) cell of every TC row becomes the "Column written" value in research R-3.
+- The FIX version(s) cell of every TC row becomes the "Column written" value in research R-3. The
+  literal cell text, copied from there (R-3's TC-017 note "(FIX-TC 17 is optional)" is outside the
+  cell):
+
+  | Row | FIX version(s) |
+  |---|---|
+  | TC-003 | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` |
+  | TC-005 | `4.2, 4.4 witnessed; FIXT.1.1 not witnessed` |
+  | TC-006 | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` |
+  | TC-008 | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` |
+  | TC-012 | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` |
+  | TC-014 | `4.4 witnessed; 4.2, FIXT.1.1 not witnessed` |
+  | TC-015 | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` |
+  | TC-017 | `4.2, 4.4 witnessed; FIXT.1.1 not witnessed` |
 - Every TC Verified cell ends with the same scope sentence, written below as `<TC-SCOPE>`:
 
   `Versions not witnessed: #614. FIX-TC §4.1 makes the scenarios applicable to the session layer of 4.2, 4.4 and FIXT, so the other versions the former column named (4.0, 4.1, 4.3, 5.0, 5.0SP1) are not required by FIX-TC.`
@@ -220,7 +233,10 @@ SVC-005 supplemental moves from :652 to :654.
 - **§4 row 3 (:405):** the note's opener changes from `**093 (partial; TC-003 stays backlog):**` to
   `**093; TC-003 done (094 reconciliation):**`. The rest of the note stays, including its
   re-derivation grep.
-- **§4 rows 8, 9, 10, 11 (:410–:413):** `005-defer: recovery-dependent — …` is replaced with:
+- **§4 rows 8, 9, 10, 11 (:410–:413):** the last cell, which reads the same on all four rows,
+  `005-defer: recovery-dependent — deferred-with-traceability to the later session-recovery feature (see 005 ledger below)`,
+  is replaced with (the before-text occurs four times, so each row is located by its scenario number,
+  tasks.md Execution rules):
   - 8 → `TC-006 done (094 reconciliation): recovery delivered by 013 (#86), 037 (#121), B28 (#609).`
   - 9 → `TC-014 done (094 reconciliation): option 2 (141=Y) delivered by 024/030/032.`
   - 10 → `TC-007 stays backlog: only 10b has a GapFill-mode witness; 10a/10c/10d/10e unwitnessed (094 row-by-row verification, 2026-10-21; parent repo (private)).`
@@ -308,7 +324,8 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
     such row open forever, and a reading settled only in one feature would bind no later row
     (Article XX §1), so §6 says it.
   Affected catalogue rows: W-015, W-016, SVC-001..005 → dropped(post-v1.0, planned, not abandoned);
-    NFR-013 split, its io_uring half → new row NFR-019 (dropped(post-v1.0, …)); NFR-002 closes under
+    NFR-013 split, its io_uring half → new row NFR-019 (dropped(post-v1.0, planned, not abandoned));
+    NFR-002 closes under
     the amended §6.
   Affected feature specs: none (merged specs/<id>/ bundles stay as written). Companion documents
     annotated by feature 094: .specify/architecture.md (Appendix Z-9), .specify/api-contract.md,
@@ -332,10 +349,20 @@ RATIFIED form (the last commit before merge): the header line reads
 `Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`; the first paragraph (the five lines
 directly after the header line, the one that opens `Gate A converged 2026-10-22`; a multi-line
 replacement) is replaced by
-`Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (loop instance 2, round 1: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
-and in the last paragraph, the clauses `Gate B: pending, recorded at the flip.` and
-`Owner sign-off: pending, recorded at the flip.` are replaced by Gate B's round tally, the sign-off
-date and `Amendment PR #<pr>`. The Gate A tally stays as written. Nothing else in the block changes.
+`Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (loop instance 2, round 1, then a scoped round on Article XIV §3: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
+and in the last paragraph, `Gate B: pending, recorded at the flip.` becomes
+`Gate B: <gate-b-tally>.` (its rounds and each round's P1/P2/P3, from the Gate B record), and
+`Owner sign-off: pending, recorded at the flip.` becomes
+`Owner sign-off: <sign-off date>. Amendment PR #<pr>.` The Gate A tally gains
+`, then a scoped round on Article XIV §3 (<tally>)` directly after its `closed)`. Nothing else in the
+block changes.
+
+**Scoped-round variant (FR-003d) — in force.** A scoped Gate A round runs on changed clause text:
+the owner accepted the Article XIV §3 edit at the checklist audit (spec §Clarifications, Session
+2026-10-22 (checklist audit)). So this RATIFIED form, §E.2's and §E.8's already read
+`loop instance 2, round 1, then a scoped round on Article XIV §3`, and `<tally>` is that scoped round's
+Codex tally. If a further scoped round runs on another clause, its clause is added the same way
+(`… then a scoped round on <clauses>`).
 
 ### E.2 Status line (`> **Status:**`, line 357 at `9b176090`)
 
@@ -349,7 +376,8 @@ and the rest of the line (from `**backwards-incompatible** (Article XX §4 v-maj
 
 RATIFIED form: `**v4.0 — PENDING** (2026-10-22)` becomes `user-ratified **v4.0** (<sign-off date>)`,
 and `not ratified: Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo, private); Gate B pending; pending the owner's Article XX §2 sign-off`
-becomes `Codex Gate A on feature 094 converged at loop instance 2, round 1, then owner sign-off <date>; amendment PR #<pr>`.
+becomes `Codex Gate A on feature 094 converged at loop instance 2, round 1, then a scoped round on Article XIV §3, then owner sign-off <date>; amendment PR #<pr>`
+(§E.1's scoped-round variant, in force).
 After T017 the phrase `Gate A converged 2026-10-22` occurs twice in `.specify/constitution.md` (the
 SIR's first paragraph and the Status line), so locate the Status line by line (`grep -n '^> \*\*Status:\*\*'`, then `sed -n '<N>p'`;
 tasks.md Execution rules, non-unique before-texts).
@@ -398,7 +426,7 @@ Before:
 `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.`
 
 After:
-`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). The control plane (gRPC) works without it.`
+`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). When the service wrapper is built, its gRPC control plane works without it.`
 
 ### E.6 Article XVIII §1
 
@@ -440,8 +468,8 @@ repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. Thi
   codes 900/901, with no behavioural commitment.
 - **Article XIV §3** — iceoryx2 SHM and sidecar mode are post-1.0.
 - **Article VI §6** — a row whose subject is a process obligation of the constitution closes on
-  per-feature records of the kind that obligation names, in place of verifying tests; a row that
-  describes behaviour still needs verifying tests.
+  per-feature records of the kind that obligation names, cited in the row, each showing it applied
+  in full, in place of verifying tests; a row that describes behaviour still needs verifying tests.
 - **Article IV §4** — the service wrapper is opt-in and post-1.0.
 
 ---
@@ -450,7 +478,8 @@ repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. Thi
 Flip form (the last commit before merge): the heading becomes
 `## Constitution v4.0 — <sign-off date>`, and the paragraph that opens "Gate A converged 2026-10-22"
 becomes
-`Ratified <date> (PR #<pr>, feature 094), after Codex Gate A converged at loop instance 2, round 1 and the owner signed off.`
+`Ratified <date> (PR #<pr>, feature 094), after Codex Gate A converged at loop instance 2, round 1, then a scoped round on Article XIV §3, and the owner signed off.`
+(§E.1's scoped-round variant, in force).
 
 ## F. Other surfaces (FR-004, FR-017, FR-018)
 
@@ -467,7 +496,7 @@ are at `9b176090`; every edit is same-line unless it says otherwise.
 - **:343** (§4.11 opening paragraph) — append:
   ` ⚠️ **Post-1.0 (Z-9):** the whole module is on the post-1.0 roadmap; v1.0 installs only the \`ControlPlaneFactory\` anchor.`
 - **:357** — `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005.` becomes
-  `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005 (each \`dropped(post-v1.0, …)\`, Z-9).`
+  `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005 (each \`dropped(post-v1.0, planned, not abandoned: …)\`, Z-9).`
 - **:450** (§6 plugin table, `ControlPlane` row) — append to its last cell: ` Post-1.0 (Z-9).`
 - **:611** — `### 8.1 Control plane (gRPC, default)` becomes
   `### 8.1 Control plane (gRPC, default) — post-1.0 (Z-9)`.
@@ -596,7 +625,7 @@ entry is written with its real number, never with a placeholder.
 
 ### Limitations
 
-- **L-094-1 — `EngineConfig::control_plane_factory` is accepted and ignored: nothing in the library reads it (fixpp#<N>).** The field is a `std::unique_ptr<fixpp::service::ControlPlaneFactory>`, null permitted (`include/fixpp/core/engine_config.hpp`). `ControlPlaneFactory` (`include/fixpp/service/control_plane_factory.hpp`) is an empty polymorphic base with no operations, and no code under `src/` reads the field, so a factory set there has no effect: no control plane starts, and nothing reports that none did. The control plane, its interface and its default gRPC implementation are post-1.0 (constitution v4.0, Article XIV §1; SVC-001..005 are `dropped(post-v1.0, planned, not abandoned)`); v1.0 keeps the type and the field as an ABI anchor with no behavioural commitment. **Re-derive:** `grep -rn control_plane_factory src/` (empty means still unread). **Status: follow-up** (fixpp#<N>: whether v1.0 should refuse a non-null factory, or document the field as reserved).
+- **L-094-1 — `EngineConfig::control_plane_factory` is accepted and ignored: nothing in the library reads it (fixpp#<N>).** The field is a `std::unique_ptr<fixpp::service::ControlPlaneFactory>`, null permitted (`include/fixpp/core/engine_config.hpp`), and it is the only way to supply a factory: no C-ABI function, configuration key or Python binding sets one. `ControlPlaneFactory` (`include/fixpp/service/control_plane_factory.hpp`) is an empty polymorphic base with no operations, and no code under `src/` reads the field, so a factory set there has no effect: no control plane starts, and nothing reports that none did. The control plane, its interface and its default gRPC implementation are post-1.0 (constitution v4.0, Article XIV §1; SVC-001..005 are `dropped(post-v1.0, planned, not abandoned)`); v1.0 keeps the type and the field as an ABI anchor, and reserves the C-ABI codes 900/901, with no behavioural commitment. **Re-derive:** `grep -rn control_plane_factory src/` (empty means still unread). **Status: follow-up** (fixpp#<N>: whether v1.0 should refuse a non-null factory, or document the field as reserved).
 ```
 
 ## G. Licence marking and the build files (FR-013, FR-013a, FR-013b, FR-014)
@@ -608,6 +637,11 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
   it on the branch. The script is not committed.
 - **C headers:** `include/fix/**/*.h` get `/* SPDX-License-Identifier: AGPL-3.0-or-later */` as line 1.
   All other files get `// SPDX-License-Identifier: AGPL-3.0-or-later`.
+  This path rule and FR-013's language rule (`//` in C++ files, `/* … */` in C headers) select the same
+  files: every tracked `.h` under `src/` and `include/` is under `include/fix/` and is a C-ABI header,
+  and no other C/C++ file is a C header. Re-derive:
+  `git ls-files src include | grep '\.h$' | grep -v '^include/fix/'` prints nothing (known positive:
+  without the `grep -v`, it lists the 12 `include/fix/` headers).
 - **`conanfile.py:8`:** `license = "AGPL-3.0-only"` becomes `license = "AGPL-3.0-or-later"` (in the
   SPDX commit).
 - **`cmake/FixppPackaging.cmake:408`:** `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")` becomes
@@ -621,11 +655,11 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
       # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
       # collide with system versions and add resolution time. Restore in Phase 5.
   ```
-  After (four lines, the owner's text of Gate A round 2, with the file's four-space indent, and the
-  `Restore:` pointer owner-approved at Gate A round 3, N3-2; `tool_requires = []` moves from line 99
-  to line 101):
+  After (four lines, the owner's text of Gate A round 2, with the file's four-space indent, the
+  `Restore:` pointer owner-approved at Gate A round 3, N3-2, and line 1's provisioning parenthesis
+  reworded by the owner at the checklist audit; `tool_requires = []` moves from line 99 to line 101):
   ```
-      # cmake and ninja come from the system (apt in CI); swig is installed by each
+      # cmake and ninja come from the system (runner image, apt or choco in CI); swig is installed by each
       # workflow that builds the bindings, at or above the minimum
       # bindings/python/CMakeLists.txt requires. Conan-pinned tools collide with
       # system versions and add resolution time. Restore: fixpp#<N-III4>.
@@ -634,6 +668,13 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
   `main` until B58 lands: the wheel lanes take PyPI's latest through `bindings/python/pyproject.toml`
   (`swig>=4.2`), and the in-tree Linux legs take apt's. "At or above the minimum" is true on both
   sides of B58 (Gate A round 2, N2-1).
+  The round-2 text said "(apt in CI)", which is true only of ninja on Linux: no workflow
+  apt-installs cmake (it is preinstalled on the runner image, `tier1.yml`), and Windows CI installs
+  ninja with `choco` (`tier2.yml`). Line 1 now reads "(runner image, apt or choco in CI)" (owner,
+  checklist audit, 2026-10-22). Only line 1 changes, so the comment stays four lines. Re-check: the
+  swig clause holds by construction (`bindings/python/CMakeLists.txt`'s `find_package(SWIG <min>
+  REQUIRED)` fails configure below the minimum); the cmake/ninja clause holds while
+  `tool_requires = []` (FR-023) and the workflows provision them as named.
   The issue number on the comment's last line is the FR-023 issue, filed before this commit; the
   comment is written with its real number, never with a placeholder.
   `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no line citation of the file, so the
@@ -651,8 +692,11 @@ step's `if:` and command) it ran. A clause with no mapped assertion does not fli
 narrowed, and the narrowing goes into the owner report. Rows read during Gate A round 1 are filled in
 here; the others carry the witness to read.
 
-Verify splits every flipped Title and version cell at its clauses and maps each one; a clause missing
-from this table is not thereby exempt. Since Gate A round 2 the table lists every clause of the
+Verify splits every flipped Title and version cell at its clauses (FR-015b's definition: a part that
+could be false while the rest is true) and maps each one; a clause missing from this table is not
+thereby exempt. The rows below whose Clause begins "each" (each Title clause, each version or BeginString named)
+are placeholders: in the verify record each is replaced by one row per clause, and a placeholder row left
+in the verify record fails FR-015b. Since Gate A round 2 the table lists every clause of the
 flipped Titles, including those most at risk of having no assertion: NFR-003's MSVC ASan and
 carve-out clauses, TC-014's negative clause and TC-017's encryption clause. NFR-005's PMR clause was narrowed at Gate A round 3 to the two cells that assert it. A
 clause witnessed by a recipe (an absence) has its recipe run first against a seeded positive.
@@ -673,7 +717,9 @@ clause witnessed by a recipe (an absence) has its recipe run first against a see
 | NFR-011 | parse arena / MemoryStore / decimal accessor | the cells in the Tests cell | read at verify |
 | NFR-013 | ASIO async I/O transport on Linux and Windows | `tests/transport/` on tier1 `linux` and tier2 `windows` | read at verify (the backend is in Verified as a design fact with its grep, not in the Title) |
 | D-001 / D-003 / D-007 / D-008 | each Title clause | the cells in each Tests cell | read at verify |
-| TC-003 | 3b/3c/3e disregarded, NextNumIn unchanged, connection open | InboundFrameDispositionsTc.TC003_3* | read at verify |
+| D-008 | version column: each version named (4.2, 4.4, 5.0SP2, FIXT.1.1, FIX Latest) | the cells in its Tests cell (the per-version byte pins and shape asserts; vlatest's `static_assert`) | read at verify |
+| TC-003 / TC-005 / TC-006 / TC-008 / TC-012 / TC-014 / TC-015 / TC-017 | version column: each BeginString named "witnessed" | each cited test's fixture, helper default or instantiation (research R-3's recipe) | the `file:line` that sets the BeginString the test drives, read at verify |
+| TC-003 | 3b/3c/3e disregarded, counted and logged (the "warning"), NextNumIn unchanged, connection open | InboundFrameDispositionsTc.TC003_3*, through `run_q1` | `run_q1`: state `Active`, `peer_read_ended` false, `next_in` as expected, and `expect_one_garble(garbles, records, …)` over the garble counter and the log records |
 | TC-005 | NextNumIn incremented (FIX.4.4) | CapiC7Witness.Row6_InboundRejectTrafficKeepsTheSessionUp | `row6_cell` writes Rejects at rising `seq`, then `order(seq, …)`; `expect_kept_up`: `EXPECT_TRUE(o.received)` |
 | TC-005 | no Reject of a Reject; session continues | TC005Reject.Fix42_7_* / Fix44_7_*; SessionReject.NoRejectLoopOnInboundReject; FsmMatrixWitness.Active_InboundReject_LogOnly_StaysActive | `tc_reject_test.cpp`: "must not trigger outbound Reject (I-5)", "must stay Active"; `session_reject_test.cpp`: `EXPECT_EQ(f.transport.sent_count(), before)`, `EXPECT_EQ(sess.state(), fsm_state::Active)`; `fsm_matrix_witness_test.cpp`: `EXPECT_EQ(sess.state(), fsm_state::Active)` only |
 | TC-006 / TC-008 / TC-012 / TC-014 / TC-015 | each Title clause | the cells in each Tests cell | read at verify |

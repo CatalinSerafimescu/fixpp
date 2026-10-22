@@ -69,6 +69,19 @@ The census traced each test from its fixture or helper to the place the BeginStr
 (2026-10-22, read-only Explore pass). No witness drives FIXT.1.1, and none is parameterised over
 versions.
 
+**Recipe (verify re-runs it per test, data-model §H's version-column rows):**
+1. For each test a TC row's Tests cell names, open its `TEST`/`TEST_F`/`TEST_P` and find the frame it
+   feeds or the fixture it uses.
+2. Follow that to where the BeginString is set: a literal in the frame builder call, a fixture member
+   (`kBeginStr`, `begin_string`), a helper's default argument (`plain_rig::Rig::begin_string`,
+   `PossDupTestBase::make_cfg`), or an `INSTANTIATE_TEST_SUITE_P` list. The search
+   `git grep -n -E 'FIX\.4\.[0-4]|FIXT\.1\.1|begin_string|kBeginStr|expected_begin' -- <test file> <fixture/helper files>`
+   lists the candidates; the one on the test's own path is the answer.
+3. Record `file:line` per test; the row's column is the union over its tests.
+- **Known positive:** TC-017 must come out as both versions: `FsmMatrixWitness`'s `kBeginStr = "FIX.4.2"`
+  for FR-022's initiator cell and the FIX44 Logon of the `EnumValidationLogonTest` cells. A recipe run
+  that reports one version for TC-017 is broken.
+
 | Row | Witness BeginStrings (per test) | Column written | vs owner wording |
 |---|---|---|---|
 | TC-003 | 4.2 (`plain_rig::Rig::begin_string` default, via `run_q1`) | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` | **narrower** (owner: "4.2, 4.4 witnessed") |
@@ -125,6 +138,13 @@ Census side-findings, recorded for the verify record:
   `tests/session/test_interpret_logon_encrypt_method.cpp`, `tests/session/test_session_plaintext_authz.cpp`,
   `tests/session/test_session_plaintext_roundtrip.cpp`). The round-1 sweep listed directories
   (`tools .github ci .claude`) and so missed `docs/prebuild.py` (Gate A round 2, C2-4).
+- **Readers that do not name the file, and readers outside the library (checklist audit, 2026-10-22).**
+  A wider sweep, `git grep -l -E "catalogue|catalog" -- '*.py' '*.sh' '*.yml' ':!specs/'`, finds the
+  same two parsers and nothing else (they are its known positive). In the workspace repository, the
+  scripts under `.claude/scripts/` and `research/G19-fix-fpml-iso20022/tools/` (parent repo
+  (private)) that mention the catalogue were searched the same way. The one hit,
+  `.claude/scripts/test-orchestrator-library-edit-guard.sh`, names the file only as a path the edit
+  guard protects and does not parse it. Verify re-runs both sweeps.
 - **`brain_inventory.py` behaviour:**
   - It resolves columns by header name and counts the Status *string* per family. It does not parse
     the Status grammar, so commas and colons inside `dropped(...)` cannot break it.
@@ -153,6 +173,11 @@ Census side-findings, recorded for the verify record:
   `tools/check_line_citations.py --shift-audit HEAD~1..HEAD`.
 - **Result for the SPDX commit:**
   - 53 files change: 37 inserts (10 `/* … */` C headers, 27 `//`) and 16 identifier replacements.
+    Re-derive each count on the base rather than copying it: 53 and 16 are quickstart §3's two
+    censuses on `origin/main`, and 37 is their difference; 10 is the number of `.h` files among the 37
+    (the first census piped through `grep -c '\.h$'`), and 27 the rest; the 10 are all C-ABI freeze
+    headers because every tracked `.h` is one of the 12 `include/fix/` headers (data-model §G), 2 of
+    which already carry the AGPL line.
   - Post-state census: 0 files missing AGPL, 0 carrying another identifier.
   - Shift audit: **GATE PASSED**, 175 rotted citations reported and **0 charged**. All 175 are cited
     from archival `specs/<id>/` bundles, which are point-in-time records and stay as written.
@@ -191,6 +216,15 @@ Census side-findings, recorded for the verify record:
 - **The 16 Apache-2.0 files have one author.** `git log --format='%an <%ae>'` over them gives only
   Catalin Serafimescu, under two addresses (123 per-file commit entries). The owner holds the copyright, so the
   relicense is the owner's to make.
+- **Authorship census beyond `%an` (checklist audit, 2026-10-22).** Over the 16 files, and over all 53:
+  `git log --format='%an <%ae>%n%cn <%ce>' -- <files> | sort | uniq -c` and
+  `git log --format='%(trailers:key=Co-Authored-By,valueonly)' -- <files> | sort | uniq -c`.
+  - Authors: only Catalin Serafimescu (the two addresses above). Committers: the same, plus
+    `GitHub <noreply@github.com>`, the committer of squash merges.
+  - `Co-Authored-By` trailers name only AI assistants: Claude (Anthropic) and Codex / GPT (OpenAI). No
+    other human appears in any author, committer or trailer field.
+  - What legal weight the AI co-author trailers carry is the owner's call (counsel review is row 15d,
+    out of scope); the owner report (T053) states this census.
 - **The relicense applies from this commit on.** fixpp is public, so versions already published
   under Apache-2.0 keep that grant for anyone who has them. The PR body says so (FR-019).
 - **Out of scope, on record:** 40 files outside `src/`/`include/` still carry
@@ -241,7 +275,8 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
   placed in parent repo (private) `phases/phase-4/issue-batches.md`; close-out places it (plan.md).
 - **Live B&L entries** (defined in `spec/behaviors-and-limitations.md`, the live file): L-003-2,
   L-022-1, L-497-1 (the open half; its resolved half moved to the closed file), L-002-4, B-043-1,
-  B-005-7, B-495-3, B-544-1, L-019-4.
+  B-005-7, B-495-3, B-544-1, L-019-4, and L-003-1 (named in D-008's Verified cell as OSS-010's scope;
+  live, Status PARTIAL; added at the checklist audit, 2026-10-22).
 - **New, filed at implement:** the issue behind L-094-1 (`EngineConfig::control_plane_factory` is
   accepted and ignored; FR-018); the 544 record's lapse, named in NFR-002's Verified cell (FR-020);
   the 40 `Apache-2.0` files outside `src/`/`include/` (FR-021); `[const §III.4]` not met on `main`,
@@ -462,6 +497,20 @@ either string (`git grep -n -E "RPM_PACKAGE_LICENSE|AGPL-3\.0\"" -- tests ci .gi
 returns only the definition). `README.md:11` (badge), `README.md:25–26`, `NOTICE:7` and
 `LICENSE-COMMERCIAL.md:3` say "AGPL-3.0" in prose. They are not package metadata, so they are kept and
 reported (the default recorded in spec §Clarifications, Gate A round 2).
+
+(c)'s regex sees `license = …` and the two named strings, so a field in another syntax (a YAML or JSON
+`license:` key, a pkg-config or CMake package-config field, another CPack generator's variable) would
+escape it. A syntax-independent sweep (checklist audit, 2026-10-22):
+`git grep -n -i -I -E 'licen[cs]e' -- '*.toml' '*.json' '*.in' '*.cfg' '*.py' '*.cmake' '*CMakeLists.txt' '*.yml' '*.yaml' '*.spec' ':!specs/' ':!tests/'`,
+read uncapped with `SPDX-License-Identifier` lines dropped (36 lines at the audit; record the count
+at verify). Its hits are the two fields above, `bindings/python/pyproject.toml:78` (already
+or-later), `CPACK_RESOURCE_FILE_LICENSE` (a path to `LICENSE`, not an identifier), licence-file paths
+and prose comments in `CMakeLists.txt`, `cmake/FixppPackaging.cmake` and `pyproject.toml`, workflow
+`paths:` entries naming `LICENSE`, `.specify/extensions/git/extension.yml:10` (`license: MIT`, the
+Spec-Kit git extension's own manifest, not fixpp's), and `conan/recipes/civetweb/conanfile.py:13`
+(`license = "MIT"`, the vendored civetweb recipe's licence for the third-party package it builds,
+not fixpp's; (c)'s `license *=` also matches it, and it is kept as other concept). So the population of package-metadata licence fields is the
+two FR-013a changes plus `pyproject.toml`. Verify re-runs this sweep beside (c).
 
 ### Re-run after the edits
 

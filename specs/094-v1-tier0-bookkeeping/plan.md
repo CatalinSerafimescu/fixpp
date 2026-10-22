@@ -17,19 +17,57 @@
   Gate A review on every amendment", so Codex must have reviewed the clause text that ratifies.
   - If the owner changes any amended **clause** at the Art. XX §2 sign-off (data-model §E.3–§E.7:
     §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2), the changed text is amendment text no Codex
-    round has seen. A scoped Codex Gate A round therefore runs on the changed lines only
+    round has seen. The same holds for a clause change proposed by anyone else after convergence (a
+    Gate B finding, the checklist audit below); spec FR-003d states the rule. A scoped Codex Gate A round therefore runs on the changed lines only
     (`codex-tool.sh --mode review`, plus an Opus judge) before the RATIFIED flip (tasks.md T061, T063).
     It runs under the owner's own `/gate-a` invocation, because no agent starts Codex on its own
     initiative (`[const §XVII.4]`).
   - The Status line, the Sync Impact Report's status and review-tally wording, and the `CHANGELOG.md`
     status wording are **metadata**: they record where the process stands and amend no rule. A change
-    to them needs only Gate B's re-check, with no Gate A round.
+    to them needs only Gate B's re-check, with no Gate A round. The same holds for every other part of
+    data-model §E.1, §E.2 and §E.8 outside the six clause bodies (the affected-rows and per-article
+    summary lines, the RATIFIED templates): they record the amendment and amend no rule (spec FR-003d).
 - **Applied once, at `/speckit-analyze` (F3), as a status-metadata edit after convergence.** data-model
   §E.1, §E.2 and §E.8 said Gate A was outstanding. They now read "Gate A converged 2026-10-22,
   record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo, private); Gate B pending;
   pending the owner's Article XX §2 sign-off", the SIR's review tally names instance 1 rounds 1–3 and
   instance 2 round 1, and the RATIFIED templates are re-anchored on the new PENDING wording. No clause
   text changed (§E.3–§E.7 are byte-identical), so by the rule above Gate A is not re-run.
+- **Applied at the step-9 checklist audit (2026-10-22), outside §E.3–§E.7.** Each audit edit is
+  recorded against its item in `checklists/{governance,catalogue,licence}.md`. Inside data-model §E the
+  audit edited only the amendment's records (metadata in the sense above; spec FR-003d): the SIR's NFR-019 affected-row wording, the RATIFIED templates' Gate B
+  slot and their scoped-round variant (§E.1, §E.2, §E.8), and the `CHANGELOG.md` entry's §VI.6 bullet
+  (now worded as the round-3 N3-1 ruling requires, which names the CHANGELOG entry). Those edits do
+  not re-open Gate A. The one clause edit the audit proposed (Article XIV §3, below) was accepted by
+  the owner and applied to §E.5, so it does re-open Gate A, as a scoped round on that line.
+
+### Clause edits awaiting a scoped Gate A round
+
+Each entry here is amendment text that changed after Gate A converged (FR-003d). An entry the owner
+accepts is applied to data-model §E, and a scoped Codex Gate A round runs on the changed line only,
+under the owner's own `/gate-a` invocation, with an Opus judge. Its result is recorded here and in
+the Gate A record. The owner then signs off on the text that round reviewed (T061), and the RATIFIED
+templates use §E.1's scoped-round variant. If the scoped round does not converge, the entry goes back
+to the owner before T016 lands the clause.
+
+- **Article XIV §3 (data-model §E.5), governance checklist CHK017 — applied; scoped Gate A round
+  pending (orchestrator runs it next).** Owner ruling, 2026-10-22 (spec §Clarifications, Session
+  2026-10-22 (checklist audit)): accept, and run the scoped round. The converged after-text kept
+  "The control plane (gRPC) works without it." as a present-tense sentence, while §E.3 (Article IV §4)
+  and §E.4 (Article XIV §1) place the control plane itself post-1.0. Read as a dependency statement (the
+  control plane does not need the data plane), it stays true; read as a v1.0 statement, it contradicts
+  §E.4. Applied after-text (data-model §E.5), following §E.3's "When it is built" pattern; only its last
+  sentence changed:
+
+  `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). When the service wrapper is built, its gRPC control plane works without it.`
+
+  The converged after-text it replaces (Gate A loop instance 2, round 1):
+  `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). The control plane (gRPC) works without it.`
+
+  The constitution before-text (§E.5, unchanged; `.specify/constitution.md:594` at `9b176090`):
+  `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.`
+  The SIR's "Modified: Article XIV §3" line and the `CHANGELOG.md` bullet are metadata and need no
+  change for it; if the owner wants them to mention the reworded sentence, that edit needs only Gate B.
 
 ### Round 1 — what changed, by root cause
 
@@ -337,7 +375,11 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
   (FR-018, FR-020, FR-021, FR-023), in the body or in commit messages (FR-019). `closingIssuesReferences` is read before merge.
 - **Peer collation PR.** The 2026-10-22 cloud batch may touch `conanfile.py` (B58/SWIG). The FR-013b
   comment is the owner's text (reworded at Gate A round 2 so it is true before and after B58), so
-  whichever merges second rebases a small conflict in the same comment. The peer was told this feature
+  whichever merges second rebases a small conflict in the same comment. Resolution rule on 094's side:
+  if B58 merges first, T054's integration resolves the comment to data-model §G's four lines (with the
+  FR-023 issue's real number), unless B58 changed a fact those lines state (how cmake, ninja or swig is
+  provisioned, or where the swig minimum lives); then `phase-implementer` stops and the orchestrator
+  asks the owner. The rest of B58's `conanfile.py` change is kept as merged. The peer was told this feature
   adds no ctest entries, which stays true: the FR-022 cells join the existing `session_pure_tests`.
 - **The RATIFIED flip re-runs the whole matrix.** FR-003a makes the flip the last commit before merge.
   The three MAJOR precedents were docs-only PRs, so their flip push was cheap. 094's diff contains

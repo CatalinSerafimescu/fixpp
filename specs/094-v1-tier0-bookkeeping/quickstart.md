@@ -77,6 +77,11 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
 - `… | xargs grep -l 'SPDX-License-Identifier: Apache'` must print nothing (on `origin/main`: 16).
 - `git diff origin/main -- src include | grep -E '^[+-][^+-]' | sort | uniq -c` must show only the
   two AGPL comment forms added and `// SPDX-License-Identifier: Apache-2.0` removed.
+- That filter cannot see an added or removed empty line (`+` or `-` alone) or a line starting with
+  `+`/`-`, so pair it with `git diff --numstat origin/main -- src include`: it must list exactly the 53
+  files, each `1 0` (the 37 inserts) or `1 1` (the 16 replacements). Over the 12 frozen C-ABI headers
+  (`include/fix/c_api.h`, `include/fix/c_api/*.h`) this is the comment-only check FR-014 names, beside
+  research R-7's symbol diff.
 - `git diff --stat origin/main -- ':!spec/' ':!.specify/' ':!brain/' ':!specs/' ':!CHANGELOG.md'`
   lists only the SC-005 files, and the only `tests/` files in it are the two FR-022 files.
 - `tools/check_capi_freeze.sh` must print `PASS`.
@@ -89,7 +94,11 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
 
 ## 4. Cross-surface sweep (SC-003)
 
-- Run research R-12's four `git grep` commands. Known positives first, on `origin/main`: (a) must report
+- Mechanical half of the constitution check: for each data-model §E.3–§E.7 after-text,
+  `grep -cF '<after-text>' .specify/constitution.md` prints 1; for each before-text it replaced,
+  `grep -cF` prints 0. Skip the before-text check for §E.3a, whose after-text extends its before-text,
+  and for §E.7, which adds a bullet. Known positive: the same checks on `origin/main` print 0 and 1.
+- Run research R-12's four `git grep` commands, and (c)'s syntax-independent licence sweep beside it. Known positives first, on `origin/main`: (a) must report
   `README.md:15` and, through its widened terms, `.specify/constitution.md:374` (§I.2); (b) must report
   `brain/components/dictionary.md:75`.
 - On the branch, every hit must fall in a "keep", "header", "other concept" or "pattern FP" class of

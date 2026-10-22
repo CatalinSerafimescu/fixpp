@@ -20,9 +20,15 @@ delivering PRs and verifying tests; (3) marks every `src/`/`include/` C/C++ file
   delivery claim").
 - **Post-v1.0 drop** — the status form `dropped(post-v1.0, planned, not abandoned: <reason>)`. It
   takes a row out of the v1.0 tag gate (`[const §I.3]`'s done-or-dropped rule) and nothing more: the
-  row stays planned and returns to `backlog` when its release opens.
+  row stays planned and returns to `backlog` when its release opens. A row with no release yet (the
+  unscheduled service wrapper's SVC-001..005, and NFR-019) returns when one is assigned to it; for the
+  service wrapper that assignment is itself an `[const §XVIII.4]` amendment.
 - **Residual on record** — a part of a row's original wording that the reworded row no longer
   claims, and that is named in its Verified cell as a live B&L row or an open issue.
+- **Narrowing not required** — a part of a row's original wording that the reworded row no longer
+  claims and that FIX / FIX-TC does not require. By the owner's rule (Context) it needs no record;
+  its Verified cell says what is no longer claimed. FR-006b classifies every narrowing of the 18 flips
+  as one or the other.
 
 ## Context: why this feature exists
 
@@ -33,14 +39,22 @@ the cheapest movement towards the v1.0 tag, with no behavioural code. Its inputs
   (gRPC control plane, iceoryx2 data plane, data-plane opt-in, health, pluggable `ControlPlane`) leave
   the v1.0 tag gate, and **none is abandoned**. The owner's words: *"We don't want to drop them
   forever, we want them to implement post-v1.0 … as long we don't permanently drop them and we don't
-  get back to a debate about saying that we 'dropped' them today."* This ruling is settled.
+  get back to a debate about saying that we 'dropped' them today."* This ruling is settled. Both
+  reason strings are the owner's wording in DECISION 1. The SVC reason's "owner decision 2026-07-15"
+  is the ★ scope decision of that date (parent repo (private) `REMAINING-WORK.md`), which kept the
+  service wrapper out of v1.0 as a deferral; a deferred row still counts as open under `[const §I.3]`,
+  and DECISION 1 is the user-signed rationale that turns that deferral into the post-v1.0 drop the
+  legend names.
 - **Row-by-row verification at fixpp `9b176090`**
   (`research/G19-fix-fpml-iso20022/research/findings/v1-tier0-flip-verification-2026-10-21.md`): 4 rows
   flip as written, 11 flip once reworded to what shipped, 4 needed an owner call, and 9 are NOT
   delivered.
 - **Owner rulings (2026-10-21):** all 11 rewordings approved. NFR-002 is reworded and flipped. NFR-013
   is split, with io_uring becoming a new post-v1.0 row. TC-017 is not supported by design and is
-  flipped. NFR-010 is postponed and stays `backlog`.
+  flipped. NFR-010 is postponed and stays `backlog`. The narrowing rule, in the owner's words (parent
+  repo (private) `REMAINING-WORK.md`, the 11 reworded rows): *"a row is narrowed to what shipped only
+  where the removed part is not required by FIX / FIX-TC, or is on record (live B&L row or open issue)
+  and named in the row's Verified cell."*
 - **Owner rulings (2026-10-22):** the service wrapper goes on the post-1.0 roadmap as **unscheduled**,
   with no version slot. The 16 `Apache-2.0` transport files are **relicensed to AGPL-3.0-or-later** in
   this PR. Their Apache identifier was inherited from 012's contract templates, not chosen. After
@@ -150,6 +164,25 @@ Owner approvals given after the round-3 reviews (Codex, and the Opus adversarial
   line ends "Restore: fixpp#<N-III4>.", filled with the FR-023 issue's real number at implement
   (data-model §G). The comment stays four lines.
 
+### Session 2026-10-22 (checklist audit)
+
+Owner rulings made on the two items the step-9 checklist audit escalated. Binding.
+
+- Q (licence checklist CHK020): the FR-013b comment's line 1 says "cmake and ninja come from the
+  system (apt in CI)", but no workflow apt-installs cmake (it is preinstalled on the runner image) and
+  Windows CI installs ninja with choco. Reword? → A: **Reword line 1** to
+  "# cmake and ninja come from the system (runner image, apt or choco in CI); swig is installed by each".
+  The rest of the comment is unchanged, so it stays four lines (data-model §G). It is still the C-607
+  commit's text, with `Refs #607` and no closing keyword. It is not clause text, so Gate B covers it.
+- Q (governance checklist CHK017): Article XIV §3's converged after-text keeps "The control plane
+  (gRPC) works without it." as a present-tense sentence, while Articles IV §4 and XIV §1 place the
+  control plane post-1.0. Change it? → A: **Apply the clause edit, and run a scoped Gate A round on
+  it.** The last sentence becomes "When the service wrapper is built, its gRPC control plane works
+  without it." (data-model §E.5). Under FR-003d this is amendment text no Codex round has seen, so
+  the orchestrator runs a scoped Codex Gate A round, with an Opus judge, on that line next, and the
+  owner signs off on the reviewed text (tasks T061). The RATIFIED templates name the scoped round
+  (data-model §E.1's scoped-round variant, in force).
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" are the owner tagging v1.0 and any contributor who reads the catalogue or the
@@ -250,8 +283,10 @@ in those files are licence comment lines.
 - **A row's evidence fails at run time.** A cited test that fails or is missing on this branch means
   the row does not flip. The row stays `backlog`, the finding is recorded, and the owner is told. A
   row is never flipped on a cell nobody ran.
-- **A residual is not on record.** If a residual is neither a live B&L row nor an open issue, the row
-  does not flip until an issue is filed. The rule is the owner's (2026-10-21).
+- **A residual is not on record.** If a removed part that FIX / FIX-TC requires is neither a live B&L
+  row nor an open issue, the row does not flip until an issue is filed. A removed part that FIX /
+  FIX-TC does not require needs no record (a narrowing not required, FR-006b). The rule is the owner's
+  (2026-10-21, quoted in Context).
 - **A Status string breaks a parser.** The drop form contains commas and a colon. Every tool that
   reads the catalogue's Status column must still parse all rows (FR-016).
 - **A file is outside the census.** Generated files under the build tree are not tracked and are out
@@ -278,8 +313,9 @@ in those files are licence comment lines.
 
   Every other cell of these rows MUST stay unchanged.
 - **FR-002**: The catalogue's Status legend MUST define the post-v1.0 drop form. It excludes the row
-  from the v1.0 tag only, the row stays planned, and it returns to `backlog` when its release opens.
-  The wording MUST NOT read as abandonment. The legend MUST name the user-signed rationale `[const
+  from the v1.0 tag only, the row stays planned, and it returns to `backlog` when its release opens
+  (a row with no release yet returns when one is assigned to it; Terminology). The wording MUST NOT
+  read as abandonment. The legend MUST name the user-signed rationale `[const
   §I.3]` requires: DECISION 1, and the NFR-013 split ruling. The definition is appended to the
   existing Status line so no catalogue line moves.
 - **FR-003**: The constitution MUST be amended so no clause requires a v1.0 service wrapper, gRPC
@@ -294,8 +330,8 @@ in those files are licence comment lines.
   - `[const §XIV.3]` and `[const §IV.4]` get the same post-1.0 note.
   - `[const §VI.6]`(b) gains the process-row clarification (owner, Gate A round 2): a row whose
     subject is a process obligation of the constitution, with no library behaviour under test, closes
-    on per-feature records of the kind that obligation names; the exception does not relax (b) for
-    any row that describes behaviour.
+    on per-feature records of the kind that obligation names, cited in the row, each showing it
+    applied in full; the exception does not relax (b) for any row that describes behaviour.
   - The exact before → after text of all six clauses is data-model §E.
   - Any further clause the FR-004 sweep finds naming the same scope as v1.0 is amended too. The sweep
     found none: §I.2, §IV.2, §XIII.3 and §XVIII.5 are read and kept (research R-12).
@@ -304,8 +340,10 @@ in those files are licence comment lines.
   affected rows and specs, the review and sign-off, and the feature and PR it rode. The
   classification is **MAJOR, v3.0 → v4.0** (owner, 2026-10-22; research R-2), so `CHANGELOG.md` MUST
   gain the entry in data-model §E.8. The Sync Impact Report's header, the Status line and the
-  CHANGELOG heading MUST read PENDING / `Unreleased` until Gate A converges and the owner signs off;
-  the flip to RATIFIED and the dated heading MUST be the last commit before merge. The report MUST
+  CHANGELOG heading MUST read PENDING / `Unreleased` until Gate A converges, Gate B converges and the
+  owner signs off, in that order (the owner signs off on a packet that carries Gate B's rounds, and the
+  flip records them; FR-003d); the flip to RATIFIED and the dated heading MUST be the last commit
+  before merge. The report MUST
   record that the first draft classified itself MINOR and was corrected at Gate A round 1, and that
   the §VI.6 clarification is a loosening that leaves the MAJOR classification resting on
   `[const §XVIII.5]`.
@@ -316,6 +354,22 @@ in those files are licence comment lines.
   with the `(v4.0)` suffix PRs #451 and #500 carry, and its description MUST state the change, the
   rationale and the affected catalogue rows and specs (owner, 2026-10-22). No §XX.2 deviation is
   recorded anywhere.
+- **FR-003d**: After Gate A's convergence, the amendment's text changes only under these rules (plan.md
+  `## Gate A`, "After convergence"):
+  - Any change to the amended **clause** text (data-model §E.3–§E.7: §IV.4, §VI.6, §XIV.1, §XIV.3,
+    §XVIII.1, §XVIII.2), whoever proposes it (the owner at sign-off, a Gate B finding, the checklist
+    audit), MUST get a scoped Codex Gate A round on the changed lines, with an Opus judge, under the
+    owner's own `/gate-a` invocation (`[const §XX.2]`, `[const §XVII.4]`), before the RATIFIED flip;
+    the owner then signs off on the text that round reviewed.
+  - A change to the **amendment's records** amends no rule and needs only Gate B's re-check: the
+    Status line, and all of the Sync Impact Report and the `CHANGELOG.md` entry outside the six clause
+    bodies (status and review-tally wording, the affected-rows and per-article summary lines, the
+    RATIFIED templates; data-model §E.1, §E.2, §E.8). A summary line must still agree with the clause
+    it summarises; the §VI.6 summary bullets also carry the owner's round-3 N3-1 wording. Catalogue, coverage-index, B&L and design-doc text is not amendment text either (FR-015b
+    covers a narrowing found at verify).
+  - The RATIFIED flip (C-RATIFY) is written after Gate B's review, from data-model §E.1, §E.2 and §E.8's
+    pre-specified text, and its evidence is the docs gates re-run on the flip head. The Gate B record
+    says so and claims no review of that commit.
 - **FR-004**: Every in-repo surface that states the dropped scope as v1.0, or states the old status
   or content of a changed row, MUST be updated, or annotated with a pointer to this feature. The set
   is not hand-picked: it is the output of research R-12's repository-wide recipe over every tracked
@@ -323,7 +377,11 @@ in those files are licence comment lines.
   the licence-metadata strings. The recipe MUST be proven able to fire on a known positive before its
   output is trusted, and every hit MUST carry a recorded disposition (edit, header, keep with a reason,
   other concept, pattern false positive). Every hit dispositioned "edit" has exact target text in
-  data-model §D–§G. The recipe is re-run after the edits (SC-003).
+  data-model §D–§G. The recipe is re-run after the edits (SC-003). A surface that states such scope or
+  status but that no R-12 command reaches (it carries neither a dropped-scope term nor a row ID, as
+  `brain/components/nfr-and-tooling.md:57`, found by review) is in scope too once found, by review or
+  otherwise: it is added to R-12's table with who found it and its disposition, and the recipe's
+  blind spot is named there.
 
 **Reconciliation flips (18 rows)**
 
@@ -346,8 +404,28 @@ in those files are licence comment lines.
     - TC-012: the duplicate check belongs to the application, per FIX-TC.
     - TC-014: ResetSeqNumFlag only; FIX-TC accepts either option.
   - **TC-005:** Title `Session conformance: Reject (35=3) receipt — NextNumIn incremented, session continues, no Reject of a Reject (test 7)`; Verified names fixpp#612.
-  - Each TC row also takes the version-column narrowing that the verification file applies to every
-    TC flip.
+  - Each TC row's FIX version(s) cell is the literal value data-model §C lists for it (research R-3's
+    "Column written", by FR-006a). Where only one BeginString is driven, that value is narrower than
+    both the verification file's and the owner's "4.2, 4.4 witnessed" wording; FR-006a says why the
+    narrower text governs.
+- **FR-006b**: Every narrowing of the 18 flips is one of the two kinds the owner's rule (Context)
+  allows, and its Verified cell states it:
+  - **On record** (FIX / FIX-TC requires the removed part, or the row names it anyway): NFR-002 (the
+    544 record's lapse, the FR-020 issue); NFR-003 (#555); NFR-005 (L-497-1, #569, #565); NFR-011
+    (L-002-4, #565, B-495-3); D-008 (runtime-XML-only versions, L-003-2); TC-005 (#612); TC-006 (#588,
+    #580, L-019-4); TC-012 (L-022-1); every TC row's unwitnessed FIX-TC §4.1 versions (4.2, 4.4 or
+    FIXT.1.1, as R-3 lists; #614).
+  - **Not required by FIX / FIX-TC** (no record needed): NFR-005's SBO and its parse → validate →
+    dispatch path beyond the two asserted surfaces (MemoryStore's slab, the validator scratch
+    resource, the cancellable_dispatch node); NFR-011's "throughout" and OrchestraLoader's unasserted
+    routing (NFR rows are `[impl]` / `[constitution]` rows, which FIX does not require); NFR-011's
+    "C++17", a stale label corrected to the project's C++23, not a removed capability; NFR-013's
+    io_uring half, moved to the new row NFR-019, and its backend, moved to Verified as a design fact;
+    TC-012's 19a/19b duplicate check (FIX-TC 19 assigns it to the application); TC-014's outbound
+    Reset-mode option (FIX-TC 9 accepts either option); TC-017's 17b ending and 17c–17j (FIX-TC 17 is
+    optional; `[const §XII.7]`); and the versions 4.0, 4.1, 4.3, 5.0 and 5.0SP1 of the old TC columns
+    (outside FIX-TC §4.1's scope).
+  - A narrowing found at verify is classified the same way before its row flips (FR-015b).
 - **FR-007**: NFR-002 MUST be reworded to `[const §IX.1]`'s per-PR obligation: ≥95/85 on touched
   modules, or a recorded assessment for every uncovered **line/branch** the PR adds or newly makes
   reachable, checked in the per-feature verify record, not a CI threshold. It then moves to `done`
@@ -372,8 +450,10 @@ in those files are licence comment lines.
   drive, determined per test (fixture, helper default or instantiation list, not a file-level grep).
   The owner's "4.2, 4.4 witnessed" wording applies where both are driven. Where only one is, the
   column narrows further, because the owner's rule (narrow to what shipped) governs the wording, not
-  the other way round. Each such deviation is listed in research.md and reported to the owner before
-  Gate A. The versions left unwitnessed are required by FIX-TC §4.1, so the owner's rule (narrow only
+  the other way round. Each such deviation is listed in research.md, was reported to the owner
+  in-session on 2026-10-22 before Gate A started, and is repeated in the owner report (tasks T053), as
+  is NFR-005's PMR narrowing of Gate A round 3. The owner is told, not asked: the owner's rule (Context)
+  already approves a narrowing to what shipped. The versions left unwitnessed are required by FIX-TC §4.1, so the owner's rule (narrow only
   where the removed part is not required, or is on record and named) needs them on record. They are,
   as **fixpp#614** (filed 2026-10-22, OPEN; research R-10), which every affected Verified cell names.
   The other versions the old columns named (4.0, 4.1, 4.3, 5.0, 5.0SP1) are outside FIX-TC §4.1's
@@ -401,6 +481,17 @@ in those files are licence comment lines.
   `/* … */` in C headers, matching `include/fix/c_api/log.h`. The 37 unmarked files gain the line.
   The 16 `Apache-2.0` files have their identifier replaced, and their `Copyright` line stays. No other
   byte of these files changes.
+  - "C/C++ file" means a tracked file whose extension is `.c`, `.cc`, `.cpp`, `.h`, `.hpp`, `.ipp` or
+    `.inl` (quickstart §3's census); any other tracked file under `src/`/`include/` is listed in the
+    verify record (Edge Cases).
+  - The line is line 1 in each of the 53 files: an insert goes at line 1, and each `Apache-2.0`
+    identifier already sits on line 1 and is replaced in place (re-derive:
+    `git ls-files src include | grep -E '\.(c|cc|cpp|h|hpp|ipp|inl)$' | xargs /usr/bin/grep -n 'SPDX-License-Identifier: Apache' | cut -d: -f2 | sort -u`
+    prints `1` on `origin/main`).
+  - Precondition, with a stop rule: before C-SPDX, research R-8's provenance grep is re-run over the 37
+    unmarked files and its authorship census over all 53. A foreign copyright or licence notice, or a
+    contributor other than the owner and the AI assistants R-8 names, means that file is not
+    relabelled and the owner is told.
 - **FR-013a**: Every package-metadata licence field MUST read `AGPL-3.0-or-later`, so the package
   metadata agrees with the files and with `bindings/python/pyproject.toml` (owner, 2026-10-22). The
   R-12 sweep (c) finds two that do not: `conanfile.py`'s `license = "AGPL-3.0-only"` and
@@ -412,10 +503,18 @@ in those files are licence comment lines.
 - **FR-013b**: In a **separate commit** of this PR, whose message references `Refs #607` and carries no
   closing keyword, the two comment lines above `tool_requires = []` in `conanfile.py` MUST be replaced
   with the four lines in data-model §G (owner, 2026-10-22, via a peer session; reworded by the owner at
-  Gate A round 2 so it is true before and after B58). Batch B58 / #607 moves SWIG off apt, and both
+  Gate A round 2 so it is true before and after B58, and line 1's "(runner image, apt or choco in CI)"
+  reworded by the owner at the checklist audit, §Clarifications). Batch B58 / #607 moves SWIG off apt, and both
   `conanfile.py` edits then ride one cache-key move.
 - **FR-014**: `tools/capi_freeze.sha256` MUST be regenerated for the C-ABI headers FR-013 touches, and
   `tools/check_capi_freeze.sh` MUST pass. The PR body MUST state that the C-ABI change is comment-only.
+  The freeze gate passing proves only that the manifest matches the headers, so the comment-only claim
+  is measured on its own: quickstart §3's per-file `--numstat` and line filter over the frozen headers
+  (one licence line each, nothing else), and research R-7's `libfixpp_capi` symbol diff (built at
+  `9b176090` and at the head, empty) and C-ABI occupancy check. There is no C-ABI version bump: the
+  versioned contract (`[const §X.1]`, `[const §X.7]`) is the C ABI's symbols, types and values, and a
+  comment line changes none of them. The manifest is still regenerated, because
+  `tools/check_capi_freeze.sh` makes any byte change to a frozen header a reviewed manifest edit.
 
 **Evidence and gates**
 
@@ -425,23 +524,41 @@ in those files are licence comment lines.
     filter, `--no-tests=error`, and the pass count read from the binary's output.
   - **CI rows** (NFR-001, NFR-003, NFR-005, NFR-013): the required jobs green on the cited `push:main`
     runs at `9b176090` (Tier 1 `39594667883`, Tier 2 `39594667975`), plus the workflow job and step
-    names re-read on this branch. NFR-005 and NFR-013 also run their witnesses locally.
+    names re-read on this branch. NFR-005 and NFR-013 also run their witnesses locally. Runs at the
+    base are enough because these rows claim CI configuration (jobs, legs, steps, `if:` lines and
+    required checks), which the branch re-reads unchanged, and the branch's library delta is licence
+    comment lines, two licence strings and two test cells; the branch's own required tier runs must
+    still be green on the C-RATIFY head before merge (tasks T065).
   - **Process row** (NFR-002, under `[const §VI.6]`(b) as amended in v4.0): the two cited verify
     records (parent repo (private)), each showing a coverage assessment of every uncovered changed line
     and every untaken branch, and the FR-020 issue's number and state.
 
   The verify record also snapshots `gh issue view 614` (state, labels, date), because the library
-  cannot show an issue's state and every TC Verified cell depends on it. A row whose evidence did not
+  cannot show an issue's state and every TC Verified cell depends on it, and the same for the FR-018,
+  FR-020, FR-021 and FR-023 issues. A row whose evidence did not
   hold MUST stay out of the flip set (Edge Cases).
 - **FR-015b**: The verify record MUST carry the claim → witness map of data-model §H in full: one row
   per clause of each flipped row's Title or version column, each mapped to the `file:line` of an
   `EXPECT`/`ASSERT`, or to a CI step's `if:` and command, that it ran or read. Every cited path MUST
   resolve in this repository or be labelled parent repo (private). A clause with no mapped assertion
   does not flip as worded: it is narrowed, and the narrowing goes into the owner report.
+  - **Clause.** A clause is a part of the cell that could be false while the rest of the cell is true.
+    A cell is split until no part can be; a qualifier (a version, a leg, "on the gated windows") stays
+    with the claim it qualifies. Where two splits are possible, the finer one is used.
+  - **Implication.** An assertion witnesses a clause it implies when the row's Verified cell states
+    the implication (TC-005: an order delivered at the next number after in-sequence Rejects implies
+    NextNumIn advanced over them).
+  - **Verified cells are not mapped.** They carry evidence pointers, residuals and design facts. Where a
+    Verified sentence names a behaviour no cited cell asserts, the cell says so (NFR-005's design facts,
+    NFR-013's backend, TC-008's RefTagID 36).
+  - **A narrowing found at verify** is written into data-model §C first (the copy source), classified
+    under FR-006b, then copied to the catalogue. It is not amendment text, so it does not re-open Gate
+    A (FR-003d); Gate B reviews it and the owner report (tasks T053) lists it. A row whose clause cannot
+    be narrowed to something witnessed stays out of the flip set (Edge Cases).
 - **FR-015a**: Every Verified cell MUST state its QuickFIX-interop disposition, because the catalogue
   legend's Verified rule names interop "where applicable". The disposition is "not applicable" for the
-  D/NFR rows. For the TC rows it is "witnessed in-process; the live QuickFIX cells skip without a
-  counterparty, so they are not per-PR evidence and are not claimed".
+  D/NFR rows. For the TC rows it is "Witnessed in-process; the live QuickFIX interop cells skip without
+  a counterparty, so they are not per-PR evidence and are not claimed." (data-model §C's literal text).
 - **FR-016**: Every tool that parses the catalogue MUST still parse every row. The sweep (research
   R-5) finds two: `tools/brain_inventory.py`, and `docs/prebuild.py`, whose `_status_header` counts each
   raw Status string for the published "Status at a glance" table. The drop form cannot break it (it
@@ -450,27 +567,56 @@ in those files are licence comment lines.
   and verify exercises it as research R-5 says. The open-row census MUST be recorded before and after
   the change, with a delta of −25 open rows (7 drops + 18 flips), +18 done, and +8 post-v1.0 drops
   (the 7 plus the new row NFR-019); the other `dropped` count is unchanged (research R-4). The census
-  is first proven against a known positive.
+  is first proven against a known positive. These figures, and those in SC-001, research R-4,
+  quickstart §1 and tasks T038, assume no row is withheld. If k of the 18 flips are withheld under Edge
+  Cases, the expected delta is −(25 − k) open and +(18 − k) done (the drops and NFR-019 do not depend
+  on evidence), and the verify record names the withheld rows and states the adjusted figures.
 - **FR-017**: The live B&L file MUST gain exactly one entry, **L-094-1** (data-model §F.6), in a new
   094 section at its end: `EngineConfig::control_plane_factory` is accepted and ignored (owner,
-  2026-10-22). No other live entry changes, and the closed file does not change. The Gate B record
+  2026-10-22). No other live entry changes, and the closed file does not change. The field is the only
+  entry point: no C-ABI function, configuration key (TOML / QuickFIX CFG) or Python binding sets a
+  control-plane factory. Re-derive with
+  `git grep -n -i -e control_plane -e controlplane -- src include bindings ':!*.md'`: its hits must be
+  only the `EngineConfig` field and its include, the anchor header itself, comments naming
+  `ControlPlaneFactory` as a pattern, the Python binding's `ControlPlaneError` mapping of the codes
+  900–999 (`bindings/python/fixpp.i`), and the binding tests under `bindings/python/tests/` that list
+  `ControlPlaneError` among the exception names (audit, 2026-10-22). A new hit is a new entry point, and L-094-1 must name it. The Gate B record
   carries this as the feature's B&L delta: one new limitation, and no behaviour change.
 - **FR-018**: Before the L-094-1 edit is written, the orchestrator MUST file one fixpp issue for the
   silently ignored field, labelled at creation from `gh label list`. Its body names the field, the
   re-derive grep (`grep -rn control_plane_factory src/`) and the two options (refuse a non-null factory
   in v1.0, or document the field as reserved). L-094-1 and research R-10 then name its real number;
   no placeholder number is ever committed.
+  - **Placeholder rule (applies to FR-018, FR-020, FR-021 and FR-023).** A placeholder is an
+    issue-number token in angle brackets: `fixpp#` directly followed by a less-than sign, or a
+    less-than sign directly followed by `N` and a hyphen (the bundle's are the FR-018, FR-020 and FR-023 issue
+    tokens). The grep in tasks.md's Execution rules finds each one; this paragraph describes the
+    tokens in words so that the grep does not list it. "Never committed" means: never in a
+    file outside `specs/094-v1-tier0-bookkeeping/` (the catalogue, the B&L file, `conanfile.py`,
+    every other product file), and, inside the bundle, none left after tasks T011 fills the real
+    numbers. The bundle carried the tokens before T011 by design. Two bundle files keep them after T011
+    because they name what is replaced: `tasks.md`, and the checklists under `checklists/`, which quote
+    the tokens in their items. The grep excludes both.
 - **FR-019**: The PR body MUST state:
   - the Conan cache miss on every lane, once (FR-013a);
   - that `include/fix/c_api` and `conanfile.py` match tier1's `PY_RE`, so the PR also launches the
     python-wheel fleet, and that the header comment edits invalidate ccache for every TU that includes
     the touched headers;
   - that the C-ABI change is comment-only (FR-014);
-  - the relicensing basis: the 16 Apache-2.0 files have one author, the owner, and versions already
-    published under Apache-2.0 keep that grant (research R-8).
-  The PR body and every commit message MUST NOT put a closing keyword ("close", "fix", "resolve" and
-  their forms) next to #607, #612, #614 or the FR-018, FR-020, FR-021 and FR-023 issues, including in a negation
-  such as "does not close".
+  - the relicensing basis: the 16 Apache-2.0 files have one human author, the owner (their
+    `Co-Authored-By` trailers name only AI assistants), and versions already published under
+    Apache-2.0 keep that grant (research R-8).
+  The PR body, every commit message, every issue body this feature files, and the squash-merge commit
+  message MUST NOT put a closing keyword ("close", "fix", "resolve" and their forms) next to #607,
+  #612, #614 or the FR-018, FR-020, FR-021 and FR-023 issues, including in a negation such as "does
+  not close".
+  - "Next to" is the form GitHub's linker reads: a keyword (close, closes, closed, fix, fixes, fixed,
+    resolve, resolves, resolved; any case), an optional colon, whitespace, then the reference, which
+    is `#N`, `owner/repo#N` or the issue's URL. tasks T048's grep is the oracle for that form, run
+    with its positive controls.
+  - The squash-merge message is the one GitHub composes from the PR title and body or from the commits
+    (both covered above). Before the merge (tasks T065) `closingIssuesReferences` is read empty, and if
+    the merge message is edited, the same grep runs over it.
 - **FR-020**: Before the NFR-002 row is written, the orchestrator MUST file one fixpp issue for the 544
   record's lapse, labelled at creation from `gh label list`. Its body says that
   `544-hot-path-zero-alloc-verify.md` (parent repo (private)) reported 81.73 % branch and assessed
@@ -481,7 +627,9 @@ in those files are licence comment lines.
 - **FR-021**: At implement time the orchestrator MUST file one fixpp follow-up issue, labelled at
   creation from `gh label list`, for the 40 files outside `src/`/`include/` that still carry
   `SPDX-License-Identifier: Apache-2.0` (37 under `tests/`, 3 under `bench/`; re-derive grep in
-  research R-8). Research R-8 names its real number. 094 does not change those files.
+  research R-8). Its body carries R-8's re-derive grep and its output and says 094 does not change
+  those files. It is filed before research R-8 records its number, which is written as the real
+  number (FR-018's placeholder rule). 094 does not change those files.
 - **FR-022**: `phase-implementer` MUST add two test cells (a test-only change; owner, Gate A round 2),
   each in a file already compiled into `session_pure_tests` (`tests/session/CMakeLists.txt`), so no
   ctest entry is added. Both files already open with `// SPDX-License-Identifier: AGPL-3.0-or-later`,
@@ -500,6 +648,17 @@ in those files are licence comment lines.
     establishes). The acceptor's send-count assertion also fails (it sends its Logon reply). For the
     initiator's send-count assertion, the known positive is the fixture itself: `captured_frames`
     holds the initiator's own outbound Logon before `clear_handshake_captures()`.
+  - **What counts as RED.** The mutant build compiles, the binary runs to completion, and gtest reports
+    the cell FAILED with a failure message at the state assertion's `file:line` (for the acceptor, also
+    at the send-count assertion's). A build error, a crash, a timeout or a failure only at another
+    assertion is not RED. The quoted RED output in the verify record shows those lines.
+  - **The initiator's send-count assertion is not required to fail under the mutant.** Whether an
+    initiator that establishes at LogonSent sends anything is not relied on: the state assertion carries
+    the mutant-level RED, and the send-count assertion's ability to fail is shown at fixture level (the
+    known positive above).
+  - **If either cell cannot be made GREEN on the branch, or cannot be proven RED as above,** TC-017
+    does not flip: Edge Cases applies (the row stays `backlog`, the finding is recorded, the owner is
+    told), and no narrowed TC-017 text is drafted at implement.
   - The stale initiator-arm comment in `src/session/session.cpp` ("with Logout in US4", on the
     `interpret_logon` refusal in `on_inbound_logon_sent_`) is not edited; it is a P3 note (plan.md
     §Gate A).
@@ -524,11 +683,19 @@ in those files are licence comment lines.
 - **SC-001**: The open OFFICIAL row count falls by exactly 25 (7 drops, 18 flips), the done count rises
   by exactly 18 (152 → 170 parsed; 154 → 172 counting C-002 and T-042, research R-4), the post-v1.0
   drop count goes 0 → 8, and no other row changes Status. All counts come from the census output.
+  These figures assume no flip is withheld; if k flips are withheld under Edge Cases, the open count
+  falls by 25 − k and the done count rises by 18 − k (FR-016), and the verify record names the k rows.
 - **SC-002**: 100 % of the tests cited in the 18 flipped rows exist literally and pass on this branch,
-  and every clause in the data-model §H map has its assertion recorded.
+  and every clause in the data-model §H map has its assertion recorded. "Exist" is research R-11's
+  counting rule and check (53 distinct entries, both negative controls reporting MISSING); "pass" is
+  each named test's PASSED read from its binary's own output, not from ctest's exit code (quickstart
+  §2).
 - **SC-003**: 0 constitution clauses state the service wrapper, gRPC control plane or iceoryx2 data
   plane as v1.0 scope, and the R-12 recipe re-run after the edits leaves 0 hits outside its "keep",
-  "header", "other concept" and "pattern FP" classes.
+  "header", "other concept" and "pattern FP" classes and the lines its "edit" hits became (an applied
+  edit still matches the terms). The constitution half has a mechanical part (quickstart §4: every
+  data-model §E.3–§E.7 after-text present once, every replaced before-text absent) and a reading part
+  (every remaining grep hit in a named class).
 - **SC-004**: 100 % of tracked C/C++ files under `src/` and `include/` carry the AGPL-3.0-or-later
   identifier, and 0 carry another identifier.
 - **SC-005**: The diff outside `spec/`, `.specify/`, `brain/`, `specs/` and `CHANGELOG.md` contains

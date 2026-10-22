@@ -4,7 +4,7 @@
 `research/G19-fix-fpml-iso20022/library`)
 
 **Input**: `specs/094-v1-tier0-bookkeeping/`:
-- spec.md (FR-001…FR-023, including FR-003a/b/c, FR-006a, FR-013a/b and FR-015a/b; SC-001…SC-006; User Stories 1–3);
+- spec.md (FR-001…FR-023, including FR-003a/b/c/d, FR-006a/b, FR-013a/b and FR-015a/b; SC-001…SC-006; User Stories 1–3);
 - plan.md (Gate A, Constitution Check, Phases, Risks);
 - research.md (R-1…R-15);
 - data-model.md (§A…§H, the exact target text of every changed row, clause and surface);
@@ -61,9 +61,10 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
     edit above the target (the SIR, the NFR-019 row and paragraph, Z-9, the L-094-1 section, the
     CHANGELOG entry) shifts a guide.
 - **No placeholder number is ever committed.** Before every commit (tasks.md excluded, since it names
-  what it replaces), `git grep -nE 'fixpp#<|<N-' -- ':!specs/094-v1-tier0-bookkeeping/tasks.md'` must
-  print nothing once T011 has run. The RATIFIED templates of data-model §E.1/§E.2/§E.8 (`#<pr>`,
-  `<sign-off date>`, `<date>`, `<tally>`) stay in the bundle as templates. They must never appear in
+  what it replaces), `git grep -nE 'fixpp#<|<N-' -- ':!specs/094-v1-tier0-bookkeeping/tasks.md' ':!specs/094-v1-tier0-bookkeeping/checklists/'`
+  must print nothing once T011 has run. The checklists are excluded too, because their items quote the
+  tokens (spec FR-018, placeholder rule). The RATIFIED templates of data-model §E.1/§E.2/§E.8 (`#<pr>`,
+  `<sign-off date>`, `<date>`, `<tally>`, `<gate-b-tally>`, `<clauses>`) stay in the bundle as templates. They must never appear in
   `.specify/constitution.md` or `CHANGELOG.md` (T063 checks this).
 - **No closing keyword.** No commit message, issue body or PR body puts "close", "fix" or "resolve"
   (in any form) next to #607, #612, #614 or the FR-018, FR-020, FR-021 or FR-023 issues, and that
@@ -151,8 +152,8 @@ shown able to report non-zero.
     `gh issue view <n> --repo CatalinSerafimescu/fixpp --json state,labels,createdAt`. Snapshot #614 into
     the verify record (FR-015).
   - In the LIVE `spec/behaviors-and-limitations.md` only (never grep across the live/closed pair),
-    confirm each of L-003-2, L-022-1, L-497-1, L-002-4, B-043-1, B-005-7, B-495-3, B-544-1, L-019-4 and
-    L-005-1 is defined.
+    confirm each of L-003-2, L-022-1, L-497-1, L-002-4, B-043-1, B-005-7, B-495-3, B-544-1, L-019-4,
+    L-003-1 (named in D-008's Verified cell) and L-005-1 is defined.
   - If an issue is closed or an entry missing, the row citing it does not flip as worded. Record it and
     tell the owner before Phase 4.
 - [ ] T005 [P] [orchestrator] **Cited-test existence (R-11).** Re-run R-11's check over `tests/` with
@@ -195,8 +196,8 @@ record of these numbers wait on this phase.
     amending §III.4 to the host-provisioned model with its reproducibility requirement.
   - Labelled at creation. Record the number.
 - [ ] T011 [orchestrator] **Fill the real numbers into the bundle** (FR-018, FR-020, FR-021, FR-023).
-  - Before editing, run the placeholder grep from the Execution rules. It must list the bundle's
-    current sites in `spec.md`, `plan.md` and `data-model.md`, exactly the sites below (one grep line
+  - Before editing, run the placeholder grep from the Execution rules (with both exclusions). It must
+    list the bundle's current sites in `spec.md`, `plan.md` and `data-model.md`, exactly the sites below (one grep line
     each; L-094-1's two tokens share one line); that is its known positive.
   - Replace each `fixpp#<…>` / `<N-…>` token with the real number of the issue it stands for:
     - in `specs/094-v1-tier0-bookkeeping/spec.md`, the FR-023 issue in §Clarifications (round 3,
@@ -365,7 +366,10 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
     `if (invalid_encrypt_method_seen)` block that returns `session_invalid_logon` in `interpret_logon`
     (`src/session/admin_messages.cpp`). Build `session_pure_tests`.
   - Each cell must fail on its state assertion (the session establishes), and the acceptor's send-count
-    assertion must fail too.
+    assertion must fail too. RED is spec FR-022's "What counts as RED": the mutant builds and runs to
+    completion, and gtest's failure lines name those assertions' `file:line`; a build error, crash,
+    timeout or failure elsewhere is not RED. If either cell cannot be made GREEN or RED, TC-017 does not
+    flip (FR-022).
   - For the initiator's send-count assertion, the known positive is the fixture itself:
     `captured_frames` holds the initiator's own outbound Logon before `clear_handshake_captures()`.
   - Revert, show `git diff` of the scratch copy against the PR head is clean, and `strings`-check that
@@ -460,7 +464,8 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
 - [ ] T038 [US2] [orchestrator] **Census after the flips (SC-001; FR-016).**
   - The census reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8.
   - The only rows whose Status differs from T002's are the 25 in data-model §A/§C, plus NFR-019.
-  - Run `tools/brain_inventory.py` again and record the diff against T002's output.
+  - Run `tools/brain_inventory.py` again and record the diff against T002's output. Re-run research
+    R-5's two parser sweeps (in the library and in the workspace repository); a new parser is run too.
   - R-5's `_status_header` shows the three `dropped(post-v1.0, …` strings with counts 2, 5 and 1.
   - FR-012: `git diff origin/main -- spec/feature-catalogue.md` touches none of the rows NFR-010,
     NFR-004, NFR-008, TC-001, TC-002, TC-004, TC-007, TC-009, TC-010, TC-013.
@@ -508,7 +513,7 @@ prints `PASS`.
   - with data-model §G's four lines, four-space indent, the last line ending
     `Restore: fixpp#NNN.`, where NNN is the FR-023 issue's real number (filled into §G by T011):
     ```
-        # cmake and ninja come from the system (apt in CI); swig is installed by each
+        # cmake and ninja come from the system (runner image, apt or choco in CI); swig is installed by each
         # workflow that builds the bindings, at or above the minimum
         # bindings/python/CMakeLists.txt requires. Conan-pinned tools collide with
         # system versions and add resolution time. Restore: fixpp#NNN.
@@ -542,7 +547,7 @@ prints `PASS`.
 ### Instruments (each with its known positive)
 
 - [ ] T044 [P] [orchestrator] **R-12 sweep re-run (SC-003; FR-004).** Run R-12's four `git grep` commands
-  ((a) the dropped-scope terms, (a) the io_uring grep, (b), (c)) on the branch. Every hit falls in a "keep", "header", "other concept" or "pattern FP"
+  ((a) the dropped-scope terms, (a) the io_uring grep, (b), (c)) on the branch, plus R-12 (c)'s syntax-independent licence sweep. Every hit falls in a "keep", "header", "other concept" or "pattern FP"
   class of R-12, or is an applied "edit". Record the count per class in the verify record, beside
   T003's base counts.
 - [ ] T045 [P] [orchestrator] **Line citations and comment claims (quickstart §5).**
@@ -629,7 +634,7 @@ prints `PASS`.
     - the `PY_RE` python-wheel fleet and the ccache invalidation for every TU including the touched
       headers;
     - that the C-ABI change is comment-only (FR-014);
-    - the relicensing basis (R-8: one author; versions already published under Apache-2.0 keep that
+    - the relicensing basis (R-8: one human author, the owner, with `Co-Authored-By` trailers naming only AI assistants; versions already published under Apache-2.0 keep that
       grant).
   - The disclosed RATIFIED-flip re-run cost (plan.md Risks).
   - The gate records are cited in the two outcome sections only; the body has no separate `## Gates`
@@ -763,12 +768,15 @@ prints `PASS`.
   - Each find-string is matched with `grep -F` first (Execution rules); a miss stops the flip.
   - **Before writing it**, `git fetch origin`. If `origin/main` moved since T054's integration, repeat
     that integration first, so that C-RATIFY stays the last commit.
-  - Fill the templates: `<pr>` from T057 (the PR number); `<tally>` from T059 (the Gate A tally of
-    loop instance 2, round 1, and Gate B's rounds); `<sign-off date>` and `<date>` from T061 (the date
-    of the last sign-off, the fresh one if a scoped Gate A round ran). The Gate A round is written in
-    the templates as the literal "loop instance 2, round 1" and needs no fill.
+  - Fill the templates: `<pr>` from T057 (the PR number); `<tally>` from the scoped Article XIV §3
+    Gate A round's record (its Codex tally; FR-003d, owner ruling at the checklist audit);
+    `<gate-b-tally>` from the Gate B record; `<sign-off date>` and `<date>` from T061 (the date of the
+    fresh sign-off on the text the scoped round reviewed). The Gate A rounds are written in the
+    templates as the literal "loop instance 2, round 1, then a scoped round on Article XIV §3" (data-model
+    §E.1's scoped-round variant, in force) and need no fill. If a further scoped round ran on another
+    clause, add it the same way.
   - Checks on the flip head:
-    - `grep -nE '<n>|<pr>|<sign-off date>|<date>|<tally>' .specify/constitution.md CHANGELOG.md` prints
+    - `grep -nE '<n>|<pr>|<sign-off date>|<date>|<tally>|<gate-b-tally>|<clauses>' .specify/constitution.md CHANGELOG.md` prints
       nothing new. Its baseline is the same grep over `git show origin/main:<file>` for both files,
       and only hits absent from the baseline count. Its positive control is the same grep run on
       data-model.md first;
@@ -821,7 +829,8 @@ prints `PASS`.
   - *Open at the audit — waiver: after T063.*
 - [ ] T065 [orchestrator] **Merge (owner-driven, pipeline step 18).**
   - Before merging, re-read `closingIssuesReferences`, which must be empty, and confirm all three tiers
-    and both gate checks are green on the C-RATIFY head.
+    and both gate checks are green on the C-RATIFY head. If the squash-merge message is edited, run
+    T048's grep over it too (FR-019).
   - If `--admin` is needed, give the owner a one-line `!` command with `--body-file`; it is
     classifier-denied for the agent.
   - *Open at the audit — waiver: owner-driven, post-Gate B.*
@@ -877,7 +886,7 @@ prints `PASS`.
     first, so an uncommitted tick cannot pass. T054–T068 carry their own waivers. T069's tick is in
     that commit. T070's own completion is evidenced in the verify record (093's T126 precedent), and
     its tick lands with T056's commit.
-  - **(ii)** Every FR-001…FR-023 (with FR-003a/b/c, FR-006a, FR-013a/b and FR-015a/b) and every
+  - **(ii)** Every FR-001…FR-023 (with FR-003a/b/c/d, FR-006a/b, FR-013a/b and FR-015a/b) and every
     SC-001…SC-006 maps to landed text, a landed commit, or a landed and passing test. Items that cannot
     hold yet carry an **explicit waiver**, never "passed" (pre-flight 4d accepts only 100 % or every
     shortfall paired with a waiver rationale). Each reads "waived at audit: satisfied after Gate B by
