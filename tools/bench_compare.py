@@ -10,8 +10,7 @@ THREE MODES, and the split is load-bearing:
 The legacy positional form is invoked by the `bench_threading_regression` CTest
 cell via cmake/run_bench_regression.cmake, and by the quickstarts. It compares a
 measurement against a dev-host baseline, so it MUST stay soft — hardening it
-would redden a ctest cell on an invalid comparison. Its behaviour is
-byte-for-byte what it was before #209.
+would redden a ctest cell on an invalid comparison.
 
 ── WHY THREE TIERS (.specify/ci209-bench-gate.md) ────────────────────────────
 The obvious fix — harden the existing ±5% baseline comparison — is not
@@ -109,7 +108,14 @@ def compare(baseline_path: str, current_path: str) -> int:
             print(f"  {name:<48} {base_str:>15} {curr_str:>14} {'N/A':>8}")
             continue
 
-        delta_pct = (curr_val - base_val) / base_val * 100.0
+        if base_val == 0:
+            # A zero baseline (Google Benchmark's `stddev` aggregate over
+            # identical repetitions) has no relative delta. A non-zero current
+            # is reported as an unbounded regression rather than skipped, so a
+            # row nothing compared cannot reach the "within threshold" summary.
+            delta_pct = 0.0 if curr_val == 0 else math.copysign(math.inf, curr_val)
+        else:
+            delta_pct = (curr_val - base_val) / base_val * 100.0
         flag = "  <-- REGRESSION" if delta_pct > THRESHOLD_PCT else ""
         print(f"  {name:<48} {base_val:>15.2f} {curr_val:>14.2f} {delta_pct:>+7.1f}%{flag}")
         if delta_pct > THRESHOLD_PCT:

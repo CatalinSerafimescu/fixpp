@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=65
+CELLS_DECLARED=66
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -853,6 +853,34 @@ grep -qE '^bench/dictionary/xml_loader_bench[[:space:]]+[^[:space:]]+[[:space:]]
 shipped manifest, so the cell below would be vacuous"
 expect_red M-PINNED-RED "xml_loader_bench downgraded to \`no\` in the manifest" \
   "mandatory paired floor violated" paired_floor "$TMP/downgraded-suite.txt"
+
+# ═══ LEGACY MODE: bench_compare.py <baseline> <current> (soft) ════════════════
+
+# L-ZERO — a baseline row of exactly 0.0 (a `stddev` aggregate over identical
+# repetitions) must neither crash the legacy comparison nor hide a regression.
+# The zero row sorts BEFORE a regressed row, so a crash at the zero row would
+# also leave the regressed row uncompared. A non-zero current against a zero
+# baseline is a reported regression; a zero current against it is no change.
+# Legacy mode is SOFT, so the verdict is the printed warning block, pinned whole.
+LEG="$TMP/legacy"; mkdir -p "$LEG"
+mkfix "$LEG/base.json" BM_A=100 BM_B=200
+mkfix "$LEG/cur.json" BM_A=100 BM_B=300
+mutate "$LEG/cur.json" BM_A_stddev cpu_time 5.0
+lrc=0
+python3 "$CMP" "$LEG/base.json" "$LEG/cur.json" > "$TMP/lzero.out" 2>&1 || lrc=$?
+[ "$lrc" -eq 0 ] \
+  || fail "L-ZERO: legacy mode is soft and must exit 0; it exited $lrc — output:\n$(cat "$TMP/lzero.out")"
+lzero_want="$(printf '%s\n' \
+  "[bench_compare] SOFT WARNING — 3 benchmark(s) regressed >±5.0%:" \
+  "  BM_A_stddev: +inf%" \
+  "  BM_B_mean: +50.0%" \
+  "  BM_B_median: +50.0%" \
+  "[bench_compare] Gate is SOFT this phase — not failing CI.")"
+lzero_got="$(sed -n '/SOFT WARNING/,/Gate is SOFT/p' "$TMP/lzero.out")"
+[ "$lzero_got" = "$lzero_want" ] \
+  || fail "L-ZERO: the regression list differs from the pinned one — output:\n$(cat "$TMP/lzero.out")"
+echo "GREEN (expected): L-ZERO — a zero baseline row is compared, and the rows after it are too"
+cells_run=$((cells_run + 1))
 
 # ═══ RUNNER: ci/run-bench-suite.sh ═══════════════════════════════════════════
 
