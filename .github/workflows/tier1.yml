@@ -2989,6 +2989,15 @@ jobs:
           FIXPP_REPO_ROOT="$PWD" python3 tools/audit_co_spawn_named_closure.py --self-test \
             --libclang "$LIBCLANG" --resource-dir "$RESOURCE_DIR"
 
+      # The cross-check's matcher needs its own fixtures for the same reason the
+      # walker does: a shape the matcher misses on BOTH sides of the set-diff
+      # reads as agreement, and no real-tree run can show that (#586).
+      - name: "Detector self-test — co_spawn census cross-check matcher (#586)"
+        run: |
+          python3 tools/reconcile_co_spawn_census.py --self-test \
+            --clang-query "$CLANG_QUERY" \
+            --extra-arg="-resource-dir=$RESOURCE_DIR"
+
       - name: "co_spawn named-closure audit (#354)"
         run: |
           set -euo pipefail

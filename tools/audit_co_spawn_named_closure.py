@@ -1325,6 +1325,23 @@ void f() {
         [("record_into", "SAFE-DRIVEN")],
     ),
     (
+        # The same follow when the local sits BELOW the argument rather than
+        # being it. Mutant: follow only the argument node itself.
+        "a named local BELOW the argument is followed too (#586 shape B)",
+        """
+namespace std { template <class T> T&& move(T& t) { return static_cast<T&&>(t); } }
+void f() {
+  io_context ioc;
+  int out = 0;
+  auto make = [&](int) { return 0; };
+  auto aw = make(out);
+  co_spawn(ioc, std::move(aw), detached);
+  ioc.run();
+}
+""",
+        [("make", "SAFE-DRIVEN")],
+    ),
+    (
         # The follow runs to a fixed point. The clang-query matcher follows one
         # hop only, so a chain like this one lands in the cross-check's ONLY
         # LIBCLANG bucket -- the loud direction. Mutant: follow one hop only.

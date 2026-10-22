@@ -32,9 +32,10 @@ a FINDING, not a pass.
 
 ⚠️ NEITHER SIDE IS THE ORACLE. A disagreement means one of them is wrong and the
 site must be read. clang-query's matcher is over-inclusive by design here — it
-matches ANY `operator()` call in an argument, including one on a non-closure
-functor — while the libclang walker requires the callee to resolve to a VarDecl of
-lambda type. So clang-query >= libclang is the EXPECTED direction, and every extra
+matches ANY `operator()` call at or below an argument (or in the initializer of a
+named local the argument refers to), including one on a non-closure functor —
+while the libclang walker requires the callee to resolve to a VarDecl of lambda
+type. `--self-test` pins which shapes the matcher sees; see MATCHER. So clang-query >= libclang is the EXPECTED direction, and every extra
 must be inspected rather than assumed benign; libclang > clang-query is the
 alarming direction and means the matcher is missing a shape.
 """
@@ -52,9 +53,41 @@ import subprocess
 import sys
 import tempfile
 
+# ⚠️ THE CLOSURE CALL MAY SIT ANYWHERE BELOW AN ARGUMENT, NOT ONLY AT IT (#586).
+# The matcher used to be `hasAnyArgument(cxxOperatorCallExpr(...))`, which sees
+# a closure call only as a DIRECT argument, while the libclang walker sees one
+# nested below it (`bind_cancellation_slot(slot, record_into(out))`) — so a
+# correct site failed the cross-check. It now matches the argument or any
+# descendant, under the same prune the walker applies: never inside a lambda
+# body that is itself below THIS co_spawn.
+#
+# The prune is anchored to this co_spawn through `equalsBoundNode("cs")`. The
+# binding is made by the FIRST `allOf` operand, which is what makes it visible to
+# the later ones; `.bind()` on the outer matcher binds only after its inner
+# matchers have run. An unanchored `unless(hasAncestor(lambdaExpr()))` would drop
+# every co_spawn written inside a lambda that another co_spawn spawns.
+#
+# ⚠️ A NAMED LOCAL IS FOLLOWED ONE HOP (#586 shape B). A DeclRefExpr to a
+# non-parameter VarDecl, at or below an argument and outside lambda bodies, is
+# followed to its initializer, where the same closure-call test runs with the
+# prune anchored to that VarDecl. Without it, `const auto token = …record_into(out)…;
+# co_spawn(ex, op(), token)` was listed by neither instrument. The walker follows
+# the same rule to a fixed point; a chain longer than one hop therefore shows up
+# here as ONLY LIBCLANG, never as agreement.
+_PRUNE_CS = 'unless(hasAncestor(lambdaExpr(hasAncestor(callExpr(equalsBoundNode("cs"))))))'
+_CLOSURE_CALL = f'cxxOperatorCallExpr(hasOverloadedOperatorName("()"), {_PRUNE_CS})'
+_INIT_CALL = (
+    'cxxOperatorCallExpr(hasOverloadedOperatorName("()"), '
+    'unless(hasAncestor(lambdaExpr(hasAncestor(varDecl(equalsBoundNode("tok")))))))'
+)
+_NAMED_LOCAL = (
+    f'declRefExpr({_PRUNE_CS}, to(varDecl(allOf(varDecl().bind("tok"), '
+    f'unless(parmVarDecl()), hasInitializer(anyOf({_INIT_CALL}, hasDescendant({_INIT_CALL})))))))'
+)
 MATCHER = (
-    'callExpr(callee(functionDecl(hasName("co_spawn"))), '
-    'hasAnyArgument(cxxOperatorCallExpr(hasOverloadedOperatorName("()"))))'
+    'callExpr(allOf(callExpr().bind("cs"), callee(functionDecl(hasName("co_spawn"))), '
+    f'hasAnyArgument(anyOf({_CLOSURE_CALL}, hasDescendant({_CLOSURE_CALL}), '
+    f'{_NAMED_LOCAL}, hasDescendant({_NAMED_LOCAL})))))'
 )
 LOC_RE = re.compile(r'^(/[^:]+):(\d+):(\d+): note: "root" binds here', re.MULTILINE)
 # The message only, without the file:line:col prefix, so identical diagnostics from
@@ -195,6 +228,211 @@ def run_clang_query(cq: str, build_dir: str, files: list[str], timeout: int,
     return sites, failures
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Self-test — guards the MATCHER, which the real-tree run cannot: a matcher that
+# misses a shape on both sides of the diff reports agreement. Each cell is one
+# synthetic TU run through the production path (sanitize_db + _one_file); the
+# expected sites are the lines carrying a `// SITE` marker, so no line number is
+# written down anywhere.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# A minimal `asio` stand-in. The token, slot and awaitable are class types with
+# user-declared special members, so the AST carries the implicit construct /
+# materialize nodes real asio code does and `IgnoreUnlessSpelledInSource` has
+# something to see through. Templates instantiated with a lambda type are
+# DEFINED, because a declaration-only stub does not compile for a type with no
+# linkage, and a fixture that does not compile is a failed cell.
+SELF_TEST_PREAMBLE = """
+namespace std { template <class T> T&& move(T& t) { return static_cast<T&&>(t); } }
+namespace asio {
+template <class T> struct awaitable { awaitable(); awaitable(const awaitable&); ~awaitable(); };
+struct cancellation_slot { cancellation_slot(); };
+struct cancellation_signal { cancellation_slot slot(); };
+template <class S, class H> struct bound { bound(S, H) {} bound(const bound&) {} ~bound() {} };
+template <class S, class H> bound<S, H> bind_cancellation_slot(S s, H h) { return bound<S, H>(s, h); }
+struct io_context { void run(); };
+template <class E, class A, class T> void co_spawn(E&, A, T) {}
+}
+struct handler { handler(); handler(const handler&); ~handler(); void operator()(); };
+asio::awaitable<void> op();
+"""
+
+SELF_TEST_CASES: list[tuple[str, str]] = [
+    (
+        "closure call as the DIRECT argument is listed (#586 shape C)",
+        """
+void f(asio::io_context& ex, int out) {
+  asio::cancellation_signal cancel;
+  auto record_into = [&](int) { return handler(); };
+  auto record_with_slot = [&](int o) { return asio::bind_cancellation_slot(cancel.slot(), record_into(o)); };
+  asio::co_spawn(ex, op(), record_with_slot(out));  // SITE
+}
+""",
+    ),
+    (
+        # Mutant: the matcher before #586, which tests the argument node only.
+        "closure call NESTED inside an argument is listed (#586 shape A)",
+        """
+void f(asio::io_context& ex, int out) {
+  asio::cancellation_signal cancel;
+  auto record_into = [&](int) { return handler(); };
+  asio::co_spawn(ex, op(), asio::bind_cancellation_slot(cancel.slot(), record_into(out)));  // SITE
+}
+""",
+    ),
+    (
+        # Mutant: drop the named-local arms from the matcher.
+        "token built in a NAMED LOCAL is followed to its initializer (#586 shape B)",
+        """
+void f(asio::io_context& ex, int out) {
+  asio::cancellation_signal cancel;
+  auto record_into = [&](int) { return handler(); };
+  const auto token = asio::bind_cancellation_slot(cancel.slot(), record_into(out));
+  asio::co_spawn(ex, op(), token);  // SITE
+}
+""",
+    ),
+    (
+        # Mutant: follow a local only when it IS the argument, not below it.
+        "a named local BELOW the argument is followed too (#586 shape B)",
+        """
+void f(asio::io_context& ex, int out) {
+  auto make = [&](int) { return op(); };
+  auto aw = make(out);
+  asio::co_spawn(ex, std::move(aw), handler());  // SITE
+}
+""",
+    ),
+    (
+        # Mutant: drop the lambda prune from the closure-call arm.
+        "a closure called inside a LAMBDA argument's body is not a site",
+        """
+void f(asio::io_context& ex, int out) {
+  auto record_into = [&](int) { return handler(); };
+  asio::co_spawn(ex, [&]() { return record_into(out); }, handler());
+}
+""",
+    ),
+    (
+        # The prune is anchored to THIS co_spawn: a co_spawn inside a lambda
+        # passed to another co_spawn is still a site, and the outer one is not.
+        # Mutants: an unanchored prune drops the inner site; no prune lists the
+        # outer one.
+        "a co_spawn NESTED in a lambda argument is a site; the outer co_spawn is not",
+        """
+void f(asio::io_context& ex, int out) {
+  auto record_into = [&](int) { return handler(); };
+  asio::co_spawn(ex, [&]() {
+    asio::co_spawn(ex, op(), record_into(out));  // SITE
+    return 0;
+  }, handler());
+}
+""",
+    ),
+    (
+        # Mutant: drop the lambda prune from the named-local arm.
+        "a local named only inside a lambda body in the argument is not followed",
+        """
+void f(asio::io_context& ex, int out) {
+  asio::cancellation_signal cancel;
+  auto record_into = [&](int) { return handler(); };
+  const auto token = asio::bind_cancellation_slot(cancel.slot(), record_into(out));
+  asio::co_spawn(ex, op(), asio::bind_cancellation_slot(cancel.slot(), [&]() { auto c = token; }));
+}
+""",
+    ),
+    (
+        # Mutant: drop the lambda prune inside the followed initializer.
+        "a closure called only inside a lambda in the local's initializer is not a site",
+        """
+void f(asio::io_context& ex, int out) {
+  asio::cancellation_signal cancel;
+  auto record_into = [&](int) { return handler(); };
+  const auto wrapped = asio::bind_cancellation_slot(cancel.slot(), [&]() { return record_into(out); });
+  asio::co_spawn(ex, op(), wrapped);
+}
+""",
+    ),
+    (
+        # The libclang walker follows VarDecls only, never parameters. Mutant:
+        # drop `unless(parmVarDecl())`, which lets a default argument through.
+        "a PARAMETER is not followed into its default argument",
+        """
+struct functor { handler operator()() const; };
+inline functor make_handler;
+void g(asio::io_context& ex, handler h = make_handler()) {
+  asio::co_spawn(ex, op(), h);
+}
+""",
+    ),
+    (
+        "a co_spawn with no closure call anywhere is not a site",
+        """
+void f(asio::io_context& ex) {
+  asio::co_spawn(ex, op(), handler());
+}
+""",
+    ),
+]
+
+# A TU that does not compile must come back UNSEEN, never as a clean file.
+SELF_TEST_UNSEEN = """
+void f(asio::io_context& ex) {
+  asio::co_spawn(ex, op(), no_such_token);
+}
+"""
+
+
+def run_self_test(cq: str, extra: list[str], timeout: int) -> int:
+    passed = failed = 0
+    with tempfile.TemporaryDirectory(prefix="cospawn-selftest-") as tmp:
+        tmp = os.path.realpath(tmp)
+        cells = [(name, body) for name, body in SELF_TEST_CASES]
+        cells.append(("a TU that does not compile is UNSEEN", SELF_TEST_UNSEEN))
+        paths, db = [], []
+        for i, (_name, body) in enumerate(cells):
+            path = os.path.join(tmp, f"cell_{i}.cpp")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(SELF_TEST_PREAMBLE + body)
+            paths.append(path)
+            db.append({"directory": tmp, "file": path,
+                       "arguments": ["clang++", "-std=c++20", "-c", path]})
+        build = os.path.join(tmp, "build")
+        os.makedirs(build)
+        with open(os.path.join(build, "compile_commands.json"), "w", encoding="utf-8") as fh:
+            json.dump(db, fh)
+        dbdir = os.path.join(tmp, "db")
+        os.makedirs(dbdir)
+        sanitize_db(build, dbdir)
+
+        for i, (name, body) in enumerate(cells):
+            f, found, err, diag = _one_file((cq, dbdir, paths[i], timeout, extra))
+            if i == len(cells) - 1:
+                if err is None:
+                    print(f"FAIL  {name}\n      a TU with a compile error was reported as seen, "
+                          f"with sites {sorted(found)}")
+                    failed += 1
+                else:
+                    passed += 1
+                continue
+            if err is not None:
+                print(f"FAIL  {name}\n      fixture is UNSEEN: {err}: {diag}")
+                failed += 1
+                continue
+            src_lines = (SELF_TEST_PREAMBLE + body).split("\n")
+            want = {n for n, text in enumerate(src_lines, 1) if "// SITE" in text}
+            got = {line for fn, line in found if fn == paths[i]}
+            if got != want or len(got) != len(found):
+                print(f"FAIL  {name}\n      expected site lines {sorted(want)}, "
+                      f"got {sorted(found)}")
+                failed += 1
+            else:
+                passed += 1
+
+    print(f"\nself-test: {passed}/{passed + failed} passed")
+    return 1 if failed else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--build-dir", default="build/linux-clang-debug")
@@ -208,7 +446,9 @@ def main() -> int:
         default=(shutil.which("clang-query") or shutil.which("clang-query-22") or ""),
         help="clang-query binary (default: first found on PATH)",
     )
-    ap.add_argument("--audit-json", required=True, help="--json-out from the libclang walker")
+    ap.add_argument("--audit-json", default="", help="--json-out from the libclang walker")
+    ap.add_argument("--self-test", action="store_true",
+                    help="run the matcher fixtures and exit (needs no compilation database)")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--jobs", type=int, default=4)
     # ⚠️ THE TWO INSTRUMENTS MUST PARSE WITH THE SAME CONFIGURATION, or the set-diff
@@ -235,6 +475,11 @@ def main() -> int:
             "  --clang-query explicitly."
         )
         return 1
+
+    if args.self_test:
+        return run_self_test(args.clang_query, args.extra_arg, args.timeout)
+    if not args.audit_json:
+        ap.error("--audit-json is required (except with --self-test)")
 
     with open(args.audit_json, encoding="utf-8") as fh:
         audit = json.load(fh)
