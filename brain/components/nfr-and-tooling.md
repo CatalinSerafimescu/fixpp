@@ -95,7 +95,7 @@ EOF
 
 ### Warnings as errors, and the lint/format sweep (#413, #416, #417)
 
-**`FIXPP_WERROR` reaches every compiled target by enumeration, not by a call list.**
+**`FIXPP_WERROR` reaches every compiled target by enumeration, not by a call list.** *(Narrowed by fixpp#560 to targets declared in fixpp's own source tree; see B-560-1.)*
 `fixpp_apply_werror_to_all_targets()` (`cmake/Helpers.cmake`) walks every directory's
 `BUILDSYSTEM_TARGETS`, called **deferred** from the top-level `CMakeLists.txt`, and fails configure on
 an empty walk. A per-target call list was rejected because that is exactly how the option went inert:
@@ -123,7 +123,7 @@ was also considered and rejected; the user chose to wire it on every toolchain, 
 
 **`fixpp_apply_common_flags_to_all_targets()`** (`cmake/Helpers.cmake`) applies
 `fixpp_apply_common_flags` by the same deferred `BUILDSYSTEM_TARGETS` walk as `FIXPP_WERROR`, for the
-same reason: a per-target call list misses the next target added without it. It fails configure on an
+same reason: a per-target call list misses the next target added without it. *(Narrowed by fixpp#560 to targets declared in fixpp's own source tree; see B-560-1.)* It fails configure on an
 empty walk, and its STATUS line names how many targets it reached and which were exempt. It is not
 gated on `FIXPP_WERROR`: its warning flags only raise warnings, and whether a warning fails the build
 stays that option's decision. The two MSVC conformance switches below are not warnings, and that

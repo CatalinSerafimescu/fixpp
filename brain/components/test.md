@@ -791,7 +791,7 @@ could not steer. `fixpp_instrument_libraries_for_fuzzing()` (`cmake/Helpers.cmak
   target's location instead.
 
 **The population is chosen by location** (`src/`), and it is enumerated from the buildsystem the same
-way #417's `-Werror` walk is. That leaves out the generated builder and validator libraries; a fuzzer
+way #417's `-Werror` walk is. *(Narrowed by fixpp#560 to targets declared in fixpp's own source tree; see B-560-1.)* That leaves out the generated builder and validator libraries; a fuzzer
 that starts linking one gets no feedback from it (L-508-1). The cost is B-508-1: in a fuzz build, *every* executable that links these libraries runs
 instrumented code, and B-508-2 follows from that. Without a sanitizer runtime to supply the
 `__sanitizer_cov_*` hooks, a non-fuzz executable does not link, so a fuzz build with no sanitizer is
