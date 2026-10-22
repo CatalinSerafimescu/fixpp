@@ -8,27 +8,32 @@
 # from scratch cannot see this. A mock UseSWIG project stands in for an incremental
 # tree, and its fixpp.i %include's a header that defines one constant.
 #
-# The mock does NOT restate the setting under test. Its source properties on fixpp.i
-# are the REAL ones: every `set_property(SOURCE fixpp.i PROPERTY ...)` line of
-# bindings/python/CMakeLists.txt, copied verbatim at run time. Deleting or disabling
-# the real USE_SWIG_DEPENDENCIES line therefore reddens this harness, and a property
-# moved to another spelling is not copied, which also reddens it (toward a false
-# RED, never a false GREEN).
+# The mock does NOT restate the setting under test. It includes a verbatim SLICE of
+# bindings/python/CMakeLists.txt, taken at run time: from the first line that starts
+# `set_property(SOURCE fixpp.i` through the line before the file's one
+# `swig_add_library(` call, then makes that call itself. The statements production
+# runs before the call thus run here in production's order and under its control
+# flow; a setting placed after the call, or under a condition that is false, is
+# absent from the mock's build as it is from production's. The harness refuses (no
+# leg runs) when `swig_add_library(` does not start exactly one line, or when no
+# fixpp.i set_property line precedes it.
 #
 # Legs, each a cell asserting its own line of output:
-#   GREEN  the real properties: build the wrapper, change the constant in the header,
+#   GREEN  the real slice: build the wrapper, change the constant in the header,
 #          rebuild the wrapper; the generated source must carry the new value.
-#   RED    the same lines minus USE_SWIG_DEPENDENCIES: the rebuilt wrapper must still
-#          carry the old value. It is the positive control that this observable can
-#          show a stale wrapper at all.
-# Mutants: copies of the real CMakeLists.txt with the line deleted, and with TRUE
-# turned to FALSE; each must fail the GREEN leg as stale. A mutant whose edit matched
-# nothing is refused (cmp guard), never counted as RED.
+#   RED    the same slice minus its one USE_SWIG_DEPENDENCIES line: the rebuilt
+#          wrapper must still carry the old value. It is the positive control that
+#          this observable can show a stale wrapper at all.
+# Mutants: copies of the real CMakeLists.txt with the line deleted, with TRUE turned
+# to FALSE, with the line moved below the swig_add_library call, and with the line
+# wrapped in if(FALSE); each must fail the GREEN leg as stale. A mutant whose edit
+# matched nothing is refused (cmp guard), never counted as RED. Refusal cells hand
+# each refusal a copy shaped to trip it, and require that refusal's own message.
 #
 # Usage: ci/test-swig-include-deps.sh [--cmakelists <file>]
 #   --cmakelists runs the two legs only, against the given file (e.g. a revision
 #   extracted with `git show <rev>:bindings/python/CMakeLists.txt`), and skips the
-#   mutants.
+#   mutants and the refusal cells.
 #
 # Needs cmake, ninja, a SWIG (`swig4.0` or `swig`) and a C++ compiler, and refuses to
 # run without them. The mock pins no SWIG version. Builds the generated wrapper source
@@ -57,15 +62,39 @@ command -v "${CXX:-c++}" >/dev/null || fail "no C++ compiler (${CXX:-c++}) on PA
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-CELLS_DECLARED=4
+CELLS_DECLARED=8
 cells_run=0
 OLD=60011
 NEW=60012
 
-# props <CMakeLists.txt> — its fixpp.i source-property lines, verbatim.
-props() { grep -E '^[[:space:]]*set_property\(SOURCE fixpp\.i PROPERTY ' "$1"; }
+# slice <CMakeLists.txt> [--drop-deps] — the lines from the first fixpp.i
+# set_property through the line before the one swig_add_library( call, verbatim.
+# --drop-deps also removes the one USE_SWIG_DEPENDENCIES TRUE line (the RED leg).
+# Exits 1 with the reason on stderr when the file does not have that shape.
+slice() {
+  python3 - "$@" <<'PY'
+import re, sys
+path, drop = sys.argv[1], "--drop-deps" in sys.argv[2:]
+lines = open(path).read().splitlines(keepends=True)
+calls = [i for i, l in enumerate(lines) if re.match(r"\s*swig_add_library\(", l)]
+if len(calls) != 1:
+    sys.exit(f"refused: swig_add_library( starts {len(calls)} line(s) of {path}, wanted exactly 1")
+props = [i for i in range(calls[0]) if re.match(r"\s*set_property\(SOURCE fixpp\.i\b", lines[i])]
+if not props:
+    sys.exit(f"refused: no set_property(SOURCE fixpp.i line precedes swig_add_library( in {path}")
+body = lines[props[0]:calls[0]]
+if drop:
+    deps = [i for i, l in enumerate(body)
+            if re.fullmatch(r"\s*set_property\(SOURCE fixpp\.i PROPERTY USE_SWIG_DEPENDENCIES TRUE\)\s*", l)]
+    if len(deps) != 1:
+        sys.exit(f"refused: the slice of {path} has {len(deps)} USE_SWIG_DEPENDENCIES TRUE line(s), wanted exactly 1")
+    del body[deps[0]]
+sys.stdout.write("".join(body))
+PY
+}
 
-# mock <dir> <props-file> — a UseSWIG project whose fixpp.i %include's a header.
+# mock <dir> — a UseSWIG project whose fixpp.i %include's a header. It includes
+# the slice named by -DMOCK_PROPS just before its own swig_add_library call.
 mock() {
   local d="$1"
   mkdir -p "$d/include/mock"
@@ -83,7 +112,7 @@ EOF
   printf '#define MOCK_VALUE %s\n' "$OLD" > "$d/include/mock/version.h"
 }
 
-# leg <props-file> <name> — configure the mock, build the wrapper, change the header,
+# leg <slice-file> <name> — configure the mock, build the wrapper, change the header,
 # rebuild the wrapper. Prints `regenerated` or `stale`; any other outcome is an error
 # (non-zero, with the reason on stdout).
 leg() {
@@ -111,21 +140,21 @@ leg() {
 
 # green <CMakeLists.txt> <name> — the GREEN leg; returns 0 when it holds, else prints why.
 green() {
-  local pf="$TMP/$2.props.cmake" r
-  props "$1" > "$pf" || { echo "no set_property(SOURCE fixpp.i PROPERTY ...) line in $1"; return 1; }
+  local pf="$TMP/$2.slice.cmake" r
+  r="$(slice "$1" 2>&1 >"$pf")" || { echo "$r"; return 1; }
   r="$(leg "$pf" "$2")" || { echo "$r"; return 1; }
   [ "$r" = regenerated ] \
-    || { echo "wrapper not regenerated: it kept MOCK_VALUE $OLD after the %include'd header changed. Properties copied from $1:"; cat "$pf"; return 1; }
+    || { echo "wrapper not regenerated: it kept MOCK_VALUE $OLD after the %include'd header changed. Slice taken from $1:"; cat "$pf"; return 1; }
 }
 
 # ── GREEN leg ────────────────────────────────────────────────────────────────
 why="$(green "$CMAKELISTS" green)" || fail "GREEN leg did not hold: $why"
-echo "GREEN (expected): wrapper regenerated with the properties of $CMAKELISTS"
+echo "GREEN (expected): wrapper regenerated with the slice of $CMAKELISTS"
 cells_run=$((cells_run + 1))
 
-# ── RED leg: the same properties without USE_SWIG_DEPENDENCIES ──────────────
-pf="$TMP/red.props.cmake"
-props "$CMAKELISTS" | grep -v USE_SWIG_DEPENDENCIES > "$pf"
+# ── RED leg: the same slice without USE_SWIG_DEPENDENCIES ───────────────────
+pf="$TMP/red.slice.cmake"
+r="$(slice "$CMAKELISTS" --drop-deps 2>&1 >"$pf")" || fail "RED leg: $r"
 r="$(leg "$pf" red)" || fail "RED leg errored: $r"
 [ "$r" = stale ] || fail "RED leg: without USE_SWIG_DEPENDENCIES the wrapper read '$r', not stale, so this harness cannot see the defect it pins"
 echo "RED (expected): without USE_SWIG_DEPENDENCIES the wrapper kept MOCK_VALUE $OLD"
@@ -137,18 +166,32 @@ if [ "$CELLS_ONLY" -eq 1 ]; then
 fi
 
 # ── Mutants of the REAL file ─────────────────────────────────────────────────
-# mutant <id> <python old> <python new>
-mutant() {
-  local id="$1" old="$2" new="$3" dst="$TMP/CMakeLists.$1.txt" why rc=0
-  python3 - "$REAL" "$dst" "$old" "$new" <<'PY' || fail "mutant $id: anchor did not apply"
+# mkmut <id> <python old> <python new> [<old> <new>]... — writes a copy of the real
+# file and prints its path. The (old, new) pairs apply in order; each old must
+# occur exactly once.
+mkmut() {
+  local id="$1" dst="$TMP/CMakeLists.$1.txt"; shift
+  python3 - "$REAL" "$dst" "$@" <<'PY' || fail "mutant $id: anchor did not apply"
 import sys
-src, dst, old, new = sys.argv[1:5]
+src, dst, pairs = sys.argv[1], sys.argv[2], sys.argv[3:]
+if not pairs or len(pairs) % 2:
+    sys.exit(f"mutant needs (old, new) pairs, got {len(pairs)} argument(s)")
 s = open(src).read()
-if s.count(old) != 1:
-    sys.exit(f"mutation anchor occurs {s.count(old)} times, wanted 1: {old!r}")
-open(dst, "w").write(s.replace(old, new, 1))
+for old, new in zip(pairs[::2], pairs[1::2]):
+    if s.count(old) != 1:
+        sys.exit(f"mutation anchor occurs {s.count(old)} times, wanted 1: {old!r}")
+    s = s.replace(old, new, 1)
+open(dst, "w").write(s)
 PY
   cmp -s "$REAL" "$dst" && fail "mutant $id did not change the file — a no-op mutant proves nothing"
+  echo "$dst"
+}
+
+# mutant <id> <python old> <python new> [<old> <new>]... — the copy must fail the
+# GREEN leg as stale.
+mutant() {
+  local id="$1" dst why rc=0
+  dst="$(mkmut "$@")" || exit 1
   why="$(green "$dst" "mut-$id")" || rc=$?
   [ "$rc" -ne 0 ] || fail "mutant $id SURVIVED the GREEN leg"
   grep -q "wrapper not regenerated" <<<"$why" || fail "mutant $id failed the GREEN leg for the wrong reason: $why"
@@ -156,10 +199,40 @@ PY
   cells_run=$((cells_run + 1))
 }
 
-mutant M-DEPS-DELETED 'set_property(SOURCE fixpp.i PROPERTY USE_SWIG_DEPENDENCIES TRUE)
-' ''
+# refusal <id> <want-substring> <python old> <python new> [<old> <new>]... — the
+# GREEN leg must refuse the copy, with <want-substring>, before any build.
+refusal() {
+  local id="$1" want="$2" dst why rc=0; shift 2
+  dst="$(mkmut "$id" "$@")" || exit 1
+  why="$(green "$dst" "ref-$id")" || rc=$?
+  [ "$rc" -ne 0 ] || fail "refusal cell $id: the GREEN leg accepted the copy"
+  grep -qF "$want" <<<"$why" || fail "refusal cell $id failed for the wrong reason (wanted '$want'): $why"
+  [ ! -e "$TMP/ref-$id" ] || fail "refusal cell $id: a leg ran before the refusal"
+  printf 'RED (expected): GREEN leg refused copy %s — %.200s\n' "$id" "$why"
+  cells_run=$((cells_run + 1))
+}
+
+DEPS='set_property(SOURCE fixpp.i PROPERTY USE_SWIG_DEPENDENCIES TRUE)
+'
+CALL_END='  SOURCES fixpp.i
+)
+'
+mutant M-DEPS-DELETED "$DEPS" ''
 mutant M-DEPS-FALSE 'PROPERTY USE_SWIG_DEPENDENCIES TRUE)' 'PROPERTY USE_SWIG_DEPENDENCIES FALSE)'
+mutant M-DEPS-AFTER "$DEPS" '' "$CALL_END" "$CALL_END$DEPS"
+mutant M-DEPS-IF-FALSE "$DEPS" "if(FALSE)
+${DEPS}endif()
+"
+refusal R-CALL-TWICE "swig_add_library( starts 2 line(s)" \
+  "$CALL_END" "${CALL_END}swig_add_library(fixpp_py_twin TYPE MODULE LANGUAGE python SOURCES fixpp.i)
+"
+refusal R-NO-PROPERTY "no set_property(SOURCE fixpp.i line precedes swig_add_library(" \
+  'set_property(SOURCE fixpp.i PROPERTY CPLUSPLUS ON)
+' '' \
+  'set_property(SOURCE fixpp.i PROPERTY USE_TARGET_INCLUDE_DIRECTORIES ON)
+' '' \
+  "$DEPS" ''
 
 [ "$cells_run" -eq "$CELLS_DECLARED" ] || fail "declared $CELLS_DECLARED cells but ran $cells_run"
 echo
-echo "PASS: SWIG %include dependency pin — $cells_run/$CELLS_DECLARED cells, every mutant reddened the GREEN leg."
+echo "PASS: SWIG %include dependency pin — $cells_run/$CELLS_DECLARED cells, every mutant reddened the GREEN leg and every refusal fired."
