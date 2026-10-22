@@ -29,9 +29,10 @@ dispositioned every checklist under `specs/094-v1-tier0-bookkeeping/checklists/`
   `research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_adversarial_review.md`. Record:
   `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private); plan.md `## Gate A`.
 
-**Tests**: only FR-022's two session-level cells (owner, Gate A round 2). They are regression guards,
-green on the base by construction, and each is proven RED by the mutant FR-022 names (T029). Every
-other flipped row is evidenced by tests that already exist (FR-015).
+**Tests**: only FR-022's two session-level cells (owner, Gate A round 2) and FR-022b's D-001 census
+cell (owner, 2026-10-22, from T030's evidence). They are regression guards, green on the base by
+construction, and each is proven RED by the mutant its requirement names (T029, T029a). Every other
+flipped row is evidenced by tests that already exist (FR-015).
 
 **Recorded deviation (093's T125a precedent):** T054–T068 (Gate B, publish, owner sign-off, the
 RATIFIED flip, merge, post-merge close-out) are chronologically AFTER the completeness audit, because
@@ -83,6 +84,7 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
   - the bundle's real issue numbers (T011, `specs/` only; orchestrator);
   - the US1 docs commits (T019, T026; orchestrator);
   - C-TEST (T029: the two FR-022 cells);
+  - C-TEST2 (T029a: FR-022b's D-001 census cell, `tests/dictionary/lookup_test.cpp` only);
   - the US2 docs commit (T039; orchestrator);
   - C-SPDX (T040: the 53 files, the `conanfile.py` licence line, the RPM licence line,
     `tools/capi_freeze.sha256`);
@@ -97,7 +99,7 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
   - Long builds run under `setsid nohup` with a `.done` marker and ONE background waiter, never a
     foreground poll loop.
 - **The MSVC sandbox.** It is not used: the library change is comment-only, and the FR-022 cells are
-  platform-independent `session_pure_tests` cells. The verify record says plainly that MSVC was not run
+  platform-independent `session_pure_tests` cells (the FR-022b cell a `dictionary_pure_tests` one). The verify record says plainly that MSVC was not run
   locally, and that all three tier matrices skip until both gate labels land. Before any full build,
   full `ctest` or packaging run, `cat /mnt/c/temp/fixpp/.sandbox-lock`. A peer holding it (the
   `cloud-1022-batch` session in `~/Work/Programming/fixpp-parallel`) may be in an MSVC window, and the
@@ -364,7 +366,7 @@ surface. L-094-1 is live.
 ## Phase 4: User Story 2 — every delivered row reads `done` and says only what shipped (Priority: P1)
 
 **Goal**: the 18 reconciliation flips, NFR-013's split into the new row NFR-019, the coverage-index
-rewrites, the two brain pages, and FR-022's two TC-017 cells.
+rewrites, the two brain pages, FR-022's two TC-017 cells, and FR-022b's D-001 census cell.
 
 **Independent Test**: every cited test exists and passes on this branch, read from the binary's own
 output (T030). Every residual a Verified cell names is a live B&L row or an open issue (T004). The census
@@ -404,6 +406,30 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - On the branch: `ctest --preset linux-clang-debug -R '^session_pure_tests$' --no-tests=error --output-on-failure`,
     plus a gtest-filtered run showing both cells PASSED in the binary's own output.
   - Quote the RED output and the GREEN counts in the verify record. Commit C-TEST (only these two files).
+- [ ] T029a [US2] [phase-implementer] **FR-022b's D-001 census cell: write it, prove it RED, make it
+  GREEN, commit C-TEST2.** Added on 2026-10-22 from T030's finding A-1 (owner ruling; spec
+  §Clarifications "Session 2026-10-22 (US2 evidence)"). The owner's autonomy grant of 2026-10-22
+  covers the build.
+  - Write `DictionaryCensus.Fix42AllMessagesAndFieldsLoaded` in `tests/dictionary/lookup_test.cpp`, a
+    source of `dictionary_pure_tests`, to spec FR-022b. It loads FIX42.xml with `XmlLoader`, walks the
+    raw XML with pugixml, guards on two non-empty raw sets, and asserts exact set equality for
+    MsgTypes and field numbers plus `field_by_name` per raw field. No ctest entry is added, and the
+    licence line is unchanged.
+  - RED: FR-022b's two mutants (field tag 24 skipped from the field-name index; message "2" skipped
+    from the messages loop, both in `LoaderState::finalize()`), each in its own scratch copy
+    (`git archive HEAD | tar -x -C "$(mktemp -d)"`). Build `dictionary_pure_tests`. The cell must
+    fail at the matching set-equality assertion, and FR-022's "What counts as RED" applies. If a named
+    drop site aborts the load, use another site in the loader's registration path and record which.
+    Revert, show the scratch diff is clean, and `strings`-check that the binary is fresh.
+  - GREEN on the branch: `ctest --preset linux-clang-debug -R '^dictionary_pure_tests$' --no-tests=error --output-on-failure`,
+    plus a gtest-filtered run showing the cell PASSED in the binary's own output, and the whole
+    binary's PASSED count.
+  - Quote the RED output and the GREEN counts in the verify record. Commit C-TEST2 (only
+    `tests/dictionary/lookup_test.cpp`; no closing keyword). If the cell cannot be made GREEN or RED,
+    D-001 does not flip (FR-022b).
+- [ ] T029b [US2] [orchestrator] (after T029a) Tick T029a in this file and record its commit hash in
+  the verify record, with the D-001 evidence that T029a's GREEN run completes for T030. The R-11 count
+  is then 54 of 54.
 
 ### Evidence before any flip (Edge Cases: "A row is never flipped on a cell nobody ran")
 
@@ -452,6 +478,7 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
 - [ ] T031 [US2] [orchestrator] `spec/feature-catalogue.md`, the clean rows **NFR-001, D-001, D-003,
   D-007** (FR-005). Write Status, /specify, PR, Tests and Verified exactly as data-model §C (each row's
   subsection) has them. The Title is unchanged.
+  - D-001 is written only after T029a is GREEN and proven RED (FR-022b); its Tests cell cites that cell.
 - [ ] T032 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-002** (FR-007; after T008). Write the
   Title, Spec ref, Status, /specify, PR, Tests and Verified from data-model §C "NFR-002 (reworded)",
   with the FR-020 issue's real number in Verified ("Lapse on record: …").
@@ -469,7 +496,8 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
 - [ ] T035 [US2] [orchestrator] `spec/feature-catalogue.md`, the TC rows **TC-003, TC-005, TC-006,
   TC-008, TC-012, TC-014, TC-015, TC-017** (FR-006, FR-006a, FR-009, FR-015a).
   - Each FIX version(s) cell becomes research R-3's "Column written" value for that row.
-  - TC-005, TC-012, TC-014 and TC-017 take their reworded Titles from data-model §C.
+  - TC-005, TC-012, TC-014, TC-015 and TC-017 take their reworded Titles from data-model §C (TC-015's
+    narrowing: owner, 2026-10-22, spec §Clarifications "Session 2026-10-22 (US2 evidence)").
   - Each row's Status, /specify, PR, Tests and Verified come from data-model §C.
   - Every `<TC-SCOPE>` is expanded to data-model §C's exact sentence:
     `Versions not witnessed: #614. FIX-TC §4.1 makes the scenarios applicable to the session layer of 4.2, 4.4 and FIXT, so the other versions the former column named (4.0, 4.1, 4.3, 5.0, 5.0SP1) are not required by FIX-TC.`
@@ -597,10 +625,10 @@ prints `PASS`.
 
 ### `/simplify` (pipeline step 11, before verify)
 
-- [ ] T043 [orchestrator] Run `/simplify` scoped to the two FR-022 cells (`tests/session/test_enum_validation_logon.cpp`,
-  `tests/session/fsm_matrix_witness_test.cpp`; `[const §XVI.7]`). Opus agents review; the orchestrator
+- [ ] T043 [orchestrator] Run `/simplify` scoped to the two FR-022 cells and the FR-022b cell (`tests/session/test_enum_validation_logon.cpp`,
+  `tests/session/fsm_matrix_witness_test.cpp`, `tests/dictionary/lookup_test.cpp`; `[const §XVI.7]`). Opus agents review; the orchestrator
   triages; `phase-implementer` applies in-scope fixes. Any change to a cell re-runs T029's RED proof
-  for that cell. Record the triage in the verify record.
+  for that cell (T029a's for the FR-022b cell). Record the triage in the verify record.
 
 ### Instruments (each with its known positive)
 
@@ -612,7 +640,7 @@ prints `PASS`.
   - `python3 tools/check_line_citations.py --range origin/main..HEAD` and `--shift-audit origin/main..HEAD`
     both pass; frozen `specs/<id>/` citers are reported, not charged.
   - `python3 "$W/.claude/scripts/check-comment-claims.py" --root "$PWD" --base origin/main` passes. Also
-    read the claims the lexical check cannot see: the FR-022 cells' comments and the C-607 comment.
+    read the claims the lexical check cannot see: the FR-022 and FR-022b cells' comments and the C-607 comment.
 - [ ] T046 [P] [orchestrator] **B&L and brain freshness.**
   - `check_bl_delta.py gate` sees the L-094-1 delta; `check_bl_citations.py gate` reports 0 dangling.
   - The in-repo freshness half: run what `.github/workflows/brain-freshness.yml` runs, derived from the
@@ -643,8 +671,8 @@ prints `PASS`.
       the C-SPDX inserts; map each path to its module directory, each module to its ctest label(s) in
       the module's `CMakeLists.txt`, and run those labels unfiltered. Record the mapping.
     - **§2**, the witness binaries per row: T030's runs repeated at the final head with
-      `--no-tests=error`, on the preset CI runs each on, including the two FR-022 cells and their RED
-      proofs (T029, re-run if T043 changed a cell).
+      `--no-tests=error`, on the preset CI runs each on, including the two FR-022 cells, the FR-022b cell and their RED
+      proofs (T029, T029a, re-run if T043 changed a cell).
     - **The §H claim → witness map, filled in full** (FR-015b): one row per clause, the `file:line` of
       each `EXPECT`/`ASSERT` or the CI step's `if:` and command, each path resolving here or labelled
       parent repo (private). A clause with no assertion does not flip as worded: it is narrowed
@@ -682,7 +710,7 @@ prints `PASS`.
     - **MSVC**: stated plainly as not run locally (Execution rules).
   - A row whose evidence did not hold is taken out of the flip set (FR-015), its row reverted to
     `backlog` by a docs task, and the owner told.
-- [ ] T050 [orchestrator] **R-11 re-run**: 53 of 53 entries exist; both negative controls report
+- [ ] T050 [orchestrator] **R-11 re-run**: 54 of 54 entries exist (53 before FR-022b); both negative controls report
   MISSING. Recorded in the verify record.
 - [ ] T051 [orchestrator] `codegraph sync` in this tree after the last code-changing commit; read back
   `codegraph status --json` (`projectPath` is this tree, `fileCount` nonzero).
@@ -729,6 +757,9 @@ prints `PASS`.
       only). TC-005 and TC-017 are as the owner worded them;
     - NFR-005's PMR clause, narrowed at Gate A round 3 to the parse arena and MemoryStore's retrieve()
       snapshot (FR-006);
+    - the T030 rulings (spec §Clarifications "Session 2026-10-22 (US2 evidence)"): D-001's census
+      cell added (FR-022b); TC-015 narrowed to one message with reordered header and body fields
+      (FIX-TC 15 optional); the NFR-005 and NFR-011 Verified overclaims corrected;
   - any row withheld by T030/T049;
   - the defaults applied and reported, not edited: coverage-index's "Cross-cuts forwarded" note, the "AGPL-3.0" licence prose,
     the stale `session.cpp` comment (P3);
@@ -1016,8 +1047,10 @@ prints `PASS`.
 - **US2 (T027–T039)**:
   - T027 ‖ T028 → T029;
   - T030 after T029;
+  - T029a (added from T030's finding A-1) → T029b;
   - catalogue T031 → T032 → T033 → T034 → T035 → T037, all after T014 and T030;
   - T035's TC-017 needs T029;
+  - T031's D-001 needs T029a;
   - coverage index T036 after T015 and before T037;
   - T038 after T037;
   - T039 after T038 (it ends with the US2 docs commit, so it must not run beside a half-written catalogue).
@@ -1059,7 +1092,7 @@ Task: "T024 [US1] [orchestrator] brain/components/service.md §F.5"
 
 - **MVP = US1**: DECISION 1 written into the catalogue and the PENDING v4.0 amendment. It removes 7 of
   the tag gate's open rows on its own (T014).
-- **Then US2**: the 18 flips. Their evidence runs (T030) and the FR-022 cells (T027–T029) must be green
+- **Then US2**: the 18 flips. Their evidence runs (T030) and the FR-022 and FR-022b cells (T027–T029a) must be green
   before any row is written.
 - **Then US3**: two `phase-implementer` commits, C-SPDX and C-607.
 - **Then** verify, Gate B, the owner's sign-off, and the RATIFIED flip as the last commit.

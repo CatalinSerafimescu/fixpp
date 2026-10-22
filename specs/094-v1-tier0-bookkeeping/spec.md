@@ -185,6 +185,31 @@ Owner rulings made on the two items the step-9 checklist audit escalated. Bindin
   2026-10-22 (Codex P1=0 P2=1 P3=0, then P1=0 P2=0 P3=0; Opus judge: clause converged; plan.md
   `## Gate A`).
 
+### Session 2026-10-22 (US2 evidence)
+
+Rulings on the findings of the T030 evidence run (verify record, `## US2 evidence (T030)`), made
+before any catalogue flip. Binding.
+
+- Q (A-1, D-001): no cited cell asserts that the loaded FIX 4.2 dictionary holds every standard field,
+  or the admin messages beyond A, 0 and 3, and FR-005 keeps D-001's Title. Narrow, cite the codegen
+  byte pins, add a cell, or withhold? → A (owner): **Add a census cell.** FR-022b specifies it
+  (`DictionaryCensus.Fix42AllMessagesAndFieldsLoaded`); D-001's Tests cell cites it, and D-001 flips
+  only after the cell is GREEN and proven RED (tasks T029a).
+- Q (A-2, TC-015): FIX-TC 15 asks for "more than one message of the same type with header and body
+  fields ordered differently" and that "subsequent messages' MsgSeqNum(34) are accepted"; the one
+  cited cell feeds a single message. Narrow, add a cell, or withhold? → A (owner): **Narrow.** The
+  Title and Verified cell say that one message with reordered header and body fields is accepted
+  (B-005-7), with no multi-message or later-MsgSeqNum claim. Scenario 15 is optional, so the removed
+  half is "Not required by FIX / FIX-TC" under FR-006b, like TC-017's 17b and 17c–17j.
+- Orchestrator correction (B-1, NFR-011; an overclaim fix, not a narrowing of a Title or version
+  clause): the Verified cell's "(every byte from the resource)" for XmlLoader becomes "(the loaded
+  Dictionary's allocations land on the supplied resource; no cited cell asserts that none reach the
+  global heap)", because `PmrAllocation.EveryByteFromMr` asserts only that allocations reach the
+  resource.
+- Orchestrator correction (B-2, NFR-005; an overclaim fix): "the if: of the three #448 steps" becomes
+  "the if: of the two #448 gate steps in tier1.yml, which a third step asserts ran on exactly those
+  presets", because the third step runs under `if: always()` and checks the preset in its script.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" are the owner tagging v1.0 and any contributor who reads the catalogue or the
@@ -254,6 +279,8 @@ is a live B&L row or an open issue.
    as amended in v4.0 (a process row), and names the FR-020 issue for the 544 record.
 6. **Given** TC-017, **When** read, **Then** its Tests cell names the two session-level 98=2 cells of
    FR-022, and both pass on this branch.
+7. **Given** D-001, **When** read, **Then** its Tests cell names FR-022b's census cell, which passes on
+   this branch.
 
 ---
 
@@ -394,7 +421,7 @@ in those files are licence comment lines.
   ★ functional track, rulings of 2026-10-21; text in the verification file). The cell text is written
   exactly as data-model §C has it; data-model is the copy source, and the summaries below name what
   each row says, not its words:
-  - **Version column only:** TC-003, TC-008 and TC-015 take research R-3's "Column written" value
+  - **Version column only:** TC-003 and TC-008 take research R-3's "Column written" value
     (narrower than the owner's "4.2, 4.4 witnessed; FIXT.1.1 shares the code path" wording, by
     FR-006a). D-008's FIX version(s) cell →
     `4.2, 4.4, 5.0SP2, FIXT.1.1 (+ FIX Latest, opt-in build flag); runtime-XML-only versions: L-003-2`.
@@ -405,6 +432,10 @@ in those files are licence comment lines.
     - TC-006: names #588 and #580.
     - TC-012: the duplicate check belongs to the application, per FIX-TC.
     - TC-014: ResetSeqNumFlag only; FIX-TC accepts either option.
+  - **TC-015** (owner, 2026-10-22, §Clarifications "Session 2026-10-22 (US2 evidence)"): R-3's
+    "Column written" version value, and a Title and Verified cell narrowed to one message with
+    reordered header and body fields accepted (B-005-7), with no multi-message or later-MsgSeqNum
+    claim (FIX-TC 15 is optional).
   - **TC-005:** Title `Session conformance: Reject (35=3) receipt — NextNumIn incremented, session continues, no Reject of a Reject (test 7)`; Verified names fixpp#612.
   - Each TC row's FIX version(s) cell is the literal value data-model §C lists for it (research R-3's
     "Column written", by FR-006a). Where only one BeginString is driven, that value is narrower than
@@ -433,7 +464,8 @@ in those files are licence comment lines.
     io_uring half, moved to the new row NFR-019, and its backend, moved to Verified as a design fact;
     TC-012's 19a/19b duplicate check (FIX-TC 19 assigns it to the application); TC-014's outbound
     Reset-mode option (FIX-TC 9 accepts either option); TC-017's 17b ending and 17c–17j (FIX-TC 17 is
-    optional; `[const §XII.7]`); and the versions 4.0, 4.1, 4.3, 5.0 and 5.0SP1 of the old TC columns
+    optional; `[const §XII.7]`); TC-015's "more than one message of the same type" and "subsequent
+    messages' MsgSeqNum(34) are accepted" (FIX-TC 15 is optional; owner, 2026-10-22); and the versions 4.0, 4.1, 4.3, 5.0 and 5.0SP1 of the old TC columns
     (outside FIX-TC §4.1's scope).
   - A narrowing found at verify is classified the same way before its row flips (FR-015b).
 - **FR-007**: NFR-002 MUST be reworded to `[const §IX.1]`'s per-PR obligation: ≥95/85 on touched
@@ -673,6 +705,38 @@ in those files are licence comment lines.
   - The stale initiator-arm comment in `src/session/session.cpp` ("with Logout in US4", on the
     `interpret_logon` refusal in `on_inbound_logon_sent_`) is not edited; it is a P3 note (plan.md
     §Gate A).
+- **FR-022b**: `phase-implementer` MUST add one test cell, D-001's census (a test-only change; owner,
+  2026-10-22, §Clarifications "Session 2026-10-22 (US2 evidence)"):
+  `DictionaryCensus.Fix42AllMessagesAndFieldsLoaded`, a `TEST` in `tests/dictionary/lookup_test.cpp`.
+  That file is a source of `dictionary_pure_tests` (`tests/dictionary/CMakeLists.txt`), whose fixture
+  already loads `FIX42.xml` through `XmlLoader` and whose binary already links pugixml, so no ctest
+  entry is added. The file already opens with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
+  - **What it reads.** It loads `FIX42.xml` (under `FIXPP_DICT_DATA_DIR`) with `XmlLoader`. It walks the
+    same file independently with pugixml, without the loader, as the raw-XML ground-truth scans of
+    `tests/dictionary/reused_tag_census_test.cpp` do: every `<fix><messages><message>`'s `msgtype`, and
+    every `<fix><fields><field>`'s `number` and `name`.
+  - **What it asserts, by exact set equality.**
+    - The MsgTypes of `Dictionary::messages()` equal the raw `msgtype` set.
+    - The tags `t` in 1..65535 for which `Dictionary::field_name(t)` is non-empty equal the raw
+      `number` set.
+    - For each raw field, `Dictionary::field_by_name(name)` returns its `number`.
+    - A guard runs first and asserts that both raw sets are non-empty: the walk's known positive, so
+      an empty walk cannot pass.
+    - Components are vacuous for FIX 4.2 (its `<components />` is empty), and groups are
+      `DelimiterCensus`'s, so the cell checks neither.
+  - **RED proof.** Two mutants, each in its own scratch copy (`git archive HEAD | tar -x`), each in
+    `LoaderState::finalize()` in `src/dictionary/xml_loader.cpp`:
+    - (a) a field mutant: the field-name index loop skips the raw field with tag 24 (IOIOthSvc, which
+      no FIX 4.2 message, component or group references, so the load still completes);
+    - (b) a message mutant: the messages loop skips one message (MsgType "2", ResendRequest).
+    - Each mutant must fail the cell at its set-equality assertion. FR-022's "What counts as RED"
+      applies.
+    - If a named drop site aborts the load or fails elsewhere, the implementer may drop the same
+      field or message at another site in the loader's registration path. The verify record names
+      the site used.
+  - **If the cell cannot be made GREEN on the branch, or cannot be proven RED by both mutants,** D-001
+    does not flip: Edge Cases applies (the row stays `backlog`, the finding is recorded, the owner is
+    told).
 - **FR-023**: Before the FR-013b commit, the orchestrator MUST file one fixpp issue, labelled at creation from
   `gh label list`, recording that `[const §III.4]` is not met on `main`: `tool_requires = []` since `629f2170`
   (2026-05-10), so CMake and Ninja come from the host toolchain. Its body asks the owner to choose: restore Conan-pinned
@@ -698,7 +762,7 @@ in those files are licence comment lines.
   falls by 25 − k and the done count rises by 18 − k (FR-016), and the verify record names the k rows.
 - **SC-002**: 100 % of the tests cited in the 18 flipped rows exist literally and pass on this branch,
   and every clause in the data-model §H map has its assertion recorded. "Exist" is research R-11's
-  counting rule and check (53 distinct entries, both negative controls reporting MISSING); "pass" is
+  counting rule and check (54 distinct entries since FR-022b, both negative controls reporting MISSING); "pass" is
   each named test's PASSED read from its binary's own output, not from ctest's exit code (quickstart
   §2).
 - **SC-003**: 0 constitution clauses state the service wrapper, gRPC control plane or iceoryx2 data
@@ -713,8 +777,9 @@ in those files are licence comment lines.
   only: the licence comment lines of the 53 `src/`/`include/` files; `tools/capi_freeze.sha256`;
   `conanfile.py`'s `license` line and its four `tool_requires` comment lines (FR-013b, separate
   commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md`'s tagline;
-  `docs/src/intro.md`'s opening sentence; and the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
-  and `tests/session/fsm_matrix_witness_test.cpp`.
+  `docs/src/intro.md`'s opening sentence; the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
+  and `tests/session/fsm_matrix_witness_test.cpp`; and the FR-022b census cell in
+  `tests/dictionary/lookup_test.cpp`.
 - **SC-006**: Gate A (on the amendment and bundle) and Gate B converge, and the owner signs off on the
   amendment.
 
@@ -723,8 +788,8 @@ in those files are licence comment lines.
 - The verification file's readings hold at the branch base, because it was read at `9b176090` and that
   is still `origin/main`. Every citation is still re-checked (FR-010, FR-015).
 - 51 of the 53 test entries the flips cite were grep-checked on 2026-10-22, with two negative controls:
-  all exist (research R-11). The other two are the FR-022 cells, added at implement. Passing is
-  checked at verify.
+  all exist (research R-11). The other two are the FR-022 cells, added at implement. FR-022b adds a
+  54th, D-001's census cell, also added at implement (T029a). Passing is checked at verify.
 - The atomic-shared-ptr spike (parent `research/G19-fix-fpml-iso20022/atomic-shared-ptr/`) carries no
   licence or copyright. The 37 unmarked files carry no foreign copyright notice (provenance grep,
   2026-10-22). So marking them AGPL relabels the owner's own work.
@@ -737,8 +802,8 @@ in those files are licence comment lines.
 - The 9 not-delivered rows (FR-012), which stay `backlog` after the typed-message track.
 - SPDX marking outside `src/`/`include/` (tests, tools, bench, bindings, examples); the 40 `Apache-2.0`
   files there are the FR-021 issue.
-- Any library code or behaviour change, including the fixpp#612 fix (batch B65). The only test change
-  is FR-022's two cells.
+- Any library code or behaviour change, including the fixpp#612 fix (batch B65). The only test changes
+  are FR-022's two cells and FR-022b's census cell.
 
 ## Normative References
 

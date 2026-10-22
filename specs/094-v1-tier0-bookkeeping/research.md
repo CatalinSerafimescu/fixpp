@@ -321,7 +321,7 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
   - The 53, by the first row citing each:
     - NFR-005: `WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena`, `MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr`
     - NFR-011: `PmrAllocation.EveryByteFromMr`, `WireThreeArenaPinning.PerMessageArenasAreIsolated`, `MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull`, `CodegenTypedAccessor.DecimalAccessorTakesMemoryResource`
-    - D-001: `AllRuntimeVersions/DictionaryLookupFixture.*`, `DelimiterCensus.RedCountsReconcileWithSpecBaseline`, `DictEnumCensus.SC011_*`, `BuilderCompleteness077Vt11V42.V42RegistryExactSetEqualsRawXmlWalk`
+    - D-001: `AllRuntimeVersions/DictionaryLookupFixture.*`, `DelimiterCensus.RedCountsReconcileWithSpecBaseline`, `DictEnumCensus.SC011_*`, `BuilderCompleteness077Vt11V42.V42RegistryExactSetEqualsRawXmlWalk`, and (the 54th, FR-022b) `DictionaryCensus.Fix42AllMessagesAndFieldsLoaded`
     - D-003: `DictionaryLookupFixture.CrossVersionIsolation`, `DelimiterCensus.RegisteredGroupCountMatchesCodegenFix50Sp2`, `DelimiterCensus.NoChangeDictionariesUnchanged`, `DictEnumCensus.SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty`, `BuilderCompleteness077Vt11V42.Vt11ExpectedEmptyNoFileEmitted`
     - D-008: `CodegenTypedAccessor.MsgTypeAndVersionAreConstexpr`, `DeterminismTest.GeneratedMatchesGolden`
     - TC-003: `InboundFrameDispositionsTc.TC003_3b_*`, `.TC003_3c_*`, `.TC003_3e_*`
@@ -332,11 +332,16 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
     - TC-014: `ResetOnLifecycleTest.ResetOnLogon_Initiator_ResetsAndEmits141`, `.ResetOnLogon_Acceptor_ResetsIdempotentWith141`, `.ResetOnLogon_BothRoles_Resets`, `.Initiator_Received141Ack_NextInboundTwo_NoResend`
     - TC-015: `FixTcCoverageGaps.BodyFieldsArbitraryOrder_Accepted`
     - TC-017: `InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted`, `.AbsentEncryptMethodAccepted`, `.NonZeroEncryptMethodRejected`, `EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday`, `.OutOfDomainEncryptMethod_RejectedAndNotEstablished`, and the FR-022 cells `EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing`, `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`
-  - Verify re-runs this check, with both negative controls, after implement; it must then report 53 of 53.
+  - Verify re-runs this check, with both negative controls, after implement; it must then report 54 of 54
+    (53 before FR-022b; see the US2-evidence bullet below).
   - `/speckit-analyze` C2 (2026-10-22) removed `tests/fuzz/fuzz_dict_xml_loader.cpp` from D-007's Tests
     cell. It was cited as a file and names no gtest entry, so by the counting rule above it was never
     one of the 53, and the counts do not change: 53 distinct, 51 exist today, 2 MISSING (the FR-022
     cells).
+  - **US2 evidence ruling A-1 (owner, 2026-10-22; spec FR-022b).** D-001's Tests cell gains
+    `DictionaryCensus.Fix42AllMessagesAndFieldsLoaded`, giving 54 distinct entries. Since C-TEST
+    (`e81e0395`) the two FR-022 cells exist, so 53 exist and 1 is MISSING (the FR-022b cell) until
+    T029a adds it.
 - **NFR-011 witnesses:**
   - `PmrAllocation.EveryByteFromMr` (XmlLoader)
   - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,

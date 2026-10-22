@@ -228,7 +228,7 @@ cells are added in two existing `tests/session/` files (FR-022).
 - `"$W/.claude/scripts/check_bl_delta.py"` (the branch now touches the live B&L file)
 - the brain freshness job's in-repo checks, and `"$W/research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh"`
 
-**Target Platform**: unchanged. Comment-only source changes mean the library build output is identical (the FR-022 cells change only the `session_pure_tests` test binary), apart
+**Target Platform**: unchanged. Comment-only source changes mean the library build output is identical (the FR-022 cells change only the `session_pure_tests` test binary, and the FR-022b cell only `dictionary_pure_tests`), apart
 from `__LINE__`-derived values shifting by one in the 37 files that gain a line (see Risks).
 
 **Project Type**: C++23 library.
@@ -262,15 +262,15 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 | §XX.4 (classification) | yes | MAJOR, v3.0 → v4.0, with a `CHANGELOG.md` entry (R-2; owner, 2026-10-22). The §VI.6 clarification is a loosening and does not change it. |
 | §XVIII.4 (roadmap change = amendment) | yes | The §XVIII.2 line is part of the amendment. |
 | §XVIII.5 (no early shipping) | yes | Unchanged; it is why the amendment is MAJOR (R-2). |
-| §XVI.6 (orchestrator does not implement) | yes | The 53 source files, `capi_freeze.sha256`, `conanfile.py`, `cmake/FixppPackaging.cmake` and the two FR-022 test cells go to `phase-implementer`. Docs (`spec/`, `specs/`, `.specify/*.md`, `brain/`, `CHANGELOG.md`, `README.md`, `docs/src/intro.md`) are governance and documentation text the orchestrator may write. |
+| §XVI.6 (orchestrator does not implement) | yes | The 53 source files, `capi_freeze.sha256`, `conanfile.py`, `cmake/FixppPackaging.cmake`, the two FR-022 test cells and the FR-022b cell go to `phase-implementer`. Docs (`spec/`, `specs/`, `.specify/*.md`, `brain/`, `CHANGELOG.md`, `README.md`, `docs/src/intro.md`) are governance and documentation text the orchestrator may write. |
 | §X.7 / C-ABI freeze | yes | Comment-only header change: the manifest is regenerated and the symbol set is unchanged (R-7). No C-ABI version bump, because no ABI changes. |
 | §III.4 (`tool_requires` pins `cmake` and `ninja`) | yes — pre-existing deviation, recorded | Not met on `main`, and not changed by 094: `629f2170` (2026-05-10) emptied `tool_requires`, so CMake and Ninja come from the host toolchain; no amendment, decision record, B&L row or issue dispositioned it before 094 (re-derive, against `9b176090` and before FR-023 files its issue: `git log -S'tool_requires = []' -- conanfile.py`; `grep -rn 'tool_requires\|\(^\|[^IVX]\)III §4\|§III\.4'` over `.specify/constitution.md`, `CHANGELOG.md`, both B&L files and `brain/` must find no hit outside §III.4 itself (known positive: §III.4's own line; the `[^IVX]` guard keeps `Article VIII §4` out); `gh issue list --state all --limit 1000 --json number,title,body` searched for `tool_requires`, with `swig>=4.2` as the known positive). 094 changes no tool provisioning; FR-013b rewords the comment above `tool_requires = []` only. fixpp#619 (FR-023) records it. Restoring the pins, or amending §III.4 to the host-provisioned model, is the owner's call and outside 094. |
 | §V.1 / §V.4 (licence; vendored attribution) | yes | AGPL marking only; the relicense basis is R-8. No vendored file is in the set. NFR-010's commercial half is untouched (postponed). |
 | §IX.1 (coverage) | n/a | No line of library code is added or made reachable (FR-022 adds test code only). The verify record says so per touched module. |
 | §VIII (bench) | n/a | No library code change. |
-| §VII.8 (grouped tests; "Tests are selected by `ctest -L <label>`, never `-R <exe-name>`") | yes — scope reading, not a deviation (orchestrator ruling, 2026-10-22) | The rule governs test registration and CI/ctest selection: the FR-022 cells join the grouped `session_pure_tests` binary and add no ctest entry, and CI selection is unchanged. A verify-time evidence run of one named entry selects it as `-R '^<NAME>$'` (research R-15), by precedent and by the clause's own carve-out: prior verify records do the same (re-derive: `grep -l -E -- 'ctest.*-R ' decisions/speckit/*-verify.md` (parent repo, private) gave 38 of 132 records on 2026-10-22, including 536-537-538, 544 and 563-564), and §VII.8 itself lists "live `-R <target>` selection" among the reasons a test stays standalone. Where a label isolates exactly one entry, the run may use `-L`; it does not have to. |
+| §VII.8 (grouped tests; "Tests are selected by `ctest -L <label>`, never `-R <exe-name>`") | yes — scope reading, not a deviation (orchestrator ruling, 2026-10-22) | The rule governs test registration and CI/ctest selection: the FR-022 cells join the grouped `session_pure_tests` binary and the FR-022b cell `dictionary_pure_tests`, adding no ctest entry, and CI selection is unchanged. A verify-time evidence run of one named entry selects it as `-R '^<NAME>$'` (research R-15), by precedent and by the clause's own carve-out: prior verify records do the same (re-derive: `grep -l -E -- 'ctest.*-R ' decisions/speckit/*-verify.md` (parent repo, private) gave 38 of 132 records on 2026-10-22, including 536-537-538, 544 and 563-564), and §VII.8 itself lists "live `-R <target>` selection" among the reasons a test stays standalone. Where a label isolates exactly one entry, the run may use `-L`; it does not have to. |
 | §XVII.7 (local pre-PR build gate) | yes | Before the PR opens, one FULL `ctest --preset linux-clang-debug --output-on-failure --no-tests=error` cycle runs on a committed tree, after the conan install, configure and build, as the LAST run of verify (tasks.md T049). The PR body's `local build: green on linux-clang-debug @ <sha>` line cites that run (T052). It runs last because a full `ctest` regenerates `_codegen` in the same build tree (`ninja -n` cannot see it), so the selected and witness runs go first and anything after it rebuilds first. `df -h /mnt/e` is read first, because the main checkout's `build/` lands on E:. `/mnt/c/temp/fixpp/.sandbox-lock` is read first too: the MSVC sandbox itself is not used, but the packaging entries compile consumer projects, so a full `ctest` is a build during a peer's MSVC window, and a lock held by a peer means asking the owner before running. The resource gate applies: every build asks the owner first. `pytest bindings/python/tests/` does not apply, because the change does not touch `bindings/python/`. |
-| §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs. Its plan derives from this diff: docs-and-comment gates, the flipped rows' witness binaries, the two FR-022 cells and their RED proofs, one full build to prove the comment edits compile, and the packaging lane's RPM build (FR-013a). |
+| §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs. Its plan derives from this diff: docs-and-comment gates, the flipped rows' witness binaries, the two FR-022 cells, the FR-022b cell and their RED proofs, one full build to prove the comment edits compile, and the packaging lane's RPM build (FR-013a). |
 
 **Result:** PASS, with one pre-existing deviation recorded (§III.4, fixpp#619); none is introduced by this feature.
 
@@ -316,6 +316,7 @@ conanfile.py                         # §G — phase-implementer (licence in the
 cmake/FixppPackaging.cmake           # §G — phase-implementer
 tests/session/test_enum_validation_logon.cpp   # FR-022 acceptor cell — phase-implementer
 tests/session/fsm_matrix_witness_test.cpp      # FR-022 initiator cell — phase-implementer
+tests/dictionary/lookup_test.cpp               # FR-022b D-001 census cell — phase-implementer
 ```
 
 Parent repo (private), after merge, at close-out: `REMAINING-WORK.md` row 1 and the Tier-0 tallies;
@@ -341,11 +342,12 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
      diff shape (SC-005).
    - Test cells (phase-implementer): the two FR-022 cells, each proven RED in a scratch copy by
      deleting the `if (invalid_encrypt_method_seen)` return in `interpret_logon`
-     (`src/session/admin_messages.cpp`).
+     (`src/session/admin_messages.cpp`); and FR-022b's D-001 census cell, proven RED by its field and
+     message mutants in the loader (spec FR-022b; owner ruling, 2026-10-22).
 4. **Verify**:
    - one full Linux build (the comment edits compile), and the packaging lane's RPM build;
    - the full test suites of the modules the 37 inserts touch, and the witness binaries of the 18 rows
-     (the ctest entries of R-15's map, the filters from R-3's census), including the two FR-022 cells and their RED proofs, with the §H map
+     (the ctest entries of R-15's map, the filters from R-3's census), including the two FR-022 cells, the FR-022b cell and their RED proofs, with the §H map
      filled from the assertions;
    - `docs/prebuild.py`'s `_status_header` on the branch's catalogue (R-5);
    - the C-ABI freeze, symbol diff and occupancy checks;
@@ -387,7 +389,8 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
   FR-023 issue's real number), unless B58 changed a fact those lines state (how cmake, ninja or swig is
   provisioned, or where the swig minimum lives); then `phase-implementer` stops and the orchestrator
   asks the owner. The rest of B58's `conanfile.py` change is kept as merged. The peer was told this feature
-  adds no ctest entries, which stays true: the FR-022 cells join the existing `session_pure_tests`.
+  adds no ctest entries, which stays true: the FR-022 cells join the existing `session_pure_tests`, and
+  the FR-022b cell the existing `dictionary_pure_tests`.
 - **The RATIFIED flip re-runs the whole matrix.** FR-003a makes the flip the last commit before merge.
   The three MAJOR precedents were docs-only PRs, so their flip push was cheap. 094's diff contains
   `include/fix/c_api/*` and `conanfile.py`, which match tier1's `PY_RE`, and that filter is matched
