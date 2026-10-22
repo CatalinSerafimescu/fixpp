@@ -67,13 +67,15 @@ import tempfile
 # matchers have run. An unanchored `unless(hasAncestor(lambdaExpr()))` would drop
 # every co_spawn written inside a lambda that another co_spawn spawns.
 #
-# ⚠️ A NAMED LOCAL IS FOLLOWED ONE HOP (#586 shape B). A DeclRefExpr to a
-# non-parameter VarDecl, at or below an argument and outside lambda bodies, is
-# followed to its initializer, where the same closure-call test runs with the
-# prune anchored to that VarDecl. Without it, `const auto token = …record_into(out)…;
-# co_spawn(ex, op(), token)` was listed by neither instrument. The walker follows
-# the same rule to a fixed point; a chain longer than one hop therefore shows up
-# here as ONLY LIBCLANG, never as agreement.
+# ⚠️ A NAMED LOCAL IS FOLLOWED ONE HOP (#586 shape B). When an argument's value
+# IS a non-parameter VarDecl -- the argument itself, or the operand of
+# `std::move` / `std::forward` -- the local is followed to its initializer, where
+# the same closure-call test runs with the prune anchored to that VarDecl.
+# Without it, `const auto token = …record_into(out)…; co_spawn(ex, op(), token)`
+# was listed by neither instrument. A receiver or a local passed into another
+# call is not followed, by the walker's same rule (value_local). The walker
+# chains to a fixed point; a chain longer than one hop therefore shows up here as
+# ONLY LIBCLANG, never as agreement.
 _PRUNE_CS = 'unless(hasAncestor(lambdaExpr(hasAncestor(callExpr(equalsBoundNode("cs"))))))'
 _CLOSURE_CALL = f'cxxOperatorCallExpr(hasOverloadedOperatorName("()"), {_PRUNE_CS})'
 _INIT_CALL = (
@@ -81,13 +83,17 @@ _INIT_CALL = (
     'unless(hasAncestor(lambdaExpr(hasAncestor(varDecl(equalsBoundNode("tok")))))))'
 )
 _NAMED_LOCAL = (
-    f'declRefExpr({_PRUNE_CS}, to(varDecl(allOf(varDecl().bind("tok"), '
-    f'unless(parmVarDecl()), hasInitializer(anyOf({_INIT_CALL}, hasDescendant({_INIT_CALL})))))))'
+    'declRefExpr(to(varDecl(allOf(varDecl().bind("tok"), unless(parmVarDecl()), '
+    f'hasInitializer(anyOf({_INIT_CALL}, hasDescendant({_INIT_CALL})))))))'
+)
+_MOVED_LOCAL = (
+    'callExpr(callee(functionDecl(hasAnyName("::std::move", "::std::forward"))), '
+    f'argumentCountIs(1), hasArgument(0, {_NAMED_LOCAL}))'
 )
 MATCHER = (
     'callExpr(allOf(callExpr().bind("cs"), callee(functionDecl(hasName("co_spawn"))), '
     f'hasAnyArgument(anyOf({_CLOSURE_CALL}, hasDescendant({_CLOSURE_CALL}), '
-    f'{_NAMED_LOCAL}, hasDescendant({_NAMED_LOCAL})))))'
+    f'{_NAMED_LOCAL}, {_MOVED_LOCAL}))))'
 )
 LOC_RE = re.compile(r'^(/[^:]+):(\d+):(\d+): note: "root" binds here', re.MULTILINE)
 # The message only, without the file:line:col prefix, so identical diagnostics from
@@ -293,8 +299,8 @@ void f(asio::io_context& ex, int out) {
 """,
     ),
     (
-        # Mutant: follow a local only when it IS the argument, not below it.
-        "a named local BELOW the argument is followed too (#586 shape B)",
+        # Mutant: drop the std::move / std::forward arm.
+        "a named local under std::move is followed too (#586 shape B)",
         """
 void f(asio::io_context& ex, int out) {
   auto make = [&](int) { return op(); };
@@ -330,14 +336,15 @@ void f(asio::io_context& ex, int out) {
 """,
     ),
     (
-        # Mutant: drop the lambda prune from the named-local arm.
-        "a local named only inside a lambda body in the argument is not followed",
+        # Only a local that IS the argument's value is followed; a receiver is
+        # not. Mutant: follow a local anywhere below the argument.
+        "a RECEIVER local is not followed into its initializer (#586 shape B)",
         """
-void f(asio::io_context& ex, int out) {
-  asio::cancellation_signal cancel;
-  auto record_into = [&](int) { return handler(); };
-  const auto token = asio::bind_cancellation_slot(cancel.slot(), record_into(out));
-  asio::co_spawn(ex, op(), asio::bind_cancellation_slot(cancel.slot(), [&]() { auto c = token; }));
+struct sess_t { asio::awaitable<void> send(int); };
+void f(asio::io_context& ex) {
+  auto make_sess = [&]() { return sess_t(); };
+  auto sess = make_sess();
+  asio::co_spawn(ex, sess.send(1), handler());
 }
 """,
     ),

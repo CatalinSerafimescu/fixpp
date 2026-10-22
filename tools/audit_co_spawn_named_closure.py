@@ -602,29 +602,36 @@ class SiteWalker:
         if spelling != "co_spawn":
             return
 
-        closure = self._named_closure_arg(cursor)
-        if closure is None:
+        # ⚠️ ONE SITE PER CLOSURE, NOT PER co_spawn. A co_spawn can name several
+        # closures -- one in the token, one in the executor's initializer -- and
+        # keeping only the first let a long-lived one decide the verdict for a
+        # short-lived one in another argument: a false SAFE. Each is recorded
+        # under the same (file, line, col), and main() keeps the WORST verdict
+        # per key, as it already does for a header seen from several TUs.
+        closures = self._named_closure_args(cursor)
+        if not closures:
             return
         exec_args = list(call.get_arguments()) if False else list(cursor.get_arguments())
         exec_name, exec_key = root_object_of(exec_args[0]) if exec_args else ("", "")
-        self.sites.append(
-            {
-                "exec": exec_name,
-                "exec_key": exec_key,
-                "file": os.path.realpath(cursor.location.file.name),
-                "line": cursor.location.line,
-                "col": cursor.location.column,
-                "off": off,
-                "off_file": off_file,
-                "scope": self.scope_key(stack),
-                "closure": closure.spelling,
-                "closure_key": decl_key(closure),
-            }
-        )
+        for closure in closures:
+            self.sites.append(
+                {
+                    "exec": exec_name,
+                    "exec_key": exec_key,
+                    "file": os.path.realpath(cursor.location.file.name),
+                    "line": cursor.location.line,
+                    "col": cursor.location.column,
+                    "off": off,
+                    "off_file": off_file,
+                    "scope": self.scope_key(stack),
+                    "closure": closure.spelling,
+                    "closure_key": decl_key(closure),
+                }
+            )
 
     @classmethod
-    def _named_closure_arg(cls, call):
-        """Return the closure VARIABLE's declaration if an argument invokes `var()`.
+    def _named_closure_args(cls, call) -> list:
+        """Every closure VARIABLE's declaration that an argument invokes as `var()`.
 
         Only a call through a NAMED closure object counts. An immediately-invoked
         temporary is #291's form and belongs to the lexer, not here; a call to a
@@ -632,6 +639,7 @@ class SiteWalker:
         closure at all and is exactly what the issue warns the crude grep
         over-counts.
         """
+        found: dict[str, object] = {}
         for arg in call.get_arguments():
             # ⚠️ PRUNE AT LAMBDA BODIES. An unpruned descent walks INTO the spawned
             # lambda's own body and mistakes a closure invoked in there for the
@@ -657,16 +665,15 @@ class SiteWalker:
             # Found by --self-test, which is the arm's entire purpose.
             if kind_of(arg) == ci.CursorKind.LAMBDA_EXPR:
                 continue
-            found = cls._closure_called_in(arg, set())
-            if found is not None:
-                return found
-        return None
+            for d in cls._closures_called_in(arg, set()):
+                found.setdefault(decl_key(d), d)
+        return list(found.values())
 
     @classmethod
-    def _closure_called_in(cls, expr, followed: set[str]):
-        """The lambda-typed VarDecl invoked somewhere in `expr`, or None.
+    def _closures_called_in(cls, expr, followed: set[str]) -> list:
+        """The lambda-typed VarDecls invoked in `expr`, in source order.
 
-        Lambda bodies are pruned (see _named_closure_arg). A closure call may sit
+        Lambda bodies are pruned (see _named_closure_args). A closure call may sit
         anywhere below the argument, not only at its root: `bind_slot(s,
         record_into(out))` invokes `record_into` one call down (#586 shape A).
 
@@ -674,13 +681,16 @@ class SiteWalker:
         auto token = bind_slot(s, record_into(out)); co_spawn(ex, op(), token);`
         is the same site as shape A with the token moved into a local. Neither
         instrument used to list it, so both agreed about a site neither examined.
-        Every non-lambda VarDecl referenced in the argument (outside lambda
-        bodies) is followed, to a fixed point through `followed`. The clang-query
-        cross-check follows ONE hop with the same rule, so a longer chain shows
-        up there as ONLY LIBCLANG -- loud, never silent.
+        Only a local that IS the expression's value is followed (value_local);
+        a receiver (`sess` in `sess.send(x)`) or a local passed into another
+        call is not, because the closure behind it has no bearing on what the
+        co_spawn is handed. The follow chains to a fixed point through
+        `followed`. The clang-query cross-check follows ONE hop with the same
+        rule, so a longer chain shows up there as ONLY LIBCLANG -- loud, never
+        silent.
         """
-        nodes = [expr] + list(_descend(expr, prune_lambda_bodies=True))
-        for node in nodes:
+        out = []
+        for node in [expr] + list(_descend(expr, prune_lambda_bodies=True)):
             if kind_of(node) != ci.CursorKind.CALL_EXPR:
                 continue
             ref = node.referenced
@@ -694,26 +704,61 @@ class SiteWalker:
                 if d is None or kind_of(d) != ci.CursorKind.VAR_DECL:
                     continue
                 if is_lambda_type(d.type.spelling):
-                    return d
-        for node in nodes:
-            if kind_of(node) != ci.CursorKind.DECL_REF_EXPR:
-                continue
-            d = node.referenced
-            if d is None or kind_of(d) != ci.CursorKind.VAR_DECL:
-                continue
-            if is_lambda_type(d.type.spelling):
-                continue  # a closure passed uninvoked; its initializer is a lambda body
+                    out.append(d)
+                    break
+        d = value_local(expr)
+        if d is not None and not is_lambda_type(d.type.spelling):
             key = decl_key(d)
-            if key in followed:
+            if key not in followed:
+                followed.add(key)
+                for init in d.get_children():
+                    if kind_of(init) == ci.CursorKind.LAMBDA_EXPR:
+                        continue
+                    out += cls._closures_called_in(init, followed)
+        return out
+
+
+def _in_std(decl) -> bool:
+    """True if `decl` is declared in namespace `std` (inline namespaces included)."""
+    p = decl.semantic_parent
+    while p is not None and kind_of(p) == ci.CursorKind.NAMESPACE:
+        if p.spelling == "std":
+            return True
+        p = p.semantic_parent
+    return False
+
+
+def value_local(expr):
+    """The VarDecl whose value `expr` IS, or None.
+
+    Sees through parentheses, implicit nodes, a one-argument constructor (the
+    copy or move into a by-value parameter) and `std::move` / `std::forward`.
+    A node whose kind the bindings cannot name is seen through as a wrapper when
+    it has one child, by the rule in the version-skew note above. Anything else
+    -- a member call, a call taking the local as an argument -- is not the
+    local's value, and None is returned.
+    """
+    node = expr
+    while node is not None:
+        k = kind_of(node)
+        if k == ci.CursorKind.DECL_REF_EXPR:
+            d = node.referenced
+            return d if d is not None and kind_of(d) == ci.CursorKind.VAR_DECL else None
+        if k is None or k in (ci.CursorKind.UNEXPOSED_EXPR, ci.CursorKind.PAREN_EXPR):
+            kids = list(node.get_children())
+            node = kids[0] if len(kids) == 1 else None
+            continue
+        if k == ci.CursorKind.CALL_EXPR:
+            ref = node.referenced
+            args = list(node.get_arguments())
+            if ref is None or len(args) != 1:
+                return None
+            if kind_of(ref) == ci.CursorKind.CONSTRUCTOR or (
+                    ref.spelling in ("move", "forward") and _in_std(ref)):
+                node = args[0]
                 continue
-            followed.add(key)
-            for init in d.get_children():
-                if kind_of(init) == ci.CursorKind.LAMBDA_EXPR:
-                    continue
-                found = cls._closure_called_in(init, followed)
-                if found is not None:
-                    return found
         return None
+    return None
 
 
 def _descend(cursor, prune_lambda_bodies: bool = False):
@@ -1342,6 +1387,45 @@ void f() {
         [("make", "SAFE-DRIVEN")],
     ),
     (
+        # One site can name more than one closure. Every one is classified and
+        # the worst verdict stands, so a long-lived closure found in one argument
+        # cannot hide a short-lived one in another. Mutant: keep only the first
+        # closure found.
+        "a SECOND closure in the same co_spawn is classified too; the worst verdict stands",
+        """
+struct slot_t { };
+template <class S, class H> int bind_slot(S, H) { return 0; }
+void f() {
+  io_context ioc;
+  auto helper = [&]() { return 0; };
+  {
+    auto lam = [&]() { return 0; };
+    co_spawn(ioc, lam(), bind_slot(slot_t{}, helper()));
+  }
+  ioc.run();
+}
+""",
+        [("helper", "SAFE-DRIVEN"), ("lam", "FLAG")],
+    ),
+    (
+        # The same, with the long-lived closure reached FIRST, through the
+        # executor's initializer -- the order in which keeping only the first
+        # closure hides the FLAG. Mutant: as above.
+        "a closure in the EXECUTOR's initializer does not hide the spawned closure's verdict",
+        """
+struct strand_t { };
+strand_t make_strand(io_context&, int);
+void f() {
+  io_context ioc;
+  auto helper = [&]() { return 0; };
+  auto s = make_strand(ioc, helper());
+  { auto lam = [&]() { return 0; }; co_spawn(s, lam(), detached); }
+  ioc.run();
+}
+""",
+        [("helper", "SAFE-DRIVEN"), ("lam", "FLAG")],
+    ),
+    (
         # The follow runs to a fixed point. The clang-query matcher follows one
         # hop only, so a chain like this one lands in the cross-check's ONLY
         # LIBCLANG bucket -- the loud direction. Mutant: follow one hop only.
@@ -1364,30 +1448,25 @@ void f() {
         [("record_into", "SAFE-DRIVEN")],
     ),
     (
-        # The follow honours the lambda-body prune: a local named only inside a
-        # lambda BELOW the argument is not followed. The lambda is nested rather
-        # than the argument itself, so the argument-level skip cannot answer for
-        # the prune. Mutant: descend without pruning lambda bodies.
-        "a local named only inside a lambda body in the argument is not followed (#586 shape B)",
+        # Only a local that IS the argument's value is followed. A receiver is
+        # not: the closure that built `sess` has no bearing on what co_spawn is
+        # handed. Mutant: follow every local referenced in the argument.
+        "a RECEIVER local is not followed into its initializer (#586 shape B)",
         """
-struct slot_t { };
-struct handler_t { };
-template <class S, class H> int bind_slot(S, H) { return 0; }
-int op();
+struct sess_t { int send(int); };
 void f() {
   io_context ioc;
-  int out = 0;
-  auto record_into = [&](int) { return handler_t{}; };
-  const auto token = bind_slot(slot_t{}, record_into(out));
-  co_spawn(ioc, op(), bind_slot(slot_t{}, [&]() { auto copy = token; return 0; }));
+  auto make_sess = [&]() { return sess_t{}; };
+  auto sess = make_sess();
+  co_spawn(ioc, sess.send(1), detached);
   ioc.run();
 }
 """,
         [],
     ),
     (
-        # The same prune inside the followed initializer: a closure called only
-        # inside a lambda there is not the argument. Mutant: as above.
+        # A closure called only inside a lambda in the followed initializer is
+        # not the argument. Mutant: descend without pruning lambda bodies.
         "a closure called only inside a lambda in the local's initializer is not a site (#586 shape B)",
         """
 struct slot_t { };
