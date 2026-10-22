@@ -1635,6 +1635,9 @@ CI_PIN_HARNESSES=(
   # fixpp#600's SWIG %include-dependency harness. ⚠️ ADDED WITH ITS OWN MUTANT (M129),
   # same dead-call-site shape as its siblings, whose mutants each prove only their own row.
   "ci/test-swig-include-deps.sh"
+  # fixpp#529's packaging instrumented-skip harness. ⚠️ ADDED WITH ITS OWN MUTANT (M130),
+  # same dead-call-site shape as its siblings, whose mutants each prove only their own row.
+  "ci/test-packaging-instrumented-skip.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1959,7 +1962,9 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=115  # M129 (the ci-script-pins call-site pin for ci/test-swig-include-deps.sh,
+MUTANTS_DECLARED=116  # M130 (the ci-script-pins call-site pin for
+                     # ci/test-packaging-instrumented-skip.sh, fixpp#529) +
+                     # M129 (the ci-script-pins call-site pin for ci/test-swig-include-deps.sh,
                      # fixpp#600) +
                      # M128 (the ci-script-pins call-site pin for ci/test-bench-seed.sh,
                      # fixpp#276) +
@@ -2632,6 +2637,18 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "          bash ci/test-swig-include-deps.sh\n"
 new = "          echo \"bash ci/test-swig-include-deps.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M130 (fixpp#529): the SAME dead-call-site shape, on the packaging instrumented-skip
+  # harness. The reason must name this harness, so a sibling row firing cannot satisfy it.
+  mutate_workflow M130 "the packaging instrumented-skip harness call site replaced by an echo" "ci-script-pins does not INVOKE .bash ci/test-packaging-instrumented-skip\\.sh." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-packaging-instrumented-skip.sh\n"
+new = "        run: echo \"bash ci/test-packaging-instrumented-skip.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '

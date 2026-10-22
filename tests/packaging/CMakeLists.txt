@@ -61,8 +61,14 @@ set_tests_properties(fixpp::packaging::clean-env PROPERTIES
   RUN_SERIAL TRUE
   TIMEOUT 600
   LABELS "packaging"
-  SKIP_REGULAR_EXPRESSION "fixpp::packaging::clean-env SKIPPED \\(instrumented build: "
 )
+# Only an instrumented registration may read Skipped. A clean one carries no skip
+# regex, so a SKIPPED line printed there meets the witness's FATAL_ERROR and reads
+# Failed. Pinned by ci/test-packaging-instrumented-skip.sh.
+if(NOT _fixpp_pkg_instrumented STREQUAL "")
+  set_tests_properties(fixpp::packaging::clean-env PROPERTIES
+    SKIP_REGULAR_EXPRESSION "fixpp::packaging::clean-env SKIPPED \\(instrumented build: ")
+endif()
 
 # ── T058 (FR-009/FR-012/FR-013/FR-018d, SC-004, SC-013): package CONTENTS ────
 # The expected archive count is NOT computed here. FIXPP_EXPORT_TARGETS is set in
