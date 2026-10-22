@@ -2616,6 +2616,19 @@ jobs:
       - name: Regression pin — bench baseline seeding (#276)
         run: bash ci/test-bench-seed.sh
 
+      # #600 — the Python binding's SWIG step must rerun when a header fixpp.i
+      # reaches through %include changes. Only an incremental tree can show it, so
+      # a mock UseSWIG project takes the real fixpp.i source properties from
+      # bindings/python/CMakeLists.txt, verbatim, and rebuilds its wrapper after
+      # changing an %include'd header; a leg without USE_SWIG_DEPENDENCIES must
+      # read stale. SWIG and Ninja are this step's own: installed into
+      # setup-python's interpreter, unpinned, since the mock pins no SWIG version.
+      # The harness refuses, never skips, when either is missing.
+      - name: "Regression pin — SWIG wrapper follows %include'd headers (#600)"
+        run: |
+          pip install --quiet swig ninja
+          bash ci/test-swig-include-deps.sh
+
       # #252's checker is the only thing standing between "the sanitizer legs are
       # green" and "the sanitizer legs can see the C half of their closure", so it
       # gets the same treatment as the instruments above: every property driven by
