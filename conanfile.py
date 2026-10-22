@@ -94,8 +94,10 @@ class FixppConan(ConanFile):
             self.requires("opentelemetry-cpp/1.26.0")
 
     # ── Build-time tools ─────────────────────────────────────────────────────
-    # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
-    # collide with system versions and add resolution time. Restore in Phase 5.
+    # cmake and ninja come from the system (runner image, apt or choco in CI); swig is installed by each
+    # workflow that builds the bindings, at or above the minimum
+    # bindings/python/CMakeLists.txt requires. Conan-pinned tools collide with
+    # system versions and add resolution time. Restore: fixpp#619.
     tool_requires = []
 
     # ── Default options ──────────────────────────────────────────────────────
