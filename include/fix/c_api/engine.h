@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/engine.h — C-ABI engine lifecycle + engine-config builder
  *                              (CA-005, Feature B)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/tls/pinset.cpp
 // Pinset implementation — FIXS-RC1 §5 add-then-remove rotation surface.
 //

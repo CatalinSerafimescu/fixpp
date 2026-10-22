@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/tls/tls_errors.hpp
 // Re-export aliases for the 16 tls_* error variants defined in

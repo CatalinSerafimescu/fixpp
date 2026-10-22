@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/tls/security_profile.hpp
 // fixpp::tls::SecurityProfile — explicit-choice trust-mode enum + SslCtxConfig +

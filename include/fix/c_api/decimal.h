@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/decimal.h — C-ABI decimal boundary functions.
  * Phase 4 / 001-core-decimal — matches contracts/c_api_decimal.h byte-for-byte.

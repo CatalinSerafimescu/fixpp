@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/capi/version.cpp — C-ABI version accessors (CA-004, T007)
 // [2i §4.5] / data-model E-4
 

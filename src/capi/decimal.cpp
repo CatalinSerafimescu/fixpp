@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/capi/decimal.cpp
 // C-ABI boundary function implementations — US3 T034 + T035.
 // Thin thunks over decimal_traits<pod_decimal>; also implements _checked siblings.

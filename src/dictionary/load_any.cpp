@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/dictionary/load_any.cpp
 // 080-orchestra-runtime-load — dict::load_any shared root-sniff dispatch
 // helper (contracts/load_any.md). Mirrors OrchestraLoader::load's

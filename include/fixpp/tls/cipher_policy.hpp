@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/tls/cipher_policy.hpp
 // fixpp::tls::CipherPolicy — compile-time allow-list + runtime predicate.

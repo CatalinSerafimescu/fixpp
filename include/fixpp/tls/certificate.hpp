@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/tls/certificate.hpp
 // fixpp::tls::Certificate — value-typed VIEW over a parsed peer/leaf cert.

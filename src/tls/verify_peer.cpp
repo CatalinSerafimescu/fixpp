@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/tls/verify_peer.cpp
 // Implementation of verify_peer + last_handshake_sub_reason.
 //

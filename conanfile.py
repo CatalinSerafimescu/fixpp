@@ -5,7 +5,7 @@ class FixppConan(ConanFile):
     name = "fixpp"
     version = "0.0.1"
     description = "Modern C++23 FIX protocol library"
-    license = "AGPL-3.0-only"
+    license = "AGPL-3.0-or-later"
     url = "https://github.com/CatalinSerafimescu/fixpp"
     homepage = "https://github.com/CatalinSerafimescu/fixpp"
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * fix/c_api.h — fixpp C ABI entry point
  *

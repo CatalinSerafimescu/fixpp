@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/core/decimal_helpers.hpp
 // detail::trap_throw — wraps throwing third-party-library calls at the noexcept boundary.

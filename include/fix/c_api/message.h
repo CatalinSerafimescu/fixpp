@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/message.h — C-ABI message handles (CA-008/CA-009/CA-010, Feature C)
  *

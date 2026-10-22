@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/core/decimal.hpp
 // pod_decimal, decimal_traits<T>, decimal<T> — literal extract from 2a-decimal.md v0.3
