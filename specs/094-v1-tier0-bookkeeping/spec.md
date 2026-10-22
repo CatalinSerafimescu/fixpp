@@ -210,6 +210,18 @@ before any catalogue flip. Binding.
   "the if: of the two #448 gate steps in tier1.yml, which a third step asserts ran on exactly those
   presets", because the third step runs under `if: always()` and checks the preset in its script.
 
+### Session 2026-10-23 (Gate B round 1)
+
+Owner rulings on the Gate B round 1 triage (parent repo (private)
+`research/G19-fix-fpml-iso20022/research/reviews/opus_pr620_1_triage.md`). Binding.
+
+- Q (Q1, Codex C-1): the eleven feature-owned rows SVC-001..004, NFR-001, NFR-002, NFR-003, NFR-005,
+  NFR-011, D-003 and D-007 have no `spec/coverage-index.md` entry, and the `[impl]`/`[constitution]`
+  ones are rows `[const §VI.3]` says are noted as design choices. Record and file, fill them here, or
+  both? → A (owner): **Fill the eleven here** (option (b)). data-model §D carries the text ("Gate B
+  round 1 supplementals"), FR-011 names them, and plan.md's §VI.3 row names the notes 094 adds. No
+  issue is filed.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" are the owner tagging v1.0 and any contributor who reads the catalogue or the
@@ -511,7 +523,12 @@ in those files are licence comment lines.
   - the stale `005-defer` notes on FIX-TC scenarios 8, 9, 10 and 11 are rewritten to their current
     owners (TC-007 stays `backlog`, and its note says why);
   - scenario 3's "TC-003 stays backlog" note is replaced;
-  - the 005 deferral ledger rows for scenarios 8–11 are annotated.
+  - the 005 deferral ledger rows for scenarios 8–11 are annotated;
+  - (Gate B round 1, owner Q1 (b)) the eleven feature-owned rows that had no entry, D-003, D-007,
+    NFR-001, NFR-002, NFR-003, NFR-005, NFR-011 and SVC-001..004, gain a supplemental note each,
+    with the exact text in data-model §D ("Gate B round 1 supplementals"): a design choice per
+    `[const §VI.3]` for the `[impl]`/`[constitution]` and design-doc rows, D-003 under its FIX spec
+    sections, and the SVC rows with the post-1.0 drop note.
   TC-003's "Feature 093 does not own this row … stays backlog" note in the catalogue is removed.
 - **FR-012**: These rows MUST NOT change, because they are not delivered: NFR-010 (postponed), NFR-004,
   NFR-008, TC-001, TC-002, TC-004, TC-007, TC-009, TC-010 and TC-013.

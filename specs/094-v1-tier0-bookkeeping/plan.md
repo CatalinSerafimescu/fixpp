@@ -237,7 +237,7 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 
 **Scale/Scope**:
 - 25 catalogue rows changed plus 1 added (NFR-019), and the legend line;
-- coverage index: 9 lines edited (FIX-TC rows 3, 8–11 and 19, the two 005 ledger rows, the SVC-005 supplemental) and 1 paragraph added;
+- coverage index: 9 lines edited (FIX-TC rows 3, 8–11 and 19, the two 005 ledger rows, the SVC-005 supplemental) and 12 paragraphs added (NFR-019's, and at Gate B round 1 the eleven of data-model §D's "Gate B round 1 supplementals");
 - constitution: 6 clauses (§IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2), the Status line and the
   Sync Impact Report; `CHANGELOG.md`: 1 entry;
 - live B&L: 1 new section with L-094-1;
@@ -257,7 +257,7 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 |---|---|---|
 | §VI.6 (closing a `done` row) | yes | (a) 094 is the `/specify` artifact, cited in each /specify cell. (b) Every flipped behaviour row's tests run green at verify (FR-015), each clause mapped to an assertion (FR-015b); NFR-002, a process row, closes under (b) as amended in v4.0 (data-model §E.3a), on the two cited records, with the 544 lapse on record (FR-020). (c) Codex Gate B runs. (d) Gate A runs (R-1). |
 | §VI.4 (coverage-index entry before a new OFFICIAL row) | yes | The NFR-019 supplemental lands in the same edit (data-model §D). |
-| §VI.3 (`[impl]` rows noted as design choices) | yes | The NFR-019 supplemental says so. |
+| §VI.3 (`[impl]` rows noted as design choices) | yes, for the rows 094 owns | 094 adds the coverage-index notes for its own rows: the NFR-019 supplemental (the row it adds) and, at Gate B round 1 (owner, Q1 (b)), the D-003, D-007, NFR-001, NFR-002, NFR-003, NFR-005, NFR-011 and SVC-001..004 supplementals (data-model §D). The other `[impl]`/`[constitution]` rows' notes are unchanged by 094 and not claimed here. Re-derive: for each row whose Spec ref starts `[impl]` or `[constitution]`, `grep -nw <ID> spec/coverage-index.md` and read each hit; known positive: the NFR-019 supplemental. |
 | §XX.1–§XX.3 (amendment) | yes | Amended in the same PR as the conflicting change, with the Sync Impact Report (data-model §E.1). The PR is titled `Constitution: amend §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0, process-row closure (v4.0) (+ 094 Tier-0 bookkeeping)` and its description states change, rationale and affected rows (FR-003c), so §XX.2's four steps are met. Codex Gate A runs, then owner sign-off; the SIR reads PENDING until both. |
 | §XX.4 (classification) | yes | MAJOR, v3.0 → v4.0, with a `CHANGELOG.md` entry (R-2; owner, 2026-10-22). The §VI.6 clarification is a loosening and does not change it. |
 | §XVIII.4 (roadmap change = amendment) | yes | The §XVIII.2 line is part of the amendment. |
