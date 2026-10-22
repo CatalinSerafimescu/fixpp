@@ -250,24 +250,24 @@ is byte-unchanged.
 
 ### Catalogue (serial: one file)
 
-- [ ] T012 [US1] [orchestrator] `spec/feature-catalogue.md`, data-model §A, Status cell only:
+- [X] T012 [US1] [orchestrator] `spec/feature-catalogue.md`, data-model §A, Status cell only:
   - W-015 and W-016 → `dropped(post-v1.0, planned, not abandoned: new wire format, not core tag-value FIX, no QuickFIX reference implementation)`;
   - SVC-001, SVC-002, SVC-003, SVC-004 and SVC-005 → `dropped(post-v1.0, planned, not abandoned: service wrapper deferred by owner decision 2026-07-15; src/service/ is a stub)`
     (as data-model §A writes it).
   - `git diff --word-diff origin/main -- spec/feature-catalogue.md` shows only those seven Status cells
     (FR-001: "Every other cell of these rows MUST stay unchanged").
-- [ ] T013 [US1] [orchestrator] `spec/feature-catalogue.md`, data-model §B: append the definition to
+- [X] T013 [US1] [orchestrator] `spec/feature-catalogue.md`, data-model §B: append the definition to
   the existing `> **Status** ∈ {backlog, planning, implementing, done, dropped(reason)}` line, as the
   exact text of §B. FR-002: "The definition is appended to the existing Status line so no catalogue
   line moves". `wc -l` is the same before and after.
-- [ ] T014 [US1] [orchestrator] **Census after the drops (R-4).**
+- [X] T014 [US1] [orchestrator] **Census after the drops (R-4).**
   - The census reads open 87, done 152 parsed (154 actual), dropped 1, postv1 7.
   - The only Status differences from T002 are W-015, W-016 and SVC-001..005.
   - `tools/brain_inventory.py` and R-5's `_status_header` both parse every row; record their output.
 
 ### Coverage index
 
-- [ ] T015 [US1] [orchestrator] `spec/coverage-index.md`, data-model §D "SVC-005 supplemental":
+- [X] T015 [US1] [orchestrator] `spec/coverage-index.md`, data-model §D "SVC-005 supplemental":
   directly after `**SVC-005 supplemental:**`, insert the exact italic note of §D, same-line.
   - Anchor the edit by its text.
   - Make no change to the W-015/W-016 entries (§D: "they already read post-1.0").
@@ -275,7 +275,7 @@ is byte-unchanged.
 
 ### Constitution and CHANGELOG (the amendment, written PENDING)
 
-- [ ] T016 [P] [US1] [orchestrator] `.specify/constitution.md`, the six clauses, each before-text
+- [X] T016 [P] [US1] [orchestrator] `.specify/constitution.md`, the six clauses, each before-text
   matched with `grep -F` first:
   - §E.3, Article IV §4;
   - §E.3a, Article VI §6: the (a)–(d) list stays byte-identical, and the two sentences are appended;
@@ -287,14 +287,14 @@ is byte-unchanged.
   - §E.6, Article XVIII §1;
   - §E.7, Article XVIII §2: one bullet after `**v1.8 — FIX MMT**`.
   - §I.2, §IV.2, §XIII.3 and §XVIII.5 are read and left unchanged (R-12).
-- [ ] T017 [US1] [orchestrator] `.specify/constitution.md`, after T016:
+- [X] T017 [US1] [orchestrator] `.specify/constitution.md`, after T016:
   - insert the PENDING Sync Impact Report of data-model §E.1 as a new block at line 1, above the
     v2.0 → v3.0 block, verbatim;
   - replace the `> **Status:**` line's opening `> **Status:** user-ratified **v3.0** (2026-09-23) — `
     with §E.2's PENDING form; the rest of the line stays unchanged.
   - The SIR already records the MINOR → MAJOR correction at round 1 and the §VI.6 loosening (FR-003a);
     do not reword it.
-- [ ] T018 [P] [US1] [orchestrator] `CHANGELOG.md`, data-model §E.8 Pending form: the entry headed
+- [X] T018 [P] [US1] [orchestrator] `CHANGELOG.md`, data-model §E.8 Pending form: the entry headed
   `## Constitution v4.0 — Unreleased`, inserted directly after the `---` that follows the "Format
   follows" line, newest first.
 - [ ] T019 [US1] [orchestrator] **The docs shift-audit dry run (R-6; quickstart §5).** Run it now,

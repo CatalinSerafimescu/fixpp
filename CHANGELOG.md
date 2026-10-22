@@ -29,6 +29,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## Constitution v4.0 — Unreleased
+
+**Backwards-incompatible.** Article XX §4 major bump. Under v3.0 a PR that shipped the gRPC control
+plane or the iceoryx2 SHM data plane before the v1.0 tag shipped required scope and conformed. Under
+v4.0 both are post-1.0 roadmap items, and Article XVIII §5 reads "No early shipping of post-1.0
+protocols into v1.0", so the same PR does not conform. This is the constitution's version: it is not a C-ABI or
+library version.
+
+Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent
+repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. This heading reads
+`Unreleased` until the owner has signed off.
+
+### Changed
+
+- **Article XVIII §1** — the gRPC service wrapper and the iceoryx2 SHM data plane leave the locked
+  v1.0 scope.
+- **Article XVIII §2** — the service wrapper becomes an unscheduled post-1.0 item with no version
+  slot. v1.1–v1.8 are unchanged.
+- **Article XIV §1** — the control plane, both its pluggable interface and its default gRPC
+  implementation, is post-1.0. v1.0 installs only the `ControlPlaneFactory` ABI anchor and the C-ABI
+  codes 900/901, with no behavioural commitment.
+- **Article XIV §3** — iceoryx2 SHM and sidecar mode are post-1.0.
+- **Article VI §6** — a row whose subject is a process obligation of the constitution closes on
+  per-feature records of the kind that obligation names, cited in the row, each showing it applied
+  in full, in place of verifying tests; a row that describes behaviour still needs verifying tests.
+- **Article IV §4** — the service wrapper is opt-in and post-1.0.
+
+---
+
 ## Constitution v3.0 — 2026-09-23
 
 **Backwards-incompatible.** Article XX §4 major bump. v2.0's `/speckit-implement` step 5a let the
