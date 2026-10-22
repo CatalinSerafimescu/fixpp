@@ -1914,6 +1914,75 @@ assert_coverage_step_count() {
     || fail "$case_id: the coverage job has $got steps, expected 25. This is coverage's OWN count pin, independent of the linux job's — deleting the coverage job's trim step must not hide behind the linux count staying correct."
 }
 
+# ── fixpp#607: every literal that states the SWIG minimum agrees ────────────
+# The minimum is stated in six places that nothing derives from one another: the
+# CMake floor, the wheel's build requirement, and, in each workflow that builds the
+# binding, the version its install step installs and the version it then checks.
+# CI installs that version, so a floor lowered in one place leaves every build green;
+# only a comparison sees the drift. Each literal is read from code (non-comment CMake,
+# TOML, a parsed workflow step's run: text), never from the comments and messages
+# that repeat it, and each surface must state it exactly once.
+SWIG_CMAKE="$repo_root/bindings/python/CMakeLists.txt"
+SWIG_PYPROJECT="$repo_root/bindings/python/pyproject.toml"
+SWIG_PARWF="$repo_root/.github/workflows/parallelism-measure.yml"
+
+assert_swig_minimum_agrees() {  # <case_id> <CMakeLists.txt> <pyproject.toml> <tier1.yml> <parallelism-measure.yml>
+  local case_id="$1" out
+  out="$(python3 - "$2" "$3" "$4" "$5" <<'PY'
+import collections, re, sys, tomllib, yaml
+
+cmake, pyproject, tier1, par = sys.argv[1:5]
+VER = r"([0-9]+(?:\.[0-9]+)*)"
+stated, errors = [], []
+
+def one(label, values):
+    if len(values) != 1:
+        errors.append(f"{label}: found {len(values)} statement(s), expected exactly 1")
+    else:
+        stated.append((label, values[0]))
+
+calls = [l.split("#", 1)[0] for l in open(cmake) if re.match(r"\s*find_package\(\s*SWIG\b", l.split("#", 1)[0])]
+one("bindings/python/CMakeLists.txt find_package(SWIG <min>)",
+    [m.group(1) for c in calls for m in [re.match(r"\s*find_package\(\s*SWIG\s+" + VER + r"\b", c)] if m]
+    + ["<no version>" for c in calls if not re.match(r"\s*find_package\(\s*SWIG\s+" + VER + r"\b", c)])
+
+reqs = tomllib.load(open(pyproject, "rb")).get("build-system", {}).get("requires", [])
+swig = [r for r in reqs if re.match(r"\s*swig(?![\w.-])", r, re.I)]
+one("bindings/python/pyproject.toml build-system.requires swig>=<min>",
+    [(m.group(1) if m else f"<not swig>=X: {r!r}>")
+     for r in swig for m in [re.fullmatch(r"\s*swig\s*>=\s*" + VER + r"\s*", r, re.I)]])
+
+for wf_label, wf in (("tier1.yml", tier1), ("parallelism-measure.yml", par)):
+    doc = yaml.safe_load(open(wf))
+    steps = [st for job in (doc.get("jobs") or {}).values() for st in (job.get("steps") or [])
+             if re.match(r"Install SWIG\b", str(st.get("name", "")))]
+    if len(steps) != 1:
+        errors.append(f"{wf_label}: found {len(steps)} 'Install SWIG' step(s), expected exactly 1")
+        continue
+    run = str(steps[0].get("run", ""))
+    one(f"{wf_label} 'Install SWIG' step: pip install swig==<min>",
+        re.findall(r"(?m)^\s*pip install swig==" + VER + r"\s*$", run))
+    one(f"{wf_label} 'Install SWIG' step: the [ \"$v\" != \"<min>\" ] comparand",
+        re.findall(r'\[ "\$v" != "' + VER + r'" \]', run))
+
+if not errors:
+    count = collections.Counter(v for _, v in stated)
+    ref, n = count.most_common(1)[0]
+    if len(count) > 1:
+        if n * 2 > len(stated):
+            errors += [f"{label} states {v}, where the other {n} surface(s) state {ref}"
+                       for label, v in stated if v != ref]
+        else:
+            errors.append("no majority: " + "; ".join(f"{label} = {v}" for label, v in stated))
+if errors:
+    print("the SWIG minimum is not stated once and identically on every surface (#607): " + " | ".join(errors))
+    sys.exit(1)
+print(f"{stated[0][1]} on all {len(stated)} surfaces")
+PY
+)" || fail "$case_id: $out"
+  echo "$out"
+}
+
 # Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
 # and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
@@ -1940,6 +2009,7 @@ run_full_pin() {
 # ── Real workflow: must pass all four assertions ────────────────────────────
 run_full_pin "$WORKFLOW" "tier1.yml"
 echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_RE case table + tier1-required needs — $WORKFLOW"
+echo "PASS: SWIG minimum — $(assert_swig_minimum_agrees swig-minimum "$SWIG_CMAKE" "$SWIG_PYPROJECT" "$WORKFLOW" "$SWIG_PARWF")"
 
 # ── Mutant witnesses: each must be shown RED before this pin is trusted ─────
 # (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree —
@@ -1962,7 +2032,9 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=116  # M130 (the ci-script-pins call-site pin for
+MUTANTS_DECLARED=123  # M131-M137 (the SWIG minimum's six literals, one each, plus
+                     # an unpinned install; fixpp#607) +
+                     # M130 (the ci-script-pins call-site pin for
                      # ci/test-packaging-instrumented-skip.sh, fixpp#529) +
                      # M129 (the ci-script-pins call-site pin for ci/test-swig-include-deps.sh,
                      # fixpp#600) +
@@ -3961,6 +4033,99 @@ old = "    branches: [\x22main\x22]\n"
 new = old + "    tags: [\x22v*\x22]\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new, 1))
+'
+  # ── M131-M137 (fixpp#607): the SWIG minimum's surfaces ──────────────────
+  # One mutant per literal, each moving that literal alone; the reason must name
+  # the surface that moved and its new value. mutate_workflow mutates tier1.yml only,
+  # so these swap whichever of the four files they name.
+  mutate_swig() {  # <id> <label> <file: cmake|pyproject|tier1|par> <grep-re> <python-src>
+    local _id="$1" _label="$2" _which="$3" _why="$4" _py="$5"
+    local _c="$SWIG_CMAKE" _p="$SWIG_PYPROJECT" _t="$WORKFLOW" _w="$SWIG_PARWF" _src _f
+    local _o="$mut_dir/${_id}_out"
+    case "$_which" in
+      cmake) _src="$_c" ;; pyproject) _src="$_p" ;; tier1) _src="$_t" ;; par) _src="$_w" ;;
+      *) fail "$_id: unknown SWIG surface '$_which'" ;;
+    esac
+    _f="$mut_dir/swig-$_id-$(basename "$_src")"
+    python3 - "$_src" "$_f" <<<"$_py"
+    if cmp -s "$_src" "$_f"; then
+      fail "$_id: replacement produced no change — mutant not applied"
+    fi
+    case "$_which" in
+      cmake) _c="$_f" ;; pyproject) _p="$_f" ;; tier1) _t="$_f" ;; par) _w="$_f" ;;
+    esac
+    if ( assert_swig_minimum_agrees "$_id" "$_c" "$_p" "$_t" "$_w" ) >"$_o" 2>&1; then
+      fail "$_id ($_label) did NOT fail the SWIG minimum check"
+    fi
+    grep -qE "$_why" "$_o" \
+      || fail "$_id failed the SWIG minimum check for the WRONG reason: $(scrub_wf_cmds "$(cat "$_o")")"
+    echo "RED (expected): $_id ($_label) — $(scrub_wf_cmds "$(cat "$_o")")"
+    MUTANTS_RUN=$((MUTANTS_RUN + 1))
+  }
+
+  mutate_swig M131 "the CMake floor lowered" cmake "CMakeLists.txt find_package.SWIG <min>. states 4\\.2, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "find_package(SWIG 4.5.1 REQUIRED)\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "find_package(SWIG 4.2 REQUIRED)\n"))
+'
+
+  mutate_swig M132 "the wheel build requirement lowered" pyproject "pyproject.toml build-system.requires swig>=<min> states 4\\.2, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "\x22swig>=4.5.1\x22]"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "\x22swig>=4.2\x22]"))
+'
+
+  mutate_swig M133 "tier1 installs another SWIG" tier1 "tier1.yml .Install SWIG. step: pip install swig==<min> states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          pip install swig==4.6.0\n"))
+'
+
+  mutate_swig M134 "tier1 checks for another SWIG" tier1 "tier1.yml .Install SWIG. step: the .* comparand states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "[ \x22$v\x22 != \x224.5.1\x22 ]"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "[ \x22$v\x22 != \x224.6.0\x22 ]"))
+'
+
+  mutate_swig M135 "parallelism-measure installs another SWIG" par "parallelism-measure.yml .Install SWIG. step: pip install swig==<min> states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          pip install swig==4.6.0\n"))
+'
+
+  mutate_swig M136 "parallelism-measure checks for another SWIG" par "parallelism-measure.yml .Install SWIG. step: the .* comparand states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "[ \x22$v\x22 != \x224.5.1\x22 ]"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "[ \x22$v\x22 != \x224.6.0\x22 ]"))
+'
+
+  # M137: the install unpinned. No literal moves; the surface stops stating one,
+  # which the exactly-once rule must report rather than skip.
+  mutate_swig M137 "tier1 installs PyPI's latest SWIG" tier1 "tier1.yml .Install SWIG. step: pip install swig==<min>: found 0 statement" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          pip install swig\n"))
 '
 }
 
