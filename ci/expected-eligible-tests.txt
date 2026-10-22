@@ -67,6 +67,13 @@
 # eligible on every lane. Re-derive rather than trusting this paragraph:
 #     cmake --build <preset-dir> && ctest --test-dir <preset-dir> -N -LE packaging | tail -1
 #
+# ⚠️ THE SEVEN TIER 1 LINES BELOW (linux-clang-debug/-release/-asan/-ubsan/-tsan,
+# linux-gcc-release, linux-clang-coverage) WERE RE-READ FROM ONE CI RUN UNDER #561.
+# The run, its commit and the per-lane log line each value was taken from are in
+# ci/ctest-parallelism-probe.md, section "RE-RECORD — #561". Every earlier value
+# for those lanes in the comments below is history. The Tier 3 libc++ and Tier 2
+# MSVC lines come from other workflows and were not re-read with them.
+#
 # ── WHY IT IS PER-LANE, AND NOT ONE NUMBER ───────────────────────────────────
 #
 # The counts genuinely DIFFER per lane — some tests are registered only under
@@ -112,8 +119,8 @@
 # siblings) rather than using `gtest_discover_tests`, so removing a TEST inside a
 # binary moves no ctest count. Stated because "+1 -1 = 0" is the plausible wrong
 # answer here.
-linux-clang-debug     365
-linux-clang-release   365
+linux-clang-debug     486
+linux-clang-release   519
 # ⚠️ 368 -> 369, RE-RECORDED 2026-09-08. This lane has now drifted twice; the
 # earlier 362 -> 368 (2026-09-06, campaign run 33990959916) was a lane-local
 # fuzz-target drift, and the note that then said "of the eleven Linux pins, ten
@@ -217,9 +224,9 @@ linux-clang-release   365
 # it is exempted in tests/fuzz/CMakeLists.txt with its reason (its body is a stub
 # awaiting 2h US4 T041). That exemption is itself checked in both directions, so it
 # cannot quietly become a permanent omission.
-linux-clang-asan      378
-linux-clang-ubsan     364
-linux-clang-tsan      364
+linux-clang-asan      483
+linux-clang-ubsan     455
+linux-clang-tsan      455
 
 # `linux-gcc-release` runs a DIFFERENT workload, not no workload.  ⚠️ An earlier
 # revision of this file said it "SKIPS the minimal-tier Test step entirely, so
@@ -233,7 +240,7 @@ linux-clang-tsan      364
 # `linux-clang-release` (a `-LE packaging` count, a different quantity).
 # ⚠️ RE-RECORDED 2026-09-08 to 372 in the suite-wide +1 — provenance now Tier 1
 # run 34160147412 at `d66b4351`.
-linux-gcc-release     373
+linux-gcc-release     527
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — so the counts are lower than
@@ -259,7 +266,7 @@ linux-clang-libc++-tsan   359
 # filtered lanes because this one runs the packaging tier they exclude.
 # ⚠️ RE-RECORDED 2026-09-08 in the suite-wide +1: 370 -> 371, provenance Tier 1
 # run 34160147412 at `d66b4351`.
-linux-clang-coverage  372
+linux-clang-coverage  493
 
 # ── Tier 2, MSVC (`.github/workflows/tier2.yml`) — NEW 2026-09-06 ────────────
 #
