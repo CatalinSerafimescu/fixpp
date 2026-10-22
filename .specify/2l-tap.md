@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v0.4 — Gate A round 3 converged (Phase A) |
+| **Status** | Draft v0.4 — Gate A round 3 converged (Phase A). **Timing (constitution v4.0, feature 094):** the iceoryx2 data plane (`Iox2Tap`, SVC-002), the gRPC-only mode (SVC-003) and every `fixppd` path below are post-1.0, unscheduled (Article XIV §3, Article XVIII §2); read each "binding v1.0 `fixppd`" statement as a post-1.0 design statement. The in-process tap (S-036, NFR-014) is not affected. |
 | **Date** | 2026-05-09 |
 | **Owner** | Opus |
 | **Inherits** | `[arch §4.9]`, `[arch §5.8]`, `[arch §8.2]`, `[arch §6]`, `[arch §5.3]`, `[arch §5.4]` |
@@ -51,7 +51,7 @@
 4. **No tap record aggregation, compression, or encryption.** Raw bytes, as-received/sent. Post-v1.0.
 5. **No multiple simultaneous consumers per session** for `RingBufferTap` in v1.0. The ring is SPSC — one producer (the session strand), one consumer (the user drain thread). Multi-consumer fan-out is post-v1.0.
 6. **No bidirectional tap** (modifying the message before it is sent/dispatched). The tap is a pure observer; it never mutates session state per `[arch §2.4]`.
-7. **No C ABI tap subscription symbols in v1.0.** External non-C++ tools use iceoryx2 SHM directly (SVC-002) or gRPC streaming (SVC-001). See §5.
+7. **No C ABI tap subscription symbols in v1.0.** External non-C++ tools use iceoryx2 SHM directly (SVC-002) or gRPC streaming (SVC-001). See §5. *(Both routes are post-1.0 — see Status. v1.0 has no cross-process route for a non-C++ tap consumer.)*
 8. **No dynamic plugin discovery.** Compile-time only per `[const §XIV.4]`.
 
 ---

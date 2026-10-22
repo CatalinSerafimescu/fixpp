@@ -297,7 +297,7 @@ is byte-unchanged.
 - [X] T018 [P] [US1] [orchestrator] `CHANGELOG.md`, data-model §E.8 Pending form: the entry headed
   `## Constitution v4.0 — Unreleased`, inserted directly after the `---` that follows the "Format
   follows" line, newest first.
-- [ ] T019 [US1] [orchestrator] **The docs shift-audit dry run (R-6; quickstart §5).** Run it now,
+- [X] T019 [US1] [orchestrator] **The docs shift-audit dry run (R-6; quickstart §5).** Run it now,
   before US2 and US3 are stacked on top: the new SIR is the known trigger.
   - Commit T012–T018.
   - In a `git clone --shared` of the branch in the scratchpad, squash the docs commits onto
@@ -309,12 +309,12 @@ is byte-unchanged.
 
 ### Other surfaces (R-12 "edit" hits; different files, parallel)
 
-- [ ] T020 [P] [US1] [orchestrator] `.specify/architecture.md`, data-model §F.1.
+- [X] T020 [P] [US1] [orchestrator] `.specify/architecture.md`, data-model §F.1.
   - The same-line edits §F.1 lists, from §1.1's public-surfaces bullet to §11 row 5.
   - The Z-3 body two-line replacement, which keeps the line count.
   - **Z-9** appended at the end of the file, after "Provenance of Z-6..Z-8", verbatim.
   - `git diff --stat` shows lines added only by the Z-9 block. Nothing above Appendix Z moves.
-- [ ] T021 [P] [US1] [orchestrator] `.specify/api-contract.md`, data-model §F.2.
+- [X] T021 [P] [US1] [orchestrator] `.specify/api-contract.md`, data-model §F.2.
   - Append at the §3.1 pluggable-interface and gRPC proto bullets, the §3.2 iceoryx2 topic shape
     bullet, the §5 `fixpp::service` namespace row, the §9 `ControlPlane` row and the §10 2j and 2l rows.
   - The §8 `fixppd` row's last cell becomes `Post-1.0 (constitution v4.0)`.
@@ -324,19 +324,19 @@ is byte-unchanged.
     line is the row §F.2 names before editing it (Execution rules, non-unique before-texts).
     `Stable from v1.0` and `` 1 (`make`) `` each occur more than once in the file, so a whole-file
     `grep -F` cannot tell the `fixppd` row or the `ControlPlaneFactory` row from the other hits.
-- [ ] T022 [P] [US1] [orchestrator] The design-doc status headers, data-model §F.3, same-line, verbatim:
+- [X] T022 [P] [US1] [orchestrator] The design-doc status headers, data-model §F.3, same-line, verbatim:
   the status lines of `.specify/2j-controlplane.md`, `.specify/2l-tap.md`, `.specify/2m-pybind.md` and
   `.specify/2i-capi.md`, and `.specify/2l-tap.md`'s non-goal 7.
-- [ ] T023 [P] [US1] [orchestrator] `README.md`'s tagline and `docs/src/intro.md`'s opening sentence, data-model §F.4, before →
+- [X] T023 [P] [US1] [orchestrator] `README.md`'s tagline and `docs/src/intro.md`'s opening sentence, data-model §F.4, before →
   after, verbatim.
   - `README.md`'s licence badge and its "Open source" / "Commercial" bullets, `NOTICE` and `LICENSE-COMMERCIAL.md`'s opening sentence are left as they
     are. That default is recorded in spec §Clarifications, Gate A round 2; T053 reports it.
-- [ ] T024 [P] [US1] [orchestrator] `brain/components/service.md`, data-model §F.5's first bullet.
+- [X] T024 [P] [US1] [orchestrator] `brain/components/service.md`, data-model §F.5's first bullet.
   - Inside the `>` blockquote, `see \`architecture.md\` **Appendix Z-3**.` gains `, superseded by **Z-9**`.
   - The "Whether the service rows are deferred …" sentences are replaced by §F.5's text, with every
     wrapped line keeping the `> ` prefix.
   - The "Precisely: …" paragraph stays.
-- [ ] T025 [US1] [orchestrator] `spec/behaviors-and-limitations.md`, data-model §F.6 (FR-017; after
+- [X] T025 [US1] [orchestrator] `spec/behaviors-and-limitations.md`, data-model §F.6 (FR-017; after
   T007): append the new `## 094-v1-tier0-bookkeeping — …` section with **L-094-1** at the END of the
   live file, verbatim, with the FR-018 issue's real number in both places.
   - Before writing it, re-run T007's FR-017 wide grep
@@ -347,7 +347,7 @@ is byte-unchanged.
   - `spec/behaviors-and-limitations-closed.md` is unchanged.
   - Then run `python3 "$W/.claude/scripts/check_bl_delta.py" gate --feature 094-v1-tier0-bookkeeping --base origin/main --root "$PWD"`
     and `python3 "$W/.claude/scripts/check_bl_citations.py" gate`. Record both.
-- [ ] T026 [US1] [orchestrator] **US1 check, then commit.**
+- [X] T026 [US1] [orchestrator] **US1 check, then commit.**
   - quickstart §4's `grep -niE "grpc|iceoryx|service wrapper|service[- ]mode|out-of-process" .specify/constitution.md`:
     every hit is the v4.0 SIR, the Status line (its v4.0 PENDING text names the post-1.0 scope), a
     clause that says post-1.0, an earlier SIR, or §I.2 / §IV.2 / §XIII.3.
