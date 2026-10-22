@@ -717,7 +717,7 @@ prints `PASS`.
 
 ### Owner report and PR text
 
-- [ ] T052 [orchestrator] **Draft the PR description** in the parent's `research/reviews/` scratch area
+- [X] T052 [orchestrator] **Draft the PR description** in the parent's `research/reviews/` scratch area
   (T057 opens the PR with it; T064 applies its final form).
   - Title, exactly (FR-003c):
     `Constitution: amend §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0, process-row closure (v4.0) (+ 094 Tier-0 bookkeeping)`.
@@ -744,7 +744,7 @@ prints `PASS`.
   - `local build: green on linux-clang-debug @ <sha>`, with the SHA of T049's full `ctest` cycle.
   - Run T048's grep over the body, with its positive control. No closing keyword, so
     `closingIssuesReferences` must come back empty.
-- [ ] T053 [orchestrator] **Owner report** (FR-006a, FR-015b; spec §Clarifications defaults). It lists:
+- [X] T053 [orchestrator] **Owner report** (FR-006a, FR-015b; spec §Clarifications defaults). It lists:
   - every narrowing verify made beyond the bundle's;
   - T039a's provenance and authorship census (R-8: authors, committers and `Co-Authored-By` trailers
     over the 53 files; the AI co-author trailers' legal weight is the owner's call), and any file it
@@ -990,7 +990,7 @@ prints `PASS`.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
-- [ ] T069 [orchestrator] **Catalogue close-out, verification only.** Data-model's rule overrides the
+- [X] T069 [orchestrator] **Catalogue close-out, verification only.** Data-model's rule overrides the
   template's "with the PR ref": "The 094 PR itself is not cited, because its number does not exist until
   the PR is opened, and close-out does not re-edit rows".
   - Assert that every one of the 26 feature-owned rows (W-015, W-016, SVC-001..005, NFR-001, NFR-002,
