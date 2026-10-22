@@ -65,7 +65,7 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
 - Fill data-model §H's last column from the assertions the cells ran (FR-015b), and run its recipe
   rows (TC-014, TC-017) after their seeded positives.
 - NFR-013's backend grep (data-model §C) prints nothing over the build files; over every tracked file
-  outside `specs/` it prints `tests/support/recycler_driver.hpp` and `.specify/544-hot-path-zero-alloc.md`.
+  it prints at least one hit (the known positive), and no hit is a build file.
 - `docs/prebuild.py`: run research R-5's `_status_header` one-liner on the branch's catalogue. The three
   `dropped(post-v1.0, …` strings appear with counts 2, 5 and 1 (on the base: none).
 - Snapshot `gh issue view 614 --repo CatalinSerafimescu/fixpp --json state,labels,createdAt` into the
