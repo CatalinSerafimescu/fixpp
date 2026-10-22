@@ -1176,8 +1176,17 @@ SENTINEL
   # census reads compile_commands.json and the headers and writes only temp files, and
   # the sentinel reads a step outcome. The census CAN fail the job before python runs,
   # which is intended.
-  [ "$got" = "42" ] \
-    || fail "$case_id: the linux job has $got steps, expected 42. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  # 42 -> 43 (fixpp#607): `Install SWIG 4.5.1 from PyPI`, right after setup-python and
+  # BEFORE the pytest pair, so the question is live, and this step DOES pip-install
+  # into the interpreter the pytest steps run. It reaches them only if the `swig`
+  # wheel adds a pytest plugin or an import-time hook: its dist-info declares only
+  # the `swig` and `swig4.0` console scripts (entry_points.txt), no `pytest11` entry
+  # and no `.pth` file — re-read that when the pinned version moves. It writes
+  # neither GITHUB_ENV nor GITHUB_PATH and does not touch the build tree. It CAN
+  # fail the job before python runs, which is intended: a leg that would configure
+  # against another SWIG should stop there.
+  [ "$got" = "43" ] \
+    || fail "$case_id: the linux job has $got steps, expected 43. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CCACHE_MAXSIZE":"2G","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -2947,7 +2956,7 @@ open(dst, "w").write(t.replace(old, new))
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 43 steps, expected 42" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 44 steps, expected 43" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()

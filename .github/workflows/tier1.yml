@@ -477,26 +477,19 @@ jobs:
           sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
-          # swig + python3-dev (#254): every leg now builds the Python bindings,
-          # so `find_package(SWIG 4.2 REQUIRED)` (bindings/python/CMakeLists.txt,
-          # #296 cap now LIFTED) must resolve here — only the >=4.2 floor
-          # applies, so the distro's unbounded `swig` package satisfies it.
-          # ⚠️ Note this is apt's swig (4.2.0 on ubuntu-24.04), NOT the wheel's:
-          # the wheel build takes swig from PyPI via pyproject's build-system
-          # requires. Lifting the cap therefore moves the WHEEL lane's SWIG and
-          # leaves these six legs where they were — which is the point, since
-          # #296 was only ever observed on the wheel lane.
-          # Both packages are carried over VERBATIM from the deleted
-          # `python-bindings` job's apt line — that is the configuration CI has
-          # proven green, and python3-dev additionally decides which
-          # Python3_SITEARCH branch fires (bindings/python/CMakeLists.txt).
-          # Dropping python3-dev on the theory that actions/setup-python's headers
-          # suffice is an UNTESTED narrowing: no CI run and no local build can
-          # discriminate it, because all of them had the system headers present.
+          # python3-dev (#254): every leg builds the Python bindings. It is carried
+          # over VERBATIM from the deleted `python-bindings` job's apt line — that
+          # is the configuration CI has proven green, and python3-dev additionally
+          # decides which Python3_SITEARCH branch fires
+          # (bindings/python/CMakeLists.txt). Dropping it on the theory that
+          # actions/setup-python's headers suffice is an UNTESTED narrowing: no
+          # CI run and no local build can discriminate it, because all of them
+          # had the system headers present.
+          # SWIG is NOT installed from apt: it comes from PyPI at exactly the
+          # minimum, in the step after setup-python (#607).
           ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
             gcc-13 g++-13 \
             ninja-build \
-            swig \
             python3-dev \
             python3-pip \
             pipx
@@ -504,6 +497,33 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      # #607 — SWIG at exactly the minimum (`find_package(SWIG 4.5.1 REQUIRED)` in
+      # bindings/python/CMakeLists.txt, `swig>=4.5.1` in pyproject.toml), so this
+      # leg builds the lowest SWIG the wheel accepts. Change the three together.
+      # It goes into setup-python's interpreter, whose bin directory precedes
+      # /usr/bin on PATH; the runner image may carry an apt swig in /usr/bin.
+      # CMake 3.28's FindSWIG takes the FIRST `swig4.0` on PATH (then `swig`) and
+      # does not skip a too-old one, so both names must resolve to this install.
+      # If they do not, this step fails here, before the 4.5.1 floor would fail
+      # Configure for a less legible reason. The Configure log's
+      # `Found SWIG: … (found suitable version "4.5.1", …)` line is the reading.
+      # The `swig` wheel ships only the two console scripts below and no pytest
+      # plugin, so installing it here does not change what the pytest steps run.
+      - name: Install SWIG 4.5.1 from PyPI (#607)
+        run: |
+          set -euo pipefail
+          pip install swig==4.5.1
+          type -a -P swig4.0 swig || true
+          for n in swig4.0 swig; do
+            p="$(command -v "$n")" || { echo "::error::no $n on PATH after pip install swig==4.5.1 (#607)."; exit 1; }
+            v="$("$p" -version | sed -n 's/^SWIG Version //p')"
+            echo "$n -> $p ($v)"
+            if [ "$v" != "4.5.1" ]; then
+              echo "::error::the first $n on PATH is $p (SWIG $v), not PyPI's 4.5.1 (#607)."
+              exit 1
+            fi
+          done
 
       - name: Install Conan + pytest via pipx
         run: |

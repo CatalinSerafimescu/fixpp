@@ -104,7 +104,7 @@ static void fixpp_py_raise_for_code(fixpp_error_t code) {
  * wrapper-block definitions inside extern "C" but leaves this header block at
  * C++ linkage, so a plain static declaration conflicts (C vs C++ linkage) under
  * gcc. The brace form is required (the extern "C" static prefix form is rejected
- * by both gcc and clang). Verified clean under SWIG 4.2 and 4.4.
+ * by both gcc and clang).
  * NOTE: keep this comment free of apostrophes and percent signs (SWIG
  * preprocessor mis-tokenizes them inside the header block). */
 extern "C" {
