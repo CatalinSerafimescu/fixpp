@@ -168,11 +168,14 @@ python3 -c "import yaml" 2>/dev/null \
 # parse happens exactly once per workflow file, here.
 extract_json() {
   local workflow="$1"
-  python3 - "$workflow" <<'PYEOF'
+  python3 - "$workflow" "$repo_root/ci" <<'PYEOF'
 import json
 import re
 import sys
 import yaml
+
+sys.path.insert(0, sys.argv[2])
+from workflow_step_pin import logical_run_lines
 
 with open(sys.argv[1]) as f:
     doc = yaml.safe_load(f)
@@ -189,25 +192,6 @@ jobs = doc["jobs"]
 _on_block = doc.get("on", doc.get(True))
 push_keys = sorted(str(k) for k in _on_block["push"].keys())
 push_branches = _on_block["push"].get("branches")
-
-def logical_run_lines(run: str) -> list[str]:
-    lines = []
-    buf = ""
-    for raw in run.splitlines():
-        if raw.lstrip().startswith("#"):
-            continue
-        line = raw.rstrip()
-        if line.endswith("\\"):
-            buf += line[:-1] + " "
-            continue
-        buf += line
-        normalized = " ".join(buf.split())
-        if normalized:
-            lines.append(normalized)
-        buf = ""
-    if buf.strip():
-        lines.append(" ".join(buf.split()))
-    return lines
 
 # #254: `python-bindings` is gone. The set this pin is exact over is now the
 # `linux` job's own preset list — a list of STRINGS, not the list of dicts the
@@ -1984,6 +1968,56 @@ PY
   echo "$out"
 }
 
+# The two 'Install SWIG' steps the minimum check reads must also RUN: their key
+# set is exactly {name, run} and their run: equals the commands below, through
+# ci/workflow_step_pin.py's rule. Every dotted version number in the step is read
+# as <min> first, so this check is blind to the version, which the agreement check
+# above owns, and a literal mutant reddens only that one.
+assert_swig_install_steps() {  # <case_id> <tier1.yml> <parallelism-measure.yml>
+  local case_id="$1" out
+  out="$(python3 - "$repo_root/ci" "$2" "$3" <<'PY'
+import re, sys, yaml
+
+sys.path.insert(0, sys.argv[1])
+from workflow_step_pin import step_pin_check
+
+GOLDEN = r'''set -euo pipefail
+pip install swig==<min>
+type -a -P swig4.0 swig || true
+for n in swig4.0 swig; do
+p="$(command -v "$n")" || { echo "::error::no $n on PATH after pip install swig==<min> (#607)."; exit 1; }
+v="$("$p" -version | sed -n 's/^SWIG Version //p')"
+echo "$n -> $p ($v)"
+if [ "$v" != "<min>" ]; then
+echo "::error::the first $n on PATH is $p (SWIG $v), not PyPI's <min> (#607)."
+exit 1
+fi
+done'''.splitlines()
+VERSION = re.compile(r"(?<![\w.])[0-9]+(?:\.[0-9]+)+(?![\w.])")
+
+errors = []
+for label, wf in (("tier1.yml", sys.argv[2]), ("parallelism-measure.yml", sys.argv[3])):
+    doc = yaml.safe_load(open(wf))
+    steps = [st for job in (doc.get("jobs") or {}).values() for st in (job.get("steps") or [])
+             if re.match(r"Install SWIG\b", str(st.get("name", "")))]
+    if len(steps) != 1:
+        errors.append(f"{label}: found {len(steps)} 'Install SWIG' step(s), expected exactly 1")
+        continue
+    step = dict(steps[0], run=VERSION.sub("<min>", str(steps[0].get("run", ""))))
+    bad_keys, diff = step_pin_check(step, GOLDEN)
+    if bad_keys:
+        errors.append(f"{label} 'Install SWIG' step: key set differs from name/run by {bad_keys}")
+    if diff:
+        errors.append(f"{label} 'Install SWIG' step: run: {diff}")
+if errors:
+    print("an 'Install SWIG' step does not run exactly the pinned commands (#607): " + " | ".join(errors))
+    sys.exit(1)
+print("both steps are name/run only and run the pinned commands")
+PY
+)" || fail "$case_id: $out"
+  echo "$out"
+}
+
 # Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
 # and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
@@ -2010,7 +2044,12 @@ run_full_pin() {
 # ── Real workflow: must pass all four assertions ────────────────────────────
 run_full_pin "$WORKFLOW" "tier1.yml"
 echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_RE case table + tier1-required needs — $WORKFLOW"
-echo "PASS: SWIG minimum — $(assert_swig_minimum_agrees swig-minimum "$SWIG_CMAKE" "$SWIG_PYPROJECT" "$WORKFLOW" "$SWIG_PARWF")"
+# Assigned, then echoed: `fail` inside an echo argument's $(...) would exit only
+# that subshell, and the PASS line would print.
+swig_min="$(assert_swig_minimum_agrees swig-minimum "$SWIG_CMAKE" "$SWIG_PYPROJECT" "$WORKFLOW" "$SWIG_PARWF")"
+echo "PASS: SWIG minimum — $swig_min"
+swig_steps="$(assert_swig_install_steps swig-install-steps "$WORKFLOW" "$SWIG_PARWF")"
+echo "PASS: SWIG install steps — $swig_steps"
 
 # ── Mutant witnesses: each must be shown RED before this pin is trusted ─────
 # (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree —
@@ -2033,7 +2072,9 @@ echo "PASS: SWIG minimum — $(assert_swig_minimum_agrees swig-minimum "$SWIG_CM
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=123  # M131-M137 (the SWIG minimum's literals, one mutant each, plus
+MUTANTS_DECLARED=126  # M138-M140 (the 'Install SWIG' steps' key set and run: golden,
+                     # one mutant per shape; fixpp#607) +
+                     # M131-M137 (the SWIG minimum's literals, one mutant each, plus
                      # an unpinned install; fixpp#607) +
                      # M130 (the ci-script-pins call-site pin for
                      # ci/test-packaging-instrumented-skip.sh, fixpp#529) +
@@ -4127,6 +4168,59 @@ t = open(src).read()
 old = "          pip install swig==4.5.1\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, "          pip install swig\n"))
+'
+
+  # ── M138-M140 (fixpp#607): the 'Install SWIG' steps must run ──────────────
+  # Each keeps every version literal and stops the step running or gating, one
+  # shape per mutant; the reason must name the workflow and the shape.
+  mutate_swig_step() {  # <id> <label> <file: tier1|par> <grep-re> <python-src>
+    local _id="$1" _label="$2" _which="$3" _why="$4" _py="$5"
+    local _t="$WORKFLOW" _w="$SWIG_PARWF" _src _f
+    local _o="$mut_dir/${_id}_out"
+    case "$_which" in
+      tier1) _src="$_t" ;; par) _src="$_w" ;;
+      *) fail "$_id: unknown workflow '$_which'" ;;
+    esac
+    _f="$mut_dir/swigstep-$_id-$(basename "$_src")"
+    python3 - "$_src" "$_f" <<<"$_py"
+    if cmp -s "$_src" "$_f"; then
+      fail "$_id: replacement produced no change — mutant not applied"
+    fi
+    case "$_which" in tier1) _t="$_f" ;; par) _w="$_f" ;; esac
+    if ( assert_swig_install_steps "$_id" "$_t" "$_w" ) >"$_o" 2>&1; then
+      fail "$_id ($_label) did NOT fail the SWIG install-step check"
+    fi
+    grep -qE "$_why" "$_o" \
+      || fail "$_id failed the SWIG install-step check for the WRONG reason: $(scrub_wf_cmds "$(cat "$_o")")"
+    echo "RED (expected): $_id ($_label) — $(scrub_wf_cmds "$(cat "$_o")")"
+    MUTANTS_RUN=$((MUTANTS_RUN + 1))
+  }
+
+  mutate_swig_step M138 "tier1's step disabled by a step if:" tier1 "tier1\\.yml 'Install SWIG' step: key set differs from name/run by \\['if'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Install SWIG 4.5.1 from PyPI (#607)\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "        if: false\n"))
+'
+
+  mutate_swig_step M139 "parallelism-measure's step made non-gating" par "parallelism-measure\\.yml 'Install SWIG' step: key set differs from name/run by \\['continue-on-error'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Install SWIG 4.5.1 from PyPI (#607)\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "        continue-on-error: true\n"))
+'
+
+  mutate_swig_step M140 "tier1's step exits before installing" tier1 "tier1\\.yml 'Install SWIG' step: run: line 2 is 'exit 0', expected 'pip install swig==<min>'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          exit 0\n" + old))
 '
 }
 
