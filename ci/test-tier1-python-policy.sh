@@ -1178,7 +1178,7 @@ SENTINEL
   # census reads compile_commands.json and the headers and writes only temp files, and
   # the sentinel reads a step outcome. The census CAN fail the job before python runs,
   # which is intended.
-  # 42 -> 43 (fixpp#607): `Install SWIG 4.5.1 from PyPI`, right after setup-python and
+  # fixpp#607: `Install SWIG 4.5.1 from PyPI` sits right after setup-python and
   # BEFORE the pytest pair, so the question is live, and this step DOES pip-install
   # into the interpreter the pytest steps run. It reaches them only if the `swig`
   # wheel adds a pytest plugin or an import-time hook: its dist-info declares only
