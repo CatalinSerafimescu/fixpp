@@ -6,8 +6,8 @@
 # instrumented build it prints a SKIPPED line and stops, and the registration's
 # SKIP_REGULAR_EXPRESSION turns that into Skipped. Both directions can fail toward
 # green: a clean build classified as instrumented reads Skipped with the witness never
-# run, and ctest exits 0 on Skipped. No CI lane registers the packaging tier on an
-# instrumented build, so neither direction is exercised by a configured tree.
+# run, and ctest exits 0 on Skipped. A configured tree exercises only the
+# configuration it was configured with, so both directions are pinned here.
 #
 # Each cell configures a throwaway project that add_subdirectory's the REAL
 # tests/packaging/CMakeLists.txt (never a copy of its logic), with the instrumentation

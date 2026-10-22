@@ -1915,9 +1915,10 @@ assert_coverage_step_count() {
 }
 
 # ── fixpp#607: every literal that states the SWIG minimum agrees ────────────
-# The minimum is stated in six places that nothing derives from one another: the
-# CMake floor, the wheel's build requirement, and, in each workflow that builds the
-# binding, the version its install step installs and the version it then checks.
+# The minimum is stated in several places, none derived from another: the
+# CMake floor, the wheel's build requirement, and, in tier1.yml and
+# parallelism-measure.yml, the version each 'Install SWIG' step installs and the
+# version it then checks.
 # CI installs that version, so a floor lowered in one place leaves every build green;
 # only a comparison sees the drift. Each literal is read from code (non-comment CMake,
 # TOML, a parsed workflow step's run: text), never from the comments and messages
@@ -2032,7 +2033,7 @@ echo "PASS: SWIG minimum — $(assert_swig_minimum_agrees swig-minimum "$SWIG_CM
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=123  # M131-M137 (the SWIG minimum's six literals, one each, plus
+MUTANTS_DECLARED=123  # M131-M137 (the SWIG minimum's literals, one mutant each, plus
                      # an unpinned install; fixpp#607) +
                      # M130 (the ci-script-pins call-site pin for
                      # ci/test-packaging-instrumented-skip.sh, fixpp#529) +

@@ -2631,8 +2631,8 @@ jobs:
 
       # #529 — fixpp::packaging::clean-env reads Skipped on an instrumented build
       # and must never read Skipped on a clean one, where ctest's exit 0 would hide
-      # a witness that never ran. No lane registers the packaging tier on an
-      # instrumented build, so mock projects that add_subdirectory the real
+      # a witness that never ran. A configured lane shows only its own
+      # configuration, so mock projects that add_subdirectory the real
       # tests/packaging/CMakeLists.txt stand in, one per instrumentation option,
       # and each mutant of tests/packaging/ must redden the cell it names.
       # Configures only; needs cmake, ctest, make and a C++ compiler, which the

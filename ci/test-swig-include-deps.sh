@@ -4,8 +4,8 @@
 #
 # Without SWIG's own depfile, UseSWIG's custom command depends on fixpp.i alone: an
 # incremental tree recompiles the old wrapper and the module serves the old constants.
-# A fresh tree (every CI build) regenerates the wrapper whatever the setting, so no
-# configured lane can see this. A mock UseSWIG project stands in for an incremental
+# A fresh tree regenerates the wrapper whatever the setting, so a lane that configures
+# from scratch cannot see this. A mock UseSWIG project stands in for an incremental
 # tree, and its fixpp.i %include's a header that defines one constant.
 #
 # The mock does NOT restate the setting under test. Its source properties on fixpp.i

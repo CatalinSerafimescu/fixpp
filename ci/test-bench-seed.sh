@@ -330,9 +330,8 @@ mutant M-READER    S10 cmp '    rows = [r for r in data.get("benchmarks", []) or
 
 mutant M-GIT-QUIET  S8  seed 'check=True,' 'check=False,'
 
-# The rename mutants. M-RENAME-HEAD restores the parse this pin was written
-# against: renames reported as one -z record pair, and the source entry skipped
-# when the INDEX column says R or C. M-RENAME-2COL reads both columns and still
+# The rename mutants. M-RENAME-HEAD: renames reported as one -z record pair, and
+# the source entry skipped when the INDEX column says R or C. M-RENAME-2COL reads both columns and still
 # skips the source. M-SKIP-DELETED drops deletion records, on the theory that a
 # deleted file cannot enter the build.
 mutant M-RENAME-HEAD  S11 seed \

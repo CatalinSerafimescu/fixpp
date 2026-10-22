@@ -5,9 +5,10 @@
 
 # #607 — the SWIG minimum. It equals the `swig>=` floor in
 # bindings/python/pyproject.toml's [build-system] requires and moves with it
-# (ci/test-tier1-python-policy.sh compares every literal that states it). The
-# in-tree CI legs install exactly this version from PyPI, so they build the lowest
-# SWIG the wheel accepts; a wheel build takes PyPI's latest SWIG at or above it.
+# (ci/test-tier1-python-policy.sh compares it with that floor and the CI install
+# steps). The in-tree CI legs install exactly this version from PyPI, so they
+# build the lowest SWIG the wheel accepts; a wheel build takes PyPI's latest SWIG
+# at or above it.
 # Conditions it answers:
 #   * below 4.3, MSVC /W4 raises C4100 in SWIG's runtime section, which fixpp.i's
 #     GCC/Clang-only %begin suppression does not cover (#562). At this minimum
