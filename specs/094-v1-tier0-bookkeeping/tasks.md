@@ -384,7 +384,7 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
 - [X] T028 [P] [US2] [phase-implementer] **The initiator cell**, in `tests/session/fsm_matrix_witness_test.cpp`.
   - Name: `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`.
   - At LogonSent it feeds a Logon built with
-    `build_frame("A", 1, kTarget, kSender, kBeginStr, "98=2\x01" "108=30\x01")` and asserts the state is
+    `build_logon(kTarget, kSender, kBeginStr, 1, 30, /*encrypt_method=*/2)` (the file's Logon builder, given an `encrypt_method` parameter defaulting to 0 at /simplify; first written as a hand-built `build_frame` call) and asserts the state is
     `Disconnected` and that `captured_frames.size()` is unchanged across the feed.
   - Same `session_pure_tests` binary; no ctest entry; licence line unchanged.
   - **Do not edit** the stale "(with Logout in US4)" comment in `src/session/session.cpp`'s
@@ -625,7 +625,7 @@ prints `PASS`.
 
 ### `/simplify` (pipeline step 11, before verify)
 
-- [ ] T043 [orchestrator] Run `/simplify` scoped to the two FR-022 cells and the FR-022b cell (`tests/session/test_enum_validation_logon.cpp`,
+- [X] T043 [orchestrator] Run `/simplify` scoped to the two FR-022 cells and the FR-022b cell (`tests/session/test_enum_validation_logon.cpp`,
   `tests/session/fsm_matrix_witness_test.cpp`, `tests/dictionary/lookup_test.cpp`; `[const §XVI.7]`). Opus agents review; the orchestrator
   triages; `phase-implementer` applies in-scope fixes. Any change to a cell re-runs T029's RED proof
   for that cell (T029a's for the FR-022b cell). Record the triage in the verify record.

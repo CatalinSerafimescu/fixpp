@@ -683,7 +683,7 @@ in those files are licence comment lines.
     is `Disconnected` and `transport.sent_frames()` is empty.
   - **Initiator:** `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`
     in `tests/session/fsm_matrix_witness_test.cpp`. At LogonSent it feeds a Logon built with
-    `build_frame("A", 1, kTarget, kSender, kBeginStr, "98=2\x01" "108=30\x01")` and asserts the state is
+    `build_logon(kTarget, kSender, kBeginStr, 1, 30, /*encrypt_method=*/2)` (the file's Logon builder, given an `encrypt_method` parameter defaulting to 0 at /simplify; first written as a hand-built `build_frame` call) and asserts the state is
     `Disconnected` and `captured_frames.size()` is unchanged across the feed.
   - **RED proof, each cell:** in a scratch copy, delete the sticky refusal in
     `src/session/admin_messages.cpp`, `interpret_logon`: the `if (invalid_encrypt_method_seen)` block
