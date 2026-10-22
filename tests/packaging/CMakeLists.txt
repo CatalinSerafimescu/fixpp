@@ -31,7 +31,10 @@ set_tests_properties(fixpp::packaging::version-mismatch PROPERTIES
 # #529: the libraries are instrumented when cmake/Sanitizers.cmake applies
 # FIXPP_ENABLE_ASAN, FIXPP_ENABLE_UBSAN or FIXPP_ENABLE_TSAN (on Clang or GCC, as
 # that file does), or when FIXPP_BUILD_FUZZ is on (B-508-1). Under that condition
-# the test stays registered and reports Skipped, naming those options.
+# the test stays registered and reports Skipped, naming those options. The marker
+# sees only those options: an instrumentation it does not see, such as MSVC
+# /fsanitize from a profile, coverage, or -fsanitize given only in
+# CMAKE_CXX_FLAGS, reaches the witness unskipped and fails or passes on its own.
 set(_fixpp_pkg_instrumented "")
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   foreach(_opt FIXPP_ENABLE_ASAN FIXPP_ENABLE_UBSAN FIXPP_ENABLE_TSAN)
