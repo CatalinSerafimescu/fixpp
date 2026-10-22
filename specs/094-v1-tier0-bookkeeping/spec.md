@@ -61,6 +61,9 @@ the catalogue no longer schedules. `[const §XX.1]` says to amend the article fi
 - Q: Where does the service wrapper sit on `[const §XVIII.2]`'s locked post-1.0 roadmap? → A:
   **Unscheduled post-1.0.** One line under §2. No version slot, and v1.1–v1.8 are not re-ordered.
 - Q: The 16 `Apache-2.0` transport files? → A: **Relicense to AGPL-3.0-or-later in this PR.**
+- Q: `conanfile.py` says `AGPL-3.0-only`, while the marked files and `pyproject.toml` say `-or-later`.
+  Which is intended? → A: **`AGPL-3.0-or-later`; fix `conanfile.py` in this PR.** The owner was told
+  that the edit misses the Conan cache on every CI lane once, and accepted that cost.
 - Q (resolved without the owner, by `[const §XX.2]`): the owner's brief said "short spec + Gate B".
   Article XX §2 requires a Codex Gate A review on **every** amendment, so this feature runs `/gate-a`
   on the bundle too. It is a governance requirement, not a choice of scope.
@@ -233,9 +236,15 @@ in those files are licence comment lines.
 - **FR-009**: TC-017 MUST be reworded to "EncryptMethod(98): 0 accepted; ≠0 refused at Logon
   (B-043-1); no application-layer encryption (`[const §XII.7]`, §XV.10), so 17c–17j do not apply" and
   moved to `done`.
+- **FR-006a**: A TC row's version column MUST name only the BeginStrings its cited witnesses actually
+  drive, determined per test (fixture, helper default or instantiation list, not a file-level grep).
+  The owner's "4.2, 4.4 witnessed" wording applies where both are driven. Where only one is, the
+  column narrows further, because the owner's rule (narrow to what shipped) governs the wording, not
+  the other way round. Each such deviation is listed in research.md and reported to the owner.
 - **FR-010**: Every flipped row's cells MUST cite tests that exist literally in the tree. Its PR cell
   MUST cite the PR and squash SHA, resolved from git, not copied from a note. Its /specify cell MUST
-  name the delivering feature, followed by "— reconciled by 094".
+  read `094-v1-tier0-bookkeeping (reconciliation; delivered by <feature or PR>)`, following D-002's
+  `070-… (bookkeeping; …)` form, so that 094 is the `/specify` artifact `[const §VI.6]`(a) requires.
 - **FR-011**: `spec/coverage-index.md` MUST be updated in the same edit:
   - the stale `005-defer` notes on FIX-TC scenarios 8, 9, 10 and 11 are rewritten to their current
     owners (TC-007 stays `backlog`, and its note says why);
@@ -252,6 +261,12 @@ in those files are licence comment lines.
   `/* … */` in C headers, matching `include/fix/c_api/log.h`. The 37 unmarked files gain the line.
   The 16 `Apache-2.0` files have their identifier replaced, and their `Copyright` line stays. No other
   byte of these files changes.
+- **FR-013a**: `conanfile.py`'s `license` field MUST change from `AGPL-3.0-only` to
+  `AGPL-3.0-or-later`, so the package metadata agrees with the files and with
+  `bindings/python/pyproject.toml` (owner, 2026-10-22). The owner accepted the known cost:
+  `ci/conan-cache-key.sh` hashes the whole of `conanfile.py`, so this PR's CI misses the Conan cache on
+  every lane once, and its `push:main` reseeds the cache. The PR body MUST say so, so a slow first run
+  is not misread as a regression.
 - **FR-014**: `tools/capi_freeze.sha256` MUST be regenerated for the C-ABI headers FR-013 touches, and
   `tools/check_capi_freeze.sh` MUST pass. The PR body MUST state that the C-ABI change is comment-only.
 
@@ -283,8 +298,8 @@ in those files are licence comment lines.
   plane as v1.0 scope, by the recorded sweep.
 - **SC-004**: 100 % of tracked C/C++ files under `src/` and `include/` carry the AGPL-3.0-or-later
   identifier, and 0 carry another identifier.
-- **SC-005**: The source diff outside `spec/`, `.specify/`, `brain/`, `specs/` and `CHANGELOG.md` is
-  licence comment lines plus `tools/capi_freeze.sha256`, and nothing else.
+- **SC-005**: The diff outside `spec/`, `.specify/`, `brain/`, `specs/` and `CHANGELOG.md` contains
+  only licence comment lines, `tools/capi_freeze.sha256` and `conanfile.py`'s `license` line.
 - **SC-006**: Gate A (on the amendment and bundle) and Gate B converge, and the owner signs off on the
   amendment.
 
