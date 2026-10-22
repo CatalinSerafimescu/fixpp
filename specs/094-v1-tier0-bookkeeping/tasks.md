@@ -565,7 +565,7 @@ prints `PASS`.
     than the owner and the AI assistants R-8 names in any author, committer or trailer field, means
     that file is not relabelled. List it, tell the owner, and do not start T040 until the owner has
     ruled on it.
-- [ ] T040 [US3] [phase-implementer] **Commit C-SPDX**, one commit (FR-013, FR-013a, FR-014).
+- [X] T040 [US3] [phase-implementer] **Commit C-SPDX**, one commit (FR-013, FR-013a, FR-014).
   - After T039a. A file T039a withheld is not marked; the owner's ruling on it is in the verify record.
   - Run `spdx_mark.py` (path in the Execution rules) on the branch:
     - `include/fix/**/*.h` get `/* SPDX-License-Identifier: AGPL-3.0-or-later */` as line 1;
@@ -581,7 +581,7 @@ prints `PASS`.
     (FR-003b).
   - Before committing, run quickstart §3's two censuses (with `/usr/bin/grep`; on the branch both print
     nothing) and its `git diff origin/main -- src include | grep -E '^[+-][^+-]' | sort | uniq -c` filter.
-- [ ] T041 [US3] [phase-implementer] **Commit C-607**, a separate commit (FR-013b; after T010 and T040).
+- [X] T041 [US3] [phase-implementer] **Commit C-607**, a separate commit (FR-013b; after T010 and T040).
   - In `conanfile.py`, replace the two comment lines above `tool_requires = []`:
     ```
         # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools

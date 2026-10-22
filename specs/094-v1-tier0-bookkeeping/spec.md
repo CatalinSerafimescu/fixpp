@@ -778,8 +778,12 @@ in those files are licence comment lines.
   `conanfile.py`'s `license` line and its four `tool_requires` comment lines (FR-013b, separate
   commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md`'s tagline;
   `docs/src/intro.md`'s opening sentence; the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
-  and `tests/session/fsm_matrix_witness_test.cpp`; and the FR-022b census cell in
-  `tests/dictionary/lookup_test.cpp`.
+  and `tests/session/fsm_matrix_witness_test.cpp`; the FR-022b census cell in
+  `tests/dictionary/lookup_test.cpp`; and one comment line in
+  `tests/tls/test_pinset_snapshot_publish_acquire.cpp`, whose `pinset.hpp §139` line citation the
+  licence-line insert made stale. The number is replaced by the member it meant (`snapshot_`),
+  following #310's rule (delete the number, cite the symbol). Found at C-SPDX by a basename sweep
+  for `§N` / `#LN` / `line N` forms, which the shift audit cannot see.
 - **SC-006**: Gate A (on the amendment and bundle) and Gate B converge, and the owner signs off on the
   amendment.
 
