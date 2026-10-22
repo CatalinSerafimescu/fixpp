@@ -17,8 +17,11 @@ lives in the orchestrator's scratchpad and is reproduced there in full.
 
 Each flipped row's Tests cell names its binaries. Run them on a fresh build of this branch:
 
-- `ctest --preset linux-clang-debug -R '<entry>' --output-on-failure` for each ctest entry in
-  research R-3. For example: `session_inbound_frame_dispositions`, `session_tc_reject` (has no labels,
+- `ctest --preset <preset> -R '<entry>' --no-tests=error --output-on-failure` for each ctest entry in
+  research R-3, on the preset CI runs it on. The mallocnesia gates (NFR-005) run on
+  `linux-clang-release` (#478); the rest run on `linux-clang-debug`.
+- CI-evidence rows (NFR-001/003/005/013) cite Tier 1 run `39594667883` and Tier 2 run `39594667975`
+  (`push:main` at `9b176090`, both success). Re-read the job and step names on this branch. For example: `session_inbound_frame_dispositions`, `session_tc_reject` (has no labels,
   so `-R` only), `session_pure_tests`, `interop_parity_us3_tests`, `session_inbound_poss_resend`,
   `session_reset_on_lifecycle`, `session_interpret_logon_encrypt_method`,
   `session_resend_reply_possdup`, `session_538_store_lookup_after_reset`,

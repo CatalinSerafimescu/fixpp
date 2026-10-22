@@ -64,6 +64,10 @@ versions.
 | TC-015 | 4.2 (`ParityAcceptorFixture`) | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` | **narrower** (owner: "4.2, 4.4 witnessed") |
 | TC-017 | 4.4 (`interpret_logon` called with `expected_begin = "FIX.4.4"`; pure parser test) | `4.4 witnessed; 4.2, FIXT.1.1 not witnessed` (FIX-TC 17 is optional) | narrower |
 
+**On record:** the unwitnessed versions are required by FIX-TC §4.1. They are filed as **fixpp#614**
+(labels `enhancement`, `follow-up`), and every TC Verified cell names it. That satisfies the owner's
+narrowing rule (owner 2026-10-21: "on record … and named in the row's Verified cell").
+
 The owner's text added "FIXT.1.1 shares the code path". That is a claim about the code, and this
 feature has measured it nowhere, so the columns say "not witnessed" and nothing more. A reader who
 needs the code-path argument finds it in the verification file (TC-003: the Framer checks are

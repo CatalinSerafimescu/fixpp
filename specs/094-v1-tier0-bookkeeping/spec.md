@@ -182,7 +182,9 @@ in those files are licence comment lines.
   rows MUST stay unchanged.
 - **FR-002**: The catalogue's Status legend MUST define the post-v1.0 drop form. It excludes the row
   from the v1.0 tag only, the row stays planned, and it returns to `backlog` when its release opens.
-  The wording MUST NOT read as abandonment.
+  The wording MUST NOT read as abandonment. The legend MUST name the user-signed rationale `[const
+  §I.3]` requires: DECISION 1, and the NFR-013 split ruling. The definition is appended to the
+  existing Status line so no catalogue line moves.
 - **FR-003**: The constitution MUST be amended so no clause requires a v1.0 service wrapper, gRPC
   control plane or iceoryx2 data plane:
   - `[const §XVIII.1]` drops them from the locked v1.0 scope.
@@ -240,7 +242,10 @@ in those files are licence comment lines.
   drive, determined per test (fixture, helper default or instantiation list, not a file-level grep).
   The owner's "4.2, 4.4 witnessed" wording applies where both are driven. Where only one is, the
   column narrows further, because the owner's rule (narrow to what shipped) governs the wording, not
-  the other way round. Each such deviation is listed in research.md and reported to the owner.
+  the other way round. Each such deviation is listed in research.md and reported to the owner before
+  Gate A. The versions left unwitnessed are required by FIX-TC §4.1, so the owner's rule (narrow only
+  where the removed part is not required, or is on record and named) needs them on record. They are,
+  as **fixpp#614** (filed 2026-10-22), which every affected Verified cell names.
 - **FR-010**: Every flipped row's cells MUST cite tests that exist literally in the tree. Its PR cell
   MUST cite the PR and squash SHA, resolved from git, not copied from a note. Its /specify cell MUST
   read `094-v1-tier0-bookkeeping (reconciliation; delivered by <feature or PR>)`, following D-002's
@@ -272,9 +277,21 @@ in those files are licence comment lines.
 
 **Evidence and gates**
 
-- **FR-015**: The verify record (`.specify/decisions/094-v1-tier0-bookkeeping-verify.md`) MUST list,
-  per flipped row, the binaries run, the filter, and the pass count read from output. A row whose
-  evidence did not run green MUST stay out of the flip set (Edge Cases).
+- **FR-015**: The verify record (`.specify/decisions/094-v1-tier0-bookkeeping-verify.md`) MUST give
+  each flipped row its evidence in one of three forms:
+  - **Test rows** (D-*, TC-*, NFR-011): the binaries run, on the preset CI runs them on, with the
+    filter, `--no-tests=error`, and the pass count read from the binary's output.
+  - **CI rows** (NFR-001, NFR-003, NFR-005, NFR-013): the required jobs green on the cited `push:main`
+    runs at `9b176090` (Tier 1 `39594667883`, Tier 2 `39594667975`), plus the workflow job and step
+    names re-read on this branch. NFR-005 and NFR-013 also run their witnesses locally.
+  - **Process row** (NFR-002): the three cited verify records, each showing a per-line coverage
+    assessment.
+
+  A row whose evidence did not hold MUST stay out of the flip set (Edge Cases).
+- **FR-015a**: Every Verified cell MUST state its QuickFIX-interop disposition, because the catalogue
+  legend's Verified rule names interop "where applicable". The disposition is "not applicable" for the
+  D/NFR rows. For the TC rows it is "witnessed in-process; the live QuickFIX cells skip without a
+  counterparty, so they are not per-PR evidence and are not claimed".
 - **FR-016**: Every tool that parses the catalogue (`tools/brain_inventory.py` and any other found by
   the plan's sweep) MUST still parse every row. The open-row census MUST be recorded before and after
   the change, with a delta of −25 open rows (7 drops + 18 flips) and +1 dropped row (NFR-019). The
