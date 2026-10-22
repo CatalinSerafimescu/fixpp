@@ -1624,6 +1624,9 @@ CI_PIN_HARNESSES=(
   # fixpp#497's sanitizer flag-match harness. ⚠️ ADDED WITH ITS OWN MUTANT (M125), same
   # dead-call-site shape as its siblings, whose mutants each prove only their own row.
   "ci/test-mallocnesia-sanitizer-match.sh"
+  # fixpp#560's first-party-walk harness. ⚠️ ADDED WITH ITS OWN MUTANT (M127), same
+  # dead-call-site shape as its siblings, whose mutants each prove only their own row.
+  "ci/test-first-party-walk.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1948,7 +1951,9 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=112  # M126 (the #448 gate-step guard narrowed to one Release leg, fixpp#544) +
+MUTANTS_DECLARED=113  # M127 (the ci-script-pins call-site pin for ci/test-first-party-walk.sh,
+                     # fixpp#560) +
+                     # M126 (the #448 gate-step guard narrowed to one Release leg, fixpp#544) +
                      # M125 (the ci-script-pins call-site pin for
                      # ci/test-mallocnesia-sanitizer-match.sh, fixpp#497) + M116 M117 (the #448 gate steps' key sets, fixpp#543) + M118 M119 (their
                      # pinned run: commands) + M120 (the #448 sentinel's existence pin) +
@@ -2578,6 +2583,18 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-mallocnesia-sanitizer-match.sh\n"
 new = "        run: echo \"bash ci/test-mallocnesia-sanitizer-match.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M127 (fixpp#560): the SAME dead-call-site shape, on the first-party-walk harness.
+  # The reason must name this harness, so a sibling row firing cannot satisfy it.
+  mutate_workflow M127 "the first-party-walk harness call site replaced by an echo" "ci-script-pins does not INVOKE .bash ci/test-first-party-walk\\.sh." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-first-party-walk.sh\n"
+new = "        run: echo \"bash ci/test-first-party-walk.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
