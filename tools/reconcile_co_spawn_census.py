@@ -54,10 +54,10 @@ import sys
 import tempfile
 
 # ⚠️ THE CLOSURE CALL MAY SIT ANYWHERE BELOW AN ARGUMENT, NOT ONLY AT IT (#586).
-# The matcher used to be `hasAnyArgument(cxxOperatorCallExpr(...))`, which sees
-# a closure call only as a DIRECT argument, while the libclang walker sees one
-# nested below it (`bind_cancellation_slot(slot, record_into(out))`) — so a
-# correct site failed the cross-check. It now matches the argument or any
+# A matcher limited to direct arguments (`hasAnyArgument(cxxOperatorCallExpr(...))`)
+# misses a closure call nested below an argument, which the libclang walker sees
+# (`bind_cancellation_slot(slot, record_into(out))`), so a correct site would
+# fail the cross-check. The matcher therefore matches the argument or any
 # descendant, under the same prune the walker applies: never inside a lambda
 # body that is itself below THIS co_spawn.
 #

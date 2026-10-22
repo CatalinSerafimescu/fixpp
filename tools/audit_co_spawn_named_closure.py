@@ -80,7 +80,7 @@ listed because a tool whose limits are undocumented gets trusted past them.
   2. A driving call in a DIFFERENT file from the closure (a .cpp driving a
      harness header's co_spawn). Scope keys are cursor identities and do not
      compare across files, and source offsets are compared only within one file
-     (every event carries the file its offset is measured in), so this lands as
+     (every event carries the file its offset is relative to), so this lands as
      FLAG or MANUAL — the loud direction, but it means such sites need reading
      rather than dismissing.
   3. `SAFE-OUTLIVES` assumes a coroutine frame destroyed at its initial suspend
@@ -318,7 +318,7 @@ def _realpath(fn: str) -> str:
 
 
 def file_of(loc) -> str:
-    """Real path of the file a SourceLocation's OFFSET is measured in; "" if none."""
+    """Real path of the file a SourceLocation's OFFSET is relative to; "" if none."""
     return _realpath(loc.file.name) if loc.file is not None else ""
 
 
@@ -491,7 +491,7 @@ class SiteWalker:
         # file, and an earlier version compared them across files: a drive in a
         # header at an offset that happened to fall inside a main-file closure's
         # extent was credited to that closure. Every event carries the file its
-        # offset is measured in, taken from the SAME location, and classify()
+        # offset is relative to, taken from the SAME location, and classify()
         # compares offsets only within one file.
         off_file = file_of(cursor.extent.start)
 
