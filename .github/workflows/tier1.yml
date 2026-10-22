@@ -2675,6 +2675,15 @@ jobs:
       - name: "Regression pin — mallocnesia sanitizer flag match (#497)"
         run: bash ci/test-mallocnesia-sanitizer-match.sh
 
+      # fixpp#560: which targets the deferred policy walks in cmake/Helpers.cmake
+      # reach (-Werror, the common warning flags, fuzz coverage). A configured lane
+      # shows only fixpp's own layout, so mock projects stand in for the FetchContent,
+      # embedded and out-of-tree cases; the observable is compile_commands.json, and
+      # each mutant must redden the arm it names. Buildless; configures the mocks with
+      # the runner's C and C++ compilers.
+      - name: "Regression pin — first-party policy walk population (#560)"
+        run: bash ci/test-first-party-walk.sh
+
       # fixpp#530: the ODR census itself runs on the linux-clang-release leg, which
       # is behind both gate labels. Its verdicts and refusals are pinned here
       # instead, on synthetic trees, each by a cell asserting its own line of output;
