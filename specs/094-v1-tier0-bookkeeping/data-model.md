@@ -177,7 +177,7 @@ no catalogue line moves:
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by fix/inbound-sequencereset-s023)`
 - PR `#90 (squash 13c49f88)`
 - Tests `tests/session/test_inbound_sequence_reset.cpp` (InboundSequenceResetTest.ResetModeHardResetsAndBypassesOrdering, .NewSeqNoEqualExpectedIsNoOp, .NewSeqNoBelowExpectedRejects), `tests/interop/parity/inbound_sequencereset_arms_test.cpp` (InboundSequenceResetArms.NewSeqNoAboveExpectedAdvances, .NewSeqNoEqualExpectedIsNoOp, .NewSeqNoBelowExpectedRejects)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. 11a NewSeqNo > NextNumIn sets it regardless of the frame's own 34; 11b equal is accepted; 11c lower is rejected with SessionRejectReason 5 (RefTagID 36), NextNumIn unchanged. Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. 11a NewSeqNo > NextNumIn sets it regardless of the frame's own 34; 11b equal is accepted; 11c lower is rejected with SessionRejectReason 5, NextNumIn unchanged (the source also sets RefTagID 36; no cited cell asserts it). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ### TC-012 (reworded)
 - Title `Session conformance: PossResend (test 19, sub-cases 19a–19b) — PossResend(97)=Y delivered to the application with the flag intact; the 19a/19b message-ID duplicate check is the application's`

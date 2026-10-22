@@ -311,6 +311,11 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
 
 ## R-12 — The cross-surface sweep (FR-004)
 
+> **Gate A instance 2 disposition (2026-10-22): L-005-1 is "keep: still true".** The live B&L entry
+> `L-005-1` says the recovery-dependent FIX-TC cases are deferred. 094 flips TC-006, TC-008 and TC-014,
+> but TC-007 (scenario 10, GapFill mode) stays `backlog`, so the entry still describes a real deferral.
+> FR-017 keeps every live entry other than the new L-094-1 unchanged.
+
 ### Recipe
 
 Over every tracked file outside `specs/`, two greps:
