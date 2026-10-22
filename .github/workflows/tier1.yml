@@ -2635,8 +2635,8 @@ jobs:
       # configuration, so mock projects that add_subdirectory the real
       # tests/packaging/CMakeLists.txt stand in, one per instrumentation option,
       # and each mutant of tests/packaging/ must redden the cell it names.
-      # Configures only; needs cmake, ctest, make and a C++ compiler, which the
-      # runner image carries, and refuses without them.
+      # Configures only; needs cmake, ctest, make and a C++ compiler, and refuses
+      # without them.
       - name: "Regression pin — packaging clean-env skips only an instrumented build (#529)"
         run: bash ci/test-packaging-instrumented-skip.sh
 

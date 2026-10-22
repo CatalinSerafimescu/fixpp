@@ -49,10 +49,6 @@
 #   returns empty and reads as healthy. Check the raw log for `Fatal Python
 #   error: Segmentation fault` and report to #296 rather than capping.
 #
-#   The two latent bugs #295 found were fixed on their own merits
-#   (bindings/python/tests/test_reentrancy.py and fixpp.i) and stay fixed
-#   whichever SWIG builds this.
-#
 #   ⚠️ ONLY THE FLOOR IS PINNED, so what the wheel lane builds is an OBSERVATION
 #   per run, not a guarantee: swig resolves to PyPI's current release at or
 #   above the floor, cibuildwheel is installed with no version specifier in
