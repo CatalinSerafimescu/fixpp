@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=69
+CELLS_DECLARED=71
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -896,7 +896,7 @@ assert src.count(old) == 1, src.count(old)
 open(path, "w").write(src.replace(old, new))
 PY
 }
-LZ_DELTA='            delta_pct = 0.0 if curr_val == 0 else math.copysign(math.inf, curr_val)'
+LZ_DELTA='            delta_pct = 0.0 if curr_val == 0 else math.inf'
 lzero_mutant "$TMP/bench_compare.lzcrash.py" '        if base_val == 0:' '        if False:'
 expect_red L-ZERO-RED-CRASH "the zero-baseline branch removed: the division crashes" \
   "must exit 0; it exited 1" lzero "$TMP/bench_compare.lzcrash.py"
@@ -906,6 +906,32 @@ expect_red L-ZERO-RED-SKIP "a zero baseline skipped instead of compared" \
 lzero_mutant "$TMP/bench_compare.lzzz.py" "$LZ_DELTA" '            delta_pct = math.inf'
 expect_red L-ZERO-RED-ZZ "a zero baseline flagged even when the current is zero too" \
   "BM_B_stddev: +inf%" lzero "$TMP/bench_compare.lzzz.py"
+
+# L-ZERO-NEG — a NEGATIVE current against a zero baseline is non-zero too, so it is
+# a reported regression like any other; its own fixture, pinned whole the same way.
+mkdir -p "$LEG/neg"
+mkfix "$LEG/neg/base.json" BM_A=100
+mkfix "$LEG/neg/cur.json" BM_A=100
+mutate "$LEG/neg/cur.json" BM_A_stddev cpu_time -5.0
+LZNEG_WANT="$(printf '%s\n' \
+  "[bench_compare] SOFT WARNING — 1 benchmark(s) regressed >±5.0%:" \
+  "  BM_A_stddev: +inf%" \
+  "[bench_compare] Gate is SOFT this phase — not failing CI.")"
+lzneg() {  # lzneg <comparator>
+  local out="$TMP/lzneg.out" lrc=0
+  python3 "$1" "$LEG/neg/base.json" "$LEG/neg/cur.json" > "$out" 2>&1 || lrc=$?
+  if [ "$lrc" -ne 0 ]; then
+    echo "L-ZERO-NEG: legacy mode is soft and must exit 0; it exited $lrc — output:"; cat "$out"; return 1
+  fi
+  if [ "$(sed -n '/SOFT WARNING/,/Gate is SOFT/p' "$out")" != "$LZNEG_WANT" ]; then
+    echo "L-ZERO-NEG: the regression list differs from the pinned one — output:"; cat "$out"; return 1
+  fi
+}
+expect_green L-ZERO-NEG "a negative current against a zero baseline is a regression" lzneg "$CMP"
+lzero_mutant "$TMP/bench_compare.lzsign.py" "$LZ_DELTA" \
+  '            delta_pct = 0.0 if curr_val == 0 else math.copysign(math.inf, curr_val)'
+expect_red L-ZERO-RED-SIGN "the unbounded delta takes the current's sign" \
+  "L-ZERO-NEG: the regression list differs" lzneg "$TMP/bench_compare.lzsign.py"
 
 # ═══ RUNNER: ci/run-bench-suite.sh ═══════════════════════════════════════════
 

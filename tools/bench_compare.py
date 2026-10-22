@@ -113,7 +113,7 @@ def compare(baseline_path: str, current_path: str) -> int:
             # identical repetitions) has no relative delta. A non-zero current
             # is reported as an unbounded regression rather than skipped, so a
             # row nothing compared cannot reach the "within threshold" summary.
-            delta_pct = 0.0 if curr_val == 0 else math.copysign(math.inf, curr_val)
+            delta_pct = 0.0 if curr_val == 0 else math.inf
         else:
             delta_pct = (curr_val - base_val) / base_val * 100.0
         flag = "  <-- REGRESSION" if delta_pct > THRESHOLD_PCT else ""
