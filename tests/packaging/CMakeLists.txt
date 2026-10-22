@@ -28,6 +28,24 @@ set_tests_properties(fixpp::packaging::version-mismatch PROPERTIES
 )
 
 # ── T041/T042/T043 (SC-016, FR-018e): the clean-environment tier ─────────────
+# #529: the libraries are instrumented when cmake/Sanitizers.cmake applies
+# FIXPP_ENABLE_ASAN, FIXPP_ENABLE_UBSAN or FIXPP_ENABLE_TSAN (on Clang or GCC, as
+# that file does), or when FIXPP_BUILD_FUZZ is on (B-508-1). Under that condition
+# the test stays registered and reports Skipped, naming those options.
+set(_fixpp_pkg_instrumented "")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  foreach(_opt FIXPP_ENABLE_ASAN FIXPP_ENABLE_UBSAN FIXPP_ENABLE_TSAN)
+    if(${_opt})
+      list(APPEND _fixpp_pkg_instrumented "${_opt}=ON")
+    endif()
+  endforeach()
+endif()
+if(FIXPP_BUILD_FUZZ)
+  list(APPEND _fixpp_pkg_instrumented "FIXPP_BUILD_FUZZ=ON")
+endif()
+# Space-joined: a `;` would split the -D argument below.
+list(JOIN _fixpp_pkg_instrumented " " _fixpp_pkg_instrumented)
+
 add_test(
   NAME fixpp::packaging::clean-env
   COMMAND "${CMAKE_COMMAND}"
@@ -36,12 +54,14 @@ add_test(
     "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/clean-env"
     "-DFIXPP_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
     "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+    "-DFIXPP_INSTRUMENTED_BY=${_fixpp_pkg_instrumented}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/run_clean_env_witness.cmake"
 )
 set_tests_properties(fixpp::packaging::clean-env PROPERTIES
   RUN_SERIAL TRUE
   TIMEOUT 600
   LABELS "packaging"
+  SKIP_REGULAR_EXPRESSION "fixpp::packaging::clean-env SKIPPED \\(instrumented build: "
 )
 
 # ── T058 (FR-009/FR-012/FR-013/FR-018d, SC-004, SC-013): package CONTENTS ────
