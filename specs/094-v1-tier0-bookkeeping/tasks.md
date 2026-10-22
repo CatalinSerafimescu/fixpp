@@ -603,7 +603,7 @@ prints `PASS`.
     fact those lines state (how cmake, ninja or swig is provisioned, or where the swig minimum lives);
     then `phase-implementer` stops and the orchestrator asks the owner. The rest of B58's
     `conanfile.py` change is kept as merged.
-- [ ] T042 [US3] [orchestrator] **US3 check.**
+- [X] T042 [US3] [orchestrator] **US3 check.**
   - Run every bullet of quickstart §3. That includes `grep -n '^    license' conanfile.py`,
     `grep -n 'CPACK_RPM_PACKAGE_LICENSE' cmake/FixppPackaging.cmake`, and
     `git log --format=%B origin/main..HEAD -- conanfile.py`, which must show `Refs #607` on C-607 and no
