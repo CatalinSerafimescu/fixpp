@@ -52,7 +52,7 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
 - `docs/prebuild.py`: run research R-5's `_status_header` one-liner on the branch's catalogue. The three
   `dropped(post-v1.0, …` strings appear with counts 2, 5 and 1 (on the base: none).
 - Snapshot `gh issue view 614 --repo CatalinSerafimescu/fixpp --json state,labels,createdAt` into the
-  verify record, and the same for the FR-018, FR-020 and FR-021 issues.
+  verify record, and the same for the FR-018, FR-020, FR-021 and FR-023 issues.
 
 ## 3. Licence census (SC-004, SC-005)
 
@@ -70,7 +70,7 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
 - `grep -n 'CPACK_RPM_PACKAGE_LICENSE' cmake/FixppPackaging.cmake` must read `"AGPL-3.0-or-later"`,
   and the packaging lane's RPM must carry `License: AGPL-3.0-or-later` (`rpm -qip`).
 - `git log --format=%B origin/main..HEAD -- conanfile.py` shows the comment commit's `Refs #607`, and
-  no closing keyword next to #607, #614 or the FR-018, FR-020 and FR-021 issues anywhere in the
+  no closing keyword next to #607, #612, #614 or the FR-018, FR-020, FR-021 and FR-023 issues anywhere in the
   branch's messages.
 
 ## 4. Cross-surface sweep (SC-003)

@@ -244,11 +244,12 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
   B-005-7, B-495-3, B-544-1, L-019-4.
 - **New, filed at implement:** the issue behind L-094-1 (`EngineConfig::control_plane_factory` is
   accepted and ignored; FR-018); the 544 record's lapse, named in NFR-002's Verified cell (FR-020);
-  the 40 `Apache-2.0` files outside `src/`/`include/` (FR-021). Each is written here with its real
-  number. Close-out places all three, and #614, in parent repo (private)
+  the 40 `Apache-2.0` files outside `src/`/`include/` (FR-021); `[const §III.4]` not met on `main`,
+  named in plan.md's Constitution Check and the FR-013b comment (FR-023). Each is written here with
+  its real number. Close-out places all four, and #614, in parent repo (private)
   `phases/phase-4/issue-batches.md`.
 
-## R-11 — The cited tests exist (49 now, 2 added by FR-022)
+## R-11 — The cited tests exist (51 now, 2 added by FR-022)
 
 - The grep required `TEST*(Suite, Name` with the name half. A negative control
   (`InboundPossResendTest.NoSuchCellXyz`) reported MISSING; the first version of the grep, which only
@@ -263,14 +264,47 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
 - Changed at Gate A round 2 for TC-017 (FR-022): the two `FsmMatrixWitness` refused-Logon cells leave
   the Tests cell, because they refuse for another cause; `EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday`
   joins it (98=0 at session level; it exists, read in the file); and the two FR-022 cells join it.
-  So 50 − 2 + 1 = **49 cited tests exist today**, and the 2 FR-022 cells are added at implement, for
-  **51** cited in all. Verify re-runs the existence grep, with its negative control, after implement.
+  So 50 − 2 + 1 = 49 cited tests existed by that round's count, and 51 once FR-022 lands. That count
+  is superseded by the round-3 re-derivation below.
+- **Re-derived at Gate A round 3 (2026-10-22), from data-model.md's Tests cells as they now read.**
+  - The population is every gtest entry a Tests cell names: each `Suite.Name`, each pattern
+    (`Suite.Prefix*`, `Suite.*`) counted once, and each parameterised instantiation counted once.
+    `DictionaryLookupFixture`'s "FIX42 instantiation", "FIX50SP2 + FIXT11 instantiations" and
+    `/AllRuntimeVersions` are all the one `INSTANTIATE_TEST_SUITE_P(AllRuntimeVersions, DictionaryLookupFixture`.
+    A test cited by two rows counts once. Files, ctest entries and signatures are not entries.
+  - Existence check, over every `.cpp`/`.hpp`/`.h`/`.cc` under `tests/`, matching across line breaks:
+    `\bTEST(_F|_P)?\(\s*Suite\s*,\s*Name\s*\)` for a named cell (the name half required); for a
+    pattern, at least one `TEST*(Suite, Prefix…`; for an instantiation, its `INSTANTIATE_TEST_SUITE_P(Inst, Suite`
+    and at least one cell of the suite.
+  - Negative controls, both reported MISSING: `InboundPossResendTest.NoSuchCellXyz` (named cell) and
+    `RecoveryAdminSpanGapfillTest.NoSuchPrefixXyz*` (pattern).
+  - Result: **53 distinct entries; 51 exist today; the 2 MISSING are the FR-022 cells**, added at
+    implement, for **53** cited in all. The difference from round 2's 49/51 is partly N3-3 (NFR-011 now
+    names `WireThreeArenaPinning.PerMessageArenasAreIsolated` in place of the glob, +1) and partly the
+    counting rule, which round 2 did not write down; the list below is the one to re-run.
+  - The 53, by the first row citing each:
+    - NFR-005: `WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena`, `MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr`
+    - NFR-011: `PmrAllocation.EveryByteFromMr`, `WireThreeArenaPinning.PerMessageArenasAreIsolated`, `MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull`, `CodegenTypedAccessor.DecimalAccessorTakesMemoryResource`
+    - D-001: `AllRuntimeVersions/DictionaryLookupFixture.*`, `DelimiterCensus.RedCountsReconcileWithSpecBaseline`, `DictEnumCensus.SC011_*`, `BuilderCompleteness077Vt11V42.V42RegistryExactSetEqualsRawXmlWalk`
+    - D-003: `DictionaryLookupFixture.CrossVersionIsolation`, `DelimiterCensus.RegisteredGroupCountMatchesCodegenFix50Sp2`, `DelimiterCensus.NoChangeDictionariesUnchanged`, `DictEnumCensus.SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty`, `BuilderCompleteness077Vt11V42.Vt11ExpectedEmptyNoFileEmitted`
+    - D-008: `CodegenTypedAccessor.MsgTypeAndVersionAreConstexpr`, `DeterminismTest.GeneratedMatchesGolden`
+    - TC-003: `InboundFrameDispositionsTc.TC003_3b_*`, `.TC003_3c_*`, `.TC003_3e_*`
+    - TC-005: `CapiC7Witness.Row6_InboundRejectTrafficKeepsTheSessionUp`, `TC005Reject.Fix42_7_ReceiveReject_NoLoop`, `TC005Reject.Fix44_7_ReceiveReject_NoLoop`, `SessionReject.NoRejectLoopOnInboundReject`, `FsmMatrixWitness.Active_InboundReject_LogOnly_StaysActive`
+    - TC-006: `RecoveryStoreHorizonTest.AvailableRangeReplaysCarryPossDupFlag`, `.ReplayFramesCarryOrigSendingTime`, `.LargeAppFrameReplayed_NotGapFilled`, `.PreHorizonGapCollapsedToGapFill`, `RecoveryAdminSpanGapfillTest.*`, `ResendReplyPossDup.Cell1_GapFill_Carries_43Y_And_122_EqOwn52`, `Stores/StoreLookupAfterReset.*`
+    - TC-008: `InboundSequenceResetTest.ResetModeHardResetsAndBypassesOrdering`, `.NewSeqNoEqualExpectedIsNoOp`, `.NewSeqNoBelowExpectedRejects`, `InboundSequenceResetArms.NewSeqNoAboveExpectedAdvances`, `.NewSeqNoEqualExpectedIsNoOp`, `.NewSeqNoBelowExpectedRejects`
+    - TC-012: `InboundPossResendTest.DeliverInSeq_97Y`, `.Combo_43Y_97Y`, `.PossResend_No122_NoReject`
+    - TC-014: `ResetOnLifecycleTest.ResetOnLogon_Initiator_ResetsAndEmits141`, `.ResetOnLogon_Acceptor_ResetsIdempotentWith141`, `.ResetOnLogon_BothRoles_Resets`, `.Initiator_Received141Ack_NextInboundTwo_NoResend`
+    - TC-015: `FixTcCoverageGaps.BodyFieldsArbitraryOrder_Accepted`
+    - TC-017: `InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted`, `.AbsentEncryptMethodAccepted`, `.NonZeroEncryptMethodRejected`, `EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday`, `.OutOfDomainEncryptMethod_RejectedAndNotEstablished`, and the FR-022 cells `EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing`, `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`
+  - Verify re-runs this check, with both negative controls, after implement; it must then report 53 of 53.
 - **NFR-011 witnesses:**
   - `PmrAllocation.EveryByteFromMr` (XmlLoader)
   - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,
     `include/fixpp/dict/orchestra_loader.hpp`). Its tests pass a `std::pmr::monotonic_buffer_resource`;
     none asserts where the allocations land.
   - `WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena` (parse arena)
+  - `WireThreeArenaPinning.PerMessageArenasAreIsolated` (parse arena; named in place of the glob at Gate A
+    round 3, N3-3)
   - `MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr`
   - `MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull` (MemoryStore)
   - `CodegenTypedAccessor.DecimalAccessorTakesMemoryResource` (typed decimal accessor)
@@ -445,9 +479,9 @@ verify record (SC-003).
     Verified cell names that issue.
 - **How the row closes (owner, Gate A round 2):** `[const §VI.6]`(b) asks for "verifying tests", and
   NFR-002 has none: it is a process obligation. v4.0 amends §VI.6 (data-model §E.3a) so that a row whose
-  subject is a process obligation of the constitution closes on the per-feature records that
-  obligation names, showing it applied in full; for `[const §IX.1]`, verify records that assess every
-  uncovered line and every untaken branch. The exception does not relax (b) for any row that describes
+  subject is a process obligation of the constitution closes on per-feature records of the kind that
+  obligation names, cited in the row, each showing it applied in full; for `[const §IX.1]`, verify
+  records that assess every uncovered line and every untaken branch. The exception does not relax (b) for any row that describes
   behaviour. NFR-002's Verified cell cites §VI.6 as amended. The two cited records meet that
   definition; the 544 record does not, and is the FR-020 issue.
 - `.claude/skills/speckit-verify/SKILL.md` is tracked in the parent, not here, and its Step 4 reads a

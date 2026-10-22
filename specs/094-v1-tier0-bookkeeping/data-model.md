@@ -74,12 +74,12 @@ no catalogue line moves:
 - Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Narrowed from "sanitizers clean on hot-path code": a clean run says no exercised path reported. Known unexercised UB on record: #555 (deadline arithmetic overflow, liveness loop). Allowlisted report: the deliberate capi_send_recv_uaf_negative canary in ci/expected-sanitizer-reports.txt. CI evidence: Tier 1 run 39594667883 and Tier 2 run 39594667975 (push:main at 9b176090, both success). QuickFIX interop: not applicable.`
 
 ### NFR-005 (reworded)
-- Title `PMR allocator-aware containers and arena allocation on the parse → validate → dispatch path; zero global-heap allocation enforced on the windows the mallocnesia gates list (B-544-1)`
+- Title `Allocator-aware (std::pmr) storage in the per-message parse arena and in MemoryStore's retrieve() snapshot; zero global-heap allocation enforced on the windows the mallocnesia gates list (B-544-1)`
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 008-message-store, #448 gates, 544-hot-path-zero-alloc)`
 - PR `#77 (squash 718195f9, slab-PMR MemoryStore) + #478 (squash a8fe9f79, mallocnesia gates enforced) + #572 (squash 2e4d15c6, B-544-1)`
-- Tests `ctest -L mallocnesia` (tier1.yml steps "Assert the mallocnesia gate population (#448)" + "Run the allocation-discipline gates (#448)"); `tests/alloc_guard/CMakeLists.txt` positive controls `alloc_guard_*_positive_control_mallocnesia`
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Zero allocation holds only on the gated windows; outside them see L-497-1; ungated windows #569; TLS per-record allocation inside OpenSSL #565. The mallocnesia steps run on linux-gcc-release and linux-clang-release (the if: of the three #448 steps in tier1.yml; #478). CI evidence: Tier 1 run 39594667883 (push:main at 9b176090, success). QuickFIX interop: not applicable.`
+- Tests `ctest -L mallocnesia` (tier1.yml steps "Assert the mallocnesia gate population (#448)" + "Run the allocation-discipline gates (#448)"); `tests/alloc_guard/CMakeLists.txt` positive controls `alloc_guard_*_positive_control_mallocnesia`; `tests/wire/three_arena_pinning_test.cpp` (WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena); `tests/session/test_memory_store_zero_allocator_calls.cpp` (MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr)
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Narrowed from "SBO/arena-friendly allocation" (SBO is not claimed) and from the whole parse → validate → dispatch path: routing through a supplied std::pmr::memory_resource is asserted for the per-message parse arena (OffsetTableStorageRoutesThroughPerMessageArena, a counting resource passed to Parser::parse) and for MemoryStore's retrieve() snapshot (RetrieveDescriptorSnapshotUsesPmr, a counting store_resource across retrieve()), on this row's surfaces. For MemoryStore's slab, no cell this row cites asserts that it is drawn from store_resource. Validator::validate takes a scratch resource (include/fixpp/wire/validator.hpp) and cancellable_dispatch draws its node from the session arena (include/fixpp/core/cancellable_dispatch.hpp): a design fact, and no cell this row cites asserts it (WireThreeArenaPinning.DISABLED_ZeroGlobalNewAcrossParseToFromApp is a disabled placeholder). Zero allocation holds only on the gated windows; outside them see L-497-1; ungated windows #569; TLS per-record allocation inside OpenSSL #565. The mallocnesia steps run on linux-gcc-release and linux-clang-release (the if: of the three #448 steps in tier1.yml; #478). CI evidence: Tier 1 run 39594667883 (push:main at 9b176090, success). QuickFIX interop: not applicable.`
 
 ### NFR-011 (reworded)
 - Title `PMR allocator support — std::pmr::memory_resource accepted by the dictionary loaders (XmlLoader, OrchestraLoader), the parse arena, MemoryStore and the typed decimal accessors`
@@ -89,7 +89,7 @@ no catalogue line moves:
 
   (Resolved from git: each witness file and test was added in the PR named after it, found with
   `git log --diff-filter=A` and `git log -S`.)
-- Tests `tests/dictionary/pmr_allocation_test.cpp` (PmrAllocation.EveryByteFromMr); `include/fixpp/dict/orchestra_loader.hpp` (OrchestraLoader::load / load_from_string take a std::pmr::memory_resource*) + `tests/dictionary/orchestra_loader_test.cpp`; `tests/wire/three_arena_pinning_test.cpp` (WireThreeArenaPinning.*); `tests/session/test_memory_store_zero_allocator_calls.cpp` (MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr), `tests/session/test_memory_store_capacity.cpp` (MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull); `tests/codegen/typed_accessor_test.cpp` (CodegenTypedAccessor.DecimalAccessorTakesMemoryResource)
+- Tests `tests/dictionary/pmr_allocation_test.cpp` (PmrAllocation.EveryByteFromMr); `include/fixpp/dict/orchestra_loader.hpp` (OrchestraLoader::load / load_from_string take a std::pmr::memory_resource*) + `tests/dictionary/orchestra_loader_test.cpp`; `tests/wire/three_arena_pinning_test.cpp` (WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena, .PerMessageArenasAreIsolated); `tests/session/test_memory_store_zero_allocator_calls.cpp` (MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr), `tests/session/test_memory_store_capacity.cpp` (MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull); `tests/codegen/typed_accessor_test.cpp` (CodegenTypedAccessor.DecimalAccessorTakesMemoryResource)
 - Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Narrowed from "throughout" and the stale "C++17" label (the project is C++23). Routing through the resource is asserted for XmlLoader (every byte from the resource); OrchestraLoader takes the resource and its tests pass one, but no cell asserts that its allocations route through it. Not on third-party internals or by design: pugixml's transient DOM (L-002-4), OpenSSL's per-record buffers (#565), the C dictionary entry point's new_delete_resource (B-495-3). QuickFIX interop: not applicable.`
 
 ### NFR-013 (reworded; io_uring split to NFR-019)
@@ -276,9 +276,9 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
     control-plane transport and iceoryx2 SHM the optional data plane.
   Modified: Article VI §6 — two sentences after (d) say how (b) is met for a process row: a row
     whose subject is a process obligation of this constitution, with no library behaviour under test,
-    closes on the per-feature records that obligation names, showing it applied in full, cited in the
-    row and labelled where a reader of this repository cannot open them. They do not relax (b) for a
-    row that describes behaviour.
+    closes on per-feature records of the kind that obligation names, cited in the row, each showing it
+    applied in full, and labelled where a reader of this repository cannot open them. They do not
+    relax (b) for a row that describes behaviour.
   Modified: Article XIV §1 — the lead-in excepts the control plane. The control-plane bullet places
     both the pluggable interface and its default gRPC implementation post-1.0 (SVC-005), and states
     that v1.0 installs only the ABI anchor fixpp::service::ControlPlaneFactory
@@ -357,7 +357,7 @@ Before:
 `6. **No PR may close a `done` row without:** (a) a matching `/specify` artifact, (b) verifying tests, (c) Codex Gate B pass, (d) Gate A pass for non-trivial designs.`
 
 After:
-`6. **No PR may close a `done` row without:** (a) a matching `/specify` artifact, (b) verifying tests, (c) Codex Gate B pass, (d) Gate A pass for non-trivial designs. For a row whose subject is a process obligation of this constitution, with no library behaviour under test, (b) is met by the per-feature records that obligation names, showing it applied in full (for Article IX §1: verify records that assess every uncovered line and every untaken branch), cited in the row and labelled where a reader of this repository cannot open them. This does not relax (b) for any row that describes behaviour.`
+`6. **No PR may close a `done` row without:** (a) a matching `/specify` artifact, (b) verifying tests, (c) Codex Gate B pass, (d) Gate A pass for non-trivial designs. For a row whose subject is a process obligation of this constitution, with no library behaviour under test, (b) is met by per-feature records of the kind that obligation names, cited in the row, each showing it applied in full (for Article IX §1: verify records that assess every uncovered line and every untaken branch), and labelled where a reader of this repository cannot open them. This does not relax (b) for any row that describes behaviour.`
 
 The before-text is `.specify/constitution.md:437` at `9b176090`. The after-text keeps the (a)–(d)
 list byte-identical and adds two sentences after it. They carry the Opus round-2 draft's exception,
@@ -427,9 +427,9 @@ both have happened.
   implementation, is post-1.0. v1.0 installs only the `ControlPlaneFactory` ABI anchor and the C-ABI
   codes 900/901, with no behavioural commitment.
 - **Article XIV §3** — iceoryx2 SHM and sidecar mode are post-1.0.
-- **Article VI §6** — a row whose subject is a process obligation of the constitution closes on the
-  per-feature records that obligation names, in place of verifying tests; a row that describes
-  behaviour still needs verifying tests.
+- **Article VI §6** — a row whose subject is a process obligation of the constitution closes on
+  per-feature records of the kind that obligation names, in place of verifying tests; a row that
+  describes behaviour still needs verifying tests.
 - **Article IV §4** — the service wrapper is opt-in and post-1.0.
 
 ---
@@ -608,18 +608,21 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
       # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
       # collide with system versions and add resolution time. Restore in Phase 5.
   ```
-  After (four lines, the owner's text of Gate A round 2, with the file's four-space indent;
-  `tool_requires = []` moves from line 99 to line 101):
+  After (four lines, the owner's text of Gate A round 2, with the file's four-space indent, and the
+  `Restore:` pointer owner-approved at Gate A round 3, N3-2; `tool_requires = []` moves from line 99
+  to line 101):
   ```
       # cmake and ninja come from the system (apt in CI); swig is installed by each
       # workflow that builds the bindings, at or above the minimum
       # bindings/python/CMakeLists.txt requires. Conan-pinned tools collide with
-      # system versions and add resolution time. Restore in Phase 5.
+      # system versions and add resolution time. Restore: fixpp#<N-III4>.
   ```
   The round-1 text said swig is provisioned "at the minimum", which is B58's end state and false on
   `main` until B58 lands: the wheel lanes take PyPI's latest through `bindings/python/pyproject.toml`
   (`swig>=4.2`), and the in-tree Linux legs take apt's. "At or above the minimum" is true on both
   sides of B58 (Gate A round 2, N2-1).
+  `<N-III4>` is the FR-023 issue, filed before this commit; the comment is written with its real
+  number, never with a placeholder.
   `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no line citation of the file, so the
   moved line breaks no citation.
 - **`tools/capi_freeze.sha256`:** regenerated with `sha256sum` over the same 12-file set, in the
@@ -638,7 +641,7 @@ here; the others carry the witness to read.
 Verify splits every flipped Title and version cell at its clauses and maps each one; a clause missing
 from this table is not thereby exempt. Since Gate A round 2 the table lists every clause of the
 flipped Titles, including those most at risk of having no assertion: NFR-003's MSVC ASan and
-carve-out clauses, NFR-005's PMR clause, TC-014's negative clause and TC-017's encryption clause. A
+carve-out clauses, TC-014's negative clause and TC-017's encryption clause. NFR-005's PMR clause was narrowed at Gate A round 3 to the two cells that assert it. A
 clause witnessed by a recipe (an absence) has its recipe run first against a seeded positive.
 
 | Row | Clause | Witness | Assertion / step |
@@ -650,7 +653,7 @@ clause witnessed by a recipe (an absence) has its recipe run first against a see
 | NFR-003 | an unexplained report fails the leg | tier1.yml step "Peak memory + unexplained-sanitizer gate" | `ci/peak-memory-report.sh` exit status, read at verify |
 | NFR-003 | the allocation-failure cells in `ci/expected-preset-conditional-tests.txt` are not built there | tier1.yml steps running `tools/check_sanitizer_test_carveouts.py --self-test` and `tools/check_sanitizer_test_carveouts.py` | the steps' commands and the census output, read at verify |
 | NFR-003 | MSVC ASan on Tier 2 (required check tier2-required) | tier2.yml job `windows` leg `windows-msvc-asan`; job `tier2-required` (`needs: [filter, windows]`); branch protection | the leg's matrix entry and the `needs:` line, read at verify; `required_status_checks` lists tier2-required |
-| NFR-005 | PMR allocator-aware containers and arena allocation on the parse → validate → dispatch path | at risk: the Tests cell names the gates, not a PMR cell. Candidates: `WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena` (parse arena), `MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr` | read at verify; if no assertion covers validate and dispatch, the clause is narrowed (FR-015b) |
+| NFR-005 | allocator-aware (std::pmr) storage in the per-message parse arena and in MemoryStore's retrieve() snapshot | WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena; MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr | `EXPECT_GT(arena.allocations, 0U)` on the counting resource passed to `Parser::parse`; `EXPECT_GT(after, baseline)` on the counting `store_resource` across `retrieve()` |
 | NFR-005 | zero allocation on the gated windows | tier1.yml #448 steps | `if: matrix.preset == 'linux-gcc-release' \|\| matrix.preset == 'linux-clang-release'`; `ctest … -L mallocnesia --no-tests=error` |
 | NFR-011 | XmlLoader routes through the resource | PmrAllocation.EveryByteFromMr | read at verify |
 | NFR-011 | OrchestraLoader accepts a resource | `include/fixpp/dict/orchestra_loader.hpp` | `load(path, std::pmr::memory_resource* mr, …)` signature |

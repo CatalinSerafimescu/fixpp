@@ -135,6 +135,21 @@ Owner rulings made after the round-2 reviews (Codex, and the Opus adversarial ju
   - The 40 `Apache-2.0` files under `tests/` and `bench/`: the orchestrator files one labelled
     follow-up issue at implement time (FR-021). They stay out of scope here.
 
+### Session 2026-10-22 (Gate A round 3)
+
+Owner approvals given after the round-3 reviews (Codex, and the Opus adversarial judge). Binding.
+
+- Q (Opus round 3, N3-1): "the per-feature records that obligation names, showing it applied in full"
+  in the §VI.6 sentence (data-model §E.3a) can be read as every record of that kind, including one that
+  did not apply the obligation in full. Reword? → A: **Approved.** The sentence reads "per-feature
+  records of the kind that obligation names, cited in the row, each showing it applied in full", in
+  §E.3a and wherever the bundle quotes it (the SIR's Article VI §6 entry, the CHANGELOG entry, FR-003,
+  research R-13). The round-2 entry above records the ruling as it was then worded.
+- Q (Opus round 3, N3-2): the FR-013b comment's "Restore in Phase 5." points at a phase that is partly
+  done and partly post-1.0. Replace it with the FR-023 issue? → A: **Approved.** The comment's last
+  line ends "Restore: fixpp#<N-III4>.", filled with the FR-023 issue's real number at implement
+  (data-model §G). The comment stays four lines.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" are the owner tagging v1.0 and any contributor who reads the catalogue or the
@@ -274,8 +289,8 @@ in those files are licence comment lines.
   - `[const §XIV.3]` and `[const §IV.4]` get the same post-1.0 note.
   - `[const §VI.6]`(b) gains the process-row clarification (owner, Gate A round 2): a row whose
     subject is a process obligation of the constitution, with no library behaviour under test, closes
-    on the per-feature records that obligation names; the exception does not relax (b) for any row
-    that describes behaviour.
+    on per-feature records of the kind that obligation names; the exception does not relax (b) for
+    any row that describes behaviour.
   - The exact before → after text of all six clauses is data-model §E.
   - Any further clause the FR-004 sweep finds naming the same scope as v1.0 is amended too. The sweep
     found none: §I.2, §IV.2, §XIII.3 and §XVIII.5 are read and kept (research R-12).
@@ -318,7 +333,7 @@ in those files are licence comment lines.
     L-003-2".
   - **Narrowed, residual on record:**
     - NFR-003: names #555 and the allowlisted allocation-failure cells.
-    - NFR-005: zero allocation on the gated windows only, L-497-1.
+    - NFR-005: zero allocation on the gated windows only, L-497-1; the PMR clause names only the parse arena and MemoryStore's retrieve() snapshot, the two surfaces a cell asserts (Gate A round 3; narrower than the verification file's wording, reported to the owner).
     - NFR-011: library surfaces only, naming L-002-4, #565 and B-495-3; "C++17" dropped from the Title.
     - TC-006: names #588 and #580.
     - TC-012: the duplicate check belongs to the application, per FIX-TC.
@@ -444,7 +459,7 @@ in those files are licence comment lines.
   - the relicensing basis: the 16 Apache-2.0 files have one author, the owner, and versions already
     published under Apache-2.0 keep that grant (research R-8).
   The PR body and every commit message MUST NOT put a closing keyword ("close", "fix", "resolve" and
-  their forms) next to #607, #614 or the FR-018, FR-020 and FR-021 issues, including in a negation
+  their forms) next to #607, #612, #614 or the FR-018, FR-020, FR-021 and FR-023 issues, including in a negation
   such as "does not close".
 - **FR-020**: Before the NFR-002 row is written, the orchestrator MUST file one fixpp issue for the 544
   record's lapse, labelled at creation from `gh label list`. Its body says that
@@ -478,6 +493,13 @@ in those files are licence comment lines.
   - The stale initiator-arm comment in `src/session/session.cpp` ("with Logout in US4", on the
     `interpret_logon` refusal in `on_inbound_logon_sent_`) is not edited; it is a P3 note (plan.md
     §Gate A).
+- **FR-023**: Before the FR-013b commit, the orchestrator MUST file one fixpp issue, labelled at creation from
+  `gh label list`, recording that `[const §III.4]` is not met on `main`: `tool_requires = []` since `629f2170`
+  (2026-05-10), so CMake and Ninja come from the host toolchain. Its body asks the owner to choose: restore Conan-pinned
+  `cmake`/`ninja` `tool_requires`, or amend §III.4 to the host-provisioned model with its reproducibility requirement.
+  Implement replaces every occurrence of the `fixpp#<N-III4>` placeholder, in the bundle and in the committed files
+  (the FR-013b `conanfile.py` comment), with its real number; no placeholder number is committed. 094 changes no tool
+  provisioning.
 
 ### Key Entities
 
@@ -512,7 +534,7 @@ in those files are licence comment lines.
 
 - The verification file's readings hold at the branch base, because it was read at `9b176090` and that
   is still `origin/main`. Every citation is still re-checked (FR-010, FR-015).
-- 49 of the 51 test names the flips cite were grep-checked on 2026-10-22, with a negative control:
+- 51 of the 53 test entries the flips cite were grep-checked on 2026-10-22, with two negative controls:
   all exist (research R-11). The other two are the FR-022 cells, added at implement. Passing is
   checked at verify.
 - The atomic-shared-ptr spike (parent `research/G19-fix-fpml-iso20022/atomic-shared-ptr/`) carries no

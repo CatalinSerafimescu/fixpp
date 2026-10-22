@@ -8,6 +8,7 @@
 
 - Round 1 applied 2026-10-22: Codex P1=3 P2=5 P3=1; Opus post-judging P1=3 P2=8 P3=14; rewrite addresses root causes RC-1, RC-2, RC-3 (+ owner rulings 2026-10-22). Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_adversarial_review.md.
 - Round 2 applied 2026-10-22: Codex P1=2 P2=3 P3=0; Opus post-judging P1=2 P2=4 P3=8; rewrite addresses root causes RC-1, RC-2, RC-3 (+ owner rulings 2026-10-22, round 2). Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_2_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_2_adversarial_review.md.
+- Round 3 (final review round of loop instance 1) 2026-10-22: Codex P1=2 P2=0 P3=0; Opus post-judging P1=1 P2=1 P3=3; loop exhausted after 2 rewrites. Owner (2026-10-22) chose "apply the literal fixes, re-run one round": fixes applied as a post-exhaustion apply (not a third rewrite), N3-1 and N3-2 owner-approved. Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_3_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_3_adversarial_review.md. A fresh Gate A loop instance follows.
 
 ### Round 1 — what changed, by root cause
 
@@ -91,12 +92,29 @@ BodyLength/CheckSum case). No Verified cell cites them.
 - **The R-11 count (Opus: "50 → 52"): not copied.** The two `FsmMatrixWitness` refused-Logon cells
   leave TC-017's Tests cell, `EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday` joins
   it, and the two FR-022 cells do not exist until implement. So 49 cited tests exist today and 51 are
-  cited once FR-022 lands (research R-11).
+  cited once FR-022 lands (research R-11). *(Re-derived at Gate A round 3 with a written counting rule
+  and the round-3 Tests cells: 51 exist today, 53 once FR-022 lands; research R-11 lists them.)*
 - **The RED mutant's file (the round-2 brief said `src/session/session.cpp`):** the sticky 98≠0
   refusal is in `src/session/admin_messages.cpp`, `interpret_logon`, the `if (invalid_encrypt_method_seen)`
   return; `session.cpp`'s Logon arms only act on its result. FR-022 names the right file. This
   matches the Opus review ("delete the `invalid_encrypt_method_seen` return").
 - No Opus-confirmed fix is declined.
+
+### Round 3 — what changed, by root cause
+
+- **RC-1 (a conditional left in a target text):** NFR-005's PMR clause is decided now, not "narrowed
+  at verify": its Title names only the parse arena and MemoryStore's retrieve() snapshot, the two
+  surfaces a cell asserts; both cells join its Tests cell, and Verified states the narrowing and the
+  design facts (data-model §C, §H; FR-006). NFR-011's Tests cell names the two enabled
+  `WireThreeArenaPinning` cells instead of the glob (N3-3).
+- **RC-2 (the Constitution Check walked the articles the feature changes, not the articles its touched
+  files implement):** §III.4 gets a row, recorded as a pre-existing deviation with one issue (FR-023);
+  the Result line and Complexity Tracking are corrected. The FR-013b comment's "Restore in Phase 5."
+  becomes "Restore: fixpp#<N-III4>." (N3-2, owner-approved).
+- **N3-1 (owner-approved):** the §VI.6 sentence reads "per-feature records of the kind that obligation
+  names, cited in the row, each showing it applied in full" (data-model §E.3a and its quotations).
+- **Codex's remedy for C3-2 (fold §III.4 into v4.0, or restore the pins): not applied**, per the Opus
+  judge.
 
 ## Summary
 
@@ -162,7 +180,7 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 - 53 source files (one line each), `tools/capi_freeze.sha256`, `conanfile.py` (two commits) and
   `cmake/FixppPackaging.cmake`;
 - 2 test cells in 2 existing test files (FR-022);
-- 3 new fixpp issues (FR-018, FR-020, FR-021).
+- 4 new fixpp issues (FR-018, FR-020, FR-021, FR-023).
 
 ## Constitution Check
 
@@ -179,12 +197,13 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 | §XVIII.5 (no early shipping) | yes | Unchanged; it is why the amendment is MAJOR (R-2). |
 | §XVI.6 (orchestrator does not implement) | yes | The 53 source files, `capi_freeze.sha256`, `conanfile.py`, `cmake/FixppPackaging.cmake` and the two FR-022 test cells go to `phase-implementer`. Docs (`spec/`, `specs/`, `.specify/*.md`, `brain/`, `CHANGELOG.md`, `README.md`, `docs/src/intro.md`) are governance and documentation text the orchestrator may write. |
 | §X.7 / C-ABI freeze | yes | Comment-only header change: the manifest is regenerated and the symbol set is unchanged (R-7). No C-ABI version bump, because no ABI changes. |
+| §III.4 (`tool_requires` pins `cmake` and `ninja`) | yes — pre-existing deviation, recorded | Not met on `main`, and not changed by 094: `629f2170` (2026-05-10) emptied `tool_requires`, so CMake and Ninja come from the host toolchain; no amendment, decision record, B&L row or issue dispositioned it before 094 (re-derive, against `9b176090` and before FR-023 files its issue: `git log -S'tool_requires = []' -- conanfile.py`; `grep -rn 'tool_requires\|III §4\|§III.4'` over `.specify/constitution.md`, `CHANGELOG.md`, both B&L files and `brain/` finds only §III.4 itself; `gh issue list --state all --limit 1000 --json number,title,body` searched for `tool_requires`, with `swig>=4.2` as the known positive). 094 changes no tool provisioning; FR-013b rewords the comment above `tool_requires = []` only. fixpp#<N-III4> (FR-023) records it. Restoring the pins, or amending §III.4 to the host-provisioned model, is the owner's call and outside 094. |
 | §V.1 / §V.4 (licence; vendored attribution) | yes | AGPL marking only; the relicense basis is R-8. No vendored file is in the set. NFR-010's commercial half is untouched (postponed). |
 | §IX.1 (coverage) | n/a | No line of library code is added or made reachable (FR-022 adds test code only). The verify record says so per touched module. |
 | §VIII (bench) | n/a | No library code change. |
 | §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs. Its plan derives from this diff: docs-and-comment gates, the flipped rows' witness binaries, the two FR-022 cells and their RED proofs, one full build to prove the comment edits compile, and the packaging lane's RPM build (FR-013a). |
 
-**Result:** PASS, with no recorded deviation.
+**Result:** PASS, with one pre-existing deviation recorded (§III.4, fixpp#<N-III4>); none is introduced by this feature.
 
 ## Project Structure
 
@@ -231,7 +250,7 @@ tests/session/fsm_matrix_witness_test.cpp      # FR-022 initiator cell — phase
 ```
 
 Parent repo (private), after merge, at close-out: `REMAINING-WORK.md` row 1 and the Tier-0 tallies;
-`phases/phase-4/issue-batches.md` places #614 and the FR-018, FR-020 and FR-021 issues.
+`phases/phase-4/issue-batches.md` places #614 and the FR-018, FR-020, FR-021 and FR-023 issues.
 
 ## Phases
 
@@ -243,7 +262,7 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
 2. **Tasks / analyze / checklist + audit.**
 3. **Implement**:
    - Orchestrator: file the FR-018 issue (labels from `gh label list`) before writing L-094-1, the
-     FR-020 issue before writing NFR-002, and the FR-021 issue.
+     FR-020 issue before writing NFR-002, the FR-021 issue, and the FR-023 issue before the FR-013b commit.
    - Docs (orchestrator): catalogue, coverage index, B&L, constitution, CHANGELOG, the §F surfaces.
      Run the census before and after (R-4), `brain_inventory.py` (R-5), and the R-12 recipe after.
    - Licence and build files (phase-implementer): run `spdx_mark.py` on the branch, change the
@@ -288,8 +307,8 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
   (R-6), so this is harmless once stated.
 - **Conan cold run, python-wheel fleet, ccache.** Accepted by the owner (FR-013a). The PR body says so
   (FR-019).
-- **A closing keyword in a negation.** FR-019 bans it next to #607, #614 and the FR-018 issue, in the
-  body and in commit messages. `closingIssuesReferences` is read before merge.
+- **A closing keyword in a negation.** None may stand next to #607, #612, #614 or the four new issues
+  (FR-018, FR-020, FR-021, FR-023), in the body or in commit messages (FR-019). `closingIssuesReferences` is read before merge.
 - **Peer collation PR.** The 2026-10-22 cloud batch may touch `conanfile.py` (B58/SWIG). The FR-013b
   comment is the owner's text (reworded at Gate A round 2 so it is true before and after B58), so
   whichever merges second rebases a small conflict in the same comment. The peer was told this feature
@@ -304,5 +323,5 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
 
 ## Complexity Tracking
 
-No constitutional violation needs tracking. The first draft recorded a §XX.2 deviation (the amendment
+No constitutional violation is introduced. One pre-existing deviation is recorded, not cured: §III.4 (Constitution Check; FR-023). The first draft recorded a §XX.2 deviation (the amendment
 riding a feature branch); FR-003c's PR title removes it.
