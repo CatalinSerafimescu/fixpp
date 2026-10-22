@@ -46,7 +46,10 @@ the cheapest movement towards the v1.0 tag, with no behavioural code. Its inputs
   this PR. Their Apache identifier was inherited from 012's contract templates, not chosen. After
   Gate A round 1: the control-plane interface goes post-1.0 with its default implementation, the
   amendment is MAJOR (v4.0), the PR is titled in `[const §XX.2]` form, and a `conanfile.py` comment
-  edit for #607 rides along (§Clarifications, Session 2026-10-22 (Gate A round 1)).
+  edit for #607 rides along (§Clarifications, Session 2026-10-22 (Gate A round 1)). After Gate A
+  round 2: a `[const §VI.6]` clarification for process rows joins the v4.0 amendment, TC-017 gains two
+  session-level test cells, and the `conanfile.py` comment is reworded (§Clarifications, Session
+  2026-10-22 (Gate A round 2)).
 
 `main` at `9b176090` still states the dropped scope as v1.0 in the constitution:
 - `[const §XVIII.1]` "v1.0 scope is locked: … the gRPC service wrapper, iceoryx2 SHM data plane (opt-in)".
@@ -93,11 +96,44 @@ Owner rulings made after the round-1 reviews (Codex, and the Opus adversarial ju
 - Q: A MAJOR amendment has always been a standalone PR. Record a new §XX.2 deviation, or change the
   PR? → A: **Title the 094 PR in `[const §XX.2]` form**:
   `Constitution: amend §IV.4, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0 (+ 094 Tier-0 bookkeeping)`.
-  There is then no §XX.2 deviation to record (FR-003c).
+  There is then no §XX.2 deviation to record (FR-003c). *(Round 2 adds §VI.6 and the `(v4.0)` suffix to
+  this title; FR-003c holds the current form.)*
 - Q (from a peer session, batch B58 / #607): any `conanfile.py` edit misses the Conan cache once. →
   A: **In this PR, as a separate commit referencing `Refs #607` with no closing keyword,** replace the
-  two comment lines above `tool_requires = []` with the three-line text in data-model §G. B58 moves
-  SWIG off apt, and both `conanfile.py` edits then ride one cache-key move (FR-013b).
+  two comment lines above `tool_requires = []` with the text in data-model §G. B58 moves
+  SWIG off apt, and both `conanfile.py` edits then ride one cache-key move (FR-013b). *(The text was
+  reworded at round 2, below.)*
+
+### Session 2026-10-22 (Gate A round 2)
+
+Owner rulings made after the round-2 reviews (Codex, and the Opus adversarial judge). Binding.
+
+- Q: NFR-002 is a process obligation with no verifying test, and `[const §VI.6]`(b) asks for
+  "verifying tests". How does it close? → A: **Fold a §VI.6 clarification into the v4.0 amendment, then
+  flip NFR-002.** The clause text is data-model §E.3a: a row whose subject is a process obligation of
+  the constitution, with no library behaviour under test, closes on the per-feature records that
+  obligation names, and the exception does not relax (b) for any row that describes behaviour. It is a
+  loosening; the MAJOR classification still rests on `[const §XVIII.5]` (research R-2). The PR title
+  gains §VI.6 and `(v4.0)` (FR-003c).
+- Q (decided by the bundle's Edge Cases rule, following the Opus review): `544-hot-path-zero-alloc-verify.md`
+  assessed added lines only. → A: **The orchestrator files one labelled issue for that lapse at
+  implement time, and NFR-002's Verified cell names it (FR-020).**
+- Q: TC-017's in-domain ending (98=1..6) has no session-level witness. → A: **Add two session-level
+  cells (FR-022)**, one acceptor and one initiator, in files already compiled into
+  `session_pure_tests`, so no ctest entry is added. Each asserts the session ends Disconnected and no
+  frame was sent, and each is proven RED. The implementer writes them, not the orchestrator. The stale
+  initiator-arm comment "(with Logout in US4)" in `src/session/session.cpp` is recorded as a P3 note and
+  not edited (plan.md §Gate A), because a non-licence line in `src/` would break SC-005.
+- Q: the FR-013b `conanfile.py` comment stated B58's end state, which is false on `main` until B58
+  lands. → A: **Reworded to the four-line text in data-model §G**, still its own commit with
+  `Refs #607` and no closing keyword.
+- Defaults applied, so no question stays open (the Opus review's recorded defaults):
+  - coverage-index :552 (T-039/T-041 wait on 2j's `ReloadCertSource`): informational. T-039, T-040 and
+    T-041 already read `done`, so the note has no tag-gate effect. Reported, not edited.
+  - The "AGPL-3.0" licence prose (`README.md:11` badge, `README.md:25–26`, `NOTICE:7`,
+    `LICENSE-COMMERCIAL.md:3`): left as it is and reported. It is not package metadata.
+  - The 40 `Apache-2.0` files under `tests/` and `bench/`: the orchestrator files one labelled
+    follow-up issue at implement time (FR-021). They stay out of scope here.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -114,7 +150,7 @@ and the constitution no longer requires a v1.0 service wrapper.
 written down, the rows block the tag although nobody intends to build them for v1.0.
 
 **Independent Test**: Read the seven rows, the catalogue legend and the amended articles. Run the
-open-row census (plan §Census) before and after the change: the after-count drops by exactly seven
+open-row census (research R-4) before and after the change: the after-count drops by exactly seven
 for these rows, and no other row changes.
 
 **Acceptance Scenarios**:
@@ -161,8 +197,13 @@ is a live B&L row or an open issue.
    carry the owner-approved wording (FR-006), and Verified names each residual on record.
 3. **Given** TC-005, **When** read, **Then** it no longer claims that an inbound Reject is logged, and
    Verified names fixpp#612 (no `fromAdmin` delivery or log of an inbound Reject).
-4. **Given** NFR-013, **When** read, **Then** it claims ASIO async I/O (epoll on Linux, IOCP on
-   Windows) only, and a new row NFR-019 carries the io_uring opt-in as a post-v1.0 drop.
+4. **Given** NFR-013, **When** read, **Then** its Title claims "ASIO async I/O transport (Linux and
+   Windows)" only, its Verified cell states the backend as asio's platform default with a re-derive
+   grep, and a new row NFR-019 carries the io_uring opt-in as a post-v1.0 drop.
+5. **Given** NFR-002, **When** read, **Then** its Verified cell says it closes under `[const §VI.6]`(b)
+   as amended in v4.0 (a process row), and names the FR-020 issue for the 544 record.
+6. **Given** TC-017, **When** read, **Then** its Tests cell names the two session-level 98=2 cells of
+   FR-022, and both pass on this branch.
 
 ---
 
@@ -222,7 +263,7 @@ in those files are licence comment lines.
   §I.3]` requires: DECISION 1, and the NFR-013 split ruling. The definition is appended to the
   existing Status line so no catalogue line moves.
 - **FR-003**: The constitution MUST be amended so no clause requires a v1.0 service wrapper, gRPC
-  control plane or iceoryx2 data plane:
+  control plane or iceoryx2 data plane, and so `[const §VI.6]` says how a process row closes:
   - `[const §XVIII.1]` drops them from the locked v1.0 scope.
   - `[const §XVIII.2]` gains one line: service wrapper (gRPC control plane, iceoryx2 data plane),
     unscheduled post-1.0.
@@ -231,9 +272,13 @@ in those files are licence comment lines.
     installs only the `ControlPlaneFactory` ABI anchor and reserves the codes 900/901, with no
     behavioural commitment.
   - `[const §XIV.3]` and `[const §IV.4]` get the same post-1.0 note.
-  - The exact before → after text of all five clauses is data-model §E.
+  - `[const §VI.6]`(b) gains the process-row clarification (owner, Gate A round 2): a row whose
+    subject is a process obligation of the constitution, with no library behaviour under test, closes
+    on the per-feature records that obligation names; the exception does not relax (b) for any row
+    that describes behaviour.
+  - The exact before → after text of all six clauses is data-model §E.
   - Any further clause the FR-004 sweep finds naming the same scope as v1.0 is amended too. The sweep
-    found none: §IV.2, §XIII.3 and §XVIII.5 are read and kept (research R-12).
+    found none: §I.2, §IV.2, §XIII.3 and §XVIII.5 are read and kept (research R-12).
 - **FR-003a**: The amendment MUST carry a Sync Impact Report (`[const §XX.3]`) with: the date, the
   version bump and an argued `[const §XX.4]` classification, the clauses changed, the rationale, the
   affected rows and specs, the review and sign-off, and the feature and PR it rode. The
@@ -241,13 +286,16 @@ in those files are licence comment lines.
   gain the entry in data-model §E.8. The Sync Impact Report's header, the Status line and the
   CHANGELOG heading MUST read PENDING / `Unreleased` until Gate A converges and the owner signs off;
   the flip to RATIFIED and the dated heading MUST be the last commit before merge. The report MUST
-  record that the first draft classified itself MINOR and was corrected at Gate A round 1.
+  record that the first draft classified itself MINOR and was corrected at Gate A round 1, and that
+  the §VI.6 clarification is a loosening that leaves the MAJOR classification resting on
+  `[const §XVIII.5]`.
 - **FR-003b**: The installed `include/fixpp/service/control_plane_factory.hpp` and the C-ABI codes 900
   and 901 MUST be kept as shipped. Removing a frozen code would be a break for nothing.
 - **FR-003c**: The 094 PR MUST be titled in `[const §XX.2]` form,
-  `Constitution: amend §IV.4, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0 (+ 094 Tier-0 bookkeeping)`,
-  and its description MUST state the change, the rationale and the affected catalogue rows and specs
-  (owner, 2026-10-22). No §XX.2 deviation is recorded anywhere.
+  `Constitution: amend §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0, process-row closure (v4.0) (+ 094 Tier-0 bookkeeping)`,
+  with the `(v4.0)` suffix PRs #451 and #500 carry, and its description MUST state the change, the
+  rationale and the affected catalogue rows and specs (owner, 2026-10-22). No §XX.2 deviation is
+  recorded anywhere.
 - **FR-004**: Every in-repo surface that states the dropped scope as v1.0, or states the old status
   or content of a changed row, MUST be updated, or annotated with a pointer to this feature. The set
   is not hand-picked: it is the output of research R-12's repository-wide recipe over every tracked
@@ -280,19 +328,24 @@ in those files are licence comment lines.
     TC flip.
 - **FR-007**: NFR-002 MUST be reworded to `[const §IX.1]`'s per-PR obligation: ≥95/85 on touched
   modules, or a recorded assessment for every uncovered **line/branch** the PR adds or newly makes
-  reachable, checked in the per-feature verify record, not a CI threshold. It then moves to `done`.
-  Its evidence cells cite only records that assess both lines and branches, and label them parent
-  repo (private) (research R-13). The global ≥95 % stays a separate release question (row 11).
-- **FR-008**: NFR-013 MUST be reworded to "ASIO async I/O transport (epoll on Linux, IOCP on Windows)"
-  and moved to `done`. A new row **NFR-019** (`OFFICIAL`, nfr) MUST carry the io_uring opt-in with
+  reachable, checked in the per-feature verify record, not a CI threshold. It then moves to `done`
+  under `[const §VI.6]`(b) as amended in v4.0 (data-model §E.3a): it is a process row, so it closes on
+  the records `[const §IX.1]` names in place of verifying tests. Its evidence cells cite only records
+  that assess both lines and branches, and label them parent repo (private) (research R-13). Its
+  Verified cell names the FR-020 issue for the 544 record. The global ≥95 % stays a separate release
+  question (row 11).
+- **FR-008**: NFR-013 MUST be reworded to "ASIO async I/O transport (Linux and Windows)" and moved to
+  `done`. The backend (asio's platform default: epoll on Linux, IOCP on Windows) is stated in its
+  Verified cell as a design fact with a re-derive grep, not in the Title, because no test asserts the
+  reactor type (data-model §C). A new row **NFR-019** (`OFFICIAL`, nfr) MUST carry the io_uring opt-in with
   Status `dropped(post-v1.0, planned, not abandoned: io_uring opt-in, to be measured in the row-16 perf
   pass)`. Before it lands, NFR-019 gets a coverage-index entry (`[const §VI.4]`).
 - **FR-009**: TC-017 MUST be reworded to "EncryptMethod(98): 0 accepted; ≠0 refused at Logon
   (B-043-1); no application-layer encryption (`[const §XII.7]`, §XV.10), so 17c–17j do not apply" and
   moved to `done`. Its Verified cell MUST name both refusal endings the source has (research R-14):
   in-domain ≠0 → Disconnected with nothing sent; out-of-domain with validation on → Reject 373=5
-  RefTagID 98, not established. It MUST say that no session-level cell drives 98=1..6 and which cells
-  the composition rests on.
+  RefTagID 98, not established. Ending (1) is witnessed by the two session-level cells of FR-022, and
+  the Verified cell names them.
 - **FR-006a**: A TC row's version column MUST name only the BeginStrings its cited witnesses actually
   drive, determined per test (fixture, helper default or instantiation list, not a file-level grep).
   The owner's "4.2, 4.4 witnessed" wording applies where both are driven. Where only one is, the
@@ -333,8 +386,9 @@ in those files are licence comment lines.
   reseeds the cache.
 - **FR-013b**: In a **separate commit** of this PR, whose message references `Refs #607` and carries no
   closing keyword, the two comment lines above `tool_requires = []` in `conanfile.py` MUST be replaced
-  with the three lines in data-model §G (owner, 2026-10-22, via a peer session). Batch B58 / #607
-  moves SWIG off apt, and both `conanfile.py` edits then ride one cache-key move.
+  with the four lines in data-model §G (owner, 2026-10-22, via a peer session; reworded by the owner at
+  Gate A round 2 so it is true before and after B58). Batch B58 / #607 moves SWIG off apt, and both
+  `conanfile.py` edits then ride one cache-key move.
 - **FR-014**: `tools/capi_freeze.sha256` MUST be regenerated for the C-ABI headers FR-013 touches, and
   `tools/check_capi_freeze.sh` MUST pass. The PR body MUST state that the C-ABI change is comment-only.
 
@@ -347,8 +401,9 @@ in those files are licence comment lines.
   - **CI rows** (NFR-001, NFR-003, NFR-005, NFR-013): the required jobs green on the cited `push:main`
     runs at `9b176090` (Tier 1 `39594667883`, Tier 2 `39594667975`), plus the workflow job and step
     names re-read on this branch. NFR-005 and NFR-013 also run their witnesses locally.
-  - **Process row** (NFR-002): the two cited verify records (parent repo (private)), each showing a
-    coverage assessment of every uncovered changed line and every untaken branch.
+  - **Process row** (NFR-002, under `[const §VI.6]`(b) as amended in v4.0): the two cited verify
+    records (parent repo (private)), each showing a coverage assessment of every uncovered changed line
+    and every untaken branch, and the FR-020 issue's number and state.
 
   The verify record also snapshots `gh issue view 614` (state, labels, date), because the library
   cannot show an issue's state and every TC Verified cell depends on it. A row whose evidence did not
@@ -362,8 +417,12 @@ in those files are licence comment lines.
   legend's Verified rule names interop "where applicable". The disposition is "not applicable" for the
   D/NFR rows. For the TC rows it is "witnessed in-process; the live QuickFIX cells skip without a
   counterparty, so they are not per-PR evidence and are not claimed".
-- **FR-016**: Every tool that parses the catalogue (`tools/brain_inventory.py` and any other found by
-  the plan's sweep) MUST still parse every row. The open-row census MUST be recorded before and after
+- **FR-016**: Every tool that parses the catalogue MUST still parse every row. The sweep (research
+  R-5) finds two: `tools/brain_inventory.py`, and `docs/prebuild.py`, whose `_status_header` counts each
+  raw Status string for the published "Status at a glance" table. The drop form cannot break it (it
+  splits on `|`, and the drop strings hold none); it renders three more Status strings. It runs in
+  `.github/workflows/docs.yml` on `push: main` and `workflow_dispatch` only, so it is not a PR check,
+  and verify exercises it as research R-5 says. The open-row census MUST be recorded before and after
   the change, with a delta of −25 open rows (7 drops + 18 flips), +18 done, and +8 post-v1.0 drops
   (the 7 plus the new row NFR-019); the other `dropped` count is unchanged (research R-4). The census
   is first proven against a known positive.
@@ -385,15 +444,47 @@ in those files are licence comment lines.
   - the relicensing basis: the 16 Apache-2.0 files have one author, the owner, and versions already
     published under Apache-2.0 keep that grant (research R-8).
   The PR body and every commit message MUST NOT put a closing keyword ("close", "fix", "resolve" and
-  their forms) next to #607, #614 or the FR-018 issue, including in a negation such as "does not
-  close".
+  their forms) next to #607, #614 or the FR-018, FR-020 and FR-021 issues, including in a negation
+  such as "does not close".
+- **FR-020**: Before the NFR-002 row is written, the orchestrator MUST file one fixpp issue for the 544
+  record's lapse, labelled at creation from `gh label list`. Its body says that
+  `544-hot-path-zero-alloc-verify.md` (parent repo (private)) reported 81.73 % branch and assessed
+  added lines only, short of `[const §IX.1]`'s "every uncovered line/branch", and asks for the
+  untaken branches to be assessed or each disposition recorded. NFR-002's Verified cell and research
+  R-10 name its real number; no placeholder number is ever committed. This is the Edge Cases rule
+  applied: a residual is on record before the row flips.
+- **FR-021**: At implement time the orchestrator MUST file one fixpp follow-up issue, labelled at
+  creation from `gh label list`, for the 40 files outside `src/`/`include/` that still carry
+  `SPDX-License-Identifier: Apache-2.0` (37 under `tests/`, 3 under `bench/`; re-derive grep in
+  research R-8). Research R-8 names its real number. 094 does not change those files.
+- **FR-022**: `phase-implementer` MUST add two test cells (a test-only change; owner, Gate A round 2),
+  each in a file already compiled into `session_pure_tests` (`tests/session/CMakeLists.txt`), so no
+  ctest entry is added. Both files already open with `// SPDX-License-Identifier: AGPL-3.0-or-later`,
+  so no licence line changes in them:
+  - **Acceptor:** `EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing`
+    in `tests/session/test_enum_validation_logon.cpp`, next to `InDomainEncryptMethod_EstablishesAsToday`.
+    It feeds `make_fix44_logon_frame(1, "TW", "ISLD", 30, /*encrypt_method=*/2)` and asserts the state
+    is `Disconnected` and `transport.sent_frames()` is empty.
+  - **Initiator:** `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`
+    in `tests/session/fsm_matrix_witness_test.cpp`. At LogonSent it feeds a Logon built with
+    `build_frame("A", 1, kTarget, kSender, kBeginStr, "98=2\x01" "108=30\x01")` and asserts the state is
+    `Disconnected` and `captured_frames.size()` is unchanged across the feed.
+  - **RED proof, each cell:** in a scratch copy, delete the sticky refusal in
+    `src/session/admin_messages.cpp`, `interpret_logon`: the `if (invalid_encrypt_method_seen)` block
+    that returns `session_invalid_logon`. Each cell must then fail on its state assertion (the session
+    establishes). The acceptor's send-count assertion also fails (it sends its Logon reply). For the
+    initiator's send-count assertion, the known positive is the fixture itself: `captured_frames`
+    holds the initiator's own outbound Logon before `clear_handshake_captures()`.
+  - The stale initiator-arm comment in `src/session/session.cpp` ("with Logout in US4", on the
+    `interpret_logon` refusal in `on_inbound_logon_sent_`) is not edited; it is a P3 note (plan.md
+    §Gate A).
 
 ### Key Entities
 
 - **Catalogue row**: ID, Source, Category, Title, FIX version(s), Spec ref, Status, /specify, PR,
   Tests, Verified (`spec/feature-catalogue.md` schema line).
 - **Residual on record**: a live B&L row ID (`L-…`/`B-…`) or an open fixpp issue number.
-- **Amendment**: the five clauses changed, the Status line, the Sync Impact Report, the version bump
+- **Amendment**: the six clauses changed, the Status line, the Sync Impact Report, the version bump
   and the `CHANGELOG.md` entry.
 
 ## Success Criteria *(mandatory)*
@@ -410,9 +501,10 @@ in those files are licence comment lines.
   identifier, and 0 carry another identifier.
 - **SC-005**: The diff outside `spec/`, `.specify/`, `brain/`, `specs/` and `CHANGELOG.md` contains
   only: the licence comment lines of the 53 `src/`/`include/` files; `tools/capi_freeze.sha256`;
-  `conanfile.py`'s `license` line and its three `tool_requires` comment lines (FR-013b, separate
-  commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md:15`; and
-  `docs/src/intro.md:3`.
+  `conanfile.py`'s `license` line and its four `tool_requires` comment lines (FR-013b, separate
+  commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md:15`;
+  `docs/src/intro.md:3`; and the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
+  and `tests/session/fsm_matrix_witness_test.cpp`.
 - **SC-006**: Gate A (on the amendment and bundle) and Gate B converge, and the owner signs off on the
   amendment.
 
@@ -420,8 +512,9 @@ in those files are licence comment lines.
 
 - The verification file's readings hold at the branch base, because it was read at `9b176090` and that
   is still `origin/main`. Every citation is still re-checked (FR-010, FR-015).
-- The 50 test names the flips cite were grep-checked on 2026-10-22, with a negative control: all
-  exist (research R-11). Passing is checked at verify.
+- 49 of the 51 test names the flips cite were grep-checked on 2026-10-22, with a negative control:
+  all exist (research R-11). The other two are the FR-022 cells, added at implement. Passing is
+  checked at verify.
 - The atomic-shared-ptr spike (parent `research/G19-fix-fpml-iso20022/atomic-shared-ptr/`) carries no
   licence or copyright. The 37 unmarked files carry no foreign copyright notice (provenance grep,
   2026-10-22). So marking them AGPL relabels the owner's own work.
@@ -432,12 +525,14 @@ in those files are licence comment lines.
 
 - NFR-010's commercial half (postponed by the owner) and counsel review (row 15d, L-2).
 - The 9 not-delivered rows (FR-012), which stay `backlog` after the typed-message track.
-- SPDX marking outside `src/`/`include/` (tests, tools, bench, bindings, examples).
-- Any code or behaviour change, including the fixpp#612 fix (batch B65).
+- SPDX marking outside `src/`/`include/` (tests, tools, bench, bindings, examples); the 40 `Apache-2.0`
+  files there are the FR-021 issue.
+- Any library code or behaviour change, including the fixpp#612 fix (batch B65). The only test change
+  is FR-022's two cells.
 
 ## Normative References
 
-- `[const §VI.6]` — closing a `done` row; `[const §VI.4]` — coverage-index entry before a new OFFICIAL
+- `[const §VI.6]` — closing a `done` row (amended in v4.0 for process rows); `[const §VI.4]` — coverage-index entry before a new OFFICIAL
   row; `[const §XX.1]`–`[const §XX.4]` — the amendment process and classification; `[const §XVIII.5]`
   — why the amendment is MAJOR; `[const §I.3]` — the tag gate; `[const §IX.1]` — NFR-002's new
   wording; `[const §XII.7]`, `[const §XV.10]` — TC-017.

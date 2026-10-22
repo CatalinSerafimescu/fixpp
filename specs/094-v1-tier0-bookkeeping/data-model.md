@@ -54,13 +54,16 @@ no catalogue line moves:
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered as the per-feature verify obligation of [const §IX.1], raised 2026-05-17)`
 - PR `— (process obligation; [const §IX.1] raised 2026-05-17)`
-- Tests `[const §IX.1] names the record: .specify/decisions/<feature>-verify.md. In this repository that path is a gitignored link into the owner's research repository — parent repo (private): decisions/speckit/563-564-callback-send-verify.md section "Coverage (T7.7)" and decisions/speckit/536-537-538-recovery-liveness-verify.md section "T6.7", each assessing every uncovered changed line and every untaken branch on the diff`
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. The row's former 90/80 figure was superseded by [const §IX.1]; reworded to the obligation that rule states (owner, 2026-10-21). It is a per-PR assessment the verifying agent records, not a threshold CI enforces: tier1.yml job coverage's merge/LCOV steps are continue-on-error and Codecov is not a required check. The records live in the owner's private repository, so this cell is a pointer, not evidence a reader of this repository can reproduce. The global ≥95% bullet of [const §IX.1] is a separate release question (parent repo (private) REMAINING-WORK row 11), not covered by this row. QuickFIX interop: not applicable.`
+- Tests `[const §IX.1] names the record: .specify/decisions/<feature>-verify.md. In this repository that path is a gitignored link into the owner's research repository — parent repo (private): research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-verify.md section "Coverage (T7.7)" and research/G19-fix-fpml-iso20022/decisions/speckit/536-537-538-recovery-liveness-verify.md section "T6.7", each assessing every uncovered changed line and every untaken branch on the diff`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. The row's former 90/80 figure was superseded by [const §IX.1]; reworded to the obligation that rule states (owner, 2026-10-21). Closed under [const §VI.6](b) as amended in v4.0: a process row, closed on the records [const §IX.1] names in place of verifying tests. Lapse on record: the 544-hot-path-zero-alloc verify record (parent repo (private)) assessed added lines only, fixpp#<N-544>. It is a per-PR assessment the verifying agent records, not a threshold CI enforces: tier1.yml job coverage's merge/LCOV steps are continue-on-error and Codecov is not a required check. The records live in the owner's private repository, so this cell is a pointer, not evidence a reader of this repository can reproduce. The global ≥95% bullet of [const §IX.1] is a separate release question (parent repo (private) REMAINING-WORK row 11), not covered by this row. QuickFIX interop: not applicable.`
 
   The earlier draft cited `.claude/skills/speckit-verify/SKILL.md`. That file is not in this
   repository (it is tracked in the parent), and its Step 4 treats a metric below threshold as a FAIL,
   which is not `[const §IX.1]`'s rule. It is no longer cited. The earlier draft also cited
-  `544-hot-path-zero-alloc-verify.md`, which assesses added lines only; it is dropped (research R-13).
+  `544-hot-path-zero-alloc-verify.md`, which assesses added lines only; it is no longer cited as
+  evidence, and is put on record instead (FR-020, research R-13). `fixpp#<N-544>` is the issue FR-020
+  files before this row is written; the cell is written with the real number, never with a
+  placeholder.
 
 ### NFR-003 (reworded)
 - Title `Sanitizers: the ASan, UBSan and TSan legs run the non-packaging ctest suite (ctest -LE packaging) before every merge (required check tier1-required), and any sanitizer report not on the allowlist fails the leg; the allocation-failure cells listed in ci/expected-preset-conditional-tests.txt are not built there; MSVC ASan on Tier 2 (required check tier2-required)`
@@ -90,12 +93,12 @@ no catalogue line moves:
 - Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Narrowed from "throughout" and the stale "C++17" label (the project is C++23). Routing through the resource is asserted for XmlLoader (every byte from the resource); OrchestraLoader takes the resource and its tests pass one, but no cell asserts that its allocations route through it. Not on third-party internals or by design: pugixml's transient DOM (L-002-4), OpenSSL's per-record buffers (#565), the C dictionary entry point's new_delete_resource (B-495-3). QuickFIX interop: not applicable.`
 
 ### NFR-013 (reworded; io_uring split to NFR-019)
-- Title `ASIO async I/O transport (epoll on Linux, IOCP on Windows)`
+- Title `ASIO async I/O transport (Linux and Windows)`
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 012-2h-transport)`
 - PR `#85 (squash 53e25b1e)`
 - Tests `tests/transport/` (`transport_smoke_test.cpp`, `test_asio_plain_transport.cpp`, `test_listener_acceptor.cpp`, `test_cancellation_propagation.cpp`) on the Linux legs of tier1.yml job `linux` and the Windows legs of tier2.yml job `windows`
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. asio's default reactor on each platform (no ASIO_HAS_IO_URING in the build). The io_uring opt-in formerly in this title is NFR-019 (post-v1.0, owner 2026-10-21). CI evidence: Tier 1 run 39594667883 and Tier 2 run 39594667975 (push:main at 9b176090, both success). QuickFIX interop: not applicable (transport-level; session interop is the S-/TC- rows').`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Backend, a design fact and not asserted by any test: asio's platform default, epoll on Linux and IOCP on Windows; no build file selects another (re-derive: git grep -n -e ASIO_HAS_IO_URING -e ASIO_DISABLE_ -- '*CMakeLists.txt' cmake/ CMakePresets.json conan/ conanfile.py is empty; the known positive: over every tracked file outside specs/ the same grep finds only tests/support/recycler_driver.hpp and .specify/544-hot-path-zero-alloc.md, neither a build file). The io_uring opt-in formerly in this title is NFR-019 (post-v1.0, owner 2026-10-21). CI evidence: Tier 1 run 39594667883 and Tier 2 run 39594667975 (push:main at 9b176090, both success). QuickFIX interop: not applicable (transport-level; session interop is the S-/TC- rows').`
 
 ### NFR-019 (new row, FR-008) — placed after NFR-014 in "NFRs (additional)"
 
@@ -204,12 +207,15 @@ no catalogue line moves:
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 043-plaintext-tcp-transport)`
 - PR `#134 (squash 95aa1c38)`
-- Tests `tests/session/test_interpret_logon_encrypt_method.cpp` (InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted, .AbsentEncryptMethodAccepted, .NonZeroEncryptMethodRejected; ctest session_interpret_logon_encrypt_method), `tests/session/fsm_matrix_witness_test.cpp` (FsmMatrixWitness.NC_InboundRefusedLogon_BeginStringMismatch_TransitionsToDisconnected, .LS_InboundRefusedLogon_TransitionsToDisconnected), `tests/session/test_enum_validation_logon.cpp` (EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished; both in ctest session_pure_tests)
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Not supported by design (owner, 2026-10-21): FIX deprecated EncryptMethod in 4.3 (TLS/FIXS replaces it, and fixpp ships TLS); QuickFIX C++/J/Go each send 98=0 and implement none of 17c–17j; FIX-TC marks scenario 17 optional, so 17b's Reject 373=7 + Logout is not required. ≠0 has two refusal endings. (1) In the dictionary's domain (FIX44 declares 0–6), or with validation off: interpret_logon returns session_invalid_logon (InterpretLogonEncryptMethod.NonZeroEncryptMethodRejected, 98=2), and the Logon arm goes to Disconnected and sends nothing. The Disconnected ending is the arm FsmMatrixWitness.NC_InboundRefusedLogon_* and LS_InboundRefusedLogon_* drive with another refusal cause (a BeginString or CompID mismatch, on a FIX.4.2 session); the arm does not branch on the cause, and "sends nothing" is read from src/session/session.cpp, not asserted. Those two cells witness the ending, not EncryptMethod, so they add no version to this row's column. No session-level cell drives 98=1..6. (2) Outside the domain with validate_inbound_messages on: Reject 373=5 RefTagID 98, and the session does not establish (EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
+- Tests `tests/session/test_interpret_logon_encrypt_method.cpp` (InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted, .AbsentEncryptMethodAccepted, .NonZeroEncryptMethodRejected; ctest session_interpret_logon_encrypt_method), `tests/session/test_enum_validation_logon.cpp` (EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday, .InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing, .OutOfDomainEncryptMethod_RejectedAndNotEstablished), `tests/session/fsm_matrix_witness_test.cpp` (FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing; both files in ctest session_pure_tests)
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. Not supported by design (owner, 2026-10-21): FIX deprecated EncryptMethod in 4.3 (TLS/FIXS replaces it, and fixpp ships TLS); QuickFIX C++/J/Go each send 98=0 and implement none of 17c–17j; FIX-TC marks scenario 17 optional, so 17b's Reject 373=7 + Logout is not required. 0 is accepted at session level (EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday) and by the interpreter. ≠0 has two refusal endings. (1) In the dictionary's domain (FIX44 declares 0–6), or with validation off: interpret_logon returns session_invalid_logon (InterpretLogonEncryptMethod.NonZeroEncryptMethodRejected, 98=2), and the Logon arm goes to Disconnected and sends nothing. Witnessed at session level with 98=2 on both roles: the acceptor by EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing (FIX.4.4), the initiator by FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing (FIX.4.2); each asserts Disconnected and no frame sent. (2) Outside the domain with validate_inbound_messages on: Reject 373=5 RefTagID 98, and the session does not establish (EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished). Witnessed in-process; the live QuickFIX interop cells skip without a counterparty, so they are not per-PR evidence and are not claimed. <TC-SCOPE>`
 
 ## D. Coverage index (FR-011, FR-004)
 
-Line numbers are at `9b176090`. Each edit is same-line except the NFR-019 paragraph.
+Line numbers are at `9b176090`. Each edit is same-line except the NFR-019 paragraph. Each edit is
+anchored by its text, and the line numbers are a guide only. Apply the same-line edits first and insert
+the NFR-019 paragraph last: it lands after the NFR-016 supplemental (:648), so once it is in, the
+SVC-005 supplemental moves from :652 to :654.
 
 - **§4 row 3 (:405):** the note's opener changes from `**093 (partial; TC-003 stays backlog):**` to
   `**093; TC-003 done (094 reconciliation):**`. The rest of the note stays, including its
@@ -239,9 +245,9 @@ Line numbers are at `9b176090`. Each edit is same-line except the NFR-019 paragr
 
 ## E. Constitution and CHANGELOG (FR-003, FR-003a, FR-003c)
 
-Five clauses change: §IV.4, §XIV.1 (its lead-in and its control-plane bullet), §XIV.3, §XVIII.1 and
-§XVIII.2. The Status line and a new Sync Impact Report change with them. §IV.2, §XIII.3 and §XVIII.5
-are read and left as they are (research R-2, R-12).
+Six clauses change: §IV.4, §VI.6, §XIV.1 (its lead-in and its control-plane bullet), §XIV.3, §XVIII.1
+and §XVIII.2. The Status line and a new Sync Impact Report change with them. §I.2, §IV.2, §XIII.3 and
+§XVIII.5 are read and left as they are (research R-2, R-12). §VI.6 was added at Gate A round 2 (owner).
 
 ### E.1 Sync Impact Report — new block at line 1, above the v2.0 → v3.0 block
 
@@ -262,10 +268,17 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
     also loosens (here, a v1.0 tag with no service wrapper becomes conformant): the reading v1.0,
     v2.0 and v3.0 set. The first draft of this amendment classified itself MINOR (v3.1) by asking
     whether any EXISTING PR stops conforming, the narrower reading those three reports rejected; it
-    was corrected at Gate A round 1 (P1), as v1.0's, v2.0's and v3.0's drafts were.
+    was corrected at Gate A round 1 (P1), as v1.0's, v2.0's and v3.0's drafts were. The Article VI
+    §6 clarification added at Gate A round 2 is a loosening (every PR mergeable under v3.0's §6 stays
+    mergeable), so the classification rests on Article XVIII §5 alone.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article IV §4 — the service wrapper is opt-in and post-1.0; when built, gRPC is the
     control-plane transport and iceoryx2 SHM the optional data plane.
+  Modified: Article VI §6 — two sentences after (d) say how (b) is met for a process row: a row
+    whose subject is a process obligation of this constitution, with no library behaviour under test,
+    closes on the per-feature records that obligation names, showing it applied in full, cited in the
+    row and labelled where a reader of this repository cannot open them. They do not relax (b) for a
+    row that describes behaviour.
   Modified: Article XIV §1 — the lead-in excepts the control plane. The control-plane bullet places
     both the pluggable interface and its default gRPC implementation post-1.0 (SVC-005), and states
     that v1.0 installs only the ABI anchor fixpp::service::ControlPlaneFactory
@@ -277,8 +290,9 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
     locked v1.0 scope.
   Modified: Article XVIII §2 — adds the service wrapper as an unscheduled post-1.0 item with no
     version slot. v1.1–v1.8 are not re-ordered.
-  Read and unchanged: Article IV §2 ("the foundation for language bindings and the service
-    wrapper") and Article XIII §3 ("control-plane handlers", an example) state no v1.0 scope.
+  Read and unchanged: Article I §2 (the C ABI "exists for … the out-of-process service mode", a
+    purpose), Article IV §2 ("the foundation for language bindings and the service wrapper") and
+    Article XIII §3 ("control-plane handlers", an example) state no v1.0 scope.
     Article XVIII §5 is unchanged; it reaches the service wrapper through §2.
   Rationale: DECISION 1 (owner, 2026-10-21) takes W-015, W-016 and SVC-001..005 out of the v1.0 tag
     gate and abandons none of them: "We don't want to drop them forever, we want them to implement
@@ -287,9 +301,13 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
     implementation and with SVC-005. The installed header holds only an empty anchor with no
     operations, no fixpp::service::ControlPlane type exists, and nothing in src/ reads
     EngineConfig::control_plane_factory (spec/behaviors-and-limitations.md L-094-1), so no v1.0
-    interface existed to keep.
+    interface existed to keep. Process rows (owner, 2026-10-22, Gate A round 2): NFR-002 states
+    Article IX §1's per-PR obligation, which no test can verify; §6(b) read literally would keep every
+    such row open forever, and a reading settled only in one feature would bind no later row
+    (Article XX §1), so §6 says it.
   Affected catalogue rows: W-015, W-016, SVC-001..005 → dropped(post-v1.0, planned, not abandoned);
-    NFR-013 split, its io_uring half → new row NFR-019 (dropped(post-v1.0, …)).
+    NFR-013 split, its io_uring half → new row NFR-019 (dropped(post-v1.0, …)); NFR-002 closes under
+    the amended §6.
   Affected feature specs: none (merged specs/<id>/ bundles stay as written). Companion documents
     annotated by feature 094: .specify/architecture.md (Appendix Z-9), .specify/api-contract.md,
     .specify/2i-capi.md, .specify/2j-controlplane.md, .specify/2l-tap.md, .specify/2m-pybind.md,
@@ -297,11 +315,11 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
   Kept as shipped: include/fixpp/service/control_plane_factory.hpp, and FIXPP_ERR_CTRL_CONFIG (900)
     / FIXPP_ERR_CTRL_RUNTIME (901). Removing a frozen code would be a break for nothing.
   Process: rides feature 094 (specs/094-v1-tier0-bookkeeping). Its PR is titled in Article XX §2
-    form, "Constitution: amend §IV.4, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0
-    (+ 094 Tier-0 bookkeeping)", and its description states the change, the rationale and the
+    form, "Constitution: amend §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper
+    post-1.0, process-row closure (v4.0) (+ 094 Tier-0 bookkeeping)", and its description states the change, the rationale and the
     affected rows and specs, so §2's four steps are met in order.
   Review and sign-off: Codex Gate A on feature 094 (round 1: NOT CONVERGED, 3 P1 / 5 P2 / 1 P3;
-    later rounds recorded at the flip). Owner sign-off: recorded at the flip.
+    round 2: NOT CONVERGED, 2 P1 / 3 P2 / 0 P3; later rounds recorded at the flip). Owner sign-off: recorded at the flip.
 -->
 ```
 
@@ -316,7 +334,7 @@ and the last paragraph's two clauses carry every round's tally, the sign-off dat
 PENDING form — the line's current opening `> **Status:** user-ratified **v3.0** (2026-09-23) — ` is
 replaced by:
 
-`> **Status:** **v4.0 — PENDING** (2026-10-22) — **backwards-incompatible** (Article XX §4 v-major, with a `CHANGELOG.md` entry); not ratified until Codex Gate A on feature 094 converges and the owner signs off. The service wrapper — the gRPC control plane, the pluggable control-plane interface and the iceoryx2 SHM data plane — leaves v1.0 scope and becomes unscheduled post-1.0 (Articles IV §4, XIV §1, XIV §3, XVIII §1–§2); v1.0 keeps only the `ControlPlaneFactory` ABI anchor and the C-ABI codes 900/901, with no behavioural commitment. Rides feature 094; its PR is titled in Article XX §2 form. Prior: user-ratified **v3.0** (2026-09-23) — `
+`> **Status:** **v4.0 — PENDING** (2026-10-22) — **backwards-incompatible** (Article XX §4 v-major, with a `CHANGELOG.md` entry); not ratified until Codex Gate A on feature 094 converges and the owner signs off. The service wrapper — the gRPC control plane, the pluggable control-plane interface and the iceoryx2 SHM data plane — leaves v1.0 scope and becomes unscheduled post-1.0 (Articles IV §4, XIV §1, XIV §3, XVIII §1–§2); v1.0 keeps only the `ControlPlaneFactory` ABI anchor and the C-ABI codes 900/901, with no behavioural commitment. Article VI §6 lets a process row close on the records its rule names. Rides feature 094; its PR is titled in Article XX §2 form. Prior: user-ratified **v3.0** (2026-09-23) — `
 
 and the rest of the line (from `**backwards-incompatible** (Article XX §4 v-major, with a
 `CHANGELOG.md` entry). The orchestrator does not implement, …`) is unchanged.
@@ -332,6 +350,19 @@ Before:
 
 After:
 `4. **Service wrapper** (`service/`) is opt-in and **post-1.0** (Article XVIII §2, unscheduled). When it is built, gRPC is the control-plane transport and iceoryx2 SHM the optional data plane (Article XIV §3).`
+
+### E.3a Article VI §6 (added at Gate A round 2, owner)
+
+Before:
+`6. **No PR may close a `done` row without:** (a) a matching `/specify` artifact, (b) verifying tests, (c) Codex Gate B pass, (d) Gate A pass for non-trivial designs.`
+
+After:
+`6. **No PR may close a `done` row without:** (a) a matching `/specify` artifact, (b) verifying tests, (c) Codex Gate B pass, (d) Gate A pass for non-trivial designs. For a row whose subject is a process obligation of this constitution, with no library behaviour under test, (b) is met by the per-feature records that obligation names, showing it applied in full (for Article IX §1: verify records that assess every uncovered line and every untaken branch), cited in the row and labelled where a reader of this repository cannot open them. This does not relax (b) for any row that describes behaviour.`
+
+The before-text is `.specify/constitution.md:437` at `9b176090`. The after-text keeps the (a)–(d)
+list byte-identical and adds two sentences after it. They carry the Opus round-2 draft's exception,
+with the two things the owner's ruling requires added: what the evidence is, and that (b) is not
+relaxed for a behaviour row.
 
 ### E.4 Article XIV §1 — lead-in and control-plane bullet
 
@@ -356,7 +387,7 @@ Before:
 `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.`
 
 After:
-`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and both are post-1.0 (Article XVIII §2). The control plane (gRPC) works without it.`
+`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). The control plane (gRPC) works without it.`
 
 ### E.6 Article XVIII §1
 
@@ -396,6 +427,9 @@ both have happened.
   implementation, is post-1.0. v1.0 installs only the `ControlPlaneFactory` ABI anchor and the C-ABI
   codes 900/901, with no behavioural commitment.
 - **Article XIV §3** — iceoryx2 SHM and sidecar mode are post-1.0.
+- **Article VI §6** — a row whose subject is a process obligation of the constitution closes on the
+  per-feature records that obligation names, in place of verifying tests; a row that describes
+  behaviour still needs verifying tests.
 - **Article IV §4** — the service wrapper is opt-in and post-1.0.
 
 ---
@@ -467,15 +501,19 @@ are at `9b176090`; every edit is same-line unless it says otherwise.
 ### F.2 `.specify/api-contract.md`
 
 - **:60** (§3.1 pluggable-interface bullet) — append:
-  ` *(Except \`ControlPlane\` and \`ControlPlaneFactory\`: the control plane is post-1.0 (constitution v4.0); v1.0 installs only the empty \`ControlPlaneFactory\` anchor, with no behavioural commitment.)*`
+  ` *(Except \`ControlPlane\`: the control plane is post-1.0 (constitution v4.0). \`ControlPlaneFactory\` is Stable from v1.0 as an empty polymorphic base; the post-1.0 control plane extends it by derivation and adds no member to it.)*`
+  (Gate A round 2, N2-2: the tier is stated once, here, and `:220` and `:249` agree with it. It matches
+  the shipped header's own comment, "Full control-plane surface owned by 2j (extends this base)".)
 - **:61** (gRPC proto bullet) — append: ` *(Post-1.0 with the service wrapper, constitution v4.0; not a v1.0 surface.)*`
 - **:67** (iceoryx2 topic shape bullet) — append: ` *(Post-1.0, constitution v4.0.)*`
 - **:113** (`fixpp::service` namespace row) — append to its second cell:
   ` v1.0 installs only \`ControlPlaneFactory\`, an empty anchor; \`ControlPlane\`, \`ControlPlaneConfig\` and \`grpc_control_plane\` are post-1.0 (constitution v4.0).`
 - **:222** (`fixppd` row) — the last cell `Stable from v1.0` becomes `Post-1.0 (constitution v4.0)`.
 - **:248** (`ControlPlane` interface row) — append to its third cell: ` — post-1.0 (constitution v4.0)`.
+- **:220** (`fixpp::service` target row, `Stable from v1.0`) — **no change**. The target installs
+  exactly the `ControlPlaneFactory` header, and that header is Stable from v1.0 per the `:60` edit.
 - **:249** (`ControlPlaneFactory` row) — the third cell `1 (\`make\`)` becomes
-  `1 (\`make\`) — post-1.0; v1.0 installs an empty anchor with no \`make\` (constitution v4.0)`.
+  `1 (\`make\`) — post-1.0, on a type derived from the v1.0 anchor (constitution v4.0)`.
 - **:272** (2j row) — append to its third cell:
   ` (post-1.0, constitution v4.0; v1.0 ships only \`ControlPlaneFactory\` as an empty anchor, and the codes 900/901)`.
 - **:274** (2l row) — append to its third cell:
@@ -506,10 +544,15 @@ are at `9b176090`; every edit is same-line unless it says otherwise.
 
 ### F.5 Brain pages
 
-- **`brain/components/service.md`** — the paragraph "Whether the service rows are deferred or formally
-  dropped is a **live decision recorded outside this repo** — this page deliberately does **not**
-  answer it. It records only that nothing is implemented." is replaced with:
-  `The decision is made: SVC-001..005 are \`dropped(post-v1.0, planned, not abandoned)\` (owner, 2026-10-21), and the constitution places the service wrapper and the control-plane interface unscheduled post-1.0 (Article XIV §1, Article XVIII §2; v4.0, feature 094). Nothing is implemented. The one v1.0 surface is the \`ControlPlaneFactory\` anchor, and \`EngineConfig::control_plane_factory\` is accepted and ignored (L-094-1).`
+- **`brain/components/service.md`** — inside the `>` blockquote that opens "⚠️ **`[arch §11]` row 5
+  still dispositions …**":
+  - `see \`architecture.md\` **Appendix Z-3**.` becomes
+    `see \`architecture.md\` **Appendix Z-3**, superseded by **Z-9**.`
+  - the sentences "Whether the service rows are deferred or formally dropped is a **live decision
+    recorded outside this repo** — this page deliberately does **not** answer it. It records only that
+    nothing is implemented." are replaced with the text below, every wrapped line keeping the `> `
+    prefix:
+    `The decision is made: SVC-001..005 are \`dropped(post-v1.0, planned, not abandoned)\` (owner, 2026-10-21), and the constitution places the service wrapper and the control-plane interface unscheduled post-1.0 (Article XIV §1, Article XVIII §2; v4.0, feature 094; \`architecture.md\` Z-9). Nothing is implemented. The one v1.0 surface is the \`ControlPlaneFactory\` anchor, and \`EngineConfig::control_plane_factory\` is accepted and ignored (L-094-1).`
   The paragraph above it ("Precisely: the public interface header exists …") stays. The page cites the
   catalogue rows and the constitution clauses, not line numbers.
 - **`brain/components/dictionary.md`**:
@@ -565,12 +608,18 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
       # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
       # collide with system versions and add resolution time. Restore in Phase 5.
   ```
-  After (three lines; `tool_requires = []` moves from line 99 to line 100):
+  After (four lines, the owner's text of Gate A round 2, with the file's four-space indent;
+  `tool_requires = []` moves from line 99 to line 101):
   ```
-      # cmake and ninja come from the system (apt in CI); swig is provisioned by each
-      # workflow at the minimum bindings/python/CMakeLists.txt requires. Conan-pinned
-      # tools collide with system versions and add resolution time. Restore in Phase 5.
+      # cmake and ninja come from the system (apt in CI); swig is installed by each
+      # workflow that builds the bindings, at or above the minimum
+      # bindings/python/CMakeLists.txt requires. Conan-pinned tools collide with
+      # system versions and add resolution time. Restore in Phase 5.
   ```
+  The round-1 text said swig is provisioned "at the minimum", which is B58's end state and false on
+  `main` until B58 lands: the wheel lanes take PyPI's latest through `bindings/python/pyproject.toml`
+  (`swig>=4.2`), and the in-tree Linux legs take apt's. "At or above the minimum" is true on both
+  sides of B58 (Gate A round 2, N2-1).
   `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no line citation of the file, so the
   moved line breaks no citation.
 - **`tools/capi_freeze.sha256`:** regenerated with `sha256sum` over the same 12-file set, in the
@@ -586,23 +635,34 @@ step's `if:` and command) it ran. A clause with no mapped assertion does not fli
 narrowed, and the narrowing goes into the owner report. Rows read during Gate A round 1 are filled in
 here; the others carry the witness to read.
 
+Verify splits every flipped Title and version cell at its clauses and maps each one; a clause missing
+from this table is not thereby exempt. Since Gate A round 2 the table lists every clause of the
+flipped Titles, including those most at risk of having no assertion: NFR-003's MSVC ASan and
+carve-out clauses, NFR-005's PMR clause, TC-014's negative clause and TC-017's encryption clause. A
+clause witnessed by a recipe (an absence) has its recipe run first against a seeded positive.
+
 | Row | Clause | Witness | Assertion / step |
 |---|---|---|---|
 | NFR-001 | C++23 | `CMakeLists.txt` | `CMAKE_CXX_STANDARD 23` + `CMAKE_CXX_STANDARD_REQUIRED ON` |
 | NFR-001 | CI on the platform matrix, required before merge | tier1/tier2 workflows; branch protection | job/leg names; `required_status_checks` lists tier1/2/3-required |
-| NFR-002 | the obligation is recorded per PR | parent repo (private) 563-564 / 536-537-538 verify records | the T7.7 / T6.7 tables (lines and branches) |
+| NFR-002 | the obligation is recorded per PR (a process row, `[const §VI.6]`(b) as amended in v4.0) | parent repo (private) 563-564 / 536-537-538 verify records; the FR-020 issue for the 544 record | the T7.7 / T6.7 tables (lines and branches); the issue's number and state |
 | NFR-003 | ASan/UBSan/TSan legs run `-LE packaging` | tier1.yml `linux` legs | the ctest step's command, read at verify |
 | NFR-003 | an unexplained report fails the leg | tier1.yml step "Peak memory + unexplained-sanitizer gate" | `ci/peak-memory-report.sh` exit status, read at verify |
+| NFR-003 | the allocation-failure cells in `ci/expected-preset-conditional-tests.txt` are not built there | tier1.yml steps running `tools/check_sanitizer_test_carveouts.py --self-test` and `tools/check_sanitizer_test_carveouts.py` | the steps' commands and the census output, read at verify |
+| NFR-003 | MSVC ASan on Tier 2 (required check tier2-required) | tier2.yml job `windows` leg `windows-msvc-asan`; job `tier2-required` (`needs: [filter, windows]`); branch protection | the leg's matrix entry and the `needs:` line, read at verify; `required_status_checks` lists tier2-required |
+| NFR-005 | PMR allocator-aware containers and arena allocation on the parse → validate → dispatch path | at risk: the Tests cell names the gates, not a PMR cell. Candidates: `WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena` (parse arena), `MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr` | read at verify; if no assertion covers validate and dispatch, the clause is narrowed (FR-015b) |
 | NFR-005 | zero allocation on the gated windows | tier1.yml #448 steps | `if: matrix.preset == 'linux-gcc-release' \|\| matrix.preset == 'linux-clang-release'`; `ctest … -L mallocnesia --no-tests=error` |
 | NFR-011 | XmlLoader routes through the resource | PmrAllocation.EveryByteFromMr | read at verify |
 | NFR-011 | OrchestraLoader accepts a resource | `include/fixpp/dict/orchestra_loader.hpp` | `load(path, std::pmr::memory_resource* mr, …)` signature |
 | NFR-011 | parse arena / MemoryStore / decimal accessor | the cells in the Tests cell | read at verify |
-| NFR-013 | ASIO transport on Linux and Windows | `tests/transport/` on tier1 `linux` and tier2 `windows` | read at verify |
+| NFR-013 | ASIO async I/O transport on Linux and Windows | `tests/transport/` on tier1 `linux` and tier2 `windows` | read at verify (the backend is in Verified as a design fact with its grep, not in the Title) |
 | D-001 / D-003 / D-007 / D-008 | each Title clause | the cells in each Tests cell | read at verify |
 | TC-003 | 3b/3c/3e disregarded, NextNumIn unchanged, connection open | InboundFrameDispositionsTc.TC003_3* | read at verify |
 | TC-005 | NextNumIn incremented (FIX.4.4) | CapiC7Witness.Row6_InboundRejectTrafficKeepsTheSessionUp | `row6_cell` writes Rejects at rising `seq`, then `order(seq, …)`; `expect_kept_up`: `EXPECT_TRUE(o.received)` |
 | TC-005 | no Reject of a Reject; session continues | TC005Reject.Fix42_7_* / Fix44_7_*; SessionReject.NoRejectLoopOnInboundReject; FsmMatrixWitness.Active_InboundReject_LogOnly_StaysActive | `tc_reject_test.cpp`: "must not trigger outbound Reject (I-5)", "must stay Active"; `session_reject_test.cpp`: `EXPECT_EQ(f.transport.sent_count(), before)`, `EXPECT_EQ(sess.state(), fsm_state::Active)`; `fsm_matrix_witness_test.cpp`: `EXPECT_EQ(sess.state(), fsm_state::Active)` only |
 | TC-006 / TC-008 / TC-012 / TC-014 / TC-015 | each Title clause | the cells in each Tests cell | read at verify |
-| TC-017 | 0 and absent accepted | InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted, .AbsentEncryptMethodAccepted | read at verify |
-| TC-017 | ≠0 refused, in-domain | InterpretLogonEncryptMethod.NonZeroEncryptMethodRejected (98=2) + FsmMatrixWitness.NC_InboundRefusedLogon_* / LS_InboundRefusedLogon_* | parser: `session_invalid_logon`; session arm: `EXPECT_EQ(sess.state(), fsm_state::Disconnected)` |
+| TC-014 | outbound SequenceReset-Reset (option 1) not offered | recipe: `git grep -n -i "build_sequence_reset" -- src include` | every hit is `build_sequence_reset_gapfill` (seeded positive: that function's own hits show the grep fires) |
+| TC-017 | 0 and absent accepted | InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted, .AbsentEncryptMethodAccepted; EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday (98=0 at session level) | read at verify |
+| TC-017 | ≠0 refused, in-domain | InterpretLogonEncryptMethod.NonZeroEncryptMethodRejected (98=2); EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing (acceptor) and FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing (initiator), both FR-022 | parser: `session_invalid_logon`; session: state `Disconnected` and no frame sent, each cell proven RED (FR-022) |
 | TC-017 | ≠0 refused, out of domain | EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished | `EXPECT_TRUE(has_reject_with_reason(5))`, `EXPECT_EQ(reject_ref_tag_id(5), 98)`, `EXPECT_NE(s, fsm_state::Active)` |
+| TC-017 | no application-layer encryption | recipe: `git grep -n -i encrypt -- src include`, minus the EncryptMethod hits | the remaining hits are TLS or transport comments and the EncryptedPassword Length/Data pair, none an encryption implementation (seeded positive: the EncryptMethod hits themselves); `[const §XII.7]` states the rule |

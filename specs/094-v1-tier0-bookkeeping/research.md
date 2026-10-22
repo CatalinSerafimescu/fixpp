@@ -14,8 +14,9 @@ public, so a reader of it cannot open them.
   precedent covered only an additive amendment outside every Appendix A trigger. This one narrows a
   *locked* scope (`[const §XVIII.1]`, `[const §XVIII.4]`: "Roadmap changes are constitution
   amendments"), so Gate A is not optional.
-- **PR form (owner, 2026-10-22):** the 094 PR is titled in `[const §XX.2]` form,
-  `Constitution: amend §IV.4, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0 (+ 094 Tier-0 bookkeeping)`,
+- **PR form (owner, 2026-10-22; §VI.6 and `(v4.0)` added at Gate A round 2):** the 094 PR is titled in
+  `[const §XX.2]` form,
+  `Constitution: amend §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper post-1.0, process-row closure (v4.0) (+ 094 Tier-0 bookkeeping)`,
   and its description states the change, the rationale and the affected rows and specs. §XX.2's four
   steps are then met literally, so there is no deviation to record (FR-003c).
 - **Rejected:** a standalone `Constitution: amend …` PR, because the owner wanted one PR carrying
@@ -38,6 +39,10 @@ public, so a reader of it cannot open them.
 - **Is there a MINOR wording?** Only a carve-out such as "may ship in any release, §5 does not
   apply". That contradicts the owner's ruling, which places the wrapper post-1.0. So no faithful MINOR
   wording exists.
+- **The §VI.6 clarification (owner, Gate A round 2) changes nothing here.** It lets a process row close
+  on the records its rule names in place of verifying tests (data-model §E.3a). Every PR mergeable
+  under v3.0's §VI.6 stays mergeable, so it is a loosening; the MAJOR classification still rests on
+  `[const §XVIII.5]` above.
 - **Consequence:** v4.0, with a `CHANGELOG.md` entry (data-model §E.8). The Sync Impact Report reads
   PENDING until Gate A converges and the owner signs off, and the flip to RATIFIED is the last commit
   before merge (the v1.0 precedent).
@@ -73,7 +78,7 @@ versions.
 | TC-012 | 4.2 (`PossDupTestBase::make_cfg`) | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` | narrower |
 | TC-014 | 4.4 (`ResetOnLifecycleTest` fixture) | `4.4 witnessed; 4.2, FIXT.1.1 not witnessed` | narrower |
 | TC-015 | 4.2 (`ParityAcceptorFixture`) | `4.2 witnessed; 4.4, FIXT.1.1 not witnessed` | **narrower** (owner: "4.2, 4.4 witnessed") |
-| TC-017 | 4.4 (`interpret_logon` called with `expected_begin = "FIX.4.4"`; the enum-validation cell feeds a FIX44 Logon). The two `FsmMatrixWitness` refused-Logon cells run on a FIX.4.2 session (`kBeginStr = "FIX.4.2"`) but refuse for a non-98 cause, so they witness the Disconnected ending, not EncryptMethod, and add no BeginString to the 98 claim | `4.4 witnessed; 4.2, FIXT.1.1 not witnessed` (FIX-TC 17 is optional) | narrower |
+| TC-017 | 4.4 (`interpret_logon` called with `expected_begin = "FIX.4.4"`; the enum-validation cells, including FR-022's acceptor cell, feed a FIX44 Logon) + 4.2 (FR-022's initiator cell runs on the `FsmMatrixWitness` fixture, `kBeginStr = "FIX.4.2"`, and drives 98=2). The two `FsmMatrixWitness` refused-Logon cells refuse for a non-98 cause and are no longer cited | `4.2, 4.4 witnessed; FIXT.1.1 not witnessed` (FIX-TC 17 is optional) | as owner, once FR-022's cells land |
 
 **On record:** the unwitnessed versions are required by FIX-TC §4.1. They are filed as **fixpp#614**,
 and every TC Verified cell names it (R-10 has the issue's state). That satisfies the owner's narrowing
@@ -114,14 +119,33 @@ Census side-findings, recorded for the verify record:
 
 ## R-5 — Catalogue parsers survive the drop form
 
-- **Sweep:** `grep -rln feature-catalogue tools .github ci .claude`. It finds `tools/brain_inventory.py`
-  (and only a prose reference in the speckit-tasks skill).
+- **Sweep:** `git grep -l feature-catalogue -- ':!specs/' ':!*.md'` over every tracked file. It finds
+  `docs/prebuild.py` and `tools/brain_inventory.py`, which parse the catalogue, and five files that
+  only mention it in comments or data (`docs/.gitignore`, `tests/interop/live-cells-excluded.txt`,
+  `tests/session/test_interpret_logon_encrypt_method.cpp`, `tests/session/test_session_plaintext_authz.cpp`,
+  `tests/session/test_session_plaintext_roundtrip.cpp`). The round-1 sweep listed directories
+  (`tools .github ci .claude`) and so missed `docs/prebuild.py` (Gate A round 2, C2-4).
 - **`brain_inventory.py` behaviour:**
   - It resolves columns by header name and counts the Status *string* per family. It does not parse
     the Status grammar, so commas and colons inside `dropped(...)` cannot break it.
   - Its /specify read takes `bundle.split()[0]`, so `094-v1-tier0-bookkeeping (reconciliation; …)`
     yields the bundle `094-v1-tier0-bookkeeping`.
   - Verify runs it before and after.
+- **`docs/prebuild.py` behaviour:**
+  - `_status_header` reads every Markdown table with a `Status` header cell, splits each row on `|`
+    and counts each raw Status string. The drop strings hold no `|`, and commas and colons are inert,
+    so it cannot break. The published "Status at a glance" table gains three rows: the W-015/W-016
+    string, the SVC string and NFR-019's.
+  - It is not a PR check. `.github/workflows/docs.yml` runs `python3 docs/prebuild.py` on `push: main`
+    (paths include `spec/**`) and on `workflow_dispatch`, so a fault would show after merge, on the
+    Pages deploy.
+  - Verify exercises it without writing the tree (the full script writes `docs/src/`, part of which is
+    tracked): load the file by path, since `python3 -I` drops the script directory from `sys.path`,
+    and call `_status_header` on the branch's catalogue:
+    `python3 -I -c 'import importlib.util as u; s=u.spec_from_file_location("p","docs/prebuild.py"); m=u.module_from_spec(s); s.loader.exec_module(m); print(m._status_header(open("spec/feature-catalogue.md").read()))'`.
+    Known positive, run 2026-10-22 on the base: it prints the table (done 158, backlog 112, one
+    `dropped(duplicate: …)`). On the branch the three `dropped(post-v1.0, …` strings must appear, with
+    counts 2, 5 and 1.
 
 ## R-6 — Line motion (dry run, scratch clone)
 
@@ -136,9 +160,14 @@ Census side-findings, recorded for the verify record:
   - The new Sync Impact Report at the top of `constitution.md` shifts every line of that file.
   - `tools/check_line_citations.py` carries fixture strings that name `constitution.md:456` (one
     without a `citation-ok` marker), `constitution.md:335` and `2j-controlplane.md:902` / `:22`.
-  - Every other docs edit is same-line (data-model §F), so `2j-controlplane.md` and
-    `architecture.md` lines above Appendix Z do not move. The `conanfile.py` comment gains one line;
-    `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no citation of it.
+  - The data-model §F edits are same-line, so `2j-controlplane.md` and `architecture.md` lines above
+    Appendix Z do not move. Some other edits add lines: the NFR-019 catalogue row, the coverage-index
+    NFR-019 paragraph, the B&L section, Z-9 at the end of `architecture.md` and the CHANGELOG entry
+    (data-model §D orders its edits for this). No tracked file outside `specs/` cites
+    `feature-catalogue.md:<n>` or `coverage-index.md:<n>`
+    (`git grep -n -E "(feature-catalogue|coverage-index)\.md:[0-9]+" -- ':!specs/'` is empty). The
+    `conanfile.py` comment gains two lines; `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no
+    citation of it.
   - So the docs commits get their own `--shift-audit` on a scratch commit before the PR (quickstart
     §5), and again over the real branch range at verify.
 
@@ -164,9 +193,11 @@ Census side-findings, recorded for the verify record:
   relicense is the owner's to make.
 - **The relicense applies from this commit on.** fixpp is public, so versions already published
   under Apache-2.0 keep that grant for anyone who has them. The PR body says so (FR-019).
-- **Out of scope, on record for the owner:** 40 files outside `src/`/`include/` still carry
+- **Out of scope, on record:** 40 files outside `src/`/`include/` still carry
   `SPDX-License-Identifier: Apache-2.0` (37 under `tests/`, 3 under `bench/`;
-  `git grep -l "SPDX-License-Identifier: Apache-2.0" -- ':!src/' ':!include/' ':!specs/'`).
+  `git grep -l "SPDX-License-Identifier: Apache-2.0" -- ':!src/' ':!include/' ':!specs/'`). The
+  orchestrator files one labelled follow-up issue for them at implement time (FR-021), and its real
+  number is recorded here.
 
 ## R-9 — Delivering PRs resolved from GitHub (`gh pr view <n> --json mergeCommit`)
 
@@ -211,10 +242,13 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
 - **Live B&L entries** (defined in `spec/behaviors-and-limitations.md`, the live file): L-003-2,
   L-022-1, L-497-1 (the open half; its resolved half moved to the closed file), L-002-4, B-043-1,
   B-005-7, B-495-3, B-544-1, L-019-4.
-- **New, filed at implement (FR-018):** the issue behind L-094-1 (`EngineConfig::control_plane_factory`
-  is accepted and ignored).
+- **New, filed at implement:** the issue behind L-094-1 (`EngineConfig::control_plane_factory` is
+  accepted and ignored; FR-018); the 544 record's lapse, named in NFR-002's Verified cell (FR-020);
+  the 40 `Apache-2.0` files outside `src/`/`include/` (FR-021). Each is written here with its real
+  number. Close-out places all three, and #614, in parent repo (private)
+  `phases/phase-4/issue-batches.md`.
 
-## R-11 — The 50 cited tests exist
+## R-11 — The cited tests exist (49 now, 2 added by FR-022)
 
 - The grep required `TEST*(Suite, Name` with the name half. A negative control
   (`InboundPossResendTest.NoSuchCellXyz`) reported MISSING; the first version of the grep, which only
@@ -225,6 +259,12 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
   (`tests/session/fsm_matrix_witness_test.cpp`), `FsmMatrixWitness.LS_InboundRefusedLogon_TransitionsToDisconnected`
   (same file), `EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished`
   (`tests/session/test_enum_validation_logon.cpp`). Both files are sources of `session_pure_tests`.
+  That made 50.
+- Changed at Gate A round 2 for TC-017 (FR-022): the two `FsmMatrixWitness` refused-Logon cells leave
+  the Tests cell, because they refuse for another cause; `EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday`
+  joins it (98=0 at session level; it exists, read in the file); and the two FR-022 cells join it.
+  So 50 − 2 + 1 = **49 cited tests exist today**, and the 2 FR-022 cells are added at implement, for
+  **51** cited in all. Verify re-runs the existence grep, with its negative control, after implement.
 - **NFR-011 witnesses:**
   - `PmrAllocation.EveryByteFromMr` (XmlLoader)
   - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,
@@ -242,8 +282,8 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
 Over every tracked file outside `specs/`, two greps:
 
 ```
-# (a) dropped-scope terms
-git grep -n -i -I -E "grpc|iceoryx|service wrapper|fixppd|sidecar|control[- ]plane" -- ':!specs/'
+# (a) dropped-scope terms (service[- ]mode|out-of-process added at Gate A round 2, N2-4)
+git grep -n -i -I -E "grpc|iceoryx|service wrapper|fixppd|sidecar|control[- ]plane|service[- ]mode|out-of-process" -- ':!specs/'
 git grep -n -i -I -E "io_uring|liburing" -- ':!specs/'
 # (b) every changed or added row ID (25 changed + NFR-019)
 git grep -n -w -I -E "W-015|W-016|SVC-00[1-5]|NFR-00[1235]|NFR-01[139]|D-00[1378]|TC-00[3568]|TC-01[2457]" -- ':!specs/'
@@ -262,8 +302,11 @@ repository's most common instrument defect.
 - (a): `README.md:15` ("… and a gRPC+iceoryx2 service wrapper"). The first draft's sweep reported
   "`README.md`: 0 hits" for the same file; this one reports it.
 - (b): `brain/components/dictionary.md:75` (`D-007` … `backlog`).
-- Counts at `9b176090` (the branch carries only `specs/` commits): (a) **647** lines in 77 files, plus
-  **4** io_uring lines; (b) **330** lines in 64 files; (c) the two licence lines below.
+- (a)'s widened terms: `.specify/constitution.md:374` (§I.2, "the out-of-process service mode"). The
+  round-1 terms did not reach it.
+- Counts at `9b176090` (the branch carries only `specs/` commits): (a) **664** lines in 79 files (the
+  round-1 terms gave 647 in 77; the 17 lines only the widened terms add are dispositioned below),
+  plus **4** io_uring lines; (b) **330** lines in 64 files; (c) the two licence lines below.
 
 ### Disposition classes
 
@@ -285,6 +328,7 @@ repository's most common instrument defect.
 | `.specify/constitution.md:594` §XIV.3 | iceoryx2 sidecar | edit (§E.5) |
 | `.specify/constitution.md:680` §XVIII.1 | the gRPC service wrapper is locked v1.0 scope | edit (§E.6) |
 | `.specify/constitution.md` §XVIII.2 | the roadmap has no wrapper line | edit (§E.7) |
+| `.specify/constitution.md:374` §I.2 | the C ABI "exists for non-C++ consumers, language bindings, and the out-of-process service mode" | keep: a purpose, no v1.0 timing |
 | `.specify/constitution.md:413` §IV.2 | the C ABI is "the foundation for … the service wrapper" | keep: a dependency direction, no timing |
 | `.specify/constitution.md:579` §XIII.3 | "control-plane handlers" as an example | keep: an example of out-of-session code |
 | `.specify/constitution.md` §XVIII.5 | no early shipping of post-1.0 protocols | keep: unchanged, reaches the wrapper through §2 (R-2) |
@@ -335,8 +379,12 @@ repository's most common instrument defect.
 | `.specify/2b-wire.md:51` | W-015, W-016 post-v1 | keep: already post-1.0 |
 | `.specify/architecture.md:6`, `:62`, `:79`, `:347–355`, `:451`, `:469`, `:518`, `:580–603`, `:614–621`, `:663`, `:665` | the service design, the boundary rule, `fixppd` "not yet built" | keep: design, covered by the edited headings and Z-9; the AGPL boundary rule still governs the installed `fixpp::service` |
 | `.specify/api-contract.md:300` | how a Provisional iceoryx2 shape may change | keep: a change rule, no timing |
+| Widened terms only (14 of the 17 lines): `.specify/2i-capi.md:1789`; `.specify/2j-controlplane.md:107`, `:1110`, `:1231`, `:1371`, `:1615`; `.specify/2l-tap.md:1271`; `.specify/2m-pybind.md:159`, `:1552`; `.specify/2k-log-otel.md:1328`; `.specify/architecture.md:19`, `:593`, `:605`, `:716` | the `[arch §8]` service-mode boundary rule: its heading, TOC entry, lint note and cross-references | keep: the AGPL boundary rule, no timing; it still governs the installed `fixpp::service` (2i/2j/2l/2m also carry their §F.3 timing header) |
+| `.specify/constitution.md:374` (widened terms only) | §I.2, above | keep |
+| `.specify/codex-review.md:72` (widened terms only) | "an out-of-process Codex CLI call" | other concept |
+| `CLAUDE-history.md:12` (widened terms only) | 086's changelog entry on the service-mode boundary | keep: history |
 | `spec/feature-catalogue.md:226` (T-040), `:281` (section heading) | "gRPC trigger remains v1.x"; "Service (Daemon/Sidecar)" | keep: already deferral / a heading |
-| `spec/coverage-index.md:552` | T-039/T-041 full rows wait on "2j `ReloadCertSource` control-plane" | keep, and reported to the owner (plan.md §Gate A): the dependency now waits on post-1.0 work |
+| `spec/coverage-index.md:552` | T-039/T-041 full rows wait on "2j `ReloadCertSource` control-plane" | keep, and reported as informational (spec §Clarifications, Gate A round 2): the dependency now waits on post-1.0 work, and T-039/T-040/T-041 already read `done` |
 | `spec/behaviors-and-limitations.md:388–390` (L-015-3) | "Bounded below the Phase-5 service wrapper" | keep: already later |
 | `spec/behaviors-and-limitations.md:470`, `:807–833`; `-closed.md:70`, `:77` | engine control strand | other concept |
 | `spec/behaviors-and-limitations.md:75`, `:78`, `:85`, `:102`, `:1542`, `:3347` | row IDs as anchors; spec-local `NFR-003-3` | keep / pattern FP |
@@ -369,7 +417,7 @@ repository's most common instrument defect.
 either string (`git grep -n -E "RPM_PACKAGE_LICENSE|AGPL-3\.0\"" -- tests ci .github tools cmake`
 returns only the definition). `README.md:11` (badge), `README.md:25–26`, `NOTICE:7` and
 `LICENSE-COMMERCIAL.md:3` say "AGPL-3.0" in prose. They are not package metadata, so they are kept and
-reported to the owner (plan.md §Gate A).
+reported (the default recorded in spec §Clarifications, Gate A round 2).
 
 ### Re-run after the edits
 
@@ -377,7 +425,7 @@ At verify the three greps run again. Every remaining hit must be in a "keep", "h
 concept" or "pattern FP" class above, or have its "edit" applied. The count per class goes into the
 verify record (SC-003).
 
-## R-13 — NFR-002's evidence (Gate A round 1, C-3)
+## R-13 — NFR-002's evidence (Gate A round 1, C-3; round 2, C2-1 and N2-3)
 
 - `[const §IX.1]`'s binding rule: "only if every uncovered **line/branch** carries a recorded Opus risk
   assessment in `.specify/decisions/<feature>-verify.md`". The first draft's Title said "every
@@ -391,7 +439,17 @@ verify record (SC-003).
   - `536-537-538-recovery-liveness-verify.md` §"T6.7 — coverage per changed line": lines and branches
     ("26 untaken branches on 25 changed lines").
   - `544-hot-path-zero-alloc-verify.md` Step 4: reports 81.73 % branch and dispositions added lines
-    only. **Dropped** as an example; whether that record met the rule is reported to the owner.
+    only, short of the rule's "every uncovered line/branch". PR #572 merged on it. It is not cited as
+    evidence, and it is not dropped silently either: by the Edge Cases rule, a residual is on record
+    before the row flips, so the orchestrator files one labelled issue for it (FR-020) and NFR-002's
+    Verified cell names that issue.
+- **How the row closes (owner, Gate A round 2):** `[const §VI.6]`(b) asks for "verifying tests", and
+  NFR-002 has none: it is a process obligation. v4.0 amends §VI.6 (data-model §E.3a) so that a row whose
+  subject is a process obligation of the constitution closes on the per-feature records that
+  obligation names, showing it applied in full; for `[const §IX.1]`, verify records that assess every
+  uncovered line and every untaken branch. The exception does not relax (b) for any row that describes
+  behaviour. NFR-002's Verified cell cites §VI.6 as amended. The two cited records meet that
+  definition; the 544 record does not, and is the FR-020 issue.
 - `.claude/skills/speckit-verify/SKILL.md` is tracked in the parent, not here, and its Step 4 reads a
   metric below threshold as a FAIL. It is no longer cited.
 
@@ -407,9 +465,19 @@ verify record (SC-003).
 - The validate-first gate runs before `interpret_logon` when `validate_inbound_messages` is on. An
   out-of-domain `98` (FIX44 declares 0–6) is then rejected with `emit_session_reject_` (373=5,
   371=98), witnessed by `EnumValidationLogonTest.OutOfDomainEncryptMethod_RejectedAndNotEstablished`.
-- No test drives `98=1..6` through a Session (`git grep -n -E "98=[1-9]"` over `tests/` finds only the
-  parser cells and a fuzz seed). The Verified cell states the composition: the parser cell, plus the
-  `FsmMatrixWitness` refused-Logon cells that drive the same `if (!result)` arm with another cause.
+- At the base no test drives `98=1..6` through a Session (`git grep -n -E "98=[1-9]"` over `tests/`
+  finds only the parser cells and a fuzz seed). FR-015b's own rule says a clause with no mapped
+  assertion does not flip as worded, so FR-022 adds the two session-level cells (owner, Gate A round
+  2): an acceptor cell in `tests/session/test_enum_validation_logon.cpp` and an initiator cell in
+  `tests/session/fsm_matrix_witness_test.cpp`, both sources of `session_pure_tests`
+  (`tests/session/CMakeLists.txt`, `add_executable(session_pure_tests …)`), so no ctest entry is added.
+  Each asserts Disconnected and no frame sent. The mutant that proves each RED deletes the
+  `if (invalid_encrypt_method_seen)` return in `interpret_logon` (`src/session/admin_messages.cpp`);
+  the refusal is in the interpreter, not in `session.cpp`, whose arms only act on its result.
+- **A stale comment, P3, not edited.** The initiator arm's comment in `on_inbound_logon_sent_` says
+  every refusal "transitions to Disconnected (with Logout in US4)", while the code sends nothing.
+  FR-022's initiator cell asserts the code's behaviour. Editing the comment would put a non-licence
+  line into `src/` and break SC-005, so it is noted here and in plan.md §Gate A instead.
 - FIX-TC 17 is "Optional" (§4.5.16), and 17b expects Reject 373=7, NextNumIn incremented, Logout and
   disconnect. Neither ending sends that, which the owner's "not supported by design" ruling accepts.
 - So the source supports the owner's wording "≠0 refused at Logon": both endings refuse the Logon and
