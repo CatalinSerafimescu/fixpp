@@ -44,7 +44,7 @@ G() { git -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
 
 # Checked at the end against what actually ran: a commented-out or early-exiting
 # cell changes the total, which is exactly why it is machine-checked.
-CELLS_DECLARED=27
+CELLS_DECLARED=33
 cells_run=0
 
 SEED="$SEED_REAL"
@@ -271,7 +271,32 @@ S13() {
   expect_refused_naming "  D  bench/baselines/old.json" "$R/current.json" "$OUT"
 }
 
-CELLS=(S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13)
+# expect_alias_refused <alias-target> — an untracked symlink alias.json pointing
+# at <alias-target> must be refused and named, since it is neither exempt path.
+expect_alias_refused() {
+  ln -s "$1" "$R/alias.json"
+  expect_refused "working tree is dirty" "$R/current.json" "$OUT" || return 1
+  grep -qxF -- "  ?? alias.json" "$TMP/o" || { echo "listing does not name '  ?? alias.json': $(cat "$TMP/o")"; return 1; }
+}
+
+# S14 RED — an untracked alias of <current.json> is not exempt.
+S14() { fresh; expect_alias_refused current.json; }
+
+# S15 RED — an untracked alias of <baseline.json> is not exempt (it dangles until
+# the baseline is written, and git lists it all the same).
+S15() { fresh; expect_alias_refused bench/baselines/alpha.json; }
+
+# S16 GREEN — both paths given through a symlink to the checkout, from outside
+# it, are still exempt: the comparison resolves the parent directory.
+S16() {
+  fresh
+  local link; link="$(mktemp -u "$TMP/link.XXXXXX")"; ln -s "$R" "$link"
+  python3 "$SEED" --repo "$link" "$link/current.json" "$link/bench/baselines/alpha.json" >"$TMP/o" 2>&1 \
+    || { echo "exit $? : $(cat "$TMP/o")"; return 1; }
+  [ "$(ctx "$OUT" git_sha)" = "$(G -C "$R" rev-parse HEAD)" ] || { echo "git_sha wrong through the link"; return 1; }
+}
+
+CELLS=(S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13 S14 S15 S16)
 
 # ── pass 1: the real helper, every cell must hold ───────────────────────────
 for c in "${CELLS[@]}"; do
@@ -315,7 +340,7 @@ mutant M-ROUNDTRIP S2  seed '    return out
 '
 mutant M-NO-DIRTY  S3  seed 'if dirty and not a.allow_dirty:' 'if False:'
 mutant M-NO-UNTRK  S4  seed '"--untracked-files=all"' '"--untracked-files=no"'
-mutant M-NO-EXEMPT S1  seed '        if os.path.realpath(os.path.join(top, path)) in exempt_real:' '        if False:'
+mutant M-NO-EXEMPT S1  seed '        if os.path.join(top, path) in exempt_real:' '        if False:'
 mutant M-NO-DFLAG  S5  seed '    if dirty:
         span +=' '    if False:
         span +='
@@ -358,6 +383,15 @@ mutant M-SKIP-DELETED S13 seed \
         if "D" in status:
             continue
 '
+
+# The alias mutants: the status side resolved through symlinks again, which exempts
+# any untracked alias of either exempt file. M-PARENT-ABS stops resolving the
+# argument's parent, which over-refuses a path given through a symlinked checkout.
+ALIAS_OLD='        if os.path.join(top, path) in exempt_real:'
+ALIAS_NEW='        if os.path.realpath(os.path.join(top, path)) in exempt_real:'
+mutant M-ALIAS-CUR    S14 seed "$ALIAS_OLD" "$ALIAS_NEW"
+mutant M-ALIAS-BASE   S15 seed "$ALIAS_OLD" "$ALIAS_NEW"
+mutant M-PARENT-ABS   S16 seed 'os.path.realpath(os.path.dirname(os.path.abspath(p)))' 'os.path.dirname(os.path.abspath(p))'
 
 # ── declared vs run ──────────────────────────────────────────────────────────
 if [ "$cells_run" -ne "$CELLS_DECLARED" ]; then

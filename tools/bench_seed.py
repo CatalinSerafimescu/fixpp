@@ -27,7 +27,8 @@ numbers is the defect this helper exists to remove, so a tree with tracked
 modifications or untracked non-ignored files (an untracked source can enter the
 build through a `file(GLOB ...)`) is refused and nothing is written.
 <current.json> and <baseline.json> themselves are exempt, since seeding
-necessarily creates them.
+necessarily creates them; the exemption is by path, so a symlink to either
+under another name is listed like any other untracked file.
 `--allow-dirty` seeds anyway and records that it did, as `context.git_dirty:
 true` next to `git_sha`.
 
@@ -85,7 +86,11 @@ def head_sha(repo: str) -> str:
 def dirty_paths(repo: str, exempt: list[str]) -> list[str]:
     """Tracked modifications and untracked non-ignored files, minus `exempt`."""
     top = os.path.realpath(_git(repo, "rev-parse", "--show-toplevel").decode().strip())
-    exempt_real = {os.path.realpath(p) for p in exempt}
+    # Compared by NAME, never by target: only each argument's parent directory is
+    # resolved, so a symlinked checkout or cwd still matches, while an untracked
+    # symlink whose target is an exempt file keeps its own name and is listed.
+    exempt_real = {os.path.join(os.path.realpath(os.path.dirname(os.path.abspath(p))),
+                                os.path.basename(p)) for p in exempt}
     # --no-renames: a rename is then a deletion record for its source plus an
     # addition record for its destination, in either status column, so every -z
     # entry is one record naming one path and no source can hide behind an
@@ -97,7 +102,7 @@ def dirty_paths(repo: str, exempt: list[str]) -> list[str]:
         if not e:
             continue
         status, path = e[:2].decode(), e[3:].decode(errors="surrogateescape")
-        if os.path.realpath(os.path.join(top, path)) in exempt_real:
+        if os.path.join(top, path) in exempt_real:
             continue
         dirty.append(f"{status} {path}")
     return dirty
