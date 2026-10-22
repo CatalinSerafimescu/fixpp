@@ -10,6 +10,7 @@
 - Round 2 applied 2026-10-22: Codex P1=2 P2=3 P3=0; Opus post-judging P1=2 P2=4 P3=8; rewrite addresses root causes RC-1, RC-2, RC-3 (+ owner rulings 2026-10-22, round 2). Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_2_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_2_adversarial_review.md.
 - Round 3 (final review round of loop instance 1) 2026-10-22: Codex P1=2 P2=0 P3=0; Opus post-judging P1=1 P2=1 P3=3; loop exhausted after 2 rewrites. Owner (2026-10-22) chose "apply the literal fixes, re-run one round": fixes applied as a post-exhaustion apply (not a third rewrite), N3-1 and N3-2 owner-approved. Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_3_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_3_adversarial_review.md. A fresh Gate A loop instance follows.
 - Loop instance 2, round 1, 2026-10-22: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=3, closed in 11c9a007. Converged. Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_4_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_4_adversarial_review.md. Record: decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo, private).
+- Scoped rounds on Article XIV §3 (after convergence, FR-003d; the checklist audit's owner-accepted clause edit), 2026-10-22: round 1 Codex P1=0 P2=1 P3=0 (counter-proposal applied); round 2 Codex P1=0 P2=0 P3=0; Opus judge: clause converged (post-judging P1=0 P2=1 P3=2, all in non-clause text, fixed). Converged. Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_review.md, research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_2_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_adversarial_review.md. Detail: `### Clause edits after convergence — scoped Gate A rounds` below.
 
 ### After convergence — which edits re-open Gate A
 
@@ -39,10 +40,12 @@
   slot and their scoped-round variant (§E.1, §E.2, §E.8), and the `CHANGELOG.md` entry's §VI.6 bullet
   (now worded as the round-3 N3-1 ruling requires, which names the CHANGELOG entry). Those edits do
   not re-open Gate A. The one clause edit the audit proposed (Article XIV §3, below) was accepted by
-  the owner and applied to §E.5, so it does re-open Gate A, as a scoped round on that line.
+  the owner and applied to §E.5, so it does re-open Gate A, as a scoped round on that line (two
+  scoped rounds ran and converged; below).
 
-### Clause edits awaiting a scoped Gate A round
+### Clause edits after convergence — scoped Gate A rounds
 
+(Headed "Clause edits awaiting a scoped Gate A round" until the Article XIV §3 rounds converged.)
 Each entry here is amendment text that changed after Gate A converged (FR-003d). An entry the owner
 accepts is applied to data-model §E, and a scoped Codex Gate A round runs on the changed line only,
 under the owner's own `/gate-a` invocation, with an Opus judge. Its result is recorded here and in
@@ -50,8 +53,8 @@ the Gate A record. The owner then signs off on the text that round reviewed (T06
 templates use §E.1's scoped-round variant. If the scoped round does not converge, the entry goes back
 to the owner before T016 lands the clause.
 
-- **Article XIV §3 (data-model §E.5), governance checklist CHK017 — applied; scoped Gate A round
-  pending (orchestrator runs it next).** Owner ruling, 2026-10-22 (spec §Clarifications, Session
+- **Article XIV §3 (data-model §E.5), governance checklist CHK017 — applied; two scoped Gate A
+  rounds, CONVERGED 2026-10-22.** Owner ruling, 2026-10-22 (spec §Clarifications, Session
   2026-10-22 (checklist audit)): accept, and run the scoped round. The converged after-text kept
   "The control plane (gRPC) works without it." as a present-tense sentence, while §E.3 (Article IV §4)
   and §E.4 (Article XIV §1) place the control plane itself post-1.0. Read as a dependency statement (the
@@ -59,7 +62,7 @@ to the owner before T016 lands the clause.
   §E.4. Applied after-text (data-model §E.5), following §E.3's "When it is built" pattern; only its last
   sentence changed:
 
-  `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). When the service wrapper is built, its gRPC control plane works without it.`
+  `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). When the service wrapper is built, its gRPC control plane works without iceoryx2 SHM.`
 
   The converged after-text it replaces (Gate A loop instance 2, round 1):
   `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). The control plane (gRPC) works without it.`
@@ -68,6 +71,10 @@ to the owner before T016 lands the clause.
   `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.`
   The SIR's "Modified: Article XIV §3" line and the `CHANGELOG.md` bullet are metadata and need no
   change for it; if the owner wants them to mention the reworded sentence, that edit needs only Gate B.
+
+- Scoped round 1 (2026-10-22, `research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_review.md`): Codex P1=0 P2=1 P3=0 — the final "it" was ambiguous (service wrapper / sidecar mode / iceoryx2 SHM). Codex's counter-proposal applied verbatim at data-model §E.5 and here: "When the service wrapper is built, its gRPC control plane works without iceoryx2 SHM." — same meaning as the owner-approved text, the dependency named instead of a pronoun. Scoped round 2 reviews the applied sentence.
+- Scoped round 2 (2026-10-22, `research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_2_review.md`): Codex P1=0 P2=0 P3=0 (PASS) on the applied sentence.
+- Opus judge (2026-10-22, `research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_adversarial_review.md`): the clause is converged, and no further Codex round on it is needed. Its post-judging tally, P1=0 P2=1 P3=2, is all in non-clause text (the CHK017 quotes, the `<tally>` fill rule, a clarification pointer); each was fixed as metadata (FR-003d), so Gate B covers them. **Converged**: Codex P1=0 P2=1 P3=0, then P1=0 P2=0 P3=0, plus the judge. The review paths are in the parent repo (private); record: decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo, private). Consequences, all metadata: the RATIFIED templates read "then two scoped rounds on Article XIV §3" with `<tally>` = both Codex tallies in order, and the PENDING SIR's review paragraph names both rounds (data-model §E.1). The owner's T061 sign-off is on this reviewed text.
 
 ### Round 1 — what changed, by root cause
 

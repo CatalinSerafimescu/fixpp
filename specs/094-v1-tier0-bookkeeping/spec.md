@@ -178,10 +178,12 @@ Owner rulings made on the two items the step-9 checklist audit escalated. Bindin
   (gRPC) works without it." as a present-tense sentence, while Articles IV §4 and XIV §1 place the
   control plane post-1.0. Change it? → A: **Apply the clause edit, and run a scoped Gate A round on
   it.** The last sentence becomes "When the service wrapper is built, its gRPC control plane works
-  without it." (data-model §E.5). Under FR-003d this is amendment text no Codex round has seen, so
+  without it." (data-model §E.5; scoped Gate A round 1 then refined it to "…works without iceoryx2 SHM.", Codex's counter-proposal for the ambiguous "it"). Under FR-003d this is amendment text no Codex round has seen, so
   the orchestrator runs a scoped Codex Gate A round, with an Opus judge, on that line next, and the
-  owner signs off on the reviewed text (tasks T061). The RATIFIED templates name the scoped round
-  (data-model §E.1's scoped-round variant, in force).
+  owner signs off on the reviewed text (tasks T061). The RATIFIED templates name the scoped rounds
+  (data-model §E.1's scoped-round variant, in force). Done: two scoped rounds ran and converged on
+  2026-10-22 (Codex P1=0 P2=1 P3=0, then P1=0 P2=0 P3=0; Opus judge: clause converged; plan.md
+  `## Gate A`).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -409,7 +411,8 @@ in those files are licence comment lines.
     both the verification file's and the owner's "4.2, 4.4 witnessed" wording; FR-006a says why the
     narrower text governs.
 - **FR-006b**: Every narrowing of the 18 flips is one of the two kinds the owner's rule (Context)
-  allows, and its Verified cell states it:
+  allows, and the row states it: in its Verified cell, or in its FIX version(s) cell where the
+  narrowing is of the versions (D-008 names L-003-2 there):
   - **On record** (FIX / FIX-TC requires the removed part, or the row names it anyway): NFR-002 (the
     544 record's lapse, the FR-020 issue); NFR-003 (#555); NFR-005 (L-497-1, #569, #565); NFR-011
     (L-002-4, #565, B-495-3); D-008 (runtime-XML-only versions, L-003-2); TC-005 (#612); TC-006 (#588,
@@ -419,7 +422,14 @@ in those files are licence comment lines.
     dispatch path beyond the two asserted surfaces (MemoryStore's slab, the validator scratch
     resource, the cancellable_dispatch node); NFR-011's "throughout" and OrchestraLoader's unasserted
     routing (NFR rows are `[impl]` / `[constitution]` rows, which FIX does not require); NFR-011's
-    "C++17", a stale label corrected to the project's C++23, not a removed capability; NFR-013's
+    "C++17", a stale label corrected to the project's C++23, not a removed capability; NFR-003's
+    allocation-failure cells listed in `ci/expected-preset-conditional-tests.txt`, which the
+    sanitizer legs do not build (named in its Title; an `[impl]` CI row, which FIX does not
+    require); NFR-003's allowlisted `capi_send_recv_uaf_negative` canary in
+    `ci/expected-sanitizer-reports.txt` (named in its Verified cell; a deliberate test of the
+    sanitizer gate itself, not a removed capability, and an `[impl]` row FIX does not require). The
+    row names both in its text, which is not a record in the Edge Cases sense (a live B&L row or an
+    open issue), and neither needs one; NFR-013's
     io_uring half, moved to the new row NFR-019, and its backend, moved to Verified as a design fact;
     TC-012's 19a/19b duplicate check (FIX-TC 19 assigns it to the application); TC-014's outbound
     Reset-mode option (FIX-TC 9 accepts either option); TC-017's 17b ending and 17c–17j (FIX-TC 17 is
@@ -506,7 +516,8 @@ in those files are licence comment lines.
   Gate A round 2 so it is true before and after B58, and line 1's "(runner image, apt or choco in CI)"
   reworded by the owner at the checklist audit, §Clarifications). Batch B58 / #607 moves SWIG off apt, and both
   `conanfile.py` edits then ride one cache-key move.
-- **FR-014**: `tools/capi_freeze.sha256` MUST be regenerated for the C-ABI headers FR-013 touches, and
+- **FR-014**: `tools/capi_freeze.sha256` MUST be regenerated for the 10 of the 12 frozen C-ABI headers
+  that change (one licence line each); the other 2 already carry it and are unchanged.
   `tools/check_capi_freeze.sh` MUST pass. The PR body MUST state that the C-ABI change is comment-only.
   The freeze gate passing proves only that the manifest matches the headers, so the comment-only claim
   is measured on its own: quickstart §3's per-file `--numstat` and line filter over the frozen headers
@@ -745,4 +756,5 @@ in those files are licence comment lines.
 - Parent repo (private) `REMAINING-WORK.md` — ★ V1.0 FUNCTIONAL TRACK row 1, DECISION 1, the Tier-0
   re-verification note and the owner rulings of 2026-10-21.
 - `spec/behaviors-and-limitations.md` — L-003-2, L-022-1, L-497-1, L-002-4, B-043-1, B-005-7,
-  B-495-3, B-544-1, L-019-4 (the residuals named in Verified cells); L-094-1 (added by this feature).
+  B-495-3, B-544-1, L-019-4, L-003-1 (the residuals named in Verified cells); L-094-1 (added by this
+  feature).

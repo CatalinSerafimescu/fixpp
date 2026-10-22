@@ -79,9 +79,10 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
   two AGPL comment forms added and `// SPDX-License-Identifier: Apache-2.0` removed.
 - That filter cannot see an added or removed empty line (`+` or `-` alone) or a line starting with
   `+`/`-`, so pair it with `git diff --numstat origin/main -- src include`: it must list exactly the 53
-  files, each `1 0` (the 37 inserts) or `1 1` (the 16 replacements). Over the 12 frozen C-ABI headers
+  files, each `1 0` (the 37 inserts) or `1 1` (the 16 replacements). Over the frozen C-ABI headers
   (`include/fix/c_api.h`, `include/fix/c_api/*.h`) this is the comment-only check FR-014 names, beside
-  research R-7's symbol diff.
+  research R-7's symbol diff. The numstat lists the 10 of the 12 frozen C-ABI headers that change
+  (one licence line each); the other 2 already carry it and are unchanged.
 - `git diff --stat origin/main -- ':!spec/' ':!.specify/' ':!brain/' ':!specs/' ':!CHANGELOG.md'`
   lists only the SC-005 files, and the only `tests/` files in it are the two FR-022 files.
 - `tools/check_capi_freeze.sh` must print `PASS`.

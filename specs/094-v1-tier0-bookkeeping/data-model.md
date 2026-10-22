@@ -341,7 +341,10 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
     3 P1 / 5 P2 / 1 P3; round 2: NOT CONVERGED, 2 P1 / 3 P2 / 0 P3; round 3: NOT CONVERGED,
     2 P1 / 0 P2 / 0 P3, loop exhausted, owner: apply the literal fixes and re-run one round), then
     loop instance 2 (round 1: CONVERGED, 0 P1 / 0 P2 / 0 P3; Opus post-judging 0 P1 / 0 P2 / 3 P3,
-    closed). Gate B: pending, recorded at the flip. Owner sign-off: pending, recorded at the flip.
+    closed), then two scoped rounds on Article XIV §3 (round 1: 0 P1 / 1 P2 / 0 P3, its
+    counter-proposal applied; round 2: CONVERGED, 0 P1 / 0 P2 / 0 P3; Opus post-judging 0 P1 /
+    1 P2 / 2 P3, all in non-clause text, closed).
+    Gate B: pending, recorded at the flip. Owner sign-off: pending, recorded at the flip.
 -->
 ```
 
@@ -349,20 +352,25 @@ RATIFIED form (the last commit before merge): the header line reads
 `Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`; the first paragraph (the five lines
 directly after the header line, the one that opens `Gate A converged 2026-10-22`; a multi-line
 replacement) is replaced by
-`Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (loop instance 2, round 1, then a scoped round on Article XIV §3: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
+`Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (loop instance 2, round 1, then two scoped rounds on Article XIV §3: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
 and in the last paragraph, `Gate B: pending, recorded at the flip.` becomes
 `Gate B: <gate-b-tally>.` (its rounds and each round's P1/P2/P3, from the Gate B record), and
 `Owner sign-off: pending, recorded at the flip.` becomes
-`Owner sign-off: <sign-off date>. Amendment PR #<pr>.` The Gate A tally gains
-`, then a scoped round on Article XIV §3 (<tally>)` directly after its `closed)`. Nothing else in the
-block changes.
+`Owner sign-off: <sign-off date>. Amendment PR #<pr>.` The Gate A tally stays as the PENDING form
+writes it, because it already names the two scoped rounds. Nothing else in the block changes.
 
 **Scoped-round variant (FR-003d) — in force.** A scoped Gate A round runs on changed clause text:
 the owner accepted the Article XIV §3 edit at the checklist audit (spec §Clarifications, Session
-2026-10-22 (checklist audit)). So this RATIFIED form, §E.2's and §E.8's already read
-`loop instance 2, round 1, then a scoped round on Article XIV §3`, and `<tally>` is that scoped round's
-Codex tally. If a further scoped round runs on another clause, its clause is added the same way
-(`… then a scoped round on <clauses>`).
+2026-10-22 (checklist audit)), and two scoped rounds ran on it and converged (plan.md `## Gate A`).
+So this RATIFIED form, §E.2's and §E.8's already read
+`loop instance 2, round 1, then two scoped rounds on Article XIV §3`, and `<tally>` is the Codex tallies of
+both scoped rounds, in order, as `Codex P1=0 P2=1 P3=0, then P1=0 P2=0 P3=0` (round 1 found the
+ambiguous "it", round 2 passed the applied counter-proposal). The PENDING form's last paragraph names
+both rounds too (status metadata, FR-003d). If a further scoped round runs on another clause after
+T017 has landed the PENDING block (for example at T061), its clause is added the same way to the
+three RATIFIED forms (`… then a scoped round on <clauses>`), and the Gate A tally gains
+`, then a scoped round on <clauses> (…)`, with that round's Codex tallies in the parentheses,
+directly after its `all in non-clause text, closed)`.
 
 ### E.2 Status line (`> **Status:**`, line 357 at `9b176090`)
 
@@ -376,7 +384,7 @@ and the rest of the line (from `**backwards-incompatible** (Article XX §4 v-maj
 
 RATIFIED form: `**v4.0 — PENDING** (2026-10-22)` becomes `user-ratified **v4.0** (<sign-off date>)`,
 and `not ratified: Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo, private); Gate B pending; pending the owner's Article XX §2 sign-off`
-becomes `Codex Gate A on feature 094 converged at loop instance 2, round 1, then a scoped round on Article XIV §3, then owner sign-off <date>; amendment PR #<pr>`
+becomes `Codex Gate A on feature 094 converged at loop instance 2, round 1, then two scoped rounds on Article XIV §3, then owner sign-off <date>; amendment PR #<pr>`
 (§E.1's scoped-round variant, in force).
 After T017 the phrase `Gate A converged 2026-10-22` occurs twice in `.specify/constitution.md` (the
 SIR's first paragraph and the Status line), so locate the Status line by line (`grep -n '^> \*\*Status:\*\*'`, then `sed -n '<N>p'`;
@@ -426,7 +434,7 @@ Before:
 `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.`
 
 After:
-`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). When the service wrapper is built, its gRPC control plane works without it.`
+`3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). When the service wrapper is built, its gRPC control plane works without iceoryx2 SHM.`
 
 ### E.6 Article XVIII §1
 
@@ -478,7 +486,7 @@ repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. Thi
 Flip form (the last commit before merge): the heading becomes
 `## Constitution v4.0 — <sign-off date>`, and the paragraph that opens "Gate A converged 2026-10-22"
 becomes
-`Ratified <date> (PR #<pr>, feature 094), after Codex Gate A converged at loop instance 2, round 1, then a scoped round on Article XIV §3, and the owner signed off.`
+`Ratified <date> (PR #<pr>, feature 094), after Codex Gate A converged at loop instance 2, round 1, then two scoped rounds on Article XIV §3, and the owner signed off.`
 (§E.1's scoped-round variant, in force).
 
 ## F. Other surfaces (FR-004, FR-017, FR-018)

@@ -10,13 +10,24 @@
 - data-model.md (§A…§H, the exact target text of every changed row, clause and surface);
 - quickstart.md (§1…§5, the re-verification recipe).
 
-**Gate A**: converged 2026-10-22 (record `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private)). The
-v4.0 amendment stays **PENDING** until the owner's own Art. XX §2 sign-off (T061).
+**Gate A**: converged 2026-10-22 (record `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private))
++ two scoped rounds on Article XIV §3, converged 2026-10-22 (Codex P1=0 P2=1 P3=0, then P1=0 P2=0
+P3=0; Opus judge: clause converged). The v4.0 amendment stays **PENDING** until the owner's own
+Art. XX §2 sign-off (T061).
 
 **Preconditions (pipeline steps 6–9, not tasks of this file)**: `/speckit-analyze` has run over spec,
 plan and this file and its CRITICAL/HIGH findings are remediated; `/speckit-checklist-audit` has
 dispositioned every checklist under `specs/094-v1-tier0-bookkeeping/checklists/`. The audit blocks
 `/speckit-implement`, so it cannot be a task inside the file it gates.
+- **DONE — the scoped Gate A rounds on Article XIV §3 (FR-003d).** The owner accepted the checklist
+  audit's clause edit to data-model §E.5 (CHK017), so two scoped Codex rounds ran on that line, under
+  the owner's `/gate-a`, with an Opus judge: round 1 Codex P1=0 P2=1 P3=0 (the ambiguous "it"; its
+  counter-proposal applied verbatim), round 2 Codex P1=0 P2=0 P3=0; the judge found the clause
+  converged. CONVERGED 2026-10-22. Reviews (parent repo, private):
+  `research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_review.md`,
+  `research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_2_review.md`,
+  `research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_adversarial_review.md`. Record:
+  `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private); plan.md `## Gate A`.
 
 **Tests**: only FR-022's two session-level cells (owner, Gate A round 2). They are regression guards,
 green on the base by construction, and each is proven RED by the mutant FR-022 names (T029). Every
@@ -174,6 +185,16 @@ record of these numbers wait on this phase.
 - [ ] T007 [orchestrator] **FR-018 issue** (the silently ignored `EngineConfig::control_plane_factory`).
   - First run `grep -rn control_plane_factory src/`, which must be empty. Its known positive is
     `grep -rn control_plane_factory include/`, which hits `include/fixpp/core/engine_config.hpp`.
+  - Then, before the body is written, run FR-017's wide grep,
+    `git grep -n -i -e control_plane -e controlplane -- src include bindings ':!*.md'` (its known
+    positive is the `EngineConfig` field's own hit). Every hit must fall in one of FR-017's classes:
+    the `EngineConfig` field and its include (`include/fixpp/core/engine_config.hpp`), the anchor header
+    itself (`include/fixpp/service/control_plane_factory.hpp`), comments naming `ControlPlaneFactory` as
+    a pattern, the Python binding's `ControlPlaneError` mapping of the codes 900–999
+    (`bindings/python/fixpp.i`), and the binding tests under `bindings/python/tests/` that list
+    `ControlPlaneError` among the exception names. A hit outside those classes is a new entry point:
+    the issue body names it, and L-094-1 must name it too (stop and tell the owner, since data-model
+    §F.6 has no text for it). Record the output and each hit's class in the verify record.
   - The body names the field, the re-derive grep and its output, and the two options: refuse a non-null
     factory in v1.0, or document the field as reserved.
   - Labelled at creation. Record the number in the verify record.
@@ -261,7 +282,9 @@ is byte-unchanged.
   - §E.3a, Article VI §6: the (a)–(d) list stays byte-identical, and the two sentences are appended;
   - §E.4, Article XIV §1: the lead-in and the control-plane bullet; the Transport, Cert source, Logger
     sinks and MessageStore bullets are unchanged;
-  - §E.5, Article XIV §3;
+  - §E.5, Article XIV §3: the converged after-text of the scoped rounds, whose last sentence is
+    "When the service wrapper is built, its gRPC control plane works without iceoryx2 SHM." (copied
+    from §E.5, not from an earlier draft);
   - §E.6, Article XVIII §1;
   - §E.7, Article XVIII §2: one bullet after `**v1.8 — FIX MMT**`.
   - §I.2, §IV.2, §XIII.3 and §XVIII.5 are read and left unchanged (R-12).
@@ -316,6 +339,10 @@ is byte-unchanged.
 - [ ] T025 [US1] [orchestrator] `spec/behaviors-and-limitations.md`, data-model §F.6 (FR-017; after
   T007): append the new `## 094-v1-tier0-bookkeeping — …` section with **L-094-1** at the END of the
   live file, verbatim, with the FR-018 issue's real number in both places.
+  - Before writing it, re-run T007's FR-017 wide grep
+    (`git grep -n -i -e control_plane -e controlplane -- src include bindings ':!*.md'`) and check every
+    hit against FR-017's classes, as T007 does. A new hit is a new entry point that L-094-1 must name:
+    stop and tell the owner. Record the output.
   - `git diff origin/main -- spec/behaviors-and-limitations.md` shows appended lines only.
   - `spec/behaviors-and-limitations-closed.md` is unchanged.
   - Then run `python3 "$W/.claude/scripts/check_bl_delta.py" gate --feature 094-v1-tier0-bookkeeping --base origin/main --root "$PWD"`
@@ -489,7 +516,29 @@ the C-ABI manifest regenerated, and FR-013b's `conanfile.py` comment.
 AGPL comment forms added and `// SPDX-License-Identifier: Apache-2.0` removed. `tools/check_capi_freeze.sh`
 prints `PASS`.
 
+- [ ] T039a [US3] [orchestrator] **Provenance and authorship census, the precondition of C-SPDX**
+  (FR-013's stop rule; research R-8). Read-only, on the branch head T040 will mark. Outputs go to the
+  verify record.
+  - Derive the 37 unmarked files by command, not by hand:
+    `git ls-files src include | /usr/bin/grep -E '\.(c|cc|cpp|h|hpp|ipp|inl)$' | xargs /usr/bin/grep -L 'SPDX-License-Identifier'`
+    (known positive: on `origin/main` it lists 37). The 53 are quickstart §3's first census
+    (`… | xargs /usr/bin/grep -L 'SPDX-License-Identifier: AGPL-3.0-or-later'`, 53 on `origin/main`).
+  - Re-run R-8's provenance grep over the 37:
+    `xargs /usr/bin/grep -n -i -E 'copyright|derived from|adapted from|ported from|licen[cs]e|BSL|boost software'`.
+    Known positive: `include/fixpp/tls/peer_identity.hpp` ("derived from a verified peer cert", prose,
+    not provenance). Disposition every hit.
+  - Re-run R-8's census over all 53:
+    `git ls-files src include | /usr/bin/grep -E '\.(c|cc|cpp|h|hpp|ipp|inl)$' | xargs /usr/bin/grep -L 'SPDX-License-Identifier: AGPL-3.0-or-later' | xargs git log --format='%an <%ae>%n%cn <%ce>' -- | sort | uniq -c`
+    and the same pipeline ending
+    `xargs git log --format='%(trailers:key=Co-Authored-By,valueonly)' -- | sort | uniq -c`.
+    R-8 expects authors: only the owner (two addresses); committers: the owner and
+    `GitHub <noreply@github.com>` (squash merges); `Co-Authored-By`: only AI assistants.
+  - **Stop rule (FR-013):** a foreign copyright or licence notice in a file, or a contributor other
+    than the owner and the AI assistants R-8 names in any author, committer or trailer field, means
+    that file is not relabelled. List it, tell the owner, and do not start T040 until the owner has
+    ruled on it.
 - [ ] T040 [US3] [phase-implementer] **Commit C-SPDX**, one commit (FR-013, FR-013a, FR-014).
+  - After T039a. A file T039a withheld is not marked; the owner's ruling on it is in the verify record.
   - Run `spdx_mark.py` (path in the Execution rules) on the branch:
     - `include/fix/**/*.h` get `/* SPDX-License-Identifier: AGPL-3.0-or-later */` as line 1;
     - every other file gets `// SPDX-License-Identifier: AGPL-3.0-or-later`;
@@ -521,12 +570,21 @@ prints `PASS`.
   - `tool_requires = []` moves from line 99 to line 101. Nothing else in the file changes.
   - The commit message carries `Refs #607` and no closing keyword.
   - The peer B58 batch also edits this comment, so whichever merges second rebases the conflict
-    (plan.md Risks).
+    (plan.md Risks). The stop rule from there: if B58 merges first, T054's integration resolves the
+    comment to data-model §G's four lines (with the FR-023 issue's real number), unless B58 changed a
+    fact those lines state (how cmake, ninja or swig is provisioned, or where the swig minimum lives);
+    then `phase-implementer` stops and the orchestrator asks the owner. The rest of B58's
+    `conanfile.py` change is kept as merged.
 - [ ] T042 [US3] [orchestrator] **US3 check.**
   - Run every bullet of quickstart §3. That includes `grep -n '^    license' conanfile.py`,
     `grep -n 'CPACK_RPM_PACKAGE_LICENSE' cmake/FixppPackaging.cmake`, and
     `git log --format=%B origin/main..HEAD -- conanfile.py`, which must show `Refs #607` on C-607 and no
     closing keyword anywhere.
+  - The files outside the census (spec Edge Cases, FR-013):
+    `git ls-files src include | /usr/bin/grep -vE '\.(c|cc|cpp|h|hpp|ipp|inl)$'`. Record its output in
+    the verify record. On `origin/main` it lists `.gitkeep` placeholders, `CMakeLists.txt` files and
+    `src/capi/fixpp_capi.map` (the C-ABI linker version script); none is a C/C++ file, so none gains
+    the licence line. Any other kind of file in the list is named to the owner.
   - SC-005's `git diff --stat origin/main -- ':!spec/' ':!.specify/' ':!brain/' ':!specs/' ':!CHANGELOG.md'`
     lists only the SC-005 files.
   - Then `codegraph sync` in this tree, with `codegraph status --json` read back.
@@ -589,8 +647,15 @@ prints `PASS`.
       proofs (T029, re-run if T043 changed a cell).
     - **The §H claim → witness map, filled in full** (FR-015b): one row per clause, the `file:line` of
       each `EXPECT`/`ASSERT` or the CI step's `if:` and command, each path resolving here or labelled
-      parent repo (private). A clause with no assertion does not flip as worded: it is narrowed, and
-      the narrowing goes to T053.
+      parent repo (private). A clause with no assertion does not flip as worded: it is narrowed
+      (FR-015b). The narrowing is written into data-model §C first (the copy source), classified under
+      FR-006b ("on record" or "not required by FIX / FIX-TC", with its reason), and only then copied
+      to the catalogue by a docs task; it goes to T053 as well. A row whose clause cannot be narrowed to
+      something witnessed stays out of the flip set (Edge Cases).
+    - **FR-017's wide grep, re-run at the verified head**:
+      `git grep -n -i -e control_plane -e controlplane -- src include bindings ':!*.md'`, every hit in
+      one of FR-017's classes (T007). A new hit is a new entry point that L-094-1 must name: tell the
+      owner before Gate B.
     - **FR-015's three evidence forms**, plus the #614 snapshot and the snapshots of the FR-018,
       FR-020, FR-021 and FR-023 issues (state, labels, createdAt).
     - **§3, the licence census** (T042), and the C-ABI checks: `tools/check_capi_freeze.sh` `PASS`;
@@ -639,8 +704,10 @@ prints `PASS`.
   - The disclosed RATIFIED-flip re-run cost (plan.md Risks).
   - The gate records are cited in the two outcome sections only; the body has no separate `## Gates`
     section:
-    - a `## Gate A outcome` section: Gate A converged (loop instance 2, round 1), linking
-      `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private);
+    - a `## Gate A outcome` section: Gate A converged (loop instance 2, round 1), then two scoped
+      rounds on Article XIV §3 converged (Codex P1=0 P2=1 P3=0, then P1=0 P2=0 P3=0; Opus judge:
+      clause converged), linking `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo,
+      private);
     - a `## Gate B outcome` section, held in the draft as a placeholder (`Gate B: pending.`) under
       which the verify record `.specify/decisions/094-v1-tier0-bookkeeping-verify.md` (parent repo
       (private)) is linked, because `/speckit-verify` is Gate B's precondition. T064 replaces the
@@ -651,6 +718,9 @@ prints `PASS`.
     `closingIssuesReferences` must come back empty.
 - [ ] T053 [orchestrator] **Owner report** (FR-006a, FR-015b; spec §Clarifications defaults). It lists:
   - every narrowing verify made beyond the bundle's;
+  - T039a's provenance and authorship census (R-8: authors, committers and `Co-Authored-By` trailers
+    over the 53 files; the AI co-author trailers' legal weight is the owner's call), and any file it
+    withheld;
   - the narrowings the bundle already reported, with where each was reported:
     - the TC version columns (FR-006a, research R-3). The orchestrator told the owner in-session on
       2026-10-22, before Gate A started ("the TC version columns now differ from the wording you
@@ -674,7 +744,11 @@ prints `PASS`.
   - **First, integrate `origin/main`.** `git fetch origin`. If `origin/main` moved past T001's base,
     merge it (a merge, not a rebase: the verify record cites this branch's SHAs). `phase-implementer`
     resolves any conflict in code or build files, such as the peer B58 batch's `conanfile.py` comment
-    (plan.md Risks). Then re-run quickstart §3's licence census, `tools/check_capi_freeze.sh`, the
+    (plan.md Risks). Its stop rule: if B58 merged first, the comment resolves to data-model §G's four
+    lines (with the FR-023 issue's real number), unless B58 changed a fact those lines state (how
+    cmake, ninja or swig is provisioned, or where the swig minimum lives); then `phase-implementer`
+    stops and the orchestrator asks the owner. The rest of B58's `conanfile.py` change is kept as
+    merged. Then re-run quickstart §3's licence census, `tools/check_capi_freeze.sh`, the
     catalogue census and T044–T048, and re-derive SC-005's diff-stat against the new merge-base.
     Record the new base under `## Base`.
   - Hard preconditions: T049's record is non-RED, T070's `## Completeness` exists, the B&L delta passes
@@ -688,6 +762,11 @@ prints `PASS`.
     cites. Otherwise record in the verify record that the delta since T049's run is docs-only
     (`git diff --name-only <T049 SHA>..HEAD` as the evidence).
   - Gate B also reviews the PENDING amendment text, which the owner signs off in T061.
+  - **A Gate B fix that changes amended clause text** (data-model §E.3–§E.7) is amendment text no Codex
+    round has seen (FR-003d): it is written into data-model §E first, then a scoped Codex Gate A round
+    runs on the changed lines, with an Opus judge, under the owner's own `/gate-a` invocation, before
+    T061 (T061's scoped-round bullets apply). A Gate B fix to the amendment's records (metadata,
+    FR-003d) needs only Gate B's re-check.
   - In the Gate B record (`.specify/decisions/094-v1-tier0-bookkeeping-gateb.md`), record the feature's
     B&L delta as "B&L delta: one new limitation (L-094-1), no behaviour change" (FR-017).
   - *Open at the audit — waiver: Gate B needs the audit record first ([const §XVII.8], pre-flight 4d).*
@@ -716,7 +795,9 @@ prints `PASS`.
     (`.specify/constitution.md`);
   - the `CHANGELOG.md` entry;
   - the Gate A tallies from `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private) (instance 1 rounds
-    1–3; instance 2 round 1, converged);
+    1–3; instance 2 round 1, converged; then the two scoped rounds on Article XIV §3, Codex
+    P1=0 P2=1 P3=0, then P1=0 P2=0 P3=0, Opus judge: clause converged), with the §XIV.3 text those
+    rounds reviewed;
   - Gate B's rounds;
   - the RATIFIED-form text T063 will write.
   - *Open at the audit — waiver: after Gate B.*
@@ -737,9 +818,15 @@ prints `PASS`.
   - **After a scoped Gate A round converges, return to T061** and ask the owner again for the
     Art. XX §2 sign-off, on the text that round reviewed. An earlier sign-off covered other text. The
     date of that fresh sign-off is the one T063 writes.
-  - **A change to the Status line, the SIR's status or tally wording, or the CHANGELOG status wording**
-    is metadata, not clause text. It needs only Gate B's re-check, with no Gate A round (plan.md
-    `## Gate A`, the post-convergence metadata rule).
+  - **A change to the amendment's records is metadata, not clause text** (spec FR-003d, its second
+    bullet, copied): "A change to the **amendment's records** amends no rule and needs only Gate B's
+    re-check: the Status line, and all of the Sync Impact Report and the `CHANGELOG.md` entry outside
+    the six clause bodies (status and review-tally wording, the affected-rows and per-article summary
+    lines, the RATIFIED templates; data-model §E.1, §E.2, §E.8). A summary line must still agree with
+    the clause it summarises; the §VI.6 summary bullets also carry the owner's round-3 N3-1 wording.
+    Catalogue, coverage-index, B&L and design-doc text is not amendment text either (FR-015b covers a
+    narrowing found at verify)." No Gate A round runs for it (plan.md `## Gate A`, the
+    post-convergence metadata rule).
   - *Open at the audit — waiver: Art. XX §2 orders it after Codex Gate A and after the text is final.*
 - [ ] T062 [orchestrator] (after owner sign-off) **Commit the `tasks.md` ticks of T056–T061.** The ticks of
   T001–T055, T069 and T070 are already committed (T069, T056); T070's re-assertion after T063 is
@@ -757,7 +844,11 @@ prints `PASS`.
     over several lines), so a single-line `grep -F` of it cannot match; print the range with
     `sed -n '<header+1>,<Bump-1>p'` and confirm it before replacing it. In the last paragraph, the
     `Gate B: pending, …` and `Owner sign-off: pending, …` clauses take Gate B's round tally, the
-    sign-off date and `Amendment PR #<pr>`; the Gate A tally stays. Nothing else in the block changes.
+    sign-off date and `Amendment PR #<pr>`. The Gate A tally stays as written, because the PENDING
+    form already names the two scoped rounds on Article XIV §3 (data-model §E.1). Only if a further
+    scoped round ran on another clause after T017 does the tally gain
+    `, then a scoped round on <clauses> (…)`, with that round's Codex tallies in the parentheses,
+    directly after its `all in non-clause text, closed)` (§E.1's scoped-round variant). Nothing else in the block changes.
   - The Status line goes to §E.2's RATIFIED form. Its find-string is the PENDING `not ratified: Gate A
     converged 2026-10-22 …` clause, but after T017 the phrase `Gate A converged 2026-10-22` occurs
     twice in the file (the SIR's first paragraph and the Status line), so apply the non-unique rule
@@ -768,13 +859,14 @@ prints `PASS`.
   - Each find-string is matched with `grep -F` first (Execution rules); a miss stops the flip.
   - **Before writing it**, `git fetch origin`. If `origin/main` moved since T054's integration, repeat
     that integration first, so that C-RATIFY stays the last commit.
-  - Fill the templates: `<pr>` from T057 (the PR number); `<tally>` from the scoped Article XIV §3
-    Gate A round's record (its Codex tally; FR-003d, owner ruling at the checklist audit);
+  - Fill the templates: `<pr>` from T057 (the PR number); `<tally>` with both scoped Article XIV §3
+    rounds' Codex tallies, in order, from the Gate A record: `Codex P1=0 P2=1 P3=0, then P1=0 P2=0 P3=0`
+    (data-model §E.1's scoped-round variant; FR-003d, owner ruling at the checklist audit);
     `<gate-b-tally>` from the Gate B record; `<sign-off date>` and `<date>` from T061 (the date of the
-    fresh sign-off on the text the scoped round reviewed). The Gate A rounds are written in the
-    templates as the literal "loop instance 2, round 1, then a scoped round on Article XIV §3" (data-model
-    §E.1's scoped-round variant, in force) and need no fill. If a further scoped round ran on another
-    clause, add it the same way.
+    fresh sign-off on the text the scoped rounds reviewed). The Gate A rounds are written in the
+    templates as the literal "loop instance 2, round 1, then two scoped rounds on Article XIV §3"
+    (data-model §E.1's scoped-round variant, in force) and need no fill. If a further scoped round ran
+    on another clause, add it the same way (`… then a scoped round on <clauses>`), with its own tally.
   - Checks on the flip head:
     - `grep -nE '<n>|<pr>|<sign-off date>|<date>|<tally>|<gate-b-tally>|<clauses>' .specify/constitution.md CHANGELOG.md` prints
       nothing new. Its baseline is the same grep over `git show origin/main:<file>` for both files,
@@ -929,7 +1021,7 @@ prints `PASS`.
   - coverage index T036 after T015 and before T037;
   - T038 after T037;
   - T039 after T038 (it ends with the US2 docs commit, so it must not run beside a half-written catalogue).
-- **US3 (T040–T042)**: T040 → T041 (also after T010) → T042. Its files are disjoint from US1/US2, but
+- **US3 (T039a–T042)**: T039a → T040 → T041 (also after T010) → T042. Its files are disjoint from US1/US2, but
   its commits serialize with theirs in the one tree.
 - **Polish**:
   - T043 → T044–T048 (parallel, except T047's runs) → T049 → T050, T051 → T052, T053;
@@ -940,7 +1032,7 @@ prints `PASS`.
 
 ### Critical path
 
-T001 → T006 → T007/T008/T010 → T011 → (T012…T026) → (T027…T039) → (T040…T042) → T043 → T049 →
+T001 → T006 → T007/T008/T010 → T011 → (T012…T026) → (T027…T039) → (T039a…T042) → T043 → T049 →
 T069 → T070 → T054 → T057 → **T061 owner sign-off** → T063 → T064 → T065 → T066/T067/T068.
 
 ### Parallel opportunities
