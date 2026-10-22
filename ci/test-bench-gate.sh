@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=66
+CELLS_DECLARED=69
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -866,21 +866,46 @@ LEG="$TMP/legacy"; mkdir -p "$LEG"
 mkfix "$LEG/base.json" BM_A=100 BM_B=200
 mkfix "$LEG/cur.json" BM_A=100 BM_B=300
 mutate "$LEG/cur.json" BM_A_stddev cpu_time 5.0
-lrc=0
-python3 "$CMP" "$LEG/base.json" "$LEG/cur.json" > "$TMP/lzero.out" 2>&1 || lrc=$?
-[ "$lrc" -eq 0 ] \
-  || fail "L-ZERO: legacy mode is soft and must exit 0; it exited $lrc — output:\n$(cat "$TMP/lzero.out")"
-lzero_want="$(printf '%s\n' \
+LZERO_WANT="$(printf '%s\n' \
   "[bench_compare] SOFT WARNING — 3 benchmark(s) regressed >±5.0%:" \
   "  BM_A_stddev: +inf%" \
   "  BM_B_mean: +50.0%" \
   "  BM_B_median: +50.0%" \
   "[bench_compare] Gate is SOFT this phase — not failing CI.")"
-lzero_got="$(sed -n '/SOFT WARNING/,/Gate is SOFT/p' "$TMP/lzero.out")"
-[ "$lzero_got" = "$lzero_want" ] \
-  || fail "L-ZERO: the regression list differs from the pinned one — output:\n$(cat "$TMP/lzero.out")"
-echo "GREEN (expected): L-ZERO — a zero baseline row is compared, and the rows after it are too"
-cells_run=$((cells_run + 1))
+lzero() {  # lzero <comparator>
+  local out="$TMP/lzero.out" lrc=0
+  python3 "$1" "$LEG/base.json" "$LEG/cur.json" > "$out" 2>&1 || lrc=$?
+  if [ "$lrc" -ne 0 ]; then
+    echo "L-ZERO: legacy mode is soft and must exit 0; it exited $lrc — output:"; cat "$out"; return 1
+  fi
+  if [ "$(sed -n '/SOFT WARNING/,/Gate is SOFT/p' "$out")" != "$LZERO_WANT" ]; then
+    echo "L-ZERO: the regression list differs from the pinned one — output:"; cat "$out"; return 1
+  fi
+}
+expect_green L-ZERO "a zero baseline row is compared, and the rows after it are too" lzero "$CMP"
+
+# L-ZERO-RED-* — the same pin against copies of the FIXED comparator with the
+# zero-baseline branch disabled three ways. Each must redden for its own reason.
+lzero_mutant() {  # lzero_mutant <out> <old> <new>
+  cp "$CMP" "$1"
+  python3 - "$@" <<'PY'
+import sys
+path, old, new = sys.argv[1:4]
+src = open(path).read()
+assert src.count(old) == 1, src.count(old)
+open(path, "w").write(src.replace(old, new))
+PY
+}
+LZ_DELTA='            delta_pct = 0.0 if curr_val == 0 else math.copysign(math.inf, curr_val)'
+lzero_mutant "$TMP/bench_compare.lzcrash.py" '        if base_val == 0:' '        if False:'
+expect_red L-ZERO-RED-CRASH "the zero-baseline branch removed: the division crashes" \
+  "must exit 0; it exited 1" lzero "$TMP/bench_compare.lzcrash.py"
+lzero_mutant "$TMP/bench_compare.lzskip.py" "$LZ_DELTA" '            continue'
+expect_red L-ZERO-RED-SKIP "a zero baseline skipped instead of compared" \
+  "SOFT WARNING — 2 benchmark(s)" lzero "$TMP/bench_compare.lzskip.py"
+lzero_mutant "$TMP/bench_compare.lzzz.py" "$LZ_DELTA" '            delta_pct = math.inf'
+expect_red L-ZERO-RED-ZZ "a zero baseline flagged even when the current is zero too" \
+  "BM_B_stddev: +inf%" lzero "$TMP/bench_compare.lzzz.py"
 
 # ═══ RUNNER: ci/run-bench-suite.sh ═══════════════════════════════════════════
 

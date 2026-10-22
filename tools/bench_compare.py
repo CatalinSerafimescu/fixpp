@@ -3,7 +3,7 @@
 
 THREE MODES, and the split is load-bearing:
 
-  LEGACY (soft, unchanged):  bench_compare.py <baseline.json> <current.json>
+  LEGACY (soft):             bench_compare.py <baseline.json> <current.json>
   SUITE  (tier 1 + 3, #209): bench_compare.py --suite <results-dir>
   PAIRED (tier 2, #209):     bench_compare.py --paired --a1 D --b D --a2 D
 
