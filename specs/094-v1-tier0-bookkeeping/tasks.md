@@ -406,7 +406,7 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - On the branch: `ctest --preset linux-clang-debug -R '^session_pure_tests$' --no-tests=error --output-on-failure`,
     plus a gtest-filtered run showing both cells PASSED in the binary's own output.
   - Quote the RED output and the GREEN counts in the verify record. Commit C-TEST (only these two files).
-- [ ] T029a [US2] [phase-implementer] **FR-022b's D-001 census cell: write it, prove it RED, make it
+- [X] T029a [US2] [phase-implementer] **FR-022b's D-001 census cell: write it, prove it RED, make it
   GREEN, commit C-TEST2.** Added on 2026-10-22 from T030's finding A-1 (owner ruling; spec
   §Clarifications "Session 2026-10-22 (US2 evidence)"). The owner's autonomy grant of 2026-10-22
   covers the build.
@@ -427,13 +427,13 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - Quote the RED output and the GREEN counts in the verify record. Commit C-TEST2 (only
     `tests/dictionary/lookup_test.cpp`; no closing keyword). If the cell cannot be made GREEN or RED,
     D-001 does not flip (FR-022b).
-- [ ] T029b [US2] [orchestrator] (after T029a) Tick T029a in this file and record its commit hash in
+- [X] T029b [US2] [orchestrator] (after T029a) Tick T029a in this file and record its commit hash in
   the verify record, with the D-001 evidence that T029a's GREEN run completes for T030. The R-11 count
   is then 54 of 54.
 
 ### Evidence before any flip (Edge Cases: "A row is never flipped on a cell nobody ran")
 
-- [ ] T030 [US2] [orchestrator] **Run every flipped row's evidence on the branch** (needs a build ask;
+- [X] T030 [US2] [orchestrator] **Run every flipped row's evidence on the branch** (needs a build ask;
   sandbox-lock check first).
   - **Test rows.** Run every ctest entry of research R-15's map (re-derive the map first with its
     recipe; a new or renamed entry is added here, never dropped), each selected as
@@ -475,25 +475,25 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
 
 ### Catalogue flips (serial: one file; each after T030 and after T012–T014)
 
-- [ ] T031 [US2] [orchestrator] `spec/feature-catalogue.md`, the clean rows **NFR-001, D-001, D-003,
+- [X] T031 [US2] [orchestrator] `spec/feature-catalogue.md`, the clean rows **NFR-001, D-001, D-003,
   D-007** (FR-005). Write Status, /specify, PR, Tests and Verified exactly as data-model §C (each row's
   subsection) has them. The Title is unchanged.
   - D-001 is written only after T029a is GREEN and proven RED (FR-022b); its Tests cell cites that cell.
-- [ ] T032 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-002** (FR-007; after T008). Write the
+- [X] T032 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-002** (FR-007; after T008). Write the
   Title, Spec ref, Status, /specify, PR, Tests and Verified from data-model §C "NFR-002 (reworded)",
   with the FR-020 issue's real number in Verified ("Lapse on record: …").
   - The Tests cell cites only the two records that assess lines and branches, labelled parent repo
     (private) (R-13).
   - This row closes under §VI.6(b) as amended by T016.
-- [ ] T033 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-003, NFR-005, NFR-011** (FR-006).
+- [X] T033 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-003, NFR-005, NFR-011** (FR-006).
   Write the Title, Status, /specify, PR, Tests and Verified from data-model §C, each row's subsection.
   NFR-005's Title is §C's narrowed form, "…in the per-message parse arena and in MemoryStore's
   retrieve() snapshot; …"; NFR-011's drops "C++17".
-- [ ] T034 [US2] [orchestrator] `spec/feature-catalogue.md`, **D-008** (FR-006). Write the FIX version(s)
+- [X] T034 [US2] [orchestrator] `spec/feature-catalogue.md`, **D-008** (FR-006). Write the FIX version(s)
   cell `4.2, 4.4, 5.0SP2, FIXT.1.1 (+ FIX Latest, opt-in build flag); runtime-XML-only versions: L-003-2`,
   and the Status, /specify, PR, Tests and Verified from data-model §C. The existing HTML comment under
   the row stays.
-- [ ] T035 [US2] [orchestrator] `spec/feature-catalogue.md`, the TC rows **TC-003, TC-005, TC-006,
+- [X] T035 [US2] [orchestrator] `spec/feature-catalogue.md`, the TC rows **TC-003, TC-005, TC-006,
   TC-008, TC-012, TC-014, TC-015, TC-017** (FR-006, FR-006a, FR-009, FR-015a).
   - Each FIX version(s) cell becomes research R-3's "Column written" value for that row.
   - TC-005, TC-012, TC-014, TC-015 and TC-017 take their reworded Titles from data-model §C (TC-015's
@@ -504,7 +504,7 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - TC-003's old Verified text, including "Feature 093 does not own this row … stays backlog", is
     replaced (FR-011).
   - TC-017 is written only after T029 is GREEN.
-- [ ] T036 [US2] [orchestrator] `spec/coverage-index.md`, data-model §D (FR-011; after T015). Apply the
+- [X] T036 [US2] [orchestrator] `spec/coverage-index.md`, data-model §D (FR-011; after T015). Apply the
   same-line edits first, each anchored by its text:
   - §4 row 3: the opener becomes `**093; TC-003 done (094 reconciliation):**`;
   - §4 rows 8–11: §D's four replacements;
@@ -512,11 +512,11 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - the two 005 ledger rows: §D's replacements.
   - **Then, last,** insert the **NFR-019 supplemental** paragraph after the NFR-016 supplemental,
     verbatim. This is the `[const §VI.4]` entry, and it must exist before T037 adds the row.
-- [ ] T037 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-013 and NFR-019** (FR-008; after T036).
+- [X] T037 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-013 and NFR-019** (FR-008; after T036).
   - NFR-013: Title `ASIO async I/O transport (Linux and Windows)`, with the Status, /specify, PR, Tests
     and Verified from data-model §C "NFR-013".
   - NFR-019: data-model §C's full row, placed after NFR-014 in "NFRs (additional)".
-- [ ] T038 [US2] [orchestrator] **Census after the flips (SC-001; FR-016).**
+- [X] T038 [US2] [orchestrator] **Census after the flips (SC-001; FR-016).**
   - The census reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8.
   - The only rows whose Status differs from T002's are the 25 in data-model §A/§C, plus NFR-019.
   - Run `tools/brain_inventory.py` again and record the diff against T002's output. Re-run research
@@ -524,7 +524,7 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - R-5's `_status_header` shows the three `dropped(post-v1.0, …` strings with counts 2, 5 and 1.
   - FR-012: `git diff origin/main -- spec/feature-catalogue.md` touches none of the rows NFR-010,
     NFR-004, NFR-008, TC-001, TC-002, TC-004, TC-007, TC-009, TC-010, TC-013.
-- [ ] T039 [US2] [orchestrator] (after T038) `brain/components/dictionary.md` (frontmatter `description:`, the
+- [X] T039 [US2] [orchestrator] (after T038) `brain/components/dictionary.md` (frontmatter `description:`, the
   title, and the "Resolved 2026-10-22" line under the kept heading) and
   `brain/components/nfr-and-tooling.md` (the frontmatter `description:` clause and the "out-of-repo planning tracker" bullet), from
   data-model §F.5's second to fourth bullets, verbatim. The tables and dated notes stay. Then commit

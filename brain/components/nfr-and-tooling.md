@@ -1,7 +1,7 @@
 ---
 type: Component Decision Map
 title: nfr and tooling — why neither gets a subsystem page, and why nfr's status column cannot be trusted
-description: Two catalogue families that are not subsystems. Recorded so the next person does not re-open the question, and so nfr's uniform backlog is not mistaken for fact.
+description: Two catalogue families that are not subsystems. Recorded so the next person does not re-open the question, and so a backlog cell in nfr is read as a lead, not as fact (feature 094 reconciled the rows that had shipped).
 status: stable
 refs:
   - .specify/constitution.md
@@ -54,8 +54,7 @@ independent grounds:
 
 - The "never flips" reading is **refutable from the catalogue alone**: it predicts that no `nfr` row
   can ever read `done`. Run the recipe below and look for one.
-- An out-of-repo planning tracker names a set of these rows as *delivered practice, never flipped*,
-  and schedules the flip as a catalogue edit with **zero code**.
+- Feature 094 (2026-10-22) re-verified each candidate row against the tree and flipped the rows that shipped to `done`, worded to what shipped; the rows it left at `backlog` were checked and are not delivered (its `spec.md` FR-012 lists them).
 
 So the correct handling is not "distrust this column in an unknown direction" — it is:
 
