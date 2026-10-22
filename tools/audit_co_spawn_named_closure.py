@@ -603,7 +603,7 @@ class SiteWalker:
             return
 
         # ⚠️ ONE SITE PER CLOSURE, NOT PER co_spawn. A co_spawn can name several
-        # closures -- one in the token, one in the executor's initializer -- and
+        # closures -- one in the token, one in the executor expression -- and
         # keeping only the first let a long-lived one decide the verdict for a
         # short-lived one in another argument: a false SAFE. Each is recorded
         # under the same (file, line, col), and main() keeps the WORST verdict
@@ -640,7 +640,7 @@ class SiteWalker:
         over-counts.
         """
         found: dict[str, object] = {}
-        for arg in call.get_arguments():
+        for index, arg in enumerate(call.get_arguments()):
             # ⚠️ PRUNE AT LAMBDA BODIES. An unpruned descent walks INTO the spawned
             # lambda's own body and mistakes a closure invoked in there for the
             # spawned argument itself. Measured: it reported
@@ -665,12 +665,16 @@ class SiteWalker:
             # Found by --self-test, which is the arm's entire purpose.
             if kind_of(arg) == ci.CursorKind.LAMBDA_EXPR:
                 continue
-            for d in cls._closures_called_in(arg, set()):
+            # Argument 0 is the executor. It is copied into co_spawn before co_spawn
+            # returns, so a closure called while initialising a named executor
+            # local cannot be reached from the spawned frame: the named-local
+            # follow is not applied there (see _closures_called_in).
+            for d in cls._closures_called_in(arg, set(), follow_local=index != 0):
                 found.setdefault(decl_key(d), d)
         return list(found.values())
 
     @classmethod
-    def _closures_called_in(cls, expr, followed: set[str]) -> list:
+    def _closures_called_in(cls, expr, followed: set[str], follow_local: bool = True) -> list:
         """The lambda-typed VarDecls invoked in `expr`, in source order.
 
         Lambda bodies are pruned (see _named_closure_args). A closure call may sit
@@ -688,6 +692,10 @@ class SiteWalker:
         `followed`. The clang-query cross-check follows ONE hop with the same
         rule, so a longer chain shows up there as ONLY LIBCLANG -- loud, never
         silent.
+
+        `follow_local` is False for the executor argument: the follow applies to
+        the awaitable and token positions only, in both instruments. A closure
+        called directly in the executor expression is still collected.
         """
         out = []
         for node in [expr] + list(_descend(expr, prune_lambda_bodies=True)):
@@ -706,7 +714,7 @@ class SiteWalker:
                 if is_lambda_type(d.type.spelling):
                     out.append(d)
                     break
-        d = value_local(expr)
+        d = value_local(expr) if follow_local else None
         if d is not None and not is_lambda_type(d.type.spelling):
             key = decl_key(d)
             if key not in followed:
@@ -1408,22 +1416,41 @@ void f() {
         [("helper", "SAFE-DRIVEN"), ("lam", "FLAG")],
     ),
     (
-        # The same, with the long-lived closure reached FIRST, through the
-        # executor's initializer -- the order in which keeping only the first
-        # closure hides the FLAG. Mutant: as above.
-        "a closure in the EXECUTOR's initializer does not hide the spawned closure's verdict",
+        # The same, with the long-lived closure reached FIRST, in the executor
+        # expression -- the order in which keeping only the first closure hides
+        # the FLAG. Mutant: as above.
+        "a closure in the EXECUTOR expression does not hide the spawned closure's verdict",
         """
 struct strand_t { };
-strand_t make_strand(io_context&, int);
+strand_t& pick(io_context&, int);
 void f() {
   io_context ioc;
   auto helper = [&]() { return 0; };
-  auto s = make_strand(ioc, helper());
-  { auto lam = [&]() { return 0; }; co_spawn(s, lam(), detached); }
+  { auto lam = [&]() { return 0; }; co_spawn(pick(ioc, helper()), lam(), detached); }
   ioc.run();
 }
 """,
         [("helper", "SAFE-DRIVEN"), ("lam", "FLAG")],
+    ),
+    (
+        # The named-local follow does not apply to the EXECUTOR argument. The
+        # executor is copied into co_spawn before it returns, so a closure called
+        # while initialising a named executor local cannot be reached from the
+        # spawned frame. Mutant: follow the named local at argument 0 as well.
+        "a named EXECUTOR local is not followed into its initializer (#586 shape B)",
+        """
+struct exec_t { };
+struct sess_t { exec_t executor(); };
+int op();
+void f() {
+  io_context ioc;
+  auto session_of = [&](int) -> sess_t& { static sess_t s; return s; };
+  const exec_t exec = session_of(1).executor();
+  auto start = [&]() { co_spawn(exec, op(), detached); };
+  start();
+}
+""",
+        [],
     ),
     (
         # The follow runs to a fixed point. The clang-query matcher follows one

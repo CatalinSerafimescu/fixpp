@@ -76,6 +76,12 @@ import tempfile
 # call is not followed, by the walker's same rule (value_local). The walker
 # chains to a fixed point; a chain longer than one hop therefore shows up here as
 # ONLY LIBCLANG, never as agreement.
+#
+# The follow applies to the awaitable and token arguments (positions 1 and 2),
+# never to the executor (position 0), by the walker's same rule: the executor is
+# copied into co_spawn before co_spawn returns, so a closure called while
+# initialising a named executor local cannot be reached from the spawned frame.
+# A closure call directly in any argument, the executor included, still matches.
 _PRUNE_CS = 'unless(hasAncestor(lambdaExpr(hasAncestor(callExpr(equalsBoundNode("cs"))))))'
 _CLOSURE_CALL = f'cxxOperatorCallExpr(hasOverloadedOperatorName("()"), {_PRUNE_CS})'
 _INIT_CALL = (
@@ -90,10 +96,11 @@ _MOVED_LOCAL = (
     'callExpr(callee(functionDecl(hasAnyName("::std::move", "::std::forward"))), '
     f'argumentCountIs(1), hasArgument(0, {_NAMED_LOCAL}))'
 )
+_FOLLOWED = f'anyOf({_NAMED_LOCAL}, {_MOVED_LOCAL})'
 MATCHER = (
     'callExpr(allOf(callExpr().bind("cs"), callee(functionDecl(hasName("co_spawn"))), '
-    f'hasAnyArgument(anyOf({_CLOSURE_CALL}, hasDescendant({_CLOSURE_CALL}), '
-    f'{_NAMED_LOCAL}, {_MOVED_LOCAL}))))'
+    f'anyOf(hasAnyArgument(anyOf({_CLOSURE_CALL}, hasDescendant({_CLOSURE_CALL}))), '
+    f'hasArgument(1, {_FOLLOWED}), hasArgument(2, {_FOLLOWED}))))'
 )
 LOC_RE = re.compile(r'^(/[^:]+):(\d+):(\d+): note: "root" binds here', re.MULTILINE)
 # The message only, without the file:line:col prefix, so identical diagnostics from
@@ -306,6 +313,20 @@ void f(asio::io_context& ex, int out) {
   auto make = [&](int) { return op(); };
   auto aw = make(out);
   asio::co_spawn(ex, std::move(aw), handler());  // SITE
+}
+""",
+    ),
+    (
+        # The named-local follow does not apply to the EXECUTOR argument, by the
+        # walker's same rule. Mutant: follow the named local at argument 0 too.
+        "a named EXECUTOR local is not followed into its initializer (#586 shape B)",
+        """
+struct exec_t { exec_t(); exec_t(const exec_t&); ~exec_t(); };
+struct sess_t { exec_t executor(); };
+void f(int who) {
+  auto session_of = [&](int) -> sess_t& { static sess_t s; return s; };
+  const exec_t exec = session_of(who).executor();
+  asio::co_spawn(exec, op(), handler());
 }
 """,
     ),
