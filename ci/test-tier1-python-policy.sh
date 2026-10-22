@@ -1164,8 +1164,10 @@ SENTINEL
   # 37 -> 40 (fixpp#448): two allocation-gate steps + the unguarded outcome sentinel
   # that proves they ran. The pin demands a deliberate
   # look before this number moves, so here it is, recorded rather than asserted:
-  # both sit at indices 23-24, BEFORE the pytest pair at 33-34, so the question the pin
-  # asks is live. They cannot reach it — neither writes GITHUB_ENV or GITHUB_PATH,
+  # both sit BEFORE the pytest pair, so the question the pin asks is live (re-derive
+  # the step order with: python3 -c 'import yaml; [print(i, s.get("name")) for i, s
+  # in enumerate(yaml.safe_load(open(".github/workflows/tier1.yml"))["jobs"]["linux"]["steps"])]').
+  # They cannot reach it — neither writes GITHUB_ENV or GITHUB_PATH,
   # neither pip-installs, neither mutates the build tree (one reads `ctest -N` output,
   # the other runs already-built binaries), and both are `if:`-guarded to
   # linux-clang-release. They CAN fail the job before python runs, which is intended:
