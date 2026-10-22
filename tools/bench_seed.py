@@ -4,14 +4,20 @@
   bench_seed.py [--repo DIR] [--allow-dirty] <current.json> <baseline.json>
 
 Copies Google Benchmark JSON (`--benchmark_format=json`) to <baseline.json>
-with ONE key added: `context.git_sha`, the full SHA of HEAD in DIR (default:
-the current directory). Every other byte is what Google Benchmark wrote.
+with `context.git_sha` added: the full SHA of HEAD in DIR (default: the
+current directory). Every other byte is what Google Benchmark wrote, except
+`context.git_dirty` under --allow-dirty (below).
 
 WHY. A baseline seeded mid-PR and then invalidated by a later commit of the same
 PR describes code that never shipped (#276). With the seeding commit recorded,
 "did anything after it touch what this baseline measures?" is one command:
 
     git log --name-only <git_sha>..HEAD -- <paths the baseline covers> ':!bench/baselines'
+
+That range means "after seeding" only while <git_sha> is an ancestor of HEAD
+(`git merge-base --is-ancestor <git_sha> HEAD`): ask it on the PR branch. After a
+squash merge the seeding commit is off `main`, so end the range at the PR's head
+(`git fetch origin pull/<N>/head`) instead of at `main`.
 
 A baseline WITHOUT the field has an unknown seeding commit. Do not backfill one:
 a SHA written after the fact is a guess presented as a record.

@@ -37,6 +37,9 @@ trap 'rm -rf "$TMP"' EXIT
 # Hermetic git: no inherited repository, no user/system config.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+# Stop repository discovery at the scratch root, so a TMPDIR that sits inside
+# some checkout cannot make S8's "not a repository" find one above it.
+export GIT_CEILING_DIRECTORIES="$TMP"
 G() { git -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
 
 # Checked at the end against what actually ran: a commented-out or early-exiting
@@ -50,6 +53,10 @@ CMP="$CMP_REAL"
 # ── fixtures ─────────────────────────────────────────────────────────────────
 # Formatted as Google Benchmark writes it: two-space indent, `%.17g`-style
 # exponents, an escaped non-ASCII character. json.dump would rewrite all three.
+# The stddev rows are NONZERO on purpose: Google Benchmark writes 0.0 for
+# identical repetitions, but bench_compare.py's legacy mode divides by every
+# baseline row and raises ZeroDivisionError on a 0.0 one. That is its own
+# defect, not this pin's subject; keep it nonzero so S10 tests the key alone.
 gbfix() {
   cat > "$1" <<'JSON'
 {
