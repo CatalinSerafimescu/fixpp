@@ -413,7 +413,11 @@ tier1_required_needs = jobs["tier1-required"]["needs"]
 # run is the dead-call-site shape this pin already guards for the derive script;
 # it was measured on the new install-witness harness (replace the invocation with
 # an echo and the job stays green, the negative layouts stop being exercised).
-ci_pin_runs = "\n".join(str(s.get("run", "")) for s in jobs["ci-script-pins"]["steps"])
+ci_pin_steps = [
+    {"name": str(s.get("name", "")), "keys": sorted(str(k) for k in s.keys()),
+     "run": str(s.get("run", ""))}
+    for s in jobs["ci-script-pins"]["steps"]
+]
 
 # #270 Gate B r1, F1. `python-wheel-build`'s CONTAINER compile does not inherit
 # the runner's environment, so CONAN_HOME and the four
@@ -534,7 +538,7 @@ out = {
     "linux_runs": linux_runs,
     "decide_run": decide_run,
     "tier1_required_needs": tier1_required_needs,
-    "ci_pin_runs": ci_pin_runs,
+    "ci_pin_steps": ci_pin_steps,
     "push_keys": push_keys,
     "push_branches": push_branches,
     "linux_matrix_keys": linux_matrix_keys,
@@ -1551,8 +1555,11 @@ assert_tier1_required_needs() {
 # replacing `bash ci/test-python-install-witness.sh` with an echo left this pin,
 # and the whole job, green while W1/W2/W3/W5 stopped being exercised.
 #
-# Same invokes-vs-mentions rule as everywhere else: the command must START a
-# line, so an echo naming it does not satisfy the census.
+# Each row's step is the one ci-script-pins step whose run: names the harness.
+# Through ci/workflow_step_pin.py's rule, that step's key set must be exactly
+# {name, run}, and its run: exactly `bash <h>`, preceded only by the setup line
+# CI_PIN_SETUP below names for that row. So an echo naming it, a dead branch, an
+# early exit, an `|| true`, a step if: and a continue-on-error each fail the census.
 CI_PIN_HARNESSES=(
   "ci/test-restore-conan-cache.sh"
   "ci/test-ccache-scripts.sh"
@@ -1624,15 +1631,60 @@ CI_PIN_HARNESSES=(
   "ci/test-packaging-instrumented-skip.sh"
 )
 
+# The one setup line a row's step may run before `bash <h>`, as <h>|<line>. A row
+# absent here runs `bash <h>` alone.
+CI_PIN_SETUP=(
+  'ci/test-tier1-python-policy.sh|python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml'
+  'ci/test-sanitized-deps.sh|python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml'
+  'ci/test-swig-include-deps.sh|pip install --quiet swig ninja'
+)
+
 assert_ci_pin_call_sites() {
-  local json="$1" case_id="$2"
-  local runs h
-  runs="$(echo "$json" | jq -r '.ci_pin_runs // ""')"
-  [ -n "$runs" ] || fail "$case_id: the ci-script-pins job has no run: text at all"
-  for h in "${CI_PIN_HARNESSES[@]}"; do
-    grep -qE "^[[:space:]]*bash ${h//\//\\/}([[:space:]]|\$)" <<<"$runs" \
-      || fail "$case_id: ci-script-pins does not INVOKE \`bash $h\` — the harness would never run, so its assertions have no durable coverage (a mention inside an echo does not count)"
-  done
+  local json="$1" case_id="$2" steps out
+  steps="$(echo "$json" | jq -c '.ci_pin_steps // []')"
+  out="$(CI_PIN_STEPS="$steps" python3 - "$repo_root/ci" "${#CI_PIN_SETUP[@]}" \
+           "${CI_PIN_SETUP[@]}" "${CI_PIN_HARNESSES[@]}" <<'PY'
+import json, os, re, sys
+
+sys.path.insert(0, sys.argv[1])
+from workflow_step_pin import logical_run_lines, step_pin_check
+
+n = int(sys.argv[2])
+setup = dict(row.split("|", 1) for row in sys.argv[3:3 + n])
+harnesses = sys.argv[3 + n:]
+steps = json.loads(os.environ["CI_PIN_STEPS"])
+errors = [f"CI_PIN_SETUP names {h}, which is not a CI_PIN_HARNESSES row"
+          for h in setup if h not in harnesses]
+if not steps:
+    errors.append("the ci-script-pins job has no steps at all")
+for h in harnesses:
+    names = re.compile(r"(?<![\w./-])" + re.escape(h) + r"(?![\w./-])")
+    hits = [st for st in steps if any(names.search(l) for l in logical_run_lines(st["run"]))]
+    if not hits:
+        errors.append(f"ci-script-pins does not INVOKE `bash {h}`: no step's run: names it, "
+                      "so the harness would never run")
+        continue
+    if len(hits) > 1:
+        errors.append(f"ci-script-pins: {len(hits)} steps name `{h}`, expected exactly 1")
+        continue
+    st = hits[0]
+    step = dict.fromkeys(st["keys"])
+    if "run" in step:
+        step["run"] = st["run"]
+    want = ([setup[h]] if h in setup else []) + [f"bash {h}"]
+    bad_keys, diff = step_pin_check(step, want)
+    if bad_keys:
+        errors.append(f"ci-script-pins step {st['name']!r}, which invokes `bash {h}`: "
+                      f"key set differs from name/run by {bad_keys}")
+    if diff:
+        errors.append(f"ci-script-pins does not INVOKE `bash {h}` unconditionally: "
+                      f"step {st['name']!r} run: {diff}")
+if errors:
+    print(" | ".join(errors))
+    sys.exit(1)
+print(f"{len(harnesses)} harness step(s) pinned")
+PY
+)" || fail "$case_id: $out"
 }
 
 assert_bench_base_runner_manifest_calls() {
@@ -2072,7 +2124,9 @@ echo "PASS: SWIG install steps — $swig_steps"
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=126  # M138-M140 (the 'Install SWIG' steps' key set and run: golden,
+MUTANTS_DECLARED=131  # M141-M145 (a ci-script-pins harness step that stops running or
+                     # gating with the call text intact, one mutant per shape; fixpp#529) +
+                     # M138-M140 (the 'Install SWIG' steps' key set and run: golden,
                      # one mutant per shape; fixpp#607) +
                      # M131-M137 (the SWIG minimum's literals, one mutant each, plus
                      # an unpinned install; fixpp#607) +
@@ -2765,6 +2819,51 @@ old = "        run: bash ci/test-packaging-instrumented-skip.sh\n"
 new = "        run: echo \"bash ci/test-packaging-instrumented-skip.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
+'
+
+  # M141-M145 (fixpp#529): the census rows' steps keep `bash <h>` in their text and
+  # stop running it or gating on it, one shape per mutant, each on a different row.
+  mutate_workflow M141 "the SWIG include-deps call inside a dead branch" "does not INVOKE .bash ci/test-swig-include-deps\\.sh. unconditionally: .* line 2 is 'if false; then'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          bash ci/test-swig-include-deps.sh\n"
+new = "          if false; then\n            bash ci/test-swig-include-deps.sh\n          fi\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+  mutate_workflow M142 "the bench-seed step disabled by a step if:" "invokes .bash ci/test-bench-seed\\.sh.: key set differs from name/run by \\['if'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-bench-seed.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "        if: false\n" + old))
+'
+  mutate_workflow M143 "the packaging instrumented-skip step made non-gating" "invokes .bash ci/test-packaging-instrumented-skip\\.sh.: key set differs from name/run by \\['continue-on-error'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-packaging-instrumented-skip.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "        continue-on-error: true\n" + old))
+'
+  mutate_workflow M144 "the first-party-walk step exits before its call" "does not INVOKE .bash ci/test-first-party-walk\\.sh. unconditionally: .* line 1 is 'exit 0'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-first-party-walk.sh\n"
+new = "        run: |\n          exit 0\n          bash ci/test-first-party-walk.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+  mutate_workflow M145 "the bench-gate call swallowed by || true" "does not INVOKE .bash ci/test-bench-gate\\.sh. unconditionally: .* line 1 is 'bash ci/test-bench-gate\\.sh \\|\\| true'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-bench-gate.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "        run: bash ci/test-bench-gate.sh || true\n"))
 '
 
   # M107 (fixpp#530): the SAME dead-call-site shape, on the ODR census harness.
