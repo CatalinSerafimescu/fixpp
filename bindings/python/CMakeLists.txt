@@ -36,6 +36,13 @@ find_package(Python3 REQUIRED COMPONENTS Development.Module
 
 set_property(SOURCE fixpp.i PROPERTY CPLUSPLUS ON)
 set_property(SOURCE fixpp.i PROPERTY USE_TARGET_INCLUDE_DIRECTORIES ON)
+# #600 — SWIG writes its own depfile, so the wrapper is regenerated when any
+# header fixpp.i reaches through %include changes, a header added to it later
+# included. Without it the SWIG step depends on fixpp.i alone: an incremental
+# tree recompiles the old wrapper and the module serves the old constants and
+# declarations. Re-check: in an existing tree, change a constant in an %include'd
+# header, rebuild fixpp_py, and read the new value from the module.
+set_property(SOURCE fixpp.i PROPERTY USE_SWIG_DEPENDENCIES TRUE)
 
 # Direct SWIG's generated fixpp.py to lib/ so it sits next to _fixpp.so;
 # `import fixpp` then loads the wrapper, which loads _fixpp.so from the
