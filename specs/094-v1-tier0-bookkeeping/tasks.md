@@ -372,14 +372,14 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
 
 ### Tests for User Story 2 (FR-022; write first)
 
-- [ ] T027 [P] [US2] [phase-implementer] **The acceptor cell**, in `tests/session/test_enum_validation_logon.cpp`.
+- [X] T027 [P] [US2] [phase-implementer] **The acceptor cell**, in `tests/session/test_enum_validation_logon.cpp`.
   - Name: `EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing`, next to
     `InDomainEncryptMethod_EstablishesAsToday`.
   - It feeds `make_fix44_logon_frame(1, "TW", "ISLD", 30, /*encrypt_method=*/2)` and asserts the state
     is `Disconnected` and `transport.sent_frames()` is empty.
   - The file is already a source of `session_pure_tests` (`tests/session/CMakeLists.txt`), so no ctest
     entry is added. Its licence line (`// SPDX-License-Identifier: AGPL-3.0-or-later`) is unchanged.
-- [ ] T028 [P] [US2] [phase-implementer] **The initiator cell**, in `tests/session/fsm_matrix_witness_test.cpp`.
+- [X] T028 [P] [US2] [phase-implementer] **The initiator cell**, in `tests/session/fsm_matrix_witness_test.cpp`.
   - Name: `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`.
   - At LogonSent it feeds a Logon built with
     `build_frame("A", 1, kTarget, kSender, kBeginStr, "98=2\x01" "108=30\x01")` and asserts the state is
@@ -387,7 +387,7 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - Same `session_pure_tests` binary; no ctest entry; licence line unchanged.
   - **Do not edit** the stale "(with Logout in US4)" comment in `src/session/session.cpp`'s
     `on_inbound_logon_sent_`. It is a P3 note (plan.md §Gate A): editing it would break SC-005.
-- [ ] T029 [US2] [phase-implementer] **RED proof for both cells, then GREEN, then commit C-TEST**
+- [X] T029 [US2] [phase-implementer] **RED proof for both cells, then GREEN, then commit C-TEST**
   (needs a build ask).
   - In a scratch copy (`git archive HEAD | tar -x -C "$(mktemp -d)"`), delete the
     `if (invalid_encrypt_method_seen)` block that returns `session_invalid_logon` in `interpret_logon`
