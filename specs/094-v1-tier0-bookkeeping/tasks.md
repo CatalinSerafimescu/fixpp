@@ -632,26 +632,26 @@ prints `PASS`.
 
 ### Instruments (each with its known positive)
 
-- [ ] T044 [P] [orchestrator] **R-12 sweep re-run (SC-003; FR-004).** Run R-12's four `git grep` commands
+- [X] T044 [P] [orchestrator] **R-12 sweep re-run (SC-003; FR-004).** Run R-12's four `git grep` commands
   ((a) the dropped-scope terms, (a) the io_uring grep, (b), (c)) on the branch, plus R-12 (c)'s syntax-independent licence sweep. Every hit falls in a "keep", "header", "other concept" or "pattern FP"
   class of R-12, or is an applied "edit". Record the count per class in the verify record, beside
   T003's base counts.
-- [ ] T045 [P] [orchestrator] **Line citations and comment claims (quickstart §5).**
+- [X] T045 [P] [orchestrator] **Line citations and comment claims (quickstart §5).**
   - `python3 tools/check_line_citations.py --range origin/main..HEAD` and `--shift-audit origin/main..HEAD`
     both pass; frozen `specs/<id>/` citers are reported, not charged.
   - `python3 "$W/.claude/scripts/check-comment-claims.py" --root "$PWD" --base origin/main` passes. Also
     read the claims the lexical check cannot see: the FR-022 and FR-022b cells' comments and the C-607 comment.
-- [ ] T046 [P] [orchestrator] **B&L and brain freshness.**
+- [X] T046 [P] [orchestrator] **B&L and brain freshness.**
   - `check_bl_delta.py gate` sees the L-094-1 delta; `check_bl_citations.py gate` reports 0 dangling.
   - The in-repo freshness half: run what `.github/workflows/brain-freshness.yml` runs, derived from the
     workflow, not from a copied list.
   - `"$W/research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh"` passes; record its execution
     count.
-- [ ] T047 [orchestrator] **Every tier1 source-audit job, run locally.** Read
+- [X] T047 [orchestrator] **Every tier1 source-audit job, run locally.** Read
   `.github/workflows/tier1.yml` with a YAML parser. For `ci-script-pins`, `check-layers`,
   `co-spawn-closure-audit` and any other ungated audit job, run each `run:` block as Actions would
   (`bash -e`). Record a job → rc table in the verify record. Every step must run and pass.
-- [ ] T048 [P] [orchestrator] **Closing-keyword check over every commit message.**
+- [X] T048 [P] [orchestrator] **Closing-keyword check over every commit message.**
   - Positive controls first: seed `Closes #607` and
     `Resolves https://github.com/CatalinSerafimescu/fixpp/issues/614` into a scratch copy of one
     message and show the grep hits both (the second is the full-URL form GitHub also links).
@@ -660,7 +660,7 @@ prints `PASS`.
 
 ### `/speckit-verify` (pipeline step 12, `[const §XVII.8]`)
 
-- [ ] T049 [orchestrator] **Run `/speckit-verify 094-v1-tier0-bookkeeping`.** It writes
+- [X] T049 [orchestrator] **Run `/speckit-verify 094-v1-tier0-bookkeeping`.** It writes
   `.specify/decisions/094-v1-tier0-bookkeeping-verify.md`, with a GREEN or YELLOW verdict. Builds need
   an owner ask, and the sandbox lock is checked first (Execution rules).
   - Its evidence list is quickstart §1–§5, at the post-simplify head:
@@ -710,9 +710,9 @@ prints `PASS`.
     - **MSVC**: stated plainly as not run locally (Execution rules).
   - A row whose evidence did not hold is taken out of the flip set (FR-015), its row reverted to
     `backlog` by a docs task, and the owner told.
-- [ ] T050 [orchestrator] **R-11 re-run**: 54 of 54 entries exist (53 before FR-022b); both negative controls report
+- [X] T050 [orchestrator] **R-11 re-run**: 54 of 54 entries exist (53 before FR-022b); both negative controls report
   MISSING. Recorded in the verify record.
-- [ ] T051 [orchestrator] `codegraph sync` in this tree after the last code-changing commit; read back
+- [X] T051 [orchestrator] `codegraph sync` in this tree after the last code-changing commit; read back
   `codegraph status --json` (`projectPath` is this tree, `fileCount` nonzero).
 
 ### Owner report and PR text
