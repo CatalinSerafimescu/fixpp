@@ -19,22 +19,36 @@ absolute workspace root instead.
   postv1 **8**.
 - The only rows whose Status differs between the two runs are the 25 in data-model §A/§C, plus the new
   NFR-019.
-- Known positive first: a copy with one row mutated moves the count by exactly one.
+- Known positive first (T002, research R-4): a mutant copy with NFR-001 set to `done` and W-015 set to
+  the drop form reads open 92 and postv1 1.
 
 ## 2. Witness tests (SC-002)
 
 Each flipped row's Tests cell names its binaries. Run them on a fresh build of this branch:
 
-- `ctest --preset <preset> -R '<entry>' --no-tests=error --output-on-failure` for each ctest entry in
-  research R-3 and R-11, on the preset CI runs it on. The mallocnesia gates (NFR-005) run on
-  `linux-gcc-release` and `linux-clang-release` (the `if:` of the #448 steps); run both, or record
-  which one was skipped and why. The rest run on `linux-clang-debug`.
-- Entries: `session_inbound_frame_dispositions`, `session_tc_reject` (has no labels, so `-R` only),
-  `session_pure_tests` (incl. the TC-017 `EnumValidationLogonTest` cells and FR-022's two cells),
-  `interop_parity_us3_tests`, `session_inbound_poss_resend`, `session_reset_on_lifecycle`,
-  `session_interpret_logon_encrypt_method`, `session_resend_reply_possdup`,
-  `session_538_store_lookup_after_reset`, `capi_inbound_frame_dispositions`, `dictionary_pure_tests`,
-  the codegen and transport entries.
+- `ctest --preset <preset> -R '^<entry>$' --no-tests=error --output-on-failure` for each ctest entry
+  in research R-15's map (test file → target → ctest NAME), re-derived with its recipe first, on the
+  preset CI runs it on. The mallocnesia gates (NFR-005) run on `linux-gcc-release` and
+  `linux-clang-release` (the `if:` of the #448 steps); run both, or record which one was skipped and
+  why. The rest run on `linux-clang-debug`.
+- Entries (R-15):
+  - wire and store: `wire_pure_tests`, `store_memory_zero_allocator_calls`, `store_memory_capacity`;
+  - dictionary: `dictionary_pmr_allocation_test`, `dictionary_orchestra_tests`,
+    `dictionary_pure_tests`, `delimiter_census`, `dictionary_dict_enum_census_test`,
+    `dictionary_load_any_tests`;
+  - codegen: `codegen_pure_tests`, `codegen_077_v42_vt11_completeness_c4_test`,
+    `codegen_vlatest_tests`, `fixpp::dict::read-tier-byte-diff` (a `cmake -P` script, not gtest),
+    `codegen_determinism_test`;
+  - transport: `transport_smoke`, `transport_asio_plain_transport`, `transport_listener_acceptor`,
+    `transport_cancellation_propagation`;
+  - C ABI: `capi_dictionary_load`, `capi_inbound_frame_dispositions`;
+  - session: `session_inbound_frame_dispositions`, `session_tc_reject` (has no labels),
+    `session_pure_tests` (incl. the TC-017 `EnumValidationLogonTest` cells and FR-022's two cells),
+    `session_resend_reply_possdup`, `session_538_store_lookup_after_reset`,
+    `session_inbound_poss_resend`, `session_reset_on_lifecycle`,
+    `session_interpret_logon_encrypt_method`;
+  - interop: `interop_parity_us3_tests`;
+  - `-L mallocnesia` (NFR-005), with the `alloc_guard_*_positive_control_mallocnesia` controls.
 - CI-evidence rows (NFR-001/003/005/013) cite Tier 1 run `39594667883` and Tier 2 run `39594667975`
   (`push:main` at `9b176090`, both success). Re-read the job and step names, and the `if:` lines, on
   this branch. Re-read branch protection:
@@ -75,7 +89,7 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
 
 ## 4. Cross-surface sweep (SC-003)
 
-- Run research R-12's `git grep`s. Known positives first, on `origin/main`: (a) must report
+- Run research R-12's four `git grep` commands. Known positives first, on `origin/main`: (a) must report
   `README.md:15` and, through its widened terms, `.specify/constitution.md:374` (§I.2); (b) must report
   `brain/components/dictionary.md:75`.
 - On the branch, every hit must fall in a "keep", "header", "other concept" or "pattern FP" class of

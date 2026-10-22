@@ -6,7 +6,7 @@
 **Input**: `specs/094-v1-tier0-bookkeeping/`:
 - spec.md (FR-001…FR-023, including FR-003a/b/c, FR-006a, FR-013a/b and FR-015a/b; SC-001…SC-006; User Stories 1–3);
 - plan.md (Gate A, Constitution Check, Phases, Risks);
-- research.md (R-1…R-14);
+- research.md (R-1…R-15);
 - data-model.md (§A…§H, the exact target text of every changed row, clause and surface);
 - quickstart.md (§1…§5, the re-verification recipe).
 
@@ -35,7 +35,8 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
     `spec/coverage-index.md`, `spec/behaviors-and-limitations.md` (L-094-1), `.specify/constitution.md`,
     `.specify/architecture.md`, `.specify/api-contract.md`, the `.specify/2*-*.md` status notes,
     `brain/**`, `README.md`, `docs/src/intro.md`, `CHANGELOG.md`, `specs/094-v1-tier0-bookkeeping/*.md`,
-    and the decision records. It files the GitHub issues and runs read-only instruments, builds and tests.
+    `CLAUDE-history.md` and `CLAUDE.md` (post-merge, T068), and the decision records. It files the
+    GitHub issues and runs read-only instruments, builds and tests.
   - `[phase-implementer]` makes EVERY change to `src/**`, `include/**`, `tests/**`, `conanfile.py`,
     `cmake/**` and `tools/capi_freeze.sha256`, including comment-only lines and every scratch mutant.
   - The orchestrator never writes those files by any tool, python or sed through Bash included.
@@ -51,21 +52,31 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
   - "Where the text says 'same-line', the edit replaces or appends text inside an existing line and
     adds no line."
   - Before replacing, `grep -F` the before-text: if it does not match byte for byte, stop and report.
+  - If the before-text is not unique in its file (`grep -cF` prints more than 1), a whole-file
+    `grep -F` does not identify the line. Anchor it to its line instead: `sed -n '<N>p' <file>` must
+    print the line holding the before-text, where `<N>` is the data-model line guide (at `9b176090`;
+    re-derived if `git diff 9b176090 HEAD -- <file>` is not empty). The edit then touches that line
+    only. To re-derive: `grep -nF '<before-text>' <file>` lists the candidate lines, and the one in the
+    section data-model names is the target. Same-line edits never move a line, so only a line-adding
+    edit above the target (the SIR, the NFR-019 row and paragraph, Z-9, the L-094-1 section, the
+    CHANGELOG entry) shifts a guide.
 - **No placeholder number is ever committed.** Before every commit (tasks.md excluded, since it names
   what it replaces), `git grep -nE 'fixpp#<|<N-' -- ':!specs/094-v1-tier0-bookkeeping/tasks.md'` must
-  print nothing once T013 has run. The RATIFIED templates of data-model §E.1/§E.2/§E.8 (`#<n>`,
+  print nothing once T011 has run. The RATIFIED templates of data-model §E.1/§E.2/§E.8 (`#<n>`,
   `<sign-off date>`, `<date>`, `<tally>`) stay in the bundle as templates. They must never appear in
   `.specify/constitution.md` or `CHANGELOG.md` (T063 checks this).
 - **No closing keyword.** No commit message, issue body or PR body puts "close", "fix" or "resolve"
   (in any form) next to #607, #612, #614 or the FR-018, FR-020, FR-021 or FR-023 issues, and that
   includes a negation such as "does not close" (FR-019). This PR closes no issue.
-- **Commit plan:**
-  - the docs commits (orchestrator);
+- **Commit plan, in execution order:**
+  - the bundle's real issue numbers (T011, `specs/` only; orchestrator);
+  - the US1 docs commits (T019, T026; orchestrator);
+  - C-TEST (T029: the two FR-022 cells);
+  - the US2 docs commit (T039; orchestrator);
   - C-SPDX (T040: the 53 files, the `conanfile.py` licence line, the RPM licence line,
     `tools/capi_freeze.sha256`);
   - C-607 (T041: the `conanfile.py` comment only, `Refs #607`), its own commit per FR-013b;
-  - C-TEST (T029: the two FR-022 cells);
-  - the `tasks.md` ticks;
+  - the `tasks.md` ticks (T069, T056, T062);
   - C-RATIFY (T063), the LAST commit before merge.
 - **Builds and test runs need an owner ask ([const §XVII.7])**, unless a standing owner grant covers
   the named phase. Record each ruling in the verify record.
@@ -131,7 +142,8 @@ shown able to report non-zero.
     files. Use the system `grep`: `xargs` cannot run a shell function.
   - R-8's `git grep -l "SPDX-License-Identifier: Apache-2.0" -- ':!src/' ':!include/' ':!specs/'` lists
     40 (37 under `tests/`, 3 under `bench/`).
-  - R-12's recipe, (a), the io_uring grep, (b) and (c), with its known positives: (a) reports
+  - R-12's recipe, its four `git grep` commands ((a) the dropped-scope terms, (a) the io_uring grep,
+    (b) and (c)), with its known positives: (a) reports
     `README.md:15` and `.specify/constitution.md:374`; (b) reports `brain/components/dictionary.md:75`.
     Record the counts beside R-12's.
 - [ ] T004 [P] [orchestrator] **Residuals on record (R-10; Edge Cases).**
@@ -184,15 +196,19 @@ record of these numbers wait on this phase.
   - Labelled at creation. Record the number.
 - [ ] T011 [orchestrator] **Fill the real numbers into the bundle** (FR-018, FR-020, FR-021, FR-023).
   - Before editing, run the placeholder grep from the Execution rules. It must list the bundle's
-    current sites in `spec.md`, `plan.md` and `data-model.md`; that is its known positive.
+    current sites in `spec.md`, `plan.md` and `data-model.md`, exactly the sites below (one grep line
+    each; L-094-1's two tokens share one line); that is its known positive.
   - Replace each `fixpp#<…>` / `<N-…>` token with the real number of the issue it stands for:
-    - in `specs/094-v1-tier0-bookkeeping/spec.md`, the FR-023 issue in §Clarifications (round 3) and in
-      FR-023;
+    - in `specs/094-v1-tier0-bookkeeping/spec.md`, the FR-023 issue in §Clarifications (round 3,
+      the N3-2 answer);
     - in `specs/094-v1-tier0-bookkeeping/plan.md`, the FR-023 issue in the round-3 RC-2 bullet, the
       Constitution Check §III.4 row and the Result line;
-    - in `specs/094-v1-tier0-bookkeeping/data-model.md`: the FR-020 issue in §C NFR-002's Verified cell
-      and the note under it; the FR-018 issue in §F.6's lead sentence and twice in L-094-1; the FR-023
-      issue in §G's comment block and the note under it.
+    - in `specs/094-v1-tier0-bookkeeping/data-model.md`: the FR-020 issue in §C NFR-002's Verified
+      cell; the FR-018 issue twice in L-094-1 (§F.6, one line); the FR-023 issue in §G's comment
+      block.
+  - The sentences that talk about a placeholder (spec FR-023, the notes under data-model §C NFR-002,
+    §F.6 and §G) name it in words, such as "the FR-023 issue-number placeholder", and carry no token,
+    so they read correctly after the fill and the grep does not list them.
   - Add the FR-021 issue's number to research R-8 ("Out of scope, on record"), and all four numbers to
     research R-10 ("New, filed at implement") in `specs/094-v1-tier0-bookkeeping/research.md`.
   - Afterwards the grep prints nothing. Commit, `specs/` only, with no closing keyword.
@@ -280,6 +296,10 @@ is byte-unchanged.
   - :222's last cell becomes `Post-1.0 (constitution v4.0)`.
   - :249's third cell becomes `` 1 (`make`) — post-1.0, on a type derived from the v1.0 anchor (constitution v4.0) ``.
   - :220 is unchanged (§F.2: "no change").
+  - Locate every target line with `sed -n '<N>p' .specify/api-contract.md` and confirm the printed
+    line is the row §F.2 names before editing it (Execution rules, non-unique before-texts).
+    `Stable from v1.0` and `` 1 (`make`) `` each occur more than once in the file, so a whole-file
+    `grep -F` cannot tell :222 or :249 from the other hits.
 - [ ] T022 [P] [US1] [orchestrator] The design-doc status headers, data-model §F.3, same-line, verbatim:
   `.specify/2j-controlplane.md:3`, `.specify/2l-tap.md:5` and `:54`, `.specify/2m-pybind.md:5`,
   `.specify/2i-capi.md:3`.
@@ -357,16 +377,29 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
 
 - [ ] T030 [US2] [orchestrator] **Run every flipped row's evidence on the branch** (needs a build ask;
   sandbox-lock check first).
-  - **Test rows.** Run quickstart §2's ctest entries on the preset CI runs each on, with
-    `--no-tests=error`, reading every named test's PASSED from the binary's output:
-    - on `linux-clang-debug`: `session_inbound_frame_dispositions`, `session_tc_reject` (`-R` only; it
-      has no labels), `session_pure_tests`, `interop_parity_us3_tests`, `session_inbound_poss_resend`,
-      `session_reset_on_lifecycle`, `session_interpret_logon_encrypt_method`,
-      `session_resend_reply_possdup`, `session_538_store_lookup_after_reset` (filter needs the `Stores/`
-      prefix), `capi_inbound_frame_dispositions`, `dictionary_pure_tests`, and the codegen and transport
-      entries;
+  - **Test rows.** Run every ctest entry of research R-15's map (re-derive the map first with its
+    recipe; a new or renamed entry is added here, never dropped), each selected as
+    `ctest --preset linux-clang-debug -R '^<NAME>$' --no-tests=error --output-on-failure`, reading every
+    named test's PASSED from the binary's output (the tier1 `linux` `-LE packaging` step runs all of
+    them on every leg; `linux-clang-debug` is the local leg):
+    - wire and store: `wire_pure_tests`, `store_memory_zero_allocator_calls`, `store_memory_capacity`;
+    - dictionary: `dictionary_pmr_allocation_test`, `dictionary_orchestra_tests`,
+      `dictionary_pure_tests`, `delimiter_census`, `dictionary_dict_enum_census_test`,
+      `dictionary_load_any_tests`;
+    - codegen: `codegen_pure_tests`, `codegen_077_v42_vt11_completeness_c4_test`,
+      `codegen_vlatest_tests` (compiles under `FIXPP_CODEGEN_FIX_LATEST`, default ON),
+      `fixpp::dict::read-tier-byte-diff` (a `cmake -P` script, not gtest), `codegen_determinism_test`;
+    - transport: `transport_smoke`, `transport_asio_plain_transport`, `transport_listener_acceptor`,
+      `transport_cancellation_propagation`;
+    - C ABI: `capi_dictionary_load`, `capi_inbound_frame_dispositions`;
+    - session: `session_inbound_frame_dispositions`, `session_tc_reject` (no labels),
+      `session_pure_tests`, `session_resend_reply_possdup`, `session_538_store_lookup_after_reset`
+      (a gtest filter needs the `Stores/` prefix), `session_inbound_poss_resend`,
+      `session_reset_on_lifecycle`, `session_interpret_logon_encrypt_method`;
+    - interop: `interop_parity_us3_tests`;
     - `ctest -L mallocnesia --no-tests=error` on `linux-gcc-release` and `linux-clang-release` (the
-      `if:` of the #448 steps); run both, or record which was skipped and why.
+      `if:` of the #448 steps), including the `alloc_guard_*_positive_control_mallocnesia` controls;
+      run both, or record which was skipped and why.
   - **CI rows (FR-015).**
     - `gh run view 39594667883` and `gh run view 39594667975` must read success at `9b176090`.
     - Re-read on this branch the tier1/tier2 job names, step names and `if:` lines the NFR-001, NFR-003,
@@ -507,8 +540,8 @@ prints `PASS`.
 
 ### Instruments (each with its known positive)
 
-- [ ] T044 [P] [orchestrator] **R-12 sweep re-run (SC-003; FR-004).** Run the three `git grep`s plus the
-  io_uring grep on the branch. Every hit falls in a "keep", "header", "other concept" or "pattern FP"
+- [ ] T044 [P] [orchestrator] **R-12 sweep re-run (SC-003; FR-004).** Run R-12's four `git grep` commands
+  ((a) the dropped-scope terms, (a) the io_uring grep, (b), (c)) on the branch. Every hit falls in a "keep", "header", "other concept" or "pattern FP"
   class of R-12, or is an applied "edit". Record the count per class in the verify record, beside
   T003's base counts.
 - [ ] T045 [P] [orchestrator] **Line citations and comment claims (quickstart §5).**
@@ -527,9 +560,10 @@ prints `PASS`.
   `co-spawn-closure-audit` and any other ungated audit job, run each `run:` block as Actions would
   (`bash -e`). Record a job → rc table in the verify record. Every step must run and pass.
 - [ ] T048 [P] [orchestrator] **Closing-keyword check over every commit message.**
-  - Positive control first: seed `Closes #607` into a scratch copy of one message and show the grep
-    hits it.
-  - Then `git log origin/main..HEAD --format=%B | grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b[: ]+([a-z0-9_.-]+/[a-z0-9_.-]+)?#[0-9]+'`
+  - Positive controls first: seed `Closes #607` and
+    `Resolves https://github.com/CatalinSerafimescu/fixpp/issues/614` into a scratch copy of one
+    message and show the grep hits both (the second is the full-URL form GitHub also links).
+  - Then `git log origin/main..HEAD --format=%B | grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b([: ]+([a-z0-9_.-]+/[a-z0-9_.-]+)?#[0-9]+|\s*:?\s*https://github.com/[^ ]+/issues/[0-9]+)'`
     must print nothing.
 
 ### `/speckit-verify` (pipeline step 12, `[const §XVII.8]`)
@@ -559,6 +593,19 @@ prints `PASS`.
     - **The packaging lane's RPM build** (FR-013a): derive the preset and the `cpack` command from
       `tier1.yml`. `rpm -qip` shows `License: AGPL-3.0-or-later`.
     - **§4 and §5**: T044–T048's results, re-read at the verified head.
+    - **One FULL `ctest` cycle, run LAST** (`[const §XVII.7]`, the local pre-PR build gate; plan.md
+      Constitution Check, row §XVII.7): `ctest --preset linux-clang-debug --output-on-failure --no-tests=error`,
+      on a committed tree, after every selected and witness run above.
+      - Why last: a full `ctest` regenerates `_codegen` in the same build tree, and `ninja -n` is blind
+        to that. So the selected runs go first and the full `ctest` last; if any build or run follows
+        it, rebuild first.
+      - Before it, run `df -h /mnt/e`: the main checkout's `build/` lands on E:.
+      - Before it, run `cat /mnt/c/temp/fixpp/.sandbox-lock`. This feature does not use the MSVC
+        sandbox, but the packaging entries in a full `ctest` compile consumer projects, so during a
+        peer's MSVC window a full `ctest` is a build. If a peer holds the lock, ask the owner before
+        running.
+      - It needs the owner's build ask, like every build here. T052's `local build: green` line cites
+        this run's SHA.
     - **Coverage `[const §IX.1]`**: n/a, because no library line is added or made reachable. The record
       says so per touched module.
     - **MSVC**: stated plainly as not run locally (Execution rules).
@@ -584,12 +631,24 @@ prints `PASS`.
     - the relicensing basis (R-8: one author; versions already published under Apache-2.0 keep that
       grant).
   - The disclosed RATIFIED-flip re-run cost (plan.md Risks); a `## Gates` section citing the Gate A and
-    verify records; a `## Gate A …` and a `## Gate B …` heading;
-    `local build: green on linux-clang-debug @ <sha>` with T049's SHA.
+    verify records.
+  - A `## Gate A outcome` section: Gate A converged (loop instance 2, round 1), linking
+    `.specify/decisions/094-v1-tier0-bookkeeping-gatea.md` (parent repo (private)).
+  - A `## Gate B outcome` section, held in the draft as a placeholder (`Gate B: pending.`). T064 replaces
+    it with Gate B's outcome and the link to the Gate B record (`[const §XVII.4]`).
+  - `local build: green on linux-clang-debug @ <sha>`, with the SHA of T049's full `ctest` cycle.
   - Run T048's grep over the body, with its positive control. No closing keyword, so
     `closingIssuesReferences` must come back empty.
 - [ ] T053 [orchestrator] **Owner report** (FR-006a, FR-015b; spec §Clarifications defaults). It lists:
   - every narrowing verify made beyond the bundle's;
+  - the narrowings the bundle already reported, with where each was reported:
+    - the TC version columns (FR-006a, research R-3). The orchestrator told the owner in-session on
+      2026-10-22, before Gate A started ("the TC version columns now differ from the wording you
+      approved…"), and #614's body carries the eight-row table. Narrower than the owner's
+      "4.2, 4.4 witnessed": TC-003, TC-006, TC-008, TC-012 and TC-015 (4.2 only), and TC-014 (4.4
+      only). TC-005 and TC-017 are as the owner worded them;
+    - NFR-005's PMR clause, narrowed at Gate A round 3 to the parse arena and MemoryStore's retrieve()
+      snapshot (FR-006);
   - any row withheld by T030/T049;
   - the defaults applied and reported, not edited: coverage-index :552, the "AGPL-3.0" licence prose,
     the stale `session.cpp` comment (P3);
@@ -614,14 +673,17 @@ prints `PASS`.
     the orchestrator for docs findings.
   - After any fix commit, re-run the affected T044–T048 gates and, for a cell change, T029.
   - Gate B also reviews the PENDING amendment text, which the owner signs off in T061.
+  - In the Gate B record (`.specify/decisions/094-v1-tier0-bookkeeping-gateb.md`), record the feature's
+    B&L delta as "B&L delta: one new limitation (L-094-1), no behaviour change" (FR-017).
   - *Open at the audit — waiver: Gate B needs the audit record first ([const §XVII.8], pre-flight 4d).*
 - [ ] T055 [orchestrator] **The SecondBrain pass on the branch** (pipeline step 15a; close-out row 3).
   The brain edits are T024 and T039; re-check that they still hold after Gate B's fixes. Run both
   freshness halves locally (T046) and report the external sweep's execution count.
   - *Open at the audit — waiver: it runs after Gate B converges.*
 - [ ] T056 [orchestrator] **Re-run the docs gates as the last action before the first push**: T045,
-  T046, T047 and T048 at the head about to be pushed. Commit the `tasks.md` ticks through T055, and
-  those of T069 and T070, first, so the head the gates ran on is the head that is pushed.
+  T046, T047 and T048 at the head about to be pushed. Commit the `tasks.md` ticks of T054, T055 and
+  T070 first (T001–T053 and T069 were committed by T069), so the head the gates ran on is the head
+  that is pushed.
   - *Open at the audit — waiver: after Gate B.*
 - [ ] T057 [orchestrator] **Push and open the PR without gate labels** (pipeline step 16).
   - `git push -u origin 094-v1-tier0-bookkeeping`, then `gh pr create` with T052's title and body. The
@@ -647,20 +709,36 @@ prints `PASS`.
   packet. Do nothing in T062–T065 until the owner answers explicitly. A request to change the text sends
   the change back through T016–T018 and a Gate B re-check. Record the answer and its date in the verify
   record and the Gate B record.
+  - **If the owner changes any amended CLAUSE text** (data-model §E.3–§E.7: §IV.4, §VI.6, §XIV.1,
+    §XIV.3, §XVIII.1, §XVIII.2), a scoped Codex Gate A round runs on the changed lines only before
+    T063: `"$W/.claude/scripts/codex-tool.sh" --mode review` with a brief naming those lines, plus an
+    Opus judge. `[const §XX.2]` requires "Codex Gate A review on every amendment", and a changed clause
+    is amendment text Codex has not reviewed. It runs under the owner's own `/gate-a` invocation,
+    because no agent starts Codex on its own initiative (`[const §XVII.4]`). Record it in the Gate A
+    record and in plan.md `## Gate A`.
+  - **A change to the Status line, the SIR's status or tally wording, or the CHANGELOG status wording**
+    is metadata, not clause text. It needs only Gate B's re-check, with no Gate A round (plan.md
+    `## Gate A`, the post-convergence metadata rule).
   - *Open at the audit — waiver: Art. XX §2 orders it after Codex Gate A and after the text is final.*
-- [ ] T062 [orchestrator] (after owner sign-off) **Commit the `tasks.md` ticks through T061** (T069 and T070
-  included, as re-asserted). The ticks for T063–T068 are recorded in the Gate B record's close-out table, not in this file, because T063 must
-  stay the last commit.
+- [ ] T062 [orchestrator] (after owner sign-off) **Commit the `tasks.md` ticks of T056–T061.** The ticks of
+  T001–T055, T069 and T070 are already committed (T069, T056); T070's re-assertion after T063 is
+  recorded in the verify record's Closure subsection, not as a new tick. The ticks for T063–T068 are
+  recorded in the Gate B record's close-out table, not in this file, because T063 must stay the last
+  commit.
   - *Open at the audit — waiver: after T061.*
 - [ ] T063 [orchestrator] (after owner sign-off) **Commit C-RATIFY, the RATIFIED flip, as the LAST
   commit before merge** (FR-003a).
   - `.specify/constitution.md`: the SIR goes to data-model §E.1's RATIFIED form. The header line reads
-    `Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`. The first paragraph becomes §E.1's
-    "Article XX §2 sequence observed in order: …" sentence. The last paragraph carries every round's
-    tally, the sign-off date and `Amendment PR #<n>`. Nothing else in the block changes.
-  - The Status line goes to §E.2's RATIFIED form.
+    `Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`. The first paragraph (it opens
+    `Gate A converged 2026-10-22`) becomes §E.1's "Article XX §2 sequence observed in order: …"
+    sentence. In the last paragraph, the `Gate B: pending, …` and `Owner sign-off: pending, …` clauses
+    take Gate B's round tally, the sign-off date and `Amendment PR #<n>`; the Gate A tally stays.
+    Nothing else in the block changes.
+  - The Status line goes to §E.2's RATIFIED form (its find-string is the PENDING `not ratified: Gate A
+    converged 2026-10-22 …` clause).
   - `CHANGELOG.md` goes to §E.8's flip form: the heading `## Constitution v4.0 — <sign-off date>`, and
-    the "Pending …" paragraph replaced by the "Ratified …" sentence.
+    the paragraph that opens "Gate A converged 2026-10-22" replaced by the "Ratified …" sentence.
+  - Each find-string is matched with `grep -F` first (Execution rules); a miss stops the flip.
   - **Before writing it**, `git fetch origin`. If `origin/main` moved since T054's integration, repeat
     that integration first, so that C-RATIFY stays the last commit.
   - Every template is filled from T057 (PR number), T059 (tallies) and T061 (date).
@@ -678,10 +756,36 @@ prints `PASS`.
   - *Open at the audit — waiver: only after the owner's sign-off.*
 - [ ] T064 [orchestrator] (after owner sign-off) **Body → labels → push last** (plan.md Risks; memory:
   three events on one SHA give three waves).
-  - First edit the PR body to its final form: the sign-off date, the verified head's SHA, and the T052
-    corrections.
-  - Then apply `gate-a-done` and `gate-b-done` in ONE `"$W/.claude/scripts/gh-pr-meta.sh"` REST call
-    and read them back.
+  - **Choose the labels from the verify verdict**, re-read in
+    `.specify/decisions/094-v1-tier0-bookkeeping-verify.md` at this head, never by default
+    (`[const §XVII.8]`, label evidence rule):
+    - **GREEN** → `gate-a-done` and `gate-b-done`, each paired with its convergence record
+      (`094-v1-tier0-bookkeeping-gatea.md`, `094-v1-tier0-bookkeeping-gateb.md`), unless that record
+      carries gate-level waivers.
+    - **GREEN, but a gate's convergence record carries gate-level (Codex-side) waivers** → that gate's
+      `-waived` label (`[const §XVII.8]`: "`YELLOW` (or `GREEN` with explicit Codex-side waivers)"),
+      treated as YELLOW below: rationales under that gate's literal heading, and the awk run locally.
+      Applying `-done` over recorded waivers is the violation the clause names.
+    - **YELLOW** → `gate-a-waived` and `gate-b-waived`. `[const §XVII.8]` allows `-done` only on GREEN,
+      and a `-waived` label needs its waiver rationales "recorded both in the verify record and the PR
+      body". Copy every waiver rationale from the verify record into the body, under a literal
+      `## Gate A …` heading and a literal `## Gate B …` heading.
+    - **RED** → no label. Go back to the Gate B fixer.
+  - **First edit the PR body to its final form**: the sign-off date, the verified head's SHA, the T052
+    corrections, and for any `-waived` label the waiver rationales. The `## Gate B outcome` section replaces T052's
+    placeholder: it states Gate B's outcome (rounds, verdict, waivers) and links
+    `.specify/decisions/094-v1-tier0-bookkeeping-gateb.md` (parent repo (private)), as `## Gate A outcome`
+    links the Gate A record (`[const §XVII.4]`: "The PR description links to the Gate A outcome and
+    the Gate B outcome").
+  - **For any `-waived` label (YELLOW, or GREEN with gate-level waivers), run the label-check awk
+    locally over the final body before labelling.** The check is
+    the one in `.github/workflows/gate-b.yml`, mirrored in `tier1.yml`, `tier2.yml` and
+    `tier3-libcxx.yml`: a heading matching `/^##+[[:space:]]*[Gg]ate[[:space:]]*[Bb]/` followed by a
+    non-blank line. `.github/workflows/gate-a.yml` runs the same check with `[Aa]`. Copy each awk from
+    the workflow at this head, not from here, and run it on the body. Each must exit 0, and the body
+    with the heading removed must exit 1 (the known positive).
+  - Then apply the chosen pair in ONE `"$W/.claude/scripts/gh-pr-meta.sh"` REST call and read them
+    back.
   - Then push C-RATIFY.
   - Never cancel a "duplicate" gate-label wave.
   - *Open at the audit — waiver: after T063.*
@@ -713,8 +817,9 @@ prints `PASS`.
   - A project memory note, with its `MEMORY.md` index line.
   - Parent commits only; confirm with `ls-tree` after each one.
   - *Open at the audit — waiver: post-merge.*
-- [ ] T068 [phase-implementer] **POST-MERGE, on `main`: the `CLAUDE-history.md` entry** (newest first)
-  and `CLAUDE.md`'s "Last merged FEATURE" pointer.
+- [ ] T068 [orchestrator] **POST-MERGE, on `main`: the `CLAUDE-history.md` entry** (newest first)
+  and `CLAUDE.md`'s "Last merged FEATURE" pointer. Both are documentation, so they are the
+  orchestrator's (Execution rules).
   - The entry records the feature, the PR, the v4.0 amendment, the 18 flips and 8 post-v1.0 drops,
     L-094-1, and the four new issues.
   - It lands after merge because SC-005 has no allowance for either file on the branch.
@@ -733,11 +838,15 @@ prints `PASS`.
   - For check (iii), `grep -nw` each of the 26 IDs in `spec/coverage-index.md` and record the result.
     A row with no entry is recorded as a gap and reported to the owner, not filled ad hoc: data-model
     has no text for it.
+  - Then commit the `tasks.md` ticks of T001–T053 and T069 (`specs/` only, no closing keyword), before
+    T070 runs, so T070's check (i) reads committed state at the branch head.
 - [ ] T070 [orchestrator] **Feature-completeness audit (MUST be the FINAL task).** Assert against the
   branch head:
-  - **(i)** Every `tasks.md` row through T053 is `[X]` or carries an explicit waiver. T054–T068 carry
-    their own waivers. T069's and T070's own completion is evidenced in the verify record (093's T126
-    precedent); their ticks land with T056's commit.
+  - **(i)** Every `tasks.md` row through T053 is `[X]` in the committed branch head (T069's tick
+    commit) or carries an explicit waiver; check `git diff --quiet HEAD -- specs/094-v1-tier0-bookkeeping/tasks.md`
+    first, so an uncommitted tick cannot pass. T054–T068 carry their own waivers. T069's tick is in
+    that commit. T070's own completion is evidenced in the verify record (093's T126 precedent), and
+    its tick lands with T056's commit.
   - **(ii)** Every FR-001…FR-023 (with FR-003a/b/c, FR-006a, FR-013a/b and FR-015a/b) and every
     SC-001…SC-006 maps to landed text, a landed commit, or a landed and passing test. Items that cannot
     hold yet carry an **explicit waiver**, never "passed" (pre-flight 4d accepts only 100 % or every

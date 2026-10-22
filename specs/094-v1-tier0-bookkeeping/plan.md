@@ -9,6 +9,27 @@
 - Round 1 applied 2026-10-22: Codex P1=3 P2=5 P3=1; Opus post-judging P1=3 P2=8 P3=14; rewrite addresses root causes RC-1, RC-2, RC-3 (+ owner rulings 2026-10-22). Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_adversarial_review.md.
 - Round 2 applied 2026-10-22: Codex P1=2 P2=3 P3=0; Opus post-judging P1=2 P2=4 P3=8; rewrite addresses root causes RC-1, RC-2, RC-3 (+ owner rulings 2026-10-22, round 2). Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_2_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_2_adversarial_review.md.
 - Round 3 (final review round of loop instance 1) 2026-10-22: Codex P1=2 P2=0 P3=0; Opus post-judging P1=1 P2=1 P3=3; loop exhausted after 2 rewrites. Owner (2026-10-22) chose "apply the literal fixes, re-run one round": fixes applied as a post-exhaustion apply (not a third rewrite), N3-1 and N3-2 owner-approved. Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_3_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_3_adversarial_review.md. A fresh Gate A loop instance follows.
+- Loop instance 2, round 1, 2026-10-22: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=3, closed in 11c9a007. Converged. Reviews: research/reviews/codex_094-v1-tier0-bookkeeping_gate_a_4_review.md, research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_4_adversarial_review.md. Record: decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent repo).
+
+### After convergence — which edits re-open Gate A
+
+- **The rule (orchestrator, 2026-10-22, at `/speckit-analyze`).** `[const §XX.2]` requires "Codex
+  Gate A review on every amendment", so Codex must have reviewed the clause text that ratifies.
+  - If the owner changes any amended **clause** at the Art. XX §2 sign-off (data-model §E.3–§E.7:
+    §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2), the changed text is amendment text no Codex
+    round has seen. A scoped Codex Gate A round therefore runs on the changed lines only
+    (`codex-tool.sh --mode review`, plus an Opus judge) before the RATIFIED flip (tasks.md T061, T063).
+    It runs under the owner's own `/gate-a` invocation, because no agent starts Codex on its own
+    initiative (`[const §XVII.4]`).
+  - The Status line, the Sync Impact Report's status and review-tally wording, and the `CHANGELOG.md`
+    status wording are **metadata**: they record where the process stands and amend no rule. A change
+    to them needs only Gate B's re-check, with no Gate A round.
+- **Applied once, at `/speckit-analyze` (F3), as a status-metadata edit after convergence.** data-model
+  §E.1, §E.2 and §E.8 said Gate A was outstanding. They now read "Gate A converged 2026-10-22
+  (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo (private)); Gate B pending;
+  pending the owner's Article XX §2 sign-off", the SIR's review tally names instance 1 rounds 1–3 and
+  instance 2 round 1, and the RATIFIED templates are re-anchored on the new PENDING wording. No clause
+  text changed (§E.3–§E.7 are byte-identical), so by the rule above Gate A is not re-run.
 
 ### Round 1 — what changed, by root cause
 
@@ -151,7 +172,8 @@ cells are added in two existing `tests/session/` files (FR-022).
 `session_pure_tests`, so no ctest entry is added; each is proven RED. The other verifying tests of the
 18 flipped rows run unchanged (FR-015). Instruments:
 - `catalogue_census.py` (R-4)
-- the R-12 sweep recipe (three `git grep`s)
+- the R-12 sweep recipe (four `git grep` commands: (a) the dropped-scope terms and the io_uring
+  grep, (b), (c))
 - `tools/check_capi_freeze.sh`
 - `tools/check_line_citations.py --range/--shift-audit`
 - `"$W/.claude/scripts/check-comment-claims.py"`, where `W=$(git rev-parse --show-superproject-working-tree)`
@@ -201,6 +223,7 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 | §V.1 / §V.4 (licence; vendored attribution) | yes | AGPL marking only; the relicense basis is R-8. No vendored file is in the set. NFR-010's commercial half is untouched (postponed). |
 | §IX.1 (coverage) | n/a | No line of library code is added or made reachable (FR-022 adds test code only). The verify record says so per touched module. |
 | §VIII (bench) | n/a | No library code change. |
+| §XVII.7 (local pre-PR build gate) | yes | Before the PR opens, one FULL `ctest --preset linux-clang-debug --output-on-failure --no-tests=error` cycle runs on a committed tree, after the conan install, configure and build, as the LAST run of verify (tasks.md T049). The PR body's `local build: green on linux-clang-debug @ <sha>` line cites that run (T052). It runs last because a full `ctest` regenerates `_codegen` in the same build tree (`ninja -n` cannot see it), so the selected and witness runs go first and anything after it rebuilds first. `df -h /mnt/e` is read first, because the main checkout's `build/` lands on E:. `/mnt/c/temp/fixpp/.sandbox-lock` is read first too: the MSVC sandbox itself is not used, but the packaging entries compile consumer projects, so a full `ctest` is a build during a peer's MSVC window, and a lock held by a peer means asking the owner before running. The resource gate applies: every build asks the owner first. `pytest bindings/python/tests/` does not apply, because the change does not touch `bindings/python/`. |
 | §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs. Its plan derives from this diff: docs-and-comment gates, the flipped rows' witness binaries, the two FR-022 cells and their RED proofs, one full build to prove the comment edits compile, and the packaging lane's RPM build (FR-013a). |
 
 **Result:** PASS, with one pre-existing deviation recorded (§III.4, fixpp#<N-III4>); none is introduced by this feature.
@@ -213,7 +236,7 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 specs/094-v1-tier0-bookkeeping/
 ├── spec.md
 ├── plan.md              # this file
-├── research.md          # R-1 … R-14
+├── research.md          # R-1 … R-15
 ├── data-model.md        # exact target text of every changed row / clause / surface (§A–§H)
 ├── quickstart.md        # how to re-verify the feature end to end
 ├── checklists/requirements.md
@@ -276,7 +299,7 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
 4. **Verify**:
    - one full Linux build (the comment edits compile), and the packaging lane's RPM build;
    - the full test suites of the modules the 37 inserts touch, and the witness binaries of the 18 rows
-     (filters from R-3's census), including the two FR-022 cells and their RED proofs, with the §H map
+     (the ctest entries of R-15's map, the filters from R-3's census), including the two FR-022 cells and their RED proofs, with the §H map
      filled from the assertions;
    - `docs/prebuild.py`'s `_status_header` on the branch's catalogue (R-5);
    - the C-ABI freeze, symbol diff and occupancy checks;
@@ -284,7 +307,9 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
      and the comment-claims check;
    - the R-12 recipe re-run, with the count per disposition class;
    - `check_bl_delta.py` (the branch touches the live B&L file), brain freshness, the external sweep;
-   - the #614 snapshot.
+   - the #614 snapshot;
+   - last, one full `ctest --preset linux-clang-debug --output-on-failure --no-tests=error` cycle on a
+     committed tree (Constitution Check, row §XVII.7).
 5. **Gate B**, then the PR (titled per FR-003c, body per FR-019), labels and merge (owner), then
    close-out. The last commit before merge flips the SIR, Status line and CHANGELOG heading; the
    owner's amendment sign-off is taken before the gate labels go on, so that flip is pushed once,

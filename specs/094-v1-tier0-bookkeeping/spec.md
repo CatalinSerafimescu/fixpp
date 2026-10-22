@@ -268,10 +268,15 @@ in those files are licence comment lines.
 **Post-v1.0 drops (DECISION 1)**
 
 - **FR-001**: W-015, W-016 and SVC-001..005 MUST carry the Status
-  `dropped(post-v1.0, planned, not abandoned: <reason>)`. W-015 and W-016 take the reason "new wire
-  format, not core tag-value FIX, no QuickFIX reference implementation". SVC-001..005 take "service
-  wrapper deferred by owner decision 2026-07-15; `src/service/` is a stub". Every other cell of these
-  rows MUST stay unchanged.
+  `dropped(post-v1.0, planned, not abandoned: <reason>)`, written exactly as data-model §A has it
+  (data-model is the copy source):
+  - W-015 and W-016:
+    `dropped(post-v1.0, planned, not abandoned: new wire format, not core tag-value FIX, no QuickFIX reference implementation)`;
+  - SVC-001..005:
+    `dropped(post-v1.0, planned, not abandoned: service wrapper deferred by owner decision 2026-07-15; src/service/ is a stub)`
+    (no backtick span inside the cell).
+
+  Every other cell of these rows MUST stay unchanged.
 - **FR-002**: The catalogue's Status legend MUST define the post-v1.0 drop form. It excludes the row
   from the v1.0 tag only, the row stays planned, and it returns to `backlog` when its release opens.
   The wording MUST NOT read as abandonment. The legend MUST name the user-signed rationale `[const
@@ -326,11 +331,13 @@ in those files are licence comment lines.
   PR, Tests and Verified cells follow the verification file, and Verified states that the flip is a
   reconciliation, not a delivery claim.
 - **FR-006**: The 11 reworded rows MUST move to `done` with the owner-approved wording (REMAINING-WORK
-  ★ functional track, rulings of 2026-10-21; text in the verification file):
+  ★ functional track, rulings of 2026-10-21; text in the verification file). The cell text is written
+  exactly as data-model §C has it; data-model is the copy source, and the summaries below name what
+  each row says, not its words:
   - **Version column only:** TC-003, TC-008 and TC-015 take research R-3's "Column written" value
     (narrower than the owner's "4.2, 4.4 witnessed; FIXT.1.1 shares the code path" wording, by
-    FR-006a). D-008 → "4.2, 4.4, 5.0SP2, FIXT.1.1 (+ FIX Latest opt-in); runtime-XML-only versions
-    L-003-2".
+    FR-006a). D-008's FIX version(s) cell →
+    `4.2, 4.4, 5.0SP2, FIXT.1.1 (+ FIX Latest, opt-in build flag); runtime-XML-only versions: L-003-2`.
   - **Narrowed, residual on record:**
     - NFR-003: names #555 and the allowlisted allocation-failure cells.
     - NFR-005: zero allocation on the gated windows only, L-497-1; the PMR clause names only the parse arena and MemoryStore's retrieve() snapshot, the two surfaces a cell asserts (Gate A round 3; narrower than the verification file's wording, reported to the owner).
@@ -338,7 +345,7 @@ in those files are licence comment lines.
     - TC-006: names #588 and #580.
     - TC-012: the duplicate check belongs to the application, per FIX-TC.
     - TC-014: ResetSeqNumFlag only; FIX-TC accepts either option.
-  - **TC-005:** "NextNumIn advances, session continues, no Reject of a Reject"; Verified names fixpp#612.
+  - **TC-005:** Title `Session conformance: Reject (35=3) receipt — NextNumIn incremented, session continues, no Reject of a Reject (test 7)`; Verified names fixpp#612.
   - Each TC row also takes the version-column narrowing that the verification file applies to every
     TC flip.
 - **FR-007**: NFR-002 MUST be reworded to `[const §IX.1]`'s per-PR obligation: ≥95/85 on touched
@@ -355,9 +362,9 @@ in those files are licence comment lines.
   reactor type (data-model §C). A new row **NFR-019** (`OFFICIAL`, nfr) MUST carry the io_uring opt-in with
   Status `dropped(post-v1.0, planned, not abandoned: io_uring opt-in, to be measured in the row-16 perf
   pass)`. Before it lands, NFR-019 gets a coverage-index entry (`[const §VI.4]`).
-- **FR-009**: TC-017 MUST be reworded to "EncryptMethod(98): 0 accepted; ≠0 refused at Logon
-  (B-043-1); no application-layer encryption (`[const §XII.7]`, §XV.10), so 17c–17j do not apply" and
-  moved to `done`. Its Verified cell MUST name both refusal endings the source has (research R-14):
+- **FR-009**: TC-017 MUST be reworded to data-model §C's Title,
+  `Session conformance (optional): EncryptMethod(98) (test 17) — 0 accepted; ≠0 refused at Logon (B-043-1); no application-layer encryption ([const §XII.7], [const §XV.10]), so 17c–17j do not apply`,
+  and moved to `done`. Its Verified cell MUST name both refusal endings the source has (research R-14):
   in-domain ≠0 → Disconnected with nothing sent; out-of-domain with validation on → Reject 373=5
   RefTagID 98, not established. Ending (1) is witnessed by the two session-level cells of FR-022, and
   the Verified cell names them.
@@ -371,8 +378,10 @@ in those files are licence comment lines.
   as **fixpp#614** (filed 2026-10-22, OPEN; research R-10), which every affected Verified cell names.
   The other versions the old columns named (4.0, 4.1, 4.3, 5.0, 5.0SP1) are outside FIX-TC §4.1's
   scope, and each TC Verified cell says so.
-- **FR-010**: Every flipped row's cells MUST cite tests that exist literally in the tree. Its PR cell
-  MUST cite the PR and squash SHA, resolved from git, not copied from a note. Its /specify cell MUST
+- **FR-010**: Every flipped row's cells MUST cite tests that exist literally in the tree, except the
+  process row (FR-007) and the pre-PR-infra rows (NFR-001, NFR-003), whose cells cite CI or records as
+  data-model §C states. Its PR cell MUST cite the PR and squash SHA, resolved from git, not copied from
+  a note. Its /specify cell MUST
   read `094-v1-tier0-bookkeeping (reconciliation; delivered by <feature or PR>)`, following D-002's
   `070-… (bookkeeping; …)` form, so that 094 is the `/specify` artifact `[const §VI.6]`(a) requires.
 - **FR-011**: `spec/coverage-index.md` MUST be updated in the same edit:
@@ -497,7 +506,7 @@ in those files are licence comment lines.
   `gh label list`, recording that `[const §III.4]` is not met on `main`: `tool_requires = []` since `629f2170`
   (2026-05-10), so CMake and Ninja come from the host toolchain. Its body asks the owner to choose: restore Conan-pinned
   `cmake`/`ninja` `tool_requires`, or amend §III.4 to the host-provisioned model with its reproducibility requirement.
-  Implement replaces every occurrence of the `fixpp#<N-III4>` placeholder, in the bundle and in the committed files
+  Implement replaces every occurrence of the FR-023 issue-number placeholder, in the bundle and in the committed files
   (the FR-013b `conanfile.py` comment), with its real number; no placeholder number is committed. 094 changes no tool
   provisioning.
 

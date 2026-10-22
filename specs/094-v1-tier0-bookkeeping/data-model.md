@@ -61,9 +61,9 @@ no catalogue line moves:
   repository (it is tracked in the parent), and its Step 4 treats a metric below threshold as a FAIL,
   which is not `[const §IX.1]`'s rule. It is no longer cited. The earlier draft also cited
   `544-hot-path-zero-alloc-verify.md`, which assesses added lines only; it is no longer cited as
-  evidence, and is put on record instead (FR-020, research R-13). `fixpp#<N-544>` is the issue FR-020
-  files before this row is written; the cell is written with the real number, never with a
-  placeholder.
+  evidence, and is put on record instead (FR-020, research R-13). The issue number the Verified cell
+  names is the issue FR-020 files before this row is written; the cell is written with its real
+  number, never with a placeholder.
 
 ### NFR-003 (reworded)
 - Title `Sanitizers: the ASan, UBSan and TSan legs run the non-packaging ctest suite (ctest -LE packaging) before every merge (required check tier1-required), and any sanitizer report not on the allowlist fails the leg; the allocation-failure cells listed in ci/expected-preset-conditional-tests.txt are not built there; MSVC ASan on Tier 2 (required check tier2-required)`
@@ -122,8 +122,8 @@ no catalogue line moves:
 - Status `done`
 - /specify `094-v1-tier0-bookkeeping (reconciliation; delivered by 002-dictionary-xml-loader)`
 - PR `#66 (merge ae4c9a56)`
-- Tests `tests/dictionary/xml_loader_test.cpp`, `tests/dictionary/negative_paths_test.cpp`, `tests/dictionary/lookup_test.cpp` (DictionaryLookupFixture/AllRuntimeVersions), `tests/fuzz/fuzz_dict_xml_loader.cpp`, `tests/dictionary/load_any_test.cpp`, `tests/capi/dictionary_load_test.cpp`
-- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. XmlLoader accepts QuickFIX XML for all nine runtime versions ([const §I.1]); reachable from C and TOML through dict::load_any (080). Load-time performance is tracked separately (#263). QuickFIX interop: not applicable (the dictionaries are QuickFIX-verbatim).`
+- Tests `tests/dictionary/xml_loader_test.cpp`, `tests/dictionary/negative_paths_test.cpp`, `tests/dictionary/lookup_test.cpp` (DictionaryLookupFixture/AllRuntimeVersions), `tests/dictionary/load_any_test.cpp`, `tests/capi/dictionary_load_test.cpp`
+- Verified `Reconciled by 094 (2026-10-22) — not a delivery claim. XmlLoader accepts QuickFIX XML for all nine runtime versions ([const §I.1]); reachable from C and TOML through dict::load_any (080). Load-time performance is tracked separately (#263). A libFuzzer target also exists (tests/fuzz/fuzz_dict_xml_loader.cpp, built on linux-clang-asan only); it is not cited as this row's evidence. QuickFIX interop: not applicable (the dictionaries are QuickFIX-verbatim).`
 
   (#263 was confirmed OPEN on 2026-10-22.)
 
@@ -256,9 +256,11 @@ PENDING form (lands with the amendment):
 ```
 <!--
 Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
-  This header reads PENDING until Codex Gate A on feature 094 has converged AND the owner has signed
-    off. The flip to RATIFIED, with the review rounds and the sign-off date filled in below, is the
-    last commit before merge, not a claim made in advance (the v1.0 precedent).
+  Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo
+    (private)); Gate B pending; pending the owner's Article XX §2 sign-off. This header reads PENDING
+    until the owner has signed off. The flip to RATIFIED, with Gate B's rounds and the sign-off date
+    filled in below, is the last commit before merge, not a claim made in advance (the v1.0
+    precedent).
   Bump: MAJOR, per Article XX §4, with a CHANGELOG.md entry. Under v3.0 a PR that shipped the gRPC
     control plane or the iceoryx2 SHM data plane before the v1.0 tag shipped required scope
     (Article XVIII §1) and conformed. Under v4.0 the same PR does not: Article IV §4 and Article XIV
@@ -318,30 +320,35 @@ Sync Impact Report — v3.0 → v4.0 (2026-10-22) — PENDING
     form, "Constitution: amend §IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2 — service wrapper
     post-1.0, process-row closure (v4.0) (+ 094 Tier-0 bookkeeping)", and its description states the change, the rationale and the
     affected rows and specs, so §2's four steps are met in order.
-  Review and sign-off: Codex Gate A on feature 094 (round 1: NOT CONVERGED, 3 P1 / 5 P2 / 1 P3;
-    round 2: NOT CONVERGED, 2 P1 / 3 P2 / 0 P3; later rounds recorded at the flip). Owner sign-off: recorded at the flip.
+  Review and sign-off: Codex Gate A on feature 094, loop instance 1 (round 1: NOT CONVERGED,
+    3 P1 / 5 P2 / 1 P3; round 2: NOT CONVERGED, 2 P1 / 3 P2 / 0 P3; round 3: NOT CONVERGED,
+    2 P1 / 0 P2 / 0 P3, loop exhausted, owner: apply the literal fixes and re-run one round), then
+    loop instance 2 (round 1: CONVERGED, 0 P1 / 0 P2 / 0 P3; Opus post-judging 0 P1 / 0 P2 / 3 P3,
+    closed). Gate B: pending, recorded at the flip. Owner sign-off: pending, recorded at the flip.
 -->
 ```
 
 RATIFIED form (the last commit before merge): the header line reads
-`Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`; the first paragraph is replaced by
+`Sync Impact Report — v3.0 → v4.0 (<sign-off date>) — RATIFIED`; the first paragraph (the one that
+opens `Gate A converged 2026-10-22`) is replaced by
 `Article XX §2 sequence observed in order: Codex Gate A on feature 094 converged (round <n>: <tally>), THEN owner sign-off <date>. This header read PENDING until both had happened.`;
-and the last paragraph's two clauses carry every round's tally, the sign-off date and
-`Amendment PR #<n>`. Nothing else in the block changes.
+and in the last paragraph, the clauses `Gate B: pending, recorded at the flip.` and
+`Owner sign-off: pending, recorded at the flip.` are replaced by Gate B's round tally, the sign-off
+date and `Amendment PR #<n>`. The Gate A tally stays as written. Nothing else in the block changes.
 
 ### E.2 Status line (`> **Status:**`, line 357 at `9b176090`)
 
 PENDING form — the line's current opening `> **Status:** user-ratified **v3.0** (2026-09-23) — ` is
 replaced by:
 
-`> **Status:** **v4.0 — PENDING** (2026-10-22) — **backwards-incompatible** (Article XX §4 v-major, with a `CHANGELOG.md` entry); not ratified until Codex Gate A on feature 094 converges and the owner signs off. The service wrapper — the gRPC control plane, the pluggable control-plane interface and the iceoryx2 SHM data plane — leaves v1.0 scope and becomes unscheduled post-1.0 (Articles IV §4, XIV §1, XIV §3, XVIII §1–§2); v1.0 keeps only the `ControlPlaneFactory` ABI anchor and the C-ABI codes 900/901, with no behavioural commitment. Article VI §6 lets a process row close on the records its rule names. Rides feature 094; its PR is titled in Article XX §2 form. Prior: user-ratified **v3.0** (2026-09-23) — `
+`> **Status:** **v4.0 — PENDING** (2026-10-22) — **backwards-incompatible** (Article XX §4 v-major, with a `CHANGELOG.md` entry); not ratified: Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo (private)); Gate B pending; pending the owner's Article XX §2 sign-off. The service wrapper — the gRPC control plane, the pluggable control-plane interface and the iceoryx2 SHM data plane — leaves v1.0 scope and becomes unscheduled post-1.0 (Articles IV §4, XIV §1, XIV §3, XVIII §1–§2); v1.0 keeps only the `ControlPlaneFactory` ABI anchor and the C-ABI codes 900/901, with no behavioural commitment. Article VI §6 lets a process row close on the records its rule names. Rides feature 094; its PR is titled in Article XX §2 form. Prior: user-ratified **v3.0** (2026-09-23) — `
 
 and the rest of the line (from `**backwards-incompatible** (Article XX §4 v-major, with a
 `CHANGELOG.md` entry). The orchestrator does not implement, …`) is unchanged.
 
 RATIFIED form: `**v4.0 — PENDING** (2026-10-22)` becomes `user-ratified **v4.0** (<sign-off date>)`,
-and `not ratified until Codex Gate A on feature 094 converges and the owner signs off` becomes
-`Codex Gate A on feature 094 converged at round <n>, then owner sign-off <date>; amendment PR #<n>`.
+and `not ratified: Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo (private)); Gate B pending; pending the owner's Article XX §2 sign-off`
+becomes `Codex Gate A on feature 094 converged at round <n>, then owner sign-off <date>; amendment PR #<n>`.
 
 ### E.3 Article IV §4
 
@@ -414,8 +421,9 @@ v4.0 both are post-1.0 roadmap items, and Article XVIII §5 reads "No early ship
 protocols into v1.0", so the same PR does not conform. This is the constitution's version: it is not a C-ABI or
 library version.
 
-Pending Codex Gate A on feature 094 and the owner's sign-off. This heading reads `Unreleased` until
-both have happened.
+Gate A converged 2026-10-22 (decisions/speckit/094-v1-tier0-bookkeeping-gatea.md, parent repo
+(private)); Gate B pending; pending the owner's Article XX §2 sign-off. This heading reads
+`Unreleased` until the owner has signed off.
 
 ### Changed
 
@@ -436,7 +444,8 @@ both have happened.
 ```
 
 Flip form (the last commit before merge): the heading becomes
-`## Constitution v4.0 — <sign-off date>`, and the "Pending …" paragraph becomes
+`## Constitution v4.0 — <sign-off date>`, and the paragraph that opens "Gate A converged 2026-10-22"
+becomes
 `Ratified <date> (PR #<n>, feature 094), after Codex Gate A converged at round <n> and the owner signed off.`
 
 ## F. Other surfaces (FR-004, FR-017, FR-018)
@@ -575,8 +584,8 @@ are at `9b176090`; every edit is same-line unless it says otherwise.
 
 ### F.6 `spec/behaviors-and-limitations.md` — new section at the end of the live file (FR-017, FR-018)
 
-`fixpp#<N>` is the issue FR-018 files before this edit is written; the entry is written with the real
-number, never with a placeholder.
+The issue number L-094-1 names (twice) is the issue FR-018 files before this edit is written; the
+entry is written with its real number, never with a placeholder.
 
 ```
 ## 094-v1-tier0-bookkeeping — the service wrapper is post-1.0; v1.0 installs only the control-plane anchor (2026-10-22)
@@ -621,8 +630,8 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
   `main` until B58 lands: the wheel lanes take PyPI's latest through `bindings/python/pyproject.toml`
   (`swig>=4.2`), and the in-tree Linux legs take apt's. "At or above the minimum" is true on both
   sides of B58 (Gate A round 2, N2-1).
-  `<N-III4>` is the FR-023 issue, filed before this commit; the comment is written with its real
-  number, never with a placeholder.
+  The issue number on the comment's last line is the FR-023 issue, filed before this commit; the
+  comment is written with its real number, never with a placeholder.
   `git grep -n 'conanfile.py:[0-9]'` outside `specs/` finds no line citation of the file, so the
   moved line breaks no citation.
 - **`tools/capi_freeze.sha256`:** regenerated with `sha256sum` over the same 12-file set, in the

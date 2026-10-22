@@ -297,6 +297,10 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
     - TC-015: `FixTcCoverageGaps.BodyFieldsArbitraryOrder_Accepted`
     - TC-017: `InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted`, `.AbsentEncryptMethodAccepted`, `.NonZeroEncryptMethodRejected`, `EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday`, `.OutOfDomainEncryptMethod_RejectedAndNotEstablished`, and the FR-022 cells `EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing`, `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`
   - Verify re-runs this check, with both negative controls, after implement; it must then report 53 of 53.
+  - `/speckit-analyze` C2 (2026-10-22) removed `tests/fuzz/fuzz_dict_xml_loader.cpp` from D-007's Tests
+    cell. It was cited as a file and names no gtest entry, so by the counting rule above it was never
+    one of the 53, and the counts do not change: 53 distinct, 51 exist today, 2 MISSING (the FR-022
+    cells).
 - **NFR-011 witnesses:**
   - `PmrAllocation.EveryByteFromMr` (XmlLoader)
   - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,
@@ -318,7 +322,8 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
 
 ### Recipe
 
-Over every tracked file outside `specs/`, two greps:
+Over every tracked file outside `specs/`, four `git grep` commands: (a) is two of them (the
+dropped-scope terms and the io_uring grep), then (b) and (c):
 
 ```
 # (a) dropped-scope terms (service[- ]mode|out-of-process added at Gate A round 2, N2-4)
@@ -400,7 +405,7 @@ repository's most common instrument defect.
 | `brain/components/service.md` | "a live decision recorded outside this repo" | edit (§F.5) |
 | `brain/components/dictionary.md:3–4`, `:75–77` | D-007 "says backlog"; D-003/D-008 `backlog` | edit (§F.5) |
 | `brain/components/nfr-and-tooling.md:4` (frontmatter) | "so nfr's uniform backlog is not mistaken for fact" | edit (§F.5) |
-| `brain/components/nfr-and-tooling.md:57` | "an out-of-repo planning tracker … schedules the flip" (no row ID: found by the Opus review, outside both greps) | edit (§F.5) |
+| `brain/components/nfr-and-tooling.md:57` | "an out-of-repo planning tracker … schedules the flip" (no dropped-scope term and no row ID, so neither (a) nor (b) reaches it: found by the Opus review) | edit (§F.5) |
 | `cmake/FixppPackaging.cmake:408` | `CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0"` (AGPL-3.0-only) | edit (§G) |
 | `conanfile.py:8` | `license = "AGPL-3.0-only"` | edit (§G) |
 | `include/fixpp/core/engine_config.hpp:171` | `control_plane_factory` member, read by nothing in `src/` | new limitation L-094-1 (§F.6) + issue (FR-018) |
@@ -460,7 +465,7 @@ reported (the default recorded in spec §Clarifications, Gate A round 2).
 
 ### Re-run after the edits
 
-At verify the three greps run again. Every remaining hit must be in a "keep", "header", "other
+At verify the four `git grep` commands run again. Every remaining hit must be in a "keep", "header", "other
 concept" or "pattern FP" class above, or have its "edit" applied. The count per class goes into the
 verify record (SC-003).
 
@@ -521,3 +526,116 @@ verify record (SC-003).
   disconnect. Neither ending sends that, which the owner's "not supported by design" ruling accepts.
 - So the source supports the owner's wording "≠0 refused at Logon": both endings refuse the Logon and
   the session does not establish. No owner question is needed for the Title.
+
+## R-15 — Test file → CMake target → ctest entry → CI preset (C1 of `/speckit-analyze`, 2026-10-22)
+
+The ctest entries T030, T049 and quickstart §2 run are derived here from data-model §C's Tests cells,
+not hand-listed. fixpp groups test sources into whole-binary executables (`[const §VII.8]`, the 068
+grouping), so a source file names a **binary**, and one ctest entry often covers several cited files.
+
+**Recipe (re-run it; do not copy the table forward):**
+1. List every path under `tests/` that a data-model §C Tests cell names.
+2. For each, `git grep -n -F <basename> -- 'tests/**/CMakeLists.txt'`, ignoring comment lines, and walk
+   back to the enclosing call (`add_executable`, `add_wire_test`, `add_threading_test`,
+   `fixpp_add_store_test`, `fixpp_add_interop_test`, …). That call's first argument is the target.
+3. Find the target's `add_test(NAME …)`: it is inside the helper for the helpers above, and explicit
+   otherwise. The NAME is not always the target name.
+4. Read the `if(…)` guards enclosing the registration.
+5. Confirm each NAME with `ctest --test-dir build/<preset> -N`, matched as a whole line, with a
+   negative control (a made-up NAME must not match).
+
+Three traps the recipe hit, each of which a plain basename grep gets wrong:
+- `tests/dictionary/pmr_allocation_test.cpp` is built by the `FIXPP_DICT_STANDALONE` `foreach` in
+  `tests/dictionary/CMakeLists.txt`, which derives the source name from the target name
+  (`dictionary_pmr_allocation_test` → `pmr_allocation_test.cpp`). The basename appears nowhere in a
+  CMake file.
+- Two files are named `determinism_test.cpp`. D-008 cites `tests/codegen/determinism_test.cpp`
+  (`codegen_determinism_test`). `tests/dictionary/determinism_test.cpp` is a source of
+  `dictionary_pure_tests` and holds a different suite.
+- Several ctest NAMEs differ from their target: `transport_smoke` (target `transport_smoke_test`),
+  `delimiter_census` (`dictionary_delimiter_census_test`), `capi_dictionary_load`
+  (`capi_dictionary_load_test`), `capi_inbound_frame_dispositions`
+  (`capi_inbound_frame_dispositions_test`), `session_tc_reject` (`tc_reject_test`).
+
+**CI preset.** Every entry below is in the population of tier1.yml job `linux`'s
+`ctest --preset <preset> --output-on-failure -LE packaging --no-tests=error` step, which runs on every
+leg (`linux-clang-{debug,release,asan,ubsan,tsan}`, `linux-gcc-release`); tier2.yml job `windows`
+runs the same `-LE packaging` selection. Verify runs each entry locally on `linux-clang-debug`, selected
+as `-R '^<NAME>$'` (anchored: several NAMEs are prefixes of others). `[const §VII.8]` prefers label
+selection, but several of these entries carry no LABELS and the rest share labels with entries no row
+cites, so a label would run a different set. Verify also reads which of them
+register on the Windows presets from tier2's run. The one exception is NFR-005's mallocnesia gates, below.
+
+| Source file (data-model §C) | Rows | Target (registration) | ctest NAME | Notes |
+|---|---|---|---|---|
+| `tests/wire/three_arena_pinning_test.cpp` | NFR-005, NFR-011 | `wire_pure_tests` (`add_wire_test`, `tests/wire/CMakeLists.txt`) | `wire_pure_tests` | grouped binary |
+| `tests/session/test_memory_store_zero_allocator_calls.cpp` | NFR-005, NFR-011 | `store_memory_zero_allocator_calls` (`fixpp_add_store_test`, `tests/session/CMakeLists.txt`) | `store_memory_zero_allocator_calls` | the helper sets no LABELS |
+| `tests/dictionary/pmr_allocation_test.cpp` | NFR-011 | `dictionary_pmr_allocation_test` (`FIXPP_DICT_STANDALONE` foreach, `tests/dictionary/CMakeLists.txt`) | `dictionary_pmr_allocation_test` | standalone: in-TU global-new counting |
+| `tests/dictionary/orchestra_loader_test.cpp` | NFR-011 | `dictionary_orchestra_tests` (`tests/dictionary/CMakeLists.txt`) | `dictionary_orchestra_tests` | |
+| `tests/session/test_memory_store_capacity.cpp` | NFR-011 | `store_memory_capacity` (`fixpp_add_store_test`) | `store_memory_capacity` | the helper sets no LABELS |
+| `tests/codegen/typed_accessor_test.cpp` | NFR-011, D-008 | `codegen_pure_tests` (`tests/codegen/CMakeLists.txt`) | `codegen_pure_tests` | grouped binary |
+| `tests/transport/transport_smoke_test.cpp` | NFR-013 | `transport_smoke_test` (`tests/transport/CMakeLists.txt`) | `transport_smoke` | NAME ≠ target; no LABELS |
+| `tests/transport/test_asio_plain_transport.cpp` | NFR-013 | `transport_asio_plain_transport` | `transport_asio_plain_transport` | |
+| `tests/transport/test_listener_acceptor.cpp` | NFR-013 | `transport_listener_acceptor` | `transport_listener_acceptor` | |
+| `tests/transport/test_cancellation_propagation.cpp` | NFR-013 | `transport_cancellation_propagation` | `transport_cancellation_propagation` | |
+| `tests/dictionary/lookup_test.cpp` | D-001, D-003, D-007 | `dictionary_pure_tests` (`tests/dictionary/CMakeLists.txt`) | `dictionary_pure_tests` | grouped binary |
+| `tests/dictionary/delimiter_census_test.cpp` | D-001, D-003 | `dictionary_delimiter_census_test` | `delimiter_census` | NAME ≠ target |
+| `tests/dictionary/dict_enum_census_test.cpp` | D-001, D-003 | `dictionary_dict_enum_census_test` | `dictionary_dict_enum_census_test` | |
+| `tests/codegen/test_077_v42_vt11_completeness_and_c4.cpp` | D-001, D-003 | `codegen_077_v42_vt11_completeness_c4_test` | `codegen_077_v42_vt11_completeness_c4_test` | |
+| `tests/dictionary/xml_loader_test.cpp` | D-007 | `dictionary_pure_tests` | `dictionary_pure_tests` | |
+| `tests/dictionary/negative_paths_test.cpp` | D-007 | `dictionary_pure_tests` | `dictionary_pure_tests` | |
+| `tests/dictionary/load_any_test.cpp` | D-007 | `dictionary_load_any_tests` | `dictionary_load_any_tests` | |
+| `tests/capi/dictionary_load_test.cpp` | D-007 | `capi_dictionary_load_test` (`tests/capi/CMakeLists.txt`) | `capi_dictionary_load` | NAME ≠ target |
+| `tests/codegen/vlatest_compile_smoke_test.cpp` | D-008 | `codegen_vlatest_tests` | `codegen_vlatest_tests` | inside `if(FIXPP_CODEGEN_FIX_LATEST)`, an option that defaults ON (`cmake/Codegen.cmake`); its evidence is `static_assert`, so building the binary is the witness |
+| `tests/dictionary/ref_shape_test.cpp` | D-008 | `dictionary_pure_tests` | `dictionary_pure_tests` | |
+| `tests/codegen/read_tier_byte_diff_test.cmake` | D-008 | none: a `cmake -P` script registered by `add_test` in `tests/codegen/CMakeLists.txt` | `fixpp::dict::read-tier-byte-diff` | not gtest: the pass is ctest's result plus the script's own output |
+| `tests/codegen/determinism_test.cpp` | D-008 | `codegen_determinism_test` | `codegen_determinism_test` | not `tests/dictionary/determinism_test.cpp` |
+| `tests/session/inbound_frame_dispositions_test.cpp` | TC-003 | `session_inbound_frame_dispositions` (`add_threading_test`) | `session_inbound_frame_dispositions` | |
+| `tests/capi/inbound_frame_dispositions_c7_witness_test.cpp` | TC-005 | `capi_inbound_frame_dispositions_test` | `capi_inbound_frame_dispositions` | NAME ≠ target |
+| `tests/session/conformance/tc_reject_test.cpp` | TC-005 | `tc_reject_test` (`tests/session/conformance/CMakeLists.txt`) | `session_tc_reject` | NAME ≠ target; no LABELS (R-3) |
+| `tests/session/session_reject_test.cpp` | TC-005 | `session_pure_tests` (`tests/session/CMakeLists.txt`) | `session_pure_tests` | grouped binary |
+| `tests/session/fsm_matrix_witness_test.cpp` | TC-005, TC-017 | `session_pure_tests` | `session_pure_tests` | holds FR-022's initiator cell |
+| `tests/session/test_recovery_store_horizon.cpp` | TC-006 | `session_pure_tests` | `session_pure_tests` | |
+| `tests/session/test_recovery_admin_span_gapfill.cpp` | TC-006 | `session_pure_tests` | `session_pure_tests` | |
+| `tests/session/test_resend_reply_possdup.cpp` | TC-006 | `session_resend_reply_possdup` (`add_threading_test`) | `session_resend_reply_possdup` | |
+| `tests/session/test_538_store_lookup_after_reset.cpp` | TC-006 | `session_538_store_lookup_after_reset` (`add_threading_test`) | `session_538_store_lookup_after_reset` | gtest filter needs the `Stores/` prefix (R-3) |
+| `tests/session/test_inbound_sequence_reset.cpp` | TC-008 | `session_pure_tests` | `session_pure_tests` | |
+| `tests/interop/parity/inbound_sequencereset_arms_test.cpp` | TC-008 | `interop_parity_us3_tests` (`fixpp_add_interop_test`, `tests/interop/CMakeLists.txt`) | `interop_parity_us3_tests` | also selected by tier1's interop gate step (`-L interop`) |
+| `tests/session/test_inbound_poss_resend.cpp` | TC-012 | `session_inbound_poss_resend` | `session_inbound_poss_resend` | |
+| `tests/session/test_reset_on_lifecycle.cpp` | TC-014 | `session_reset_on_lifecycle` | `session_reset_on_lifecycle` | |
+| `tests/interop/parity/fix_tc_coverage_gaps_test.cpp` | TC-015 | `interop_parity_us3_tests` | `interop_parity_us3_tests` | |
+| `tests/session/test_interpret_logon_encrypt_method.cpp` | TC-017 | `session_interpret_logon_encrypt_method` (`add_threading_test`) | `session_interpret_logon_encrypt_method` | |
+| `tests/session/test_enum_validation_logon.cpp` | TC-017 | `session_pure_tests` | `session_pure_tests` | holds FR-022's acceptor cell |
+
+**The distinct ctest entries**, in the order T030 names them: `wire_pure_tests`,
+`store_memory_zero_allocator_calls`, `store_memory_capacity`, `dictionary_pmr_allocation_test`,
+`dictionary_orchestra_tests`, `codegen_pure_tests`, `transport_smoke`,
+`transport_asio_plain_transport`, `transport_listener_acceptor`, `transport_cancellation_propagation`,
+`dictionary_pure_tests`, `delimiter_census`, `dictionary_dict_enum_census_test`,
+`codegen_077_v42_vt11_completeness_c4_test`, `dictionary_load_any_tests`, `capi_dictionary_load`,
+`codegen_vlatest_tests`, `fixpp::dict::read-tier-byte-diff`, `codegen_determinism_test`,
+`session_inbound_frame_dispositions`, `capi_inbound_frame_dispositions`, `session_tc_reject`,
+`session_pure_tests`, `session_resend_reply_possdup`, `session_538_store_lookup_after_reset`,
+`interop_parity_us3_tests`, `session_inbound_poss_resend`, `session_reset_on_lifecycle`,
+`session_interpret_logon_encrypt_method`. Each matched exactly one whole line of
+`ctest --test-dir build/linux-clang-debug -N` (2026-10-22; the negative control `NoSuchEntryXyz`
+matched none). Before this table, T030 and quickstart §2 named only some of them and covered the rest
+with "the codegen and transport entries"; that phrase also left out the dictionary entries
+`delimiter_census` and `dictionary_dict_enum_census_test`.
+
+**NFR-005's mallocnesia gates.** `ctest --preset <preset> -L mallocnesia --no-tests=error` on
+`linux-gcc-release` and `linux-clang-release`, the presets the `if:` of tier1.yml's #448 steps names.
+`tests/alloc_guard/CMakeLists.txt` registers the positive controls in that label:
+`alloc_guard_positive_control_mallocnesia` unconditionally, and the per-entry-point
+`alloc_guard_*_positive_control_mallocnesia` controls inside `if(FIXPP_MALLOCNESIA_SUPPORTED)`.
+
+**Preset carve-outs.** No cited gtest suite appears in `ci/expected-preset-conditional-tests.txt`
+(searched for each suite name of R-11's list; the known positive: the same search finds the
+`WireLifetimeTrap*` cells the file lists).
+
+**Cited, and not ctest entries** (their evidence is read, not run): `include/fixpp/dict/orchestra_loader.hpp`
+(NFR-011, a signature); `CMakeLists.txt` (NFR-001, the C++ standard); the tier1/tier2 jobs, steps and
+`if:` lines, `ci/expected-sanitizer-reports.txt`, `ci/expected-preset-conditional-tests.txt` and
+`tools/check_sanitizer_test_carveouts.py` (NFR-001, NFR-003, NFR-005, NFR-013: CI rows, FR-015);
+NFR-002's two verify records (parent repo (private)). `tests/fuzz/fuzz_dict_xml_loader.cpp` is no
+longer cited by D-007 (data-model §C).
