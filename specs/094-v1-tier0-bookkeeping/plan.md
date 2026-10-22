@@ -67,7 +67,7 @@ to the owner before T016 lands the clause.
   The converged after-text it replaces (Gate A loop instance 2, round 1):
   `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode, and iceoryx2 SHM and sidecar mode are both post-1.0 (Article XVIII §2). The control plane (gRPC) works without it.`
 
-  The constitution before-text (§E.5, unchanged; `.specify/constitution.md:594` at `9b176090`):
+  The constitution before-text (§E.5, unchanged; `.specify/constitution.md` §XIV.3 at `9b176090`):
   `3. **Data-plane SHM via iceoryx2** is opt-in for sidecar mode. The control plane (gRPC) works without it.`
   The SIR's "Modified: Article XIV §3" line and the `CHANGELOG.md` bullet are metadata and need no
   change for it; if the owner wants them to mention the reworded sentence, that edit needs only Gate B.
@@ -88,7 +88,7 @@ to the owner before T016 lands the clause.
   files outside `specs/`, for dropped-scope terms, all 26 row IDs and the licence strings. It is
   proven on known positives, and every hit has a disposition. Its "edit" hits have exact text in
   data-model §D, §F and §G (architecture incl. Z-9, api-contract, 2i/2j/2l/2m headers, coverage-index
-  :421/:436/:652, README, intro, three brain pages, the RPM licence, L-094-1).
+  row 19, the PossDup / PossResend ledger row and the SVC-005 supplemental, README, intro, three brain pages, the RPM licence, L-094-1).
 - **RC-3 (witnesses cited by name):** data-model §H's claim → witness map, required in full in the
   verify record (FR-015b). NFR-002, TC-017, TC-005, NFR-011, D-008, NFR-005 and NFR-001 cells were
   corrected against what each witness asserts.
@@ -114,10 +114,10 @@ to the owner before T016 lands the clause.
 2. **`544-hot-path-zero-alloc-verify.md` assessed added lines only.** Answered by the Edge Cases rule
    (Opus round 2, N2-3), merged with answer 1: the orchestrator files one labelled issue at implement
    time and NFR-002's Verified cell names it (FR-020).
-3. **No v1.0 cross-process tap route or non-C++ rotation route; coverage-index :552.** Informational,
-   recorded as a note only: T-039, T-040 and T-041 already read `done`, so the :552 note has no
+3. **No v1.0 cross-process tap route or non-C++ rotation route; coverage-index "Cross-cuts forwarded" note (012-2h-transport).** Informational,
+   recorded as a note only: T-039, T-040 and T-041 already read `done`, so that note has no
    tag-gate effect. Reported, not edited.
-4. **Licence prose** (`README.md:11` badge, `README.md:25–26`, `NOTICE:7`, `LICENSE-COMMERCIAL.md:3`).
+4. **Licence prose** (`README.md`'s licence badge and its "Open source" / "Commercial" bullets, `NOTICE`, `LICENSE-COMMERCIAL.md`'s opening sentence).
    Default applied: left as it is and reported. It is not package metadata.
 5. **40 `Apache-2.0` files outside `src/`/`include/`.** Default applied: the orchestrator files one
    labelled follow-up issue at implement time (FR-021).
@@ -142,7 +142,7 @@ BodyLength/CheckSum case). No Verified cell cites them.
 - **RC-3 (sweeps scoped by a directory or term list):** R-5's sweep is a `git grep` over every tracked
   file and finds `docs/prebuild.py`; R-12's terms gain `service[- ]mode|out-of-process` and §I.2 is
   dispositioned; the `conanfile.py` comment is reworded (owner) so it is true before and after B58;
-  `ControlPlaneFactory`'s tier is stated once in `api-contract.md` (`:60`), with `:220` and `:249`
+  `ControlPlaneFactory`'s tier is stated once in `api-contract.md` (the §3.1 pluggable-interface bullet), with the §8 `fixpp::service` target row and the §9 `ControlPlaneFactory` row
   agreeing.
 - **P3s:** script paths resolve from the library root through the workspace root (quickstart §5); the
   NFR-002 parent path, the §E.5 "both" and the `brain/components/service.md` blockquote are fixed;
@@ -237,7 +237,7 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 
 **Scale/Scope**:
 - 25 catalogue rows changed plus 1 added (NFR-019), and the legend line;
-- coverage index: 9 lines edited (:405, :410–:413, :421, :435, :436, :652) and 1 paragraph added;
+- coverage index: 9 lines edited (FIX-TC rows 3, 8–11 and 19, the two 005 ledger rows, the SVC-005 supplemental) and 1 paragraph added;
 - constitution: 6 clauses (§IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2), the Status line and the
   Sync Impact Report; `CHANGELOG.md`: 1 entry;
 - live B&L: 1 new section with L-094-1;

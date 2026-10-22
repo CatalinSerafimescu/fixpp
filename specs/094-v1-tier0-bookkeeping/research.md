@@ -183,8 +183,9 @@ Census side-findings, recorded for the verify record:
     from archival `specs/<id>/` bundles, which are point-in-time records and stay as written.
 - **Not yet run, and the known trigger (Gate A round 1, N-10):** the docs edits.
   - The new Sync Impact Report at the top of `constitution.md` shifts every line of that file.
-  - `tools/check_line_citations.py` carries fixture strings that name `constitution.md:456` (one
-    without a `citation-ok` marker), `constitution.md:335` and `2j-controlplane.md:902` / `:22`.
+  - `tools/check_line_citations.py` carries self-test fixture strings that cite `constitution.md`
+    by line number (one of them without a `citation-ok` marker) and `2j-controlplane.md` by line
+    number; re-derive with `grep -n -e 'constitution\.md:[0-9]' -e '2j-controlplane\.md:[0-9]' tools/check_line_citations.py`.
   - The data-model §F edits are same-line, so `2j-controlplane.md` and `architecture.md` lines above
     Appendix Z do not move. Some other edits add lines: the NFR-019 catalogue row, the coverage-index
     NFR-019 paragraph, the B&L section, Z-9 at the end of `architecture.md` and the CHANGELOG entry
@@ -378,10 +379,10 @@ repository's most common instrument defect.
 
 ### Proof the instrument fires
 
-- (a): `README.md:15` ("… and a gRPC+iceoryx2 service wrapper"). The first draft's sweep reported
+- (a): `README.md`'s tagline ("… and a gRPC+iceoryx2 service wrapper"). The first draft's sweep reported
   "`README.md`: 0 hits" for the same file; this one reports it.
-- (b): `brain/components/dictionary.md:75` (`D-007` … `backlog`).
-- (a)'s widened terms: `.specify/constitution.md:374` (§I.2, "the out-of-process service mode"). The
+- (b): `brain/components/dictionary.md`'s D-007 table row (`D-007` … `backlog`).
+- (a)'s widened terms: `.specify/constitution.md` §I.2 ("the out-of-process service mode"). The
   round-1 terms did not reach it.
 - Counts at `9b176090` (the branch carries only `specs/` commits): (a) **664** lines in 79 files (the
   round-1 terms gave 647 in 77; the 17 lines only the widened terms add are dispositioned below),
@@ -402,100 +403,100 @@ repository's most common instrument defect.
 
 | Hit | Says | Disposition |
 |---|---|---|
-| `.specify/constitution.md:415` §IV.4 | gRPC is the control-plane transport | edit (§E.3) |
-| `.specify/constitution.md:587`, `:589` §XIV.1 | control plane, default gRPC, v1.0 | edit (§E.4) |
-| `.specify/constitution.md:594` §XIV.3 | iceoryx2 sidecar | edit (§E.5) |
-| `.specify/constitution.md:680` §XVIII.1 | the gRPC service wrapper is locked v1.0 scope | edit (§E.6) |
+| `.specify/constitution.md` §IV.4 | gRPC is the control-plane transport | edit (§E.3) |
+| `.specify/constitution.md` §XIV.1 (lead-in and control-plane bullet) | control plane, default gRPC, v1.0 | edit (§E.4) |
+| `.specify/constitution.md` §XIV.3 | iceoryx2 sidecar | edit (§E.5) |
+| `.specify/constitution.md` §XVIII.1 | the gRPC service wrapper is locked v1.0 scope | edit (§E.6) |
 | `.specify/constitution.md` §XVIII.2 | the roadmap has no wrapper line | edit (§E.7) |
-| `.specify/constitution.md:374` §I.2 | the C ABI "exists for non-C++ consumers, language bindings, and the out-of-process service mode" | keep: a purpose, no v1.0 timing |
-| `.specify/constitution.md:413` §IV.2 | the C ABI is "the foundation for … the service wrapper" | keep: a dependency direction, no timing |
-| `.specify/constitution.md:579` §XIII.3 | "control-plane handlers" as an example | keep: an example of out-of-session code |
+| `.specify/constitution.md` §I.2 | the C ABI "exists for non-C++ consumers, language bindings, and the out-of-process service mode" | keep: a purpose, no v1.0 timing |
+| `.specify/constitution.md` §IV.2 | the C ABI is "the foundation for … the service wrapper" | keep: a dependency direction, no timing |
+| `.specify/constitution.md` §XIII.3 | "control-plane handlers" as an example | keep: an example of out-of-session code |
 | `.specify/constitution.md` §XVIII.5 | no early shipping of post-1.0 protocols | keep: unchanged, reaches the wrapper through §2 (R-2) |
-| `.specify/architecture.md:32` | "the gRPC service" among the public surfaces | edit (§F.1) |
-| `.specify/architecture.md:64` | module row 11, `fixppd` gRPC + iceoryx2 | edit (§F.1) |
-| `.specify/architecture.md:161` | `fixpp::service` interfaces | edit (§F.1) |
-| `.specify/architecture.md:343`, `:357` | §4.11 module and its rows | edit (§F.1) |
-| `.specify/architecture.md:450` | §6 plugin table, `ControlPlane` default gRPC | edit (§F.1) |
-| `.specify/architecture.md:611`, `:617` | §8.1, §8.2 headings | edit (§F.1) |
-| `.specify/architecture.md:642` | §9.3 "Stable from v1.0 … the gRPC control-plane proto" | edit (§F.1) |
-| `.specify/architecture.md:643` | §9.3 Provisional "the iceoryx2 topic shape" | edit (§F.1) |
-| `.specify/architecture.md:686` | §11 row 5, ControlPlane shape "Phase 2" | edit (§F.1) |
-| `.specify/architecture.md:815–816` | Z-3 "a live decision … do not read Z-3 as dropped" | edit (§F.1); new Z-9 at the end |
-| `.specify/api-contract.md:60`, `:61`, `:67` | §3.1 Stable from v1.0: `ControlPlane`, `ControlPlaneFactory`, the proto; §3.2 iceoryx2 topic | edit (§F.2) |
-| `.specify/api-contract.md:113`, `:222`, `:248`, `:249`, `:272`, `:274` | `fixpp::service` row, `fixppd` "Stable from v1.0", interface rows, 2j/2l rows | edit (§F.2) |
+| `.specify/architecture.md` §1.1 ("A small set of public surfaces") | "the gRPC service" among the public surfaces | edit (§F.1) |
+| `.specify/architecture.md` §2.1 module table | module row 11, `fixppd` gRPC + iceoryx2 | edit (§F.1) |
+| `.specify/architecture.md` §3 namespace table | `fixpp::service` interfaces | edit (§F.1) |
+| `.specify/architecture.md` §4.11 | §4.11 module and its rows | edit (§F.1) |
+| `.specify/architecture.md` §6 | §6 plugin table, `ControlPlane` default gRPC | edit (§F.1) |
+| `.specify/architecture.md` §8 | §8.1, §8.2 headings | edit (§F.1) |
+| `.specify/architecture.md` §9.3 ("Stable from v1.0" bullet) | §9.3 "Stable from v1.0 … the gRPC control-plane proto" | edit (§F.1) |
+| `.specify/architecture.md` §9.3 ("Provisional" bullet) | §9.3 Provisional "the iceoryx2 topic shape" | edit (§F.1) |
+| `.specify/architecture.md` §11 | §11 row 5, ControlPlane shape "Phase 2" | edit (§F.1) |
+| `.specify/architecture.md` Appendix Z-3 body | Z-3 "a live decision … do not read Z-3 as dropped" | edit (§F.1); new Z-9 at the end |
+| `.specify/api-contract.md` §3.1, §3.2 | §3.1 Stable from v1.0: `ControlPlane`, `ControlPlaneFactory`, the proto; §3.2 iceoryx2 topic | edit (§F.2) |
+| `.specify/api-contract.md` §5, §8, §9, §10 | `fixpp::service` row, `fixppd` "Stable from v1.0", interface rows, 2j/2l rows | edit (§F.2) |
 | `.specify/2j-controlplane.md` (225 lines) | the control-plane design, "v1.0 RPC surface" (§1 goal 4) | header (§F.3) |
-| `.specify/2l-tap.md:54` | non-goal 7: non-C++ tools use iceoryx2 or gRPC in v1.0 | edit (§F.3) |
-| `.specify/2l-tap.md:568`, `:806`, `:813`, `:977`, `:1151` | "binding v1.0 `fixppd` path" | header (§F.3) |
-| `.specify/2m-pybind.md:53`, `:917–918`, `:1394–1396`, `:1406`, `:1476` | Python reaches control plane / tap through `fixppd` in v1.0 | header (§F.3) |
-| `.specify/2i-capi.md:89`, `:1544`, `:1574`, `:1674` | rotation and engine registration through 2j's control plane | header (§F.3) |
-| `spec/coverage-index.md:652` | SVC-005 "Stable from v1.0" proto, "v1.0 RPC surface" | edit (§D) |
-| `spec/coverage-index.md:405` | "TC-003 stays backlog" | edit (§D) |
-| `spec/coverage-index.md:410–413` | `005-defer` on scenarios 8–11 | edit (§D) |
-| `spec/coverage-index.md:421`, `:436` | TC-012 "remains backlog" | edit (§D) |
-| `spec/coverage-index.md:435` | 005 ledger, scenarios 8–11 | edit (§D) |
-| `spec/feature-catalogue.md:285–289` | SVC-001..005 at `backlog` | edit (§A) |
+| `.specify/2l-tap.md` §2 | non-goal 7: non-C++ tools use iceoryx2 or gRPC in v1.0 | edit (§F.3) |
+| `.specify/2l-tap.md` §4.5, §6.4, §7.4, the RC#2 root-cause row | "binding v1.0 `fixppd` path" | header (§F.3) |
+| `.specify/2m-pybind.md` §1.1, §4.7, §7.10, §7.12, §10 Q4 | Python reaches control plane / tap through `fixppd` in v1.0 | header (§F.3) |
+| `.specify/2i-capi.md` §1.2, §7.7, §7.9, §10 question 3 | rotation and engine registration through 2j's control plane | header (§F.3) |
+| `spec/coverage-index.md` SVC-005 supplemental | SVC-005 "Stable from v1.0" proto, "v1.0 RPC surface" | edit (§D) |
+| `spec/coverage-index.md` FIX-TC row 3 | "TC-003 stays backlog" | edit (§D) |
+| `spec/coverage-index.md` FIX-TC rows 8–11 | `005-defer` on scenarios 8–11 | edit (§D) |
+| `spec/coverage-index.md` FIX-TC row 19; 005 ledger PossDup / PossResend row | TC-012 "remains backlog" | edit (§D) |
+| `spec/coverage-index.md` 005 ledger ResendRequest row | 005 ledger, scenarios 8–11 | edit (§D) |
+| `spec/feature-catalogue.md` Service section | SVC-001..005 at `backlog` | edit (§A) |
 | `spec/feature-catalogue.md` rows of the 18 flips, NFR-013 | old Status/Title | edit (§C) |
-| `README.md:15` | "and a gRPC+iceoryx2 service wrapper"; "≥90% test coverage" (NFR-002's old figure) | edit (§F.4) |
-| `docs/src/intro.md:3` | "and a gRPC + iceoryx2 service wrapper" | edit (§F.4) |
+| `README.md` tagline | "and a gRPC+iceoryx2 service wrapper"; "≥90% test coverage" (NFR-002's old figure) | edit (§F.4) |
+| `docs/src/intro.md` opening sentence | "and a gRPC + iceoryx2 service wrapper" | edit (§F.4) |
 | `brain/components/service.md` | "a live decision recorded outside this repo" | edit (§F.5) |
-| `brain/components/dictionary.md:3–4`, `:75–77` | D-007 "says backlog"; D-003/D-008 `backlog` | edit (§F.5) |
-| `brain/components/nfr-and-tooling.md:4` (frontmatter) | "so nfr's uniform backlog is not mistaken for fact" | edit (§F.5) |
-| `brain/components/nfr-and-tooling.md:57` | "an out-of-repo planning tracker … schedules the flip" (no dropped-scope term and no row ID, so neither (a) nor (b) reaches it: found by the Opus review) | edit (§F.5) |
-| `cmake/FixppPackaging.cmake:408` | `CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0"` (AGPL-3.0-only) | edit (§G) |
-| `conanfile.py:8` | `license = "AGPL-3.0-only"` | edit (§G) |
-| `include/fixpp/core/engine_config.hpp:171` | `control_plane_factory` member, read by nothing in `src/` | new limitation L-094-1 (§F.6) + issue (FR-018) |
+| `brain/components/dictionary.md` frontmatter; D-007, D-003, D-008 table rows | D-007 "says backlog"; D-003/D-008 `backlog` | edit (§F.5) |
+| `brain/components/nfr-and-tooling.md` (frontmatter `description:`) | "so nfr's uniform backlog is not mistaken for fact" | edit (§F.5) |
+| `brain/components/nfr-and-tooling.md` ("An out-of-repo planning tracker" bullet) | "an out-of-repo planning tracker … schedules the flip" (no dropped-scope term and no row ID, so neither (a) nor (b) reaches it: found by the Opus review) | edit (§F.5) |
+| `cmake/FixppPackaging.cmake` | `CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0"` (AGPL-3.0-only) | edit (§G) |
+| `conanfile.py` `license` attribute | `license = "AGPL-3.0-only"` | edit (§G) |
+| `include/fixpp/core/engine_config.hpp` | `control_plane_factory` member, read by nothing in `src/` | new limitation L-094-1 (§F.6) + issue (FR-018) |
 
 ### Hits kept, by file group
 
 | Group | Lines | Why kept |
 |---|---|---|
-| `.specify/2j-controlplane.md:1452–1469`, `:1682`; `.specify/2k-log-otel.md:1695`, `:1703`, `:1729`, `:1737` | SVC rows at `backlog` inside the docs' Appendix D drop-in blocks | historical proposals; 2j's header note covers 2j, and 2k's copies propose nothing about timing |
+| `.specify/2j-controlplane.md` Appendix D drop-in (its Service catalogue block and its SVC-005 supplemental); `.specify/2k-log-otel.md` §D.3 and §D.4 drop-in blocks | SVC rows at `backlog` inside the docs' Appendix D drop-in blocks | historical proposals; 2j's header note covers 2j, and 2k's copies propose nothing about timing |
 | `.specify/2k-log-otel.md` (rest of 39) | OTLP gRPC exporter; `StreamLogs` deferred to v1.x | other concept / already deferral |
-| `.specify/2d-threading.md`, `2f-async-mutex*.md`, `563-564-callback-send.md`, `2e-msgstore.md:1833` | "control-plane handlers", engine control strand | other concept |
-| `.specify/2e-msgstore.md:1132`, `:1284`; `544-hot-path-zero-alloc.md:1875` | "sidecar" audit entry / private sidecar | other concept |
-| `.specify/2g-tls.md:59`, `:1056–1058`, `:1152` | runtime cert reload owned by 2j | keep: ownership, no v1.0 timing; in-process rotation (T-040) is done, and Z-9 / 2j's header give the timing |
-| `.specify/2h-transport.md` (9), `.specify/2c-codegen.md:1795–1903`, `2a-decimal.md`, `2b-wire.md:724` | 2j cross-references, control-plane examples | keep: ownership or examples |
-| `.specify/2b-wire.md:51` | W-015, W-016 post-v1 | keep: already post-1.0 |
-| `.specify/architecture.md:6`, `:62`, `:79`, `:347–355`, `:451`, `:469`, `:518`, `:580–603`, `:614–621`, `:663`, `:665` | the service design, the boundary rule, `fixppd` "not yet built" | keep: design, covered by the edited headings and Z-9; the AGPL boundary rule still governs the installed `fixpp::service` |
-| `.specify/api-contract.md:300` | how a Provisional iceoryx2 shape may change | keep: a change rule, no timing |
-| Widened terms only (14 of the 17 lines): `.specify/2i-capi.md:1789`; `.specify/2j-controlplane.md:107`, `:1110`, `:1231`, `:1371`, `:1615`; `.specify/2l-tap.md:1271`; `.specify/2m-pybind.md:159`, `:1552`; `.specify/2k-log-otel.md:1328`; `.specify/architecture.md:19`, `:593`, `:605`, `:716` | the `[arch §8]` service-mode boundary rule: its heading, TOC entry, lint note and cross-references | keep: the AGPL boundary rule, no timing; it still governs the installed `fixpp::service` (2i/2j/2l/2m also carry their §F.3 timing header) |
-| `.specify/constitution.md:374` (widened terms only) | §I.2, above | keep |
-| `.specify/codex-review.md:72` (widened terms only) | "an out-of-process Codex CLI call" | other concept |
-| `CLAUDE-history.md:12` (widened terms only) | 086's changelog entry on the service-mode boundary | keep: history |
-| `spec/feature-catalogue.md:226` (T-040), `:281` (section heading) | "gRPC trigger remains v1.x"; "Service (Daemon/Sidecar)" | keep: already deferral / a heading |
-| `spec/coverage-index.md:552` | T-039/T-041 full rows wait on "2j `ReloadCertSource` control-plane" | keep, and reported as informational (spec §Clarifications, Gate A round 2): the dependency now waits on post-1.0 work, and T-039/T-040/T-041 already read `done` |
-| `spec/behaviors-and-limitations.md:388–390` (L-015-3) | "Bounded below the Phase-5 service wrapper" | keep: already later |
-| `spec/behaviors-and-limitations.md:470`, `:807–833`; `-closed.md:70`, `:77` | engine control strand | other concept |
-| `spec/behaviors-and-limitations.md:75`, `:78`, `:85`, `:102`, `:1542`, `:3347` | row IDs as anchors; spec-local `NFR-003-3` | keep / pattern FP |
-| `brain/components/session.md:493–495`, `engine-accept-path.md:75–76`, `test.md:881` | control-plane domain; capture sidecar | other concept |
-| `brain/index.md:64`, `brain/render-architecture.md:102` | "a stub by decision" | keep: still true |
-| `docs/src/tls-quickstart.md:83`, `docs/src/transport-quickstart.md:88` | "owned by 2j" in a not-covered list | keep: ownership, no timing |
-| `conanfile.py:29–42`, `:61`, `:118` | grpc as a Phase-5 dependency; OTel `with_otlp_grpc=False` | keep: already later |
-| `cmake/ProjectOptions.cmake:9` | `FIXPP_BUILD_SERVICE` OFF | keep: the option exists, off |
-| `src/service/CMakeLists.txt:2–3`, `src/tap/CMakeLists.txt:2` | module description comments | keep: design, no timing |
-| `include/fix/c_api/error.h:20`, `:145–150`; `src/capi/error.cpp:360–364`; `tools/abi_history/error_codes_v1.txt:73` | codes 900/901 | keep: FR-003b |
-| `include/fixpp/service/control_plane_factory.hpp:9`, `:23` | the anchor's own comment | keep: FR-003b |
+| `.specify/2d-threading.md`, `2f-async-mutex*.md`, `563-564-callback-send.md`, `2e-msgstore.md` §D.6 | "control-plane handlers", engine control strand | other concept |
+| `.specify/2e-msgstore.md` §6.5 and §10 question 3; `544-hot-path-zero-alloc.md` round-1 disagreement C-6 | "sidecar" audit entry / private sidecar | other concept |
+| `.specify/2g-tls.md` §1.2, §7.7, §11 | runtime cert reload owned by 2j | keep: ownership, no v1.0 timing; in-process rotation (T-040) is done, and Z-9 / 2j's header give the timing |
+| `.specify/2h-transport.md` (9), `.specify/2c-codegen.md` §7.4 through §11, `2a-decimal.md`, `2b-wire.md` §7.4 | 2j cross-references, control-plane examples | keep: ownership or examples |
+| `.specify/2b-wire.md` §2 | W-015, W-016 post-v1 | keep: already post-1.0 |
+| `.specify/architecture.md` scope rule, §2.1 `tap` row, §2.2 diagram, §4.11 body, §6 `TapConsumer` row, §7.1, §7.4 and §8 `fixppd` text, §8.1/§8.2 bodies, §10 2j/2l rows | the service design, the boundary rule, `fixppd` "not yet built" | keep: design, covered by the edited headings and Z-9; the AGPL boundary rule still governs the installed `fixpp::service` |
+| `.specify/api-contract.md` §11 | how a Provisional iceoryx2 shape may change | keep: a change rule, no timing |
+| Widened terms only (14 of the 17 lines): `.specify/2i-capi.md` B.3; `.specify/2j-controlplane.md` §3.2, §10 question 10, B.3, the v0.1 → v0.2 changelog, Appendix D's `EngineConfig` §4.4 drop-in; `.specify/2l-tap.md` v0.2 → v0.3 net-effect summary; `.specify/2m-pybind.md` §3.4, B.2; `.specify/2k-log-otel.md` B.2; `.specify/architecture.md` TOC, §8 heading and its `tools/check_layers.py` note, Appendix A | the `[arch §8]` service-mode boundary rule: its heading, TOC entry, lint note and cross-references | keep: the AGPL boundary rule, no timing; it still governs the installed `fixpp::service` (2i/2j/2l/2m also carry their §F.3 timing header) |
+| `.specify/constitution.md` §I.2 (widened terms only) | §I.2, above | keep |
+| `.specify/codex-review.md` (widened terms only) | "an out-of-process Codex CLI call" | other concept |
+| `CLAUDE-history.md` (widened terms only) | 086's changelog entry on the service-mode boundary | keep: history |
+| `spec/feature-catalogue.md` T-040 row, Service section heading | "gRPC trigger remains v1.x"; "Service (Daemon/Sidecar)" | keep: already deferral / a heading |
+| `spec/coverage-index.md` 012-2h-transport "Cross-cuts forwarded" note | T-039/T-041 full rows wait on "2j `ReloadCertSource` control-plane" | keep, and reported as informational (spec §Clarifications, Gate A round 2): the dependency now waits on post-1.0 work, and T-039/T-040/T-041 already read `done` |
+| `spec/behaviors-and-limitations.md` L-015-3 | "Bounded below the Phase-5 service wrapper" | keep: already later |
+| `spec/behaviors-and-limitations.md` B-017-2 and the 023-engine-session-strand section; `-closed.md` L-019-3 | engine control strand | other concept |
+| `spec/behaviors-and-limitations.md` B-002-1, B-002-4, L-002-4, L-003-4, B-043-1, L-495-1 | row IDs as anchors; spec-local `NFR-003-3` | keep / pattern FP |
+| `brain/components/session.md` (fixpp#563/#564 section), `engine-accept-path.md` (the 2d-threading row of its WRONG-documents table), `test.md` (#442 section) | control-plane domain; capture sidecar | other concept |
+| `brain/index.md` service-wrapper route, `brain/render-architecture.md` gap-naming section | "a stub by decision" | keep: still true |
+| `docs/src/tls-quickstart.md`, `docs/src/transport-quickstart.md` | "owned by 2j" in a not-covered list | keep: ownership, no timing |
+| `conanfile.py` (the "Returns in Phase 5: grpc" note, its `with_otlp_grpc=False` comment and option) | grpc as a Phase-5 dependency; OTel `with_otlp_grpc=False` | keep: already later |
+| `cmake/ProjectOptions.cmake` | `FIXPP_BUILD_SERVICE` OFF | keep: the option exists, off |
+| `src/service/CMakeLists.txt`, `src/tap/CMakeLists.txt` header comments | module description comments | keep: design, no timing |
+| `include/fix/c_api/error.h` (the range table, "Control-plane block (900–999)"); `src/capi/error.cpp` ("// control-plane"); `tools/abi_history/error_codes_v1.txt` ("Control plane [900, 999]") | codes 900/901 | keep: FR-003b |
+| `include/fixpp/service/control_plane_factory.hpp` | the anchor's own comment | keep: FR-003b |
 | `include/fixpp/log/*`, `include/fixpp/otel/providers.hpp`, `src/config/logger_resolver.cpp`, `tests/config/*`, `tools/otel_smoke/collector.yaml` | OTLP gRPC exporter / `use_grpc` | other concept |
-| `include/fixpp/session/engine.hpp`, `src/session/engine.cpp`, `src/capi/engine.cpp:237`, `tests/session/test_engine_session_strand.cpp`, `tests/session/CMakeLists.txt:2127` | engine control strand | other concept |
-| `tests/interop/**`, `tests/codegen/CMakeLists.txt:58` | capture / selection "sidecar" | other concept |
-| `.github/workflows/{tier2,parallelism-measure}.yml`, `ci/assert-ci-lane-policy.py:235` | `.sha256` sidecar | other concept |
+| `include/fixpp/session/engine.hpp`, `src/session/engine.cpp`, `src/capi/engine.cpp` ("start()-vs-loop control-plane races"), `tests/session/test_engine_session_strand.cpp`, `tests/session/CMakeLists.txt` (the V-1..V-12 comment) | engine control strand | other concept |
+| `tests/interop/**`, `tests/codegen/CMakeLists.txt` (mallocnesia sidecar selection) | capture / selection "sidecar" | other concept |
+| `.github/workflows/{tier2,parallelism-measure}.yml`, `ci/assert-ci-lane-policy.py` | `.sha256` sidecar | other concept |
 | `tests/oracle/conftest.py`, `tests/codegen/test_082_*`, `tests/codegen/vlatest_manifest_*`, `tests/tls/fixtures/ca-db/newcerts/1004.pem` | `_FixppDecimalT`, `kGrpClassStart`, base64 | pattern FP |
-| `tests/session/test_interpret_logon_encrypt_method.cpp:10` | "(TC-017 backlog)" | keep: history ("S-021 documented as …"), and a test file outside SC-005 |
-| `tests/conformance/test_transport_interop.cpp`, `tests/conformance/CMakeLists.txt:44` | `TC-001..TC-017` as DISABLED transport cells | keep: a different numbering (there TC-012 is a BodyLength/CheckSum case); the cells are still disabled, and no Verified cell claims them |
-| `tests/session/conformance/tc_reject_test.cpp`, `tests/session/conformance/CMakeLists.txt:73` | TC-005 cells | keep: the witnesses themselves |
-| `.specify/2c-codegen.md:7–8`, `:2117`; `.specify/constitution.md:447`, `:616`; `.specify/architecture.md:138`, `:189`, `:210`, `:324`, `:763`; `.specify/2h-transport.md:1393`, `:1518`; `.specify/2m-pybind.md:1806`, `:1818` | rows named as owned, cited or in rule text | keep: no status claim |
+| `tests/session/test_interpret_logon_encrypt_method.cpp` | "(TC-017 backlog)" | keep: history ("S-021 documented as …"), and a test file outside SC-005 |
+| `tests/conformance/test_transport_interop.cpp`, `tests/conformance/CMakeLists.txt` | `TC-001..TC-017` as DISABLED transport cells | keep: a different numbering (there TC-012 is a BodyLength/CheckSum case); the cells are still disabled, and no Verified cell claims them |
+| `tests/session/conformance/tc_reject_test.cpp`, `tests/session/conformance/CMakeLists.txt` (T052 block) | TC-005 cells | keep: the witnesses themselves |
+| `.specify/2c-codegen.md` Cites header, v1.0 → v1.1 RC#3; `.specify/constitution.md` §VII.5, §XV.13; `.specify/architecture.md` §2.4 RC#3 amendment, §4.1/§4.2/§4.9 catalogue rows, Appendix B; `.specify/2h-transport.md` §9, B.2; `.specify/2m-pybind.md` §D.4 | rows named as owned, cited or in rule text | keep: no status claim |
 | `src/`, `include/`, `tools/codegen/`, `cmake/templates/`, `bench/`, `tests/` other ID hits | a row ID cited as an anchor in a comment | keep: no status claim (the status-word filter `backlog|not … done|pending|deferred|remains|stays` over them finds only the two kept lines above) |
 | `bench/**`, `docs/src/dictionary/codegen.md`, `.specify/495-493-486-*.md`, `.specify/ci209-bench-gate.md` | `NFR-002-1`, `NFR-003-1..7` | pattern FP (spec-local IDs) |
-| `tools/brain_link_decisions.py:19–20` | `D-007`, `NFR-001` as examples of ids not to match | keep |
-| `.specify/2h-transport.md:837`, `.specify/544-hot-path-zero-alloc.md:170`, `tests/support/recycler_driver.hpp:54` | io_uring as an example / `ASIO_HAS_IO_URING` guard | keep: no v1.0 claim |
+| `tools/brain_link_decisions.py` | `D-007`, `NFR-001` as examples of ids not to match | keep |
+| `.specify/2h-transport.md` §4.6, `.specify/544-hot-path-zero-alloc.md` §1, `tests/support/recycler_driver.hpp` | io_uring as an example / `ASIO_HAS_IO_URING` guard | keep: no v1.0 claim |
 
 ### Licence metadata (c)
 
-`conanfile.py:8` and `cmake/FixppPackaging.cmake:408` are the only two non-or-later licence fields;
-`bindings/python/pyproject.toml:78` already reads `AGPL-3.0-or-later`. No test, CI script or tool pins
+`conanfile.py`'s `license` attribute and `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` are the only two non-or-later licence fields;
+`bindings/python/pyproject.toml`'s `license` key already reads `AGPL-3.0-or-later`. No test, CI script or tool pins
 either string (`git grep -n -E "RPM_PACKAGE_LICENSE|AGPL-3\.0\"" -- tests ci .github tools cmake`
-returns only the definition). `README.md:11` (badge), `README.md:25–26`, `NOTICE:7` and
-`LICENSE-COMMERCIAL.md:3` say "AGPL-3.0" in prose. They are not package metadata, so they are kept and
+returns only the definition). `README.md`'s licence badge and its "Open source" / "Commercial" bullets, `NOTICE` and
+`LICENSE-COMMERCIAL.md`'s opening sentence say "AGPL-3.0" in prose. They are not package metadata, so they are kept and
 reported (the default recorded in spec §Clarifications, Gate A round 2).
 
 (c)'s regex sees `license = …` and the two named strings, so a field in another syntax (a YAML or JSON
@@ -503,11 +504,11 @@ reported (the default recorded in spec §Clarifications, Gate A round 2).
 escape it. A syntax-independent sweep (checklist audit, 2026-10-22):
 `git grep -n -i -I -E 'licen[cs]e' -- '*.toml' '*.json' '*.in' '*.cfg' '*.py' '*.cmake' '*CMakeLists.txt' '*.yml' '*.yaml' '*.spec' ':!specs/' ':!tests/'`,
 read uncapped with `SPDX-License-Identifier` lines dropped (36 lines at the audit; record the count
-at verify). Its hits are the two fields above, `bindings/python/pyproject.toml:78` (already
+at verify). Its hits are the two fields above, `bindings/python/pyproject.toml`'s `license` key (already
 or-later), `CPACK_RESOURCE_FILE_LICENSE` (a path to `LICENSE`, not an identifier), licence-file paths
 and prose comments in `CMakeLists.txt`, `cmake/FixppPackaging.cmake` and `pyproject.toml`, workflow
-`paths:` entries naming `LICENSE`, `.specify/extensions/git/extension.yml:10` (`license: MIT`, the
-Spec-Kit git extension's own manifest, not fixpp's), and `conan/recipes/civetweb/conanfile.py:13`
+`paths:` entries naming `LICENSE`, `.specify/extensions/git/extension.yml` (`license: MIT`, the
+Spec-Kit git extension's own manifest, not fixpp's), and `conan/recipes/civetweb/conanfile.py`
 (`license = "MIT"`, the vendored civetweb recipe's licence for the third-party package it builds,
 not fixpp's; (c)'s `license *=` also matches it, and it is kept as other concept). So the population of package-metadata licence fields is the
 two FR-013a changes plus `pyproject.toml`. Verify re-runs this sweep beside (c).

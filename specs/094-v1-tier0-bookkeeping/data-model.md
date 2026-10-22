@@ -225,15 +225,15 @@ no catalogue line moves:
 
 ## D. Coverage index (FR-011, FR-004)
 
-Line numbers are at `9b176090`. Each edit is same-line except the NFR-019 paragraph. Each edit is
-anchored by its text, and the line numbers are a guide only. Apply the same-line edits first and insert
-the NFR-019 paragraph last: it lands after the NFR-016 supplemental (:648), so once it is in, the
-SVC-005 supplemental moves from :652 to :654.
+Anchors are at `9b176090`. Each edit is same-line except the NFR-019 paragraph. Each edit is
+anchored by its text (its row number, row label or quoted before-text). Apply the same-line edits first and insert
+the NFR-019 paragraph last: it lands after the NFR-016 supplemental, so once it is in, the
+SVC-005 supplemental moves down by two lines.
 
-- **§4 row 3 (:405):** the note's opener changes from `**093 (partial; TC-003 stays backlog):**` to
+- **§4 row 3:** the note's opener changes from `**093 (partial; TC-003 stays backlog):**` to
   `**093; TC-003 done (094 reconciliation):**`. The rest of the note stays, including its
   re-derivation grep.
-- **§4 rows 8, 9, 10, 11 (:410–:413):** the last cell, which reads the same on all four rows,
+- **§4 rows 8, 9, 10, 11:** the last cell, which reads the same on all four rows,
   `005-defer: recovery-dependent — deferred-with-traceability to the later session-recovery feature (see 005 ledger below)`,
   is replaced with (the before-text occurs four times, so each row is located by its scenario number,
   tasks.md Execution rules):
@@ -241,23 +241,24 @@ SVC-005 supplemental moves from :652 to :654.
   - 9 → `TC-014 done (094 reconciliation): option 2 (141=Y) delivered by 024/030/032.`
   - 10 → `TC-007 stays backlog: only 10b has a GapFill-mode witness; 10a/10c/10d/10e unwitnessed (094 row-by-row verification, 2026-10-21; parent repo (private)).`
   - 11 → `TC-008 done (094 reconciliation): Reset-mode SequenceReset delivered by S-023 (#90).`
-- **§4 row 19 (:421):** the sentence `The formal \`[FIX-TC]\` scenario-19 conformance cell (TC-012)
+- **§4 row 19:** the sentence `The formal \`[FIX-TC]\` scenario-19 conformance cell (TC-012)
   remains backlog (conformance-harness scope, see 005 ledger below).` is replaced with
   `TC-012 done (094 reconciliation): delivered by 022 (#103); the 19a/19b message-ID duplicate check is the application's (L-022-1).`
 - **005 deferral ledger, row "ResendRequest / SequenceReset-GapFill / SequenceReset-Reset /
-  synchronize-seqnums" (:435):** the last cell is replaced with
+  synchronize-seqnums":** the last cell is replaced with
   `discharged by 013/S-023/024 — TC-006, TC-008, TC-014 done (094); TC-007 backlog`.
-- **005 deferral ledger, row "PossDup / PossResend duplicate semantics (S-010)" (:436):** the
+- **005 deferral ledger, row "PossDup / PossResend duplicate semantics (S-010)":** the
   fragment `only the formal \`[FIX-TC]\` scenario-19 conformance cell (TC-012) remains → later
   conformance-harness work` is replaced with
   `TC-012 done (094 reconciliation): delivered by 022 (#103); the 19a/19b message-ID duplicate check is the application's (L-022-1)`.
-- **SVC-005 supplemental (:652):** directly after `**SVC-005 supplemental:**` insert
+- **SVC-005 supplemental:** directly after `**SVC-005 supplemental:**` insert
   ` *(Post-1.0 — constitution v4.0, feature 094: SVC-005 is \`dropped(post-v1.0, planned, not abandoned)\`; the design below, its "Stable from v1.0" proto tier and its "v1.0 RPC surface" describe the post-1.0 release that builds it. v1.0 installs only the empty \`ControlPlaneFactory\` anchor and the codes 900/901.)*`
 - **NFR-019 supplemental** (new paragraph, after the NFR-016 supplemental):
   `**NFR-019 supplemental:** io_uring async I/O backend (Linux, opt-in) — a design choice split from NFR-013 (owner 2026-10-21), not a FIX spec section ([const §VI.3]). No constitution clause or design doc requires it; to be measured in the row-16 perf pass. Status: dropped(post-v1.0, planned, not abandoned).`
-- **No change** to the W-015 / W-016 entries (:112, :634, :701, :705): they already read post-1.0.
+- **No change** to the W-015 / W-016 entries (the FIX-SL §7 row, the Gap Summary attachment-group row,
+  and the Post-1.0 Gap Registry's attachment-group and FIXP rows): they already read post-1.0.
   The earlier draft also said SVC-005's entry already read post-1.0; it did not (Gate A round 1),
-  hence the :652 edit above.
+  hence the SVC-005 supplemental edit above.
 
 ## E. Constitution and CHANGELOG (FR-003, FR-003a, FR-003c)
 
@@ -372,7 +373,7 @@ three RATIFIED forms (`… then a scoped round on <clauses>`), and the Gate A ta
 `, then a scoped round on <clauses> (…)`, with that round's Codex tallies in the parentheses,
 directly after its `all in non-clause text, closed)`.
 
-### E.2 Status line (`> **Status:**`, line 357 at `9b176090`)
+### E.2 Status line (`> **Status:**`)
 
 PENDING form — the line's current opening `> **Status:** user-ratified **v3.0** (2026-09-23) — ` is
 replaced by:
@@ -406,7 +407,7 @@ Before:
 After:
 `6. **No PR may close a `done` row without:** (a) a matching `/specify` artifact, (b) verifying tests, (c) Codex Gate B pass, (d) Gate A pass for non-trivial designs. For a row whose subject is a process obligation of this constitution, with no library behaviour under test, (b) is met by per-feature records of the kind that obligation names, cited in the row, each showing it applied in full (for Article IX §1: verify records that assess every uncovered line and every untaken branch), and labelled where a reader of this repository cannot open them. This does not relax (b) for any row that describes behaviour.`
 
-The before-text is `.specify/constitution.md:437` at `9b176090`. The after-text keeps the (a)–(d)
+The before-text is `.specify/constitution.md` §VI.6 at `9b176090`. The after-text keeps the (a)–(d)
 list byte-identical and adds two sentences after it. They carry the Opus round-2 draft's exception,
 with the two things the owner's ruling requires added: what the evidence is, and that (b) is not
 relaxed for a behaviour row.
@@ -491,31 +492,31 @@ becomes
 
 ## F. Other surfaces (FR-004, FR-017, FR-018)
 
-Every edit here comes from the research R-12 sweep, where each hit has its disposition. Line numbers
-are at `9b176090`; every edit is same-line unless it says otherwise.
+Every edit here comes from the research R-12 sweep, where each hit has its disposition. Anchors (a
+section, row or quoted text) are at `9b176090`; every edit is same-line unless it says otherwise.
 
 ### F.1 `.specify/architecture.md`
 
-- **:32** — append to the bullet: ` *(The gRPC service is post-1.0: Appendix Z-9.)*`
-- **:64** (module table, row 11) — the last cell `Yes (binary + gRPC schema)` becomes
+- **§1.1, the "A small set of public surfaces" bullet** — append to the bullet: ` *(The gRPC service is post-1.0: Appendix Z-9.)*`
+- **§2.1 module table, row 11 (`service`)** — the last cell `Yes (binary + gRPC schema)` becomes
   `Yes (binary + gRPC schema) — post-1.0, Z-9`.
-- **:161** (namespace inventory, `fixpp::service`) — append to its third cell:
+- **§3 namespace inventory, `fixpp::service` row** — append to its third cell:
   ` Post-1.0 except the installed \`ControlPlaneFactory\` anchor (Z-9).`
-- **:343** (§4.11 opening paragraph) — append:
+- **§4.11 opening paragraph** ("The module has two parts with different stability and API status") — append:
   ` ⚠️ **Post-1.0 (Z-9):** the whole module is on the post-1.0 roadmap; v1.0 installs only the \`ControlPlaneFactory\` anchor.`
-- **:357** — `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005.` becomes
+- **§4.11** — `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005.` becomes
   `**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005 (each \`dropped(post-v1.0, planned, not abandoned: …)\`, Z-9).`
-- **:450** (§6 plugin table, `ControlPlane` row) — append to its last cell: ` Post-1.0 (Z-9).`
-- **:611** — `### 8.1 Control plane (gRPC, default)` becomes
+- **§6 plugin table, `ControlPlane` row** — append to its last cell: ` Post-1.0 (Z-9).`
+- **§8.1 heading** — `### 8.1 Control plane (gRPC, default)` becomes
   `### 8.1 Control plane (gRPC, default) — post-1.0 (Z-9)`.
-- **:617** — `### 8.2 Data plane (iceoryx2, opt-in)` becomes
+- **§8.2 heading** — `### 8.2 Data plane (iceoryx2, opt-in)` becomes
   `### 8.2 Data plane (iceoryx2, opt-in) — post-1.0 (Z-9)`.
-- **:642** (§9.3) — `…, the C ABI, the gRPC control-plane proto.` becomes
+- **§9.3, "Stable from v1.0" bullet** — `…, the C ABI, the gRPC control-plane proto.` becomes
   `…, the C ABI. The gRPC control-plane proto is post-1.0 (Z-9).`
-- **:643** (§9.3) — `the iceoryx2 topic shape,` becomes
+- **§9.3, "Provisional" bullet** — `the iceoryx2 topic shape,` becomes
   `the iceoryx2 topic shape (post-1.0 with the data plane, Z-9),`.
-- **:686** (§11 row 5) — append to its last cell: ` ⚠️ **Z-9: post-1.0 (constitution v4.0).**`
-- **:815–:816** (Z-3 body; same two lines, the line count is kept). Before:
+- **§11 row 5** — append to its last cell: ` ⚠️ **Z-9: post-1.0 (constitution v4.0).**`
+- **Z-3 body, the two lines quoted below** (the line count is kept). Before:
 
   ```
   the surrounding scope has been revisited more than once since. ⚠️ **The disposition of the service
@@ -550,46 +551,46 @@ are at `9b176090`; every edit is same-line unless it says otherwise.
 
 ### F.2 `.specify/api-contract.md`
 
-- **:60** (§3.1 pluggable-interface bullet) — append:
+- **§3.1 pluggable-interface bullet** ("Each pluggable interface enumerated in §9") — append:
   ` *(Except \`ControlPlane\`: the control plane is post-1.0 (constitution v4.0). \`ControlPlaneFactory\` is Stable from v1.0 as an empty polymorphic base; the post-1.0 control plane extends it by derivation and adds no member to it.)*`
-  (Gate A round 2, N2-2: the tier is stated once, here, and `:220` and `:249` agree with it. It matches
+  (Gate A round 2, N2-2: the tier is stated once, here, and the §8 `fixpp::service` target row and the §9 `ControlPlaneFactory` row agree with it. It matches
   the shipped header's own comment, "Full control-plane surface owned by 2j (extends this base)".)
-- **:61** (gRPC proto bullet) — append: ` *(Post-1.0 with the service wrapper, constitution v4.0; not a v1.0 surface.)*`
-- **:67** (iceoryx2 topic shape bullet) — append: ` *(Post-1.0, constitution v4.0.)*`
-- **:113** (`fixpp::service` namespace row) — append to its second cell:
+- **§3.1 gRPC proto bullet** — append: ` *(Post-1.0 with the service wrapper, constitution v4.0; not a v1.0 surface.)*`
+- **§3.2 iceoryx2 topic shape bullet** — append: ` *(Post-1.0, constitution v4.0.)*`
+- **§5 `fixpp::service` namespace row** — append to its second cell:
   ` v1.0 installs only \`ControlPlaneFactory\`, an empty anchor; \`ControlPlane\`, \`ControlPlaneConfig\` and \`grpc_control_plane\` are post-1.0 (constitution v4.0).`
-- **:222** (`fixppd` row) — the last cell `Stable from v1.0` becomes `Post-1.0 (constitution v4.0)`.
-- **:248** (`ControlPlane` interface row) — append to its third cell: ` — post-1.0 (constitution v4.0)`.
-- **:220** (`fixpp::service` target row, `Stable from v1.0`) — **no change**. The target installs
-  exactly the `ControlPlaneFactory` header, and that header is Stable from v1.0 per the `:60` edit.
-- **:249** (`ControlPlaneFactory` row) — the third cell `1 (\`make\`)` becomes
+- **§8 `fixppd` row** — the last cell `Stable from v1.0` becomes `Post-1.0 (constitution v4.0)`.
+- **§9 `ControlPlane` interface row** — append to its third cell: ` — post-1.0 (constitution v4.0)`.
+- **§8 `fixpp::service` target row** (`Stable from v1.0`) — **no change**. The target installs
+  exactly the `ControlPlaneFactory` header, and that header is Stable from v1.0 per the §3.1 pluggable-interface bullet edit.
+- **§9 `ControlPlaneFactory` row** — the third cell `1 (\`make\`)` becomes
   `1 (\`make\`) — post-1.0, on a type derived from the v1.0 anchor (constitution v4.0)`.
-- **:272** (2j row) — append to its third cell:
+- **§10 2j row** — append to its third cell:
   ` (post-1.0, constitution v4.0; v1.0 ships only \`ControlPlaneFactory\` as an empty anchor, and the codes 900/901)`.
-- **:274** (2l row) — append to its third cell:
+- **§10 2l row** — append to its third cell:
   ` (\`Iox2Tap\`, \`TapShmRecord\` and the iceoryx2 service name are post-1.0, constitution v4.0)`.
 
 ### F.3 Design-doc status headers (one same-line note each)
 
-- **`.specify/2j-controlplane.md:3`** (`**Status:**` line) — append:
+- **`.specify/2j-controlplane.md`** (`**Status:**` line) — append:
   ` **Timing (constitution v4.0, feature 094):** this design — the \`ControlPlane\` interface, its default gRPC implementation, the proto and \`fixppd\` — is post-1.0, unscheduled (Article XIV §1, Article XVIII §2). v1.0 installs only the \`ControlPlaneFactory\` anchor and the C-ABI codes 900/901, so read every "v1.0" statement below as a post-1.0 design statement.`
-- **`.specify/2l-tap.md:5`** (Status row) — the cell `Draft v0.4 — Gate A round 3 converged (Phase A)`
+- **`.specify/2l-tap.md`** (Status row) — the cell `Draft v0.4 — Gate A round 3 converged (Phase A)`
   becomes `Draft v0.4 — Gate A round 3 converged (Phase A). **Timing (constitution v4.0, feature 094):** the iceoryx2 data plane (\`Iox2Tap\`, SVC-002), the gRPC-only mode (SVC-003) and every \`fixppd\` path below are post-1.0, unscheduled (Article XIV §3, Article XVIII §2); read each "binding v1.0 \`fixppd\`" statement as a post-1.0 design statement. The in-process tap (S-036, NFR-014) is not affected.`
-- **`.specify/2l-tap.md:54`** (non-goal 7) — append:
+- **`.specify/2l-tap.md`** (§2 non-goal 7, "No C ABI tap subscription symbols in v1.0") — append:
   ` *(Both routes are post-1.0 — see Status. v1.0 has no cross-process route for a non-C++ tap consumer.)*`
-- **`.specify/2m-pybind.md:5`** (Status row) — append to the cell:
+- **`.specify/2m-pybind.md`** (Status row) — append to the cell:
   ` **Timing (constitution v4.0, feature 094):** \`fixppd\`, the gRPC control plane and the iceoryx2 tap are post-1.0, unscheduled; every route below that runs through them (§1.2, §7.10, §7.12, Q4, the tap docstring) is a post-1.0 design statement.`
-- **`.specify/2i-capi.md:3`** (`**Status:**` line) — append:
+- **`.specify/2i-capi.md`** (`**Status:**` line) — append:
   ` **Timing (constitution v4.0, feature 094):** 2j's control plane is post-1.0, unscheduled. The codes 900/901 stay reserved, and every route below that runs through 2j's control plane (cert/pinset rotation via \`ReloadCertSource\`, the gRPC control-plane registration on \`fixpp_engine_create\`) is a post-1.0 design statement.`
 
 ### F.4 Public prose (`README.md`, `docs/src/intro.md`)
 
-- **`README.md:15`** — before:
+- **`README.md`** (the tagline paragraph) — before:
   `A modern C++23 FIX protocol library. Zero-copy parsing, lock-free hot paths, ABI-agnostic C interface, Python bindings (SWIG), and a gRPC+iceoryx2 service wrapper. Targets FIX 4.0 through 5.0SP2/FIXT.1.1 with ≥90% test coverage via TDD.`
   After:
   `A modern C++23 FIX protocol library. Zero-copy parsing, lock-free hot paths, ABI-agnostic C interface and Python bindings (SWIG); a gRPC+iceoryx2 service wrapper is planned after v1.0. Targets FIX 4.0 through 5.0SP2/FIXT.1.1, test-driven, under the per-PR coverage rule of constitution Article IX §1.`
   (The "≥90%" figure is NFR-002's former 90/80, which `[const §IX.1]` superseded.)
-- **`docs/src/intro.md:3`** — `…, Python bindings, and a gRPC + iceoryx2 service wrapper. It covers …`
+- **`docs/src/intro.md`** (the opening sentence) — `…, Python bindings, and a gRPC + iceoryx2 service wrapper. It covers …`
   becomes `…, and Python bindings, with a gRPC + iceoryx2 service wrapper planned after v1.0. It covers …`.
 
 ### F.5 Brain pages
@@ -618,7 +619,7 @@ are at `9b176090`; every edit is same-line unless it says otherwise.
   `and so nfr's uniform backlog is not mistaken for fact.` becomes
   `and so a backlog cell in nfr is read as a lead, not as fact (feature 094 reconciled the rows that had shipped).`
   The title stays: the ⭐ caution under it still applies to the rows left at `backlog`.
-- **`brain/components/nfr-and-tooling.md:57`** — the bullet "An out-of-repo planning tracker names a
+- **`brain/components/nfr-and-tooling.md`** — the bullet "An out-of-repo planning tracker names a
   set of these rows as *delivered practice, never flipped*, and schedules the flip as a catalogue edit
   with **zero code**." is replaced with:
   `- Feature 094 (2026-10-22) re-verified each candidate row against the tree and flipped the rows that shipped to \`done\`, worded to what shipped; the rows it left at \`backlog\` were checked and are not delivered (its \`spec.md\` FR-012 lists them).`
@@ -650,13 +651,13 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
   and no other C/C++ file is a C header. Re-derive:
   `git ls-files src include | grep '\.h$' | grep -v '^include/fix/'` prints nothing (known positive:
   without the `grep -v`, it lists the 12 `include/fix/` headers).
-- **`conanfile.py:8`:** `license = "AGPL-3.0-only"` becomes `license = "AGPL-3.0-or-later"` (in the
+- **`conanfile.py`:** `license = "AGPL-3.0-only"` becomes `license = "AGPL-3.0-or-later"` (in the
   SPDX commit).
-- **`cmake/FixppPackaging.cmake:408`:** `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")` becomes
+- **`cmake/FixppPackaging.cmake`:** `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")` becomes
   `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0-or-later")` (in the SPDX commit). `AGPL-3.0` is the
   deprecated SPDX short id for AGPL-3.0-only and is the `License:` tag of the RPM the packaging lane
   builds. No test, CI script or tool pins either string (research R-12).
-- **`conanfile.py:97–98` (owner, 2026-10-22; FR-013b) — a separate commit, message referencing
+- **`conanfile.py`'s two-line comment above `tool_requires = []` (owner, 2026-10-22; FR-013b) — a separate commit, message referencing
   `Refs #607` with no closing keyword.** Before:
 
   ```
@@ -665,7 +666,7 @@ All of §G is the phase-implementer's (`[const §XVI.6]`: build and configuratio
   ```
   After (four lines, the owner's text of Gate A round 2, with the file's four-space indent, the
   `Restore:` pointer owner-approved at Gate A round 3, N3-2, and line 1's provisioning parenthesis
-  reworded by the owner at the checklist audit; `tool_requires = []` moves from line 99 to line 101):
+  reworded by the owner at the checklist audit; the `tool_requires = []` line moves down by two):
   ```
       # cmake and ninja come from the system (runner image, apt or choco in CI); swig is installed by each
       # workflow that builds the bindings, at or above the minimum

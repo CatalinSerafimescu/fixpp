@@ -64,13 +64,12 @@ carries its own "Open at the audit — waiver" line, which the audit's check (i)
     adds no line."
   - Before replacing, `grep -F` the before-text: if it does not match byte for byte, stop and report.
   - If the before-text is not unique in its file (`grep -cF` prints more than 1), a whole-file
-    `grep -F` does not identify the line. Anchor it to its line instead: `sed -n '<N>p' <file>` must
-    print the line holding the before-text, where `<N>` is the data-model line guide (at `9b176090`;
-    re-derived if `git diff 9b176090 HEAD -- <file>` is not empty). The edit then touches that line
-    only. To re-derive: `grep -nF '<before-text>' <file>` lists the candidate lines, and the one in the
-    section data-model names is the target. Same-line edits never move a line, so only a line-adding
+    `grep -F` does not identify the line. Anchor it to its line instead: `grep -nF '<before-text>' <file>`
+    lists the candidate lines, and the one in the section or row data-model names is the target;
+    `sed -n '<N>p' <file>` with that `<N>` must print the line holding the before-text. The edit then
+    touches that line only. Same-line edits never move a line, so only a line-adding
     edit above the target (the SIR, the NFR-019 row and paragraph, Z-9, the L-094-1 section, the
-    CHANGELOG entry) shifts a guide.
+    CHANGELOG entry) shifts an `<N>`; re-derive it after any such edit.
 - **No placeholder number is ever committed.** Before every commit (tasks.md excluded, since it names
   what it replaces), `git grep -nE 'fixpp#<|<N-' -- ':!specs/094-v1-tier0-bookkeeping/tasks.md' ':!specs/094-v1-tier0-bookkeeping/checklists/'`
   must print nothing once T011 has run. The checklists are excluded too, because their items quote the
@@ -156,7 +155,7 @@ shown able to report non-zero.
     40 (37 under `tests/`, 3 under `bench/`).
   - R-12's recipe, its four `git grep` commands ((a) the dropped-scope terms, (a) the io_uring grep,
     (b) and (c)), with its known positives: (a) reports
-    `README.md:15` and `.specify/constitution.md:374`; (b) reports `brain/components/dictionary.md:75`.
+    `README.md`'s tagline and `.specify/constitution.md` §I.2; (b) reports `brain/components/dictionary.md`'s D-007 table row.
     Record the counts beside R-12's.
 - [ ] T004 [P] [orchestrator] **Residuals on record (R-10; Edge Cases).**
   - Read the state and labels of #555, #565, #569, #580, #588, #612, #263 and #614 with
@@ -268,10 +267,10 @@ is byte-unchanged.
 
 ### Coverage index
 
-- [ ] T015 [US1] [orchestrator] `spec/coverage-index.md`, data-model §D "SVC-005 supplemental (:652)":
+- [ ] T015 [US1] [orchestrator] `spec/coverage-index.md`, data-model §D "SVC-005 supplemental":
   directly after `**SVC-005 supplemental:**`, insert the exact italic note of §D, same-line.
-  - Anchor the edit by its text; the line number is a guide.
-  - Make no change to the W-015/W-016 entries (§D: ":112, :634, :701, :705 … already read post-1.0").
+  - Anchor the edit by its text.
+  - Make no change to the W-015/W-016 entries (§D: "they already read post-1.0").
   - This is a same-line edit, so it precedes T036's NFR-019 paragraph, which §D places last.
 
 ### Constitution and CHANGELOG (the amendment, written PENDING)
@@ -305,31 +304,32 @@ is byte-unchanged.
     `origin/main` as one scratch commit. Run `python3 tools/check_line_citations.py --shift-audit HEAD~1..HEAD`.
   - Frozen `specs/<id>/` citers are reported, not charged.
   - If the audit charges a fixture string in `tools/check_line_citations.py` (for example
-    `constitution.md:456`, which has no `citation-ok` marker), the only remedy is a `tools/` edit
+    the `constitution.md` self-test fixture that carries no `citation-ok` marker), the only remedy is a `tools/` edit
     outside SC-005's allowlist. **Stop and ask the owner**; do not apply it.
 
 ### Other surfaces (R-12 "edit" hits; different files, parallel)
 
 - [ ] T020 [P] [US1] [orchestrator] `.specify/architecture.md`, data-model §F.1.
-  - The same-line edits at :32, :64, :161, :343, :357, :450, :611, :617, :642, :643 and :686.
-  - The :815–:816 two-line replacement, which keeps the line count.
+  - The same-line edits §F.1 lists, from §1.1's public-surfaces bullet to §11 row 5.
+  - The Z-3 body two-line replacement, which keeps the line count.
   - **Z-9** appended at the end of the file, after "Provenance of Z-6..Z-8", verbatim.
   - `git diff --stat` shows lines added only by the Z-9 block. Nothing above Appendix Z moves.
 - [ ] T021 [P] [US1] [orchestrator] `.specify/api-contract.md`, data-model §F.2.
-  - Append at :60, :61, :67, :113, :248, :272 and :274.
-  - :222's last cell becomes `Post-1.0 (constitution v4.0)`.
-  - :249's third cell becomes `` 1 (`make`) — post-1.0, on a type derived from the v1.0 anchor (constitution v4.0) ``.
-  - :220 is unchanged (§F.2: "no change").
+  - Append at the §3.1 pluggable-interface and gRPC proto bullets, the §3.2 iceoryx2 topic shape
+    bullet, the §5 `fixpp::service` namespace row, the §9 `ControlPlane` row and the §10 2j and 2l rows.
+  - The §8 `fixppd` row's last cell becomes `Post-1.0 (constitution v4.0)`.
+  - The §9 `ControlPlaneFactory` row's third cell becomes `` 1 (`make`) — post-1.0, on a type derived from the v1.0 anchor (constitution v4.0) ``.
+  - The §8 `fixpp::service` target row is unchanged (§F.2: "no change").
   - Locate every target line with `sed -n '<N>p' .specify/api-contract.md` and confirm the printed
     line is the row §F.2 names before editing it (Execution rules, non-unique before-texts).
     `Stable from v1.0` and `` 1 (`make`) `` each occur more than once in the file, so a whole-file
-    `grep -F` cannot tell :222 or :249 from the other hits.
+    `grep -F` cannot tell the `fixppd` row or the `ControlPlaneFactory` row from the other hits.
 - [ ] T022 [P] [US1] [orchestrator] The design-doc status headers, data-model §F.3, same-line, verbatim:
-  `.specify/2j-controlplane.md:3`, `.specify/2l-tap.md:5` and `:54`, `.specify/2m-pybind.md:5`,
-  `.specify/2i-capi.md:3`.
-- [ ] T023 [P] [US1] [orchestrator] `README.md:15` and `docs/src/intro.md:3`, data-model §F.4, before →
+  the status lines of `.specify/2j-controlplane.md`, `.specify/2l-tap.md`, `.specify/2m-pybind.md` and
+  `.specify/2i-capi.md`, and `.specify/2l-tap.md`'s non-goal 7.
+- [ ] T023 [P] [US1] [orchestrator] `README.md`'s tagline and `docs/src/intro.md`'s opening sentence, data-model §F.4, before →
   after, verbatim.
-  - `README.md:11` (badge), `README.md:25–26`, `NOTICE:7` and `LICENSE-COMMERCIAL.md:3` are left as they
+  - `README.md`'s licence badge and its "Open source" / "Commercial" bullets, `NOTICE` and `LICENSE-COMMERCIAL.md`'s opening sentence are left as they
     are. That default is recorded in spec §Clarifications, Gate A round 2; T053 reports it.
 - [ ] T024 [P] [US1] [orchestrator] `brain/components/service.md`, data-model §F.5's first bullet.
   - Inside the `>` blockquote, `see \`architecture.md\` **Appendix Z-3**.` gains `, superseded by **Z-9**`.
@@ -478,11 +478,11 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
   - TC-017 is written only after T029 is GREEN.
 - [ ] T036 [US2] [orchestrator] `spec/coverage-index.md`, data-model §D (FR-011; after T015). Apply the
   same-line edits first, each anchored by its text:
-  - §4 row 3 (:405): the opener becomes `**093; TC-003 done (094 reconciliation):**`;
-  - §4 rows 8–11 (:410–:413): §D's four replacements;
-  - §4 row 19 (:421): §D's replacement sentence;
-  - the 005 ledger rows at :435 and :436: §D's replacements.
-  - **Then, last,** insert the **NFR-019 supplemental** paragraph after the NFR-016 supplemental (:648),
+  - §4 row 3: the opener becomes `**093; TC-003 done (094 reconciliation):**`;
+  - §4 rows 8–11: §D's four replacements;
+  - §4 row 19: §D's replacement sentence;
+  - the two 005 ledger rows: §D's replacements.
+  - **Then, last,** insert the **NFR-019 supplemental** paragraph after the NFR-016 supplemental,
     verbatim. This is the `[const §VI.4]` entry, and it must exist before T037 adds the row.
 - [ ] T037 [US2] [orchestrator] `spec/feature-catalogue.md`, **NFR-013 and NFR-019** (FR-008; after T036).
   - NFR-013: Title `ASIO async I/O transport (Linux and Windows)`, with the Status, /specify, PR, Tests
@@ -498,7 +498,7 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
     NFR-004, NFR-008, TC-001, TC-002, TC-004, TC-007, TC-009, TC-010, TC-013.
 - [ ] T039 [US2] [orchestrator] (after T038) `brain/components/dictionary.md` (frontmatter `description:`, the
   title, and the "Resolved 2026-10-22" line under the kept heading) and
-  `brain/components/nfr-and-tooling.md` (the frontmatter `description:` clause and the :57 bullet), from
+  `brain/components/nfr-and-tooling.md` (the frontmatter `description:` clause and the "out-of-repo planning tracker" bullet), from
   data-model §F.5's second to fourth bullets, verbatim. The tables and dated notes stay. Then commit
   the US2 docs (no closing keyword).
 
@@ -544,8 +544,8 @@ prints `PASS`.
     - every other file gets `// SPDX-License-Identifier: AGPL-3.0-or-later`;
     - the 16 `Apache-2.0` files have their identifier replaced and their `Copyright` line unchanged.
     - "No other byte of these files changes."
-  - `conanfile.py:8`: `license = "AGPL-3.0-only"` → `license = "AGPL-3.0-or-later"`.
-  - `cmake/FixppPackaging.cmake:408`: `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")` →
+  - `conanfile.py`: `license = "AGPL-3.0-only"` → `license = "AGPL-3.0-or-later"`.
+  - `cmake/FixppPackaging.cmake`: `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")` →
     `set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0-or-later")`.
   - `tools/capi_freeze.sha256` is regenerated with `sha256sum` over the same 12-file set, in the
     manifest's existing order and two-space format. `tools/check_capi_freeze.sh` prints `PASS`.
@@ -567,7 +567,7 @@ prints `PASS`.
         # bindings/python/CMakeLists.txt requires. Conan-pinned tools collide with
         # system versions and add resolution time. Restore: fixpp#NNN.
     ```
-  - `tool_requires = []` moves from line 99 to line 101. Nothing else in the file changes.
+  - The `tool_requires = []` line moves down by two. Nothing else in the file changes.
   - The commit message carries `Refs #607` and no closing keyword.
   - The peer B58 batch also edits this comment, so whichever merges second rebases the conflict
     (plan.md Risks). The stop rule from there: if B58 merges first, T054's integration resolves the
@@ -730,7 +730,7 @@ prints `PASS`.
     - NFR-005's PMR clause, narrowed at Gate A round 3 to the parse arena and MemoryStore's retrieve()
       snapshot (FR-006);
   - any row withheld by T030/T049;
-  - the defaults applied and reported, not edited: coverage-index :552, the "AGPL-3.0" licence prose,
+  - the defaults applied and reported, not edited: coverage-index's "Cross-cuts forwarded" note, the "AGPL-3.0" licence prose,
     the stale `session.cpp` comment (P3);
   - the four new issue numbers.
   Record that it was sent.
@@ -1051,7 +1051,7 @@ Task: "T018 [US1] [orchestrator] CHANGELOG.md §E.8 pending entry"
 Task: "T020 [US1] [orchestrator] .specify/architecture.md §F.1 + Z-9"
 Task: "T021 [US1] [orchestrator] .specify/api-contract.md §F.2"
 Task: "T022 [US1] [orchestrator] .specify/2{i,j,l,m}-*.md §F.3 headers"
-Task: "T023 [US1] [orchestrator] README.md:15 + docs/src/intro.md:3 §F.4"
+Task: "T023 [US1] [orchestrator] README.md + docs/src/intro.md §F.4"
 Task: "T024 [US1] [orchestrator] brain/components/service.md §F.5"
 ```
 

@@ -142,10 +142,10 @@ Owner rulings made after the round-2 reviews (Codex, and the Opus adversarial ju
   lands. → A: **Reworded to the four-line text in data-model §G**, still its own commit with
   `Refs #607` and no closing keyword.
 - Defaults applied, so no question stays open (the Opus review's recorded defaults):
-  - coverage-index :552 (T-039/T-041 wait on 2j's `ReloadCertSource`): informational. T-039, T-040 and
+  - coverage-index's "Cross-cuts forwarded" note (T-039/T-041 wait on 2j's `ReloadCertSource`): informational. T-039, T-040 and
     T-041 already read `done`, so the note has no tag-gate effect. Reported, not edited.
-  - The "AGPL-3.0" licence prose (`README.md:11` badge, `README.md:25–26`, `NOTICE:7`,
-    `LICENSE-COMMERCIAL.md:3`): left as it is and reported. It is not package metadata.
+  - The "AGPL-3.0" licence prose (`README.md`'s licence badge and its "Open source" / "Commercial" bullets, `NOTICE`,
+    `LICENSE-COMMERCIAL.md`'s opening sentence): left as it is and reported. It is not package metadata.
   - The 40 `Apache-2.0` files under `tests/` and `bench/`: the orchestrator files one labelled
     follow-up issue at implement time (FR-021). They stay out of scope here.
 
@@ -381,7 +381,7 @@ in those files are licence comment lines.
   other concept, pattern false positive). Every hit dispositioned "edit" has exact target text in
   data-model §D–§G. The recipe is re-run after the edits (SC-003). A surface that states such scope or
   status but that no R-12 command reaches (it carries neither a dropped-scope term nor a row ID, as
-  `brain/components/nfr-and-tooling.md:57`, found by review) is in scope too once found, by review or
+  `brain/components/nfr-and-tooling.md`'s "out-of-repo planning tracker" bullet, found by review) is in scope too once found, by review or
   otherwise: it is added to R-12's table with who found it and its disposition, and the recipe's
   blind spot is named there.
 
@@ -712,8 +712,8 @@ in those files are licence comment lines.
 - **SC-005**: The diff outside `spec/`, `.specify/`, `brain/`, `specs/` and `CHANGELOG.md` contains
   only: the licence comment lines of the 53 `src/`/`include/` files; `tools/capi_freeze.sha256`;
   `conanfile.py`'s `license` line and its four `tool_requires` comment lines (FR-013b, separate
-  commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md:15`;
-  `docs/src/intro.md:3`; and the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
+  commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md`'s tagline;
+  `docs/src/intro.md`'s opening sentence; and the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
   and `tests/session/fsm_matrix_witness_test.cpp`.
 - **SC-006**: Gate A (on the amendment and bundle) and Gate B converge, and the owner signs off on the
   amendment.

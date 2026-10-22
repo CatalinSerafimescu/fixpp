@@ -100,8 +100,8 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
   `grep -cF` prints 0. Skip the before-text check for §E.3a, whose after-text extends its before-text,
   and for §E.7, which adds a bullet. Known positive: the same checks on `origin/main` print 0 and 1.
 - Run research R-12's four `git grep` commands, and (c)'s syntax-independent licence sweep beside it. Known positives first, on `origin/main`: (a) must report
-  `README.md:15` and, through its widened terms, `.specify/constitution.md:374` (§I.2); (b) must report
-  `brain/components/dictionary.md:75`.
+  `README.md`'s tagline and, through its widened terms, `.specify/constitution.md` §I.2; (b) must report
+  `brain/components/dictionary.md`'s D-007 table row.
 - On the branch, every hit must fall in a "keep", "header", "other concept" or "pattern FP" class of
   R-12, or be an edited line. Record the count per class.
 - `grep -niE "grpc|iceoryx|service wrapper|service[- ]mode|out-of-process" .specify/constitution.md`:
