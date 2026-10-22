@@ -158,7 +158,7 @@ The build enforces this graph at the include level via `include-what-you-use` co
 | `fixpp::log` | `Logger`, `Sink`, `Level`, `Record`, `LogConfig` | `log` | |
 | `fixpp::otel` | `TracerProvider`, `MeterProvider`, span helpers, exporter setup | `otel` | |
 | `fixpp::tap` | `RingBufferTap`, `Iox2Tap`, `SyncCallbackTap`, `TapConfig` | `tap` | |
-| `fixpp::service` | Public service-mode plugin interfaces (`ControlPlane`, `ControlPlaneConfig`); the daemon binary `fixppd` and default plugin impls are downstream and **not** C++ API | `service` (interface part) Post-1.0 except the installed `ControlPlaneFactory` anchor (Z-9). | Interface headers only; see §4.11. |
+| `fixpp::service` | Public service-mode plugin interfaces (`ControlPlane`, `ControlPlaneConfig`); the daemon binary `fixppd` and default plugin impls are downstream and **not** C++ API | `service` (interface part) | Interface headers only; see §4.11. Post-1.0 except the installed `ControlPlaneFactory` anchor (Z-9). |
 | `fixpp::current_trace_context` | The free awaitable returning the current `trace_context` from the strand-stored slot `[const §XIII.3]` | `core` | Not `thread_local`; coroutine-correct. |
 | `fixpp::config` | TOML config loader, `LoadResult`, `ConfigBundle`, `LoadDiagnostic`, `LoadOptions` | `config` | Opt-in; consumers link `fixpp_config_toml` explicitly. |
 | `fixpp::detail` | Internal-only helpers; never user-callable | (any module) | Headers carry `// detail: not API` and are excluded from Doxygen. |

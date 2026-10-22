@@ -500,7 +500,7 @@ section, row or quoted text) are at `9b176090`; every edit is same-line unless i
 - **§1.1, the "A small set of public surfaces" bullet** — append to the bullet: ` *(The gRPC service is post-1.0: Appendix Z-9.)*`
 - **§2.1 module table, row 11 (`service`)** — the last cell `Yes (binary + gRPC schema)` becomes
   `Yes (binary + gRPC schema) — post-1.0, Z-9`.
-- **§3 namespace inventory, `fixpp::service` row** — append to its third cell:
+- **§3 namespace inventory, `fixpp::service` row** — append to its last (Notes) cell:
   ` Post-1.0 except the installed \`ControlPlaneFactory\` anchor (Z-9).`
 - **§4.11 opening paragraph** ("The module has two parts with different stability and API status") — append:
   ` ⚠️ **Post-1.0 (Z-9):** the whole module is on the post-1.0 roadmap; v1.0 installs only the \`ControlPlaneFactory\` anchor.`
