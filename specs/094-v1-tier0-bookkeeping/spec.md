@@ -277,6 +277,10 @@ Owner ruling on the Gate B round 4 triage (parent repo (private)
   **(a) Add the value assertion.** FR-022d specifies it; SC-005 names the file.
 - Applied by Codex: FR-022d strengthens TC-012's existing witness with the owner-approved value
   assertion.
+- Orchestrator correction (Opus round 4, N-1; a missing citation, not a narrowing): TC-014's
+  "ResetSeqNumFlag(141)=Y" clause was witnessed outbound by presence only. Its Tests cell and §H row
+  add `Reset.InitiatorResetLogon_Advertises1` (FIX.4.4), which asserts the emitted value is `Y`.
+- Applied by Codex: the TC-014 citation correction is applied on every surface named by the fix queue.
 
 ## User Scenarios & Testing *(mandatory)*
 

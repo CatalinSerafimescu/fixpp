@@ -329,7 +329,7 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
     - TC-006: `RecoveryStoreHorizonTest.AvailableRangeReplaysCarryPossDupFlag`, `.ReplayFramesCarryOrigSendingTime`, `.LargeAppFrameReplayed_NotGapFilled`, `.PreHorizonGapCollapsedToGapFill`, `RecoveryAdminSpanGapfillTest.*`, `ResendReplyPossDup.Cell1_GapFill_Carries_43Y_And_122_EqOwn52`, `Stores/StoreLookupAfterReset.*`
     - TC-008: `InboundSequenceResetTest.ResetModeHardResetsAndBypassesOrdering`, `.NewSeqNoEqualExpectedIsNoOp`, `.NewSeqNoBelowExpectedRejects`, `InboundSequenceResetArms.NewSeqNoAboveExpectedAdvances`, `.NewSeqNoEqualExpectedIsNoOp`, `.NewSeqNoBelowExpectedRejects`
     - TC-012: `InboundPossResendTest.DeliverInSeq_97Y`, `.Combo_43Y_97Y`, `.PossResend_No122_NoReject`
-    - TC-014: `ResetOnLifecycleTest.ResetOnLogon_Initiator_ResetsAndEmits141`, `.ResetOnLogon_Acceptor_ResetsIdempotentWith141`, `.ResetOnLogon_BothRoles_Resets`, `.Initiator_Received141Ack_NextInboundTwo_NoResend`
+    - TC-014: `ResetOnLifecycleTest.ResetOnLogon_Initiator_ResetsAndEmits141`, `.ResetOnLogon_Acceptor_ResetsIdempotentWith141`, `.ResetOnLogon_BothRoles_Resets`, `.Initiator_Received141Ack_NextInboundTwo_NoResend`, `Reset.InitiatorResetLogon_Advertises1`
     - TC-015: `FixTcCoverageGaps.BodyFieldsArbitraryOrder_Accepted`
     - TC-017: `InterpretLogonEncryptMethod.ZeroEncryptMethodAccepted`, `.AbsentEncryptMethodAccepted`, `.NonZeroEncryptMethodRejected`, `EnumValidationLogonTest.InDomainEncryptMethod_EstablishesAsToday`, `.OutOfDomainEncryptMethod_RejectedAndNotEstablished`, and the FR-022 cells `EnumValidationLogonTest.InDomainNonZeroEncryptMethod_DisconnectsAndSendsNothing`, `FsmMatrixWitness.LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing`
   - Verify re-runs this check, with both negative controls, after implement; it must then report 54 of 54
@@ -694,6 +694,7 @@ register on the Windows presets from tier2's run. The one exception is NFR-005's
 | `tests/interop/parity/inbound_sequencereset_arms_test.cpp` | TC-008 | `interop_parity_us3_tests` (`fixpp_add_interop_test`, `tests/interop/CMakeLists.txt`) | `interop_parity_us3_tests` | also selected by tier1's interop gate step (`-L interop`) |
 | `tests/session/test_inbound_poss_resend.cpp` | TC-012 | `session_inbound_poss_resend` | `session_inbound_poss_resend` | |
 | `tests/session/test_reset_on_lifecycle.cpp` | TC-014 | `session_reset_on_lifecycle` | `session_reset_on_lifecycle` | |
+| `tests/session/test_next_expected_msgseqnum.cpp` | TC-014 | `session_next_expected_msgseqnum` | `session_next_expected_msgseqnum` | |
 | `tests/interop/parity/fix_tc_coverage_gaps_test.cpp` | TC-015 | `interop_parity_us3_tests` | `interop_parity_us3_tests` | |
 | `tests/session/test_interpret_logon_encrypt_method.cpp` | TC-017 | `session_interpret_logon_encrypt_method` (`add_threading_test`) | `session_interpret_logon_encrypt_method` | |
 | `tests/session/test_enum_validation_logon.cpp` | TC-017 | `session_pure_tests` | `session_pure_tests` | holds FR-022's acceptor cell |
@@ -715,6 +716,7 @@ default. It does not mean off unless requested.
 `session_inbound_frame_dispositions`, `capi_inbound_frame_dispositions`, `session_tc_reject`,
 `session_pure_tests`, `session_resend_reply_possdup`, `session_538_store_lookup_after_reset`,
 `interop_parity_us3_tests`, `session_inbound_poss_resend`, `session_reset_on_lifecycle`,
+`session_next_expected_msgseqnum`,
 `session_interpret_logon_encrypt_method`. Each matched exactly one whole line of
 `ctest --test-dir build/linux-clang-debug -N` (2026-10-22; the negative control `NoSuchEntryXyz`
 matched none). Before this table, T030 and quickstart §2 named only some of them and covered the rest

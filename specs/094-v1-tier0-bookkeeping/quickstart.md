@@ -46,6 +46,7 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
     `session_pure_tests` (incl. the TC-017 `EnumValidationLogonTest` cells and FR-022's two cells),
     `session_resend_reply_possdup`, `session_538_store_lookup_after_reset`,
     `session_inbound_poss_resend`, `session_reset_on_lifecycle`,
+    `session_next_expected_msgseqnum` (filter `Reset.InitiatorResetLogon_Advertises1`),
     `session_interpret_logon_encrypt_method`;
   - interop: `interop_parity_us3_tests`;
   - `-L mallocnesia` (NFR-005), with the `alloc_guard_*_positive_control_mallocnesia` controls.

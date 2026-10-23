@@ -454,7 +454,8 @@ reads open 69, done 170 parsed (172 actual), dropped 1, postv1 8 (T038).
     - session: `session_inbound_frame_dispositions`, `session_tc_reject` (no labels),
       `session_pure_tests`, `session_resend_reply_possdup`, `session_538_store_lookup_after_reset`
       (a gtest filter needs the `Stores/` prefix), `session_inbound_poss_resend`,
-      `session_reset_on_lifecycle`, `session_interpret_logon_encrypt_method`;
+      `session_reset_on_lifecycle`, `session_next_expected_msgseqnum` (filter
+      `Reset.InitiatorResetLogon_Advertises1`), `session_interpret_logon_encrypt_method`;
     - interop: `interop_parity_us3_tests`;
     - `ctest -L mallocnesia --no-tests=error` on `linux-gcc-release` and `linux-clang-release` (the
       `if:` of the #448 steps), including the `alloc_guard_*_positive_control_mallocnesia` controls;
