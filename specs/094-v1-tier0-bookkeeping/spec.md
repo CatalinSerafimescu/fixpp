@@ -851,7 +851,7 @@ in those files are licence comment lines.
       The restatement is the design mapping, not each field's correct type: it carries
       MultiCharValue → char, which fixpp#621 reports as wrong, so a wrong mapping is not caught. The
       field names come from the library's loaders, which the codegen also uses; a loader defect is
-      D-001's census subject, not this cell's.
+      the subject of the dictionary rows' own witnesses (D-001, D-003, D-007), not this cell's.
   - **Positive control.** A guard runs first, over a synthetic `Messages.hpp`, a synthetic
     `Fields.hpp` and a synthetic name map:
     - the synthetic text passes all three checks, an accessor in the `_t<tag>` collision form
@@ -868,7 +868,8 @@ in those files are licence comment lines.
       under a char and under a decimal accessor.
 
     Then, per version, the classified typed-accessor count is nonzero, and the version's dictionary
-    loads and names its `Fields.hpp` tags.
+    loads and names at least one of its `Fields.hpp` tags (a tag it leaves unnamed fails the identity
+    check for any accessor of that tag).
   - **RED proof.** Emitter mutants, each in a scratch copy on F: (`git archive HEAD | tar -x` of a
     head that holds the cell), each in `tools/codegen/fixpp-codegen/emit_messages.cpp`, so the
     configure-time codegen writes it into every version's header:

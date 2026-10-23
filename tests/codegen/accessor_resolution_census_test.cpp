@@ -47,7 +47,8 @@
 //        field's correct type: it carries the MultiCharValue -> char entry
 //        that fixpp#621 reports as wrong, so a wrong mapping passes here.
 //      The field names come from the dictionary loaders, which the codegen
-//      also uses; a loader defect is D-001's census subject, not this cell's.
+//      also uses; a loader defect is the subject of the dictionary rows' own
+//      witnesses (D-001, D-003, D-007), not this cell's.
 //
 // EXCLUSIONS. `field_value(::std::uint16_t tag)` is the runtime-tag
 // passthrough (its tag is the caller's), and `view()` returns the bound
@@ -1092,8 +1093,10 @@ std::vector<version_input> versions() {
     return v;
 }
 
-// The field name of every tag Fields.hpp declares, read from the version's
-// dictionary and copied out before the dictionary and its arena go.
+// The field name of every tag Fields.hpp declares that the version's
+// dictionary names, copied out before the dictionary and its arena go. A tag
+// the dictionary leaves unnamed gets no entry, which the identity check
+// reports for any accessor of that tag.
 tag_names load_names(version_input const& v, field_rows const& f, std::string& error) {
     tag_names out;
     std::set<std::uint32_t> tags;
@@ -1112,7 +1115,8 @@ tag_names load_names(version_input const& v, field_rows const& f, std::string& e
                                                  : fixpp::dict::XmlLoader{}.load(path, &arena);
         for (std::uint32_t t : tags) {
             if (t > 0xFFFFU) continue;
-            out.emplace(t, std::string{dict.field_name(static_cast<std::uint16_t>(t))});
+            std::string_view const name = dict.field_name(static_cast<std::uint16_t>(t));
+            if (!name.empty()) out.emplace(t, std::string{name});
         }
     } catch (std::exception const& e) {
         error = path + ": " + e.what();
