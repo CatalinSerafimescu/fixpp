@@ -6,6 +6,12 @@ status: stable
 
 # Log
 
+- **2026-10-23 — 094-v1-tier0-bookkeeping close-out (PR #620): class 1 gains a status-witness form.**
+  `failure-classes.md` class 1 adds *a `done` row witnessed by its precondition, not its property*:
+  a presence check for a value claim, or a sample or same-loader oracle for a completeness claim,
+  cannot fail on the property the row claims. Filed under class 1, not 12: the witness cannot report
+  the bad answer, where class 12 reports a true answer two populations share. Owner-approved
+  2026-10-23 from the Gate B record's anti-pattern candidate.
 - **2026-10-20 — B28 (fixpp#536, #537, #538, #598) Gate B (PR #609): class 4 gains a narrowing form.**
   `failure-classes.md` class 4 (a copy propagates a claim that is false at the new site) adds *when a
   rule is narrowed, a sweep for its wording finds the sites that state it, not the sites that cite or

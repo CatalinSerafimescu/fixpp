@@ -283,6 +283,15 @@ prints `0` for a whole syntax.
   - Expand explicitly: `${=var}` for a space-separated string, `${(f)var}` for a newline-separated list, or an array.
   - Then prove the expansion: the run must report a finding you know is there (a pre-existing finding, or a seeded one), or must print the count of items it actually processed.
 
+**The same class, in a status witness: a `done` row witnessed by its precondition, not its property.**
+- A witness for a value claim that only checks the field is present passes when the value is wrong. A witness for a completeness or identity claim that uses headline samples, a per-class tag set, or an oracle read through the code's own loader passes when an entry is dropped, swapped or misnamed. The row reads `done` and its witness cannot fail on the claim it is cited for.
+- The 094 case (PR #620, Gate B rounds 2–5): four rows had this shape. TC-012 checked that tag 97 was present, not that it was `Y`; TC-014 did the same for 141; D-003 sampled headline messages; D-008's census compared tag sets read through the codegen loader. Each earlier review had marked the row OK without reading the assertion.
+- **Trigger:** you are flipping a catalogue row to `done`, or reviewing a flip, and the witness is a test that already exists.
+- **Procedure:**
+  - Read the assertion, not the test name. For a value claim, assert the value. For a completeness claim, compare against an independent walk of the source.
+  - RED-prove the witness with a mutant that keeps the precondition and breaks the property: `97=N`, two tags swapped, the loader dropping one field.
+- **Sibling.** Test-shape item (g) in the parent's `.claude/agents/phase-implementer.md` is the implementer-facing copy.
+
 ### 2. A fix that replaces a wrong claim with a NEW claim reproduces the defect
 
 Rounds of review converge only when a claim is **deleted**, not refreshed. A corrected claim is still a
