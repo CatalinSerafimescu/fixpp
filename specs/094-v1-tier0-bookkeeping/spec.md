@@ -221,6 +221,12 @@ Owner rulings on the Gate B round 1 triage (parent repo (private)
   both? → A (owner): **Fill the eleven here** (option (b)). data-model §D carries the text ("Gate B
   round 1 supplementals"), FR-011 names them, and plan.md's §VI.3 row names the notes 094 adds. No
   issue is filed.
+- Q (Q2, Codex C-4): D-008's Title keeps "zero-runtime-cost field lookup", and no cited cell
+  witnesses a lookup over the generated code. Narrow the Title, add a discriminating witness, or
+  withhold D-008? → A (owner): **Keep the clause and add the witness** (option (b)). The property is
+  2c's: a generated typed accessor resolves its standard field's tag and value type at compile time
+  and never consults a runtime dictionary or table. FR-022c specifies the cell; D-008's Tests and
+  Verified cells name it, and data-model §H maps the clause to it.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -754,6 +760,67 @@ in those files are licence comment lines.
   - **If the cell cannot be made GREEN on the branch, or cannot be proven RED by both mutants,** D-001
     does not flip: Edge Cases applies (the row stays `backlog`, the finding is recorded, the owner is
     told).
+- **FR-022c**: `phase-implementer` MUST add one test cell, D-008's accessor-resolution census (a
+  test-only change; owner, 2026-10-23, §Clarifications "Session 2026-10-23 (Gate B round 1)", Q2):
+  `CodegenAccessorResolutionCensus.EveryTypedAccessorResolvesTagAndTypeAtCompileTime`, a `TEST` in a
+  new file, `tests/codegen/accessor_resolution_census_test.cpp`, added to the sources of
+  `codegen_pure_tests` (`tests/codegen/CMakeLists.txt`), so no ctest entry is added. The file opens
+  with `// SPDX-License-Identifier: AGPL-3.0-or-later`. `codegen_pure_tests` already defines
+  `FIXPP_CODEGEN_INC`; the CMake edit adds the source and a compile definition,
+  `FIXPP_D008_CENSUS_HAS_VLATEST`, set only when `FIXPP_CODEGEN_FIX_LATEST` is ON.
+  - **The property** it witnesses, D-008's "zero-runtime-cost field lookup" read against
+    `.specify/2c-codegen.md`'s inherited rule ("Eager codegen with no runtime dictionary path. Hybrid
+    mandated: codegen for standard fields (D-008), runtime XML loader for custom"): a generated typed
+    accessor resolves its standard field's tag and value type at compile time, and never consults a
+    runtime `Dictionary`, a name→tag or tag→type table, or any dictionary lookup function. The tag is
+    an integer literal: the template argument of `view_.template get<N>()` or of
+    `view_.template group<N, …G_N>()`, or the literal argument of `::fixpp::wire::get(ctx_.span, N, …)`
+    or of `nested_group_slices(…, N, …)`. The value type is fixed by the emitted text:
+    `decode_field<T>` with T equal to the accessor's `expected_t<T>` and one of the four scalar types
+    the emitter uses, `decimal_t::parse` for a `decimal_t` accessor, or the group flyweight type.
+  - **Population.** Every typed field accessor of each codegen version's generated `Messages.hpp`:
+    v42, v44, v50sp2 and vt11, and vlatest when the build generates it. Message flyweights and group
+    flyweights both count, with their group and nested-group accessors. A listed version whose
+    header is missing fails; it is never skipped. **Excluded:** `field_value(::std::uint16_t tag)`, the
+    runtime-tag passthrough, whose tag is the caller's, and the `view()` bridge, which returns the
+    bound view. Neither is a typed field accessor; each is accepted only with its exact signature
+    and body, and exactly once per class (once per message for `view()`), so a second member of that
+    shape cannot carry a lookup. `Reify.hpp`'s `owning_<Msg>` accessors (`emit_reify.cpp`) are
+    outside the population.
+  - **What it asserts.** A closed grammar, not a forbidden-token list: every line of the file is one
+    of the shapes the emitter writes (the pinned include set, the namespace and class lines, the
+    constructors and members, the `static_assert`s, comments), and every member function matches
+    one of the accessor templates in full, signature and body, or one of the two exclusions. Any
+    other line fails the cell. A deliberate emitter change that adds an accessor shape must add it
+    to the cell by hand.
+  - **Positive control.** A guard runs first: the classifier accepts a synthetic text holding each
+    real accessor shape and rejects each of a set of seeded runtime-resolution shapes (a tag looked
+    up by name, a tag read from a runtime-indexed table, a type chosen at runtime, an extra include,
+    a namespace-scope table, a dictionary member, an accessor without `[[nodiscard]] inline`, a
+    second passthrough). Then, per version, the classified typed-accessor count is nonzero, and for
+    every class the set of tags its typed accessors bind equals the set the version's `Fields.hpp`
+    declares for it: a message's `<Msg>_fields[]` rows with `group_no_tag` 0, and a group
+    flyweight `G_K`'s rows with `group_no_tag` K across every message. `Fields.hpp` is written by
+    another emitter (`emit_fields.cpp`) from the same IR, so the check proves the walk reached every
+    accessor the version declares; dictionary completeness is D-001's census and the 082 tests'.
+  - **RED proof.** Two mutants, each in a scratch copy on F: (`git archive HEAD | tar -x`, with the
+    new test file and `tests/codegen/CMakeLists.txt` copied over it), each in `emit_scalar` in
+    `tools/codegen/fixpp-codegen/emit_messages.cpp`, so the configure-time codegen writes it into
+    every version's header:
+    - (a) the message-flyweight path: ClOrdID(11)'s accessor resolves its tag at runtime, by name,
+      through a function-local name→tag table, and reads it with `view_.get(tag)`;
+    - (b) the group-entry path: one group-entry scalar accessor resolves its tag the same way and
+      passes it to `::fixpp::wire::get`.
+    - Before the run, the scratch's generated `Messages.hpp` is checked to hold the mutant bytes.
+      The whole `codegen_pure_tests` binary runs unfiltered. FR-022's "What counts as RED" applies:
+      the cell fails at its unclassified-line assertion naming the mutated accessor, and the binary
+      exits 1, not with an abort.
+  - **Why the byte pins are not this witness.** `read_tier_byte_diff_test.cmake` and
+    `DeterminismTest.GeneratedMatchesGolden` pin the generated text, and are republished at every
+    intended emitter change; this cell asserts the property, so a republished pin that carried a
+    runtime lookup would still fail it. vlatest has no read-tier byte pin.
+  - **If the cell cannot be made GREEN on the branch, or cannot be proven RED by both mutants,** the
+    clause is not witnessed: the finding is recorded and the owner is told (Edge Cases).
 - **FR-023**: Before the FR-013b commit, the orchestrator MUST file one fixpp issue, labelled at creation from
   `gh label list`, recording that `[const §III.4]` is not met on `main`: `tool_requires = []` since `629f2170`
   (2026-05-10), so CMake and Ninja come from the host toolchain. Its body asks the owner to choose: restore Conan-pinned
@@ -779,7 +846,7 @@ in those files are licence comment lines.
   falls by 25 − k and the done count rises by 18 − k (FR-016), and the verify record names the k rows.
 - **SC-002**: 100 % of the tests cited in the 18 flipped rows exist literally and pass on this branch,
   and every clause in the data-model §H map has its assertion recorded. "Exist" is research R-11's
-  counting rule and check (54 distinct entries since FR-022b, both negative controls reporting MISSING); "pass" is
+  counting rule and check (54 distinct entries since FR-022b, 55 since FR-022c, both negative controls reporting MISSING); "pass" is
   each named test's PASSED read from its binary's own output, not from ctest's exit code (quickstart
   §2).
 - **SC-003**: 0 constitution clauses state the service wrapper, gRPC control plane or iceoryx2 data
@@ -796,7 +863,9 @@ in those files are licence comment lines.
   commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md`'s tagline;
   `docs/src/intro.md`'s opening sentence; the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
   and `tests/session/fsm_matrix_witness_test.cpp`; the FR-022b census cell in
-  `tests/dictionary/lookup_test.cpp`; and one comment line in
+  `tests/dictionary/lookup_test.cpp`; FR-022c's new file `tests/codegen/accessor_resolution_census_test.cpp`
+  and its registration in `tests/codegen/CMakeLists.txt` (one source line, and the
+  `FIXPP_D008_CENSUS_HAS_VLATEST` block); and one comment line in
   `tests/tls/test_pinset_snapshot_publish_acquire.cpp`, whose `pinset.hpp §139` line citation the
   licence-line insert made stale. The number is replaced by the member it meant (`snapshot_`),
   following #310's rule (delete the number, cite the symbol). Found at C-SPDX by a basename sweep
@@ -810,7 +879,8 @@ in those files are licence comment lines.
   is still `origin/main`. Every citation is still re-checked (FR-010, FR-015).
 - 51 of the 53 test entries the flips cite were grep-checked on 2026-10-22, with two negative controls:
   all exist (research R-11). The other two are the FR-022 cells, added at implement. FR-022b adds a
-  54th, D-001's census cell, also added at implement (T029a). Passing is checked at verify.
+  54th, D-001's census cell, also added at implement (T029a). FR-022c adds a 55th, D-008's
+  accessor-resolution census, added at Gate B round 1. Passing is checked at verify.
 - The atomic-shared-ptr spike (parent `research/G19-fix-fpml-iso20022/atomic-shared-ptr/`) carries no
   licence or copyright. The 37 unmarked files carry no foreign copyright notice (provenance grep,
   2026-10-22). So marking them AGPL relabels the owner's own work.
@@ -824,7 +894,7 @@ in those files are licence comment lines.
 - SPDX marking outside `src/`/`include/` (tests, tools, bench, bindings, examples); the 40 `Apache-2.0`
   files there are the FR-021 issue.
 - Any library code or behaviour change, including the fixpp#612 fix (batch B65). The only test changes
-  are FR-022's two cells and FR-022b's census cell.
+  are FR-022's two cells, FR-022b's census cell and FR-022c's accessor-resolution census.
 
 ## Normative References
 

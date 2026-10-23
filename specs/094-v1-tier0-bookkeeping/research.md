@@ -342,6 +342,9 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
     `DictionaryCensus.Fix42AllMessagesAndFieldsLoaded`, giving 54 distinct entries. Since C-TEST
     (`e81e0395`) the two FR-022 cells exist, so 53 exist and 1 is MISSING (the FR-022b cell) until
     T029a adds it.
+  - **Gate B round 1 ruling Q2 (owner, 2026-10-23; spec FR-022c).** D-008's Tests cell gains
+    `CodegenAccessorResolutionCensus.EveryTypedAccessorResolvesTagAndTypeAtCompileTime`, giving 55
+    distinct entries, all existing once FR-022c's file lands.
 - **NFR-011 witnesses:**
   - `PmrAllocation.EveryByteFromMr` (XmlLoader)
   - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,
