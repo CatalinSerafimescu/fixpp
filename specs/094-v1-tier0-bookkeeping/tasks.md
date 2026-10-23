@@ -775,7 +775,7 @@ prints `PASS`.
 > Each task below runs AFTER T070's audit, chronologically. It is numbered here so that T070 stays the
 > FINAL task (recorded deviation, header). Each is open at the audit, under the waiver written in it.
 
-- [ ] T054 [orchestrator] **Run `/gate-b 094-v1-tier0-bookkeeping`** (pipeline step 14).
+- [X] T054 [orchestrator] **Run `/gate-b 094-v1-tier0-bookkeeping`** (pipeline step 14).
   - **First, integrate `origin/main`.** `git fetch origin`. If `origin/main` moved past T001's base,
     merge it (a merge, not a rebase: the verify record cites this branch's SHAs). `phase-implementer`
     resolves any conflict in code or build files, such as the peer B58 batch's `conanfile.py` comment
@@ -805,11 +805,11 @@ prints `PASS`.
   - In the Gate B record (`.specify/decisions/094-v1-tier0-bookkeeping-gateb.md`), record the feature's
     B&L delta as "B&L delta: one new limitation (L-094-1), no behaviour change" (FR-017).
   - *Open at the audit — waiver: Gate B needs the audit record first ([const §XVII.8], pre-flight 4d).*
-- [ ] T055 [orchestrator] **The SecondBrain pass on the branch** (pipeline step 15a; close-out row 3).
+- [X] T055 [orchestrator] **The SecondBrain pass on the branch** (pipeline step 15a; close-out row 3).
   The brain edits are T024 and T039; re-check that they still hold after Gate B's fixes. Run both
   freshness halves locally (T046) and report the external sweep's execution count.
   - *Open at the audit — waiver: it runs after Gate B converges.*
-- [ ] T056 [orchestrator] **Re-run the docs gates as the last action before the first push**: T045,
+- [X] T056 [orchestrator] **Re-run the docs gates as the last action before the first push**: T045,
   T046, T047 and T048 at the head about to be pushed. Commit the `tasks.md` ticks of T054, T055 and
   T070 first (T001–T053 and T069 were committed by T069), so the head the gates ran on is the head
   that is pushed.
@@ -817,15 +817,15 @@ prints `PASS`.
     rule), T049's full `ctest` re-runs last and the cited SHA is updated before the push; otherwise
     the verify record states that the delta is docs-only.
   - *Open at the audit — waiver: after Gate B.*
-- [ ] T057 [orchestrator] **Push and open the PR without gate labels** (pipeline step 16).
+- [X] T057 [orchestrator] **Push and open the PR without gate labels** (pipeline step 16).
   - `git push -u origin 094-v1-tier0-bookkeeping`, then `gh pr create` with T052's title and body. The
     tiers skip until both labels land.
   - Read `closingIssuesReferences`; it must be empty. Record the PR number (needed by T063).
   - *Open at the audit — waiver: after Gate B.*
-- [ ] T058 [orchestrator] Read the PR's ungated checks (the tier1 source audits); a red one goes back
+- [X] T058 [orchestrator] Read the PR's ungated checks (the tier1 source audits); a red one goes back
   through the Gate B fixer.
   - *Open at the audit — waiver: after T057.*
-- [ ] T059 [orchestrator] **Prepare the sign-off packet.** It holds:
+- [X] T059 [orchestrator] **Prepare the sign-off packet.** It holds:
   - the six amended clauses, the PENDING SIR and the Status line as they stand on the PR head
     (`.specify/constitution.md`);
   - the `CHANGELOG.md` entry;
@@ -836,10 +836,10 @@ prints `PASS`.
   - Gate B's rounds;
   - the RATIFIED-form text T063 will write.
   - *Open at the audit — waiver: after Gate B.*
-- [ ] T060 [orchestrator] **Take the PR-title and body corrections Gate B asked for into T052's draft**,
+- [X] T060 [orchestrator] **Take the PR-title and body corrections Gate B asked for into T052's draft**,
   if it asked for any. The body is applied only in T064.
   - *Open at the audit — waiver: after Gate B.*
-- [ ] T061 [orchestrator] **ASK THE OWNER for the Art. XX §2 sign-off** on the amendment, with T059's
+- [X] T061 [orchestrator] **ASK THE OWNER for the Art. XX §2 sign-off** on the amendment, with T059's
   packet. Do nothing in T062–T065 until the owner answers explicitly. A request to change the text sends
   the change back through T016–T018 and a Gate B re-check. Record the answer and its date in the verify
   record and the Gate B record.
@@ -863,7 +863,7 @@ prints `PASS`.
     narrowing found at verify)." No Gate A round runs for it (plan.md `## Gate A`, the
     post-convergence metadata rule).
   - *Open at the audit — waiver: Art. XX §2 orders it after Codex Gate A and after the text is final.*
-- [ ] T062 [orchestrator] (after owner sign-off) **Commit the `tasks.md` ticks of T056–T061.** The ticks of
+- [X] T062 [orchestrator] (after owner sign-off) **Commit the `tasks.md` ticks of T056–T061.** The ticks of
   T001–T055, T069 and T070 are already committed (T069, T056); T070's re-assertion after T063 is
   recorded in the verify record's Closure subsection, not as a new tick. The ticks for T063–T068 are
   recorded in the Gate B record's close-out table, not in this file, because T063 must stay the last
@@ -1006,7 +1006,7 @@ prints `PASS`.
     has no text for it.
   - Then commit the `tasks.md` ticks of T001–T053 and T069 (`specs/` only, no closing keyword), before
     T070 runs, so T070's check (i) reads committed state at the branch head.
-- [ ] T070 [orchestrator] **Feature-completeness audit (MUST be the FINAL task).** Assert against the
+- [X] T070 [orchestrator] **Feature-completeness audit (MUST be the FINAL task).** Assert against the
   branch head:
   - **(i)** Every `tasks.md` row through T053 is `[X]` in the committed branch head (T069's tick
     commit) or carries an explicit waiver; check `git diff --quiet HEAD -- specs/094-v1-tier0-bookkeeping/tasks.md`
