@@ -29,7 +29,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## Constitution v4.0 — Unreleased
+## Constitution v4.0 — 2026-10-23
 
 **Backwards-incompatible.** Article XX §4 major bump. Under v3.0 a PR that shipped the gRPC control
 plane or the iceoryx2 SHM data plane before the v1.0 tag shipped required scope and conformed. Under
@@ -37,9 +37,8 @@ v4.0 both are post-1.0 roadmap items, and Article XVIII §5 reads "No early ship
 protocols into v1.0", so the same PR does not conform. This is the constitution's version: it is not a C-ABI or
 library version.
 
-Gate A converged 2026-10-22, record decisions/speckit/094-v1-tier0-bookkeeping-gatea.md (parent
-repo, private); Gate B pending; pending the owner's Article XX §2 sign-off. This heading reads
-`Unreleased` until the owner has signed off.
+Ratified 2026-10-23 (PR #620, feature 094), after Codex Gate A converged at loop instance 2, round 1,
+then two scoped rounds on Article XIV §3, and the owner signed off.
 
 ### Changed
 
