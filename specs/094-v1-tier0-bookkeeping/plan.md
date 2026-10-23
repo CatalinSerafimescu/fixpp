@@ -241,9 +241,10 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
 - constitution: 6 clauses (§IV.4, §VI.6, §XIV.1, §XIV.3, §XVIII.1, §XVIII.2), the Status line and the
   Sync Impact Report; `CHANGELOG.md`: 1 entry;
 - live B&L: 1 new section with L-094-1;
-- 11 other surfaces: `.specify/architecture.md`, `.specify/api-contract.md`, `.specify/2i-capi.md`,
+- 11 other surfaces, 12 since Gate B round 2: `.specify/architecture.md`, `.specify/api-contract.md`, `.specify/2i-capi.md`,
   `.specify/2j-controlplane.md`, `.specify/2l-tap.md`, `.specify/2m-pybind.md`,
   `brain/components/{service,dictionary,nfr-and-tooling}.md`, `README.md`, `docs/src/intro.md`;
+  and, at Gate B round 2, `.specify/2c-codegen.md`'s two quotes of D-008's old Title (data-model §F.7);
 - 53 source files (one line each), `tools/capi_freeze.sha256`, `conanfile.py` (two commits) and
   `cmake/FixppPackaging.cmake`;
 - 2 test cells in 2 existing test files (FR-022);

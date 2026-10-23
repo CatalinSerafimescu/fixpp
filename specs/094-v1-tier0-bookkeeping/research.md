@@ -449,6 +449,7 @@ dispositioned under "Hits kept, by file group" and in the table below.
 | `.specify/2l-tap.md` §4.5, §6.4, §7.4, the RC#2 root-cause row | "binding v1.0 `fixppd` path" | header (§F.3) |
 | `.specify/2m-pybind.md` §1.1, §4.7, §7.10, §7.12, §10 Q4 | Python reaches control plane / tap through `fixppd` in v1.0 | header (§F.3) |
 | `.specify/2i-capi.md` §1.2, §7.7, §7.9, §10 question 3 | rotation and engine registration through 2j's control plane | header (§F.3) |
+| `.specify/2c-codegen.md` §1.3 D-008 bullet; Appendix A D-008 row | D-008's pre-094 Title, "… — zero-runtime-cost field lookup" | edit (§F.7), added at Gate B round 2 (owner Q1 (a)): a same-line note on each; (b) reaches both lines |
 | `spec/coverage-index.md` SVC-005 supplemental | SVC-005 "Stable from v1.0" proto, "v1.0 RPC surface" | edit (§D) |
 | `spec/coverage-index.md` FIX-TC row 3 | "TC-003 stays backlog" | edit (§D) |
 | `spec/coverage-index.md` FIX-TC rows 8–11 | `005-defer` on scenarios 8–11 | edit (§D) |

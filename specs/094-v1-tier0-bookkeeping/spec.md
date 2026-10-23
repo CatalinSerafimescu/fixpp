@@ -223,12 +223,34 @@ Owner rulings on the Gate B round 1 triage (parent repo (private)
   issue is filed.
 - Q (Q2, Codex C-4): D-008's Title keeps "zero-runtime-cost field lookup", and no cited cell
   witnesses a lookup over the generated code. Narrow the Title, add a discriminating witness, or
-  withhold D-008? → A (owner): **Keep the clause and add the witness** (option (b)). The property is
-  2c's: a generated typed accessor resolves its standard field's tag and value type at compile time
-  and never consults a runtime dictionary or table. FR-022c specifies the cell, reads the property
-  over the accessor's own generated text, and names under "Boundary" the callees' runtime work, which
-  may call the session dictionary and which the cell does not cover; D-008's Tests and
-  Verified cells name it, and data-model §H maps the clause to it.
+  withhold D-008? → A (owner): **Keep the clause and add the witness** (option (b)).
+  - Orchestrator definition (written after the ruling; superseded by Gate B round 2, below): the
+    property is 2c's: a generated typed accessor resolves its standard field's tag and value type at
+    compile time and never consults a runtime dictionary or table. FR-022c specifies the cell;
+    D-008's Tests and Verified cells name it, and data-model §H maps the clause to it.
+  - Round-1 fixer's boundary (`ca483a38`, written after the ruling; superseded by Gate B round 2,
+    below): FR-022c reads the property over the accessor's own generated text, and names under
+    "Boundary" the callees' runtime work, which may call the session dictionary and which the cell
+    does not cover.
+
+### Session 2026-10-23 (Gate B round 2)
+
+Owner ruling on the Gate B round 2 triage (parent repo (private)
+`research/G19-fix-fpml-iso20022/research/reviews/opus_pr620_2_triage.md`). Binding.
+
+- Q (Q1, Codex C-1 and C-2): at round 1 the clause was kept on the basis that no generated lookup
+  exists. But the generated accessors find each value at runtime (`OffsetTable::find` for a message
+  field, a scan of the entry for a group-entry field), group accessors ask the session's runtime
+  dictionary for group membership on their first call, the witness kept the Title only through a
+  boundary written after the ruling, and its design anchor quoted a banned pattern (`[const §XV.13]`)
+  as the property. What should D-008 claim? → A (owner): **Narrow + strengthen census**
+  (option (a)). The Title becomes `Code-generated constexpr field metadata from data dictionary — each
+  typed accessor binds its field's tag at compile time, with its value type fixed in its generated
+  text`. The value type is the one the codegen's data-type mapping assigns, not necessarily the
+  field's correct type (MultiCharValue → char, fixpp#621). FR-022c's census gains a name-identity
+  check and a mapped-type check, and the Verified cell states the accessor path's runtime work.
+  FR-006 and FR-006b record the narrowing, data-model §C and §H carry the text, and data-model §F.7
+  annotates `.specify/2c-codegen.md`'s two quotes of the old Title.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -443,9 +465,13 @@ in those files are licence comment lines.
   each row says, not its words:
   - **Version column only:** TC-003 and TC-008 take research R-3's "Column written" value
     (narrower than the owner's "4.2, 4.4 witnessed; FIXT.1.1 shares the code path" wording, by
-    FR-006a). D-008's FIX version(s) cell →
-    `4.2, 4.4, 5.0SP2, FIXT.1.1 (+ FIX Latest, opt-in build flag); runtime-XML-only versions: L-003-2`.
+    FR-006a).
   - **Narrowed, residual on record:**
+    - D-008: its FIX version(s) cell →
+      `4.2, 4.4, 5.0SP2, FIXT.1.1 (+ FIX Latest, opt-in build flag); runtime-XML-only versions: L-003-2`;
+      and the Title's "zero-runtime-cost field lookup" becomes the compile-time binding of each
+      accessor's tag, with its value type fixed in its generated text (owner, Gate B round 2; the
+      MultiCharValue → char mapping is fixpp#621).
     - NFR-003: names #555 and the allowlisted allocation-failure cells.
     - NFR-005: zero allocation on the gated windows only, L-497-1; the PMR clause names only the parse arena and MemoryStore's retrieve() snapshot, the two surfaces a cell asserts (Gate A round 3; narrower than the verification file's wording, reported to the owner).
     - NFR-011: library surfaces only, naming L-002-4, #565 and B-495-3; "C++17" dropped from the Title.
@@ -483,7 +509,8 @@ in those files are licence comment lines.
     open issue), and neither needs one; NFR-013's
     io_uring half, moved to the new row NFR-019, and its backend, moved to Verified as a design fact;
     TC-012's 19a/19b duplicate check (FIX-TC 19 assigns it to the application); TC-014's outbound
-    Reset-mode option (FIX-TC 9 accepts either option); TC-017's 17b ending and 17c–17j (FIX-TC 17 is
+    Reset-mode option (FIX-TC 9 accepts either option); D-008's "zero-runtime-cost field lookup"
+    (reading a field is runtime work; an `[impl]` row); TC-017's 17b ending and 17c–17j (FIX-TC 17 is
     optional; `[const §XII.7]`); TC-015's "more than one message of the same type" and "subsequent
     messages' MsgSeqNum(34) are accepted" (FIX-TC 15 is optional; owner, 2026-10-22); and the versions 4.0, 4.1, 4.3, 5.0 and 5.0SP1 of the old TC columns
     (outside FIX-TC §4.1's scope).
@@ -763,26 +790,27 @@ in those files are licence comment lines.
     does not flip: Edge Cases applies (the row stays `backlog`, the finding is recorded, the owner is
     told).
 - **FR-022c**: `phase-implementer` MUST add one test cell, D-008's accessor-resolution census (a
-  test-only change; owner, 2026-10-23, §Clarifications "Session 2026-10-23 (Gate B round 1)", Q2):
+  test-only change; owner, 2026-10-23, §Clarifications "Session 2026-10-23 (Gate B round 1)", Q2,
+  and "Session 2026-10-23 (Gate B round 2)", Q1):
   `CodegenAccessorResolutionCensus.EveryTypedAccessorResolvesTagAndTypeAtCompileTime`, a `TEST` in a
   new file, `tests/codegen/accessor_resolution_census_test.cpp`, added to the sources of
   `codegen_pure_tests` (`tests/codegen/CMakeLists.txt`), so no ctest entry is added. The file opens
   with `// SPDX-License-Identifier: AGPL-3.0-or-later`. `codegen_pure_tests` already defines
   `FIXPP_CODEGEN_INC`; the CMake edit adds the source and a compile definition,
   `FIXPP_D008_CENSUS_HAS_VLATEST`, set only when `FIXPP_CODEGEN_FIX_LATEST` is ON.
-  - **The property** it witnesses, D-008's "zero-runtime-cost field lookup" read against
-    `.specify/2c-codegen.md`'s inherited rule ("Eager codegen with no runtime dictionary path. Hybrid
-    mandated: codegen for standard fields (D-008), runtime XML loader for custom"): a generated typed
-    accessor resolves its standard field's tag and value type at compile time, and its own generated
-    text never consults a runtime `Dictionary`, a name→tag or tag→type table, or any dictionary lookup
-    function. The tag is
-    an integer literal: the template argument of `view_.template get<N>()` or of
-    `view_.template group<N, …G_N>()`, or the literal argument of `::fixpp::wire::get(ctx_.span, N, …)`
-    or of `nested_group_slices(…, N, …)`. The value type is fixed by the emitted text:
+  - **The property** it witnesses, D-008's compile-time binding clause: each typed accessor binds its
+    field's tag at compile time, with its value type fixed in its generated text, and its own
+    generated text never consults a runtime `Dictionary`, a name→tag or tag→type table, or any
+    dictionary lookup function. The tag is an integer literal: the template argument of
+    `view_.template get<N>()` or of `view_.template group<N, …G_N>()`, or the literal argument of
+    `::fixpp::wire::get(ctx_.span, N, …)` or of `nested_group_slices(…, N, …)`; and it is the tag of
+    the field the accessor is named for. The value type is fixed by the emitted text:
     `decode_field<T>` with T equal to the accessor's `expected_t<T>` and one of the four scalar types
-    the emitter uses, `decimal_t::parse` for a `decimal_t` accessor, or the group flyweight type.
+    the emitter uses, `decimal_t::parse` for a `decimal_t` accessor, or the group flyweight type; and
+    it is the type the codegen's data-type mapping assigns to the field's data type, not necessarily
+    the field's correct type (fixpp#621).
   - **Boundary.** The cell reads the accessor's own text. The runtime work of what it calls is outside
-    the cell and outside the clause: `MessageView::get` finds the field in the offset table, and
+    the cell; the Title makes no claim about it: `MessageView::get` finds the field in the offset table, and
     `MessageView::group<>()`, `nested_group_slices` and the group-entry `::fixpp::wire::get` segment
     group occurrences and split Length+Data pairs, which may call the session dictionary through
     `dict_hooks` (group membership, group delimiter, a dictionary's own pairs). Re-derive the
