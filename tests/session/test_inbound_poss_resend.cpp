@@ -10,7 +10,8 @@
 //
 // Six witnesses:
 //   1. DeliverInSeq_97Y          — in-seq 97=Y app msg: seqnum N→N+1, fromApp called,
-//                                   tag 97 readable, no Reject/Logout, Active (C4.1/FR-001/FR-002)
+//                                   tag 97 delivered as Y, no Reject/Logout, Active
+//                                   (C4.1/FR-001/FR-002)
 //   2. NoApp_ByteIdentity        — no Application registered: 97=Y handled byte-identically
 //                                   to the same message without 97 (C4.4/FR-005)
 //   3. Combo_43Y_97Y             — 021 PossDup arms fire on 43; 97 adds nothing (C4.3/FR-004)
@@ -22,6 +23,9 @@
 //          Edge Cases; tasks.md T003/T004.
 
 #include <gtest/gtest.h>
+
+#include <optional>
+#include <string>
 
 #include "support/possdup_test_support.hpp"
 #include "support/session_test_access.hpp"
@@ -37,6 +41,7 @@ class CapturingApplication : public fixpp::session::Application {
 public:
     int from_app_calls{0};
     bool last_had_tag97{false};
+    std::optional<std::string> last_tag97;
 
     fixpp::core::expected_t<void> fromApp(
         const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& view,
@@ -48,6 +53,7 @@ public:
         // use extract_field (the same helper used by all 021 tests).
         auto raw = view.bytes();  // std::span<const std::byte> (from View::bytes())
         last_had_tag97 = extract_field(raw, 97).has_value();
+        if (auto v = extract_field(raw, 97)) last_tag97 = std::string(*v);
         return {};
     }
 };
@@ -111,6 +117,9 @@ TEST_F(InboundPossResendTest, DeliverInSeq_97Y) {
     // Tag 97 must be readable in the delivered view.
     EXPECT_TRUE(app->last_had_tag97)
         << "C4.1/FR-001: tag 97 must be present in the MessageView delivered to fromApp";
+    ASSERT_TRUE(app->last_tag97.has_value());
+    EXPECT_EQ(*app->last_tag97, "Y")
+        << "TC-012: PossResend(97) must reach fromApp with the value the peer sent (Y)";
 
     // Seqnum advanced N→N+1 (2→3).
     const auto expected_after =

@@ -266,6 +266,18 @@ Owner ruling on the Gate B round 3 triage (parent repo (private)
   - Applied by Codex: one shared helper drives four new `DictionaryCensus.*AllMessagesAndFieldsLoaded` cells, and
     every census also checks `field_name(number) == name` against its source XML.
 
+### Session 2026-10-23 (Gate B round 4)
+
+Owner ruling on the Gate B round 4 triage (parent repo (private)
+`research/G19-fix-fpml-iso20022/research/reviews/opus_pr620_4_triage.md`). Binding.
+
+- Q (Q1, Codex C-1): TC-012's Title says PossResend(97)=Y reaches the application "with the flag
+  intact", but `InboundPossResendTest.DeliverInSeq_97Y` asserts only that tag 97 is present, and it
+  passes with `97=N`. Add a value assertion, narrow the Title, or withhold TC-012? → A (owner):
+  **(a) Add the value assertion.** FR-022d specifies it; SC-005 names the file.
+- Applied by Codex: FR-022d strengthens TC-012's existing witness with the owner-approved value
+  assertion.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" are the owner tagging v1.0 and any contributor who reads the catalogue or the
@@ -948,6 +960,12 @@ in those files are licence comment lines.
     runtime lookup would still fail it. vlatest has no read-tier byte pin.
   - **If the cell cannot be made GREEN on the branch, or cannot be proven RED by its mutants,** the
     clause is not witnessed: the finding is recorded and the owner is told (Edge Cases).
+- **FR-022d**: `phase-implementer` MUST strengthen one existing test cell, TC-012's witness (a
+  test-only change; owner, §Clarifications "Session 2026-10-23 (Gate B round 4)", Q1):
+  `InboundPossResendTest.DeliverInSeq_97Y` (`tests/session/test_inbound_poss_resend.cpp`, ctest
+  `session_inbound_poss_resend`) copies tag 97's value from the view delivered to `fromApp` and
+  asserts it equals `Y`. RED proof: with the fixture's `97=Y` changed to `97=N`, the cell fails at
+  that assertion; the same change against the cell before FR-022d passes, which is the gap it closes.
 - **FR-023**: Before the FR-013b commit, the orchestrator MUST file one fixpp issue, labelled at creation from
   `gh label list`, recording that `[const §III.4]` is not met on `main`: `tool_requires = []` since `629f2170`
   (2026-05-10), so CMake and Ninja come from the host toolchain. Its body asks the owner to choose: restore Conan-pinned
@@ -992,7 +1010,8 @@ in those files are licence comment lines.
   and `tests/session/fsm_matrix_witness_test.cpp`; the FR-022b census cells in
   `tests/dictionary/lookup_test.cpp`; FR-022c's new file `tests/codegen/accessor_resolution_census_test.cpp`
   and its registration in `tests/codegen/CMakeLists.txt` (one source line, and the
-  `FIXPP_D008_CENSUS_HAS_VLATEST` block); and one comment line in
+  `FIXPP_D008_CENSUS_HAS_VLATEST` block); FR-022d's assertion in
+  `tests/session/test_inbound_poss_resend.cpp`; and one comment line in
   `tests/tls/test_pinset_snapshot_publish_acquire.cpp`, whose `pinset.hpp §139` line citation the
   licence-line insert made stale. The number is replaced by the member it meant (`snapshot_`),
   following #310's rule (delete the number, cite the symbol). Found at C-SPDX by a basename sweep
@@ -1021,7 +1040,8 @@ in those files are licence comment lines.
 - SPDX marking outside `src/`/`include/` (tests, tools, bench, bindings, examples); the 40 `Apache-2.0`
   files there are the FR-021 issue.
 - Any library code or behaviour change, including the fixpp#612 fix (batch B65). The only test changes
-  are FR-022's two cells, FR-022b's census cells and FR-022c's accessor-resolution census.
+  are FR-022's two cells, FR-022b's census cells, FR-022c's accessor-resolution census and FR-022d's
+  TC-012 assertion.
 
 ## Normative References
 

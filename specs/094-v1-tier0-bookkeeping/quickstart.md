@@ -66,6 +66,8 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
   in `codegen_pure_tests`): it passes on the branch, and it fails under each of spec FR-022c's
   emitter mutants, each run after the scratch's generated `Messages.hpp` is shown to hold the mutant
   bytes, and under its test-side mutant, at the assertion FR-022c names for each. Record the runs.
+- FR-022d's assertion (`InboundPossResendTest.DeliverInSeq_97Y`): it passes on the branch, and it
+  fails in a scratch copy whose `make_poss_resend_frame` writes `97=N`. Record both runs.
 - Fill data-model §H's last column from the assertions the cells ran (FR-015b), and run its recipe
   rows (TC-014, TC-017) after their seeded positives.
 - NFR-013's backend grep (data-model §C) prints nothing over the build files; over every tracked file
