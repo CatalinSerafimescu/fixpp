@@ -244,13 +244,15 @@ Owner ruling on the Gate B round 2 triage (parent repo (private)
   dictionary for group membership on their first call, the witness kept the Title only through a
   boundary written after the ruling, and its design anchor quoted a banned pattern (`[const §XV.13]`)
   as the property. What should D-008 claim? → A (owner): **Narrow + strengthen census**
-  (option (a)). The Title becomes `Code-generated constexpr field metadata from data dictionary — each
-  typed accessor binds its field's tag at compile time, with its value type fixed in its generated
-  text`. The value type is the one the codegen's data-type mapping assigns, not necessarily the
-  field's correct type (MultiCharValue → char, fixpp#621). FR-022c's census gains a name-identity
-  check and a mapped-type check, and the Verified cell states the accessor path's runtime work.
-  FR-006 and FR-006b record the narrowing, data-model §C and §H carry the text, and data-model §F.7
-  annotates `.specify/2c-codegen.md`'s two quotes of the old Title.
+  (option (a)). Option (a)'s Title, as the triage worded it: `Code-generated constexpr field metadata
+  from data dictionary — each typed accessor binds its field's tag at compile time, with its value
+  type fixed in its generated text`.
+  - Applied by the Gate B round 2 fixer (`655b3d5b`, `de2f01c4`), from the triage's edit list for
+    option (a): the value type is stated as the one the codegen's data-type mapping assigns, not
+    necessarily the field's correct type (MultiCharValue → char, fixpp#621); FR-022c's census gains a
+    name-identity check and a mapped-type check, and the Verified cell states the accessor path's
+    runtime work; FR-006 and FR-006b record the narrowing, data-model §C and §H carry the text, and
+    data-model §F.7 annotates `.specify/2c-codegen.md`'s two quotes of the old Title.
 
 ## User Scenarios & Testing *(mandatory)*
 
