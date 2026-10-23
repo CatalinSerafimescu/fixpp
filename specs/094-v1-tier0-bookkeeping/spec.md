@@ -946,7 +946,7 @@ in those files are licence comment lines.
     `DeterminismTest.GeneratedMatchesGolden` pin the generated text, and are republished at every
     intended emitter change; this cell asserts the property, so a republished pin that carried a
     runtime lookup would still fail it. vlatest has no read-tier byte pin.
-  - **If the cell cannot be made GREEN on the branch, or cannot be proven RED by both mutants,** the
+  - **If the cell cannot be made GREEN on the branch, or cannot be proven RED by its mutants,** the
     clause is not witnessed: the finding is recorded and the owner is told (Edge Cases).
 - **FR-023**: Before the FR-013b commit, the orchestrator MUST file one fixpp issue, labelled at creation from
   `gh label list`, recording that `[const §III.4]` is not met on `main`: `tool_requires = []` since `629f2170`
