@@ -185,7 +185,8 @@ BodyLength/CheckSum case). No Verified cell cites them.
 ## Summary
 
 This is a governance and reconciliation feature with no behavioural code. Its changes are docs,
-licence comments and two test cells. It:
+licence comments, and the build-file and test-file lines SC-005 names, among them the test-only
+regression guards of FR-022, FR-022b, FR-022c and FR-022d. It:
 - writes the owner's DECISION 1 into the catalogue (7 post-v1.0 drops plus a legend line) and into the
   constitution (**v3.0 → v4.0, MAJOR**: the service wrapper and the control-plane interface leave v1.0
   scope and become unscheduled post-1.0; §VI.6 says how a process row closes), with a `CHANGELOG.md`
@@ -194,7 +195,9 @@ licence comments and two test cells. It:
   limitation L-094-1 and a new issue;
 - flips 18 delivered rows to `done` as reconciliations, worded to what shipped, and splits io_uring
   into a new post-v1.0 row NFR-019;
-- adds two session-level TC-017 test cells (FR-022), test-only, in `session_pure_tests`;
+- adds test-only regression guards, each proven RED by the mutants its requirement names: FR-022's
+  session-level TC-017 cells, the census cells of FR-022b and FR-022c added from the US2 evidence and
+  Gate B (spec §Clarifications), and FR-022d's strengthened TC-012 assertion;
 - marks every library source file `AGPL-3.0-or-later`, including the C-ABI freeze manifest and the
   Conan and RPM licence fields; and, in a separate commit, updates `conanfile.py`'s `tool_requires`
   comment for #607.
@@ -206,16 +209,18 @@ them is measured in [research.md](./research.md).
 
 **Language/Version**: Markdown (catalogue, coverage index, B&L, constitution, CHANGELOG, design docs,
 brain, README, docs). The only library source-file change is a comment line (C++23 / C headers), plus
-one string and one comment in `conanfile.py` and one string in `cmake/FixppPackaging.cmake`. Two test
-cells are added in two existing `tests/session/` files (FR-022).
+one string and one comment in `conanfile.py` and one string in `cmake/FixppPackaging.cmake`.
+Test-only regression guards are added in the test files SC-005 names (FR-022, FR-022b, FR-022c,
+FR-022d).
 
 **Primary Dependencies**: none added or changed.
 
 **Storage**: N/A.
 
-**Testing**: two new test cells for TC-017 (FR-022), in files already compiled into
-`session_pure_tests`, so no ctest entry is added; each is proven RED. The other verifying tests of the
-18 flipped rows run unchanged (FR-015). Instruments:
+**Testing**: the test-only regression guards of FR-022, FR-022b, FR-022c and FR-022d, each compiled
+into a binary that already has a ctest entry, so no ctest entry is added; each is proven RED by the
+mutants its requirement names. The other verifying tests of the 18 flipped rows run unchanged
+(FR-015). Instruments:
 - `catalogue_census.py` (R-4)
 - the R-12 sweep recipe (four `git grep` commands: (a) the dropped-scope terms and the io_uring
   grep, (b), (c))
@@ -247,7 +252,7 @@ from `__LINE__`-derived values shifting by one in the 37 files that gain a line 
   and, at Gate B round 2, `.specify/2c-codegen.md`'s two quotes of D-008's old Title (data-model §F.7);
 - 53 source files (one line each), `tools/capi_freeze.sha256`, `conanfile.py` (two commits) and
   `cmake/FixppPackaging.cmake`;
-- 2 test cells in 2 existing test files (FR-022);
+- the test-only regression guards SC-005 names (FR-022, FR-022b, FR-022c, FR-022d);
 - 4 new fixpp issues (FR-018, FR-020, FR-021, FR-023).
 
 ## Constitution Check

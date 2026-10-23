@@ -651,8 +651,9 @@ in those files are licence comment lines.
     runs at `9b176090` (Tier 1 `39594667883`, Tier 2 `39594667975`), plus the workflow job and step
     names re-read on this branch. NFR-005 and NFR-013 also run their witnesses locally. Runs at the
     base are enough because these rows claim CI configuration (jobs, legs, steps, `if:` lines and
-    required checks), which the branch re-reads unchanged, and the branch's library delta is licence
-    comment lines, two licence strings and two test cells; the branch's own required tier runs must
+    required checks), which the branch re-reads unchanged, and the branch's diff outside `spec/`,
+    `.specify/`, `brain/`, `specs/` and `CHANGELOG.md` is limited to the members SC-005 names, none
+    of which edits a workflow job, step or `if:` line; the branch's own required tier runs must
     still be green on the C-RATIFY head before merge (tasks T065).
   - **Process row** (NFR-002, under `[const §VI.6]`(b) as amended in v4.0): the two cited verify
     records (parent repo (private)), each showing a coverage assessment of every uncovered changed line

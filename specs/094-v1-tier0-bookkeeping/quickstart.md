@@ -94,7 +94,7 @@ Each flipped row's Tests cell names its binaries. Run them on a fresh build of t
   research R-7's symbol diff. The numstat lists the 10 of the 12 frozen C-ABI headers that change
   (one licence line each); the other 2 already carry it and are unchanged.
 - `git diff --stat origin/main -- ':!spec/' ':!.specify/' ':!brain/' ':!specs/' ':!CHANGELOG.md'`
-  lists only the SC-005 files, and the only `tests/` files in it are the two FR-022 files and FR-022b's `tests/dictionary/lookup_test.cpp`.
+  lists only files SC-005 names; any other path, under `tests/` or elsewhere, is a finding.
 - `tools/check_capi_freeze.sh` must print `PASS`.
 - `grep -n '^    license' conanfile.py` must read `license = "AGPL-3.0-or-later"`.
 - `grep -n 'CPACK_RPM_PACKAGE_LICENSE' cmake/FixppPackaging.cmake` must read `"AGPL-3.0-or-later"`,

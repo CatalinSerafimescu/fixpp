@@ -29,11 +29,13 @@ dispositioned every checklist under `specs/094-v1-tier0-bookkeeping/checklists/`
   `research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_adversarial_review.md`. Record:
   `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private); plan.md `## Gate A`.
 
-**Tests**: only FR-022's two session-level cells (owner, Gate A round 2), FR-022b's D-001 census
-cell (owner, 2026-10-22, from T030's evidence) and FR-022c's D-008 census cell (owner, 2026-10-23,
-Gate B round 1). They are regression guards, green on the base by
-construction, and each is proven RED by the mutant its requirement names (T029, T029a). Every other
-flipped row is evidenced by tests that already exist (FR-015).
+**Tests**: the only test cells added or strengthened are the regression guards SC-005 names: FR-022's
+session-level TC-017 cells (owner, Gate A round 2), FR-022b's census cells (owner, 2026-10-22, from
+T030's evidence; extended at Gate B round 3), FR-022c's D-008 census cell (owner, Gate B round 1), and
+FR-022d's strengthened TC-012 assertion (owner, Gate B round 4). They are regression guards, green on
+the base by construction, and each is proven RED by the mutants its requirement names (T029, T029a,
+and the Gate B round sections of the verify record). Every other cited witness existed before 094
+(FR-015).
 
 **Recorded deviation (093's T125a precedent):** T054–T068 (Gate B, publish, owner sign-off, the
 RATIFIED flip, merge, post-merge close-out) are chronologically AFTER the completeness audit, because
