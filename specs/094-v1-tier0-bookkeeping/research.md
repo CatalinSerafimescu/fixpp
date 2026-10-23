@@ -345,6 +345,10 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
   - **Gate B round 1 ruling Q2 (owner, 2026-10-23; spec FR-022c).** D-008's Tests cell gains
     `CodegenAccessorResolutionCensus.EveryTypedAccessorResolvesTagAndTypeAtCompileTime`, giving 55
     distinct entries, all existing once FR-022c's file lands.
+  - **Gate B round 2 (triage F-3, 2026-10-23).** TC-014's Tests cell gains
+    `ResendReplyPossDup.Cell1_GapFill_Carries_43Y_And_122_EqOwn52`, the witness of its "option 1 not
+    offered" clause. TC-006 already cites it, so by the counting rule above (a test cited by two rows
+    counts once) the distinct count stays 55.
 - **NFR-011 witnesses:**
   - `PmrAllocation.EveryByteFromMr` (XmlLoader)
   - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,
