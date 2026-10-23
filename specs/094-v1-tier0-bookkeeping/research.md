@@ -285,7 +285,7 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
   its real number. Close-out places all four, and #614, in parent repo (private)
   `phases/phase-4/issue-batches.md`.
 
-## R-11 — The cited tests exist (51 now, 2 added by FR-022)
+## R-11 — The cited tests exist
 
 - The grep required `TEST*(Suite, Name` with the name half. A negative control
   (`InboundPossResendTest.NoSuchCellXyz`) reported MISSING; the first version of the grep, which only
@@ -322,8 +322,8 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
     - NFR-005: `WireThreeArenaPinning.OffsetTableStorageRoutesThroughPerMessageArena`, `MemoryStoreZeroAllocatorCalls.RetrieveDescriptorSnapshotUsesPmr`
     - NFR-011: `PmrAllocation.EveryByteFromMr`, `WireThreeArenaPinning.PerMessageArenasAreIsolated`, `MemoryStoreCapacity.EngineMrAppliedWhenConfigResourceIsNull`, `CodegenTypedAccessor.DecimalAccessorTakesMemoryResource`
     - D-001: `AllRuntimeVersions/DictionaryLookupFixture.*`, `DelimiterCensus.RedCountsReconcileWithSpecBaseline`, `DictEnumCensus.SC011_*`, `BuilderCompleteness077Vt11V42.V42RegistryExactSetEqualsRawXmlWalk`, and (the 54th, FR-022b) `DictionaryCensus.Fix42AllMessagesAndFieldsLoaded`
-    - D-003: `DictionaryLookupFixture.CrossVersionIsolation`, `DelimiterCensus.RegisteredGroupCountMatchesCodegenFix50Sp2`, `DelimiterCensus.NoChangeDictionariesUnchanged`, `DictEnumCensus.SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty`, `BuilderCompleteness077Vt11V42.Vt11ExpectedEmptyNoFileEmitted`
-    - D-008: `CodegenTypedAccessor.MsgTypeAndVersionAreConstexpr`, `DeterminismTest.GeneratedMatchesGolden`
+    - D-003: `DictionaryLookupFixture.CrossVersionIsolation`, `DelimiterCensus.RegisteredGroupCountMatchesCodegenFix50Sp2`, `DelimiterCensus.NoChangeDictionariesUnchanged`, `DictEnumCensus.SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty`, `BuilderCompleteness077Vt11V42.Vt11ExpectedEmptyNoFileEmitted`, `DictionaryCensus.Fix50Sp2AllMessagesAndFieldsLoaded`, `DictionaryCensus.Fixt11AllMessagesAndFieldsLoaded`
+    - D-008: `CodegenTypedAccessor.MsgTypeAndVersionAreConstexpr`, `DeterminismTest.GeneratedMatchesGolden`, `DictionaryCensus.Fix44AllMessagesAndFieldsLoaded`, `DictionaryCensus.OrchestraFixLatestAllMessagesAndFieldsLoaded`
     - TC-003: `InboundFrameDispositionsTc.TC003_3b_*`, `.TC003_3c_*`, `.TC003_3e_*`
     - TC-005: `CapiC7Witness.Row6_InboundRejectTrafficKeepsTheSessionUp`, `TC005Reject.Fix42_7_ReceiveReject_NoLoop`, `TC005Reject.Fix44_7_ReceiveReject_NoLoop`, `SessionReject.NoRejectLoopOnInboundReject`, `FsmMatrixWitness.Active_InboundReject_LogOnly_StaysActive`
     - TC-006: `RecoveryStoreHorizonTest.AvailableRangeReplaysCarryPossDupFlag`, `.ReplayFramesCarryOrigSendingTime`, `.LargeAppFrameReplayed_NotGapFilled`, `.PreHorizonGapCollapsedToGapFill`, `RecoveryAdminSpanGapfillTest.*`, `ResendReplyPossDup.Cell1_GapFill_Carries_43Y_And_122_EqOwn52`, `Stores/StoreLookupAfterReset.*`
@@ -349,6 +349,12 @@ lists `tier1-required`, `tier2-required`, `tier3-required` and the two gate-labe
     `ResendReplyPossDup.Cell1_GapFill_Carries_43Y_And_122_EqOwn52`, the witness of its "option 1 not
     offered" clause. TC-006 already cites it, so by the counting rule above (a test cited by two rows
     counts once) the distinct count stays 55.
+  - **Gate B round 3 (owner Q1 (a), 2026-10-23).** FR-022b's extension adds four cells:
+    `DictionaryCensus.Fix44AllMessagesAndFieldsLoaded`,
+    `DictionaryCensus.Fix50Sp2AllMessagesAndFieldsLoaded`,
+    `DictionaryCensus.Fixt11AllMessagesAndFieldsLoaded` and
+    `DictionaryCensus.OrchestraFixLatestAllMessagesAndFieldsLoaded`. The distinct count is 59; the
+    existence recipe finds all 59, while both negative controls report MISSING.
 - **NFR-011 witnesses:**
   - `PmrAllocation.EveryByteFromMr` (XmlLoader)
   - `OrchestraLoader::load(path, std::pmr::memory_resource*, …)` (signature,
@@ -661,7 +667,7 @@ register on the Windows presets from tier2's run. The one exception is NFR-005's
 | `tests/transport/test_asio_plain_transport.cpp` | NFR-013 | `transport_asio_plain_transport` | `transport_asio_plain_transport` | |
 | `tests/transport/test_listener_acceptor.cpp` | NFR-013 | `transport_listener_acceptor` | `transport_listener_acceptor` | |
 | `tests/transport/test_cancellation_propagation.cpp` | NFR-013 | `transport_cancellation_propagation` | `transport_cancellation_propagation` | |
-| `tests/dictionary/lookup_test.cpp` | D-001, D-003, D-007 | `dictionary_pure_tests` (`tests/dictionary/CMakeLists.txt`) | `dictionary_pure_tests` | grouped binary |
+| `tests/dictionary/lookup_test.cpp` | D-001, D-003, D-007, D-008 | `dictionary_pure_tests` (`tests/dictionary/CMakeLists.txt`) | `dictionary_pure_tests` | grouped binary |
 | `tests/dictionary/delimiter_census_test.cpp` | D-001, D-003 | `dictionary_delimiter_census_test` | `delimiter_census` | NAME ≠ target |
 | `tests/dictionary/dict_enum_census_test.cpp` | D-001, D-003 | `dictionary_dict_enum_census_test` | `dictionary_dict_enum_census_test` | |
 | `tests/codegen/test_077_v42_vt11_completeness_and_c4.cpp` | D-001, D-003 | `codegen_077_v42_vt11_completeness_c4_test` | `codegen_077_v42_vt11_completeness_c4_test` | |

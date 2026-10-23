@@ -254,6 +254,18 @@ Owner ruling on the Gate B round 2 triage (parent repo (private)
     runtime work; FR-006 and FR-006b record the narrowing, data-model §C and §H carry the text, and
     data-model §F.7 annotates `.specify/2c-codegen.md`'s two quotes of the old Title.
 
+### Session 2026-10-23 (Gate B round 3)
+
+Owner ruling on the Gate B round 3 triage (parent repo (private)
+`research/G19-fix-fpml-iso20022/research/reviews/opus_pr620_3_triage.md`). Binding.
+
+- Q (Q1, Codex C-1 and C-2): D-008's identity check reads each field's name through the loader the codegen also
+  uses, and only FIX 4.2's loaded names are checked against the XML (FR-022b); D-003's cells check headline messages,
+  not every message and field. Extend FR-022b's census to FIX 4.4, FIX 5.0SP2, FIXT 1.1 and FIX Latest, disclose the
+  boundary, or withhold D-003? → A (owner): **(a) Extend the census.**
+  - Applied by Codex: one shared helper drives four new `DictionaryCensus.*AllMessagesAndFieldsLoaded` cells, and
+    every census also checks `field_name(number) == name` against its source XML.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" are the owner tagging v1.0 and any contributor who reads the catalogue or the
@@ -774,6 +786,7 @@ in those files are licence comment lines.
     - The tags `t` in 1..65535 for which `Dictionary::field_name(t)` is non-empty equal the raw
       `number` set.
     - For each raw field, `Dictionary::field_by_name(name)` returns its `number`.
+      Since Gate B round 3, `Dictionary::field_name(number)` also returns its `name`.
     - A guard runs first and asserts that both raw sets are non-empty: the walk's known positive, so
       an empty walk cannot pass.
     - Components are vacuous for FIX 4.2 (its `<components />` is empty), and groups are
@@ -791,6 +804,20 @@ in those files are licence comment lines.
   - **If the cell cannot be made GREEN on the branch, or cannot be proven RED by both mutants,** D-001
     does not flip: Edge Cases applies (the row stays `backlog`, the finding is recorded, the owner is
     told).
+  - **Extended at Gate B round 3 (owner, 2026-10-23, §Clarifications "Session 2026-10-23 (Gate B round 3)").** The
+    same census runs, through one shared helper, in four more TESTs of the same file:
+    `DictionaryCensus.Fix44AllMessagesAndFieldsLoaded`, `DictionaryCensus.Fix50Sp2AllMessagesAndFieldsLoaded` and
+    `DictionaryCensus.Fixt11AllMessagesAndFieldsLoaded` (`XmlLoader`, the raw `<fix>` walk above), and
+    `DictionaryCensus.OrchestraFixLatestAllMessagesAndFieldsLoaded` (`OrchestraLoader`; the raw walk reads every
+    `fixr:repository/fixr:messages/fixr:message`'s `msgType` and every `fixr:repository/fixr:fields/fixr:field`'s
+    `id` and `name`). Every census, FIX 4.2's included, also asserts that `Dictionary::field_name(number)` equals each
+    raw field's `name`. The FIX50SP2 and FIXT11 cells witness D-003's dictionaries; all five anchor to the source XML
+    the field names that the codegen and FR-022c's identity check read through the same loaders. RED proof: three
+    loader mutants, each in both loaders, in a scratch copy on F: — a field-name index entry dropped (BeginSeqNo(7)),
+    a message entry dropped (MsgTypes "2" and "DZ"), and two name pairs exchanged in the field-name index (Account /
+    ClOrdID, SenderCompID / TargetCompID) — each failing every census at its set-equality, `field_by_name` or
+    `field_name` assertion; under the exchange, FR-022c's census still passes, which is the common mode this
+    extension closes.
 - **FR-022c**: `phase-implementer` MUST add one test cell, D-008's accessor-resolution census (a
   test-only change; owner, 2026-10-23, §Clarifications "Session 2026-10-23 (Gate B round 1)", Q2,
   and "Session 2026-10-23 (Gate B round 2)", Q1):
@@ -847,7 +874,7 @@ in those files are licence comment lines.
       equals the `Fields.hpp`-derived count. In `Reify.hpp` each `owning_<Msg>` class is compared with
       `<Msg>_fields[]` (it declares no group flyweights of its own). `Fields.hpp` is written by another emitter
       (`emit_fields.cpp`) from the same IR, so the check proves the walk reached every accessor the
-      version declares; dictionary completeness is D-001's census and the 082 tests'.
+      version declares; dictionary completeness is FR-022b's censuses' and the 082 tests'.
     - *Identity.* Per accessor, its name and its value type. The name: the accessor's identifier is
       the accessor name of its tag's field name in the dictionary the version is generated from
       (`FIX42.xml`, `FIX44.xml`, `FIX50SP2.xml`, `FIXT11.xml`, and `orchestra/OrchestraFIXLatest.xml`
@@ -860,8 +887,9 @@ in those files are licence comment lines.
       cell, of the codegen's data-type mapping (`kind_of`) assigns to its `Fields.hpp` data type.
       The restatement is the design mapping, not each field's correct type: it carries
       MultiCharValue → char, which fixpp#621 reports as wrong, so a wrong mapping is not caught. The
-      field names come from the library's loaders, which the codegen also uses; a loader defect is
-      the subject of the dictionary rows' own witnesses (D-001, D-003, D-007), not this cell's.
+      field names come from the library's loaders, which the codegen also uses, so a loader name defect common to
+      both would pass this cell; FR-022b's censuses, one per dictionary this cell reads, check those loaders' names
+      against an independent walk of the source XML.
   - **Positive control.** A guard runs first, over a synthetic `Messages.hpp`, a synthetic
     `Reify.hpp`, a synthetic `Fields.hpp` and a synthetic name map:
     - the synthetic text passes all three checks, an accessor in the `_t<tag>` collision form
@@ -945,7 +973,7 @@ in those files are licence comment lines.
   falls by 25 − k and the done count rises by 18 − k (FR-016), and the verify record names the k rows.
 - **SC-002**: 100 % of the tests cited in the 18 flipped rows exist literally and pass on this branch,
   and every clause in the data-model §H map has its assertion recorded. "Exist" is research R-11's
-  counting rule and check (54 distinct entries since FR-022b, 55 since FR-022c, both negative controls reporting MISSING); "pass" is
+  counting rule and check (54 distinct entries since FR-022b, 55 since FR-022c, 59 since FR-022b's round-3 extension, both negative controls reporting MISSING); "pass" is
   each named test's PASSED read from its binary's own output, not from ctest's exit code (quickstart
   §2).
 - **SC-003**: 0 constitution clauses state the service wrapper, gRPC control plane or iceoryx2 data
@@ -961,7 +989,7 @@ in those files are licence comment lines.
   `conanfile.py`'s `license` line and its four `tool_requires` comment lines (FR-013b, separate
   commit); `cmake/FixppPackaging.cmake`'s `CPACK_RPM_PACKAGE_LICENSE` line; `README.md`'s tagline;
   `docs/src/intro.md`'s opening sentence; the two FR-022 test cells in `tests/session/test_enum_validation_logon.cpp`
-  and `tests/session/fsm_matrix_witness_test.cpp`; the FR-022b census cell in
+  and `tests/session/fsm_matrix_witness_test.cpp`; the FR-022b census cells in
   `tests/dictionary/lookup_test.cpp`; FR-022c's new file `tests/codegen/accessor_resolution_census_test.cpp`
   and its registration in `tests/codegen/CMakeLists.txt` (one source line, and the
   `FIXPP_D008_CENSUS_HAS_VLATEST` block); and one comment line in
@@ -993,7 +1021,7 @@ in those files are licence comment lines.
 - SPDX marking outside `src/`/`include/` (tests, tools, bench, bindings, examples); the 40 `Apache-2.0`
   files there are the FR-021 issue.
 - Any library code or behaviour change, including the fixpp#612 fix (batch B65). The only test changes
-  are FR-022's two cells, FR-022b's census cell and FR-022c's accessor-resolution census.
+  are FR-022's two cells, FR-022b's census cells and FR-022c's accessor-resolution census.
 
 ## Normative References
 

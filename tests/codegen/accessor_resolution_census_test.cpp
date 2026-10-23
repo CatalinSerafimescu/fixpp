@@ -52,8 +52,10 @@
 //        field's correct type: it carries the MultiCharValue -> char entry
 //        that fixpp#621 reports as wrong, so a wrong mapping passes here.
 //      The field names come from the dictionary loaders, which the codegen
-//      also uses; a loader defect is the subject of the dictionary rows' own
-//      witnesses (D-001, D-003, D-007), not this cell's.
+//      also uses, so a loader name defect common to both would pass here;
+//      DictionaryCensus.*AllMessagesAndFieldsLoaded in
+//      tests/dictionary/lookup_test.cpp checks the loaders' names against an
+//      independent walk of each source XML.
 //
 // EXCLUSIONS. `field_value(::std::uint16_t tag)` is the runtime-tag
 // passthrough (its tag is the caller's), and `view()` returns the bound

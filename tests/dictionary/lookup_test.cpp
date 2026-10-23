@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_ref.hpp>
+#include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
@@ -573,24 +574,20 @@ std::string only_in(std::set<T> const& a, std::set<T> const& b) {
     return out.str();
 }
 
-}  // namespace
+struct RawDictionary {
+    std::set<std::string> msg_types;
+    std::vector<std::pair<std::string, std::uint32_t>> fields;
+};
 
-// D-001 census (094 FR-022b): every <message> MsgType and every <field> of
-// FIX42.xml is in the Dictionary XmlLoader builds from it. The expected sets
-// come from an independent pugixml walk of the same file, not from the loader.
-TEST(DictionaryCensus, Fix42AllMessagesAndFieldsLoaded) {
-    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX42.xml";
-
+RawDictionary raw_quickfix(std::filesystem::path const& path) {
     pugi::xml_document doc;
-    ASSERT_TRUE(doc.load_file(xml_path.c_str())) << xml_path;
+    EXPECT_TRUE(doc.load_file(path.c_str())) << path;
     auto const fix = doc.child("fix");
 
-    std::set<std::string> raw_msg_types;
+    RawDictionary raw;
     for (auto const message : fix.child("messages").children("message")) {
-        raw_msg_types.emplace(message.attribute("msgtype").as_string());
+        raw.msg_types.emplace(message.attribute("msgtype").as_string());
     }
-    std::set<std::uint32_t> raw_tags;
-    std::vector<std::pair<std::string, std::uint32_t>> raw_fields;
     for (auto const field : fix.child("fields").children("field")) {
         auto const number = field.attribute("number").as_uint();
         std::string const name = field.attribute("name").as_string();
@@ -598,23 +595,53 @@ TEST(DictionaryCensus, Fix42AllMessagesAndFieldsLoaded) {
             ADD_FAILURE() << "raw field '" << name << "' has no usable number";
             continue;
         }
+        raw.fields.emplace_back(name, number);
+    }
+    return raw;
+}
+
+RawDictionary raw_orchestra(std::filesystem::path const& path) {
+    pugi::xml_document doc;
+    EXPECT_TRUE(doc.load_file(path.c_str())) << path;
+    auto const repository = doc.child("fixr:repository");
+
+    RawDictionary raw;
+    for (auto const message : repository.child("fixr:messages").children("fixr:message")) {
+        raw.msg_types.emplace(message.attribute("msgType").as_string());
+    }
+    for (auto const field : repository.child("fixr:fields").children("fixr:field")) {
+        auto const number = field.attribute("id").as_uint();
+        std::string const name = field.attribute("name").as_string();
+        if (number == 0U || number > 0xFFFFU) {
+            ADD_FAILURE() << "raw field '" << name << "' has no usable number";
+            continue;
+        }
+        raw.fields.emplace_back(name, number);
+    }
+    return raw;
+}
+
+void expect_loaded_equals_raw(
+    std::set<std::string> const& raw_msg_types,
+    std::vector<std::pair<std::string, std::uint32_t>> const& raw_fields,
+    fixpp::dict::Dictionary const& dict, std::string const& what) {
+    std::set<std::uint32_t> raw_tags;
+    for (auto const& [name, number] : raw_fields) {
+        (void)name;
         raw_tags.insert(number);
-        raw_fields.emplace_back(name, number);
     }
 
-    // The walk's known positive: an empty walk cannot pass the equalities below.
-    ASSERT_FALSE(raw_msg_types.empty()) << "no <message> found in " << xml_path;
-    ASSERT_FALSE(raw_tags.empty()) << "no <field> found in " << xml_path;
-
-    auto const dict = fixpp::dict::XmlLoader{}.load(xml_path, std::pmr::new_delete_resource());
+    ASSERT_FALSE(raw_msg_types.empty()) << "no <message> found in " << what;
+    ASSERT_FALSE(raw_tags.empty()) << "no <field> found in " << what;
 
     std::set<std::string> loaded_msg_types;
     for (auto const& e : dict.messages()) {
         loaded_msg_types.emplace(e.msg_type);
     }
     EXPECT_EQ(loaded_msg_types, raw_msg_types)
-        << "MsgTypes only in the raw XML:" << only_in(raw_msg_types, loaded_msg_types)
-        << "\nMsgTypes only in the loaded Dictionary:" << only_in(loaded_msg_types, raw_msg_types);
+        << what << " MsgTypes only in the raw XML:" << only_in(raw_msg_types, loaded_msg_types)
+        << "\nMsgTypes only in the loaded Dictionary:"
+        << only_in(loaded_msg_types, raw_msg_types);
 
     std::set<std::uint32_t> loaded_tags;
     for (std::uint32_t t = 1U; t <= 0xFFFFU; ++t) {
@@ -623,14 +650,62 @@ TEST(DictionaryCensus, Fix42AllMessagesAndFieldsLoaded) {
         }
     }
     EXPECT_EQ(loaded_tags, raw_tags)
-        << "field tags only in the raw XML:" << only_in(raw_tags, loaded_tags)
+        << what << " field tags only in the raw XML:" << only_in(raw_tags, loaded_tags)
         << "\nfield tags only in the loaded Dictionary:" << only_in(loaded_tags, raw_tags);
 
     for (auto const& [name, number] : raw_fields) {
         EXPECT_EQ(dict.field_by_name(name),
                   std::optional<std::uint16_t>{static_cast<std::uint16_t>(number)})
-            << "field_by_name(\"" << name << "\")";
+            << what << " field_by_name(\"" << name << "\")";
+        EXPECT_EQ(dict.field_name(static_cast<std::uint16_t>(number)), name)
+            << what << " field_name(" << number << ")";
     }
+}
+
+}  // namespace
+
+// D-001 census (094 FR-022b): every <message> MsgType and every <field> of
+// FIX42.xml, including each field number's name, is compared with the Dictionary
+// XmlLoader builds from an independent pugixml walk of the same file.
+TEST(DictionaryCensus, Fix42AllMessagesAndFieldsLoaded) {
+    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX42.xml";
+    auto const raw = raw_quickfix(xml_path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(xml_path, std::pmr::new_delete_resource());
+    expect_loaded_equals_raw(raw.msg_types, raw.fields, dict, xml_path.string());
+}
+
+// Anchors D-008's v44 accessor names to the source XML.
+TEST(DictionaryCensus, Fix44AllMessagesAndFieldsLoaded) {
+    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    auto const raw = raw_quickfix(xml_path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(xml_path, std::pmr::new_delete_resource());
+    expect_loaded_equals_raw(raw.msg_types, raw.fields, dict, xml_path.string());
+}
+
+// Checks D-003's FIX 5.0SP2 dictionary against the source XML.
+TEST(DictionaryCensus, Fix50Sp2AllMessagesAndFieldsLoaded) {
+    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX50SP2.xml";
+    auto const raw = raw_quickfix(xml_path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(xml_path, std::pmr::new_delete_resource());
+    expect_loaded_equals_raw(raw.msg_types, raw.fields, dict, xml_path.string());
+}
+
+// Checks D-003's FIXT.1.1 dictionary against the source XML.
+TEST(DictionaryCensus, Fixt11AllMessagesAndFieldsLoaded) {
+    auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIXT11.xml";
+    auto const raw = raw_quickfix(xml_path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(xml_path, std::pmr::new_delete_resource());
+    expect_loaded_equals_raw(raw.msg_types, raw.fields, dict, xml_path.string());
+}
+
+// Anchors D-008's vlatest accessor names to the source XML.
+TEST(DictionaryCensus, OrchestraFixLatestAllMessagesAndFieldsLoaded) {
+    auto const xml_path =
+        std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
+    auto const raw = raw_orchestra(xml_path);
+    std::pmr::monotonic_buffer_resource arena;
+    auto const dict = fixpp::dict::OrchestraLoader{}.load(xml_path, &arena);
+    expect_loaded_equals_raw(raw.msg_types, raw.fields, dict, xml_path.string());
 }
 
 // ---------------------------------------------------------------------------
