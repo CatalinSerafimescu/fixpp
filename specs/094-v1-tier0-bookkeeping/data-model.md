@@ -279,6 +279,8 @@ SVC-005 supplemental moves down by two lines.
   - `**SVC-002 supplemental:** *(Post-1.0 — constitution v4.0, feature 094: SVC-002 is \`dropped(post-v1.0, planned, not abandoned)\`; the design below describes the post-1.0 release that builds it. v1.0 installs only the empty \`ControlPlaneFactory\` anchor and the codes 900/901.)* iceoryx2 data plane (zero-copy SHM publish/subscribe) — a design choice, not a FIX spec section ([const §VI.3]). The row's \`[impl]\` Spec ref resolves to \`[const §XIV.3]\` (iceoryx2 SHM opt-in for sidecar mode) and \`[arch §8.2]\` (the data plane, designed in 2l), with 2l's \`Iox2Tap\` consumer (\`[2l §4.5]\`).`
   - `**SVC-003 supplemental:** *(Post-1.0 — constitution v4.0, feature 094: SVC-003 is \`dropped(post-v1.0, planned, not abandoned)\`; the design below describes the post-1.0 release that builds it. v1.0 installs only the empty \`ControlPlaneFactory\` anchor and the codes 900/901.)* gRPC-only mode when iceoryx2 is unavailable — a design choice, not a FIX spec section ([const §VI.3]). The row's \`[impl]\` Spec ref resolves to \`[const §XIV.3]\` ("its gRPC control plane works without iceoryx2 SHM") and \`[arch §8.2]\` (a request/response consumer can run gRPC-only).`
   - `**SVC-004 supplemental:** *(Post-1.0 — constitution v4.0, feature 094: SVC-004 is \`dropped(post-v1.0, planned, not abandoned)\`; the design below describes the post-1.0 release that builds it. v1.0 installs only the empty \`ControlPlaneFactory\` anchor and the codes 900/901.)* service health and observability (gRPC health check, Prometheus-compatible metrics) — a design choice of the service wrapper, not a FIX spec section ([const §VI.3]). Source design sections: \`[2j §4.7]\` (the \`Health\` RPC) and \`[2j §4.8]\` (health, metrics and logs), the row's Spec ref, under \`[const §XIII.1]\` (Prometheus + OTLP export).`
+- **Gate B round 3 D-008 supplemental edit:** after `see \`[2c Appendix D §2]\`.` append
+  ` *(Superseded by feature 094: the catalogue row's FIX-version column now carries the codegen / runtime-XML-only split; this note is the pre-094 record. See spec/feature-catalogue.md row D-008.)*`
 - **No change** to the W-015 / W-016 entries (the FIX-SL §7 row, the Gap Summary attachment-group row,
   and the Post-1.0 Gap Registry's attachment-group and FIXP rows): they already read post-1.0.
   The earlier draft also said SVC-005's entry already read post-1.0; it did not (Gate A round 1),
@@ -669,7 +671,7 @@ entry is written with its real number, never with a placeholder.
 - **L-094-1 — `EngineConfig::control_plane_factory` is accepted and ignored: nothing in the library reads it (fixpp#616).** The field is a `std::unique_ptr<fixpp::service::ControlPlaneFactory>`, null permitted (`include/fixpp/core/engine_config.hpp`), and it is the only way to supply a factory: no C-ABI function, configuration key or Python binding sets one. `ControlPlaneFactory` (`include/fixpp/service/control_plane_factory.hpp`) is an empty polymorphic base with no operations, and no code under `src/` reads the field, so a factory set there has no effect: no control plane starts, and nothing reports that none did. The control plane, its interface and its default gRPC implementation are post-1.0 (constitution v4.0, Article XIV §1; SVC-001..005 are `dropped(post-v1.0, planned, not abandoned)`); v1.0 keeps the type and the field as an ABI anchor, and reserves the C-ABI codes 900/901, with no behavioural commitment. **Re-derive:** `grep -rn control_plane_factory src/` (empty means still unread). **Status: follow-up** (fixpp#616: whether v1.0 should refuse a non-null factory, or document the field as reserved).
 ```
 
-### F.7 `.specify/2c-codegen.md` — D-008's pre-094 Title (Gate B round 2, owner Q1 (a))
+### F.7 `.specify/2c-codegen.md` — D-008's pre-094 Title and scope (Gate B rounds 2 and 3)
 
 Two lines quote D-008's Title as it read before 094 ("… — zero-runtime-cost field lookup"): the §1.3
 bullet that opens `- D-008 (Code-generated constexpr field metadata — zero-runtime-cost field lookup)`,
@@ -678,8 +680,18 @@ one same-line note (FR-004): at the end of the §1.3 bullet's line, and in the A
 second cell, after the quoted Title:
 
 ```
- *(Title narrowed by feature 094: the zero-runtime-cost clause is not claimed; see the catalogue row.)*
+ *(Superseded by feature 094: this bullet is the pre-094 record. The quoted Title, "four codegen versions only" and "covers the broader 4.0–5.0SP2 surface (left intact per the locked decision)" no longer describe the catalogue row; its current Title and FIX-version column are spec/feature-catalogue.md row D-008.)*
+
+ *(Superseded by feature 094: this row is the pre-094 record. The quoted Title, "retains its broader 4.0–5.0SP2 scope (per the locked decision)" and the third cell's "four codegen versions only" no longer describe the catalogue row; its current Title and FIX-version column are spec/feature-catalogue.md row D-008.)*
 ```
+
+The "Catalogue rows owned" header's D-008 entry gets a third pointer note:
+
+```
+ *(pre-094 scope; see spec/feature-catalogue.md row D-008)*
+```
+
+Round 3 widened the round-2 Title-only note (Codex round 3 C-3): 094 also rewrote D-008's FIX-version column, so the scope sentences beside the quotes state a changed row's old content (FR-004).
 
 ## G. Licence marking and the build files (FR-013, FR-013a, FR-013b, FR-014)
 

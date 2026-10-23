@@ -459,7 +459,9 @@ dispositioned under "Hits kept, by file group" and in the table below.
 | `.specify/2l-tap.md` §4.5, §6.4, §7.4, the RC#2 root-cause row | "binding v1.0 `fixppd` path" | header (§F.3) |
 | `.specify/2m-pybind.md` §1.1, §4.7, §7.10, §7.12, §10 Q4 | Python reaches control plane / tap through `fixppd` in v1.0 | header (§F.3) |
 | `.specify/2i-capi.md` §1.2, §7.7, §7.9, §10 question 3 | rotation and engine registration through 2j's control plane | header (§F.3) |
-| `.specify/2c-codegen.md` §1.3 D-008 bullet; Appendix A D-008 row | D-008's pre-094 Title, "… — zero-runtime-cost field lookup" | edit (§F.7), added at Gate B round 2 (owner Q1 (a)): a same-line note on each; (b) reaches both lines |
+| `.specify/2c-codegen.md` §1.3 D-008 bullet; Appendix A D-008 row | D-008's pre-094 Title and scope ("four codegen versions only", "covers / retains the broader 4.0–5.0SP2 surface") | edit (§F.7), added at Gate B round 2 (Title) and widened at round 3 (scope; Codex C-3) |
+| `.specify/2c-codegen.md` "Catalogue rows owned" header, D-008 entry | "codegen, four versions only" | edit (§F.7), found by Gate B round 3 (Opus N-2) |
+| `spec/coverage-index.md` D-008 supplemental | "covers the broader 4.0–5.0 SP2 surface; codegen vs runtime-XML disposition lives here" | edit (§D), found by Gate B round 3 (Opus N-1): recipe (b) reached it, but the table had no row for it |
 | `spec/coverage-index.md` SVC-005 supplemental | SVC-005 "Stable from v1.0" proto, "v1.0 RPC surface" | edit (§D) |
 | `spec/coverage-index.md` FIX-TC row 3 | "TC-003 stays backlog" | edit (§D) |
 | `spec/coverage-index.md` FIX-TC rows 8–11 | `005-defer` on scenarios 8–11 | edit (§D) |
@@ -520,7 +522,7 @@ dispositioned under "Hits kept, by file group" and in the table below.
 | `tests/session/test_interpret_logon_encrypt_method.cpp` | "(TC-017 backlog)" | keep: history ("S-021 documented as …"), and a test file outside SC-005 |
 | `tests/conformance/test_transport_interop.cpp`, `tests/conformance/CMakeLists.txt` | `TC-001..TC-017` as DISABLED transport cells | keep: a different numbering (there TC-012 is a BodyLength/CheckSum case); the cells are still disabled, and no Verified cell claims them |
 | `tests/session/conformance/tc_reject_test.cpp`, `tests/session/conformance/CMakeLists.txt` (T052 block) | TC-005 cells | keep: the witnesses themselves |
-| `.specify/2c-codegen.md` Cites header, v1.0 → v1.1 RC#3; `.specify/constitution.md` §VII.5, §XV.13; `.specify/architecture.md` §2.4 RC#3 amendment, §4.1/§4.2/§4.9 catalogue rows, Appendix B; `.specify/2h-transport.md` §9, B.2; `.specify/2m-pybind.md` §D.4 | rows named as owned, cited or in rule text | keep: no status claim |
+| `.specify/2c-codegen.md` Cites header, v1.0 → v1.1 RC#3; `.specify/constitution.md` §VII.5, §XV.13; `.specify/architecture.md` §2.4 RC#3 amendment, §4.1/§4.2/§4.9 catalogue rows, Appendix B; `.specify/2h-transport.md` §9, B.2; `.specify/2m-pybind.md` §D.4 | rows named as owned, cited or in rule text | keep: no status claim (except the D-008 entry, row above) |
 | `src/`, `include/`, `tools/codegen/`, `cmake/templates/`, `bench/`, `tests/` other ID hits | a row ID cited as an anchor in a comment | keep: no status claim (the status-word filter `backlog|not … done|pending|deferred|remains|stays` over them finds only the two kept lines above) |
 | `bench/**`, `docs/src/dictionary/codegen.md`, `.specify/495-493-486-*.md`, `.specify/ci209-bench-gate.md` | `NFR-002-1`, `NFR-003-1..7` | pattern FP (spec-local IDs) |
 | `tools/brain_link_decisions.py` | `D-007`, `NFR-001` as examples of ids not to match | keep |
