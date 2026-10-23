@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/capi/capi.cpp
 // Phase 3 skeleton: implements the single C ABI symbol wired for SWIG.
 // Full C ABI surface per api-contract.md §7 lands incrementally in Phase 4.

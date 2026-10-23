@@ -144,12 +144,13 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
     return frame;
 }
 
-// Build a valid Logon(35=A) frame (includes 98=0 / 108=HeartBtInt).
+// Build a Logon(35=A) frame (includes 98=EncryptMethod / 108=HeartBtInt; valid at
+// the default encrypt_method 0).
 std::vector<std::byte> build_logon(std::string_view sender, std::string_view target,
                                    std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
-                                   int heartbt = 30) {
+                                   int heartbt = 30, int encrypt_method = 0) {
     std::string extra;
-    extra += "98=0\x01";
+    extra += "98=" + std::to_string(encrypt_method) + "\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
     return build_frame("A", seq, sender, target, begin_string, extra);
 }
@@ -695,6 +696,26 @@ TEST_F(FsmMatrixWitness, LS_InvalidMsgType_TransitionsToDisconnected) {
     (void)feed_sync(sess, app);
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+}
+
+// S1×E03 (TC-017): inbound Logon with EncryptMethod(98)=2 → refused → Disconnected,
+// nothing sent.
+TEST_F(FsmMatrixWitness, LS_InboundLogonEncryptMethodNonZero_DisconnectsAndSendsNothing) {
+    auto cfg = make_initiator_cfg();
+    Session sess(engine, cfg);
+    (void)open_sync(sess);
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    // Known positive: the capture holds the initiator's own outbound Logon.
+    const auto before = captured_frames.size();
+    ASSERT_GE(before, 1U) << "transport_send capture must hold the initiator's Logon";
+
+    auto logon = build_logon(kTarget, kSender, kBeginStr, 1, 30, /*encrypt_method=*/2);
+    (void)feed_sync(sess, logon);
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    EXPECT_EQ(captured_frames.size(), before)
+        << "a refused Logon with EncryptMethod(98)=2 must send nothing";
 }
 
 // S1×E15: close(terminal) → Disconnected.

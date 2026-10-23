@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/core/sync/atomic_shared_ptr.cpp — out-of-line definition of the type-
 // erased fallback shard lock (NFR-017 / feature 046).
 //

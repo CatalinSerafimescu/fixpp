@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/tls/pinset.hpp
 // fixpp::tls::Pinset — mid-session-mutable pin set for FIXS-RC1 §5 rotation.

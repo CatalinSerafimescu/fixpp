@@ -5,7 +5,7 @@
 // Pinset::snapshot_ (fixpp::sync::atomic_shared_ptr<const pin_snapshot>).
 //
 // Design anchor: .specify/046-atomic-shared-ptr.md (plan row 6-consumers)
-// Consumer: fixpp::tls::Pinset (include/fixpp/tls/pinset.hpp §139)
+// Consumer: fixpp::tls::Pinset (include/fixpp/tls/pinset.hpp, the snapshot_ member)
 //
 // Pattern: writer thread calls add()/remove() (which release-store a new
 // snapshot_); reader thread calls find() and snapshot() (which acquire-load).

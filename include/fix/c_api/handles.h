@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/handles.h — opaque handle catalogue (CA-001)
  *

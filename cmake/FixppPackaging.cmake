@@ -405,7 +405,7 @@ install(CODE "
 
 # ── Generator-specific ───────────────────────────────────────────────────────
 set(CPACK_DEBIAN_PACKAGE_SECTION "libdevel")
-set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
+set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
 # ⚠️ CPACK_DEBIAN_FILE_NAME / CPACK_RPM_FILE_NAME are deliberately NOT set to
 # DEB-DEFAULT / RPM-DEFAULT. Those switch each generator to its distribution

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/capi/decimal_assert.cpp
 // Seam #4 compile-time anchor — six static_asserts verifying fixpp_decimal_t layout.
 // These fail to compile until include/fix/c_api/decimal.h has the correct shape.

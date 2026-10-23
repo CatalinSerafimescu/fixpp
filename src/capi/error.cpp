@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/capi/error.cpp — C-ABI error surface (CA-002, T011)
 // [2i §4.3/§4.4] / data-model E-3/E-5 / research D-1/D-2/D-3/D-8.
 //

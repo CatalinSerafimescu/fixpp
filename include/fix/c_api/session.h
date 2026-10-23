@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/session.h — C-ABI session lifecycle, send, receive callback,
  *                               and session-config builder (CA-005/006/007, Feature B)

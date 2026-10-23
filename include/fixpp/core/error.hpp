@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/core/error.hpp
 // Engine-wide error enum for fixpp::core. Owned by 2k; this feature (001-core-decimal)

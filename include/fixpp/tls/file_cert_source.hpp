@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/tls/file_cert_source.hpp
 // fixpp::tls::file_cert_source — default file-path cert_source implementation.

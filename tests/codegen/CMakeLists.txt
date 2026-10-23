@@ -34,6 +34,7 @@ add_executable(codegen_pure_tests
   nested_group_read_test.cpp
   group_entry_generation_trap_test.cpp   # EXPECT_DEATH only (gtest fork) — isolation-safe
   conformance/conformance_test.cpp        # T022 conformance — manifest-driven presence/shape
+  accessor_resolution_census_test.cpp     # 094 FR-022c — D-008 compile-time accessor census
 )
 add_dependencies(codegen_pure_tests fixpp_codegen_generate)
 target_link_libraries(codegen_pure_tests PRIVATE
@@ -50,6 +51,11 @@ target_compile_definitions(codegen_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
   "FIXPP_CODEGEN_MANIFEST=\"${CMAKE_CURRENT_SOURCE_DIR}/conformance/must_include_manifest.txt\""
 )
+# 094 FR-022c: the census reads vlatest/Messages.hpp only when the tier is
+# generated (cmake/Codegen.cmake removes the directory when it is OFF).
+if(FIXPP_CODEGEN_FIX_LATEST)
+  target_compile_definitions(codegen_pure_tests PRIVATE FIXPP_D008_CENSUS_HAS_VLATEST)
+endif()
 add_test(NAME codegen_pure_tests COMMAND codegen_pure_tests)
 set_tests_properties(codegen_pure_tests PROPERTIES LABELS codegen)
 

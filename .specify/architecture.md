@@ -29,7 +29,7 @@
 ### 1.1 Goals
 
 - **One acyclic dependency graph** across the engine. A reader who skims this file should be able to predict, for any pair of modules, which way the include arrow points.
-- **A small set of public surfaces** — the C++ API, the C ABI, the Python module, the gRPC service — each one explicitly enumerated and traceable to a module.
+- **A small set of public surfaces** — the C++ API, the C ABI, the Python module, the gRPC service — each one explicitly enumerated and traceable to a module. *(The gRPC service is post-1.0: Appendix Z-9.)*
 - **Cross-cutting machinery defined once.** Executors, allocators, errors, trace context, lifetimes, plugin pattern — locked here so the per-feature design docs can build on a stable spine.
 - **Design seams for testability.** Every interface that touches the outside world (sockets, disks, clocks, OTel exporters) is pluggable so the session FSM and parser can be unit-tested without real I/O `[const §VII]` `[SYN §3.4 Q16]`.
 - **The legal isolation boundary is structural, not bolted on.** The C ABI is the unique linkage seam between the AGPL engine and any non-AGPL consumer `[const §V.1]` `[const §IV.2]`.
@@ -61,7 +61,7 @@
 | 8 | `otel` | `src/otel/` + `include/fixpp/otel/` | Trace/metric/log span helpers, OTLP+Prometheus exporter wiring | Yes (C++) |
 | 9 | `tap` | `src/tap/` + `include/fixpp/tap/` | Session tap ring buffer + iceoryx2 publisher + sync-callback hook | Yes (C++) |
 | 10 | `capi` | `src/capi/` + `include/fix/c_api.h` | `extern "C"` opaque-handle API, `fixpp_error_t`, version macros | Yes (C ABI) |
-| 11 | `service` | `service/` | `fixppd` daemon: gRPC control plane (default) + iceoryx2 data plane (opt-in) | Yes (binary + gRPC schema) |
+| 11 | `service` | `service/` | `fixppd` daemon: gRPC control plane (default) + iceoryx2 data plane (opt-in) | Yes (binary + gRPC schema) — post-1.0, Z-9 |
 | 12 | `bindings/python` | `bindings/python/` | SWIG `.i` files, pytest suite, wheel build | Yes (Python module) |
 | 13 | `bindings/c` | `bindings/c/` | Example C consumers; not a library — example/test code | No (samples only) |
 | 14 | `config` | `src/config/` + `include/fixpp/config/` | TOML session-config loader (`fixpp_config_toml` STATIC target); opt-in adjacent — NOT part of the core module graph; nothing in core/session/transport/log links it. Links `log` (for logger/sink hydration, 045); conditional `log_otlp` link when OTel SDK present. Parser (`tomlplusplus`) isolated as PRIVATE `.cpp`-only dep (FR-004/SC-006). | Yes (C++) |
@@ -158,7 +158,7 @@ The build enforces this graph at the include level via `include-what-you-use` co
 | `fixpp::log` | `Logger`, `Sink`, `Level`, `Record`, `LogConfig` | `log` | |
 | `fixpp::otel` | `TracerProvider`, `MeterProvider`, span helpers, exporter setup | `otel` | |
 | `fixpp::tap` | `RingBufferTap`, `Iox2Tap`, `SyncCallbackTap`, `TapConfig` | `tap` | |
-| `fixpp::service` | Public service-mode plugin interfaces (`ControlPlane`, `ControlPlaneConfig`); the daemon binary `fixppd` and default plugin impls are downstream and **not** C++ API | `service` (interface part) | Interface headers only; see §4.11. |
+| `fixpp::service` | Public service-mode plugin interfaces (`ControlPlane`, `ControlPlaneConfig`); the daemon binary `fixppd` and default plugin impls are downstream and **not** C++ API | `service` (interface part) | Interface headers only; see §4.11. Post-1.0 except the installed `ControlPlaneFactory` anchor (Z-9). |
 | `fixpp::current_trace_context` | The free awaitable returning the current `trace_context` from the strand-stored slot `[const §XIII.3]` | `core` | Not `thread_local`; coroutine-correct. |
 | `fixpp::config` | TOML config loader, `LoadResult`, `ConfigBundle`, `LoadDiagnostic`, `LoadOptions` | `config` | Opt-in; consumers link `fixpp_config_toml` explicitly. |
 | `fixpp::detail` | Internal-only helpers; never user-callable | (any module) | Headers carry `// detail: not API` and are excluded from Doxygen. |
@@ -340,7 +340,7 @@ For each module: the public-facing types/functions, the design-doc that owns the
 
 ### 4.11 `service`
 
-The module has two parts with different stability and API status. The split resolves the apparent contradiction between SVC-005's "pluggable control plane" promise and the AGPL boundary rule (§8): the *interface* is a public C++ header like any other plugin contract; the *daemon and default impls* sit downstream of the C ABI.
+The module has two parts with different stability and API status. The split resolves the apparent contradiction between SVC-005's "pluggable control plane" promise and the AGPL boundary rule (§8): the *interface* is a public C++ header like any other plugin contract; the *daemon and default impls* sit downstream of the C ABI. ⚠️ **Post-1.0 (Z-9):** the whole module is on the post-1.0 roadmap; v1.0 installs only the `ControlPlaneFactory` anchor.
 
 **Public C++ interface surface (pluggable):**
 
@@ -354,7 +354,7 @@ The module has two parts with different stability and API status. The split reso
 - Default gRPC implementation of `ControlPlane` — translation-units under `service/grpc/`, links against `fixpp::capi` and the gRPC C++ runtime.
 - Optional iceoryx2 publisher for the data plane `[const §XIV.3]`.
 
-**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005.
+**Catalogue rows:** SVC-001, SVC-002, SVC-003, SVC-004, SVC-005 (each `dropped(post-v1.0, planned, not abandoned: …)`, Z-9).
 
 ### 4.12 `bindings/python`
 
@@ -447,7 +447,7 @@ The module has two parts with different stability and API status. The split reso
 | `fixpp::tls::cert_source` | `file_cert_source` | **2g** | HSM/KMS are user-side. |
 | `fixpp::session::MessageStore` | `MemoryStore`, `FileStore` | **2e** | Async API; QuickFIX-compat shim on best-effort. |
 | `fixpp::log::Sink` | `FileSink`, `OtlpLogSink`, `SyslogSink` | **2k** | |
-| `fixpp::service::ControlPlane` (SVC-005) | gRPC | **2j** | JSON-over-Unix-socket is a sample alt impl. |
+| `fixpp::service::ControlPlane` (SVC-005) | gRPC | **2j** | JSON-over-Unix-socket is a sample alt impl. Post-1.0 (Z-9). |
 | `fixpp::tap::TapConsumer` (variant) | `RingBufferTap` (in-process) | **2l** | iceoryx2 opt-in cross-process. |
 | `fixpp::core::Clock` | `system_clock_source` | **2d** | Test seam for heartbeat / SendingTime / session scheduling / log + OTel timestamps. Carried by `EngineConfig` (§5.6); mock impl steps time deterministically in tests. |
 
@@ -608,13 +608,13 @@ This is enforced by — **each mechanism named for what it actually does, correc
 
 **Why this matters:** the service is the most common deployment shape for non-C++ consumers and for HFT shops that do not want the engine in-process. Keeping it strictly downstream of the C ABI makes the legal isolation (AGPL boundary `[const §V.1]`) structural, lets the service be packaged separately under different licensing if a commercial deployment requires it, and gives us a built-in compatibility test for the C ABI: if the service builds, the C ABI is at least cohesive enough to host a non-trivial consumer.
 
-### 8.1 Control plane (gRPC, default)
+### 8.1 Control plane (gRPC, default) — post-1.0 (Z-9)
 
 - Schema lives at `service/proto/fixpp_control.proto`.
 - Transport: Unix domain socket (Linux), named pipe (Windows). TCP gRPC is opt-in via config and not the default for security reasons.
 - Control-plane interface (`SVC-005`) lets shops swap gRPC for JSON-over-Unix-socket or anything else without rebuilding the engine. Owned by **2j**.
 
-### 8.2 Data plane (iceoryx2, opt-in)
+### 8.2 Data plane (iceoryx2, opt-in) — post-1.0 (Z-9)
 
 - iceoryx2 publish/subscribe over shared memory.
 - Topic shape, ownership semantics, backpressure, fallback when iceoryx2 isn't running — all in **2l** (which also covers the in-process tap consumer).
@@ -639,8 +639,8 @@ This is enforced by — **each mechanism named for what it actually does, correc
 
 ### 9.3 Stability tiers
 
-- **Stable from v1.0:** the C++ public API of `core`, `wire` accessors, `dictionary`, `session`, `transport` interface, `tls`, `log` interface, `tap` interface, the C ABI, the gRPC control-plane proto.
-- **Provisional (may change in patch releases without notice during early v1.x):** the iceoryx2 topic shape, the `SecurityProfile::one_way_ca` deprecation timing, the in-process logger's choice of impl (quill vs own).
+- **Stable from v1.0:** the C++ public API of `core`, `wire` accessors, `dictionary`, `session`, `transport` interface, `tls`, `log` interface, `tap` interface, the C ABI. The gRPC control-plane proto is post-1.0 (Z-9).
+- **Provisional (may change in patch releases without notice during early v1.x):** the iceoryx2 topic shape (post-1.0 with the data plane, Z-9), the `SecurityProfile::one_way_ca` deprecation timing, the in-process logger's choice of impl (quill vs own).
 - **Internal (no stability guarantee):** anything in `fixpp::detail` or under `<module>/detail/`.
 
 ---
@@ -683,7 +683,7 @@ Each doc must:
 | 2 | Coroutine HALO firing on inbound dispatch path across our compiler matrix | **2d**, **2f** | Verify by spike `[SYN §3.2 Q6]` |
 | 3 | QuickFIX-compat shim for synchronous `MessageStore` impls — feasible or document as known incompatibility | **2e** | CLOSED — Path B verdict per `[2e §4.8.A]`; v1.0 ships documented incompatibility + migration recipe + `quickfix_compat::cfg_loader` config-translation surface (no runtime adapter). Disposition applied by `008-message-store` Phase-4 Gate A convergence (2026-05-20) per FR-039. |
 | 4 | `quill` vs own async logger — adopt or build | **2k** | Bench-driven `[SYN §3.8]` ⚠️ **Z-2: settled in the build — see Appendix Z** |
-| 5 | ControlPlane interface shape — full surface to lock in 2j (SVC-005 row) | **2j** | Phase 2 ⚠️ **Z-3: not locked; the module is empty — see Appendix Z** |
+| 5 | ControlPlane interface shape — full surface to lock in 2j (SVC-005 row) | **2j** | Phase 2 ⚠️ **Z-3: not locked; the module is empty — see Appendix Z** ⚠️ **Z-9: post-1.0 (constitution v4.0).** |
 | 6 | TestRequestThreshold / SendingTimeThreshold defaults | session-module spec (Phase 4) | DEFERRED `[SYN §3.2 Q10]` ⚠️ **Z-4: shipped — see Appendix Z** |
 | 7 | Add catalogue row `NFR-015 — pluggable Clock interface` to `feature-catalogue.md` | **2d** (along with threading contract decisions) | DONE — added in `feature-catalogue.md` by 2d v0.4 sign-off (2026-05-08); coverage-index entry links `[2d §4.1]` and `[arch §1.1]` to NFR-015. |
 
@@ -812,8 +812,8 @@ The row still reads *"Bench-driven"*. Two things have happened since:
 ### Z-3 — §11 row 5 (ControlPlane shape) is dispositioned "Phase 2"; the module is a directory with a build file in it
 
 `src/service/` contains no implementation. The interface shape this row tracks was never locked, and
-the surrounding scope has been revisited more than once since. ⚠️ **The disposition of the service
-rows is a live decision that is not this file's to make** — do not read Z-3 as "dropped". It records
+the surrounding scope has been revisited more than once since. ⚠️ **Superseded by Z-9: the service
+rows are post-1.0 and not abandoned (constitution v4.0, feature 094).** It records
 only that the row's stated disposition does not describe the tree.
 
 **Re-derive:** `ls src/service/`.
@@ -870,3 +870,20 @@ All three were found by **blind agents** during the A4 measurement, not by revie
 that had this bundle, one by the arm that did not. ⭐ The control arm finding Z-8 is worth keeping in
 mind: **a reader with no bundle still catches things, and an appendix that only ever grows from
 in-house review will drift toward what the house already believes.**
+
+### Z-9 — the service module, §8.1/§8.2, §9.3's proto and the iceoryx2 tap are post-1.0
+
+Constitution v4.0 (feature 094) places the service wrapper on the post-1.0 roadmap, unscheduled:
+the `fixppd` daemon, the gRPC control plane, the pluggable `ControlPlane` interface and the iceoryx2
+SHM data plane, with the iceoryx2 tap consumer (`Iox2Tap`, §4.9 / 2l) that rides it (Article IV §4,
+Article XIV §1 and §3, Article XVIII §1–§2). The design in §4.11, §6, §8.1, §8.2 and §10 row 2j
+stands as design; its timing is post-1.0. Catalogue rows SVC-001..005 read
+`dropped(post-v1.0, planned, not abandoned: …)`. This supersedes Z-3's "live decision" sentence.
+
+What v1.0 installs is the `ControlPlaneFactory` anchor, an empty polymorphic base with no
+operations, and the C-ABI codes 900/901. `EngineConfig::control_plane_factory` holds one, and
+nothing in `src/` reads it (L-094-1 in `spec/behaviors-and-limitations.md`).
+
+**Re-derive:** `grep -n "service wrapper" .specify/constitution.md` for the timing;
+`grep -rn control_plane_factory src/` (empty means the field is still unread);
+`grep -rn "class ControlPlane\b" include/ src/` (empty means the interface still does not exist).

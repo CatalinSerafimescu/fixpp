@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/tls/security_profile.cpp
 // Implementation of make_ssl_ctx_config.
 //

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v0.4 — Gate A round 2 converged (Phase A); **post-sign-off amendment 2026-08-29 — the Appendix D drop-in blocks are NOT a description of their targets; see "Appendix Z" at the END of this file** |
+| **Status** | Draft v0.4 — Gate A round 2 converged (Phase A); **post-sign-off amendment 2026-08-29 — the Appendix D drop-in blocks are NOT a description of their targets; see "Appendix Z" at the END of this file** **Timing (constitution v4.0, feature 094):** `fixppd`, the gRPC control plane and the iceoryx2 tap are post-1.0, unscheduled; every route below that runs through them (§1.2, §7.10, §7.12, Q4, the tap docstring) is a post-1.0 design statement. |
 | **Date** | 2026-05-10 |
 | **Owner** | Opus (drafter) |
 | **Inherits** | `[const §I.1]`, `[const §IV.3]`, `[const §IV.5]`, `[const §V.1]`, `[const §VII.2]`, `[const §VIII.5]`, `[const §X.1]`, `[const §X.3]`, `[const §X.4]`, `[const §X.5]`, `[const §XI.2]`, `[const §XII.1]`, `[const §XIV.2]`, `[const §XV.15]`, `[const §XVII.1]`, `[const §XVIII.1]`, `[arch §1.2]`, `[arch §2.3]`, `[arch §4.10]`, `[arch §4.12]`, `[arch §5.2]`, `[arch §5.3]`, `[arch §5.5]`, `[arch §5.6]`, `[arch §6]`, `[arch §7.1]`, `[arch §7.4]`, `[arch §8]`, `[arch §9.1]`, `[arch §10] row 2m`, `[SYN §3.5 #18]`, `[2a §5.1]`, `[2a §5.2]`, `[2b §6.4]`, `[2c §5]`, `[2d §4.4]`, `[2d §4.5]`, `[2d §6.7]`, `[2d §7.6]`, `[2e §4.4]`, `[2g §7.6]`, `[2h §7.8]`, `[2i §1.1]`, `[2i §1.2]`, `[2i §3.5]`, `[2i §4.2]`, `[2i §4.3]`, `[2i §4.4]`, `[2i §4.5]`, `[2i §4.6]`, `[2i §4.7]`, `[2i §4.9]`, `[2i §4.10]`, `[2i §5.2]`, `[2i §6.3]`, `[2i §6.5]`, `[2i §7.12]`, `[2i §10 Q5]`, `[2j §4.7]`, `[2j §1.2]`, `[2j §11]`, `[2k §1.1]`, `[2k §2]`, `[2l §1.1]` |

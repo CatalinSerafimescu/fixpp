@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/dict.h — C-ABI dictionary loader (052 US1 / FR-001..003)
  *

@@ -1,7 +1,7 @@
 ---
 type: Component Decision Map
-title: dictionary — two loaders, a version registry, and a catalogue row that disagrees with the tree
-description: A substantial shipped subsystem whose catalogue status under-reports it. D-007 says backlog; xml_loader.cpp is over a thousand lines.
+title: dictionary — two loaders, a version registry, and a catalogue that under-reported them
+description: A substantial shipped subsystem whose catalogue status under-reported it until feature 094 reconciled D-001, D-003, D-007 and D-008 to done.
 status: stable
 refs:
   - src/dictionary/xml_loader.cpp
@@ -65,6 +65,8 @@ control block and G2 asserts zero matches. The passkey and the provenance check 
 the *shape* — two loader front-ends converging on one dictionary representation, with codegen on top.
 
 ## ⚠️ The catalogue under-reports this family — a LEAD, not a verdict
+
+> **Resolved 2026-10-22 by feature 094:** D-001, D-003, D-007 and D-008 now read `done`, each with its delivering PR and witnessing tests (`spec/feature-catalogue.md`). The table below is the 2026-08-29 observation that led there, kept as history.
 
 `spec/feature-catalogue.md` defines `Status ∈ {backlog, planning, implementing, done, dropped}`, where
 **`backlog` means not started**. Several `dictionary` rows sit at `backlog` while the tree plainly

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/core/decimal_alias.hpp
 // Build-time engine-wide decimal alias + link-time mismatch guard.

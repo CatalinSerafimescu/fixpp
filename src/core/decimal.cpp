@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // src/core/decimal.cpp
 // decimal_traits<pod_decimal> implementation — US1 parse/format/compare + pod conversion.
 // Also emits decimal_alias_sentinel<FIXPP_DECIMAL_T>::tag definition (US2).

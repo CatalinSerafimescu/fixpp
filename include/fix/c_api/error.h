@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/error.h — fixpp_error_t type + published error codes (E-2)
  *

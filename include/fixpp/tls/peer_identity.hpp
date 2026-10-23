@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 // include/fixpp/tls/peer_identity.hpp
 // fixpp::tls::peer_identity — owning value type derived from a verified peer cert.

@@ -30,9 +30,12 @@ whole module — and `[arch §8]`'s own carve-out says the C-ABI-only rule const
 default impls*, not these interface headers.
 
 > ⚠️ **`[arch §11]` row 5 still dispositions the ControlPlane interface shape as "Phase 2".** That does
-> not describe the tree; see `architecture.md` **Appendix Z-3**. Whether the service rows are deferred
-> or formally dropped is a **live decision recorded outside this repo** — this page deliberately does
-> **not** answer it. It records only that nothing is implemented.
+> not describe the tree; see `architecture.md` **Appendix Z-3**, superseded by **Z-9**. The decision is
+> made: SVC-001..005 are `dropped(post-v1.0, planned, not abandoned)` (owner, 2026-10-21), and the
+> constitution places the service wrapper and the control-plane interface unscheduled post-1.0 (Article
+> XIV §1, Article XVIII §2; v4.0, feature 094; `architecture.md` Z-9). Nothing is implemented. The one
+> v1.0 surface is the `ControlPlaneFactory` anchor, and `EngineConfig::control_plane_factory` is
+> accepted and ignored (L-094-1).
 
 **Why the page exists at all:** an empty module reads as an accident. This says it is not, so nobody
 "discovers" the gap and starts filling it without the decision behind it.

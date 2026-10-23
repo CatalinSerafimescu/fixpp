@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * include/fix/c_api/export.h — FIXPP_API_EXPORT visibility macro
  *
