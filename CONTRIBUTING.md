@@ -11,12 +11,17 @@
   - CI provisions Clang 22 the same way, so local == CI.
 - **Build: CMake ≥ 3.28 + Ninja.**
 - **Deps: Conan 2.x.** Profiles live in `conan/profiles/`.
-- **Python: 3.12+, SWIG >=4.2 (no upper bound), pytest** (only when working on Python
-  bindings). The `<4.5` #296 safety cap was LIFTED — not because #296 was
-  root-caused (it was not), but because the cap made it unfalsifiable: the crash
-  needs SWIG 4.5.0, and while capped CI could only ever build 4.4.1. ⚠️ If the
-  wheel lane segfaults during garbage collection with no `FAILED` line, that is
-  #296 reproducing, not a flake — report it there rather than re-capping.
+- **Python: 3.12+, SWIG >=4.5.1 (no upper bound), pytest** (only when working on Python
+  bindings). The minimum is the wheel's `swig>=` floor. CI's in-tree legs
+  install exactly it (`pip install swig==4.5.1`), so they build the lowest SWIG
+  the wheel accepts; a wheel build takes PyPI's latest SWIG at or above it
+  (#607). Install it from PyPI (`pipx install swig==4.5.1`); a distro `swig`
+  older than the minimum fails configure. A tree
+  configured with an older SWIG keeps it cached: re-point it with
+  `cmake -U 'SWIG_*' build/<preset>`. There is no upper bound because #296 is not
+  root-caused and a cap would leave it unfalsifiable. ⚠️ If a Python lane
+  segfaults during garbage collection with no `FAILED` line, that is #296
+  reproducing, not a flake — report it there rather than capping.
 
 ## Pre-PR build gate (mandatory)
 

@@ -104,7 +104,7 @@ static void fixpp_py_raise_for_code(fixpp_error_t code) {
  * wrapper-block definitions inside extern "C" but leaves this header block at
  * C++ linkage, so a plain static declaration conflicts (C vs C++ linkage) under
  * gcc. The brace form is required (the extern "C" static prefix form is rejected
- * by both gcc and clang). Verified clean under SWIG 4.2 and 4.4.
+ * by both gcc and clang).
  * NOTE: keep this comment free of apostrophes and percent signs (SWIG
  * preprocessor mis-tokenizes them inside the header block). */
 extern "C" {
@@ -835,19 +835,19 @@ except ImportError:
 %}
 
 /* ── #295 — drop SWIG >= 4.5's unused module-scope `import typing` ───────────
- * SWIG 4.5.0 added `import typing` to the generated proxy's preamble. Nothing
- * in the generated output uses it: measured on 4.5.0 against THIS interface
- * file, `typing` occurs exactly once in fixpp.py (the import itself) and zero
- * times in fixpp_wrap.cxx. But a module-scope import binds the name in the
+ * SWIG >= 4.5 adds `import typing` to the generated proxy's preamble. This
+ * block is correct while nothing in the generated output uses it: in fixpp.py
+ * `typing` occurs only in the import itself and in the pop below, and it does
+ * not occur in fixpp_wrap.cxx. But a module-scope import binds the name in the
  * module namespace, so `dir(fixpp)` grew a `typing` entry and the exact-set
  * import-surface snapshot (tests/wheel/test_import_surface.py) correctly
  * rejected it — the wheel really was exposing a stdlib module as public API.
  *
  * Fixed HERE rather than by capping `swig<4.5` in pyproject.toml, and rather
  * than by adding "typing" to EXPECTED_PUBLIC_SURFACE:
- *   - before the temporary #296 cap, the pyproject policy was deliberately
- *     open-ended ("NO upper bound — builds with the latest SWIG"), and this
- *     repo's precedent for a SWIG behaviour
+ *   - the pyproject policy has NO upper bound (the wheel builds with the
+ *     latest SWIG at or above the floor), and this repo's precedent for a SWIG
+ *     behaviour
  *     change is a version-agnostic fix, not a pin: see the SWIG_Python_Append-
  *     Output/is_void note in pyproject.toml, where the 4.3 semantics change was
  *     absorbed by the typemaps instead of a version bound.
@@ -861,8 +861,7 @@ except ImportError:
  * ORDERING INVARIANT (this is what matters, not this block's position):
  * SWIG emits %pythoncode blocks in SOURCE ORDER, and the `import typing` being
  * undone lives in the generated PREAMBLE, which precedes every %pythoncode
- * block. So any block in this file runs after it. Verified on 4.5.0: the
- * import precedes this pop, consistent with SOURCE ORDER.
+ * block. So any block in this file runs after it.
  *
  * Deliberately NOT stated as "the last block in the file". The comment 60-odd
  * lines above made exactly that claim and went stale the moment another block
@@ -875,17 +874,11 @@ except ImportError:
  * NOT protect a future use inside a generated FUNCTION BODY: that would
  * import fine and only fail later, when the function is first called — and
  * the test suite cannot guarantee it calls every future generated code path.
- * Re-verify the two occurrence counts above, and grep the generated output
+ * Re-verify the occurrence condition above, and grep the generated output
  * for `typing` INSIDE function bodies, before bumping past a SWIG
- * major/minor that touches the proxy preamble.
- *
- * ⚠️ #296 CAP CAVEAT: while pyproject.toml's temporary `swig<4.5` cap (added
- * for #296, unrelated to this block) is in force, the build resolves 4.4.1,
- * which emits no `import typing` — so this pop is a no-op CI never exercises.
- * Verified locally in both directions before the cap: 4.5.0 unfixed — 72
- * public names, `typing` PRESENT (the control proving the check can fail);
- * 4.5.0 fixed — 71 names, `typing` absent; 4.2.0 fixed — clean import, no
- * NameError. Re-verify when the cap lifts; do not assume it still works. */
+ * major/minor that touches the proxy preamble. Re-check in both directions:
+ * without this pop `typing` is in dir(fixpp) (the control proving the check
+ * can fail); with it, `typing` is absent and the import is clean. */
 %pythoncode %{
 globals().pop("typing", None)
 %}

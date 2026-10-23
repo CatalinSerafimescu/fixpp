@@ -79,8 +79,10 @@ listed because a tool whose limits are undocumented gets trusted past them.
      counts as a drive.
   2. A driving call in a DIFFERENT file from the closure (a .cpp driving a
      harness header's co_spawn). Scope keys are cursor identities and do not
-     compare across files, so this lands as FLAG or MANUAL — the loud direction,
-     but it means such sites need reading rather than dismissing.
+     compare across files, and source offsets are compared only within one file
+     (every event carries the file its offset is relative to), so this lands as
+     FLAG or MANUAL — the loud direction, but it means such sites need reading
+     rather than dismissing.
   3. `SAFE-OUTLIVES` assumes a coroutine frame destroyed at its initial suspend
      point never reads a capture. That is true for a frame that never started —
      it runs frame-local destructors, not the body — and it is the basis for
@@ -304,23 +306,51 @@ _FREE_FUNCTION_PARENTS = frozenset(
 )
 
 
-def root_object_of(cursor) -> str:
-    """Spelling of the first VarDecl a DeclRefExpr in this subtree refers to.
+_REALPATH: dict[str, str] = {}
+
+
+def _realpath(fn: str) -> str:
+    real = _REALPATH.get(fn)
+    if real is None:
+        real = os.path.realpath(fn)
+        _REALPATH[fn] = real
+    return real
+
+
+def file_of(loc) -> str:
+    """Real path of the file a SourceLocation's OFFSET is relative to; "" if none."""
+    return _realpath(loc.file.name) if loc.file is not None else ""
+
+
+def decl_key(decl) -> str:
+    """Identity of a DECLARATION: file and offset of its canonical declaration.
+
+    ⚠️ IDENTITY, NOT SPELLING (#586). Both the walked VarDecl and every
+    reference to it reach this through `canonical`, so the two spellings of one
+    declaration always produce one key.
+    """
+    c = decl.canonical
+    return f"{file_of(c.location)}:{c.location.offset}"
+
+
+def root_object_of(cursor) -> tuple[str, str]:
+    """(spelling, decl_key) of the first VarDecl a DeclRefExpr in this subtree refers to.
 
     `ioc` for `ioc`, for `ioc.run()` and for `ioc.get_executor()`; `entry` for
     `*entry.session_strand`. Used to decide WHICH context a co_spawn was made on
     and WHICH context a driving call drove — without that correlation the
     classifier silences a real FLAG whenever any unrelated io_context happens to
-    be in scope. Empty when it cannot be resolved, which the caller treats as
-    MANUAL rather than as a match.
+    be in scope. The KEY is what correlates; the spelling is for messages only.
+    Both empty when it cannot be resolved, which the caller treats as MANUAL
+    rather than as a match.
     """
     for node in [cursor] + list(_descend(cursor)):
         if kind_of(node) != ci.CursorKind.DECL_REF_EXPR:
             continue
         d = node.referenced
         if d is not None and kind_of(d) in (ci.CursorKind.VAR_DECL, ci.CursorKind.PARM_DECL):
-            return d.spelling or ""
-    return ""
+            return (d.spelling or "", decl_key(d))
+    return ("", "")
 
 
 def owner_of(cursor) -> str:
@@ -452,6 +482,11 @@ class SiteWalker:
         if k is None:
             return
         off = cursor.extent.start.offset
+        # ⚠️ AN OFFSET MEANS NOTHING WITHOUT ITS FILE (#586). Offsets are per
+        # file. Every event carries the file its offset is relative to, taken
+        # from the SAME location, and classify() compares offsets only within
+        # one file.
+        off_file = file_of(cursor.extent.start)
 
         # (a) VarDecls: closures and io_contexts
         if k == ci.CursorKind.VAR_DECL:
@@ -461,7 +496,9 @@ class SiteWalker:
                     {
                         "kind": "closure_decl",
                         "name": cursor.spelling,
+                        "key": decl_key(cursor),
                         "off": off,
+                        "off_file": off_file,
                         "end": cursor.extent.end.offset,
                         "scope": self.scope_key(stack),
                         "line": cursor.location.line,
@@ -478,15 +515,37 @@ class SiteWalker:
                 # Also catches the future a co_spawn was assigned to
                 # (`auto f = co_spawn(...); f.get();`), whose `.get()` blocks until
                 # that coroutine completes and is therefore a drive for THAT site.
-                base = ""
+                own = decl_key(cursor)
+                # ⚠️ A CONDITIONAL INITIALIZER HAS ONE BASE PER BRANCH (#586).
+                # `c ? any_io_executor{a…} : any_io_executor{b…}` stands for `a` OR
+                # `b`, and root_object_of over the whole initializer returns the
+                # first variable it meets, which is the CONDITION's. Each branch
+                # is resolved with root_object_of on its own; the condition is
+                # never a base. A branch that does not resolve keeps an empty
+                # base, which ends that path unresolved, and classify() takes the
+                # worst verdict over the paths, so it cannot be driven.
+                cond = conditional_initializer(cursor)
+                if cond is not None:
+                    ops = list(cond.get_children())
+                    roots = ([root_object_of(b) for b in ops[1:3]] if len(ops) == 3
+                             else [("", "")])
+                    self.events.append(
+                        {"kind": "exec_alias", "name": cursor.spelling, "key": own,
+                         "base": " | ".join(r[0] or "?" for r in roots),
+                         "base_keys": [r[1] if r[1] != own else "" for r in roots],
+                         "off": off, "off_file": off_file, "scope": self.scope_key(stack)}
+                    )
+                    return
+                base = ("", "")
                 for ch in cursor.get_children():
                     base = root_object_of(ch)
-                    if base and base != cursor.spelling:
+                    if base[1] and base[1] != own:
                         break
-                if base and base != cursor.spelling:
+                if base[1] and base[1] != own:
                     self.events.append(
-                        {"kind": "exec_alias", "name": cursor.spelling, "base": base,
-                         "off": off, "scope": self.scope_key(stack)}
+                        {"kind": "exec_alias", "name": cursor.spelling, "key": own,
+                         "base": base[0], "base_keys": [base[1]],
+                         "off": off, "off_file": off_file, "scope": self.scope_key(stack)}
                     )
                 return
             elif is_context_type(tspell):
@@ -494,7 +553,9 @@ class SiteWalker:
                     {
                         "kind": "ioc_decl",
                         "name": cursor.spelling,
+                        "key": decl_key(cursor),
                         "off": off,
+                        "off_file": off_file,
                         "scope": self.scope_key(stack),
                         "line": cursor.location.line,
                     }
@@ -515,12 +576,15 @@ class SiteWalker:
             # For a method call the object is the receiver; for a free pump helper
             # it is the io_context passed as its first argument. root_object_of on
             # the whole call expression resolves both.
+            obj, obj_key = root_object_of(cursor)
             self.events.append(
                 {
                     "kind": "drive",
-                    "obj": root_object_of(cursor),
+                    "obj": obj,
+                    "obj_key": obj_key,
                     "name": spelling,
                     "off": off,
+                    "off_file": off_file,
                     "scope": self.scope_key(stack),
                     "line": cursor.location.line,
                 }
@@ -538,11 +602,12 @@ class SiteWalker:
             parent = ref.semantic_parent if ref is not None else None
             if parent is not None and is_lambda_type(parent.type.spelling if parent.type else ""):
                 pass
-            callee = root_object_of(cursor)
-            if callee:
+            callee, callee_key = root_object_of(cursor)
+            if callee_key:
                 self.events.append(
-                    {"kind": "closure_call", "name": callee, "off": off,
-                     "scope": self.scope_key(stack), "line": cursor.location.line}
+                    {"kind": "closure_call", "name": callee, "key": callee_key, "off": off,
+                     "off_file": off_file, "scope": self.scope_key(stack),
+                     "line": cursor.location.line}
                 )
             return
 
@@ -550,25 +615,36 @@ class SiteWalker:
         if spelling != "co_spawn":
             return
 
-        closure_var = self._named_closure_arg(cursor)
-        if closure_var is None:
+        # ⚠️ ONE SITE PER CLOSURE, NOT PER co_spawn. A co_spawn can name several
+        # closures -- one in the token, one in the executor expression -- and
+        # keeping only the first let a long-lived one decide the verdict for a
+        # short-lived one in another argument: a false SAFE. Each is recorded
+        # under the same (file, line, col), and main() keeps the WORST verdict
+        # per key, as it already does for a header seen from several TUs.
+        closures = self._named_closure_args(cursor)
+        if not closures:
             return
         exec_args = list(call.get_arguments()) if False else list(cursor.get_arguments())
-        self.sites.append(
-            {
-                "exec": root_object_of(exec_args[0]) if exec_args else "",
-                "file": os.path.realpath(cursor.location.file.name),
-                "line": cursor.location.line,
-                "col": cursor.location.column,
-                "off": off,
-                "scope": self.scope_key(stack),
-                "closure": closure_var,
-            }
-        )
+        exec_name, exec_key = root_object_of(exec_args[0]) if exec_args else ("", "")
+        for closure in closures:
+            self.sites.append(
+                {
+                    "exec": exec_name,
+                    "exec_key": exec_key,
+                    "file": os.path.realpath(cursor.location.file.name),
+                    "line": cursor.location.line,
+                    "col": cursor.location.column,
+                    "off": off,
+                    "off_file": off_file,
+                    "scope": self.scope_key(stack),
+                    "closure": closure.spelling,
+                    "closure_key": decl_key(closure),
+                }
+            )
 
-    @staticmethod
-    def _named_closure_arg(call) -> str | None:
-        """Return the closure VARIABLE's spelling if an argument is `var()`.
+    @classmethod
+    def _named_closure_args(cls, call) -> list:
+        """Every closure VARIABLE's declaration that an argument invokes as `var()`.
 
         Only a call through a NAMED closure object counts. An immediately-invoked
         temporary is #291's form and belongs to the lexer, not here; a call to a
@@ -576,7 +652,8 @@ class SiteWalker:
         closure at all and is exactly what the issue warns the crude grep
         over-counts.
         """
-        for arg in call.get_arguments():
+        found: dict[str, object] = {}
+        for index, arg in enumerate(call.get_arguments()):
             # ⚠️ PRUNE AT LAMBDA BODIES. An unpruned descent walks INTO the spawned
             # lambda's own body and mistakes a closure invoked in there for the
             # spawned argument itself. Measured: it reported
@@ -601,22 +678,150 @@ class SiteWalker:
             # Found by --self-test, which is the arm's entire purpose.
             if kind_of(arg) == ci.CursorKind.LAMBDA_EXPR:
                 continue
-            for node in [arg] + list(_descend(arg, prune_lambda_bodies=True)):
-                if kind_of(node) != ci.CursorKind.CALL_EXPR:
+            # Argument 0 is the executor. It is copied into co_spawn before co_spawn
+            # returns, so a closure called while initialising a named executor
+            # local cannot be reached from the spawned frame: the named-local
+            # follow is not applied there (see _closures_called_in).
+            for d in cls._closures_called_in(arg, set(), follow_local=index != 0):
+                found.setdefault(decl_key(d), d)
+        return list(found.values())
+
+    @classmethod
+    def _closures_called_in(cls, expr, followed: set[str], follow_local: bool = True) -> list:
+        """The lambda-typed VarDecls invoked in `expr`, in source order.
+
+        Lambda bodies are pruned (see _named_closure_args). A closure call may sit
+        anywhere below the argument, not only at its root: `bind_slot(s,
+        record_into(out))` invokes `record_into` one call down (#586 shape A).
+
+        ⚠️ A NAMED LOCAL IS FOLLOWED TO ITS INITIALIZER (#586 shape B). `const
+        auto token = bind_slot(s, record_into(out)); co_spawn(ex, op(), token);`
+        is the same site as shape A with the token moved into a local.
+        Only a local that IS the expression's value is followed (value_local);
+        a receiver (`sess` in `sess.send(x)`) or a local passed into another
+        call is not, because the closure behind it has no bearing on what the
+        co_spawn is handed. The follow chains to a fixed point through
+        `followed`. The clang-query cross-check follows ONE hop with the same
+        rule, so a longer chain shows up there as ONLY LIBCLANG -- loud, never
+        silent.
+
+        `follow_local` is False for the executor argument: the follow applies to
+        the awaitable and token positions only, in both instruments. A closure
+        called directly in the executor expression is still collected.
+        """
+        out = []
+        for node in [expr] + list(_descend(expr, prune_lambda_bodies=True)):
+            if kind_of(node) != ci.CursorKind.CALL_EXPR:
+                continue
+            ref = node.referenced
+            if ref is None or ref.spelling != "operator()":
+                continue
+            # The object being called: a DeclRefExpr to a VarDecl of lambda type.
+            for sub in _descend(node):
+                if kind_of(sub) != ci.CursorKind.DECL_REF_EXPR:
                     continue
-                ref = node.referenced
-                if ref is None or ref.spelling != "operator()":
+                d = sub.referenced
+                if d is None or kind_of(d) != ci.CursorKind.VAR_DECL:
                     continue
-                # The object being called: a DeclRefExpr to a VarDecl of lambda type.
-                for sub in _descend(node):
-                    if kind_of(sub) != ci.CursorKind.DECL_REF_EXPR:
+                if is_lambda_type(d.type.spelling):
+                    out.append(d)
+                    break
+        d = value_local(expr) if follow_local else None
+        if d is not None and not is_lambda_type(d.type.spelling):
+            key = decl_key(d)
+            if key not in followed:
+                followed.add(key)
+                for init in d.get_children():
+                    if kind_of(init) == ci.CursorKind.LAMBDA_EXPR:
                         continue
-                    d = sub.referenced
-                    if d is None or kind_of(d) != ci.CursorKind.VAR_DECL:
-                        continue
-                    if is_lambda_type(d.type.spelling):
-                        return d.spelling
+                    out += cls._closures_called_in(init, followed)
+        return out
+
+
+def _in_std(decl) -> bool:
+    """True if `decl` is declared in namespace `std` (inline namespaces included)."""
+    p = decl.semantic_parent
+    while p is not None and kind_of(p) == ci.CursorKind.NAMESPACE:
+        if p.spelling == "std":
+            return True
+        p = p.semantic_parent
+    return False
+
+
+def value_local(expr):
+    """The VarDecl whose value `expr` IS, or None.
+
+    Sees through parentheses, implicit nodes, a one-argument constructor (the
+    copy or move into a by-value parameter) and `std::move` / `std::forward`.
+    A node whose kind the bindings cannot name is seen through as a wrapper when
+    it has one child, by the rule in the version-skew note above. Anything else
+    -- a member call, a call taking the local as an argument -- is not the
+    local's value, and None is returned.
+    """
+    node = expr
+    while node is not None:
+        k = kind_of(node)
+        if k == ci.CursorKind.DECL_REF_EXPR:
+            d = node.referenced
+            return d if d is not None and kind_of(d) == ci.CursorKind.VAR_DECL else None
+        if k is None or k in (ci.CursorKind.UNEXPOSED_EXPR, ci.CursorKind.PAREN_EXPR):
+            kids = list(node.get_children())
+            node = kids[0] if len(kids) == 1 else None
+            continue
+        if k == ci.CursorKind.CALL_EXPR:
+            ref = node.referenced
+            args = list(node.get_arguments())
+            if ref is None or len(args) != 1:
+                return None
+            if kind_of(ref) == ci.CursorKind.CONSTRUCTOR or (
+                    ref.spelling in ("move", "forward") and _in_std(ref)):
+                node = args[0]
+                continue
         return None
+    return None
+
+
+_REF_KINDS = frozenset(
+    {ci.CursorKind.TYPE_REF, ci.CursorKind.TEMPLATE_REF, ci.CursorKind.NAMESPACE_REF}
+)
+
+
+def _expr_children(node) -> list:
+    """Children that are not type, template or namespace references."""
+    return [c for c in node.get_children() if kind_of(c) not in _REF_KINDS]
+
+
+def conditional_initializer(var):
+    """The `?:` a VarDecl's initializer IS, or None.
+
+    Sees through parentheses, implicit nodes, casts, a braced or functional
+    construction (`any_io_executor{c ? a : b}`) and a one-argument constructor,
+    by value_local's rule for nodes the bindings cannot name. Anything else --
+    a `?:` nested inside a call's argument, say -- is not the initializer's value.
+    """
+    kids = _expr_children(var)
+    node = kids[0] if len(kids) == 1 else None
+    while node is not None:
+        k = kind_of(node)
+        if k == ci.CursorKind.CONDITIONAL_OPERATOR:
+            return node
+        if k == ci.CursorKind.CALL_EXPR:
+            ref = node.referenced
+            args = list(node.get_arguments())
+            if ref is None or kind_of(ref) != ci.CursorKind.CONSTRUCTOR or len(args) != 1:
+                return None
+            node = args[0]
+            continue
+        if k is None or k in (ci.CursorKind.UNEXPOSED_EXPR, ci.CursorKind.PAREN_EXPR,
+                              ci.CursorKind.CXX_FUNCTIONAL_CAST_EXPR,
+                              ci.CursorKind.CSTYLE_CAST_EXPR,
+                              ci.CursorKind.CXX_STATIC_CAST_EXPR,
+                              ci.CursorKind.INIT_LIST_EXPR):
+            kids = _expr_children(node)
+            node = kids[0] if len(kids) == 1 else None
+            continue
+        return None
+    return None
 
 
 def _descend(cursor, prune_lambda_bodies: bool = False):
@@ -638,20 +843,24 @@ def encloses(outer: tuple, inner: tuple) -> bool:
     return len(outer) <= len(inner) and inner[: len(outer)] == outer
 
 
+def _before(a: dict, b: dict) -> bool:
+    """`a` is lexically before `b`: same file, smaller offset. See _record's note."""
+    return a["off_file"] == b["off_file"] and a["off"] < b["off"]
+
+
 def classify(site: dict, events: list[dict]) -> tuple[str, str]:
     closures = [
         e
         for e in events
         if e["kind"] == "closure_decl"
-        and e["name"] == site["closure"]
-        and e["off"] < site["off"]
+        and e["key"] == site["closure_key"]
+        and _before(e, site)
         and encloses(e["scope"], site["scope"])
     ]
     if not closures:
         return ("MANUAL", "closure declaration not found in an enclosing block scope "
                           "(member, parameter, or captured from another TU)")
     decl = max(closures, key=lambda e: e["off"])
-    cscope = decl["scope"]
 
     # ⚠️ THE EXECUTOR MUST MATCH. Without this, ANY io_context in scope silenced a
     # real finding: a closure spawned on `a` was certified SAFE because an
@@ -663,32 +872,64 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
     #
     # An unresolvable executor is MANUAL, never a match. Guessing in the
     # permissive direction here is what the bug was.
-    alias = {e["name"]: e["base"] for e in events if e["kind"] == "exec_alias"}
+    # Keyed by DECLARATION (decl_key), so one name declared in two scopes is two
+    # entries rather than one that the later declaration overwrites (#586).
+    alias = {e["key"]: e["base_keys"] for e in events if e["kind"] == "exec_alias"}
+    names = {e["key"]: e["name"] for e in events if "key" in e}
 
-    def resolve(name: str) -> set[str]:
-        """All names this one may stand for: itself plus its alias chain.
+    def resolve(key: str) -> list[list[str]]:
+        """Every declaration chain this one may stand for, one per path.
 
-        `strand1` -> {strand1, ioc}. Matching on the SET keeps the executor
-        correlation honest (an unrelated context still cannot certify a site)
-        while accepting the legitimate indirections this tree actually uses.
+        `strand1` -> [[strand1, ioc]]. Matching on a path's SET keeps the
+        executor correlation honest (an unrelated context still cannot certify a
+        site) while accepting the legitimate indirections this tree actually
+        uses. A conditional alias forks the path, one per branch; an empty base
+        (a branch that did not resolve) or a cycle ends its path where it is.
         """
-        seen, cur = {name}, name
-        while cur in alias and alias[cur] not in seen:
-            cur = alias[cur]
-            seen.add(cur)
-        return seen
+        paths: list[list[str]] = []
 
-    site_exec = site.get("exec", "")
-    if not site_exec:
+        def walk(chain: list[str]) -> None:
+            bases = alias.get(chain[-1], [])
+            if not bases:
+                paths.append(chain)
+                return
+            for b in bases:
+                if not b or b in chain:
+                    paths.append(chain)
+                else:
+                    walk(chain + [b])
+
+        walk([key])
+        return paths
+
+    paths = resolve(site["exec_key"]) if site.get("exec_key") else []
+    if not paths:
         return ("MANUAL", "could not resolve which io_context/executor this site spawns on, "
                           "so no driving call or context lifetime can be matched to it")
+    # ⚠️ EVERY PATH MUST BE SAFE, so the WORST verdict over the paths stands. A
+    # conditional executor is SAFE-DRIVEN only when each branch is driven; taking
+    # the best, or the first branch, certifies a branch nothing drives.
+    results = [(p, _classify_on(site, events, decl, set(p))) for p in paths]
+    worst = min(results, key=lambda r: VERDICT_RANK[r[1][0]])[1]
+    if len(results) == 1:
+        return worst
+    return (worst[0], "; ".join(
+        f"executor branch `{' -> '.join(names.get(k, '?') for k in p)}`: {v} ({why})"
+        for p, (v, why) in results))
+
+
+def _classify_on(site: dict, events: list[dict], decl: dict,
+                 exec_keys: set[str]) -> tuple[str, str]:
+    """classify() for ONE executor path: `exec_keys` is that path's declarations."""
+    cscope = decl["scope"]
+    site_exec = site.get("exec", "")
 
     # SAFE-OUTLIVES: THIS site's io_context declared in the SAME scope AFTER the
     # closure, or in a scope the closure's scope encloses, dies first.
     for e in events:
-        if e["kind"] != "ioc_decl" or e["name"] not in resolve(site_exec):
+        if e["kind"] != "ioc_decl" or e["key"] not in exec_keys:
             continue
-        if e["scope"] == cscope and e["off"] > decl["off"]:
+        if e["scope"] == cscope and _before(decl, e):
             return ("SAFE-OUTLIVES", f"io_context `{e['name']}` (line {e['line']}) is declared "
                                      f"after the closure in the same scope, so the closure outlives it")
         if len(e["scope"]) > len(cscope) and encloses(cscope, e["scope"]):
@@ -705,25 +946,26 @@ def classify(site: dict, events: list[dict]) -> tuple[str, str]:
             continue
         body_lo, body_hi = d["off"], d.get("end", d["off"])
         for e in events:
-            if (e["kind"] == "drive" and e.get("obj", "") in resolve(site_exec)
+            if (e["kind"] == "drive" and e.get("obj_key", "") in exec_keys
+                    and e["off_file"] == d["off_file"]
                     and body_lo <= e["off"] <= body_hi):
-                driving_closures.add(d["name"])
+                driving_closures.add(d["key"])
                 break
 
     # SAFE-DRIVEN: a driving call ON THIS SITE'S CONTEXT, after the co_spawn, while
     # the closure is in scope — either directly, or through a local helper closure
     # whose body drives it.
     for e in events:
-        if e["off"] <= site["off"]:
+        if not _before(site, e):
             continue
-        if e["kind"] == "closure_call" and e["name"] in driving_closures:
+        if e["kind"] == "closure_call" and e["key"] in driving_closures:
             if encloses(cscope, e["scope"]):
                 return ("SAFE-DRIVEN", f"`{e['name']}()` at line {e['line']} runs after the "
                                        f"co_spawn and drives `{site_exec}` in its body")
             continue
         if e["kind"] != "drive":
             continue
-        if e.get("obj", "") not in resolve(site_exec):
+        if e.get("obj_key", "") not in exec_keys:
             continue
         if encloses(cscope, e["scope"]):
             return ("SAFE-DRIVEN", f"`{e['name']}()` at line {e['line']} runs after the co_spawn "
@@ -852,32 +1094,10 @@ def load_db(build_dir: str, only_with_cospawn: bool) -> list[dict]:
             # reported a confident, 16.5%-incomplete clean.
             e["arguments"] = shlex.split(e["command"])
         if only_with_cospawn:
-            # ⚠️ SCOPE LIMIT (#363). This tests the MAIN FILE's own text. A header
-            # carrying a named-closure `co_spawn` whose every including .cpp lacks
-            # the literal token is therefore never parsed — and the cross-check
-            # consumes this same population, so it cannot report the omission
-            # either. Sharing the population is what makes the set-diff mean
-            # anything; it also means the population is the one thing the PAIR
-            # cannot check.
-            #
-            # ⚠️ IT IS NO LONGER SILENT, AND THAT IS THE WHOLE OF THE #363 FIX. A
-            # third instrument outside the pair — screen_headers(), run from main()
-            # on every prefiltered sweep — screens the headers directly and FAILS
-            # the run if any carries the shape. The limit below is unchanged; what
-            # changed is that hitting it is now loud instead of invisible. Do not
-            # re-describe this as "undetectable"; do not delete the call in main()
-            # without restoring some other way to see past this line.
-            #
-            # No count is recorded here — that would rot, and the check that
-            # replaced the recipe cannot. The CONDITION is "a header with the
-            # named-closure form, reachable only from TUs without the token";
-            # screen_headers() evaluates exactly that on every run. ⚠️ A
-            # line-based grep UNDER-REPORTS the shape twice over: the argument list
-            # spans lines, and the closure is often invoked WITH arguments
-            # (`make_waiter(1)`), so an empty-parens pattern silently misses it —
-            # measured 2 against an AST truth of 10 on tests/sync/
-            # test_fifo_across_cycles.cpp. Validate any screen against a file whose
-            # site count this tool already reports before trusting a zero from it.
+            # This prefilter tests the main file's own text. screen_headers()
+            # separately nominates every header containing a real-code `co_spawn(`
+            # call, and main() admits that header's includers for walker adjudication.
+            # The sweep refuses if a nominated header is never parsed.
             #
             # `--all-files` removes the limit at the cost of parsing every TU.
             try:
@@ -1148,6 +1368,23 @@ void f() {
         [("lam", "FLAG")],
     ),
     (
+        # The arm above cannot fail for its stated reason on its own: `p` is not
+        # the site's executor, so the executor match rejects `p.get()` whether or
+        # not the owner is checked. Here the non-driving `run()` is reached
+        # THROUGH the site's own executor root, so only the owner check rejects
+        # it. Mutant: accept any owner for a DRIVING_METHODS name.
+        "a run() whose OWNER is not a context does not drive, even on the site's own root",
+        """
+struct runner_t { void run(); };
+struct rig_t { io_context ioc; runner_t r; };
+void f() {
+  rig_t rig;
+  { auto lam = [&]() { return 0; }; co_spawn(rig.ioc, lam(), detached); rig.r.run(); }
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
         "a NAMESPACED free pump helper does count as driving (owner_of kind check)",
         # owner_of once tested for an empty parent SPELLING; a free function's
         # parent is a NAMESPACE, so fixpp::test_support::pump_until was missed and
@@ -1162,7 +1399,343 @@ void f() {
 """,
         [("lam", "SAFE-DRIVEN")],
     ),
+    (
+        # #586 shape A. The closure call sits one call BELOW the co_spawn's own
+        # argument. Mutant: test only the argument node itself, not its subtree.
+        "a closure call NESTED inside a co_spawn argument is a site (#586 shape A)",
+        """
+struct slot_t { };
+struct handler_t { };
+template <class S, class H> int bind_slot(S, H) { return 0; }
+int op();
+void f() {
+  io_context ioc;
+  int out = 0;
+  auto record_into = [&](int) { return handler_t{}; };
+  co_spawn(ioc, op(), bind_slot(slot_t{}, record_into(out)));
+  ioc.run();
+}
+""",
+        [("record_into", "SAFE-DRIVEN")],
+    ),
+    (
+        # #586 shape B. The token is built in a NAMED LOCAL before the call; the
+        # site must be followed to that local's initializer, never left out.
+        "a token built in a NAMED LOCAL is followed to its initializer (#586 shape B)",
+        """
+struct slot_t { };
+struct handler_t { };
+template <class S, class H> int bind_slot(S, H) { return 0; }
+int op();
+void f() {
+  io_context ioc;
+  int out = 0;
+  auto record_into = [&](int) { return handler_t{}; };
+  const auto token = bind_slot(slot_t{}, record_into(out));
+  co_spawn(ioc, op(), token);
+  ioc.run();
+}
+""",
+        [("record_into", "SAFE-DRIVEN")],
+    ),
+    (
+        # The same follow when the local sits BELOW the argument rather than
+        # being it. Mutant: follow only the argument node itself.
+        "a named local BELOW the argument is followed too (#586 shape B)",
+        """
+namespace std { template <class T> T&& move(T& t) { return static_cast<T&&>(t); } }
+void f() {
+  io_context ioc;
+  int out = 0;
+  auto make = [&](int) { return 0; };
+  auto aw = make(out);
+  co_spawn(ioc, std::move(aw), detached);
+  ioc.run();
+}
+""",
+        [("make", "SAFE-DRIVEN")],
+    ),
+    (
+        # One site can name more than one closure. Every one is classified and
+        # the worst verdict stands, so a long-lived closure found in one argument
+        # cannot hide a short-lived one in another. Mutant: keep only the first
+        # closure found.
+        "a SECOND closure in the same co_spawn is classified too; the worst verdict stands",
+        """
+struct slot_t { };
+template <class S, class H> int bind_slot(S, H) { return 0; }
+void f() {
+  io_context ioc;
+  auto helper = [&]() { return 0; };
+  {
+    auto lam = [&]() { return 0; };
+    co_spawn(ioc, lam(), bind_slot(slot_t{}, helper()));
+  }
+  ioc.run();
+}
+""",
+        [("helper", "SAFE-DRIVEN"), ("lam", "FLAG")],
+    ),
+    (
+        # The same, with the long-lived closure reached FIRST, in the executor
+        # expression -- the order in which keeping only the first closure hides
+        # the FLAG. Mutant: as above.
+        "a closure in the EXECUTOR expression does not hide the spawned closure's verdict",
+        """
+struct strand_t { };
+strand_t& pick(io_context&, int);
+void f() {
+  io_context ioc;
+  auto helper = [&]() { return 0; };
+  { auto lam = [&]() { return 0; }; co_spawn(pick(ioc, helper()), lam(), detached); }
+  ioc.run();
+}
+""",
+        [("helper", "SAFE-DRIVEN"), ("lam", "FLAG")],
+    ),
+    (
+        # The named-local follow does not apply to the EXECUTOR argument. The
+        # executor is copied into co_spawn before it returns, so a closure called
+        # while initialising a named executor local cannot be reached from the
+        # spawned frame. Mutant: follow the named local at argument 0 as well.
+        "a named EXECUTOR local is not followed into its initializer (#586 shape B)",
+        """
+struct exec_t { };
+struct sess_t { exec_t executor(); };
+int op();
+void f() {
+  io_context ioc;
+  auto session_of = [&](int) -> sess_t& { static sess_t s; return s; };
+  const exec_t exec = session_of(1).executor();
+  auto start = [&]() { co_spawn(exec, op(), detached); };
+  start();
+}
+""",
+        [],
+    ),
+    (
+        # A CONDITIONAL executor alias resolves each branch, and the site is
+        # SAFE-DRIVEN only when every branch is driven. Mutant: take the
+        # condition operand as the base.
+        "a conditional executor whose branches are BOTH driven is SAFE-DRIVEN",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+void f(bool on_a) {
+  io_context ioc_a;
+  io_context ioc_b;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = on_a ? exec_t{make_exec(ioc_a)} : exec_t{make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_a.run();
+  ioc_b.run();
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        # Only the FIRST branch is driven. Mutants: resolve the first branch
+        # only; accept any driven branch; take the condition operand as the base
+        # (the condition reads the driven context).
+        "a conditional executor with one branch NOT driven stays FLAG",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+bool idle(io_context&);
+void f() {
+  io_context ioc_a;
+  io_context ioc_b;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = idle(ioc_a) ? exec_t{make_exec(ioc_a)} : exec_t{make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_a.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        # The same, with the `?:` inside a braced construction. Mutant: recognise
+        # a conditional only at the top of the initializer.
+        "a conditional executor INSIDE a construction is resolved per branch too",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+bool idle(io_context&);
+void f() {
+  io_context ioc_a;
+  io_context ioc_b;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = exec_t{idle(ioc_a) ? make_exec(ioc_a) : make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_a.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        # The condition operand is never a base: here it reads the only driven
+        # context, and neither branch is driven. Mutant: take the condition
+        # operand as the base.
+        "the condition of a conditional executor is not taken as its base",
+        """
+struct exec_t { };
+exec_t make_exec(io_context&);
+bool idle(io_context&);
+void f() {
+  io_context ioc_a;
+  io_context ioc_b;
+  io_context ioc_c;
+  auto lam = [&]() { return 0; };
+  const exec_t exec = idle(ioc_c) ? exec_t{make_exec(ioc_a)} : exec_t{make_exec(ioc_b)};
+  co_spawn(exec, lam(), detached);
+  ioc_c.run();
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        # The follow runs to a fixed point. The clang-query matcher follows one
+        # hop only, so a chain like this one lands in the cross-check's ONLY
+        # LIBCLANG bucket -- the loud direction. Mutant: follow one hop only.
+        "a CHAIN of named locals is followed to the closure call (#586 shape B)",
+        """
+struct slot_t { };
+struct handler_t { };
+template <class S, class H> int bind_slot(S, H) { return 0; }
+int op();
+void f() {
+  io_context ioc;
+  int out = 0;
+  auto record_into = [&](int) { return handler_t{}; };
+  const auto first = bind_slot(slot_t{}, record_into(out));
+  const auto token = first;
+  co_spawn(ioc, op(), token);
+  ioc.run();
+}
+""",
+        [("record_into", "SAFE-DRIVEN")],
+    ),
+    (
+        # Only a local that IS the argument's value is followed. A receiver is
+        # not: the closure that built `sess` has no bearing on what co_spawn is
+        # handed. Mutant: follow every local referenced in the argument.
+        "a RECEIVER local is not followed into its initializer (#586 shape B)",
+        """
+struct sess_t { int send(int); };
+void f() {
+  io_context ioc;
+  auto make_sess = [&]() { return sess_t{}; };
+  auto sess = make_sess();
+  co_spawn(ioc, sess.send(1), detached);
+  ioc.run();
+}
+""",
+        [],
+    ),
+    (
+        # A closure called only inside a lambda in the followed initializer is
+        # not the argument. Mutant: descend without pruning lambda bodies.
+        "a closure called only inside a lambda in the local's initializer is not a site (#586 shape B)",
+        """
+struct slot_t { };
+struct handler_t { };
+template <class S, class H> int bind_slot(S, H) { return 0; }
+int op();
+void f() {
+  io_context ioc;
+  int out = 0;
+  auto record_into = [&](int) { return handler_t{}; };
+  const auto wrapped = bind_slot(slot_t{}, [&]() { return record_into(out); });
+  co_spawn(ioc, op(), wrapped);
+  ioc.run();
+}
+""",
+        [],
+    ),
+    (
+        # #586 D, one direction. The alias table resolved a NAME over the whole
+        # TU, last declaration wins, so an unrelated `h` in a later function
+        # re-pointed this site's `h` at another context. Mutant: key the alias
+        # table by spelling.
+        "an unrelated later local with the SAME NAME does not re-point an alias (SAFE stays SAFE)",
+        """
+struct strand_t { };
+strand_t make_strand(io_context&);
+void f() {
+  io_context ioc;
+  auto h = make_strand(ioc);
+  auto lam = [&]() { return 0; };
+  co_spawn(h, lam(), detached);
+  ioc.run();
+}
+void g() {
+  io_context other;
+  auto h = make_strand(other);
+  (void)h;
+}
+""",
+        [("lam", "SAFE-DRIVEN")],
+    ),
+    (
+        # #586 D, the other direction: the same mechanism must not certify a
+        # site whose context is never driven.
+        "an unrelated later local with the SAME NAME does not re-point an alias (FLAG stays FLAG)",
+        """
+struct strand_t { };
+strand_t make_strand(io_context&);
+void f() {
+  io_context a;
+  io_context b;
+  auto h = make_strand(a);
+  auto lam = [&]() { return 0; };
+  co_spawn(h, lam(), detached);
+  b.run();
+}
+void g() {
+  io_context b;
+  auto h = make_strand(b);
+  (void)h;
+}
+""",
+        [("lam", "FLAG")],
+    ),
+    (
+        # #586 E. A drive in a HEADER whose offset falls inside a main-file
+        # closure's extent was credited to that closure. The header drives the
+        # SAME context the site spawns on, so declaration identity alone cannot
+        # tell the two apart; only the file can. The padding comments place the
+        # header's drive inside `idle`'s extent; the arm checks that placement
+        # itself and fails if it does not hold. Mutant: compare offsets without
+        # the file.
+        "a drive in ANOTHER FILE at an offset inside a closure's extent is not credited to it",
+        """
+#include "selftest_drive.hpp"
+void f() {
+  {
+    auto lam = [&]() { return 0; };
+    auto idle = [&]() {
+      /* PAD_IDLE */
+    };
+    co_spawn(g_ioc, lam(), detached);
+    idle();
+  }
+}
+""",
+        [("lam", "FLAG")],
+        {
+            "selftest_drive.hpp": """
+inline io_context g_ioc;
+/* PAD_HEADER */
+inline void drive_global() { g_ioc.run(); }
+""",
+        },
+    ),
 ]
+
+# The E arm's padding. The header drive must land at an offset that a main-file
+# closure's extent covers; these sizes place it there with a wide margin either
+# side, and run_self_test() checks the placement rather than trusting the sizes.
+_PAD = {"PAD_HEADER": 1500, "PAD_IDLE": 4000}
 
 
 def _load_libclang(libclang: str) -> str | None:
@@ -1185,182 +1758,20 @@ def _load_libclang(libclang: str) -> str | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HEADER SCREEN (#363) -- the population's own blind spot, made LOUD.
+# HEADER SCREEN (#363)
 #
-# The prefilter in load_db() tests each compile-database entry's MAIN FILE text
-# for the literal token. A header carrying a named-closure co_spawn whose every
-# including .cpp lacks the token is therefore never parsed -- and
-# reconcile_co_spawn_census.py deliberately CONSUMES this population rather than
-# re-deriving one (that is what makes its set-diff mean anything), so the pair
-# cannot report the omission either. The population is the one thing the two
-# instruments do not check.
-#
-# This does not widen the population -- parsing every TU costs ~20 min on 242
-# TUs. It converts a SILENT hole into a LOUD one: screen the headers directly,
-# and if any carries the shape, refuse to report and say to re-run --all-files.
-# A false alarm here costs one --all-files run; a false zero costs the finding.
-#
-# ⚠️ THIS SCREEN IS AN INSTRUMENT AND IT IS PINNED IN --self-test, because the
-# ISSUE'S OWN SCREEN WAS WRONG TWICE. A line-based grep misses the shape (the
-# argument list spans lines) and an empty-parens pattern misses it again (the
-# closure is frequently invoked WITH arguments, `make_waiter(1)`) -- measured 2
-# against an AST truth of 10. Balanced-paren scanning is what reproduces 10/5.
-FORWARDING_WRAPPERS = frozenset({"std::move", "move", "std::forward", "forward"})
-# A leading `*` or `&` is a call through a pointer/reference to a closure --
-# `(*p)()` after the paren unwrap. Nominate it; the walker decides.
-_IDENT_HEAD = re.compile(r"^\s*[*&]?\s*([A-Za-z_][A-Za-z0-9_:]*)\s*")
-
-
-def _after_first_top_level_comma(s: str) -> str | None:
-    """Everything after `s`'s first depth-0 comma, or None if it has none.
-
-    ⚠️ DELIBERATELY DOES NOT SPLIT THE WHOLE LIST. The previous version split on
-    every top-level comma and looked at element [1], which silently LOST every
-    template-instantiated call: `co_spawn(ioc, make_thing<A,B>(), tok)` split
-    inside the template argument list and yielded `make_thing<A`. Returning the
-    remainder uncut lets _names_a_call() do its own balanced `<...>` scan, so the
-    comma inside `<>` never has to be recognised as such.
-    """
-    # ⚠️ ANGLE BRACKETS COUNT HERE TOO, AND FORGETTING THEM WAS THE SAME BUG
-    # TWICE. `_names_a_call` learned to balance `<...>` for the CALLEE
-    # (`make_thing<A,B>()`); this function is the other half and was left with the
-    # identical hole, so `co_spawn(pool<A,B>::get(), make_waiter(1), tok)` split
-    # inside the EXECUTOR's template list and lost the site. Fixing the callee and
-    # not the splitter was fixing a blast radius rather than a cause.
-    #
-    # `<` is ambiguous with less-than, so it opens a template list only when it
-    # directly follows an identifier character — `pool<` does, `a <` does not.
-    # That is a heuristic; it errs toward NOMINATING, which is the safe direction
-    # for a candidate generator whose over-approximation inside a parsed file is
-    # free.
-    depth = 0
-    angle = 0
-    prev = ""
-    for i, ch in enumerate(s):
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            depth -= 1
-        elif ch == "<" and depth == 0 and (prev.isalnum() or prev in "_>"):
-            angle += 1
-        elif ch == ">" and angle > 0:
-            angle -= 1
-        elif ch == "," and depth == 0 and angle == 0:
-            return s[i + 1 :]
-        if not ch.isspace():
-            prev = ch
-    return None
-
-
-def _names_a_call(arg: str) -> str | None:
-    r"""The callee name if `arg` begins `ident(` or `ident<...>(`, else None.
-
-    ⚠️ THE `<...>` ARM IS NOT COSMETIC -- WITHOUT IT THE SCREEN FAILS TOWARD
-    CLEAN. A bare `^ident\s*\(` pattern misses EVERY templated closure call,
-    including the single-argument `make_thing<A>()`, because `<A>` sits between
-    the identifier and the paren. Measured before the fix: `make_thing<A>()`,
-    `make_thing<A,B>()` and `make_thing<A, B>(1)` all screened as NO HIT while
-    the non-template control screened as a hit. In a screen whose whole purpose
-    is to stop being silent, that is the defect it exists to prevent.
-    """
-    # ⚠️ A PARENTHESISED CALLEE IS ORDINARY C++ AND WAS MISSED. `co_spawn(ioc,
-    # (lam)(), tok)` is the same site as `co_spawn(ioc, lam(), tok)` — the AST
-    # walker sees through the parens and reports it — but a matcher anchored on
-    # an identifier sees a leading `(` and returns nothing. Strip balanced
-    # wrapping parens first. Found by hostile review, not by the self-test, which
-    # is the fourth shape this screen has been wrong about.
-    arg = arg.lstrip()
-    while arg.startswith("("):
-        depth, k = 0, 0
-        while k < len(arg):
-            if arg[k] == "(":
-                depth += 1
-            elif arg[k] == ")":
-                depth -= 1
-                if depth == 0:
-                    break
-            k += 1
-        if depth != 0 or k + 1 >= len(arg):
-            break
-        inner, after = arg[1:k].strip(), arg[k + 1 :].lstrip()
-        # `(lam)(...)` unwraps; `(a + b)` or a cast does not name a call.
-        if not after.startswith("("):
-            break
-        arg = inner + after
-    # ⚠️ THE CALLEE IS A PATH, NOT AN IDENTIFIER. `obj.make_waiter()`,
-    # `self->make_waiter()` and `(*p)()` are all ordinary spellings of the same
-    # site and were all missed while a bare `lam()` was caught. Walk
-    # ident (`<...>`)? ( `.` | `->` | `::` ) ident (`<...>`)? ... and then require
-    # the paren.
-    m = _IDENT_HEAD.match(arg)
-    if not m:
-        return None  # a lambda literal `[&]...`, a brace-init, anything unnamed
-    name, j = m.group(1), m.end()
-
-    def skip_template(k: int) -> int | None:
-        """Index past a balanced `<...>` at k, or None if it does not close."""
-        if k >= len(arg) or arg[k] != "<":
-            return k
-        d = 0
-        while k < len(arg):
-            if arg[k] == "<":
-                d += 1
-            elif arg[k] == ">":
-                d -= 1
-                if d == 0:
-                    return k + 1
-            k += 1
-        return None  # an unbalanced `<` is a comparison, not a template list
-
-    while True:
-        nxt = skip_template(j)
-        if nxt is None:
-            return None
-        j = nxt
-        while j < len(arg) and arg[j].isspace():
-            j += 1
-        for sep in ("->", "::", "."):
-            if arg.startswith(sep, j):
-                k = j + len(sep)
-                while k < len(arg) and arg[k].isspace():
-                    k += 1
-                seg = _IDENT_HEAD.match(arg[k:])
-                if not seg:
-                    return None
-                name, j = seg.group(1), k + seg.end()
-                break
-        else:
-            break
-    return name if j < len(arg) and arg[j] == "(" else None
+# The compile-database prefilter reads main files. This screen nominates every
+# tracked header containing a real-code `co_spawn(` call so main() can admit its
+# includers for walker adjudication. The post-sweep check refuses only when a
+# nominated header was never parsed.
 
 
 def screen_named_closure(text: str) -> list[int]:
-    """1-based line numbers of `co_spawn(<ex>, <ident>(<args>), ...)` in `text`.
+    """Nominate every real-code `co_spawn(` call by its original 1-based line.
 
-    Whole-file and balanced-paren, NOT line-based -- see the note above for the
-    two ways a simpler pattern reports a false zero on this exact shape.
-
-    ⚠️ RUNS ON BLANKED CODE, NEVER ON RAW TEXT, and it used the raw text first.
-    A `co_spawn(ex, name(...), ...)` inside a `//` comment, a `/* */` block, or a
-    string literal screened IDENTICALLY to a real one -- measured, all four
-    returning [1]. Since a hit REFUSES the whole audit in a gating CI step, one
-    commented-out example added to any tracked header would have failed tier1
-    with "a header carries the named-closure co_spawn shape". The sibling scanner
-    check_co_spawn_lambda.scan_text() already blanks for exactly this reason on
-    its own balanced-paren walk; reuse it rather than re-deriving it.
-    splice() is not optional either: without it a backslash-newline inside a
-    `/* ... */` close leaves the stripper believing the comment never closes,
-    and it blanks the REST OF THE FILE into a clean result -- fail-toward-clean in the screen whose
-    whole job is to stop being silent.
-
-    Deliberately over-approximates: any identifier-call in argument 2 counts,
-    because a screen that guesses wrong should guess LOUD. The one enumerated
-    exception is FORWARDING_WRAPPERS -- `std::move(coro)` names a std facility
-    and moves an awaitable, so it cannot be a named-closure invocation. That
-    exception is NOT covered by the 10/5 oracle below (neither oracle file
-    contains the shape), so it carries its own self-test arm; without one, a
-    count identity on two files would have been mistaken for proof the screen
-    does not over-match.
+    The walker adjudicates every nomination. A call not spelled `co_spawn(` in
+    the header's own text, such as a macro or alias defined elsewhere, is outside
+    this screen's condition.
     """
     spliced, line_of = splice(text)
     code = strip_noncode(spliced)
@@ -1373,24 +1784,7 @@ def screen_named_closure(text: str) -> list[int]:
             return line_of[off]
         return line_of[-1] if line_of else 1
 
-    hits: list[int] = []
-    for m in re.finditer(r"\bco_spawn\s*\(", code):
-        i, depth = m.end(), 1
-        while i < len(code) and depth:
-            if code[i] in "([{":
-                depth += 1
-            elif code[i] in ")]}":
-                depth -= 1
-            i += 1
-        if depth:
-            continue  # unbalanced (macro, truncated file) -- not a claim either way
-        rest = _after_first_top_level_comma(code[m.end() : i - 1])
-        if rest is None:
-            continue  # fewer than two arguments -- not the shape
-        name = _names_a_call(rest)
-        if name is not None and name not in FORWARDING_WRAPPERS:
-            hits.append(lineno(m.start()))
-    return hits
+    return [lineno(m.start()) for m in re.finditer(r"\bco_spawn\s*\(", code)]
 
 
 def includers_of(header_rel: str, build_dir: str, repo_root: str) -> list[dict]:
@@ -1416,7 +1810,7 @@ def includers_of(header_rel: str, build_dir: str, repo_root: str) -> list[dict]:
 
 
 def screen_headers(repo_root: str) -> dict[str, list[int]]:
-    """Every tracked header carrying the named-closure shape. Empty == none."""
+    """Every tracked `*.hpp`/`*.h` holding a real-code `co_spawn(` call, by line. Empty == none."""
     try:
         listing = subprocess.run(
             ["git", "grep", "-l", "co_spawn", "--", "*.hpp", "*.h"],
@@ -1451,50 +1845,6 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
 
     passed = failed = 0
 
-    # ── screen arms (#363) -- no libclang needed; see screen_named_closure ──
-    # The two in-tree oracles are files whose site count this tool ALREADY
-    # reports, so they pin the screen against something external rather than
-    # against itself. The synthetic arms cover the shapes the oracles do not
-    # contain.
-    #
-    # ⚠️ THESE ARMS DO NOT PIN "THE SCREEN AND THE WALKER AGREE ABOUT WHAT A SITE
-    # IS", and an earlier version of the failure message claimed they did. The two
-    # disagree BY DESIGN and always have: the screen nominates any identifier call
-    # in argument two, so it reports `run_liveness_loop()`, `run_accept_loop()`,
-    # `asio::bind_executor(...)` — all of which the walker correctly REJECTS,
-    # since none is a lambda-typed variable (see SiteWalker._named_closure_arg,
-    # which names run_liveness_loop() as its example of what a crude grep
-    # over-counts). Neither oracle file contains a divergent shape, so an arm
-    # asserting agreement could not have failed for the reason it stated.
-    #
-    # Since the gate refuses only on UNPARSED files, that divergence costs
-    # nothing: the screen is a CANDIDATE GENERATOR and the walker is the
-    # authority. What these arms actually pin is narrower and still worth having —
-    # that the screen has not stopped seeing a shape it used to see.
-    screen_arms: list[tuple[str, str, int]] = [
-        ("screen/oracle-fifo-across-cycles", "tests/sync/test_fifo_across_cycles.cpp", 10),
-        ("screen/oracle-asan-clean", "tests/sync/test_asan_clean.cpp", 5),
-    ]
-    repo_root = os.environ.get("FIXPP_REPO_ROOT", os.getcwd())
-    for name, rel, expected_n in screen_arms:
-        path = os.path.join(repo_root, rel)
-        try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                got = len(screen_named_closure(fh.read()))
-        except OSError as exc:
-            print(f"FAIL  {name}\n      oracle unreadable: {exc}")
-            failed += 1
-            continue
-        if got != expected_n:
-            print(f"FAIL  {name}\n      expected {expected_n} screen hits, got {got}. "
-                  f"⚠️ Do NOT relax the expectation to match — re-derive why the count "
-                  f"moved. These two files are pinned because their shapes are ones the "
-                  f"screen and the walker DO agree on, so a change here means the screen "
-                  f"stopped seeing a shape it used to see.")
-            failed += 1
-        else:
-            passed += 1
-
     synthetic: list[tuple[str, str, int]] = [
         # Multi-line argument list -- the shape a line-based grep misses.
         ("screen/multiline-args",
@@ -1503,14 +1853,11 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         ("screen/closure-with-args", "co_spawn(ioc, make_waiter(1), use_future);", 1),
         # Zero-argument closure.
         ("screen/closure-no-args", "co_spawn(ioc, holder(), use_future);", 1),
-        # A lambda LITERAL is not a named closure -- nothing outlives the call.
+        # Every real-code call is nominated whatever its arguments.
         ("screen/lambda-literal",
-         "co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, use_future);", 0),
-        # Forwarding wrappers move an awaitable, not a closure. NOT covered by the
-        # oracles (neither file contains the shape), which is why this arm exists:
-        # without it, 10/5 would have been mistaken for proof of no over-matching.
-        ("screen/forwarder-move", "co_spawn(pool.get_executor(), std::move(coro), use_future);", 0),
-        ("screen/forwarder-forward", "co_spawn(ex, std::forward<C>(c), use_future);", 0),
+         "co_spawn(ioc, [&]() -> asio::awaitable<void> { co_return; }, use_future);", 1),
+        ("screen/forwarder-move", "co_spawn(pool.get_executor(), std::move(coro), use_future);", 1),
+        ("screen/forwarder-forward", "co_spawn(ex, std::forward<C>(c), use_future);", 1),
         # An executor argument containing its own parens must not break the split.
         ("screen/executor-with-parens",
          "co_spawn(ioc.get_executor(), make_waiter(1), use_future);", 1),
@@ -1531,40 +1878,20 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         # Blanking must not eat real code that merely sits after a comment.
         ("screen/code-after-comment",
          "// co_spawn(ioc, holder(), t);\nco_spawn(ioc, make_waiter(1), use_future);", 1),
-        # ── TEMPLATE ARMS. Every one of these screened as NO HIT before
-        # _names_a_call() grew its balanced `<...>` scan -- silently, which in a
-        # screen built to be loud is the defect it exists to prevent. Note the
-        # single-argument case fails too: `<A>` sits between the identifier and
-        # the paren, so it is not only about the comma.
         ("screen/template-one-arg", "co_spawn(ioc, make_thing<A>(), use_future);", 1),
         ("screen/template-two-args", "co_spawn(ioc, make_thing<A,B>(), use_future);", 1),
         ("screen/template-spaced-with-args",
          "co_spawn(ioc, make_thing<A, B>(1), use_future);", 1),
         ("screen/template-nested", "co_spawn(ioc, make_thing<A<B>>(), use_future);", 1),
-        # A templated forwarder is still a forwarder.
-        ("screen/template-forwarder", "co_spawn(ex, std::forward<C>(c), use_future);", 0),
-        # A bare `<` is a comparison, not a template list -- must not be read as
-        # an unterminated template and must not become a hit.
-        ("screen/comparison-not-template", "co_spawn(ioc, a < b, use_future);", 0),
-        # Fewer than two arguments is not the shape.
-        ("screen/single-argument", "co_spawn(ioc);", 0),
-        # ── PARENTHESISED CALLEE. `(lam)()` is the same site as `lam()` and the
-        # AST walker reports it; a matcher anchored on an identifier saw the
-        # leading `(` and returned nothing. Found by hostile review — the FOURTH
-        # shape this screen has been wrong about, and the third found by a human
-        # rather than by these arms.
+        ("screen/template-forwarder", "co_spawn(ex, std::forward<C>(c), use_future);", 1),
+        ("screen/comparison-not-template", "co_spawn(ioc, a < b, use_future);", 1),
+        ("screen/single-argument", "co_spawn(ioc);", 1),
         ("screen/paren-callee", "co_spawn(ioc, (lam)(), use_future);", 1),
         ("screen/paren-callee-double", "co_spawn(ioc, ((lam))(), use_future);", 1),
         ("screen/paren-callee-template", "co_spawn(ioc, (make<A,B>)(), use_future);", 1),
-        ("screen/paren-forwarder", "co_spawn(ex, (std::move)(coro), use_future);", 0),
-        # Parens that do NOT wrap a callee must stay silent.
-        ("screen/paren-cast", "co_spawn(ioc, (Foo)x, use_future);", 0),
-        ("screen/paren-arith", "co_spawn(ioc, (a + b), use_future);", 0),
-        # ── THE CALLEE IS A PATH, NOT AN IDENTIFIER. All four were missed while a
-        # bare `lam()` was caught. The last one is the SAME `<...>` defect as
-        # screen/template-two-args but on the EXECUTOR side: fixing the callee's
-        # template handling and not the comma splitter's was fixing a blast radius
-        # rather than a cause.
+        ("screen/paren-forwarder", "co_spawn(ex, (std::move)(coro), use_future);", 1),
+        ("screen/paren-cast", "co_spawn(ioc, (Foo)x, use_future);", 1),
+        ("screen/paren-arith", "co_spawn(ioc, (a + b), use_future);", 1),
         ("screen/member-call", "co_spawn(ioc, obj.make_waiter(), use_future);", 1),
         ("screen/arrow-call", "co_spawn(ioc, self->make_waiter(), use_future);", 1),
         ("screen/deref-callee", "co_spawn(ioc, (*p)(), use_future);", 1),
@@ -1573,8 +1900,14 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         # Qualified + templated member path, both halves at once.
         ("screen/qualified-template-member",
          "co_spawn(ioc, reg<A,B>::inst().make<C>(), use_future);", 1),
-        # A member path on a forwarder is still a forwarder.
-        ("screen/member-forwarder", "co_spawn(ex, std::move(coro), use_future);", 0),
+        ("screen/member-forwarder", "co_spawn(ex, std::move(coro), use_future);", 1),
+        ("screen/token-call", "co_spawn(ex, aw, record_into(out));", 1),
+        ("screen/token-call-moved-awaitable",
+         "co_spawn(ex, std::move(aw), record_into(out));", 1),
+        ("screen/token-call-bound", "co_spawn(ex, aw, bind_slot(s, record_into(out)));", 1),
+        ("screen/named-token",
+         "const auto token = bind_slot(s, record_into(out));\nco_spawn(ex, aw, token);", 1),
+        ("screen/executor-call", "co_spawn(get_ex(), aw, detached);", 1),
     ]
     for name, body, expected_n in synthetic:
         got = len(screen_named_closure(body))
@@ -1584,19 +1917,62 @@ def run_self_test(libclang: str, resource_dir: str) -> int:
         else:
             passed += 1
 
-    for name, body, expected in SELF_TEST_CASES:
-        src = SELF_TEST_PREAMBLE + body
+    # Absolute paths, so an arm's `#include "<header>"` resolves to its unsaved
+    # header whatever the working directory is.
+    fixture_dir = os.path.realpath(os.getcwd())
+
+    def unpad(text: str) -> str:
+        for marker, n in _PAD.items():
+            text = text.replace(f"/* {marker} */", "/*" + " " * n + "*/")
+        return text
+
+    for case in SELF_TEST_CASES:
+        name, body, expected = case[:3]
+        headers = case[3] if len(case) > 3 else {}
+        src = unpad(SELF_TEST_PREAMBLE + body)
+        main_path = os.path.join(fixture_dir, "selftest.cpp")
+        unsaved = [(main_path, src)] + [
+            (os.path.join(fixture_dir, h), unpad(t)) for h, t in headers.items()]
+        if headers:
+            # The E arm is only meaningful while the header's drive offset lies
+            # inside the main file's `idle` extent. Check it from the text, so a
+            # padding change cannot turn the arm into one that passes vacuously.
+            htext = unsaved[1][1]
+            drive_off = htext.find("g_ioc.run()")
+            lo = src.find("auto idle")
+            hi = src.find("};", lo)
+            if drive_off < 0 or lo < 0 or not lo < drive_off < hi:
+                print(f"FAIL  {name}\n      the header drive (offset {drive_off}) is not inside "
+                      f"`idle`'s extent ({lo}..{hi}); re-size _PAD")
+                failed += 1
+                continue
         idx = ci.Index.create()
-        tu = idx.parse("selftest.cpp", args=args, unsaved_files=[("selftest.cpp", src)])
+        tu = idx.parse(main_path, args=args, unsaved_files=unsaved)
         bad = [d for d in tu.diagnostics if d.severity >= ci.Diagnostic.Error]
         if bad:
             print(f"FAIL  {name}\n      fixture did not compile: {bad[0].spelling}")
             failed += 1
             continue
-        w = SiteWalker("selftest.cpp", os.getcwd())
+        w = SiteWalker(main_path, os.getcwd())
         # The fixture is an unsaved buffer, not a repo file; accept it explicitly.
         w.repo_root = ""
         w.walk(tu.cursor, [])
+        unsaved_text = {os.path.realpath(path): text for path, text in unsaved}
+        screen_lines = {
+            path: set(screen_named_closure(text)) for path, text in unsaved_text.items()
+        }
+        missed = [
+            (site["file"], site["line"])
+            for site in w.sites
+            if site["line"] not in screen_lines.get(os.path.realpath(site["file"]), set())
+        ]
+        if missed:
+            path, line = missed[0]
+            print(f"FAIL  screen/superset/{name}\n"
+                  f"      walker site at {path}:{line} was not nominated by the screen")
+            failed += 1
+        else:
+            passed += 1
         got = sorted((s["closure"], classify(s, w.events)[0]) for s in w.sites)
         if got != sorted(expected):
             print(f"FAIL  {name}\n      expected {sorted(expected)}\n      got      {got}")
@@ -1806,35 +2182,22 @@ def main() -> int:
     # rather than a miss. Re-derive with that pair; a single-sided seed cannot
     # tell this gate from the one it replaced.
     #
-    # So the screen NOMINATES and the walker CONFIRMS: a hit is a finding only
-    # where the sweep reported no site in that header. That also demotes the
+    # So the screen NOMINATES and the walker CONFIRMS. That also demotes the
     # regex from an authority to a candidate generator — it may over-approximate
     # loudly without costing a false CI failure, and it stops being a second
     # definition of "what is a site" competing with the AST walker's.
     #
-    # ⚠️ THE CONDITION IS "WAS THIS FILE PARSED", NOT "DID IT YIELD A SITE", AND
-    # THE DIFFERENCE IS A CI OUTAGE. It was written the second way first, using
-    # the site list as a proxy because the walker did not report what it parsed.
-    # That proxy fails on ORDINARY CODE: the screen deliberately nominates any
-    # identifier call in argument two, so `co_spawn(ioc, run_pump(), tok)` in a
-    # header is a candidate — while the AST walker correctly reports no site,
-    # because `run_pump` is a plain coroutine function, not a lambda-typed
-    # variable. Under the proxy that header had no site, the gate refused, and a
-    # perfectly ordinary spawn in a perfectly ordinary header would have failed
-    # the required CI command with no way to satisfy it. SiteWalker now records
-    # every in-repo file it walked a cursor in (`files_seen`), so the gate asks
-    # the question it means. Over-approximation inside a PARSED file is now free,
-    # which is what lets the screen stay deliberately loud.
+    # The condition is "was this file parsed", not "did it yield a site".
+    # SiteWalker records every in-repo file it walks in `files_seen`. The screen
+    # nominates every real-code call, and a nomination in a parsed file costs
+    # nothing because the walker adjudicates it.
     #
     # ⚠️ TWO RESIDUALS, AND A GREEN HERE MEANS LESS THAN IT LOOKS. Neither is
     # closable without `--all-files`; both are stated so the green is read for
     # what it is.
     #
-    #   1. THE SCREEN CAN MISS THE SHAPE. It is a regex over blanked text and has
-    #      already been wrong FOUR times — raw text, forwarding wrappers,
-    #      template argument lists, parenthesised callees — every one found by a
-    #      reviewer, none by this gate's own arms. A miss in an unreachable header
-    #      is silent.
+    #   1. The screen cannot see a call not spelled `co_spawn(` in the header's
+    #      own text, such as a macro or alias defined in another file.
     #
     #   2. `files_seen` IS FILE-GRANULAR; THE HAZARD IS REGION-GRANULAR. `walk`
     #      adds a file on ANY in-repo cursor, so the set proves ">= 1 cursor from
@@ -1862,7 +2225,7 @@ def main() -> int:
             if os.path.realpath(os.path.join(repo_root, rel)) not in parsed_files
         }
         if unseen:
-            print("ERROR: a header carries the named-closure co_spawn shape and the sweep "
+            print("ERROR: a header holds a real-code `co_spawn(` call and the sweep "
                   "NEVER PARSED it (#363).")
             for rel, lines in sorted(unseen.items()):
                 print(f"  {rel}: lines {', '.join(str(n) for n in lines)}")

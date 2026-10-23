@@ -3,28 +3,30 @@
 # Produces _fixpp.so (or _fixpp.pyd on Windows) + fixpp.py.
 # [arch §4.12] — depends on fixpp::capi ONLY; no C++ engine headers leak.
 
-# T005 / PKG-1 / D-3 — SWIG 4.2 minimum: a 4.0 runner silently regresses the
-# limited-API (abi3) heap-type mode.
+# #607 — the SWIG minimum. It equals the `swig>=` floor in
+# bindings/python/pyproject.toml's [build-system] requires and moves with it
+# (ci/test-tier1-python-policy.sh compares it with that floor and the CI install
+# steps). The in-tree CI legs install exactly this version from PyPI, so they
+# build the lowest SWIG the wheel accepts; a wheel build takes PyPI's latest SWIG
+# at or above it.
+# Conditions it answers:
+#   * below 4.3, MSVC /W4 raises C4100 in SWIG's runtime section, which fixpp.i's
+#     GCC/Clang-only %begin suppression does not cover (#562). At this minimum
+#     fixpp.i needs no MSVC arm; lowering it below 4.3 needs one.
+#   * a 4.0 SWIG silently regresses the limited-API (abi3) heap-type mode
+#     (T005 / PKG-1 / D-3).
+# No upper bound, as in pyproject.toml (#296).
 #
-# ⚠️ THE #296 `<4.5` UPPER BOUND IS LIFTED HERE, together with its twin in
-# bindings/python/pyproject.toml — the two were documented as liftable only as a
-# pair, and that is how they moved.
+# ⚠️ A RED PYTHON LANE IS A RESULT, NOT A FLAKE. Read it before capping: the #296
+# signature is a SEGFAULT during garbage collection with no `FAILED` line at all
+# (the interpreter dies before pytest reports), so grepping that leg for test
+# names returns empty and looks fine. Report it on #296.
 #
-# It is NOT lifted because #296 was root-caused. It was not. It is lifted because
-# capping had made #296 UNFALSIFIABLE: the crash was seen on SWIG 4.5.0 × CPython
-# 3.11, and with the cap in force CI built 4.4.1 — so no run could produce
-# evidence either way, and every green wheel lane was green for a reason
-# unrelated to the question. Retiring the 3.10/3.11 legs alone would not have
-# fixed that; it removes the OTHER axis of the same reproducing pair.
-#
-# ⚠️ SO A RED WHEEL LANE HERE IS A RESULT, NOT A FLAKE. Read it before re-capping:
-# the #296 signature is a SEGFAULT during garbage collection with no `FAILED`
-# line at all (the interpreter dies before pytest reports), which is why grepping
-# for test names on that leg returns empty and looks fine.
-#
-# 4.2 minimum stays: a 4.0 runner silently regresses the limited-API (abi3)
-# heap-type mode (T005 / PKG-1 / D-3).
-find_package(SWIG 4.2 REQUIRED)
+# A tree configured with an older SWIG keeps it in its cache (SWIG_EXECUTABLE),
+# and CMake 3.28's FindSWIG takes the first `swig4.0` on PATH without skipping a
+# too-old one: re-point the tree with `cmake -U 'SWIG_*' <build-dir>` after
+# putting this version first on PATH.
+find_package(SWIG 4.5.1 REQUIRED)
 include(UseSWIG)
 
 # T005 — request the stable-ABI (SABI) development component when available so the
@@ -36,6 +38,13 @@ find_package(Python3 REQUIRED COMPONENTS Development.Module
 
 set_property(SOURCE fixpp.i PROPERTY CPLUSPLUS ON)
 set_property(SOURCE fixpp.i PROPERTY USE_TARGET_INCLUDE_DIRECTORIES ON)
+# #600 — SWIG writes its own depfile, so the wrapper is regenerated when any
+# header fixpp.i reaches through %include changes, a header added to it later
+# included. Without it the SWIG step depends on fixpp.i alone: an incremental
+# tree recompiles the old wrapper and the module serves the old constants and
+# declarations. Re-check: in an existing tree, change a constant in an %include'd
+# header, rebuild fixpp_py, and read the new value from the module.
+set_property(SOURCE fixpp.i PROPERTY USE_SWIG_DEPENDENCIES TRUE)
 
 # Direct SWIG's generated fixpp.py to lib/ so it sits next to _fixpp.so;
 # `import fixpp` then loads the wrapper, which loads _fixpp.so from the

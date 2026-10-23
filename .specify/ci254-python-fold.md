@@ -134,6 +134,8 @@ No leg gets a conditional bindings build. A per-leg conditional would reintroduc
 
 ### 4.2 Edit 1 — the apt line
 
+> ⚠️ **Superseded for SWIG by fixpp#607 (B58).** The apt `swig` package in §4.1 and §4.2 and the `find_package(SWIG 4.2 REQUIRED)` floor below are this design's record, not how the legs get SWIG now: they install it from PyPI, at the minimum `find_package(SWIG …)` in `bindings/python/CMakeLists.txt` states.
+
 The matrix job's existing install step (`tier1.yml`) gains **`swig`** and **`python3-dev`**:
 
 ```yaml
