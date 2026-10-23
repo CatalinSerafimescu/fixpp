@@ -168,11 +168,14 @@ python3 -c "import yaml" 2>/dev/null \
 # parse happens exactly once per workflow file, here.
 extract_json() {
   local workflow="$1"
-  python3 - "$workflow" <<'PYEOF'
+  python3 - "$workflow" "$repo_root/ci" <<'PYEOF'
 import json
 import re
 import sys
 import yaml
+
+sys.path.insert(0, sys.argv[2])
+from workflow_step_pin import logical_run_lines
 
 with open(sys.argv[1]) as f:
     doc = yaml.safe_load(f)
@@ -189,25 +192,6 @@ jobs = doc["jobs"]
 _on_block = doc.get("on", doc.get(True))
 push_keys = sorted(str(k) for k in _on_block["push"].keys())
 push_branches = _on_block["push"].get("branches")
-
-def logical_run_lines(run: str) -> list[str]:
-    lines = []
-    buf = ""
-    for raw in run.splitlines():
-        if raw.lstrip().startswith("#"):
-            continue
-        line = raw.rstrip()
-        if line.endswith("\\"):
-            buf += line[:-1] + " "
-            continue
-        buf += line
-        normalized = " ".join(buf.split())
-        if normalized:
-            lines.append(normalized)
-        buf = ""
-    if buf.strip():
-        lines.append(" ".join(buf.split()))
-    return lines
 
 # #254: `python-bindings` is gone. The set this pin is exact over is now the
 # `linux` job's own preset list — a list of STRINGS, not the list of dicts the
@@ -429,7 +413,11 @@ tier1_required_needs = jobs["tier1-required"]["needs"]
 # run is the dead-call-site shape this pin already guards for the derive script;
 # it was measured on the new install-witness harness (replace the invocation with
 # an echo and the job stays green, the negative layouts stop being exercised).
-ci_pin_runs = "\n".join(str(s.get("run", "")) for s in jobs["ci-script-pins"]["steps"])
+ci_pin_steps = [
+    {"name": str(s.get("name", "")), "keys": sorted(str(k) for k in s.keys()),
+     "run": str(s.get("run", ""))}
+    for s in jobs["ci-script-pins"]["steps"]
+]
 
 # #270 Gate B r1, F1. `python-wheel-build`'s CONTAINER compile does not inherit
 # the runner's environment, so CONAN_HOME and the four
@@ -550,7 +538,7 @@ out = {
     "linux_runs": linux_runs,
     "decide_run": decide_run,
     "tier1_required_needs": tier1_required_needs,
-    "ci_pin_runs": ci_pin_runs,
+    "ci_pin_steps": ci_pin_steps,
     "push_keys": push_keys,
     "push_branches": push_branches,
     "linux_matrix_keys": linux_matrix_keys,
@@ -1164,8 +1152,10 @@ SENTINEL
   # 37 -> 40 (fixpp#448): two allocation-gate steps + the unguarded outcome sentinel
   # that proves they ran. The pin demands a deliberate
   # look before this number moves, so here it is, recorded rather than asserted:
-  # both sit at indices 23-24, BEFORE the pytest pair at 33-34, so the question the pin
-  # asks is live. They cannot reach it — neither writes GITHUB_ENV or GITHUB_PATH,
+  # both sit BEFORE the pytest pair, so the question the pin asks is live (re-derive
+  # the step order with: python3 -c 'import yaml; [print(i, s.get("name")) for i, s
+  # in enumerate(yaml.safe_load(open(".github/workflows/tier1.yml"))["jobs"]["linux"]["steps"])]').
+  # They cannot reach it — neither writes GITHUB_ENV or GITHUB_PATH,
   # neither pip-installs, neither mutates the build tree (one reads `ctest -N` output,
   # the other runs already-built binaries), and both are `if:`-guarded to
   # linux-clang-release. They CAN fail the job before python runs, which is intended:
@@ -1176,8 +1166,17 @@ SENTINEL
   # census reads compile_commands.json and the headers and writes only temp files, and
   # the sentinel reads a step outcome. The census CAN fail the job before python runs,
   # which is intended.
-  [ "$got" = "42" ] \
-    || fail "$case_id: the linux job has $got steps, expected 42. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  # fixpp#607: `Install SWIG 4.5.1 from PyPI` sits right after setup-python and
+  # BEFORE the pytest pair, so the question is live, and this step DOES pip-install
+  # into the interpreter the pytest steps run. It reaches them only if the `swig`
+  # wheel adds a pytest plugin or an import-time hook: its dist-info declares only
+  # the `swig` and `swig4.0` console scripts (entry_points.txt), no `pytest11` entry
+  # and no `.pth` file — re-read that when the pinned version moves. It writes
+  # neither GITHUB_ENV nor GITHUB_PATH and does not touch the build tree. It CAN
+  # fail the job before python runs, which is intended: a leg that would configure
+  # against another SWIG should stop there.
+  [ "$got" = "43" ] \
+    || fail "$case_id: the linux job has $got steps, expected 43. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CCACHE_MAXSIZE":"2G","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1556,8 +1555,11 @@ assert_tier1_required_needs() {
 # replacing `bash ci/test-python-install-witness.sh` with an echo left this pin,
 # and the whole job, green while W1/W2/W3/W5 stopped being exercised.
 #
-# Same invokes-vs-mentions rule as everywhere else: the command must START a
-# line, so an echo naming it does not satisfy the census.
+# Each row's step is the one ci-script-pins step whose run: names the harness.
+# Through ci/workflow_step_pin.py's rule, that step's key set must be exactly
+# {name, run}, and its run: exactly `bash <h>`, preceded only by the setup line
+# CI_PIN_SETUP below names for that row. So an echo naming it, a dead branch, an
+# early exit, an `|| true`, a step if: and a continue-on-error each fail the census.
 CI_PIN_HARNESSES=(
   "ci/test-restore-conan-cache.sh"
   "ci/test-ccache-scripts.sh"
@@ -1615,17 +1617,74 @@ CI_PIN_HARNESSES=(
   # fixpp#497's sanitizer flag-match harness. ⚠️ ADDED WITH ITS OWN MUTANT (M125), same
   # dead-call-site shape as its siblings, whose mutants each prove only their own row.
   "ci/test-mallocnesia-sanitizer-match.sh"
+  # fixpp#560's first-party-walk harness. ⚠️ ADDED WITH ITS OWN MUTANT (M127), same
+  # dead-call-site shape as its siblings, whose mutants each prove only their own row.
+  "ci/test-first-party-walk.sh"
+  # fixpp#276's bench-seed harness. ⚠️ ADDED WITH ITS OWN MUTANT (M128), same
+  # dead-call-site shape as its siblings, whose mutants each prove only their own row.
+  "ci/test-bench-seed.sh"
+  # fixpp#600's SWIG %include-dependency harness. ⚠️ ADDED WITH ITS OWN MUTANT (M129),
+  # same dead-call-site shape as its siblings, whose mutants each prove only their own row.
+  "ci/test-swig-include-deps.sh"
+  # fixpp#529's packaging instrumented-skip harness. ⚠️ ADDED WITH ITS OWN MUTANT (M130),
+  # same dead-call-site shape as its siblings, whose mutants each prove only their own row.
+  "ci/test-packaging-instrumented-skip.sh"
+)
+
+# The one setup line a row's step may run before `bash <h>`, as <h>|<line>. A row
+# absent here runs `bash <h>` alone.
+CI_PIN_SETUP=(
+  'ci/test-tier1-python-policy.sh|python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml'
+  'ci/test-sanitized-deps.sh|python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml'
+  'ci/test-swig-include-deps.sh|pip install --quiet swig ninja'
 )
 
 assert_ci_pin_call_sites() {
-  local json="$1" case_id="$2"
-  local runs h
-  runs="$(echo "$json" | jq -r '.ci_pin_runs // ""')"
-  [ -n "$runs" ] || fail "$case_id: the ci-script-pins job has no run: text at all"
-  for h in "${CI_PIN_HARNESSES[@]}"; do
-    grep -qE "^[[:space:]]*bash ${h//\//\\/}([[:space:]]|\$)" <<<"$runs" \
-      || fail "$case_id: ci-script-pins does not INVOKE \`bash $h\` — the harness would never run, so its assertions have no durable coverage (a mention inside an echo does not count)"
-  done
+  local json="$1" case_id="$2" steps out
+  steps="$(echo "$json" | jq -c '.ci_pin_steps // []')"
+  out="$(CI_PIN_STEPS="$steps" python3 - "$repo_root/ci" "${#CI_PIN_SETUP[@]}" \
+           "${CI_PIN_SETUP[@]}" "${CI_PIN_HARNESSES[@]}" <<'PY'
+import json, os, re, sys
+
+sys.path.insert(0, sys.argv[1])
+from workflow_step_pin import logical_run_lines, step_pin_check
+
+n = int(sys.argv[2])
+setup = dict(row.split("|", 1) for row in sys.argv[3:3 + n])
+harnesses = sys.argv[3 + n:]
+steps = json.loads(os.environ["CI_PIN_STEPS"])
+errors = [f"CI_PIN_SETUP names {h}, which is not a CI_PIN_HARNESSES row"
+          for h in setup if h not in harnesses]
+if not steps:
+    errors.append("the ci-script-pins job has no steps at all")
+for h in harnesses:
+    names = re.compile(r"(?<![\w./-])" + re.escape(h) + r"(?![\w./-])")
+    hits = [st for st in steps if any(names.search(l) for l in logical_run_lines(st["run"]))]
+    if not hits:
+        errors.append(f"ci-script-pins does not INVOKE `bash {h}`: no step's run: names it, "
+                      "so the harness would never run")
+        continue
+    if len(hits) > 1:
+        errors.append(f"ci-script-pins: {len(hits)} steps name `{h}`, expected exactly 1")
+        continue
+    st = hits[0]
+    step = dict.fromkeys(st["keys"])
+    if "run" in step:
+        step["run"] = st["run"]
+    want = ([setup[h]] if h in setup else []) + [f"bash {h}"]
+    bad_keys, diff = step_pin_check(step, want)
+    if bad_keys:
+        errors.append(f"ci-script-pins step {st['name']!r}, which invokes `bash {h}`: "
+                      f"key set differs from name/run by {bad_keys}")
+    if diff:
+        errors.append(f"ci-script-pins does not INVOKE `bash {h}` unconditionally: "
+                      f"step {st['name']!r} run: {diff}")
+if errors:
+    print(" | ".join(errors))
+    sys.exit(1)
+print(f"{len(harnesses)} harness step(s) pinned")
+PY
+)" || fail "$case_id: $out"
 }
 
 assert_bench_base_runner_manifest_calls() {
@@ -1891,6 +1950,126 @@ assert_coverage_step_count() {
     || fail "$case_id: the coverage job has $got steps, expected 25. This is coverage's OWN count pin, independent of the linux job's — deleting the coverage job's trim step must not hide behind the linux count staying correct."
 }
 
+# ── fixpp#607: every literal that states the SWIG minimum agrees ────────────
+# The minimum is stated in several places, none derived from another: the
+# CMake floor, the wheel's build requirement, and, in tier1.yml and
+# parallelism-measure.yml, the version each 'Install SWIG' step installs and the
+# version it then checks.
+# CI installs that version, so a floor lowered in one place leaves every build green;
+# only a comparison sees the drift. Each literal is read from code (non-comment CMake,
+# TOML, a parsed workflow step's run: text), never from the comments and messages
+# that repeat it, and each surface must state it exactly once.
+SWIG_CMAKE="$repo_root/bindings/python/CMakeLists.txt"
+SWIG_PYPROJECT="$repo_root/bindings/python/pyproject.toml"
+SWIG_PARWF="$repo_root/.github/workflows/parallelism-measure.yml"
+
+assert_swig_minimum_agrees() {  # <case_id> <CMakeLists.txt> <pyproject.toml> <tier1.yml> <parallelism-measure.yml>
+  local case_id="$1" out
+  out="$(python3 - "$2" "$3" "$4" "$5" <<'PY'
+import collections, re, sys, tomllib, yaml
+
+cmake, pyproject, tier1, par = sys.argv[1:5]
+VER = r"([0-9]+(?:\.[0-9]+)*)"
+stated, errors = [], []
+
+def one(label, values):
+    if len(values) != 1:
+        errors.append(f"{label}: found {len(values)} statement(s), expected exactly 1")
+    else:
+        stated.append((label, values[0]))
+
+calls = [l.split("#", 1)[0] for l in open(cmake) if re.match(r"\s*find_package\(\s*SWIG\b", l.split("#", 1)[0])]
+one("bindings/python/CMakeLists.txt find_package(SWIG <min>)",
+    [m.group(1) for c in calls for m in [re.match(r"\s*find_package\(\s*SWIG\s+" + VER + r"\b", c)] if m]
+    + ["<no version>" for c in calls if not re.match(r"\s*find_package\(\s*SWIG\s+" + VER + r"\b", c)])
+
+reqs = tomllib.load(open(pyproject, "rb")).get("build-system", {}).get("requires", [])
+swig = [r for r in reqs if re.match(r"\s*swig(?![\w.-])", r, re.I)]
+one("bindings/python/pyproject.toml build-system.requires swig>=<min>",
+    [(m.group(1) if m else f"<not swig>=X: {r!r}>")
+     for r in swig for m in [re.fullmatch(r"\s*swig\s*>=\s*" + VER + r"\s*", r, re.I)]])
+
+for wf_label, wf in (("tier1.yml", tier1), ("parallelism-measure.yml", par)):
+    doc = yaml.safe_load(open(wf))
+    steps = [st for job in (doc.get("jobs") or {}).values() for st in (job.get("steps") or [])
+             if re.match(r"Install SWIG\b", str(st.get("name", "")))]
+    if len(steps) != 1:
+        errors.append(f"{wf_label}: found {len(steps)} 'Install SWIG' step(s), expected exactly 1")
+        continue
+    run = str(steps[0].get("run", ""))
+    one(f"{wf_label} 'Install SWIG' step: pip install swig==<min>",
+        re.findall(r"(?m)^\s*pip install swig==" + VER + r"\s*$", run))
+    one(f"{wf_label} 'Install SWIG' step: the [ \"$v\" != \"<min>\" ] comparand",
+        re.findall(r'\[ "\$v" != "' + VER + r'" \]', run))
+
+if not errors:
+    count = collections.Counter(v for _, v in stated)
+    ref, n = count.most_common(1)[0]
+    if len(count) > 1:
+        if n * 2 > len(stated):
+            errors += [f"{label} states {v}, where the other {n} surface(s) state {ref}"
+                       for label, v in stated if v != ref]
+        else:
+            errors.append("no majority: " + "; ".join(f"{label} = {v}" for label, v in stated))
+if errors:
+    print("the SWIG minimum is not stated once and identically on every surface (#607): " + " | ".join(errors))
+    sys.exit(1)
+print(f"{stated[0][1]} on all {len(stated)} surfaces")
+PY
+)" || fail "$case_id: $out"
+  echo "$out"
+}
+
+# The two 'Install SWIG' steps the minimum check reads must also RUN: their key
+# set is exactly {name, run} and their run: equals the commands below, through
+# ci/workflow_step_pin.py's rule. Every dotted version number in the step is read
+# as <min> before the compare, so this check does not read the version; the
+# agreement check above does (M146 is the GREEN control for that).
+assert_swig_install_steps() {  # <case_id> <tier1.yml> <parallelism-measure.yml>
+  local case_id="$1" out
+  out="$(python3 - "$repo_root/ci" "$2" "$3" <<'PY'
+import re, sys, yaml
+
+sys.path.insert(0, sys.argv[1])
+from workflow_step_pin import step_pin_check
+
+GOLDEN = r'''set -euo pipefail
+pip install swig==<min>
+type -a -P swig4.0 swig || true
+for n in swig4.0 swig; do
+p="$(command -v "$n")" || { echo "::error::no $n on PATH after pip install swig==<min> (#607)."; exit 1; }
+v="$("$p" -version | sed -n 's/^SWIG Version //p')"
+echo "$n -> $p ($v)"
+if [ "$v" != "<min>" ]; then
+echo "::error::the first $n on PATH is $p (SWIG $v), not PyPI's <min> (#607)."
+exit 1
+fi
+done'''.splitlines()
+VERSION = re.compile(r"(?<![\w.])[0-9]+(?:\.[0-9]+)+(?![\w.])")
+
+errors = []
+for label, wf in (("tier1.yml", sys.argv[2]), ("parallelism-measure.yml", sys.argv[3])):
+    doc = yaml.safe_load(open(wf))
+    steps = [st for job in (doc.get("jobs") or {}).values() for st in (job.get("steps") or [])
+             if re.match(r"Install SWIG\b", str(st.get("name", "")))]
+    if len(steps) != 1:
+        errors.append(f"{label}: found {len(steps)} 'Install SWIG' step(s), expected exactly 1")
+        continue
+    step = dict(steps[0], run=VERSION.sub("<min>", str(steps[0].get("run", ""))))
+    bad_keys, diff = step_pin_check(step, GOLDEN)
+    if bad_keys:
+        errors.append(f"{label} 'Install SWIG' step: key set differs from name/run by {bad_keys}")
+    if diff:
+        errors.append(f"{label} 'Install SWIG' step: run: {diff}")
+if errors:
+    print("an 'Install SWIG' step does not run exactly the pinned commands (#607): " + " | ".join(errors))
+    sys.exit(1)
+print("both steps are name/run only and run the pinned commands")
+PY
+)" || fail "$case_id: $out"
+  echo "$out"
+}
+
 # Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
 # and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
@@ -1917,6 +2096,12 @@ run_full_pin() {
 # ── Real workflow: must pass all four assertions ────────────────────────────
 run_full_pin "$WORKFLOW" "tier1.yml"
 echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_RE case table + tier1-required needs — $WORKFLOW"
+# Assigned, then echoed: `fail` inside an echo argument's $(...) would exit only
+# that subshell, and the PASS line would print.
+swig_min="$(assert_swig_minimum_agrees swig-minimum "$SWIG_CMAKE" "$SWIG_PYPROJECT" "$WORKFLOW" "$SWIG_PARWF")"
+echo "PASS: SWIG minimum — $swig_min"
+swig_steps="$(assert_swig_install_steps swig-install-steps "$WORKFLOW" "$SWIG_PARWF")"
+echo "PASS: SWIG install steps — $swig_steps"
 
 # ── Mutant witnesses: each must be shown RED before this pin is trusted ─────
 # (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree —
@@ -1939,7 +2124,23 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=112  # M126 (the #448 gate-step guard narrowed to one Release leg, fixpp#544) +
+MUTANTS_DECLARED=132  # M146 (GREEN control: the install-step check does not read the
+                     # version; fixpp#607) +
+                     # M141-M145 (a ci-script-pins harness step that stops running or
+                     # gating with the call text intact, one mutant per shape; fixpp#529) +
+                     # M138-M140 (the 'Install SWIG' steps' key set and run: golden,
+                     # one mutant per shape; fixpp#607) +
+                     # M131-M137 (the SWIG minimum's literals, one mutant each, plus
+                     # an unpinned install; fixpp#607) +
+                     # M130 (the ci-script-pins call-site pin for
+                     # ci/test-packaging-instrumented-skip.sh, fixpp#529) +
+                     # M129 (the ci-script-pins call-site pin for ci/test-swig-include-deps.sh,
+                     # fixpp#600) +
+                     # M128 (the ci-script-pins call-site pin for ci/test-bench-seed.sh,
+                     # fixpp#276) +
+                     # M127 (the ci-script-pins call-site pin for ci/test-first-party-walk.sh,
+                     # fixpp#560) +
+                     # M126 (the #448 gate-step guard narrowed to one Release leg, fixpp#544) +
                      # M125 (the ci-script-pins call-site pin for
                      # ci/test-mallocnesia-sanitizer-match.sh, fixpp#497) + M116 M117 (the #448 gate steps' key sets, fixpp#543) + M118 M119 (their
                      # pinned run: commands) + M120 (the #448 sentinel's existence pin) +
@@ -2573,6 +2774,100 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
 
+  # M127 (fixpp#560): the SAME dead-call-site shape, on the first-party-walk harness.
+  # The reason must name this harness, so a sibling row firing cannot satisfy it.
+  mutate_workflow M127 "the first-party-walk harness call site replaced by an echo" "ci-script-pins does not INVOKE .bash ci/test-first-party-walk\\.sh." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-first-party-walk.sh\n"
+new = "        run: echo \"bash ci/test-first-party-walk.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M128 (fixpp#276): the SAME dead-call-site shape, on the bench-seed harness.
+  # The reason must name this harness, so a sibling row firing cannot satisfy it.
+  mutate_workflow M128 "the bench-seed harness call site replaced by an echo" "ci-script-pins does not INVOKE .bash ci/test-bench-seed\\.sh." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-bench-seed.sh\n"
+new = "        run: echo \"bash ci/test-bench-seed.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M129 (fixpp#600): the SAME dead-call-site shape, on the SWIG %include-dependency
+  # harness, whose call sits in a multi-line run: after its install line. The reason
+  # must name this harness, so a sibling row firing cannot satisfy it.
+  mutate_workflow M129 "the SWIG include-deps harness call site replaced by an echo" "ci-script-pins does not INVOKE .bash ci/test-swig-include-deps\\.sh." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          bash ci/test-swig-include-deps.sh\n"
+new = "          echo \"bash ci/test-swig-include-deps.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M130 (fixpp#529): the SAME dead-call-site shape, on the packaging instrumented-skip
+  # harness. The reason must name this harness, so a sibling row firing cannot satisfy it.
+  mutate_workflow M130 "the packaging instrumented-skip harness call site replaced by an echo" "ci-script-pins does not INVOKE .bash ci/test-packaging-instrumented-skip\\.sh." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-packaging-instrumented-skip.sh\n"
+new = "        run: echo \"bash ci/test-packaging-instrumented-skip.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M141-M145 (fixpp#529): the census rows' steps keep `bash <h>` in their text and
+  # stop running it or gating on it, one shape per mutant, each on a different row.
+  mutate_workflow M141 "the SWIG include-deps call inside a dead branch" "does not INVOKE .bash ci/test-swig-include-deps\\.sh. unconditionally: .* line 2 is 'if false; then'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          bash ci/test-swig-include-deps.sh\n"
+new = "          if false; then\n            bash ci/test-swig-include-deps.sh\n          fi\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+  mutate_workflow M142 "the bench-seed step disabled by a step if:" "invokes .bash ci/test-bench-seed\\.sh.: key set differs from name/run by \\['if'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-bench-seed.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "        if: false\n" + old))
+'
+  mutate_workflow M143 "the packaging instrumented-skip step made non-gating" "invokes .bash ci/test-packaging-instrumented-skip\\.sh.: key set differs from name/run by \\['continue-on-error'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-packaging-instrumented-skip.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "        continue-on-error: true\n" + old))
+'
+  mutate_workflow M144 "the first-party-walk step exits before its call" "does not INVOKE .bash ci/test-first-party-walk\\.sh. unconditionally: .* line 1 is 'exit 0'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-first-party-walk.sh\n"
+new = "        run: |\n          exit 0\n          bash ci/test-first-party-walk.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+  mutate_workflow M145 "the bench-gate call swallowed by || true" "does not INVOKE .bash ci/test-bench-gate\\.sh. unconditionally: .* line 1 is 'bash ci/test-bench-gate\\.sh \\|\\| true'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-bench-gate.sh\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "        run: bash ci/test-bench-gate.sh || true\n"))
+'
+
   # M107 (fixpp#530): the SAME dead-call-site shape, on the ODR census harness.
   mutate_workflow M107 "the ODR census harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
 import sys
@@ -2947,7 +3242,7 @@ open(dst, "w").write(t.replace(old, new))
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 43 steps, expected 42" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 44 steps, expected 43" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -3882,6 +4177,176 @@ new = old + "    tags: [\x22v*\x22]\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new, 1))
 '
+  # ── M131-M137 (fixpp#607): the SWIG minimum's surfaces ──────────────────
+  # One mutant per literal, each moving that literal alone; the reason must name
+  # the surface that moved and its new value. mutate_workflow mutates tier1.yml only,
+  # so these swap whichever of the four files they name.
+  mutate_swig() {  # <id> <label> <file: cmake|pyproject|tier1|par> <grep-re> <python-src>
+    local _id="$1" _label="$2" _which="$3" _why="$4" _py="$5"
+    local _c="$SWIG_CMAKE" _p="$SWIG_PYPROJECT" _t="$WORKFLOW" _w="$SWIG_PARWF" _src _f
+    local _o="$mut_dir/${_id}_out"
+    case "$_which" in
+      cmake) _src="$_c" ;; pyproject) _src="$_p" ;; tier1) _src="$_t" ;; par) _src="$_w" ;;
+      *) fail "$_id: unknown SWIG surface '$_which'" ;;
+    esac
+    _f="$mut_dir/swig-$_id-$(basename "$_src")"
+    python3 - "$_src" "$_f" <<<"$_py"
+    if cmp -s "$_src" "$_f"; then
+      fail "$_id: replacement produced no change — mutant not applied"
+    fi
+    case "$_which" in
+      cmake) _c="$_f" ;; pyproject) _p="$_f" ;; tier1) _t="$_f" ;; par) _w="$_f" ;;
+    esac
+    if ( assert_swig_minimum_agrees "$_id" "$_c" "$_p" "$_t" "$_w" ) >"$_o" 2>&1; then
+      fail "$_id ($_label) did NOT fail the SWIG minimum check"
+    fi
+    grep -qE "$_why" "$_o" \
+      || fail "$_id failed the SWIG minimum check for the WRONG reason: $(scrub_wf_cmds "$(cat "$_o")")"
+    echo "RED (expected): $_id ($_label) — $(scrub_wf_cmds "$(cat "$_o")")"
+    MUTANTS_RUN=$((MUTANTS_RUN + 1))
+  }
+
+  mutate_swig M131 "the CMake floor lowered" cmake "CMakeLists.txt find_package.SWIG <min>. states 4\\.2, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "find_package(SWIG 4.5.1 REQUIRED)\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "find_package(SWIG 4.2 REQUIRED)\n"))
+'
+
+  mutate_swig M132 "the wheel build requirement lowered" pyproject "pyproject.toml build-system.requires swig>=<min> states 4\\.2, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "\x22swig>=4.5.1\x22]"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "\x22swig>=4.2\x22]"))
+'
+
+  mutate_swig M133 "tier1 installs another SWIG" tier1 "tier1.yml .Install SWIG. step: pip install swig==<min> states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          pip install swig==4.6.0\n"))
+'
+
+  mutate_swig M134 "tier1 checks for another SWIG" tier1 "tier1.yml .Install SWIG. step: the .* comparand states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "[ \x22$v\x22 != \x224.5.1\x22 ]"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "[ \x22$v\x22 != \x224.6.0\x22 ]"))
+'
+
+  mutate_swig M135 "parallelism-measure installs another SWIG" par "parallelism-measure.yml .Install SWIG. step: pip install swig==<min> states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          pip install swig==4.6.0\n"))
+'
+
+  mutate_swig M136 "parallelism-measure checks for another SWIG" par "parallelism-measure.yml .Install SWIG. step: the .* comparand states 4\\.6\\.0, " '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "[ \x22$v\x22 != \x224.5.1\x22 ]"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "[ \x22$v\x22 != \x224.6.0\x22 ]"))
+'
+
+  # M137: the install unpinned. No literal moves; the surface stops stating one,
+  # which the exactly-once rule must report rather than skip.
+  mutate_swig M137 "tier1 installs PyPI's latest SWIG" tier1 "tier1.yml .Install SWIG. step: pip install swig==<min>: found 0 statement" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          pip install swig\n"))
+'
+
+  # ── M138-M140 (fixpp#607): the 'Install SWIG' steps must run ──────────────
+  # Each keeps every version literal and stops the step running or gating, one
+  # shape per mutant; the reason must name the workflow and the shape.
+  mutate_swig_step() {  # <id> <label> <file: tier1|par> <grep-re> <python-src>
+    local _id="$1" _label="$2" _which="$3" _why="$4" _py="$5"
+    local _t="$WORKFLOW" _w="$SWIG_PARWF" _src _f
+    local _o="$mut_dir/${_id}_out"
+    case "$_which" in
+      tier1) _src="$_t" ;; par) _src="$_w" ;;
+      *) fail "$_id: unknown workflow '$_which'" ;;
+    esac
+    _f="$mut_dir/swigstep-$_id-$(basename "$_src")"
+    python3 - "$_src" "$_f" <<<"$_py"
+    if cmp -s "$_src" "$_f"; then
+      fail "$_id: replacement produced no change — mutant not applied"
+    fi
+    case "$_which" in tier1) _t="$_f" ;; par) _w="$_f" ;; esac
+    if ( assert_swig_install_steps "$_id" "$_t" "$_w" ) >"$_o" 2>&1; then
+      fail "$_id ($_label) did NOT fail the SWIG install-step check"
+    fi
+    grep -qE "$_why" "$_o" \
+      || fail "$_id failed the SWIG install-step check for the WRONG reason: $(scrub_wf_cmds "$(cat "$_o")")"
+    echo "RED (expected): $_id ($_label) — $(scrub_wf_cmds "$(cat "$_o")")"
+    MUTANTS_RUN=$((MUTANTS_RUN + 1))
+  }
+
+  mutate_swig_step M138 "tier1's step disabled by a step if:" tier1 "tier1\\.yml 'Install SWIG' step: key set differs from name/run by \\['if'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Install SWIG 4.5.1 from PyPI (#607)\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "        if: false\n"))
+'
+
+  mutate_swig_step M139 "parallelism-measure's step made non-gating" par "parallelism-measure\\.yml 'Install SWIG' step: key set differs from name/run by \\['continue-on-error'\\]" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Install SWIG 4.5.1 from PyPI (#607)\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "        continue-on-error: true\n"))
+'
+
+  mutate_swig_step M140 "tier1's step exits before installing" tier1 "tier1\\.yml 'Install SWIG' step: run: line 2 is 'exit 0', expected 'pip install swig==<min>'" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          pip install swig==4.5.1\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, "          exit 0\n" + old))
+'
+
+  # M146 — the GREEN control for M138-M140's check: tier1's step with every version
+  # in it moved (a minimum bump on that surface) must still pass the install-step
+  # check, which leaves the version to the agreement check.
+  local m146="$mut_dir/tier1-m146.yml" m146_out="$mut_dir/m146_out"
+  python3 - "$WORKFLOW" "$m146" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("      - name: Install SWIG 4.5.1 from PyPI (#607)\n")
+end = t.index("      - name: ", start + 1)
+step = t[start:end]
+assert step.count("4.5.1") >= 3, step.count("4.5.1")
+open(dst, "w").write(t[:start] + step.replace("4.5.1", "4.6.0") + t[end:])
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m146"; then
+    fail "M146: python literal-replace produced no change — the positive control was not applied, so it proves nothing"
+  fi
+  if ! ( assert_swig_install_steps M146 "$m146" "$SWIG_PARWF" ) >"$m146_out" 2>&1; then
+    fail "M146 (tier1's Install SWIG step with its versions moved) went RED: the install-step check reads the version, which belongs to the agreement check alone. Output: $(scrub_wf_cmds "$(cat "$m146_out")")"
+  fi
+  GREEN_CONTROLS=$((GREEN_CONTROLS + 1))
+  echo "GREEN (expected): M146 (tier1's Install SWIG step with its versions moved) — the install-step check does not read the version"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
 }
 
 run_mutant_checks

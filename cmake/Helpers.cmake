@@ -193,15 +193,61 @@ endif()
 #   fixpp_collect_buildsystem_targets(<out-var> <type-regex>)
 #
 # Sets <out-var> to every target defined so far whose TYPE matches <type-regex>,
-# walking each directory's BUILDSYSTEM_TARGETS recursively from the source root.
-# Callers apply their own filter and action, and must run DEFERRED (see #417).
+# walking each directory's BUILDSYSTEM_TARGETS recursively from fixpp's own
+# source root. Callers apply their own filter and action, and must run DEFERRED
+# (see #417).
+#
+# ⚠️ FIRST-PARTY ONLY, BY LOCATION (#560). The walk starts at PROJECT_SOURCE_DIR,
+# never CMAKE_SOURCE_DIR: embedded in a superproject the latter is the
+# superproject's root, and fixpp's policy would reach the superproject's own
+# targets. It also prunes, with its whole subtree, every subdirectory that is
+#   - outside PROJECT_SOURCE_DIR (an out-of-tree add_subdirectory, or a
+#     FetchContent dependency whose source lives elsewhere), or
+#   - a FetchContent dependency: its BINARY_DIR lies under FETCHCONTENT_BASE_DIR
+#     (default ${CMAKE_BINARY_DIR}/_deps). This is what catches a dependency
+#     whose SOURCE_DIR was pointed inside this tree, since FetchContent places
+#     its binary directory under the base either way.
+# When fixpp is itself fetched, its own binary directory lies under that base
+# too, so a subdirectory whose binary directory is under fixpp's is kept.
+#
+# ⚠️ THIS FAILS TOWARD CLEAN: a pruned first-party directory loses fixpp's flags
+# with no error. A first-party target is missed if it is declared in a directory
+# added from outside PROJECT_SOURCE_DIR, given a binary directory under
+# FETCHCONTENT_BASE_DIR, or declared by a fixpp helper called from a superproject
+# directory; or if the walk is called from a directory whose project() is not
+# fixpp's. To compare the enumerated set, configure with --log-level=DEBUG and
+# read the "fixpp: buildsystem walk" lines.
 function(fixpp_collect_buildsystem_targets out_var type_regex)
-  set(_dirs "${CMAKE_SOURCE_DIR}")
+  set(_root "${PROJECT_SOURCE_DIR}")
+  get_property(_root_bin DIRECTORY "${_root}" PROPERTY BINARY_DIR)
+  if(DEFINED FETCHCONTENT_BASE_DIR)
+    set(_fc_base "${FETCHCONTENT_BASE_DIR}")
+  else()
+    set(_fc_base "${CMAKE_BINARY_DIR}/_deps")
+  endif()
+  cmake_path(IS_PREFIX _fc_base "${_root_bin}" NORMALIZE _root_is_fetched)
+  set(_dirs "${_root}")
   set(_found "")
+  set(_pruned "")
   while(_dirs)
     list(POP_FRONT _dirs _dir)
     get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
-    list(APPEND _dirs ${_subdirs})
+    foreach(_sub IN LISTS _subdirs)
+      get_property(_sub_bin DIRECTORY "${_sub}" PROPERTY BINARY_DIR)
+      cmake_path(IS_PREFIX _root "${_sub}" NORMALIZE _in_tree)
+      cmake_path(IS_PREFIX _fc_base "${_sub_bin}" NORMALIZE _fetched)
+      if(_fetched AND _root_is_fetched)
+        cmake_path(IS_PREFIX _root_bin "${_sub_bin}" NORMALIZE _ours)
+        if(_ours)
+          set(_fetched FALSE)
+        endif()
+      endif()
+      if(NOT _in_tree OR _fetched)
+        list(APPEND _pruned "${_sub}")
+      else()
+        list(APPEND _dirs "${_sub}")
+      endif()
+    endforeach()
     get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
     foreach(_tgt IN LISTS _targets)
       get_target_property(_type ${_tgt} TYPE)
@@ -210,6 +256,8 @@ function(fixpp_collect_buildsystem_targets out_var type_regex)
       endif()
     endforeach()
   endwhile()
+  message(DEBUG "fixpp: buildsystem walk (${type_regex}) from ${_root}: ${_found}")
+  message(DEBUG "fixpp: buildsystem walk pruned: ${_pruned}")
   set(${out_var} "${_found}" PARENT_SCOPE)
 endfunction()
 
@@ -222,12 +270,15 @@ endfunction()
 # every preset inheriting `_base`) turned no warning into an error anywhere.
 # A per-target call list would repeat that failure the next time a target is
 # added without it, so the targets are ENUMERATED from the buildsystem instead:
-# every directory's BUILDSYSTEM_TARGETS, recursively from the source root.
+# every directory's BUILDSYSTEM_TARGETS, recursively from fixpp's source root
+# (see fixpp_collect_buildsystem_targets above for what it prunes).
 #
-# ⚠️ CALL IT DEFERRED — `cmake_language(DEFER DIRECTORY ${CMAKE_SOURCE_DIR}
-# CALL ...)` — for the reason `fixpp_assert_every_fuzz_harness_replays` gives:
-# BUILDSYSTEM_TARGETS holds only the targets defined so far, so an inline call
-# would silently skip everything declared after it.
+# ⚠️ CALL IT DEFERRED — `cmake_language(DEFER CALL ...)` from fixpp's top-level
+# CMakeLists.txt — for the reason `fixpp_assert_every_fuzz_harness_replays`
+# gives: BUILDSYSTEM_TARGETS holds only the targets defined so far, so an inline
+# call would silently skip everything declared after it. Defer to fixpp's own
+# directory, not `DEFER DIRECTORY ${CMAKE_SOURCE_DIR}`: embedded, that is the
+# superproject's root, and the walk would run only after the whole superproject.
 #
 # ⚠️ OPT-OUT IS PER TARGET AND CARRIES A REASON. Set the target property
 # FIXPP_WERROR_EXEMPT to the reason. The deliberate case is a negative-compile
@@ -343,7 +394,7 @@ endfunction()
 # top-level CMakeLists.txt. The per-harness `fuzz_libcov_*` ctests (registered
 # by fixpp_add_fuzz_replay() below) check the effect on the linked binaries.
 function(fixpp_instrument_libraries_for_fuzzing)
-  set(_src_root "${CMAKE_SOURCE_DIR}/src")
+  set(_src_root "${PROJECT_SOURCE_DIR}/src")
   fixpp_collect_buildsystem_targets(_targets
     "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
   set(_instrumented "")
