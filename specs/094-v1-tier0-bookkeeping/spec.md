@@ -996,7 +996,8 @@ in those files are licence comment lines.
   falls by 25 − k and the done count rises by 18 − k (FR-016), and the verify record names the k rows.
 - **SC-002**: 100 % of the tests cited in the 18 flipped rows exist literally and pass on this branch,
   and every clause in the data-model §H map has its assertion recorded. "Exist" is research R-11's
-  counting rule and check (54 distinct entries since FR-022b, 55 since FR-022c, 59 since FR-022b's round-3 extension, both negative controls reporting MISSING); "pass" is
+  counting rule and check (every distinct entry the 18 rows' Tests cells cite exists, both negative
+  controls reporting MISSING; the verify record's latest Gate B round section records the re-run); "pass" is
   each named test's PASSED read from its binary's own output, not from ctest's exit code (quickstart
   §2).
 - **SC-003**: 0 constitution clauses state the service wrapper, gRPC control plane or iceoryx2 data
