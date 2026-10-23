@@ -346,7 +346,7 @@ The order is the canonical pipeline (`.specify/pipeline.md`).
      deleting the `if (invalid_encrypt_method_seen)` return in `interpret_logon`
      (`src/session/admin_messages.cpp`); and FR-022b's D-001 census cell, proven RED by its field and
      message mutants in the loader (spec FR-022b; owner ruling, 2026-10-22); and, at Gate B round 1,
-     FR-022c's D-008 census cell, proven RED by its two emitter mutants (owner ruling, 2026-10-23).
+     FR-022c's D-008 census cell, proven RED by its emitter mutants and its test-side mutant (owner rulings, 2026-10-23).
 4. **Verify**:
    - one full Linux build (the comment edits compile), and the packaging lane's RPM build;
    - the full test suites of the modules the 37 inserts touch, and the witness binaries of the 18 rows

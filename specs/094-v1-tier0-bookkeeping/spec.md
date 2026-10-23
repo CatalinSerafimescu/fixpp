@@ -796,34 +796,73 @@ in those files are licence comment lines.
     and body, and exactly once per class (once per message for `view()`), so a second member of that
     shape cannot carry a lookup. `Reify.hpp`'s `owning_<Msg>` accessors (`emit_reify.cpp`) are
     outside the population.
-  - **What it asserts.** A closed grammar, not a forbidden-token list: every line of the file is one
-    of the shapes the emitter writes (the pinned include set, the namespace and class lines, the
-    constructors and members, the `static_assert`s, comments), and every member function matches
-    one of the accessor templates in full, signature and body, or one of the two exclusions. Any
-    other line fails the cell. A deliberate emitter change that adds an accessor shape must add it
-    to the cell by hand.
-  - **Positive control.** A guard runs first: the classifier accepts a synthetic text holding each
-    real accessor shape and rejects each of a set of seeded runtime-resolution shapes (a tag looked
-    up by name, a tag read from a runtime-indexed table, a type chosen at runtime, an extra include,
-    a namespace-scope table, a dictionary member, an accessor without `[[nodiscard]] inline`, a
-    second passthrough). Then, per version, the classified typed-accessor count is nonzero, and for
-    every class the set of tags its typed accessors bind equals the set the version's `Fields.hpp`
-    declares for it: a message's `<Msg>_fields[]` rows with `group_no_tag` 0, and a group
-    flyweight `G_K`'s rows with `group_no_tag` K across every message. `Fields.hpp` is written by
-    another emitter (`emit_fields.cpp`) from the same IR, so the check proves the walk reached every
-    accessor the version declares; dictionary completeness is D-001's census and the 082 tests'.
-  - **RED proof.** Two mutants, each in a scratch copy on F: (`git archive HEAD | tar -x` of a head
-    that holds the cell), each in `emit_scalar` in
-    `tools/codegen/fixpp-codegen/emit_messages.cpp`, so the configure-time codegen writes it into
-    every version's header:
+  - **What it asserts.** Three checks over each version's `Messages.hpp`, each with its own assertion:
+    - *Grammar.* A closed grammar, not a forbidden-token list: every line of the file is one of the
+      shapes the emitter writes (the pinned include set, the namespace and class lines, the
+      constructors and members, the `static_assert`s, comments), and every member function matches
+      one of the accessor templates in full, signature and body, or one of the two exclusions. Any
+      other line fails the cell. A deliberate emitter change that adds an accessor shape must add it
+      to the cell by hand.
+    - *Population.* For every class, the set of tags its typed accessors bind equals the set the
+      version's `Fields.hpp` declares for it, less the rows whose data type the mapping below omits:
+      a message's `<Msg>_fields[]` rows with `group_no_tag` 0, and a group flyweight `G_K`'s rows
+      with `group_no_tag` K across every message. No tag is bound twice, and the classified count
+      equals the `Fields.hpp`-derived count. `Fields.hpp` is written by another emitter
+      (`emit_fields.cpp`) from the same IR, so the check proves the walk reached every accessor the
+      version declares; dictionary completeness is D-001's census and the 082 tests'.
+    - *Identity.* Per accessor, its name and its value type. The name: the accessor's identifier is
+      the accessor name of its tag's field name in the dictionary the version is generated from
+      (`FIX42.xml`, `FIX44.xml`, `FIX50SP2.xml`, `FIXT11.xml`, and `orchestra/OrchestraFIXLatest.xml`
+      for vlatest, read with `XmlLoader` or `OrchestraLoader` as `build_ir` reads them), under the
+      naming rule restated in the cell (`to_accessor`'s documented rule; a group accessor first drops
+      a leading "No", as `strip_no_prefix` does). The base name followed by `_t<tag>` is accepted
+      only when another accessor of the class holds the base name, the emitter's collision form;
+      which of the two holds the base name is not checked. The value type: a tag that heads a group
+      in `Fields.hpp` has a group accessor, and any other has the kind that a restatement, in the
+      cell, of the codegen's data-type mapping (`kind_of`) assigns to its `Fields.hpp` data type.
+      The restatement is the design mapping, not each field's correct type: it carries
+      MultiCharValue → char, which fixpp#621 reports as wrong, so a wrong mapping is not caught. The
+      field names come from the library's loaders, which the codegen also uses; a loader defect is
+      D-001's census subject, not this cell's.
+  - **Positive control.** A guard runs first, over a synthetic `Messages.hpp`, a synthetic
+    `Fields.hpp` and a synthetic name map:
+    - the synthetic text passes all three checks, an accessor in the `_t<tag>` collision form
+      included;
+    - each of a set of seeded runtime-resolution shapes fails the grammar (a tag looked up by name,
+      a tag read from a runtime-indexed table, a type chosen at runtime, an extra include, a
+      namespace-scope table, a dictionary member, an accessor without `[[nodiscard]] inline`, a
+      second passthrough);
+    - each seeded identity mutation passes the grammar and the population check and fails the
+      identity check, so the identity check is what catches it: two same-type message accessors'
+      tag literals swapped; a scalar's return and `decode_field<T>` type changed together; a message
+      scalar, a group-entry scalar, a group accessor and a nested-group accessor renamed; a `_t<tag>`
+      suffix naming another tag, or used with no collision; and a `Fields.hpp` data type changed
+      under a char and under a decimal accessor.
+
+    Then, per version, the classified typed-accessor count is nonzero, and the version's dictionary
+    loads and names its `Fields.hpp` tags.
+  - **RED proof.** Emitter mutants, each in a scratch copy on F: (`git archive HEAD | tar -x` of a
+    head that holds the cell), each in `tools/codegen/fixpp-codegen/emit_messages.cpp`, so the
+    configure-time codegen writes it into every version's header:
     - (a) the message-flyweight path: ClOrdID(11)'s accessor resolves its tag at runtime, by name,
       through a function-local name→tag table, and reads it with `view_.get(tag)`;
     - (b) the group-entry path: one group-entry scalar accessor resolves its tag the same way and
-      passes it to `::fixpp::wire::get`.
-    - Before the run, the scratch's generated `Messages.hpp` is checked to hold the mutant bytes.
-      The whole `codegen_pure_tests` binary runs unfiltered. FR-022's "What counts as RED" applies:
-      the cell fails at its unclassified-line assertion naming the mutated accessor, and the binary
-      exits 1, not with an abort.
+      passes it to `::fixpp::wire::get`;
+    - (c) a tag swap that keeps the tag set: NewOrderSingle's (MsgType D) Account(1) and ClOrdID(11)
+      accessors are emitted under each other's names, so `account()` binds 11 and `cl_ord_id()`
+      binds 1, both `string_view`;
+    - (d) a type change inside the grammar: in `emit_scalar`, a Boolean field's accessor is emitted
+      with `char` as both its return type and its `decode_field<T>` type;
+    - (e) a rename: NewOrderSingle's Account(1) accessor is emitted as `account_id()`, its tag and
+      type kept.
+
+    One test-side mutant, in the scratch copy of the cell: (f) the identity check's name
+    comparison is removed. Before each emitter run, the scratch's generated `Messages.hpp` is
+    checked to hold the mutant bytes. The whole `codegen_pure_tests` binary runs unfiltered.
+    FR-022's "What counts as RED" applies: the binary exits 1, not with an abort, and the census
+    is the only failing test. (a) and (b) fail at the unclassified-line assertion naming the
+    mutated accessor. (c), (d) and (e) fail at the identity assertion, and the grammar and
+    population assertions pass. (f) fails in the guard, at "identity mutation accepted".
   - **Why the byte pins are not this witness.** `read_tier_byte_diff_test.cmake` and
     `DeterminismTest.GeneratedMatchesGolden` pin the generated text, and are republished at every
     intended emitter change; this cell asserts the property, so a republished pin that carried a

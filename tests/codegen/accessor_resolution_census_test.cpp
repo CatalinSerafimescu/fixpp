@@ -1,31 +1,53 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/codegen/accessor_resolution_census_test.cpp
 //
-// 094-v1-tier0-bookkeeping FR-022c — D-008's "zero-runtime-cost field
-// lookup" clause, witnessed over the SHIPPED generated text.
+// 094-v1-tier0-bookkeeping FR-022c — D-008's compile-time binding clause,
+// witnessed over the SHIPPED generated text: each typed accessor binds its
+// field's tag at compile time, with its value type fixed in its generated
+// text.
 //
-// THE PROPERTY. A generated typed field accessor resolves its standard
-// field's tag and value type at compile time: the tag is an integer literal
-// (the template argument of `view_.template get<N>()` / `group<N, G_N>()`,
-// or the literal argument of `::fixpp::wire::get(ctx_.span, N, ...)` and of
-// `nested_group_slices(..., N, ...)`), and the value type is fixed by the
-// emitted text (`decode_field<T>` with T equal to the accessor's
-// `expected_t<T>`, `decimal_t::parse` for a decimal_t accessor, or the
-// group flyweight type). Its own text never consults a runtime `Dictionary`,
-// a name->tag or tag->type table, or any dictionary lookup function. The
-// runtime work of its callees (the offset-table find, group occurrence
-// segmentation, the Length+Data split, which may call the session dictionary
-// through `dict_hooks`) is outside this census.
-// `.specify/2c-codegen.md`: "Eager codegen with no runtime dictionary path."
+// THE PROPERTY. The tag is an integer literal (the template argument of
+// `view_.template get<N>()` / `group<N, G_N>()`, or the literal argument of
+// `::fixpp::wire::get(ctx_.span, N, ...)` and of `nested_group_slices(...,
+// N, ...)`), and the value type is fixed by the emitted text (`decode_field<T>`
+// with T equal to the accessor's `expected_t<T>`, `decimal_t::parse` for a
+// decimal_t accessor, or the group flyweight type). The literal is the tag of
+// the field the accessor is named for, and the value type is the one the
+// codegen's data-type mapping assigns to that field's data type. Reading the
+// field is runtime work of the callees (the offset-table find, the entry
+// scan, group occurrence segmentation through `dict_hooks`); the cell reads
+// the accessor's own text and makes no claim about that work.
 //
-// THE MECHANISM: a closed line grammar, not a forbidden-token list. Every
-// line of each version's `Messages.hpp` must be one of the shapes below;
-// every member function must match one of the accessor templates in full
-// (signature and body), or one of the two named exclusions. Anything else —
-// a new include, a namespace-scope table, a member without
-// `[[nodiscard]] inline`, a body that computes its tag — is reported as an
-// unclassified line and fails the cell. A deliberate emitter change that
-// adds a new accessor shape must therefore be added here too, by hand.
+// THE MECHANISM, three checks over each version's `Messages.hpp`:
+//   1. A closed line grammar, not a forbidden-token list. Every line must be
+//      one of the shapes below; every member function must match one of the
+//      accessor templates in full (signature and body), or one of the two
+//      named exclusions. Anything else — a new include, a namespace-scope
+//      table, a member without `[[nodiscard]] inline`, a body that computes
+//      its tag — is an unclassified line. A deliberate emitter change that
+//      adds an accessor shape must be added here too, by hand.
+//   2. Population: for every class, the set of tags its typed accessors bind
+//      equals the set `Fields.hpp` declares for it (a message's
+//      `<Msg>_fields[]` rows with group_no_tag 0; a group flyweight G_K's rows
+//      with group_no_tag K across every message), less the rows whose data
+//      type the mapping omits. `Fields.hpp` is written by another emitter
+//      (emit_fields.cpp) from the same IR, so this proves the walk reached
+//      every accessor the version declares.
+//   3. Identity, per accessor:
+//      - NAME. Its identifier is the accessor name of its tag's field name in
+//        the dictionary the version is generated from (`kVersions`), by the
+//        naming rule restated below (`accessor_name`; a group accessor drops
+//        a leading "No"). The base name followed by `_t<tag>` is accepted only
+//        when another accessor of the class holds the base name (the
+//        emitter's collision form); which of the two gets the base name is
+//        not checked.
+//      - TYPE. A tag that heads a group in `Fields.hpp` has a group accessor;
+//        any other has the kind `mapped_kind` gives for its `Fields.hpp` data
+//        type. That table restates the codegen's DESIGN mapping, not each
+//        field's correct type: it carries the MultiCharValue -> char entry
+//        that fixpp#621 reports as wrong, so a wrong mapping passes here.
+//      The field names come from the dictionary loaders, which the codegen
+//      also uses; a loader defect is D-001's census subject, not this cell's.
 //
 // EXCLUSIONS. `field_value(::std::uint16_t tag)` is the runtime-tag
 // passthrough (its tag is the caller's), and `view()` returns the bound
@@ -39,35 +61,44 @@
 // fails; it is never skipped. `Reify.hpp`'s `owning_<Msg>` accessors
 // (emit_reify.cpp) are not in the population.
 //
-// POPULATION CONTROL. For every class, the set of tags its typed accessors
-// bind must equal the set `Fields.hpp` declares for it: a message's
-// `<Msg>_fields[]` rows with group_no_tag 0, and a group flyweight G_K's
-// rows with group_no_tag K across every message. `Fields.hpp` is written by
-// a different emitter (emit_fields.cpp) from the same IR, so this proves the
-// walk reached every accessor the version declares; it says nothing about
-// dictionary completeness, which is the dictionary censuses' subject.
-// A guard runs first: the classifier must accept each real shape and reject
-// seeded runtime-lookup shapes, so a classifier that accepts everything
-// cannot pass.
+// GUARD. Before any shipped header is read, the checks run over a synthetic
+// text in the shipped grammar. It must pass all three. Each seeded
+// runtime-lookup shape must fail the grammar. Each seeded identity mutation
+// (a tag swap that keeps the tag set, a consistent type change, a rename, a
+// changed data type) must PASS the grammar and the population check and fail
+// the identity check, so the identity check is shown to be what catches it.
 //
 // RE-DERIVE the population by hand: for one version,
 //   grep -c '\[\[nodiscard\]\] inline' build/<preset>/_codegen/include/fixpp/<v>/Messages.hpp
 // counts the member functions the census classifies: the typed accessors,
-// one `field_value` per class and one `view()` per message class.
+// one `field_value` per class and one `view()` per message class. Re-derive
+// one accessor's identity: find its tag's FieldRef row in `Fields.hpp`
+// (column 2 is the data type) and `<field number="<tag>" name=...>` in the
+// version's dictionary XML.
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <exception>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/field_ref.hpp>
+#include <fixpp/dict/orchestra_loader.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <map>
+#include <memory_resource>
 #include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef FIXPP_CODEGEN_INC
 #error "FIXPP_CODEGEN_INC must be set by CMake target_compile_definitions"
+#endif
+#ifndef FIXPP_DICT_DATA_DIR
+#error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
 #endif
 
 namespace {
@@ -153,13 +184,179 @@ std::string replace_all(std::string s, std::string_view from, std::string_view t
     return s;
 }
 
+// The value kind of a typed accessor, as its emitted text fixes it.
+enum class vkind { string_view, char_, bool_, int32, decimal, group, omitted, unknown };
+
+std::string_view kind_name(vkind k) {
+    switch (k) {
+        case vkind::string_view:
+            return "string_view";
+        case vkind::char_:
+            return "char";
+        case vkind::bool_:
+            return "bool";
+        case vkind::int32:
+            return "int32";
+        case vkind::decimal:
+            return "decimal";
+        case vkind::group:
+            return "group";
+        case vkind::omitted:
+            return "omitted";
+        case vkind::unknown:
+            return "unknown";
+    }
+    return "unknown";
+}
+
 // The value types decode_field<T> is emitted with (emit_messages.cpp,
 // kind_cpp_type). A T outside this set is unclassified.
-constexpr std::string_view kScalarTypes[] = {"::std::string_view", "char", "bool",
-                                             "::std::int32_t"};
+struct scalar_type {
+    std::string_view cpp;
+    vkind kind;
+};
+constexpr scalar_type kScalarTypes[] = {{"::std::string_view", vkind::string_view},
+                                        {"char", vkind::char_},
+                                        {"bool", vkind::bool_},
+                                        {"::std::int32_t", vkind::int32}};
 
 constexpr std::string_view kMsgView =
     "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
+
+// The codegen's DESIGN mapping from a field's data type to the accessor
+// kind (gen_util.hpp's kind_of, [2c §4.7]), restated here rather than
+// included so an edit to kind_of is caught. It is the design, not each
+// field's correct type: MultiCharValue -> char is the entry fixpp#621
+// reports as wrong. A switch with no default, so a new data type fails the
+// build (-Wswitch) until it is classified here.
+vkind mapped_kind(std::uint32_t raw) {
+    using D = fixpp::dict::field_data_type;
+    if (raw > static_cast<std::uint32_t>(D::DialectExtension)) return vkind::unknown;
+    switch (static_cast<D>(raw)) {
+        case D::Price:
+        case D::Qty:
+        case D::Amt:
+        case D::PriceOffset:
+        case D::Percentage:
+        case D::Float:
+            return vkind::decimal;
+        case D::Char:
+        case D::MultiCharValue:
+            return vkind::char_;
+        case D::Boolean:
+            return vkind::bool_;
+        case D::Int:
+        case D::Length:
+        case D::SeqNum:
+        case D::NumInGroup:
+        case D::DayOfMonth:
+            return vkind::int32;
+        case D::String:
+        case D::MultiStringValue:
+        case D::Currency:
+        case D::Exchange:
+        case D::Country:
+        case D::MonthYear:
+        case D::UtcTimestamp:
+        case D::UtcTimeOnly:
+        case D::UtcDateOnly:
+        case D::LocalMktDate:
+        case D::TzTimeOnly:
+        case D::TzTimestamp:
+        case D::Language:
+        case D::Data:
+        case D::XmlData:
+            return vkind::string_view;
+        case D::DialectExtension:
+            return vkind::omitted;
+    }
+    return vkind::unknown;
+}
+
+// ---------------------------------------------------------------------------
+// The naming rule, restated from its documentation (gen_util.hpp: "ClOrdID
+// -> cl_ord_id; SecurityIDSource -> security_id_source", C++-keyword
+// guarded; a group accessor drops the "No" prefix, "NoPartyIDs ->
+// party_i_ds"):
+//   - a run of characters other than [A-Za-z0-9] becomes one '_';
+//   - an uppercase letter starts a new word when the character before it is
+//     lowercase or a digit, or when it is the last capital of an acronym
+//     followed by a lowercase letter ("IDSource" -> "id_source");
+//   - letters are lowercased; leading and trailing '_' are dropped;
+//   - a leading digit gets a '_' prefix; a C++ keyword gets a '_' suffix.
+// An empty result is reported, never defaulted.
+// ---------------------------------------------------------------------------
+constexpr std::string_view kCppKeywords[] = {"alignas",       "alignof",     "and",
+                                             "and_eq",        "asm",         "auto",
+                                             "bitand",        "bitor",       "bool",
+                                             "break",         "case",        "catch",
+                                             "char",          "char8_t",     "char16_t",
+                                             "char32_t",      "class",       "compl",
+                                             "concept",       "const",       "consteval",
+                                             "constexpr",     "constinit",   "const_cast",
+                                             "continue",      "co_await",    "co_return",
+                                             "co_yield",      "decltype",    "default",
+                                             "delete",        "do",          "double",
+                                             "dynamic_cast",  "else",        "enum",
+                                             "explicit",      "export",      "extern",
+                                             "false",         "float",       "for",
+                                             "friend",        "goto",        "if",
+                                             "inline",        "int",         "long",
+                                             "mutable",       "namespace",   "new",
+                                             "noexcept",      "not",         "not_eq",
+                                             "nullptr",       "operator",    "or",
+                                             "or_eq",         "private",     "protected",
+                                             "public",        "register",    "reinterpret_cast",
+                                             "requires",      "return",      "short",
+                                             "signed",        "sizeof",      "static",
+                                             "static_assert", "static_cast", "struct",
+                                             "switch",        "template",    "this",
+                                             "thread_local",  "throw",       "true",
+                                             "try",           "typedef",     "typeid",
+                                             "typename",      "union",       "unsigned",
+                                             "using",         "virtual",     "void",
+                                             "volatile",      "wchar_t",     "while",
+                                             "xor",           "xor_eq"};
+
+bool is_upper(char c) { return c >= 'A' && c <= 'Z'; }
+bool is_lower(char c) { return c >= 'a' && c <= 'z'; }
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
+
+std::string accessor_name(std::string_view fix_name) {
+    std::string out;
+    for (std::size_t i = 0; i < fix_name.size(); ++i) {
+        char const c = fix_name[i];
+        if (!is_upper(c) && !is_lower(c) && !is_digit(c)) {
+            if (!out.empty() && out.back() != '_') out += '_';
+            continue;
+        }
+        if (is_upper(c) && i > 0 && !out.empty() && out.back() != '_') {
+            char const before = fix_name[i - 1];
+            bool const acronym_end =
+                is_upper(before) && i + 1 < fix_name.size() && is_lower(fix_name[i + 1]);
+            if (is_lower(before) || is_digit(before) || acronym_end) out += '_';
+        }
+        out += is_upper(c) ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+    while (!out.empty() && out.back() == '_') out.pop_back();
+    while (!out.empty() && out.front() == '_') out.erase(0, 1);
+    if (out.empty()) return out;
+    if (is_digit(out.front())) out.insert(0, "_");
+    for (std::string_view kw : kCppKeywords) {
+        if (out == kw) {
+            out += '_';
+            break;
+        }
+    }
+    return out;
+}
+
+std::string_view without_no_prefix(std::string_view fix_name) {
+    if (fix_name.size() > 2 && fix_name[0] == 'N' && fix_name[1] == 'o' && is_upper(fix_name[2])) {
+        return fix_name.substr(2);
+    }
+    return fix_name;
+}
 
 // ---------------------------------------------------------------------------
 // One member function: the return type (after "[[nodiscard]] inline "), the
@@ -170,6 +367,8 @@ enum class kind { scalar, decimal, group, nested, passthrough, view, unclassifie
 struct classified {
     kind k = kind::unclassified;
     std::uint32_t tag = 0;
+    std::string id;             // the accessor identifier
+    vkind vk = vkind::unknown;  // the value kind its text fixes
 };
 
 classified classify_message_member(std::string_view ns, std::string_view ret, std::string_view name,
@@ -177,42 +376,46 @@ classified classify_message_member(std::string_view ns, std::string_view ret, st
     if (ret == "::fixpp::core::expected_t<::fixpp::wire::field_view>" &&
         name == "field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]" &&
         body == "{ return view_.get(tag); }") {
-        return {kind::passthrough, 0};
+        return {kind::passthrough, 0, {}, vkind::unknown};
     }
     if (ret == std::string{kMsgView} + " const&" &&
         name == "view() const noexcept [[clang::lifetimebound]]" && body == "{ return view_; }") {
-        return {kind::view, 0};
+        return {kind::view, 0, {}, vkind::unknown};
     }
-    for (std::string_view t : kScalarTypes) {
-        if (ret != "::fixpp::core::expected_t<" + std::string{t} + ">") continue;
-        std::string const name_pat = t == "::std::string_view"
+    for (scalar_type const& t : kScalarTypes) {
+        if (ret != "::fixpp::core::expected_t<" + std::string{t.cpp} + ">") continue;
+        std::string const name_pat = t.kind == vkind::string_view
                                          ? "@I() const noexcept [[clang::lifetimebound]]"
                                          : "@I() const noexcept";
+        caps n;
         caps c;
-        if (match(name_pat, name) && match("{ return ::fixpp::dict::decode_field<" +
-                                               std::string{t} + ">(view_.template get<@N>()); }",
-                                           body, c)) {
-            return {kind::scalar, c.nums.front()};
+        if (match(name_pat, name, n) &&
+            match("{ return ::fixpp::dict::decode_field<" + std::string{t.cpp} +
+                      ">(view_.template get<@N>()); }",
+                  body, c)) {
+            return {kind::scalar, c.nums.front(), n.ids.front(), t.kind};
         }
     }
     if (ret == "::fixpp::core::expected_t<::fixpp::decimal_t>") {
+        caps n;
         caps c;
-        if (match("@I(::std::pmr::memory_resource* mr) const noexcept", name) &&
+        if (match("@I(::std::pmr::memory_resource* mr) const noexcept", name, n) &&
             match("{ auto fv = view_.template get<@N>(); if (!fv) return "
                   "::std::unexpected{fv.error()};\n"
                   "return ::fixpp::decimal_t::parse(fv->bytes(), mr); }",
                   body, c)) {
-            return {kind::decimal, c.nums.front()};
+            return {kind::decimal, c.nums.front(), n.ids.front(), vkind::decimal};
         }
     }
     {
         std::string const groups = "::fixpp::" + std::string{ns} + "::groups::G_";
+        caps n;
         caps c;
         if (match("::fixpp::wire::group_view<" + groups + "@N>", ret, c) &&
-            match("@I() const noexcept [[clang::lifetimebound]]", name) &&
+            match("@I() const noexcept [[clang::lifetimebound]]", name, n) &&
             match("{ return view_.template group<@N, " + groups + "@N>(); }", body, c) &&
             all_equal(c.nums)) {
-            return {kind::group, c.nums.front()};
+            return {kind::group, c.nums.front(), n.ids.front(), vkind::group};
         }
     }
     return {};
@@ -223,35 +426,38 @@ classified classify_group_member(std::string_view ret, std::string_view name,
     if (ret == "::fixpp::core::expected_t<::fixpp::wire::field_view>" &&
         name == "field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]" &&
         body == "{ return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }") {
-        return {kind::passthrough, 0};
+        return {kind::passthrough, 0, {}, vkind::unknown};
     }
-    for (std::string_view t : kScalarTypes) {
-        if (ret != "::fixpp::core::expected_t<" + std::string{t} + ">") continue;
-        std::string const name_pat = t == "::std::string_view"
+    for (scalar_type const& t : kScalarTypes) {
+        if (ret != "::fixpp::core::expected_t<" + std::string{t.cpp} + ">") continue;
+        std::string const name_pat = t.kind == vkind::string_view
                                          ? "@I() const noexcept [[clang::lifetimebound]]"
                                          : "@I() const noexcept";
+        caps n;
         caps c;
-        if (match(name_pat, name) &&
-            match("{ return ::fixpp::dict::decode_field<" + std::string{t} +
+        if (match(name_pat, name, n) &&
+            match("{ return ::fixpp::dict::decode_field<" + std::string{t.cpp} +
                       ">(::fixpp::wire::get(ctx_.span, @N, ctx_.hooks, ctx_.gen)); }",
                   body, c)) {
-            return {kind::scalar, c.nums.front()};
+            return {kind::scalar, c.nums.front(), n.ids.front(), t.kind};
         }
     }
     if (ret == "::fixpp::core::expected_t<::fixpp::decimal_t>") {
+        caps n;
         caps c;
-        if (match("@I(::std::pmr::memory_resource* mr) const noexcept", name) &&
+        if (match("@I(::std::pmr::memory_resource* mr) const noexcept", name, n) &&
             match("{ auto fv = ::fixpp::wire::get(ctx_.span, @N, ctx_.hooks, ctx_.gen); if (!fv) "
                   "return ::std::unexpected{fv.error()};\n"
                   "return ::fixpp::decimal_t::parse(fv->bytes(), mr); }",
                   body, c)) {
-            return {kind::decimal, c.nums.front()};
+            return {kind::decimal, c.nums.front(), n.ids.front(), vkind::decimal};
         }
     }
     {
+        caps n;
         caps c;
         if (match("::fixpp::wire::group_view<G_@N>", ret, c) &&
-            match("@I() const noexcept [[clang::lifetimebound]]", name) &&
+            match("@I() const noexcept [[clang::lifetimebound]]", name, n) &&
             match("{ if (ctx_.parent_cache_owner == nullptr) return {};\n"
                   "auto const r = ctx_.parent_cache_owner->nested_group_slices("
                   "ctx_.outer_occurrence_id, ctx_.span.size(), @N, ctx_.hooks, ctx_.gen, "
@@ -261,7 +467,7 @@ classified classify_group_member(std::string_view ret, std::string_view name,
                   "return ::fixpp::wire::group_view<G_@N>{r.slices, child_ctx, r.alloc_failed}; }",
                   body, c) &&
             all_equal(c.nums)) {
-            return {kind::nested, c.nums.front()};
+            return {kind::nested, c.nums.front(), n.ids.front(), vkind::group};
         }
     }
     return {};
@@ -270,9 +476,15 @@ classified classify_group_member(std::string_view ret, std::string_view name,
 // ---------------------------------------------------------------------------
 // The census over one Messages.hpp text.
 // ---------------------------------------------------------------------------
+struct accessor {
+    std::uint32_t tag = 0;
+    std::string id;
+    vkind vk = vkind::unknown;
+};
+
 struct class_record {
     bool is_group = false;
-    std::vector<std::uint32_t> tags;  // typed accessors' tags, in order
+    std::vector<accessor> typed;  // typed accessors, in order
     int passthroughs = 0;
     int views = 0;
 };
@@ -364,7 +576,7 @@ census run_census(std::string_view ns, std::vector<std::string> const& lines) {
                         "member function '" + std::string{name} + "' matches no accessor template");
                     break;
                 default:
-                    rec.tags.push_back(r.tag);
+                    rec.typed.push_back({r.tag, r.id, r.vk});
                     ++out.typed;
                     break;
             }
@@ -447,19 +659,28 @@ census run_census(std::string_view ns, std::vector<std::string> const& lines) {
 
 // ---------------------------------------------------------------------------
 // The independent side: Fields.hpp's FieldRef rows.
-//   message name -> its rows' tags with group_no_tag 0
-//   group no_tag -> its member rows' tags, across every message
+//   message name -> its rows with group_no_tag 0: tag -> data type
+//   group no_tag -> its member rows across every message: tag -> data type
 // ---------------------------------------------------------------------------
-struct field_sets {
-    std::map<std::string, std::set<std::uint32_t>> messages;
-    std::map<std::uint32_t, std::set<std::uint32_t>> groups;
+using tag_types = std::map<std::uint32_t, std::uint32_t>;
+
+struct field_rows {
+    std::map<std::string, tag_types> messages;
+    std::map<std::uint32_t, tag_types> groups;
     std::size_t rows = 0;
     std::vector<std::string> malformed;
 };
 
-field_sets read_fields(std::vector<std::string> const& lines) {
-    field_sets out;
+field_rows read_fields(std::vector<std::string> const& lines) {
+    field_rows out;
     std::string cur;
+    auto put = [&](tag_types& into, std::uint32_t tag, std::uint32_t type, std::size_t i) {
+        auto const [it, fresh] = into.emplace(tag, type);
+        if (!fresh && it->second != type) {
+            out.malformed.push_back("line " + std::to_string(i + 1) +
+                                    " (a second data type for the tag): " + lines[i]);
+        }
+    };
     for (std::size_t i = 0; i < lines.size(); ++i) {
         std::string_view const s = strip(lines[i]);
         caps c;
@@ -497,18 +718,125 @@ field_sets read_fields(std::vector<std::string> const& lines) {
                 in_num = false;
             }
         }
-        if (nums.size() != 9 || !s.starts_with("{ ") || !s.ends_with(" },")) {
+        if (nums.size() != 9 || !s.starts_with("{ ") || !s.ends_with(" },") ||
+            !match("{ @N, static_cast<::fixpp::dict::field_data_type>(@S", s)) {
             out.malformed.push_back("line " + std::to_string(i + 1) + ": " + lines[i]);
             continue;
         }
         ++out.rows;
         if (nums[4] == 0) {
-            out.messages[cur].insert(nums[0]);
+            put(out.messages[cur], nums[0], nums[1], i);
         } else {
-            out.groups[nums[4]].insert(nums[0]);
+            put(out.groups[nums[4]], nums[0], nums[1], i);
         }
     }
     return out;
+}
+
+bool heads_group(field_rows const& f, std::uint32_t tag) { return f.groups.contains(tag); }
+
+// The kind an accessor of `tag` must have, given its Fields.hpp data type.
+vkind expected_kind(field_rows const& f, std::uint32_t tag, std::uint32_t type) {
+    return heads_group(f, tag) ? vkind::group : mapped_kind(type);
+}
+
+tag_types const* rows_of(field_rows const& f, std::string const& cls, class_record const& rec) {
+    if (rec.is_group) {
+        auto const it = f.groups.find(static_cast<std::uint32_t>(std::stoul(cls.substr(2))));
+        return it == f.groups.end() ? nullptr : &it->second;
+    }
+    auto const it = f.messages.find(cls);
+    return it == f.messages.end() ? nullptr : &it->second;
+}
+
+// Check 2: every class's typed-accessor tags equal its FieldRef rows (less
+// the rows the mapping omits), with no tag bound twice and no class or array
+// without its counterpart.
+std::vector<std::string> population_problems(census const& c, field_rows const& f) {
+    std::vector<std::string> out;
+    std::size_t expected_typed = 0;
+    auto compare = [&](std::string const& cls, tag_types const& rows, bool want_group) {
+        std::set<std::uint32_t> want;
+        for (auto const& [tag, type] : rows) {
+            if (expected_kind(f, tag, type) != vkind::omitted) want.insert(tag);
+        }
+        expected_typed += want.size();
+        auto const it = c.classes.find(cls);
+        if (it == c.classes.end() || it->second.is_group != want_group) {
+            out.push_back("Fields.hpp has rows for " + cls + " but Messages.hpp has no such class");
+            return;
+        }
+        std::set<std::uint32_t> got;
+        for (auto const& a : it->second.typed) {
+            if (!got.insert(a.tag).second) {
+                out.push_back(cls + ": tag " + std::to_string(a.tag) + " bound by two accessors");
+            }
+        }
+        if (got != want) {
+            out.push_back(cls + ": accessor tags differ from its FieldRef rows");
+        }
+    };
+    for (auto const& [m, rows] : f.messages) compare(m, rows, false);
+    for (auto const& [no_tag, rows] : f.groups) compare("G_" + std::to_string(no_tag), rows, true);
+    for (auto const& [name, rec] : c.classes) {
+        if (rows_of(f, name, rec) == nullptr && !rec.typed.empty()) {
+            out.push_back(name + " has typed accessors but no FieldRef rows in Fields.hpp");
+        }
+    }
+    if (c.typed != expected_typed) {
+        out.push_back("typed accessors classified (" + std::to_string(c.typed) +
+                      ") differ from the FieldRef-derived count (" +
+                      std::to_string(expected_typed) + ")");
+    }
+    return out;
+}
+
+// Check 3: each accessor's identifier is its field's accessor name, and its
+// value kind is the one the mapping assigns.
+using tag_names = std::map<std::uint32_t, std::string>;
+
+std::vector<std::string> identity_problems(census const& c, field_rows const& f,
+                                           tag_names const& names) {
+    std::vector<std::string> out;
+    for (auto const& [cls, rec] : c.classes) {
+        tag_types const* rows = rows_of(f, cls, rec);
+        std::set<std::string> ids;
+        for (auto const& a : rec.typed) ids.insert(a.id);
+        for (auto const& a : rec.typed) {
+            std::string const where = cls + "::" + a.id + " (tag " + std::to_string(a.tag) + ")";
+            auto const n = names.find(a.tag);
+            std::string const fix = n == names.end() ? std::string{} : n->second;
+            std::string const base =
+                fix.empty() ? std::string{}
+                            : accessor_name(a.vk == vkind::group ? without_no_prefix(fix) : fix);
+            if (base.empty()) {
+                out.push_back(where + ": the dictionary gives tag " + std::to_string(a.tag) +
+                              " no field name");
+            } else if (a.id != base) {
+                std::string const suffixed = base + "_t" + std::to_string(a.tag);
+                if (a.id != suffixed || !ids.contains(base)) {
+                    out.push_back(where + ": the field is " + fix + ", whose accessor name is " +
+                                  base + (a.id == suffixed ? " (no other accessor holds it)" : ""));
+                }
+            }
+            if (rows == nullptr) continue;  // reported by the population check
+            auto const r = rows->find(a.tag);
+            if (r == rows->end()) continue;  // reported by the population check
+            vkind const want = expected_kind(f, a.tag, r->second);
+            if (a.vk != want) {
+                out.push_back(where + ": its text fixes " + std::string{kind_name(a.vk)} +
+                              ", the mapping assigns " + std::string{kind_name(want)} +
+                              " to data type " + std::to_string(r->second));
+            }
+        }
+    }
+    return out;
+}
+
+std::string first_of(std::vector<std::string> const& v) {
+    std::string s;
+    for (std::size_t i = 0; i < v.size() && i < 3; ++i) s += "\n  " + v[i];
+    return s;
 }
 
 std::vector<std::string> read_lines(std::string const& path, bool& ok) {
@@ -528,14 +856,32 @@ std::vector<std::string> split(std::string_view text) {
     return out;
 }
 
-// A synthetic Messages.hpp in the shipped grammar: one group flyweight with
-// a scalar, a decimal and a nested-group accessor, and one message with a
-// scalar, a decimal and a group accessor. The guard checks it is accepted,
-// then that each seeded mutation of it is not.
+// A synthetic Messages.hpp in the shipped grammar: two group flyweights
+// (G_539 with two scalars whose names collide, so the second takes the
+// `_t<tag>` form; G_78 with a scalar, a decimal and a nested-group accessor)
+// and one message with three scalars, a decimal and a group accessor. The
+// guard checks it passes, then that each seeded mutation of it fails.
 constexpr std::string_view kSynthetic = R"(// header comment
 #pragma once
 #include <cstdint>
 namespace fixpp::vx::groups {  // shared repeating-group flyweights (AC-G5/AC-G6)
+    class G_539 {
+    public:
+        G_539() noexcept = default;
+        explicit G_539(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    nested_party_id() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 524, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    nested_party_id_t9001() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 9001, ctx_.hooks, ctx_.gen)); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
+    field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
+    private:
+        ::fixpp::wire::entry_context ctx_{};
+    };
     class G_78 {
     public:
         G_78() noexcept = default;
@@ -549,7 +895,7 @@ namespace fixpp::vx::groups {  // shared repeating-group flyweights (AC-G5/AC-G6
     { auto fv = ::fixpp::wire::get(ctx_.span, 80, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
-    nested_parties() const noexcept [[clang::lifetimebound]]
+    nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
       auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
@@ -574,6 +920,9 @@ public:
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
     { return ::fixpp::dict::decode_field<::std::string_view>(view_.template get<1>()); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    cl_ord_id() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(view_.template get<11>()); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
     { return ::fixpp::dict::decode_field<char>(view_.template get<54>()); }
@@ -597,6 +946,35 @@ static_assert(sizeof(NewOrderSingle) == sizeof(::fixpp::wire::MessageView<::fixp
 }  // namespace fixpp::vx
 )";
 
+// Its Fields.hpp: data types 13 String, 11 Char, 5 Price, 6 Qty,
+// 3 NumInGroup (field_ref.hpp's field_data_type order).
+constexpr std::string_view kSyntheticFields = R"(#pragma once
+namespace fixpp::vx::fields {
+inline constexpr ::fixpp::dict::FieldRef NewOrderSingle_fields[] = {  // MsgType D
+    { 1, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0, 0 },
+    { 11, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(2), 0, 0, 0, 0, 0, 0 },
+    { 44, static_cast<::fixpp::dict::field_data_type>(5), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0, 0 },
+    { 54, static_cast<::fixpp::dict::field_data_type>(11), static_cast<::fixpp::dict::field_presence>(2), 0, 0, 0, 0, 0, 0 },
+    { 78, static_cast<::fixpp::dict::field_data_type>(3), static_cast<::fixpp::dict::field_presence>(1), 0, 0, 0, 0, 0, 0 },
+    { 79, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0, 0 },
+    { 80, static_cast<::fixpp::dict::field_data_type>(6), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0, 0 },
+    { 539, static_cast<::fixpp::dict::field_data_type>(3), static_cast<::fixpp::dict::field_presence>(1), 0, 78, 0, 0, 0, 0 },
+    { 524, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 539, 0, 0, 0, 0 },
+    { 9001, static_cast<::fixpp::dict::field_data_type>(13), static_cast<::fixpp::dict::field_presence>(1), 0, 539, 0, 0, 0, 0 },
+};
+}  // namespace fixpp::vx::fields
+)";
+
+// Its dictionary names. 9001's name differs from 524's only by an '_', so
+// both give the accessor name nested_party_id.
+tag_names synthetic_names() {
+    return {{1, "Account"},         {11, "ClOrdID"},
+            {44, "Price"},          {54, "Side"},
+            {78, "NoAllocs"},       {79, "AllocAccount"},
+            {80, "AllocShares"},    {539, "NoNestedPartyIDs"},
+            {524, "NestedPartyID"}, {9001, "Nested_PartyID"}};
+}
+
 struct seeded {
     std::string_view what;
     std::string_view from;
@@ -604,7 +982,8 @@ struct seeded {
 };
 
 // Each mutation turns one accessor (or one line) into a runtime resolution,
-// or adds a surface a lookup could hide behind. Every one must be rejected.
+// or adds a surface a lookup could hide behind. Every one must fail the
+// grammar.
 constexpr seeded kSeeded[] = {
     {"tag looked up by name at runtime", "view_.template get<1>()",
      "view_.get(tag_by_name(\"Account\"))"},
@@ -635,6 +1014,52 @@ constexpr seeded kSeeded[] = {
      "namespace fixpp::vx {\ninline constexpr ::std::uint16_t kTags[] = {54};\n"},
 };
 
+// Identity mutations: each keeps the grammar and the tag sets, so only the
+// identity check can catch it. `edits` apply in order to the Messages text
+// (or, when `fields` is set, to the Fields text); the "@SWAP@" sentinel lets
+// two literals exchange places.
+struct identity_seed {
+    std::string_view what;
+    bool fields;
+    std::vector<std::pair<std::string_view, std::string_view>> edits;
+};
+
+std::vector<identity_seed> identity_seeds() {
+    return {
+        {"two same-type message accessors' tag literals swapped",
+         false,
+         {{"view_.template get<1>()", "@SWAP@"},
+          {"view_.template get<11>()", "view_.template get<1>()"},
+          {"@SWAP@", "view_.template get<11>()"}}},
+        {"a scalar's return and decode_field<T> type changed together",
+         false,
+         {{"::fixpp::core::expected_t<char>\n    side()",
+           "::fixpp::core::expected_t<bool>\n    side()"},
+          {"decode_field<char>(view_.template get<54>())",
+           "decode_field<bool>(view_.template get<54>())"}}},
+        {"a message scalar renamed, tag and type kept",
+         false,
+         {{"    side() const", "    sides() const"}}},
+        {"a group-entry scalar renamed", false, {{"alloc_account()", "allocation_account()"}}},
+        {"a message group accessor named without dropping No",
+         false,
+         {{"allocs()", "no_allocs()"}}},
+        {"a nested-group accessor renamed", false, {{"nested_party_i_ds()", "nested_parties()"}}},
+        {"a collision suffix naming another tag",
+         false,
+         {{"nested_party_id_t9001()", "nested_party_id_t524()"}}},
+        {"a collision suffix with no collision", false, {{"cl_ord_id()", "cl_ord_id_t11()"}}},
+        {"Fields.hpp gives the char accessor's field Boolean",
+         true,
+         {{"{ 54, static_cast<::fixpp::dict::field_data_type>(11)",
+           "{ 54, static_cast<::fixpp::dict::field_data_type>(12)"}}},
+        {"Fields.hpp gives the decimal accessor's field String",
+         true,
+         {{"{ 44, static_cast<::fixpp::dict::field_data_type>(5)",
+           "{ 44, static_cast<::fixpp::dict::field_data_type>(13)"}}},
+    };
+}
+
 // A census over well-formed text reports a problem as an unclassified line,
 // or as a class that does not carry exactly one passthrough (and, for a
 // message, one view()).
@@ -647,23 +1072,72 @@ bool census_rejects(census const& c) {
     return false;
 }
 
-std::vector<std::string> versions() {
-    std::vector<std::string> v{"v42", "v44", "v50sp2", "vt11"};
+// Each codegen version, the namespace it generates, and the dictionary it is
+// generated from (cmake/Codegen.cmake's --xml list; build_ir picks the loader
+// by the root element).
+struct version_input {
+    std::string_view ns;
+    std::string_view xml;  // under FIXPP_DICT_DATA_DIR
+    bool orchestra;
+};
+
+std::vector<version_input> versions() {
+    std::vector<version_input> v{{"v42", "FIX42.xml", false},
+                                 {"v44", "FIX44.xml", false},
+                                 {"v50sp2", "FIX50SP2.xml", false},
+                                 {"vt11", "FIXT11.xml", false}};
 #ifdef FIXPP_D008_CENSUS_HAS_VLATEST
-    v.emplace_back("vlatest");
+    v.push_back({"vlatest", "orchestra/OrchestraFIXLatest.xml", true});
 #endif
     return v;
 }
 
+// The field name of every tag Fields.hpp declares, read from the version's
+// dictionary and copied out before the dictionary and its arena go.
+tag_names load_names(version_input const& v, field_rows const& f, std::string& error) {
+    tag_names out;
+    std::set<std::uint32_t> tags;
+    for (auto const& [m, rows] : f.messages) {
+        for (auto const& [tag, type] : rows) tags.insert(tag);
+    }
+    for (auto const& [g, rows] : f.groups) {
+        tags.insert(g);
+        for (auto const& [tag, type] : rows) tags.insert(tag);
+    }
+    std::string const path = std::string{FIXPP_DICT_DATA_DIR} + "/" + std::string{v.xml};
+    try {
+        std::pmr::monotonic_buffer_resource arena;
+        fixpp::dict::Dictionary const dict = v.orchestra
+                                                 ? fixpp::dict::OrchestraLoader{}.load(path, &arena)
+                                                 : fixpp::dict::XmlLoader{}.load(path, &arena);
+        for (std::uint32_t t : tags) {
+            if (t > 0xFFFFU) continue;
+            out.emplace(t, std::string{dict.field_name(static_cast<std::uint16_t>(t))});
+        }
+    } catch (std::exception const& e) {
+        error = path + ": " + e.what();
+    }
+    return out;
+}
+
 TEST(CodegenAccessorResolutionCensus, EveryTypedAccessorResolvesTagAndTypeAtCompileTime) {
-    // ---- Guard: the classifier accepts the real shapes and rejects runtime
-    // resolution, before any shipped header is read.
+    // ---- Guard: the checks accept the real shapes and reject runtime
+    // resolution and wrong identities, before any shipped header is read.
     {
+        field_rows const gf = read_fields(split(kSyntheticFields));
+        ASSERT_TRUE(gf.malformed.empty()) << gf.malformed.front();
+        ASSERT_EQ(gf.rows, 10U) << "the synthetic Fields text holds ten rows";
+        tag_names const gn = synthetic_names();
         census const good = run_census("vx", split(kSynthetic));
         ASSERT_TRUE(good.unclassified.empty())
             << "the synthetic well-formed text is rejected: " << good.unclassified.front();
         ASSERT_FALSE(census_rejects(good));
-        ASSERT_EQ(good.typed, 7U) << "the synthetic text holds seven typed accessors";
+        ASSERT_EQ(good.typed, 10U) << "the synthetic text holds ten typed accessors";
+        auto const good_pop = population_problems(good, gf);
+        ASSERT_TRUE(good_pop.empty()) << first_of(good_pop);
+        auto const good_id = identity_problems(good, gf, gn);
+        ASSERT_TRUE(good_id.empty()) << first_of(good_id);
+
         for (auto const& m : kSeeded) {
             std::string const text{kSynthetic};
             ASSERT_NE(text.find(m.from), std::string::npos) << m.what << ": anchor not in the text";
@@ -680,13 +1154,39 @@ TEST(CodegenAccessorResolutionCensus, EveryTypedAccessorResolvesTagAndTypeAtComp
         twice.insert(twice.find(pt), pt);
         EXPECT_TRUE(census_rejects(run_census("vx", split(twice))))
             << "a second field_value passthrough is accepted";
+
+        // Each identity mutation must pass the grammar and the population
+        // check (a spurious hit for both) and fail the identity check.
+        for (auto const& m : identity_seeds()) {
+            std::string msgs{kSynthetic};
+            std::string flds{kSyntheticFields};
+            std::string& target = m.fields ? flds : msgs;
+            for (auto const& [from, to] : m.edits) {
+                ASSERT_NE(target.find(from), std::string::npos)
+                    << m.what << ": anchor not in the text: " << from;
+                target = replace_all(target, from, to);
+            }
+            ASSERT_NE(m.fields ? flds : msgs, m.fields ? kSyntheticFields : kSynthetic)
+                << m.what << ": the mutation changed nothing";
+            field_rows const bf = read_fields(split(flds));
+            census const bad = run_census("vx", split(msgs));
+            EXPECT_FALSE(census_rejects(bad))
+                << m.what << ": the grammar rejects it, so this arm cannot show the identity check";
+            EXPECT_TRUE(population_problems(bad, bf).empty())
+                << m.what
+                << ": the population check rejects it, so this arm cannot show the "
+                   "identity check";
+            EXPECT_FALSE(identity_problems(bad, bf, gn).empty())
+                << "identity mutation accepted: " << m.what;
+        }
     }
 
     // ---- The census over every version's shipped Messages.hpp.
     std::size_t total_typed = 0;
-    for (std::string const& v : versions()) {
-        SCOPED_TRACE("version " + v);
-        std::string const dir = std::string{FIXPP_CODEGEN_INC} + "/fixpp/" + v + "/";
+    for (version_input const& v : versions()) {
+        std::string const ns{v.ns};
+        SCOPED_TRACE("version " + ns);
+        std::string const dir = std::string{FIXPP_CODEGEN_INC} + "/fixpp/" + ns + "/";
         bool ok_m = false;
         bool ok_f = false;
         auto const msg_lines = read_lines(dir + "Messages.hpp", ok_m);
@@ -694,7 +1194,8 @@ TEST(CodegenAccessorResolutionCensus, EveryTypedAccessorResolvesTagAndTypeAtComp
         ASSERT_TRUE(ok_m && !msg_lines.empty()) << "missing or empty: " << dir << "Messages.hpp";
         ASSERT_TRUE(ok_f && !fld_lines.empty()) << "missing or empty: " << dir << "Fields.hpp";
 
-        census const c = run_census(v, msg_lines);
+        // Check 1: the closed grammar.
+        census const c = run_census(ns, msg_lines);
         EXPECT_TRUE(c.unclassified.empty())
             << c.unclassified.size()
             << " line(s) outside the compile-time accessor grammar; first: "
@@ -707,49 +1208,24 @@ TEST(CodegenAccessorResolutionCensus, EveryTypedAccessorResolvesTagAndTypeAtComp
         }
         ASSERT_GT(c.typed, 0U) << "no typed accessor classified: the walk reached nothing";
 
-        // ---- Population control against Fields.hpp.
-        field_sets const f = read_fields(fld_lines);
+        // Check 2: population against Fields.hpp.
+        field_rows const f = read_fields(fld_lines);
         EXPECT_TRUE(f.malformed.empty())
             << "Fields.hpp rows outside the FieldRef grammar; first: "
             << (f.malformed.empty() ? std::string{} : f.malformed.front());
         ASSERT_GT(f.rows, 0U) << "Fields.hpp yielded no FieldRef row";
-        std::size_t expected_typed = 0;
-        for (auto const& [m, tags] : f.messages) {
-            expected_typed += tags.size();
-            auto const it = c.classes.find(m);
-            if (it == c.classes.end() || it->second.is_group) {
-                ADD_FAILURE() << "Fields.hpp declares " << m
-                              << "_fields[] but Messages.hpp has no class " << m;
-                continue;
-            }
-            std::set<std::uint32_t> const got(it->second.tags.begin(), it->second.tags.end());
-            EXPECT_EQ(got.size(), it->second.tags.size()) << m << ": a tag bound by two accessors";
-            EXPECT_EQ(got, tags) << m << ": accessor tags differ from its top-level FieldRef rows";
-        }
-        for (auto const& [no_tag, tags] : f.groups) {
-            expected_typed += tags.size();
-            std::string const g = "G_" + std::to_string(no_tag);
-            auto const it = c.classes.find(g);
-            if (it == c.classes.end() || !it->second.is_group) {
-                ADD_FAILURE() << "Fields.hpp has rows under group " << no_tag
-                              << " but Messages.hpp has no " << g;
-                continue;
-            }
-            std::set<std::uint32_t> const got(it->second.tags.begin(), it->second.tags.end());
-            EXPECT_EQ(got.size(), it->second.tags.size()) << g << ": a tag bound by two accessors";
-            EXPECT_EQ(got, tags) << g << ": accessor tags differ from its member FieldRef rows";
-        }
-        for (auto const& [name, rec] : c.classes) {
-            bool const known =
-                rec.is_group
-                    ? f.groups.contains(static_cast<std::uint32_t>(std::stoul(name.substr(2))))
-                    : f.messages.contains(name);
-            if (!known && !rec.tags.empty()) {
-                ADD_FAILURE() << name << " has typed accessors but no FieldRef rows in Fields.hpp";
-            }
-        }
-        EXPECT_EQ(c.typed, expected_typed)
-            << "typed accessors classified vs FieldRef-derived count";
+        auto const pop = population_problems(c, f);
+        EXPECT_TRUE(pop.empty()) << pop.size()
+                                 << " population mismatch(es); first:" << first_of(pop);
+
+        // Check 3: identity against the version's dictionary and the mapping.
+        std::string load_error;
+        tag_names const names = load_names(v, f, load_error);
+        ASSERT_TRUE(load_error.empty()) << "dictionary load failed: " << load_error;
+        ASSERT_FALSE(names.empty()) << "the dictionary named no Fields.hpp tag";
+        auto const ids = identity_problems(c, f, names);
+        EXPECT_TRUE(ids.empty()) << ids.size()
+                                 << " accessor identity mismatch(es); first:" << first_of(ids);
         total_typed += c.typed;
     }
     EXPECT_GT(total_typed, 0U);
