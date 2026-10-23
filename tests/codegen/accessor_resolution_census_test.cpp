@@ -11,8 +11,11 @@
 // `nested_group_slices(..., N, ...)`), and the value type is fixed by the
 // emitted text (`decode_field<T>` with T equal to the accessor's
 // `expected_t<T>`, `decimal_t::parse` for a decimal_t accessor, or the
-// group flyweight type). It never consults a runtime `Dictionary`, a
-// name->tag or tag->type table, or any dictionary lookup function.
+// group flyweight type). Its own text never consults a runtime `Dictionary`,
+// a name->tag or tag->type table, or any dictionary lookup function. The
+// runtime work of its callees (the offset-table find, group occurrence
+// segmentation, the Length+Data split, which may call the session dictionary
+// through `dict_hooks`) is outside this census.
 // `.specify/2c-codegen.md`: "Eager codegen with no runtime dictionary path."
 //
 // THE MECHANISM: a closed line grammar, not a forbidden-token list. Every
@@ -49,8 +52,8 @@
 //
 // RE-DERIVE the population by hand: for one version,
 //   grep -c '\[\[nodiscard\]\] inline' build/<preset>/_codegen/include/fixpp/<v>/Messages.hpp
-// counts the member functions the census classifies (accessors plus the two
-// exclusions per class).
+// counts the member functions the census classifies: the typed accessors,
+// one `field_value` per class and one `view()` per message class.
 
 #include <gtest/gtest.h>
 
@@ -698,7 +701,9 @@ TEST(CodegenAccessorResolutionCensus, EveryTypedAccessorResolvesTagAndTypeAtComp
             << (c.unclassified.empty() ? std::string{} : c.unclassified.front());
         for (auto const& [name, rec] : c.classes) {
             EXPECT_EQ(rec.passthroughs, 1) << name << ": field_value passthrough count";
-            if (!rec.is_group) EXPECT_EQ(rec.views, 1) << name << ": view() count";
+            if (!rec.is_group) {
+                EXPECT_EQ(rec.views, 1) << name << ": view() count";
+            }
         }
         ASSERT_GT(c.typed, 0U) << "no typed accessor classified: the walk reached nothing";
 

@@ -29,8 +29,9 @@ dispositioned every checklist under `specs/094-v1-tier0-bookkeeping/checklists/`
   `research/reviews/opus_094-v1-tier0-bookkeeping_gate_a_scoped_xiv3_adversarial_review.md`. Record:
   `decisions/speckit/094-v1-tier0-bookkeeping-gatea.md` (parent repo, private); plan.md `## Gate A`.
 
-**Tests**: only FR-022's two session-level cells (owner, Gate A round 2) and FR-022b's D-001 census
-cell (owner, 2026-10-22, from T030's evidence). They are regression guards, green on the base by
+**Tests**: only FR-022's two session-level cells (owner, Gate A round 2), FR-022b's D-001 census
+cell (owner, 2026-10-22, from T030's evidence) and FR-022c's D-008 census cell (owner, 2026-10-23,
+Gate B round 1). They are regression guards, green on the base by
 construction, and each is proven RED by the mutant its requirement names (T029, T029a). Every other
 flipped row is evidenced by tests that already exist (FR-015).
 

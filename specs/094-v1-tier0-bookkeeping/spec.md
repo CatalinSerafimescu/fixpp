@@ -225,7 +225,9 @@ Owner rulings on the Gate B round 1 triage (parent repo (private)
   witnesses a lookup over the generated code. Narrow the Title, add a discriminating witness, or
   withhold D-008? → A (owner): **Keep the clause and add the witness** (option (b)). The property is
   2c's: a generated typed accessor resolves its standard field's tag and value type at compile time
-  and never consults a runtime dictionary or table. FR-022c specifies the cell; D-008's Tests and
+  and never consults a runtime dictionary or table. FR-022c specifies the cell, reads the property
+  over the accessor's own generated text, and names under "Boundary" the callees' runtime work, which
+  may call the session dictionary and which the cell does not cover; D-008's Tests and
   Verified cells name it, and data-model §H maps the clause to it.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -771,13 +773,20 @@ in those files are licence comment lines.
   - **The property** it witnesses, D-008's "zero-runtime-cost field lookup" read against
     `.specify/2c-codegen.md`'s inherited rule ("Eager codegen with no runtime dictionary path. Hybrid
     mandated: codegen for standard fields (D-008), runtime XML loader for custom"): a generated typed
-    accessor resolves its standard field's tag and value type at compile time, and never consults a
-    runtime `Dictionary`, a name→tag or tag→type table, or any dictionary lookup function. The tag is
+    accessor resolves its standard field's tag and value type at compile time, and its own generated
+    text never consults a runtime `Dictionary`, a name→tag or tag→type table, or any dictionary lookup
+    function. The tag is
     an integer literal: the template argument of `view_.template get<N>()` or of
     `view_.template group<N, …G_N>()`, or the literal argument of `::fixpp::wire::get(ctx_.span, N, …)`
     or of `nested_group_slices(…, N, …)`. The value type is fixed by the emitted text:
     `decode_field<T>` with T equal to the accessor's `expected_t<T>` and one of the four scalar types
     the emitter uses, `decimal_t::parse` for a `decimal_t` accessor, or the group flyweight type.
+  - **Boundary.** The cell reads the accessor's own text. The runtime work of what it calls is outside
+    the cell and outside the clause: `MessageView::get` finds the field in the offset table, and
+    `MessageView::group<>()`, `nested_group_slices` and the group-entry `::fixpp::wire::get` segment
+    group occurrences and split Length+Data pairs, which may call the session dictionary through
+    `dict_hooks` (group membership, group delimiter, a dictionary's own pairs). Re-derive the
+    callbacks: `grep -n 'group_member_fn\|group_delim_fn\|length_pair_fn' include/fixpp/wire/*.hpp src/wire/*.cpp`.
   - **Population.** Every typed field accessor of each codegen version's generated `Messages.hpp`:
     v42, v44, v50sp2 and vt11, and vlatest when the build generates it. Message flyweights and group
     flyweights both count, with their group and nested-group accessors. A listed version whose
@@ -803,8 +812,8 @@ in those files are licence comment lines.
     flyweight `G_K`'s rows with `group_no_tag` K across every message. `Fields.hpp` is written by
     another emitter (`emit_fields.cpp`) from the same IR, so the check proves the walk reached every
     accessor the version declares; dictionary completeness is D-001's census and the 082 tests'.
-  - **RED proof.** Two mutants, each in a scratch copy on F: (`git archive HEAD | tar -x`, with the
-    new test file and `tests/codegen/CMakeLists.txt` copied over it), each in `emit_scalar` in
+  - **RED proof.** Two mutants, each in a scratch copy on F: (`git archive HEAD | tar -x` of a head
+    that holds the cell), each in `emit_scalar` in
     `tools/codegen/fixpp-codegen/emit_messages.cpp`, so the configure-time codegen writes it into
     every version's header:
     - (a) the message-flyweight path: ClOrdID(11)'s accessor resolves its tag at runtime, by name,
