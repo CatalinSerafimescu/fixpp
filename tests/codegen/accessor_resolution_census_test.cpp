@@ -7,7 +7,9 @@
 // text.
 //
 // THE PROPERTY. The tag is an integer literal (the template argument of
-// `view_.template get<N>()` / `group<N, G_N>()`, or the literal argument of
+// `view_.template get<N>()` / `group<N, G_N>()` in Messages.hpp and of
+// `view().template get<N>()` / `group<N, G_N>()` in Reify.hpp's
+// owning_<Msg> classes, or the literal argument of
 // `::fixpp::wire::get(ctx_.span, N, ...)` and of `nested_group_slices(...,
 // N, ...)`), and the value type is fixed by the emitted text (`decode_field<T>`
 // with T equal to the accessor's `expected_t<T>`, `decimal_t::parse` for a
@@ -18,7 +20,10 @@
 // scan, group occurrence segmentation through `dict_hooks`); the cell reads
 // the accessor's own text and makes no claim about that work.
 //
-// THE MECHANISM, three checks over each version's `Messages.hpp`:
+// THE MECHANISM, three checks over each version's `Messages.hpp` and, the
+// same three, over its `Reify.hpp` (`run_reify_census`; there each
+// owning_<Msg> class is checked against its message's `Fields.hpp` rows, and
+// the grammar also closes the out-of-line definitions and the traits):
 //   1. A closed line grammar, not a forbidden-token list. Every line must be
 //      one of the shapes below; every member function must match one of the
 //      accessor templates in full (signature and body), or one of the two
@@ -35,7 +40,7 @@
 //      every accessor the version declares.
 //   3. Identity, per accessor:
 //      - NAME. Its identifier is the accessor name of its tag's field name in
-//        the dictionary the version is generated from (`kVersions`), by the
+//        the dictionary the version is generated from (`versions()`), by the
 //        naming rule restated below (`accessor_name`; a group accessor drops
 //        a leading "No"). The base name followed by `_t<tag>` is accepted only
 //        when another accessor of the class holds the base name (the
@@ -54,16 +59,19 @@
 // passthrough (its tag is the caller's), and `view()` returns the bound
 // view; neither is a typed field accessor. Each is accepted only with its
 // exact signature and body, and only once per class, so a second member of
-// that shape cannot carry a lookup past the census.
+// that shape cannot carry a lookup past the census. In Reify.hpp the other
+// non-accessor members (the deleted copies, the move declarations, which(),
+// from_view, the private constructor and data members) are accepted only by
+// their exact text, and view() and the traits specialisation once per class.
 //
-// SCOPE. `Messages.hpp` of v42, v44, v50sp2 and vt11, and of vlatest when
-// the build generates it (FIXPP_CODEGEN_FIX_LATEST, which defines
-// FIXPP_D008_CENSUS_HAS_VLATEST). A listed version whose header is missing
-// fails; it is never skipped. `Reify.hpp`'s `owning_<Msg>` accessors
-// (emit_reify.cpp) are not in the population.
+// SCOPE. `Messages.hpp` and `Reify.hpp` of v42, v44, v50sp2 and vt11, and
+// of vlatest when the build generates it (FIXPP_CODEGEN_FIX_LATEST, which
+// defines FIXPP_D008_CENSUS_HAS_VLATEST). A listed version whose header is
+// missing fails; it is never skipped.
 //
 // GUARD. Before any shipped header is read, the checks run over a synthetic
-// text in the shipped grammar. It must pass all three. Each seeded
+// text in the shipped grammar, one for Messages.hpp and one for Reify.hpp.
+// Each must pass all three. Each seeded
 // runtime-lookup shape must fail the grammar. Each seeded identity mutation
 // (a tag swap that keeps the tag set, a consistent type change, a rename, a
 // changed data type) must PASS the grammar and the population check and fail
@@ -72,7 +80,9 @@
 // RE-DERIVE the population by hand: for one version,
 //   grep -c '\[\[nodiscard\]\] inline' build/<preset>/_codegen/include/fixpp/<v>/Messages.hpp
 // counts the member functions the census classifies: the typed accessors,
-// one `field_value` per class and one `view()` per message class. Re-derive
+// one `field_value` per class and one `view()` per message class. The same
+// grep over Reify.hpp counts the owning_ typed accessors plus one
+// `field_value` per class (its view() declaration is not `inline`). Re-derive
 // one accessor's identity: find its tag's FieldRef row in `Fields.hpp`
 // (column 2 is the data type) and `<field number="<tag>" name=...>` in the
 // version's dictionary XML.
@@ -488,6 +498,7 @@ struct class_record {
     std::vector<accessor> typed;  // typed accessors, in order
     int passthroughs = 0;
     int views = 0;
+    int traits = 0;  // Reify.hpp only: owning_message_traits specialisations
 };
 
 struct census {
@@ -659,6 +670,315 @@ census run_census(std::string_view ns, std::vector<std::string> const& lines) {
 }
 
 // ---------------------------------------------------------------------------
+// The census over one Reify.hpp text (emit_reify.cpp). Its owning_<Msg>
+// classes carry their own typed accessors, which read through the lazily
+// rebuilt view(): `view().template get<N>()` / `group<N, ...G_N>()`. The
+// grammar is closed over the whole file: the pinned includes, the namespace
+// lines, each owning_<Msg> class body, the out-of-line definitions of its
+// move constructor, move assignment, view() and from_view (exact text, per
+// class, in that order, directly after the class), and one
+// owning_message_traits specialisation per class. A record is keyed by the
+// message name (owning_ dropped), so the population and identity checks
+// compare it with that message's Fields.hpp rows.
+// ---------------------------------------------------------------------------
+classified classify_owning_member(std::string_view ns, std::string_view ret, std::string_view name,
+                                  std::string_view body) {
+    if (ret == "::fixpp::core::expected_t<::fixpp::wire::field_view>" &&
+        name == "field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]" &&
+        body == "{ return view().get(tag); }") {
+        return {kind::passthrough, 0, {}, vkind::unknown};
+    }
+    for (scalar_type const& t : kScalarTypes) {
+        if (ret != "::fixpp::core::expected_t<" + std::string{t.cpp} + ">") continue;
+        std::string const name_pat = t.kind == vkind::string_view
+                                         ? "@I() const noexcept [[clang::lifetimebound]]"
+                                         : "@I() const noexcept";
+        caps n;
+        caps c;
+        if (match(name_pat, name, n) &&
+            match("{ return ::fixpp::dict::decode_field<" + std::string{t.cpp} +
+                      ">(view().template get<@N>()); }",
+                  body, c)) {
+            return {kind::scalar, c.nums.front(), n.ids.front(), t.kind};
+        }
+    }
+    if (ret == "::fixpp::core::expected_t<::fixpp::decimal_t>") {
+        caps n;
+        caps c;
+        if (match("@I(::std::pmr::memory_resource* mr) const noexcept", name, n) &&
+            match("{ auto fv = view().template get<@N>(); if (!fv) return "
+                  "::std::unexpected{fv.error()};\n"
+                  "return ::fixpp::decimal_t::parse(fv->bytes(), mr); }",
+                  body, c)) {
+            return {kind::decimal, c.nums.front(), n.ids.front(), vkind::decimal};
+        }
+    }
+    {
+        std::string const groups = "::fixpp::" + std::string{ns} + "::groups::G_";
+        caps n;
+        caps c;
+        if (match("::fixpp::wire::group_view<" + groups + "@N>", ret, c) &&
+            match("@I() const noexcept [[clang::lifetimebound]]", name, n) &&
+            match("{ return view().template group<@N, " + groups + "@N>(); }", body, c) &&
+            all_equal(c.nums)) {
+            return {kind::group, c.nums.front(), n.ids.front(), vkind::group};
+        }
+    }
+    return {};
+}
+
+std::vector<std::string> reify_includes(std::string_view ns) {
+    return {"#include <fixpp/" + std::string{ns} +
+                "/Messages.hpp>   // flyweight classes + owning_<Msg> forward-decls",
+            "#include <fixpp/core/decimal_alias.hpp>",
+            "#include <fixpp/core/error.hpp>",
+            "#include <fixpp/dict/field_traits.hpp>",
+            "#include <fixpp/dict/reify.hpp>         // owning_message_traits primary template",
+            "#include <fixpp/dict/version_profile.hpp>",
+            "#include <fixpp/wire/message_view_contract.hpp>",
+            "#include <fixpp/wire/parser.hpp>          // MessageView<Index>, Framer,",
+            "#include <cstddef>",
+            "#include <cstdint>",
+            "#include <memory_resource>",
+            "#include <new>",
+            "#include <optional>",
+            "#include <span>",
+            "#include <string_view>",
+            "#include <type_traits>",
+            "#include <vector>"};
+}
+
+// The out-of-line definitions that follow each owning_<Msg> class, stripped.
+std::vector<std::string> owning_out_of_line(std::string const& o) {
+    std::string const mv{kMsgView};
+    return {"inline " + o + "::" + o + "(" + o + " && other) noexcept",
+            ": bytes_(::std::move(other.bytes_))",
+            ", view_cache_(::std::nullopt) {",
+            "other.view_cache_ = ::std::nullopt;  // reset source cache (I-9/AC-R4)",
+            "}",
+            "inline " + o + "& " + o + "::operator=(" + o + " && other) noexcept {",
+            "if (this != &other) {",
+            "bytes_            = ::std::move(other.bytes_);",
+            "view_cache_       = ::std::nullopt;  // reset dest cache (I-9/AC-R4)",
+            "other.view_cache_ = ::std::nullopt;  // reset source cache",
+            "}",
+            "return *this;",
+            "}",
+            "inline " + mv + " const&",
+            o + "::view() const noexcept {",
+            "if (!view_cache_) {",
+            "::fixpp::wire::pmr_carry_buffer carry{0, bytes_.get_allocator().resource()};",
+            "::fixpp::wire::Framer framer{};",
+            "::fixpp::wire::frame_view out_arr[1]{};",
+            "auto framed = framer.feed(",
+            "::std::span<const ::std::byte>{bytes_.data(), bytes_.size()},",
+            "carry, ::std::span<::fixpp::wire::frame_view>{out_arr, 1});",
+            "if (framed && !framed->empty()) {",
+            "view_cache_.emplace((*framed)[0], bytes_.get_allocator().resource());",
+            "} else {",
+            "view_cache_.emplace();",
+            "}",
+            "}",
+            "return *view_cache_;",
+            "}",
+            "inline ::fixpp::core::expected_t<" + o + ">",
+            o + "::from_view(" + mv + " const& src, ::std::pmr::memory_resource* mr) {",
+            "try {",
+            o + " owned{mr};",
+            "auto const sb = src.bytes();  // full validated frame span",
+            "owned.bytes_.assign(sb.begin(), sb.end());  // deep copy into mr arena",
+            "return owned;  // move (custom noexcept move ctor)",
+            "} catch (::std::bad_alloc const&) {",
+            "return ::std::unexpected{::fixpp::core::error::dict_reify_oom};",
+            "}",
+            "}"};
+}
+
+census run_reify_census(std::string_view ns, std::vector<std::string> const& lines) {
+    census out;
+    auto bad = [&](std::size_t idx, std::string_view why) {
+        out.unclassified.push_back("line " + std::to_string(idx + 1) + " (" + std::string{why} +
+                                   "): " + lines[idx]);
+    };
+    std::string const nsv{ns};
+    std::string const mv{kMsgView};
+    std::vector<std::string> const includes = reify_includes(ns);
+    std::set<std::string> includes_seen;
+    enum class region { head, body, traits } where = region::head;
+    std::string oid;                // the open owning_ class, empty outside one
+    std::vector<std::string> tail;  // the out-of-line lines still expected
+    std::size_t tail_at = 0;
+    std::vector<std::string> trait;  // the traits lines still expected
+    std::size_t trait_at = 0;
+
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        std::string_view const s = strip(lines[i]);
+        if (s.empty() || s.starts_with("//")) continue;
+
+        if (tail_at < tail.size()) {
+            if (s != tail[tail_at]) bad(i, "out-of-line definition outside the grammar");
+            ++tail_at;
+            continue;
+        }
+        if (trait_at < trait.size()) {
+            if (s != trait[trait_at]) bad(i, "traits specialisation outside the grammar");
+            ++trait_at;
+            continue;
+        }
+
+        if (!oid.empty()) {
+            std::string const msg = oid.substr(std::string_view{"owning_"}.size());
+            auto& rec = out.classes[msg];
+            // A two-line declaration whose second line must follow exactly.
+            auto pair = [&](std::string_view first, std::string const& second) {
+                if (s != first) return false;
+                if (i + 1 >= lines.size() || strip(lines[i + 1]) != second) {
+                    bad(i, "declaration outside the grammar");
+                }
+                ++i;
+                return true;
+            };
+            if (s.starts_with("[[nodiscard]] inline ")) {
+                std::string_view const ret =
+                    s.substr(std::string_view{"[[nodiscard]] inline "}.size());
+                std::size_t const at = i;
+                if (i + 2 >= lines.size()) {
+                    bad(at, "truncated member function");
+                    break;
+                }
+                std::string_view const name = strip(lines[i + 1]);
+                std::string body{strip(lines[i + 2])};
+                i += 2;
+                int depth = 0;
+                for (char ch : body) depth += ch == '{' ? 1 : ch == '}' ? -1 : 0;
+                while (depth > 0 && i + 1 < lines.size()) {
+                    ++i;
+                    std::string_view const b = strip(lines[i]);
+                    body += '\n';
+                    body += b;
+                    for (char ch : b) depth += ch == '{' ? 1 : ch == '}' ? -1 : 0;
+                }
+                classified const r = classify_owning_member(ns, ret, name, body);
+                if (r.k == kind::passthrough) {
+                    ++rec.passthroughs;
+                } else if (r.k == kind::unclassified) {
+                    bad(at,
+                        "member function '" + std::string{name} + "' matches no accessor template");
+                } else {
+                    rec.typed.push_back({r.tag, r.id, r.vk});
+                    ++out.typed;
+                }
+                continue;
+            }
+            if (pair("[[nodiscard]] " + mv + " const&",
+                     "view() const noexcept [[clang::lifetimebound]];")) {
+                ++rec.views;
+                continue;
+            }
+            if (pair("[[nodiscard]] static constexpr ::fixpp::dict::application_version",
+                     "which() noexcept { return version_v; }") ||
+                pair("[[nodiscard]] static ::fixpp::core::expected_t<" + oid + ">",
+                     "from_view(" + mv + " const& src, ::std::pmr::memory_resource* mr);")) {
+                continue;
+            }
+            if (s == "public:" || s == "private:" ||
+                match("static constexpr ::std::string_view msg_type_v = \"@S\";", s) ||
+                s == "static constexpr ::fixpp::dict::application_version version_v =" ||
+                match("::fixpp::dict::application_version::@I;", s) ||
+                s == oid + "(" + oid + " const&) = delete;" ||
+                s == oid + "& operator=(" + oid + " const&) = delete;" ||
+                s == oid + "(" + oid + " &&) noexcept;" ||
+                s == oid + "& operator=(" + oid + " &&) noexcept;" ||
+                s == "~" + oid + "() = default;" ||
+                s == "explicit " + oid + "(::std::pmr::memory_resource* mr) : bytes_(mr) {}" ||
+                s == "::std::pmr::vector<::std::byte>                    bytes_;      // owned "
+                     "arena copy" ||
+                s == "mutable ::std::optional<" + mv +
+                         "> view_cache_;  // lazy, nullopt after move") {
+                continue;
+            }
+            if (s == "};") {
+                tail = owning_out_of_line(oid);
+                tail_at = 0;
+                oid.clear();
+                continue;
+            }
+            bad(i, "line outside the grammar (class scope)");
+            continue;
+        }
+
+        caps c;
+        if (where == region::head) {
+            if (s == "#pragma once") continue;
+            if (s.starts_with("#include ")) {
+                bool known = false;
+                for (auto const& inc : includes) {
+                    if (s == inc) {
+                        known = true;
+                        if (!includes_seen.insert(inc).second) bad(i, "include repeated");
+                    }
+                }
+                if (!known) bad(i, "include outside the pinned set");
+                continue;
+            }
+            if (s == "namespace fixpp::" + nsv + " {") {
+                where = region::body;
+                continue;
+            }
+        } else if (where == region::body) {
+            if (match("class owning_@I {", s, c)) {
+                oid = "owning_" + c.ids.front();
+                std::string const msg = c.ids.front();
+                if (out.classes.contains(msg)) bad(i, "class defined twice");
+                out.classes[msg].is_group = false;
+                continue;
+            }
+            if (s == "}  // namespace fixpp::" + nsv) {
+                where = region::traits;
+                continue;
+            }
+        } else {
+            if (s == "template <>" && i + 1 < lines.size() &&
+                match("struct fixpp::dict::owning_message_traits<fixpp::" + nsv + "::@I> {",
+                      strip(lines[i + 1]), c)) {
+                std::string const msg = c.ids.front();
+                auto const it = out.classes.find(msg);
+                if (it == out.classes.end()) {
+                    bad(i, "traits for a class the file does not define");
+                } else {
+                    ++it->second.traits;
+                }
+                std::string const q = "fixpp::" + nsv + "::";
+                trait = {"using type = " + q + "owning_" + msg + ";", "};",
+                         "static_assert(::std::is_same_v<",
+                         "fixpp::dict::owning_message_t<" + q + msg + ">,",
+                         q + "owning_" + msg + ">);  // AC-G7a"};
+                trait_at = 0;
+                ++i;
+                continue;
+            }
+        }
+        bad(i, "line outside the grammar (namespace scope)");
+    }
+    if (!oid.empty()) out.unclassified.push_back("class " + oid + " is never closed");
+    if (tail_at < tail.size() || trait_at < trait.size()) {
+        out.unclassified.push_back("the file ends inside a definition block");
+    }
+    if (where != region::traits) out.unclassified.push_back("namespace never closed");
+    return out;
+}
+
+// A Reify census reports a problem as an unclassified line, or as a class
+// without exactly one passthrough, one view() and one traits specialisation.
+bool reify_rejects(census const& c) {
+    if (!c.unclassified.empty()) return true;
+    for (auto const& [name, rec] : c.classes) {
+        if (rec.passthroughs != 1 || rec.views != 1 || rec.traits != 1) return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // The independent side: Fields.hpp's FieldRef rows.
 //   message name -> its rows with group_no_tag 0: tag -> data type
 //   group no_tag -> its member rows across every message: tag -> data type
@@ -753,7 +1073,10 @@ tag_types const* rows_of(field_rows const& f, std::string const& cls, class_reco
 // Check 2: every class's typed-accessor tags equal its FieldRef rows (less
 // the rows the mapping omits), with no tag bound twice and no class or array
 // without its counterpart.
-std::vector<std::string> population_problems(census const& c, field_rows const& f) {
+// `with_groups` is false for Reify.hpp, whose owning_<Msg> classes reuse
+// Messages.hpp's group flyweights and declare none of their own.
+std::vector<std::string> population_problems(census const& c, field_rows const& f,
+                                             bool with_groups = true) {
     std::vector<std::string> out;
     std::size_t expected_typed = 0;
     auto compare = [&](std::string const& cls, tag_types const& rows, bool want_group) {
@@ -778,7 +1101,11 @@ std::vector<std::string> population_problems(census const& c, field_rows const& 
         }
     };
     for (auto const& [m, rows] : f.messages) compare(m, rows, false);
-    for (auto const& [no_tag, rows] : f.groups) compare("G_" + std::to_string(no_tag), rows, true);
+    if (with_groups) {
+        for (auto const& [no_tag, rows] : f.groups) {
+            compare("G_" + std::to_string(no_tag), rows, true);
+        }
+    }
     for (auto const& [name, rec] : c.classes) {
         if (rows_of(f, name, rec) == nullptr && !rec.typed.empty()) {
             out.push_back(name + " has typed accessors but no FieldRef rows in Fields.hpp");
@@ -1061,6 +1388,142 @@ std::vector<identity_seed> identity_seeds() {
     };
 }
 
+// A synthetic Reify.hpp in the shipped grammar: owning_NewOrderSingle with
+// the same accessors as the synthetic message (three scalars, a decimal and
+// a group accessor), its out-of-line definitions and its traits.
+constexpr std::string_view kSyntheticReify = R"(// header comment
+#pragma once
+#include <cstdint>
+namespace fixpp::vx {
+class owning_NewOrderSingle {
+public:
+    static constexpr ::std::string_view msg_type_v = "D";
+    static constexpr ::fixpp::dict::application_version version_v =
+        ::fixpp::dict::application_version::v44;
+    owning_NewOrderSingle(owning_NewOrderSingle const&) = delete;
+    owning_NewOrderSingle& operator=(owning_NewOrderSingle const&) = delete;
+    owning_NewOrderSingle(owning_NewOrderSingle &&) noexcept;
+    owning_NewOrderSingle& operator=(owning_NewOrderSingle &&) noexcept;
+    ~owning_NewOrderSingle() = default;
+    [[nodiscard]] static constexpr ::fixpp::dict::application_version
+    which() noexcept { return version_v; }
+    [[nodiscard]] static ::fixpp::core::expected_t<owning_NewOrderSingle>
+    from_view(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& src, ::std::pmr::memory_resource* mr);
+    [[nodiscard]] ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const&
+    view() const noexcept [[clang::lifetimebound]];
+    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
+    field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
+    { return view().get(tag); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    account() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(view().template get<1>()); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
+    cl_ord_id() const noexcept [[clang::lifetimebound]]
+    { return ::fixpp::dict::decode_field<::std::string_view>(view().template get<11>()); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<char>
+    side() const noexcept
+    { return ::fixpp::dict::decode_field<char>(view().template get<54>()); }
+    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
+    price(::std::pmr::memory_resource* mr) const noexcept
+    { auto fv = view().template get<44>(); if (!fv) return ::std::unexpected{fv.error()};
+      return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
+    [[nodiscard]] inline ::fixpp::wire::group_view<::fixpp::vx::groups::G_78>
+    allocs() const noexcept [[clang::lifetimebound]]
+    { return view().template group<78, ::fixpp::vx::groups::G_78>(); }
+private:
+    explicit owning_NewOrderSingle(::std::pmr::memory_resource* mr) : bytes_(mr) {}
+    ::std::pmr::vector<::std::byte>                    bytes_;      // owned arena copy
+    mutable ::std::optional<::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>> view_cache_;  // lazy, nullopt after move
+};
+inline owning_NewOrderSingle::owning_NewOrderSingle(owning_NewOrderSingle && other) noexcept
+    : bytes_(::std::move(other.bytes_))
+    , view_cache_(::std::nullopt) {
+    other.view_cache_ = ::std::nullopt;  // reset source cache (I-9/AC-R4)
+}
+inline owning_NewOrderSingle& owning_NewOrderSingle::operator=(owning_NewOrderSingle && other) noexcept {
+    if (this != &other) {
+        bytes_            = ::std::move(other.bytes_);
+        view_cache_       = ::std::nullopt;  // reset dest cache (I-9/AC-R4)
+        other.view_cache_ = ::std::nullopt;  // reset source cache
+    }
+    return *this;
+}
+inline ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const&
+owning_NewOrderSingle::view() const noexcept {
+    if (!view_cache_) {
+        ::fixpp::wire::pmr_carry_buffer carry{0, bytes_.get_allocator().resource()};
+        ::fixpp::wire::Framer framer{};
+        ::fixpp::wire::frame_view out_arr[1]{};
+        auto framed = framer.feed(
+            ::std::span<const ::std::byte>{bytes_.data(), bytes_.size()},
+            carry, ::std::span<::fixpp::wire::frame_view>{out_arr, 1});
+        if (framed && !framed->empty()) {
+            view_cache_.emplace((*framed)[0], bytes_.get_allocator().resource());
+        } else {
+            view_cache_.emplace();
+        }
+    }
+    return *view_cache_;
+}
+inline ::fixpp::core::expected_t<owning_NewOrderSingle>
+owning_NewOrderSingle::from_view(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& src, ::std::pmr::memory_resource* mr) {
+    try {
+        owning_NewOrderSingle owned{mr};
+        auto const sb = src.bytes();  // full validated frame span
+        owned.bytes_.assign(sb.begin(), sb.end());  // deep copy into mr arena
+        return owned;  // move (custom noexcept move ctor)
+    } catch (::std::bad_alloc const&) {
+        return ::std::unexpected{::fixpp::core::error::dict_reify_oom};
+    }
+}
+}  // namespace fixpp::vx
+template <>
+struct fixpp::dict::owning_message_traits<fixpp::vx::NewOrderSingle> {
+    using type = fixpp::vx::owning_NewOrderSingle;
+};
+static_assert(::std::is_same_v<
+    fixpp::dict::owning_message_t<fixpp::vx::NewOrderSingle>,
+    fixpp::vx::owning_NewOrderSingle>);  // AC-G7a
+)";
+
+// Runtime-lookup shapes in the Reify text; each must fail the grammar.
+constexpr seeded kReifySeeded[] = {
+    {"owning accessor's tag looked up by name at runtime", "view().template get<1>()",
+     "view().get(tag_by_name(\"Account\"))"},
+    {"owning accessor's tag read from a member", "view().template get<54>()",
+     "view().get(side_tag_)"},
+    {"namespace-scope lookup table in Reify.hpp", "namespace fixpp::vx {\n",
+     "namespace fixpp::vx {\ninline constexpr ::std::uint16_t kTags[] = {54};\n"},
+    {"an out-of-line definition changed", "auto const sb = src.bytes();",
+     "auto const sb = src.bytes_for(dict_);"},
+    {"the traits specialisation missing",
+     "template <>\nstruct fixpp::dict::owning_message_traits<fixpp::vx::NewOrderSingle> {\n", ""},
+};
+
+// Identity mutations of the Reify text: each keeps the grammar and the tag
+// set, so only the identity check can catch it.
+std::vector<identity_seed> reify_identity_seeds() {
+    return {
+        {"two same-type owning accessors' tag literals swapped",
+         false,
+         {{"view().template get<1>()", "@SWAP@"},
+          {"view().template get<11>()", "view().template get<1>()"},
+          {"@SWAP@", "view().template get<11>()"}}},
+        {"an owning scalar's return and decode_field<T> type changed together",
+         false,
+         {{"::fixpp::core::expected_t<char>\n    side()",
+           "::fixpp::core::expected_t<bool>\n    side()"},
+          {"decode_field<char>(view().template get<54>())",
+           "decode_field<bool>(view().template get<54>())"}}},
+        {"an owning scalar renamed, tag and type kept",
+         false,
+         {{"    side() const", "    sides() const"}}},
+        {"an owning group accessor named without dropping No",
+         false,
+         {{"allocs()", "no_allocs()"}}},
+    };
+}
+
 // A census over well-formed text reports a problem as an unclassified line,
 // or as a class that does not carry exactly one passthrough (and, for a
 // message, one view()).
@@ -1183,6 +1646,41 @@ TEST(CodegenAccessorResolutionCensus, EveryTypedAccessorResolvesTagAndTypeAtComp
             EXPECT_FALSE(identity_problems(bad, bf, gn).empty())
                 << "identity mutation accepted: " << m.what;
         }
+
+        // The same three checks over the synthetic Reify.hpp.
+        census const rgood = run_reify_census("vx", split(kSyntheticReify));
+        ASSERT_TRUE(rgood.unclassified.empty())
+            << "the synthetic Reify text is rejected: " << rgood.unclassified.front();
+        ASSERT_FALSE(reify_rejects(rgood));
+        ASSERT_EQ(rgood.typed, 5U) << "the synthetic Reify text holds five typed accessors";
+        auto const rgood_pop = population_problems(rgood, gf, false);
+        ASSERT_TRUE(rgood_pop.empty()) << first_of(rgood_pop);
+        auto const rgood_id = identity_problems(rgood, gf, gn);
+        ASSERT_TRUE(rgood_id.empty()) << first_of(rgood_id);
+        for (auto const& m : kReifySeeded) {
+            std::string const text{kSyntheticReify};
+            ASSERT_NE(text.find(m.from), std::string::npos) << m.what << ": anchor not in the text";
+            census const bad = run_reify_census("vx", split(replace_all(text, m.from, m.to)));
+            EXPECT_TRUE(reify_rejects(bad)) << "seeded Reify mutation accepted: " << m.what;
+        }
+        for (auto const& m : reify_identity_seeds()) {
+            std::string text{kSyntheticReify};
+            for (auto const& [from, to] : m.edits) {
+                ASSERT_NE(text.find(from), std::string::npos)
+                    << m.what << ": anchor not in the text: " << from;
+                text = replace_all(text, from, to);
+            }
+            ASSERT_NE(text, kSyntheticReify) << m.what << ": the mutation changed nothing";
+            census const bad = run_reify_census("vx", split(text));
+            EXPECT_FALSE(reify_rejects(bad))
+                << m.what << ": the grammar rejects it, so this arm cannot show the identity check";
+            EXPECT_TRUE(population_problems(bad, gf, false).empty())
+                << m.what
+                << ": the population check rejects it, so this arm cannot show the "
+                   "identity check";
+            EXPECT_FALSE(identity_problems(bad, gf, gn).empty())
+                << "Reify identity mutation accepted: " << m.what;
+        }
     }
 
     // ---- The census over every version's shipped Messages.hpp.
@@ -1231,6 +1729,30 @@ TEST(CodegenAccessorResolutionCensus, EveryTypedAccessorResolvesTagAndTypeAtComp
         EXPECT_TRUE(ids.empty()) << ids.size()
                                  << " accessor identity mismatch(es); first:" << first_of(ids);
         total_typed += c.typed;
+
+        // The same three checks over the version's Reify.hpp owning_<Msg>
+        // accessors, against the same Fields.hpp rows and names.
+        bool ok_r = false;
+        auto const reify_lines = read_lines(dir + "Reify.hpp", ok_r);
+        ASSERT_TRUE(ok_r && !reify_lines.empty()) << "missing or empty: " << dir << "Reify.hpp";
+        census const rc = run_reify_census(ns, reify_lines);
+        EXPECT_TRUE(rc.unclassified.empty())
+            << rc.unclassified.size() << " Reify.hpp line(s) outside the grammar; first: "
+            << (rc.unclassified.empty() ? std::string{} : rc.unclassified.front());
+        for (auto const& [name, rec] : rc.classes) {
+            EXPECT_EQ(rec.passthroughs, 1) << "owning_" << name << ": field_value count";
+            EXPECT_EQ(rec.views, 1) << "owning_" << name << ": view() declaration count";
+            EXPECT_EQ(rec.traits, 1) << "owning_" << name << ": owning_message_traits count";
+        }
+        ASSERT_GT(rc.typed, 0U) << "no owning_ accessor classified: the walk reached nothing";
+        auto const rpop = population_problems(rc, f, false);
+        EXPECT_TRUE(rpop.empty()) << rpop.size()
+                                  << " Reify.hpp population mismatch(es); first:" << first_of(rpop);
+        auto const rids = identity_problems(rc, f, names);
+        EXPECT_TRUE(rids.empty()) << rids.size()
+                                  << " Reify.hpp accessor identity mismatch(es); first:"
+                                  << first_of(rids);
+        total_typed += rc.typed;
     }
     EXPECT_GT(total_typed, 0U);
 }

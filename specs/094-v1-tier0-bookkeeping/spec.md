@@ -804,8 +804,10 @@ in those files are licence comment lines.
     field's tag at compile time, with its value type fixed in its generated text, and its own
     generated text never consults a runtime `Dictionary`, a name→tag or tag→type table, or any
     dictionary lookup function. The tag is an integer literal: the template argument of
-    `view_.template get<N>()` or of `view_.template group<N, …G_N>()`, or the literal argument of
-    `::fixpp::wire::get(ctx_.span, N, …)` or of `nested_group_slices(…, N, …)`; and it is the tag of
+    `view_.template get<N>()` or of `view_.template group<N, …G_N>()` (and, in `Reify.hpp`'s
+    `owning_<Msg>` classes, of `view().template get<N>()` or of `view().template group<N, …G_N>()`),
+    or the literal argument of `::fixpp::wire::get(ctx_.span, N, …)` or of
+    `nested_group_slices(…, N, …)`; and it is the tag of
     the field the accessor is named for. The value type is fixed by the emitted text:
     `decode_field<T>` with T equal to the accessor's `expected_t<T>` and one of the four scalar types
     the emitter uses, `decimal_t::parse` for a `decimal_t` accessor, or the group flyweight type; and
@@ -817,27 +819,33 @@ in those files are licence comment lines.
     group occurrences and split Length+Data pairs, which may call the session dictionary through
     `dict_hooks` (group membership, group delimiter, a dictionary's own pairs). Re-derive the
     callbacks: `grep -n 'group_member_fn\|group_delim_fn\|length_pair_fn' include/fixpp/wire/*.hpp src/wire/*.cpp`.
-  - **Population.** Every typed field accessor of each codegen version's generated `Messages.hpp`:
-    v42, v44, v50sp2 and vt11, and vlatest when the build generates it. Message flyweights and group
-    flyweights both count, with their group and nested-group accessors. A listed version whose
-    header is missing fails; it is never skipped. **Excluded:** `field_value(::std::uint16_t tag)`, the
-    runtime-tag passthrough, whose tag is the caller's, and the `view()` bridge, which returns the
-    bound view. Neither is a typed field accessor; each is accepted only with its exact signature
+  - **Population.** Every typed field accessor of each codegen version's generated `Messages.hpp`
+    and `Reify.hpp`: v42, v44, v50sp2 and vt11, and vlatest when the build generates it. In
+    `Messages.hpp`, message flyweights and group flyweights both count, with their group and
+    nested-group accessors; in `Reify.hpp` (`emit_reify.cpp`), every `owning_<Msg>` class's scalar,
+    decimal and group accessors. A listed version whose header is missing fails; it is never
+    skipped. **Excluded:** `field_value(::std::uint16_t tag)`, the runtime-tag passthrough, whose tag
+    is the caller's, and the `view()` bridge (in `Reify.hpp`, the `view()` declaration), which returns
+    the bound view. Neither is a typed field accessor; each is accepted only with its exact signature
     and body, and exactly once per class (once per message for `view()`), so a second member of that
-    shape cannot carry a lookup. `Reify.hpp`'s `owning_<Msg>` accessors (`emit_reify.cpp`) are
-    outside the population.
-  - **What it asserts.** Three checks over each version's `Messages.hpp`, each with its own assertion:
+    shape cannot carry a lookup. `Reify.hpp`'s other non-accessor members (the deleted copies, the
+    move declarations, `which()`, `from_view`, the private constructor and data members, the
+    out-of-line definitions of the moves, `view()` and `from_view`, and the `owning_message_traits`
+    specialisation, once per class) are accepted only by their exact text.
+  - **What it asserts.** Three checks over each version's `Messages.hpp`, and the same three over its
+    `Reify.hpp`, each with its own assertion:
     - *Grammar.* A closed grammar, not a forbidden-token list: every line of the file is one of the
       shapes the emitter writes (the pinned include set, the namespace and class lines, the
       constructors and members, the `static_assert`s, comments), and every member function matches
       one of the accessor templates in full, signature and body, or one of the two exclusions. Any
       other line fails the cell. A deliberate emitter change that adds an accessor shape must add it
-      to the cell by hand.
+      to the cell by hand. The `Reify.hpp` grammar is closed the same way over the whole file.
     - *Population.* For every class, the set of tags its typed accessors bind equals the set the
       version's `Fields.hpp` declares for it, less the rows whose data type the mapping below omits:
       a message's `<Msg>_fields[]` rows with `group_no_tag` 0, and a group flyweight `G_K`'s rows
       with `group_no_tag` K across every message. No tag is bound twice, and the classified count
-      equals the `Fields.hpp`-derived count. `Fields.hpp` is written by another emitter
+      equals the `Fields.hpp`-derived count. In `Reify.hpp` each `owning_<Msg>` class is compared with
+      `<Msg>_fields[]` (it declares no group flyweights of its own). `Fields.hpp` is written by another emitter
       (`emit_fields.cpp`) from the same IR, so the check proves the walk reached every accessor the
       version declares; dictionary completeness is D-001's census and the 082 tests'.
     - *Identity.* Per accessor, its name and its value type. The name: the accessor's identifier is
@@ -855,7 +863,7 @@ in those files are licence comment lines.
       field names come from the library's loaders, which the codegen also uses; a loader defect is
       the subject of the dictionary rows' own witnesses (D-001, D-003, D-007), not this cell's.
   - **Positive control.** A guard runs first, over a synthetic `Messages.hpp`, a synthetic
-    `Fields.hpp` and a synthetic name map:
+    `Reify.hpp`, a synthetic `Fields.hpp` and a synthetic name map:
     - the synthetic text passes all three checks, an accessor in the `_t<tag>` collision form
       included;
     - each of a set of seeded runtime-resolution shapes fails the grammar (a tag looked up by name,
@@ -867,9 +875,15 @@ in those files are licence comment lines.
       tag literals swapped; a scalar's return and `decode_field<T>` type changed together; a message
       scalar, a group-entry scalar, a group accessor and a nested-group accessor renamed; a `_t<tag>`
       suffix naming another tag, or used with no collision; and a `Fields.hpp` data type changed
-      under a char and under a decimal accessor.
+      under a char and under a decimal accessor;
+    - the synthetic `Reify.hpp` passes all three checks; each of its seeded runtime-resolution and
+      grammar shapes fails the grammar (an `owning_` accessor's tag looked up by name, a tag read from
+      a member, a namespace-scope table, a changed out-of-line definition, a missing traits
+      specialisation); and each of its identity seeds passes the grammar and the population check
+      and fails the identity check (two same-type `owning_` accessors' tag literals swapped, a
+      consistent type change, a scalar renamed, a group accessor named without dropping "No").
 
-    Then, per version, the classified typed-accessor count is nonzero, and the version's dictionary
+    Then, per version and per file, the classified typed-accessor count is nonzero, and the version's dictionary
     loads and names at least one of its `Fields.hpp` tags (a tag it leaves unnamed fails the identity
     check for any accessor of that tag).
   - **RED proof.** Emitter mutants, each in a scratch copy on F: (`git archive HEAD | tar -x` of a
@@ -885,7 +899,11 @@ in those files are licence comment lines.
     - (d) a type change inside the grammar: in `emit_scalar`, a Boolean field's accessor is emitted
       with `char` as both its return type and its `decode_field<T>` type;
     - (e) a rename: NewOrderSingle's Account(1) accessor is emitted as `account_id()`, its tag and
-      type kept.
+      type kept;
+    - (g) and (h), in `tools/codegen/fixpp-codegen/emit_reify.cpp`, so they reach `Reify.hpp` only:
+      (g) `owning_` ClOrdID(11)'s accessor resolves its tag at runtime by name and reads it with
+      `view().get(tag)`; (h) `owning_NewOrderSingle`'s Account(1) and ClOrdID(11) accessors are
+      emitted under each other's names, the tag set kept.
 
     One test-side mutant, in the scratch copy of the cell: (f) the identity check's name
     comparison is removed. Before each emitter run, the scratch's generated `Messages.hpp` is
@@ -893,7 +911,9 @@ in those files are licence comment lines.
     FR-022's "What counts as RED" applies: the binary exits 1, not with an abort, and the census
     is the only failing test. (a) and (b) fail at the unclassified-line assertion naming the
     mutated accessor. (c), (d) and (e) fail at the identity assertion, and the grammar and
-    population assertions pass. (f) fails in the guard, at "identity mutation accepted".
+    population assertions pass. (f) fails in the guard, at "identity mutation accepted". (g) fails
+    at the `Reify.hpp` grammar assertion, and (h) at the `Reify.hpp` identity assertion only, with
+    every `Messages.hpp` assertion passing under both.
   - **Why the byte pins are not this witness.** `read_tier_byte_diff_test.cmake` and
     `DeterminismTest.GeneratedMatchesGolden` pin the generated text, and are republished at every
     intended emitter change; this cell asserts the property, so a republished pin that carried a
