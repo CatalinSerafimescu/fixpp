@@ -454,6 +454,7 @@ dispositioned under "Hits kept, by file group" and in the table below.
 | `spec/coverage-index.md` FIX-TC rows 8–11 | `005-defer` on scenarios 8–11 | edit (§D) |
 | `spec/coverage-index.md` FIX-TC row 19; 005 ledger PossDup / PossResend row | TC-012 "remains backlog" | edit (§D) |
 | `spec/coverage-index.md` 005 ledger ResendRequest row | 005 ledger, scenarios 8–11 | edit (§D) |
+| `spec/coverage-index.md` Gate B round 1 supplementals (D-003, D-007, NFR-001, NFR-002, NFR-003, NFR-005, NFR-011, SVC-001..004) | new notes; the SVC ones name gRPC, iceoryx2 and `Iox2Tap` as post-1.0 | edit (§D), added at Gate B round 1 (owner Q1 (b)) |
 | `spec/feature-catalogue.md` Service section | SVC-001..005 at `backlog` | edit (§A) |
 | `spec/feature-catalogue.md` rows of the 18 flips, NFR-013 | old Status/Title | edit (§C) |
 | `README.md` tagline | "and a gRPC+iceoryx2 service wrapper"; "≥90% test coverage" (NFR-002's old figure) | edit (§F.4) |
