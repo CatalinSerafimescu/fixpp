@@ -200,6 +200,9 @@ fixpp_add_interop_test(
     SOURCES happy/hp_fixt50sp2_logon_hb_logout_test.cpp
     TLS
 )
+# 095-tail-evidence-pass: label 095 (expected-ctest-095.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST interop_hp_fixt50sp2_logon_hb_logout_test APPEND PROPERTY LABELS 095)
 fixpp_add_interop_test(
     NAME interop_hp_down_peer_stop_watchdog_test
     GROUP happy

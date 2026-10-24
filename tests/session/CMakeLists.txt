@@ -203,6 +203,9 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 092)
 # 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_pure_tests APPEND PROPERTY LABELS 093)
+# 095-tail-evidence-pass: label 095 (expected-ctest-095.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 095)
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry
@@ -3243,12 +3246,17 @@ if(TARGET fixpp_codegen_generate)
   # stopgap gate).
   add_executable(test_077_allversions_builder_roundtrip
     test_077_allversions_builder_roundtrip.cpp
+    # 095-tail-evidence-pass: the tail-row witnesses and their census join this
+    # standalone executable (no new ctest entry, [const §VII.8]); the census reads
+    # the registered tests of this binary.
+    test_095_tail_rows_roundtrip.cpp
   )
   add_dependencies(test_077_allversions_builder_roundtrip fixpp_codegen_generate)
   target_link_libraries(test_077_allversions_builder_roundtrip PRIVATE
     fixpp_wire
     fixpp_dictionary
     fixpp::builders::v50sp2
+    pugixml::pugixml
     GTest::gtest
     GTest::gtest_main
   )
@@ -3259,11 +3267,16 @@ if(TARGET fixpp_codegen_generate)
   )
   target_compile_definitions(test_077_allversions_builder_roundtrip PRIVATE
     "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    # 095: the QuickFIX-cpp golden the walk's field leg is compared with, read at test time.
+    "FIXPP_095_QUICKFIX_GOLDEN_CSV=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/golden.csv\""
   )
   add_test(NAME test_077_allversions_builder_roundtrip
     COMMAND test_077_allversions_builder_roundtrip)
   set_tests_properties(test_077_allversions_builder_roundtrip PROPERTIES
     LABELS "077;us2;builder-roundtrip;v50sp2;091")
+  # 095-tail-evidence-pass: label 095 (expected-ctest-095.txt). APPEND, after the
+  # last LABELS setter for this entry, so the existing labels survive.
+  set_property(TEST test_077_allversions_builder_roundtrip APPEND PROPERTY LABELS 095)
 
   # vlatest half of T016 -- kept in a SEPARATE TU/executable from the v50sp2
   # one above (not one combined "allversions" TU): compiling both the ~75MB
