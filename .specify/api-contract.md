@@ -211,18 +211,9 @@ Per `[const §X.5]` / `[2i]`: every C-ABI symbol is annotated **thread-safe** / 
 
 Per `[arch §7.4]`:
 
-> **⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`).** The set described here is the
-> BASE export set, which every configuration still exports. Wherever the typed tier is in effect
-> (`FIXPP_INSTALL_TYPED_TIER` resolves ON: `AUTO` in a single-config `Release` tree, which is every released
-> package, or an explicit `ON`), the export also carries, for each generated version (`v42`, `v44`, `v50sp2`,
-> and `vlatest` iff `FIXPP_CODEGEN_FIX_LATEST`), the STATIC pair `fixpp::builders::<ver>` /
-> `fixpp::validators::<ver>`. A consumer links that pair by name; `fixpp::fixpp` does not reach it. The counts
-> written below are the base set's, as 084/086 measured it, and are history; a configured tree's
-> `fixpp-export-names.txt` lists the current set.
-
 | Target | Type | Purpose | Stability |
 |---|---|---|---|
-| `fixpp::core` … `fixpp::tap` | **`STATIC`, except `tap` and `dict::dispatch` which are `INTERFACE`** | One per module. **SUPERSEDED (086/FR-013): **13 STATIC / 4 INTERFACE / 1 OBJECT**, measured in the shipped `fixppTargets.cmake`: STATIC = `core`, `sync`, `wire`, `dictionary`, `dict_dispatch_bridge`, `session`, `transport`, `tls`, `log`, `otel`, `config_toml`, `log_otlp`, `capi`; INTERFACE = `fixpp`, `service`, `tap`, `dict::dispatch`; OBJECT = `capi_objects`. There is no combined umbrella shared/static library** — `fixpp::fixpp` is an INTERFACE target. Measured in the shipped `fixppTargets.cmake`. | Internal contract; not redistributed standalone. |
+| `fixpp::core` … `fixpp::tap` | **`STATIC`, except `tap` and `dict::dispatch` which are `INTERFACE`** | One per module. **SUPERSEDED (086/FR-013): **13 STATIC / 4 INTERFACE / 1 OBJECT**, measured in the shipped `fixppTargets.cmake` (the base set; ⚠️ superseded in part by fixpp#613: with `FIXPP_INSTALL_TYPED_TIER` in effect the export adds a STATIC `fixpp::builders::<ver>` / `fixpp::validators::<ver>` pair per generated version, linked by name; see the #613 note at the end of this file): STATIC = `core`, `sync`, `wire`, `dictionary`, `dict_dispatch_bridge`, `session`, `transport`, `tls`, `log`, `otel`, `config_toml`, `log_otlp`, `capi`; INTERFACE = `fixpp`, `service`, `tap`, `dict::dispatch`; OBJECT = `capi_objects`. There is no combined umbrella shared/static library** — `fixpp::fixpp` is an INTERFACE target. Measured in the shipped `fixppTargets.cmake`. | Internal contract; not redistributed standalone. |
 | `fixpp::capi_objects` | `OBJECT` | `extern "C"` translation units. **Exports with an underscore, not a hyphen**, and its objects are absorbed into the STATIC `fixpp_capi` archive — there is no umbrella library to combine into (086/FR-013). | Internal; an export-set member by explicit enumeration. |
 | `fixpp::fixpp` | **`INTERFACE`** (umbrella) | **C++ public consumer target.** `INTERFACE_INCLUDE_DIRECTORIES = ${_IMPORT_PREFIX}/include`. Brings in both `<fix/c_api.h>` and the entire `<fixpp/...>` C++ surface. Selected by `find_package(fixpp REQUIRED)` and linking `fixpp::fixpp`; **`COMPONENTS Cxx` does NOT exist** and never did (086/FR-013). | Stable from v1.0 |
 | `fixpp::capi` | **`STATIC`** (consumer target) | **C-ABI consumer target.** A DISTINCT static archive, backed by the `fixpp::capi_objects` OBJECT library whose objects it absorbs — it does not share object code with `fixpp::fixpp`, which is an INTERFACE target linking the session stack and carrying no object code of its own (corrected 086/Gate B r2). **Delivered by 086** (issue #218): `INTERFACE_INCLUDE_DIRECTORIES = ${_IMPORT_PREFIX}/include/capi`, under which the C-ABI headers sit at `capi/fix/**`, and `INTERFACE_LINK_LIBRARIES = $<LINK_ONLY:fixpp::capi_objects>` so the objects target's whole-tree include path is not inherited. C++ headers are genuinely not on its include path, asserted by three configure-time `try_compile` probes each demonstrated able to fail. **The `include/fix/` root this row used to name is UNSATISFIABLE** — every C-ABI header carries `fix/` in its own include spelling, so that root resolves `<fix/c_api.h>` to `include/fix/fix/c_api.h`; see `architecture.md` §7.4's include/fix/-only rows. | Stable from v1.0 |
@@ -369,3 +360,13 @@ Combined post-judging tally: P1 = 6, P2 = 5, P3 = 3 across 3 root causes. Closin
 ---
 
 **End of v0.2 draft. Gate A round 1 converged 2026-05-10 (Phase A). Awaiting user sign-off.**
+
+## #613 note — the typed builder/validator export pair
+
+**⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`).** The export sets this file states are the
+BASE export set, which every configuration still exports. Wherever the typed tier is in effect
+(`FIXPP_INSTALL_TYPED_TIER` resolves ON: `AUTO` in a single-config `Release` tree, which is every released package,
+or an explicit `ON`), the export also carries, for each generated version (`v42`, `v44`, `v50sp2`, and `vlatest` iff
+`FIXPP_CODEGEN_FIX_LATEST`), the STATIC pair `fixpp::builders::<ver>` / `fixpp::validators::<ver>`. A consumer links
+that pair by name; `fixpp::fixpp` does not reach it. The counts this file writes are the base set's, as 084/086
+measured it, and are history; a configured tree's `fixpp-export-names.txt` lists the current set.
