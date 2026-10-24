@@ -22,6 +22,9 @@
 //     exponent-0 value writes its mantissa's digits. Only exponent-0 decimals are used.
 //   * the REQUIRED sets — the dictionary (FIX42.xml / FIX44.xml / FIX50SP2.xml
 //     required="Y"; the Orchestra presence="required" for vlatest).
+// Re-derive a version's tag order with
+//   grep -oE 'bb\.(field|group_begin)\([0-9]+|set_[a-z]+\([0-9]+' <ver>/messages/<Msg>.builder.inl
+// in a configured tree's _codegen/include/fixpp/, keeping the tags this file sets.
 // If a literal and the program disagree, re-read those sources; do not copy the bytes.
 //
 // Header-only inline mode would satisfy the link WITHOUT the archive (a spurious HIT),
@@ -101,9 +104,8 @@ fixpp::decimal_t dec(std::int64_t mantissa) {
 }  // namespace
 
 int main() {
-    // ── v42 NewOrderSingle (35=D). Required (FIX42.xml): 11, 21, 55, 54, 60, 40.
-    // Emission order of the fields set here (v42 NewOrderSingle.builder.inl):
-    // 11, 21, 40, 54, 55, 60. Cleared: 11.
+    // ── v42 NewOrderSingle (35=D): every field FIX42.xml marks required="Y" is set;
+    // the cleared one is ClOrdID(11). Tag order: v42 NewOrderSingle.builder.inl.
     {
         fixpp::v42::NewOrderSingleArgs a{};
         a.cl_ord_id = "CL42";
@@ -126,9 +128,8 @@ int main() {
               [](auto const& x) { return fixpp::v42::validate_NewOrderSingle(x).has_value(); });
     }
 
-    // ── v44 NewOrderSingle (35=D). Required (FIX44.xml, top level): 11, 54, 60, 40.
-    // Emission order of the fields set here (v44 NewOrderSingle.builder.inl):
-    // 11, 21, 40, 54, 55, 60. Cleared: 11.
+    // ── v44 NewOrderSingle (35=D): every top-level field FIX44.xml marks required="Y"
+    // is set; the cleared one is ClOrdID(11). Tag order: v44 NewOrderSingle.builder.inl.
     {
         fixpp::v44::NewOrderSingleArgs a{};
         a.cl_ord_id = "CL44";
@@ -151,10 +152,10 @@ int main() {
               [](auto const& x) { return fixpp::v44::validate_NewOrderSingle(x).has_value(); });
     }
 
-    // ── v50sp2 ListStatus (35=N). Required (FIX50SP2.xml): 66, 429, 82, 431, 83, 68,
-    // and the OrdListStatGrp component (NoOrders, 73). Emission order of the fields set
-    // here (v50sp2 ListStatus.builder.inl): 66, 68, 73 { 11, 14, 39, 151, 84, 6 }, 82,
-    // 83, 429, 431. Cleared: 66.
+    // ── v50sp2 ListStatus (35=N): every top-level field FIX50SP2.xml marks
+    // required="Y" is set, and one NoOrders(73) entry (the required OrdListStatGrp)
+    // with the entry fields vlatest requires; the cleared one is ListID(66). Tag order,
+    // group entry included: v50sp2 ListStatus.builder.inl.
     {
         fixpp::v50sp2::groups::G_73_5Args order{};
         order.cl_ord_id = "C50";
@@ -194,9 +195,10 @@ int main() {
     }
 
 #if FIXPP_613_HAS_VLATEST
-    // ── vlatest ListStatus (35=N). Required (Orchestra presence="required"): 66, 429,
-    // 82, 431, 83, 68, and the NoOrders group (73). Same emission order as v50sp2's
-    // (vlatest ListStatus.builder.inl). Cleared: 66.
+    // ── vlatest ListStatus (35=N): every field and the NoOrders(73) group the
+    // Orchestra marks presence="required" are set, with the entry fields the generated
+    // traits require; the cleared one is ListID(66). Tag order: vlatest
+    // ListStatus.builder.inl.
     {
         fixpp::vlatest::groups::G_73_5Args order{};
         order.cl_ord_id = "CLX";
