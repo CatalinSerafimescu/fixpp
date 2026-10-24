@@ -33,6 +33,11 @@ to 5.0SP2, and the 12 rows flipped to `done`."
   reference wrapping a `required='N'` group; QuickFIX/J 3.0.1's `FIX50SP2.modified.xml` marks the
   same groups `required='Y'` directly. Required **members of a group instance** are the instance's
   required fields and required nested groups by the same two rules, starting from the group.
+- **Closure-required set** — per MsgType, the required fields and required groups above. It is the
+  **owner's closure bar**, stricter than either engine's own validation: only its **field** leg is
+  QuickFIX's rule (QuickFIX-cpp does not require a component-wrapped group, L-067-1; QuickFIX/J
+  requires the groups its own file flags). Nothing in this feature calls the group leg QuickFIX
+  semantics.
 - **Offline witness** — a test per MsgType: values chosen before the build → typed builder → wire
   bytes → an independent, dictionary-driven parse of `FIX50SP2.xml` → per-field (and per-group-
   instance) readback compared against the chosen values. "Independent" means the parse does not use
@@ -67,7 +72,8 @@ differential round-trip witness per message, a completeness-pin entry, then `don
 
 **Owner rulings, 2026-10-24:** the live FIXT cell sends a message built with the **typed builder**,
 not 089's generic body builder; the parent harness change that the cell needs may be pushed to the
-parent `main` by the orchestrator.
+parent `main` by the orchestrator. At Gate A round 1 the owner extended the version narrowing quoted
+above to **N-002** (Clarifications, Session 2026-10-24 (Gate A round 1)).
 
 **What exists today (read at `4e8b3779`):**
 - `tests/session/test_077_allversions_builder_roundtrip.cpp` already round-trips every one of the 23
@@ -90,13 +96,50 @@ parent `main` by the orchestrator.
 - Q: Which live message? → A: one message of the tail set that is present in both QuickFIX-cpp
   v1.16.0's and QuickFIX/J 3.0.1's FIX50SP2 dictionaries and whose required set is the same in both
   (so not CQ, absent from QuickFIX/J; not BJ/BS/BM, whose required sets differ between the two
-  engines per the readiness findings Q1). The plan names it and shows the check.
+  engines per the readiness findings Q1). The plan names it and shows the check. *(Superseded in part
+  at Gate A round 1: which MsgTypes differ, and on which axis, is what FR-014's check prints; no
+  artifact lists them.)*
 - Q: Does "against both QuickFIX peers" mean one cell or one per peer? → A: one scenario, run against
   each peer — at least one cell per peer, each with its own evidence row.
 - Q: Does N-002/N-003 need a routing witness? → A: yes, one: DECISION 2's premise is that fixpp's
   session delivers these MsgTypes to the application callback like any application message. N-002
   and N-003 are catalogue-categorised `session`, so their `done` cites a witness of that premise, not
   only a statement of it (FR-008). No production code.
+
+### Session 2026-10-24 (Gate A round 1)
+
+- Q: N-002's version column reads `5.0–5.0SP2`, but only `v50sp2` has a typed tier for BE/BF. Narrow
+  it? → A (**owner ruling**, answering the Opus review's N-3): **narrow N-002 to `5.0SP2`**, the same
+  rule as A-018/A-029/A-030 (FR-018 extends to N-002). Its Verified cell states that FIX 5.0 and
+  5.0SP1 have no typed tier (runtime-XML path only), and that BE/BF are present in `FIX44.xml` but
+  the v44 codegen still excludes them through `kN002N003Excluded` / `is_n002_n003_excluded` in
+  `tools/codegen/fixpp-codegen/emit_builders.cpp`, whose "session-FSM" reason DECISION 2 supersedes
+  (as it does the same reason in `[const §XVIII.7]`). The feature files an issue for lifting that
+  exclusion; **no codegen change in 095** (FR-020).
+- Q: The three `[FIX50SP1] …` Spec refs (A-018, A-029, A-030) and N-002's `[FIX50] …` — do they move
+  when the version column narrows? → A: no. The Spec ref names the section that introduces the
+  message, which FIX 5.0SP2 still carries; re-canonicalising Spec refs is pre-existing catalogue debt
+  outside this feature (plan, Gate A round 1 disagreement on Codex #1b).
+- Q: The clarification above excludes BJ/BS for differing required sets, while research compared BQ
+  and CC. Which is it? → A: both, on two different **axes**. (a) *Engine semantics:* each engine's
+  own rule over its own file (QuickFIX-cpp's group requiredness versus QuickFIX/J's directly flagged
+  groups). (b) *Closure-required walk:* the Terminology's rule over the vendored file versus over
+  QuickFIX/J's file. FR-014's check prints both axes; the live message must agree on both. No artifact
+  lists which MsgTypes differ on which axis (FR-005).
+- Q: What exactly is a witness's name? → A: `TailRows095.<RowId>_<GeneratedName>`, where `<RowId>` is
+  the catalogue ID with its hyphen dropped (`A018`; a gtest name cannot contain `-`) and
+  `<GeneratedName>` is the vendored dictionary's message name (`ExecutionAck`). The name does not
+  carry the MsgType literal; the census maps the generated name to its MsgType through the dictionary
+  (FR-004a).
+- Q: A required group nested in a group instance, a required component holding a group among
+  siblings, or one tag at both message level and inside a group — how does a witness handle them? →
+  A: for a tail MsgType, the walk **fails loudly** on each of the three; no reading is guessed and no
+  recursive readback ships untested. The fail-loud is proven able to fire on a message outside the
+  tail set that has a nested required group (MassQuote, 35=i).
+- Q: How are "every set field is read back" and "at least two fields" checked, rather than trusted to
+  the witness's author? → A: each witness declares one **intent list** of `(path, literal)` entries;
+  the readback is a bidirectional exact comparison of that list against an enumeration of the parsed
+  body (FR-003).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -111,7 +154,7 @@ value it set.
 which no QuickFIX/J peer can witness live.
 
 **Independent Test**: build and run the witness target alone; every one of the 23 tests passes, and
-each test's name contains its row ID and MsgType.
+each test's name contains its row ID (hyphen dropped) and its generated message name (FR-001).
 
 **Acceptance Scenarios**:
 
@@ -170,8 +213,9 @@ change and an image republish, so it is the long pole.
 
 ### User Story 4 — The catalogue says what shipped (Priority: P2)
 
-The 12 rows read `done`, their Tests and Verified cells name the witnesses, and the three rows whose
-version column claimed 5.0SP1 now claim only 5.0SP2.
+The 12 rows read `done`, their Tests and Verified cells name the witnesses, and the four rows whose
+version column claimed a FIX 5.0 version without a typed tier (A-018, A-029, A-030, N-002) now claim
+only 5.0SP2.
 
 **Independent Test**: re-derive the 12 rows from `spec/feature-catalogue.md` and check each cited
 test name exists in the tree.
@@ -182,15 +226,23 @@ test name exists in the tree.
    and each named witness resolves to a test in the tree.
 2. **Given** A-018, A-029, A-030, **When** read, **Then** the version column is `5.0SP2` and the
    Verified cell says SP1 is not covered by a typed tier and stays on the runtime-XML path.
+3. **Given** N-002, **When** read, **Then** the version column is `5.0SP2` and the Verified cell says
+   FIX 5.0 and 5.0SP1 have no typed tier (runtime-XML path only) and that the v44 codegen excludes
+   BE/BF (`kN002N003Excluded`), naming the follow-up issue.
 
 ### Edge Cases
 
-- **A required group's own members include a nested required group** → the instance sets it too,
-  by the same rule; the dictionary-derived check covers nested levels.
-- **A field present both at message level and inside a group** (same tag) → readback is scoped:
-  message-level fields are read outside group instances, instance fields within their instance.
+- **A required group's own members include a nested required group** (tail MsgType) → the walk fails
+  loudly naming it; the feature does not ship an untested recursive branch. The fail-loud is proven
+  able to fire on 35=i (FR-004).
+- **A tag that is both a message-level member and a group member of the same tail MsgType** → the
+  walk fails loudly naming it, because a first-occurrence lookup could read the wrong one. The body
+  enumeration of FR-003 assigns each parsed entry to message level or to the group instance that
+  contains it, so the readback itself never relies on first occurrence.
 - **A tail MsgType with no required fields and no required group** → its witness still sets and reads
-  back at least two fields, so it is not vacuous.
+  back at least two fields; FR-003's intent-size assertion checks it, so it is not vacuous.
+- **A required group with no required instance member** → each instance still sets the group's
+  delimiter (first) field (FR-002); without it the parser cannot open the instance.
 - **Generated name ≠ catalogue title** (BN) → the witness and the row cite the generated name and the
   catalogue title side by side.
 - **C-003 (CQ) has no QuickFIX/J peer** → it closes on the offline witness; the live cell does not
@@ -199,7 +251,9 @@ test name exists in the tree.
   fails until the witness is updated; nothing in this feature records the derived counts as fixed
   numbers.
 - **The peer image the live cell ran against is older than the harness change** → the cell refuses to
-  run or fails, rather than passing against a stale peer.
+  run or fails, rather than passing against a stale peer. Mechanism: `ci/run-interop-live.py`'s
+  `reconcile` fails when a tree skip id is unaccounted for by the image's registered cells, which is
+  what a stale image is once the two skip-list lines land.
 - **fixpp inbound validation on a FIXT session** → off on this cell; the reason (L-041-2) is stated
   in the cell's record and in the B&L delta.
 
@@ -209,23 +263,48 @@ test name exists in the tree.
 
 **Offline witnesses (US1)**
 
-- **FR-001**: Each of the 23 tail MsgTypes MUST have exactly one offline witness test whose name
-  contains its catalogue row ID and the generated message name.
-- **FR-002**: Each witness MUST set every required field and every required group of its message
+- **FR-001**: Each of the 23 tail MsgTypes MUST have exactly one offline witness test named
+  `TailRows095.<RowId>_<GeneratedName>`: the catalogue row ID with its hyphen dropped, and the
+  vendored dictionary's message name (Clarifications, Gate A round 1).
+- **FR-002**: Each witness MUST set every member of its message's closure-required set
   (Terminology), each required group with at least two instances, each instance with all its required
-  members; and MUST set at least two fields in total.
+  members **and the group's delimiter (first) field**; and MUST set at least two fields in total.
 - **FR-003**: Each value MUST be chosen before the build as a literal in the test (never captured from
-  a build), and the readback MUST compare every set field — message-level and per group instance, in
-  instance order, plus each group's count field — against that literal after an independent
-  dictionary-driven parse of `dictionaries/FIX50SP2.xml`.
+  a build). Each witness MUST declare one **intent list** of `(path, literal)` entries, where a path
+  is a tag at message level or `<NumInGroup tag>[<k>].<tag>` inside instance k, and the count fields
+  are entries too. After an independent dictionary-driven parse of `dictionaries/FIX50SP2.xml`, the
+  witness MUST compare that list, as an exact multiset **in both directions**, against an enumeration
+  of every parsed body entry, each entry assigned to message level or to the group instance that
+  contains it. The tags the test's framing writes and tag 35 (checked by FR-004a) are removed from
+  both sides. A set field that is not read back, a parsed field that was not intended, and a value
+  mismatch each fail it, naming the path. The witness MUST also assert that its intent list holds at
+  least two entries.
 - **FR-004**: A check derived independently from `dictionaries/FIX50SP2.xml` by the Terminology's
-  rules MUST fail when any witness omits a required field or a required group (at any nesting level)
-  of its message. The check MUST be shown able to fail: a known-positive arm (a message outside the
-  tail set whose required group the rule must find, e.g. NewOrderList's NoOrders) and a mutant that
-  removes one required member from one witness, each demonstrated RED.
-- **FR-005**: The rule and the command that re-derives the required-member sets MUST be stated in the
+  rules MUST fail when any witness omits a member of its message's closure-required set. The check:
+  - returns the list of members it found missing, rather than only emitting failures;
+  - takes the MsgType from the parsed frame's tag 35, never from a caller argument;
+  - fails loudly, for a tail MsgType, on a nested required group, a required component holding a
+    group among siblings, or a tag that is both a message-level and a group member (Edge Cases).
+
+  It MUST be shown able to fail, each arm demonstrated RED with its command:
+  - its **field** leg equals the measured QuickFIX-cpp golden `tools/quickfix_required_golden/golden.csv`
+    for every tail MsgType and for 35=E, read from that file at test time (a non-circular known
+    positive);
+  - a deliberately deficient NewOrderList (35=E) frame is reported missing exactly the members it
+    lacks;
+  - the nested fail-loud fires on MassQuote (35=i);
+  - a mutant that removes one required member from one witness, **its setter and its intent entry
+    both**, goes RED with the presence check's message (not the readback's).
+- **FR-004a**: A census MUST show that each of the 23 tail MsgTypes has **exactly one** witness,
+  independently of test run order, `--gtest_filter` and `--gtest_shuffle`: it iterates the registered
+  tests of suite `TailRows095` (`::testing::UnitTest`), maps each name's generated name to a MsgType
+  through the dictionary, and requires multiplicity 1 per tail MsgType and no extra. Each witness also
+  asserts that its parsed tag 35 equals the MsgType its own name maps to.
+- **FR-005**: The rule and the command that re-derives the closure-required sets MUST be stated in the
   feature's artifacts; no artifact or comment may record the derived counts or member lists as a
-  result (`[const §XVII]` claims-rot rule in `.claude/CLAUDE.md`: procedure, not result).
+  result. Authority: the parent repo's `.claude/CLAUDE.md`, section "Testing & Verification" ("A
+  comment may record a PROCEDURE; it may not record a RESULT"). The known-positive assertions of
+  FR-004 are the one exception: they re-run on every build, so they cannot rot silently.
 - **FR-006**: The existing 077 round-trip tests MUST keep passing unchanged in behaviour; this
   feature strengthens the evidence, it does not weaken or delete existing coverage.
 
@@ -235,7 +314,8 @@ test name exists in the tree.
   N-003, that BE, BF (N-002) and BW, BX, BY (N-003) are keys of the generated v50sp2 builder registry.
 - **FR-008**: A session-level cell MUST show that an inbound BE and an inbound BW on an established
   session are delivered to the application callback and not handled as admin messages, using existing
-  session test infrastructure and no production-code change.
+  session test infrastructure and no production-code change. Each leg (BE, BW) MUST be shown able
+  to fail on its own.
 
 **Live FIXT cell (US3)**
 
@@ -251,10 +331,16 @@ test name exists in the tree.
 - **FR-013**: fixpp's inbound validation MUST be off on this cell, and the cell's record and the B&L
   delta MUST state why (L-041-2: the session validator takes one dictionary).
 - **FR-014**: The representative message MUST be a tail MsgType present in both engines' FIX50SP2
-  dictionaries with the same required set in both; the plan MUST show the check that selected it.
+  dictionaries with the same required set on both axes (Clarifications, Gate A round 1). The check
+  that selected it MUST be committed and runnable: it reads the vendored `dictionaries/FIX50SP2.xml`
+  and the QuickFIX/J 3.0.1 jar's `FIX50SP2.xml` (the file the peer config loads) and
+  `FIX50SP2.modified.xml`, prints both axes for the tail set, asserts the chosen MsgType equal on
+  every axis, and **fails, never skips,** when an input is absent.
 - **FR-015**: The parent harness change MUST land on the parent `main` and the counterparty image
   MUST be republished before any fixpp commit that depends on it is pushed; the cell's evidence MUST
-  identify the peer build it ran against.
+  identify the peer build it ran against. The hello record carries the harness's image-digest
+  sentinel unless the lane sets the digest; the image digest the run pulled is recorded in the verify
+  record (data-model §D).
 - **FR-016**: The cell's evidence MUST be recorded in the interop evidence files under the same
   schema and gates as the existing live cells; any hand-maintained pin those gates use MUST be
   updated and its gate shown RED before the update.
@@ -264,10 +350,13 @@ test name exists in the tree.
 - **FR-017**: The 12 tail rows MUST move to `done`, with Tests cells naming each witness (FR-001,
   FR-007, FR-008, and the live cell for the row that carries it) and Verified cells stating the bar
   they closed on.
-- **FR-018**: A-018, A-029 and A-030's FIX version column MUST become `5.0SP2`, with the Verified cell
-  stating that FIX 5.0SP1 has no typed tier and stays on the runtime-XML path.
-- **FR-019**: `spec/coverage-index.md` MUST carry a line per tail MsgType naming its witness, and the
-  B&L files MUST carry the delta (FR-013's disclosure, and anything a witness exposes).
+- **FR-018**: A-018, A-029, A-030 and N-002's FIX version column MUST become `5.0SP2`, with the
+  Verified cell stating that the FIX 5.0 versions the column dropped have no typed tier and stay on
+  the runtime-XML path. N-002's Verified cell also states the v44 BE/BF exclusion and names the
+  follow-up issue (Clarifications, Gate A round 1). The Spec ref cells are unchanged.
+- **FR-019**: `spec/coverage-index.md`'s existing row for each tail MsgType MUST name its witness in
+  its gap-note column (no new row), and the B&L files MUST carry the delta: FR-013's disclosure, that
+  FIX 4.4 BE/BF have no typed builder (the v44 exclusion), and anything a witness exposes.
 - **FR-020**: No production source changes (`src/`, non-generated `include/`, codegen). If a witness
   exposes a defect in production code, the defect MUST be filed as an issue and brought to the owner
   before the affected row is flipped.
@@ -275,9 +364,9 @@ test name exists in the tree.
 ### Key Entities
 
 - **Tail row**: catalogue ID, its MsgTypes, version column, Tests/Verified cells.
-- **Required-member set**: per MsgType, the required fields and required groups (with instance
+- **Closure-required set**: per MsgType, the required fields and required groups (with instance
   members), derived from the dictionary by the Terminology's rules.
-- **Witness**: per MsgType, the chosen values and their readback.
+- **Witness**: per MsgType, its intent list and the bidirectional comparison against the parsed body.
 - **Live cell record**: cell ID, peer, peer build identity, outcome, per-field comparison.
 
 ## Success Criteria *(mandatory)*
@@ -286,8 +375,8 @@ test name exists in the tree.
 
 - **SC-001**: 23 of 23 tail MsgTypes have a passing named witness; 0 tail MsgTypes are left with an
   unset required field or required group according to the dictionary-derived check.
-- **SC-002**: Every non-vacuity arm named in FR-004, FR-012 and FR-016 has been run and recorded RED
-  with its command.
+- **SC-002**: Every non-vacuity arm named in FR-004, FR-004a, FR-008, FR-012 and FR-016 has been run
+  and recorded RED with its command.
 - **SC-003**: The live cell passes against both QuickFIX peers, locally and in the live interop lane
   on the PR head.
 - **SC-004**: 12 of 12 tail rows read `done` on `main` after merge, and the `[const §I.3]` backlog
@@ -312,3 +401,27 @@ test name exists in the tree.
   domains (L-069-1).
 - A FIX 5.0SP1 typed tier; per-message live sweeps; fixpp validation-on over FIXT (L-041-2).
 - Exporting/installing the typed builder libraries (fixpp#613, running in parallel).
+- Lifting the v44 BE/BF codegen exclusion (`kN002N003Excluded`): filed as a follow-up issue, not done
+  here (Clarifications, Gate A round 1).
+
+## Normative References
+
+- **The 12 rows' own Spec refs**, as `spec/feature-catalogue.md` carries them and this feature leaves
+  them: `[FIX50SP1] Single General Order Handling` (A-018); `[FIX50SP2] Order Mass Handling` (A-023);
+  `[FIX50SP2] Market Structure Reference Data` (A-027, A-028); `[FIX50SP1] Securities Reference Data`
+  (A-029); `[FIX50SP1] Settlement Instructions` (A-030); `[FIX50SP2] Allocation` (A-031);
+  `[FIX50SP2] User Management` (A-032); `[FIX50SP2] Application Sequencing` (A-033, N-003);
+  `[FIX50SP2] Position Maintenance` (C-003); `[FIX50] User Management` (N-002). In
+  `spec/coverage-index.md` these MsgTypes are indexed by MsgType under the "Application Messages — …"
+  headings of "FIX Application Layer (FIX40–FIX50SP2)", not by a section-level entry; adding one is
+  pre-existing catalogue debt (plan, Gate A round 1 disagreement on Codex #1b).
+- **The live cell's session profile** (coverage-index "FIXT.1.1 (FIXT)"): `[FIX-SL §5.3.1]`
+  BeginString=FIXT.1.1 (S-020); `[FIX-SL §4.3.7]` / `[FIX-SL §5.3.3]` DefaultApplVerID(1137) on Logon
+  (S-025); `[FIX-SL §5.3.5]` ApplVerID(1128) per message (S-026, not stamped by the cell, research R-8).
+- **Constitution:** `[const §I.3]` the tag gate; `[const §VI.4]`, `[const §VI.5]`, `[const §VI.6]`
+  coverage-index, this section, closing a `done` row; `[const §VII.6]` interop; `[const §VII.8]`
+  grouped tests and label selection; `[const §XVI.6]`, `[const §XVI.7]` orchestrator role and
+  `/simplify`; `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build and its
+  resource gate, verify; `[const §XVIII.7]` the N-002/N-003 deferral text DECISION 2 supersedes.
+- **B&L:** L-041-2 (FIXT validation, FR-013), L-067-1 (component-wrapped groups), L-069-1 (enum
+  domains), L-089-1 (evidence attests no fixpp revision).
