@@ -93,10 +93,10 @@ Mass Handling`. In the sources checked, there is no §X.Y.Z to cite for them:
 `[const §VI.3]` does not cover these rows. It is for rows backed by design decisions, in
 `[impl]`/`[constitution]` form, and a coverage-index comment is not an amendment (Gate A round 3).
 The owner chose to **amend the constitution in 095**: `[const §VI.2]` admits a message-level form
-for a row whose subject is application messages, and `[const §VI.5]` lets Normative References list
+for a row whose `Title` names its application MsgTypes as `35=<MT>`, and `[const §VI.5]` lets Normative References list
 such refs (FR-021; the text is data-model §F). 095 corrects four of the 12 refs (FR-018): A-033's
-and C-003's name a category other than the one the FIX Repository and FIX Orchestra place their
-MsgTypes in, and A-030's and N-003's name Orchestra's category in a heading spelling that the
+and C-003's name a category other than the one the vendored FIX Orchestra file places
+their MsgTypes in, and A-030's and N-003's name Orchestra's category in a heading spelling that the
 amended clause does not admit. Writing those cells in the message-level form is a 095 act. So `[const §XX.1]` applies: amend the article first,
 in the same PR.
 
@@ -540,8 +540,8 @@ test name exists in the tree.
   fixpp#625 (Clarifications, Gate A round 1). The Spec ref cells are unchanged except four
   (data-model §E):
   - A-033's becomes `[FIX50SP2] Market Data` and C-003's becomes `[FIX50SP2] Account Reporting`,
-    the categories the FIX Repository and FIX Orchestra place their MsgTypes in (Clarifications,
-    Gate A round 3);
+    the categories the vendored FIX Orchestra file places their MsgTypes in (Clarifications,
+    Gate A round 3, has the Repository cross-check);
   - A-030's becomes `[FIX50SP1] Settlement Instruction` and N-003's becomes `[FIX50SP2]
     Application`, the words of the Orchestra category they already named in a heading spelling
     (Clarifications, post-exhaustion review).
@@ -549,8 +549,9 @@ test name exists in the tree.
   These edits land after the amendment (FR-021).
 - **FR-021**: `.specify/constitution.md` MUST be amended, v4.0 → v4.1 (`[const §XX.4]` MINOR, no
   `CHANGELOG.md` entry; plan, Constitution Check §XX.4), so that:
-  - `[const §VI.2]` admits the message-level form `[DocAbbrev] Category` for a row whose subject
-    is application messages, with every term decidable from committed files (the token's vendored
+  - `[const §VI.2]` admits the message-level form `[DocAbbrev] Category` for a row whose `Title` cell
+    names at least one MsgType as `35=<MT>`, each an application message in the token's vendored
+    dictionary, with every term decidable from committed files (the token's vendored
     dictionary and the vendored Orchestra file), and keeps the section form for every other row. It
     states no CI state; the Sync Impact Report records that its check is owed (fixpp#626);
   - `[const §VI.5]` lets Normative References list such refs without letting one stand in for a

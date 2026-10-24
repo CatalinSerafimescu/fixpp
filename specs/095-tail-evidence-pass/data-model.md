@@ -199,7 +199,7 @@ for id in A-018 A-023 A-027 A-028 A-029 A-030 A-031 A-032 A-033 C-003 N-002 N-00
   ref=$(col "$id" 7) || { echo "$id: not exactly one well-formed row"; bad=1; continue; }
   tok=$(printf '%s\n' "$ref" | sed -n 's/^\[\([A-Z0-9]*\)\] .*/\1/p'); cat=${ref#*] }
   test -n "$tok" -a -f "dictionaries/$tok.xml" || { echo "$id: '$ref' names no vendored dictionary"; bad=1; continue; }
-  mts=$(col "$id" 5 | grep -o '35=[A-Z0-9]*' | cut -d= -f2)
+  mts=$(col "$id" 5 | grep -o '35=[A-Za-z0-9]*' | cut -d= -f2)
   test -n "$mts" || { echo "$id: Title names no 35=<MT>"; bad=1; continue; }
   for mt in $mts; do
     test "$(grep -o "<message [^>]*msgtype='$mt'[^>]*>" "dictionaries/$tok.xml" | grep -c "msgcat='app'")" = 1 \
@@ -241,14 +241,17 @@ Before:
 `2. Every OFFICIAL row's `Spec ref` uses canonical format `[DocAbbrev §X.Y.Z] Section title`. Vague refs (`§4`, "FIX spec") are a CI-linting failure.`
 
 After:
-`2. Every OFFICIAL row's `Spec ref` uses canonical format `[DocAbbrev §X.Y.Z] Section title`. A row whose subject is one or more application messages may instead use the message-level form `[DocAbbrev] Category`. In that form, `DocAbbrev` is an application-specification abbreviation from the DocAbbrev Registry in `coverage-index.md` (`FIX40` … `FIX50SP2`, `FIX-Latest`) whose vendored dictionary defines, as an application message, every MsgType that the row's `Title` cell names as `35=<MT>`, of which there is at least one. That dictionary is `dictionaries/<DocAbbrev>.xml`, where an application message is a `message` with `msgcat='app'`; for `FIX-Latest` it is the vendored FIX Orchestra file `dictionaries/orchestra/OrchestraFIXLatest.xml`, where it is a `fixr:message` whose `category` is not `Session`. `Category` names the category, or categories, in which that Orchestra file (each message's `category`) places those MsgTypes, each written as its identifier's words: the identifier with a space before each capital letter but the first (`SettlementInstruction` is written `Settlement Instruction`). Each named category may be preceded by the words of its Orchestra `section`, written the same way, and ` — ` (`Pre Trade — Market Data`). When those MsgTypes lie in several categories, each of their categories is named once, in that form, joined with ` / `, and no other category is named. A row whose subject is a version's whole application layer may use `[DocAbbrev] FIX <version> application specification`, or one bracketed abbreviation per version followed by `application specifications`. Every other row keeps the section form, except as §3 provides. Vague refs (`§4`, "FIX spec") do not conform.`
+`2. Every OFFICIAL row's `Spec ref` uses canonical format `[DocAbbrev §X.Y.Z] Section title`. A row whose `Title` cell names at least one MsgType as `35=<MT>`, where `<MT>` is the run of letters and digits that follows `35=`, may instead use the message-level form `[DocAbbrev] Category`. In that form, `DocAbbrev` is an application-specification abbreviation from the DocAbbrev Registry in `coverage-index.md` (`FIX40` … `FIX50SP2`, `FIX-Latest`) whose vendored dictionary defines, as an application message, every MsgType that the row's `Title` cell names as `35=<MT>`. That dictionary is `dictionaries/<DocAbbrev>.xml`, where an application message is a `message` with `msgcat='app'`; for `FIX-Latest` it is the vendored FIX Orchestra file `dictionaries/orchestra/OrchestraFIXLatest.xml`, where it is a `fixr:message` whose `category` is not `Session`. `Category` names the category, or categories, in which that Orchestra file (each message's `category`) places those MsgTypes, each written as its identifier's words: the identifier with a space before each capital letter but the first (`SettlementInstruction` is written `Settlement Instruction`). Each named category may be preceded by the words of its Orchestra `section`, written the same way, and ` — ` (`Pre Trade — Market Data`). When those MsgTypes lie in several categories, each of their categories is named once, in that form, joined with ` / `, and no other category is named. Every other row keeps the section form, except as §3 provides. Vague refs (`§4`, "FIX spec") do not conform.`
 
 Design notes (not clause text):
 - The form follows the catalogue's message-level rows: one version token and a category. Every
   term is decidable from committed files alone: the token from `dictionaries/`, the
   application-message test from `msgcat` (or Orchestra's `category`), and the category, its words,
-  its section and the ` / ` join from the Orchestra file. The data-dictionary rows use the
-  whole-layer form.
+  its section and the ` / ` join from the Orchestra file. The data-dictionary rows' whole-layer
+  refs (`[FIX42] FIX 4.2 application specification` and the like) fit neither form, as under v4.0,
+  and are among fixpp#626's findings. A whole-layer form was drafted and dropped at Gate A round 5.
+  Its eligibility ('a version's whole application layer') had no decidable test, and recognising
+  its string alone would admit a version-qualified 'FIX spec'.
 - **One spelling per category, no heading or title alternative** (post-exhaustion review F-1). The
   candidates were read and rejected:
   - Orchestra's category `SYNOPSIS` annotations are not titles. Where a category has one, it is
@@ -333,12 +336,12 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     versions. A §5 that REQUIRED message-level entries would make such an artifact fail. That would be
     MAJOR, and it was not adopted.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
-  Modified: Article VI §2 — an OFFICIAL row whose subject is application messages may carry the
+  Modified: Article VI §2 — an OFFICIAL row whose Title names at least one MsgType as `35=<MT>` may carry the
     message-level Spec ref `[DocAbbrev] Category`. The version token names a version whose vendored
     dictionary defines every MsgType of the row as an application message (`msgcat='app'`; for
     `FIX-Latest`, the vendored Orchestra file). The category is the one the vendored FIX Orchestra
     repository places them in, written as its identifier's words, optionally after its section's
-    words. A whole-application-layer form is admitted for version-level rows. Every other row keeps
+    words. Every other row keeps
     `[DocAbbrev §X.Y.Z] Section title`, except as §3 provides. "Vague refs … are a CI-linting
     failure" becomes "do not conform". No CI job checks §2: that check is owed, as is Article IX §6's
     Tier-1 "catalogue consistency check" (follow-up fixpp#626).
@@ -387,7 +390,7 @@ round converges needs another scoped round (FR-021).
 
 PENDING form — the line's current opening `> **Status:** ` is replaced by:
 
-`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: pending a scoped Codex Gate A round on the amendment, Gate B, and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose subject is application messages; Article VI §5 lets Normative References list such refs. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
+`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: pending a scoped Codex Gate A round on the amendment, Gate B, and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose `Title` names its application MsgTypes as `35=<MT>`; Article VI §5 lets Normative References list such refs. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
 
 The rest of the line, from `user-ratified **v4.0** (2026-10-23) — **backwards-incompatible**`
 onward, is unchanged.

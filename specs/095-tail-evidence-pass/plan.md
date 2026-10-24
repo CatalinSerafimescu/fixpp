@@ -11,6 +11,7 @@
 - Round 3 (final, loop exhausted) 2026-10-24: Codex P1=1 P2=1 P3=2; Opus post-judging P1=0 P2=3 P3=4 (root causes RC-α a constitutional reading recorded as authority, RC-β arms enumerated per output not per predicate, RC-γ claims made of a larger population than checked). Reviews: research/reviews/codex_095-tail-evidence-pass_gate_a_3_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_3_adversarial_review.md.
 - Post-exhaustion pass applied 2026-10-24 (owner: hand-edit + one Opus round, skip Codex): residuals R-1..R-7 + §VI amendment drafted; amendment clauses still owe a scoped Codex Gate A review per [const §XX.2].
 - Post-exhaustion review applied 2026-10-24: Opus P1=0 P2=3 P3=3 (research/reviews/opus_095-tail-evidence-pass_gate_a_4_postexhaustion_review.md); F-1 (a), F-2..F-6 applied; scoped Codex+Opus round on the amendment + these fixes owed (owner, 2026-10-24).
+- Scoped round 5 (amendment) 2026-10-24: Codex P1=1 P2=1; Opus P1=0 P2=2 P3=1 (research/reviews/codex_095-tail-evidence-pass_gate_a_5_amendment_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_5_amendment_triage.md); fixes 1, 2, N-1 applied; a narrow scoped Codex round on the §VI.2 clause body is owed (FR-021).
 
 ### Round 1 — disagreements
 
@@ -241,8 +242,8 @@ FR-021), and changes no production code (FR-020):
 'catalogue consistency check' a Tier-1 job (095 follow-up)" (labels `ci`, `follow-up`). Its scope:
 - check every OFFICIAL row's Spec ref against the amended §VI.2: the section form, the message-level
   form `[DocAbbrev] Category` for application-message rows (decided from the token's vendored
-  dictionary and the vendored `dictionaries/orchestra/OrchestraFIXLatest.xml`, data-model §F.1), the
-  whole-layer form, or §VI.3's `[impl]`/`[constitution]`;
+  dictionary and the vendored `dictionaries/orchestra/OrchestraFIXLatest.xml`, data-model §F.1),
+  or §VI.3's `[impl]`/`[constitution]`;
 - run in `tier1.yml`.
 
 Its first run lists the rows outside 095 that do not fit, FIX Latest's A-035..A-065 and the
