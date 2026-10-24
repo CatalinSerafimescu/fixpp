@@ -24,7 +24,7 @@ Expected: every `TailRows095.*` and `TailRows095Census.*` test passes, including
 alone and shuffled. RED arms: the table of clause W6 of contracts/witness-contract.md, one row per
 output. For each mutant row: apply the scratch mutant, rebuild, rerun the filter, record the message
 that fired (it must be the one the row names: W5's for Mutants A and B, W4's for D and H, the
-census's for F, G, I and J), revert, `git diff --exit-code`. A census mutant that adds or deletes a
+census's for F, G, I and J, the deficient-frame assertion's for C, L and M), revert, `git diff --exit-code`. A census mutant that adds or deletes a
 witness also changes the listed count, so run it with the count assertion above skipped, and record
 that it was.
 
@@ -146,18 +146,20 @@ RED arms:
 Run on the head after P7; it must pass. Its RED arms, one per check, each recorded with the message
 that fired:
 - **once before P7:** the first Status check fails, because no tail row is `done` yet;
-- **after P7, on scratch copies** (`CAT`/`CI` pointed at a copy under `mktemp -d`, the tree
+- **after P7, on scratch copies** (`CAT`/`CI`/`CONST` pointed at a copy under `mktemp -d`, the tree
   untouched), one perturbation per run:
   - one narrowed version cell reverted;
   - `fixpp#625` dropped from N-002's Verified cell;
   - one witness name removed from its row's Tests cell;
   - one witness name removed from its coverage-index gap note;
   - one pin or live-cell ID removed from its row's Tests cell;
-  - the 095 disposition line removed.
+  - one corrected Spec ref (A-033 or C-003) reverted to its old category;
+  - the amended §VI.2 sentence removed from the constitution copy.
 
 ```bash
 CAT=${CAT:-spec/feature-catalogue.md}
 CI=${CI:-spec/coverage-index.md}
+CONST=${CONST:-.specify/constitution.md}
 B=build/linux-clang-debug/bin/test_077_allversions_builder_roundtrip
 P=build/linux-clang-debug/bin/codegen_077_v50sp2_builder_completeness_test
 S=build/linux-clang-debug/bin/session_pure_tests
@@ -205,8 +207,14 @@ for cell in HP-QFcpp-init-fixt11-fix50sp2-app-bn HP-QFj-init-fixt11-fix50sp2-app
     || { echo "$cell: not registered"; exit 1; }
   col A-018 11 | command grep -qF "$cell" || { echo "$cell: not in A-018's Tests cell"; exit 1; }
 done
-# the [const §VI.3] disposition 095 extends (spec Normative References)
-command grep -q 'ART VI §3 DISPOSITION (095-tail-evidence-pass' "$CI" || { echo "no 095 disposition"; exit 1; }
+# FR-018's two Spec ref corrections, and FR-021's amendment, which they need (data-model §E, §F.1)
+for pair in 'A-033|[FIX50SP2] Market Data' 'C-003|[FIX50SP2] Account Reporting'; do
+  id=${pair%%|*}; want=${pair#*|}
+  v=$(col "$id" 7) || { echo "$id: not exactly one well-formed row"; exit 1; }
+  test "$v" = "$want" || { echo "$id: Spec ref is '$v', not '$want'"; exit 1; }
+done
+command grep -qF 'may instead use the message-level form `[DocAbbrev] Category`' "$CONST" \
+  || { echo "$CONST: §VI.2 is not amended"; exit 1; }
 ```
 
 SC-004: run 094's `catalogue_census.py` (its text is in `.specify/decisions/094-v1-tier0-bookkeeping-verify.md`)

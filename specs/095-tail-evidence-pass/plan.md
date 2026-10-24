@@ -7,7 +7,9 @@
 ## Gate A
 
 - Round 1 applied 2026-10-24: Codex P1=4 P2=7 P3=1; Opus post-judging P1=1 P2=9 P3=17; rewrite addresses root causes A (witness completeness checked from the frame: intent list, bidirectional readback, returned missing-member list, fail-loud walk, run-order-free census, non-circular known positives), B (FR-014's selection as a committed check over the QFJ file the peer loads), C (the live-cell harness contract, L0), D (traceability and citations), plus the owner ruling on N-3 (N-002 narrowed to 5.0SP2, follow-up issue for the v44 exclusion). Reviews: research/reviews/codex_095-tail-evidence-pass_gate_a_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_adversarial_review.md.
-- Round 2 applied 2026-10-24: Codex P1=1 P2=4 P3=1; Opus post-judging P1=1 P2=5 P3=7; rewrite addresses root causes R1 (an arm for every walk status, comparator direction, presence leg and census finding: contracts W6's table, the synthetic dictionaries, Mutants G–K, and the CC delimiter rule), R2 (the selection check hard-asserts only BN, with BM as its known positive), R3 (via the owner ruling) and R4 (records: the extended §VI.3 disposition, the coverage-index entries listed verbatim, quickstart §7 and the `cmp`, fixpp#625 named, counts deleted, data-model §C's enum rule, the YAML rows specified); owner ruling "keep #462" applied. Reviews: research/reviews/codex_095-tail-evidence-pass_gate_a_2_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_2_adversarial_review.md.
+- Round 2 applied 2026-10-24: Codex P1=1 P2=4 P3=1; Opus post-judging P1=1 P2=5 P3=7; rewrite addresses root causes R1 (an arm for every walk status, comparator direction, presence leg and census finding: contracts W6's table, the synthetic dictionaries, Mutants G–K, and the CC delimiter rule), R2 (the selection check hard-asserts only BN, with BM as its known positive), R3 (via the owner ruling) and R4 (records: the extended §VI.3 disposition, the coverage-index entries listed verbatim, quickstart §7 and the `cmp`, fixpp#625 named, counts deleted, data-model §C's enum rule, the YAML rows specified); owner ruling "keep #462" applied. Reviews: research/reviews/codex_095-tail-evidence-pass_gate_a_2_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_2_adversarial_review.md. *(Superseded at round 3: R4's "extended §VI.3 disposition" is withdrawn; see Round 3 — disagreements.)*
+- Round 3 (final, loop exhausted) 2026-10-24: Codex P1=1 P2=1 P3=2; Opus post-judging P1=0 P2=3 P3=4 (root causes RC-α a constitutional reading recorded as authority, RC-β arms enumerated per output not per predicate, RC-γ claims made of a larger population than checked). Reviews: research/reviews/codex_095-tail-evidence-pass_gate_a_3_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_3_adversarial_review.md.
+- Post-exhaustion pass applied 2026-10-24 (owner: hand-edit + one Opus round, skip Codex): residuals R-1..R-7 + §VI amendment drafted; amendment clauses still owe a scoped Codex Gate A review per [const §XX.2].
 
 ### Round 1 — disagreements
 
@@ -19,7 +21,10 @@ replaced; the reason is the one the bundle acts on.
   `.github/` checks it; `[const §VI.6]`'s closure list (a)–(d) does not include re-canonicalising
   Spec refs. Pre-existing debt, not 095's obligation. spec Normative References discloses it.
   *(Reworded at round 2: the form is a recorded `[const §VI.3]` disposition that 095 extends, not
-  debt; Round 2 — disagreements, Codex #1.)*
+  debt; Round 2 — disagreements, Codex #1.)* *(Superseded at Gate A round 3: §VI.3 covers
+  design-decision rows in `[impl]`/`[constitution]` form; it does not authorize message-level refs on
+  normative rows, and a coverage-index comment is not an amendment. The owner then ruled to amend
+  §VI.2/§VI.5 in 095; Round 3 — disagreements.)*
 - **Codex #1c (Verified cells must restate green tests + Codex pass + interop) — not applied.** The
   catalogue header's "Verified requires …" is a precondition for writing the cell, not its template
   (A-001's cell does not restate Codex pass); `[const §VI.6](c)` is met by Gate B on the PR.
@@ -62,7 +67,10 @@ replaced; the reason is the one the bundle acts on.
   application layer against a recorded choice. `[const §VI.6]`'s (a)–(d) do not include
   re-canonicalisation. The residual Opus judged a 095 defect is applied (spec Normative References):
   095 extends the disposition to its 12 rows instead of calling the form "debt", lists the
-  coverage-index entries, and quotes the FIXT entries.
+  coverage-index entries, and quotes the FIXT entries. *(Superseded at Gate A round 3: §VI.3 covers
+  design-decision rows in `[impl]`/`[constitution]` form; it does not authorize message-level refs on
+  normative rows, and a coverage-index comment is not an amendment. Round 3 reverses this fix; Round
+  3 — disagreements.)*
 - **Codex #3's fixture for the tag-at-two-levels detector — replaced** by deleting the detector, the
   alternative Opus accepted. W4 and W5 share one enumeration that attributes by extent, so no check
   uses the first-occurrence lookup the detector guarded. The group-among-siblings detector keeps its
@@ -71,10 +79,40 @@ replaced; the reason is the one the bundle acts on.
   downgraded the finding to P3). The edit is a one-shot table change, Gate B reads the catalogue
   diff, and 067/069 closed more rows without a checker. §7 still has its own RED run, before P7.
 
+### Round 3 — disagreements and owner rulings
+
+- **Round 2's fix of Codex #1 (extend the `[const §VI.3]` disposition to the 12 rows) — reversed.**
+  Round 3 judged it on the text. §VI.3 reaches rows "backed by design decisions instead of spec
+  sections", in `[impl]`/`[constitution]` form, and the 12 rows are normative message rows. Only
+  Article XX amends. Every forward-looking surface of the claim is deleted:
+  - spec Normative References;
+  - Summary item 4;
+  - the Constitution Check row;
+  - P7's coverage-index disposition line;
+  - quickstart §7's check of that line and its perturbation.
+
+  The log surfaces above carry supersession notes.
+- **The residual's interim remedy (a Constitution Check note disclosing a pre-existing §VI.2
+  non-conformance) — replaced by owner ruling.** "Amend the constitution in 095": FR-021 amends
+  §VI.2 and §VI.5 (data-model §F), so the 12 rows' refs conform to the amended text. Nothing is
+  disclosed as non-conforming.
+- **Codex #1's remedy (section-bearing refs for the 12 rows) — not applied.** There is no
+  `§X.Y.Z` to copy:
+  - the FIX Repository numbers no message category;
+  - the FIX 4.4 application volumes 3–5 head them "CATEGORY: …" and number no heading; the
+    FIX 5.0–5.0SP2 volumes are not local and were not checked (spec Context).
+
+  Applying the amendment's form did find two refs naming the wrong category: A-033 and C-003 are
+  corrected (FR-018).
+- **Owner: "Hand-edit + one Opus round, skip Codex"** for residuals R-1..R-7; this pass applies
+  them. The amendment's clause text is new to every Codex round, so it carries its own scoped Codex
+  Gate A round (FR-021).
+
 ## Summary
 
 This feature closes 12 OFFICIAL catalogue rows (23 FIX 5.0SP2 MsgTypes) on the owner's amended bar.
-It adds **tests and records only** and changes no production code (FR-020):
+It adds **tests and records**, plus one constitution amendment (`[const §VI.2]`, `[const §VI.5]`;
+FR-021), and changes no production code (FR-020):
 
 1. **US1, offline witnesses.** A new TU joins the existing `test_077_allversions_builder_roundtrip`
    executable. It has one test per MsgType, named `TailRows095.<RowId>_<Msg>` (`<RowId>` without its
@@ -109,9 +147,14 @@ It adds **tests and records only** and changes no production code (FR-020):
      commit with the gitlink bump, the image republishes, and `interop-live` is dispatched on fixpp
      `main`. Before the merge, the live evidence is local.
 4. **US4, records.** The 12 rows move to `done`. A-018, A-029, A-030 and N-002 narrow to 5.0SP2
-   (owner ruling 2026-10-24 for N-002). The existing coverage-index rows name their witnesses, a
-   one-line `[const §VI.3]` disposition extends 067's to the 12 rows, and the B&L delta is added.
-   The v44 BE/BF exclusion is fixpp#625.
+   (owner ruling 2026-10-24 for N-002). A-033's and C-003's Spec refs are corrected to their
+   MsgTypes' category (FR-018). The existing coverage-index rows name their witnesses, and the B&L
+   delta is added. The v44 BE/BF exclusion is fixpp#625.
+5. **The amendment (FR-021, owner ruling 2026-10-24).** `[const §VI.2]` admits the message-level
+   form `[DocAbbrev] Category` for application-message rows and records that its CI check is owed;
+   `[const §VI.5]` lets Normative References list such refs. Constitution v4.0 → v4.1 (MINOR). It
+   lands before the catalogue edits, and reads PENDING until a scoped Codex Gate A round, Gate B and
+   the owner's sign-off (data-model §F).
 
 ## Technical Context
 
@@ -167,24 +210,45 @@ It adds **tests and records only** and changes no production code (FR-020):
 | §I.3 (tag gate) | yes | 12 rows go `backlog` → `done`. Re-derive the gate's backlog count before and after from `spec/feature-catalogue.md` (SC-004). |
 | §VI.6 (closing a `done` row) | yes | (a) 095 is the `/specify` artifact. (b) Every row's witnesses run green at verify, and their RED arms are recorded. (c) Codex Gate B runs. (d) Gate A runs on this bundle. |
 | §VI.4 (coverage-index) | yes | Each tail MsgType's existing row in `spec/coverage-index.md` names its witness in its gap-note column; no new row (FR-019). No new OFFICIAL row, so no new entry is owed. |
-| §VI.5 (Normative References) | yes | spec.md `## Normative References` lists the exact coverage-index entries: the 23 MsgType rows, grouped by their "Application Messages — …" heading, and the FIXT entries, quoted. |
-| §VI.2 / §VI.3 (Spec ref form) | yes | The 12 rows keep message-level refs under the `[const §VI.3]` disposition the coverage index records (067's "ART VI §3 DISPOSITION" comment, extended by 069). 095 extends it to its 12 rows: P7 adds a one-line disposition beside 067's comment, and quickstart §7 checks it. No Spec-ref cell changes (Gate A round 2 disagreement on Codex #1). |
+| §VI.5 (Normative References) | yes, as amended by FR-021 | spec.md `## Normative References` lists the section entries that inform 095 (`[FIX50SP2 §3.1]`, `§3.2`, `§3.3`, and the FIX-SL/FIXT entries, titles quoted), then the 12 rows' message-level refs. Under the amended clause those may be listed but do not stand in for a section entry. It also lists the coverage-index MsgType entries, grouped by their "Application Messages — …" heading. |
+| §VI.2 (Spec ref form) | yes, as amended by FR-021 | The 12 rows' refs take the amended clause's message-level form `[DocAbbrev] Category` (data-model §F). A-033 and C-003 are corrected to their MsgTypes' category (FR-018); data-model §E's recipe re-checks all 12. The clause's CI check is owed, and nothing lints Spec refs today: `grep -n -i catalog .github/workflows/*.yml` is empty, and `tools/`/`ci/` hold no Spec-ref check. That gap is recorded as a follow-up issue the orchestrator files (below), with the `[const §IX.6]` "catalogue consistency check" that also has no Tier-1 job. Which rows outside the 12 fit the amended form is not checked here. The follow-up's lint does that mechanically; data-model §F has the recipe that lists the candidates. |
+| §VI.3 (design-decision rows) | read, not applicable | §VI.3 is for rows backed by design decisions, in `[impl]`/`[constitution]` form. The 12 are normative message rows, so §VI.3 does not reach them (Gate A round 3). 067's coverage-index "ART VI §3 DISPOSITION" comment is left as written: it is history, and an amendment is the only route (`[const §XX.1]`). |
 | §VI.6(b) (verifying tests) | yes | Each row's Tests cell names test IDs that exist. Quickstart §7 resolves every cited gtest name against `--gtest_list_tests` of its own binary and the live-cell IDs against the harness `CELLS` registry, and checks Status, version cells and coverage-index gap notes; its RED run is recorded before P7. |
 | §VII.8 (grouped tests; `ctest -L`) | yes | No new ctest entry. The witnesses, census and known positives join `test_077_allversions_builder_roundtrip`, a standalone exact-set-gate target (its census reads its own binary's registry). The pins join `codegen_077_v50sp2_builder_completeness_test`, a standalone exact-set completeness gate. The routing cell joins the grouped bucket `session_pure_tests` (isolation-safe). The live cell joins `interop_hp_fixt50sp2_logon_hb_logout_test`, a live harness-selected target. Each gains `set_property(TEST … APPEND PROPERTY LABELS 095)`; verify selects with `ctest -L 095 --no-tests=error` against `expected-ctest-095.txt`. |
 | §IX.1 (coverage) | n/a | No library line added. The verify record states it per module. |
-| §IX.4 (static analysis) | yes, on test code | clang-format on the new TUs. clang-tidy follows the repo config for `tests/`. |
+| §IX.4 (static analysis) | yes, on test code | `/speckit-verify` Step 1 runs all four tools on every hand-written C/C++ file the diff touches. Its scope is an exclude-list (`specs/`, `third_party/`), so `tests/**` is in scope. It is a changed-lines instrument: debt on lines this diff does not modify is recorded, not fixed. Per tool, for this diff (the new and edited TUs under `tests/session/`, `tests/codegen/`, `tests/interop/happy/`): **clang-tidy** runs with `-p build/linux-clang-debug`. It needs a compile command, so the verify record shows each touched TU is in that build's `compile_commands.json`; any TU that is not is recorded `SKIPPED (no compile command)`, never PASS. **clang-format** runs `--dry-run --Werror` on every touched TU; it needs no compile command. **cppcheck** runs with verify Appendix A's flag set and `cppcheck-suppressions.txt` on every touched TU; it needs no compile command. **include-what-you-use** has the same compile-command rule as clang-tidy. A tool that is not installed is recorded `SKIPPED (tool not installed)` and named in the record's environment section. No workflow runs any §IX.4 tool, so verify is the only enforcement point. The CMake and YAML edits are not C/C++ and are out of §IX.4's scope. |
 | §VIII.3 (bench with a perf change) | n/a | No library code change. |
 | §X.7 / C-ABI | n/a | No C-ABI change. |
 | §XII.7 (fail closed) | n/a | No production path changes. |
-| §XVI.6 (orchestrator does not implement) | yes | Every test TU, CMake edit, harness and counterparty change goes to `phase-implementer`. The orchestrator may write the spec bundle, `spec/` catalogue / coverage-index / B&L text and parent docs, places fixpp#625 in the parent's `phases/phase-4/issue-batches.md` if it is not there, and makes and pushes the one post-merge parent commit (the harness files in it are the implementer's). |
+| §XVI.6 (orchestrator does not implement) | yes | Every test TU, CMake edit, harness and counterparty change goes to `phase-implementer`. The orchestrator may write the spec bundle, the `.specify/constitution.md` amendment (data-model §F's text, verbatim), `spec/` catalogue / coverage-index / B&L text and parent docs, places fixpp#625 in the parent's `phases/phase-4/issue-batches.md` if it is not there, and makes and pushes the one post-merge parent commit (the harness files in it are the implementer's). |
 | §XVI.7 (`/simplify` before verify) | yes | `/simplify` runs on the implementation diff before `/speckit-verify` (phase P8). |
 | §XVII.1 (Gate A trigger) | yes | The session and interop test surfaces are touched, and a live-interop vehicle changes in the parent. Gate A runs (`/gate-a 095-tail-evidence-pass`). |
 | §XVII.7 (local pre-PR build gate) | yes | One FULL `ctest --preset linux-clang-debug` on a committed tree runs as the LAST step of verify, after `df -h /mnt/e` and a check of `/mnt/c/temp/fixpp/.sandbox-lock`. Packaging entries compile consumer projects. **Resource gate:** an `AskUserQuestion` precedes the first agent-run local build, and the owner approves it before it runs. |
 | §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs in the main checkout, which owns this branch. |
 | §VII.6 (interop against an independent FIX implementation) | yes — already met by 089/033; this adds to it | Two live cells against both QuickFIX peers, run locally before merge and in `interop-live` dispatched on `main` after the post-merge parent commit (SC-003). |
-| §XVIII.7 (v1.0 codegen scope) | read, not amended | Its text keeps "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate". DECISION 2 supersedes that reason for the v50sp2 rows this feature closes; the v44 BE/BF exclusion it describes is unchanged here and is the subject of fixpp#625. No constitution edit in 095. |
+| §XVIII.7 (v1.0 codegen scope) | read, not amended | Its text keeps "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate". DECISION 2 supersedes that reason for the v50sp2 rows this feature closes; the v44 BE/BF exclusion it describes is unchanged here and is the subject of fixpp#625. 095's only constitution edit is FR-021's §VI.2/§VI.5 amendment; §XVIII.7 is not touched. |
+| §XX.1 (amend first) | yes | 095 writes two Spec ref cells in the message-level form (FR-018). Under v4.0's §VI.2 that form does not conform, so the article is amended first, in the same PR. The rationale is committed in the Sync Impact Report (data-model §F.3). The constitution commit precedes P7's catalogue commit. |
+| §XX.2 (amendment process) | yes | The PR is titled `Constitution: amend §VI.2, §VI.5 — message-level Spec refs for application-message rows (v4.1) (+ 095 tail evidence pass)`. Its description states the change, the rationale and the affected rows and specs. **Codex Gate A on the amendment:** a scoped Codex Gate A round on the two clause bodies and the Sync Impact Report (data-model §F.1–§F.3), with an Opus judge, under the owner's `/gate-a` invocation. It is owed because the post-exhaustion pass skipped Codex. Then Gate B, then owner sign-off. Like 094's, the amendment rides the feature PR rather than a standalone PR, and the title form meets §2's first step. |
+| §XX.3 (Sync Impact Report) | yes | data-model §F.3 has a new block above the v3.0 → v4.0 report. It records the date, the bump and its §4 classification, the clauses changed, the rationale, the affected rows and specs, the review and sign-off, and the feature and PR. Its header and the Status line (§F.4) read PENDING until the scoped Gate A round, Gate B and the owner's sign-off. The RATIFIED flip is the last commit before merge. |
+| §XX.4 (classification) | yes | **MINOR, v4.0 → v4.1, no `CHANGELOG.md` entry.** The test is the one the v4.0 report applies (four earlier drafts got it wrong at round 1): does any PR mergeable under v4.0 fail under v4.1? None does. §VI.2 adds a form and leaves the section form valid for every row it was valid for. Its last sentence keeps "vague refs" non-conforming and only records that no CI job checks it, which is today's state. §VI.5 adds a permission ("may also be listed") and restates the existing obligation word for word. It does not newly require any entry: a `/specify` artifact that lists only section entries conforms under both versions. Requiring message-level entries would have made a bundle conforming under v4.0 fail, which is a MAJOR change, and it was rejected for that reason. |
 
-**Result:** PASS — no deviation.
+**Result:** PASS once FR-021's amendment lands. Under v4.1 the 12 rows' refs conform (A-033 and C-003 after FR-018's corrections). No Complexity Tracking row.
+
+**Follow-up issue (the orchestrator files it; label from `gh label list`):** "Constitution §VI.2: lint
+catalogue Spec refs, and give §IX.6's 'catalogue consistency check' a Tier-1 job". Body: v4.1's
+§VI.2 says no CI job checks the clause yet and that the check is owed. `[const §IX.6]` lists a Tier-1
+"catalogue consistency check", and `grep -n -i catalog .github/workflows/*.yml` returns nothing, so
+neither exists. The lint should:
+- check every OFFICIAL row's Spec ref against the amended §VI.2: the section form, the message-level
+  form `[DocAbbrev] Category` for application-message rows (the token's vendored `dictionaries/<ver>.xml`
+  defines every MsgType the row names; the category is the vendored
+  `dictionaries/orchestra/OrchestraFIXLatest.xml` `category` of each MsgType), the whole-layer form, or §VI.3's `[impl]`/`[constitution]`;
+- carry a table from category identifier to title;
+- run in `tier1.yml`.
+
+Its first run will list the rows outside 095 that do not fit, FIX Latest's A-035..A-065 among the
+candidates. Those rows need re-canonicalising or an explicit exception before the lint can be
+required. FUNCTIONAL TRACK row 3 should check its rows against §VI.2 as amended.
 
 ## Project Structure
 
@@ -220,7 +284,8 @@ specs/095-tail-evidence-pass/
 | `tests/interop/conversation/fixt_app_script.yaml` | NEW: one-step script, F-01 / 35=BN |
 | `tests/interop/cell_results.yaml`, `cell_results_schema_check_test.py`, `expected-skips-without-counterparty.txt` | +2 rows / ids / lines |
 | `specs/095-tail-evidence-pass/expected-ctest-095.txt` | NEW: one ctest name per line |
-| `spec/feature-catalogue.md`, `spec/coverage-index.md`, `spec/behaviors-and-limitations.md` | rows → `done`; version narrowing (four rows); existing coverage rows' gap notes; B&L delta |
+| `.specify/constitution.md` | FR-021: §VI.2 and §VI.5 clause bodies, the Status line, a new Sync Impact Report block (data-model §F). No `CHANGELOG.md` change (MINOR) |
+| `spec/feature-catalogue.md`, `spec/coverage-index.md`, `spec/behaviors-and-limitations.md` | rows → `done`; version narrowing (four rows); A-033 and C-003 Spec refs (FR-018); existing coverage rows' gap notes; B&L delta |
 
 **Parent (`phase-9-harness/`): uncommitted until the fixpp PR merges, then one parent commit with
 the gitlink bump (research R-10):**
@@ -247,8 +312,8 @@ limited to the files above.
      `required_members_missing` over W4's enumeration.
    - Add the golden field-leg test, the deficient 35=E and 35=CC frames, the 35=i fail-loud and the
      synthetic dictionaries S1/S2 (contracts W6). Confirm the parser accepts every deficient frame
-     (W6: if it refuses one, stop and report). Prove the deficient-frame test RED under Mutant C, and
-     each walk detector RED under its disabled-detector mutant.
+     (W6: if it refuses one, stop and report). Prove the deficient-frame test RED under Mutant C, under
+     Mutants L and M (one W5 leg each), and each walk detector RED under its disabled-detector mutant.
    - Add the labels and `expected-ctest-095.txt`.
 2. **P1 — 23 witnesses and the census (US1).** One test per MsgType (data-model §A), each with its
    intent list and bidirectional readback. Run every remaining mutant row of contracts W6 (A, B, D,
@@ -277,13 +342,17 @@ limited to the files above.
    the whole-population `--list` reconcile, every live cell through `ci/run-interop-live.py` against
    the local harness (the 089 CONV and PROBE cells and the 033 FIXT cells included, L7), the harness
    suites, and the real-template test, now green.
-8. **P7 — records (US4).**
+8. **P7 — amendment, then records (US4).**
    - Run quickstart §7 first and record its RED (no row is `done` yet).
+   - **Amend first** (`[const §XX.1]`, FR-021): apply data-model §F to `.specify/constitution.md`
+     (§VI.2, §VI.5, the Status line and the Sync Impact Report, all PENDING), in a commit of its
+     own, before any catalogue edit. File the follow-up issue (Constitution Check, below the table)
+     before this commit, so its number replaces `fixpp#<N>` and no placeholder lands.
    - Catalogue flips with witness names.
    - Version narrowing: A-018, A-029, A-030, N-002 (data-model §E).
-   - coverage-index: each existing tail row's gap note names its witness. Beside 067's "ART VI §3
-     DISPOSITION" comment, add a one-line comment beginning `ART VI §3 DISPOSITION
-     (095-tail-evidence-pass` that extends it to the 12 rows (spec Normative References).
+   - Spec ref corrections: A-033 → `[FIX50SP2] Market Data`, C-003 → `[FIX50SP2] Account
+     Reporting` (FR-018). Run data-model §E's recipe and record its output for all 12 rows.
+   - coverage-index: each existing tail row's gap note names its witness.
    - B&L delta: the live cell's validation-off disclosure under L-041-2, a B-row naming what the
      live cell does and does not witness, and a line that FIX 4.4 BE/BF have no typed builder (the
      v44 exclusion, fixpp#625).
@@ -292,8 +361,12 @@ limited to the files above.
    - `/simplify` on the implementation diff (`[const §XVI.7]`).
    - `/speckit-verify`, which carries the local live evidence of P4–P6 (commands, outputs, peer
      builds) and quickstart §7's output.
-   - Push the fixpp branch, open the PR, run `/gate-b`. The PR body discloses what its
-     `interop-live` will show (below).
+   - Push the fixpp branch and open the PR, titled in `[const §XX.2]` form (FR-021). The PR body
+     discloses what its `interop-live` will show (below).
+   - The scoped Codex Gate A round on the amendment (data-model §F.1–§F.3), under the owner's own
+     `/gate-a` invocation, if it has not already run on the bundle before implementation.
+   - Run `/gate-b`. Then owner sign-off on the amendment. Then the last commit before merge flips
+     the Sync Impact Report and the Status line to RATIFIED (data-model §F.3, §F.4).
 10. **P9 — after the merge (close-out, research R-10 steps 4–6).**
    - The fixpp close-out resets the main checkout to `main` (close-out rows 16–17).
    - One parent commit: the harness changes, the goldens, and the gitlink bump to the merged fixpp

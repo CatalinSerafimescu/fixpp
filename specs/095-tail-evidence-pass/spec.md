@@ -30,8 +30,10 @@ to 5.0SP2, and the 12 rows flipped to `done`."
   required, where a group that is the **only child** of a component inherits that component
   reference's `required` flag. Reason: the vendored FIX50SP2 dictionary (byte-identical to
   QuickFIX-cpp v1.16.0's `spec/FIX50SP2.xml`) writes a required group as a `required='Y'` component
-  reference wrapping a `required='N'` group; QuickFIX/J 3.0.1's `FIX50SP2.modified.xml` marks the
-  same groups `required='Y'` directly. Required **members of a group instance** are the instance's
+  reference wrapping a `required='N'` group. QuickFIX/J 3.0.1's `FIX50SP2.modified.xml` flags
+  `NoTradingSessions` (BJ, BS) `required='Y'` directly, leaves `NoSettlOblig` (BQ) and `NoAsgnReqs`
+  (CC) `required='N'` behind the same wrapping components, and has no CQ. FR-014's axis-(b) walk over
+  its file applies the same inheritance. Required **members of a group instance** are the instance's
   required fields and required nested groups by the same two rules, starting from the group.
 - **Closure-required set** — per MsgType, the required fields and required groups above. It is the
   **owner's closure bar**, stricter than either engine's own validation: only its **field** leg is
@@ -76,6 +78,26 @@ parent `main` by the orchestrator. At Gate A round 1 the owner extended the vers
 above to **N-002** (Clarifications, Session 2026-10-24 (Gate A round 1)). At Gate A round 2 the owner
 ruled that the harness registration lands **after** the fixpp merge, with the gitlink bump
 (Clarifications, Session 2026-10-24 (Gate A round 2)); the parent push happens at that step only.
+
+**Constitution amendment (owner ruling 2026-10-24, after Gate A round 3).** `[const §VI.2]` requires
+every OFFICIAL row's Spec ref in the form `[DocAbbrev §X.Y.Z] Section title`. The 12 tail rows, like
+the application-message rows already `done`, carry a message-level ref such as `[FIX50SP2] Order
+Mass Handling`. In the sources checked, there is no §X.Y.Z to cite for them:
+- the FIX Repository identifies an application message by its version, its category
+  (`Categories.xml` `CategoryID`), that category's section (`SectionID`) and volume, and numbers
+  none of them;
+- the FIX 4.4 application volumes 3, 4 and 5 head each message group "CATEGORY: …" and number
+  none of their headings (re-derive: `pdftotext -layout` on each `fix-44_VOL-<n>_w_Errata_20030618.pdf`,
+  then grep `CATEGORY:`). The FIX 5.0–5.0SP2 volumes are not local and were not checked.
+
+`[const §VI.3]` does not cover these rows. It is for rows backed by design decisions, in
+`[impl]`/`[constitution]` form, and a coverage-index comment is not an amendment (Gate A round 3).
+The owner chose to **amend the constitution in 095**: `[const §VI.2]` admits a message-level form
+for a row whose subject is application messages, and `[const §VI.5]` lets Normative References list
+such refs (FR-021; the text is data-model §F). 095 corrects two of the 12 refs, whose category is
+not the one the FIX Repository and FIX Orchestra place their MsgTypes in (FR-018). Writing those two
+cells in the message-level form is a 095 act. So `[const §XX.1]` applies: amend the article first,
+in the same PR.
 
 **What exists today (read at `4e8b3779`):**
 - `tests/session/test_077_allversions_builder_roundtrip.cpp` already round-trips every one of the 23
@@ -122,7 +144,15 @@ ruled that the harness registration lands **after** the fixpp merge, with the gi
   when the version column narrows? → A: no. The Spec ref names the section that introduces the
   message, which FIX 5.0SP2 still carries. *(Reworded at Gate A round 2: the message-level form is
   the recorded `[const §VI.3]` disposition of `spec/coverage-index.md`, which 095 extends to its 12
-  rows — Normative References — not catalogue debt.)*
+  rows — Normative References — not catalogue debt.)* *(Superseded at Gate A round 3: §VI.3 covers
+  design-decision rows in `[impl]`/`[constitution]` form; it does not authorize message-level refs
+  on normative rows, and a coverage-index comment is not an amendment. The answer "no" stands on a
+  different reason. The reason given above is false: FIX Orchestra's `added` attribute gives FIX 4.4
+  for BN, BE, BF, BK and BP, and FIX 5.0 for BQ, so these refs do not name the version that
+  introduced the message.
+  What the refs must satisfy is the amended `[const §VI.2]`: the token names a version whose
+  dictionary defines every MsgType of the row. These four tokens do (data-model §E has the recipe),
+  so they stay. Session 2026-10-24 (Gate A round 3).)*
 - Q: The clarification above excludes BJ/BS for differing required sets, while research compared BQ
   and CC. Which is it? → A: both, on two different **axes**. (a) *Engine semantics:* each engine's
   own rule over its own file (QuickFIX-cpp's group requiredness versus QuickFIX/J's directly flagged
@@ -182,6 +212,50 @@ ruled that the harness registration lands **after** the fixpp merge, with the gi
   field), so the check fails on today's inputs. Narrow it? → A: yes. It hard-asserts only
   what selects BN and prints the other MsgTypes. Its RED arm is the same equality assertion pointed
   at BM, which must fail.
+
+### Session 2026-10-24 (Gate A round 3, post-exhaustion)
+
+- Q: The 2-rewrite loop exhausted at round 3 (Opus post-judging P1=0 P2=3 P3=4). How does it end? →
+  A (**owner ruling**): **"Hand-edit + one Opus round, skip Codex"** for the round-3 residuals R-1..R-7.
+  Then, on the Spec-ref form question the round-3 review raised as a separate owner item: **"Amend
+  the constitution in 095."** Consequences:
+  - The round-2 claim that a `[const §VI.3]` disposition covers the 12 rows is withdrawn on every
+    surface (Normative References, plan Summary and Constitution Check, P7, quickstart §7).
+  - The amendment (FR-021, data-model §F) is what makes the 12 rows' refs conform. It is not a
+    disclosure of pre-existing non-conformance.
+  - The amended clauses still owe a scoped Codex Gate A review (`[const §XX.2]`).
+- Q: What message-level form does the amendment admit? → A: `[DocAbbrev] Category`, designed from
+  what the catalogue's message-level rows use and what the sources offer (data-model §F):
+  - `DocAbbrev` is a version whose vendored dictionary (`dictionaries/<ver>.xml`) defines every
+    MsgType of the row;
+  - `Category` is the message category the vendored FIX Orchestra file
+    (`dictionaries/orchestra/OrchestraFIXLatest.xml`, each message's `category`) places those
+    MsgTypes in. A CI lint can read that file; the FIX Repository zip is owner-local and is not
+    committed, so it is a cross-check only.
+
+  Volume is not part of the form. No catalogue row carries it, and adding it would make every
+  message-level row non-conforming.
+- Q: Do the 12 rows' refs conform to that form as written? → A: not all; 095 corrects the two the
+  measurement below found (FR-018), and data-model §E's recipe re-checks all 12. Measured
+  2026-10-24 with that recipe:
+  - **A-033** (CC, CD, CE) reads `[FIX50SP2] Application Sequencing`. Both the 2010 Repository's
+    FIX.5.0SP2 `Messages.xml` and the vendored `OrchestraFIXLatest.xml` place these MsgTypes in
+    `MarketData`. `Application` is BW/BX/BY's category (N-003). The ref becomes
+    `[FIX50SP2] Market Data`.
+  - **C-003** (CQ) reads `[FIX50SP2] Position Maintenance`. The 2010 Repository has no CQ, and
+    Orchestra places it in `AccountReporting`. The ref becomes `[FIX50SP2] Account Reporting`.
+  The coverage index files CC, CD, CE and CQ under its own "Application Messages — Infrastructure
+  (FIX 4.2+)" heading. That heading is the index's grouping, not a Spec ref, and 095 leaves the
+  rows where they are (FR-019 edits gap notes only).
+- Q: Does 095 add the CI lint that §VI.2's "CI-linting failure" sentence implies? → A: no. The
+  amended sentence states the rule and records that the check is owed, and a follow-up issue tracks
+  it (plan, Constitution Check §VI.2). No CI job lints Spec refs today: `grep -n -i catalog
+  .github/workflows/*.yml` returns nothing, and that also leaves `[const §IX.6]`'s Tier-1 "catalogue
+  consistency check" without a job.
+
+  A lint is not small. It would fail today on rows outside 095 (the recipe in data-model §F), so it
+  needs those rows re-canonicalised or excepted. It also needs a table mapping each category
+  identifier to its title. Both are design work outside this feature.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -366,8 +440,11 @@ test name exists in the tree.
   feature's artifacts; no artifact or comment may record the derived counts or member lists as a
   result. Authority: the parent repo's `.claude/CLAUDE.md`, section "Testing & Verification" ("A
   comment may record a PROCEDURE; it may not record a RESULT"). The known-positive assertions of
-  FR-004 and FR-014 are the one exception (contracts W7 lists them): they re-run on every
-  invocation, so they cannot rot silently.
+  FR-004 are the one exception (contracts W7 lists them): they are committed, enabled tests that
+  re-run on every invocation of their binary, so they cannot rot silently. W7 also lists FR-014's
+  BN and BM assertions, but on a narrower basis. The check is `DISABLED_`, so they run only when it
+  is invoked with the jar (verify, quickstart §3), never on a build or a CI lane. A dictionary change
+  that falsifies them shows up only at the next run of that check.
 - **FR-006**: The existing 077 round-trip tests MUST keep passing unchanged in behaviour; this
   feature strengthens the evidence, it does not weaken or delete existing coverage.
 
@@ -426,7 +503,31 @@ test name exists in the tree.
 - **FR-018**: A-018, A-029, A-030 and N-002's FIX version column MUST become `5.0SP2`, with the
   Verified cell stating that the FIX 5.0 versions the column dropped have no typed tier and stay on
   the runtime-XML path. N-002's Verified cell also states the v44 BE/BF exclusion and names
-  fixpp#625 (Clarifications, Gate A round 1). The Spec ref cells are unchanged.
+  fixpp#625 (Clarifications, Gate A round 1). The Spec ref cells are unchanged except two. A-033's
+  becomes `[FIX50SP2] Market Data` and C-003's becomes `[FIX50SP2] Account Reporting`, the
+  categories the FIX Repository and FIX Orchestra place their MsgTypes in (Clarifications, Gate A
+  round 3; data-model §E). These edits land after the amendment (FR-021).
+- **FR-021**: `.specify/constitution.md` MUST be amended, v4.0 → v4.1 (`[const §XX.4]` MINOR, no
+  `CHANGELOG.md` entry; plan, Constitution Check §XX.4), so that:
+  - `[const §VI.2]` admits the message-level form `[DocAbbrev] Category` for a row whose subject
+    is application messages, keeps the section form for every other row, and records that the CI
+    check of the clause is owed;
+  - `[const §VI.5]` lets Normative References list such refs without letting one stand in for a
+    section entry.
+
+  The exact before → after text, the Status line and the Sync Impact Report are data-model §F.
+  Further requirements:
+  - The amendment lands **before** the catalogue edits of FR-017/FR-018 (`[const §XX.1]`).
+  - Its Sync Impact Report and Status line read PENDING until a scoped Codex Gate A round on the
+    amended clauses converges, Gate B converges and the owner signs off, in that order. The flip to
+    RATIFIED is the last commit before merge (094's FR-003a precedent).
+  - After that Gate A round converges, any change to the two clause bodies gets another scoped Codex
+    Gate A round before the flip. A change to the amendment's records (Status line, the Sync Impact
+    Report outside the clause bodies) needs only Gate B's re-check (094's FR-003d precedent).
+  - The 095 PR is titled in `[const §XX.2]` form: `Constitution: amend §VI.2, §VI.5 — message-level
+    Spec refs for application-message rows (v4.1) (+ 095 tail evidence pass)`. Its description
+    states the change, the rationale and the affected rows and specs.
+  - `[const §VI.3]`, `[const §VI.6]` and `[const §IX.6]` are not amended.
 - **FR-019**: `spec/coverage-index.md`'s existing row for each tail MsgType MUST name its witness in
   its gap-note column (no new row), and the B&L files MUST carry the delta: FR-013's disclosure, that
   FIX 4.4 BE/BF have no typed builder (the v44 exclusion), and anything a witness exposes.
@@ -484,21 +585,38 @@ test name exists in the tree.
 - Exporting/installing the typed builder libraries (fixpp#613, running in parallel).
 - Lifting the v44 BE/BF codegen exclusion (`kN002N003Excluded`): fixpp#625, not done here
   (Clarifications, Gate A round 1).
+- A CI lint of `[const §VI.2]`, the `[const §IX.6]` "catalogue consistency check", and
+  re-canonicalising the Spec refs of rows outside the 12. These go to a follow-up issue (plan,
+  Constitution Check §VI.2). FUNCTIONAL TRACK row 3's FIX Latest rows are among the rows to check.
 
 ## Normative References
 
-- **Granularity: message-level, a recorded `[const §VI.3]` disposition.** `spec/coverage-index.md`
-  indexes "FIX Application Layer (FIX40–FIX50SP2)" "at message granularity (one row per MsgType)".
-  Its "ART VI §3 DISPOSITION (067-codegen-writer-emitter …)" comment records message-level
-  `[FIX44]`/`[FIX50SP2]` refs as a deliberate design-authority disposition for 067's rows, and 069's
-  spec (Normative References) extended it to the FIX44 families. **095 extends it to its 12 rows**,
-  which are FIX 5.0–5.0SP2 messages: plan P7 records a one-line disposition beside 067's comment, and
-  quickstart §7 checks that it is there. The 12 rows' Spec refs stay as `spec/feature-catalogue.md`
-  carries them: `[FIX50SP1] Single General Order Handling` (A-018); `[FIX50SP2] Order Mass Handling`
-  (A-023); `[FIX50SP2] Market Structure Reference Data` (A-027, A-028); `[FIX50SP1] Securities
-  Reference Data` (A-029); `[FIX50SP1] Settlement Instructions` (A-030); `[FIX50SP2] Allocation`
-  (A-031); `[FIX50SP2] User Management` (A-032); `[FIX50SP2] Application Sequencing` (A-033, N-003);
-  `[FIX50SP2] Position Maintenance` (C-003); `[FIX50] User Management` (N-002).
+- **Section entries** (coverage index, "General Encoding Rules (common to all app versions)"
+  table; DocAbbrev as its supplemental note writes them, titles quoted):
+  - `[FIX50SP2 §3.2] Repeating groups (NoXxx delimiter, ordered field list, nested groups)`. It
+    governs FR-002's delimiter and nested-group rule, W4's instance attribution and every group
+    witness.
+  - `[FIX50SP2 §3.3] Field data types (28 types: STRING, CHAR, INT, FLOAT, BOOLEAN, UTCTIMESTAMP,
+    etc.)`. It governs data-model §C's literal rules.
+  - `[FIX50SP2 §3.1] Standard header (BeginString/8, BodyLength/9, MsgType/35, mandatory
+    ordering)`. It governs W3's framing.
+- **Message-level entries**, in the form the amended `[const §VI.2]` admits and `[const §VI.5]` lets
+  this section list (FR-021, data-model §F). They do not stand in for the section entries above.
+  These are the 12 rows' Spec refs as they read after P7 (FR-018):
+  - `[FIX50SP1] Single General Order Handling` (A-018);
+  - `[FIX50SP2] Order Mass Handling` (A-023);
+  - `[FIX50SP2] Market Structure Reference Data` (A-027, A-028);
+  - `[FIX50SP1] Securities Reference Data` (A-029);
+  - `[FIX50SP1] Settlement Instructions` (A-030);
+  - `[FIX50SP2] Allocation` (A-031);
+  - `[FIX50SP2] User Management` (A-032);
+  - `[FIX50SP2] Market Data` (A-033, corrected from `Application Sequencing`);
+  - `[FIX50SP2] Account Reporting` (C-003, corrected from `Position Maintenance`);
+  - `[FIX50] User Management` (N-002);
+  - `[FIX50SP2] Application Sequencing` (N-003).
+
+  `spec/coverage-index.md` indexes "FIX Application Layer (FIX40–FIX50SP2)" "at message granularity
+  (one row per MsgType)", so these rows have no section entry.
 - **The coverage-index entries** (`| MsgType | Message | Catalogue ID |`), by heading of "FIX
   Application Layer (FIX40–FIX50SP2)":
   - "Application Messages — Reference Data": `BI TradingSessionListRequest A-027`,
@@ -515,6 +633,10 @@ test name exists in the tree.
     `CE StreamAssignmentReportACK A-033`, `CQ AccountSummaryReport C-003`, `BE UserRequest N-002`,
     `BF UserResponse N-002`, `BW ApplicationMessageRequest N-003`,
     `BX ApplicationMessageRequestAck N-003`, `BY ApplicationMessageReport N-003`.
+
+  These headings are the coverage index's own grouping, not Spec refs. CC, CD, CE and CQ stay under
+  "Infrastructure" although their corrected refs name `Market Data` and `Account Reporting`
+  (data-model §E).
 - **The live cell's session profile** (coverage-index FIX-SL section table, titles quoted):
   - `[FIX-SL §5.3.1] Profile identification (BeginString=FIXT.1.1)` (S-020);
   - `[FIX-SL §4.3.7] Specifying application version (DefaultApplVerID 1137 / FIXT)` (S-025, S-026);
@@ -526,8 +648,10 @@ test name exists in the tree.
   The "FIXT.1.1 (FIXT)" table indexes the same sections by concept ("BeginString=FIXT.1.1 — session
   profile identification", "DefaultApplVerID(1137) on Logon — default app version", "ApplVerID(1128)
   per message — per-message app version override").
-- **Constitution:** `[const §I.3]` the tag gate; `[const §VI.4]`, `[const §VI.5]`, `[const §VI.6]`
-  coverage-index, this section, closing a `done` row; `[const §VII.6]` interop; `[const §VII.8]`
+- **Constitution:** `[const §I.3]` the tag gate; `[const §VI.2]`, `[const §VI.5]` amended by this
+  feature (FR-021); `[const §VI.3]` read, not applicable; `[const §VI.4]`, `[const §VI.6]`
+  coverage-index, closing a `done` row; `[const §XX.1]`–`[const §XX.4]` the amendment process;
+  `[const §IX.4]`, `[const §IX.6]` static analysis, the unimplemented catalogue check; `[const §VII.6]` interop; `[const §VII.8]`
   grouped tests and label selection; `[const §XVI.6]`, `[const §XVI.7]` orchestrator role and
   `/simplify`; `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build and its
   resource gate, verify; `[const §XVIII.7]` the N-002/N-003 deferral text DECISION 2 supersedes.

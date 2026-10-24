@@ -246,8 +246,9 @@ no new evidence.
   - asserts that the same equality predicate is **false** for BM, which differs on axis (b) (the
     round-2 Gate A reviews measured it; the check's printed output shows where). This known positive
     shows the equality can fail on real inputs, which the input-absent arm below cannot show
-    (contracts W7 lists it as an exception). If a dictionary change makes BM agree, the check goes
-    RED and a new known positive is chosen from its output;
+    (contracts W7 lists it as an exception, on the narrower basis that it runs only at verify). If a
+    dictionary change makes BM agree, the check goes RED the next time it is invoked with the jar,
+    not on a build, and a new known positive is chosen from its output;
   - **fails** when `FIXPP_095_QFJ_DICT_DIR` is unset or a file is missing — it never skips.
 - It is `DISABLED_` so plain `ctest` (which has no jar) does not run it; verify runs it with
   `--gtest_also_run_disabled_tests` and asserts it ran (quickstart §3).

@@ -46,7 +46,7 @@ to the same walk entry point (data-model §B).
 
 | Output | Arm | Expected RED / assertion |
 |---|---|---|
-| walk `ok`, field leg | `FieldLegMatchesQuickFixCppGolden`: for every tail MsgType and 35=E, the walk's message-level field set equals the row of `tools/quickfix_required_golden/golden.csv` (measured QuickFIX-cpp 1.16.0 output), read from the file at test time and never copied into the TU | a mismatch names the MsgType and both sets |
+| walk `ok`, field leg | `FieldLegMatchesQuickFixCppGolden`: it first asserts that `golden.csv` holds exactly one `FIX50SP2,<MT>,` row for each of the 24 MsgTypes (the 23 tail MsgTypes and 35=E), so an absent row cannot read as an empty set; then, for each, the walk's message-level field set equals that row of `tools/quickfix_required_golden/golden.csv` (measured QuickFIX-cpp 1.16.0 output), read from the file at test time and never copied into the TU | a mismatch names the MsgType and both sets |
 | walk `ok`, group leg (only-child inheritance) | **Mutant C**: the walk ignores the only-child inheritance | the deficient-frame assertions on `NoOrders`(73) go RED; Mutant A, re-applied on top, no longer goes RED in W5 (the rule, not a list, decides) |
 | walk `nested_required_group` (required group in an instance) | `NestedRequiredGroupFailsLoud_MassQuote`: the status for 35=i; the walk returns a status per MsgType, so this does not break `SetUpTestSuite` for the 23 | mutant: the detector returns `ok` → RED naming 35=i |
 | walk `nested_required_group` (delimiter chain) | `WalkStatusesOnSyntheticDictionaries`, document S2: a message requiring a group whose first emitted element is a group whose own first emitted element is again a group | the status and the inner group's name; mutant: the chain check disabled → RED |
@@ -60,8 +60,11 @@ to the same walk entry point (data-model §B).
 | W5 count below 2 | frame E-one: 35=E with one `NoOrders` instance | the exact list |
 | W5 instance count ≠ count value | frame E-short: literal bytes, `73=2` followed by one complete instance | the exact list |
 | W5 instance member | frame E-member: two instances, the second lacking `ListSeqNo`(67) | the exact list (`73[1].67`) |
-| W5 instance delimiter | frame CC-nodelim: 35=CC with `1499=2`, instance 0 carrying only its `NoRelatedSym` group and no `NoPartyIDs` | the exact list (`1499[0].453`) |
-| W5 delimiter's nested group | frame CC-nested: instance 0 carries `453=1` and a PartyIDSource(447) but no PartyID(448) | the exact list (`1499[0].448`) |
+| W5 instance delimiter | frame CC-nodelim: 35=CC with `1499=2`, instance 0 carrying only its `NoRelatedSym` group and no `NoPartyIDs` | the exact list (`1499[0].453`), reported once, by the delimiter leg (data-model §B) |
+| W5 instance delimiter, alone | **Mutant L**: disable only the delimiter leg | RED on CC-nodelim (the list loses `1499[0].453`); no other leg reports that path |
+| W5 delimiter's nested group, delimiter absent | frame CC-nested: instance 0 carries `453=1` and a PartyIDSource(447) but no PartyID(448) | the exact list (`1499[0].448`) |
+| W5 delimiter's nested group, count ≠ 1 | frame CC-count2: 35=CC, `1499=2`, instance 0 carrying `453=2` with two complete 448-delimited nested instances, instance 1 well-formed | the exact list (`1499[0].453`), reported by the `delim_group` leg (the count is present) |
+| W5 nested count ≠ 1, alone | **Mutant M**: disable only the `!= 1` comparison | RED on CC-count2 (the list comes back empty) |
 | census multiplicity 0 | **Mutant G**: delete one witness (e.g. `TailRows095.C003_AccountSummaryReport`) | RED naming CQ with multiplicity 0 |
 | census multiplicity > 1, row mismatch | **Mutant F**: duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` (A-024 is BN's duplicate catalogue row) | RED naming BN with multiplicity 2 **and** the row mismatch (A024 against A-018); gtest names are unique in a suite, so a second name always carries another row |
 | census unmapped name | **Mutant I**: add `TailRows095.A018_ExecutionAcknowledgement` (the catalogue title, which is no dictionary message name) | RED naming the unmapped name |
@@ -73,16 +76,25 @@ All frames (E-*, CC-*) live in `KnownPositive_DeficientFrames` and assert the ex
 confirms in P0 that the parser accepts each frame. If it refuses one, the leg that frame serves cannot
 be reached from a parsed frame: the implementer stops and reports, and a parse error is never
 recorded as that leg's RED. Mutants F, G, I and J may share one rebuild, because the census reports
-every finding; the record must show each one's message.
+every finding; the record must show each one's message. CC-count2's two nested instances parse as
+one outer instance: `consume_group_extent` consumes the nested 453 extent through `consume_one`, and
+`group_slices_status` splits on the outer delimiter only at the outer level (`src/wire/offset_table.cpp`).
+The implementer confirms that reading in P0, under the same stop rule.
 
 **W7 — no result recorded.** No comment, artifact or assertion literal states how many
 closure-required members/groups any message has, or lists them (FR-005). **One narrow exception:**
-the known-positive assertions, which re-run on every invocation and so cannot rot silently:
+the known-positive assertions. The committed, enabled ones below re-run on every invocation of their
+binary, so they cannot rot silently:
 - the deficient-frame assertions on 35=E (`NoOrders`(73), `ClOrdID`(11), `ListSeqNo`(67)) and on
-  35=CC (`NoAsgnReqs`(1499), `NoPartyIDs`(453), `PartyID`(448), `PartyIDSource`(447), `NoRelatedSym`);
+  35=CC (`NoAsgnReqs`(1499), `NoPartyIDs`(453), `PartyID`(448), `PartyIDSource`(447), `NoRelatedSym`),
+  CC-count2 included;
 - the 35=i nested fail-loud;
-- the synthetic dictionaries S1 and S2 and their expected statuses;
-- the selection check's BN-agrees and BM-differs assertions (research R-7).
+- the synthetic dictionaries S1 and S2 and their expected statuses.
+
+The selection check's BN-agrees and BM-differs assertions (research R-7) are also allowed, on a
+narrower basis. `TailRows095Selection` is `DISABLED_` and needs `FIXPP_095_QFJ_DICT_DIR`, so they
+run only when the check is invoked with the jar (verify, quickstart §3), never on a build or a CI
+lane. A dictionary change that falsifies them shows up only at the next run of that check (FR-005).
 
 The TU header records the rule and the recipe.
 
