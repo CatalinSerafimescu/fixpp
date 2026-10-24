@@ -42,13 +42,16 @@
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
-#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/engine.hpp>
-#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/transport/endpoint.hpp>
 #include <fixpp/v50sp2/messages/ExecutionAck.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <fstream>
 #include <future>
 #include <memory>
@@ -63,7 +66,9 @@
 #include "support/app_message_read_scaffold.hpp"
 #include "support/counterparty_probe.hpp"
 #include "support/intent_file.hpp"
+#include "support/interop_fixture.hpp"
 #include "support/readback_jsonl.hpp"
+#include "support/scenario_descriptor.hpp"
 #include "support/session_test_access.hpp"
 #include "support/witness_comparator.hpp"
 
@@ -169,7 +174,7 @@ std::string app_cell_name(::testing::TestParamInfo<Counterparty> const& info) {
 
 TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     Counterparty const counterparty = GetParam();
-    INTEROP_REQUIRE_COUNTERPARTY(hp::counterparty_token(counterparty).c_str());
+    INTEROP_REQUIRE_COUNTERPARTY(hp::counterparty_token(counterparty));
 
     // ── Run identity (data-model §1/§9): set by the parent harness for a scripted cell. ──
     std::string const run_id = env_or_empty("INTEROP_FIXPP_RUN_ID");
@@ -207,6 +212,7 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
 
     // The `sent` record: the F-01 literals, fixed before the build (data-model §D).
     std::vector<rb::FieldEntry> sent_fields;
+    sent_fields.reserve(f01->fields.size());
     for (auto const& f : f01->fields) sent_fields.push_back({.path = f.path, .value = f.value});
 
     // The builder's input: the same F-01 literals, set member by member.
@@ -254,8 +260,10 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     prod.engine_config.application = app;
     fixpp::interop::InteropEngineFixture fx{std::move(prod.engine_config)};
 
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above returns when unset.
     auto cfg = hp::make_session_config(Role::fixpp_initiator, "FIXT.1.1", factory,
                                        fx.ioc().get_executor(), *endpoint);
+    // NOLINTEND(bugprone-unchecked-optional-access)
     cfg.default_appl_ver_id = fixpp::dict::application_version::v50sp2;
     cfg.dictionary = prod.session_dictionary;
     cfg.validate_inbound_messages = false;

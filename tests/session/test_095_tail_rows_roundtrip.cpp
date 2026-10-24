@@ -45,9 +45,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/v50sp2/groups/G_1165Args.hpp>
+#include <fixpp/v50sp2/groups/G_1499_1Args.hpp>
+#include <fixpp/v50sp2/groups/G_386_2Args.hpp>
+#include <fixpp/v50sp2/groups/G_453Args.hpp>
 #include <fixpp/v50sp2/messages/AccountSummaryReport.hpp>
 #include <fixpp/v50sp2/messages/AllocationInstructionAlert.hpp>
 #include <fixpp/v50sp2/messages/ApplicationMessageReport.hpp>
@@ -71,7 +75,9 @@
 #include <fixpp/v50sp2/messages/UserNotification.hpp>
 #include <fixpp/v50sp2/messages/UserRequest.hpp>
 #include <fixpp/v50sp2/messages/UserResponse.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/view.hpp>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -165,7 +171,7 @@ public:
         messages_ = fix.child("messages");
     }
 
-    WalkMap walk_all() const {
+    [[nodiscard]] WalkMap walk_all() const {
         WalkMap out;
         for (pugi::xml_node m : messages_.children("message")) {
             out[m.attribute("msgtype").as_string()] = walk_message(m);
@@ -185,18 +191,18 @@ private:
         }
     };
 
-    std::uint16_t tag_of(pugi::xml_node n) const {
+    [[nodiscard]] std::uint16_t tag_of(pugi::xml_node n) const {
         auto const it = tags_.find(n.attribute("name").as_string());
         return it == tags_.end() ? std::uint16_t{0} : it->second;
     }
 
-    pugi::xml_node component_def(pugi::xml_node ref) const {
+    [[nodiscard]] pugi::xml_node component_def(pugi::xml_node ref) const {
         auto const it = components_.find(ref.attribute("name").as_string());
         return it == components_.end() ? pugi::xml_node{} : it->second;
     }
 
     // The first emitted element (a field or a group) under `n`, components expanded.
-    pugi::xml_node first_emitted(pugi::xml_node n) const {
+    [[nodiscard]] pugi::xml_node first_emitted(pugi::xml_node n) const {
         for (pugi::xml_node c : element_children(n)) {
             if (std::string_view{c.name()} != "component") return c;
             if (pugi::xml_node const inner = first_emitted(component_def(c))) return inner;
@@ -212,7 +218,7 @@ private:
             bool const req = path_required && is_required(c);
             std::string_view const kind = c.name();
             if (kind == "field") {
-                if (req && std::find(fields.begin(), fields.end(), tag_of(c)) == fields.end()) {
+                if (req && std::ranges::find(fields, tag_of(c)) == fields.end()) {
                     fields.push_back(tag_of(c));
                 }
             } else if (kind == "group") {
@@ -226,7 +232,7 @@ private:
                     if (req) groups.push_back(kids.front());
                     continue;
                 }
-                if (req && std::any_of(kids.begin(), kids.end(), is_group)) {
+                if (req && std::ranges::any_of(kids, is_group)) {
                     fail.set(walk_status::group_among_siblings, c.attribute("name").as_string());
                 }
                 collect(def, req, fields, groups, fail);
@@ -234,7 +240,7 @@ private:
         }
     }
 
-    WalkResult walk_message(pugi::xml_node m) const {
+    [[nodiscard]] WalkResult walk_message(pugi::xml_node m) const {
         WalkResult r;
         Failure fail;
         std::vector<pugi::xml_node> groups;
@@ -324,14 +330,14 @@ BodyEnumeration enumerate_body(IndexView const& mv, WalkResult const& wr) {
     std::byte const* const base = mv.bytes().data();
     for (auto const& e : mv.offsets().entries()) {
         if (is_framing_or_msgtype(e.tag)) continue;
-        std::byte const* const value_at = base + e.offset;
+        std::byte const* const value_ptr = base + e.offset;
         BodyEntry be;
         be.tag = e.tag;
-        be.value.assign(reinterpret_cast<char const*>(value_at), e.length);
+        be.value.assign(reinterpret_cast<char const*>(value_ptr), e.length);
         for (std::size_t gi = 0; gi < slices.size() && be.group < 0; ++gi) {
             for (std::size_t k = 0; k < slices[gi].size(); ++k) {
                 auto const& s = slices[gi][k];
-                if (value_at >= s.data && value_at < s.data + s.len) {
+                if (value_ptr >= s.data && value_ptr < s.data + s.len) {
                     be.group = static_cast<int>(gi);
                     be.instance = k;
                     break;
@@ -473,25 +479,25 @@ struct TailRow {
 
 std::vector<TailRow> const& tail_rows() {
     static std::vector<TailRow> const rows = {
-        {"A-018", {"BN"}},
-        {"A-023", {"CA", "BZ"}},
-        {"A-027", {"BI", "BJ", "BS"}},
-        {"A-028", {"BT", "BU", "BV"}},
-        {"A-029", {"BK", "BP"}},
-        {"A-030", {"BQ"}},
-        {"A-031", {"BM"}},
-        {"A-032", {"CB"}},
-        {"A-033", {"CC", "CD", "CE"}},
-        {"C-003", {"CQ"}},
-        {"N-002", {"BE", "BF"}},
-        {"N-003", {"BW", "BX", "BY"}},
+        {.row = "A-018", .msgtypes = {"BN"}},
+        {.row = "A-023", .msgtypes = {"CA", "BZ"}},
+        {.row = "A-027", .msgtypes = {"BI", "BJ", "BS"}},
+        {.row = "A-028", .msgtypes = {"BT", "BU", "BV"}},
+        {.row = "A-029", .msgtypes = {"BK", "BP"}},
+        {.row = "A-030", .msgtypes = {"BQ"}},
+        {.row = "A-031", .msgtypes = {"BM"}},
+        {.row = "A-032", .msgtypes = {"CB"}},
+        {.row = "A-033", .msgtypes = {"CC", "CD", "CE"}},
+        {.row = "C-003", .msgtypes = {"CQ"}},
+        {.row = "N-002", .msgtypes = {"BE", "BF"}},
+        {.row = "N-003", .msgtypes = {"BW", "BX", "BY"}},
     };
     return rows;
 }
 
 std::string drop_hyphen(std::string_view row) {
     std::string s{row};
-    s.erase(std::remove(s.begin(), s.end(), '-'), s.end());
+    std::erase(s, '-');
     return s;
 }
 
@@ -540,6 +546,9 @@ protected:
 
     static pugi::xml_document const& doc() { return shared_->doc; }
     static WalkMap const& walk() { return shared_->walk; }
+    // tv is emplaced on every path that leaves load_error empty, and SetUp() fails the test
+    // before a witness body runs otherwise.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     static fixpp::dict::table_view const& tv() { return *shared_->tv; }
 
     // W3–W5 for one witness: frame, independent parse, tag 35, both-direction readback,
@@ -643,19 +652,35 @@ TEST_F(TailRows095Census, EveryTailMsgTypeHasExactlyOneWitness) {
             auto const [row, generated] = split_test_name(name);
             std::string const mt = msgtype_for_generated_name(doc(), generated);
             if (mt.empty()) {
-                findings.push_back("unmapped name TailRows095." + name + ": no <message name='" +
-                                   generated + "'> in FIX50SP2.xml");
+                std::string f = "unmapped name TailRows095.";
+                f += name;
+                f += ": no <message name='";
+                f += generated;
+                f += "'> in FIX50SP2.xml";
+                findings.push_back(std::move(f));
                 continue;
             }
             auto const it = row_of_msgtype.find(mt);
             if (it == row_of_msgtype.end()) {
-                findings.push_back("extra MsgType 35=" + mt + " (TailRows095." + name + ")");
+                std::string f = "extra MsgType 35=";
+                f += mt;
+                f += " (TailRows095.";
+                f += name;
+                f += ")";
+                findings.push_back(std::move(f));
                 continue;
             }
             ++multiplicity[mt];
             if (drop_hyphen(it->second) != row) {
-                findings.push_back("row mismatch: TailRows095." + name + " names row " + row +
-                                   ", 35=" + mt + " is row " + it->second);
+                std::string f = "row mismatch: TailRows095.";
+                f += name;
+                f += " names row ";
+                f += row;
+                f += ", 35=";
+                f += mt;
+                f += " is row ";
+                f += it->second;
+                findings.push_back(std::move(f));
             }
         }
     }
@@ -679,12 +704,12 @@ TEST_F(TailRows095Census, FieldLegMatchesQuickFixCppGolden) {
     ASSERT_TRUE(in) << "cannot open " << FIXPP_095_QUICKFIX_GOLDEN_CSV;
     std::map<std::string, std::vector<std::set<std::uint16_t>>> rows;
     for (std::string line; std::getline(in, line);) {
-        if (line.rfind("FIX50SP2,", 0) != 0) continue;
+        if (!line.starts_with("FIX50SP2,")) continue;
         std::size_t const c2 = line.find(',', 9);
         if (c2 == std::string::npos) continue;
         std::string const mt = line.substr(9, c2 - 9);
         std::string tags = line.substr(c2 + 1);
-        tags.erase(std::remove(tags.begin(), tags.end(), '"'), tags.end());
+        std::erase(tags, '"');
         std::set<std::uint16_t> set;
         std::istringstream ts{tags};
         for (unsigned t = 0; ts >> t;) set.insert(static_cast<std::uint16_t>(t));
@@ -692,7 +717,7 @@ TEST_F(TailRows095Census, FieldLegMatchesQuickFixCppGolden) {
     }
     bool rows_ok = true;
     for (std::string const& mt : asserted) {
-        std::size_t const n = rows.count(mt) ? rows[mt].size() : 0;
+        std::size_t const n = rows.contains(mt) ? rows[mt].size() : 0;
         if (n != 1) {
             rows_ok = false;
             ADD_FAILURE() << "golden.csv holds " << n << " rows FIX50SP2," << mt
@@ -732,57 +757,57 @@ TEST_F(TailRows095Census, KnownPositive_DeficientFrames) {
         "1497=CC_req\x01"
         "1498=1\x01";
     std::vector<Frame> const frames = {
-        {"E-absent", e_head, {"73"}},
-        {"E-one",
-         e_head + "73=1\x01"
-                  "11=O0\x01"
-                  "67=1\x01"
-                  "54=1\x01",
-         {"73"}},
-        {"E-short",
-         e_head + "73=2\x01"
-                  "11=O0\x01"
-                  "67=1\x01"
-                  "54=1\x01",
-         {"73"}},
-        {"E-member",
-         e_head + "73=2\x01"
-                  "11=O0\x01"
-                  "67=1\x01"
-                  "54=1\x01"
-                  "11=O1\x01"
-                  "54=1\x01",
-         {"73[1].67"}},
-        {"E-nodelim",
-         e_head + "73=2\x01"
-                  "67=1\x01"
-                  "54=1\x01"
-                  "11=O1\x01"
-                  "67=2\x01"
-                  "54=1\x01",
-         {"73[0].11"}},
-        {"CC-nodelim",
-         cc_head + "1499=2\x01"
-                   "146=1\x01"
-                   "55=SYM\x01"
-                   "453=1\x01"
-                   "448=P1\x01",
-         {"1499[0].453"}},
-        {"CC-nested",
-         cc_head + "1499=2\x01"
-                   "453=1\x01"
-                   "447=D\x01"
-                   "453=1\x01"
-                   "448=P1\x01",
-         {"1499[0].448"}},
-        {"CC-count2",
-         cc_head + "1499=2\x01"
-                   "453=2\x01"
-                   "448=PA\x01"
-                   "448=PB\x01"
-                   "453=1\x01"
-                   "448=PC\x01",
-         {"1499[0].453"}},
+        {.name = "E-absent", .body = e_head, .expected = {"73"}},
+        {.name = "E-one",
+         .body = e_head + "73=1\x01"
+                          "11=O0\x01"
+                          "67=1\x01"
+                          "54=1\x01",
+         .expected = {"73"}},
+        {.name = "E-short",
+         .body = e_head + "73=2\x01"
+                          "11=O0\x01"
+                          "67=1\x01"
+                          "54=1\x01",
+         .expected = {"73"}},
+        {.name = "E-member",
+         .body = e_head + "73=2\x01"
+                          "11=O0\x01"
+                          "67=1\x01"
+                          "54=1\x01"
+                          "11=O1\x01"
+                          "54=1\x01",
+         .expected = {"73[1].67"}},
+        {.name = "E-nodelim",
+         .body = e_head + "73=2\x01"
+                          "67=1\x01"
+                          "54=1\x01"
+                          "11=O1\x01"
+                          "67=2\x01"
+                          "54=1\x01",
+         .expected = {"73[0].11"}},
+        {.name = "CC-nodelim",
+         .body = cc_head + "1499=2\x01"
+                           "146=1\x01"
+                           "55=SYM\x01"
+                           "453=1\x01"
+                           "448=P1\x01",
+         .expected = {"1499[0].453"}},
+        {.name = "CC-nested",
+         .body = cc_head + "1499=2\x01"
+                           "453=1\x01"
+                           "447=D\x01"
+                           "453=1\x01"
+                           "448=P1\x01",
+         .expected = {"1499[0].448"}},
+        {.name = "CC-count2",
+         .body = cc_head + "1499=2\x01"
+                           "453=2\x01"
+                           "448=PA\x01"
+                           "448=PB\x01"
+                           "453=1\x01"
+                           "448=PC\x01",
+         .expected = {"1499[0].453"}},
     };
     for (Frame const& f : frames) {
         SCOPED_TRACE(f.name);
@@ -952,8 +977,7 @@ private:
 
 // The one equality predicate both axes use.
 bool all_equal(std::vector<RequiredSet> const& sets) {
-    return std::all_of(sets.begin(), sets.end(),
-                       [&](RequiredSet const& s) { return s == sets.front(); });
+    return std::ranges::all_of(sets, [&](RequiredSet const& s) { return s == sets.front(); });
 }
 
 std::string join_set(std::set<std::string> const& s) {
@@ -1057,15 +1081,15 @@ TEST(TailRows095Selection, DISABLED_LiveMessageAgreesOnBothAxes) {
 TEST_F(TailRows095, A018_ExecutionAck) {
     Intent intent;
     fixpp::v50sp2::ExecutionAckArgs args{};
-    intent.push_back({"37", "A018_ExecutionAck_order_id"});
+    intent.emplace_back("37", "A018_ExecutionAck_order_id");
     args.order_id = "A018_ExecutionAck_order_id";
-    intent.push_back({"1036", "0"});
+    intent.emplace_back("1036", "0");
     args.exec_ack_status = '0';
-    intent.push_back({"17", "A018_ExecutionAck_exec_id"});
+    intent.emplace_back("17", "A018_ExecutionAck_exec_id");
     args.exec_id = "A018_ExecutionAck_exec_id";
-    intent.push_back({"54", "1"});
+    intent.emplace_back("54", "1");
     args.side = '1';
-    intent.push_back({"14", "10.5"});
+    intent.emplace_back("14", "10.5");
     args.cum_qty = make_decimal("10.5", &arena_);
     auto const built = fixpp::v50sp2::build_ExecutionAck(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_ExecutionAck refused the witness build";
@@ -1076,13 +1100,13 @@ TEST_F(TailRows095, A018_ExecutionAck) {
 TEST_F(TailRows095, A023_OrderMassActionRequest) {
     Intent intent;
     fixpp::v50sp2::OrderMassActionRequestArgs args{};
-    intent.push_back({"11", "A023_OrderMassActionRequest_cl_ord_id"});
+    intent.emplace_back("11", "A023_OrderMassActionRequest_cl_ord_id");
     args.cl_ord_id = "A023_OrderMassActionRequest_cl_ord_id";
-    intent.push_back({"1373", "1"});
+    intent.emplace_back("1373", "1");
     args.mass_action_type = 1;
-    intent.push_back({"1374", "1"});
+    intent.emplace_back("1374", "1");
     args.mass_action_scope = 1;
-    intent.push_back({"60", "20261024-12:00:00.000"});
+    intent.emplace_back("60", "20261024-12:00:00.000");
     args.transact_time = "20261024-12:00:00.000";
     auto const built = fixpp::v50sp2::build_OrderMassActionRequest(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_OrderMassActionRequest refused the witness build";
@@ -1093,13 +1117,13 @@ TEST_F(TailRows095, A023_OrderMassActionRequest) {
 TEST_F(TailRows095, A023_OrderMassActionReport) {
     Intent intent;
     fixpp::v50sp2::OrderMassActionReportArgs args{};
-    intent.push_back({"1369", "A023_OrderMassActionReport_mass_action_report_id"});
+    intent.emplace_back("1369", "A023_OrderMassActionReport_mass_action_report_id");
     args.mass_action_report_id = "A023_OrderMassActionReport_mass_action_report_id";
-    intent.push_back({"1373", "1"});
+    intent.emplace_back("1373", "1");
     args.mass_action_type = 1;
-    intent.push_back({"1374", "1"});
+    intent.emplace_back("1374", "1");
     args.mass_action_scope = 1;
-    intent.push_back({"1375", "0"});
+    intent.emplace_back("1375", "0");
     args.mass_action_response = 0;
     auto const built = fixpp::v50sp2::build_OrderMassActionReport(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_OrderMassActionReport refused the witness build";
@@ -1110,9 +1134,9 @@ TEST_F(TailRows095, A023_OrderMassActionReport) {
 TEST_F(TailRows095, A027_TradingSessionListRequest) {
     Intent intent;
     fixpp::v50sp2::TradingSessionListRequestArgs args{};
-    intent.push_back({"335", "A027_TradingSessionListRequest_trad_ses_req_id"});
+    intent.emplace_back("335", "A027_TradingSessionListRequest_trad_ses_req_id");
     args.trad_ses_req_id = "A027_TradingSessionListRequest_trad_ses_req_id";
-    intent.push_back({"263", "0"});
+    intent.emplace_back("263", "0");
     args.subscription_request_type = '0';
     auto const built = fixpp::v50sp2::build_TradingSessionListRequest(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_TradingSessionListRequest refused the witness build";
@@ -1124,22 +1148,22 @@ TEST_F(TailRows095, A027_TradingSessionList) {
     Intent intent;
     fixpp::v50sp2::TradingSessionListArgs args{};
     std::array<fixpp::v50sp2::groups::G_386_2Args, 2> trading_sessions{};
-    intent.push_back({"335", "A027_TradingSessionList_trad_ses_req_id"});
+    intent.emplace_back("335", "A027_TradingSessionList_trad_ses_req_id");
     args.trad_ses_req_id = "A027_TradingSessionList_trad_ses_req_id";
-    intent.push_back({"1180", "A027_TradingSessionList_appl_id"});
+    intent.emplace_back("1180", "A027_TradingSessionList_appl_id");
     args.appl_id = "A027_TradingSessionList_appl_id";
-    intent.push_back({"386", "2"});
-    intent.push_back({"386[0].336", "1"});
+    intent.emplace_back("386", "2");
+    intent.emplace_back("386[0].336", "1");
     trading_sessions[0].trading_session_id = "1";
-    intent.push_back({"386[0].340", "0"});
+    intent.emplace_back("386[0].340", "0");
     trading_sessions[0].trad_ses_status = 0;
-    intent.push_back({"386[0].1326", "A027_TradingSessionList_trading_session_desc_i0"});
+    intent.emplace_back("386[0].1326", "A027_TradingSessionList_trading_session_desc_i0");
     trading_sessions[0].trading_session_desc = "A027_TradingSessionList_trading_session_desc_i0";
-    intent.push_back({"386[1].336", "1"});
+    intent.emplace_back("386[1].336", "1");
     trading_sessions[1].trading_session_id = "1";
-    intent.push_back({"386[1].340", "0"});
+    intent.emplace_back("386[1].340", "0");
     trading_sessions[1].trad_ses_status = 0;
-    intent.push_back({"386[1].1326", "A027_TradingSessionList_trading_session_desc_i1"});
+    intent.emplace_back("386[1].1326", "A027_TradingSessionList_trading_session_desc_i1");
     trading_sessions[1].trading_session_desc = "A027_TradingSessionList_trading_session_desc_i1";
     args.trading_sessions = std::span<fixpp::v50sp2::groups::G_386_2Args const>{trading_sessions};
     auto const built = fixpp::v50sp2::build_TradingSessionList(out_, args);
@@ -1152,21 +1176,21 @@ TEST_F(TailRows095, A027_TradingSessionListUpdateReport) {
     Intent intent;
     fixpp::v50sp2::TradingSessionListUpdateReportArgs args{};
     std::array<fixpp::v50sp2::groups::G_386_2Args, 2> trading_sessions{};
-    intent.push_back({"386", "2"});
-    intent.push_back({"386[0].336", "1"});
+    intent.emplace_back("386", "2");
+    intent.emplace_back("386[0].336", "1");
     trading_sessions[0].trading_session_id = "1";
-    intent.push_back({"386[0].340", "0"});
+    intent.emplace_back("386[0].340", "0");
     trading_sessions[0].trad_ses_status = 0;
-    intent.push_back(
-        {"386[0].1326", "A027_TradingSessionListUpdateReport_trading_session_desc_i0"});
+    intent.emplace_back("386[0].1326",
+                        "A027_TradingSessionListUpdateReport_trading_session_desc_i0");
     trading_sessions[0].trading_session_desc =
         "A027_TradingSessionListUpdateReport_trading_session_desc_i0";
-    intent.push_back({"386[1].336", "1"});
+    intent.emplace_back("386[1].336", "1");
     trading_sessions[1].trading_session_id = "1";
-    intent.push_back({"386[1].340", "0"});
+    intent.emplace_back("386[1].340", "0");
     trading_sessions[1].trad_ses_status = 0;
-    intent.push_back(
-        {"386[1].1326", "A027_TradingSessionListUpdateReport_trading_session_desc_i1"});
+    intent.emplace_back("386[1].1326",
+                        "A027_TradingSessionListUpdateReport_trading_session_desc_i1");
     trading_sessions[1].trading_session_desc =
         "A027_TradingSessionListUpdateReport_trading_session_desc_i1";
     args.trading_sessions = std::span<fixpp::v50sp2::groups::G_386_2Args const>{trading_sessions};
@@ -1180,9 +1204,9 @@ TEST_F(TailRows095, A027_TradingSessionListUpdateReport) {
 TEST_F(TailRows095, A028_MarketDefinitionRequest) {
     Intent intent;
     fixpp::v50sp2::MarketDefinitionRequestArgs args{};
-    intent.push_back({"1393", "A028_MarketDefinitionRequest_market_req_id"});
+    intent.emplace_back("1393", "A028_MarketDefinitionRequest_market_req_id");
     args.market_req_id = "A028_MarketDefinitionRequest_market_req_id";
-    intent.push_back({"263", "0"});
+    intent.emplace_back("263", "0");
     args.subscription_request_type = '0';
     auto const built = fixpp::v50sp2::build_MarketDefinitionRequest(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_MarketDefinitionRequest refused the witness build";
@@ -1193,9 +1217,9 @@ TEST_F(TailRows095, A028_MarketDefinitionRequest) {
 TEST_F(TailRows095, A028_MarketDefinition) {
     Intent intent;
     fixpp::v50sp2::MarketDefinitionArgs args{};
-    intent.push_back({"1394", "A028_MarketDefinition_market_report_id"});
+    intent.emplace_back("1394", "A028_MarketDefinition_market_report_id");
     args.market_report_id = "A028_MarketDefinition_market_report_id";
-    intent.push_back({"1301", "A028_MarketDefinition_market_id"});
+    intent.emplace_back("1301", "A028_MarketDefinition_market_id");
     args.market_id = "A028_MarketDefinition_market_id";
     auto const built = fixpp::v50sp2::build_MarketDefinition(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_MarketDefinition refused the witness build";
@@ -1206,9 +1230,9 @@ TEST_F(TailRows095, A028_MarketDefinition) {
 TEST_F(TailRows095, A028_MarketDefinitionUpdateReport) {
     Intent intent;
     fixpp::v50sp2::MarketDefinitionUpdateReportArgs args{};
-    intent.push_back({"1394", "A028_MarketDefinitionUpdateReport_market_report_id"});
+    intent.emplace_back("1394", "A028_MarketDefinitionUpdateReport_market_report_id");
     args.market_report_id = "A028_MarketDefinitionUpdateReport_market_report_id";
-    intent.push_back({"1301", "A028_MarketDefinitionUpdateReport_market_id"});
+    intent.emplace_back("1301", "A028_MarketDefinitionUpdateReport_market_id");
     args.market_id = "A028_MarketDefinitionUpdateReport_market_id";
     auto const built = fixpp::v50sp2::build_MarketDefinitionUpdateReport(out_, args);
     ASSERT_TRUE(built.has_value())
@@ -1220,9 +1244,9 @@ TEST_F(TailRows095, A028_MarketDefinitionUpdateReport) {
 TEST_F(TailRows095, A029_SecurityListUpdateReport) {
     Intent intent;
     fixpp::v50sp2::SecurityListUpdateReportArgs args{};
-    intent.push_back({"320", "A029_SecurityListUpdateReport_security_req_id"});
+    intent.emplace_back("320", "A029_SecurityListUpdateReport_security_req_id");
     args.security_req_id = "A029_SecurityListUpdateReport_security_req_id";
-    intent.push_back({"322", "A029_SecurityListUpdateReport_security_response_id"});
+    intent.emplace_back("322", "A029_SecurityListUpdateReport_security_response_id");
     args.security_response_id = "A029_SecurityListUpdateReport_security_response_id";
     auto const built = fixpp::v50sp2::build_SecurityListUpdateReport(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_SecurityListUpdateReport refused the witness build";
@@ -1233,9 +1257,9 @@ TEST_F(TailRows095, A029_SecurityListUpdateReport) {
 TEST_F(TailRows095, A029_SecurityDefinitionUpdateReport) {
     Intent intent;
     fixpp::v50sp2::SecurityDefinitionUpdateReportArgs args{};
-    intent.push_back({"55", "A029_SecurityDefinitionUpdateReport_symbol"});
+    intent.emplace_back("55", "A029_SecurityDefinitionUpdateReport_symbol");
     args.symbol = "A029_SecurityDefinitionUpdateReport_symbol";
-    intent.push_back({"58", "A029_SecurityDefinitionUpdateReport_text"});
+    intent.emplace_back("58", "A029_SecurityDefinitionUpdateReport_text");
     args.text = "A029_SecurityDefinitionUpdateReport_text";
     auto const built = fixpp::v50sp2::build_SecurityDefinitionUpdateReport(out_, args);
     ASSERT_TRUE(built.has_value())
@@ -1248,18 +1272,18 @@ TEST_F(TailRows095, A030_SettlementObligationReport) {
     Intent intent;
     fixpp::v50sp2::SettlementObligationReportArgs args{};
     std::array<fixpp::v50sp2::groups::G_1165Args, 2> settl_oblig{};
-    intent.push_back({"1160", "A030_SettlementObligationReport_settl_oblig_msg_id"});
+    intent.emplace_back("1160", "A030_SettlementObligationReport_settl_oblig_msg_id");
     args.settl_oblig_msg_id = "A030_SettlementObligationReport_settl_oblig_msg_id";
-    intent.push_back({"1159", "1"});
+    intent.emplace_back("1159", "1");
     args.settl_oblig_mode = 1;
-    intent.push_back({"1165", "2"});
-    intent.push_back({"1165[0].430", "1"});
+    intent.emplace_back("1165", "2");
+    intent.emplace_back("1165[0].430", "1");
     settl_oblig[0].net_gross_ind = 1;
-    intent.push_back({"1165[0].1161", "A030_SettlementObligationReport_settl_oblig_id_i0"});
+    intent.emplace_back("1165[0].1161", "A030_SettlementObligationReport_settl_oblig_id_i0");
     settl_oblig[0].settl_oblig_id = "A030_SettlementObligationReport_settl_oblig_id_i0";
-    intent.push_back({"1165[1].430", "1"});
+    intent.emplace_back("1165[1].430", "1");
     settl_oblig[1].net_gross_ind = 1;
-    intent.push_back({"1165[1].1161", "A030_SettlementObligationReport_settl_oblig_id_i1"});
+    intent.emplace_back("1165[1].1161", "A030_SettlementObligationReport_settl_oblig_id_i1");
     settl_oblig[1].settl_oblig_id = "A030_SettlementObligationReport_settl_oblig_id_i1";
     args.settl_oblig = std::span<fixpp::v50sp2::groups::G_1165Args const>{settl_oblig};
     auto const built = fixpp::v50sp2::build_SettlementObligationReport(out_, args);
@@ -1271,15 +1295,15 @@ TEST_F(TailRows095, A030_SettlementObligationReport) {
 TEST_F(TailRows095, A031_AllocationInstructionAlert) {
     Intent intent;
     fixpp::v50sp2::AllocationInstructionAlertArgs args{};
-    intent.push_back({"70", "A031_AllocationInstructionAlert_alloc_id"});
+    intent.emplace_back("70", "A031_AllocationInstructionAlert_alloc_id");
     args.alloc_id = "A031_AllocationInstructionAlert_alloc_id";
-    intent.push_back({"71", "0"});
+    intent.emplace_back("71", "0");
     args.alloc_trans_type = '0';
-    intent.push_back({"626", "1"});
+    intent.emplace_back("626", "1");
     args.alloc_type = 1;
-    intent.push_back({"54", "1"});
+    intent.emplace_back("54", "1");
     args.side = '1';
-    intent.push_back({"75", "20261024"});
+    intent.emplace_back("75", "20261024");
     args.trade_date = "20261024";
     auto const built = fixpp::v50sp2::build_AllocationInstructionAlert(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_AllocationInstructionAlert refused the witness build";
@@ -1290,9 +1314,9 @@ TEST_F(TailRows095, A031_AllocationInstructionAlert) {
 TEST_F(TailRows095, A032_UserNotification) {
     Intent intent;
     fixpp::v50sp2::UserNotificationArgs args{};
-    intent.push_back({"926", "1"});
+    intent.emplace_back("926", "1");
     args.user_status = 1;
-    intent.push_back({"58", "A032_UserNotification_text"});
+    intent.emplace_back("58", "A032_UserNotification_text");
     args.text = "A032_UserNotification_text";
     auto const built = fixpp::v50sp2::build_UserNotification(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_UserNotification refused the witness build";
@@ -1306,18 +1330,18 @@ TEST_F(TailRows095, A033_StreamAssignmentRequest) {
     std::array<fixpp::v50sp2::groups::G_1499_1Args, 2> asgn_reqs{};
     std::array<fixpp::v50sp2::groups::G_453Args, 1> asgn_reqs_0_party_i_ds{};
     std::array<fixpp::v50sp2::groups::G_453Args, 1> asgn_reqs_1_party_i_ds{};
-    intent.push_back({"1497", "A033_StreamAssignmentRequest_stream_asgn_req_id"});
+    intent.emplace_back("1497", "A033_StreamAssignmentRequest_stream_asgn_req_id");
     args.stream_asgn_req_id = "A033_StreamAssignmentRequest_stream_asgn_req_id";
-    intent.push_back({"1498", "1"});
+    intent.emplace_back("1498", "1");
     args.stream_asgn_req_type = 1;
-    intent.push_back({"1499", "2"});
-    intent.push_back({"1499[0].453", "1"});
-    intent.push_back({"1499[0].448", "A033_StreamAssignmentRequest_party_id_i0"});
+    intent.emplace_back("1499", "2");
+    intent.emplace_back("1499[0].453", "1");
+    intent.emplace_back("1499[0].448", "A033_StreamAssignmentRequest_party_id_i0");
     asgn_reqs_0_party_i_ds[0].party_id = "A033_StreamAssignmentRequest_party_id_i0";
     asgn_reqs[0].party_i_ds =
         std::span<fixpp::v50sp2::groups::G_453Args const>{asgn_reqs_0_party_i_ds};
-    intent.push_back({"1499[1].453", "1"});
-    intent.push_back({"1499[1].448", "A033_StreamAssignmentRequest_party_id_i1"});
+    intent.emplace_back("1499[1].453", "1");
+    intent.emplace_back("1499[1].448", "A033_StreamAssignmentRequest_party_id_i1");
     asgn_reqs_1_party_i_ds[0].party_id = "A033_StreamAssignmentRequest_party_id_i1";
     asgn_reqs[1].party_i_ds =
         std::span<fixpp::v50sp2::groups::G_453Args const>{asgn_reqs_1_party_i_ds};
@@ -1331,9 +1355,9 @@ TEST_F(TailRows095, A033_StreamAssignmentRequest) {
 TEST_F(TailRows095, A033_StreamAssignmentReport) {
     Intent intent;
     fixpp::v50sp2::StreamAssignmentReportArgs args{};
-    intent.push_back({"1501", "A033_StreamAssignmentReport_stream_asgn_rpt_id"});
+    intent.emplace_back("1501", "A033_StreamAssignmentReport_stream_asgn_rpt_id");
     args.stream_asgn_rpt_id = "A033_StreamAssignmentReport_stream_asgn_rpt_id";
-    intent.push_back({"1497", "A033_StreamAssignmentReport_stream_asgn_req_id"});
+    intent.emplace_back("1497", "A033_StreamAssignmentReport_stream_asgn_req_id");
     args.stream_asgn_req_id = "A033_StreamAssignmentReport_stream_asgn_req_id";
     auto const built = fixpp::v50sp2::build_StreamAssignmentReport(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_StreamAssignmentReport refused the witness build";
@@ -1344,9 +1368,9 @@ TEST_F(TailRows095, A033_StreamAssignmentReport) {
 TEST_F(TailRows095, A033_StreamAssignmentReportACK) {
     Intent intent;
     fixpp::v50sp2::StreamAssignmentReportACKArgs args{};
-    intent.push_back({"1503", "0"});
+    intent.emplace_back("1503", "0");
     args.stream_asgn_ack_type = 0;
-    intent.push_back({"1501", "A033_StreamAssignmentReportACK_stream_asgn_rpt_id"});
+    intent.emplace_back("1501", "A033_StreamAssignmentReportACK_stream_asgn_rpt_id");
     args.stream_asgn_rpt_id = "A033_StreamAssignmentReportACK_stream_asgn_rpt_id";
     auto const built = fixpp::v50sp2::build_StreamAssignmentReportACK(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_StreamAssignmentReportACK refused the witness build";
@@ -1358,14 +1382,14 @@ TEST_F(TailRows095, C003_AccountSummaryReport) {
     Intent intent;
     fixpp::v50sp2::AccountSummaryReportArgs args{};
     std::array<fixpp::v50sp2::groups::G_453Args, 2> party_i_ds{};
-    intent.push_back({"1699", "C003_AccountSummaryReport_account_summary_report_id"});
+    intent.emplace_back("1699", "C003_AccountSummaryReport_account_summary_report_id");
     args.account_summary_report_id = "C003_AccountSummaryReport_account_summary_report_id";
-    intent.push_back({"715", "20261024"});
+    intent.emplace_back("715", "20261024");
     args.clearing_business_date = "20261024";
-    intent.push_back({"453", "2"});
-    intent.push_back({"453[0].448", "C003_AccountSummaryReport_party_id_i0"});
+    intent.emplace_back("453", "2");
+    intent.emplace_back("453[0].448", "C003_AccountSummaryReport_party_id_i0");
     party_i_ds[0].party_id = "C003_AccountSummaryReport_party_id_i0";
-    intent.push_back({"453[1].448", "C003_AccountSummaryReport_party_id_i1"});
+    intent.emplace_back("453[1].448", "C003_AccountSummaryReport_party_id_i1");
     party_i_ds[1].party_id = "C003_AccountSummaryReport_party_id_i1";
     args.party_i_ds = std::span<fixpp::v50sp2::groups::G_453Args const>{party_i_ds};
     auto const built = fixpp::v50sp2::build_AccountSummaryReport(out_, args);
@@ -1377,11 +1401,11 @@ TEST_F(TailRows095, C003_AccountSummaryReport) {
 TEST_F(TailRows095, N002_UserRequest) {
     Intent intent;
     fixpp::v50sp2::UserRequestArgs args{};
-    intent.push_back({"923", "N002_UserRequest_user_request_id"});
+    intent.emplace_back("923", "N002_UserRequest_user_request_id");
     args.user_request_id = "N002_UserRequest_user_request_id";
-    intent.push_back({"924", "1"});
+    intent.emplace_back("924", "1");
     args.user_request_type = 1;
-    intent.push_back({"553", "N002_UserRequest_username"});
+    intent.emplace_back("553", "N002_UserRequest_username");
     args.username = "N002_UserRequest_username";
     auto const built = fixpp::v50sp2::build_UserRequest(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_UserRequest refused the witness build";
@@ -1392,9 +1416,9 @@ TEST_F(TailRows095, N002_UserRequest) {
 TEST_F(TailRows095, N002_UserResponse) {
     Intent intent;
     fixpp::v50sp2::UserResponseArgs args{};
-    intent.push_back({"923", "N002_UserResponse_user_request_id"});
+    intent.emplace_back("923", "N002_UserResponse_user_request_id");
     args.user_request_id = "N002_UserResponse_user_request_id";
-    intent.push_back({"553", "N002_UserResponse_username"});
+    intent.emplace_back("553", "N002_UserResponse_username");
     args.username = "N002_UserResponse_username";
     auto const built = fixpp::v50sp2::build_UserResponse(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_UserResponse refused the witness build";
@@ -1405,9 +1429,9 @@ TEST_F(TailRows095, N002_UserResponse) {
 TEST_F(TailRows095, N003_ApplicationMessageRequest) {
     Intent intent;
     fixpp::v50sp2::ApplicationMessageRequestArgs args{};
-    intent.push_back({"1346", "N003_ApplicationMessageRequest_appl_req_id"});
+    intent.emplace_back("1346", "N003_ApplicationMessageRequest_appl_req_id");
     args.appl_req_id = "N003_ApplicationMessageRequest_appl_req_id";
-    intent.push_back({"1347", "0"});
+    intent.emplace_back("1347", "0");
     args.appl_req_type = 0;
     auto const built = fixpp::v50sp2::build_ApplicationMessageRequest(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_ApplicationMessageRequest refused the witness build";
@@ -1418,9 +1442,9 @@ TEST_F(TailRows095, N003_ApplicationMessageRequest) {
 TEST_F(TailRows095, N003_ApplicationMessageRequestAck) {
     Intent intent;
     fixpp::v50sp2::ApplicationMessageRequestAckArgs args{};
-    intent.push_back({"1353", "N003_ApplicationMessageRequestAck_appl_response_id"});
+    intent.emplace_back("1353", "N003_ApplicationMessageRequestAck_appl_response_id");
     args.appl_response_id = "N003_ApplicationMessageRequestAck_appl_response_id";
-    intent.push_back({"58", "N003_ApplicationMessageRequestAck_text"});
+    intent.emplace_back("58", "N003_ApplicationMessageRequestAck_text");
     args.text = "N003_ApplicationMessageRequestAck_text";
     auto const built = fixpp::v50sp2::build_ApplicationMessageRequestAck(out_, args);
     ASSERT_TRUE(built.has_value())
@@ -1432,9 +1456,9 @@ TEST_F(TailRows095, N003_ApplicationMessageRequestAck) {
 TEST_F(TailRows095, N003_ApplicationMessageReport) {
     Intent intent;
     fixpp::v50sp2::ApplicationMessageReportArgs args{};
-    intent.push_back({"1356", "N003_ApplicationMessageReport_appl_report_id"});
+    intent.emplace_back("1356", "N003_ApplicationMessageReport_appl_report_id");
     args.appl_report_id = "N003_ApplicationMessageReport_appl_report_id";
-    intent.push_back({"1426", "0"});
+    intent.emplace_back("1426", "0");
     args.appl_report_type = 0;
     auto const built = fixpp::v50sp2::build_ApplicationMessageReport(out_, args);
     ASSERT_TRUE(built.has_value()) << "build_ApplicationMessageReport refused the witness build";
