@@ -498,6 +498,7 @@ if(FIXPP_TYPED_TIER_EFFECTIVE)
 endif()
 
 set(_086_artifacts_done 0)
+set(_613_artifacts_done 0)
 foreach(_artifact IN LISTS _artifacts)
   get_filename_component(_aname "${_artifact}" NAME)
   _fixpp_list_package("${_artifact}" _files)
@@ -507,6 +508,9 @@ foreach(_artifact IN LISTS _artifacts)
   endif()
 
   set(_missing "")
+  # #613: each typed-tier check below appends its name here once it has passed; the
+  # end of this body requires the complete list (see the completion check there).
+  set(_613_steps "")
 
   # ── The INTERNAL PREFIX must match the platform (measured, not normalised away)
   # Normalisation below strips `usr/` so one set of expectations covers every
@@ -914,6 +918,7 @@ foreach(_artifact IN LISTS _artifacts)
     message(FATAL_ERROR
       "T058/FR-013: ${_aname} LEAKS ${_n_leaked} denylisted path(s):\n  ${_leaked_pretty}")
   endif()
+  list(APPEND _613_steps absent)
 
   # ── The generated-header tree is an ALLOWLIST, not just a denylist ─────────
   # The install rule is allowlist-by-EXCLUSION: everything under the codegen
@@ -955,6 +960,7 @@ foreach(_artifact IN LISTS _artifacts)
       "T058/#613: ${_aname} ships generated version directories [${_versions_seen}], expected "
       "exactly [${_expected_versions}]. Every package carries all four versions (owner ruling R-2).")
   endif()
+  list(APPEND _613_steps versions)
 
   foreach(_ver IN LISTS _expected_versions)
     set(_actual ${_children_${_ver}})
@@ -971,6 +977,7 @@ foreach(_artifact IN LISTS _artifacts)
         "together with a deliberate decision about what ships.")
     endif()
   endforeach()
+  list(APPEND _613_steps children)
 
   if(FIXPP_TYPED_TIER_EFFECTIVE)
     foreach(_ver IN LISTS _expected_versions)
@@ -1041,6 +1048,7 @@ foreach(_artifact IN LISTS _artifacts)
           "#613 schema: ${_aname} include/fixpp/${_ver}/messages/ does not pair every <Msg>.hpp "
           "with its .builder.inl and .validator.inl (or holds none). Unpaired: ${_unpaired_list}")
       endif()
+      list(APPEND _613_steps "schema:${_ver}")
 
       # Build-tree equality (install fidelity): the shipped files must equal the
       # tier-ON rule (D-7) applied to this build's generated tree. It catches a
@@ -1065,11 +1073,32 @@ foreach(_artifact IN LISTS _artifacts)
           "  in the build tree, not shipped:\n    ${_d_pretty}\n"
           "  shipped, not in the build tree:\n    ${_x_pretty}")
       endif()
+      list(APPEND _613_steps "equality:${_ver}")
     endforeach()
   endif()
 
   message(STATUS "T058: ${_aname} OK (${_nf} entries, ${_n_archives} archives, "
                  "generated tree exact for: ${_versions_seen})")
+
+  # #613 completion, per artifact: every typed-tier check ran and passed, in order.
+  # ABSENT has no schema or equality step, so the expected list depends on the
+  # outcome. A deleted or skipped check leaves its name out of _613_steps and fails
+  # here; a continue() before this point leaves _613_artifacts_done short and fails
+  # the post-loop check. Both are the LAST statements of the body, deliberately.
+  set(_613_steps_want absent versions children)
+  if(FIXPP_TYPED_TIER_EFFECTIVE)
+    foreach(_ver IN LISTS _expected_versions)
+      list(APPEND _613_steps_want "schema:${_ver}" "equality:${_ver}")
+    endforeach()
+  endif()
+  if(NOT "${_613_steps}" STREQUAL "${_613_steps_want}")
+    message(FATAL_ERROR
+      "#613: the typed-tier block did not run to completion for ${_aname} (${_typed_outcome}).\n"
+      "  ran:      ${_613_steps}\n"
+      "  expected: ${_613_steps_want}\n"
+      "A check was removed or skipped in run_package_contents_witness.cmake.")
+  endif()
+  math(EXPR _613_artifacts_done "${_613_artifacts_done} + 1")
 endforeach()
 
 # ── NOTICE content, compared against the PINNED ANCHOR ───────────────────────
@@ -1139,5 +1168,16 @@ endif()
 message(STATUS
   "086: FR-010/FR-010a asserted over ${_086_artifacts_done} artifact(s), "
   "2 root pairs and 2 isolated roots each")
+
+# ── #613 completion token — emitted ONCE, after EVERY artifact ───────────────
+# Same two-leg shape as the 086 token above: run_package_contents_gate.cmake requires
+# this script's exit code to be 0 AND this token (its LEG 3).
+if(NOT _613_artifacts_done EQUAL _n_artifacts_final)
+  message(FATAL_ERROR
+    "#613: the typed-tier block completed for ${_613_artifacts_done} of "
+    "${_n_artifacts_final} artifact(s). Every produced artifact must be asserted.")
+endif()
+message(STATUS
+  "#613: typed-tier block asserted over ${_613_artifacts_done} artifact(s) (${_typed_outcome})")
 
 message(STATUS "fixpp::packaging::contents: OK")
