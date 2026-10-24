@@ -308,6 +308,7 @@ the gitlink bump (research R-10):**
 | `quickfixj/.../InteropCounterparty.java` | move the conversation-mode seqnum bump + Heartbeat inside the A-TESTREQ check |
 | `golden/<2 cells>.fix` | captured with `--update-goldens`, then reviewed |
 | `tools/emit_matrix.py`, `tools/test_emit_matrix.py` | the L0 `run_kind` branches: probe rule narrowed to `"validator-positive-control"` (stubbed-template raise tested), promotion skipped, N2 unchanged, and a both-directions pin for the two cells beside `RegistryAgreesWithTheRealTemplateTest` — each tested |
+| `tools/promote_interop_evidence.py`, `tools/test_promote_interop_evidence.py` | (added at T079, `/simplify`) `PROMOTED_RUN_KINDS`: `promote_and_record` refuses any other `run_kind`, and `emit_matrix.py` skips on the same constant; unknown-kind tests RED on the old code, then GREEN |
 
 **Structure decision:** tests only, in existing ctest targets (no new entry). Parent harness changes stay
 limited to the files above.

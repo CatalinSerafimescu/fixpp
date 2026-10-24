@@ -741,7 +741,7 @@ delta (plan P7).
 
 ### `/simplify` (`[const §XVI.7]`, before verify)
 
-- [ ] T079 (orchestrator) **Run `/simplify`** on the implementation diff (`git diff origin/main..HEAD -- tests`
+- [X] T079 (orchestrator) **Run `/simplify`** on the implementation diff (`git diff origin/main..HEAD -- tests`
   and the uncommitted parent harness diff). The orchestrator triages; `phase-implementer` applies
   in-scope fixes (parent edits stay uncommitted, copy refreshed). A change to the witness TU re-runs
   T024 and the W6 arms its edit touches; to the routing cell, T040–T041; to the live cell, T051's
