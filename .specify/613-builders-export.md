@@ -1,6 +1,7 @@
 # #613 — export the typed builder/validator libraries and install the slim typed headers
 
-> **Status: draft v0.1, 2026-10-24. Gate A: not yet run.**
+> **Status: draft v0.2, 2026-10-24. Gate A: not yet run.** v0.2 records the owner's 2026-10-24 rulings on v0.1's
+> two open questions (Args freeze, cost); §9 now has no open item.
 >
 > Issue mode, which is the owner's ruling of 2026-10-24: this note plus issue-mode Gate A and Gate B, with no
 > `specs/` bundle. Branch `613-builders-export` in `fixpp-parallel`, based on `origin/main` `4e8b3779`. Batch B66.
@@ -11,9 +12,10 @@
 > **Owner decisions, not open for review:**
 > - 2026-10-21: "export all versions for v1.0" (v42, v44, v50sp2, vlatest).
 > - 2026-10-24: issue mode.
->
-> **Open owner question OQ-1 (§9) gates the implementation brief, not this note.** 084 FR-010 requires work to stop
-> before any export reaches `messages/` or `groups/`, until the deferred "Option 3" `Args` decision has been taken.
+> - 2026-10-24 (R-1, was OQ-1): "FREEZE span-based Args as the v1.0 public shape (Option 3 stays deferred; a later
+>   change would be a 2.0 break)." This is the explicit decision 084 FR-010 requires before an export reaches
+>   `messages/` or `groups/`; §9 says where the PR records it.
+> - 2026-10-24 (R-2, was OQ-2): keep "all four versions, every platform" at the measured cost (§5).
 
 ## 0. Scope
 
@@ -32,7 +34,7 @@ The five items of fixpp#613, quoted:
    stay consistent."
 
 **Out of scope:**
-- Any change to the generated code, the emitter, or the `Args` shape. That is "Option 3", see OQ-1.
+- Any change to the generated code, the emitter, or the `Args` shape. That is "Option 3", deferred by R-1 (§9).
 - The per-version `fixpp::dict::<ver>` INTERFACE targets. They stay unexported, as 084 research R2 decided.
 - A runtime/dev component split of the package. 084 shipped one dev-shaped package per configuration.
 - `research/G19-fix-fpml-iso20022/remaining-work/packaging-cpack.md` item 6. It lives in the parent repository and
@@ -453,6 +455,10 @@ build-tree + in-tree only (Gate A round 1, R3)".** Insert directly under the hea
 > `.cpp` translation units. The **coherence rule still holds, through the other branch**: every installed
 > `build_`/`validate_` declaration now has an exported definition. The rest of this section is the Gate A round 1
 > record. Its version list predates 082, which added v42.
+>
+> **`Args` freeze (owner ruling, 2026-10-24):** "FREEZE span-based Args as the v1.0 public shape (Option 3 stays
+> deferred; a later change would be a 2.0 break)." Installing the layout makes `<Msg>Args` and `groups::G_*Args`
+> public API in their span-based shape; L-078-1's compile cost is part of that shape (B&L L-613-2).
 
 **(b) `CMakeLists.txt`, the comment above the generated-header `install(DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/" …)`
 rule.** Replace the paragraph that begins "078-precompiled-builder-libs: the split emits…" with:
@@ -480,7 +486,7 @@ not seven. Every 'the 7-pattern denylist' phrase…"). Keep the reason the patte
 | `CMakeLists.txt`, the umbrella comment ("⚠️ The umbrella is deliberately NOT the whole export set …") | Name the eight libs in the BY-NAME class, with the D-3 reason, and drop the "FOUR are" count |
 | `cmake/Codegen.cmake`, the library-loop comment "Build-tree + in-tree consumers only; NO install() (R3, Gate A round 1)" | Replace with a line saying they are export-set members installed by the top-level `install(TARGETS)` since #613, while `fixpp_dict_<ver>` stays build-tree only (084 R2) |
 | `cmake/fixppConfig.cmake.in`, the "Usage" block ("That is the whole contract.") | Add the by-name typed line: `target_link_libraries(app PRIVATE fixpp::builders::v44 fixpp::validators::v44)` |
-| `specs/084-packaging-cpack-export/contracts/export-set.md`: the "Never exported" table, B2's pattern list and B3 | Banner naming this note. Under FR-010, B3's "standing obligation" is discharged by the OQ-1 ruling, which the banner quotes |
+| `specs/084-packaging-cpack-export/contracts/export-set.md`: the "Never exported" table, B2's pattern list and B3 | Banner naming this note. Under FR-010, B3's "standing obligation" is discharged by R-1, which the banner quotes and points at the 078 banner for |
 | `specs/084-packaging-cpack-export/contracts/package-layout.md`, the "7-pattern exclusion set" rows | Banner naming this note |
 | `specs/078-precompiled-builder-libs/contracts/include-layout.md`, "Generated file set" ("external … header-export is deferred"; "`v42` emits none") | Banner: installed since #613; v42 emitted since 082 |
 | `docs/src/dictionary/codegen.md`, "Precompiled Builder/Validator Libraries (078)" and the typed-builders note | Installed consumers: the same names through `find_package(fixpp)`, not through `fixpp::fixpp`. Correct the v42 statements and the `<ver>` list (P-8) |
@@ -522,34 +528,37 @@ says "typed builders not installed (#613)". Both change when this PR merges.
   macros work in the installed tree, under 078's same-message ODR rule.
 - **L-613-1.** A tree configured with `FIXPP_CODEGEN_FIX_LATEST=OFF` exports and installs no vlatest typed tier and
   defines no packaging.
-- **L-613-2, conditional on OQ-1.** The span-based `Args` shape (L-078-1's compile cost included) becomes installed
-  public API.
+- **L-613-2.** The span-based `Args` shape, L-078-1's compile cost included, is installed public API and frozen for
+  v1.0 (R-1). A forward-declared or handle-based `Args` ("Option 3") is a 2.0 break.
 
-## 9. Open questions (owner)
+## 9. Owner rulings, 2026-10-24 (v0.1's open questions)
 
-**OQ-1 — gates the implementation brief: freeze span-based `Args`, or do Option 3 first?** Three documents require
-this to be decided explicitly before `install(EXPORT)` ships `Args`:
-- 084 FR-010: "if the final export set does reach either tree, work MUST STOP and the deferred 'Option 3' decision
-  MUST be escalated to the user before any export ships". The same rule is B3's standing obligation in
-  `contracts/export-set.md`.
-- `remaining-work/packaging-cpack.md` item 6's ordering constraint.
-- `fable-assessments/6.2-option3-forward-declared-args.md`: "do it, or explicitly freeze the API, before
-  `install(EXPORT)` opens the external consumer surface".
+**R-1 (was OQ-1): `Args` shape.** Ruling, quoted: "FREEZE span-based Args as the v1.0 public shape (Option 3 stays
+deferred; a later change would be a 2.0 break)."
 
-The 2026-10-21 ruling decides which versions ship. It does not state this choice.
+The question was raised because three documents require an explicit decision before `install(EXPORT)` ships `Args`:
+- 084 FR-010 and B3's standing obligation in `contracts/export-set.md`;
+- `remaining-work/packaging-cpack.md` item 6's ordering constraint;
+- `fable-assessments/6.2-option3-forward-declared-args.md`.
 
-The choices:
-- **(a)** Freeze span-based `Args` as the v1.0 public shape, and record L-613-2.
-- **(b)** Implement Option 3 before #613 ships.
+This ruling is that decision, so FR-010's "work MUST STOP" no longer blocks the implementation.
 
-The Fable verdict was "keep deferred" (about 85 %), with an empty beneficiary set at the time. (a) is what that
-verdict implies once the surface opens; (b) is a separate, larger feature.
+**Where the PR records it:**
+- **The 078 contract amendment, §6.1(a).** The banner on `contracts/cmake-targets.md` "Install / export scope" quotes
+  the ruling. This is the authoritative in-repo record.
+- **The 084 `contracts/export-set.md` banner (§6.2).** It quotes the ruling as the discharge of B3's standing
+  obligation, and points at the 078 banner.
+- **B&L L-613-2 (§8).**
+- **`remaining-work/packaging-cpack.md` item 6** is in the parent repository. The orchestrator updates it; this PR
+  does not touch it.
 
-**OQ-2 — cost confirmation.** The 2026-10-21 ruling was made against "about 150 MB" (gcc archives). §5 measures
-more:
-- the slim headers add about as much again;
-- the Windows release ZIP goes from about 21 MB to about 120 MB, and its unpacked size grows by about 0.77 GB;
-- every lane's install witness copies 5–11 GB of Debug/sanitizer archives per run. D-10 bounds the local
-  persistence, but not the per-run copy.
+**R-2 (was OQ-2): cost.** Ruling: keep "all four versions, every platform" at the measured cost (§5). This covers:
+- the slim headers, which add about as much again as the gcc archives;
+- the Windows release ZIP growing from about 21 MB to about 120 MB, about 0.77 GB unpacked;
+- each lane's install witness copying 5–11 GB of Debug/sanitizer archives per run, with local persistence bounded
+  by D-10.
 
-Confirm "all four versions, every platform" at this cost, or narrow it, for example per platform.
+The implementation records the measured "after" figures from the PR's CI artifacts (§5).
+
+No open owner question remains. Technical questions are settled in §1–§4 or assigned there as implementation
+obligations with their measurement.
