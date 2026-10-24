@@ -750,26 +750,26 @@ delta (plan P7).
 
 ### Instruments (each with its known positive)
 
-- [ ] T080 [P] (orchestrator) **Line citations and comment claims.** `python3 tools/check_line_citations.py --range origin/main..HEAD`
+- [X] T080 [P] (orchestrator) **Line citations and comment claims.** `python3 tools/check_line_citations.py --range origin/main..HEAD`
   and `--shift-audit origin/main..HEAD` pass; `python3 "$W/.claude/scripts/check-comment-claims.py" --root "$PWD" --base origin/main`
   passes. Read what the lexical check cannot see: the witness TU header (W7: rule and recipe, no
   result), the cell's comments, the harness comments.
-- [ ] T081 [P] (orchestrator) **Every tier1 source-audit job, run locally.** Read `.github/workflows/tier1.yml`
+- [X] T081 [P] (orchestrator) **Every tier1 source-audit job, run locally.** Read `.github/workflows/tier1.yml`
   with a YAML parser; run each ungated audit job's `run:` blocks (`ci-script-pins`, `check-layers`,
   `co-spawn-closure-audit`, and any other) as Actions would (`bash -e`). Record a job → rc table in
   the evidence file.
-- [ ] T082 [P] (orchestrator) **Closing-keyword check.** Positive controls first: seed `Closes #625` and
+- [X] T082 [P] (orchestrator) **Closing-keyword check.** Positive controls first: seed `Closes #625` and
   `Resolves https://github.com/CatalinSerafimescu/fixpp/issues/626` into a scratch copy of one message;
   the grep hits both. Then `git log origin/main..HEAD --format=%B | grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b([: ]+([a-z0-9_.-]+/[a-z0-9_.-]+)?#[0-9]+|\s*:?\s*https://github.com/[^ ]+/issues/[0-9]+)'`
   prints nothing.
-- [ ] T083 [P] (orchestrator) **Static analysis on test code** (`[const §IX.4]` row of plan Constitution
+- [X] T083 [P] (orchestrator) **Static analysis on test code** (`[const §IX.4]` row of plan Constitution
   Check): clang-tidy (`-p build/linux-clang-debug`; each touched TU shown in `compile_commands.json`,
   else `SKIPPED (no compile command)`), clang-format `--dry-run --Werror`, cppcheck with verify
   Appendix A's flags and `cppcheck-suppressions.txt`, include-what-you-use — on every touched C/C++
   file under `tests/session/`, `tests/codegen/`, `tests/interop/happy/`. A missing tool is recorded
   `SKIPPED (tool not installed)`. `/speckit-verify` Step 1 may carry this; it is listed so it cannot
   be skipped.
-- [ ] T084 [P] (orchestrator) **SC-005 at the head**: T006's command prints nothing for
+- [X] T084 [P] (orchestrator) **SC-005 at the head**: T006's command prints nothing for
   `origin/main..HEAD`.
 
 ### `/speckit-verify` (`[const §XVII.8]`)
