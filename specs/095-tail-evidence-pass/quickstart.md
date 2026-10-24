@@ -212,6 +212,8 @@ for id in A-018 A-029 A-030 N-002; do
   test "$v" = 5.0SP2 || { echo "$id: version is '$v', not 5.0SP2"; exit 1; }
 done
 ! in_flip N-002 || col N-002 12 | command grep -q 'fixpp#625' || { echo "N-002: Verified does not name fixpp#625"; exit 1; }
+# each ID is matched with its backticks: a witness name is a prefix of its siblings' (TradingSessionList,
+# TradingSessionListRequest), so a bare substring match passes with the name removed
 # every witness of a flipping row: in its row's Tests cell, and named in its MsgType's coverage-index
 # gap note; a non-flipping row's witnesses stay (FR-004a) and are counted as skipped, not checked
 n=0
@@ -220,11 +222,11 @@ pairs=
 for t in $(gtests "$B" | command grep '^TailRows095\.'); do
   c=${t#TailRows095.}; rid=$(echo "${c%%_*}" | sed 's/^\([A-Z]\)/\1-/'); name=${c#*_}
   in_flip "$rid" || { s=$((s+1)); continue; }
-  col "$rid" 11 | command grep -qF "$t" || { echo "$t: not in $rid's Tests cell"; exit 1; }
+  col "$rid" 11 | command grep -qF "\`$t\`" || { echo "$t: not in $rid's Tests cell"; exit 1; }
   mt=$(command grep -o "<message name='$name' msgtype='[^']*'" dictionaries/FIX50SP2.xml | sed "s/.*msgtype='//; s/'//")
   test -n "$mt" || { echo "$t: no dictionary message $name"; exit 1; }
   test "$(awk -F'|' -v m="$mt" '{v=$2; gsub(/ /,"",v)} v==m' "$CI" | wc -l)" -eq 1 || { echo "$mt: not one coverage-index row"; exit 1; }
-  awk -F'|' -v m="$mt" '{v=$2; gsub(/ /,"",v)} v==m {print $5}' "$CI" | command grep -qF "$t" \
+  awk -F'|' -v m="$mt" '{v=$2; gsub(/ /,"",v)} v==m {print $5}' "$CI" | command grep -qF "\`$t\`" \
     || { echo "$mt: gap note does not name $t"; exit 1; }
   pairs="$pairs$rid $mt
 "
@@ -246,13 +248,13 @@ for pair in "N-002 BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegi
   set -- $pair
   in_flip "$1" || continue
   gtests "$3" | command grep -qxF "$2" || { echo "$2: not in $3"; exit 1; }
-  col "$1" 11 | command grep -qF "$2" || { echo "$2: not in $1's Tests cell"; exit 1; }
+  col "$1" 11 | command grep -qF "\`$2\`" || { echo "$2: not in $1's Tests cell"; exit 1; }
 done
 # A-018's live cells resolve in the (local) harness registry and sit in A-018's Tests cell
 if in_flip A-018; then for cell in HP-QFcpp-init-fixt11-fix50sp2-app-bn HP-QFj-init-fixt11-fix50sp2-app-bn; do
   (cd ../phase-9-harness/tools && python3 -c "import sys, run_interop_cell as r; sys.exit(0 if sys.argv[1] in r.CELLS else 1)" "$cell") \
     || { echo "$cell: not registered"; exit 1; }
-  col A-018 11 | command grep -qF "$cell" || { echo "$cell: not in A-018's Tests cell"; exit 1; }
+  col A-018 11 | command grep -qF "\`$cell\`" || { echo "$cell: not in A-018's Tests cell"; exit 1; }
 done; fi
 # FR-018's Spec ref corrections, and FR-021's amendment, which they need (data-model §E, §F.1)
 for pair in 'A-030|[FIX50SP1] Settlement Instruction' 'A-033|[FIX50SP2] Market Data' \
