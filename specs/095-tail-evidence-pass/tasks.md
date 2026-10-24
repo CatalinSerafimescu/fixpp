@@ -648,14 +648,14 @@ delta (plan P7).
 
 ### RED before records
 
-- [ ] T059 [US4] (orchestrator) **Quickstart §7, RED run, before any record edit**: the script fails at
+- [X] T059 [US4] (orchestrator) **Quickstart §7, RED run, before any record edit**: the script fails at
   its first Status check (no tail row is `done`). Record the message.
-- [ ] T060 [US4] (orchestrator) **Data-model §E recipe, positive control** on the unedited catalogue:
+- [X] T060 [US4] (orchestrator) **Data-model §E recipe, positive control** on the unedited catalogue:
   it exits 1 and flags exactly A-030, A-033, C-003 and N-003, no other row. Record the output.
 
 ### Amendment (its own commit, before any catalogue edit)
 
-- [ ] T061 [US4] (orchestrator) **Commit C-AMEND** — `.specify/constitution.md` only, data-model §F
+- [X] T061 [US4] (orchestrator) **Commit C-AMEND** — `.specify/constitution.md` only, data-model §F
   verbatim: `## Article VI` §2 and §5 (§F.1, §F.2), `## Article XVIII` §7's two sentences (§F.5)
   (every before-text `grep -F`-matched first, exactly once), the Status line's PENDING form (§F.4),
   and the PENDING Sync Impact Report block above the v3.0 → v4.0 block (§F.3). No `CHANGELOG.md`
@@ -674,30 +674,30 @@ delta (plan P7).
 
 ### Catalogue, coverage index, B&L (after T061)
 
-- [ ] T062 [US4] (orchestrator) `spec/feature-catalogue.md`, the 12 rows (data-model §E): Status `done`;
+- [X] T062 [US4] (orchestrator) `spec/feature-catalogue.md`, the 12 rows (data-model §E): Status `done`;
   `/specify` `095-tail-evidence-pass`; Tests the witness IDs of data-model §A (plus, for N-002 and
   N-003, the pin and `TailRouting095.InboundBeAndBwReachFromApp`; for A-018 the two live-cell IDs);
   Verified the text of data-model §E "Verified cells", byte for byte (the offline-bar sentence; A-018's
   generated `ExecutionAck` and live-cell sentence; N-002's and N-003's pin, routing and resend-path
   sentences, R-5). T063 adds the version sentences. The PR cell stays as on `origin/main` until T104.
-- [ ] T063 [US4] (orchestrator) **Version narrowing** (FR-018): FIX version(s) → `5.0SP2` for A-018,
+- [X] T063 [US4] (orchestrator) **Version narrowing** (FR-018): FIX version(s) → `5.0SP2` for A-018,
   A-029, A-030 and N-002; each Verified cell ends with its version sentence of data-model §E, byte for
   byte (N-002's names `kN002N003Excluded` and fixpp#625).
-- [ ] T064 [US4] (orchestrator) **Spec-ref corrections** (FR-018): A-030 → `[FIX50SP1] Settlement Instruction`,
+- [X] T064 [US4] (orchestrator) **Spec-ref corrections** (FR-018): A-030 → `[FIX50SP1] Settlement Instruction`,
   A-033 → `[FIX50SP2] Market Data`, C-003 → `[FIX50SP2] Account Reporting`, N-003 → `[FIX50SP2] Application`.
   Every other Spec ref cell byte-unchanged.
-- [ ] T065 [US4] (orchestrator) **Data-model §E recipe after the edits**: exits 0. Then, on scratch
+- [X] T065 [US4] (orchestrator) **Data-model §E recipe after the edits**: exits 0. Then, on scratch
   copies (`CAT` under `mktemp -d`), each must exit 1 with its leg's message, output recorded:
   (a) A-030's token changed to `[FIX44]`; (b) one tail row's Title cell given `35=A`; (c) A-030's
   token changed to `[FIXT11]` (registry leg); (d) A-030's token changed to `[FIX51]` (file leg)
   (data-model §E, RED arms). Record the 2010 Repository `<CategoryID>`
   cross-check where the owner-local edition has the message.
-- [ ] T066 [P] [US4] (orchestrator) `spec/coverage-index.md`, data-model §E "Coverage-index edits"
+- [X] T066 [P] [US4] (orchestrator) `spec/coverage-index.md`, data-model §E "Coverage-index edits"
   byte for byte: each tail MsgType's existing row names its witness in its gap-note column by the
   rule there (no new row, no row moved; CC, CD, CE, CQ stay under "Infrastructure"; FR-019), and the
   one superseder comment follows 067's "ART VI §3 DISPOSITION" comment; `command grep -cF 'SUPERSEDED (095-tail-evidence-pass' spec/coverage-index.md`
   prints 1.
-- [ ] T067 [P] [US4] (orchestrator) `spec/behaviors-and-limitations.md` delta (FR-013, FR-019,
+- [X] T067 [P] [US4] (orchestrator) `spec/behaviors-and-limitations.md` delta (FR-013, FR-019,
   contracts L8): data-model §E's "B&L delta" section, byte for byte, at the end of the live file
   (B-095-1: what the live cell witnesses and the validation-off disclosure under L-041-2; L-095-1:
   FIX 4.4 BE/BF have no typed builder, fixpp#625), plus a row per exposure under §E's rule, if any. Then `python3 "$W/.claude/scripts/check_bl_delta.py" gate --feature 095-tail-evidence-pass`
@@ -705,31 +705,31 @@ delta (plan P7).
 
 ### Records check (quickstart §7) and its perturbations
 
-- [ ] T068 [US4] (orchestrator) **Quickstart §7, GREEN** on the edited tree (with the uncommitted
+- [X] T068 [US4] (orchestrator) **Quickstart §7, GREEN** on the edited tree (with the uncommitted
   parent registration present, so the live-cell IDs resolve in `CELLS`).
-- [ ] T069 [US4] (orchestrator) Perturbation, scratch `CAT`: one narrowed version cell reverted → RED
+- [X] T069 [US4] (orchestrator) Perturbation, scratch `CAT`: one narrowed version cell reverted → RED
   ("version is …, not 5.0SP2").
-- [ ] T070 [US4] (orchestrator) Perturbation, scratch `CAT`: `fixpp#625` dropped from N-002's Verified
+- [X] T070 [US4] (orchestrator) Perturbation, scratch `CAT`: `fixpp#625` dropped from N-002's Verified
   cell → RED.
-- [ ] T071 [US4] (orchestrator) Perturbation, scratch `CAT`: one witness name removed from its row's
+- [X] T071 [US4] (orchestrator) Perturbation, scratch `CAT`: one witness name removed from its row's
   Tests cell → RED naming it.
-- [ ] T072 [US4] (orchestrator) Perturbation, scratch `CI`: one witness name removed from its
+- [X] T072 [US4] (orchestrator) Perturbation, scratch `CI`: one witness name removed from its
   coverage-index gap note → RED naming the MsgType and witness.
-- [ ] T073 [US4] (orchestrator) Perturbation, scratch `CAT`: one pin or live-cell ID removed from its
+- [X] T073 [US4] (orchestrator) Perturbation, scratch `CAT`: one pin or live-cell ID removed from its
   row's Tests cell → RED naming it.
-- [ ] T074 [US4] (orchestrator) Perturbation, scratch `CAT`: A-033 or C-003's Spec ref reverted to its
+- [X] T074 [US4] (orchestrator) Perturbation, scratch `CAT`: A-033 or C-003's Spec ref reverted to its
   old category → RED.
-- [ ] T075 [US4] (orchestrator) Perturbation, scratch `CAT`: A-030 or N-003's Spec ref reverted to its
+- [X] T075 [US4] (orchestrator) Perturbation, scratch `CAT`: A-030 or N-003's Spec ref reverted to its
   old heading spelling → RED.
-- [ ] T076 [US4] (orchestrator) Perturbation, scratch `CONST`: the amended §VI.2 sentence removed →
+- [X] T076 [US4] (orchestrator) Perturbation, scratch `CONST`: the amended §VI.2 sentence removed →
   RED ("§VI.2 is not amended").
-- [ ] T076a [US4] (orchestrator) Perturbation, scratch `CAT`: one tail row's Title cell given an extra
+- [X] T076a [US4] (orchestrator) Perturbation, scratch `CAT`: one tail row's Title cell given an extra
   `35=<MT>` that no witness maps to → RED ("Title names …, its witnesses map to …"), the check that
   ties the TU's literal row table to the catalogue.
-- [ ] T077 [US4] (orchestrator) **SC-004 census**: T004's `catalogue_census.py` on the merge-base's
+- [X] T077 [US4] (orchestrator) **SC-004 census**: T004's `catalogue_census.py` on the merge-base's
   catalogue and on the head's; OFFICIAL open falls by 12, done rises by 12, and `--list` differs only
   in the 12 tail rows. Every output in the evidence file.
-- [ ] T078 [US4] (orchestrator) **Commit C-RECORDS** (`spec/feature-catalogue.md`,
+- [X] T078 [US4] (orchestrator) **Commit C-RECORDS** (`spec/feature-catalogue.md`,
   `spec/coverage-index.md`, `spec/behaviors-and-limitations.md`), after the placeholder grep. C-AMEND
   precedes it in `git log`.
 
