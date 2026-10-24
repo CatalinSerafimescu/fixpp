@@ -5,7 +5,7 @@
 # fixpp-package target's command and each packaging witness that executes cpack. A
 # guard on the wrapper target alone would miss the witnesses.
 #
-# Owner rulings 2026-10-24: R-2 keeps "all four versions, every platform"; R-2a
+# Owner rulings: R-2 keeps "all four versions, every platform"; R-2a
 # "Release packages only."; R-2b put the typed tier behind FIXPP_INSTALL_TYPED_TIER,
 # in effect by default for Release, and stated that Debug configurations are never
 # released. So a `release` package must carry the typed tier, and this refuses to
