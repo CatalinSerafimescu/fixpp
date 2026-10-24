@@ -203,6 +203,28 @@ fixpp_add_interop_test(
 # 095-tail-evidence-pass: label 095 (expected-ctest-095.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST interop_hp_fixt50sp2_logon_hb_logout_test APPEND PROPERTY LABELS 095)
+# 095-tail-evidence-pass (US3): the FIXT.1.1 / FIX.5.0SP2 app-message cells
+# (Fixt/HappyFixtAppMessage.*) join this target as a second source. They build
+# 35=BN with the generated fixpp::v50sp2 builder, so the source and its link
+# need codegen (the interop_conversation_test pattern below); a configure
+# without codegen leaves 033's target as it is. FIXPP_DICT_DATA_DIR is the
+# fallback for the production dictionaries the shared fixture loads
+# (hp::production_fixt50sp2_engine_config).
+if(TARGET fixpp_codegen_generate)
+    target_sources(interop_hp_fixt50sp2_logon_hb_logout_test PRIVATE
+        happy/hp_fixt50sp2_app_message_test.cpp
+    )
+    target_link_libraries(interop_hp_fixt50sp2_logon_hb_logout_test PRIVATE
+        fixpp::builders::v50sp2
+    )
+    add_dependencies(interop_hp_fixt50sp2_logon_hb_logout_test fixpp_codegen_generate)
+    target_include_directories(interop_hp_fixt50sp2_logon_hb_logout_test PRIVATE
+        "${CMAKE_BINARY_DIR}/_codegen/include"
+    )
+endif()
+target_compile_definitions(interop_hp_fixt50sp2_logon_hb_logout_test PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
 fixpp_add_interop_test(
     NAME interop_hp_down_peer_stop_watchdog_test
     GROUP happy

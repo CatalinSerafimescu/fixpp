@@ -2,8 +2,9 @@
 // test_095_tail_rows_roundtrip.cpp
 //
 // 095-tail-evidence-pass: one offline witness per tail MsgType (suite TailRows095), the
-// dictionary-derived presence check every witness asserts, and the known positives that prove that
-// check able to fire (suite TailRows095Census). Second source of the
+// dictionary-derived presence check every witness asserts, the known positives that prove that
+// check able to fire (suite TailRows095Census), and FR-014's live-message selection check (suite
+// TailRows095Selection, verify-time only). Second source of the
 // test_077_allversions_builder_roundtrip executable. FR-006 / contracts W8 keep the 077 TU
 // beside it byte-unchanged; check with
 //   git diff --exit-code origin/main -- tests/session/test_077_allversions_builder_roundtrip.cpp
@@ -43,6 +44,7 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
@@ -71,6 +73,7 @@
 #include <fixpp/v50sp2/messages/UserResponse.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -833,6 +836,211 @@ TEST_F(TailRows095Census, WalkStatusesOnSyntheticDictionaries) {
     ASSERT_EQ(w2.count("S2"), 1U);
     EXPECT_STREQ(to_string(w2.at("S2").status), "delimiter_chain") << "S2";
     EXPECT_EQ(w2.at("S2").element, "NoInner") << "S2";
+}
+
+// ── FR-014: the live-message selection check (research R-7) ──────────────────
+//
+// Verify-time only: DISABLED_, run by quickstart §3 with --gtest_also_run_disabled_tests and the
+// directory FIXPP_095_QFJ_DICT_DIR names, which holds the QuickFIX/J 3.0.1 jar's FIX50SP2.xml (the
+// file the peer config loads) and FIX50SP2.modified.xml. Two axes per tail MsgType, over the
+// vendored file and both QuickFIX/J files:
+//   (a) an engine's own rule: a field or a group is required when every element on its path, the
+//       group's own flag included, is required='Y' (no only-child inheritance); a group's members
+//       follow the same rule from the group;
+//   (b) the closure-required walk above (Walker).
+// Both axes are printed for the tail set. Only what selects 35=BN is asserted; the same equality
+// predicate is asserted false for 35=BM, the known positive that shows it can fail on real inputs
+// (research R-7). A missing variable, file or parse fails the test; it never skips.
+
+namespace {
+
+// A required set, order-insensitive: "<tag>" at message level, "<count>/<tag>" in a group.
+using RequiredSet = std::set<std::string>;
+
+RequiredSet closure_required_set(WalkResult const& wr) {
+    RequiredSet s;
+    for (std::uint16_t f : wr.fields) s.insert(std::to_string(f));
+    for (RequiredGroup const& g : wr.groups) {
+        std::string const count = std::to_string(g.count_tag);
+        s.insert(count);
+        for (std::uint16_t f : g.fields) s.insert(count + "/" + std::to_string(f));
+    }
+    return s;
+}
+
+class EngineRule {
+public:
+    explicit EngineRule(pugi::xml_document const& doc) {
+        pugi::xml_node const fix = doc.child("fix");
+        for (pugi::xml_node f : fix.child("fields").children("field")) {
+            tags_[f.attribute("name").as_string()] = f.attribute("number").as_string();
+        }
+        for (pugi::xml_node c : fix.child("components").children("component")) {
+            components_[c.attribute("name").as_string()] = c;
+        }
+        for (pugi::xml_node m : fix.child("messages").children("message")) {
+            messages_[m.attribute("msgtype").as_string()] = m;
+        }
+    }
+
+    [[nodiscard]] bool has(std::string const& mt) const { return messages_.contains(mt); }
+
+    [[nodiscard]] RequiredSet required(std::string const& mt) const {
+        RequiredSet s;
+        collect_required(messages_.at(mt), true, "", s);
+        return s;
+    }
+
+    // Every field reachable at message level, components expanded, groups not entered.
+    [[nodiscard]] std::set<std::string> members(std::string const& mt) const {
+        std::set<std::string> s;
+        collect_members(messages_.at(mt), s);
+        return s;
+    }
+
+private:
+    [[nodiscard]] std::string tag_of(pugi::xml_node n) const {
+        auto const it = tags_.find(n.attribute("name").as_string());
+        return it == tags_.end() ? std::string{"?"} : it->second;
+    }
+
+    [[nodiscard]] pugi::xml_node component_def(pugi::xml_node ref) const {
+        auto const it = components_.find(ref.attribute("name").as_string());
+        return it == components_.end() ? pugi::xml_node{} : it->second;
+    }
+
+    void collect_required(pugi::xml_node n, bool path_required, std::string const& prefix,
+                          RequiredSet& s) const {
+        for (pugi::xml_node c : element_children(n)) {
+            bool const req = path_required && is_required(c);
+            std::string_view const kind = c.name();
+            if (kind == "field") {
+                if (req) s.insert(prefix + tag_of(c));
+            } else if (kind == "group") {
+                if (req) {
+                    std::string const g = prefix + tag_of(c);
+                    s.insert(g);
+                    collect_required(c, true, g + "/", s);
+                }
+            } else {
+                collect_required(component_def(c), req, prefix, s);
+            }
+        }
+    }
+
+    void collect_members(pugi::xml_node n, std::set<std::string>& s) const {
+        for (pugi::xml_node c : element_children(n)) {
+            std::string_view const kind = c.name();
+            if (kind == "field") {
+                s.insert(tag_of(c));
+            } else if (kind == "component") {
+                collect_members(component_def(c), s);
+            }
+        }
+    }
+
+    std::map<std::string, std::string, std::less<>> tags_;
+    std::map<std::string, pugi::xml_node, std::less<>> components_;
+    std::map<std::string, pugi::xml_node, std::less<>> messages_;
+};
+
+// The one equality predicate both axes use.
+bool all_equal(std::vector<RequiredSet> const& sets) {
+    return std::all_of(sets.begin(), sets.end(),
+                       [&](RequiredSet const& s) { return s == sets.front(); });
+}
+
+std::string join_set(std::set<std::string> const& s) {
+    std::string out = "{";
+    bool first = true;
+    for (std::string const& e : s) {
+        out += (first ? "" : " ") + e;
+        first = false;
+    }
+    return out + "}";
+}
+
+}  // namespace
+
+TEST(TailRows095Selection, DISABLED_LiveMessageAgreesOnBothAxes) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) -- single-threaded test setup.
+    char const* const qfj_dir = std::getenv("FIXPP_095_QFJ_DICT_DIR");
+    ASSERT_TRUE(qfj_dir != nullptr && qfj_dir[0] != '\0')
+        << "FIXPP_095_QFJ_DICT_DIR is unset: name the directory holding the QuickFIX/J 3.0.1 jar's "
+           "FIX50SP2.xml and FIX50SP2.modified.xml (quickstart §3)";
+
+    std::array<std::string, 3> const labels = {"vendored FIX50SP2.xml", "QuickFIX/J FIX50SP2.xml",
+                                               "QuickFIX/J FIX50SP2.modified.xml"};
+    std::array<std::string, 3> const paths = {std::string(FIXPP_DICT_DATA_DIR) + "/FIX50SP2.xml",
+                                              std::string(qfj_dir) + "/FIX50SP2.xml",
+                                              std::string(qfj_dir) + "/FIX50SP2.modified.xml"};
+    std::array<pugi::xml_document, 3> docs;
+    for (std::size_t i = 0; i < docs.size(); ++i) {
+        pugi::xml_parse_result const r = docs[i].load_file(paths[i].c_str());
+        ASSERT_TRUE(r) << labels[i] << ": pugixml could not load " << paths[i] << ": "
+                       << r.description();
+    }
+    std::vector<EngineRule> rules;
+    std::vector<WalkMap> walks;
+    for (pugi::xml_document const& d : docs) {
+        rules.emplace_back(d);
+        walks.push_back(Walker{d}.walk_all());
+    }
+
+    // Both axes, printed for the tail set; nothing below the print is asserted except for BN/BM.
+    std::map<std::string, std::vector<RequiredSet>> axis_a;
+    std::map<std::string, std::vector<RequiredSet>> axis_b;
+    for (TailRow const& row : tail_rows()) {
+        for (char const* mt : row.msgtypes) {
+            std::cout << "[selection] 35=" << mt << " (" << row.row << ")\n";
+            bool present_everywhere = true;
+            for (std::size_t i = 0; i < docs.size(); ++i) {
+                if (!rules[i].has(mt)) {
+                    std::cout << "  " << labels[i] << ": absent\n";
+                    present_everywhere = false;
+                    continue;
+                }
+                WalkResult const& wr = walks[i].at(mt);
+                axis_a[mt].push_back(rules[i].required(mt));
+                axis_b[mt].push_back(closure_required_set(wr));
+                std::cout << "  " << labels[i] << ": (a) " << join_set(axis_a[mt].back())
+                          << "  (b) walk " << to_string(wr.status)
+                          << (wr.element.empty() ? "" : " at " + wr.element) << " "
+                          << join_set(axis_b[mt].back()) << "\n";
+            }
+            if (present_everywhere) {
+                std::cout << "  equal on (a): " << (all_equal(axis_a[mt]) ? "yes" : "no")
+                          << "; equal on (b): " << (all_equal(axis_b[mt]) ? "yes" : "no") << "\n";
+            }
+        }
+    }
+
+    // What selects BN. The sent fields are research R-7's field set (the live cell's step F-01).
+    std::set<std::string> const sent = {"37", "1036", "17", "54", "55", "38", "11", "14", "6"};
+    for (std::size_t i = 0; i < docs.size(); ++i) {
+        ASSERT_TRUE(rules[i].has("BN")) << "35=BN is absent from " << labels[i];
+        EXPECT_STREQ(to_string(walks[i].at("BN").status), "ok")
+            << "35=BN walk status in " << labels[i] << " at " << walks[i].at("BN").element;
+        for (std::string const& e : axis_b["BN"][i]) {
+            EXPECT_TRUE(sent.contains(e)) << "35=BN closure-required " << e << " in " << labels[i]
+                                          << " is not among the sent fields";
+        }
+        std::set<std::string> const members = rules[i].members("BN");
+        for (std::string const& t : sent) {
+            EXPECT_TRUE(members.contains(t))
+                << "sent field " << t << " is not a 35=BN member in " << labels[i];
+        }
+    }
+    EXPECT_TRUE(all_equal(axis_a["BN"])) << "35=BN differs on axis (a) across the three files";
+    EXPECT_TRUE(all_equal(axis_b["BN"])) << "35=BN differs on axis (b) across the three files";
+
+    // The known positive: the same predicate must be false for BM on axis (b).
+    for (std::size_t i = 0; i < docs.size(); ++i) {
+        ASSERT_TRUE(rules[i].has("BM")) << "35=BM is absent from " << labels[i];
+    }
+    EXPECT_FALSE(all_equal(axis_b["BM"]))
+        << "known positive: the equality predicate holds for 35=BM on axis (b); choose a new "
+           "known positive from the printed axes (research R-7)";
 }
 
 // ── Witnesses: one per tail MsgType (contracts W1–W5) ─────────────────────────

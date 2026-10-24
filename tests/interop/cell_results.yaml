@@ -84,6 +84,10 @@ cells:
   - { id: HP-QFj-acc-fixt11-fix50sp2-logon-hb-logout,    config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-001/FR-012" }
   - { id: HP-QFj-init-fixt11-fix44-logon-hb-logout,      config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
   - { id: HP-QFj-acc-fixt11-fix44-logon-hb-logout,       config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "033 US3 SC-004/SC-006 FR-006 (4.4-over-FIXT)" }
+  # 095 US3: one typed-built 35=BN from fixpp per QuickFIX peer, over FIXT.1.1 / FIX.5.0SP2.
+  # Status stays the pre-live value; the parent overrides it with real results.
+  - { id: HP-QFcpp-init-fixt11-fix50sp2-app-bn, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §5.3.1/§5.3.3" }
+  - { id: HP-QFj-init-fixt11-fix50sp2-app-bn,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §5.3.1/§5.3.3" }
 
   # ── US1 deferred rows (present, NOT executed → status n/a) ───────────────────
   - { id: HP-fix8-happy-cells, config: normal, kind: happy, status: "n/a", matrix_disposition: "deferred:fix8-revisit", deferred_reason: "Fix8 is corpus-only at v1.0; live disposition revisited from corpus findings (FR-009).", spec_ref: "FIX-SL §4" }

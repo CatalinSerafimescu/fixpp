@@ -41,6 +41,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <fixpp/core/engine_config.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session.hpp>
@@ -273,6 +275,86 @@ inline ProductionDictionary production_dictionary_and_digest() {
     auto dict = std::make_shared<fixpp::dict::Dictionary>(
         fixpp::dict::XmlLoader{}.load_from_string(xml_text, std::pmr::get_default_resource()));
     return ProductionDictionary{.dictionary = std::move(dict), .dictionary_digest = std::move(hex)};
+}
+
+// ---------------------------------------------------------------------------
+// production_fixt50sp2_engine_config — 095 (the live-cell contract's clause L1).
+//
+// The production FIXT.1.1 / FIX.5.0SP2 pair for a live FIXT cell:
+//   - `engine_config.dictionaries` holds FIX50SP2.xml, which the version
+//     registry files under ApplVerID 9 (application_version::v50sp2), so
+//     Session::open() accepts a FIXT session whose default_appl_ver_id is
+//     v50sp2 (it refuses one whose registry lacks that version, in both roles);
+//   - `session_dictionary` is FIXT11.xml, for SessionConfig::dictionary;
+//   - `app_dictionary_digest` is the lowercase-hex SHA-256 of the FIX50SP2.xml
+//     bytes handed to the loader, for the hello's `dictionary_digest`.
+// FIX50SP2.xml comes from env `FIXPP_FIX50SP2_DICT_XML` (the path the parent
+// harness's `_run_initiator_cell` sets, the same file its FR-011 check hashes),
+// falling back to the `FIXPP_DICT_DATA_DIR` compile definition; FIXT11.xml from
+// `FIXPP_DICT_DATA_DIR`. Throws std::runtime_error when a file cannot be opened
+// (test-setup time, `[arch §5.3]`). production_dictionary_and_digest() above is
+// the FIX44 seam and is not involved.
+// ---------------------------------------------------------------------------
+struct ProductionFixtEngineConfig {
+    fixpp::core::EngineConfig engine_config;
+    std::shared_ptr<const fixpp::dict::Dictionary> session_dictionary;
+    std::string app_dictionary_path;
+    std::string app_dictionary_digest;  // lowercase-hex SHA-256, 64 chars
+};
+
+inline std::string production_dict_data_file(const char* basename) {
+#ifdef FIXPP_DICT_DATA_DIR
+    return std::string(FIXPP_DICT_DATA_DIR) + "/" + basename;
+#else
+    (void)basename;
+    return {};
+#endif
+}
+
+inline std::string read_file_or_throw(const std::string& path, const char* who) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) {
+        throw std::runtime_error(std::string(who) + ": cannot open " + path);
+    }
+    std::ostringstream oss;
+    oss << f.rdbuf();
+    return oss.str();
+}
+
+inline std::string sha256_lower_hex(const std::string& bytes) {
+    unsigned char raw_digest[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(), raw_digest);
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string hex(SHA256_DIGEST_LENGTH * 2, '\0');
+    for (std::size_t i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
+        hex[2 * i] = kHex[raw_digest[i] >> 4U];
+        hex[(2 * i) + 1] = kHex[raw_digest[i] & 0xFU];
+    }
+    return hex;
+}
+
+inline ProductionFixtEngineConfig production_fixt50sp2_engine_config() {
+    constexpr const char* kWho = "production_fixt50sp2_engine_config";
+    std::string app_path;
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) — single-threaded test setup.
+    if (const char* env = std::getenv("FIXPP_FIX50SP2_DICT_XML");
+        env != nullptr && env[0] != '\0') {
+        app_path = env;
+    } else {
+        app_path = production_dict_data_file("FIX50SP2.xml");
+    }
+    const std::string app_xml = read_file_or_throw(app_path, kWho);
+    const std::string session_xml =
+        read_file_or_throw(production_dict_data_file("FIXT11.xml"), kWho);
+
+    ProductionFixtEngineConfig out;
+    out.engine_config.dictionaries = {std::make_shared<fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load_from_string(app_xml, std::pmr::get_default_resource()))};
+    out.session_dictionary = std::make_shared<fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load_from_string(session_xml, std::pmr::get_default_resource()));
+    out.app_dictionary_path = app_path;
+    out.app_dictionary_digest = sha256_lower_hex(app_xml);
+    return out;
 }
 
 // Drive a registered session to Active (logon complete) within `deadline`.
