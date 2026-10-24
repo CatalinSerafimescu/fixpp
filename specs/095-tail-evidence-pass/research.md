@@ -27,9 +27,12 @@ A group instance's required members follow the same rules, starting from the gro
   this is parity, not a defect. The witness TU proves it against the measured QuickFIX-cpp golden
   (`tools/quickfix_required_golden/golden.csv`, R-3 arm 1).
 - The group rule is **not** QuickFIX-cpp behaviour: QuickFIX-cpp does not require a
-  component-wrapped group (L-067-1; its instance-level golden is
-  `tools/quickfix_required_golden/golden_groups.csv`). It is the owner's closure bar, stricter than
-  either engine.
+  component-wrapped group. Its measured message-level required set,
+  `tools/quickfix_required_golden/golden.csv`, leaves out such a group's count tag (spec
+  Terminology has the re-check), and its per-group golden,
+  `tools/quickfix_required_golden/golden_groups.csv`, AND-composes each member with the group's own
+  `required='N'`. L-067-1 covers the field case only. The group rule is the owner's closure bar,
+  stricter than either engine, and neither golden can be its positive (spec FR-004).
 - The group rule follows from how the vendored dictionary is written. It is byte-identical to
   QuickFIX-cpp v1.16.0's (re-check with `cmp dictionaries/FIX50SP2.xml
   <qfcpp>/spec/FIX50SP2.xml`). It never sets `required='Y'` on a `<group>` that sits inside a
@@ -129,7 +132,7 @@ arms are listed once, in the table of contracts W6. The non-circular known posit
    `required_members_missing` returns on each deficient 35=E and 35=CC frame of W6, one frame per
    presence leg. This tests the helper on a frame.
 3. **Nested fail-loud:** `TailRows095Census.NestedRequiredGroupFailsLoud_MassQuote` asserts the walk's
-   status for 35=i.
+   status for 35=i and the nested group that status names.
 4. **Synthetic dictionaries:** `TailRows095Census.WalkStatusesOnSyntheticDictionaries` asserts the
    group-among-siblings and delimiter-chain statuses, with the element each names.
 
@@ -250,13 +253,20 @@ no new evidence.
     closure-required set contained in the sent fields above, and every sent field a BN member in
     every file;
   - asserts nothing about the other tail MsgTypes, which are only printed (R-1);
+  - uses one equality predicate for both axes, so the predicate mutant of T050 arms it once for
+    both; axis (a)'s inputs for BN are also checked live, since a peer whose own rule required more
+    than the sent fields would reject BN (contracts L4);
   - asserts that the same equality predicate is **false** for BM, which differs on axis (b) (the
     round-2 Gate A reviews measured it; the check's printed output shows where). This known positive
     shows the equality can fail on real inputs, which the input-absent arm below cannot show
     (contracts W7 lists it as an exception, on the narrower basis that it runs only at verify). If a
     dictionary change makes BM agree, the check goes RED the next time it is invoked with the jar,
     not on a build, and a new known positive is chosen from its output;
-  - **fails** when `FIXPP_095_QFJ_DICT_DIR` is unset or a file is missing — it never skips.
+  - **fails** when `FIXPP_095_QFJ_DICT_DIR` is unset, when a file is missing (the directory empty
+    included) or when a file does not parse (`pugi::xml_document::load_file`'s result asserted per
+    file) — it never skips. Two arms are recorded (quickstart §3): the variable unset, and the
+    variable naming an empty directory; the second exercises the per-file load assertion that a
+    missing and an unparsable file share.
 - It is `DISABLED_` so plain `ctest` (which has no jar) does not run it; verify runs it with
   `--gtest_also_run_disabled_tests` and asserts it ran (quickstart §3).
 
@@ -370,7 +380,11 @@ check would fail instead.
 
 **Peer identity (FR-015).** The cell's hello record carries `build_conversation_meta`'s
 `image_digest`: `INTEROP_COUNTERPARTY_IMAGE_DIGEST` if set, else the sentinel `local-build:unpinned`.
-`interop-live.yml` does not set it, so the committed evidence carries the sentinel. The image digest
+`interop-live.yml` does not set it, so the committed evidence carries the sentinel. QuickFIX-cpp's
+version is the image's build pin (`ARG QUICKFIX_CPP_REF` in the parent's
+`phase-9-harness/ci/counterparties.Dockerfile`, restated in its `org.opencontainers.image.description`
+label); the local run records that label with `docker inspect` next to the digest, and QuickFIX/J's
+is `quickfixj/pom.xml`'s `quickfixj.version`. The image digest
 the post-merge `interop-live` run pulled is read from its job log and recorded at close-out. The
 local run's peer builds are the extracted image's QF-cpp counterparty (its digest from `docker
 inspect`) and the locally built QFJ jar (its source is the parent working copy), recorded in the
@@ -415,6 +429,10 @@ verify record.
   `/opt/interop/qfcpp-spec`, while FR-014 reads the vendored file in its place. Quickstart §5 runs
   `cmp` on the two after the `docker cp` and puts the output in the verify record. QuickFIX/J needs
   no such check: `quickfixj/pom.xml` pins `quickfixj.version` to the 3.0.1 jar FR-014 reads.
+- The extracted counterparty is the pre-095 image's. 095 changes no QuickFIX-cpp counterparty
+  source (R-9), so the republished image rebuilds it from the same source, but the post-merge
+  `interop-live` run (SC-003) is the only evidence against the republished build; the local run is
+  not offered as evidence of it.
 - Because the PR's `interop-live` runs no cell (R-10), the local run covers what it would have:
   the two new cells, the existing 033 FIXT cells of `interop_hp_fixt50sp2_logon_hb_logout_test`
   (whose binary 095 changes), 089's CONV and PROBE cells (L7), and `ci/run-interop-live.py

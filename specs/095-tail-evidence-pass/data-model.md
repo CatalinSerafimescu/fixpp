@@ -55,7 +55,7 @@ not depend on another test having run.
 ```
 walk(doc : pugi::xml_document const&) -> map<msg_type, WalkResult>
 WalkResult(msg_type):
-  status : ok | nested_required_group | group_among_siblings  (+ the element named)
+  status : ok | nested_required_group | delimiter_chain | group_among_siblings  (+ the element named)
   set    : ClosureRequiredSet                 # meaningful only when status == ok
 ClosureRequiredSet:
   fields : set<tag>                           # required message-level fields (R-1 field rule)
@@ -70,14 +70,18 @@ RequiredGroup:
 Derivation: pugixml over a loaded document, components resolved by name. The production call loads
 `FIXPP_DICT_DATA_DIR "/FIX50SP2.xml"` once in `SetUpTestSuite`; the W6 synthetic arms pass
 `load_string` literals to the same entry point. One `WalkResult` per MsgType. The only-child
-inheritance applies only when the component's element children number exactly one. The delimiter is
+inheritance applies only when the component's element children number exactly one. Children are
+counted on the component's definition as written, before expansion, and a nested component
+reference counts as one child. So, in a chain of component references each holding exactly one
+child, the group inherits the `required` flag of the reference that directly wraps it, and every
+reference above that one is an element of the group's path (the AND of the field rule). The delimiter is
 the group's first emitted tag in dictionary order with components expanded, the loader's rule
 (research R-1). When it is a nested group's count tag, `delim_group` holds that nested group's count
 and its own first emitted tag. For every MsgType it walks, the walk sets a non-`ok` status, naming
 the element, when it meets:
 - a required group inside a required group's instance (`nested_required_group`);
 - a delimiter chain longer than one nested group, i.e. `delim_group`'s own delimiter is again a count
-  tag (`nested_required_group`, naming the inner group);
+  tag (`delimiter_chain`, naming the inner group);
 - a required component reference whose component holds a group among siblings
   (`group_among_siblings`).
 
@@ -86,7 +90,10 @@ A non-`ok` status fails a tail witness, and the known positives require `ok` for
 Nothing about the result is written into the TU or any artifact (FR-005).
 
 `required_members_missing(...)` on a parsed frame takes the MsgType from its tag 35 and reads the body
-enumeration W4 uses (each entry attributed by extent, research R-4). It returns:
+enumeration W4 uses (each entry attributed by extent, research R-4). Its signature has no MsgType
+parameter, so no caller can pass one; and because the 35=E and 35=CC frames go through the same call
+in one test (`KnownPositive_DeficientFrames`), a helper that used any fixed MsgType would return a
+wrong list for one of them. It returns:
 - each `fields` tag absent at message level;
 - each required group absent from the frame;
 - each group whose count value is below 2;
@@ -101,20 +108,35 @@ enumeration W4 uses (each entry attributed by extent, research R-4). It returns:
 
 Each missing path is reported **once**, by exactly one leg:
 - a `delim_tag` that is also a required instance field (E's `NoOrders`(73), whose delimiter `ClOrdID`(11)
-  is required) is reported by the delimiter leg, and the field leg skips it;
+  is required) is reported by the delimiter leg, and the field leg skips it (frame E-nodelim,
+  Mutant P);
 - a `delim_tag` that is a nested count tag (CC's `NoAsgnReqs`(1499) → `NoPartyIDs`(453)) is reported
   by the delimiter leg when absent, and by the `delim_group` leg's first disjunct when present with a
   value not 1;
 - the nested delimiter (CC's `PartyID`(448)) is reported only by the `delim_group` leg's second
   disjunct, and only when the nested count tag is present.
 
-So each leg, and each disjunct of the `delim_group` leg, has a frame on which it alone fires
-(contracts W6: CC-nodelim, CC-count2, CC-nested). Each item names its path (`<tag>`,
-`<count_tag>`, `<count_tag>[<k>].<tag>`), so a known-positive assertion compares exact lists.
+So each leg, each disjunct of the `delim_group` leg and the once-only rule has a frame on which it
+alone fires (contracts W6: E-nodelim, CC-nodelim, CC-count2, CC-nested). Each item names its path
+(`<tag>`, `<count_tag>`, `<count_tag>[<k>].<tag>`), so a known-positive assertion compares exact
+lists.
+
+The deficient frames' expected lists are dictionary facts. Re-derive them from the message and the
+components it references: `sed -n "/<message name='<Name>'/,/<\/message>/p" dictionaries/FIX50SP2.xml`,
+then `sed -n "/<component name='<Comp>'>/,/<\/component>/p" dictionaries/FIX50SP2.xml` for each
+component on the path (`NewOrderList` → `ListOrdGrp`; `StreamAssignmentRequest` → `StrmAsgnReqGrp`
+→ `Parties`), applying R-1's rules by hand. They are written from that reading, never pasted from
+the walk's output.
 
 The field leg's known positive reads `tools/quickfix_required_golden/golden.csv` (rows
 `FIX50SP2,<MsgType>,"<tags>"`) through a compile definition on the target, for the 23 tail
-MsgTypes and 35=E.
+MsgTypes and 35=E. The file's header records its scope (body-only: the message-level
+component-AND set, QuickFIX's `DataDictionary::isRequiredField`), the QuickFIX version it was
+measured against and the SHA-1 of each dictionary. Its generator, `tools/quickfix_required_golden/main.cpp`,
+measures it from a locally built QuickFIX, and `tools/quickfix_required_golden/regen_and_diff.py`
+re-measures it (target `quickfix_required_golden_regen_diff`, defined only with
+`FIXPP_BUILD_QUICKFIX_GOLDEN=ON`). It is derived neither from this walk nor from fixpp's loader.
+The group and per-instance legs have no measured positive (spec FR-004 states why).
 
 ## C. Chosen values and the intent list (per witness)
 
@@ -122,8 +144,14 @@ Each witness holds one intent list of `(path, literal)` entries, chosen before t
 convention; never captured). Paths are `<tag>` at message level and `<count_tag>[<k>].<tag>` inside
 instance k; each count field is an entry with the instance count as its literal. A delimiter's
 nested group takes paths in the outer instance: `1499[<k>].453` with literal 1, then
-`1499[<k>].448`. The Args are
-populated from the same literals, and W4 compares the list with the parsed body in both directions.
+`1499[<k>].448`. Each value is written twice in the TU, as the same literal: once in its intent
+entry and once in its `Args` setter. The two are separate statements and neither reads the other
+(no setter reads the intent list, and no intent entry is derived from the Args), so a mutant can
+delete either statement, or both, and the TU still compiles with no unused name left behind
+(contracts W6, Mutants B, D, E and H). W4 compares the list with the parsed body in both directions.
+
+A witness sets no repeating group outside its closure-required set, except a delimiter's nested
+group (FR-002): W4 attributes entries only to the instances of required groups (contracts W4).
 
 Literals:
 - strings `"<Row>_<Msg>_<field>"`, inside group instance k `"<Row>_<Msg>_<field>_i<k>"`;
@@ -135,7 +163,17 @@ Literals:
 - int without an enum: the field's own tag number; NumInGroup: the instance count (≥ 2; 1 for a
   delimiter's nested group);
 - bool `true` → `Y`; decimal `"10.5"`; UTCTimestamp `"20261024-12:00:00.000"`; LocalMktDate
-  `"20261024"`.
+  `"20261024"`;
+- inside group instance k, an int without an enum takes its tag number plus k. A NumInGroup count
+  is not covered by this rule: it keeps the instance count (a delimiter's nested count stays 1).
+
+Every instance of a required group differs from the others in at least one literal, so an
+instance swap or a misattribution between instances fails W4. Where every entry attributed to the
+instance (its `<count_tag>[<k>].*` paths, a delimiter's nested group included) is a NumInGroup
+count or an enum, char, bool, decimal or timestamp field, the witness also sets one string or int member
+of that group (an optional one is allowed) under the rules above. A required group with no string
+or int member stops the implementer (tasks.md Execution rules); W4's instance-order check would not
+cover it.
 
 Every intent entry is read back (W4); every closure-required member is covered by §B's check (W5).
 
@@ -146,7 +184,12 @@ the live-cell contract's clause L0:
 - session: FIXT.1.1, DefaultApplVerID 9 (FIX.5.0SP2), fixpp initiator, TLS as in 033;
 - fixpp hello: `dictionary_digest` = SHA-256 of the `FIX50SP2.xml` bytes the shared fixture loaded
   and registered under ApplVerID 9 (L1);
-- fixpp `sent` record: step F-01, MsgType BN, MsgSeqNum captured in `toApp`, the chosen fields;
+- fixpp `sent` record: step F-01, MsgType BN, MsgSeqNum captured in `toApp` (the pairing key, and
+  the only value captured), the chosen fields. Their values are step F-01's literals in
+  `tests/interop/conversation/fixt_app_script.yaml`, written before the build and read from there,
+  never captured from the outgoing frame or in `toApp`. They follow §C's literal rules (an enum
+  field takes its first declared value) and are independent of the A-018 witness's intent list;
+  only the field set is research R-7's;
 - peer readback: the counterparty's generic field enumeration of the received BN;
 - comparison: 089's `compare_streams` with the decimal resolver loaded from `FIX50SP2.xml`;
 - template row in `tests/interop/cell_results.yaml` (the fields of research R-11), schema-checked. Its
@@ -160,9 +203,21 @@ the live-cell contract's clause L0:
 
 ## E. Catalogue edits (US4)
 
-For each row in §A: Status `done`; `/specify` `095-tail-evidence-pass`; PR the 095 PR; Tests the
-witness IDs of §A (plus, for N-002 and N-003, the pin and the routing cell; for A-018, the two
-live-cell IDs); Verified the text below.
+For each row in §A: Status `done`; `/specify` `095-tail-evidence-pass`; PR the 095 PR, written
+`#<pr>` (C-PRCELL, tasks T104); Tests the witness IDs of §A (plus, for N-002 and N-003, the pin and
+the routing cell; for A-018, the two live-cell IDs); Verified the text below. Only those five cells
+of the 12 rows, the version cell of four and the Spec ref cell of four change. A-024
+(`dropped(duplicate: same MsgType as A-018)`, version `5.0SP1–5.0SP2`) stays byte-unchanged on
+purpose: it is not a tail row (spec FR-018).
+
+**Tests cells**, in this form (each ID in backticks, `, ` between IDs of one file, `; ` between
+files):
+- every row: `` `tests/session/test_095_tail_rows_roundtrip.cpp`: `` followed by the row's witness
+  IDs of §A, in §A's order;
+- N-002 and N-003, then: `` ; `tests/codegen/test_077_v50sp2_builder_completeness.cpp`: `` and the
+  row's pin of §A, then `` ; `<routing TU>`: `TailRouting095.InboundBeAndBwReachFromApp` (BE leg) ``
+  for N-002 or `(BW leg)` for N-003, where `<routing TU>` is the path tasks T042 reports;
+- A-018, then: `` ; live: `HP-QFcpp-init-fixt11-fix50sp2-app-bn`, `HP-QFj-init-fixt11-fix50sp2-app-bn` ``.
 
 **Verified cells**, written byte for byte (T062, T063). No sentence contains `|`, so quickstart §7's
 `col` still splits each row into its 13 fields. Every row's cell opens with sentence S0:
@@ -177,8 +232,12 @@ Then, after S0 and a space:
 
 - Version column → `5.0SP2` for A-018, A-029, A-030 and N-002 (T063). Each of their Verified cells
   ends with its version sentence, after a space:
-  - A-018, A-029, A-030: `FIX 5.0SP1: no typed tier; runtime-XML path only.`
-  - N-002: `FIX 5.0 and 5.0SP1: no typed tier; runtime-XML path only. FIX 4.4 BE/BF: present in FIX44.xml, excluded from v44 codegen by kN002N003Excluded; lifting it is fixpp#625.`
+  - A-018, A-029, A-030: `FIX 5.0SP1: no typed tier; runtime-XML path only. The Spec ref's token names a vendored dictionary that defines the MsgType (constitution Article VI §2), not this row's version.`
+  - N-002: `FIX 5.0 and 5.0SP1: no typed tier; runtime-XML path only. FIX 4.4 BE/BF: present in FIX44.xml, excluded from v44 codegen by kN002N003Excluded; lifting it is fixpp#625. The Spec ref's token names a vendored dictionary that defines the MsgType (constitution Article VI §2), not this row's version.`
+  - N-002's sentence states the v44 exclusion as it stands at 095. A catalogue cell is a dated
+    evidence record, not a standing rule, so it may name the symbol that §F.5's clause leaves out;
+    the feature that lifts the exclusion (fixpp#625) rewrites the sentence, as a later feature
+    rewrites any Verified cell whose truth it changes.
 - Spec ref cells are unchanged except four (FR-018; spec Clarifications, Gate A round 3 and the
   post-exhaustion pass). These edits come after §F's amendment lands.
   - A-033 → `[FIX50SP2] Market Data` and C-003 → `[FIX50SP2] Account Reporting`: the old refs name
@@ -191,9 +250,13 @@ Then, after S0 and a space:
 **Re-check the 12 refs against the amended `[const §VI.2]` (§F.1)**, at P7, recording the output in
 the evidence file (tasks.md Execution rules), whose entries T085 copies into the verify record. Run it from the library root as a script (`bash`); `CAT` may point at a scratch
 copy. It reads each row's MsgTypes from its `Title` cell (`35=<MT>`), as the clause does, and checks
-three legs per MsgType: the token's dictionary defines it as `msgcat='app'` exactly once (token and
-application-message legs), and the identifier's words of its Orchestra `category` equal the ref's
-`Category` (category leg). All 12 rows are single-category without a section prefix and none uses
+four legs: the token names a vendored dictionary (file leg) and is an application version of the
+coverage index's DocAbbrev Registry (registry leg; the Registry writes them as one
+`FIX40`…`FIX50SP2` row, which the `case` expands); per MsgType, the token's dictionary defines it as
+`msgcat='app'` exactly once (application-message leg), and the identifier's words of its Orchestra
+`category`, by the clause's own rule, equal the ref's `Category` (category leg). `words()` is that
+rule as written, a space before each capital but the first, consecutive capitals included; the
+follow-up lint (fixpp#626) takes the same rule from the clause. All 12 rows are single-category without a section prefix and none uses
 `FIX-Latest`, so the script implements neither the clause's prefix or ` / ` rules nor its
 `FIX-Latest` dictionary; a row that needed one would be reported as a mismatch, not passed.
 
@@ -204,12 +267,14 @@ col() {   # quickstart §7's: column $2 of the one well-formed row with ID $1
   awk -F'|' -v want="$1" -v c="$2" '{id=$2; gsub(/ /,"",id)} id==want {n++; nf=NF; v=$c}
     END {gsub(/^ +| +$/,"",v); if (n!=1 || nf!=13) exit 1; print v}' "$CAT"
 }
-words() { sed 's/\([a-z]\)\([A-Z]\)/\1 \2/g'; }
+words() { sed 's/\([A-Z]\)/ \1/g; s/^ //'; }   # the clause's rule: a space before each capital but the first
 bad=0
 for id in A-018 A-023 A-027 A-028 A-029 A-030 A-031 A-032 A-033 C-003 N-002 N-003; do
   ref=$(col "$id" 7) || { echo "$id: not exactly one well-formed row"; bad=1; continue; }
   tok=$(printf '%s\n' "$ref" | sed -n 's/^\[\([A-Z0-9]*\)\] .*/\1/p'); cat=${ref#*] }
   test -n "$tok" -a -f "dictionaries/$tok.xml" || { echo "$id: '$ref' names no vendored dictionary"; bad=1; continue; }
+  case $tok in FIX40|FIX41|FIX42|FIX43|FIX44|FIX50|FIX50SP1|FIX50SP2) ;;   # the Registry's FIX40…FIX50SP2 row
+    *) echo "$id: '$tok' is not a DocAbbrev Registry application version"; bad=1; continue ;; esac
   mts=$(col "$id" 5 | grep -o '35=[A-Za-z0-9]*' | cut -d= -f2)
   test -n "$mts" || { echo "$id: Title names no 35=<MT>"; bad=1; continue; }
   for mt in $mts; do
@@ -226,15 +291,47 @@ exit $bad
 Its RED arms, each recorded with what it printed:
 - **positive control, before P7's edits:** on the unedited catalogue it must exit 1 and flag
   exactly the four rows above, and no other row;
-- after P7, on a scratch copy: one ref's token changed to a dictionary that lacks its MsgType
-  (A-030 → `[FIX44]`), and one Title cell given an admin MsgType (`35=A`); each must exit 1.
+- after P7, on a scratch copy, one perturbation per run, each of which must exit 1 with its leg's
+  message: (a) one ref's token changed to a dictionary that lacks its MsgType (A-030 → `[FIX44]`,
+  application-message leg); (b) one Title cell given an admin MsgType (`35=A`, application-message
+  leg); (c) A-030's token changed to `[FIXT11]`, a vendored dictionary that is no Registry
+  application version (registry leg); (d) A-030's token changed to `[FIX51]`, which names no
+  vendored dictionary (file leg). The positive control is the category leg's arm.
 
 After P7 it must exit 0. As a cross-check, where the owner-local FIX Repository 2010 edition has
 the message, the record also shows its `FIX.5.0SP2/Base/Messages.xml` `<CategoryID>`.
 
 The coverage index files CC, CD, CE and CQ under its own "Application Messages — Infrastructure
 (FIX 4.2+)" heading. That heading is the index's grouping, not a Spec ref; 095 leaves the rows
-there (FR-019 edits gap notes only).
+there (FR-019 edits gap notes, plus the one comment below).
+
+**Coverage-index edits (T066), byte for byte:**
+- gap note of each tail MsgType's existing row (its last column): a cell reading `—` becomes
+  `` 095 witness: `TailRows095.<RowId>_<Name>` `` (the row's witness ID of §A); a cell with text keeps
+  it and gains `` ; 095 witness: `TailRows095.<RowId>_<Name>` `` at its end (BN's "A-018 and A-024 are
+  duplicates …" note is the one such cell). No row is added or moved.
+- one line, directly after the closing `-->` of 067's "ART VI §3 DISPOSITION" comment:
+  `<!-- SUPERSEDED (095-tail-evidence-pass, constitution v4.1): message-level Spec refs on application-message rows are governed by Article VI §2 as amended in v4.1, not by §3; the comment above is history. -->`
+
+**B&L delta (T067, FR-013, FR-019, contracts L8), byte for byte**, as a new section at the end of
+the live `spec/behaviors-and-limitations.md`:
+
+```
+## 095-tail-evidence-pass — the 12 FIX 5.0SP2 tail rows close on offline witnesses and one live FIXT cell (2026-10-24)
+
+### Behaviors
+
+- **B-095-1 — one live FIXT.1.1 / FIX.5.0SP2 interop cell carries a typed-built application message.** fixpp, as initiator, sends one 35=BN built by `fixpp::v50sp2::build_ExecutionAck`, and QuickFIX-cpp v1.16.0 (`HP-QFcpp-init-fixt11-fix50sp2-app-bn`) and QuickFIX/J 3.0.1 (`HP-QFj-init-fixt11-fix50sp2-app-bn`) each read it back field by field with their data dictionaries on. fixpp's inbound validation is off on that session (`SessionConfig::validate_inbound_messages`, its default) because of L-041-2: the session validator takes one dictionary. The cell witnesses that one MsgType in that one direction; every other MsgType of the rows A-018, A-023, A-027 … A-033, C-003, N-002 and N-003 closes on its offline witness only (`TailRows095.*`, `tests/session/test_095_tail_rows_roundtrip.cpp`). *(095 FR-009…FR-013; contracts L8.)*
+
+### Limitations
+
+- **L-095-1 — FIX 4.4 BE (UserRequest) and BF (UserResponse) have no typed builder: the `fixpp::v44` codegen excludes them, although `dictionaries/FIX44.xml` defines both as application messages.** Their typed builders are `fixpp::v50sp2`'s, on which N-002 closes. **Re-derive:** `grep -n kN002N003Excluded tools/codegen/fixpp-codegen/emit_builders.cpp`. **Status: follow-up** (fixpp#625: lift the exclusion).
+```
+
+Anything a witness exposes adds rows to this section, none of them written in advance: an exposed
+production defect is an issue first (FR-020) and, if the owner rules that its row still flips, an
+`L-095-<n>` row naming that issue with its status; an exposed fact that is no defect but that a user
+must know is a `B-095-<n>` row. Numbering continues from the rows above.
 
 Measured 2026-10-24 (Gate A round 3 and the post-exhaustion review): the Repository and Orchestra
 agreed for every tail MsgType the Repository has, and the Repository has no CQ.
@@ -371,7 +468,7 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged (fixpp#625).
   Read and unchanged: Article VI §3 covers design-decision rows (`[impl]`/`[constitution]`). It does
     not reach normative message rows; the 067 coverage-index comment that read it so is history, not
-    an amendment. Article VI §6 is unchanged. Article IX §6 is unchanged: its Tier-1 "catalogue
+    an amendment. Article VI §6 is unchanged: feature 095 meets its (a)–(d) as written. Article IX §6 is unchanged: its Tier-1 "catalogue
     consistency check" has no job, a gap recorded in the same follow-up as §2's check (fixpp#626).
   Rationale: in the sources checked, no message category is numbered. The FIX Repository 2010
     edition (Categories.xml) identifies one by CategoryID, SectionID and Volume. The FIX 4.4
@@ -400,13 +497,23 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
 -->
 ```
 
-RATIFIED form, written in the last commit before merge:
+RATIFIED form, written in the last commit before merge. Its slots are `<pr>` (the PR number),
+`<gate-b rounds>` (the Gate B record's round count and final tally) and `<sign-off date>`; the
+placeholder grep of tasks.md's Execution rules is derived from this list. Each round's tally is
+copied from plan `## Gate A`.
 - the header's `— PENDING` becomes `— RATIFIED`;
-- the first paragraph becomes "Article XX §2 sequence observed in order: …", with each round's tally
-  (Codex and Opus post-judging) and "THEN owner sign-off <date>. This header read PENDING until all
-  three had happened.";
-- "Review and sign-off: pending." becomes the rounds, the Gate B rounds on PR #<pr>, and the owner's
-  sign-off date.
+- the first paragraph (from `  Not ratified.` to the line before `  Bump:`) becomes:
+
+```
+  Ratified. Article XX §2 sequence observed in order: a scoped Codex Gate A review of this
+    amendment's clause bodies (feature 095's scoped round 5 on Article VI §2/§5, Codex P1=1 P2=1,
+    Opus post-judging P1=0 P2=2 P3=1; round 6, Codex P1=0 P2=0 P3=0, converged; narrow round 7 on
+    the Article XVIII §7 correction, Codex P1=0 P2=0 P3=0, converged), THEN Gate B on PR #<pr>
+    (<gate-b rounds>), THEN owner sign-off <sign-off date>. This header read PENDING until all three
+    had happened.
+```
+- `  Review and sign-off: pending.` becomes
+  `  Review and sign-off: scoped Codex Gate A rounds 5–7 (above); Gate B on PR #<pr>, <gate-b rounds>; owner sign-off <sign-off date>.`
 
 Only these record lines change at the flip. A change to any of the three amended clause texts (§F.1,
 §F.2, §F.5) after its scoped Gate A round converges needs another scoped round (FR-021).
@@ -422,14 +529,14 @@ onward, is unchanged.
 
 RATIFIED form: `**v4.1 — PENDING** (2026-10-24)` becomes `user-ratified **v4.1** (<sign-off date>)`,
 and `not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off`
-becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7), then Gate B and owner sign-off <date>; amendment PR #<pr>`.
+becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7), then Gate B and owner sign-off <sign-off date>; amendment PR #<pr>` (slots as in §F.3).
 
 ### F.5 Article XVIII §7 — two sentences (owner ruling 2026-10-24)
 
 The owner folded this correction into v4.1. Only the two sentences below change; the rest of the
 clause, which is one line, stays byte-identical. Locate it by `## Article XVIII` and its leading
-`7.`; `grep -F` each before-text and require exactly one match. A narrow scoped Codex Gate A round
-with an Opus judge reviews this section before implement (plan `## Gate A`).
+`7.`; `grep -F` each before-text and require exactly one match. Narrow scoped Codex Gate A round 7
+reviewed this section and converged with no finding (plan `## Gate A`).
 
 Before (the end of the sentence that lists the FIX50-only rows; its bold opening, "The FIX50-only
 rows … are NOT delivered by 069", is unchanged):

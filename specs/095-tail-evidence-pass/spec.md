@@ -37,8 +37,10 @@ to 5.0SP2, and the 12 rows flipped to `done`."
   required fields and required nested groups by the same two rules, starting from the group.
 - **Closure-required set** — per MsgType, the required fields and required groups above. It is the
   **owner's closure bar**, stricter than either engine's own validation: only its **field** leg is
-  QuickFIX's rule (QuickFIX-cpp does not require a component-wrapped group, L-067-1; QuickFIX/J
-  requires the groups its own file flags). Nothing in this feature calls the group leg QuickFIX
+  QuickFIX's rule (QuickFIX-cpp does not require a component-wrapped group: its measured
+  message-level required set, `tools/quickfix_required_golden/golden.csv`, leaves out such a group's
+  count tag; re-check with `grep '^FIX50SP2,BJ,' tools/quickfix_required_golden/golden.csv` against
+  BJ's `NoTradingSessions`(386). QuickFIX/J requires the groups its own file flags). Nothing in this feature calls the group leg QuickFIX
   semantics.
 - **Offline witness** — a test per MsgType: values chosen before the build → typed builder → wire
   bytes → an independent, dictionary-driven parse of `FIX50SP2.xml` → per-field (and per-group-
@@ -113,7 +115,9 @@ in the same PR.
   message.
 - fixpp's generated `validate_<Msg>` does not require a group that the dictionary makes required only
   through its wrapping component (e.g. `TradingSessionListArgs::trading_sessions` is optional). This
-  is QuickFIX-cpp parity (L-067-1) and stays out of scope; the witnesses set those groups anyway.
+  is QuickFIX-cpp parity (the measured `golden.csv` of the Terminology; L-067-1 records the same
+  component-context derivation for fields) and stays out of scope; the witnesses set those groups
+  anyway.
 
 ## Clarifications
 
@@ -227,8 +231,9 @@ in the same PR.
     disclosure of pre-existing non-conformance.
   - The amended clauses still owe a scoped Codex Gate A review (`[const §XX.2]`). *(Superseded
     2026-10-24: scoped rounds 5 and 6 ran on the §VI.2/§VI.5 clauses and converged at round 6; plan
-    `## Gate A`. The §XVIII.7 correction the owner folded in afterwards owes its own narrow scoped
-    round before implement; FR-021.)*
+    `## Gate A`. The §XVIII.7 correction the owner folded in afterwards owed its own narrow scoped
+    round before implement; that round, round 7, converged with no finding (plan `## Gate A`;
+    FR-021).)*
 - Q: What message-level form does the amendment admit? → A: `[DocAbbrev] Category`, designed from
   what the catalogue's message-level rows use and what the sources offer (data-model §F):
   - `DocAbbrev` is a version whose vendored dictionary (`dictionaries/<ver>.xml`) defines every
@@ -430,7 +435,8 @@ test name exists in the tree.
   vendored dictionary's message name (Clarifications, Gate A round 1).
 - **FR-002**: Each witness MUST set every member of its message's closure-required set
   (Terminology), each required group with at least two instances, each instance with all its required
-  members **and the group's delimiter**; and MUST set at least two fields in total. A group's
+  members **and the group's delimiter**; and MUST set at least two fields in total, counted as
+  FR-003's intent entries (a count field is one entry, like any other field). A group's
   delimiter is its first emitted tag in dictionary order, the loader's rule (Clarifications, Gate A
   round 2). When that tag is a nested group's count tag, each instance MUST carry that nested group
   with exactly one instance, which sets the nested group's own delimiter.
@@ -463,15 +469,27 @@ test name exists in the tree.
     `tools/quickfix_required_golden/golden.csv` for every tail MsgType and for 35=E, read from that
     file at test time;
   - deficient NewOrderList (35=E) and StreamAssignmentRequest (35=CC) frames are each reported
-    missing exactly what they lack;
+    missing exactly what they lack. Their expected lists are dictionary facts a reviewer re-derives
+    from `dictionaries/FIX50SP2.xml` with data-model §B's command, not output of the walk;
   - the nested fail-loud fires on MassQuote (35=i);
   - a mutant that removes one required member from one witness, **its setter and its intent entry
     both**, goes RED with the presence check's message (not the readback's).
+
+  No measured source can stand as a positive for the walk's **group** leg or its **per-instance
+  member** leg across the tail set, because neither engine's measured output applies the owner's
+  rule: `golden.csv` leaves out a component-wrapped group's count tag (Terminology), and QuickFIX-cpp's
+  per-group golden `tools/quickfix_required_golden/golden_groups.csv` AND-composes each member with
+  the group's own `required='N'`, so it does not carry the instance rule (re-check:
+  `grep '^FIX50SP2,BJ,"",386,' tools/quickfix_required_golden/golden_groups.csv`). QuickFIX/J's file
+  is another edition, read only by FR-014's verify-time check (research R-1). Those two legs' known
+  positives are therefore the 35=E and 35=CC frames, the synthetic dictionaries and Mutants A and C;
+  this is a stated limit, not a gap closed by a measurement.
 - **FR-004a**: A census MUST show that each of the 23 tail MsgTypes has **exactly one** witness,
   independently of test run order, `--gtest_filter` and `--gtest_shuffle`: it iterates the registered
   tests of suite `TailRows095` (`::testing::UnitTest`), maps each name's generated name to a MsgType
   through the dictionary, and requires multiplicity 1 per tail MsgType, the name's row equal to the
-  row the catalogue gives that MsgType, no unmapped name and no extra MsgType. It collects every
+  row the catalogue gives that MsgType among the 12 tail rows (Terminology; A-024, BN's `dropped`
+  duplicate row, is not a tail row), no unmapped name and no extra MsgType. It collects every
   finding before it asserts, so one run reports all of them. Each witness also asserts that its
   parsed tag 35 equals the MsgType its own name maps to.
 - **FR-005**: The rule and the command that re-derives the closure-required sets MUST be stated in the
@@ -493,7 +511,13 @@ test name exists in the tree.
 - **FR-008**: A session-level cell MUST show that an inbound BE and an inbound BW on an established
   session are delivered to the application callback and not handled as admin messages, using existing
   session test infrastructure and no production-code change. Each leg (BE, BW) MUST be shown able
-  to fail on its own.
+  to fail on its own. The cell's session has inbound validation off (the
+  `SessionConfig::validate_inbound_messages` default) and a registered `Application`: without one,
+  the session sends a non-admin MsgType down its Reject path (`src/session/session.cpp`, the
+  `engine_.application == nullptr` branch after `is_admin_msgtype`). BW is not defined in
+  `FIX44.xml`, so the cell's report names the session's BeginString and dictionary; if BW does not
+  reach `fromApp` on the unmutated fixture, the implementer stops (tasks.md Execution rules) rather
+  than switching fixtures.
 
 **Live FIXT cell (US3)**
 
@@ -503,7 +527,10 @@ test name exists in the tree.
   (owner ruling 2026-10-24), from values fixed before the build.
 - **FR-011**: Each peer MUST parse the message with its own data dictionary on (transport FIXT11,
   application FIX50SP2), and the cell MUST pass only if the peer accepted it and the peer's per-field
-  readback equals fixpp's chosen value for every chosen field.
+  readback of the body equals fixpp's chosen fields exactly: every chosen field read back with its
+  chosen value, and no body field read back that fixpp did not choose (`compare_streams` reports
+  it `spurious`). Header and trailer fields are in neither record (the peers' generic readback
+  enumerates the body).
 - **FR-012**: The cell MUST be shown able to fail: a changed chosen value and a peer-side rejection
   each turn it RED.
 - **FR-013**: fixpp's inbound validation MUST be off on this cell, and the cell's record and the B&L
@@ -531,9 +558,12 @@ test name exists in the tree.
   at close-out. The cell's evidence MUST identify the peer build it ran against: the hello record
   carries the harness's image-digest sentinel unless the lane sets the digest, and the image digest
   each run pulled is recorded (data-model §D).
-- **FR-016**: The cell's evidence MUST be recorded in the interop evidence files under the same
-  schema and gates as the existing live cells; any hand-maintained pin those gates use MUST be
-  updated and its gate shown RED before the update.
+- **FR-016**: The two cells MUST be declared in the interop evidence files under the same schema
+  and gates as the existing live cells: their `tests/interop/cell_results.yaml` template rows keep
+  the status `skip:counterparty-unavailable` on the PR and after the live runs (research R-11), and
+  the cells' pass is recorded in the verify record and the Gate B close-out record, not in those
+  files. Any hand-maintained pin those gates use MUST be updated and its gate shown RED before the
+  update.
 
 **Catalogue and records (US4)**
 
@@ -552,7 +582,9 @@ test name exists in the tree.
     Application`, the words of the Orchestra category they already named in a heading spelling
     (Clarifications, post-exhaustion review).
 
-  These edits land after the amendment (FR-021).
+  These edits land after the amendment (FR-021). A-024 (`dropped(duplicate: same MsgType as
+  A-018)`, version `5.0SP1–5.0SP2`) stays byte-unchanged on purpose, although A-018 narrows: it is
+  not a tail row, and 095 changes no catalogue row but the 12 (SC-004).
 - **FR-021**: `.specify/constitution.md` MUST be amended, v4.0 → v4.1 (`[const §XX.4]` MINOR, no
   `CHANGELOG.md` entry; plan, Constitution Check §XX.4), so that:
   - `[const §VI.2]` admits the message-level form `[DocAbbrev] Category` for a row whose `Title` cell
@@ -573,9 +605,12 @@ test name exists in the tree.
   Further requirements:
   - The amendment lands **before** the catalogue edits of FR-017/FR-018 (`[const §XX.1]`).
   - Its Sync Impact Report and Status line read PENDING until the scoped Codex Gate A rounds on the
-    amended clauses converge (rounds 5–6 for §VI.2/§VI.5, converged at round 6; a narrow round on
-    §XVIII.7, owed before implement), Gate B converges and the owner signs off, in that order. The flip to
+    amended clauses converge (rounds 5–6 for §VI.2/§VI.5, converged at round 6; narrow round 7 on
+    §XVIII.7, converged with no finding), Gate B converges and the owner signs off, in that order. The flip to
     RATIFIED is the last commit before merge (094's FR-003a precedent).
+  - If a row leaves the flip set (FR-020; tasks T085), the §XVIII.7 after-text that names it
+    changes. That is a clause-body change: data-model §F.5 is edited first, then the constitution
+    sentence, and another scoped Codex round runs on it before the flip.
   - After a clause's scoped Gate A round converges, any change to that clause's amended text gets
     another scoped Codex Gate A round before the flip. A change to the amendment's records (Status line, the Sync Impact
     Report outside the clause bodies) needs only Gate B's re-check (094's FR-003d precedent).
@@ -585,11 +620,17 @@ test name exists in the tree.
     states the change, the rationale and the affected rows and specs.
   - `[const §VI.3]`, `[const §VI.6]` and `[const §IX.6]` are not amended.
 - **FR-019**: `spec/coverage-index.md`'s existing row for each tail MsgType MUST name its witness in
-  its gap-note column (no new row), and the B&L files MUST carry the delta: FR-013's disclosure, that
-  FIX 4.4 BE/BF have no typed builder (the v44 exclusion), and anything a witness exposes.
+  its gap-note column (no new row), and one comment naming its superseder MUST follow 067's "ART VI
+  §3 DISPOSITION" comment (the parent repo's issue #310 rule: a superseded decision names its
+  successor in place). The B&L files MUST carry the delta: FR-013's disclosure, that FIX 4.4 BE/BF
+  have no typed builder (the v44 exclusion), and anything a witness exposes. Data-model §E gives the
+  gap-note rule, the comment and the B&L rows as text.
 - **FR-020**: No production source changes (`src/`, non-generated `include/`, codegen). If a witness
   exposes a defect in production code, the defect MUST be filed as an issue and brought to the owner
-  before the affected row is flipped.
+  before the affected row is flipped. If the owner rules that the row does not flip, it leaves the
+  flip set: its catalogue and coverage-index rows stay as on `origin/main`, FR-021's §XVIII.7
+  procedure applies, and SC-001 and SC-004 are read over the rows that do flip and the witnesses of
+  their MsgTypes.
 
 ### Key Entities
 
@@ -605,7 +646,7 @@ test name exists in the tree.
 
 - **SC-001**: 23 of 23 tail MsgTypes have a passing named witness; 0 tail MsgTypes are left with an
   unset required field or required group according to the dictionary-derived check.
-- **SC-002**: Every non-vacuity arm named in FR-004 (the contracts W6 table), FR-004a, FR-008,
+- **SC-002**: Every non-vacuity arm named in FR-004 (the contracts W6 table), FR-004a, FR-007, FR-008,
   FR-012, FR-014 and FR-016, and the records check's own RED run (quickstart §7), has been run and
   recorded RED with its command and the message that fired.
 - **SC-003**: The live cell passes against both QuickFIX peers locally before merge (verify record),
@@ -617,7 +658,9 @@ test name exists in the tree.
   OFFICIAL rows that are neither `done` nor `dropped` drops by 12 between the merge-base and the
   head, and the only rows whose Status differs are the 12 tail rows, re-derived with 094's
   catalogue census (quickstart §7).
-- **SC-005**: No file under `src/`, non-generated `include/` or `tools/codegen/` changes.
+- **SC-005**: No file under `src/`, non-generated `include/` or `tools/codegen/` changes. `include/`
+  holds no generated file (the generated headers are written under `build/<preset>/_codegen/include`),
+  so tasks T006's `git diff --name-only <range> -- src include tools/codegen` names the same set.
 
 ## Assumptions
 
@@ -628,14 +671,18 @@ test name exists in the tree.
   and its GHCR counterparty image are the CI vehicle for the live cell, run by dispatch on `main`
   after merge; it stays advisory, as today.
 - 089's evidence-integrity residual L-089-1 (evidence attests no fixpp revision) applies to the live
-  cell's committed evidence as it does to 089's; this feature does not close it.
+  cell's committed evidence as it does to 089's; this feature does not close it. What ties this
+  feature's evidence to a fixpp revision is outside the committed artifact: each evidence-file and
+  verify-record entry names the library `HEAD` it ran at (tasks.md Execution rules), and the
+  post-merge `interop-live` run on fixpp `main` is recorded by run id (SC-003).
 - The owner rulings quoted in Context are settled and not re-opened by this feature.
 
 ## Out of Scope
 
 - FIX Latest rows A-035..A-065 (FUNCTIONAL TRACK row 3) and `ApplExtID(1156)=303` / version-registry
   re-key (row 4, L-074-1).
-- `validate_<Msg>` enforcing component-required groups (QuickFIX-cpp parity, L-067-1) and enum value
+- `validate_<Msg>` enforcing component-required groups (QuickFIX-cpp parity, measured in
+  `golden.csv`, Terminology; L-067-1 for the field case) and enum value
   domains (L-069-1).
 - A FIX 5.0SP1 typed tier; per-message live sweeps; fixpp validation-on over FIXT (L-041-2).
 - Exporting/installing the typed builder libraries (fixpp#613, running in parallel).
@@ -711,5 +758,6 @@ test name exists in the tree.
   grouped tests and label selection; `[const §XVI.6]`, `[const §XVI.7]` orchestrator role and
   `/simplify`; `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build and its
   resource gate, verify; `[const §XVIII.7]` the v1.0 codegen scope, two of its sentences amended by this feature (FR-021).
-- **B&L:** L-041-2 (FIXT validation, FR-013), L-067-1 (component-wrapped groups), L-069-1 (enum
+- **B&L:** L-041-2 (FIXT validation, FR-013), L-067-1 (component-scope required-ness: the AND
+  composition for fields), L-069-1 (enum
   domains), L-089-1 (evidence attests no fixpp revision).

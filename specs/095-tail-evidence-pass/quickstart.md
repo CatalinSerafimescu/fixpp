@@ -27,8 +27,10 @@ test "$n" -eq 23 || { echo "expected 23 witnesses, listed $n"; exit 1; }
 Expected: every `TailRows095.*` and `TailRows095Census.*` test passes, including the census run
 alone and shuffled. RED arms: the table of clause W6 of contracts/witness-contract.md, one row per
 output. For each mutant row: apply the scratch mutant, rebuild, rerun the filter, record the message
-that fired (it must be the one the row names: W5's for Mutants A and B, W4's for D and H, the
-census's for F, G, I and J, the deficient-frame assertion's for C, L, M and N), revert, `git diff --exit-code`. A census mutant that adds or deletes a
+that fired (it must be the one the row names: W5's for Mutants A and B, W4's for D and H and the
+changed value, the intent-size assertion's for E, the census's for F, G, I, J and O, the tag-35
+assertion's for K, the deficient-frame assertion's for C, L, M, N and P, the golden test's for
+T013's two, and the status assertion of its own test for each detector mutant), revert, `git diff --exit-code`. A census mutant that adds or deletes a
 witness also changes the listed count, so run it with the count assertion above skipped, and record
 that it was.
 
@@ -61,6 +63,10 @@ command grep -q '^\[  PASSED  \] 1 test' "$D/selection.log" || { echo "selection
 # RED arm: without its input the check must FAIL, not skip
 if env -u FIXPP_095_QFJ_DICT_DIR "$B" --gtest_also_run_disabled_tests \
      --gtest_filter='TailRows095Selection.*'; then echo "check passed without its input"; exit 1; fi
+# RED arm: an empty directory (every file missing) must FAIL too, on the per-file load assertion
+E=$(mktemp -d)
+if FIXPP_095_QFJ_DICT_DIR="$E" "$B" --gtest_also_run_disabled_tests \
+     --gtest_filter='TailRows095Selection.*'; then echo "check passed with no files"; exit 1; fi
 ```
 The log carries both axes for the tail set (spec Clarifications, Gate A round 1); it goes in the
 verify record, not in any artifact. The check hard-asserts only BN, and inside the same test it
@@ -75,6 +81,9 @@ ctest --preset linux-clang-debug -N -L '^095$' | sed -n 's/^ *Test *#[0-9]*: //p
   | diff - specs/095-tail-evidence-pass/expected-ctest-095.txt
 ctest --preset linux-clang-debug -L '^095$' --no-tests=error --output-on-failure
 ```
+With no counterparty leased, the interop entry labelled `095`
+(`interop_hp_fixt50sp2_logon_hb_logout_test`) passes with its live cells, the two new ones
+included, SKIPPED. §4's GREEN is therefore no live evidence; §5 is.
 
 ## 5. Live cells (US3), locally, before the fixpp PR is pushed
 
@@ -135,7 +144,10 @@ RED arms:
 - **The fixpp PR's `interop-live`** runs against the pre-095 image. Expected: the build step
   compiles the image's targets, then `ci/run-interop-live.py` fails its coverage reconcile on the
   two new skip-list ids and prints "population reconciliation FAILED -- not running any cell".
-  This is advisory, disclosed in the PR body, and not SC-003 evidence (research R-10).
+  This is advisory, disclosed in the PR body, and not SC-003 evidence (research R-10). It is
+  recorded only after its log is read: the build step succeeded (the 033 FIXT target, with the
+  new source, compiled), and the reconcile failed naming exactly the two new skip-list ids. Any
+  other failure is triaged like a red check, never recorded as this advisory outcome (tasks T088).
 - **After the merge**, in this order:
   1. The one parent commit (harness changes + goldens + gitlink bump) is made, and the orchestrator
      pushes parent `main`.
@@ -145,8 +157,11 @@ RED arms:
   4. Dispatch the fixpp lane: `gh workflow run interop-live.yml --ref main` (it has no `push`
      trigger).
   5. That run must list both new cells as passed. Record its run id and the pulled digest at
-     close-out; the hello carries the `local-build:unpinned` sentinel (data-model §D). If it does
-     not pass, the close-out stops and goes to the owner.
+     close-out; the hello carries the `local-build:unpinned` sentinel (data-model §D). The pulled
+     digest must equal the one step 3 recorded, which shows the run used the republished image;
+     otherwise re-dispatch. Pull that digest locally and `cmp` its `qfcpp-spec/FIX50SP2.xml`
+     against `dictionaries/FIX50SP2.xml` (as §5 does). If the run does not pass, the close-out
+     stops and goes to the owner.
 
 ## 7. Records (US4, SC-004)
 
@@ -162,7 +177,9 @@ that fired:
   - one pin or live-cell ID removed from its row's Tests cell;
   - one corrected Spec ref of each kind reverted (A-033 or C-003 to its old category; A-030 or
     N-003 to its old heading spelling);
-  - the amended §VI.2 sentence removed from the constitution copy.
+  - the amended §VI.2 sentence removed from the constitution copy;
+  - one tail row's Title cell given an extra `35=<MT>` that no witness maps to (the catalogue
+    names a MsgType the TU's literal table lacks).
 
 ```bash
 CAT=${CAT:-spec/feature-catalogue.md}
@@ -189,6 +206,7 @@ done
 col N-002 12 | command grep -q 'fixpp#625' || { echo "N-002: Verified does not name fixpp#625"; exit 1; }
 # every witness: in its row's Tests cell, and named in its MsgType's coverage-index gap note
 n=0
+pairs=
 for t in $(gtests "$B" | command grep '^TailRows095\.'); do
   c=${t#TailRows095.}; rid=$(echo "${c%%_*}" | sed 's/^\([A-Z]\)/\1-/'); name=${c#*_}
   col "$rid" 11 | command grep -qF "$t" || { echo "$t: not in $rid's Tests cell"; exit 1; }
@@ -197,9 +215,18 @@ for t in $(gtests "$B" | command grep '^TailRows095\.'); do
   test "$(awk -F'|' -v m="$mt" '{v=$2; gsub(/ /,"",v)} v==m' "$CI" | wc -l)" -eq 1 || { echo "$mt: not one coverage-index row"; exit 1; }
   awk -F'|' -v m="$mt" '{v=$2; gsub(/ /,"",v)} v==m {print $5}' "$CI" | command grep -qF "$t" \
     || { echo "$mt: gap note does not name $t"; exit 1; }
+  pairs="$pairs$rid $mt
+"
   n=$((n+1))
 done
 test "$n" -eq 23 || { echo "checked $n witnesses"; exit 1; }
+# each row's Title MsgTypes (35=<MT>) are exactly the MsgTypes its witnesses map to, so the TU's
+# literal row table, which the census holds the witnesses to, agrees with the catalogue
+for id in A-018 A-023 A-027 A-028 A-029 A-030 A-031 A-032 A-033 C-003 N-002 N-003; do
+  t=$(col "$id" 5 | command grep -o '35=[A-Za-z0-9]*' | cut -d= -f2 | sort | tr '\n' ' ')
+  w=$(printf '%s' "$pairs" | awk -v r="$id" '$1==r {print $2}' | sort | tr '\n' ' ')
+  test -n "$t" -a "$t" = "$w" || { echo "$id: Title names '$t', its witnesses map to '$w'"; exit 1; }
+done
 # N-002 / N-003 pins and the routing cell resolve in their binaries and sit in the right rows
 for pair in "N-002 BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegistered $P" \
             "N-003 BuilderCompleteness077V50sp2.N003_ApplicationMessageRequestAckReportRegistered $P" \

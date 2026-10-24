@@ -26,11 +26,13 @@ P2=1; Opus P1=0 P2=2 P3=1) and its fixes are applied; narrow scoped round 6 on t
 finding. **Gate A converged** (plan `## Gate A`; FR-021's Codex review of the §VI.2/§VI.5 amendment is discharged).
 *(Superseded in part 2026-10-24: the owner folded a `[const §XVIII.7]` correction into v4.1
 (data-model §F.5). A narrow scoped Codex round on it is owed before implement; plan `## Gate A`.)*
+*(Discharged 2026-10-24: narrow scoped round 7 on §F.5 converged with no finding; plan `## Gate A`.)*
 
 **Preconditions (pipeline steps 6–9, not tasks of this file)**: `/speckit-analyze` has run over spec,
 plan and this file and its CRITICAL/HIGH findings are remediated; `/speckit-checklist-audit` has
 dispositioned every checklist under `specs/095-tail-evidence-pass/checklists/`; the narrow scoped
-Codex round on data-model §F.5 (`[const §XVIII.7]`) has converged, logged in plan `## Gate A`. The
+Codex round on data-model §F.5 (`[const §XVIII.7]`) has converged (round 7, no finding), logged in
+plan `## Gate A`. The
 audit blocks `/speckit-implement`, so it cannot be a task inside the file it gates.
 
 **Tests**: requested — this is an evidence feature, written test-first. Every witness, census,
@@ -73,13 +75,21 @@ run before the audit, in the order T087 → T088 → T104 → T089 → T105.
   A witness that exposes a production defect stops the task: the orchestrator files an issue
   (labelled from `gh label list`) and brings it to the owner before the affected row flips.
 - **Stop rules (plan Risks).** The implementer stops and reports, and does not work around, when: the
-  walk returns a non-`ok` status for a tail MsgType; the parser refuses a deficient frame or reads
-  CC-count2 otherwise than contracts W6 says; a closure-required member has no typed `Args` member;
-  FR-014's check disagrees on BN; the typed builder refuses a build an arm needs. A parse error or a
-  build failure is never recorded as an arm's RED.
-- **Mutant protocol (contracts W6).** Apply the scratch edit; rebuild only the affected target;
+  walk returns a non-`ok` status for a tail MsgType; the parser refuses a deficient frame, or splits
+  E-nodelim, CC-nodelim or CC-count2 into instances otherwise than contracts W6 states (an expected
+  list is never rewritten to fit the parser); the parser refuses a witness frame the typed builder
+  produced (a builder/parser disagreement, FR-020); a closure-required set contains a tag the
+  framing writes (contracts W3); a required group has no string or int member to carry an
+  instance-distinguishing literal (data-model §C); a closure-required member has no typed `Args`
+  member; FR-014's check disagrees on BN; the typed builder refuses a build a witness or an arm
+  needs; an inbound BW does not reach `fromApp` on the unmutated routing fixture (spec FR-008). A
+  parse error or a build failure is never recorded as an arm's RED.
+- **Mutant protocol (contracts W6).** Apply the scratch edit; rebuild only the affected target and
+  show the rebuild took the edit (the build log relinks the target, and the binary's mtime is newer
+  than the edited file's; record both), so a stale binary cannot report the pre-mutant result;
   rerun the task's filter; record the command and the message that fired (it must be the one the
-  task names); revert; `git diff --exit-code` over the touched paths. Mutants are never committed.
+  task names); revert, rebuild the same way; `git diff --exit-code` over the touched paths. Mutants
+  are never committed.
 - **Evidence file (pre-verify).** `/speckit-verify` (T085) writes
   `.specify/decisions/095-tail-evidence-pass-verify.md` whole, replacing what is there. So every
   "record" in a task before T085 goes to `.specify/decisions/095-tail-evidence-pass-evidence.md`
@@ -87,8 +97,8 @@ run before the audit, in the order T087 → T088 → T104 → T089 → T105.
   record. The orchestrator writes it; an implementer task's report carries the entry. Each entry
   names its task ID, the command, its output or the message that fired, and where it ran: the
   library `git rev-parse HEAD` (with `git status --porcelain` empty, or the applied scratch mutant
-  named), and for a run that reads the uncommitted parent harness, `sha256sum` of each harness file
-  the task names. T085 copies its entries into the verify record by hand, under its carry rule. After T085, every task that writes the
+  named), and for a run that reads an uncommitted file (the parent harness, or a fixpp file before
+  its commit), `sha256sum` of each such file. T085 copies its entries into the verify record by hand, under its carry rule. After T085, every task that writes the
   verify record (T089, T091, T092, T093, T103, T105) appends the same text to the evidence file, so a
   `/speckit-verify` re-run copies them in again rather than erasing them.
 - **Builds (`[const §XVII.7]`).** T005's owner ruling covers them, or an `AskUserQuestion` precedes the
@@ -113,8 +123,12 @@ run before the audit, in the order T087 → T088 → T104 → T089 → T105.
   first, stages explicit paths only, and runs `git ls-tree HEAD research/G19-fix-fpml-iso20022/library` after.
 - **No closing keyword.** No commit message or PR body puts "close", "fix" or "resolve" (any form,
   a negation included) next to #462, #613, #625 or #626. This PR closes no issue.
-- **No placeholder number is committed.** Before every commit, `git grep -nE 'fixpp#<|#<pr>|<sign-off date>'`
-  over `spec/` and `.specify/constitution.md` prints nothing new against `origin/main`.
+- **No placeholder number is committed.** The slots are those data-model §E and §F.3 define:
+  `<pr>`, `<gate-b rounds>`, `<sign-off date>` and `<routing TU>`, plus `fixpp#<`. Before every
+  commit, `git grep -nE 'fixpp#<|<pr>|<gate-b rounds>|<sign-off date>|<routing TU>'` over `spec/`
+  and `.specify/constitution.md` prints nothing new against `origin/main`. Its positive control: the
+  same grep over `specs/095-tail-evidence-pass/data-model.md` prints the slot lines. A generic `<…>`
+  pattern cannot replace it: the amended §VI.2 clause itself contains `35=<MT>` and `<DocAbbrev>`.
 - **Text is copied, never paraphrased.** Constitution text comes from data-model §F, catalogue text
   from data-model §E, byte for byte. Before replacing, `grep -F` the before-text; a miss stops the
   edit. Locate clauses by heading and leading number, rows by ID, never by line.
@@ -186,7 +200,7 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
   - a header comment that records the rule (spec Terminology; research R-1) and the re-derivation
     recipe, and no derived count or member list (W7, FR-005);
   - the walk over a loaded `pugi::xml_document` (data-model §B), returning one `WalkResult` per
-    MsgType with status `ok` / `nested_required_group` / `group_among_siblings` (naming the element),
+    MsgType with status `ok` / `nested_required_group` / `delimiter_chain` / `group_among_siblings` (naming the element),
     the closure-required fields and groups, each group's `count_tag`, `delim_tag` (first emitted tag
     in dictionary order, components expanded, the loader's rule in `src/dictionary/xml_loader.cpp`
     `expand_field_list`) and `delim_group`;
@@ -202,7 +216,8 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
 - [ ] T008 (implementer) **CMake for the TU** in `tests/session/CMakeLists.txt`: add the TU to
   `test_077_allversions_builder_roundtrip`; link pugixml if the target does not already; add a compile
   definition naming `tools/quickfix_required_golden/golden.csv`. `tests/session/test_077_allversions_builder_roundtrip.cpp`
-  stays byte-unchanged (FR-006, W8).
+  stays byte-unchanged (FR-006, W8). Before the edit, record the existing binary's
+  `--gtest_list_tests` in the evidence file; T024 compares against it.
 - [ ] T009 (implementer) **The `095` label and its expected set.** `set_property(TEST <name> APPEND PROPERTY LABELS 095)`,
   with a comment in the 092/093 pattern, on `test_077_allversions_builder_roundtrip` and
   `session_pure_tests` (`tests/session/CMakeLists.txt`), `codegen_077_v50sp2_builder_completeness_test`
@@ -219,19 +234,21 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
   row, read from the file at test time and never copied into the TU. GREEN expected. Record the
   command and its `[       OK ]` line in the evidence file.
 - [ ] T011 (implementer) **Deficient frames** `TailRows095Census.KnownPositive_DeficientFrames`
-  (contracts W6): frames E-absent, E-one, E-short, E-member, CC-nodelim, CC-nested, CC-count2 (literal
+  (contracts W6): frames E-absent, E-one, E-short, E-member, E-nodelim, CC-nodelim, CC-nested, CC-count2 (literal
   bytes or typed-builder output, `NewOrderList.hpp` / `StreamAssignmentRequest.hpp`), each asserting
   the exact list `required_members_missing` returns. The 35=E and 35=CC walk statuses are asserted
-  `ok`. **First** confirm and report that the parser accepts every frame and that CC-count2's two
+  `ok`. **First** confirm and report that the parser accepts every frame, that E-nodelim and
+  CC-nodelim open instance 0 without its delimiter as W6 states, and that CC-count2's two
   nested instances parse as one outer instance (`consume_group_extent` / `group_slices_status`,
   `src/wire/offset_table.cpp`); otherwise stop (Execution rules). GREEN expected. Record in the
   evidence file the command, each frame's asserted list as the test states it, and the parser
   confirmation.
 - [ ] T012 (implementer) **Fail-loud known positives**: `TailRows095Census.NestedRequiredGroupFailsLoud_MassQuote`
-  (status `nested_required_group` for 35=i, without breaking `SetUpTestSuite` for the tail set) and
+  (status `nested_required_group` for 35=i and the nested group it names, both literals, without
+  breaking `SetUpTestSuite` for the tail set) and
   `TailRows095Census.WalkStatusesOnSyntheticDictionaries` (inline `load_string` documents S1, a
   required component holding one field and one group → `group_among_siblings` naming the component;
-  S2, a delimiter chain → `nested_required_group` naming the inner group). GREEN expected. Record
+  S2, a delimiter chain → `delimiter_chain` naming the inner group). GREEN expected. Record
   the command and each asserted status with the element it names in the evidence file.
 - [ ] T013 (implementer) **RED arm, field leg.** Scratch: drop one tag from the walk's field set for
   one tail MsgType (e.g. a component-flag check turned off). `"$B" --gtest_filter='TailRows095Census.FieldLegMatchesQuickFixCppGolden'`
@@ -245,12 +262,13 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
   returns `ok`. `--gtest_filter='TailRows095Census.NestedRequiredGroupFailsLoud_MassQuote'` fails
   naming 35=i. Revert, `git diff --exit-code`.
 - [ ] T016 (implementer) **RED arms, synthetic statuses.** Scratch (a): the delimiter-chain check
-  disabled → `WalkStatusesOnSyntheticDictionaries` fails on S2. Scratch (b), separately: the
-  group-among-siblings detector disabled → it fails on S1. Each reverted, `git diff --exit-code`.
+  disabled → `WalkStatusesOnSyntheticDictionaries` fails in S2's status assertion. Scratch (b),
+  separately: the group-among-siblings detector disabled → it fails in S1's status assertion. Each reverted, `git diff --exit-code`.
 - [ ] T017 (implementer) **RED arms, Mutants L, M, N** (one run each, `--gtest_filter='TailRows095Census.KnownPositive_DeficientFrames'`):
   L — only the delimiter leg disabled → CC-nodelim's list loses `1499[0].453`; M — only the
   nested `!= 1` comparison disabled → CC-count2's list comes back empty; N — only the `delim_group`
-  leg's nested-delimiter-absent disjunct disabled → CC-nested's list comes back empty. Each reverted,
+  leg's nested-delimiter-absent disjunct disabled → CC-nested's list comes back empty; P — the field
+  leg no longer skips `delim_tag` → E-nodelim's list carries `73[0].11` twice. Each reverted,
   `git diff --exit-code`.
 - [ ] T018 (implementer) **P0 GREEN run**: `--gtest_filter='TailRows095Census.*'` passes with no
   witness yet (the census test lands in T023); the existing 077 tests in the same binary pass.
@@ -304,7 +322,8 @@ maps to.
 - [ ] T024 [US1] (implementer) **US1 GREEN run** — quickstart §1, as a `bash -e` script: the count
   assertion (`TailRows095.*` lists 23); `--gtest_filter='TailRows095.*:TailRows095Census.*'` passes;
   `TailRows095Census.*` alone passes; `--gtest_shuffle --gtest_repeat=3` passes. The 077 tests of the
-  binary pass (FR-006), and `git diff --exit-code origin/main -- tests/session/test_077_allversions_builder_roundtrip.cpp`
+  binary pass (FR-006): `"$B" --gtest_filter='-TailRows095*'` passes, and its `--gtest_list_tests`
+  equals T008's before-list (the new TU adds only `TailRows095*` suites to the binary). Also `git diff --exit-code origin/main -- tests/session/test_077_allversions_builder_roundtrip.cpp`
   is clean (W8).
 
 ### RED arms (contracts W6; Mutant protocol; record each in the evidence file)
@@ -314,8 +333,10 @@ maps to.
 - [ ] T026 [US1] (implementer) **Mutant H** — in `TailRows095.A018_ExecutionAck`, delete the CumQty(14)
   setter and keep its intent entry → RED in W4 ("intended, not parsed") naming the path; W5 stays
   green.
-- [ ] T027 [US1] (implementer) **Changed literal** — one witness's buffer altered after the build (or
-  its intent literal changed) → RED in W4 naming the path and both values.
+- [ ] T027 [US1] (implementer) **Changed value** — in one witness, after the build and before
+  `make_frame`, one character of one string field's literal in the built buffer changed to another
+  letter, never a count or other structural value (contracts W6) → RED in W4 naming the path and both values. A literal changed before the build is
+  not this arm: both sides would carry it.
 - [ ] T028 [US1] (implementer) **Mutant E** — cut `TailRows095.A029_SecurityListUpdateReport` to one
   field (setters **and** intent entries deleted) → RED in the intent-size assertion, with its message.
 - [ ] T029 [US1] (implementer) **Mutant B** — in `TailRows095.A018_ExecutionAck`, delete the
@@ -324,15 +345,19 @@ maps to.
 - [ ] T030 [US1] (implementer) **Mutant A, and Mutant C on top** — in `TailRows095.A027_TradingSessionList`,
   delete the `trading_sessions` assignment and its intent entries → RED in W5 naming the group. Then,
   with Mutant A still applied, re-apply T014's Mutant C → that W5 RED disappears (the rule, not a
-  list, decides). Record both runs; revert both; `git diff --exit-code`.
+  list, decides). Record both runs in full: in the second, the A-027 witness passes and T014's
+  `NoOrders`(73) deficient-frame assertions fail, which shows Mutant C is active and that the
+  disappearance is its effect, not a second fault. Revert both; `git diff --exit-code`.
 - [ ] T031 [US1] (implementer) **Census Mutant G** — delete `TailRows095.C003_AccountSummaryReport` →
   census RED naming CQ with multiplicity 0.
 - [ ] T032 [US1] (implementer) **Census Mutants F, I, J** (may share one rebuild with T031; the record
-  shows each message; the quickstart §1 count assertion is skipped for these runs, and the record says
-  so): F — duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` → RED naming BN with
+  shows each message; the quickstart §1 count assertion is skipped for the runs of F, I and J, and the
+  record says so): F — duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` → RED naming BN with
   multiplicity 2 **and** the row mismatch (A024 against A-018); I — add `TailRows095.A018_ExecutionAcknowledgement`
   → RED naming the unmapped name; J — add `TailRows095.A001_NewOrderSingle` → RED naming 35=D as
-  extra.
+  extra; O — rename `TailRows095.A027_TradingSessionList` to `TailRows095.A028_TradingSessionList` →
+  RED naming BJ's row mismatch alone (multiplicity stays 1, and the listed count stays 23, so the
+  count assertion runs for O).
 - [ ] T033 [US1] (implementer) **Mutant K** — the name → MsgType lookup returns another tail MsgType
   for one generated name → RED in that witness's tag-35 assertion naming both MsgTypes (the census
   goes RED too).
@@ -360,7 +385,9 @@ maps to.
   (FR-008, R-5) in an existing `session_pure_tests` fixture TU under `tests/session/` (the implementer
   picks it and names it in the report): on an established session, one inbound 35=BE and one 35=BW;
   `Application::fromApp` called once per message with its MsgType, `fromAdmin` not called for
-  them, no Reject sent. The BE and BW assertions are separate, so each leg fails on its own.
+  them, no Reject sent. The BE and BW assertions are separate, so each leg fails on its own. The
+  fixture runs with inbound validation off and a registered `Application` (spec FR-008); the report
+  names the session's BeginString and dictionary. If BW does not reach `fromApp` unmutated, stop.
 - [ ] T039 [US2] (implementer) **US2 GREEN run** — quickstart §2's script (count assertions: 2 pins,
   1 routing cell). Instrument check (CLAUDE.md "prove the instrument can report non-zero"): scratch,
   one pin's expected key changed to a MsgType absent from the registry → that pin fails; revert.
@@ -405,9 +432,12 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   cell; `run_kind="app-message-evidence"`; `arm="validation-off"`; `script_path` the new script); set
   `FIXPP_FIX50SP2_DICT_XML` at the `_run_initiator_cell` launch site; give `_finalize`'s FR-011 check
   a per-cell expected dictionary (`dictionaries/FIX50SP2.xml` for these cells, FIX44 for every
-  other). The tests pass; record the GREEN. Refresh the outside-tree copy.
+  other). The tests pass; record the GREEN. Re-derive the readers of `combo_id` and `run_kind`
+  (contracts L0, Combo and `run_kind` rows) and record each with its effect on the two cells; a
+  reader that is not neutral for them stops the task. Refresh the outside-tree copy.
 - [ ] T045 [P] [US3] (implementer) **Capability minimums** (R-9 item 3): two entries in
-  `phase-9-harness/tools/interop_capability_minimums.yaml`. Refresh the copy.
+  `phase-9-harness/tools/interop_capability_minimums.yaml`, keyed by the two cell ids, with the
+  capability keys and minimum values of the file's `CONV-PROBE-*` entries (contracts L0). Refresh the copy.
 - [ ] T046 [US3] (implementer) **QuickFIX/J A-TESTREQ blocker, RED first** (R-9 item 4; the same
   ruling as T044). Runs **after** T051 and T052's QF-cpp half: it needs the cell, T044/T045's
   registration and T048's **unpatched** jar.
@@ -448,7 +478,8 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
 
 - [ ] T049 [US3] (orchestrator) **Run the selection check** — quickstart §3 as a `bash -e` script:
   the unzip from the `~/.m2` jar T048's build fetched; the run passes (`[  PASSED  ] 1 test`); the
-  input-absent arm (`env -u FIXPP_095_QFJ_DICT_DIR`) FAILS. The printed axes go in the evidence file,
+  input-absent arms FAIL: the variable unset (`env -u FIXPP_095_QFJ_DICT_DIR`), and the variable
+  naming an empty directory. The printed axes go in the evidence file,
   never in an artifact (FR-005). If BN does not pass, stop: the live cell is not built on BN and the
   orchestrator re-selects from the output (plan Risks).
 - [ ] T050 [US3] (implementer) **Selection check, predicate mutant** — scratch: the equality predicate
@@ -491,12 +522,18 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   comparison row; no peer Reject; a clean Logout, which two checks decide, both required:
   `hp::expect_graceful_stop` on the fixpp side (`Engine::stop()` within its bound, `stopped()`
   true) and the harness's `_logout_sync_step`, which on a capture requires the peer's trailing
-  `LOGOUT` transcript line (`_logout_marker_required`). The orchestrator reviews both goldens by hand,
-  confirms each ends with that `LOGOUT` line, and records the review.
+  `LOGOUT` transcript line (`_logout_marker_required`). The orchestrator reviews both goldens by hand
+  against these criteria and records each: the Logon carries BeginString FIXT.1.1 and `1137=9`; one
+  35=BN from fixpp is present; neither side sends a 35=3; the golden ends with that `LOGOUT` line. A
+  golden that fails one is not approved.
 - [ ] T053 [US3] (implementer) **L5 RED arms**, each against both peers, scratch, reverted:
-  (a) one chosen value altered on the send side after the `sent` record is fixed → RED (comparison
-  mismatch); (b) ExecID(17) omitted → the peer rejects → RED (missing readback and/or unexpected peer
-  Reject). If the typed builder refuses (b)'s build, stop (Execution rules). `git diff --exit-code`
+  (a) one value in `ExecutionAckArgs` altered after the `sent` record is fixed, the F-01 literal
+  unchanged → RED (a comparison mismatch naming that field); (b) `args.exec_id` left unset,
+  `build_ExecutionAck` called directly (never `validate_ExecutionAck`) → the peer rejects → RED, the
+  record showing the peer-Reject check's own message naming the peer's 35=3 (a RED from the missing
+  comparison row alone does not count); (c) the `Engine::send` call and the `sent` record skipped →
+  RED in the exactly-one-row condition (contracts L5). If the typed builder refuses (b)'s build, stop
+  (Execution rules). `git diff --exit-code`
   in both trees' touched paths.
 
 ### Evidence files and pins (plan P5)
@@ -584,11 +621,17 @@ delta (plan P7).
   (every before-text `grep -F`-matched first, exactly once), the Status line's PENDING form (§F.4),
   and the PENDING Sync Impact Report block above the v3.0 → v4.0 block (§F.3). No `CHANGELOG.md`
   change (MINOR). Copy only data-model text a converged scoped round has seen: §F.1 and §F.2 as
-  round 6 converged on them, and §F.5 as its narrow scoped round (Preconditions) converged on it; if
-  that round changes §F.5, data-model §F is edited first, then copied. Then
+  round 6 converged on them, and §F.5 as narrow round 7 converged on it. Then
   `command grep -qF 'may instead use the message-level form `[DocAbbrev] Category`' .specify/constitution.md`
   and `command grep -qF 'are application messages, not a session-FSM pair' .specify/constitution.md`
-  both succeed, and `git diff` shows no other changed line in `## Article XVIII`.
+  both succeed, and `git diff` shows no other changed line in `## Article XVIII`. **Byte check per
+  clause**, since each clause is one line and a line diff cannot see a change inside it: write each
+  before-text and after-text of data-model §F.1, §F.2 and §F.5 to its own scratch file, copied from
+  data-model.md, never retyped. (a) §VI.2 and §VI.5: the amended line, extracted by heading and
+  leading number, `cmp`s equal to its after-text file. (b) §XVIII.7: with `old7` the §7 line of
+  `git show origin/main:.specify/constitution.md` and `new7` the working tree's,
+  `python3 -c 'import sys; o,n,b1,a1,b2,a2=(open(f,encoding="utf-8").read().rstrip("\n") for f in sys.argv[1:]); sys.exit(0 if n.count(a1)==1 and n.count(a2)==1 and n.replace(a1,b1).replace(a2,b2)==o else 1)' old7 new7 before1 after1 before2 after2`
+  exits 0. Record both checks; T090 repeats them at its head.
 
 ### Catalogue, coverage index, B&L (after T061)
 
@@ -599,23 +642,26 @@ delta (plan P7).
   generated `ExecutionAck` and live-cell sentence; N-002's and N-003's pin, routing and resend-path
   sentences, R-5). T063 adds the version sentences. The PR cell stays as on `origin/main` until T104.
 - [ ] T063 [US4] (orchestrator) **Version narrowing** (FR-018): FIX version(s) → `5.0SP2` for A-018,
-  A-029, A-030 (Verified adds "FIX 5.0SP1: no typed tier; runtime-XML path only") and N-002 (Verified
-  adds §E's FIX 5.0/5.0SP1 and FIX 4.4 BE/BF sentence, naming `kN002N003Excluded` and fixpp#625).
+  A-029, A-030 and N-002; each Verified cell ends with its version sentence of data-model §E, byte for
+  byte (N-002's names `kN002N003Excluded` and fixpp#625).
 - [ ] T064 [US4] (orchestrator) **Spec-ref corrections** (FR-018): A-030 → `[FIX50SP1] Settlement Instruction`,
   A-033 → `[FIX50SP2] Market Data`, C-003 → `[FIX50SP2] Account Reporting`, N-003 → `[FIX50SP2] Application`.
   Every other Spec ref cell byte-unchanged.
 - [ ] T065 [US4] (orchestrator) **Data-model §E recipe after the edits**: exits 0. Then, on scratch
-  copies (`CAT` under `mktemp -d`), each must exit 1, output recorded: (a) A-030's token changed to
-  `[FIX44]`; (b) one tail row's Title cell given `35=A`. Record the 2010 Repository `<CategoryID>`
+  copies (`CAT` under `mktemp -d`), each must exit 1 with its leg's message, output recorded:
+  (a) A-030's token changed to `[FIX44]`; (b) one tail row's Title cell given `35=A`; (c) A-030's
+  token changed to `[FIXT11]` (registry leg); (d) A-030's token changed to `[FIX51]` (file leg)
+  (data-model §E, RED arms). Record the 2010 Repository `<CategoryID>`
   cross-check where the owner-local edition has the message.
-- [ ] T066 [P] [US4] (orchestrator) `spec/coverage-index.md`: each tail MsgType's existing row names its
-  witness in its gap-note column (no new row, no row moved; CC, CD, CE, CQ stay under
-  "Infrastructure"; FR-019).
-- [ ] T067 [P] [US4] (orchestrator) `spec/behaviors-and-limitations.md` delta (FR-019, contracts L8):
-  the live cell's validation-off disclosure under L-041-2 (FR-013); a B-row naming what the live cell
-  witnesses (one BN from fixpp to each peer, inbound validation off) and that the other 22 tail
-  MsgTypes close offline; FIX 4.4 BE/BF have no typed builder (the v44 exclusion, fixpp#625); anything
-  a witness exposed. Then `python3 "$W/.claude/scripts/check_bl_delta.py" gate --feature 095-tail-evidence-pass`
+- [ ] T066 [P] [US4] (orchestrator) `spec/coverage-index.md`, data-model §E "Coverage-index edits"
+  byte for byte: each tail MsgType's existing row names its witness in its gap-note column by the
+  rule there (no new row, no row moved; CC, CD, CE, CQ stay under "Infrastructure"; FR-019), and the
+  one superseder comment follows 067's "ART VI §3 DISPOSITION" comment; `command grep -cF 'SUPERSEDED (095-tail-evidence-pass' spec/coverage-index.md`
+  prints 1.
+- [ ] T067 [P] [US4] (orchestrator) `spec/behaviors-and-limitations.md` delta (FR-013, FR-019,
+  contracts L8): data-model §E's "B&L delta" section, byte for byte, at the end of the live file
+  (B-095-1: what the live cell witnesses and the validation-off disclosure under L-041-2; L-095-1:
+  FIX 4.4 BE/BF have no typed builder, fixpp#625), plus a row per exposure under §E's rule, if any. Then `python3 "$W/.claude/scripts/check_bl_delta.py" gate --feature 095-tail-evidence-pass`
   passes and `check_bl_citations.py gate` reports 0 dangling (`W=$(git rev-parse --show-superproject-working-tree)`).
 
 ### Records check (quickstart §7) and its perturbations
@@ -638,6 +684,9 @@ delta (plan P7).
   old heading spelling → RED.
 - [ ] T076 [US4] (orchestrator) Perturbation, scratch `CONST`: the amended §VI.2 sentence removed →
   RED ("§VI.2 is not amended").
+- [ ] T076a [US4] (orchestrator) Perturbation, scratch `CAT`: one tail row's Title cell given an extra
+  `35=<MT>` that no witness maps to → RED ("Title names …, its witnesses map to …"), the check that
+  ties the TU's literal row table to the catalogue.
 - [ ] T077 [US4] (orchestrator) **SC-004 census**: T004's `catalogue_census.py` on the merge-base's
   catalogue and on the head's; OFFICIAL open falls by 12, done rises by 12, and `--list` differs only
   in the 12 tail rows. Every output in the evidence file.
@@ -656,7 +705,8 @@ delta (plan P7).
 - [ ] T079 (orchestrator) **Run `/simplify`** on the implementation diff (`git diff origin/main..HEAD -- tests`
   and the uncommitted parent harness diff). The orchestrator triages; `phase-implementer` applies
   in-scope fixes (parent edits stay uncommitted, copy refreshed). A change to the witness TU re-runs
-  T024 and the W6 arms its edit touches; to the routing cell, T040–T041; to the live cell, T052–T053.
+  T024 and the W6 arms its edit touches; to the routing cell, T040–T041; to the live cell, T051's
+  `--gtest_list_tests` check, then T052–T053.
   Record the triage in the evidence file.
 
 ### Instruments (each with its known positive)
@@ -694,9 +744,14 @@ delta (plan P7).
   It writes `.specify/decisions/095-tail-evidence-pass-verify.md`, replacing the file. The skill has
   no import step: the orchestrator copies the evidence file's entries into the skill's Step 3a
   (load-bearing witnesses) buffer by hand, each entry marked re-run or carried. **Carry rule:** an arm recorded at library SHA `s` is carried
-  only if `git diff --name-only s..<verified head>` lists none of the files its task names, and, for
-  an arm that read the parent harness, the `sha256sum` of each harness file it names is unchanged;
-  otherwise it is re-run at the verified head. The record lists, per arm, "re-run at `<head>`" or
+  only if `git diff --name-only s..<verified head>` lists none of: the files its task names; the
+  source file its test lives in (for every W6 arm, `tests/session/test_095_tail_rows_roundtrip.cpp`);
+  and its binary's transitive inputs (`dictionaries/`, `tests/support/`, every `CMakeLists.txt`,
+  `cmake/`, `src/`, `include/`, `tools/codegen/`). An arm that ran on an uncommitted file (the live
+  cell before C-US3, the parent harness) is carried only if the `sha256sum` recorded at the run for
+  each such file equals the file's at the verified head. Otherwise it is re-run at the verified
+  head. So T043's edit of the witness TU, landing in C-US3 after C-US1, re-runs every arm of
+  T010–T034 at the verified head, and so does any T079 or Gate B edit of that TU. The record lists, per arm, "re-run at `<head>`" or
   "carried from `<s>`". Its evidence:
   - quickstart §1 (T024), §2 (T039), §3 (T049), §4 (`ctest -L '^095$' --no-tests=error` against
     `expected-ctest-095.txt`), §5 (T057's local live run and its peer identities), §7 (T068) and
@@ -704,8 +759,9 @@ delta (plan P7).
   - the GREEN known positives with their commands and asserted lists or statuses: T010–T012;
   - every RED arm, with its GREEN pair where its task has one, its command and the message that
     fired: T013–T017, T025–T034, T039's
-    instrument check, T040–T041, the harness RED-firsts of T044, T046 and T047, T049–T050, T053,
-    T054, T055a, T055, T055b, T056, T059–T060, T065, T069–T076 (SC-002);
+    instrument check, T040–T041, the harness RED-firsts of T044, T046 and T047, T049–T050 (both
+    input-absent arms), T053 (arms a–c), T054, T055a, T055, T055b, T056, T059–T060, T065 (a–d),
+    T069–T076a (SC-002);
   - T080–T084's results; coverage `[const §IX.1]` n/a per touched module (no library line);
   - MSVC stated plainly as not run locally, and each skipped preset with its waiver;
   - **one FULL `ctest --preset linux-clang-debug --output-on-failure --no-tests=error`, run LAST**, on a
@@ -744,7 +800,9 @@ delta (plan P7).
 - [ ] T088 (orchestrator) **Re-run T080–T082 as the last action, then push and open the PR without
   gate labels**: `git push -u origin 095-tail-evidence-pass`; `gh pr create` with T087's title and
   body. Read `closingIssuesReferences` (empty) and record the PR number. Read the ungated checks; a red
-  one goes back through the fixer. The PR's `interop-live` result is recorded as advisory. T104
+  one goes back through the fixer. The PR's `interop-live` result is recorded as advisory only after
+  its log is read (quickstart §6): the build step succeeded, and the reconcile failed naming exactly
+  the two new skip-list ids; any other failure is triaged like a red check. T104
   follows (it needs the PR number).
 - [ ] T089 (orchestrator) **Verify-delta check and the pre-audit tick commit**, after T104's C-PRCELL:
   `git diff --name-only <T085 full-ctest SHA>..HEAD` lists only `spec/` and `specs/` paths; the
@@ -766,7 +824,8 @@ delta (plan P7).
   then re-run T080–T084 and record the new base. Preconditions: T085 non-RED, T105's `## Completeness`
   present, `check_bl_delta.py gate` green. Fixer: `phase-implementer` for code/test findings, the
   orchestrator for docs; a parent-harness fix stays uncommitted (copy refreshed). After a fix that
-  touches a non-docs path, re-run the affected arms and T085's full `ctest` command last, under the
+  touches a non-docs path, re-run the affected arms (for the live cell's source, T051's
+  `--gtest_list_tests` check first) and T085's full `ctest` command last, under the
   same pre-checks (the command alone, appended to the verify record and the evidence file; a full
   `/speckit-verify` re-run instead copies the evidence file's entries in again, Execution rules). Gate B also
   reviews the PENDING amendment text. The Gate B record carries the B&L delta
@@ -784,7 +843,9 @@ delta (plan P7).
 - [ ] T093 (orchestrator) **Sign-off packet, then ASK THE OWNER** for the Art. XX §2 sign-off: the
   amended §VI.2 and §VI.5 and the corrected §XVIII.7 sentences, the PENDING SIR and Status line as on the PR head, the Gate A tallies
   (including the scoped amendment rounds), Gate B's rounds, and the RATIFIED-form text T095 will write
-  (data-model §F.3, §F.4). Nothing in T094–T097 runs until the owner answers explicitly. A request to
+  (data-model §F.3, §F.4). Gate A's "convergence counts as sign-off" rule (plan `## Gate A`, round
+  6) signs off the Gate A design review only; it does not discharge this Article XX §2 sign-off.
+  Nothing in T094–T097 runs until the owner answers explicitly. A request to
   change clause text goes back through T090. Record the answer and its date in the verify and Gate B
   records.
   - *Open at the audit — waiver: Art. XX §2 orders it after Codex Gate A and Gate B.*
@@ -794,9 +855,9 @@ delta (plan P7).
   - *Open at the audit — waiver: after T093.*
 - [ ] T095 (orchestrator) (after sign-off) **Commit C-RATIFY, the LAST commit before merge**
   (FR-021): `.specify/constitution.md` only — the SIR to data-model §F.3's RATIFIED form (header
-  `— RATIFIED`; first paragraph "Article XX §2 sequence observed in order: …" with each round's tally and
-  the sign-off date; "Review and sign-off" filled with the rounds, Gate B rounds on PR #<n>, sign-off
-  date) and the Status line to §F.4's RATIFIED form. Only these record lines change. The multi-line
+  `— RATIFIED`; the first paragraph and "Review and sign-off" replaced by §F.3's literal RATIFIED
+  text with its slots `<pr>`, `<gate-b rounds>` and `<sign-off date>` filled) and the Status line to
+  §F.4's RATIFIED form. Only these record lines change. The multi-line
   paragraph is anchored by position (SIR header line to the line before `  Bump:`), printed with
   `sed -n` and confirmed before replacing. `git fetch origin` first; if `origin/main` moved, repeat
   T091's integration so C-RATIFY stays last. Checks on the flip head: the placeholder grep (baseline
@@ -805,7 +866,9 @@ delta (plan P7).
   - *Open at the audit — waiver: only after the owner's sign-off.*
 - [ ] T096 (orchestrator) **Body → labels → push last.** Labels (owner ruling 2026-10-24, the 094
   precedent): `gate-a-done`, with the Gate A convergence record, and `gate-b-waived`, because the
-  verify verdict is YELLOW by construction (T085's pre-recorded waivers), with the waiver
+  verify verdict is YELLOW by construction (T085's pre-recorded waivers). The label records that
+  verify consequence only: Gate B itself still runs and converges (T091), and the body's Gate B
+  section reports its outcome, so the label does not mean Gate B was skipped. The waiver
   rationales in the verify record and under the body's literal `## Gate B — waived` heading (T087). A
   RED verdict at this head → no label, and the owner is told. First edit the body to its final form
   (sign-off date, verified SHA, Gate B outcome replacing `Gate B: pending.`, which `grep -cF` must then
@@ -816,7 +879,9 @@ delta (plan P7).
   - *Open at the audit — waiver: after T095.*
 - [ ] T097 (orchestrator) **Merge (owner-driven) and the fixpp close-out.** Before merging,
   `closingIssuesReferences` empty and all three tiers plus both gate checks green on the C-RATIFY
-  head; if `--admin` is needed, give the owner a one-line `!` command with `--body-file`. After the
+  head. The sanitizer jobs (`linux-clang-{asan,ubsan,tsan}`) of the first labelled run are read:
+  each ran the `095`-labelled entries (they appear in its log) and passed; a sanitizer report is a
+  defect until disproven and is triaged before merge, whatever the leg's waiver says. If `--admin` is needed, give the owner a one-line `!` command with `--body-file`. After the
   merge, `.specify/close-out.md` §3's table in the Gate B record, every row DONE or N/A:<reason>: row 5
   labels read back; row 9 none closed, #462, #613, #625, #626 read OPEN; row 16 the main checkout
   reset (`git switch main && git merge --ff-only origin/main`, only if this tree's branch is this PR's
@@ -834,18 +899,25 @@ delta (plan P7).
   the merge). `git fetch`; check `git diff --cached --name-only` holds nothing that is not ours;
   stage with `git add` (explicit paths), commit **without** a pathspec; then `git ls-tree HEAD research/G19-fix-fpml-iso20022/library`
   equals `git -C research/G19-fix-fpml-iso20022/library rev-parse HEAD` and `git cat-file -t` says `commit`.
+  In the "alone" case, first prove the gitlink already contains the merge:
+  `git -C research/G19-fix-fpml-iso20022/library merge-base --is-ancestor <095 squash SHA> <gitlink SHA>`
+  exits 0, with the gitlink SHA read from `git ls-tree HEAD research/G19-fix-fpml-iso20022/library`.
   - *Open at the audit — waiver: post-merge (owner ruling "Keep #462").*
 - [ ] T100 (orchestrator) **POST-MERGE: push parent `main`** (owner authorization 2026-10-24; it
   carries any unpushed parent commits): `ls-tree` re-checked first; then `harness-tests` green on that
   commit; wait for `publish-counterparties` and record the image digest; re-dispatch the parent
-  `interop-matrix` if its push run started before the publish finished, and record the post-publish
-  run.
+  `interop-matrix` if its push run started before the publish finished, decided by comparing the
+  push run's `createdAt` with the publish run's completion time (`gh run view <id> --json
+  createdAt,updatedAt,conclusion` on each), and record the post-publish run.
   - *Open at the audit — waiver: post-merge.*
 - [ ] T101 (orchestrator) **POST-MERGE: dispatch `interop-live` on fixpp `main`** (`gh workflow run interop-live.yml --ref main`;
   it has no `push` trigger). It must list `HP-QFcpp-init-fixt11-fix50sp2-app-bn` and
   `HP-QFj-init-fixt11-fix50sp2-app-bn` as passed. Record the run id and the pulled image digest in
-  the Gate B record's close-out table (the hello carries `local-build:unpinned`, data-model §D). If
-  either cell does not pass, the close-out stops and goes to the owner (SC-003).
+  the Gate B record's close-out table (the hello carries `local-build:unpinned`, data-model §D). The
+  pulled digest must equal T100's published one, which shows the run used the republished image;
+  otherwise re-dispatch. Pull that digest locally and `cmp` its `qfcpp-spec/FIX50SP2.xml` against
+  `dictionaries/FIX50SP2.xml` (quickstart §6). If either cell does not pass, the close-out stops and
+  goes to the owner (SC-003).
   - *Open at the audit — waiver: post-merge.*
 - [ ] T102 (orchestrator) **POST-MERGE: parent bookkeeping** — parent `REMAINING-WORK.md` FUNCTIONAL
   TRACK row 2 marked done; `phases/phase-4.md` dashboard; a project memory note with its `MEMORY.md`
@@ -865,12 +937,14 @@ delta (plan P7).
   themselves land in US4 (T062–T064, C-RECORDS), because quickstart §7 and `/speckit-verify` must see
   them; this task fills what could not exist then and re-checks the rest:
   - fill the PR cell of the 12 rows with T088's PR number, commit C-PRCELL (`spec/feature-catalogue.md`
-    only, placeholder grep first);
+    only, placeholder grep first); `git diff --word-diff HEAD~1 HEAD -- spec/feature-catalogue.md`
+    on C-PRCELL shows only the PR cell of the 12 rows changed;
   - extract each of the 12 rows and diff it against data-model §E: Status `done`, `/specify`, PR,
     Tests (the data-model §A witness IDs, the N-002/N-003 pins and routing cell, A-018's live cells),
     Verified (the offline-bar sentence; A-018's live cells and `ExecutionAck`; the four narrowed rows'
     "no typed tier" sentences; N-002's `kN002N003Excluded` / fixpp#625 sentence); the four FR-018
-    Spec refs; every other column byte-identical to `origin/main`;
+    Spec refs; every other column byte-identical to `origin/main`. The diff has a known positive
+    first: on a scratch copy with one character of one Verified cell changed, it reports that row;
   - `spec/coverage-index.md`: each of the 23 tail MsgTypes' existing row names its witness in its
     gap-note column (quickstart §7's coverage-index loop), and no row was added;
   - re-run quickstart §7 and data-model §E's recipe on the C-PRCELL head: both pass.
@@ -915,7 +989,7 @@ delta (plan P7).
   half → T053; T054 (needs T044, T047) → T055a → T055 → T055b → T056 → T057 → T058.
 - **US4 (T059–T078)**: after T058 (T062 cites test IDs that must exist; T068 resolves the live-cell IDs
   in the uncommitted `CELLS`). T059 ‖ T060 → **T061 (C-AMEND) before every catalogue edit** → T062 →
-  T063 → T064 → T065; T066 ‖ T067 after T061; T068 after T062–T067 → T069…T076 → T077 → T078.
+  T063 → T064 → T065; T066 ‖ T067 after T061; T068 after T062–T067 → T069…T076a → T077 → T078.
 - **Polish**: T079 → T080–T084 (parallel) → T085 → T086 → T087 → T088 → **T104** → T089 → **T105** →
   T090 → T091 → T092 → **T093 (owner)** → T094 → **T095 (last commit)** → T096 → T097 → T098 → T099 →
   T100 → T101 → T102, T103.
