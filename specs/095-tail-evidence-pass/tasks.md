@@ -469,6 +469,10 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
     Rebuild the jar (`mvn … package -DskipTests`, detached, marker). Refresh the copy.
   - **GREEN:** the same command; the recorded symptom is absent. The QFJ cell's capture and its full
     pass are T052's second half.
+  - *(2026-10-24, premise correction, orchestrator ruling: the RED's predicted sequence did not show,
+    because the cell logs out within the induction's 800 ms sleep; the observed symptom, a stray
+    `OUT 0` after the peer's `LOGOUT` line, is the RED. See the evidence file, Phase 5, "T046 premise
+    correction".)*
 - [ ] T047 [US3] (implementer) **`emit_matrix` `run_kind` handling, test-first** (R-9 item 6; L0
   rows Select, Select `--conversation-only`, Promote, N2, Registration; the same ruling as T044).
   After T044: its tests need the two cells registered, so that each RED is the rule's and not an

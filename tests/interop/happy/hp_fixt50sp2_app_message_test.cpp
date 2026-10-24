@@ -25,6 +25,8 @@
 // passes; no Reject(35=3) from the peer; Engine::stop() completes (hp::expect_graceful_stop). The
 // harness adds the peer's trailing LOGOUT transcript line. After Engine start every check is
 // non-fatal until the engine has stopped, so a failure reports instead of aborting in ~Engine.
+// Peer Rejects are read from the peer's own transcript (`OUT 3` / `OUT j` lines), because fixpp
+// does not dispatch an inbound Reject to fromAdmin; tracked as fixpp#612.
 //
 // Counterparty-required (FR-023): absent ⇒ GTEST_SKIP through INTEROP_REQUIRE_COUNTERPARTY, the
 // first statement that can skip or return.
