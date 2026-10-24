@@ -1159,6 +1159,20 @@ git grep -n -i -E 'unexported|never exported|stay unexported|NO install\(\)|buil
 "of the 18 export members, 13 are STATIC", the respelling v0.2's recipe (`13 of the 18` only) could not match. The
 recipe is lexical, so it is backed by `check-comment-claims.py` and by reading each changed region.
 
+**F6 has a respelling the recipe above misses** (Gate B round 1, Codex #1 and N-1). The count is written as a number
+followed by "members" or "STATIC", in the binding `.specify/` documents as well as in comments:
+
+```
+git grep -n -i -E '[0-9]+ members|[0-9]+ STATIC|(eighteen|thirteen) (export )?members' \
+  -- .specify/architecture.md .specify/api-contract.md CMakeLists.txt cmake docs tests/consumer tests/packaging \
+     specs/084-packaging-cpack-export/contracts specs/078-precompiled-builder-libs/contracts
+```
+
+Known positive: run on `0ed8b197` (2026-10-24), it reports `.specify/architecture.md`'s §7.4 banner ("Delivered export
+set: 18 members — 13 STATIC …") and its "The delivered export set is 18 members" list, and `.specify/api-contract.md`'s
+target-kind row ("13 STATIC"). Every hit is adjudicated at the Gate B round-1 head; the adjudication is in the
+parent's `613-builders-export-evidence.md`.
+
 **F8 has spellings of its own** (the facts above cannot find it, because before R-2a nothing in the export or layout
 varied with the build type):
 
