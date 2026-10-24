@@ -93,7 +93,11 @@ Nothing about the result is written into the TU or any artifact (FR-005).
 enumeration W4 uses (each entry attributed by extent, research R-4). Its signature has no MsgType
 parameter, so no caller can pass one; and because the 35=E and 35=CC frames go through the same call
 in one test (`KnownPositive_DeficientFrames`), a helper that used any fixed MsgType would return a
-wrong list for one of them. It returns:
+wrong list for one of them. It returns an **ordered sequence** of paths (a `std::vector`, never a
+set), duplicates kept. The order is leg-major: the legs in the order of the list below; within a
+leg, instances in wire order, and within one instance or at message level, the walk's dictionary
+order with components expanded. Duplicates are kept so a path reported by two legs shows twice: a
+set would collapse it, and Mutant P could not fire. Each item of the sequence is:
 - each `fields` tag absent at message level;
 - each required group absent from the frame;
 - each group whose count value is below 2;
@@ -118,15 +122,15 @@ Each missing path is reported **once**, by exactly one leg:
 
 So each leg, each disjunct of the `delim_group` leg and the once-only rule has a frame on which it
 alone fires (contracts W6: E-nodelim, CC-nodelim, CC-count2, CC-nested). Each item names its path
-(`<tag>`, `<count_tag>`, `<count_tag>[<k>].<tag>`), so a known-positive assertion compares exact
-lists.
+(`<tag>`, `<count_tag>`, `<count_tag>[<k>].<tag>`), so every known-positive assertion, and Mutant
+P's, compares the returned sequence exactly, in that order and with its duplicates.
 
 The deficient frames' expected lists are dictionary facts. Re-derive them from the message and the
 components it references: `sed -n "/<message name='<Name>'/,/<\/message>/p" dictionaries/FIX50SP2.xml`,
 then `sed -n "/<component name='<Comp>'>/,/<\/component>/p" dictionaries/FIX50SP2.xml` for each
 component on the path (`NewOrderList` → `ListOrdGrp`; `StreamAssignmentRequest` → `StrmAsgnReqGrp`
-→ `Parties`), applying R-1's rules by hand. They are written from that reading, never pasted from
-the walk's output.
+→ `Parties`), applying R-1's rules by hand and ordering the paths by the sequence rule above. They
+are written from that reading, never pasted from the walk's output.
 
 The field leg's known positive reads `tools/quickfix_required_golden/golden.csv` (rows
 `FIX50SP2,<MsgType>,"<tags>"`) through a compile definition on the target, for the 23 tail
@@ -308,8 +312,7 @@ there (FR-019 edits gap notes, plus the one comment below).
 **Coverage-index edits (T066), byte for byte:**
 - gap note of each tail MsgType's existing row (its last column): a cell reading `—` becomes
   `` 095 witness: `TailRows095.<RowId>_<Name>` `` (the row's witness ID of §A); a cell with text keeps
-  it and gains `` ; 095 witness: `TailRows095.<RowId>_<Name>` `` at its end (BN's "A-018 and A-024 are
-  duplicates …" note is the one such cell). No row is added or moved.
+  it and gains `` ; 095 witness: `TailRows095.<RowId>_<Name>` `` at its end. No row is added or moved.
 - one line, directly after the closing `-->` of 067's "ART VI §3 DISPOSITION" comment:
   `<!-- SUPERSEDED (095-tail-evidence-pass, constitution v4.1): message-level Spec refs on application-message rows are governed by Article VI §2 as amended in v4.1, not by §3; the comment above is history. -->`
 
@@ -529,7 +532,7 @@ onward, is unchanged.
 
 RATIFIED form: `**v4.1 — PENDING** (2026-10-24)` becomes `user-ratified **v4.1** (<sign-off date>)`,
 and `not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off`
-becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7), then Gate B and owner sign-off <sign-off date>; amendment PR #<pr>` (slots as in §F.3).
+becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then narrow round 7 on Article XVIII §7), then Gate B and owner sign-off <sign-off date>; amendment PR #<pr>` (slots as in §F.3).
 
 ### F.5 Article XVIII §7 — two sentences (owner ruling 2026-10-24)
 

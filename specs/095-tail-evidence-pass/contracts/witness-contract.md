@@ -47,7 +47,9 @@ It also asserts that the intent list holds at least two entries.
 **W5 — required presence.** `required_members_missing(...)` (data-model §B) takes the MsgType from
 the parsed frame's tag 35 and reads W4's enumeration, so message-level and per-instance entries are
 attributed by extent, never by first occurrence. It returns the closure-required members it did not
-find, each with its path, and the witness asserts that list is empty, printing it otherwise.
+find, each with its path, as an ordered sequence with duplicates kept, in data-model §B's leg order;
+the witness asserts that sequence is empty, printing it otherwise. Every known positive below, and
+Mutant P, compares the sequence exactly (order and duplicates included).
 
 **W6 — non-vacuity: one arm per output (recorded at verify with the command and the message that
 fired).** Every status the walk can return, every direction of W4's comparator, every leg of W5's
@@ -82,7 +84,7 @@ names it); a RED from another assertion, a compile error or a parse error is not
 | W5 instance delimiter | frame CC-nodelim: 35=CC with `1499=2`, instance 0 carrying only its `NoRelatedSym` group and no `NoPartyIDs` | the exact list (`1499[0].453`), reported once, by the delimiter leg; the `delim_group` leg is silent, because the nested count tag is absent (data-model §B) |
 | W5 instance delimiter, alone | **Mutant L**: disable only the delimiter leg | RED on CC-nodelim (the list loses `1499[0].453`); no other leg reports that path |
 | W5 once-only rule (a delimiter that is also a required instance field) | frame E-nodelim: 35=E with `73=2`, instance 0 carrying its other members but no `ClOrdID`(11), the shape of CC-nodelim | the exact list (`73[0].11`), reported once, by the delimiter leg |
-| W5 once-only rule, alone | **Mutant P**: the field leg no longer skips `delim_tag` | RED on E-nodelim (the list carries `73[0].11` twice) |
+| W5 once-only rule, alone | **Mutant P**: the field leg no longer skips `delim_tag` | RED on E-nodelim (the sequence carries `73[0].11` twice; duplicates are kept because a set would collapse them and this arm could not fire) |
 | W5 delimiter's nested group, delimiter absent | frame CC-nested: instance 0 carries `453=1` and a PartyIDSource(447) but no PartyID(448) | the exact list (`1499[0].448`), reported by the `delim_group` leg's second disjunct alone (the count is present and equals 1; the delimiter leg sees 453) |
 | W5 delimiter's nested group, count ≠ 1 | frame CC-count2: 35=CC, `1499=2`, instance 0 carrying `453=2` with two complete 448-delimited nested instances, instance 1 well-formed | the exact list (`1499[0].453`), reported by the `delim_group` leg's first disjunct alone (the count is present; both nested instances carry 448) |
 | W5 nested count ≠ 1, alone | **Mutant M**: disable only the `!= 1` comparison | RED on CC-count2 (the list comes back empty) |
@@ -95,12 +97,14 @@ names it); a RED from another assertion, a compile error or a parse error is not
 | census extra MsgType | **Mutant J**: add `TailRows095.A001_NewOrderSingle` | RED naming 35=D as extra |
 | W1 per-witness tag 35 | **Mutant K**: the name → MsgType lookup returns, for one generated name, another tail MsgType (scratch) | RED in that witness's tag-35 assertion, naming both MsgTypes (the census goes RED too) |
 
-All frames (E-*, CC-*) live in `KnownPositive_DeficientFrames` and assert the exact list
-`required_members_missing` returns. They are literal bytes or typed-builder output. The implementer
+All frames (E-*, CC-*) live in `KnownPositive_DeficientFrames` and assert the exact sequence
+`required_members_missing` returns (W5). They are literal bytes or typed-builder output. The implementer
 confirms in P0 that the parser accepts each frame. If it refuses one, or splits E-nodelim, CC-nodelim or CC-count2 into instances otherwise than
 this table states, the leg that frame serves cannot be reached from a parsed frame: the implementer stops and reports, and a parse error is never
-recorded as that leg's RED. Mutants F, G, I, J and O may share one rebuild, because the census reports
-every finding; the record must show each one's message. CC-count2's two nested instances parse as
+recorded as that leg's RED. Mutants F, G, I and J may share one rebuild, because the census reports
+every finding; the record must show each one's message. Mutant O gets its own rebuild, applied
+alone: its RED is a row mismatch with no multiplicity finding and a listed count of 23, which F, G,
+I or J beside it would change. CC-count2's two nested instances parse as
 one outer instance: `consume_group_extent` consumes the nested 453 extent through `consume_one`, and
 `group_slices_status` splits on the outer delimiter only at the outer level (`src/wire/offset_table.cpp`).
 The implementer confirms that reading in P0, under the same stop rule.

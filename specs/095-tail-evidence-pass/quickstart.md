@@ -188,6 +188,10 @@ CONST=${CONST:-.specify/constitution.md}
 B=build/linux-clang-debug/bin/test_077_allversions_builder_roundtrip
 P=build/linux-clang-debug/bin/codegen_077_v50sp2_builder_completeness_test
 S=build/linux-clang-debug/bin/session_pure_tests
+# the flip set: the one list every check below reads; a row leaving it (tasks T085) is removed here
+FLIP="A-018 A-023 A-027 A-028 A-029 A-030 A-031 A-032 A-033 C-003 N-002 N-003"
+test -n "$FLIP" || { echo "empty flip set"; exit 1; }
+in_flip() { case " $FLIP " in *" $1 "*) return 0 ;; esac; return 1; }
 gtests() { "$1" --gtest_list_tests | awk '/^[^ ]/{s=$1} /^  /{print s $1}'; }
 # column $2 of the catalogue row with ID $1; fails unless exactly one row has that ID and it splits
 # into its 11 columns (13 fields with the empty edges), so a literal '|' in a cell cannot shift it
@@ -195,20 +199,24 @@ col() {
   awk -F'|' -v want="$1" -v c="$2" '{id=$2; gsub(/ /,"",id)} id==want {n++; nf=NF; v=$c}
     END {gsub(/^ +| +$/,"",v); if (n!=1 || nf!=13) exit 1; print v}' "$CAT"
 }
-for id in A-018 A-023 A-027 A-028 A-029 A-030 A-031 A-032 A-033 C-003 N-002 N-003; do
+for id in $FLIP; do
   v=$(col "$id" 8) || { echo "$id: not exactly one well-formed row"; exit 1; }
   test "$v" = done || { echo "$id: Status is '$v', not done"; exit 1; }
 done
 for id in A-018 A-029 A-030 N-002; do
+  in_flip "$id" || continue
   v=$(col "$id" 6) || { echo "$id: not exactly one well-formed row"; exit 1; }
   test "$v" = 5.0SP2 || { echo "$id: version is '$v', not 5.0SP2"; exit 1; }
 done
-col N-002 12 | command grep -q 'fixpp#625' || { echo "N-002: Verified does not name fixpp#625"; exit 1; }
-# every witness: in its row's Tests cell, and named in its MsgType's coverage-index gap note
+! in_flip N-002 || col N-002 12 | command grep -q 'fixpp#625' || { echo "N-002: Verified does not name fixpp#625"; exit 1; }
+# every witness of a flipping row: in its row's Tests cell, and named in its MsgType's coverage-index
+# gap note; a non-flipping row's witnesses stay (FR-004a) and are counted as skipped, not checked
 n=0
+s=0
 pairs=
 for t in $(gtests "$B" | command grep '^TailRows095\.'); do
   c=${t#TailRows095.}; rid=$(echo "${c%%_*}" | sed 's/^\([A-Z]\)/\1-/'); name=${c#*_}
+  in_flip "$rid" || { s=$((s+1)); continue; }
   col "$rid" 11 | command grep -qF "$t" || { echo "$t: not in $rid's Tests cell"; exit 1; }
   mt=$(command grep -o "<message name='$name' msgtype='[^']*'" dictionaries/FIX50SP2.xml | sed "s/.*msgtype='//; s/'//")
   test -n "$mt" || { echo "$t: no dictionary message $name"; exit 1; }
@@ -219,10 +227,10 @@ for t in $(gtests "$B" | command grep '^TailRows095\.'); do
 "
   n=$((n+1))
 done
-test "$n" -eq 23 || { echo "checked $n witnesses"; exit 1; }
+test "$n" -ge 1 -a $((n+s)) -eq 23 || { echo "checked $n witnesses, skipped $s"; exit 1; }
 # each row's Title MsgTypes (35=<MT>) are exactly the MsgTypes its witnesses map to, so the TU's
 # literal row table, which the census holds the witnesses to, agrees with the catalogue
-for id in A-018 A-023 A-027 A-028 A-029 A-030 A-031 A-032 A-033 C-003 N-002 N-003; do
+for id in $FLIP; do
   t=$(col "$id" 5 | command grep -o '35=[A-Za-z0-9]*' | cut -d= -f2 | sort | tr '\n' ' ')
   w=$(printf '%s' "$pairs" | awk -v r="$id" '$1==r {print $2}' | sort | tr '\n' ' ')
   test -n "$t" -a "$t" = "$w" || { echo "$id: Title names '$t', its witnesses map to '$w'"; exit 1; }
@@ -233,19 +241,21 @@ for pair in "N-002 BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegi
             "N-002 TailRouting095.InboundBeAndBwReachFromApp $S" \
             "N-003 TailRouting095.InboundBeAndBwReachFromApp $S"; do
   set -- $pair
+  in_flip "$1" || continue
   gtests "$3" | command grep -qxF "$2" || { echo "$2: not in $3"; exit 1; }
   col "$1" 11 | command grep -qF "$2" || { echo "$2: not in $1's Tests cell"; exit 1; }
 done
 # A-018's live cells resolve in the (local) harness registry and sit in A-018's Tests cell
-for cell in HP-QFcpp-init-fixt11-fix50sp2-app-bn HP-QFj-init-fixt11-fix50sp2-app-bn; do
+if in_flip A-018; then for cell in HP-QFcpp-init-fixt11-fix50sp2-app-bn HP-QFj-init-fixt11-fix50sp2-app-bn; do
   (cd ../phase-9-harness/tools && python3 -c "import sys, run_interop_cell as r; sys.exit(0 if sys.argv[1] in r.CELLS else 1)" "$cell") \
     || { echo "$cell: not registered"; exit 1; }
   col A-018 11 | command grep -qF "$cell" || { echo "$cell: not in A-018's Tests cell"; exit 1; }
-done
+done; fi
 # FR-018's Spec ref corrections, and FR-021's amendment, which they need (data-model §E, §F.1)
 for pair in 'A-030|[FIX50SP1] Settlement Instruction' 'A-033|[FIX50SP2] Market Data' \
             'C-003|[FIX50SP2] Account Reporting' 'N-003|[FIX50SP2] Application'; do
   id=${pair%%|*}; want=${pair#*|}
+  in_flip "$id" || continue
   v=$(col "$id" 7) || { echo "$id: not exactly one well-formed row"; exit 1; }
   test "$v" = "$want" || { echo "$id: Spec ref is '$v', not '$want'"; exit 1; }
 done

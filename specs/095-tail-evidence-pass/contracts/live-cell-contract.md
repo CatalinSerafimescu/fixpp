@@ -19,7 +19,7 @@ and each branch marked *test* gets a unit test in the parent harness's test modu
 | N2 rows | Unchanged: the producer already keeps only `run_kind == "conformance"` — *test* that the new cells add no row | `emit_matrix.py` N2 producer |
 | Dictionary digest | `_finalize`'s FR-011 check compares fixpp's hello `dictionary_digest` with the per-cell expected file: `dictionaries/FIX50SP2.xml` for these cells, FIX44 for every other — *test* both | `run_interop_cell.py::_finalize` |
 | Dictionary path | one env var, `FIXPP_FIX50SP2_DICT_XML`, set at the `_run_initiator_cell` launch site next to `FIXPP_FIX44_DICT_XML`, and read by the gtest's fixture (L1); same file on both sides | `_run_initiator_cell` |
-| Capability minimums | two entries in `phase-9-harness/tools/interop_capability_minimums.yaml`, each keyed by its cell id (`check_capability_minimums` looks up `cell.cell_id`), with the same capability keys and minimum values as the file's `CONV-PROBE-*` entries, copied at T045 (the same counterparty builds announce them); a missing entry fails closed | `CAPABILITY_MINIMUMS_PATH`, `check_capability_minimums` |
+| Capability minimums | two entries in `phase-9-harness/tools/interop_capability_minimums.yaml`, each keyed by its cell id (`check_capability_minimums` looks up `cell.cell_id`), with the same capability keys and minimum values as the file's entries for the same counterparty build, copied at T045: the QF-cpp cell from `CONV-PROBE-*` / `CONV-C1-*` (QuickFIX-cpp), the QFJ cell from `CONV-C3-*` (QuickFIX/J); a missing entry fails closed | `CAPABILITY_MINIMUMS_PATH`, `check_capability_minimums` |
 | Reconcile | two lines in `tests/interop/expected-skips-without-counterparty.txt`; `ci/run-interop-live.py::reconcile` fails on a stray image filter and on an unaccounted skip id. Against the pre-095 image (the fixpp PR's own `interop-live`), the two ids are unaccounted, so it runs no cell (research R-10) | `reconcile` |
 | Image digest | the hello carries `INTEROP_COUNTERPARTY_IMAGE_DIGEST` or the sentinel `local-build:unpinned`; the lane does not set it, so the pulled digest is recorded at close-out (data-model §D) | `build_conversation_meta` |
 | Registration lands with its template rows | no parent commit registers the two cells while its gitlink lacks their rows (fixpp#462; owner ruling, Gate A round 2): one parent commit after the fixpp merge carries every harness change and the gitlink bump (research R-10). `RegistryAgreesWithTheRealTemplateTest` holds at every parent commit. *test*: a both-directions pin for the two cells, modelled on `test_the_recovery_inbound_cells_are_registered_AND_declared` (registered in `CELLS` and declared by the real template), because the real-template test checks only registered ⇒ declared | `test_emit_matrix.py::RegistryAgreesWithTheRealTemplateTest` |
@@ -76,7 +76,10 @@ row (`missing`), so the cell fails. A cell that skips reports `skip:…` through
 never `pass`.
 
 Which pass condition has which arm: the comparison row and the peer Reject have L5's arms (a), (b)
-and (c). The two Logout checks are shared machinery and are not re-armed per cell: the harness's
+and (c). FR-011's spurious direction (a body field read back that fixpp did not choose,
+`compare_streams`' `spurious` class) is armed in the shared comparator, not per cell:
+`WitnessComparator.ForcedSpuriousNamesThePath` (`tests/interop/support/witness_comparator_test.cpp`,
+ctest target `interop_readback_witness_test`). The two Logout checks are shared machinery and are not re-armed per cell: the harness's
 `_logout_sync_step` / `_logout_marker_required` have their own tests in
 `phase-9-harness/tools/test_run_interop_cell.py`, and `hp::expect_graceful_stop` is 033's helper,
 which every 033 HP cell runs. That is a stated limit of this cell's evidence, not an arm.

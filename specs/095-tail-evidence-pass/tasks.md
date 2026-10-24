@@ -180,7 +180,11 @@ report non-zero.
   the builds of this feature: the `linux-clang-debug` tree in the main checkout, and no other preset
   tree (owner ruling 2026-10-24: local verify scope is `linux-clang-debug` only; T085 waives every
   other leg), including the interop targets T055a builds; the QuickFIX/J `mvn` builds (unpatched at
-  T048, patched at T046); the docker pull; the full `ctest` of T085. Record the ruling in the
+  T048, patched at T046); the docker pull; the full `ctest` of T085; and T085's re-run at the
+  verified head of every arm its carry rule does not carry (every scratch-mutant arm recorded before C-US3: each
+  mutant's rebuild of its target, `test_077_allversions_builder_roundtrip`, `session_pure_tests` and
+  `interop_hp_fixt50sp2_logon_hb_logout_test`, and both peers' live runs for T053 (a)–(c), which need
+  quickstart §5's docker extraction and the patched jar still present). Record the ruling in the
   evidence file. No build runs before it.
 - [ ] T006 [P] (orchestrator) **SC-005 instrument, known positive first.** Show that
   `git diff --name-only <range> -- src include tools/codegen` reports non-zero on a range that touches
@@ -208,7 +212,8 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
     tag 35 removed, each entry attributed by extent to message level or to the outermost required
     group's `group_slices(count_tag)` instance), shared by the readback and the presence check;
   - `required_members_missing(...)`, data-model §B's legs, each missing path reported once, MsgType
-    taken from the parsed frame's tag 35;
+    taken from the parsed frame's tag 35, returning an ordered sequence (a `std::vector`, duplicates
+    kept) in §B's leg order;
   - a fixture `SetUpTestSuite` that loads `FIXPP_DICT_DATA_DIR "/FIX50SP2.xml"` once.
   The parse path is `fixpp::wire::Parser<Index>` over `XmlLoader().load(...)`'s `table_view`
   (`fixpp_test_support::parse_dict`, `tests/support/app_message_read_scaffold.hpp`). The TU
@@ -216,8 +221,10 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
 - [ ] T008 (implementer) **CMake for the TU** in `tests/session/CMakeLists.txt`: add the TU to
   `test_077_allversions_builder_roundtrip`; link pugixml if the target does not already; add a compile
   definition naming `tools/quickfix_required_golden/golden.csv`. `tests/session/test_077_allversions_builder_roundtrip.cpp`
-  stays byte-unchanged (FR-006, W8). Before the edit, record the existing binary's
-  `--gtest_list_tests` in the evidence file; T024 compares against it.
+  stays byte-unchanged (FR-006, W8). Before the edit, take the before-list from a build without
+  it (T005's ruling, Builds rule): `cmake --build --preset linux-clang-debug --target test_077_allversions_builder_roundtrip -j2`,
+  then record `build/linux-clang-debug/bin/test_077_allversions_builder_roundtrip --gtest_list_tests`
+  in the evidence file; T024 compares against it.
 - [ ] T009 (implementer) **The `095` label and its expected set.** `set_property(TEST <name> APPEND PROPERTY LABELS 095)`,
   with a comment in the 092/093 pattern, on `test_077_allversions_builder_roundtrip` and
   `session_pure_tests` (`tests/session/CMakeLists.txt`), `codegen_077_v50sp2_builder_completeness_test`
@@ -236,7 +243,7 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
 - [ ] T011 (implementer) **Deficient frames** `TailRows095Census.KnownPositive_DeficientFrames`
   (contracts W6): frames E-absent, E-one, E-short, E-member, E-nodelim, CC-nodelim, CC-nested, CC-count2 (literal
   bytes or typed-builder output, `NewOrderList.hpp` / `StreamAssignmentRequest.hpp`), each asserting
-  the exact list `required_members_missing` returns. The 35=E and 35=CC walk statuses are asserted
+  the exact sequence `required_members_missing` returns (data-model §B's order, duplicates kept). The 35=E and 35=CC walk statuses are asserted
   `ok`. **First** confirm and report that the parser accepts every frame, that E-nodelim and
   CC-nodelim open instance 0 without its delimiter as W6 states, and that CC-count2's two
   nested instances parse as one outer instance (`consume_group_extent` / `group_slices_status`,
@@ -264,11 +271,12 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
 - [ ] T016 (implementer) **RED arms, synthetic statuses.** Scratch (a): the delimiter-chain check
   disabled → `WalkStatusesOnSyntheticDictionaries` fails in S2's status assertion. Scratch (b),
   separately: the group-among-siblings detector disabled → it fails in S1's status assertion. Each reverted, `git diff --exit-code`.
-- [ ] T017 (implementer) **RED arms, Mutants L, M, N** (one run each, `--gtest_filter='TailRows095Census.KnownPositive_DeficientFrames'`):
+- [ ] T017 (implementer) **RED arms, Mutants L, M, N and P** (one run each, `--gtest_filter='TailRows095Census.KnownPositive_DeficientFrames'`;
+  each RED is the exact-sequence comparison of data-model §B):
   L — only the delimiter leg disabled → CC-nodelim's list loses `1499[0].453`; M — only the
   nested `!= 1` comparison disabled → CC-count2's list comes back empty; N — only the `delim_group`
   leg's nested-delimiter-absent disjunct disabled → CC-nested's list comes back empty; P — the field
-  leg no longer skips `delim_tag` → E-nodelim's list carries `73[0].11` twice. Each reverted,
+  leg no longer skips `delim_tag` → E-nodelim's sequence carries `73[0].11` twice. Each reverted,
   `git diff --exit-code`.
 - [ ] T018 (implementer) **P0 GREEN run**: `--gtest_filter='TailRows095Census.*'` passes with no
   witness yet (the census test lands in T023); the existing 077 tests in the same binary pass.
@@ -322,8 +330,9 @@ maps to.
 - [ ] T024 [US1] (implementer) **US1 GREEN run** — quickstart §1, as a `bash -e` script: the count
   assertion (`TailRows095.*` lists 23); `--gtest_filter='TailRows095.*:TailRows095Census.*'` passes;
   `TailRows095Census.*` alone passes; `--gtest_shuffle --gtest_repeat=3` passes. The 077 tests of the
-  binary pass (FR-006): `"$B" --gtest_filter='-TailRows095*'` passes, and its `--gtest_list_tests`
-  equals T008's before-list (the new TU adds only `TailRows095*` suites to the binary). Also `git diff --exit-code origin/main -- tests/session/test_077_allversions_builder_roundtrip.cpp`
+  binary pass (FR-006): `"$B" --gtest_filter='-TailRows095*'` passes, and
+  `"$B" --gtest_filter='-TailRows095*' --gtest_list_tests` (`B` as in quickstart §1,
+  `build/linux-clang-debug/bin/test_077_allversions_builder_roundtrip`) equals T008's before-list (the new TU adds only `TailRows095*` suites to the binary). Also `git diff --exit-code origin/main -- tests/session/test_077_allversions_builder_roundtrip.cpp`
   is clean (W8).
 
 ### RED arms (contracts W6; Mutant protocol; record each in the evidence file)
@@ -350,14 +359,19 @@ maps to.
   disappearance is its effect, not a second fault. Revert both; `git diff --exit-code`.
 - [ ] T031 [US1] (implementer) **Census Mutant G** — delete `TailRows095.C003_AccountSummaryReport` →
   census RED naming CQ with multiplicity 0.
-- [ ] T032 [US1] (implementer) **Census Mutants F, I, J** (may share one rebuild with T031; the record
-  shows each message; the quickstart §1 count assertion is skipped for the runs of F, I and J, and the
-  record says so): F — duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` → RED naming BN with
+- [ ] T032 [US1] (implementer) **Census Mutants F, I, J and O** (F, I and J may share one rebuild
+  with T031; O has its own rebuild and is applied alone; the record shows each message; the
+  quickstart §1 count assertion is skipped for the runs of F, I and J, and the record says so): F — duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` → RED naming BN with
   multiplicity 2 **and** the row mismatch (A024 against A-018); I — add `TailRows095.A018_ExecutionAcknowledgement`
   → RED naming the unmapped name; J — add `TailRows095.A001_NewOrderSingle` → RED naming 35=D as
   extra; O — rename `TailRows095.A027_TradingSessionList` to `TailRows095.A028_TradingSessionList` →
   RED naming BJ's row mismatch alone (multiplicity stays 1, and the listed count stays 23, so the
-  count assertion runs for O).
+  count assertion runs for O). O's commands, with only O applied:
+  `cmake --build --preset linux-clang-debug --target test_077_allversions_builder_roundtrip -j2`
+  (Mutant protocol: show the relink and the binary's mtime); `B=build/linux-clang-debug/bin/test_077_allversions_builder_roundtrip`;
+  quickstart §1's count line (`n=$("$B" --gtest_filter='TailRows095.*' --gtest_list_tests | command grep -c '^  ' || true)`;
+  `test "$n" -eq 23`), which must pass; then `"$B" --gtest_filter='TailRows095Census.EveryTailMsgTypeHasExactlyOneWitness'`
+  RED with BJ's row mismatch and no multiplicity finding. Revert, rebuild, `git diff --exit-code`.
 - [ ] T033 [US1] (implementer) **Mutant K** — the name → MsgType lookup returns another tail MsgType
   for one generated name → RED in that witness's tag-35 assertion naming both MsgTypes (the census
   goes RED too).
@@ -436,8 +450,11 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   (contracts L0, Combo and `run_kind` rows) and record each with its effect on the two cells; a
   reader that is not neutral for them stops the task. Refresh the outside-tree copy.
 - [ ] T045 [P] [US3] (implementer) **Capability minimums** (R-9 item 3): two entries in
-  `phase-9-harness/tools/interop_capability_minimums.yaml`, keyed by the two cell ids, with the
-  capability keys and minimum values of the file's `CONV-PROBE-*` entries (contracts L0). Refresh the copy.
+  `phase-9-harness/tools/interop_capability_minimums.yaml`, keyed by the two cell ids, each copying
+  the capability keys and minimum values of the entries for its own counterparty build (contracts
+  L0): the QF-cpp cell from `CONV-PROBE-*` / `CONV-C1-*` (the QuickFIX-cpp counterparty), the QFJ
+  cell from `CONV-C3-*` (the QuickFIX/J counterparty). Re-read the file's comments for which build
+  each entry was derived from before copying. Refresh the copy.
 - [ ] T046 [US3] (implementer) **QuickFIX/J A-TESTREQ blocker, RED first** (R-9 item 4; the same
   ruling as T044). Runs **after** T051 and T052's QF-cpp half: it needs the cell, T044/T045's
   registration and T048's **unpatched** jar.
@@ -497,7 +514,9 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
     after it, contracts L1); after Logon one 35=BN built by `fixpp::v50sp2::build_ExecutionAck` from
     the R-7 field values fixed before the build, sent via `Engine::send`; MsgSeqNum captured in
     `toApp`; `validate_inbound_messages` off; the `sent` record and the comparison by
-    `compare_streams` (decimal resolver over `FIX50SP2.xml`). Its header comment is FR-013's "cell's
+    `compare_streams` (decimal resolver over `FIX50SP2.xml`). The peer-Reject check is non-fatal
+    (`EXPECT_*`, never `ASSERT_*`) and is evaluated whatever the comparison returns, so arm (b) of
+    T053 can show its own message (contracts L5(b)). Its header comment is FR-013's "cell's
     record": inbound validation is off, and why (L-041-2: the session validator takes one
     dictionary). The verify record carries the rest, and the hello carries `arm="validation-off"`;
   - `tests/interop/CMakeLists.txt`: the new source joins `interop_hp_fixt50sp2_logon_hb_logout_test`
@@ -508,6 +527,14 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
     `target_compile_definitions` for `FIXPP_DICT_DATA_DIR` after the `fixpp_add_interop_test` call;
   - `tests/interop/conversation/fixt_app_script.yaml` (NEW): step F-01, 35=BN, originator fixpp,
     `applicable_combos: [C1, C3]`.
+  - **Re-verify the readback order (contracts L4)** and record it in the evidence file: in each
+    counterparty source, `phase-9-harness/quickfix-cpp/counterparty/interop_counterparty_main.cpp`
+    and `phase-9-harness/quickfixj/src/main/java/io/fixpp/phase9harness/quickfixj/InteropCounterparty.java`,
+    `grep -n` the `fromApp` definition, its generic readback call (QF-cpp `emit_readback`, QFJ
+    `emitReadback`) and the stage-0 conversation send (`send_conversation_message("B-02"` /
+    `sendConversationMessage("B-02"`), then read the `fromApp` body and confirm the readback call
+    comes first, before the conversation-mode lookup. Record the commands and what they show. If
+    either peer does not write the readback first, stop and report.
   033's own cells are unchanged. After the build, `--gtest_list_tests` on the target lists the two
   ids of contracts L0 exactly once each, and 033's `Fixt/HappyFixtLogonHbLogout.*` cases unchanged
   (compare with the list taken before the edit); record both lists in the evidence file.
@@ -532,7 +559,15 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   `build_ExecutionAck` called directly (never `validate_ExecutionAck`) → the peer rejects → RED, the
   record showing the peer-Reject check's own message naming the peer's 35=3 (a RED from the missing
   comparison row alone does not count); (c) the `Engine::send` call and the `sent` record skipped →
-  RED in the exactly-one-row condition (contracts L5). If the typed builder refuses (b)'s build, stop
+  RED in the exactly-one-row condition (contracts L5). (c)'s commands, with only (c) applied and
+  quickstart §5's environment exported: `cmake --build --preset linux-clang-debug --target interop_hp_fixt50sp2_logon_hb_logout_test -j2`
+  (Mutant protocol: show the relink and the binary's mtime); then, for each cell,
+  `python3 ../phase-9-harness/tools/run_interop_cell.py HP-QFcpp-init-fixt11-fix50sp2-app-bn --build-root build`
+  and `python3 ../phase-9-harness/tools/run_interop_cell.py HP-QFj-init-fixt11-fix50sp2-app-bn --build-root build`,
+  never with `--update-goldens` (it would overwrite the golden); the record shows the
+  exactly-one-row condition's own message (a golden-diff RED alone does not count). After the revert
+  and rebuild, `diff` each of the two cells' goldens under `phase-9-harness/golden/` against its
+  outside-tree copy: nothing differs. If the typed builder refuses (b)'s build, stop
   (Execution rules). `git diff --exit-code`
   in both trees' touched paths.
 
@@ -747,12 +782,19 @@ delta (plan P7).
   only if `git diff --name-only s..<verified head>` lists none of: the files its task names; the
   source file its test lives in (for every W6 arm, `tests/session/test_095_tail_rows_roundtrip.cpp`);
   and its binary's transitive inputs (`dictionaries/`, `tests/support/`, every `CMakeLists.txt`,
-  `cmake/`, `src/`, `include/`, `tools/codegen/`). An arm that ran on an uncommitted file (the live
-  cell before C-US3, the parent harness) is carried only if the `sha256sum` recorded at the run for
-  each such file equals the file's at the verified head. Otherwise it is re-run at the verified
-  head. So T043's edit of the witness TU, landing in C-US3 after C-US1, re-runs every arm of
-  T010–T034 at the verified head, and so does any T079 or Gate B edit of that TU. The record lists, per arm, "re-run at `<head>`" or
-  "carried from `<s>`". Its evidence:
+  `cmake/`, `src/`, `include/`, `tools/codegen/`). For an arm that ran on files uncommitted at run
+  time (the live cell before C-US3, the parent harness), the `sha256sum` match REPLACES the diff test
+  for those files (orchestrator ruling): a fixpp file's recorded `sha256sum` must equal its head
+  blob's (`git show <verified head>:<path> | sha256sum`); a parent-harness file, uncommitted until
+  T099, is compared with the working-copy file when T085 runs. Every other file the clauses above
+  name stays under the diff test. Otherwise the arm is re-run at the verified head. So T043's edit
+  of the witness TU, landing in C-US3 after C-US1, re-runs every arm of T010–T034 at the verified
+  head, and so does any T079 or Gate B edit of that TU. **Accepted consequence (orchestrator
+  ruling):** C-US3 edits `tests/interop/CMakeLists.txt`, which is in every arm's transitive-input
+  clause, so every scratch-mutant arm recorded at a SHA before C-US3 re-runs at the verified head:
+  the W6 arms (T013–T017, T025–T034), T039–T041 and both peers' T053 (a)–(c); T005's resource gate
+  covers that re-run. The record lists, per arm, "re-run at `<head>`" or
+  "carried from `<s>`". **RED-first arms** (T044, T046, T047, T054, T055a, T055's schema RED), whose RED was taken against the pre-change state, are carried as historical by construction: their entry keeps the SHA, command and output of the RED run, and the record adds their GREEN re-run at the verified head (orchestrator ruling 2026-10-24); they are never re-staged against a reconstructed pre-state. Its evidence:
   - quickstart §1 (T024), §2 (T039), §3 (T049), §4 (`ctest -L '^095$' --no-tests=error` against
     `expected-ctest-095.txt`), §5 (T057's local live run and its peer identities), §7 (T068) and
     SC-004 (T077);
@@ -770,10 +812,26 @@ delta (plan P7).
     `.done` marker. A full `ctest` regenerates `_codegen` in the same tree, so any build or run after
     it rebuilds first. T087's `local build: green` line cites its SHA.
   A row whose evidence did not hold is taken out of the flip set (its row reverted by a docs task)
-  and the owner told. Every tail row, N-002 and N-003 included, is named as closed by 095 in
+  and the owner told. Its witnesses STAY: FR-004a's census keeps all 23, and quickstart §1's
+  `n -eq 23` is unchanged. Every tail row, N-002 and N-003 included, is named as closed by 095 in
   data-model §F.5's `[const §XVIII.7]` after-text, so dropping one is a clause-body change: edit §F.5
   first, then the constitution's §XVIII.7 sentence to match, and T090's extra narrow scoped Codex
-  round runs on that change before the RATIFIED flip.
+  round runs on that change before the RATIFIED flip. The same docs task makes every other edit
+  that dropping the row requires:
+  - quickstart §7: the dropped ID leaves both 12-ID loops (Status, Title MsgTypes) and every other
+    loop or check that names it (version, `fixpp#625`, pins and routing cell, live cells, Spec
+    refs); the witness loop skips that row's witnesses, and its `n -eq 23` falls by their number;
+  - data-model §E: the recipe's ID list; the Tests, Verified, version and Spec ref edits of that
+    row; the coverage-index gap-note edits for its MsgTypes (FR-020: its coverage-index rows stay as
+    on `origin/main`); the B&L section heading's "12" and B-095-1's row list;
+  - data-model §F.3's SIR sentence naming the rows, and §F.5's clause sentence (above);
+  - T077's "by 12" and "the 12 tail rows"; T104's "12 rows" and its coverage-index check's "each of
+    the 23 tail MsgTypes"; T062–T064 and T066 for that row;
+  - spec FR-017's and SC-004's counts; SC-001 is read over the rows that flip (FR-020), so its
+    reading is stated in the verify record rather than left implied.
+  The list is a starting point, not the population: re-derive it with
+  `command grep -rnE '\b12\b|\b23\b|A-018 A-023|tail rows|<dropped ID>' specs/095-tail-evidence-pass/`
+  and dispose of every hit in the docs task's record.
   After the skill writes the verify record, commit it with the evidence file in one parent commit,
   explicit paths only, under the Execution rules' parent-commit checks.
 - [ ] T086 (orchestrator) `codegraph sync` in this tree after the last code-changing commit; read
@@ -979,7 +1037,7 @@ delta (plan P7).
 - **Foundational (T007–T019)**: T007 → T008 → T009 → T010, T011, T012 (same TU, serial) → T013–T017
   (each needs its known positive) → T018 → T019. **Blocks every US1 task and T043.**
 - **US1 (T020–T036)**: T020 → T021 → T022 → T023 → T024 → T025…T034 (one mutant at a time; T030
-  needs T014's Mutant C; T031 and T032 may share a rebuild) → T035 → T036.
+  needs T014's Mutant C; T031 and T032's F, I and J may share a rebuild, T032's O has its own) → T035 → T036.
 - **US2 (T037–T042)**: after T005; independent of US1 by file, but shares the build tree, so its
   builds wait for the US1 build owner. T037 ‖ T038 → T039 → T040 → T041 → T042.
 - **US3 (T043–T058)**: T043 after T019; T044 ‖ T045 (parent files) → T047 (test-first, needs T044's
