@@ -66,6 +66,8 @@ That is the whole contract **for the core C++ surface**, *for a consumer whose e
 
 **Never exported** (FR-007, settled by 078 Gate B P1):
 
+> **⚠️ Superseded by fixpp#613** (`.specify/613-builders-export.md`) wherever `FIXPP_INSTALL_TYPED_TIER` is in effect (by default: Release, the only released packages): the two rows below are export-set members there, exported as `fixpp::builders::<ver>` / `fixpp::validators::<ver>` and linked by name, and the slim headers that declare their symbols ship on the same condition, so 078's coherence rule holds. Elsewhere (by default: Debug) they stay unexported, as below.
+
 | Target | Why |
 |---|---|
 | `fixpp_builders_<ver>` | Install-scope coherence — an installed consumer would get unresolvable `build_` symbols |
@@ -101,6 +103,8 @@ That is the whole contract **for the core C++ surface**, *for a consumer whose e
 **B0 — Every member must have an include interface at all.** `$<BUILD_INTERFACE:>` for the build tree, `$<INSTALL_INTERFACE:>` for the installed prefix. **No module target has either today** — verified census: `grep -rn "BUILD_INTERFACE" src/` → 0 matches, with every module declaring `PUBLIC "${CMAKE_SOURCE_DIR}/include"` raw. `install(EXPORT)` rejects such a target at **generate** time, so this is a precondition of the whole contract, not a refinement of it. Research R11, FR-002a. *(Related: no member may carry an uninstalled interface `FILE_SET` — research R12, FR-002b.)*
 
 **B1 — Closure, over the `$<LINK_ONLY:>`-expanded interface.** No exported target may expose a link-interface dependency on a non-exported target. For a STATIC library, `PRIVATE` link dependencies land in `INTERFACE_LINK_LIBRARIES` as `$<LINK_ONLY:…>` and count exactly like public ones (FR-008a) — a closure computed from the PUBLIC column alone is incomplete by construction. CMake enforces this at **generate** time, which is why SC-007a's evidence is a recorded red generate run or a nested scratch configure, not a ctest assertion: a tree with a broken export set produces no build system for ctest to run in.
+
+> **⚠️ B2's pattern list, B3 and §6's "No typed-builder API" are superseded by fixpp#613** (`.specify/613-builders-export.md`) wherever `FIXPP_INSTALL_TYPED_TIER` is in effect (by default: Release, the only released packages): the five 078 patterns (`messages`, `groups`, `validators`, `all.hpp`, `groups.hpp`) are lifted there and `*.cpp` is excluded instead; `_dispatch`, `vt11` and `Manifest.txt` stay. B3's standing obligation (FR-010) is discharged by owner ruling R-1, 2026-10-24: "FREEZE span-based Args as the v1.0 public shape (Option 3 stays deferred; a later change would be a 2.0 break)." See the banner on `specs/078-precompiled-builder-libs/contracts/cmake-targets.md` "Install / export scope". The text below is the 084 record.
 
 **B2 — The install interface must not reach denylisted content.** `CMakeLists.txt:349-355` excludes **seven** patterns: `_dispatch`, `vt11`, `messages`, `groups`, `validators`, `all.hpp`, `groups.hpp`. Any `$<INSTALL_INTERFACE:>` added by this feature must resolve to the *installed* include directory, whose contents are already filtered. **A member with an empty install interface satisfies B2 by construction** — that is the basis of `fixpp_dict_dispatch`'s disposition in §2. *(The five-pattern 078 tail is a subset; every "must be absent" list in this feature is keyed to the full seven — FR-009.)*
 

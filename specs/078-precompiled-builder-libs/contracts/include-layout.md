@@ -8,6 +8,12 @@ consumer-visible include/macro contract. Replaces the monolithic
 
 ## Generated file set (per version `<ns>` ∈ {v44, v50sp2, vlatest})
 
+> **⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`).** This file set is **installed**
+> wherever `FIXPP_INSTALL_TYPED_TIER` is in effect (by default: single-config Release, the only released packages),
+> except its `.cpp` translation units; elsewhere it stays build-tree only. `v42` is emitted since 082 (#196), so
+> `<ns>` ∈ {v42, v44, v50sp2, vlatest}. The text below is the 078 record. See the banner on `cmake-targets.md`
+> "Install / export scope".
+
 Emitted into `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/<ns>/` (the **build-tree**
 slim layout that the library's own tests + in-tree consumers include; external
 `install(TARGETS)`/header-export is deferred with the targets — see R3 /
