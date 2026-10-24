@@ -24,6 +24,20 @@ if(NOT FIXPP_BUILD_CODEGEN_TOOL)
     "registered, so the omission would not be caught by any gate.")
 endif()
 
+# ── #613 D-6: FIXPP_CODEGEN_FIX_LATEST must be ON for every packaged build ───
+# The owner ruled that the v1.0 packages carry all four FIX versions. The root
+# CMakeLists disables packaging when the option is OFF, so this module is never
+# included in such a tree and this guard is LATENT while that decision holds. It is
+# here so that deleting the root decision is loud (this FATAL) rather than a silently
+# packaged tree without vlatest. Same shape as the FR-011a guard above.
+if(NOT FIXPP_CODEGEN_FIX_LATEST)
+  message(FATAL_ERROR
+    "#613 D-6: packaging requires FIXPP_CODEGEN_FIX_LATEST=ON. A package must carry all "
+    "four FIX versions (v42, v44, v50sp2, vlatest); with it OFF the vlatest typed tier "
+    "and headers are not generated. The root CMakeLists.txt should have disabled "
+    "packaging for this configuration -- its D-6 decision is missing.")
+endif()
+
 # ── T062a (FR-011): telemetry provenance -- shipped artifacts are OTel-ON ─────
 # FR-011 permits an OTel-OFF dependency build as a DEVELOPMENT ACCELERATOR while
 # packaging logic is being written, and forbids one reaching a shipped artifact.
@@ -419,5 +433,20 @@ set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
 # generator claims ownership of directories the distribution already owns.
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "/usr/include;/usr/lib;/usr/share;/usr/share/doc")
+
+# ── #613 (`.specify/613-builders-export.md` D-0): released packages carry the typed tier ──
+# Owner rulings R-2/R-2a/R-2b: every released (Release) package carries the typed
+# builder/validator tier. The refusal is at PACKAGE GENERATION, not here at configure:
+# a FATAL in this module would run on every OTel-ON configure and refuse a permitted
+# Release self-build configured with FIXPP_INSTALL_TYPED_TIER=OFF before anyone asked
+# for a package -- the shape T062a above records removing once for OTel ("The first cut
+# refused to CONFIGURE ... which was wrong"). Only CPACK_* variables reach
+# CPackConfig.cmake, hence the two names; cmake/FixppCPackTypedTierGuard.cmake reads
+# them when cpack initialises each generator, which covers every
+# `cpack --config CPackConfig.cmake` run (the fixpp-package target's and the
+# packaging witnesses').
+set(CPACK_FIXPP_PKG_CONFIG "${_fixpp_pkg_config}")
+set(CPACK_FIXPP_TYPED_TIER_EFFECTIVE "${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE}")
+set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_SOURCE_DIR}/cmake/FixppCPackTypedTierGuard.cmake")
 
 include(CPack)
