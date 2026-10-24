@@ -94,17 +94,22 @@ enumeration W4 uses (each entry attributed by extent, research R-4). It returns:
 - per instance, its `delim_tag` absent from that instance (the **delimiter leg**);
 - per instance, each `fields` tag other than `delim_tag` absent from that instance (the **field
   leg**);
-- per instance, for a `delim_group`: the nested count tag **present** with a value not equal to 1,
-  or the nested delimiter absent. An absent nested count is not this leg's: the nested count tag is
-  the outer group's `delim_tag`, so the delimiter leg reports it.
+- per instance, for a `delim_group` whose nested count tag is present in that instance (the
+  **`delim_group` leg**): the nested count's value not equal to 1, or the nested delimiter absent.
+  When the nested count tag is absent from the instance, this leg reports nothing, neither path:
+  the nested count tag is the outer group's `delim_tag`, so the delimiter leg reports it.
 
 Each missing path is reported **once**, by exactly one leg:
 - a `delim_tag` that is also a required instance field (E's `NoOrders`(73), whose delimiter `ClOrdID`(11)
   is required) is reported by the delimiter leg, and the field leg skips it;
 - a `delim_tag` that is a nested count tag (CC's `NoAsgnReqs`(1499) → `NoPartyIDs`(453)) is reported
-  by the delimiter leg when absent, and by the `delim_group` leg when present with a value not 1.
+  by the delimiter leg when absent, and by the `delim_group` leg's first disjunct when present with a
+  value not 1;
+- the nested delimiter (CC's `PartyID`(448)) is reported only by the `delim_group` leg's second
+  disjunct, and only when the nested count tag is present.
 
-So each leg has a frame on which it alone fires (contracts W6). Each item names its path (`<tag>`,
+So each leg, and each disjunct of the `delim_group` leg, has a frame on which it alone fires
+(contracts W6: CC-nodelim, CC-count2, CC-nested). Each item names its path (`<tag>`,
 `<count_tag>`, `<count_tag>[<k>].<tag>`), so a known-positive assertion compares exact lists.
 
 The field leg's known positive reads `tools/quickfix_required_golden/golden.csv` (rows
@@ -162,34 +167,66 @@ and for N-002/N-003 the pin and routing cell.
   runtime-XML path only") and N-002 (Verified adds "FIX 5.0 and 5.0SP1: no typed tier; runtime-XML
   path only. FIX 4.4 BE/BF: present in FIX44.xml, excluded from v44 codegen by `kN002N003Excluded`;
   lifting it is fixpp#625").
-- Spec ref cells are unchanged except A-033 → `[FIX50SP2] Market Data` and C-003 → `[FIX50SP2]
-  Account Reporting` (FR-018; spec Clarifications, Gate A round 3). These edits come after §F's
-  amendment lands.
+- Spec ref cells are unchanged except four (FR-018; spec Clarifications, Gate A round 3 and the
+  post-exhaustion pass). These edits come after §F's amendment lands.
+  - A-033 → `[FIX50SP2] Market Data` and C-003 → `[FIX50SP2] Account Reporting`: the old refs name
+    a category other than the one Orchestra places their MsgTypes in.
+  - A-030 → `[FIX50SP1] Settlement Instruction` and N-003 → `[FIX50SP2] Application`: the old refs
+    name the right category, but in a heading spelling (`Settlement Instructions`, `Application
+    Sequencing`) that is not the identifier's words, which is the only spelling the amended clause
+    admits (§F.1). A-030's token is unchanged: `dictionaries/FIX50SP1.xml` defines BQ.
 - A-018's Verified names the generated `ExecutionAck`.
 
 **Re-check the 12 refs against the amended `[const §VI.2]` (§F.1)**, at P7, recording the output in
-the verify record.
-- **Token leg.** For each row, take its Spec ref's `[DocAbbrev]` and each MsgType of the row
-  (§A). Then `grep -c "msgtype='<MT>'" dictionaries/<DocAbbrev>.xml` must print 1 for every
-  MsgType.
-- **Category leg.** For each MsgType, print its category, the authority, with
-  `grep -o "<fixr:message [^>]*msgType=\"<MT>\"[^>]*>" dictionaries/orchestra/OrchestraFIXLatest.xml | grep -o 'category="[^"]*"'`.
-  The row's `Category` must name that category. As a cross-check, where the owner-local FIX
-  Repository 2010 edition has the message, the record also shows its `FIX.5.0SP2/Base/Messages.xml`
-  `<CategoryID>`.
+the verify record. Run it from the library root as a script (`bash`); `CAT` may point at a scratch
+copy. It reads each row's MsgTypes from its `Title` cell (`35=<MT>`), as the clause does, and checks
+three legs per MsgType: the token's dictionary defines it as `msgcat='app'` exactly once (token and
+application-message legs), and the identifier's words of its Orchestra `category` equal the ref's
+`Category` (category leg). All 12 rows are single-category without a section prefix and none uses
+`FIX-Latest`, so the script implements neither the clause's prefix or ` / ` rules nor its
+`FIX-Latest` dictionary; a row that needed one would be reported as a mismatch, not passed.
+
+```bash
+CAT=${CAT:-spec/feature-catalogue.md}
+O=dictionaries/orchestra/OrchestraFIXLatest.xml
+col() {   # quickstart §7's: column $2 of the one well-formed row with ID $1
+  awk -F'|' -v want="$1" -v c="$2" '{id=$2; gsub(/ /,"",id)} id==want {n++; nf=NF; v=$c}
+    END {gsub(/^ +| +$/,"",v); if (n!=1 || nf!=13) exit 1; print v}' "$CAT"
+}
+words() { sed 's/\([a-z]\)\([A-Z]\)/\1 \2/g'; }
+bad=0
+for id in A-018 A-023 A-027 A-028 A-029 A-030 A-031 A-032 A-033 C-003 N-002 N-003; do
+  ref=$(col "$id" 7) || { echo "$id: not exactly one well-formed row"; bad=1; continue; }
+  tok=$(printf '%s\n' "$ref" | sed -n 's/^\[\([A-Z0-9]*\)\] .*/\1/p'); cat=${ref#*] }
+  test -n "$tok" -a -f "dictionaries/$tok.xml" || { echo "$id: '$ref' names no vendored dictionary"; bad=1; continue; }
+  mts=$(col "$id" 5 | grep -o '35=[A-Z0-9]*' | cut -d= -f2)
+  test -n "$mts" || { echo "$id: Title names no 35=<MT>"; bad=1; continue; }
+  for mt in $mts; do
+    test "$(grep -o "<message [^>]*msgtype='$mt'[^>]*>" "dictionaries/$tok.xml" | grep -c "msgcat='app'")" = 1 \
+      || { echo "$id $mt: not one msgcat='app' message in $tok.xml"; bad=1; }
+    oc=$(grep -o "<fixr:message [^>]*msgType=\"$mt\"[^>]*>" "$O" | grep -o 'category="[^"]*"' | cut -d'"' -f2)
+    test -n "$oc" -a "$(printf '%s\n' "$oc" | wc -l)" = 1 || { echo "$id $mt: not one Orchestra message"; bad=1; continue; }
+    test "$(printf '%s\n' "$oc" | words)" = "$cat" || { echo "$id $mt: Orchestra category $oc, ref names '$cat'"; bad=1; }
+  done
+done
+exit $bad
+```
+
+Its RED arms, each recorded with what it printed:
+- **positive control, before P7's edits:** on the unedited catalogue it must exit 1 and flag
+  exactly the four rows above, and no other row;
+- after P7, on a scratch copy: one ref's token changed to a dictionary that lacks its MsgType
+  (A-030 → `[FIX44]`), and one Title cell given an admin MsgType (`35=A`); each must exit 1.
+
+After P7 it must exit 0. As a cross-check, where the owner-local FIX Repository 2010 edition has
+the message, the record also shows its `FIX.5.0SP2/Base/Messages.xml` `<CategoryID>`.
 
 The coverage index files CC, CD, CE and CQ under its own "Application Messages — Infrastructure
 (FIX 4.2+)" heading. That heading is the index's grouping, not a Spec ref; 095 leaves the rows
 there (FR-019 edits gap notes only).
 
-Measured 2026-10-24 with this recipe:
-- the Repository and Orchestra agreed for every tail MsgType the Repository has;
-- the Repository has no CQ;
-- the two corrected rows were the only category mismatches;
-- every token passed.
-
-N-003's `Application Sequencing` is the specification's heading for category `Application`, which
-the clause admits. That heading was not checked against a FIX 5.0 volume, because none is local.
+Measured 2026-10-24 (Gate A round 3 and the post-exhaustion review): the Repository and Orchestra
+agreed for every tail MsgType the Repository has, and the Repository has no CQ.
 
 ## F. Constitution amendment, v4.0 → v4.1 (FR-021)
 
@@ -204,12 +241,38 @@ Before:
 `2. Every OFFICIAL row's `Spec ref` uses canonical format `[DocAbbrev §X.Y.Z] Section title`. Vague refs (`§4`, "FIX spec") are a CI-linting failure.`
 
 After:
-`2. Every OFFICIAL row's `Spec ref` uses canonical format `[DocAbbrev §X.Y.Z] Section title`. A row whose subject is one or more application messages may instead use the message-level form `[DocAbbrev] Category`. In that form, `DocAbbrev` is an application-specification abbreviation from the DocAbbrev Registry in `coverage-index.md` (`FIX40` … `FIX50SP2`, `FIX-Latest`) for a version whose vendored dictionary under `dictionaries/` defines every MsgType the row names. `Category` names the message category in which the vendored FIX Orchestra repository under `dictionaries/orchestra/` (each message's `category`) places those MsgTypes. It is written as the identifier's words or as the specification's heading for it, may be preceded by the category's section (`Pre-Trade — Market Data`), and joins several categories with ` / `. A row whose subject is a version's whole application layer may use `[DocAbbrev] FIX <version> application specification`, or one bracketed abbreviation per version followed by `application specifications`. Every other row keeps the section form, except as §3 provides. Vague refs (`§4`, "FIX spec") do not conform. No CI job checks this clause yet; that check is owed.`
+`2. Every OFFICIAL row's `Spec ref` uses canonical format `[DocAbbrev §X.Y.Z] Section title`. A row whose subject is one or more application messages may instead use the message-level form `[DocAbbrev] Category`. In that form, `DocAbbrev` is an application-specification abbreviation from the DocAbbrev Registry in `coverage-index.md` (`FIX40` … `FIX50SP2`, `FIX-Latest`) whose vendored dictionary defines, as an application message, every MsgType that the row's `Title` cell names as `35=<MT>`, of which there is at least one. That dictionary is `dictionaries/<DocAbbrev>.xml`, where an application message is a `message` with `msgcat='app'`; for `FIX-Latest` it is the vendored FIX Orchestra file `dictionaries/orchestra/OrchestraFIXLatest.xml`, where it is a `fixr:message` whose `category` is not `Session`. `Category` names the category, or categories, in which that Orchestra file (each message's `category`) places those MsgTypes, each written as its identifier's words: the identifier with a space before each capital letter but the first (`SettlementInstruction` is written `Settlement Instruction`). Each named category may be preceded by the words of its Orchestra `section`, written the same way, and ` — ` (`Pre Trade — Market Data`). When those MsgTypes lie in several categories, each of their categories is named once, in that form, joined with ` / `, and no other category is named. A row whose subject is a version's whole application layer may use `[DocAbbrev] FIX <version> application specification`, or one bracketed abbreviation per version followed by `application specifications`. Every other row keeps the section form, except as §3 provides. Vague refs (`§4`, "FIX spec") do not conform.`
 
 Design notes (not clause text):
-- The form is what the catalogue's message-level rows already carry: one version token and a
-  category title. The FIX Latest rows add the section prefix, and the data-dictionary rows use the
+- The form follows the catalogue's message-level rows: one version token and a category. Every
+  term is decidable from committed files alone: the token from `dictionaries/`, the
+  application-message test from `msgcat` (or Orchestra's `category`), and the category, its words,
+  its section and the ` / ` join from the Orchestra file. The data-dictionary rows use the
   whole-layer form.
+- **One spelling per category, no heading or title alternative** (post-exhaustion review F-1). The
+  candidates were read and rejected:
+  - Orchestra's category `SYNOPSIS` annotations are not titles. Where a category has one, it is
+    either its identifier's words or a prose description of the category. Re-derive:
+    `sed -n '/<fixr:categories>/,/<\/fixr:categories>/p' dictionaries/orchestra/OrchestraFIXLatest.xml | grep -B2 'purpose="SYNOPSIS"'`.
+  - The FIX Repository 2010 edition has no category title.
+  - The FIX 4.4 volumes' `CATEGORY:` headings differ from the identifiers (`Security and Trading
+    Session Definition/Status` where the identifier is `SecuritiesReferenceData`), and they bind
+    FIX 4.4 only. The FIX 5.0–5.0SP2 volumes are not local.
+
+  So a heading alternative would let whoever picks "the specification" decide conformance. Rows
+  outside 095 that use a heading spelling (`Settlement Instructions`, `Program/List Trading`) or
+  another section spelling (`Pre-Trade — …`) are fixpp#626's findings, not 095's.
+- The section prefix and the ` / ` join are kept because Orchestra decides both: each category
+  carries a `section` attribute, and the categories of a row's MsgTypes are a set. None of the 12
+  rows uses either.
+- "Application message" is `msgcat='app'`, not the catalogue's `Category` column. N-002 and N-003
+  are catalogue category `session`, but BE, BF, BW, BX and BY are `msgcat='app'` in their tokens'
+  dictionaries (DECISION 2: they are application messages). The row's MsgTypes are the `35=<MT>` of
+  its `Title` cell, as each of the 12 rows writes them.
+- `FIX-Latest` has no `dictionaries/<DocAbbrev>.xml`; its vendored dictionary is the Orchestra file,
+  whose message attribute is `msgType="<MT>"`, and which has no `msgcat`. Its `Session` category
+  holds the admin messages, so "not `Session`" is the application-message test there. 095 uses no
+  `FIX-Latest` token; FUNCTIONAL TRACK row 3 does.
 - Volume is left out. The Repository has it (`Categories.xml` `<Volume>`), but no row carries it,
   and requiring it would make every message-level row non-conforming.
 - The token is tied to a dictionary that defines the messages, not to the version that introduced
@@ -219,12 +282,18 @@ Design notes (not clause text):
 - The clause states no reason. The reason (no numbered section to cite) is a measurement over the
   sources that were checked, so it goes in the Sync Impact Report's Rationale, scoped to those
   sources.
-- The category authority is the vendored Orchestra file, because the owed CI lint can read it. The
+- The clause states no CI state. v4.0's "are a CI-linting failure" described a check that does not
+  exist. A replacement such as "no CI job checks this clause yet" would turn false the day the
+  check lands, and deleting it then would be a clause-body change with its own Article XX cycle
+  (post-exhaustion review F-3). The CI obligation stays where it already is: `[const §IX.6]`'s
+  Tier-1 "catalogue consistency check", unchanged. The dated Sync Impact Report records that the
+  check is owed (fixpp#626).
+- The category authority is the vendored Orchestra file, because a CI lint can read it. The
   FIX Repository 2010 edition is owner-local and not committed, so it is a cross-check (§E's recipe).
   Both are FIX Trading Community categories; on the tail MsgTypes they agreed wherever the Repository
   has the message (§E, measured 2026-10-24).
 - The issue number of the owed check is kept out of the clause, because an issue number in a clause
-  rots. It goes in §F.3 and the plan.
+  rots. It goes in §F.3, the spec and the plan (fixpp#626).
 - Candidates outside 095 for the follow-up lint are the OFFICIAL rows whose Spec ref carries no `§`
   and no `[impl]`/`[constitution]` token. List them with:
   `awk -F'|' 'NF>=13 && $3 ~ /OFFICIAL/ && $7 !~ /§/ && $7 !~ /\[(impl|constitution)\]/ {print $2 $7}' spec/feature-catalogue.md`.
@@ -257,25 +326,28 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     made in advance (the v1.0 and v4.0 precedent).
   Bump: MINOR, per Article XX §4; no CHANGELOG.md entry. The test is the v4.0 report's: does any PR
     mergeable under v4.0 fail under v4.1? None does. §2 adds a form and leaves the section form valid
-    for every row it was valid for. Its last sentence keeps vague refs non-conforming and records that
-    no CI job checks the clause, which was already so. §5 adds a permission and keeps its obligation
-    word for word, so a /specify artifact that lists only section entries conforms under both
+    for every row it was valid for. Its last sentence keeps vague refs non-conforming; "are a
+    CI-linting failure" becomes "do not conform", which removes no PR obligation, since no CI job
+    checked the clause under v4.0 either. §5 adds a permission and keeps its obligation word for
+    word, so a /specify artifact that lists only section entries conforms under both
     versions. A §5 that REQUIRED message-level entries would make such an artifact fail. That would be
     MAJOR, and it was not adopted.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article VI §2 — an OFFICIAL row whose subject is application messages may carry the
-    message-level Spec ref `[DocAbbrev] Category`. The version token names a version whose dictionary
-    defines every MsgType of the row in its vendored dictionary. The category is the one the vendored
-    FIX Orchestra repository places them in. A whole-application-layer form is admitted
-    for version-level rows. Every other row keeps `[DocAbbrev §X.Y.Z] Section title`, except as §3
-    provides. "Vague refs … are a CI-linting failure" becomes "do not conform", and the CI check is
-    recorded as owed (follow-up fixpp#<N>).
+    message-level Spec ref `[DocAbbrev] Category`. The version token names a version whose vendored
+    dictionary defines every MsgType of the row as an application message (`msgcat='app'`; for
+    `FIX-Latest`, the vendored Orchestra file). The category is the one the vendored FIX Orchestra
+    repository places them in, written as its identifier's words, optionally after its section's
+    words. A whole-application-layer form is admitted for version-level rows. Every other row keeps
+    `[DocAbbrev §X.Y.Z] Section title`, except as §3 provides. "Vague refs … are a CI-linting
+    failure" becomes "do not conform". No CI job checks §2: that check is owed, as is Article IX §6's
+    Tier-1 "catalogue consistency check" (follow-up fixpp#626).
   Modified: Article VI §5 — Normative References may also list such message-level refs. One does not
     stand in for a section entry.
   Read and unchanged: Article VI §3 covers design-decision rows (`[impl]`/`[constitution]`). It does
     not reach normative message rows; the 067 coverage-index comment that read it so is history, not
     an amendment. Article VI §6 is unchanged. Article IX §6 is unchanged: its Tier-1 "catalogue
-    consistency check" has no job, a gap recorded in the same follow-up as §2's check.
+    consistency check" has no job, a gap recorded in the same follow-up as §2's check (fixpp#626).
   Rationale: in the sources checked, no message category is numbered. The FIX Repository 2010
     edition (Categories.xml) identifies one by CategoryID, SectionID and Volume. The FIX 4.4
     application volumes 3–5 head each "CATEGORY: …" and number no heading. The FIX 5.0–5.0SP2
@@ -284,9 +356,13 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     message-level ref. Feature 095's Gate A round 3 rejected a reading of §3 as covering them. Owner
     ruling 2026-10-24: amend the constitution in 095. §2's CI-lint sentence described a check that does
     not exist (`grep -n -i catalog .github/workflows/*.yml` returns nothing).
-  Affected catalogue rows: the 12 rows feature 095 closes (A-018, A-023, A-027 … A-033, C-003,
-    N-002, N-003) conform as amended, A-033 and C-003 after 095 corrects their category. Rows
-    outside 095 are not re-checked here; the follow-up lint checks them.
+  Affected catalogue rows: every OFFICIAL row whose Spec ref carries no `§` and no
+    `[impl]`/`[constitution]` token, since the amended §2 decides their conformance (list them with
+    the awk in specs/095-tail-evidence-pass/data-model.md §F.1). Of these, feature 095 re-checked
+    only its 12 rows (A-018, A-023, A-027 … A-033, C-003, N-002, N-003), with the recipe in the same
+    file's §E, and corrects four refs: A-033 and C-003 named another category than Orchestra's;
+    A-030 and N-003 named Orchestra's category in a heading spelling. Which of the other rows
+    conform is fixpp#626's first-run output.
   Affected feature specs: specs/095-tail-evidence-pass. Merged specs/<id>/ bundles stay as written.
   Process: rides feature 095 (specs/095-tail-evidence-pass). Its PR is titled in Article XX §2 form,
     "Constitution: amend §VI.2, §VI.5 — message-level Spec refs for application-message rows (v4.1)
@@ -302,9 +378,7 @@ RATIFIED form, written in the last commit before merge:
   (Codex and Opus post-judging) and "THEN owner sign-off <date>. This header read PENDING until all
   three had happened.";
 - "Review and sign-off: pending." becomes the rounds, the Gate B rounds on PR #<pr>, and the owner's
-  sign-off date;
-- `fixpp#<N>` becomes the filed follow-up's number (that edit may land earlier, as soon as it is
-  filed).
+  sign-off date.
 
 Only these record lines change at the flip. A change to either clause body after the scoped Gate A
 round converges needs another scoped round (FR-021).
@@ -313,7 +387,7 @@ round converges needs another scoped round (FR-021).
 
 PENDING form — the line's current opening `> **Status:** ` is replaced by:
 
-`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: pending a scoped Codex Gate A round on the amendment, Gate B, and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose subject is application messages, and records that its CI check is owed; Article VI §5 lets Normative References list such refs. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
+`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: pending a scoped Codex Gate A round on the amendment, Gate B, and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose subject is application messages; Article VI §5 lets Normative References list such refs. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
 
 The rest of the line, from `user-ratified **v4.0** (2026-10-23) — **backwards-incompatible**`
 onward, is unchanged.

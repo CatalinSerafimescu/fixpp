@@ -94,9 +94,10 @@ Mass Handling`. In the sources checked, there is no §X.Y.Z to cite for them:
 `[impl]`/`[constitution]` form, and a coverage-index comment is not an amendment (Gate A round 3).
 The owner chose to **amend the constitution in 095**: `[const §VI.2]` admits a message-level form
 for a row whose subject is application messages, and `[const §VI.5]` lets Normative References list
-such refs (FR-021; the text is data-model §F). 095 corrects two of the 12 refs, whose category is
-not the one the FIX Repository and FIX Orchestra place their MsgTypes in (FR-018). Writing those two
-cells in the message-level form is a 095 act. So `[const §XX.1]` applies: amend the article first,
+such refs (FR-021; the text is data-model §F). 095 corrects four of the 12 refs (FR-018): A-033's
+and C-003's name a category other than the one the FIX Repository and FIX Orchestra place their
+MsgTypes in, and A-030's and N-003's name Orchestra's category in a heading spelling that the
+amended clause does not admit. Writing those cells in the message-level form is a 095 act. So `[const §XX.1]` applies: amend the article first,
 in the same PR.
 
 **What exists today (read at `4e8b3779`):**
@@ -246,16 +247,49 @@ in the same PR.
     Orchestra places it in `AccountReporting`. The ref becomes `[FIX50SP2] Account Reporting`.
   The coverage index files CC, CD, CE and CQ under its own "Application Messages — Infrastructure
   (FIX 4.2+)" heading. That heading is the index's grouping, not a Spec ref, and 095 leaves the
-  rows where they are (FR-019 edits gap notes only).
+  rows where they are (FR-019 edits gap notes only). *(Extended in the post-exhaustion pass: the
+  clause now admits only the identifier's words, so A-030 and N-003 are corrected too; Session
+  2026-10-24 (post-exhaustion review).)*
 - Q: Does 095 add the CI lint that §VI.2's "CI-linting failure" sentence implies? → A: no. The
   amended sentence states the rule and records that the check is owed, and a follow-up issue tracks
   it (plan, Constitution Check §VI.2). No CI job lints Spec refs today: `grep -n -i catalog
   .github/workflows/*.yml` returns nothing, and that also leaves `[const §IX.6]`'s Tier-1 "catalogue
-  consistency check" without a job.
+  consistency check" without a job. *(Superseded in part in the post-exhaustion pass: the clause no
+  longer records that the check is owed; the dated Sync Impact Report does. The follow-up is filed
+  as fixpp#626. Session 2026-10-24 (post-exhaustion review).)*
 
   A lint is not small. It would fail today on rows outside 095 (the recipe in data-model §F), so it
   needs those rows re-canonicalised or excepted. It also needs a table mapping each category
-  identifier to its title. Both are design work outside this feature.
+  identifier to its title. Both are design work outside this feature. *(Superseded in part in the
+  post-exhaustion pass: with one spelling per category, the lint derives the words from the
+  identifier and needs no title table.)*
+
+### Session 2026-10-24 (post-exhaustion review)
+
+The post-exhaustion Opus review (`research/reviews/opus_095-tail-evidence-pass_gate_a_4_postexhaustion_review.md`,
+parent repo) found the amended clause's category spelling undecidable, and a state claim in the
+clause. Owner (2026-10-24): "Fix, then Codex+Opus on amendment+fixes".
+- Q: The draft clause let `Category` be written "as the identifier's words or as the
+  specification's heading for it". Which specification, and is it decidable? → A: neither; the
+  heading alternative is deleted (option (a) of the review's F-1). `Category` is the Orchestra
+  identifier's words only: the identifier with a space before each capital letter but the first.
+  - Orchestra's category `SYNOPSIS` annotations were considered and rejected: where a category has
+    one, it is its words or a prose description, not a title (data-model §F.1 has the re-derivation).
+  - The optional section prefix and the ` / ` join are kept, both decided by the Orchestra file
+    (the category's `section`; the set of the row's categories).
+  - A-030 (`Settlement Instructions`) and N-003 (`Application Sequencing`) named Orchestra's
+    category in a heading spelling, so FR-018 corrects them to `[FIX50SP1] Settlement Instruction`
+    and `[FIX50SP2] Application`. A-030's token stays: `dictionaries/FIX50SP1.xml` defines BQ.
+  - Rows outside 095 written in a heading spelling are fixpp#626's findings.
+- Q: "Application message" and the `FIX-Latest` token: how does a check decide them? → A: an
+  application message is a MsgType with `msgcat='app'` in the token's vendored dictionary, named
+  in the row's `Title` cell as `35=<MT>`. For `FIX-Latest` the vendored dictionary is the Orchestra
+  file, where a MsgType is a `fixr:message` with that `msgType` and is an application message when
+  its `category` is not `Session`.
+- Q: The draft clause ended "No CI job checks this clause yet; that check is owed." Keep it? → A:
+  no, deleted. It states the state of CI, which turns false when fixpp#626 lands, and removing it
+  then would be a clause-body change. The CI obligation remains `[const §IX.6]`'s; the dated Sync
+  Impact Report records that the check is owed (fixpp#626).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -503,15 +537,22 @@ test name exists in the tree.
 - **FR-018**: A-018, A-029, A-030 and N-002's FIX version column MUST become `5.0SP2`, with the
   Verified cell stating that the FIX 5.0 versions the column dropped have no typed tier and stay on
   the runtime-XML path. N-002's Verified cell also states the v44 BE/BF exclusion and names
-  fixpp#625 (Clarifications, Gate A round 1). The Spec ref cells are unchanged except two. A-033's
-  becomes `[FIX50SP2] Market Data` and C-003's becomes `[FIX50SP2] Account Reporting`, the
-  categories the FIX Repository and FIX Orchestra place their MsgTypes in (Clarifications, Gate A
-  round 3; data-model §E). These edits land after the amendment (FR-021).
+  fixpp#625 (Clarifications, Gate A round 1). The Spec ref cells are unchanged except four
+  (data-model §E):
+  - A-033's becomes `[FIX50SP2] Market Data` and C-003's becomes `[FIX50SP2] Account Reporting`,
+    the categories the FIX Repository and FIX Orchestra place their MsgTypes in (Clarifications,
+    Gate A round 3);
+  - A-030's becomes `[FIX50SP1] Settlement Instruction` and N-003's becomes `[FIX50SP2]
+    Application`, the words of the Orchestra category they already named in a heading spelling
+    (Clarifications, post-exhaustion review).
+
+  These edits land after the amendment (FR-021).
 - **FR-021**: `.specify/constitution.md` MUST be amended, v4.0 → v4.1 (`[const §XX.4]` MINOR, no
   `CHANGELOG.md` entry; plan, Constitution Check §XX.4), so that:
   - `[const §VI.2]` admits the message-level form `[DocAbbrev] Category` for a row whose subject
-    is application messages, keeps the section form for every other row, and records that the CI
-    check of the clause is owed;
+    is application messages, with every term decidable from committed files (the token's vendored
+    dictionary and the vendored Orchestra file), and keeps the section form for every other row. It
+    states no CI state; the Sync Impact Report records that its check is owed (fixpp#626);
   - `[const §VI.5]` lets Normative References list such refs without letting one stand in for a
     section entry.
 
@@ -586,8 +627,8 @@ test name exists in the tree.
 - Lifting the v44 BE/BF codegen exclusion (`kN002N003Excluded`): fixpp#625, not done here
   (Clarifications, Gate A round 1).
 - A CI lint of `[const §VI.2]`, the `[const §IX.6]` "catalogue consistency check", and
-  re-canonicalising the Spec refs of rows outside the 12. These go to a follow-up issue (plan,
-  Constitution Check §VI.2). FUNCTIONAL TRACK row 3's FIX Latest rows are among the rows to check.
+  re-canonicalising the Spec refs of rows outside the 12. These are fixpp#626 (plan, Constitution
+  Check §VI.2). FUNCTIONAL TRACK row 3's FIX Latest rows are among the rows to check.
 
 ## Normative References
 
@@ -607,13 +648,13 @@ test name exists in the tree.
   - `[FIX50SP2] Order Mass Handling` (A-023);
   - `[FIX50SP2] Market Structure Reference Data` (A-027, A-028);
   - `[FIX50SP1] Securities Reference Data` (A-029);
-  - `[FIX50SP1] Settlement Instructions` (A-030);
+  - `[FIX50SP1] Settlement Instruction` (A-030, corrected from `Settlement Instructions`);
   - `[FIX50SP2] Allocation` (A-031);
   - `[FIX50SP2] User Management` (A-032);
   - `[FIX50SP2] Market Data` (A-033, corrected from `Application Sequencing`);
   - `[FIX50SP2] Account Reporting` (C-003, corrected from `Position Maintenance`);
   - `[FIX50] User Management` (N-002);
-  - `[FIX50SP2] Application Sequencing` (N-003).
+  - `[FIX50SP2] Application` (N-003, corrected from `Application Sequencing`).
 
   `spec/coverage-index.md` indexes "FIX Application Layer (FIX40–FIX50SP2)" "at message granularity
   (one row per MsgType)", so these rows have no section entry.

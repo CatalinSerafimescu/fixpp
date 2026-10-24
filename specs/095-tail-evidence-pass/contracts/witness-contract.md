@@ -60,11 +60,12 @@ to the same walk entry point (data-model §B).
 | W5 count below 2 | frame E-one: 35=E with one `NoOrders` instance | the exact list |
 | W5 instance count ≠ count value | frame E-short: literal bytes, `73=2` followed by one complete instance | the exact list |
 | W5 instance member | frame E-member: two instances, the second lacking `ListSeqNo`(67) | the exact list (`73[1].67`) |
-| W5 instance delimiter | frame CC-nodelim: 35=CC with `1499=2`, instance 0 carrying only its `NoRelatedSym` group and no `NoPartyIDs` | the exact list (`1499[0].453`), reported once, by the delimiter leg (data-model §B) |
+| W5 instance delimiter | frame CC-nodelim: 35=CC with `1499=2`, instance 0 carrying only its `NoRelatedSym` group and no `NoPartyIDs` | the exact list (`1499[0].453`), reported once, by the delimiter leg; the `delim_group` leg is silent, because the nested count tag is absent (data-model §B) |
 | W5 instance delimiter, alone | **Mutant L**: disable only the delimiter leg | RED on CC-nodelim (the list loses `1499[0].453`); no other leg reports that path |
-| W5 delimiter's nested group, delimiter absent | frame CC-nested: instance 0 carries `453=1` and a PartyIDSource(447) but no PartyID(448) | the exact list (`1499[0].448`) |
-| W5 delimiter's nested group, count ≠ 1 | frame CC-count2: 35=CC, `1499=2`, instance 0 carrying `453=2` with two complete 448-delimited nested instances, instance 1 well-formed | the exact list (`1499[0].453`), reported by the `delim_group` leg (the count is present) |
+| W5 delimiter's nested group, delimiter absent | frame CC-nested: instance 0 carries `453=1` and a PartyIDSource(447) but no PartyID(448) | the exact list (`1499[0].448`), reported by the `delim_group` leg's second disjunct alone (the count is present and equals 1; the delimiter leg sees 453) |
+| W5 delimiter's nested group, count ≠ 1 | frame CC-count2: 35=CC, `1499=2`, instance 0 carrying `453=2` with two complete 448-delimited nested instances, instance 1 well-formed | the exact list (`1499[0].453`), reported by the `delim_group` leg's first disjunct alone (the count is present; both nested instances carry 448) |
 | W5 nested count ≠ 1, alone | **Mutant M**: disable only the `!= 1` comparison | RED on CC-count2 (the list comes back empty) |
+| W5 nested delimiter absent, alone | **Mutant N**: disable only the `delim_group` leg's nested-delimiter-absent disjunct | RED on CC-nested (the list comes back empty) |
 | census multiplicity 0 | **Mutant G**: delete one witness (e.g. `TailRows095.C003_AccountSummaryReport`) | RED naming CQ with multiplicity 0 |
 | census multiplicity > 1, row mismatch | **Mutant F**: duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` (A-024 is BN's duplicate catalogue row) | RED naming BN with multiplicity 2 **and** the row mismatch (A024 against A-018); gtest names are unique in a suite, so a second name always carries another row |
 | census unmapped name | **Mutant I**: add `TailRows095.A018_ExecutionAcknowledgement` (the catalogue title, which is no dictionary message name) | RED naming the unmapped name |
