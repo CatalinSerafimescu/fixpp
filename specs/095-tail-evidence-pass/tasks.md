@@ -391,26 +391,26 @@ maps to.
 
 **Independent test**: quickstart §2.
 
-- [ ] T037 [P] [US2] (implementer) **The two pins** in `tests/codegen/test_077_v50sp2_builder_completeness.cpp`
+- [X] T037 [P] [US2] (implementer) **The two pins** in `tests/codegen/test_077_v50sp2_builder_completeness.cpp`
   (FR-007, R-5): `BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegistered` asserts `"BE"`
   and `"BF"` are `builder_registry` keys and `BuilderCompleteness077V50sp2.N003_ApplicationMessageRequestAckReportRegistered`
   asserts `"BW"`, `"BX"`, `"BY"`; each also calls the entry and checks the built body starts `35=<mt>`.
-- [ ] T038 [P] [US2] (implementer) **The routing cell** `TailRouting095.InboundBeAndBwReachFromApp`
+- [X] T038 [P] [US2] (implementer) **The routing cell** `TailRouting095.InboundBeAndBwReachFromApp`
   (FR-008, R-5) in an existing `session_pure_tests` fixture TU under `tests/session/` (the implementer
   picks it and names it in the report): on an established session, one inbound 35=BE and one 35=BW;
   `Application::fromApp` called once per message with its MsgType, `fromAdmin` not called for
   them, no Reject sent. The BE and BW assertions are separate, so each leg fails on its own. The
   fixture runs with inbound validation off and a registered `Application` (spec FR-008); the report
   names the session's BeginString and dictionary. If BW does not reach `fromApp` unmutated, stop.
-- [ ] T039 [US2] (implementer) **US2 GREEN run** — quickstart §2's script (count assertions: 2 pins,
+- [X] T039 [US2] (implementer) **US2 GREEN run** — quickstart §2's script (count assertions: 2 pins,
   1 routing cell). Instrument check (CLAUDE.md "prove the instrument can report non-zero"): scratch,
   one pin's expected key changed to a MsgType absent from the registry → that pin fails; revert.
-- [ ] T040 [US2] (implementer) **RED arm, BE leg** — scratch: add `"BE"` to `detail::is_admin_msgtype`
+- [X] T040 [US2] (implementer) **RED arm, BE leg** — scratch: add `"BE"` to `detail::is_admin_msgtype`
   (`src/session/msgtype_classifier.hpp`); rebuild `session_pure_tests`; `"$S" --gtest_filter='TailRouting095.*'`
   fails on the BE assertions only. Revert; `git diff --exit-code -- src`.
-- [ ] T041 [US2] (implementer) **RED arm, BW leg** — the same with `"BW"`; the BW assertions fail
+- [X] T041 [US2] (implementer) **RED arm, BW leg** — the same with `"BW"`; the BW assertions fail
   only. Revert; `git diff --exit-code -- src`.
-- [ ] T042 [US2] (implementer) **Commit C-US2** (the two test files). Report the hash and the routing
+- [X] T042 [US2] (implementer) **Commit C-US2** (the two test files). Report the hash and the routing
   cell's TU; orchestrator runs `codegraph sync` and ticks T037–T042.
 
 **Checkpoint**: N-002/N-003's per-row evidence exists; FR-008's two legs each recorded RED.
