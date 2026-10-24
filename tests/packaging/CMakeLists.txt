@@ -124,6 +124,12 @@ add_test(
     # assumption. Both values are consumed two-sidedly by the witness.
     "-DFIXPP_PY_EXPECTED_PAYLOAD=${_fixpp_pkg_py_expected}"
     "-DFIXPP_PY_PAYLOAD_DIR=${_fixpp_pkg_py_dir}"
+    # ── #613 (`.specify/613-builders-export.md` §4.2) — the typed tier's raw setting
+    # AND effective value. The root CMakeLists resolves both BEFORE the tests block
+    # adds this subdirectory, so they are set when this add_test reads them; the
+    # witness checks both against the artifact's own name rather than trusting them.
+    "-DFIXPP_TYPED_TIER_SETTING=${FIXPP_INSTALL_TYPED_TIER}"
+    "-DFIXPP_TYPED_TIER_EFFECTIVE=${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/run_package_contents_gate.cmake"
 )
 set_tests_properties(fixpp::packaging::contents PROPERTIES
