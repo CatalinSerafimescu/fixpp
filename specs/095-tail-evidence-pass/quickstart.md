@@ -4,6 +4,10 @@ Run from the main checkout (`research/G19-fix-fpml-iso20022/library`), preset `l
 `export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`; `-j2`; check `df -h /mnt/e` first. An agent asks the
 owner (`AskUserQuestion`) before the first build it runs (`[const §XVII.7]` resource gate).
 
+Before `/speckit-verify` runs, "the verify record" below means the staging evidence file
+`.specify/decisions/095-tail-evidence-pass-evidence.md` (tasks.md Execution rules): verify's own write
+replaces the verify record, and tasks T085 copies the evidence file's entries into it.
+
 Run each block as a script (`bash -e`). A zero-match `--gtest_filter` exits 0, and the vendored
 GoogleTest has no `--gtest_fail_if_no_test_selected` (it prints the usage text and exits 0), so every
 filtered run is preceded by a count assertion that stops the block; every `ctest` line carries
@@ -121,7 +125,10 @@ every output in the verify record.
 RED arms:
 - clause L5 of contracts/live-cell-contract.md;
 - the real-template test's RED, recorded once in P5 before the template rows are added: it fails
-  naming the two cells.
+  naming the two cells;
+- the skip-list gate's RED, also in P5 before the two skip lines land: `ci/assert-interop-skips.py`
+  over the whole `ctest -L interop` population with no counterparty exits 1 naming the two new
+  gtest ids as unexpected skips, then 0 once the lines are in (tasks T055a, T055b).
 
 ## 6. CI
 
@@ -195,7 +202,7 @@ done
 test "$n" -eq 23 || { echo "checked $n witnesses"; exit 1; }
 # N-002 / N-003 pins and the routing cell resolve in their binaries and sit in the right rows
 for pair in "N-002 BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegistered $P" \
-            "N-003 BuilderCompleteness077V50sp2.N003_ApplicationSequencingRegistered $P" \
+            "N-003 BuilderCompleteness077V50sp2.N003_ApplicationMessageRequestAckReportRegistered $P" \
             "N-002 TailRouting095.InboundBeAndBwReachFromApp $S" \
             "N-003 TailRouting095.InboundBeAndBwReachFromApp $S"; do
   set -- $pair

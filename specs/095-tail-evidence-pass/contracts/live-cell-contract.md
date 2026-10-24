@@ -6,6 +6,8 @@ and each branch marked *test* gets a unit test in the parent harness's test modu
 
 | Concern | Required value / behaviour | Enforced by |
 |---|---|---|
+| Gtest ids | fixed here, before the cell source exists (T044 registers them first): INSTANTIATE prefix `Fixt`, suite `HappyFixtAppMessage`, test `TypedExecutionAck`, param names `QFcpp_init_fix50sp2` and `QFj_init_fix50sp2` (033's `fixt_cell_name` shape). So the ids are `Fixt/HappyFixtAppMessage.TypedExecutionAck/QFcpp_init_fix50sp2` and `Fixt/HappyFixtAppMessage.TypedExecutionAck/QFj_init_fix50sp2`, used verbatim as the cells' `gtest_filter` and as the two skip-list lines. The built binary's `--gtest_list_tests` must list both exactly once (T051) | `run_interop_cell.py`'s `parse_gtest_status` (a no-match filter reads as a pass, so the filter must match verbatim); `ci/assert-interop-skips.py` (an unlisted skip or a listed id that does not skip fails) |
+| `Cell` fields | `binary="interop_hp_fixt50sp2_logon_hb_logout_test"` (the 033 FIXT target, research R-6); `gtest_filter` the cell's gtest id above; `config_template` the engine's existing `*-acceptor-tls-fixt50sp2.cfg.in` (`quickfix-cpp-acceptor-tls-fixt50sp2.cfg.in`, `quickfixj-acceptor-tls-fixt50sp2.cfg.in`; no new config); `counterparty`, `role="fixpp-initiator"` and `spec_ref` as the 033 FIXT cells set them; plus `combo_id`, `arm`, `run_kind` and `script_path` (rows below) | `run_interop_cell.py::Cell`, `_build_cells` |
 | Combo | `combo_id="C1"` on the QF-cpp cell, `"C3"` on the QFJ cell: 089's fixpp-initiator combos (`_build_cells`, `CONV-C1-*` / `CONV-C3-*`), reused as `CONV-PROBE-*` reuses C1 | `build_conversation_meta` raises "sets script_path but not combo_id" |
 | Script steps | `fixt_app_script.yaml` step F-01 lists `applicable_combos: [C1, C3]` | `render_intent_file`, `expected_peer_rejects` filter steps by it |
 | Arm | `arm="validation-off"` (the `Cell` default), FR-013 | `build_conversation_meta` → hello |
@@ -31,7 +33,14 @@ accepts the FIXT session, and returns the SHA-256 of the `FIX50SP2.xml` bytes it
 It resolves the file from `FIXPP_FIX50SP2_DICT_XML`, falling back to `FIXPP_DICT_DATA_DIR`, which the
 033 target gains through a `target_compile_definitions` after its `fixpp_add_interop_test` call (the
 helper has no definitions keyword). 033's own cells are unchanged.
-`SessionConfig::validate_inbound_messages` stays off (FR-013).
+`SessionConfig::validate_inbound_messages` stays off (FR-013); the cell source's header comment
+states it and why (L-041-2: the session validator takes one dictionary), which with the verify
+record is FR-013's "cell's record"; the hello carries `arm="validation-off"`.
+The cell's **first** statement that can skip or return is `INTEROP_REQUIRE_COUNTERPARTY(...)`
+(`tests/interop/support/counterparty_probe.hpp`), as in 033's cell: with no counterparty leased it
+skips with the one reason `ci/assert-interop-skips.py` accepts, and any later guard (the TLS fixture
+directory, the dictionary file) comes after it. A guard placed before it would make the no-counterparty
+lanes skip for a reason that checker refuses (the skip list's header).
 
 **L2 — peers.** Two cells: `HP-QFcpp-init-fixt11-fix50sp2-app-bn` (QuickFIX-cpp v1.16.0) and
 `HP-QFj-init-fixt11-fix50sp2-app-bn` (QuickFIX/J 3.0.1), each against the existing
@@ -40,12 +49,17 @@ helper has no definitions keyword). 033's own cells are unchanged.
 
 **L3 — message.** After Logon, fixpp sends one 35=BN built by `fixpp::v50sp2::build_ExecutionAck`
 from the step F-01 intent values (research R-7 field set), via `Engine::send`. The MsgSeqNum is
-captured in `to_app` for the `sent` record.
+captured in `toApp` for the `sent` record.
 
 **L4 — evidence.** The peer's generic per-field readback of the received BN is compared with
 fixpp's `sent` record by `compare_streams` (decimal resolver over `FIX50SP2.xml`). The cell passes
 only if exactly one comparison row exists and it passes, no peer Reject was seen, and the session
-logged out cleanly. Its outcome row lands in `tests/interop/cell_results.yaml` (`kind: happy`) and
+logged out cleanly. Two checks decide "logged out cleanly", both required: on the fixpp side
+`hp::expect_graceful_stop` (`tests/interop/happy/hp_support.hpp`: `Engine::stop()` within its bound
+and `stopped()` true), and in the harness `run_interop_cell.py::_logout_sync_step`, which requires
+the counterparty's trailing `LOGOUT` transcript line whenever `_logout_marker_required` says so (on
+every capture, and on a run against a committed golden that ends with that line). Its template row lands in `tests/interop/cell_results.yaml` (`kind: happy`, status
+`skip:counterparty-unavailable`, kept after the live runs: research R-11) and
 the schema test's `EXPECTED_IDS`. In conversation mode both counterparties' `fromApp` stage-0 branch
 looks up `B-02` in the intent file; this script has no such entry, so they log and return
 (`send_conversation_message` / `sendConversationMessage`) — expected, not a defect.

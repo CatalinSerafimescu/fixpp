@@ -6,7 +6,12 @@ re-derives it is given instead of the value. The Gate A round 1 revisions (2026-
 symbols they cite at fixpp `45a3f821` and the same parent harness. The Gate A round 2 revisions
 (2026-10-24) re-read theirs at fixpp `5ed00d76`: `ci/run-interop-live.py`, `interop-live.yml`, the
 parent's `emit_matrix.py` / `test_emit_matrix.py` and workflows, and the generated
-`StreamAssignmentRequest.builder.inl`.
+`StreamAssignmentRequest.builder.inl`. The `/speckit-analyze` remediation (2026-10-24) re-read its
+symbols at fixpp `ee39a894`: `tests/support/app_message_read_scaffold.hpp`,
+`include/fixpp/session/application.hpp`, `ci/assert-interop-skips.py` and the tier workflows' interop
+steps, `tests/interop/happy/hp_fixt50sp2_logon_hb_logout_test.cpp`, `tests/interop/cell_results.yaml`
+and its schema test, the CMake blocks it names, and the parent's `run_interop_cell.py` and
+`test_emit_matrix.py`.
 
 ## R-1 Required-member rule (FR-002, FR-004, FR-005)
 
@@ -151,7 +156,7 @@ so multiplicity above 1 always comes with a row mismatch; W6's Mutant F records 
 
 **Decision.**
 - Parse with `fixpp::wire::Parser<Index>` over a `table_view` from `XmlLoader().load(FIX50SP2.xml)`,
-  as 077 does (`fixpp_test_support::parse_dict`, `tests/session/support/app_message_read_scaffold.hpp`).
+  as 077 does (`fixpp_test_support::parse_dict`, `tests/support/app_message_read_scaffold.hpp`).
 - Enumerate the parsed body with `OffsetTable::entries()` (document order), removing from both
   sides the tags the test's framing writes and tag 35 (the vendored FIX50SP2 file's `<header/>` is
   empty, so the dictionary cannot name them), and assign each entry to message level or to the
@@ -178,13 +183,13 @@ with the builder: the builder writes from emitted literals, the parser reads `ta
   `all.hpp` and has `builder_registry`):
   - `BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegistered` asserts `"BE"` and `"BF"`
     are registry keys;
-  - `…N003_ApplicationSequencingRegistered` asserts `"BW"`, `"BX"`, `"BY"`.
+  - `…N003_ApplicationMessageRequestAckReportRegistered` asserts `"BW"`, `"BX"`, `"BY"`.
   - Each test also calls the registry entry and checks the built body starts `35=<mt>`.
 - *Routing:* one cell in `session_pure_tests`, `TailRouting095.InboundBeAndBwReachFromApp`. An
   established session (existing pure-session fixture, FIX.4.4 or FIXT; the classifier is
   version-independent) receives one inbound 35=BE and one 35=BW. The assertions:
-  - `Application::from_app` is called once per message, with the MsgType;
-  - `from_admin` is not called for them;
+  - `Application::fromApp` is called once per message, with the MsgType;
+  - `fromAdmin` is not called for them;
   - no Reject is sent.
 - RED arms, one per leg: add `"BE"` to `detail::is_admin_msgtype` (`src/session/msgtype_classifier.hpp`)
   → the BE assertions go RED; separately, add `"BW"` → the BW assertions go RED. Scratch mutants only,
@@ -211,7 +216,9 @@ Conversation.Cell"), run on 033's FIXT session setup:
   fixpp);
 - the peer writes its generic per-field readback (QF-cpp `collect_fields`, QFJ `collectFields`);
 - 089's `compare_streams` (`tests/interop/support/witness_comparator.cpp`) compares it against
-  fixpp's `sent` record.
+  fixpp's `sent` record;
+- its gtest ids are fixed in the live-cell contract's clause L0 ("Gtest ids"), before the source
+  exists, because the harness registration names them first.
 
 **Rationale.** These come from the 2026-10-24 harness survey. Each claim is to be re-verified by the
 implementer at the cited line before it is relied on.
@@ -271,7 +278,7 @@ All re-verified at implementation; citations are to symbols, not lines.
   `Session.java`, the same).
 - **Inbound validation.** Off (`SessionConfig::validate_inbound_messages` default) — FR-013,
   L-041-2.
-- **`sent` record.** The fixpp cell captures MsgSeqNum(34) of the sent BN in its `to_app` hook for
+- **`sent` record.** The fixpp cell captures MsgSeqNum(34) of the sent BN in its `toApp` hook for
   the record (pairing key).
 
 ## R-9 Parent harness changes and their blockers
@@ -375,7 +382,15 @@ verify record.
   normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref:
   "FIX-SL §5.3.1/§5.3.3" }`. The fields are the schema test's `REQUIRED_FIELDS`. The status is the
   US1 block's pre-live value, not the `pass` of 033's banked rows: at the PR commit these cells have
-  no CI run (R-10). `declared_cell_ids` reads a non-conversation row's `id` as its registry cell id,
+  no CI run (R-10). *(Settled 2026-10-24, superseding plan `## Gate A`'s "/speckit-tasks rulings"
+  note that left the status to the implementer:)* the rows keep that status on the PR and after the
+  live runs. Precedent: the file's own header (live cells carry `skip:counterparty-unavailable`; the
+  parent overrides it with real results when a counterparty is present), and the two
+  `HP-QFj-*-fix44-recovery-inbound` rows fixpp#462 added (PR #474), committed with that status
+  beside their captured goldens. 089's `kind: conversation` rows are no precedent here: their `pass`
+  rows carry ledger fields written by promotion, which these cells never get (contracts L0,
+  Promote), and 089 T095 keeps `EXPECTED_IDS` as the non-conversation inventory these two rows join.
+  The pass is recorded in the verify record (T057, T085) and the Gate B close-out record (T101). `declared_cell_ids` reads a non-conversation row's `id` as its registry cell id,
   so these rows are what declares the two cells.
 - `tests/interop/cell_results_schema_check_test.py`: the hand-pinned `EXPECTED_IDS` list gains the
   two ids. RED first: add the rows, run the schema test, and record the failure on the pin.

@@ -34,7 +34,7 @@ The catalogue row is the authority for the MsgTypes it names. The generated name
 
 Additional per-row evidence:
 - N-002: `BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegistered`, `TailRouting095.InboundBeAndBwReachFromApp` (BE leg).
-- N-003: `BuilderCompleteness077V50sp2.N003_ApplicationSequencingRegistered`, `TailRouting095.InboundBeAndBwReachFromApp` (BW leg).
+- N-003: `BuilderCompleteness077V50sp2.N003_ApplicationMessageRequestAckReportRegistered`, `TailRouting095.InboundBeAndBwReachFromApp` (BW leg).
 - A-018: the live cells `HP-QFcpp-init-fixt11-fix50sp2-app-bn`, `HP-QFj-init-fixt11-fix50sp2-app-bn`.
 - Census and known positives (suite `TailRows095Census`): `EveryTailMsgTypeHasExactlyOneWitness`,
   `FieldLegMatchesQuickFixCppGolden`, `KnownPositive_DeficientFrames`,
@@ -146,10 +146,12 @@ the live-cell contract's clause L0:
 - session: FIXT.1.1, DefaultApplVerID 9 (FIX.5.0SP2), fixpp initiator, TLS as in 033;
 - fixpp hello: `dictionary_digest` = SHA-256 of the `FIX50SP2.xml` bytes the shared fixture loaded
   and registered under ApplVerID 9 (L1);
-- fixpp `sent` record: step F-01, MsgType BN, MsgSeqNum captured in `to_app`, the chosen fields;
+- fixpp `sent` record: step F-01, MsgType BN, MsgSeqNum captured in `toApp`, the chosen fields;
 - peer readback: the counterparty's generic field enumeration of the received BN;
 - comparison: 089's `compare_streams` with the decimal resolver loaded from `FIX50SP2.xml`;
-- outcome row in `tests/interop/cell_results.yaml` (the fields of research R-11), schema-checked;
+- template row in `tests/interop/cell_results.yaml` (the fields of research R-11), schema-checked. Its
+  status stays the pre-live `skip:counterparty-unavailable` on the PR and after it (R-11 has the
+  precedent); the pass is recorded in the verify record and in the Gate B close-out record;
 - peer identity: the hello's `image_digest` is whatever `INTEROP_COUNTERPARTY_IMAGE_DIGEST` gives
   `build_conversation_meta`; `interop-live.yml` does not set it, so in CI the record carries the
   sentinel `local-build:unpinned`. The image digest the post-merge `interop-live` run on `main`
@@ -159,14 +161,24 @@ the live-cell contract's clause L0:
 ## E. Catalogue edits (US4)
 
 For each row in §A: Status `done`; `/specify` `095-tail-evidence-pass`; PR the 095 PR; Tests the
-witness IDs of §A; Verified: "offline bar (owner 2026-10-21): typed builder → wire → independent
-dict-driven parse → bidirectional per-field + per-group-instance readback; every closure-required
-field and group set, checked against a runtime walk of FIX50SP2.xml" plus, for A-018, the live cells,
-and for N-002/N-003 the pin and routing cell.
-- Version column → `5.0SP2` for A-018, A-029, A-030 (Verified adds "FIX 5.0SP1: no typed tier;
-  runtime-XML path only") and N-002 (Verified adds "FIX 5.0 and 5.0SP1: no typed tier; runtime-XML
-  path only. FIX 4.4 BE/BF: present in FIX44.xml, excluded from v44 codegen by `kN002N003Excluded`;
-  lifting it is fixpp#625").
+witness IDs of §A (plus, for N-002 and N-003, the pin and the routing cell; for A-018, the two
+live-cell IDs); Verified the text below.
+
+**Verified cells**, written byte for byte (T062, T063). No sentence contains `|`, so quickstart §7's
+`col` still splits each row into its 13 fields. Every row's cell opens with sentence S0:
+
+- **S0** (all 12 rows): `offline bar (owner 2026-10-21): typed builder → wire → independent dict-driven parse → bidirectional per-field + per-group-instance readback; every closure-required field and group set, checked against a runtime walk of FIX50SP2.xml.`
+
+Then, after S0 and a space:
+- **A-018:** `Generated name: ExecutionAck (catalogue title: ExecutionAcknowledgement). Live: one 35=BN built by fixpp::v50sp2::build_ExecutionAck and sent by fixpp on FIXT.1.1 with DefaultApplVerID 9 and fixpp inbound validation off (L-041-2), read back field by field by QuickFIX-cpp v1.16.0 (HP-QFcpp-init-fixt11-fix50sp2-app-bn) and QuickFIX/J 3.0.1 (HP-QFj-init-fixt11-fix50sp2-app-bn).`
+- **N-002:** `Registry pin BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegistered (BE, BF). An inbound BE reaches Application::fromApp, not fromAdmin, and draws no Reject (TailRouting095.InboundBeAndBwReachFromApp, BE leg). Not witnessed: the resend path's replay of these MsgTypes as application messages rather than gap-filling them.`
+- **N-003:** `Registry pin BuilderCompleteness077V50sp2.N003_ApplicationMessageRequestAckReportRegistered (BW, BX, BY). An inbound BW reaches Application::fromApp, not fromAdmin, and draws no Reject (TailRouting095.InboundBeAndBwReachFromApp, BW leg). Not witnessed: the resend path's replay of these MsgTypes as application messages rather than gap-filling them.`
+- every other row: nothing more, apart from the version sentence below for A-029 and A-030.
+
+- Version column → `5.0SP2` for A-018, A-029, A-030 and N-002 (T063). Each of their Verified cells
+  ends with its version sentence, after a space:
+  - A-018, A-029, A-030: `FIX 5.0SP1: no typed tier; runtime-XML path only.`
+  - N-002: `FIX 5.0 and 5.0SP1: no typed tier; runtime-XML path only. FIX 4.4 BE/BF: present in FIX44.xml, excluded from v44 codegen by kN002N003Excluded; lifting it is fixpp#625.`
 - Spec ref cells are unchanged except four (FR-018; spec Clarifications, Gate A round 3 and the
   post-exhaustion pass). These edits come after §F's amendment lands.
   - A-033 → `[FIX50SP2] Market Data` and C-003 → `[FIX50SP2] Account Reporting`: the old refs name
@@ -175,10 +187,9 @@ and for N-002/N-003 the pin and routing cell.
     name the right category, but in a heading spelling (`Settlement Instructions`, `Application
     Sequencing`) that is not the identifier's words, which is the only spelling the amended clause
     admits (§F.1). A-030's token is unchanged: `dictionaries/FIX50SP1.xml` defines BQ.
-- A-018's Verified names the generated `ExecutionAck`.
 
 **Re-check the 12 refs against the amended `[const §VI.2]` (§F.1)**, at P7, recording the output in
-the verify record. Run it from the library root as a script (`bash`); `CAT` may point at a scratch
+the evidence file (tasks.md Execution rules), whose entries T085 copies into the verify record. Run it from the library root as a script (`bash`); `CAT` may point at a scratch
 copy. It reads each row's MsgTypes from its `Title` cell (`35=<MT>`), as the clause does, and checks
 three legs per MsgType: the token's dictionary defines it as `msgcat='app'` exactly once (token and
 application-message legs), and the identifier's words of its Orchestra `category` equal the ref's
@@ -230,10 +241,12 @@ agreed for every tail MsgType the Repository has, and the Repository has no CQ.
 
 ## F. Constitution amendment, v4.0 → v4.1 (FR-021)
 
-Two clauses change, `[const §VI.2]` and `[const §VI.5]`, and so do the Status line and a new Sync
-Impact Report. `[const §VI.3]`, `[const §VI.6]` and `[const §IX.6]` are read and left as they are. The
-before-texts are `.specify/constitution.md` at `95fdf4c9`. Locate each clause by its heading
-(`## Article VI`) and its leading `2.` / `5.`, never by line.
+Three clauses change, `[const §VI.2]`, `[const §VI.5]` and two sentences of `[const §XVIII.7]`
+(§F.5, owner ruling 2026-10-24), and so do the Status line and a new Sync Impact Report.
+`[const §VI.3]`, `[const §VI.6]` and `[const §IX.6]` are read and left as they are. The before-texts
+are `.specify/constitution.md` at `95fdf4c9` (§F.1, §F.2) and at `ee39a894` (§F.5; `git diff
+95fdf4c9 ee39a894 -- .specify/constitution.md` is empty). Locate each clause by its heading
+(`## Article VI`, `## Article XVIII`) and its leading `2.` / `5.` / `7.`, never by line.
 
 ### F.1 Article VI §2
 
@@ -314,7 +327,7 @@ After:
 The first sentence is byte-identical. The added sentence is a permission, not an obligation. That
 is what keeps the bump MINOR (§F.3, "Bump").
 
-### F.3 Sync Impact Report — new block at line 1, above the v3.0 → v4.0 block
+### F.3 Sync Impact Report — the first comment block, above the v3.0 → v4.0 block
 
 PENDING form (lands with the amendment, P7):
 
@@ -322,7 +335,8 @@ PENDING form (lands with the amendment, P7):
 <!--
 Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
   Not ratified. Article XX §2 sequence, in order: a scoped Codex Gate A review of this amendment's
-    clause bodies (done: feature 095's scoped rounds 5 and 6, converged at round 6 with no finding),
+    clause bodies (done: feature 095's scoped rounds 5 and 6 on Article VI §2/§5, converged at round
+    6 with no finding, and its narrow scoped round on the Article XVIII §7 correction, converged),
     Gate B on the 095 PR (pending), owner sign-off (pending). This header reads PENDING until all three have happened. The flip to RATIFIED, with
     the rounds and the sign-off date filled in below, is the last commit before merge, not a claim
     made in advance (the v1.0 and v4.0 precedent).
@@ -333,7 +347,10 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     checked the clause under v4.0 either. §5 adds a permission and keeps its obligation word for
     word, so a /specify artifact that lists only section entries conforms under both
     versions. A §5 that REQUIRED message-level entries would make such an artifact fail. That would be
-    MAJOR, and it was not adopted.
+    MAJOR, and it was not adopted. The Article XVIII §7 correction replaces two deferral statements
+    that feature 077 and owner DECISION 2 had already ended, and records which feature closes those
+    rows. It adds no banned pattern, tightens no budget and imposes no obligation, so no PR mergeable
+    under v4.0 fails under v4.1 because of it.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article VI §2 — an OFFICIAL row whose Title names at least one MsgType as `35=<MT>` may carry the
     message-level Spec ref `[DocAbbrev] Category`. The version token names a version whose vendored
@@ -346,6 +363,12 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     Tier-1 "catalogue consistency check" (follow-up fixpp#626).
   Modified: Article VI §5 — Normative References may also list such message-level refs. One does not
     stand in for a section entry.
+  Modified: Article XVIII §7 (owner ruling 2026-10-24) — the FIX50-only rows (A-018, A-023, A-027 …
+    A-033, C-003) no longer "remain deferred to future `fixpp::v50sp2`/all-version widening": their
+    typed tier is `fixpp::v50sp2`, delivered by feature 077, and feature 095 closes them on it.
+    N-002/N-003 are application messages (owner DECISION 2, 2026-10-21), no longer a session-FSM pair
+    deferred to the v1.0-tagging gate; feature 095 closes both rows on `fixpp::v50sp2`. Feature 095
+    leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged (fixpp#625).
   Read and unchanged: Article VI §3 covers design-decision rows (`[impl]`/`[constitution]`). It does
     not reach normative message rows; the 067 coverage-index comment that read it so is history, not
     an amendment. Article VI §6 is unchanged. Article IX §6 is unchanged: its Tier-1 "catalogue
@@ -357,18 +380,21 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     application-message row, and the catalogue's application-message rows already carried a
     message-level ref. Feature 095's Gate A round 3 rejected a reading of §3 as covering them. Owner
     ruling 2026-10-24: amend the constitution in 095. §2's CI-lint sentence described a check that does
-    not exist (`grep -n -i catalog .github/workflows/*.yml` returns nothing).
+    not exist (`grep -n -i catalog .github/workflows/*.yml` returns nothing). Article XVIII §7 still
+    described as deferred the rows feature 095 closes, so it would have contradicted the catalogue it
+    governs; owner ruling 2026-10-24: fold its correction into v4.1.
   Affected catalogue rows: every OFFICIAL row whose Spec ref carries no `§` and no
     `[impl]`/`[constitution]` token, since the amended §2 decides their conformance (list them with
     the awk in specs/095-tail-evidence-pass/data-model.md §F.1). Of these, feature 095 re-checked
     only its 12 rows (A-018, A-023, A-027 … A-033, C-003, N-002, N-003), with the recipe in the same
     file's §E, and corrects four refs: A-033 and C-003 named another category than Orchestra's;
     A-030 and N-003 named Orchestra's category in a heading spelling. Which of the other rows
-    conform is fixpp#626's first-run output.
+    conform is fixpp#626's first-run output. Article XVIII §7's correction concerns the same 12 rows,
+    which feature 095 flips to done.
   Affected feature specs: specs/095-tail-evidence-pass. Merged specs/<id>/ bundles stay as written.
   Process: rides feature 095 (specs/095-tail-evidence-pass). Its PR is titled in Article XX §2 form,
-    "Constitution: amend §VI.2, §VI.5 — message-level Spec refs for application-message rows (v4.1)
-    (+ 095 tail evidence pass)", and its description states the change, the rationale and the
+    "Constitution: amend §VI.2, §VI.5, §XVIII.7 — message-level Spec refs for application-message
+    rows; FIX50-only tail rows delivered (v4.1) (+ 095 tail evidence pass)", and its description states the change, the rationale and the
     affected rows and specs, so §2's four steps are met in order.
   Review and sign-off: pending.
 -->
@@ -382,18 +408,59 @@ RATIFIED form, written in the last commit before merge:
 - "Review and sign-off: pending." becomes the rounds, the Gate B rounds on PR #<pr>, and the owner's
   sign-off date.
 
-Only these record lines change at the flip. A change to either clause body after the scoped Gate A
-round converges needs another scoped round (FR-021).
+Only these record lines change at the flip. A change to any of the three amended clause texts (§F.1,
+§F.2, §F.5) after its scoped Gate A round converges needs another scoped round (FR-021).
 
 ### F.4 Status line (`> **Status:**`)
 
 PENDING form — the line's current opening `> **Status:** ` is replaced by:
 
-`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: scoped Codex Gate A on the amendment converged (feature 095, round 6); pending Gate B and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose `Title` names its application MsgTypes as `35=<MT>`; Article VI §5 lets Normative References list such refs. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
+`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose `Title` names its application MsgTypes as `35=<MT>`; Article VI §5 lets Normative References list such refs; Article XVIII §7 records the FIX50-only tail rows and N-002/N-003 as closed by feature 095 on the `fixpp::v50sp2` tier. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
 
 The rest of the line, from `user-ratified **v4.0** (2026-10-23) — **backwards-incompatible**`
 onward, is unchanged.
 
 RATIFIED form: `**v4.1 — PENDING** (2026-10-24)` becomes `user-ratified **v4.1** (<sign-off date>)`,
-and `not ratified: scoped Codex Gate A on the amendment converged (feature 095, round 6); pending Gate B and the owner's Article XX §2 sign-off`
-becomes `scoped Codex Gate A on feature 095 converged at round 6, then Gate B and owner sign-off <date>; amendment PR #<pr>`.
+and `not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off`
+becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7), then Gate B and owner sign-off <date>; amendment PR #<pr>`.
+
+### F.5 Article XVIII §7 — two sentences (owner ruling 2026-10-24)
+
+The owner folded this correction into v4.1. Only the two sentences below change; the rest of the
+clause, which is one line, stays byte-identical. Locate it by `## Article XVIII` and its leading
+`7.`; `grep -F` each before-text and require exactly one match. A narrow scoped Codex Gate A round
+with an Opus judge reviews this section before implement (plan `## Gate A`).
+
+Before (the end of the sentence that lists the FIX50-only rows; its bold opening, "The FIX50-only
+rows … are NOT delivered by 069", is unchanged):
+`they carry no FIX44 message and remain deferred to future `fixpp::v50sp2`/all-version widening.`
+
+After:
+`they carry no FIX44 message. Their typed tier is `fixpp::v50sp2`, delivered by feature 077 below; feature 095 closes the catalogue rows A-018, A-023, A-027, A-028, A-029, A-030, A-031, A-032, A-033 and C-003 on it.`
+
+Before:
+`The N-002/N-003 session-FSM pair (BE UserRequest / BF UserResponse) remains deferred to the separate v1.0-tagging gate.`
+
+After:
+`N-002 (BE UserRequest / BF UserResponse) and N-003 (BW / BX / BY) are application messages, not a session-FSM pair (owner DECISION 2, 2026-10-21); feature 095 closes both rows on the `fixpp::v50sp2` tier. Feature 095 leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged.`
+
+Design notes (not clause text):
+- "Their typed tier" covers every MsgType the sentence lists, the mixed-row siblings BO, BR and BL
+  included (each is `msgcat='app'` in `dictionaries/FIX50SP2.xml`). "Closes" names only the tail
+  rows: A-022, A-026 and C-002, the siblings' rows, are not 095's. Re-derive the siblings' class with
+  `grep -o "<message [^>]*msgtype='<MT>'[^>]*>" dictionaries/FIX50SP2.xml`.
+- Both after-texts are history tied to a feature (077 delivered, 095 closes, 095 leaves the v44
+  exclusion unchanged), not a state of the tree, so none turns false when the exclusion is lifted.
+  Per §F.1's note, no issue number sits in the clause (orchestrator ruling 2026-10-24); the lifting
+  is tracked as fixpp#625 in the SIR's Modified entry.
+- The v44 exclusion's code is `kN002N003Excluded` in `tools/codegen/fixpp-codegen/emit_builders.cpp`
+  (re-derive what it holds and where it applies: `grep -n kN002N003Excluded tools/codegen/fixpp-codegen/emit_builders.cpp`).
+  The clause names its effect on BE/BF, the N-002 MsgTypes `dictionaries/FIX44.xml` defines
+  (`grep -o "<message [^>]*msgtype='B[EF]'[^>]*>" dictionaries/FIX44.xml`), and not the symbol, which
+  can be renamed.
+- No count is written: the rows are named, so nothing is derived.
+- Classification: MINOR (§F.3 "Bump"). The two statements described a deferral that feature 077
+  and DECISION 2 had already ended; replacing them adds no banned pattern, tightens no budget and
+  imposes no obligation.
+- Check after C-AMEND (T061): `command grep -qF 'are application messages, not a session-FSM pair'`
+  on the constitution, and the `## Article XVIII` diff changes the §7 line only.

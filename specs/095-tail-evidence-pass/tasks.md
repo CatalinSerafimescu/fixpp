@@ -23,12 +23,15 @@ description: "Task list for 095-tail-evidence-pass"
 **Gate A**: the loop exhausted at round 3; the owner's post-exhaustion pass ("Hand-edit + one Opus
 round, skip Codex") and its Opus review were applied; scoped round 5 on the amendment ran (Codex P1=1
 P2=1; Opus P1=0 P2=2 P3=1) and its fixes are applied; narrow scoped round 6 on the `[const §VI.2]` clause body converged with no
-finding. **Gate A converged** (plan `## Gate A`; FR-021's Codex review of the amendment is discharged).
+finding. **Gate A converged** (plan `## Gate A`; FR-021's Codex review of the §VI.2/§VI.5 amendment is discharged).
+*(Superseded in part 2026-10-24: the owner folded a `[const §XVIII.7]` correction into v4.1
+(data-model §F.5). A narrow scoped Codex round on it is owed before implement; plan `## Gate A`.)*
 
 **Preconditions (pipeline steps 6–9, not tasks of this file)**: `/speckit-analyze` has run over spec,
 plan and this file and its CRITICAL/HIGH findings are remediated; `/speckit-checklist-audit` has
-dispositioned every checklist under `specs/095-tail-evidence-pass/checklists/`. The audit blocks
-`/speckit-implement`, so it cannot be a task inside the file it gates.
+dispositioned every checklist under `specs/095-tail-evidence-pass/checklists/`; the narrow scoped
+Codex round on data-model §F.5 (`[const §XVIII.7]`) has converged, logged in plan `## Gate A`. The
+audit blocks `/speckit-implement`, so it cannot be a task inside the file it gates.
 
 **Tests**: requested — this is an evidence feature, written test-first. Every witness, census,
 known positive, mutant and RED arm of contracts W6, live-cell contract L5, the routing cell's two
@@ -77,8 +80,20 @@ run before the audit, in the order T087 → T088 → T104 → T089 → T105.
 - **Mutant protocol (contracts W6).** Apply the scratch edit; rebuild only the affected target;
   rerun the task's filter; record the command and the message that fired (it must be the one the
   task names); revert; `git diff --exit-code` over the touched paths. Mutants are never committed.
+- **Evidence file (pre-verify).** `/speckit-verify` (T085) writes
+  `.specify/decisions/095-tail-evidence-pass-verify.md` whole, replacing what is there. So every
+  "record" in a task before T085 goes to `.specify/decisions/095-tail-evidence-pass-evidence.md`
+  instead (the parent's tracked `decisions/speckit/`, through the symlink), never to the verify
+  record. The orchestrator writes it; an implementer task's report carries the entry. Each entry
+  names its task ID, the command, its output or the message that fired, and where it ran: the
+  library `git rev-parse HEAD` (with `git status --porcelain` empty, or the applied scratch mutant
+  named), and for a run that reads the uncommitted parent harness, `sha256sum` of each harness file
+  the task names. T085 copies its entries into the verify record by hand, under its carry rule. After T085, every task that writes the
+  verify record (T089, T091, T092, T093, T103, T105) appends the same text to the evidence file, so a
+  `/speckit-verify` re-run copies them in again rather than erasing them.
 - **Builds (`[const §XVII.7]`).** T005's owner ruling covers them, or an `AskUserQuestion` precedes the
-  build. For every heavy build: `export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`; `-j2`; one build
+  build. The only preset tree built locally is `linux-clang-debug` (owner ruling 2026-10-24; T085
+  waives every other leg). For every heavy build: `export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`; `-j2`; one build
   owner per build directory; first check
   `/tmp/claude-1000/-home-catalin-Work-Programming-Antreprenoriat/94f182a9-92bf-450a-92fa-f65ed094e81d/scratchpad/lane613.build.active`
   (a parallel lane builds in `fixpp-parallel`: if the marker exists, wait or ask); run `df -h /mnt/e`
@@ -87,7 +102,8 @@ run before the audit, in the order T087 → T088 → T104 → T089 → T105.
   marker, never a foreground poll loop.
 - **The MSVC sandbox** is not used. Before any full `ctest` (packaging entries compile consumer
   projects), `cat /mnt/c/temp/fixpp/.sandbox-lock`; a lock held by someone else means ask the owner
-  first. The verify record states plainly that MSVC was not run locally.
+  first. The verify record states plainly that MSVC was not run locally (`windows-msvc-debug` and
+  `windows-msvc-asan` are among T085's pre-recorded waivers).
 - **The parent working copy (owner ruling "Keep #462: register after merge.", research R-10).** Every
   `phase-9-harness/` change stays an uncommitted edit in the parent working copy until T099. Nobody
   stages a `phase-9-harness/` path before T099. A copy of every changed and new harness file is kept
@@ -129,14 +145,14 @@ report non-zero.
 
 - [ ] T001 (orchestrator) **Base and tree check.** In `research/G19-fix-fpml-iso20022/library`:
   `git rev-parse --abbrev-ref HEAD` reads `095-tail-evidence-pass`; `git status --porcelain` is clean
-  apart from this bundle; `git fetch origin`; record `git merge-base HEAD origin/main` under the verify
-  record's `## Base`. In the parent: `git status --short -- research/G19-fix-fpml-iso20022/phase-9-harness`
+  apart from this bundle; `git fetch origin`; record `git merge-base HEAD origin/main` under the
+  evidence file's `## Base` (Execution rules). In the parent: `git status --short -- research/G19-fix-fpml-iso20022/phase-9-harness`
   prints nothing (the harness baseline R-10 needs). `codegraph status --json` in this tree:
   `projectPath` is this tree, `fileCount` nonzero; `codegraph sync` if HEAD moved.
 - [ ] T002 [P] (orchestrator) **Issue placement, read-only.** fixpp#625 and fixpp#626 are already
   filed and placed (no filing task): `grep -n '#625\|#626' research/G19-fix-fpml-iso20022/phases/phase-4/issue-batches.md`
   (parent) shows both under their batch headings, and `gh issue view 625` / `gh issue view 626`
-  (`--repo CatalinSerafimescu/fixpp --json state,labels`) read OPEN. Record both in the verify record.
+  (`--repo CatalinSerafimescu/fixpp --json state,labels`) read OPEN. Record both in the evidence file.
 - [ ] T003 [P] (orchestrator) **The bundle's own line-citation charge.** `python3 tools/check_line_citations.py --range origin/main..HEAD`
   and `--shift-audit origin/main..HEAD` both pass on the bundle commits before implementation starts.
   A hit is fixed in the bundle (orchestrator) before T007.
@@ -147,9 +163,11 @@ report non-zero.
   `git show origin/main:spec/feature-catalogue.md` and record the OFFICIAL open / done figures and
   `--list open`, which must contain all 12 tail rows.
 - [ ] T005 (orchestrator) **Resource gate (`[const §XVII.7]`, plan phase 0).** `AskUserQuestion` for
-  the builds of this feature (the `linux-clang-debug` tree in the main checkout, the QuickFIX/J `mvn`
-  build, the docker pull, the full `ctest` of T085). Record the ruling in the verify record. No build
-  runs before it.
+  the builds of this feature: the `linux-clang-debug` tree in the main checkout, and no other preset
+  tree (owner ruling 2026-10-24: local verify scope is `linux-clang-debug` only; T085 waives every
+  other leg), including the interop targets T055a builds; the QuickFIX/J `mvn` builds (unpatched at
+  T048, patched at T046); the docker pull; the full `ctest` of T085. Record the ruling in the
+  evidence file. No build runs before it.
 - [ ] T006 [P] (orchestrator) **SC-005 instrument, known positive first.** Show that
   `git diff --name-only <range> -- src include tools/codegen` reports non-zero on a range that touches
   those paths (094's merge, `45a620f4~1..45a620f4`, touched `src/` and `include/`), then record that
@@ -179,7 +197,7 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
     taken from the parsed frame's tag 35;
   - a fixture `SetUpTestSuite` that loads `FIXPP_DICT_DATA_DIR "/FIX50SP2.xml"` once.
   The parse path is `fixpp::wire::Parser<Index>` over `XmlLoader().load(...)`'s `table_view`
-  (`fixpp_test_support::parse_dict`, `tests/session/support/app_message_read_scaffold.hpp`). The TU
+  (`fixpp_test_support::parse_dict`, `tests/support/app_message_read_scaffold.hpp`). The TU
   includes per-message headers `fixpp/v50sp2/messages/<Msg>.hpp`, never `all.hpp` (R-2).
 - [ ] T008 (implementer) **CMake for the TU** in `tests/session/CMakeLists.txt`: add the TU to
   `test_077_allversions_builder_roundtrip`; link pugixml if the target does not already; add a compile
@@ -189,25 +207,32 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
   with a comment in the 092/093 pattern, on `test_077_allversions_builder_roundtrip` and
   `session_pure_tests` (`tests/session/CMakeLists.txt`), `codegen_077_v50sp2_builder_completeness_test`
   (`tests/codegen/CMakeLists.txt`) and the ctest entry of `interop_hp_fixt50sp2_logon_hb_logout_test`
-  (`tests/interop/CMakeLists.txt`). Reconfigure, then write `specs/095-tail-evidence-pass/expected-ctest-095.txt`
+  (`tests/interop/CMakeLists.txt`). Each line goes in the block that defines its target: the
+  `test_077_allversions_builder_roundtrip` line inside `tests/session/CMakeLists.txt`'s
+  `if(TARGET fixpp_codegen_generate)` block, after that target's `set_tests_properties`, because
+  outside it the line would name a test that does not exist when that target is absent. Reconfigure, then write `specs/095-tail-evidence-pass/expected-ctest-095.txt`
   from `ctest --preset linux-clang-debug -N -L '^095$'` (one ctest name per line, sorted; 093's
   format). Quickstart §4's `diff` prints nothing. No new ctest entry (`[const §VII.8]`).
 - [ ] T010 (implementer) **Field-leg known positive** `TailRows095Census.FieldLegMatchesQuickFixCppGolden`
   (W6 row "walk `ok`, field leg"): first assert `golden.csv` holds exactly one `FIX50SP2,<MT>,` row
   for each of the 23 tail MsgTypes and 35=E, then that the walk's message-level field set equals that
-  row, read from the file at test time and never copied into the TU. GREEN expected.
+  row, read from the file at test time and never copied into the TU. GREEN expected. Record the
+  command and its `[       OK ]` line in the evidence file.
 - [ ] T011 (implementer) **Deficient frames** `TailRows095Census.KnownPositive_DeficientFrames`
   (contracts W6): frames E-absent, E-one, E-short, E-member, CC-nodelim, CC-nested, CC-count2 (literal
   bytes or typed-builder output, `NewOrderList.hpp` / `StreamAssignmentRequest.hpp`), each asserting
   the exact list `required_members_missing` returns. The 35=E and 35=CC walk statuses are asserted
   `ok`. **First** confirm and report that the parser accepts every frame and that CC-count2's two
   nested instances parse as one outer instance (`consume_group_extent` / `group_slices_status`,
-  `src/wire/offset_table.cpp`); otherwise stop (Execution rules). GREEN expected.
+  `src/wire/offset_table.cpp`); otherwise stop (Execution rules). GREEN expected. Record in the
+  evidence file the command, each frame's asserted list as the test states it, and the parser
+  confirmation.
 - [ ] T012 (implementer) **Fail-loud known positives**: `TailRows095Census.NestedRequiredGroupFailsLoud_MassQuote`
   (status `nested_required_group` for 35=i, without breaking `SetUpTestSuite` for the tail set) and
   `TailRows095Census.WalkStatusesOnSyntheticDictionaries` (inline `load_string` documents S1, a
   required component holding one field and one group → `group_among_siblings` naming the component;
-  S2, a delimiter chain → `nested_required_group` naming the inner group). GREEN expected.
+  S2, a delimiter chain → `nested_required_group` naming the inner group). GREEN expected. Record
+  the command and each asserted status with the element it names in the evidence file.
 - [ ] T013 (implementer) **RED arm, field leg.** Scratch: drop one tag from the walk's field set for
   one tail MsgType (e.g. a component-flag check turned off). `"$B" --gtest_filter='TailRows095Census.FieldLegMatchesQuickFixCppGolden'`
   fails, the message naming the MsgType and both sets. Second scratch: add a MsgType absent from
@@ -282,7 +307,7 @@ maps to.
   binary pass (FR-006), and `git diff --exit-code origin/main -- tests/session/test_077_allversions_builder_roundtrip.cpp`
   is clean (W8).
 
-### RED arms (contracts W6; Mutant protocol; record each in the verify record)
+### RED arms (contracts W6; Mutant protocol; record each in the evidence file)
 
 - [ ] T025 [US1] (implementer) **Mutant D** — delete one intent entry, setter kept → RED in W4
   ("parsed, not intended") naming the path.
@@ -329,12 +354,12 @@ maps to.
 
 - [ ] T037 [P] [US2] (implementer) **The two pins** in `tests/codegen/test_077_v50sp2_builder_completeness.cpp`
   (FR-007, R-5): `BuilderCompleteness077V50sp2.N002_UserRequestUserResponseRegistered` asserts `"BE"`
-  and `"BF"` are `builder_registry` keys and `BuilderCompleteness077V50sp2.N003_ApplicationSequencingRegistered`
+  and `"BF"` are `builder_registry` keys and `BuilderCompleteness077V50sp2.N003_ApplicationMessageRequestAckReportRegistered`
   asserts `"BW"`, `"BX"`, `"BY"`; each also calls the entry and checks the built body starts `35=<mt>`.
 - [ ] T038 [P] [US2] (implementer) **The routing cell** `TailRouting095.InboundBeAndBwReachFromApp`
   (FR-008, R-5) in an existing `session_pure_tests` fixture TU under `tests/session/` (the implementer
   picks it and names it in the report): on an established session, one inbound 35=BE and one 35=BW;
-  `Application::from_app` called once per message with its MsgType, `from_admin` not called for
+  `Application::fromApp` called once per message with its MsgType, `fromAdmin` not called for
   them, no Reject sent. The BE and BW assertions are separate, so each leg fails on its own.
 - [ ] T039 [US2] (implementer) **US2 GREEN run** — quickstart §2's script (count assertions: 2 pins,
   1 routing cell). Instrument check (CLAUDE.md "prove the instrument can report non-zero"): scratch,
@@ -367,39 +392,63 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   only what selects BN (present in every file, equal on every axis, closure-required set within the
   R-7 sent fields, every sent field a member in every file); asserts the same equality predicate is
   false for BM; **fails, never skips**, when the variable is unset or a file is missing.
-- [ ] T044 [P] [US3] (implementer) **Registration and dictionary digest** (R-9 items 1–2) in
-  `phase-9-harness/tools/run_interop_cell.py`: register both cells with L0's fields (`combo_id` C1 on
-  the QF-cpp cell, C3 on the QFJ cell; `run_kind="app-message-evidence"`; `arm="validation-off"`;
-  `script_path` the new script), against the existing `*-acceptor-tls-fixt50sp2.cfg.in` configs; set
+- [ ] T044 [P] [US3] (implementer) **Registration and dictionary digest, test-first** (R-9 items 1–2;
+  `[const §VII.3]` applies to the parent harness, orchestrator ruling 2026-10-24) in
+  `phase-9-harness/tools/run_interop_cell.py`. **First** write the tests in
+  `phase-9-harness/tools/test_run_interop_cell.py`: the registration fields of both cells (contracts
+  L0's `Cell` fields `binary`, `gtest_filter`, `config_template`, `combo_id`, `run_kind`, `arm`,
+  `script_path`) and both dictionary cases of `_finalize`'s FR-011 check. Run them against the
+  unmodified harness and record the RED (the cells absent from `CELLS`; the FIX50SP2 digest refused).
+  **Then** register both cells with L0's values (`binary` `interop_hp_fixt50sp2_logon_hb_logout_test`;
+  `gtest_filter` the cell's gtest id, contracts L0 "Gtest ids"; `config_template` the existing
+  `*-acceptor-tls-fixt50sp2.cfg.in` of its engine; `combo_id` C1 on the QF-cpp cell, C3 on the QFJ
+  cell; `run_kind="app-message-evidence"`; `arm="validation-off"`; `script_path` the new script); set
   `FIXPP_FIX50SP2_DICT_XML` at the `_run_initiator_cell` launch site; give `_finalize`'s FR-011 check
-  a per-cell expected dictionary (`dictionaries/FIX50SP2.xml` for these cells, FIX44 for every other).
-  Tests in `phase-9-harness/tools/test_run_interop_cell.py` for both dictionary cases and the
-  registration fields. Refresh the outside-tree copy.
+  a per-cell expected dictionary (`dictionaries/FIX50SP2.xml` for these cells, FIX44 for every
+  other). The tests pass; record the GREEN. Refresh the outside-tree copy.
 - [ ] T045 [P] [US3] (implementer) **Capability minimums** (R-9 item 3): two entries in
   `phase-9-harness/tools/interop_capability_minimums.yaml`. Refresh the copy.
-- [ ] T046 [P] [US3] (implementer) **QuickFIX/J A-TESTREQ blocker** (R-9 item 4): in
-  `phase-9-harness/quickfixj/.../InteropCounterparty.java`, move the conversation-mode seqnum bump and
-  the Heartbeat inside the `A-TESTREQ` null check (the C++ twin's 089 T062a shape). Refresh the copy.
-- [ ] T047 [P] [US3] (implementer) **`emit_matrix` `run_kind` handling** (R-9 item 6; L0 rows Select,
-  Select `--conversation-only`, Promote, N2, Registration) in `phase-9-harness/tools/emit_matrix.py`,
-  each with a test in `phase-9-harness/tools/test_emit_matrix.py`: the probe rule narrowed to
-  `"validator-positive-control"` (*test*: `declared_cell_ids` stubbed to omit the two rows →
-  `select_cells` raises naming both); `conversation_only=True` returns the new cells (*test*);
-  promotion skipped for `"app-message-evidence"`, neither promoted nor flipped (*test*); N2 adds no
-  row (*test*); a both-directions pin for the two cells modelled on
-  `test_the_recovery_inbound_cells_are_registered_AND_declared` (*test*). Refresh the copy.
+- [ ] T046 [US3] (implementer) **QuickFIX/J A-TESTREQ blocker, RED first** (R-9 item 4; the same
+  ruling as T044). Runs **after** T051 and T052's QF-cpp half: it needs the cell, T044/T045's
+  registration and T048's **unpatched** jar.
+  - **RED:** `python3 ../phase-9-harness/tools/run_interop_cell.py HP-QFj-init-fixt11-fix50sp2-app-bn --build-root build`
+    against the unpatched jar, without `--update-goldens`. Record the symptom from the run's
+    transcript, not only its exit status (a missing golden also exits red): after Logon the peer's
+    outbound MsgSeqNum(34) skips one value, its next frame is the induction Heartbeat (35=0), and
+    fixpp answers the gap with a ResendRequest (35=2). If that sequence does not show, stop and
+    report: the blocker's premise is wrong.
+  - **Fix:** in `phase-9-harness/quickfixj/.../InteropCounterparty.java`, move the conversation-mode
+    seqnum bump and the Heartbeat inside the `A-TESTREQ` null check (the C++ twin's 089 T062a shape).
+    Rebuild the jar (`mvn … package -DskipTests`, detached, marker). Refresh the copy.
+  - **GREEN:** the same command; the recorded symptom is absent. The QFJ cell's capture and its full
+    pass are T052's second half.
+- [ ] T047 [US3] (implementer) **`emit_matrix` `run_kind` handling, test-first** (R-9 item 6; L0
+  rows Select, Select `--conversation-only`, Promote, N2, Registration; the same ruling as T044).
+  After T044: its tests need the two cells registered, so that each RED is the rule's and not an
+  absent cell's. **First** add each test to `phase-9-harness/tools/test_emit_matrix.py` and run it against the
+  unmodified `emit_matrix.py`, recording each RED: `declared_cell_ids` stubbed to omit the two rows →
+  `select_cells` raises naming both (RED today: the probe rule admits them through combos C1/C3);
+  `conversation_only=True` returns the new cells; promotion skipped for `"app-message-evidence"`,
+  neither promoted nor flipped; N2 adds no row; and, inside class
+  `RegistryAgreesWithTheRealTemplateTest`, a both-directions pin for the two cells modelled on its
+  `test_the_recovery_inbound_cells_are_registered_AND_declared`. A test that passes before the change
+  is recorded as such, with the reason (N2's producer already keeps only `"conformance"`); the
+  pin's RED is T054's (the template rows do not exist until T055). **Then** change `emit_matrix.py`
+  (the probe rule narrowed to `"validator-positive-control"`, the promotion skip); every test but the
+  pin passes. Refresh the copy.
 - [ ] T048 [US3] (implementer) **Peers and harness unit run.** `mvn -f ../phase-9-harness/quickfixj/pom.xml package -DskipTests`
-  (detached, marker); quickstart §5's docker pull / inspect / create / cp of the QF-cpp counterparty,
-  recording the image digest; `cmp dictionaries/FIX50SP2.xml "$P/qfcpp-spec/FIX50SP2.xml"` prints
-  nothing. `python3 -m pytest -q -p no:cacheprovider test_run_interop_cell.py test_emit_matrix.py -k 'not RegistryAgreesWithTheRealTemplate'`
-  passes (the real-template test is expected RED until T055; T054 records it). Parent
-  `git diff --cached --name-only` prints nothing.
+  **before** T046's fix, so this jar is the unpatched one T046's RED needs (detached, marker);
+  quickstart §5's docker pull / inspect / create / cp of the QF-cpp counterparty, recording the image
+  digest; `cmp dictionaries/FIX50SP2.xml "$P/qfcpp-spec/FIX50SP2.xml"` prints nothing.
+  `python3 -m pytest -q -p no:cacheprovider test_run_interop_cell.py test_emit_matrix.py -k 'not RegistryAgreesWithTheRealTemplate'`
+  passes (the deselected class holds the real-template test and T047's pin, both RED until T055; T054
+  records them). Parent `git diff --cached --name-only` prints nothing.
 
 ### fixpp live cell (plan P4)
 
 - [ ] T049 [US3] (orchestrator) **Run the selection check** — quickstart §3 as a `bash -e` script:
   the unzip from the `~/.m2` jar T048's build fetched; the run passes (`[  PASSED  ] 1 test`); the
-  input-absent arm (`env -u FIXPP_095_QFJ_DICT_DIR`) FAILS. The printed axes go in the verify record,
+  input-absent arm (`env -u FIXPP_095_QFJ_DICT_DIR`) FAILS. The printed axes go in the evidence file,
   never in an artifact (FR-005). If BN does not pass, stop: the live cell is not built on BN and the
   orchestrator re-selects from the output (plan Risks).
 - [ ] T050 [US3] (implementer) **Selection check, predicate mutant** — scratch: the equality predicate
@@ -410,22 +459,40 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
     (loads production `FIXT11.xml` and `FIX50SP2.xml`, registers FIX50SP2 under ApplVerID 9, returns
     the SHA-256 of the FIX50SP2 bytes; file from `FIXPP_FIX50SP2_DICT_XML`, falling back to
     `FIXPP_DICT_DATA_DIR`); `production_dictionary_and_digest` unchanged;
-  - `tests/interop/happy/hp_fixt50sp2_app_message_test.cpp` (NEW): the two-parameter cell; fixpp
-    initiator; after Logon one 35=BN built by `fixpp::v50sp2::build_ExecutionAck` from the R-7 field
-    values fixed before the build, sent via `Engine::send`; MsgSeqNum captured in `to_app`;
-    `validate_inbound_messages` off (FR-013); the `sent` record and the comparison by `compare_streams`
-    (decimal resolver over `FIX50SP2.xml`);
-  - `tests/interop/CMakeLists.txt`: the source joins `interop_hp_fixt50sp2_logon_hb_logout_test`; link
-    `fixpp::builders::v50sp2` and the codegen include; `target_compile_definitions` for
-    `FIXPP_DICT_DATA_DIR` after the `fixpp_add_interop_test` call;
+  - `tests/interop/happy/hp_fixt50sp2_app_message_test.cpp` (NEW): the two-parameter cell, with the
+    gtest ids of contracts L0 "Gtest ids" verbatim (INSTANTIATE prefix, suite, test and param names);
+    fixpp initiator; the cell's **first** statement that can skip or return is
+    `INTEROP_REQUIRE_COUNTERPARTY(...)` (033's cell shape; any TLS-fixture or dictionary guard comes
+    after it, contracts L1); after Logon one 35=BN built by `fixpp::v50sp2::build_ExecutionAck` from
+    the R-7 field values fixed before the build, sent via `Engine::send`; MsgSeqNum captured in
+    `toApp`; `validate_inbound_messages` off; the `sent` record and the comparison by
+    `compare_streams` (decimal resolver over `FIX50SP2.xml`). Its header comment is FR-013's "cell's
+    record": inbound validation is off, and why (L-041-2: the session validator takes one
+    dictionary). The verify record carries the rest, and the hello carries `arm="validation-off"`;
+  - `tests/interop/CMakeLists.txt`: the new source joins `interop_hp_fixt50sp2_logon_hb_logout_test`
+    through `target_sources` after the `fixpp_add_interop_test` call, inside an
+    `if(TARGET fixpp_codegen_generate)` block with the `fixpp::builders::v50sp2` link, the codegen
+    include and `add_dependencies(… fixpp_codegen_generate)` (the pattern of `interop_conversation_test`
+    in the same file), so a configure without codegen leaves 033's target as it is;
+    `target_compile_definitions` for `FIXPP_DICT_DATA_DIR` after the `fixpp_add_interop_test` call;
   - `tests/interop/conversation/fixt_app_script.yaml` (NEW): step F-01, 35=BN, originator fixpp,
     `applicable_combos: [C1, C3]`.
-  033's own cells are unchanged.
-- [ ] T052 [US3] (implementer) **Local run and goldens** — build the 033 FIXT target (Builds rule);
-  run each cell with `python3 ../phase-9-harness/tools/run_interop_cell.py <cell> --build-root build`
-  against the T048 peers; first capture with `--update-goldens` (R-9 item 5) into
-  `phase-9-harness/golden/`; refresh the copy. Each cell: exactly one passing comparison row, no peer
-  Reject, clean Logout. The orchestrator reviews both goldens by hand and records the review.
+  033's own cells are unchanged. After the build, `--gtest_list_tests` on the target lists the two
+  ids of contracts L0 exactly once each, and 033's `Fixt/HappyFixtLogonHbLogout.*` cases unchanged
+  (compare with the list taken before the edit); record both lists in the evidence file.
+- [ ] T052 [US3] (implementer) **Local run and goldens** — first run quickstart §5's environment and
+  certificate lines (the `export` of `INTEROP_QFC_COUNTERPARTY_BIN`, `LD_LIBRARY_PATH`,
+  `INTEROP_QFCPP_SPEC_DIR` and `INTEROP_QFJ_JAR` over T048's extraction and jar, `test -f "$INTEROP_QFJ_JAR"`,
+  and `bash ../phase-9-harness/tls/gen-interop-certs.sh`); build the 033 FIXT target (Builds rule).
+  Run each cell with `python3 ../phase-9-harness/tools/run_interop_cell.py <cell> --build-root build`,
+  first capture with `--update-goldens` (R-9 item 5) into `phase-9-harness/golden/`; refresh the
+  copy. In two halves: the QF-cpp cell first; then T046 (its RED against the unpatched jar, the fix,
+  the rebuilt jar); then the QFJ cell against the patched jar. Each cell: exactly one passing
+  comparison row; no peer Reject; a clean Logout, which two checks decide, both required:
+  `hp::expect_graceful_stop` on the fixpp side (`Engine::stop()` within its bound, `stopped()`
+  true) and the harness's `_logout_sync_step`, which on a capture requires the peer's trailing
+  `LOGOUT` transcript line (`_logout_marker_required`). The orchestrator reviews both goldens by hand,
+  confirms each ends with that `LOGOUT` line, and records the review.
 - [ ] T053 [US3] (implementer) **L5 RED arms**, each against both peers, scratch, reverted:
   (a) one chosen value altered on the send side after the `sent` record is fixed → RED (comparison
   mismatch); (b) ExecID(17) omitted → the peer rejects → RED (missing readback and/or unexpected peer
@@ -436,17 +503,46 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
 
 - [ ] T054 [US3] (implementer) **Real-template RED first.** With T044's registration in place and
   before any template row exists: `python3 -m pytest -q -p no:cacheprovider test_emit_matrix.py -k RegistryAgreesWithTheRealTemplate`
-  (from `phase-9-harness/tools`) FAILS naming both cells. Record it.
+  (from `phase-9-harness/tools`) FAILS naming both cells, in both of the class's tests that read them
+  (`test_no_registered_cell_is_undeclared_by_the_submodule_template` and T047's both-directions pin).
+  Record it.
+- [ ] T055a [US3] (implementer) **Skip-list gate, RED first** (`ci/assert-interop-skips.py`,
+  which the ctest-interop steps of `tier1.yml`, `tier2.yml` and `tier3-libcxx.yml` run). Before T055
+  adds the two skip lines, run that step's recipe on `linux-clang-debug`, reading it from
+  `tier1.yml`'s "Interop gate" step (its count pin against `ci/expected-interop-tests.txt` is left
+  out: that file has no `linux-clang-debug` line):
+  - `unset INTEROP_QUICKFIX_CPP_PORT INTEROP_QUICKFIX_J_PORT INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST TESTBRIDGE_TEST_ONLY`
+    and every `GTEST_*` variable;
+  - build every target `ctest --preset linux-clang-debug -N -L interop` names (an interop ctest name
+    is its target name, `fixpp_add_interop_test`), except the pytest entry
+    `interop_cell_results_schema_check`;
+  - `--expected-count` is that list's length without the pytest entry;
+  - `GTEST_OUTPUT="json:$D/" ctest --preset linux-clang-debug -L interop --no-tests=error --output-on-failure`
+    into a fresh `D=$(mktemp -d)`;
+  - `python3 ci/assert-interop-skips.py --json-dir "$D" --bin-dir build/linux-clang-debug/bin --expected-skips tests/interop/expected-skips-without-counterparty.txt --expected-count <n>`.
+
+  Expected RED: exit 1, "unexpected skips" naming exactly the two new gtest ids and no other
+  violation. Exit 2 is an instrument failure, never this RED; any other violation stops the task.
+  Record the command, the count and the output; keep `$D`.
 - [ ] T055 [US3] (implementer) **Template rows and skip list** (R-11): two rows next to 033's FIXT rows
   in `tests/interop/cell_results.yaml` (`id`, `config: normal`, `kind: happy`,
-  `status: "skip:counterparty-unavailable"`, `matrix_disposition: live`, `spec_ref: "FIX-SL §5.3.1/§5.3.3"`);
-  two lines in `tests/interop/expected-skips-without-counterparty.txt`. Then
+  `status: "skip:counterparty-unavailable"`, `matrix_disposition: live`, `spec_ref: "FIX-SL §5.3.1/§5.3.3"`).
+  The status stays that pre-live value on the PR and after it: the file header's convention (live
+  cells carry it; the parent overrides it with real results) and the precedent of the two
+  `HP-QFj-*-fix44-recovery-inbound` rows fixpp#462 added (PR #474). The pass lives in the evidence file and
+  the verify record (T057, T085) and in the Gate B close-out record (T101), never in this file
+  (data-model §D). Two
+  lines in `tests/interop/expected-skips-without-counterparty.txt`, the two gtest ids of contracts L0
+  verbatim, each in sorted position (the file's FORMAT header). Then
   `python3 -m pytest tests/interop/cell_results_schema_check_test.py -q` FAILS on the `EXPECTED_IDS`
   pin (FR-016's RED first). Record it.
+- [ ] T055b [US3] (implementer) **Skip-list gate, GREEN.** With T055's two lines in place, re-run only
+  T055a's `assert-interop-skips.py` command over the same `$D` (the binaries are unchanged, so the
+  pair is attributable to the two lines): exit 0. Record it.
 - [ ] T056 [US3] (implementer) **The pin** — add the two ids to `EXPECTED_IDS` in
   `tests/interop/cell_results_schema_check_test.py`; the schema test passes with no other edit (no
   `CENSUS_KEY_COUNT`, e7a inventory, `CONV_COMBO_IDS` or `witness_evidence.yaml` change). The
-  real-template test of T054 now passes.
+  real-template test of T054 and T047's pin now pass.
 
 ### Local live evidence (plan P6; stands in for the PR's `interop-live`, contracts L7)
 
@@ -454,7 +550,7 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   reconciles the whole population; `--list-binaries` builds; the full `python3 ci/run-interop-live.py --harness ../phase-9-harness --build-root build`
   ends "all … live interop cell(s) passed" (the two new cells, 033's FIXT cells, 089's CONV-C1…C4
   and PROBE cells against the patched QuickFIX/J); the schema test; both harness suites; the
-  real-template test. Record in the verify record: every output, the image digest, the jar's source
+  real-template test. Record in the evidence file: every output, the image digest, the jar's source
   state (`git -C .. status --short -- phase-9-harness`), the peer builds (FR-015).
 - [ ] T058 [US3] (implementer) **Commit C-US3** (fixpp only: `tests/session/test_095_tail_rows_roundtrip.cpp`'s
   selection check, `tests/interop/**` changes, `hp_support.hpp`). The parent harness stays
@@ -484,20 +580,24 @@ delta (plan P7).
 ### Amendment (its own commit, before any catalogue edit)
 
 - [ ] T061 [US4] (orchestrator) **Commit C-AMEND** — `.specify/constitution.md` only, data-model §F
-  verbatim: `## Article VI` §2 and §5 (before-texts `grep -F`-matched first), the Status line's
-  PENDING form (§F.4), and the PENDING Sync Impact Report block above the v3.0 → v4.0 block (§F.3).
-  No `CHANGELOG.md` change (MINOR). Copy from the data-model text a converged scoped round has seen;
-  if the owed narrow §VI.2 round (header) changes the clause, data-model §F is edited first, then
-  copied. Then `command grep -qF 'may instead use the message-level form `[DocAbbrev] Category`' .specify/constitution.md`.
+  verbatim: `## Article VI` §2 and §5 (§F.1, §F.2), `## Article XVIII` §7's two sentences (§F.5)
+  (every before-text `grep -F`-matched first, exactly once), the Status line's PENDING form (§F.4),
+  and the PENDING Sync Impact Report block above the v3.0 → v4.0 block (§F.3). No `CHANGELOG.md`
+  change (MINOR). Copy only data-model text a converged scoped round has seen: §F.1 and §F.2 as
+  round 6 converged on them, and §F.5 as its narrow scoped round (Preconditions) converged on it; if
+  that round changes §F.5, data-model §F is edited first, then copied. Then
+  `command grep -qF 'may instead use the message-level form `[DocAbbrev] Category`' .specify/constitution.md`
+  and `command grep -qF 'are application messages, not a session-FSM pair' .specify/constitution.md`
+  both succeed, and `git diff` shows no other changed line in `## Article XVIII`.
 
 ### Catalogue, coverage index, B&L (after T061)
 
 - [ ] T062 [US4] (orchestrator) `spec/feature-catalogue.md`, the 12 rows (data-model §E): Status `done`;
   `/specify` `095-tail-evidence-pass`; Tests the witness IDs of data-model §A (plus, for N-002 and
   N-003, the pin and `TailRouting095.InboundBeAndBwReachFromApp`; for A-018 the two live-cell IDs);
-  Verified the offline-bar sentence of §E (A-018's naming the generated `ExecutionAck` and the live
-  cells; N-002/N-003's naming the pin and the routing cell, and that the resend-path replay half is
-  not witnessed, R-5). The PR cell stays as on `origin/main` until T104.
+  Verified the text of data-model §E "Verified cells", byte for byte (the offline-bar sentence; A-018's
+  generated `ExecutionAck` and live-cell sentence; N-002's and N-003's pin, routing and resend-path
+  sentences, R-5). T063 adds the version sentences. The PR cell stays as on `origin/main` until T104.
 - [ ] T063 [US4] (orchestrator) **Version narrowing** (FR-018): FIX version(s) → `5.0SP2` for A-018,
   A-029, A-030 (Verified adds "FIX 5.0SP1: no typed tier; runtime-XML path only") and N-002 (Verified
   adds §E's FIX 5.0/5.0SP1 and FIX 4.4 BE/BF sentence, naming `kN002N003Excluded` and fixpp#625).
@@ -540,7 +640,7 @@ delta (plan P7).
   RED ("§VI.2 is not amended").
 - [ ] T077 [US4] (orchestrator) **SC-004 census**: T004's `catalogue_census.py` on the merge-base's
   catalogue and on the head's; OFFICIAL open falls by 12, done rises by 12, and `--list` differs only
-  in the 12 tail rows. Every output in the verify record.
+  in the 12 tail rows. Every output in the evidence file.
 - [ ] T078 [US4] (orchestrator) **Commit C-RECORDS** (`spec/feature-catalogue.md`,
   `spec/coverage-index.md`, `spec/behaviors-and-limitations.md`), after the placeholder grep. C-AMEND
   precedes it in `git log`.
@@ -557,7 +657,7 @@ delta (plan P7).
   and the uncommitted parent harness diff). The orchestrator triages; `phase-implementer` applies
   in-scope fixes (parent edits stay uncommitted, copy refreshed). A change to the witness TU re-runs
   T024 and the W6 arms its edit touches; to the routing cell, T040–T041; to the live cell, T052–T053.
-  Record the triage in the verify record.
+  Record the triage in the evidence file.
 
 ### Instruments (each with its known positive)
 
@@ -568,7 +668,7 @@ delta (plan P7).
 - [ ] T081 [P] (orchestrator) **Every tier1 source-audit job, run locally.** Read `.github/workflows/tier1.yml`
   with a YAML parser; run each ungated audit job's `run:` blocks (`ci-script-pins`, `check-layers`,
   `co-spawn-closure-audit`, and any other) as Actions would (`bash -e`). Record a job → rc table in
-  the verify record.
+  the evidence file.
 - [ ] T082 [P] (orchestrator) **Closing-keyword check.** Positive controls first: seed `Closes #625` and
   `Resolves https://github.com/CatalinSerafimescu/fixpp/issues/626` into a scratch copy of one message;
   the grep hits both. Then `git log origin/main..HEAD --format=%B | grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b([: ]+([a-z0-9_.-]+/[a-z0-9_.-]+)?#[0-9]+|\s*:?\s*https://github.com/[^ ]+/issues/[0-9]+)'`
@@ -585,23 +685,41 @@ delta (plan P7).
 
 ### `/speckit-verify` (`[const §XVII.8]`)
 
-- [ ] T085 (orchestrator) **Run `/speckit-verify 095-tail-evidence-pass`** in the main checkout. It
-  writes `.specify/decisions/095-tail-evidence-pass-verify.md` with a GREEN or YELLOW verdict. Its
-  evidence, at the post-simplify head:
+- [ ] T085 (orchestrator) **Run `/speckit-verify 095-tail-evidence-pass`** in the main checkout, with
+  the owner's local scope (ruling 2026-10-24: `linux-clang-debug` only):
+  `--skip=linux-clang-release,linux-clang-asan,linux-clang-ubsan,linux-clang-tsan,linux-clang-coverage,linux-clang-libc++,windows-msvc-debug,windows-msvc-asan`
+  and, for each preset in that `--skip`, `--waive=T085-<preset>:test-only change, no library code; CI runs it once both labels land; owner ruling 2026-10-24`.
+  Coverage is N/A by the skill's Step 0c (no `src/` or `include/` file touched), so its coverage
+  re-add does not apply. The verdict is therefore YELLOW (every skip paired with its waiver), or RED.
+  It writes `.specify/decisions/095-tail-evidence-pass-verify.md`, replacing the file. The skill has
+  no import step: the orchestrator copies the evidence file's entries into the skill's Step 3a
+  (load-bearing witnesses) buffer by hand, each entry marked re-run or carried. **Carry rule:** an arm recorded at library SHA `s` is carried
+  only if `git diff --name-only s..<verified head>` lists none of the files its task names, and, for
+  an arm that read the parent harness, the `sha256sum` of each harness file it names is unchanged;
+  otherwise it is re-run at the verified head. The record lists, per arm, "re-run at `<head>`" or
+  "carried from `<s>`". Its evidence:
   - quickstart §1 (T024), §2 (T039), §3 (T049), §4 (`ctest -L '^095$' --no-tests=error` against
     `expected-ctest-095.txt`), §5 (T057's local live run and its peer identities), §7 (T068) and
     SC-004 (T077);
-  - every RED arm with its command and the message that fired: T013–T017, T025–T034, T040–T041,
-    T049–T050, T053–T056, T059–T060, T065, T069–T076 (SC-002);
+  - the GREEN known positives with their commands and asserted lists or statuses: T010–T012;
+  - every RED arm, with its GREEN pair where its task has one, its command and the message that
+    fired: T013–T017, T025–T034, T039's
+    instrument check, T040–T041, the harness RED-firsts of T044, T046 and T047, T049–T050, T053,
+    T054, T055a, T055, T055b, T056, T059–T060, T065, T069–T076 (SC-002);
   - T080–T084's results; coverage `[const §IX.1]` n/a per touched module (no library line);
-  - MSVC stated plainly as not run locally;
+  - MSVC stated plainly as not run locally, and each skipped preset with its waiver;
   - **one FULL `ctest --preset linux-clang-debug --output-on-failure --no-tests=error`, run LAST**, on a
     committed tree, after every selected run: before it `df -h /mnt/e`, `cat /mnt/c/temp/fixpp/.sandbox-lock`
     (someone else's lock → ask the owner), and the `lane613.build.active` marker check; detached with a
     `.done` marker. A full `ctest` regenerates `_codegen` in the same tree, so any build or run after
     it rebuilds first. T087's `local build: green` line cites its SHA.
   A row whose evidence did not hold is taken out of the flip set (its row reverted by a docs task)
-  and the owner told.
+  and the owner told. Every tail row, N-002 and N-003 included, is named as closed by 095 in
+  data-model §F.5's `[const §XVIII.7]` after-text, so dropping one is a clause-body change: edit §F.5
+  first, then the constitution's §XVIII.7 sentence to match, and T090's extra narrow scoped Codex
+  round runs on that change before the RATIFIED flip.
+  After the skill writes the verify record, commit it with the evidence file in one parent commit,
+  explicit paths only, under the Execution rules' parent-commit checks.
 - [ ] T086 (orchestrator) `codegraph sync` in this tree after the last code-changing commit; read
   back `codegraph status --json`.
 
@@ -612,14 +730,16 @@ delta (plan P7).
 > deviation, header); each of them is open at the audit, under the waiver written in it.
 
 - [ ] T087 (orchestrator) **Draft the PR description** in the parent's `research/reviews/` scratch
-  area: title exactly `Constitution: amend §VI.2, §VI.5 — message-level Spec refs for application-message rows (v4.1) (+ 095 tail evidence pass)`
+  area: title exactly `Constitution: amend §VI.2, §VI.5, §XVIII.7 — message-level Spec refs for application-message rows; FIX50-only tail rows delivered (v4.1) (+ 095 tail evidence pass)`
   (FR-021); body states the change, the rationale, the affected rows and specs; discloses what the
   PR's own `interop-live` will show (plan, "What the fixpp PR's `interop-live` shows": compiles the
   new source, then "population reconciliation FAILED -- not running any cell"; advisory, not SC-003
   evidence) and the post-merge windows (R-10); `## Gate A outcome` (rounds 1–3, the post-exhaustion
-  passes, the scoped amendment rounds) and `## Gate B outcome` with the placeholder `Gate B: pending.`
-  under which the verify record is linked; `local build: green on linux-clang-debug @ <sha>` from
-  T085; T082's grep over the body, so `closingIssuesReferences` is empty. T096 applies the final
+  passes, the scoped amendment rounds, the §XVIII.7 round) and the literal heading
+  `## Gate B — waived` (U+2014 em dash; owner ruling 2026-10-24, the 094 precedent) with the
+  placeholder `Gate B: pending.` under it, under which the verify record is linked and its
+  pre-recorded waivers are stated with their rationale; `local build: green on linux-clang-debug @ <sha>`
+  from T085; T082's grep over the body, so `closingIssuesReferences` is empty. T096 applies the final
   body.
 - [ ] T088 (orchestrator) **Re-run T080–T082 as the last action, then push and open the PR without
   gate labels**: `git push -u origin 095-tail-evidence-pass`; `gh pr create` with T087's title and
@@ -632,11 +752,12 @@ delta (plan P7).
   commit the `tasks.md` ticks of T001–T089 and T104 (`specs/` only, placeholder grep and T082's
   grep first), so T105's check (i) reads committed state, re-run T080–T082 and push.
 - [ ] T090 (orchestrator) **Amendment review check** (FR-021, `[const §XX.2]`). The scoped Codex Gate A
-  review of the amendment converged at round 6 (plan `## Gate A`). Diff the two clause bodies in
-  `.specify/constitution.md` against data-model §F.1 at this point: identical → tick this task, record
-  "no clause-body change since round 6". Any clause-body change since round 6 → one more narrow
-  scoped Codex round with an Opus judge on that change, recorded in plan `## Gate A` and the Gate A
-  record, before the RATIFIED flip. A records-only change (Status line, SIR outside the clause
+  review converged at round 6 on the §VI.2/§VI.5 clause bodies and, in its own narrow round, on the
+  §XVIII.7 sentences (plan `## Gate A`). Diff the three amended clause texts in
+  `.specify/constitution.md` against data-model §F.1, §F.2 and §F.5 at this point: identical → tick
+  this task, record "no clause-body change since the converged scoped rounds". Any clause-body change
+  since → one more narrow scoped Codex round with an Opus judge on that change, recorded in plan
+  `## Gate A` and the Gate A record, before the RATIFIED flip. A records-only change (Status line, SIR outside the clause
   bodies) needs only Gate B's re-check.
   - *Open at the audit — waiver: it is a post-audit check by construction (it compares the head that
     Gate B reviews).*
@@ -645,16 +766,23 @@ delta (plan P7).
   then re-run T080–T084 and record the new base. Preconditions: T085 non-RED, T105's `## Completeness`
   present, `check_bl_delta.py gate` green. Fixer: `phase-implementer` for code/test findings, the
   orchestrator for docs; a parent-harness fix stays uncommitted (copy refreshed). After a fix that
-  touches a non-docs path, re-run the affected arms and T085's full `ctest` last, under the same
-  pre-checks. Gate B also reviews the PENDING amendment text. The Gate B record carries the B&L delta
+  touches a non-docs path, re-run the affected arms and T085's full `ctest` command last, under the
+  same pre-checks (the command alone, appended to the verify record and the evidence file; a full
+  `/speckit-verify` re-run instead copies the evidence file's entries in again, Execution rules). Gate B also
+  reviews the PENDING amendment text. The Gate B record carries the B&L delta
   disposition (T067's rows).
   - *Open at the audit — waiver: Gate B needs the audit record first (pre-flight 4d).*
 - [ ] T092 (orchestrator) **SecondBrain pass on the branch** (pipeline step 15a; close-out row 3), after
   Gate B converges: brain pages that describe the touched surfaces (`brain/components/` for session,
-  interop, codegen tests) are checked and updated if needed; both freshness halves run locally.
+  interop, codegen tests) are checked and updated if needed; then both freshness halves run
+  locally, neither standing in for the other: the in-repo `refs` half, every `run:` step of
+  `.github/workflows/brain-freshness.yml`, read from the workflow with a YAML parser at this head
+  (not a pasted command list), run as Actions would (`bash -e`); and the `refs_external` half, the
+  parent's `tools/brain-external-sweep.sh` wrapper, never a bare `check_brain.py sweep`. Record each
+  command and rc in the verify record and the evidence file.
   - *Open at the audit — waiver: after Gate B.*
 - [ ] T093 (orchestrator) **Sign-off packet, then ASK THE OWNER** for the Art. XX §2 sign-off: the
-  amended §VI.2 and §VI.5, the PENDING SIR and Status line as on the PR head, the Gate A tallies
+  amended §VI.2 and §VI.5 and the corrected §XVIII.7 sentences, the PENDING SIR and Status line as on the PR head, the Gate A tallies
   (including the scoped amendment rounds), Gate B's rounds, and the RATIFIED-form text T095 will write
   (data-model §F.3, §F.4). Nothing in T094–T097 runs until the owner answers explicitly. A request to
   change clause text goes back through T090. Record the answer and its date in the verify and Gate B
@@ -675,13 +803,15 @@ delta (plan P7).
   `git show origin/main:.specify/constitution.md`; positive control on data-model.md) prints nothing
   new; T080 re-run.
   - *Open at the audit — waiver: only after the owner's sign-off.*
-- [ ] T096 (orchestrator) **Body → labels → push last.** Choose labels from the verify verdict at this
-  head (GREEN → `gate-a-done` + `gate-b-done`, each with its convergence record; YELLOW, or GREEN with
-  gate-level waivers → the `-waived` label, with the waiver rationales in the verify record and under a
-  literal `## Gate A …` / `## Gate B …` heading in the body; RED → no label). First edit the body to
-  its final form (sign-off date, verified SHA, Gate B outcome replacing `Gate B: pending.`, which
-  `grep -cF` must then count 0); for a `-waived` label run the workflows' heading awk locally, with
-  its known positive. Then apply the labels in ONE `"$W/.claude/scripts/gh-pr-meta.sh"` call and read
+- [ ] T096 (orchestrator) **Body → labels → push last.** Labels (owner ruling 2026-10-24, the 094
+  precedent): `gate-a-done`, with the Gate A convergence record, and `gate-b-waived`, because the
+  verify verdict is YELLOW by construction (T085's pre-recorded waivers), with the waiver
+  rationales in the verify record and under the body's literal `## Gate B — waived` heading (T087). A
+  RED verdict at this head → no label, and the owner is told. First edit the body to its final form
+  (sign-off date, verified SHA, Gate B outcome replacing `Gate B: pending.`, which `grep -cF` must then
+  count 0); then run `gate-b.yml`'s heading awk locally on the final body, byte for byte (the heading's
+  dash is U+2014), with its known positive: the same awk on a copy of the body without the heading
+  exits 1. Then apply the labels in ONE `"$W/.claude/scripts/gh-pr-meta.sh"` call and read
   them back. Then push C-RATIFY. Never cancel a "duplicate" gate-label wave.
   - *Open at the audit — waiver: after T095.*
 - [ ] T097 (orchestrator) **Merge (owner-driven) and the fixpp close-out.** Before merging,
@@ -696,10 +826,10 @@ delta (plan P7).
   - *Open at the audit — waiver: post-merge.*
 - [ ] T098 (orchestrator) **POST-MERGE: confirm the harness edits are intact** before the parent
   commit: `diff -r` the outside-tree copy against the parent working copy; `git -C <parent> status --short -- research/G19-fix-fpml-iso20022/phase-9-harness`
-  lists exactly the files of plan "Files changed" (parent table) plus the two goldens.
+  lists exactly the files of plan "Files changed" (parent table, which already lists the two goldens).
   - *Open at the audit — waiver: post-merge.*
 - [ ] T099 (orchestrator) **POST-MERGE: the ONE parent commit** (FR-015, research R-10 step 4): every
-  R-9 harness change, the two goldens, and the gitlink bump to the merged fixpp `main` (or the harness
+  R-9 harness change (the two goldens are its item 5), and the gitlink bump to the merged fixpp `main` (or the harness
   changes alone, if another parent commit already bumped the gitlink to a library commit containing
   the merge). `git fetch`; check `git diff --cached --name-only` holds nothing that is not ours;
   stage with `git add` (explicit paths), commit **without** a pathspec; then `git ls-tree HEAD research/G19-fix-fpml-iso20022/library`
@@ -778,9 +908,11 @@ delta (plan P7).
   needs T014's Mutant C; T031 and T032 may share a rebuild) → T035 → T036.
 - **US2 (T037–T042)**: after T005; independent of US1 by file, but shares the build tree, so its
   builds wait for the US1 build owner. T037 ‖ T038 → T039 → T040 → T041 → T042.
-- **US3 (T043–T058)**: T043 after T019; T044 ‖ T045 ‖ T046 ‖ T047 (parent files) → T048 → T049 (needs
-  T043 and T048's jar) → T050; T051 after T049 passes on BN → T052 → T053; T054 (needs T044, T047) →
-  T055 → T056 → T057 → T058.
+- **US3 (T043–T058)**: T043 after T019; T044 ‖ T045 (parent files) → T047 (test-first, needs T044's
+  registration) → T048
+  (the unpatched jar) → T049 (needs T043 and T048's jar) → T050; T051 after T049 passes on BN → T052's
+  QF-cpp half → T046 (RED against the unpatched jar, then the fix and the rebuilt jar) → T052's QFJ
+  half → T053; T054 (needs T044, T047) → T055a → T055 → T055b → T056 → T057 → T058.
 - **US4 (T059–T078)**: after T058 (T062 cites test IDs that must exist; T068 resolves the live-cell IDs
   in the uncommitted `CELLS`). T059 ‖ T060 → **T061 (C-AMEND) before every catalogue edit** → T062 →
   T063 → T064 → T065; T066 ‖ T067 after T061; T068 after T062–T067 → T069…T076 → T077 → T078.
@@ -790,14 +922,16 @@ delta (plan P7).
 
 ### Critical path
 
-T001 → T005 → T007…T019 → T020…T036 → T043 → T048 → T049 → T051…T058 → T059…T078 → T079 → T085 →
+T001 → T005 → T007…T019 → T020…T036 → T043 → T048 → T049 → T051 → T052 (QF-cpp) → T046 → T052 (QFJ)
+→ T053 → T054 → T055a → T055 → T055b → T056…T058 → T059…T078 → T079 → T085 →
 T088 → T104 → T105 → T091 → **T093 owner sign-off** → T095 → T096 → T097 → T099 → T100 → T101.
 
 ### Parallel opportunities
 
 - T002 ‖ T003 ‖ T004 ‖ T006 (read-only).
 - T037 ‖ T038 (two test files), single build owner.
-- T044 ‖ T045 ‖ T046 ‖ T047 (four parent harness files; copy refreshed after each).
+- T044 ‖ T045 (two parent harness files; copy refreshed after each). T047 follows T044 (its tests
+  need the registration); T046 follows T051 (its RED needs the cell and T048's unpatched jar).
 - T066 ‖ T067 (coverage index vs B&L), after T061.
 - T080 ‖ T081 ‖ T082 ‖ T083 ‖ T084.
 
@@ -806,9 +940,9 @@ T088 → T104 → T105 → T091 → **T093 owner sign-off** → T095 → T096 �
 ```text
 Task: "T044 [US3] (implementer) phase-9-harness/tools/run_interop_cell.py + test_run_interop_cell.py — L0 registration, per-cell dictionary"
 Task: "T045 [US3] (implementer) phase-9-harness/tools/interop_capability_minimums.yaml — two entries"
-Task: "T046 [US3] (implementer) phase-9-harness/quickfixj/.../InteropCounterparty.java — A-TESTREQ check"
-Task: "T047 [US3] (implementer) phase-9-harness/tools/emit_matrix.py + test_emit_matrix.py — run_kind rows"
 ```
+
+T047 (`emit_matrix.py` + `test_emit_matrix.py`, the `run_kind` rows) starts once T044 lands.
 
 ## Implementation strategy
 

@@ -13,7 +13,9 @@
 - Post-exhaustion review applied 2026-10-24: Opus P1=0 P2=3 P3=3 (research/reviews/opus_095-tail-evidence-pass_gate_a_4_postexhaustion_review.md); F-1 (a), F-2..F-6 applied; scoped Codex+Opus round on the amendment + these fixes owed (owner, 2026-10-24).
 - Scoped round 5 (amendment) 2026-10-24: Codex P1=1 P2=1; Opus P1=0 P2=2 P3=1 (research/reviews/codex_095-tail-evidence-pass_gate_a_5_amendment_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_5_amendment_triage.md); fixes 1, 2, N-1 applied; a narrow scoped Codex round on the §VI.2 clause body is owed (FR-021).
 - Narrow scoped round 6 (§VI.2 clause body and its mirrors) 2026-10-24: Codex P1=0 P2=0 P3=0, §E recipe re-run by Codex (research/reviews/codex_095-tail-evidence-pass_gate_a_6_clause_review.md). **Gate A CONVERGED** (record decisions/speckit/095-tail-evidence-pass-gatea.md; owner rule 2026-10-24: convergence counts as sign-off). The FR-021 Codex review of the amendment is discharged by rounds 5–6.
-- Orchestrator rulings at /speckit-tasks (2026-10-24): catalogue flips stay in US4 (plan P7), the final close-out task re-checks them; `expected-ctest-095.txt` is the implementer's; the three extra RED arms (golden field-leg mutants, census-alone Mutant G, pin RED) are kept; the PR cell is filled by a docs-only commit after the PR opens and before the gate labels (tiers skip until both labels land, so no extra wave); the two new `cell_results.yaml` rows record what the existing schema admits for a locally-run cell (the implementer reads `cell_results_schema_check_test.py` and 089's rows to decide; no schema change), and the post-merge `interop-live` run id goes in the Gate B close-out record.
+- Orchestrator rulings at /speckit-tasks (2026-10-24): catalogue flips stay in US4 (plan P7), the final close-out task re-checks them; `expected-ctest-095.txt` is the implementer's; the three extra RED arms (golden field-leg mutants, census-alone Mutant G, pin RED) are kept; the PR cell is filled by a docs-only commit after the PR opens and before the gate labels (tiers skip until both labels land, so no extra wave); the two new `cell_results.yaml` rows record what the existing schema admits for a locally-run cell (the implementer reads `cell_results_schema_check_test.py` and 089's rows to decide; no schema change), and the post-merge `interop-live` run id goes in the Gate B close-out record. *(Superseded in part 2026-10-24, `/speckit-analyze` remediation: the rows' status is settled, not left to the implementer. They stay `skip:counterparty-unavailable` on the PR and after the live runs, as the file header's convention and fixpp#462's `HP-QFj-*-fix44-recovery-inbound` rows (PR #474) do; the pass lives in the verify and Gate B records. research R-11.)*
+- §XVIII.7 correction folded into v4.1 (owner, 2026-10-24); a narrow scoped Codex round on it is owed before implement. The text is data-model §F.5; the amended clauses are now §VI.2, §VI.5 and §XVIII.7, and the PR title names all three (`[const §XX.2]`).
+- `/speckit-analyze` findings remediated 2026-10-24 (no Gate A round): tasks.md, research.md, data-model.md, contracts, quickstart.md and spec.md. Owner rulings 2026-10-24 applied in the same pass: the §XVIII.7 correction (above), and local verify scope `linux-clang-debug` only, every other leg a pre-recorded waiver, so the labels are `gate-a-done` / `gate-b-waived` (094 precedent; Constitution Check §XVII.7, §XVII.8).
 
 ### Round 1 — disagreements
 
@@ -138,7 +140,7 @@ FR-021), and changes no production code (FR-020):
    synthetic dictionaries, and scratch mutants (research R-3).
 2. **US2, N-002 and N-003.** Two named registry pins go in the existing
    `codegen_077_v50sp2_builder_completeness_test` executable, and one routing cell goes in
-   `session_pure_tests`. The cell shows that an inbound BE and BW reach `from_app`, each leg with
+   `session_pure_tests`. The cell shows that an inbound BE and BW reach `fromApp`, each leg with
    its own RED arm.
 3. **US3, the live FIXT cell.** A probe-pattern cell runs on 033's FIXT session, with fixpp as
    initiator, against QuickFIX-cpp and QuickFIX/J (two cells). fixpp sends 35=BN, built by
@@ -158,9 +160,11 @@ FR-021), and changes no production code (FR-020):
    delta is added. The v44 BE/BF exclusion is fixpp#625.
 5. **The amendment (FR-021, owner ruling 2026-10-24).** `[const §VI.2]` admits the message-level
    form `[DocAbbrev] Category` for application-message rows, decidable from the vendored dictionary
-   and Orchestra file; `[const §VI.5]` lets Normative References list such refs. Constitution v4.0 → v4.1 (MINOR). It
-   lands before the catalogue edits, and reads PENDING until a scoped Codex Gate A round, Gate B and
-   the owner's sign-off (data-model §F).
+   and Orchestra file; `[const §VI.5]` lets Normative References list such refs; two sentences of
+   `[const §XVIII.7]` stop calling the tail rows and N-002/N-003 deferred and record that 095 closes
+   them on the `fixpp::v50sp2` tier (owner ruling 2026-10-24, data-model §F.5). Constitution v4.0 →
+   v4.1 (MINOR). It lands before the catalogue edits, and reads PENDING until the scoped Codex Gate A
+   rounds, Gate B and the owner's sign-off (data-model §F).
 
 ## Technical Context
 
@@ -229,14 +233,14 @@ FR-021), and changes no production code (FR-020):
 | §XVI.6 (orchestrator does not implement) | yes | Every test TU, CMake edit, harness and counterparty change goes to `phase-implementer`. The orchestrator may write the spec bundle, the `.specify/constitution.md` amendment (data-model §F's text, verbatim), `spec/` catalogue / coverage-index / B&L text and parent docs, places fixpp#625 in the parent's `phases/phase-4/issue-batches.md` if it is not there, and makes and pushes the one post-merge parent commit (the harness files in it are the implementer's). |
 | §XVI.7 (`/simplify` before verify) | yes | `/simplify` runs on the implementation diff before `/speckit-verify` (phase P8). |
 | §XVII.1 (Gate A trigger) | yes | The session and interop test surfaces are touched, and a live-interop vehicle changes in the parent. Gate A runs (`/gate-a 095-tail-evidence-pass`). |
-| §XVII.7 (local pre-PR build gate) | yes | One FULL `ctest --preset linux-clang-debug` on a committed tree runs as the LAST step of verify, after `df -h /mnt/e` and a check of `/mnt/c/temp/fixpp/.sandbox-lock`. Packaging entries compile consumer projects. **Resource gate:** an `AskUserQuestion` precedes the first agent-run local build, and the owner approves it before it runs. |
-| §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs in the main checkout, which owns this branch. |
+| §XVII.7 (local pre-PR build gate) | yes | One FULL `ctest --preset linux-clang-debug` on a committed tree runs as the LAST step of verify, after `df -h /mnt/e` and a check of `/mnt/c/temp/fixpp/.sandbox-lock`. Packaging entries compile consumer projects. **Resource gate:** an `AskUserQuestion` precedes the first agent-run local build, and the owner approves it before it runs. **Local scope (owner ruling 2026-10-24):** `linux-clang-debug` is the only preset tree built locally. Every other leg the verify skill lists (`linux-clang-{release,asan,ubsan,tsan,coverage,libc++}`, `windows-msvc-debug`, `windows-msvc-asan`) is not built here; `tasks.md` T085 waives each. |
+| §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs in the main checkout, which owns this branch, with `--skip` of every leg above, each paired with a pre-recorded `--waive` whose rationale is "test-only change, no library code; CI runs it once both labels land; owner ruling 2026-10-24". The verdict is therefore YELLOW, so the labels are `gate-a-done` and `gate-b-waived` (094 precedent), and the PR body carries the literal heading `## Gate B — waived` with the waivers. Evidence recorded before verify lives in `.specify/decisions/095-tail-evidence-pass-evidence.md`; verify's own write replaces the verify record, so `tasks.md` T085 copies those entries into it by hand, each marked re-run or carried. |
 | §VII.6 (interop against an independent FIX implementation) | yes — already met by 089/033; this adds to it | Two live cells against both QuickFIX peers, run locally before merge and in `interop-live` dispatched on `main` after the post-merge parent commit (SC-003). |
-| §XVIII.7 (v1.0 codegen scope) | read, not amended | Its text keeps "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate". DECISION 2 supersedes that reason for the v50sp2 rows this feature closes; the v44 BE/BF exclusion it describes is unchanged here and is the subject of fixpp#625. 095's only constitution edit is FR-021's §VI.2/§VI.5 amendment; §XVIII.7 is not touched. |
+| §XVIII.7 (v1.0 codegen scope) | yes, amended by FR-021 (owner ruling 2026-10-24) | Two sentences change (data-model §F.5): the FIX50-only rows' "remain deferred to future `fixpp::v50sp2`/all-version widening" becomes their typed tier, `fixpp::v50sp2` (077), with 095 closing them on it; "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate" becomes N-002/N-003 as application messages (DECISION 2) that 095 closes on `fixpp::v50sp2`, the `fixpp::v44` BE/BF exclusion left unchanged (fixpp#625). The rest of the clause is byte-identical. A narrow scoped Codex Gate A round on §F.5 is owed before implement (`## Gate A`). *(Supersedes the row's earlier "read, not amended" disposition.)* |
 | §XX.1 (amend first) | yes | 095 writes the four corrected Spec ref cells of FR-018 in the message-level form. Under v4.0's §VI.2 that form does not conform, so the article is amended first, in the same PR. The rationale is committed in the Sync Impact Report (data-model §F.3). The constitution commit precedes P7's catalogue commit. |
-| §XX.2 (amendment process) | yes | The PR is titled `Constitution: amend §VI.2, §VI.5 — message-level Spec refs for application-message rows (v4.1) (+ 095 tail evidence pass)`. Its description states the change, the rationale and the affected rows and specs. **Codex Gate A on the amendment:** a scoped Codex Gate A round on the two clause bodies and the Sync Impact Report (data-model §F.1–§F.3), with an Opus judge, under the owner's `/gate-a` invocation. It is owed because the post-exhaustion pass skipped Codex. Then Gate B, then owner sign-off. Like 094's, the amendment rides the feature PR rather than a standalone PR, and the title form meets §2's first step. |
-| §XX.3 (Sync Impact Report) | yes | data-model §F.3 has a new block above the v3.0 → v4.0 report. It records the date, the bump and its §4 classification, the clauses changed, the rationale, the affected rows and specs, the review and sign-off, and the feature and PR. Its header and the Status line (§F.4) read PENDING until the scoped Gate A round, Gate B and the owner's sign-off. The RATIFIED flip is the last commit before merge. |
-| §XX.4 (classification) | yes | **MINOR, v4.0 → v4.1, no `CHANGELOG.md` entry.** The test is the one the v4.0 report applies (four earlier drafts got it wrong at round 1): does any PR mergeable under v4.0 fail under v4.1? None does. §VI.2 adds a form and leaves the section form valid for every row it was valid for. Its last sentence keeps "vague refs" non-conforming; v4.0's "are a CI-linting failure" becomes "do not conform", which removes no PR obligation (no CI job checked the clause under v4.0), and the clause adds no CI statement. §VI.5 adds a permission ("may also be listed") and restates the existing obligation word for word. It does not newly require any entry: a `/specify` artifact that lists only section entries conforms under both versions. Requiring message-level entries would have made a bundle conforming under v4.0 fail, which is a MAJOR change, and it was rejected for that reason. |
+| §XX.2 (amendment process) | yes | The PR is titled `Constitution: amend §VI.2, §VI.5, §XVIII.7 — message-level Spec refs for application-message rows; FIX50-only tail rows delivered (v4.1) (+ 095 tail evidence pass)`. Its description states the change, the rationale and the affected rows and specs. **Codex Gate A on the amendment:** scoped Codex Gate A rounds on the two §VI clause bodies and the Sync Impact Report (data-model §F.1–§F.3), with an Opus judge, under the owner's `/gate-a` invocation, ran because the post-exhaustion pass skipped Codex: rounds 5 and 6, converged at round 6 (`## Gate A`). The §XVIII.7 correction (§F.5), folded in afterwards, owes its own narrow scoped round before implement. Then Gate B, then owner sign-off. Like 094's, the amendment rides the feature PR rather than a standalone PR, and the title form meets §2's first step. |
+| §XX.3 (Sync Impact Report) | yes | data-model §F.3 has a new block above the v3.0 → v4.0 report, naming all three amended clauses. It records the date, the bump and its §4 classification, the clauses changed, the rationale, the affected rows and specs, the review and sign-off, and the feature and PR. Its header and the Status line (§F.4) read PENDING until the scoped Gate A round, Gate B and the owner's sign-off. The RATIFIED flip is the last commit before merge. |
+| §XX.4 (classification) | yes | **MINOR, v4.0 → v4.1, no `CHANGELOG.md` entry.** The test is the one the v4.0 report applies (four earlier drafts got it wrong at round 1): does any PR mergeable under v4.0 fail under v4.1? None does. §VI.2 adds a form and leaves the section form valid for every row it was valid for. Its last sentence keeps "vague refs" non-conforming; v4.0's "are a CI-linting failure" becomes "do not conform", which removes no PR obligation (no CI job checked the clause under v4.0), and the clause adds no CI statement. §VI.5 adds a permission ("may also be listed") and restates the existing obligation word for word. It does not newly require any entry: a `/specify` artifact that lists only section entries conforms under both versions. Requiring message-level entries would have made a bundle conforming under v4.0 fail, which is a MAJOR change, and it was rejected for that reason. §XVIII.7's correction replaces two deferral statements that 077 and DECISION 2 had already ended; it adds no banned pattern, tightens no budget and imposes no obligation, so it fails no PR mergeable under v4.0. |
 
 **Result:** PASS once FR-021's amendment lands. Under v4.1 the 12 rows' refs conform (A-030, A-033, C-003 and N-003 after FR-018's corrections), as data-model §E's recipe re-checks at P7. No Complexity Tracking row.
 
@@ -287,7 +291,7 @@ specs/095-tail-evidence-pass/
 | `tests/interop/conversation/fixt_app_script.yaml` | NEW: one-step script, F-01 / 35=BN |
 | `tests/interop/cell_results.yaml`, `cell_results_schema_check_test.py`, `expected-skips-without-counterparty.txt` | +2 rows / ids / lines |
 | `specs/095-tail-evidence-pass/expected-ctest-095.txt` | NEW: one ctest name per line |
-| `.specify/constitution.md` | FR-021: §VI.2 and §VI.5 clause bodies, the Status line, a new Sync Impact Report block (data-model §F). No `CHANGELOG.md` change (MINOR) |
+| `.specify/constitution.md` | FR-021: §VI.2 and §VI.5 clause bodies, two §XVIII.7 sentences, the Status line, a new Sync Impact Report block (data-model §F). No `CHANGELOG.md` change (MINOR) |
 | `spec/feature-catalogue.md`, `spec/coverage-index.md`, `spec/behaviors-and-limitations.md` | rows → `done`; version narrowing (four rows); the four Spec refs of FR-018 (A-030, A-033, C-003, N-003); existing coverage rows' gap notes; B&L delta |
 
 **Parent (`phase-9-harness/`): uncommitted until the fixpp PR merges, then one parent commit with
@@ -325,7 +329,10 @@ limited to the files above.
 3. **P2 — N-002/N-003 (US2).** Add the two pins and the routing cell. Run the routing cell's two
    RED arms (scratch classifier mutants, `"BE"` then `"BW"`).
 4. **P3 — parent harness (US3, parent side), uncommitted.**
-   - Apply R-9's items 1–4 and 6 (contracts L0), with their tests, as uncommitted edits in the parent
+   - Apply R-9's items 1–4 and 6 (contracts L0), test-first (`[const §VII.3]` applies to the parent
+     harness; orchestrator ruling 2026-10-24): each harness test RED against the unmodified harness,
+     then the change. Item 4's RED is the QuickFIX/J cell run against the unpatched jar, so it waits
+     for P4's cell. All of it as uncommitted edits in the parent
      working copy (research R-10 step 1: nothing staged under `phase-9-harness/`, a copy kept outside
      the tree, no `git stash`).
    - Build QFJ.
@@ -340,7 +347,9 @@ limited to the files above.
 6. **P5 — evidence files and pins (US3).**
    - Run the parent's `RegistryAgreesWithTheRealTemplateTest` locally with the registration in place
      and before the rows exist, and record its RED naming the two cells.
-   - Edit `cell_results.yaml` (research R-11) and the skip list.
+   - Run `ci/assert-interop-skips.py` over the `ctest -L interop` population with no counterparty
+     (the tier1 recipe) and record its RED on the two unlisted skips; edit `cell_results.yaml`
+     (research R-11) and the skip list; re-run the script, GREEN.
    - Edit the `EXPECTED_IDS` pin, RED first.
 7. **P6 — local live evidence (stands in for the PR's `interop-live`).** Run quickstart §5 in full:
    the whole-population `--list` reconcile, every live cell through `ci/run-interop-live.py` against
@@ -349,8 +358,8 @@ limited to the files above.
 8. **P7 — amendment, then records (US4).**
    - Run quickstart §7 first and record its RED (no row is `done` yet).
    - **Amend first** (`[const §XX.1]`, FR-021): apply data-model §F to `.specify/constitution.md`
-     (§VI.2, §VI.5, the Status line and the Sync Impact Report, all PENDING), in a commit of its
-     own, before any catalogue edit.
+     (§VI.2, §VI.5, §XVIII.7's two sentences, the Status line and the Sync Impact Report, all
+     PENDING), in a commit of its own, before any catalogue edit.
    - Catalogue flips with witness names.
    - Version narrowing: A-018, A-029, A-030, N-002 (data-model §E).
    - Spec ref corrections (FR-018): A-030 → `[FIX50SP1] Settlement Instruction`, A-033 →
@@ -368,8 +377,9 @@ limited to the files above.
      builds) and quickstart §7's output.
    - Push the fixpp branch and open the PR, titled in `[const §XX.2]` form (FR-021). The PR body
      discloses what its `interop-live` will show (below).
-   - The scoped Codex Gate A review of the amendment converged at round 6 (2026-10-24). A change to a
-     clause body after it needs another scoped Codex round before the RATIFIED flip; a records-only
+   - The scoped Codex Gate A review of the amendment converged at round 6 (2026-10-24) for §VI.2 and
+     §VI.5; §XVIII.7's narrow round runs before implement. A change to a clause body after its round
+     needs another scoped Codex round before the RATIFIED flip; a records-only
      change (Status line, SIR outside the clause bodies) needs only Gate B's re-check.
    - Run `/gate-b`. Then owner sign-off on the amendment. Then the last commit before merge flips
      the Sync Impact Report and the Status line to RATIFIED (data-model §F.3, §F.4).

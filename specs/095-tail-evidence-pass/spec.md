@@ -44,7 +44,8 @@ to 5.0SP2, and the 12 rows flipped to `done`."
   bytes → an independent, dictionary-driven parse of `FIX50SP2.xml` → per-field (and per-group-
   instance) readback compared against the chosen values. "Independent" means the parse does not use
   the typed builder's code or tables. This is the bar A-001..A-012 and N-001 closed on (067/069/077).
-- **Live FIXT cell** — the one new interop cell (§User Story 3).
+- **Live FIXT cell** — one scenario, one cell per peer: the two new interop cells
+  `HP-QFcpp-init-fixt11-fix50sp2-app-bn` and `HP-QFj-init-fixt11-fix50sp2-app-bn` (§User Story 3).
 
 ## Context: why this feature exists
 
@@ -224,7 +225,10 @@ in the same PR.
     surface (Normative References, plan Summary and Constitution Check, P7, quickstart §7).
   - The amendment (FR-021, data-model §F) is what makes the 12 rows' refs conform. It is not a
     disclosure of pre-existing non-conformance.
-  - The amended clauses still owe a scoped Codex Gate A review (`[const §XX.2]`).
+  - The amended clauses still owe a scoped Codex Gate A review (`[const §XX.2]`). *(Superseded
+    2026-10-24: scoped rounds 5 and 6 ran on the §VI.2/§VI.5 clauses and converged at round 6; plan
+    `## Gate A`. The §XVIII.7 correction the owner folded in afterwards owes its own narrow scoped
+    round before implement; FR-021.)*
 - Q: What message-level form does the amendment admit? → A: `[DocAbbrev] Category`, designed from
   what the catalogue's message-level rows use and what the sources offer (data-model §F):
   - `DocAbbrev` is a version whose vendored dictionary (`dictionaries/<ver>.xml`) defines every
@@ -503,7 +507,9 @@ test name exists in the tree.
 - **FR-012**: The cell MUST be shown able to fail: a changed chosen value and a peer-side rejection
   each turn it RED.
 - **FR-013**: fixpp's inbound validation MUST be off on this cell, and the cell's record and the B&L
-  delta MUST state why (L-041-2: the session validator takes one dictionary).
+  delta MUST state why (L-041-2: the session validator takes one dictionary). The cell's record is the
+  cell source's header comment plus the verify record; the hello already carries
+  `arm="validation-off"` (contracts L0, L1).
 - **FR-014**: The representative message MUST be a tail MsgType present in both engines' FIX50SP2
   dictionaries with the same required set on both axes (Clarifications, Gate A round 1). The check
   that selected it MUST be committed and runnable: it reads the vendored `dictionaries/FIX50SP2.xml`
@@ -555,19 +561,27 @@ test name exists in the tree.
     dictionary and the vendored Orchestra file), and keeps the section form for every other row. It
     states no CI state; the Sync Impact Report records that its check is owed (fixpp#626);
   - `[const §VI.5]` lets Normative References list such refs without letting one stand in for a
-    section entry.
+    section entry;
+  - `[const §XVIII.7]` (owner ruling 2026-10-24) no longer calls the tail rows deferred: their typed
+    tier is the `fixpp::v50sp2` tier (077) and their catalogue rows close in 095; BE, BF, BW, BX and
+    BY are application messages (owner DECISION 2, 2026-10-21), and 095 closes N-002 and N-003 on
+    `fixpp::v50sp2`; `fixpp::v44` still excludes BE/BF, which 095 leaves unchanged (fixpp#625). Only
+    those two sentences change.
 
-  The exact before → after text, the Status line and the Sync Impact Report are data-model §F.
+  The exact before → after text, the Status line and the Sync Impact Report are data-model §F
+  (§F.5 for `[const §XVIII.7]`).
   Further requirements:
   - The amendment lands **before** the catalogue edits of FR-017/FR-018 (`[const §XX.1]`).
-  - Its Sync Impact Report and Status line read PENDING until a scoped Codex Gate A round on the
-    amended clauses converges, Gate B converges and the owner signs off, in that order. The flip to
+  - Its Sync Impact Report and Status line read PENDING until the scoped Codex Gate A rounds on the
+    amended clauses converge (rounds 5–6 for §VI.2/§VI.5, converged at round 6; a narrow round on
+    §XVIII.7, owed before implement), Gate B converges and the owner signs off, in that order. The flip to
     RATIFIED is the last commit before merge (094's FR-003a precedent).
-  - After that Gate A round converges, any change to the two clause bodies gets another scoped Codex
-    Gate A round before the flip. A change to the amendment's records (Status line, the Sync Impact
+  - After a clause's scoped Gate A round converges, any change to that clause's amended text gets
+    another scoped Codex Gate A round before the flip. A change to the amendment's records (Status line, the Sync Impact
     Report outside the clause bodies) needs only Gate B's re-check (094's FR-003d precedent).
-  - The 095 PR is titled in `[const §XX.2]` form: `Constitution: amend §VI.2, §VI.5 — message-level
-    Spec refs for application-message rows (v4.1) (+ 095 tail evidence pass)`. Its description
+  - The 095 PR is titled in `[const §XX.2]` form: `Constitution: amend §VI.2, §VI.5, §XVIII.7 —
+    message-level Spec refs for application-message rows; FIX50-only tail rows delivered (v4.1) (+ 095
+    tail evidence pass)`. Its description
     states the change, the rationale and the affected rows and specs.
   - `[const §VI.3]`, `[const §VI.6]` and `[const §IX.6]` are not amended.
 - **FR-019**: `spec/coverage-index.md`'s existing row for each tail MsgType MUST name its witness in
@@ -696,6 +710,6 @@ test name exists in the tree.
   `[const §IX.4]`, `[const §IX.6]` static analysis, the unimplemented catalogue check; `[const §VII.6]` interop; `[const §VII.8]`
   grouped tests and label selection; `[const §XVI.6]`, `[const §XVI.7]` orchestrator role and
   `/simplify`; `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build and its
-  resource gate, verify; `[const §XVIII.7]` the N-002/N-003 deferral text DECISION 2 supersedes.
+  resource gate, verify; `[const §XVIII.7]` the v1.0 codegen scope, two of its sentences amended by this feature (FR-021).
 - **B&L:** L-041-2 (FIXT validation, FR-013), L-067-1 (component-wrapped groups), L-069-1 (enum
   domains), L-089-1 (evidence attests no fixpp revision).
