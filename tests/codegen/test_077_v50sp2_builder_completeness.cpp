@@ -19,9 +19,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <fixpp/v50sp2/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
 #include <iterator>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -53,6 +56,19 @@ std::vector<std::pair<std::string_view, std::string_view>> const kMsgtypeToIdent
 #include "generated/v50sp2_builder_completeness_entries.def"
 };
 #undef FIXPP_BC_ENTRY
+
+// 095-tail-evidence-pass FR-007 (research R-5): the N-002 / N-003 per-row pins.
+// A key is "registered" when it is a msg_type of the compiled builder_registry
+// array; the registry entry carries no callable, so each pin then calls that
+// MsgType's build_<Msg> and checks the body opens with the literal 35=<mt><SOH>.
+bool registered(std::string_view mt) {
+    return std::ranges::any_of(::fixpp::v50sp2::builder_registry,
+                               [&](auto const& e) { return e.msg_type == mt; });
+}
+
+std::string as_string(std::span<std::byte const> bytes) {
+    return {reinterpret_cast<char const*>(bytes.data()), bytes.size()};
+}
 
 }  // namespace
 
@@ -110,4 +126,60 @@ TEST(BuilderCompleteness077V50sp2, BuildFnSignaturesMatchRawXmlWalk) {
         translated_msgtypes.emplace(it->first);
     }
     EXPECT_EQ(translated_msgtypes, expected);
+}
+
+TEST(BuilderCompleteness077V50sp2, N002_UserRequestUserResponseRegistered) {
+    EXPECT_TRUE(registered("BE")) << "\"BE\" (UserRequest) is not a builder_registry key";
+    EXPECT_TRUE(registered("BF")) << "\"BF\" (UserResponse) is not a builder_registry key";
+
+    std::array<std::byte, 1024> out{};
+    ::fixpp::v50sp2::UserRequestArgs be{};
+    be.user_request_id = "N002_pin_user_request_id";
+    be.user_request_type = 1;
+    be.username = "N002_pin_username";
+    auto const built_be = ::fixpp::v50sp2::build_UserRequest(out, be);
+    ASSERT_TRUE(built_be.has_value()) << "build_UserRequest refused the pin build";
+    EXPECT_TRUE(as_string(*built_be).starts_with("35=BE\x01"))
+        << "build_UserRequest body: " << as_string(*built_be);
+
+    ::fixpp::v50sp2::UserResponseArgs bf{};
+    bf.user_request_id = "N002_pin_user_request_id";
+    bf.username = "N002_pin_username";
+    auto const built_bf = ::fixpp::v50sp2::build_UserResponse(out, bf);
+    ASSERT_TRUE(built_bf.has_value()) << "build_UserResponse refused the pin build";
+    EXPECT_TRUE(as_string(*built_bf).starts_with("35=BF\x01"))
+        << "build_UserResponse body: " << as_string(*built_bf);
+}
+
+TEST(BuilderCompleteness077V50sp2, N003_ApplicationMessageRequestAckReportRegistered) {
+    EXPECT_TRUE(registered("BW"))
+        << "\"BW\" (ApplicationMessageRequest) is not a builder_registry key";
+    EXPECT_TRUE(registered("BX"))
+        << "\"BX\" (ApplicationMessageRequestAck) is not a builder_registry key";
+    EXPECT_TRUE(registered("BY"))
+        << "\"BY\" (ApplicationMessageReport) is not a builder_registry key";
+
+    std::array<std::byte, 1024> out{};
+    ::fixpp::v50sp2::ApplicationMessageRequestArgs bw{};
+    bw.appl_req_id = "N003_pin_appl_req_id";
+    bw.appl_req_type = 0;
+    auto const built_bw = ::fixpp::v50sp2::build_ApplicationMessageRequest(out, bw);
+    ASSERT_TRUE(built_bw.has_value()) << "build_ApplicationMessageRequest refused the pin build";
+    EXPECT_TRUE(as_string(*built_bw).starts_with("35=BW\x01"))
+        << "build_ApplicationMessageRequest body: " << as_string(*built_bw);
+
+    ::fixpp::v50sp2::ApplicationMessageRequestAckArgs bx{};
+    bx.appl_response_id = "N003_pin_appl_response_id";
+    auto const built_bx = ::fixpp::v50sp2::build_ApplicationMessageRequestAck(out, bx);
+    ASSERT_TRUE(built_bx.has_value()) << "build_ApplicationMessageRequestAck refused the pin build";
+    EXPECT_TRUE(as_string(*built_bx).starts_with("35=BX\x01"))
+        << "build_ApplicationMessageRequestAck body: " << as_string(*built_bx);
+
+    ::fixpp::v50sp2::ApplicationMessageReportArgs by{};
+    by.appl_report_id = "N003_pin_appl_report_id";
+    by.appl_report_type = 0;
+    auto const built_by = ::fixpp::v50sp2::build_ApplicationMessageReport(out, by);
+    ASSERT_TRUE(built_by.has_value()) << "build_ApplicationMessageReport refused the pin build";
+    EXPECT_TRUE(as_string(*built_by).starts_with("35=BY\x01"))
+        << "build_ApplicationMessageReport body: " << as_string(*built_by);
 }
