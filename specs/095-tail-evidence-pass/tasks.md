@@ -157,26 +157,26 @@ run before the audit, in the order T087 → T088 → T104 → T089 → T105.
 **Purpose**: confirm the base, and give each later instrument a "before" from a run shown able to
 report non-zero.
 
-- [ ] T001 (orchestrator) **Base and tree check.** In `research/G19-fix-fpml-iso20022/library`:
+- [X] T001 (orchestrator) **Base and tree check.** In `research/G19-fix-fpml-iso20022/library`:
   `git rev-parse --abbrev-ref HEAD` reads `095-tail-evidence-pass`; `git status --porcelain` is clean
   apart from this bundle; `git fetch origin`; record `git merge-base HEAD origin/main` under the
   evidence file's `## Base` (Execution rules). In the parent: `git status --short -- research/G19-fix-fpml-iso20022/phase-9-harness`
   prints nothing (the harness baseline R-10 needs). `codegraph status --json` in this tree:
   `projectPath` is this tree, `fileCount` nonzero; `codegraph sync` if HEAD moved.
-- [ ] T002 [P] (orchestrator) **Issue placement, read-only.** fixpp#625 and fixpp#626 are already
+- [X] T002 [P] (orchestrator) **Issue placement, read-only.** fixpp#625 and fixpp#626 are already
   filed and placed (no filing task): `grep -n '#625\|#626' research/G19-fix-fpml-iso20022/phases/phase-4/issue-batches.md`
   (parent) shows both under their batch headings, and `gh issue view 625` / `gh issue view 626`
   (`--repo CatalinSerafimescu/fixpp --json state,labels`) read OPEN. Record both in the evidence file.
-- [ ] T003 [P] (orchestrator) **The bundle's own line-citation charge.** `python3 tools/check_line_citations.py --range origin/main..HEAD`
+- [X] T003 [P] (orchestrator) **The bundle's own line-citation charge.** `python3 tools/check_line_citations.py --range origin/main..HEAD`
   and `--shift-audit origin/main..HEAD` both pass on the bundle commits before implementation starts.
   A hit is fixed in the bundle (orchestrator) before T007.
-- [ ] T004 [P] (orchestrator) **Scratch tools and the SC-004 baseline.** Copy the text of 094's
+- [X] T004 [P] (orchestrator) **Scratch tools and the SC-004 baseline.** Copy the text of 094's
   `catalogue_census.py` out of `.specify/decisions/094-v1-tier0-bookkeeping-verify.md` into
   `/tmp/claude-1000/-home-catalin-Work-Programming-Antreprenoriat/94f182a9-92bf-450a-92fa-f65ed094e81d/scratchpad/tools/catalogue_census.py`
   (the 094 session's scratchpad path is gone). Show it can report non-zero: run it on
   `git show origin/main:spec/feature-catalogue.md` and record the OFFICIAL open / done figures and
   `--list open`, which must contain all 12 tail rows.
-- [ ] T005 (orchestrator) **Resource gate (`[const §XVII.7]`, plan phase 0).** `AskUserQuestion` for
+- [X] T005 (orchestrator) **Resource gate (`[const §XVII.7]`, plan phase 0).** `AskUserQuestion` for
   the builds of this feature: the `linux-clang-debug` tree in the main checkout, and no other preset
   tree (owner ruling 2026-10-24: local verify scope is `linux-clang-debug` only; T085 waives every
   other leg), including the interop targets T055a builds; the QuickFIX/J `mvn` builds (unpatched at
@@ -186,7 +186,7 @@ report non-zero.
   `interop_hp_fixt50sp2_logon_hb_logout_test`, and both peers' live runs for T053 (a)–(c), which need
   quickstart §5's docker extraction and the patched jar still present). Record the ruling in the
   evidence file. No build runs before it.
-- [ ] T006 [P] (orchestrator) **SC-005 instrument, known positive first.** Show that
+- [X] T006 [P] (orchestrator) **SC-005 instrument, known positive first.** Show that
   `git diff --name-only <range> -- src include tools/codegen` reports non-zero on a range that touches
   those paths (094's merge, `45a620f4~1..45a620f4`, touched `src/` and `include/`), then record that
   it prints nothing for `origin/main..HEAD`. T084 re-runs it at the verified head.
@@ -200,7 +200,7 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
 
 **⚠️ CRITICAL**: no witness (US1) is written before T019's commit.
 
-- [ ] T007 (implementer) **The TU and its walk.** Create `tests/session/test_095_tail_rows_roundtrip.cpp`:
+- [X] T007 (implementer) **The TU and its walk.** Create `tests/session/test_095_tail_rows_roundtrip.cpp`:
   - a header comment that records the rule (spec Terminology; research R-1) and the re-derivation
     recipe, and no derived count or member list (W7, FR-005);
   - the walk over a loaded `pugi::xml_document` (data-model §B), returning one `WalkResult` per
@@ -218,14 +218,14 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
   The parse path is `fixpp::wire::Parser<Index>` over `XmlLoader().load(...)`'s `table_view`
   (`fixpp_test_support::parse_dict`, `tests/support/app_message_read_scaffold.hpp`). The TU
   includes per-message headers `fixpp/v50sp2/messages/<Msg>.hpp`, never `all.hpp` (R-2).
-- [ ] T008 (implementer) **CMake for the TU** in `tests/session/CMakeLists.txt`: add the TU to
+- [X] T008 (implementer) **CMake for the TU** in `tests/session/CMakeLists.txt`: add the TU to
   `test_077_allversions_builder_roundtrip`; link pugixml if the target does not already; add a compile
   definition naming `tools/quickfix_required_golden/golden.csv`. `tests/session/test_077_allversions_builder_roundtrip.cpp`
   stays byte-unchanged (FR-006, W8). Before the edit, take the before-list from a build without
   it (T005's ruling, Builds rule): `cmake --build --preset linux-clang-debug --target test_077_allversions_builder_roundtrip -j2`,
   then record `build/linux-clang-debug/bin/test_077_allversions_builder_roundtrip --gtest_list_tests`
   in the evidence file; T024 compares against it.
-- [ ] T009 (implementer) **The `095` label and its expected set.** `set_property(TEST <name> APPEND PROPERTY LABELS 095)`,
+- [X] T009 (implementer) **The `095` label and its expected set.** `set_property(TEST <name> APPEND PROPERTY LABELS 095)`,
   with a comment in the 092/093 pattern, on `test_077_allversions_builder_roundtrip` and
   `session_pure_tests` (`tests/session/CMakeLists.txt`), `codegen_077_v50sp2_builder_completeness_test`
   (`tests/codegen/CMakeLists.txt`) and the ctest entry of `interop_hp_fixt50sp2_logon_hb_logout_test`
@@ -235,12 +235,12 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
   outside it the line would name a test that does not exist when that target is absent. Reconfigure, then write `specs/095-tail-evidence-pass/expected-ctest-095.txt`
   from `ctest --preset linux-clang-debug -N -L '^095$'` (one ctest name per line, sorted; 093's
   format). Quickstart §4's `diff` prints nothing. No new ctest entry (`[const §VII.8]`).
-- [ ] T010 (implementer) **Field-leg known positive** `TailRows095Census.FieldLegMatchesQuickFixCppGolden`
+- [X] T010 (implementer) **Field-leg known positive** `TailRows095Census.FieldLegMatchesQuickFixCppGolden`
   (W6 row "walk `ok`, field leg"): first assert `golden.csv` holds exactly one `FIX50SP2,<MT>,` row
   for each of the 23 tail MsgTypes and 35=E, then that the walk's message-level field set equals that
   row, read from the file at test time and never copied into the TU. GREEN expected. Record the
   command and its `[       OK ]` line in the evidence file.
-- [ ] T011 (implementer) **Deficient frames** `TailRows095Census.KnownPositive_DeficientFrames`
+- [X] T011 (implementer) **Deficient frames** `TailRows095Census.KnownPositive_DeficientFrames`
   (contracts W6): frames E-absent, E-one, E-short, E-member, E-nodelim, CC-nodelim, CC-nested, CC-count2 (literal
   bytes or typed-builder output, `NewOrderList.hpp` / `StreamAssignmentRequest.hpp`), each asserting
   the exact sequence `required_members_missing` returns (data-model §B's order, duplicates kept). The 35=E and 35=CC walk statuses are asserted
@@ -250,37 +250,37 @@ any witness relies on it. FR-014's selection check (T043) reuses the same walk.
   `src/wire/offset_table.cpp`); otherwise stop (Execution rules). GREEN expected. Record in the
   evidence file the command, each frame's asserted list as the test states it, and the parser
   confirmation.
-- [ ] T012 (implementer) **Fail-loud known positives**: `TailRows095Census.NestedRequiredGroupFailsLoud_MassQuote`
+- [X] T012 (implementer) **Fail-loud known positives**: `TailRows095Census.NestedRequiredGroupFailsLoud_MassQuote`
   (status `nested_required_group` for 35=i and the nested group it names, both literals, without
   breaking `SetUpTestSuite` for the tail set) and
   `TailRows095Census.WalkStatusesOnSyntheticDictionaries` (inline `load_string` documents S1, a
   required component holding one field and one group → `group_among_siblings` naming the component;
   S2, a delimiter chain → `delimiter_chain` naming the inner group). GREEN expected. Record
   the command and each asserted status with the element it names in the evidence file.
-- [ ] T013 (implementer) **RED arm, field leg.** Scratch: drop one tag from the walk's field set for
+- [X] T013 (implementer) **RED arm, field leg.** Scratch: drop one tag from the walk's field set for
   one tail MsgType (e.g. a component-flag check turned off). `"$B" --gtest_filter='TailRows095Census.FieldLegMatchesQuickFixCppGolden'`
   fails, the message naming the MsgType and both sets. Second scratch: add a MsgType absent from
   `golden.csv` to the asserted set; the row-count precondition fails naming it. Revert, `git diff --exit-code`.
-- [ ] T014 (implementer) **RED arm, Mutant C, frame half** (W6 row "group leg"). Scratch: the walk
+- [X] T014 (implementer) **RED arm, Mutant C, frame half** (W6 row "group leg"). Scratch: the walk
   ignores the only-child inheritance. `--gtest_filter='TailRows095Census.KnownPositive_DeficientFrames'`
   fails on the `NoOrders`(73) assertions. Revert, `git diff --exit-code`. (Its second half, with Mutant
   A, is T030: it needs the A-027 witness.)
-- [ ] T015 (implementer) **RED arm, nested detector.** Scratch: the nested-required-group detector
+- [X] T015 (implementer) **RED arm, nested detector.** Scratch: the nested-required-group detector
   returns `ok`. `--gtest_filter='TailRows095Census.NestedRequiredGroupFailsLoud_MassQuote'` fails
   naming 35=i. Revert, `git diff --exit-code`.
-- [ ] T016 (implementer) **RED arms, synthetic statuses.** Scratch (a): the delimiter-chain check
+- [X] T016 (implementer) **RED arms, synthetic statuses.** Scratch (a): the delimiter-chain check
   disabled → `WalkStatusesOnSyntheticDictionaries` fails in S2's status assertion. Scratch (b),
   separately: the group-among-siblings detector disabled → it fails in S1's status assertion. Each reverted, `git diff --exit-code`.
-- [ ] T017 (implementer) **RED arms, Mutants L, M, N and P** (one run each, `--gtest_filter='TailRows095Census.KnownPositive_DeficientFrames'`;
+- [X] T017 (implementer) **RED arms, Mutants L, M, N and P** (one run each, `--gtest_filter='TailRows095Census.KnownPositive_DeficientFrames'`;
   each RED is the exact-sequence comparison of data-model §B):
   L — only the delimiter leg disabled → CC-nodelim's list loses `1499[0].453`; M — only the
   nested `!= 1` comparison disabled → CC-count2's list comes back empty; N — only the `delim_group`
   leg's nested-delimiter-absent disjunct disabled → CC-nested's list comes back empty; P — the field
   leg no longer skips `delim_tag` → E-nodelim's sequence carries `73[0].11` twice. Each reverted,
   `git diff --exit-code`.
-- [ ] T018 (implementer) **P0 GREEN run**: `--gtest_filter='TailRows095Census.*'` passes with no
+- [X] T018 (implementer) **P0 GREEN run**: `--gtest_filter='TailRows095Census.*'` passes with no
   witness yet (the census test lands in T023); the existing 077 tests in the same binary pass.
-- [ ] T019 (implementer) **Commit C-P0** (the TU, the three CMake label edits, `expected-ctest-095.txt`),
+- [X] T019 (implementer) **Commit C-P0** (the TU, the three CMake label edits, `expected-ctest-095.txt`),
   after the reverted-mutant `git diff --exit-code`. Report the commit hash; orchestrator runs
   `codegraph sync` and ticks T007–T019.
 
@@ -306,28 +306,28 @@ directions against the enumeration; the intent list asserted ≥ 2 entries; `req
 asserted empty; parsed tag 35 asserted equal to the MsgType the test's own `current_test_info()` name
 maps to.
 
-- [ ] T020 [US1] (implementer) Witnesses for A-018…A-029 in `tests/session/test_095_tail_rows_roundtrip.cpp`:
+- [X] T020 [US1] (implementer) Witnesses for A-018…A-029 in `tests/session/test_095_tail_rows_roundtrip.cpp`:
   `TailRows095.A018_ExecutionAck`, `TailRows095.A023_OrderMassActionRequest`,
   `TailRows095.A023_OrderMassActionReport`, `TailRows095.A027_TradingSessionListRequest`,
   `TailRows095.A027_TradingSessionList`, `TailRows095.A027_TradingSessionListUpdateReport`,
   `TailRows095.A028_MarketDefinitionRequest`, `TailRows095.A028_MarketDefinition`,
   `TailRows095.A028_MarketDefinitionUpdateReport`, `TailRows095.A029_SecurityListUpdateReport`,
   `TailRows095.A029_SecurityDefinitionUpdateReport`.
-- [ ] T021 [US1] (implementer) Witnesses for A-030…C-003 in the same TU:
+- [X] T021 [US1] (implementer) Witnesses for A-030…C-003 in the same TU:
   `TailRows095.A030_SettlementObligationReport`, `TailRows095.A031_AllocationInstructionAlert`,
   `TailRows095.A032_UserNotification`, `TailRows095.A033_StreamAssignmentRequest`,
   `TailRows095.A033_StreamAssignmentReport`, `TailRows095.A033_StreamAssignmentReportACK`,
   `TailRows095.C003_AccountSummaryReport`.
-- [ ] T022 [US1] (implementer) Witnesses for N-002/N-003 in the same TU:
+- [X] T022 [US1] (implementer) Witnesses for N-002/N-003 in the same TU:
   `TailRows095.N002_UserRequest`, `TailRows095.N002_UserResponse`,
   `TailRows095.N003_ApplicationMessageRequest`, `TailRows095.N003_ApplicationMessageRequestAck`,
   `TailRows095.N003_ApplicationMessageReport`.
-- [ ] T023 [US1] (implementer) **The census** `TailRows095Census.EveryTailMsgTypeHasExactlyOneWitness`
+- [X] T023 [US1] (implementer) **The census** `TailRows095Census.EveryTailMsgTypeHasExactlyOneWitness`
   (FR-004a, W1): the row → MsgTypes table of data-model §A as a literal; iterate the registered tests
   of suite `TailRows095` via `::testing::UnitTest::GetInstance()`; map each `<Name>` to a MsgType
   through the dictionary's `<message name=… msgtype=…>`; collect every finding (multiplicity 0,
   multiplicity > 1, unmapped name, extra MsgType, row mismatch) before asserting.
-- [ ] T024 [US1] (implementer) **US1 GREEN run** — quickstart §1, as a `bash -e` script: the count
+- [X] T024 [US1] (implementer) **US1 GREEN run** — quickstart §1, as a `bash -e` script: the count
   assertion (`TailRows095.*` lists 23); `--gtest_filter='TailRows095.*:TailRows095Census.*'` passes;
   `TailRows095Census.*` alone passes; `--gtest_shuffle --gtest_repeat=3` passes. The 077 tests of the
   binary pass (FR-006): `"$B" --gtest_filter='-TailRows095*'` passes, and
@@ -337,29 +337,29 @@ maps to.
 
 ### RED arms (contracts W6; Mutant protocol; record each in the evidence file)
 
-- [ ] T025 [US1] (implementer) **Mutant D** — delete one intent entry, setter kept → RED in W4
+- [X] T025 [US1] (implementer) **Mutant D** — delete one intent entry, setter kept → RED in W4
   ("parsed, not intended") naming the path.
-- [ ] T026 [US1] (implementer) **Mutant H** — in `TailRows095.A018_ExecutionAck`, delete the CumQty(14)
+- [X] T026 [US1] (implementer) **Mutant H** — in `TailRows095.A018_ExecutionAck`, delete the CumQty(14)
   setter and keep its intent entry → RED in W4 ("intended, not parsed") naming the path; W5 stays
   green.
-- [ ] T027 [US1] (implementer) **Changed value** — in one witness, after the build and before
+- [X] T027 [US1] (implementer) **Changed value** — in one witness, after the build and before
   `make_frame`, one character of one string field's literal in the built buffer changed to another
   letter, never a count or other structural value (contracts W6) → RED in W4 naming the path and both values. A literal changed before the build is
   not this arm: both sides would carry it.
-- [ ] T028 [US1] (implementer) **Mutant E** — cut `TailRows095.A029_SecurityListUpdateReport` to one
+- [X] T028 [US1] (implementer) **Mutant E** — cut `TailRows095.A029_SecurityListUpdateReport` to one
   field (setters **and** intent entries deleted) → RED in the intent-size assertion, with its message.
-- [ ] T029 [US1] (implementer) **Mutant B** — in `TailRows095.A018_ExecutionAck`, delete the
+- [X] T029 [US1] (implementer) **Mutant B** — in `TailRows095.A018_ExecutionAck`, delete the
   ExecAckStatus(1036) setter **and** its intent entry → RED in W5 (not W4) naming `1036`. This is
   FR-004's "setter and intent entry both" known positive.
-- [ ] T030 [US1] (implementer) **Mutant A, and Mutant C on top** — in `TailRows095.A027_TradingSessionList`,
+- [X] T030 [US1] (implementer) **Mutant A, and Mutant C on top** — in `TailRows095.A027_TradingSessionList`,
   delete the `trading_sessions` assignment and its intent entries → RED in W5 naming the group. Then,
   with Mutant A still applied, re-apply T014's Mutant C → that W5 RED disappears (the rule, not a
   list, decides). Record both runs in full: in the second, the A-027 witness passes and T014's
   `NoOrders`(73) deficient-frame assertions fail, which shows Mutant C is active and that the
   disappearance is its effect, not a second fault. Revert both; `git diff --exit-code`.
-- [ ] T031 [US1] (implementer) **Census Mutant G** — delete `TailRows095.C003_AccountSummaryReport` →
+- [X] T031 [US1] (implementer) **Census Mutant G** — delete `TailRows095.C003_AccountSummaryReport` →
   census RED naming CQ with multiplicity 0.
-- [ ] T032 [US1] (implementer) **Census Mutants F, I, J and O** (F, I and J may share one rebuild
+- [X] T032 [US1] (implementer) **Census Mutants F, I, J and O** (F, I and J may share one rebuild
   with T031; O has its own rebuild and is applied alone; the record shows each message; the
   quickstart §1 count assertion is skipped for the runs of F, I and J, and the record says so): F — duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` → RED naming BN with
   multiplicity 2 **and** the row mismatch (A024 against A-018); I — add `TailRows095.A018_ExecutionAcknowledgement`
@@ -372,13 +372,13 @@ maps to.
   quickstart §1's count line (`n=$("$B" --gtest_filter='TailRows095.*' --gtest_list_tests | command grep -c '^  ' || true)`;
   `test "$n" -eq 23`), which must pass; then `"$B" --gtest_filter='TailRows095Census.EveryTailMsgTypeHasExactlyOneWitness'`
   RED with BJ's row mismatch and no multiplicity finding. Revert, rebuild, `git diff --exit-code`.
-- [ ] T033 [US1] (implementer) **Mutant K** — the name → MsgType lookup returns another tail MsgType
+- [X] T033 [US1] (implementer) **Mutant K** — the name → MsgType lookup returns another tail MsgType
   for one generated name → RED in that witness's tag-35 assertion naming both MsgTypes (the census
   goes RED too).
-- [ ] T034 [US1] (implementer) **Census order-freedom arm** — `"$B" --gtest_filter='TailRows095Census.EveryTailMsgTypeHasExactlyOneWitness'`
+- [X] T034 [US1] (implementer) **Census order-freedom arm** — `"$B" --gtest_filter='TailRows095Census.EveryTailMsgTypeHasExactlyOneWitness'`
   alone, with Mutant G applied, is RED (the census reads registration, not runs). Revert.
-- [ ] T035 [US1] (implementer) Re-run T024 on the reverted tree; all GREEN; `git diff --exit-code`.
-- [ ] T036 [US1] (implementer) **Commit C-US1** (the TU only). Report the hash; orchestrator runs
+- [X] T035 [US1] (implementer) Re-run T024 on the reverted tree; all GREEN; `git diff --exit-code`.
+- [X] T036 [US1] (implementer) **Commit C-US1** (the TU only). Report the hash; orchestrator runs
   `codegraph sync` and ticks T020–T036.
 
 **Checkpoint**: SC-001's offline half holds; every W6 row has a recorded RED.
