@@ -571,8 +571,11 @@ endforeach()
 # disjoint per-message *.builder.cpp / *.validator.cpp sets emitted by T003-
 # T005 (SC-002 object granularity, SC-003 builder⟂validator, R1/R2a ODR
 # safety). Always built (FR-004) — consumer opt-in is link-time only.
-# Build-tree + in-tree consumers only; NO install() (R3, Gate A round 1) —
-# same "no install() rules" convention as fixpp_dict_<ver> above.
+# Install scope: #613 (`.specify/613-builders-export.md`) supersedes 078's
+# build-tree-only decision. Where FIXPP_INSTALL_TYPED_TIER is in effect these are
+# FIXPP_EXPORT_TARGETS members, installed by the top-level install(TARGETS) and
+# exported as fixpp::builders::<ver> / fixpp::validators::<ver>; otherwise they
+# stay build-tree only. fixpp_dict_<ver> above is build-tree only in every case.
 # 082-structural-group-detection T035 [US2] — issue #196: **v42 added.** T035 removes
 # main.cpp's `if (ir.ns != "v42")` so the 226-file v42 builder/validator set is now
 # emitted; without v42 in this list those files would be generated and then compiled
@@ -592,8 +595,11 @@ foreach(_ver IN ITEMS v42 v44 v50sp2 vlatest)
     "${FIXPP_CODEGEN_OUT_DIR}/${_ver}/messages/*.builder.cpp")
   add_library(fixpp_builders_${_ver} STATIC ${_builder_sources})
   add_library(fixpp::builders::${_ver} ALIAS fixpp_builders_${_ver})
+  # #613 D-5: the INSTALL_INTERFACE is the lib's own declared include root (084 B0),
+  # read only when the target is exported, so it is inert with the typed tier off.
   target_include_directories(fixpp_builders_${_ver} PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/_codegen/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
   )
   target_link_libraries(fixpp_builders_${_ver} PUBLIC fixpp::wire)
   add_dependencies(fixpp_builders_${_ver} fixpp_codegen_generate)
@@ -606,6 +612,7 @@ foreach(_ver IN ITEMS v42 v44 v50sp2 vlatest)
   add_library(fixpp::validators::${_ver} ALIAS fixpp_validators_${_ver})
   target_include_directories(fixpp_validators_${_ver} PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/_codegen/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
   )
   target_link_libraries(fixpp_validators_${_ver} PUBLIC fixpp::wire)
   add_dependencies(fixpp_validators_${_ver} fixpp_codegen_generate)

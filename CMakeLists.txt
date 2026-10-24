@@ -125,7 +125,9 @@ add_compile_definitions(FIXPP_BUILD_OTEL=$<BOOL:${FIXPP_BUILD_OTEL}>)
 # ── 084 FR-011: is PACKAGING available in this configuration? ────────────────
 # Computed HERE, before tests/ and before the CPack module, because both must
 # agree — and the answer is needed long before cmake/FixppPackaging.cmake is
-# included at the bottom of this file.
+# included at the bottom of this file. A second condition, #613 D-6
+# (FIXPP_CODEGEN_FIX_LATEST=OFF ⇒ no packaging), is applied right after
+# cmake/Codegen.cmake is included, because that is where the option is declared.
 #
 # FR-011 permits an OTel-OFF build as a development accelerator and forbids one
 # reaching a shipped artifact. The first cut enforced that with a FATAL_ERROR in
@@ -339,6 +341,74 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
   include(cmake/Codegen.cmake)
 endif()
 
+# ── #613 (`.specify/613-builders-export.md` D-0): the typed builder/validator tier ──
+# Owner rulings R-2a "Release packages only." and R-2b, which put it behind this
+# setting, in effect by default for Release and switchable ON by anyone who builds
+# fixpp themselves, in any configuration (Debug configurations are never
+# released). Where the EFFECTIVE value is ON, fixpp_builders_<ver> /
+# fixpp_validators_<ver> join FIXPP_EXPORT_TARGETS and the slim typed headers are
+# installed; where it is OFF, neither is. Every surface that depends on the tier keys
+# on FIXPP_INSTALL_TYPED_TIER_EFFECTIVE, never on the build type.
+#
+# A tri-state STRING, not a BOOL option(): AUTO is re-evaluated at every configure
+# (a computed BOOL default would freeze into the cache at the first one), and the
+# witnesses can tell "defaulted" from "set by the user" and check the default
+# against their own copy of the rule.
+#
+# ⚠️ PLACEMENT IS LOAD-BEARING. It sits HERE, after cmake/Codegen.cmake and BEFORE
+# the tests block, because add_test() expands ${...} when it executes and both
+# witness registrations read it (fixpp::consumer::install-witness below, and
+# fixpp::packaging::contents in tests/packaging/, which the tests block enters
+# first). Placed later, they would receive empty values; each witness refuses an
+# out-of-domain value, so that slip is loud rather than green. Re-derive the order:
+#   grep -n -E 'include\(cmake/Codegen.cmake\)|^if\(FIXPP_BUILD_TESTS|add_subdirectory\(tests/packaging\)|install-witness|_codegen/include/"|APPEND FIXPP_EXPORT_TARGETS' CMakeLists.txt
+#
+# A released (Release) package cannot be generated with the tier OFF. That refusal is
+# at PACKAGE GENERATION (cmake/FixppCPackTypedTierGuard.cmake), never here: a Release
+# tree may be configured, built and installed with OFF.
+set(FIXPP_INSTALL_TYPED_TIER "AUTO" CACHE STRING
+    "Export and install the typed builder/validator tier (#613): AUTO = only for a single-config Release tree; ON/OFF force it")
+set_property(CACHE FIXPP_INSTALL_TYPED_TIER PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${FIXPP_INSTALL_TYPED_TIER}" _fixpp_typed_setting_uc)
+get_property(_fixpp_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _fixpp_build_type_uc)
+if(_fixpp_typed_setting_uc STREQUAL "AUTO")
+  if(NOT _fixpp_multi_config AND _fixpp_build_type_uc STREQUAL "RELEASE")
+    set(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE ON)
+  else()
+    set(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE OFF)
+  endif()
+elseif(_fixpp_typed_setting_uc MATCHES "^(ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0)$")
+  if(FIXPP_INSTALL_TYPED_TIER)
+    set(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE ON)
+  else()
+    set(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE OFF)
+  endif()
+else()
+  message(FATAL_ERROR "#613: FIXPP_INSTALL_TYPED_TIER must be AUTO, ON or OFF, got '${FIXPP_INSTALL_TYPED_TIER}'")
+endif()
+message(STATUS "#613: typed builder/validator tier "
+               "${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE} (FIXPP_INSTALL_TYPED_TIER=${FIXPP_INSTALL_TYPED_TIER}, "
+               "CMAKE_BUILD_TYPE='${CMAKE_BUILD_TYPE}')")
+unset(_fixpp_typed_setting_uc)
+unset(_fixpp_multi_config)
+unset(_fixpp_build_type_uc)
+
+# ── #613 D-6: FIXPP_CODEGEN_FIX_LATEST=OFF defines NO packaging ──────────────
+# The owner ruled that the v1.0 packages carry all four versions (v42, v44, v50sp2,
+# vlatest), so a tree without vlatest must not be able to produce one. Same shape as
+# the OTel-OFF decision above: no CPack configuration and no packaging tests, so there
+# is nothing to invoke. A FATAL_ERROR here is rejected: it would break the developer
+# configure docs/src/dictionary/codegen.md documents. cmake/FixppPackaging.cmake
+# carries a guard on the same option, so deleting this decision is loud there.
+if(FIXPP_PACKAGING_ENABLED AND NOT FIXPP_CODEGEN_FIX_LATEST)
+  set(FIXPP_PACKAGING_ENABLED OFF)
+  message(STATUS
+    "#613 D-6: packaging DISABLED because FIXPP_CODEGEN_FIX_LATEST is OFF — a package "
+    "must carry all four FIX versions, so no CPack configuration and no packaging tests "
+    "are defined. The build itself is unaffected.")
+endif()
+
 # ── 075-live-wire-enum-validation Phase 0.5 golden generator (local-only) ────
 # Guarded OFF by default (FIXPP_BUILD_QUICKFIX_GOLDEN, declared inside this
 # subdirectory's own CMakeLists.txt). Never enabled in CI; see T002.
@@ -424,6 +494,21 @@ if(FIXPP_BUILD_TESTS)
   # this build, configure+build the consumer against the staged prefix only,
   # run it, assert PASS. Requires the T023 install rule (FIXPP_BUILD_CODEGEN_TOOL).
   if(FIXPP_BUILD_CODEGEN_TOOL)
+    # #613: an evaluated-empty format is ambiguous without this flag (unset means
+    # CMake's default, a PDB format in Debug; set-but-empty means no debug info).
+    get_target_property(_fixpp_typed_debug_info fixpp_builders_v44 MSVC_DEBUG_INFORMATION_FORMAT)
+    if(_fixpp_typed_debug_info MATCHES "-NOTFOUND$")
+      set(_fixpp_typed_debug_info_set 0)
+    else()
+      set(_fixpp_typed_debug_info_set 1)
+    endif()
+    # A configure-time value, not $<CXX_COMPILER_ID:MSVC>: that genex is refused in
+    # an add_test() command ("may only be used with binary targets").
+    if(MSVC)
+      set(_fixpp_is_msvc 1)
+    else()
+      set(_fixpp_is_msvc 0)
+    endif()
     add_test(
       NAME "fixpp::consumer::install-witness"
       COMMAND "${CMAKE_COMMAND}"
@@ -440,6 +525,19 @@ if(FIXPP_BUILD_TESTS)
         # from xml_loader.cpp.o at link. Single-config Ninja presets always set
         # CMAKE_BUILD_TYPE; the run script defaults to Debug if it is empty.
         "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        # #613 (`.specify/613-builders-export.md` §4): the raw setting AND the
+        # effective value, so the driver can check one against the other and
+        # against FIXPP_BUILD_TYPE; never the effective value alone.
+        "-DFIXPP_TYPED_TIER_SETTING=${FIXPP_INSTALL_TYPED_TIER}"
+        "-DFIXPP_TYPED_TIER_EFFECTIVE=${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE}"
+        "-DFIXPP_CODEGEN_FIX_LATEST=${FIXPP_CODEGEN_FIX_LATEST}"
+        # The typed PDB expectation (§4.1, D-9). TARGET_GENEX_EVAL, not a bare
+        # $<TARGET_PROPERTY:>: the property can hold a genex (tier2 sets the format
+        # as one), which the bare form passes through unevaluated.
+        "-DFIXPP_PACKAGING_ENABLED=${FIXPP_PACKAGING_ENABLED}"
+        "-DFIXPP_IS_MSVC=${_fixpp_is_msvc}"
+        "-DFIXPP_TYPED_DEBUG_INFO=$<TARGET_GENEX_EVAL:fixpp_builders_v44,$<TARGET_PROPERTY:fixpp_builders_v44,MSVC_DEBUG_INFORMATION_FORMAT>>"
+        "-DFIXPP_TYPED_DEBUG_INFO_SET=${_fixpp_typed_debug_info_set}"
         -P "${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_witness.cmake"
     )
     set_tests_properties("fixpp::consumer::install-witness" PROPERTIES
@@ -596,29 +694,41 @@ install(
 # could not #include them. _dispatch/ (build-tree-private reify bridge) and
 # vt11/ (FIXT.1.1, not part of the public v42/v44/v50sp2 set) are excluded.
 #
-# 078-precompiled-builder-libs: the split emits a `messages/`+`groups/`+
-# `validators/` layout plus `all.hpp`/`groups.hpp` aggregators whose
-# `build_<Msg>`/`validate_<Msg>` declarations resolve only against the
-# unexported `fixpp_builders_<ver>`/`fixpp_validators_<ver>` libs
-# (`cmake/Codegen.cmake`). Per `contracts/cmake-targets.md` "Install / export
-# scope" Coherence rule (Gate A round 1, R3): while those libs are unexported,
-# the slim typed layout must NOT be installed — an installed consumer would
-# get unresolvable `build_`/`validate_` link symbols, and the generated
-# `.builder.cpp`/`.validator.cpp` would leak as public "headers". This is a
-# denylist against the 061 install rule below; extend it if a new emitted
-# file/directory type is added under `_codegen/include/<ns>/`.
+# 078 → #613 (`.specify/613-builders-export.md`): where FIXPP_INSTALL_TYPED_TIER is in effect (AUTO = single-config
+# Release, the only released packages; ON in any configuration a consumer builds itself; owner rulings R-2a/R-2b)
+# the 078 split's messages/ + groups/ + validators/ layout and its all.hpp / groups.hpp aggregators SHIP. Their
+# build_<Msg>/validate_<Msg> declarations resolve against fixpp_builders_<ver>/fixpp_validators_<ver>, which are
+# FIXPP_EXPORT_TARGETS members on exactly the same condition, so 078's coherence rule (no installed declaration
+# without an exported definition) holds because the definitions are exported. With it OFF the five 078 patterns
+# stay, and the rule holds because the declarations are withheld. Superseded: 078
+# contracts/cmake-targets.md "Install / export scope". The .builder.inl/.validator.inl files ship with the layout:
+# they are the FIXPP_{BUILDERS,VALIDATORS}_HEADER_ONLY[_<Msg>] surface the installed .hpp files include.
+# Translation units never ship (*.cpp below).
+# This rule is a DENYLIST: a new emitted kind ships by default. What catches one is the schema allowlist in
+# tests/packaging/run_package_contents_witness.cmake, written from 078 contracts/include-layout.md, not from this rule.
 if(FIXPP_BUILD_CODEGEN_TOOL)
+  # The five 078 patterns, kept only where the typed tier is NOT in effect. Keyed on
+  # the effective value, never on the build type: a Debug tree set ON installs the
+  # slim headers its exported Debug libs define.
+  set(_fixpp_typed_header_excludes "")
+  if(NOT FIXPP_INSTALL_TYPED_TIER_EFFECTIVE)
+    list(APPEND _fixpp_typed_header_excludes
+      PATTERN "messages"   EXCLUDE   # 078 per-message .hpp/.builder.{inl,cpp}/.validator.{inl,cpp}
+      PATTERN "groups"     EXCLUDE   # 078 per-plan group headers
+      PATTERN "validators" EXCLUDE   # 078 validators/traits.hpp
+      PATTERN "all.hpp"    EXCLUDE   # 078 aggregator
+      PATTERN "groups.hpp" EXCLUDE)  # 078 groups umbrella
+  endif()
   install(
     DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     PATTERN "_dispatch" EXCLUDE
     PATTERN "vt11" EXCLUDE
-    PATTERN "messages"   EXCLUDE   # 078 per-message .hpp/.builder.{inl,cpp}/.validator.{inl,cpp}
-    PATTERN "groups"     EXCLUDE   # 078 per-plan group headers
-    PATTERN "validators" EXCLUDE   # 078 validators/traits.hpp
-    PATTERN "all.hpp"    EXCLUDE   # 078 aggregator
-    PATTERN "groups.hpp" EXCLUDE   # 078 groups umbrella
-    # ── 8th pattern, added by 084 T058/T059 (FR-013) ────────────────────────
+    ${_fixpp_typed_header_excludes}
+    # #613: a translation unit is never a header, whatever directory it is emitted
+    # to, so the generated .builder.cpp/.validator.cpp stay out by construction.
+    PATTERN "*.cpp" EXCLUDE
+    # ── added by 084 T058/T059 (FR-013) ─────────────────────────────────────
     # Manifest.txt is the 076 T012 codegen CENSUS manifest — a ~12 MB generated
     # "DO NOT EDIT" audit artifact emitted under fixpp/vlatest/. It is read ONLY
     # by tests/codegen, and only from the BUILD tree (FIXPP_CODEGEN_VLATEST_MANIFEST
@@ -626,13 +736,12 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
     # and no consumer has any use for it. It is build-system output in FR-013's
     # sense, and it was ~12 MB of every package.
     #
-    # ⚠️ Note for anyone updating docs: the denylist is now EIGHT patterns, not
-    # seven. Every "the 7-pattern denylist" phrase in this feature's bundle
-    # predates this exclusion. It was found by the T058 exact-set gate on its
-    # first real run against a package — a denylist-only check could not have
-    # found it, which is the whole point of T059.
+    # It was found by the T058 exact-set gate on its first real run against a
+    # package — a denylist-only check could not have found it, which is the whole
+    # point of T059.
     PATTERN "Manifest.txt" EXCLUDE
   )
+  unset(_fixpp_typed_header_excludes)
 endif()
 
 # ── 084: export + packaging surface ──────────────────────────────────────────
@@ -661,6 +770,10 @@ if(NOT FIXPP_CODEGEN_BOOTSTRAP_RUNNING)
 # was wrong three times across a three-level cascade, which is why T024 re-runs
 # the experiment against this list rather than trusting it.
 #
+# #613 adds the typed builder/validator members, appended after the umbrella below
+# where FIXPP_INSTALL_TYPED_TIER is in effect; their configure probe is recorded in
+# `.specify/613-builders-export.md` (D-1). The dated 084 measurement above is history.
+#
 # ONE list, deliberately: install(TARGETS) and the EXPORT_NAME sweep both consume
 # it, so a member added here cannot get an export entry without also getting its
 # imported name. A second, separately-maintained list is exactly the half-applied
@@ -688,23 +801,30 @@ set(FIXPP_EXPORT_TARGETS
 
 # ── T029: the fixpp::fixpp umbrella (FR-001, FR-002) ─────────────────────────
 # find_package(fixpp REQUIRED) + target_link_libraries(app PRIVATE fixpp::fixpp)
-# is the whole contract. Linking fixpp_session pulls the measured closure
+# is the umbrella's contract. Linking fixpp_session pulls the measured closure  claim-ok: 084's wording, unchanged except "whole" -> "umbrella's"
 # transitively (core, sync, wire, dictionary, tls, transport, log, otel, and the
 # dict dispatch pair) -- the umbrella does not restate it.
 #
 # ⚠️ The umbrella is deliberately NOT the whole export set. It does not reach
-# fixpp_capi, fixpp_config_toml, fixpp_tap, fixpp_service or fixpp_log_otlp,
+# fixpp_capi, fixpp_config_toml, fixpp_tap, fixpp_service, fixpp_log_otlp, or (where
+# FIXPP_INSTALL_TYPED_TIER is in effect, #613) the typed builder/validator pairs,
 # because fixpp_session links none of them. That is correct, not a gap -- but the
-# five are NOT one class:
-#   * FOUR are exported so a consumer can link them BY NAME: fixpp::capi for a
+# members the umbrella does not reach are NOT one class:
+#   * the BY-NAME class, exported so a consumer can link them by name: fixpp::capi for a
 #     C-ABI consumer who deliberately does not want the C++ umbrella (Article IV
 #     §2 / architecture.md §7.4 -- linking both is rejected by CONVENTION and by
 #     review, NOT by tools/check_layers.py: that script is a source #include-edge
 #     lint over src/** and bindings/** (its `Scan src/ and bindings/` loop) which reads no CMake link
 #     interface at all. Corrected by 086/FR-014),
-#     and fixpp::config_toml exactly as include/fixpp/config/toml_config_loader.hpp
-#     instructs.
-#   * The FIFTH, fixpp_log_otlp, is CLOSURE-ONLY: it is in the export set solely
+#     fixpp::config_toml exactly as include/fixpp/config/toml_config_loader.hpp
+#     instructs, fixpp::tap, fixpp::service, and (#613, where the typed tier is in
+#     effect) fixpp::builders::<ver> / fixpp::validators::<ver> for v42, v44 and
+#     v50sp2, plus vlatest iff FIXPP_CODEGEN_FIX_LATEST. The typed pairs stay out of
+#     the umbrella because 078 FR-004 makes the opt-in "purely link-time" and
+#     fixpp_session links none of them; their headers still resolve through this
+#     include root, so an umbrella-only consumer calling build_<Msg> gets an
+#     undefined symbol at link time naming the function (B-613-1).
+#   * fixpp_log_otlp is CLOSURE-ONLY: it is in the export set solely
 #     as fixpp_config_toml's $<LINK_ONLY:> requirement. No public header names
 #     fixpp::log_otlp and nothing instructs anyone to link it directly.
 add_library(fixpp INTERFACE)
@@ -716,13 +836,30 @@ target_include_directories(fixpp INTERFACE
 )
 list(APPEND FIXPP_EXPORT_TARGETS fixpp)
 
-# fixpp_log_otlp is the one genuinely configuration-dependent member: it exists
-# only under if(TARGET opentelemetry-cpp::api) (src/log/CMakeLists.txt). It is a
+# fixpp_log_otlp's membership depends on the OTel SDK: it exists only under
+# if(TARGET opentelemetry-cpp::api) (src/log/CMakeLists.txt). (The typed tier's
+# membership depends on FIXPP_INSTALL_TYPED_TIER instead, below.) It is a
 # CLOSURE-ONLY member -- fixpp_config_toml names it via a PRIVATE link edge, which
 # lands in INTERFACE_LINK_LIBRARIES as $<LINK_ONLY:> and is an export-set
 # requirement all the same (FR-008a). No public header names fixpp::log_otlp.
 if(TARGET fixpp_log_otlp)
   list(APPEND FIXPP_EXPORT_TARGETS fixpp_log_otlp)
+endif()
+
+# #613 D-1 (`.specify/613-builders-export.md`): the typed builder/validator tier,
+# where FIXPP_INSTALL_TYPED_TIER is in effect (D-0). v42, v44 and v50sp2 are
+# unconditional while it is, so a missing one is reported by the fail-closed check
+# below rather than skipped. vlatest is gated on the option that decides whether it
+# is BUILT (FIXPP_CODEGEN_FIX_LATEST, cmake/Codegen.cmake), never on if(TARGET ...):
+# with the option ON and the target missing, the check still fails closed.
+if(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE)
+  foreach(_fixpp_typed_ver IN ITEMS v42 v44 v50sp2)
+    list(APPEND FIXPP_EXPORT_TARGETS fixpp_builders_${_fixpp_typed_ver} fixpp_validators_${_fixpp_typed_ver})
+  endforeach()
+  if(FIXPP_CODEGEN_FIX_LATEST)
+    list(APPEND FIXPP_EXPORT_TARGETS fixpp_builders_vlatest fixpp_validators_vlatest)
+  endif()
+  unset(_fixpp_typed_ver)
 endif()
 
 # Fail CLOSED. Every other name above is expected to exist in EVERY in-scope
@@ -751,12 +888,25 @@ endforeach()
 unset(_fixpp_export_tgt)
 unset(_fixpp_export_short)
 
-# One target diverges from the prefix-strip rule, and it is the in-tree alias that
-# decides: fixpp_dict_dispatch is aliased fixpp::dict::dispatch (a NESTED namespace,
-# cmake/Codegen.cmake), not fixpp::dict_dispatch. Measured 2026-08-02: CMake accepts
-# a "::" inside EXPORT_NAME and emits fixpp::dict::dispatch verbatim, so the export
-# matches the alias and T026's set-equality needs no exemption.
+# The rule for the exceptions: a member whose in-tree alias is NESTED gets a nested
+# EXPORT_NAME, because the in-tree alias decides. fixpp_dict_dispatch is aliased
+# fixpp::dict::dispatch (cmake/Codegen.cmake), not fixpp::dict_dispatch, and is set by
+# the override below. Measured 2026-08-02: CMake accepts a "::" inside EXPORT_NAME  claim-ok: 084's dated record, carried over from the replaced paragraph
+# and emits fixpp::dict::dispatch verbatim, so the export matches the alias and
+# T026's set-equality needs no exemption.
 set_target_properties(fixpp_dict_dispatch PROPERTIES EXPORT_NAME "dict::dispatch")
+
+# #613 D-2: the typed libs are aliased fixpp::builders::<ver> / fixpp::validators::<ver>
+# (cmake/Codegen.cmake), the names docs/src/dictionary/codegen.md tells consumers to
+# link. One rule over the list, so a version added later is named by it and never
+# left out of a hand-written list; with the typed tier not in effect it matches nothing.
+foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+  if(_fixpp_export_tgt MATCHES "^fixpp_(builders|validators)_(.+)$")
+    set_target_properties(${_fixpp_export_tgt} PROPERTIES
+      EXPORT_NAME "${CMAKE_MATCH_1}::${CMAKE_MATCH_2}")
+  endif()
+endforeach()
+unset(_fixpp_export_tgt)
 
 # T022/T026: two export members had no in-tree fixpp:: alias at all
 # (fixpp_dict_dispatch_bridge, fixpp_capi_objects) while every other member had one.
@@ -871,7 +1021,9 @@ install(
 #      invariant I2 / rule B2. That member is link-closure-only and must export no
 #      install include path at all.
 # With the per-target rewrite in place this option is redundant; dropping it makes
-# I2 hold BY CONSTRUCTION, which is what T021 asks for.
+# I2 hold BY CONSTRUCTION, which is what T021 asks for. (That count is 084's
+# reading. The typed fixpp_builders_<ver> / fixpp_validators_<ver> libs declare
+# their own install interface too: #613, cmake/Codegen.cmake.)
 
 # Writing the export set is what makes CMake ENFORCE the link closure ("... includes
 # target X which requires target Y that is not in any export set"). install(TARGETS
