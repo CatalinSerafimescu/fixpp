@@ -962,8 +962,9 @@ and that a Debug consumer builds fixpp with `FIXPP_INSTALL_TYPED_TIER=ON` (R-2a,
   - A consumer must match the installed configuration, as for every fixpp library (084). On MSVC a Debug consumer
     cannot link Release libraries at all (runtime-library and iterator-debug-level mismatch, LNK2038).
   - With a multi-config generator (outside the supported Ninja-only build), install each configuration into its own
-    prefix: fixpp archives carry no per-configuration suffix, so two configurations installed into one prefix
-    overwrite each other's archives, for every fixpp library, not only the typed tier.
+    prefix: fixpp archives carry no per-configuration suffix, so with two configurations installed into one prefix a
+    single file per archive name serves both configurations' imported locations, and a consumer can link the other
+    configuration's code (D-0's probe), for every fixpp library, not only the typed tier.
   - In-tree builds are unaffected: the libs are built and linkable in every configuration.
 - **B-613-2.** `FIXPP_INSTALL_TYPED_TIER` (`AUTO` / `ON` / `OFF`) is a documented configure setting
   (`docs/src/dictionary/codegen.md`); an invalid value fails the configure naming the accepted ones.
