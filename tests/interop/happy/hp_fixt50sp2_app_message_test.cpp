@@ -34,7 +34,6 @@
 // [const §XV.9]: tests/-only.
 
 #include <gtest/gtest.h>
-#include <openssl/sha.h>
 
 #include <array>
 #include <asio/co_spawn.hpp>
@@ -42,6 +41,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <filesystem>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/session/application.hpp>
@@ -50,19 +50,17 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/v50sp2/messages/ExecutionAck.hpp>
 #include <fstream>
-#include <functional>
 #include <future>
 #include <memory>
 #include <memory_resource>
-#include <mutex>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "hp_support.hpp"
+#include "support/app_message_read_scaffold.hpp"
 #include "support/counterparty_probe.hpp"
 #include "support/intent_file.hpp"
 #include "support/readback_jsonl.hpp"
@@ -89,60 +87,14 @@ std::string env_or_empty(char const* key) {
     return v == nullptr ? std::string() : std::string(v);
 }
 
-std::string sha256_hex_file(std::string const& path) {
-    std::ifstream f(path, std::ios::binary);
-    std::ostringstream oss;
-    oss << f.rdbuf();
-    std::string const data = oss.str();
-    unsigned char digest[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<unsigned char const*>(data.data()), data.size(), digest);
-    static char const* kHex = "0123456789abcdef";
-    std::string out(SHA256_DIGEST_LENGTH * 2, '\0');
-    for (std::size_t i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
-        out[2 * i] = kHex[(digest[i] >> 4) & 0x0F];
-        out[(2 * i) + 1] = kHex[digest[i] & 0x0F];
-    }
-    return out;
-}
-
 std::string run_dir_of(std::string const& readback_path) {
     std::size_t const slash = readback_path.find_last_of('/');
     return slash == std::string::npos ? std::string(".") : readback_path.substr(0, slash);
 }
 
-fixpp::decimal_t decimal_from(std::string const& v, std::pmr::memory_resource* mr) {
-    auto r = fixpp::decimal_t::parse(
-        std::span<std::byte const>{reinterpret_cast<std::byte const*>(v.data()), v.size()}, mr);
-    EXPECT_TRUE(r.has_value()) << "F-01 value '" << v << "' is not a decimal";
-    return r.value_or(fixpp::decimal_t{});
-}
-
 class AppMessageApp : public Application {
 public:
     rb::Stream* stream = nullptr;
-
-    // Every stream write before stream.hello() is deferred until it is written, so the hello
-    // stays the stream's first line (the 089 drivers' rule).
-    std::mutex hello_mu;
-    bool hello_written = false;
-    std::vector<std::function<void()>> pending_before_hello;
-
-    template <typename F>
-    void write_or_defer(F&& write_call) {
-        std::scoped_lock lk(hello_mu);
-        if (hello_written) {
-            write_call();
-        } else {
-            pending_before_hello.emplace_back(std::forward<F>(write_call));
-        }
-    }
-
-    void mark_hello_written() {
-        std::scoped_lock lk(hello_mu);
-        for (auto& fn : pending_before_hello) fn();
-        pending_before_hello.clear();
-        hello_written = true;
-    }
 
     // Armed right before Engine::send(); consumed by toApp, which adds the one captured value,
     // MsgSeqNum(34), the pairing key.
@@ -163,11 +115,8 @@ public:
             PendingSent p = std::move(*pending_sent);
             pending_sent.reset();
             long long const seq = msg.msg_seq_num();
-            rb::Stream* s = stream;
-            write_or_defer([s, mt = std::string(msg.msg_type()), seq, step_id = p.script_step_id,
-                            fields = std::move(p.fields)]() mutable {
-                s->sent(mt, seq, rb::kDirectionFixppToPeer, 0, step_id, std::move(fields));
-            });
+            stream->sent(std::string(msg.msg_type()), seq, rb::kDirectionFixppToPeer, 0,
+                         p.script_step_id, std::move(p.fields));
         }
         return {};
     }
@@ -243,7 +192,8 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     ASSERT_FALSE(readback_path.empty()) << "INTEROP_FIXPP_READBACK_PATH absent";
     ASSERT_FALSE(intent_path.empty()) << "INTEROP_FIXPP_INTENT_PATH absent";
 
-    std::string const actual_digest = sha256_hex_file(script_path);
+    std::string const actual_digest =
+        hp::sha256_lower_hex(hp::read_file_or_throw(script_path, "script digest"));
     ASSERT_EQ(actual_digest, script_digest_expected) << "script_digest mismatch";
 
     // ── Step F-01's values, from the rendered intent file. ──
@@ -276,13 +226,13 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
         } else if (f.path == "55") {
             args.symbol = f.value;
         } else if (f.path == "38") {
-            args.order_qty = decimal_from(f.value, &arena);
+            args.order_qty = fixpp_test_support::make_decimal(f.value, &arena);
         } else if (f.path == "11") {
             args.cl_ord_id = f.value;
         } else if (f.path == "14") {
-            args.cum_qty = decimal_from(f.value, &arena);
+            args.cum_qty = fixpp_test_support::make_decimal(f.value, &arena);
         } else if (f.path == "6") {
-            args.avg_px = decimal_from(f.value, &arena);
+            args.avg_px = fixpp_test_support::make_decimal(f.value, &arena);
         } else {
             FAIL() << "step F-01 path " << f.path << " has no ExecutionAckArgs member here";
         }
@@ -330,7 +280,6 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     EXPECT_FALSE(has_validator) << "inbound validation must be off on this cell (FR-013)";
     stream.hello(run_id, cell_id, config, actual_digest, arm, has_validator,
                  prod.app_dictionary_digest);
-    app->mark_hello_written();
 
     std::string const cp_path = run_dir_of(readback_path) + "/counterparty-readback.jsonl";
     std::string const cp_transcript = run_dir_of(readback_path) + "/counterparty-transcript.txt";
@@ -360,6 +309,9 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     stream.terminal("completed", run_id, cell_id, config, actual_digest);
 
     // ── The peer-Reject check: evaluated whatever the comparison below returns. ──
+    EXPECT_TRUE(std::filesystem::exists(cp_transcript))
+        << "no counterparty transcript at " << cp_transcript
+        << ": the peer-Reject check cannot run";
     std::vector<std::string> const peer_rejects = peer_rejects_in(cp_transcript);
     EXPECT_TRUE(peer_rejects.empty())
         << "the peer rejected fixpp's message: " << join_lines(peer_rejects);

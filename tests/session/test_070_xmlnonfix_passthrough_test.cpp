@@ -43,6 +43,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 
@@ -330,11 +331,8 @@ std::vector<std::byte> make_app_frame(std::uint32_t seq, std::string_view msg_ty
 [[nodiscard]] bool reject_among(const std::vector<std::vector<std::byte>>& frames, std::size_t from,
                                 std::size_t to) {
     for (std::size_t i = from; i < to && i < frames.size(); ++i) {
-        std::string w(reinterpret_cast<const char*>(frames[i].data()), frames[i].size());
-        if (w.contains("\x01"
-                       "35=3\x01") ||
-            w.contains("\x01"
-                       "35=j\x01")) {
+        std::string const mt = fixpp::test_support::extract_tag(frames[i], 35);
+        if (mt == "3" || mt == "j") {
             return true;
         }
     }

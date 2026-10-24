@@ -250,25 +250,34 @@ inline std::string production_fix44_dict_path() {
 #endif
 }
 
-inline ProductionDictionary production_dictionary_and_digest() {
-    const std::string path = production_fix44_dict_path();
+inline std::string read_file_or_throw(const std::string& path, const char* who) {
     std::ifstream f(path, std::ios::binary);
     if (!f.is_open()) {
-        throw std::runtime_error("production_dictionary_and_digest: cannot open " + path);
+        throw std::runtime_error(std::string(who) + ": cannot open " + path);
     }
     std::ostringstream oss;
     oss << f.rdbuf();
-    const std::string xml_text = oss.str();
+    return oss.str();
+}
 
-    // SHA-256 over the exact bytes handed to the loader below.
+inline std::string sha256_lower_hex(const std::string& bytes) {
     unsigned char raw_digest[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(xml_text.data()), xml_text.size(), raw_digest);
+    SHA256(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(), raw_digest);
     static constexpr char kHex[] = "0123456789abcdef";
     std::string hex(SHA256_DIGEST_LENGTH * 2, '\0');
     for (std::size_t i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
         hex[2 * i] = kHex[raw_digest[i] >> 4U];
         hex[(2 * i) + 1] = kHex[raw_digest[i] & 0xFU];
     }
+    return hex;
+}
+
+inline ProductionDictionary production_dictionary_and_digest() {
+    const std::string xml_text =
+        read_file_or_throw(production_fix44_dict_path(), "production_dictionary_and_digest");
+
+    // SHA-256 over the exact bytes handed to the loader below.
+    std::string hex = sha256_lower_hex(xml_text);
 
     // Dictionary is move-only; loaded once here and kept alive via shared_ptr
     // (same pattern as witness_comparator.cpp's make_fix44_decimal_resolver).
@@ -309,28 +318,6 @@ inline std::string production_dict_data_file(const char* basename) {
     (void)basename;
     return {};
 #endif
-}
-
-inline std::string read_file_or_throw(const std::string& path, const char* who) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f.is_open()) {
-        throw std::runtime_error(std::string(who) + ": cannot open " + path);
-    }
-    std::ostringstream oss;
-    oss << f.rdbuf();
-    return oss.str();
-}
-
-inline std::string sha256_lower_hex(const std::string& bytes) {
-    unsigned char raw_digest[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(), raw_digest);
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string hex(SHA256_DIGEST_LENGTH * 2, '\0');
-    for (std::size_t i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
-        hex[2 * i] = kHex[raw_digest[i] >> 4U];
-        hex[(2 * i) + 1] = kHex[raw_digest[i] & 0xFU];
-    }
-    return hex;
 }
 
 inline ProductionFixtEngineConfig production_fixt50sp2_engine_config() {

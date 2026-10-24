@@ -223,8 +223,7 @@ private:
                 if (kids.size() == 1 && is_group(kids.front())) {
                     // Only-child inheritance: the group takes the flag of the reference that wraps
                     // it.
-                    bool const group_required = req;
-                    if (group_required) groups.push_back(kids.front());
+                    if (req) groups.push_back(kids.front());
                     continue;
                 }
                 if (req && std::any_of(kids.begin(), kids.end(), is_group)) {
@@ -309,6 +308,10 @@ bool is_framing_or_msgtype(std::uint16_t tag) {
     return tag == 8 || tag == 9 || tag == 10 || tag == 35;
 }
 
+std::string instance_path(std::uint16_t count_tag, std::size_t k, std::uint16_t tag) {
+    return std::to_string(count_tag) + "[" + std::to_string(k) + "]." + std::to_string(tag);
+}
+
 // Every parsed body entry but the framing tags and tag 35, each attributed by extent to message
 // level or to the instance of the outermost required group whose slice contains it.
 BodyEnumeration enumerate_body(IndexView const& mv, WalkResult const& wr) {
@@ -337,8 +340,8 @@ BodyEnumeration enumerate_body(IndexView const& mv, WalkResult const& wr) {
         }
         be.path = be.group < 0
                       ? std::to_string(e.tag)
-                      : std::to_string(wr.groups[static_cast<std::size_t>(be.group)].count_tag) +
-                            "[" + std::to_string(be.instance) + "]." + std::to_string(e.tag);
+                      : instance_path(wr.groups[static_cast<std::size_t>(be.group)].count_tag,
+                                      be.instance, e.tag);
         out.entries.push_back(std::move(be));
     }
     return out;
@@ -367,10 +370,6 @@ std::uint16_t tag_of_path(std::string_view path) {
     unsigned v = 0;
     std::from_chars(t.data(), t.data() + t.size(), v);
     return static_cast<std::uint16_t>(v);
-}
-
-std::string instance_path(std::uint16_t count_tag, std::size_t k, std::uint16_t tag) {
-    return std::to_string(count_tag) + "[" + std::to_string(k) + "]." + std::to_string(tag);
 }
 
 // The closure-required members the parsed frame lacks, as an ordered sequence with duplicates
@@ -496,6 +495,18 @@ std::string drop_hyphen(std::string_view row) {
     return s;
 }
 
+// parse_dict reports a refusal as a gtest failure; `refused` says whether this parse added one.
+IndexView parse_noting_refusal(std::vector<std::byte> const& frame,
+                               fixpp::dict::table_view const& tv, std::pmr::memory_resource* mr,
+                               bool& refused) {
+    ::testing::TestResult const* const result =
+        ::testing::UnitTest::GetInstance()->current_test_info()->result();
+    int const parts_before = result->total_part_count();
+    IndexView mv = parse_dict(frame, tv, mr);
+    refused = result->total_part_count() != parts_before;
+    return mv;
+}
+
 // ── Fixture: the dictionary, loaded once ─────────────────────────────────────
 
 using Intent = std::vector<std::pair<std::string, std::string>>;
@@ -537,11 +548,9 @@ protected:
         ASSERT_GE(intent.size(), 2U) << "W4 intent-size: the intent list holds " << intent.size()
                                      << " entries; a witness reads back at least two";
         std::vector<std::byte> const frame = make_frame("FIX.5.0SP2", body);
-        ::testing::TestResult const* const result =
-            ::testing::UnitTest::GetInstance()->current_test_info()->result();
-        int const parts_before = result->total_part_count();
-        auto const mv = parse_dict(frame, tv(), &read_arena_);
-        ASSERT_EQ(result->total_part_count(), parts_before)
+        bool refused = false;
+        auto const mv = parse_noting_refusal(frame, tv(), &read_arena_, refused);
+        ASSERT_FALSE(refused)
             << "W3: the parser refused the witness frame (a builder/parser disagreement, FR-020)";
 
         std::string const test_name =
@@ -779,12 +788,9 @@ TEST_F(TailRows095Census, KnownPositive_DeficientFrames) {
         SCOPED_TRACE(f.name);
         std::pmr::monotonic_buffer_resource arena{65536};
         std::vector<std::byte> const frame = make_frame("FIX.5.0SP2", f.body);
-        ::testing::TestResult const* const result =
-            ::testing::UnitTest::GetInstance()->current_test_info()->result();
-        int const parts_before = result->total_part_count();
-        auto const mv = parse_dict(frame, tv(), &arena);
-        ASSERT_EQ(result->total_part_count(), parts_before)
-            << f.name << ": the parser refused the frame";
+        bool refused = false;
+        auto const mv = parse_noting_refusal(frame, tv(), &arena, refused);
+        ASSERT_FALSE(refused) << f.name << ": the parser refused the frame";
         EXPECT_EQ(required_members_missing(walk(), mv), f.expected) << f.name;
     }
 }
