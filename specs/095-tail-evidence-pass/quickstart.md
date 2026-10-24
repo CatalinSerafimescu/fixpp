@@ -165,8 +165,11 @@ RED arms:
 
 ## 7. Records (US4, SC-004)
 
-Run on the head after P7; it must pass. Its RED arms, one per check, each recorded with the message
-that fired:
+Run on the head after P7; it must pass. Every row check reads the flip set from the one `FLIP`
+list at the top of the script. A row that leaves the flip set (tasks T085) is removed from `FLIP`
+only: its witnesses stay in the TU (FR-004a), so the witness loop counts them as skipped rather than
+checking its catalogue and coverage-index rows, and the total of checked and skipped witnesses must
+still be 23. Its RED arms, one per check, each recorded with the message that fired:
 - **once before P7:** the first Status check fails, because no tail row is `done` yet;
 - **after P7, on scratch copies** (`CAT`/`CI`/`CONST` pointed at a copy under `mktemp -d`, the tree
   untouched), one perturbation per run:

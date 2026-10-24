@@ -818,9 +818,12 @@ delta (plan P7).
   first, then the constitution's §XVIII.7 sentence to match, and T090's extra narrow scoped Codex
   round runs on that change before the RATIFIED flip. The same docs task makes every other edit
   that dropping the row requires:
-  - quickstart §7: the dropped ID leaves both 12-ID loops (Status, Title MsgTypes) and every other
-    loop or check that names it (version, `fixpp#625`, pins and routing cell, live cells, Spec
-    refs); the witness loop skips that row's witnesses, and its `n -eq 23` falls by their number;
+  - quickstart §7: the dropped ID is removed from the script's one `FLIP` list, and from nothing
+    else in it. Every row check reads `FLIP` (`in_flip`): the Status and Title loops iterate it, the
+    version, `fixpp#625`, pins/routing, live-cell and Spec-ref checks skip an ID outside it, and the
+    witness loop counts that row's witnesses as skipped instead of checking its Tests cell and gap
+    notes (they stay as on `origin/main`, FR-020). Its assertion, checked plus skipped equal 23 with at
+    least one checked, is unchanged;
   - data-model §E: the recipe's ID list; the Tests, Verified, version and Spec ref edits of that
     row; the coverage-index gap-note edits for its MsgTypes (FR-020: its coverage-index rows stay as
     on `origin/main`); the B&L section heading's "12" and B-095-1's row list;
