@@ -18,12 +18,12 @@
 #
 # Every leg is asserted here instead, in order, with the exit code first.
 
-# #613: FIXPP_TYPED_TIER_SETTING and FIXPP_TYPED_TIER_EFFECTIVE are required here AND
-# forwarded below; the forward list is separate from this loop, so a value required
+# #613: FIXPP_TYPED_TIER_SETTING, FIXPP_TYPED_TIER_EFFECTIVE and
+# FIXPP_GENERATOR_IS_MULTI_CONFIG are required here AND forwarded below; the forward list is separate from this loop, so a value required
 # but not forwarded reaches the witness empty, which its guard 0 refuses.
 foreach(_var FIXPP_WITNESS_SCRIPT FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR
              FIXPP_PROJECT_VERSION FIXPP_PY_EXPECTED_PAYLOAD FIXPP_PY_PAYLOAD_DIR
-             FIXPP_TYPED_TIER_SETTING FIXPP_TYPED_TIER_EFFECTIVE)
+             FIXPP_TYPED_TIER_SETTING FIXPP_TYPED_TIER_EFFECTIVE FIXPP_GENERATOR_IS_MULTI_CONFIG)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "run_package_contents_gate.cmake: -D${_var}=... is required")
   endif()
@@ -39,6 +39,7 @@ execute_process(
     "-DFIXPP_PY_PAYLOAD_DIR=${FIXPP_PY_PAYLOAD_DIR}"
     "-DFIXPP_TYPED_TIER_SETTING=${FIXPP_TYPED_TIER_SETTING}"
     "-DFIXPP_TYPED_TIER_EFFECTIVE=${FIXPP_TYPED_TIER_EFFECTIVE}"
+    "-DFIXPP_GENERATOR_IS_MULTI_CONFIG=${FIXPP_GENERATOR_IS_MULTI_CONFIG}"
     -P "${FIXPP_WITNESS_SCRIPT}"
   RESULT_VARIABLE _rc
   OUTPUT_VARIABLE _out

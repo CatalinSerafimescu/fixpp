@@ -30,6 +30,7 @@
 # alike, and naming them there would make the loop, not guard 0, the line that fires.
 #   FIXPP_TYPED_TIER_SETTING   — the raw FIXPP_INSTALL_TYPED_TIER cache value.
 #   FIXPP_TYPED_TIER_EFFECTIVE — FIXPP_INSTALL_TYPED_TIER_EFFECTIVE (ON|OFF).
+#   FIXPP_GENERATOR_IS_MULTI_CONFIG — the generator's GENERATOR_IS_MULTI_CONFIG (0|1).
 #   FIXPP_PACKAGING_ENABLED, FIXPP_IS_MSVC, FIXPP_TYPED_DEBUG_INFO,
 #   FIXPP_TYPED_DEBUG_INFO_SET — the typed PDB expectation's inputs (D-9).
 #
@@ -59,15 +60,18 @@ endif()
 
 # ── 0. #613 — is the typed tier expected? Decided BEFORE the multi-GB copy ─────
 # PRESENT/ABSENT is the EFFECTIVE value the build passed, but it is never trusted
-# alone: guard 0 checks both inputs' domain, guard 1 re-derives the default from
-# FIXPP_BUILD_TYPE (or normalises an explicit setting) and requires agreement. So a
+# alone: guard 0 checks every input's domain, guard 1 re-derives the default from
+# FIXPP_BUILD_TYPE and the generator kind (or normalises an explicit setting) and
+# requires agreement. So a
 # defaulting bug cannot turn both sides green, and an ordering slip in the root
 # CMakeLists (a value read before it is set reaches here EMPTY) is refused.
 include("${FIXPP_SOURCE_DIR}/cmake/FixppTypedTierRule.cmake")
 fixpp_typed_tier_check_domain("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_TYPED_TIER_EFFECTIVE}"
+  "${FIXPP_GENERATOR_IS_MULTI_CONFIG}"
   "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER before the root CMakeLists.txt declared it."
-  "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it.")
-fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_BUILD_TYPE}"
+  "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it."
+  "Empty means the add_test registration did not pass the generator's GENERATOR_IS_MULTI_CONFIG.")
+fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_BUILD_TYPE}" "${FIXPP_GENERATOR_IS_MULTI_CONFIG}"
   "the default for FIXPP_BUILD_TYPE=${FIXPP_BUILD_TYPE}" _typed_rederived _typed_rederived_from)
 if(NOT _typed_rederived STREQUAL FIXPP_TYPED_TIER_EFFECTIVE)
   message(FATAL_ERROR

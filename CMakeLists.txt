@@ -502,6 +502,13 @@ if(FIXPP_BUILD_TESTS)
     else()
       set(_fixpp_typed_debug_info_set 1)
     endif()
+    # #613: the generator kind for the driver's guard 1, normalised to exactly 0 or 1.
+    get_property(_fixpp_witness_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(_fixpp_witness_multi_config)
+      set(_fixpp_witness_multi_config 1)
+    else()
+      set(_fixpp_witness_multi_config 0)
+    endif()
     add_test(
       NAME "fixpp::consumer::install-witness"
       COMMAND "${CMAKE_COMMAND}"
@@ -520,9 +527,11 @@ if(FIXPP_BUILD_TESTS)
         "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
         # #613 (`.specify/613-builders-export.md` §4): the raw setting AND the
         # effective value, so the driver can check one against the other and
-        # against FIXPP_BUILD_TYPE; never the effective value alone.
+        # against FIXPP_BUILD_TYPE and the generator kind; never the effective value
+        # alone.
         "-DFIXPP_TYPED_TIER_SETTING=${FIXPP_INSTALL_TYPED_TIER}"
         "-DFIXPP_TYPED_TIER_EFFECTIVE=${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE}"
+        "-DFIXPP_GENERATOR_IS_MULTI_CONFIG=${_fixpp_witness_multi_config}"
         "-DFIXPP_CODEGEN_FIX_LATEST=${FIXPP_CODEGEN_FIX_LATEST}"
         # The typed PDB expectation (§4.1, D-9). TARGET_GENEX_EVAL, not a bare
         # $<TARGET_PROPERTY:>: the property can hold a genex (tier2 sets the format
@@ -898,9 +907,8 @@ unset(_fixpp_export_short)
 # The rule for the exceptions: a member whose in-tree alias is NESTED gets a nested
 # EXPORT_NAME, because the in-tree alias decides. fixpp_dict_dispatch is aliased
 # fixpp::dict::dispatch (cmake/Codegen.cmake), not fixpp::dict_dispatch, and is set by
-# the override below. Measured 2026-08-02: CMake accepts a "::" inside EXPORT_NAME  claim-ok: 084's dated record, carried over from the replaced paragraph
-# and emits fixpp::dict::dispatch verbatim, so the export matches the alias and
-# T026's set-equality needs no exemption.
+# the override below. The export must then match the alias; T026's set-equality
+# checks that it does.
 set_target_properties(fixpp_dict_dispatch PROPERTIES EXPORT_NAME "dict::dispatch")
 
 # T022/T026: two export members had no in-tree fixpp:: alias at all

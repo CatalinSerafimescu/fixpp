@@ -12,11 +12,13 @@
 # Usable from `cmake -P` (no project(), no policy version set): no IN_LIST, and every
 # value is compared quoted.
 
-# Guard 0 — both inputs in domain. The raw setting, uppercased, is AUTO or one of D-0's
-# boolean spellings; the effective value is exactly ON or OFF. Empty is out of domain on
-# both (`STREQUAL ""`, not `NOT DEFINED`: `-DX=` defines X as empty). Each hint is the
-# caller's sentence for what an EMPTY value of that input means.
-function(fixpp_typed_tier_check_domain setting effective setting_hint effective_hint)
+# Guard 0 — every input in domain. The raw setting, uppercased, is AUTO or one of D-0's
+# boolean spellings; the effective value is exactly ON or OFF; the generator's
+# GENERATOR_IS_MULTI_CONFIG, as the registration passes it, is exactly 0 or 1. Empty is
+# out of domain on each (`STREQUAL ""`, not `NOT DEFINED`: `-DX=` defines X as empty).
+# Each hint is the caller's sentence for what an EMPTY value of that input means.
+function(fixpp_typed_tier_check_domain setting effective multi_config
+         setting_hint effective_hint multi_config_hint)
   string(TOUPPER "${setting}" _uc)
   if("${setting}" STREQUAL "" OR NOT _uc MATCHES "^(AUTO|ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0)$")
     message(FATAL_ERROR
@@ -28,23 +30,34 @@ function(fixpp_typed_tier_check_domain setting effective setting_hint effective_
       "#613 guard 0: FIXPP_TYPED_TIER_EFFECTIVE='${effective}' is not exactly ON or OFF. "
       "${effective_hint}")
   endif()
+  if(NOT "${multi_config}" STREQUAL "0" AND NOT "${multi_config}" STREQUAL "1")
+    message(FATAL_ERROR
+      "#613 guard 0: FIXPP_GENERATOR_IS_MULTI_CONFIG='${multi_config}' is not exactly 0 or 1. "
+      "${multi_config_hint}")
+  endif()
 endfunction()
 
 # Guard 1's re-derivation, written from the rule, not read from the root's code. With
-# the setting AUTO: a case-insensitive Release build type is ON, every other build type
-# OFF, and `${out_from}` is `default_label` (the caller's words for where the build type
-# came from). An explicit setting is normalised (ON|YES|TRUE|Y|1 ⇒ ON, else OFF) and
-# `${out_from}` names it. Call after fixpp_typed_tier_check_domain().
-function(fixpp_typed_tier_rederive setting build_type default_label out out_from)
+# the setting AUTO: OFF under a multi-config generator (`multi_config` 1) whatever the
+# build type; otherwise a case-insensitive Release build type is ON and every other build
+# type OFF. `${out_from}` is then `default_label` (the caller's words for where the build
+# type came from), naming the generator when it is multi-config. An explicit setting is
+# normalised (ON|YES|TRUE|Y|1 ⇒ ON, else OFF) and `${out_from}` names it. Call after
+# fixpp_typed_tier_check_domain().
+function(fixpp_typed_tier_rederive setting build_type multi_config default_label out out_from)
   string(TOUPPER "${setting}" _uc)
   string(TOUPPER "${build_type}" _bt)
   if(_uc STREQUAL "AUTO")
-    if(_bt STREQUAL "RELEASE")
+    if("${multi_config}" STREQUAL "1")
+      set(_v OFF)
+      set(_from "${default_label} under a multi-config generator")
+    elseif(_bt STREQUAL "RELEASE")
       set(_v ON)
+      set(_from "${default_label}")
     else()
       set(_v OFF)
+      set(_from "${default_label}")
     endif()
-    set(_from "${default_label}")
   elseif(_uc MATCHES "^(ON|YES|TRUE|Y|1)$")
     set(_v ON)
     set(_from "the explicit setting '${setting}'")

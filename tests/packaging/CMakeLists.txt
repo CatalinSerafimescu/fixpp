@@ -110,6 +110,14 @@ else()
   set(_fixpp_pkg_py_dir "<no-payload>")
 endif()
 
+# #613: the generator kind for the witness's guard 1, normalised to exactly 0 or 1.
+get_property(_fixpp_pkg_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_fixpp_pkg_multi_config)
+  set(_fixpp_pkg_multi_config 1)
+else()
+  set(_fixpp_pkg_multi_config 0)
+endif()
+
 add_test(
   NAME fixpp::packaging::contents
   COMMAND "${CMAKE_COMMAND}"
@@ -130,6 +138,8 @@ add_test(
     # witness checks both against the artifact's own name rather than trusting them.
     "-DFIXPP_TYPED_TIER_SETTING=${FIXPP_INSTALL_TYPED_TIER}"
     "-DFIXPP_TYPED_TIER_EFFECTIVE=${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE}"
+    # The generator kind, as exactly 0 or 1, for guard 1's AUTO re-derivation.
+    "-DFIXPP_GENERATOR_IS_MULTI_CONFIG=${_fixpp_pkg_multi_config}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/run_package_contents_gate.cmake"
 )
 set_tests_properties(fixpp::packaging::contents PROPERTIES

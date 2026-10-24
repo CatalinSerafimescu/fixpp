@@ -28,6 +28,7 @@
 # fires when run_package_contents_gate.cmake fails to forward one.
 #   FIXPP_TYPED_TIER_SETTING   — the raw FIXPP_INSTALL_TYPED_TIER cache value.
 #   FIXPP_TYPED_TIER_EFFECTIVE — FIXPP_INSTALL_TYPED_TIER_EFFECTIVE (ON|OFF).
+#   FIXPP_GENERATOR_IS_MULTI_CONFIG — the generator's GENERATOR_IS_MULTI_CONFIG (0|1).
 
 # Required for `IN_LIST`: a `cmake -P` script has no project(), so CMP0057 is
 # unset and the if(... IN_LIST ...) form is a hard error rather than a fallback.
@@ -40,11 +41,13 @@ foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR FIXPP_PROJECT_
   endif()
 endforeach()
 
-# ── #613 guard 0 — both typed-tier inputs in domain, BEFORE cpack runs ───────
+# ── #613 guard 0 — the typed-tier inputs in domain, BEFORE cpack runs ────────
 include("${FIXPP_SOURCE_DIR}/cmake/FixppTypedTierRule.cmake")
 fixpp_typed_tier_check_domain("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_TYPED_TIER_EFFECTIVE}"
+  "${FIXPP_GENERATOR_IS_MULTI_CONFIG}"
   "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration read FIXPP_INSTALL_TYPED_TIER before the root CMakeLists.txt declared it."
-  "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it.")
+  "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it."
+  "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration did not pass the generator's GENERATOR_IS_MULTI_CONFIG.")
 
 set(_pkgdir "${FIXPP_WORK_DIR}/packages")
 file(REMOVE_RECURSE "${FIXPP_WORK_DIR}")
@@ -162,7 +165,7 @@ if(_typed_cfg STREQUAL "release" AND FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "OFF")
 endif()
 # Guard 1: the default re-derived from the component (cmake/FixppTypedTierRule.cmake,
 # the tests' copy of the D-0 rule), or an explicit setting normalised.
-fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${_typed_cfg}"
+fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${_typed_cfg}" "${FIXPP_GENERATOR_IS_MULTI_CONFIG}"
   "the default for a '${_typed_cfg}' artifact" _typed_rederived _typed_rederived_from)
 if(NOT _typed_rederived STREQUAL FIXPP_TYPED_TIER_EFFECTIVE)
   message(FATAL_ERROR
