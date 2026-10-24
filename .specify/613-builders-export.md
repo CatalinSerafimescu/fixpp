@@ -382,8 +382,8 @@ registration would have to bump them.
 the build type itself, not from `FIXPP_INSTALL_TYPED_TIER`:
 - the install witness's driver from `FIXPP_BUILD_TYPE` (already passed by the `add_test`; case-insensitive `Release`
   means present, anything else, and the driver's own empty-means-Debug default, means absent);
-- the contents witness from the artifact's own name (`-release` / `-debug`), the method its FR-019 PDB block already
-  uses.
+- the contents witness from the configuration component of the artifact's own name (§4.2), the method its FR-019
+  PDB block already uses.
 
 So a mutant that flips `FIXPP_INSTALL_TYPED_TIER` either way meets an oracle that did not move (M-10, M-13).
 
@@ -472,8 +472,15 @@ compiling):
 ### 4.2 `fixpp::packaging::contents` (tests/packaging) — linux-gcc-release and windows-msvc-release
 
 Changes to `tests/packaging/run_package_contents_witness.cmake`. **The typed-tier expectation is keyed off the
-artifact's own name**, as the FR-019 PDB block is: `-release` expects the slim set, `-debug` expects today's
-read-side-only set.
+artifact's own name**, as the FR-019 PDB block is. The name is `CPACK_PACKAGE_FILE_NAME`'s
+`fixpp-<version>-<platform>-<toolchain>-<config>`, optionally followed by `-otel-off-fixture`, then the extension
+(`cmake/FixppPackaging.cmake`, T051). The witness **parses** the configuration component
+(`^fixpp-[^-]+-[^-]+-[^-]+-([^-.]+)`) rather than matching a suffix, and FATALs if the name does not parse:
+- component equal to `release` → PRESENT: the slim set is expected;
+- any other component (`debug`, and equally `relwithdebinfo` or `minsizerel`, mirroring D-0) → ABSENT: today's
+  read-side-only set is expected.
+
+Below, "Release artifacts" and "Debug artifacts" mean these two outcomes.
 
 - **Must-be-absent, every artifact.** Keep `_dispatch`, `vt11`, `core/test` and `transport/test`. Add
   `^include/.*\.cpp$`. Debug artifacts also keep the `messages|groups|validators` and `(all|groups)\.hpp`
@@ -707,12 +714,37 @@ git grep -n -i -E 'unexported|never exported|stay unexported|NO install\(\)|buil
 "of the 18 export members, 13 are STATIC", the respelling v0.2's recipe (`13 of the 18` only) could not match. The
 recipe is lexical, so it is backed by `check-comment-claims.py` and by reading each changed region.
 
+**F8 has spellings of its own** (the facts above cannot find it, because before R-2a nothing in the export or layout
+varied with the build type):
+
+```
+git grep -n -i -E 'configuration-dependent|every (in-scope )?configuration|each configuration|same (export set|file set|payload)|Debug and Release|Release and Debug|per configuration' \
+  -- CMakeLists.txt cmake tests/consumer tests/packaging docs .github bindings/python/CMakeLists.txt \
+     specs/084-packaging-cpack-export/contracts specs/078-precompiled-builder-libs/contracts
+```
+
+Known positive (2026-10-24, `e46ee9a0`): `CMakeLists.txt`'s "fixpp_log_otlp is the one genuinely
+configuration-dependent member", which D-0 makes false and which sits beside the D-1 append. The recipe matches one
+line at a time, so a phrase wrapped across comment lines escapes it: the fail-closed membership comment's "expected
+to exist in EVERY in-scope configuration" was found by reading the region instead. Adjudication of its hits:
+- `CMakeLists.txt`, the `fixpp_log_otlp` comment → **amended** (row below).
+- `CMakeLists.txt`, the fail-closed loop's "Every other name above is expected to exist in EVERY in-scope
+  configuration" → **still true**, left: the typed libs exist in every configuration (they are built in `all`); only
+  their membership depends on the build type, and inside a Release tree they are fail-closed like the rest.
+- `specs/084-packaging-cpack-export/contracts/package-layout.md` §1, "One dev-shaped package per configuration. Each
+  carries headers + static libraries + …" → still true as a model, but the typed content now differs by
+  configuration: covered by that contract's banner, which also names §1.
+- `specs/084-packaging-cpack-export/contracts/export-set.md`, "`fixpp_otel` is exported in every configuration" and
+  the other `fixpp_otel` / `fixpp_log_otlp` rows → about OTel membership, unchanged.
+- `.github/workflows/tier1.yml`, "test in EVERY configuration" → the Python witness's modes, unrelated.
+
 **Live surfaces — amended:**
 
 | Surface | Fact | Change |
 |---|---|---|
 | `CMakeLists.txt`, the `FIXPP_EXPORT_TARGETS` banner ("Membership basis: the ELEVEN measured … plus the SIX derived") | F1, F6 | Add: the builder/validator members appended after the umbrella in Release trees, with their probe in this note. Leave the dated 084 measurement as history. |
 | `CMakeLists.txt`, the umbrella comment ("is the whole contract"; "⚠️ The umbrella is deliberately NOT the whole export set …"; "FOUR are exported so a consumer can link them BY NAME") | F1, F6, F8 | Name the eight libs in the BY-NAME class, Release only, with the D-3 reason; replace "FOUR are" with the condition (the by-name members are the ones the umbrella does not reach) |
+| `CMakeLists.txt`, "fixpp_log_otlp is the one genuinely configuration-dependent member" | F8 | State the condition instead of "the one": `fixpp_log_otlp` depends on the OTel SDK, and the typed tier on the build type (D-0) |
 | `CMakeLists.txt`, "One target diverges from the prefix-strip rule" | F3 | State the rule: nested in-tree aliases get a nested `EXPORT_NAME`; `fixpp_dict_dispatch` by override, the typed libs by the D-2 loop |
 | `CMakeLists.txt`, the `INCLUDES DESTINATION` comment ("on the 14 targets that already declare `$<INSTALL_INTERFACE:…>`") | F4 | A dated 2026-08-02 measurement: keep it as dated history and add that the typed libs declare their own since #613, rather than re-counting |
 | `CMakeLists.txt`, the 084 FR-011 block ("is PACKAGING available in this configuration?") | F5 | Name the second condition (D-6) next to the OTel one |
@@ -734,7 +766,7 @@ pointer must run forward, and #334: a reader who opens the stale file directly m
 |---|---|
 | `specs/084-packaging-cpack-export/spec.md`, **FR-010** ("If the final export set does reach either tree, work MUST STOP") and the edge case saying the libs "are absent from the export set by design" | Discharged by R-1 and superseded by #613 for Release configurations; names this note and the 078 banner |
 | `specs/084-packaging-cpack-export/contracts/export-set.md`: the "Never exported" table, B2's pattern list, B3, and the "No typed-builder API" bullet | Banner naming this note. Under FR-010, B3's "standing obligation" is discharged by R-1, which the banner quotes and points at the 078 banner for |
-| `specs/084-packaging-cpack-export/contracts/package-layout.md`, the "7-pattern exclusion set" rows | Banner naming this note, with R-2a (Release vs Debug content differs) |
+| `specs/084-packaging-cpack-export/contracts/package-layout.md`, §1 "Package model" and the "7-pattern exclusion set" rows | Banner naming this note, with R-2a: the Release and Debug packages of one toolchain now differ in typed content |
 | `specs/078-precompiled-builder-libs/spec.md`, the Clarifications Q on "Install/export scope" and the "Scope (Gate A round 1): … build-tree + in-tree consumers only" paragraph | Banner naming this note and the 078 contract banner |
 | `specs/078-precompiled-builder-libs/contracts/cmake-targets.md` | §6.1(a) |
 | `specs/078-precompiled-builder-libs/contracts/include-layout.md`, "Generated file set" ("external … header-export is deferred"; "`v42` emits none") | Banner: installed in Release since #613; v42 emitted since 082 |
@@ -850,7 +882,8 @@ Where each finding landed:
   obligation.
 - **Root cause 4.** Codex #6 → §6.2's normative-entry-point banners (084 FR-010 and edge case, 078 spec scope and
   clarification), §6.3's Fable assessment and wall-time bench, `--shift-audit`. N-5 → §6.2 rebuilt per fact, with
-  the recipe's known positive and every hit adjudicated.
+  the recipe's known positive and every hit adjudicated; R-2a's own fact (F8) has its own recipe, known positive and
+  adjudication.
 - **Root cause 5.** Codex #7 → P-4. Codex #8 → D-0's multi-config section. N-6 → D-9 `/W4` reason; the dangling §4.5
   references now point at §4.4. N-7 → C-1's two oracle sources. N-8 → M-6's hand procedure and lane. N-10 → §4.2's
   first-component derivation.
