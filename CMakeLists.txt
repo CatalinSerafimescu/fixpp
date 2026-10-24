@@ -502,13 +502,6 @@ if(FIXPP_BUILD_TESTS)
     else()
       set(_fixpp_typed_debug_info_set 1)
     endif()
-    # A configure-time value, not $<CXX_COMPILER_ID:MSVC>: that genex is refused in
-    # an add_test() command ("may only be used with binary targets").
-    if(MSVC)
-      set(_fixpp_is_msvc 1)
-    else()
-      set(_fixpp_is_msvc 0)
-    endif()
     add_test(
       NAME "fixpp::consumer::install-witness"
       COMMAND "${CMAKE_COMMAND}"
@@ -535,7 +528,9 @@ if(FIXPP_BUILD_TESTS)
         # $<TARGET_PROPERTY:>: the property can hold a genex (tier2 sets the format
         # as one), which the bare form passes through unevaluated.
         "-DFIXPP_PACKAGING_ENABLED=${FIXPP_PACKAGING_ENABLED}"
-        "-DFIXPP_IS_MSVC=${_fixpp_is_msvc}"
+        # $<BOOL:${MSVC}>, not $<CXX_COMPILER_ID:MSVC>: that genex is refused in an
+        # add_test() command ("may only be used with binary targets").
+        "-DFIXPP_IS_MSVC=$<BOOL:${MSVC}>"
         "-DFIXPP_TYPED_DEBUG_INFO=$<TARGET_GENEX_EVAL:fixpp_builders_v44,$<TARGET_PROPERTY:fixpp_builders_v44,MSVC_DEBUG_INFORMATION_FORMAT>>"
         "-DFIXPP_TYPED_DEBUG_INFO_SET=${_fixpp_typed_debug_info_set}"
         -P "${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_witness.cmake"
@@ -853,13 +848,15 @@ endif()
 # is BUILT (FIXPP_CODEGEN_FIX_LATEST, cmake/Codegen.cmake), never on if(TARGET ...):
 # with the option ON and the target missing, the check still fails closed.
 if(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE)
-  foreach(_fixpp_typed_ver IN ITEMS v42 v44 v50sp2)
+  set(_fixpp_typed_vers v42 v44 v50sp2)
+  if(FIXPP_CODEGEN_FIX_LATEST)
+    list(APPEND _fixpp_typed_vers vlatest)
+  endif()
+  foreach(_fixpp_typed_ver IN LISTS _fixpp_typed_vers)
     list(APPEND FIXPP_EXPORT_TARGETS fixpp_builders_${_fixpp_typed_ver} fixpp_validators_${_fixpp_typed_ver})
   endforeach()
-  if(FIXPP_CODEGEN_FIX_LATEST)
-    list(APPEND FIXPP_EXPORT_TARGETS fixpp_builders_vlatest fixpp_validators_vlatest)
-  endif()
   unset(_fixpp_typed_ver)
+  unset(_fixpp_typed_vers)
 endif()
 
 # Fail CLOSED. Every other name above is expected to exist in EVERY in-scope
@@ -881,8 +878,18 @@ endforeach()
 # package would publish fixpp::fixpp_capi while architecture.md §7.4 promises
 # fixpp::capi. Convention = target name minus the fixpp_ prefix, which is the
 # repository's existing de-facto one across 15 in-tree aliases.
+#
+# #613 D-2: the typed libs are aliased fixpp::builders::<ver> / fixpp::validators::<ver>
+# (cmake/Codegen.cmake), the names docs/src/dictionary/codegen.md tells consumers to
+# link, so they take the nested name (see the rule for the exceptions below). One rule
+# over the list, so a version added later is named by it and never left out of a
+# hand-written list; with the typed tier not in effect it matches nothing.
 foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)
-  string(REGEX REPLACE "^fixpp_" "" _fixpp_export_short "${_fixpp_export_tgt}")
+  if(_fixpp_export_tgt MATCHES "^fixpp_(builders|validators)_(.+)$")
+    set(_fixpp_export_short "${CMAKE_MATCH_1}::${CMAKE_MATCH_2}")
+  else()
+    string(REGEX REPLACE "^fixpp_" "" _fixpp_export_short "${_fixpp_export_tgt}")
+  endif()
   set_target_properties(${_fixpp_export_tgt} PROPERTIES EXPORT_NAME "${_fixpp_export_short}")
 endforeach()
 unset(_fixpp_export_tgt)
@@ -895,18 +902,6 @@ unset(_fixpp_export_short)
 # and emits fixpp::dict::dispatch verbatim, so the export matches the alias and
 # T026's set-equality needs no exemption.
 set_target_properties(fixpp_dict_dispatch PROPERTIES EXPORT_NAME "dict::dispatch")
-
-# #613 D-2: the typed libs are aliased fixpp::builders::<ver> / fixpp::validators::<ver>
-# (cmake/Codegen.cmake), the names docs/src/dictionary/codegen.md tells consumers to
-# link. One rule over the list, so a version added later is named by it and never
-# left out of a hand-written list; with the typed tier not in effect it matches nothing.
-foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)
-  if(_fixpp_export_tgt MATCHES "^fixpp_(builders|validators)_(.+)$")
-    set_target_properties(${_fixpp_export_tgt} PROPERTIES
-      EXPORT_NAME "${CMAKE_MATCH_1}::${CMAKE_MATCH_2}")
-  endif()
-endforeach()
-unset(_fixpp_export_tgt)
 
 # T022/T026: two export members had no in-tree fixpp:: alias at all
 # (fixpp_dict_dispatch_bridge, fixpp_capi_objects) while every other member had one.

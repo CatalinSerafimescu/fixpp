@@ -41,20 +41,10 @@ foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR FIXPP_PROJECT_
 endforeach()
 
 # ── #613 guard 0 — both typed-tier inputs in domain, BEFORE cpack runs ───────
-string(TOUPPER "${FIXPP_TYPED_TIER_SETTING}" _typed_setting_uc)
-if("${FIXPP_TYPED_TIER_SETTING}" STREQUAL ""
-   OR NOT _typed_setting_uc MATCHES "^(AUTO|ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0)$")
-  message(FATAL_ERROR
-    "#613 guard 0: FIXPP_TYPED_TIER_SETTING='${FIXPP_TYPED_TIER_SETTING}' is not AUTO or a CMake "
-    "boolean spelling. Empty means it was not forwarded by run_package_contents_gate.cmake, or "
-    "the registration read FIXPP_INSTALL_TYPED_TIER before the root CMakeLists.txt declared it.")
-endif()
-if(NOT "${FIXPP_TYPED_TIER_EFFECTIVE}" STREQUAL "ON" AND NOT "${FIXPP_TYPED_TIER_EFFECTIVE}" STREQUAL "OFF")
-  message(FATAL_ERROR
-    "#613 guard 0: FIXPP_TYPED_TIER_EFFECTIVE='${FIXPP_TYPED_TIER_EFFECTIVE}' is not exactly ON or OFF. "
-    "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration "
-    "read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it.")
-endif()
+include("${FIXPP_SOURCE_DIR}/cmake/FixppTypedTierRule.cmake")
+fixpp_typed_tier_check_domain("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_TYPED_TIER_EFFECTIVE}"
+  "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration read FIXPP_INSTALL_TYPED_TIER before the root CMakeLists.txt declared it."
+  "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it.")
 
 set(_pkgdir "${FIXPP_WORK_DIR}/packages")
 file(REMOVE_RECURSE "${FIXPP_WORK_DIR}")
@@ -170,32 +160,18 @@ if(_typed_cfg STREQUAL "release" AND FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "OFF")
     "#613 guard 2: a '${_typed_cfg}' artifact was produced with the typed tier OFF. Released "
     "packages carry the typed builder/validator tier (owner rulings R-2/R-2a/R-2b).")
 endif()
-# Guard 1: the default re-derived from the component, written from the rule
-# (`.specify/613-builders-export.md` D-0), or an explicit setting normalised.
-if(_typed_setting_uc STREQUAL "AUTO")
-  if(_typed_cfg STREQUAL "release")
-    set(_typed_rederived ON)
-  else()
-    set(_typed_rederived OFF)
-  endif()
-  set(_typed_rederived_from "the default for a '${_typed_cfg}' artifact")
-elseif(_typed_setting_uc MATCHES "^(ON|YES|TRUE|Y|1)$")
-  set(_typed_rederived ON)
-  set(_typed_rederived_from "the explicit setting '${FIXPP_TYPED_TIER_SETTING}'")
-else()
-  set(_typed_rederived OFF)
-  set(_typed_rederived_from "the explicit setting '${FIXPP_TYPED_TIER_SETTING}'")
-endif()
+# Guard 1: the default re-derived from the component (cmake/FixppTypedTierRule.cmake,
+# the tests' copy of the D-0 rule), or an explicit setting normalised.
+fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${_typed_cfg}"
+  "the default for a '${_typed_cfg}' artifact" _typed_rederived _typed_rederived_from)
 if(NOT _typed_rederived STREQUAL FIXPP_TYPED_TIER_EFFECTIVE)
   message(FATAL_ERROR
     "#613 guard 1: FIXPP_INSTALL_TYPED_TIER=${FIXPP_TYPED_TIER_SETTING} resolved "
     "${FIXPP_TYPED_TIER_EFFECTIVE}, but ${_typed_rederived_from} is ${_typed_rederived}.")
 endif()
 if(FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "ON")
-  set(_typed_present TRUE)
   set(_typed_outcome PRESENT)
 else()
-  set(_typed_present FALSE)
   set(_typed_outcome ABSENT)
 endif()
 message(STATUS "#613 typed tier: expected ${_typed_outcome} (setting=${FIXPP_TYPED_TIER_SETTING}, "
@@ -497,6 +473,30 @@ endfunction()
 # completion. Asserted against _n_artifacts AFTER the loop — a per-artifact token
 # proves only that ONE artifact's block completed, and Linux processes DEB, RPM
 # and TGZ sequentially.
+# #613: the typed-tier expectations, computed once for every artifact below. The
+# version list is unconditional (sorted; see the per-artifact block), the children set
+# comes from cmake/FixppTypedTierRule.cmake, and, PRESENT only, the build tree's
+# generated files under the tier-ON rule (D-7: no *.cpp, no Manifest.txt) are globbed
+# once per version for the build-tree equality check.
+set(_expected_versions v42 v44 v50sp2 vlatest)
+fixpp_typed_tier_expected_children(${FIXPP_TYPED_TIER_EFFECTIVE} _expected_children)
+if(FIXPP_TYPED_TIER_EFFECTIVE)
+  foreach(_ver IN LISTS _expected_versions)
+    set(_gen_root "${FIXPP_MAIN_BUILD_DIR}/_codegen/include/fixpp/${_ver}")
+    if(NOT IS_DIRECTORY "${_gen_root}")
+      message(FATAL_ERROR "#613 equality: no generated tree at ${_gen_root}")
+    endif()
+    file(GLOB_RECURSE _gen LIST_DIRECTORIES false RELATIVE "${_gen_root}" "${_gen_root}/*")
+    set(_gen_want_${_ver} "")
+    foreach(_g IN LISTS _gen)
+      get_filename_component(_gn "${_g}" NAME)
+      if(NOT _g MATCHES "\\.cpp$" AND NOT _gn STREQUAL "Manifest.txt")
+        list(APPEND _gen_want_${_ver} "${_g}")
+      endif()
+    endforeach()
+  endforeach()
+endif()
+
 set(_086_artifacts_done 0)
 foreach(_artifact IN LISTS _artifacts)
   get_filename_component(_aname "${_artifact}" NAME)
@@ -901,7 +901,7 @@ foreach(_artifact IN LISTS _artifacts)
        OR _f MATCHES "^include/.*\\.cpp$"
        OR _f MATCHES "^include/fixpp/(core|transport)/test(/|$)")
       list(APPEND _leaked "${_f}")
-    elseif(NOT _typed_present
+    elseif(NOT FIXPP_TYPED_TIER_EFFECTIVE
            AND (_f MATCHES "^include/fixpp/[^/]+/(messages|groups|validators)(/|$)"
                 OR _f MATCHES "^include/fixpp/[^/]+/(all|groups)\\.hpp$"
                 OR _f MATCHES "^lib/.*fixpp_(builders|validators)_"))
@@ -931,35 +931,33 @@ foreach(_artifact IN LISTS _artifacts)
   #      so a listed directory entry and a file below it give the same component);
   #   3. PRESENT only: a schema allowlist over messages/ groups/ validators/, written
   #      from 078 contracts/include-layout.md, and then build-tree equality.
-  set(_expected_versions v42 v44 v50sp2 vlatest)
+  # One pass over the listing: the versions seen, and per version its immediate
+  # children and its entries relative to include/fixpp/<ver>/.
   set(_versions_seen "")
+  foreach(_ver IN LISTS _expected_versions)
+    set(_children_${_ver} "")
+    set(_entries_${_ver} "")
+  endforeach()
   foreach(_f IN LISTS _files)
-    if(_f MATCHES "^include/fixpp/(v[A-Za-z0-9]+)/")
-      list(APPEND _versions_seen "${CMAKE_MATCH_1}")
+    if(_f MATCHES "^include/fixpp/(v[A-Za-z0-9]+)/(.+)$")
+      set(_v "${CMAKE_MATCH_1}")
+      set(_rest "${CMAKE_MATCH_2}")
+      list(APPEND _versions_seen "${_v}")
+      string(REGEX REPLACE "/.*$" "" _first "${_rest}")
+      list(APPEND _children_${_v} "${_first}")
+      list(APPEND _entries_${_v} "${_rest}")
     endif()
   endforeach()
   list(REMOVE_DUPLICATES _versions_seen)
   list(SORT _versions_seen)
-  set(_want_versions ${_expected_versions})
-  list(SORT _want_versions)
-  if(NOT "${_versions_seen}" STREQUAL "${_want_versions}")
+  if(NOT "${_versions_seen}" STREQUAL "${_expected_versions}")
     message(FATAL_ERROR
       "T058/#613: ${_aname} ships generated version directories [${_versions_seen}], expected "
-      "exactly [${_want_versions}]. Every package carries all four versions (owner ruling R-2).")
+      "exactly [${_expected_versions}]. Every package carries all four versions (owner ruling R-2).")
   endif()
 
-  set(_expected_children "Fields.hpp;Messages.hpp;NormativeReferences.md;Reify.hpp;Validator.hpp")
-  if(_typed_present)
-    list(APPEND _expected_children all.hpp groups.hpp groups messages validators)
-  endif()
-  list(SORT _expected_children)
   foreach(_ver IN LISTS _expected_versions)
-    set(_actual "")
-    foreach(_f IN LISTS _files)
-      if(_f MATCHES "^include/fixpp/${_ver}/([^/]+)(/|$)")
-        list(APPEND _actual "${CMAKE_MATCH_1}")
-      endif()
-    endforeach()
+    set(_actual ${_children_${_ver}})
     list(REMOVE_DUPLICATES _actual)
     list(SORT _actual)
     if(NOT "${_actual}" STREQUAL "${_expected_children}")
@@ -974,17 +972,12 @@ foreach(_artifact IN LISTS _artifacts)
     endif()
   endforeach()
 
-  if(_typed_present)
+  if(FIXPP_TYPED_TIER_EFFECTIVE)
     foreach(_ver IN LISTS _expected_versions)
       # The version's shipped FILES, relative to include/fixpp/<ver>/. A listing may
       # carry directory entries; an entry that is the parent of another entry is a
       # directory and is dropped.
-      set(_entries "")
-      foreach(_f IN LISTS _files)
-        if(_f MATCHES "^include/fixpp/${_ver}/(.+)$")
-          list(APPEND _entries "${CMAKE_MATCH_1}")
-        endif()
-      endforeach()
+      set(_entries ${_entries_${_ver}})
       list(REMOVE_DUPLICATES _entries)
       set(_parents "")
       foreach(_e IN LISTS _entries)
@@ -1054,18 +1047,7 @@ foreach(_artifact IN LISTS _artifacts)
       # dropped file and a leaked .cpp; it CANNOT catch a new emitted kind, because
       # its expectation is the same denylist as the rule; the schema check above
       # exists for that.
-      set(_gen_root "${FIXPP_MAIN_BUILD_DIR}/_codegen/include/fixpp/${_ver}")
-      if(NOT IS_DIRECTORY "${_gen_root}")
-        message(FATAL_ERROR "#613 equality: no generated tree at ${_gen_root}")
-      endif()
-      file(GLOB_RECURSE _gen LIST_DIRECTORIES false RELATIVE "${_gen_root}" "${_gen_root}/*")
-      set(_want "")
-      foreach(_g IN LISTS _gen)
-        get_filename_component(_gn "${_g}" NAME)
-        if(NOT _g MATCHES "\\.cpp$" AND NOT _gn STREQUAL "Manifest.txt")
-          list(APPEND _want "${_g}")
-        endif()
-      endforeach()
+      set(_want ${_gen_want_${_ver}})
       set(_dropped ${_want})
       if(_shipped)
         list(REMOVE_ITEM _dropped ${_shipped})

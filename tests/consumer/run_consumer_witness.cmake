@@ -63,37 +63,12 @@ endif()
 # FIXPP_BUILD_TYPE (or normalises an explicit setting) and requires agreement. So a
 # defaulting bug cannot turn both sides green, and an ordering slip in the root
 # CMakeLists (a value read before it is set reaches here EMPTY) is refused.
-string(TOUPPER "${FIXPP_TYPED_TIER_SETTING}" _typed_setting_uc)
-if("${FIXPP_TYPED_TIER_SETTING}" STREQUAL ""
-   OR NOT _typed_setting_uc MATCHES "^(AUTO|ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0)$")
-  message(FATAL_ERROR
-    "#613 guard 0: FIXPP_TYPED_TIER_SETTING='${FIXPP_TYPED_TIER_SETTING}' is not AUTO or a CMake "
-    "boolean spelling. Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER before "
-    "the root CMakeLists.txt declared it.")
-endif()
-if(NOT "${FIXPP_TYPED_TIER_EFFECTIVE}" STREQUAL "ON" AND NOT "${FIXPP_TYPED_TIER_EFFECTIVE}" STREQUAL "OFF")
-  message(FATAL_ERROR
-    "#613 guard 0: FIXPP_TYPED_TIER_EFFECTIVE='${FIXPP_TYPED_TIER_EFFECTIVE}' is not exactly ON or OFF. "
-    "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root "
-    "CMakeLists.txt resolved it.")
-endif()
-string(TOUPPER "${FIXPP_BUILD_TYPE}" _typed_build_type_uc)
-if(_typed_setting_uc STREQUAL "AUTO")
-  # Written from the rule (`.specify/613-builders-export.md` D-0), not read from the
-  # root's code: Release, case-insensitively, is ON; every other build type is OFF.
-  if(_typed_build_type_uc STREQUAL "RELEASE")
-    set(_typed_rederived ON)
-  else()
-    set(_typed_rederived OFF)
-  endif()
-  set(_typed_rederived_from "the default for FIXPP_BUILD_TYPE=${FIXPP_BUILD_TYPE}")
-elseif(_typed_setting_uc MATCHES "^(ON|YES|TRUE|Y|1)$")
-  set(_typed_rederived ON)
-  set(_typed_rederived_from "the explicit setting '${FIXPP_TYPED_TIER_SETTING}'")
-else()
-  set(_typed_rederived OFF)
-  set(_typed_rederived_from "the explicit setting '${FIXPP_TYPED_TIER_SETTING}'")
-endif()
+include("${FIXPP_SOURCE_DIR}/cmake/FixppTypedTierRule.cmake")
+fixpp_typed_tier_check_domain("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_TYPED_TIER_EFFECTIVE}"
+  "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER before the root CMakeLists.txt declared it."
+  "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it.")
+fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_BUILD_TYPE}"
+  "the default for FIXPP_BUILD_TYPE=${FIXPP_BUILD_TYPE}" _typed_rederived _typed_rederived_from)
 if(NOT _typed_rederived STREQUAL FIXPP_TYPED_TIER_EFFECTIVE)
   message(FATAL_ERROR
     "#613 guard 1: FIXPP_INSTALL_TYPED_TIER=${FIXPP_TYPED_TIER_SETTING} resolved "
@@ -101,10 +76,8 @@ if(NOT _typed_rederived STREQUAL FIXPP_TYPED_TIER_EFFECTIVE)
     "The root CMakeLists.txt's resolution disagrees with the rule.")
 endif()
 if(FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "ON")
-  set(_typed_expected ON)
   set(_typed_outcome PRESENT)
 else()
-  set(_typed_expected OFF)
   set(_typed_outcome ABSENT)
 endif()
 message(STATUS "#613 typed tier: expected ${_typed_outcome} (setting=${FIXPP_TYPED_TIER_SETTING}, "
@@ -162,14 +135,9 @@ if(EXISTS "${_stage}/include/fixpp/vt11")
 endif()
 
 # ── 1b. #613 §4.1 stage check, both branches — BEFORE any consumer configure ───
-# Each expected version's immediate children must be EXACTLY the set below. Written
-# from 078 contracts/include-layout.md's file set, not from the install rule.
-set(_typed_read_side Fields.hpp Messages.hpp NormativeReferences.md Reify.hpp Validator.hpp)
-set(_typed_children_expected ${_typed_read_side})
-if(_typed_expected)
-  list(APPEND _typed_children_expected all.hpp groups.hpp groups messages validators)
-endif()
-list(SORT _typed_children_expected)
+# Each expected version's immediate children must be EXACTLY the set
+# fixpp_typed_tier_expected_children() names (cmake/FixppTypedTierRule.cmake).
+fixpp_typed_tier_expected_children(${FIXPP_TYPED_TIER_EFFECTIVE} _typed_children_expected)
 foreach(_ver IN LISTS _typed_versions)
   set(_vdir "${_stage}/include/fixpp/${_ver}")
   if(NOT IS_DIRECTORY "${_vdir}")
@@ -190,7 +158,7 @@ if(NOT FIXPP_CODEGEN_FIX_LATEST AND EXISTS "${_stage}/include/fixpp/vlatest")
 endif()
 
 file(GLOB _staged_lib_files LIST_DIRECTORIES false RELATIVE "${_stage}" "${_stage}/lib/*")
-if(NOT _typed_expected)
+if(NOT FIXPP_TYPED_TIER_EFFECTIVE)
   # ABSENT: no typed file in lib/ (archives AND .pdb, by name), and no typed imported
   # target in the staged export.
   set(_typed_lib_hits "")
@@ -220,6 +188,7 @@ else()
       "#613: FIXPP_TYPED_DEBUG_INFO='${FIXPP_TYPED_DEBUG_INFO}' is not empty, ProgramDatabase, "
       "EditAndContinue or Embedded")
   endif()
+  string(TOUPPER "${FIXPP_BUILD_TYPE}" _typed_build_type_uc)
   if(FIXPP_TYPED_DEBUG_INFO_SET)
     set(_typed_dbg "${FIXPP_TYPED_DEBUG_INFO}")
   elseif(_typed_build_type_uc MATCHES "^(DEBUG|RELWITHDEBINFO)$")
@@ -312,7 +281,8 @@ execute_process(
     # compile DB here, clang-tidy cannot be pointed at the new probe TUs at all.
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     "-DFIXPP_STAGE_PREFIX=${_stage}"
-    "-DFIXPP_TYPED_EXPECTED=${_typed_expected}"
+    "-DFIXPP_TYPED_EXPECTED=${FIXPP_TYPED_TIER_EFFECTIVE}"
+    "-DFIXPP_TYPED_VERSIONS=${_typed_versions}"
     "-DFIXPP_CODEGEN_FIX_LATEST=${FIXPP_CODEGEN_FIX_LATEST}"
   RESULT_VARIABLE _cfg_rc
   OUTPUT_VARIABLE _cfg_out
@@ -466,7 +436,7 @@ set(_required_targets
   probe_system_include_contract) # 087 T010 — installed system-include interface (C-6.3)
 # #613 §4.1: both branches add required targets, so neither can pass by registering
 # nothing.
-if(_typed_expected)
+if(FIXPP_TYPED_TIER_EFFECTIVE)
   list(APPEND _required_targets
     consumer_typed_witness     # C-1: build_/validate_ per version, linked by name, RUN at step 4
     probe_typed_inline_small   # C-2a: whole-TU header-only mode, v42 + v44
@@ -629,16 +599,36 @@ endforeach()
 message(STATUS "086 FR-009a(ii): OK — no usage requirement propagates through fixpp::capi")
 
 # ── 4. Run it and check the output ────────────────────────────────────────────
+# Run one built witness executable and require exit 0 and a PASS line.
+#   name        the executable's basename in the sub-build
+#   pass_regex  what its stdout must match (each caller keeps its own)
+#   prefix      the caller's message prefix
+#   ARGN        its command-line arguments
 # Ninja single-config drops the exe at the sub-build root; the basename carries a
 # .exe suffix on Windows (this -P script has no CMAKE_EXECUTABLE_SUFFIX, so probe
 # both) and none on UNIX.
-set(_exe "${_sub_build}/consumer_witness")
-if(NOT EXISTS "${_exe}" AND EXISTS "${_exe}.exe")
-  set(_exe "${_exe}.exe")
-endif()
-if(NOT EXISTS "${_exe}")
-  message(FATAL_ERROR "consumer_witness executable not found at ${_exe}")
-endif()
+function(_fixpp_run_witness_exe name pass_regex prefix)
+  set(_exe "${_sub_build}/${name}")
+  if(NOT EXISTS "${_exe}" AND EXISTS "${_exe}.exe")
+    set(_exe "${_exe}.exe")
+  endif()
+  if(NOT EXISTS "${_exe}")
+    message(FATAL_ERROR "${prefix}${name} executable not found at ${_exe}")
+  endif()
+  execute_process(
+    COMMAND "${_exe}" ${ARGN}
+    RESULT_VARIABLE _run_rc
+    OUTPUT_VARIABLE _run_out
+    ERROR_VARIABLE  _run_err
+  )
+  message(STATUS "${name} stdout: ${_run_out}")
+  if(NOT _run_rc EQUAL 0)
+    message(FATAL_ERROR "${prefix}${name} exited ${_run_rc}:\n${_run_out}\n${_run_err}")
+  endif()
+  if(NOT _run_out MATCHES "${pass_regex}")
+    message(FATAL_ERROR "${prefix}${name} did not print PASS: ${_run_out}")
+  endif()
+endfunction()
 
 # 084 T037 / SC-014 — the API/data pairing must be USABLE, not merely co-located.
 # The dictionary is loaded from the INSTALLED PREFIX, never from the source tree:
@@ -654,42 +644,11 @@ if(NOT EXISTS "${_installed_dict}")
     "fixpp::dict::load_any with none of its data.")
 endif()
 
-execute_process(
-  COMMAND "${_exe}" "${_installed_dict}"
-  RESULT_VARIABLE _run_rc
-  OUTPUT_VARIABLE _run_out
-  ERROR_VARIABLE  _run_err
-)
-message(STATUS "consumer_witness stdout: ${_run_out}")
-if(NOT _run_rc EQUAL 0)
-  message(FATAL_ERROR "consumer_witness exited ${_run_rc}:\n${_run_out}\n${_run_err}")
-endif()
-if(NOT _run_out MATCHES "^PASS:")
-  message(FATAL_ERROR "consumer_witness did not print PASS: ${_run_out}")
-endif()
+_fixpp_run_witness_exe(consumer_witness "^PASS:" "" "${_installed_dict}")
 
 # ── 4a. #613 C-1 — RUN the typed witness (PRESENT only) ─────────────────────
-if(_typed_expected)
-  set(_typed_exe "${_sub_build}/consumer_typed_witness")
-  if(NOT EXISTS "${_typed_exe}" AND EXISTS "${_typed_exe}.exe")
-    set(_typed_exe "${_typed_exe}.exe")
-  endif()
-  if(NOT EXISTS "${_typed_exe}")
-    message(FATAL_ERROR "#613: consumer_typed_witness executable not found at ${_typed_exe}")
-  endif()
-  execute_process(
-    COMMAND "${_typed_exe}"
-    RESULT_VARIABLE _typed_rc
-    OUTPUT_VARIABLE _typed_out
-    ERROR_VARIABLE  _typed_err
-  )
-  message(STATUS "consumer_typed_witness stdout: ${_typed_out}")
-  if(NOT _typed_rc EQUAL 0)
-    message(FATAL_ERROR "#613: consumer_typed_witness exited ${_typed_rc}:\n${_typed_out}\n${_typed_err}")
-  endif()
-  if(NOT _typed_out MATCHES "(^|\n)PASS:")
-    message(FATAL_ERROR "#613: consumer_typed_witness did not print PASS: ${_typed_out}")
-  endif()
+if(FIXPP_TYPED_TIER_EFFECTIVE)
+  _fixpp_run_witness_exe(consumer_typed_witness "(^|\n)PASS:" "#613: ")
 endif()
 
 # ── 5. #613 D-10 — after a PASS, remove only stage/lib/ ──────────────────────

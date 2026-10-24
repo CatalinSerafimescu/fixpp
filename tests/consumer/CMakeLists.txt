@@ -396,25 +396,19 @@ add_custom_target(probe_system_include_contract
 # and 1 there). Both branches add required targets in the driver, so neither can pass
 # by registering nothing.
 # ═════════════════════════════════════════════════════════════════════════════
-if(NOT DEFINED FIXPP_TYPED_EXPECTED OR NOT DEFINED FIXPP_CODEGEN_FIX_LATEST)
-  message(FATAL_ERROR "#613: FIXPP_TYPED_EXPECTED and FIXPP_CODEGEN_FIX_LATEST must be passed by the driver")
-endif()
-if(FIXPP_CODEGEN_FIX_LATEST)
-  set(_fixpp_613_has_vlatest 1)
-else()
-  set(_fixpp_613_has_vlatest 0)
+if(NOT DEFINED FIXPP_TYPED_EXPECTED OR NOT DEFINED FIXPP_CODEGEN_FIX_LATEST
+   OR "${FIXPP_TYPED_VERSIONS}" STREQUAL "")
+  message(FATAL_ERROR
+    "#613: FIXPP_TYPED_EXPECTED, FIXPP_CODEGEN_FIX_LATEST and FIXPP_TYPED_VERSIONS must be passed by the driver")
 endif()
 
 if(FIXPP_TYPED_EXPECTED)
   # ── PRESENT: the imported targets of the expected pairs, linked BY NAME ──────
-  # v42, v44 and v50sp2, plus vlatest iff FIXPP_CODEGEN_FIX_LATEST. No if(TARGET ...)
-  # filter and no fixpp::fixpp, so the by-name targets must carry their own closure.
+  # FIXPP_TYPED_VERSIONS is the driver's expected version list (v42, v44 and v50sp2,
+  # plus vlatest iff FIXPP_CODEGEN_FIX_LATEST). No if(TARGET ...) filter and no
+  # fixpp::fixpp, so the by-name targets must carry their own closure.
   set(_fixpp_613_typed_targets "")
-  set(_fixpp_613_versions v42 v44 v50sp2)
-  if(FIXPP_CODEGEN_FIX_LATEST)
-    list(APPEND _fixpp_613_versions vlatest)
-  endif()
-  foreach(_v IN LISTS _fixpp_613_versions)
+  foreach(_v IN LISTS FIXPP_TYPED_VERSIONS)
     list(APPEND _fixpp_613_typed_targets fixpp::builders::${_v} fixpp::validators::${_v})
   endforeach()
 
@@ -451,7 +445,7 @@ if(FIXPP_TYPED_EXPECTED)
   # C-1: built, linked and RUN by the driver.
   add_executable(consumer_typed_witness consumer_typed_witness.cpp)
   target_link_libraries(consumer_typed_witness PRIVATE ${_fixpp_613_typed_targets})
-  target_compile_definitions(consumer_typed_witness PRIVATE FIXPP_613_HAS_VLATEST=${_fixpp_613_has_vlatest})
+  target_compile_definitions(consumer_typed_witness PRIVATE FIXPP_613_HAS_VLATEST=$<BOOL:${FIXPP_CODEGEN_FIX_LATEST}>)
 
   # C-2a / C-2b: compile-only, header-only inline mode. SEPARATE targets (see each TU).
   add_library(probe_typed_inline_small OBJECT probe_typed_inline_small.cpp)
@@ -462,7 +456,7 @@ if(FIXPP_TYPED_EXPECTED)
   add_library(probe_typed_inline_large OBJECT probe_typed_inline_large.cpp)
   target_link_libraries(probe_typed_inline_large PRIVATE fixpp::fixpp)
   target_compile_definitions(probe_typed_inline_large PRIVATE
-    FIXPP_BUILDERS_HEADER_ONLY_ListStatus FIXPP_613_HAS_VLATEST=${_fixpp_613_has_vlatest})
+    FIXPP_BUILDERS_HEADER_ONLY_ListStatus FIXPP_613_HAS_VLATEST=$<BOOL:${FIXPP_CODEGEN_FIX_LATEST}>)
 else()
   # ── ABSENT: no typed imported target, and no slim header through the umbrella ──
   get_directory_property(_fixpp_613_imported IMPORTED_TARGETS)
@@ -486,5 +480,5 @@ else()
   # C-3: compile-only ❌ cell, 086's form.
   add_library(probe_typed_absent OBJECT probe_typed_absent.cpp)
   target_link_libraries(probe_typed_absent PRIVATE fixpp::fixpp)
-  target_compile_definitions(probe_typed_absent PRIVATE FIXPP_613_HAS_VLATEST=${_fixpp_613_has_vlatest})
+  target_compile_definitions(probe_typed_absent PRIVATE FIXPP_613_HAS_VLATEST=$<BOOL:${FIXPP_CODEGEN_FIX_LATEST}>)
 endif()
