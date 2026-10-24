@@ -4,7 +4,9 @@
 // 095-tail-evidence-pass: one offline witness per tail MsgType (suite TailRows095), the
 // dictionary-derived presence check every witness asserts, and the known positives that prove that
 // check able to fire (suite TailRows095Census). Second source of the
-// test_077_allversions_builder_roundtrip executable; the 077 TU beside it is left unchanged.
+// test_077_allversions_builder_roundtrip executable. FR-006 / contracts W8 keep the 077 TU
+// beside it byte-unchanged; check with
+//   git diff --exit-code origin/main -- tests/session/test_077_allversions_builder_roundtrip.cpp
 //
 // THE RULE (spec Terminology; research R-1), applied to dictionaries/FIX50SP2.xml at test runtime:
 //   - a field is required when every element on its path from the message (each enclosing
@@ -44,6 +46,29 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/v50sp2/messages/AccountSummaryReport.hpp>
+#include <fixpp/v50sp2/messages/AllocationInstructionAlert.hpp>
+#include <fixpp/v50sp2/messages/ApplicationMessageReport.hpp>
+#include <fixpp/v50sp2/messages/ApplicationMessageRequest.hpp>
+#include <fixpp/v50sp2/messages/ApplicationMessageRequestAck.hpp>
+#include <fixpp/v50sp2/messages/ExecutionAck.hpp>
+#include <fixpp/v50sp2/messages/MarketDefinition.hpp>
+#include <fixpp/v50sp2/messages/MarketDefinitionRequest.hpp>
+#include <fixpp/v50sp2/messages/MarketDefinitionUpdateReport.hpp>
+#include <fixpp/v50sp2/messages/OrderMassActionReport.hpp>
+#include <fixpp/v50sp2/messages/OrderMassActionRequest.hpp>
+#include <fixpp/v50sp2/messages/SecurityDefinitionUpdateReport.hpp>
+#include <fixpp/v50sp2/messages/SecurityListUpdateReport.hpp>
+#include <fixpp/v50sp2/messages/SettlementObligationReport.hpp>
+#include <fixpp/v50sp2/messages/StreamAssignmentReport.hpp>
+#include <fixpp/v50sp2/messages/StreamAssignmentReportACK.hpp>
+#include <fixpp/v50sp2/messages/StreamAssignmentRequest.hpp>
+#include <fixpp/v50sp2/messages/TradingSessionList.hpp>
+#include <fixpp/v50sp2/messages/TradingSessionListRequest.hpp>
+#include <fixpp/v50sp2/messages/TradingSessionListUpdateReport.hpp>
+#include <fixpp/v50sp2/messages/UserNotification.hpp>
+#include <fixpp/v50sp2/messages/UserRequest.hpp>
+#include <fixpp/v50sp2/messages/UserResponse.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fstream>
 #include <map>
@@ -462,6 +487,12 @@ std::vector<TailRow> const& tail_rows() {
     return rows;
 }
 
+std::string drop_hyphen(std::string_view row) {
+    std::string s{row};
+    s.erase(std::remove(s.begin(), s.end(), '-'), s.end());
+    return s;
+}
+
 // ── Fixture: the dictionary, loaded once ─────────────────────────────────────
 
 using Intent = std::vector<std::pair<std::string, std::string>>;
@@ -579,7 +610,51 @@ class TailRows095Census : public Tail095Fixture {};
 
 }  // namespace
 
-// ── Known positives ───────────────────────────────────────────────
+// ── Census and known positives ───────────────────────────────────────────────
+
+TEST_F(TailRows095Census, EveryTailMsgTypeHasExactlyOneWitness) {
+    std::map<std::string, std::string> row_of_msgtype;
+    std::map<std::string, int> multiplicity;
+    for (TailRow const& r : tail_rows()) {
+        for (char const* mt : r.msgtypes) {
+            row_of_msgtype[mt] = r.row;
+            multiplicity[mt] = 0;
+        }
+    }
+    std::vector<std::string> findings;
+    ::testing::UnitTest const* const ut = ::testing::UnitTest::GetInstance();
+    for (int s = 0; s < ut->total_test_suite_count(); ++s) {
+        ::testing::TestSuite const* const suite = ut->GetTestSuite(s);
+        if (std::string_view{suite->name()} != "TailRows095") continue;
+        for (int t = 0; t < suite->total_test_count(); ++t) {
+            std::string const name = suite->GetTestInfo(t)->name();
+            auto const [row, generated] = split_test_name(name);
+            std::string const mt = msgtype_for_generated_name(doc(), generated);
+            if (mt.empty()) {
+                findings.push_back("unmapped name TailRows095." + name + ": no <message name='" +
+                                   generated + "'> in FIX50SP2.xml");
+                continue;
+            }
+            auto const it = row_of_msgtype.find(mt);
+            if (it == row_of_msgtype.end()) {
+                findings.push_back("extra MsgType 35=" + mt + " (TailRows095." + name + ")");
+                continue;
+            }
+            ++multiplicity[mt];
+            if (drop_hyphen(it->second) != row) {
+                findings.push_back("row mismatch: TailRows095." + name + " names row " + row +
+                                   ", 35=" + mt + " is row " + it->second);
+            }
+        }
+    }
+    for (auto const& [mt, n] : multiplicity) {
+        if (n != 1) {
+            findings.push_back("35=" + mt + " has multiplicity " + std::to_string(n) +
+                               " (exactly one witness required)");
+        }
+    }
+    EXPECT_TRUE(findings.empty()) << "census findings: " << join(findings);
+}
 
 TEST_F(TailRows095Census, FieldLegMatchesQuickFixCppGolden) {
     std::vector<std::string> asserted;
@@ -632,8 +707,8 @@ TEST_F(TailRows095Census, KnownPositive_DeficientFrames) {
         std::string body;
         std::vector<std::string> expected;
     };
-    // Each expected list is a dictionary fact, written from the file, not from the walk.
-    // Re-derive it with the header's sed recipe over NewOrderList -> ListOrdGrp and
+    // Each expected list is a dictionary fact: re-derive it from the file, never from the walk's
+    // output, with the header's sed recipe over NewOrderList -> ListOrdGrp and
     // StreamAssignmentRequest -> StrmAsgnReqGrp -> Parties, then data-model §B's leg order.
     std::string const e_head =
         "35=E\x01"
@@ -758,4 +833,397 @@ TEST_F(TailRows095Census, WalkStatusesOnSyntheticDictionaries) {
     ASSERT_EQ(w2.count("S2"), 1U);
     EXPECT_STREQ(to_string(w2.at("S2").status), "delimiter_chain") << "S2";
     EXPECT_EQ(w2.at("S2").element, "NoInner") << "S2";
+}
+
+// ── Witnesses: one per tail MsgType (contracts W1–W5) ─────────────────────────
+//
+// Each value is written twice, as the same literal: once in its intent entry, once in its Args
+// setter (data-model §C). Neither statement reads the other.
+
+TEST_F(TailRows095, A018_ExecutionAck) {
+    Intent intent;
+    fixpp::v50sp2::ExecutionAckArgs args{};
+    intent.push_back({"37", "A018_ExecutionAck_order_id"});
+    args.order_id = "A018_ExecutionAck_order_id";
+    intent.push_back({"1036", "0"});
+    args.exec_ack_status = '0';
+    intent.push_back({"17", "A018_ExecutionAck_exec_id"});
+    args.exec_id = "A018_ExecutionAck_exec_id";
+    intent.push_back({"54", "1"});
+    args.side = '1';
+    intent.push_back({"14", "10.5"});
+    args.cum_qty = make_decimal("10.5", &arena_);
+    auto const built = fixpp::v50sp2::build_ExecutionAck(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_ExecutionAck refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A023_OrderMassActionRequest) {
+    Intent intent;
+    fixpp::v50sp2::OrderMassActionRequestArgs args{};
+    intent.push_back({"11", "A023_OrderMassActionRequest_cl_ord_id"});
+    args.cl_ord_id = "A023_OrderMassActionRequest_cl_ord_id";
+    intent.push_back({"1373", "1"});
+    args.mass_action_type = 1;
+    intent.push_back({"1374", "1"});
+    args.mass_action_scope = 1;
+    intent.push_back({"60", "20261024-12:00:00.000"});
+    args.transact_time = "20261024-12:00:00.000";
+    auto const built = fixpp::v50sp2::build_OrderMassActionRequest(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_OrderMassActionRequest refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A023_OrderMassActionReport) {
+    Intent intent;
+    fixpp::v50sp2::OrderMassActionReportArgs args{};
+    intent.push_back({"1369", "A023_OrderMassActionReport_mass_action_report_id"});
+    args.mass_action_report_id = "A023_OrderMassActionReport_mass_action_report_id";
+    intent.push_back({"1373", "1"});
+    args.mass_action_type = 1;
+    intent.push_back({"1374", "1"});
+    args.mass_action_scope = 1;
+    intent.push_back({"1375", "0"});
+    args.mass_action_response = 0;
+    auto const built = fixpp::v50sp2::build_OrderMassActionReport(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_OrderMassActionReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A027_TradingSessionListRequest) {
+    Intent intent;
+    fixpp::v50sp2::TradingSessionListRequestArgs args{};
+    intent.push_back({"335", "A027_TradingSessionListRequest_trad_ses_req_id"});
+    args.trad_ses_req_id = "A027_TradingSessionListRequest_trad_ses_req_id";
+    intent.push_back({"263", "0"});
+    args.subscription_request_type = '0';
+    auto const built = fixpp::v50sp2::build_TradingSessionListRequest(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_TradingSessionListRequest refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A027_TradingSessionList) {
+    Intent intent;
+    fixpp::v50sp2::TradingSessionListArgs args{};
+    std::array<fixpp::v50sp2::groups::G_386_2Args, 2> trading_sessions{};
+    intent.push_back({"335", "A027_TradingSessionList_trad_ses_req_id"});
+    args.trad_ses_req_id = "A027_TradingSessionList_trad_ses_req_id";
+    intent.push_back({"1180", "A027_TradingSessionList_appl_id"});
+    args.appl_id = "A027_TradingSessionList_appl_id";
+    intent.push_back({"386", "2"});
+    intent.push_back({"386[0].336", "1"});
+    trading_sessions[0].trading_session_id = "1";
+    intent.push_back({"386[0].340", "0"});
+    trading_sessions[0].trad_ses_status = 0;
+    intent.push_back({"386[0].1326", "A027_TradingSessionList_trading_session_desc_i0"});
+    trading_sessions[0].trading_session_desc = "A027_TradingSessionList_trading_session_desc_i0";
+    intent.push_back({"386[1].336", "1"});
+    trading_sessions[1].trading_session_id = "1";
+    intent.push_back({"386[1].340", "0"});
+    trading_sessions[1].trad_ses_status = 0;
+    intent.push_back({"386[1].1326", "A027_TradingSessionList_trading_session_desc_i1"});
+    trading_sessions[1].trading_session_desc = "A027_TradingSessionList_trading_session_desc_i1";
+    args.trading_sessions = std::span<fixpp::v50sp2::groups::G_386_2Args const>{trading_sessions};
+    auto const built = fixpp::v50sp2::build_TradingSessionList(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_TradingSessionList refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A027_TradingSessionListUpdateReport) {
+    Intent intent;
+    fixpp::v50sp2::TradingSessionListUpdateReportArgs args{};
+    std::array<fixpp::v50sp2::groups::G_386_2Args, 2> trading_sessions{};
+    intent.push_back({"386", "2"});
+    intent.push_back({"386[0].336", "1"});
+    trading_sessions[0].trading_session_id = "1";
+    intent.push_back({"386[0].340", "0"});
+    trading_sessions[0].trad_ses_status = 0;
+    intent.push_back(
+        {"386[0].1326", "A027_TradingSessionListUpdateReport_trading_session_desc_i0"});
+    trading_sessions[0].trading_session_desc =
+        "A027_TradingSessionListUpdateReport_trading_session_desc_i0";
+    intent.push_back({"386[1].336", "1"});
+    trading_sessions[1].trading_session_id = "1";
+    intent.push_back({"386[1].340", "0"});
+    trading_sessions[1].trad_ses_status = 0;
+    intent.push_back(
+        {"386[1].1326", "A027_TradingSessionListUpdateReport_trading_session_desc_i1"});
+    trading_sessions[1].trading_session_desc =
+        "A027_TradingSessionListUpdateReport_trading_session_desc_i1";
+    args.trading_sessions = std::span<fixpp::v50sp2::groups::G_386_2Args const>{trading_sessions};
+    auto const built = fixpp::v50sp2::build_TradingSessionListUpdateReport(out_, args);
+    ASSERT_TRUE(built.has_value())
+        << "build_TradingSessionListUpdateReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A028_MarketDefinitionRequest) {
+    Intent intent;
+    fixpp::v50sp2::MarketDefinitionRequestArgs args{};
+    intent.push_back({"1393", "A028_MarketDefinitionRequest_market_req_id"});
+    args.market_req_id = "A028_MarketDefinitionRequest_market_req_id";
+    intent.push_back({"263", "0"});
+    args.subscription_request_type = '0';
+    auto const built = fixpp::v50sp2::build_MarketDefinitionRequest(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_MarketDefinitionRequest refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A028_MarketDefinition) {
+    Intent intent;
+    fixpp::v50sp2::MarketDefinitionArgs args{};
+    intent.push_back({"1394", "A028_MarketDefinition_market_report_id"});
+    args.market_report_id = "A028_MarketDefinition_market_report_id";
+    intent.push_back({"1301", "A028_MarketDefinition_market_id"});
+    args.market_id = "A028_MarketDefinition_market_id";
+    auto const built = fixpp::v50sp2::build_MarketDefinition(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_MarketDefinition refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A028_MarketDefinitionUpdateReport) {
+    Intent intent;
+    fixpp::v50sp2::MarketDefinitionUpdateReportArgs args{};
+    intent.push_back({"1394", "A028_MarketDefinitionUpdateReport_market_report_id"});
+    args.market_report_id = "A028_MarketDefinitionUpdateReport_market_report_id";
+    intent.push_back({"1301", "A028_MarketDefinitionUpdateReport_market_id"});
+    args.market_id = "A028_MarketDefinitionUpdateReport_market_id";
+    auto const built = fixpp::v50sp2::build_MarketDefinitionUpdateReport(out_, args);
+    ASSERT_TRUE(built.has_value())
+        << "build_MarketDefinitionUpdateReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A029_SecurityListUpdateReport) {
+    Intent intent;
+    fixpp::v50sp2::SecurityListUpdateReportArgs args{};
+    intent.push_back({"320", "A029_SecurityListUpdateReport_security_req_id"});
+    args.security_req_id = "A029_SecurityListUpdateReport_security_req_id";
+    intent.push_back({"322", "A029_SecurityListUpdateReport_security_response_id"});
+    args.security_response_id = "A029_SecurityListUpdateReport_security_response_id";
+    auto const built = fixpp::v50sp2::build_SecurityListUpdateReport(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_SecurityListUpdateReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A029_SecurityDefinitionUpdateReport) {
+    Intent intent;
+    fixpp::v50sp2::SecurityDefinitionUpdateReportArgs args{};
+    intent.push_back({"55", "A029_SecurityDefinitionUpdateReport_symbol"});
+    args.symbol = "A029_SecurityDefinitionUpdateReport_symbol";
+    intent.push_back({"58", "A029_SecurityDefinitionUpdateReport_text"});
+    args.text = "A029_SecurityDefinitionUpdateReport_text";
+    auto const built = fixpp::v50sp2::build_SecurityDefinitionUpdateReport(out_, args);
+    ASSERT_TRUE(built.has_value())
+        << "build_SecurityDefinitionUpdateReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A030_SettlementObligationReport) {
+    Intent intent;
+    fixpp::v50sp2::SettlementObligationReportArgs args{};
+    std::array<fixpp::v50sp2::groups::G_1165Args, 2> settl_oblig{};
+    intent.push_back({"1160", "A030_SettlementObligationReport_settl_oblig_msg_id"});
+    args.settl_oblig_msg_id = "A030_SettlementObligationReport_settl_oblig_msg_id";
+    intent.push_back({"1159", "1"});
+    args.settl_oblig_mode = 1;
+    intent.push_back({"1165", "2"});
+    intent.push_back({"1165[0].430", "1"});
+    settl_oblig[0].net_gross_ind = 1;
+    intent.push_back({"1165[0].1161", "A030_SettlementObligationReport_settl_oblig_id_i0"});
+    settl_oblig[0].settl_oblig_id = "A030_SettlementObligationReport_settl_oblig_id_i0";
+    intent.push_back({"1165[1].430", "1"});
+    settl_oblig[1].net_gross_ind = 1;
+    intent.push_back({"1165[1].1161", "A030_SettlementObligationReport_settl_oblig_id_i1"});
+    settl_oblig[1].settl_oblig_id = "A030_SettlementObligationReport_settl_oblig_id_i1";
+    args.settl_oblig = std::span<fixpp::v50sp2::groups::G_1165Args const>{settl_oblig};
+    auto const built = fixpp::v50sp2::build_SettlementObligationReport(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_SettlementObligationReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A031_AllocationInstructionAlert) {
+    Intent intent;
+    fixpp::v50sp2::AllocationInstructionAlertArgs args{};
+    intent.push_back({"70", "A031_AllocationInstructionAlert_alloc_id"});
+    args.alloc_id = "A031_AllocationInstructionAlert_alloc_id";
+    intent.push_back({"71", "0"});
+    args.alloc_trans_type = '0';
+    intent.push_back({"626", "1"});
+    args.alloc_type = 1;
+    intent.push_back({"54", "1"});
+    args.side = '1';
+    intent.push_back({"75", "20261024"});
+    args.trade_date = "20261024";
+    auto const built = fixpp::v50sp2::build_AllocationInstructionAlert(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_AllocationInstructionAlert refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A032_UserNotification) {
+    Intent intent;
+    fixpp::v50sp2::UserNotificationArgs args{};
+    intent.push_back({"926", "1"});
+    args.user_status = 1;
+    intent.push_back({"58", "A032_UserNotification_text"});
+    args.text = "A032_UserNotification_text";
+    auto const built = fixpp::v50sp2::build_UserNotification(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_UserNotification refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A033_StreamAssignmentRequest) {
+    Intent intent;
+    fixpp::v50sp2::StreamAssignmentRequestArgs args{};
+    std::array<fixpp::v50sp2::groups::G_1499_1Args, 2> asgn_reqs{};
+    std::array<fixpp::v50sp2::groups::G_453Args, 1> asgn_reqs_0_party_i_ds{};
+    std::array<fixpp::v50sp2::groups::G_453Args, 1> asgn_reqs_1_party_i_ds{};
+    intent.push_back({"1497", "A033_StreamAssignmentRequest_stream_asgn_req_id"});
+    args.stream_asgn_req_id = "A033_StreamAssignmentRequest_stream_asgn_req_id";
+    intent.push_back({"1498", "1"});
+    args.stream_asgn_req_type = 1;
+    intent.push_back({"1499", "2"});
+    intent.push_back({"1499[0].453", "1"});
+    intent.push_back({"1499[0].448", "A033_StreamAssignmentRequest_party_id_i0"});
+    asgn_reqs_0_party_i_ds[0].party_id = "A033_StreamAssignmentRequest_party_id_i0";
+    asgn_reqs[0].party_i_ds =
+        std::span<fixpp::v50sp2::groups::G_453Args const>{asgn_reqs_0_party_i_ds};
+    intent.push_back({"1499[1].453", "1"});
+    intent.push_back({"1499[1].448", "A033_StreamAssignmentRequest_party_id_i1"});
+    asgn_reqs_1_party_i_ds[0].party_id = "A033_StreamAssignmentRequest_party_id_i1";
+    asgn_reqs[1].party_i_ds =
+        std::span<fixpp::v50sp2::groups::G_453Args const>{asgn_reqs_1_party_i_ds};
+    args.asgn_reqs = std::span<fixpp::v50sp2::groups::G_1499_1Args const>{asgn_reqs};
+    auto const built = fixpp::v50sp2::build_StreamAssignmentRequest(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_StreamAssignmentRequest refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A033_StreamAssignmentReport) {
+    Intent intent;
+    fixpp::v50sp2::StreamAssignmentReportArgs args{};
+    intent.push_back({"1501", "A033_StreamAssignmentReport_stream_asgn_rpt_id"});
+    args.stream_asgn_rpt_id = "A033_StreamAssignmentReport_stream_asgn_rpt_id";
+    intent.push_back({"1497", "A033_StreamAssignmentReport_stream_asgn_req_id"});
+    args.stream_asgn_req_id = "A033_StreamAssignmentReport_stream_asgn_req_id";
+    auto const built = fixpp::v50sp2::build_StreamAssignmentReport(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_StreamAssignmentReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, A033_StreamAssignmentReportACK) {
+    Intent intent;
+    fixpp::v50sp2::StreamAssignmentReportACKArgs args{};
+    intent.push_back({"1503", "0"});
+    args.stream_asgn_ack_type = 0;
+    intent.push_back({"1501", "A033_StreamAssignmentReportACK_stream_asgn_rpt_id"});
+    args.stream_asgn_rpt_id = "A033_StreamAssignmentReportACK_stream_asgn_rpt_id";
+    auto const built = fixpp::v50sp2::build_StreamAssignmentReportACK(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_StreamAssignmentReportACK refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, C003_AccountSummaryReport) {
+    Intent intent;
+    fixpp::v50sp2::AccountSummaryReportArgs args{};
+    std::array<fixpp::v50sp2::groups::G_453Args, 2> party_i_ds{};
+    intent.push_back({"1699", "C003_AccountSummaryReport_account_summary_report_id"});
+    args.account_summary_report_id = "C003_AccountSummaryReport_account_summary_report_id";
+    intent.push_back({"715", "20261024"});
+    args.clearing_business_date = "20261024";
+    intent.push_back({"453", "2"});
+    intent.push_back({"453[0].448", "C003_AccountSummaryReport_party_id_i0"});
+    party_i_ds[0].party_id = "C003_AccountSummaryReport_party_id_i0";
+    intent.push_back({"453[1].448", "C003_AccountSummaryReport_party_id_i1"});
+    party_i_ds[1].party_id = "C003_AccountSummaryReport_party_id_i1";
+    args.party_i_ds = std::span<fixpp::v50sp2::groups::G_453Args const>{party_i_ds};
+    auto const built = fixpp::v50sp2::build_AccountSummaryReport(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_AccountSummaryReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, N002_UserRequest) {
+    Intent intent;
+    fixpp::v50sp2::UserRequestArgs args{};
+    intent.push_back({"923", "N002_UserRequest_user_request_id"});
+    args.user_request_id = "N002_UserRequest_user_request_id";
+    intent.push_back({"924", "1"});
+    args.user_request_type = 1;
+    intent.push_back({"553", "N002_UserRequest_username"});
+    args.username = "N002_UserRequest_username";
+    auto const built = fixpp::v50sp2::build_UserRequest(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_UserRequest refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, N002_UserResponse) {
+    Intent intent;
+    fixpp::v50sp2::UserResponseArgs args{};
+    intent.push_back({"923", "N002_UserResponse_user_request_id"});
+    args.user_request_id = "N002_UserResponse_user_request_id";
+    intent.push_back({"553", "N002_UserResponse_username"});
+    args.username = "N002_UserResponse_username";
+    auto const built = fixpp::v50sp2::build_UserResponse(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_UserResponse refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, N003_ApplicationMessageRequest) {
+    Intent intent;
+    fixpp::v50sp2::ApplicationMessageRequestArgs args{};
+    intent.push_back({"1346", "N003_ApplicationMessageRequest_appl_req_id"});
+    args.appl_req_id = "N003_ApplicationMessageRequest_appl_req_id";
+    intent.push_back({"1347", "0"});
+    args.appl_req_type = 0;
+    auto const built = fixpp::v50sp2::build_ApplicationMessageRequest(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_ApplicationMessageRequest refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, N003_ApplicationMessageRequestAck) {
+    Intent intent;
+    fixpp::v50sp2::ApplicationMessageRequestAckArgs args{};
+    intent.push_back({"1353", "N003_ApplicationMessageRequestAck_appl_response_id"});
+    args.appl_response_id = "N003_ApplicationMessageRequestAck_appl_response_id";
+    intent.push_back({"58", "N003_ApplicationMessageRequestAck_text"});
+    args.text = "N003_ApplicationMessageRequestAck_text";
+    auto const built = fixpp::v50sp2::build_ApplicationMessageRequestAck(out_, args);
+    ASSERT_TRUE(built.has_value())
+        << "build_ApplicationMessageRequestAck refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
+}
+
+TEST_F(TailRows095, N003_ApplicationMessageReport) {
+    Intent intent;
+    fixpp::v50sp2::ApplicationMessageReportArgs args{};
+    intent.push_back({"1356", "N003_ApplicationMessageReport_appl_report_id"});
+    args.appl_report_id = "N003_ApplicationMessageReport_appl_report_id";
+    intent.push_back({"1426", "0"});
+    args.appl_report_type = 0;
+    auto const built = fixpp::v50sp2::build_ApplicationMessageReport(out_, args);
+    ASSERT_TRUE(built.has_value()) << "build_ApplicationMessageReport refused the witness build";
+    std::string const body = bytes_to_string(*built);
+    check_witness(body, intent);
 }
