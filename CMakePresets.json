@@ -197,7 +197,8 @@
       "inherits": "_base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-debug/conan_toolchain.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-debug/conan_toolchain.cmake",
+        "FIXPP_INSTALL_TYPED_TIER": "ON"
       }
     },
 

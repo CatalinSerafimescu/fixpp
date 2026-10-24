@@ -25,15 +25,15 @@ through a custom CMake script.
 | `fixpp-codegen` | The host-only code generator executable. |
 | `fixpp_codegen_generate` | No-op marker target that library/test TUs depend on. The generated headers are produced at **configure time** (`execute_process` runs `fixpp-codegen` on the XML dictionaries into `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/`), not by building this target. |
 | `fixpp_dictionary` | The user-facing library. **Depends on** `fixpp_codegen_generate` so generated headers are ready before any library TU compiles. |
-| `fixpp_builders_<ver>` / `fixpp::builders::<ver>` | Precompiled **STATIC** library holding every `build_<Msg>` body for version `<ver>` ∈ {v44, v50sp2, vlatest} (078). Always built. |
-| `fixpp_validators_<ver>` / `fixpp::validators::<ver>` | Precompiled **STATIC** library holding every `validate_<Msg>` body for version `<ver>` — a disjoint object set from the builder lib (078). Always built. |
+| `fixpp_builders_<ver>` / `fixpp::builders::<ver>` | Precompiled **STATIC** library holding every `build_<Msg>` body for version `<ver>` ∈ {v42, v44, v50sp2, vlatest} (078; v42 since 082). Always built. Exported to installed consumers where `FIXPP_INSTALL_TYPED_TIER` is in effect (#613, [below](#installed-consumers-613)). |
+| `fixpp_validators_<ver>` / `fixpp::validators::<ver>` | Precompiled **STATIC** library holding every `validate_<Msg>` body for version `<ver>` — a disjoint object set from the builder lib (078). Always built. Exported on the same condition as the builder lib (#613). |
 
 Generated headers live at:
 
 ```
 build/<preset>/_codegen/include/fixpp/
   v42/     Messages.hpp  Fields.hpp  Validator.hpp  Reify.hpp  NormativeReferences.md
-                                      #   (NO builder/validator tier — v42 descoped, L-077-1/issue #196)
+           + groups.hpp  groups/  validators/  messages/  all.hpp   # typed builder/validator tier (since 082, issue #196)
   v44/     ...  + groups.hpp  groups/  validators/  messages/  all.hpp   # typed builder/validator tier (078 split layout)
   v50sp2/  ...  + groups.hpp  groups/  validators/  messages/  all.hpp   # typed builder/validator tier (078 split layout)
   vt11/    ...                        # FIXT.1.1 (admin-only → no builder/validator tier)
@@ -89,18 +89,17 @@ cmake --preset linux-clang-debug -DFIXPP_CODEGEN_FIX_LATEST=OFF
 cmake --preset linux-clang-debug -DFIXPP_CODEGEN_V44_FAMILIES=official
 ```
 
-> **Typed builders (`build_<Msg>`/`validate_<Msg>`) are emitted for `fixpp::v44`,
-> `fixpp::v50sp2`, and `fixpp::vlatest`** (their full `is_application` sets:
-> 83 / 156 / 173; `vlatest` gated by `FIXPP_CODEGEN_FIX_LATEST`). Each repeating
+> **Typed builders (`build_<Msg>`/`validate_<Msg>`) are emitted for `fixpp::v42`,
+> `fixpp::v44`, `fixpp::v50sp2`, and `fixpp::vlatest`** (their full `is_application`
+> sets; `vlatest` gated by `FIXPP_CODEGEN_FIX_LATEST`; v42 since 082, issue #196). Each repeating
 > group's input `Args` struct is **deduplicated** — emitted once per distinct
 > `(no_tag, recursive structural signature)` plan into `fixpp::<ns>::groups` as
 > `G_<no_tag>Args` (one plan) or `G_<no_tag>_1..kArgs` (≥2 plans) — which is what
 > makes the FIX Latest builder tier compile as a single TU (577-ish shared plans
 > vs 26,806 message-rooted structs; 077, resolving L-076-1). **`fixpp::vt11`**
-> (admin-only) and **`fixpp::v42`** (descoped — FIX 4.2 types `NumInGroup` as
-> legacy `INT`, so 0 typed groups materialize; L-077-1 / issue #196) emit NO
-> builders; construct v42 messages via the runtime `wire::body_builder` /
-> tag-keyed path. **Source-API note:** the v44 nested-group `Args` type names
+> (admin-only) emits NO builders. (`fixpp::v42` was descoped by 077, L-077-1; 082
+> added it to the emitter and to the library loop, so it now has the same typed tier
+> as the other versions.) **Source-API note:** the v44 nested-group `Args` type names
 > changed from message-rooted (`NewOrderListOrdersArgs`) to shared
 > (`groups::G_73_1Args`) — a deliberate pre-1.0 break with no aliases; top-level
 > `<Msg>Args` names are unchanged. **Since 091 (fixpp#418)**, a coupled
@@ -118,8 +117,8 @@ cmake --preset linux-clang-debug -DFIXPP_CODEGEN_V44_FAMILIES=official
 ## Precompiled Builder/Validator Libraries (078)
 
 078 restructured 077's single-file `fixpp/<ns>/Builders.hpp` into a precompiled
-per-version library layout, for each builder-bearing version `<ns>` ∈ {v44,
-v50sp2, vlatest} (`vt11`/`v42` emit none):
+per-version library layout, for each builder-bearing version `<ns>` ∈ {v42, v44,
+v50sp2, vlatest} (`vt11` emits none; v42 since 082):
 
 | File | Contents |
 |---|---|
@@ -146,6 +145,51 @@ target_link_libraries(my_app PRIVATE fixpp::builders::v44 fixpp::validators::v44
 
 A builder-only link carries zero `validate_<Msg>` machine code, and vice versa
 (the builder surface never includes `validators/traits.hpp`).
+
+### Installed consumers (#613)
+
+The typed tier reaches an **installed** consumer (`find_package(fixpp)`) under the
+same names, linked by name — the `fixpp::fixpp` umbrella does not reach them:
+
+```cmake
+find_package(fixpp REQUIRED)
+target_link_libraries(my_app PRIVATE fixpp::builders::v44 fixpp::validators::v44)
+```
+
+The headers (`<fixpp/<ver>/messages/<Msg>.hpp>`, `<fixpp/<ver>/all.hpp>`, and the
+`.builder.inl` / `.validator.inl` the inline mode below includes) are installed
+beside the read-side headers; the generated `.cpp` translation units are not. An
+umbrella-only consumer that calls `build_<Msg>` gets an undefined symbol at link
+time naming the function (B&L B-613-1).
+
+Whether a tree exports and installs the typed tier is the configure setting
+**`FIXPP_INSTALL_TYPED_TIER`** (`AUTO` / `ON` / `OFF`; any other value fails the
+configure, naming the accepted ones):
+
+| Value | Effect |
+|---|---|
+| `AUTO` (default) | In effect for a single-config tree whose `CMAKE_BUILD_TYPE` is `Release` (case-insensitive); not in effect for `Debug`, `RelWithDebInfo`, `MinSizeRel`, a custom type, or a multi-config generator. |
+| `ON` | In effect in any configuration: that configuration's typed archives are exported and the slim headers installed. |
+| `OFF` | Not in effect: no typed target is exported and the typed headers are withheld, so no installed header declares a symbol no installed library defines. |
+
+**Released packages carry it.** Only Release packages are released, and package
+generation refuses a `release` package with the tier not in effect (cpack exits
+non-zero naming the setting). A Release tree may still be configured, built and
+installed with `OFF`; on such a tree the `packaging`-labelled tests that generate a
+package fail by design, so run `ctest -LE packaging` there.
+
+**Debug.** Debug packages are not released, so a Debug consumer of the typed API
+builds fixpp itself with the tier on:
+
+```bash
+cmake --preset linux-clang-debug -DFIXPP_INSTALL_TYPED_TIER=ON
+cmake --build --preset linux-clang-debug
+cmake --install build/linux-clang-debug --prefix <prefix>
+```
+
+A consumer must match the installed configuration, as for every fixpp library. A
+tree configured with `FIXPP_CODEGEN_FIX_LATEST=OFF` exports and installs no vlatest
+typed tier and defines no packaging (B&L L-613-1, L-613-3).
 
 ### Per-message header-only inline mode
 

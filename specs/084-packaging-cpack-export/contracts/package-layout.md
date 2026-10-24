@@ -8,6 +8,16 @@ What ships, where it lands, and what the package must legally carry.
 
 ## 1. Package model
 
+> **⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`), owner rulings R-2a (2026-10-24: "Release
+> packages only.") and R-2b (2026-10-24).** The model below still holds, but the typed content of one toolchain's
+> packages now differs by configuration at the default: a Release package carries the typed builder/validator tier
+> (`fixpp_builders_<ver>` / `fixpp_validators_<ver>` and the slim `messages/` / `groups/` / `validators/` headers,
+> `FIXPP_INSTALL_TYPED_TIER=AUTO`), a Debug package does not. Debug configurations are never released (2026-08-03;
+> only the Release packages are uploaded), so a Debug package is a local build only. The exclusion set the rows
+> below call the "7-pattern" set lost the five 078 patterns wherever the typed tier is in effect, and gained `*.cpp`
+> and `Manifest.txt`; the rule's current form is the generated-header `install(DIRECTORY …)` rule in
+> `CMakeLists.txt`.
+
 **One dev-shaped package per configuration** (user decision, 2026-07-31). Each carries headers + static libraries + CMake package config + dictionaries + attribution.
 
 **There is no separate binary-only runtime package before v1.0.** The anchor doc describes one as "shared libs, no headers", but every *compiled library* target is STATIC except `fixpp_capi_shared` — which is itself gated on `FIXPP_BUILD_TESTS` (`src/capi/CMakeLists.txt:114-115`), so a packaging build with tests OFF has **zero** SHARED targets. Such a package would hold one file or none. Adding shared variants of the core C++ targets is an explicit non-goal — *not* because any ABI freeze is being held (that freeze is **CLOSED**, `REMAINING-WORK.md:7`, and it governs the C ABI, not these targets) but because those targets have **no freeze mechanism at all**: no version script, no header-hash baseline, no symbol golden. See `spec.md` → Explicit non-goals.

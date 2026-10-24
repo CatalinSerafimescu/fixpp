@@ -22,9 +22,23 @@
 #   FIXPP_CONSUMER_SRC_DIR — tests/consumer/ (this directory).
 #   FIXPP_WITNESS_WORK_DIR — scratch dir for the staged install + consumer
 #                            sub-build (created fresh; NOT the source tree).
+#   FIXPP_CODEGEN_FIX_LATEST — whether vlatest is generated (its typed pair and
+#                            its headers exist only then).
+#
+# #613 (`.specify/613-builders-export.md` §4, §4.1) inputs, deliberately NOT in the
+# required-variable loop below: guard 0 refuses an undefined value and an empty one
+# alike, and naming them there would make the loop, not guard 0, the line that fires.
+#   FIXPP_TYPED_TIER_SETTING   — the raw FIXPP_INSTALL_TYPED_TIER cache value.
+#   FIXPP_TYPED_TIER_EFFECTIVE — FIXPP_INSTALL_TYPED_TIER_EFFECTIVE (ON|OFF).
+#   FIXPP_PACKAGING_ENABLED, FIXPP_IS_MSVC, FIXPP_TYPED_DEBUG_INFO,
+#   FIXPP_TYPED_DEBUG_INFO_SET — the typed PDB expectation's inputs (D-9).
+#
+# Environment: FIXPP_WITNESS_KEEP_STAGE_LIB set to a true value skips the post-PASS
+# removal of stage/lib/ (D-10), for the hand procedures that relink or rebuild the
+# consumer from the kept stage.
 
 foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_SOURCE_DIR FIXPP_CONSUMER_SRC_DIR FIXPP_WITNESS_WORK_DIR
-             FIXPP_CXX_COMPILER FIXPP_C_COMPILER)
+             FIXPP_CXX_COMPILER FIXPP_C_COMPILER FIXPP_CODEGEN_FIX_LATEST)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "run_consumer_witness.cmake: -D${_var}=... is required")
   endif()
@@ -43,7 +57,56 @@ if(NOT DEFINED FIXPP_BUILD_TYPE OR FIXPP_BUILD_TYPE STREQUAL "")
   set(FIXPP_BUILD_TYPE "Debug")
 endif()
 
+# ── 0. #613 — is the typed tier expected? Decided BEFORE the multi-GB copy ─────
+# PRESENT/ABSENT is the EFFECTIVE value the build passed, but it is never trusted
+# alone: guard 0 checks both inputs' domain, guard 1 re-derives the default from
+# FIXPP_BUILD_TYPE (or normalises an explicit setting) and requires agreement. So a
+# defaulting bug cannot turn both sides green, and an ordering slip in the root
+# CMakeLists (a value read before it is set reaches here EMPTY) is refused.
+include("${FIXPP_SOURCE_DIR}/cmake/FixppTypedTierRule.cmake")
+fixpp_typed_tier_check_domain("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_TYPED_TIER_EFFECTIVE}"
+  "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER before the root CMakeLists.txt declared it."
+  "Empty means the add_test registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it.")
+fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_BUILD_TYPE}"
+  "the default for FIXPP_BUILD_TYPE=${FIXPP_BUILD_TYPE}" _typed_rederived _typed_rederived_from)
+if(NOT _typed_rederived STREQUAL FIXPP_TYPED_TIER_EFFECTIVE)
+  message(FATAL_ERROR
+    "#613 guard 1: FIXPP_INSTALL_TYPED_TIER=${FIXPP_TYPED_TIER_SETTING} resolved "
+    "${FIXPP_TYPED_TIER_EFFECTIVE}, but ${_typed_rederived_from} is ${_typed_rederived}. "
+    "The root CMakeLists.txt's resolution disagrees with the rule.")
+endif()
+if(FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "ON")
+  set(_typed_outcome PRESENT)
+else()
+  set(_typed_outcome ABSENT)
+endif()
+message(STATUS "#613 typed tier: expected ${_typed_outcome} (setting=${FIXPP_TYPED_TIER_SETTING}, "
+               "effective=${FIXPP_TYPED_TIER_EFFECTIVE}, FIXPP_BUILD_TYPE=${FIXPP_BUILD_TYPE})")
+
+# The expected version list, never the directories found in the stage.
+set(_typed_versions v42 v44 v50sp2)
+if(FIXPP_CODEGEN_FIX_LATEST)
+  list(APPEND _typed_versions vlatest)
+endif()
+
 file(REMOVE_RECURSE "${_stage}" "${_sub_build}")
+
+# #613 §4.4 disk instrument: free space of the work directory before and after the
+# install. It reports; it gates nothing.
+file(MAKE_DIRECTORY "${FIXPP_WITNESS_WORK_DIR}")
+find_program(_fixpp_df NAMES df)
+function(_fixpp_witness_free _out)
+  set(_free "unavailable")
+  if(_fixpp_df)
+    execute_process(COMMAND "${_fixpp_df}" -B1 --output=avail "${FIXPP_WITNESS_WORK_DIR}"
+                    RESULT_VARIABLE _rc OUTPUT_VARIABLE _o ERROR_QUIET)
+    if(_rc EQUAL 0 AND _o MATCHES "([0-9]+)[ \t\r\n]*$")
+      set(_free "${CMAKE_MATCH_1}")
+    endif()
+  endif()
+  set(${_out} "${_free}" PARENT_SCOPE)
+endfunction()
+_fixpp_witness_free(_free_before)
 
 # ── 1. Stage-install the main build ──────────────────────────────────────────
 execute_process(
@@ -55,6 +118,8 @@ execute_process(
 if(NOT _install_rc EQUAL 0)
   message(FATAL_ERROR "cmake --install failed (exit ${_install_rc}):\n${_install_out}\n${_install_err}")
 endif()
+
+_fixpp_witness_free(_free_after)
 
 # FR-008 sub-assertion: v42/v44/v50sp2 present, _dispatch/vt11 absent.
 foreach(_ver v42 v44 v50sp2)
@@ -68,6 +133,124 @@ endif()
 if(EXISTS "${_stage}/include/fixpp/vt11")
   message(FATAL_ERROR "Staged install leaked fixpp/vt11/ (must be excluded per FR-008)")
 endif()
+
+# ── 1b. #613 §4.1 stage check, both branches — BEFORE any consumer configure ───
+# Each expected version's immediate children must be EXACTLY the set
+# fixpp_typed_tier_expected_children() names (cmake/FixppTypedTierRule.cmake).
+fixpp_typed_tier_expected_children(${FIXPP_TYPED_TIER_EFFECTIVE} _typed_children_expected)
+foreach(_ver IN LISTS _typed_versions)
+  set(_vdir "${_stage}/include/fixpp/${_ver}")
+  if(NOT IS_DIRECTORY "${_vdir}")
+    message(FATAL_ERROR "#613: the staged install has no include/fixpp/${_ver}/ (an expected version)")
+  endif()
+  file(GLOB _children LIST_DIRECTORIES true RELATIVE "${_vdir}" "${_vdir}/*")
+  list(SORT _children)
+  if(NOT "${_children}" STREQUAL "${_typed_children_expected}")
+    message(FATAL_ERROR
+      "#613: include/fixpp/${_ver}/'s children are not the ${_typed_outcome} set.\n"
+      "  expected: ${_typed_children_expected}\n"
+      "  staged:   ${_children}")
+  endif()
+endforeach()
+if(NOT FIXPP_CODEGEN_FIX_LATEST AND EXISTS "${_stage}/include/fixpp/vlatest")
+  message(FATAL_ERROR
+    "#613: FIXPP_CODEGEN_FIX_LATEST is OFF but the staged install has include/fixpp/vlatest/")
+endif()
+
+file(GLOB _staged_lib_files LIST_DIRECTORIES false RELATIVE "${_stage}" "${_stage}/lib/*")
+if(NOT FIXPP_TYPED_TIER_EFFECTIVE)
+  # ABSENT: no typed file in lib/ (archives AND .pdb, by name), and no typed imported
+  # target in the staged export.
+  set(_typed_lib_hits "")
+  foreach(_f IN LISTS _staged_lib_files)
+    if(_f MATCHES "fixpp_(builders|validators)_")
+      list(APPEND _typed_lib_hits "${_f}")
+    endif()
+  endforeach()
+  if(NOT _typed_lib_hits STREQUAL "")
+    message(FATAL_ERROR
+      "#613: the typed tier is ABSENT here, but the staged lib/ carries: ${_typed_lib_hits}")
+  endif()
+  file(GLOB _staged_targets "${_stage}/lib/cmake/fixpp/fixppTargets*.cmake")
+  foreach(_t IN LISTS _staged_targets)
+    file(READ "${_t}" _t_text)
+    if(_t_text MATCHES "fixpp::(builders|validators)::[A-Za-z0-9_]+")
+      message(FATAL_ERROR
+        "#613: the typed tier is ABSENT here, but ${_t} names ${CMAKE_MATCH_0}")
+    endif()
+  endforeach()
+else()
+  # PRESENT: the typed PDB expectation (D-9). Required iff MSVC, packaging enabled
+  # (the PDB plumbing lives in cmake/FixppPackaging.cmake) and a PDB debug-info
+  # format; forbidden under Embedded (/Z7); otherwise not checked.
+  if(NOT "${FIXPP_TYPED_DEBUG_INFO}" MATCHES "^(|ProgramDatabase|EditAndContinue|Embedded)$")
+    message(FATAL_ERROR
+      "#613: FIXPP_TYPED_DEBUG_INFO='${FIXPP_TYPED_DEBUG_INFO}' is not empty, ProgramDatabase, "
+      "EditAndContinue or Embedded")
+  endif()
+  string(TOUPPER "${FIXPP_BUILD_TYPE}" _typed_build_type_uc)
+  if(FIXPP_TYPED_DEBUG_INFO_SET)
+    set(_typed_dbg "${FIXPP_TYPED_DEBUG_INFO}")
+  elseif(_typed_build_type_uc MATCHES "^(DEBUG|RELWITHDEBINFO)$")
+    # CMake's documented CMP0141 default: $<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>.
+    set(_typed_dbg "ProgramDatabase")
+  else()
+    set(_typed_dbg "")
+  endif()
+  set(_typed_pdbs "")
+  set(_typed_libs "")
+  foreach(_f IN LISTS _staged_lib_files)
+    if(_f MATCHES "^lib/fixpp_(builders|validators)_[A-Za-z0-9]+\\.pdb$")
+      list(APPEND _typed_pdbs "${_f}")
+    elseif(_f MATCHES "^lib/fixpp_(builders|validators)_[A-Za-z0-9]+\\.lib$")
+      list(APPEND _typed_libs "${_f}")
+    endif()
+  endforeach()
+  if(FIXPP_IS_MSVC AND FIXPP_PACKAGING_ENABLED AND _typed_dbg MATCHES "^(ProgramDatabase|EditAndContinue)$")
+    set(_typed_pdb_arm "required")
+    set(_typed_missing_pdbs "")
+    foreach(_l IN LISTS _typed_libs)
+      string(REGEX REPLACE "\\.lib$" ".pdb" _p "${_l}")
+      # list(FIND), not IN_LIST: this -P script sets no policy version (CMP0057).
+      list(FIND _typed_pdbs "${_p}" _p_idx)
+      if(_p_idx EQUAL -1)
+        list(APPEND _typed_missing_pdbs "${_l}")
+      endif()
+    endforeach()
+    if(_typed_libs STREQUAL "" OR NOT _typed_missing_pdbs STREQUAL "")
+      message(FATAL_ERROR
+        "#613 (D-9): resolved debug-information format ${_typed_dbg}, so every staged typed .lib "
+        "needs its .pdb beside it. Staged typed .lib files: [${_typed_libs}]; without a .pdb: "
+        "[${_typed_missing_pdbs}]")
+    endif()
+  elseif(_typed_dbg STREQUAL "Embedded")
+    set(_typed_pdb_arm "forbidden")
+    if(NOT _typed_pdbs STREQUAL "")
+      message(FATAL_ERROR
+        "#613 (D-9): resolved debug-information format Embedded (/Z7) writes no compiler PDB, "
+        "but the stage carries: ${_typed_pdbs}")
+    endif()
+  else()
+    set(_typed_pdb_arm "not checked")
+  endif()
+  message(STATUS "#613 typed PDB expectation: resolved format '${_typed_dbg}' "
+                 "(set=${FIXPP_TYPED_DEBUG_INFO_SET}, MSVC=${FIXPP_IS_MSVC}, "
+                 "packaging=${FIXPP_PACKAGING_ENABLED}), arm: ${_typed_pdb_arm}")
+endif()
+
+# #613 §4.4: the stage's size, summed per file so it works on every platform. A zero
+# sum means the glob saw nothing, which is a broken instrument, not a small stage.
+file(GLOB_RECURSE _stage_files LIST_DIRECTORIES false "${_stage}/*")
+set(_stage_bytes 0)
+foreach(_f IN LISTS _stage_files)
+  file(SIZE "${_f}" _sz)
+  math(EXPR _stage_bytes "${_stage_bytes} + ${_sz}")
+endforeach()
+if(_stage_bytes EQUAL 0)
+  message(FATAL_ERROR "#613 disk instrument: the stage sums to 0 bytes; the glob saw nothing")
+endif()
+message(STATUS "#613 consumer stage: ${_stage_bytes} bytes; work-dir free: "
+               "${_free_before} before the install, ${_free_after} after")
 
 # ── 1a. 087 T006 — request the codemodel-v2 File API reply ───────────────────
 # contract §2a: a reply exists only if .cmake/api/v1/query/codemodel-v2 was
@@ -98,6 +281,9 @@ execute_process(
     # compile DB here, clang-tidy cannot be pointed at the new probe TUs at all.
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     "-DFIXPP_STAGE_PREFIX=${_stage}"
+    "-DFIXPP_TYPED_EXPECTED=${FIXPP_TYPED_TIER_EFFECTIVE}"
+    "-DFIXPP_TYPED_VERSIONS=${_typed_versions}"
+    "-DFIXPP_CODEGEN_FIX_LATEST=${FIXPP_CODEGEN_FIX_LATEST}"
   RESULT_VARIABLE _cfg_rc
   OUTPUT_VARIABLE _cfg_out
   ERROR_VARIABLE  _cfg_err
@@ -248,6 +434,17 @@ set(_required_targets
   probe_capi_negative_service # ❌ fixpp::capi must not reach the service header
   probe_service_negative     # ❌ fixpp::service must not reach an engine header
   probe_system_include_contract) # 087 T010 — installed system-include interface (C-6.3)
+# #613 §4.1: both branches add required targets, so neither can pass by registering
+# nothing.
+if(FIXPP_TYPED_TIER_EFFECTIVE)
+  list(APPEND _required_targets
+    consumer_typed_witness     # C-1: build_/validate_ per version, linked by name, RUN at step 4
+    probe_typed_inline_small   # C-2a: whole-TU header-only mode, v42 + v44
+    probe_typed_inline_large)  # C-2b: per-message header-only ListStatus, v50sp2 (+ vlatest)
+else()
+  list(APPEND _required_targets
+    probe_typed_absent)        # C-3: no slim header resolves through fixpp::fixpp
+endif()
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${_sub_build}" --target ${_required_targets}
   RESULT_VARIABLE _build_rc
@@ -402,16 +599,36 @@ endforeach()
 message(STATUS "086 FR-009a(ii): OK — no usage requirement propagates through fixpp::capi")
 
 # ── 4. Run it and check the output ────────────────────────────────────────────
+# Run one built witness executable and require exit 0 and a PASS line.
+#   name        the executable's basename in the sub-build
+#   pass_regex  what its stdout must match (each caller keeps its own)
+#   prefix      the caller's message prefix
+#   ARGN        its command-line arguments
 # Ninja single-config drops the exe at the sub-build root; the basename carries a
 # .exe suffix on Windows (this -P script has no CMAKE_EXECUTABLE_SUFFIX, so probe
 # both) and none on UNIX.
-set(_exe "${_sub_build}/consumer_witness")
-if(NOT EXISTS "${_exe}" AND EXISTS "${_exe}.exe")
-  set(_exe "${_exe}.exe")
-endif()
-if(NOT EXISTS "${_exe}")
-  message(FATAL_ERROR "consumer_witness executable not found at ${_exe}")
-endif()
+function(_fixpp_run_witness_exe name pass_regex prefix)
+  set(_exe "${_sub_build}/${name}")
+  if(NOT EXISTS "${_exe}" AND EXISTS "${_exe}.exe")
+    set(_exe "${_exe}.exe")
+  endif()
+  if(NOT EXISTS "${_exe}")
+    message(FATAL_ERROR "${prefix}${name} executable not found at ${_exe}")
+  endif()
+  execute_process(
+    COMMAND "${_exe}" ${ARGN}
+    RESULT_VARIABLE _run_rc
+    OUTPUT_VARIABLE _run_out
+    ERROR_VARIABLE  _run_err
+  )
+  message(STATUS "${name} stdout: ${_run_out}")
+  if(NOT _run_rc EQUAL 0)
+    message(FATAL_ERROR "${prefix}${name} exited ${_run_rc}:\n${_run_out}\n${_run_err}")
+  endif()
+  if(NOT _run_out MATCHES "${pass_regex}")
+    message(FATAL_ERROR "${prefix}${name} did not print PASS: ${_run_out}")
+  endif()
+endfunction()
 
 # 084 T037 / SC-014 — the API/data pairing must be USABLE, not merely co-located.
 # The dictionary is loaded from the INSTALLED PREFIX, never from the source tree:
@@ -427,18 +644,25 @@ if(NOT EXISTS "${_installed_dict}")
     "fixpp::dict::load_any with none of its data.")
 endif()
 
-execute_process(
-  COMMAND "${_exe}" "${_installed_dict}"
-  RESULT_VARIABLE _run_rc
-  OUTPUT_VARIABLE _run_out
-  ERROR_VARIABLE  _run_err
-)
-message(STATUS "consumer_witness stdout: ${_run_out}")
-if(NOT _run_rc EQUAL 0)
-  message(FATAL_ERROR "consumer_witness exited ${_run_rc}:\n${_run_out}\n${_run_err}")
+_fixpp_run_witness_exe(consumer_witness "^PASS:" "" "${_installed_dict}")
+
+# ── 4a. #613 C-1 — RUN the typed witness (PRESENT only) ─────────────────────
+if(FIXPP_TYPED_TIER_EFFECTIVE)
+  _fixpp_run_witness_exe(consumer_typed_witness "(^|\n)PASS:" "#613: ")
 endif()
-if(NOT _run_out MATCHES "^PASS:")
-  message(FATAL_ERROR "consumer_witness did not print PASS: ${_run_out}")
+
+# ── 5. #613 D-10 — after a PASS, remove only stage/lib/ ──────────────────────
+# On a PRESENT lane stage/lib/ holds a full copy of the tree's typed archives, which
+# lib/ in the build tree already holds once. stage/include and the sub-build (with the
+# compile database 086's `clang-tidy -p` step reads) stay. A FATAL above leaves the
+# whole stage in place for diagnosis. After the removal the sub-build can neither
+# rebuild nor reconfigure, so the hand procedures that relink from the stage set
+# FIXPP_WITNESS_KEEP_STAGE_LIB first.
+if("$ENV{FIXPP_WITNESS_KEEP_STAGE_LIB}")
+  message(STATUS "#613 D-10: FIXPP_WITNESS_KEEP_STAGE_LIB is set; keeping ${_stage}/lib")
+else()
+  file(REMOVE_RECURSE "${_stage}/lib")
+  message(STATUS "#613 D-10: removed ${_stage}/lib after the PASS (stage/include and the sub-build kept)")
 endif()
 
 message(STATUS "fixpp::consumer::install-witness: OK")

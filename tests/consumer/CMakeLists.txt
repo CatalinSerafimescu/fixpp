@@ -11,12 +11,15 @@
 # imported targets — a missing or broken install rule fails this configure rather
 # than silently falling back to a build-tree-private path.
 #
-# 084: fixpp NOW HAS a CMake package-config export. The whole contract is
+# 084: fixpp NOW HAS a CMake package-config export. The umbrella's contract is
 #
 #     find_package(fixpp REQUIRED)
 #     target_link_libraries(app PRIVATE fixpp::fixpp)
 #
-# and this file is the first thing that proves it. Everything the pre-084 version
+# and this file is the first thing that proves it. The by-name members the umbrella
+# does not reach (fixpp::capi, fixpp::service, and, where the typed tier is
+# installed, fixpp::builders::<ver> / fixpp::validators::<ver>, #613) are linked by
+# name by their own targets below. Everything the pre-084 version
 # hand-rolled is GONE, deliberately:
 #   * the explicit ${FIXPP_STAGE_PREFIX}/include include path  -> arrives via the
 #     umbrella's $<INSTALL_INTERFACE:>
@@ -383,3 +386,99 @@ add_custom_target(probe_system_include_contract
   VERBATIM
   COMMENT "087: comparing the installed system-include interface (capi, then service)"
 )
+
+# ═════════════════════════════════════════════════════════════════════════════
+# #613 — the typed builder/validator tier, two-sided
+# (`.specify/613-builders-export.md` §4.1)
+#
+# FIXPP_TYPED_EXPECTED is decided by run_consumer_witness.cmake from the build's
+# effective FIXPP_INSTALL_TYPED_TIER after checking it against the build type (guards 0
+# and 1 there). Both branches add required targets in the driver, so neither can pass
+# by registering nothing.
+# ═════════════════════════════════════════════════════════════════════════════
+if(NOT DEFINED FIXPP_TYPED_EXPECTED OR NOT DEFINED FIXPP_CODEGEN_FIX_LATEST
+   OR "${FIXPP_TYPED_VERSIONS}" STREQUAL "")
+  message(FATAL_ERROR
+    "#613: FIXPP_TYPED_EXPECTED, FIXPP_CODEGEN_FIX_LATEST and FIXPP_TYPED_VERSIONS must be passed by the driver")
+endif()
+
+if(FIXPP_TYPED_EXPECTED)
+  # ── PRESENT: the imported targets of the expected pairs, linked BY NAME ──────
+  # FIXPP_TYPED_VERSIONS is the driver's expected version list (v42, v44 and v50sp2,
+  # plus vlatest iff FIXPP_CODEGEN_FIX_LATEST). No if(TARGET ...) filter and no
+  # fixpp::fixpp, so the by-name targets must carry their own closure.
+  set(_fixpp_613_typed_targets "")
+  foreach(_v IN LISTS FIXPP_TYPED_VERSIONS)
+    list(APPEND _fixpp_613_typed_targets fixpp::builders::${_v} fixpp::validators::${_v})
+  endforeach()
+
+  # Own include interface (D-5). fixpp::wire's install interface is the same
+  # directory, so a COMPILE cannot tell whether the typed target declares one itself;
+  # its own INTERFACE_INCLUDE_DIRECTORIES can.
+  file(REAL_PATH "${FIXPP_STAGE_PREFIX}/include" _fixpp_613_stage_include)
+  foreach(_t IN LISTS _fixpp_613_typed_targets)
+    if(NOT TARGET ${_t})
+      message(FATAL_ERROR "#613: ${_t} is not exported")
+    endif()
+    get_target_property(_inc ${_t} INTERFACE_INCLUDE_DIRECTORIES)
+    set(_inc_real "")
+    if(_inc)
+      foreach(_d IN LISTS _inc)
+        file(REAL_PATH "${_d}" _d_real)
+        list(APPEND _inc_real "${_d_real}")
+      endforeach()
+    endif()
+    if(NOT "${_inc_real}" STREQUAL "${_fixpp_613_stage_include}")
+      message(FATAL_ERROR
+        "#613 (D-5): ${_t}'s own INTERFACE_INCLUDE_DIRECTORIES is [${_inc}], expected exactly "
+        "the staged include root ${_fixpp_613_stage_include}")
+    endif()
+  endforeach()
+  if(NOT FIXPP_CODEGEN_FIX_LATEST)
+    foreach(_t fixpp::builders::vlatest fixpp::validators::vlatest)
+      if(TARGET ${_t})
+        message(FATAL_ERROR "#613: FIXPP_CODEGEN_FIX_LATEST is OFF but ${_t} is exported")
+      endif()
+    endforeach()
+  endif()
+
+  # C-1: built, linked and RUN by the driver.
+  add_executable(consumer_typed_witness consumer_typed_witness.cpp)
+  target_link_libraries(consumer_typed_witness PRIVATE ${_fixpp_613_typed_targets})
+  target_compile_definitions(consumer_typed_witness PRIVATE FIXPP_613_HAS_VLATEST=$<BOOL:${FIXPP_CODEGEN_FIX_LATEST}>)
+
+  # C-2a / C-2b: compile-only, header-only inline mode. SEPARATE targets (see each TU).
+  add_library(probe_typed_inline_small OBJECT probe_typed_inline_small.cpp)
+  target_link_libraries(probe_typed_inline_small PRIVATE fixpp::fixpp)
+  target_compile_definitions(probe_typed_inline_small PRIVATE
+    FIXPP_BUILDERS_HEADER_ONLY FIXPP_VALIDATORS_HEADER_ONLY)
+
+  add_library(probe_typed_inline_large OBJECT probe_typed_inline_large.cpp)
+  target_link_libraries(probe_typed_inline_large PRIVATE fixpp::fixpp)
+  target_compile_definitions(probe_typed_inline_large PRIVATE
+    FIXPP_BUILDERS_HEADER_ONLY_ListStatus FIXPP_613_HAS_VLATEST=$<BOOL:${FIXPP_CODEGEN_FIX_LATEST}>)
+else()
+  # ── ABSENT: no typed imported target, and no slim header through the umbrella ──
+  get_directory_property(_fixpp_613_imported IMPORTED_TARGETS)
+  if(NOT "fixpp::fixpp" IN_LIST _fixpp_613_imported)
+    # Positive control: a blind read would report no typed target.
+    message(FATAL_ERROR
+      "#613: the IMPORTED_TARGETS read after find_package(fixpp) does not list fixpp::fixpp, "
+      "so it cannot be trusted to list a typed target either: [${_fixpp_613_imported}]")
+  endif()
+  set(_fixpp_613_typed_found "")
+  foreach(_t IN LISTS _fixpp_613_imported)
+    if(_t MATCHES "^fixpp::(builders|validators)::")
+      list(APPEND _fixpp_613_typed_found "${_t}")
+    endif()
+  endforeach()
+  if(NOT _fixpp_613_typed_found STREQUAL "")
+    message(FATAL_ERROR
+      "#613: the typed tier is ABSENT here, but find_package(fixpp) imported: ${_fixpp_613_typed_found}")
+  endif()
+
+  # C-3: compile-only ❌ cell, 086's form.
+  add_library(probe_typed_absent OBJECT probe_typed_absent.cpp)
+  target_link_libraries(probe_typed_absent PRIVATE fixpp::fixpp)
+  target_compile_definitions(probe_typed_absent PRIVATE FIXPP_613_HAS_VLATEST=$<BOOL:${FIXPP_CODEGEN_FIX_LATEST}>)
+endif()

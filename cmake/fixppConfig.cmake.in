@@ -6,9 +6,15 @@
 #   find_package(fixpp REQUIRED)
 #   target_link_libraries(app PRIVATE fixpp::fixpp)
 #
-# That is the whole contract. Include paths, compile features, link ordering and
+# That is the umbrella's contract. Include paths, compile features, link ordering and
 # transitive third-party dependencies all arrive through the imported target; a
 # consumer never hand-adds an include directory and never restates a link line.
+#
+# The typed builder/validator tier (#613) is linked BY NAME, never through the
+# umbrella:
+#   target_link_libraries(app PRIVATE fixpp::builders::v44 fixpp::validators::v44)
+# present in Release packages, and in a self-built tree configured with
+# FIXPP_INSTALL_TYPED_TIER=ON (any configuration); v42, v44, v50sp2 and vlatest.
 #
 # PROVIDER-AGNOSTIC (084 FR-018e). fixpp is BUILT with Conan, but nothing about
 # that survives into this file: every fixpp target links only imported target

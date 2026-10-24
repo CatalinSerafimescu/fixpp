@@ -22,7 +22,7 @@
 //   * hand-written public headers   (installed by the install(DIRECTORY include/) rule)
 //   * a generated per-version typed header, <fixpp/v44/Messages.hpp>
 //     (installed by the separate generated-header rule, filtered by its
-//      seven-pattern exclusion set)
+//      exclusion rule)
 //
 // ⚠️ STATED LIMIT — do not cite this criterion for more than it can carry.
 // Both install rules write to the SAME ${CMAKE_INSTALL_INCLUDEDIR}, so a

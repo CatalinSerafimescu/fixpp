@@ -13,11 +13,21 @@
 #   ZIP  fixpp-<version>-windows-msvc-<config>/lib/...   (NO usr/ — Windows)
 #
 # Expected artifacts are derived BY MEMBER KIND, not from a flat "the exported
-# static libraries": of the 18 export members, 13 are STATIC (one archive each),
-# 3 are INTERFACE (no compiled output at all), 1 is an OBJECT library (loose
-# objects, no archive) and the umbrella is INTERFACE. A gate written from the flat
-# phrase either passes trivially ("at least one .a" — cannot catch a genuinely
-# missing archive) or fails spuriously (one archive per member — impossible).
+# static libraries": each STATIC export member contributes one archive, an
+# INTERFACE member (the umbrella among them) no compiled output at all, and the
+# OBJECT member loose objects and no archive. The membership itself depends on the
+# configuration (fixpp_log_otlp on the OTel SDK; the typed tier on
+# FIXPP_INSTALL_TYPED_TIER, #613), so the counts are read from the package below,
+# never written here. A gate written from the flat phrase either passes trivially
+# ("at least one .a" — cannot catch a genuinely missing archive) or fails
+# spuriously (one archive per member — impossible).
+#
+# #613 (`.specify/613-builders-export.md` §4.2) inputs, deliberately NOT in the
+# required-variable loop below: guard 0 refuses an undefined value and an empty one
+# alike, and naming them in the loop would make the loop, not guard 0, the line that
+# fires when run_package_contents_gate.cmake fails to forward one.
+#   FIXPP_TYPED_TIER_SETTING   — the raw FIXPP_INSTALL_TYPED_TIER cache value.
+#   FIXPP_TYPED_TIER_EFFECTIVE — FIXPP_INSTALL_TYPED_TIER_EFFECTIVE (ON|OFF).
 
 # Required for `IN_LIST`: a `cmake -P` script has no project(), so CMP0057 is
 # unset and the if(... IN_LIST ...) form is a hard error rather than a fallback.
@@ -29,6 +39,12 @@ foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR FIXPP_PROJECT_
     message(FATAL_ERROR "run_package_contents_witness.cmake: -D${_var}=... is required")
   endif()
 endforeach()
+
+# ── #613 guard 0 — both typed-tier inputs in domain, BEFORE cpack runs ───────
+include("${FIXPP_SOURCE_DIR}/cmake/FixppTypedTierRule.cmake")
+fixpp_typed_tier_check_domain("${FIXPP_TYPED_TIER_SETTING}" "${FIXPP_TYPED_TIER_EFFECTIVE}"
+  "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration read FIXPP_INSTALL_TYPED_TIER before the root CMakeLists.txt declared it."
+  "Empty means it was not forwarded by run_package_contents_gate.cmake, or the registration read FIXPP_INSTALL_TYPED_TIER_EFFECTIVE before the root CMakeLists.txt resolved it.")
 
 set(_pkgdir "${FIXPP_WORK_DIR}/packages")
 file(REMOVE_RECURSE "${FIXPP_WORK_DIR}")
@@ -114,6 +130,52 @@ if(NOT _missing_exts STREQUAL "" OR NOT _extra_exts STREQUAL "")
 endif()
 list(LENGTH _artifacts _n_artifacts)
 message(STATUS "T058: enumerating ${_n_artifacts} produced artifact(s)")
+
+# ── #613 — PRESENT/ABSENT, checked against the artifact's OWN name ───────────
+# PRESENT/ABSENT is the effective value passed by the build; the configuration
+# component of CPACK_PACKAGE_FILE_NAME (`fixpp-<version>-<platform>-<toolchain>-<config>`,
+# cmake/FixppPackaging.cmake T051) is the independent check on it, as the FR-019 PDB
+# block below uses the name. PARSED, not suffix-matched, and every artifact must agree.
+set(_typed_cfg "")
+foreach(_artifact IN LISTS _artifacts)
+  get_filename_component(_artifact_name "${_artifact}" NAME)
+  if(NOT _artifact_name MATCHES "^fixpp-[^-]+-[^-]+-[^-]+-([^-.]+)")
+    message(FATAL_ERROR
+      "#613: cannot parse the configuration component from artifact '${_artifact_name}' "
+      "(expected fixpp-<version>-<platform>-<toolchain>-<config>...)")
+  endif()
+  if(_typed_cfg STREQUAL "")
+    set(_typed_cfg "${CMAKE_MATCH_1}")
+  elseif(NOT _typed_cfg STREQUAL CMAKE_MATCH_1)
+    message(FATAL_ERROR
+      "#613: produced artifacts disagree on the configuration component "
+      "(${_typed_cfg} vs ${CMAKE_MATCH_1}): ${_artifacts}")
+  endif()
+endforeach()
+# Guard 2: a released configuration without the typed tier. The cpack-time guard
+# (cmake/FixppCPackTypedTierGuard.cmake) refuses to generate such a package, so this
+# is reachable only when that guard is gone; it is the independent second half.
+if(_typed_cfg STREQUAL "release" AND FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "OFF")
+  message(FATAL_ERROR
+    "#613 guard 2: a '${_typed_cfg}' artifact was produced with the typed tier OFF. Released "
+    "packages carry the typed builder/validator tier (owner rulings R-2/R-2a/R-2b).")
+endif()
+# Guard 1: the default re-derived from the component (cmake/FixppTypedTierRule.cmake,
+# the tests' copy of the D-0 rule), or an explicit setting normalised.
+fixpp_typed_tier_rederive("${FIXPP_TYPED_TIER_SETTING}" "${_typed_cfg}"
+  "the default for a '${_typed_cfg}' artifact" _typed_rederived _typed_rederived_from)
+if(NOT _typed_rederived STREQUAL FIXPP_TYPED_TIER_EFFECTIVE)
+  message(FATAL_ERROR
+    "#613 guard 1: FIXPP_INSTALL_TYPED_TIER=${FIXPP_TYPED_TIER_SETTING} resolved "
+    "${FIXPP_TYPED_TIER_EFFECTIVE}, but ${_typed_rederived_from} is ${_typed_rederived}.")
+endif()
+if(FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "ON")
+  set(_typed_outcome PRESENT)
+else()
+  set(_typed_outcome ABSENT)
+endif()
+message(STATUS "#613 typed tier: expected ${_typed_outcome} (setting=${FIXPP_TYPED_TIER_SETTING}, "
+               "effective=${FIXPP_TYPED_TIER_EFFECTIVE}, artifact configuration=${_typed_cfg})")
 
 # ── Extract one artifact, and DERIVE the expected archive count from it ──────
 # The expected count is read from the package's OWN exported declaration — the
@@ -411,6 +473,30 @@ endfunction()
 # completion. Asserted against _n_artifacts AFTER the loop — a per-artifact token
 # proves only that ONE artifact's block completed, and Linux processes DEB, RPM
 # and TGZ sequentially.
+# #613: the typed-tier expectations, computed once for every artifact below. The
+# version list is unconditional (sorted; see the per-artifact block), the children set
+# comes from cmake/FixppTypedTierRule.cmake, and, PRESENT only, the build tree's
+# generated files under the tier-ON rule (D-7: no *.cpp, no Manifest.txt) are globbed
+# once per version for the build-tree equality check.
+set(_expected_versions v42 v44 v50sp2 vlatest)
+fixpp_typed_tier_expected_children(${FIXPP_TYPED_TIER_EFFECTIVE} _expected_children)
+if(FIXPP_TYPED_TIER_EFFECTIVE)
+  foreach(_ver IN LISTS _expected_versions)
+    set(_gen_root "${FIXPP_MAIN_BUILD_DIR}/_codegen/include/fixpp/${_ver}")
+    if(NOT IS_DIRECTORY "${_gen_root}")
+      message(FATAL_ERROR "#613 equality: no generated tree at ${_gen_root}")
+    endif()
+    file(GLOB_RECURSE _gen LIST_DIRECTORIES false RELATIVE "${_gen_root}" "${_gen_root}/*")
+    set(_gen_want_${_ver} "")
+    foreach(_g IN LISTS _gen)
+      get_filename_component(_gn "${_g}" NAME)
+      if(NOT _g MATCHES "\\.cpp$" AND NOT _gn STREQUAL "Manifest.txt")
+        list(APPEND _gen_want_${_ver} "${_g}")
+      endif()
+    endforeach()
+  endforeach()
+endif()
+
 set(_086_artifacts_done 0)
 foreach(_artifact IN LISTS _artifacts)
   get_filename_component(_aname "${_artifact}" NAME)
@@ -639,8 +725,9 @@ foreach(_artifact IN LISTS _artifacts)
       "T058/SC-013: ${_aname} is MISSING required content:\n  ${_missing_pretty}")
   endif()
 
-  # By KIND: 13 of the 18 export members are STATIC and each must contribute
-  # exactly one archive. Asserted as an exact count, not ">= 1".
+  # By KIND: each STATIC export member must contribute exactly one archive, and
+  # the STATIC count is the one read from the shipped fixppTargets.cmake above.
+  # Asserted as an exact count, not ">= 1".
   if(NOT _n_archives EQUAL FIXPP_EXPECTED_ARCHIVES)
     message(FATAL_ERROR
       "T058: ${_aname} carries ${_n_archives} fixpp archives, expected exactly "
@@ -802,16 +889,22 @@ foreach(_artifact IN LISTS _artifacts)
   endif()
   math(EXPR _086_artifacts_done "${_086_artifacts_done} + 1")
 
-  # MUST BE ABSENT — SET EQUALITY over the exact 7-pattern denylist, never a
-  # subset. A check written from the 078 five-pattern tail would pass a package
-  # leaking the build-tree-private reify bridge (_dispatch/) or the FIXT.1.1 tree
-  # (vt11/) while looking perfectly coherent.
+  # MUST BE ABSENT — every alternative the install rule's exclusions stand for,
+  # never a subset. A check written from the typed-layout alternatives alone would
+  # pass a package leaking the build-tree-private reify bridge (_dispatch/) or the
+  # FIXT.1.1 tree (vt11/) while looking perfectly coherent. #613: a translation unit
+  # never ships; the typed layout and the typed archives are absent only where the
+  # typed tier is (ABSENT).
   set(_leaked "")
   foreach(_f IN LISTS _files)
     if(_f MATCHES "^include/fixpp/(_dispatch|vt11)(/|$)"
-       OR _f MATCHES "^include/fixpp/[^/]+/(messages|groups|validators)(/|$)"
-       OR _f MATCHES "^include/fixpp/[^/]+/(all|groups)\\.hpp$"
+       OR _f MATCHES "^include/.*\\.cpp$"
        OR _f MATCHES "^include/fixpp/(core|transport)/test(/|$)")
+      list(APPEND _leaked "${_f}")
+    elseif(NOT FIXPP_TYPED_TIER_EFFECTIVE
+           AND (_f MATCHES "^include/fixpp/[^/]+/(messages|groups|validators)(/|$)"
+                OR _f MATCHES "^include/fixpp/[^/]+/(all|groups)\\.hpp$"
+                OR _f MATCHES "^lib/.*fixpp_(builders|validators)_"))
       list(APPEND _leaked "${_f}")
     endif()
   endforeach()
@@ -824,39 +917,53 @@ foreach(_artifact IN LISTS _artifacts)
 
   # ── The generated-header tree is an ALLOWLIST, not just a denylist ─────────
   # The install rule is allowlist-by-EXCLUSION: everything under the codegen
-  # include root ships unless one of seven patterns removes it. So a future
-  # emitter adding a NEW artifact kind is installed BY DEFAULT and every
-  # denylist-shaped check above passes over it — it matches none of the seven.
-  # That is the silent leak T059 exists to prove catchable, and only an exact-set
-  # assertion over each version directory's immediate children can catch it.
-  set(_expected_generated "Fields.hpp;Messages.hpp;NormativeReferences.md;Reify.hpp;Validator.hpp")
+  # include root ships unless a pattern removes it. So a future emitter adding a
+  # NEW artifact kind is installed BY DEFAULT and every denylist-shaped check above
+  # passes over it. That is the silent leak T059 exists to prove catchable, and only
+  # exact-set assertions can catch it.
+  #
+  # #613 — three checks, in this order (`.specify/613-builders-export.md` §4.2), each
+  # a FATAL, so the first that fails is the one that prints:
+  #   1. the shipped versions are an UNCONDITIONAL expected list: R-2 rules all four
+  #      into every package and D-6 makes a FIX_LATEST=OFF tree unpackageable, so
+  #      keying the list on FIXPP_CODEGEN_FIX_LATEST would track the regression;
+  #   2. each version's immediate children (the first path component, deduplicated,
+  #      so a listed directory entry and a file below it give the same component);
+  #   3. PRESENT only: a schema allowlist over messages/ groups/ validators/, written
+  #      from 078 contracts/include-layout.md, and then build-tree equality.
+  # One pass over the listing: the versions seen, and per version its immediate
+  # children and its entries relative to include/fixpp/<ver>/.
   set(_versions_seen "")
+  foreach(_ver IN LISTS _expected_versions)
+    set(_children_${_ver} "")
+    set(_entries_${_ver} "")
+  endforeach()
   foreach(_f IN LISTS _files)
-    if(_f MATCHES "^include/fixpp/(v[A-Za-z0-9]+)/([^/]+)$")
-      list(APPEND _versions_seen "${CMAKE_MATCH_1}")
+    if(_f MATCHES "^include/fixpp/(v[A-Za-z0-9]+)/(.+)$")
+      set(_v "${CMAKE_MATCH_1}")
+      set(_rest "${CMAKE_MATCH_2}")
+      list(APPEND _versions_seen "${_v}")
+      string(REGEX REPLACE "/.*$" "" _first "${_rest}")
+      list(APPEND _children_${_v} "${_first}")
+      list(APPEND _entries_${_v} "${_rest}")
     endif()
   endforeach()
   list(REMOVE_DUPLICATES _versions_seen)
-  if(_versions_seen STREQUAL "")
+  list(SORT _versions_seen)
+  if(NOT "${_versions_seen}" STREQUAL "${_expected_versions}")
     message(FATAL_ERROR
-      "T058: ${_aname} ships no generated per-version header directory at all — "
-      "the FR-011a install rule produced nothing and every check over it is vacuous.")
+      "T058/#613: ${_aname} ships generated version directories [${_versions_seen}], expected "
+      "exactly [${_expected_versions}]. Every package carries all four versions (owner ruling R-2).")
   endif()
-  foreach(_ver IN LISTS _versions_seen)
-    set(_actual "")
-    foreach(_f IN LISTS _files)
-      if(_f MATCHES "^include/fixpp/${_ver}/([^/]+)$")
-        list(APPEND _actual "${CMAKE_MATCH_1}")
-      endif()
-    endforeach()
+
+  foreach(_ver IN LISTS _expected_versions)
+    set(_actual ${_children_${_ver}})
     list(REMOVE_DUPLICATES _actual)
     list(SORT _actual)
-    set(_want ${_expected_generated})
-    list(SORT _want)
-    if(NOT "${_actual}" STREQUAL "${_want}")
+    if(NOT "${_actual}" STREQUAL "${_expected_children}")
       message(FATAL_ERROR
-        "T058/FR-013: ${_aname} generated tree for ${_ver} is not the expected exact set.\n"
-        "  expected: ${_want}\n"
+        "T058/FR-013/#613: ${_aname} generated tree for ${_ver} is not the expected exact ${_typed_outcome} set.\n"
+        "  expected: ${_expected_children}\n"
         "  actual:   ${_actual}\n"
         "An ADDED entry is a new emitted artifact kind leaking into the package "
         "(the install rule ships anything not explicitly excluded); a MISSING one "
@@ -864,6 +971,102 @@ foreach(_artifact IN LISTS _artifacts)
         "together with a deliberate decision about what ships.")
     endif()
   endforeach()
+
+  if(FIXPP_TYPED_TIER_EFFECTIVE)
+    foreach(_ver IN LISTS _expected_versions)
+      # The version's shipped FILES, relative to include/fixpp/<ver>/. A listing may
+      # carry directory entries; an entry that is the parent of another entry is a
+      # directory and is dropped.
+      set(_entries ${_entries_${_ver}})
+      list(REMOVE_DUPLICATES _entries)
+      set(_parents "")
+      foreach(_e IN LISTS _entries)
+        get_filename_component(_d "${_e}" DIRECTORY)
+        while(NOT _d STREQUAL "")
+          list(APPEND _parents "${_d}")
+          get_filename_component(_d "${_d}" DIRECTORY)
+        endwhile()
+      endforeach()
+      list(REMOVE_DUPLICATES _parents)
+      set(_shipped ${_entries})
+      if(_parents)
+        list(REMOVE_ITEM _shipped ${_parents})
+      endif()
+
+      # Schema allowlist (catches a new emitted kind): messages/ holds only
+      # <Msg>.hpp, <Msg>.builder.inl and <Msg>.validator.inl, each <Msg>.hpp with
+      # both .inl siblings and vice versa; groups/ holds only [A-Za-z0-9_]+.hpp;
+      # validators/ holds exactly traits.hpp. Any other file fails, by name.
+      set(_schema_bad "")
+      set(_msg_hpp "")
+      set(_msg_binl "")
+      set(_msg_vinl "")
+      set(_have_traits FALSE)
+      foreach(_e IN LISTS _shipped)
+        if(_e MATCHES "^messages/([A-Za-z0-9_]+)\\.hpp$")
+          list(APPEND _msg_hpp "${CMAKE_MATCH_1}")
+        elseif(_e MATCHES "^messages/([A-Za-z0-9_]+)\\.builder\\.inl$")
+          list(APPEND _msg_binl "${CMAKE_MATCH_1}")
+        elseif(_e MATCHES "^messages/([A-Za-z0-9_]+)\\.validator\\.inl$")
+          list(APPEND _msg_vinl "${CMAKE_MATCH_1}")
+        elseif(_e MATCHES "^groups/[A-Za-z0-9_]+\\.hpp$")
+        elseif(_e STREQUAL "validators/traits.hpp")
+          set(_have_traits TRUE)
+        elseif(_e MATCHES "^(messages|groups|validators)/")
+          list(APPEND _schema_bad "include/fixpp/${_ver}/${_e}")
+        endif()
+      endforeach()
+      if(NOT _schema_bad STREQUAL "")
+        string(REPLACE ";" "\n  " _pretty "${_schema_bad}")
+        message(FATAL_ERROR
+          "#613 schema: ${_aname} ships file(s) outside the 078 typed file set:\n  ${_pretty}")
+      endif()
+      if(NOT _have_traits)
+        message(FATAL_ERROR "#613 schema: ${_aname} ships no include/fixpp/${_ver}/validators/traits.hpp")
+      endif()
+      list(SORT _msg_hpp)
+      list(SORT _msg_binl)
+      list(SORT _msg_vinl)
+      if(_msg_hpp STREQUAL "" OR NOT "${_msg_hpp}" STREQUAL "${_msg_binl}"
+         OR NOT "${_msg_hpp}" STREQUAL "${_msg_vinl}")
+        set(_unpaired ${_msg_hpp} ${_msg_binl} ${_msg_vinl})
+        list(REMOVE_DUPLICATES _unpaired)
+        set(_unpaired_list "")
+        foreach(_m IN LISTS _unpaired)
+          if(NOT _m IN_LIST _msg_hpp OR NOT _m IN_LIST _msg_binl OR NOT _m IN_LIST _msg_vinl)
+            list(APPEND _unpaired_list "${_m}")
+          endif()
+        endforeach()
+        message(FATAL_ERROR
+          "#613 schema: ${_aname} include/fixpp/${_ver}/messages/ does not pair every <Msg>.hpp "
+          "with its .builder.inl and .validator.inl (or holds none). Unpaired: ${_unpaired_list}")
+      endif()
+
+      # Build-tree equality (install fidelity): the shipped files must equal the
+      # tier-ON rule (D-7) applied to this build's generated tree. It catches a
+      # dropped file and a leaked .cpp; it CANNOT catch a new emitted kind, because
+      # its expectation is the same denylist as the rule; the schema check above
+      # exists for that.
+      set(_want ${_gen_want_${_ver}})
+      set(_dropped ${_want})
+      if(_shipped)
+        list(REMOVE_ITEM _dropped ${_shipped})
+      endif()
+      set(_extra ${_shipped})
+      if(_want)
+        list(REMOVE_ITEM _extra ${_want})
+      endif()
+      if(NOT _dropped STREQUAL "" OR NOT _extra STREQUAL "")
+        string(REPLACE ";" "\n    " _d_pretty "${_dropped}")
+        string(REPLACE ";" "\n    " _x_pretty "${_extra}")
+        message(FATAL_ERROR
+          "#613 equality: ${_aname} include/fixpp/${_ver}/ differs from the build tree's "
+          "generated tree under the tier-ON rule.\n"
+          "  in the build tree, not shipped:\n    ${_d_pretty}\n"
+          "  shipped, not in the build tree:\n    ${_x_pretty}")
+      endif()
+    endforeach()
+  endif()
 
   message(STATUS "T058: ${_aname} OK (${_nf} entries, ${_n_archives} archives, "
                  "generated tree exact for: ${_versions_seen})")
