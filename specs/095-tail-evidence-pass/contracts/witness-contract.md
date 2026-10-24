@@ -5,14 +5,17 @@
 iterates the registered tests of suite `TailRows095` through `::testing::UnitTest::GetInstance()`
 (not the tests that ran), maps each `<Name>` to its MsgType through the dictionary's
 `<message name=… msgtype=…>`, and requires multiplicity 1 for each MsgType of the TU's literal tail
-table, no unmapped name and no extra MsgType (FR-004a). It is therefore independent of run order,
+table, the name's row equal to the table's row, no unmapped name and no extra MsgType (FR-004a). It
+collects every finding before it asserts. It is therefore independent of run order,
 `--gtest_filter` and `--gtest_shuffle`. Each witness also asserts that its parsed tag 35 equals the
 MsgType its own `current_test_info()` name maps to.
 
 **W2 — build.** Args are populated from the literals of the witness's **intent list** (data-model §C)
 and built with `fixpp::v50sp2::build_<Name>` into a caller buffer; the build MUST succeed. Every
 closure-required member is set; every required group has ≥ 2 instances, and each instance sets the
-group's delimiter (first) field and its required members; at least two fields in total.
+group's delimiter and its required members; at least two fields in total. The delimiter is the
+group's first emitted tag (data-model §B). When it is a nested group's count tag (CC's `NoAsgnReqs`),
+each instance carries that nested group with exactly one instance, which sets its own delimiter.
 
 **W3 — independent parse.** The body is framed with BeginString `FIX.5.0SP2` and parsed by
 `fixpp::wire::Parser<Index>` over a `table_view` loaded from `FIX50SP2.xml` by `XmlLoader`. No
@@ -21,43 +24,67 @@ builder-side table is consulted.
 **W4 — readback, both directions.** The witness enumerates every parsed body entry
 (`OffsetTable::entries()`), removes from **both** sides the tags W3's framing writes and tag 35
 (checked by W1), assigns each remaining entry to message level
-or to the `group_slices(count_tag)` instance that contains it, and forms its path (`<tag>` or
-`<count_tag>[<k>].<tag>`). It compares that multiset with the intent list exactly: a path missing
+or to the `group_slices(count_tag)` instance of the outermost required group whose extent contains
+it, and forms its path (`<tag>` or `<count_tag>[<k>].<tag>`; a delimiter's nested group's entries,
+its count included, take paths in the outer instance, e.g. `1499[<k>].453`, `1499[<k>].448`). It
+compares that multiset with the intent list exactly: a path missing
 from the frame, a path in the frame that was not intended, and a value mismatch each fail, naming the
 path. Count fields are intent entries. Instance order is checked by the per-instance literals
 (`_i<k>`). It also asserts that the intent list holds at least two entries.
 
-**W5 — required presence.** `required_members_missing(mv)` (data-model §B) takes the MsgType from the
-parsed frame's tag 35, returns the closure-required members it did not find, and the witness asserts
-that list is empty, printing it otherwise.
+**W5 — required presence.** `required_members_missing(...)` (data-model §B) takes the MsgType from
+the parsed frame's tag 35 and reads W4's enumeration, so message-level and per-instance entries are
+attributed by extent, never by first occurrence. It returns the closure-required members it did not
+find, each with its path, and the witness asserts that list is empty, printing it otherwise.
 
-**W6 — non-vacuity (recorded at verify with command and output):**
-- **field-leg golden:** for every tail MsgType and for 35=E, the walk's required message-level field
-  set equals the row of `tools/quickfix_required_golden/golden.csv` (measured from real QuickFIX-cpp
-  1.16.0), read from the file at test time and never copied into the TU;
-- **deficient frames:** three 35=E frames (literal bytes or the typed builder) — one with a single
-  `NoOrders` instance, one whose second instance lacks `ClOrdID`, one with no `NoOrders` — and
-  `required_members_missing` reports exactly each frame's deficiency;
-- **nested fail-loud:** the walk's status for 35=i (MassQuote) is the nested-required-group failure;
-  the walk returns a status per MsgType, so this arm does not break `SetUpTestSuite` for the 23;
-- **Mutant A** (in the A-027 TradingSessionList witness, delete the `trading_sessions` assignment
-  **and** its intent entries) → RED in W5, with the recorded failure W5's message;
-- **Mutant B** (in the A-018 witness, delete the `ExecAckStatus(1036)` assignment **and** its intent
-  entry) → RED in W5, recorded likewise;
-- **Mutant C** (in the walk, ignore the only-child inheritance) → the deficient-frame assertions on
-  `NoOrders` go RED, and Mutant A, re-applied on top, no longer goes RED in W5 — the rule, not a
-  list, decides;
-- **Mutant D** (delete one intent entry, setter kept) → RED in W4 ("parsed, not intended");
-- **Mutant E** (cut the BK witness to one field: delete the other setters **and** their intent
-  entries) → RED in W4's size assertion, with the recorded failure that assertion's message;
-- **Mutant F** (duplicate one witness under a second name) → RED in W1's census;
-- a literal changed after the build in one witness → RED in W4.
-Mutants are scratch edits, reverted; the reverted tree is diffed clean before commit.
+**W6 — non-vacuity: one arm per output (recorded at verify with the command and the message that
+fired).** Every status the walk can return, every direction of W4's comparator, every leg of W5's
+helper and every census finding has a row. A committed known positive re-runs on every build; a
+mutant is a scratch edit, reverted, and the reverted tree is diffed clean before commit. Where no real
+dictionary can drive an output, the arm is an inline synthetic dictionary (`load_string` literal) fed
+to the same walk entry point (data-model §B).
+
+| Output | Arm | Expected RED / assertion |
+|---|---|---|
+| walk `ok`, field leg | `FieldLegMatchesQuickFixCppGolden`: for every tail MsgType and 35=E, the walk's message-level field set equals the row of `tools/quickfix_required_golden/golden.csv` (measured QuickFIX-cpp 1.16.0 output), read from the file at test time and never copied into the TU | a mismatch names the MsgType and both sets |
+| walk `ok`, group leg (only-child inheritance) | **Mutant C**: the walk ignores the only-child inheritance | the deficient-frame assertions on `NoOrders`(73) go RED; Mutant A, re-applied on top, no longer goes RED in W5 (the rule, not a list, decides) |
+| walk `nested_required_group` (required group in an instance) | `NestedRequiredGroupFailsLoud_MassQuote`: the status for 35=i; the walk returns a status per MsgType, so this does not break `SetUpTestSuite` for the 23 | mutant: the detector returns `ok` → RED naming 35=i |
+| walk `nested_required_group` (delimiter chain) | `WalkStatusesOnSyntheticDictionaries`, document S2: a message requiring a group whose first emitted element is a group whose own first emitted element is again a group | the status and the inner group's name; mutant: the chain check disabled → RED |
+| walk `group_among_siblings` | `WalkStatusesOnSyntheticDictionaries`, document S1: a message with a required component holding one field and one group | the status and the component's name; mutant: the detector disabled → RED |
+| W4 "parsed, not intended" | **Mutant D**: delete one intent entry, setter kept | RED in W4 naming the path |
+| W4 "intended, not parsed" | **Mutant H**: in the A-018 witness, delete the setter of an optional field (e.g. CumQty(14)) and keep its intent entry | RED in W4 naming the path; W5 stays green, since the field is optional |
+| W4 value mismatch | a literal changed after the build in one witness | RED in W4 naming the path |
+| W4 intent-size assertion | **Mutant E**: cut the BK witness to one field (delete the other setters **and** their intent entries) | RED in the size assertion, with that assertion's message |
+| W5 message-level field | **Mutant B**: in the A-018 witness, delete the `ExecAckStatus(1036)` setter **and** its intent entry | RED in W5 (not W4), naming `1036` |
+| W5 group absent | **Mutant A**: in the A-027 TradingSessionList witness, delete the `trading_sessions` assignment **and** its intent entries; and frame E-absent (35=E without `NoOrders`) | RED in W5 naming the group; the frame's exact list |
+| W5 count below 2 | frame E-one: 35=E with one `NoOrders` instance | the exact list |
+| W5 instance count ≠ count value | frame E-short: literal bytes, `73=2` followed by one complete instance | the exact list |
+| W5 instance member | frame E-member: two instances, the second lacking `ListSeqNo`(67) | the exact list (`73[1].67`) |
+| W5 instance delimiter | frame CC-nodelim: 35=CC with `1499=2`, instance 0 carrying only its `NoRelatedSym` group and no `NoPartyIDs` | the exact list (`1499[0].453`) |
+| W5 delimiter's nested group | frame CC-nested: instance 0 carries `453=1` and a PartyIDSource(447) but no PartyID(448) | the exact list (`1499[0].448`) |
+| census multiplicity 0 | **Mutant G**: delete one witness (e.g. `TailRows095.C003_AccountSummaryReport`) | RED naming CQ with multiplicity 0 |
+| census multiplicity > 1, row mismatch | **Mutant F**: duplicate the A-018 witness as `TailRows095.A024_ExecutionAck` (A-024 is BN's duplicate catalogue row) | RED naming BN with multiplicity 2 **and** the row mismatch (A024 against A-018); gtest names are unique in a suite, so a second name always carries another row |
+| census unmapped name | **Mutant I**: add `TailRows095.A018_ExecutionAcknowledgement` (the catalogue title, which is no dictionary message name) | RED naming the unmapped name |
+| census extra MsgType | **Mutant J**: add `TailRows095.A001_NewOrderSingle` | RED naming 35=D as extra |
+| W1 per-witness tag 35 | **Mutant K**: the name → MsgType lookup returns, for one generated name, another tail MsgType (scratch) | RED in that witness's tag-35 assertion, naming both MsgTypes (the census goes RED too) |
+
+All frames (E-*, CC-*) live in `KnownPositive_DeficientFrames` and assert the exact list
+`required_members_missing` returns. They are literal bytes or typed-builder output. The implementer
+confirms in P0 that the parser accepts each frame. If it refuses one, the leg that frame serves cannot
+be reached from a parsed frame: the implementer stops and reports, and a parse error is never
+recorded as that leg's RED. Mutants F, G, I and J may share one rebuild, because the census reports
+every finding; the record must show each one's message.
 
 **W7 — no result recorded.** No comment, artifact or assertion literal states how many
 closure-required members/groups any message has, or lists them (FR-005). **One narrow exception:**
-the W6 known-positive assertions on 35=E (`NoOrders`, `ClOrdID`) and on 35=i (the nested
-fail-loud) — they re-run on every build, so they cannot rot silently. The TU header records the rule and the recipe.
+the known-positive assertions, which re-run on every invocation and so cannot rot silently:
+- the deficient-frame assertions on 35=E (`NoOrders`(73), `ClOrdID`(11), `ListSeqNo`(67)) and on
+  35=CC (`NoAsgnReqs`(1499), `NoPartyIDs`(453), `PartyID`(448), `PartyIDSource`(447), `NoRelatedSym`);
+- the 35=i nested fail-loud;
+- the synthetic dictionaries S1 and S2 and their expected statuses;
+- the selection check's BN-agrees and BM-differs assertions (research R-7).
+
+The TU header records the rule and the recipe.
 
 **W8 — existing coverage.** `test_077_allversions_builder_roundtrip.cpp` is byte-unchanged; its
 tests still pass.

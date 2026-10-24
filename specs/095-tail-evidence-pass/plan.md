@@ -7,6 +7,7 @@
 ## Gate A
 
 - Round 1 applied 2026-10-24: Codex P1=4 P2=7 P3=1; Opus post-judging P1=1 P2=9 P3=17; rewrite addresses root causes A (witness completeness checked from the frame: intent list, bidirectional readback, returned missing-member list, fail-loud walk, run-order-free census, non-circular known positives), B (FR-014's selection as a committed check over the QFJ file the peer loads), C (the live-cell harness contract, L0), D (traceability and citations), plus the owner ruling on N-3 (N-002 narrowed to 5.0SP2, follow-up issue for the v44 exclusion). Reviews: research/reviews/codex_095-tail-evidence-pass_gate_a_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_adversarial_review.md.
+- Round 2 applied 2026-10-24: Codex P1=1 P2=4 P3=1; Opus post-judging P1=1 P2=5 P3=7; rewrite addresses root causes R1 (an arm for every walk status, comparator direction, presence leg and census finding: contracts W6's table, the synthetic dictionaries, Mutants G–K, and the CC delimiter rule), R2 (the selection check hard-asserts only BN, with BM as its known positive), R3 (via the owner ruling) and R4 (records: the extended §VI.3 disposition, the coverage-index entries listed verbatim, quickstart §7 and the `cmp`, fixpp#625 named, counts deleted, data-model §C's enum rule, the YAML rows specified); owner ruling "keep #462" applied. Reviews: research/reviews/codex_095-tail-evidence-pass_gate_a_2_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_2_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -17,6 +18,8 @@ replaced; the reason is the one the bundle acts on.
   form already sits on catalogue rows that are `done` (A-001); no lint in `tools/`, `ci/` or
   `.github/` checks it; `[const §VI.6]`'s closure list (a)–(d) does not include re-canonicalising
   Spec refs. Pre-existing debt, not 095's obligation. spec Normative References discloses it.
+  *(Reworded at round 2: the form is a recorded `[const §VI.3]` disposition that 095 extends, not
+  debt; Round 2 — disagreements, Codex #1.)*
 - **Codex #1c (Verified cells must restate green tests + Codex pass + interop) — not applied.** The
   catalogue header's "Verified requires …" is a precondition for writing the cell, not its template
   (A-001's cell does not restate Codex pass); `[const §VI.6](c)` is met by Gate B on the PR.
@@ -37,8 +40,8 @@ replaced; the reason is the one the bundle acts on.
 - **Codex #10's fix (promotion withheld "until the gitlink lands", reconciliation "accepts" the
   cells) — replaced.** The cells are never promoted: they are not 089 conformance or
   validator-positive-control runs and have no ledger kind; their evidence is the `cell_results.yaml`
-  row. Before the gitlink bump, `select_cells` raises on them (fixpp#431 rule) rather than accepting
-  them (the live-cell contract's clause L0).
+  row. *(Superseded at round 2: the registration lands with the gitlink bump, so no window exists in
+  which `select_cells` sees a registered-but-undeclared cell; the live-cell contract's clause L0.)*
 - **Codex #11's "workflow-path trigger assertion" — not applied.** The path is corrected; the
   `publish-counterparties.yml` `paths:` list was read and names both `tools/run_interop_cell.py` and
   `tools/interop_capability_minimums.yaml`, and a missing capability entry fails closed. Opus
@@ -48,6 +51,25 @@ replaced; the reason is the one the bundle acts on.
   with a zero-match filter, it prints the usage text and exits 0 (as
   `specs/085-fold-flat-cap-loop/quickstart.md` already records). The quickstart uses Opus's other
   option, an explicit count assertion that stops the block, plus `ctest --no-tests=error`.
+
+### Round 2 — disagreements
+
+- **Codex #1, the canonicalisation half (section-level `[DocAbbrev §X.Y.Z]` entries in the coverage
+  index, catalogue Spec refs rewritten to them) — not applied.** The coverage index indexes the
+  application layer "at message granularity (one row per MsgType)" and records message-level refs as
+  a deliberate `[const §VI.3]` disposition (067's "ART VI §3 DISPOSITION" comment, which 069's spec
+  extended). So it has no section-level entries to copy, and adding them would re-index the whole
+  application layer against a recorded choice. `[const §VI.6]`'s (a)–(d) do not include
+  re-canonicalisation. The residual Opus judged a 095 defect is applied (spec Normative References):
+  095 extends the disposition to its 12 rows instead of calling the form "debt", lists the
+  coverage-index entries, and quotes the FIXT entries.
+- **Codex #3's fixture for the tag-at-two-levels detector — replaced** by deleting the detector, the
+  alternative Opus accepted. W4 and W5 share one enumeration that attributes by extent, so no check
+  uses the first-occurrence lookup the detector guarded. The group-among-siblings detector keeps its
+  synthetic fixture as Codex asked.
+- **Codex #5's committed records checker — replaced** by the scripted quickstart §7 (Opus
+  downgraded the finding to P3). The edit is a one-shot table change, Gate B reads the catalogue
+  diff, and 067/069 closed more rows without a checker. §7 still has its own RED run, before P7.
 
 ## Summary
 
@@ -67,9 +89,10 @@ It adds **tests and records only** and changes no production code (FR-020):
      is derived at runtime from a pugixml walk of the dictionary under the rule in research R-1, so
      it is not taken from the witness's own list.
 
-   A census over the registered tests proves exactly one witness per MsgType. The known positives
-   are measured QuickFIX-cpp output (`golden.csv`), deficient 35=E frames, and the walk's fail-loud
-   on 35=i (research R-3).
+   A census over the registered tests proves exactly one witness per MsgType. Every output of the
+   walk, the comparator, the presence check and the census has an arm (contracts W6's table): measured
+   QuickFIX-cpp output (`golden.csv`), deficient 35=E and 35=CC frames, the fail-loud on 35=i, inline
+   synthetic dictionaries, and scratch mutants (research R-3).
 2. **US2, N-002 and N-003.** Two named registry pins go in the existing
    `codegen_077_v50sp2_builder_completeness_test` executable, and one routing cell goes in
    `session_pure_tests`. The cell shows that an inbound BE and BW reach `from_app`, each leg with
@@ -81,11 +104,14 @@ It adds **tests and records only** and changes no production code (FR-020):
    check over the vendored file and the QuickFIX/J file the peer loads (research R-7).
    - Parent harness: register the cells with the fields the live-cell contract's clause L0 names,
      and fix two blockers (research R-9).
-   - The parent harness change is pushed first, then the image is republished, then the fixpp PR
-     is pushed (R-10).
+   - Ordering (R-10; owner ruling "Keep #462: register after merge."): the harness change stays
+     uncommitted in the parent working copy until the fixpp PR merges. Then it lands in one parent
+     commit with the gitlink bump, the image republishes, and `interop-live` is dispatched on fixpp
+     `main`. Before the merge, the live evidence is local.
 4. **US4, records.** The 12 rows move to `done`. A-018, A-029, A-030 and N-002 narrow to 5.0SP2
-   (owner ruling 2026-10-24 for N-002). The existing coverage-index rows name their witnesses, and
-   the B&L delta is added. The orchestrator files the follow-up issue for the v44 BE/BF exclusion.
+   (owner ruling 2026-10-24 for N-002). The existing coverage-index rows name their witnesses, a
+   one-line `[const §VI.3]` disposition extends 067's to the 12 rows, and the B&L delta is added.
+   The v44 BE/BF exclusion is fixpp#625.
 
 ## Technical Context
 
@@ -125,10 +151,11 @@ It adds **tests and records only** and changes no production code (FR-020):
 - The main checkout's `build/linux-clang-debug` is on E:. Read `df -h /mnt/e` first.
 
 **Scale/Scope**:
-- 23 witnesses, the census and three known-positive tests, one verify-time selection check;
+- 23 witnesses, the census, the known-positive tests of contracts W6, one verify-time selection
+  check;
 - 2 pins and 1 routing cell;
 - 2 live cells;
-- parent harness: about 6 files;
+- parent harness: the files of the parent table under Files changed;
 - 12 catalogue rows.
 
 ## Constitution Check
@@ -140,25 +167,24 @@ It adds **tests and records only** and changes no production code (FR-020):
 | §I.3 (tag gate) | yes | 12 rows go `backlog` → `done`. Re-derive the gate's backlog count before and after from `spec/feature-catalogue.md` (SC-004). |
 | §VI.6 (closing a `done` row) | yes | (a) 095 is the `/specify` artifact. (b) Every row's witnesses run green at verify, and their RED arms are recorded. (c) Codex Gate B runs. (d) Gate A runs on this bundle. |
 | §VI.4 (coverage-index) | yes | Each tail MsgType's existing row in `spec/coverage-index.md` names its witness in its gap-note column; no new row (FR-019). No new OFFICIAL row, so no new entry is owed. |
-| §VI.5 (Normative References) | yes | spec.md `## Normative References`, added at Gate A round 1. |
-| §VI.2 (canonical Spec ref) | no change | The 12 rows' Spec refs are left as they stand; re-canonicalising them is pre-existing debt (Gate A round 1 disagreement on Codex #1b). |
-| §VI.6(b) (verifying tests) | yes | Each row's Tests cell names test IDs that exist; verify greps every cited ID against `ctest -N` / `--gtest_list_tests`. |
+| §VI.5 (Normative References) | yes | spec.md `## Normative References` lists the exact coverage-index entries: the 23 MsgType rows, grouped by their "Application Messages — …" heading, and the FIXT entries, quoted. |
+| §VI.2 / §VI.3 (Spec ref form) | yes | The 12 rows keep message-level refs under the `[const §VI.3]` disposition the coverage index records (067's "ART VI §3 DISPOSITION" comment, extended by 069). 095 extends it to its 12 rows: P7 adds a one-line disposition beside 067's comment, and quickstart §7 checks it. No Spec-ref cell changes (Gate A round 2 disagreement on Codex #1). |
+| §VI.6(b) (verifying tests) | yes | Each row's Tests cell names test IDs that exist. Quickstart §7 resolves every cited gtest name against `--gtest_list_tests` of its own binary and the live-cell IDs against the harness `CELLS` registry, and checks Status, version cells and coverage-index gap notes; its RED run is recorded before P7. |
 | §VII.8 (grouped tests; `ctest -L`) | yes | No new ctest entry. The witnesses, census and known positives join `test_077_allversions_builder_roundtrip`, a standalone exact-set-gate target (its census reads its own binary's registry). The pins join `codegen_077_v50sp2_builder_completeness_test`, a standalone exact-set completeness gate. The routing cell joins the grouped bucket `session_pure_tests` (isolation-safe). The live cell joins `interop_hp_fixt50sp2_logon_hb_logout_test`, a live harness-selected target. Each gains `set_property(TEST … APPEND PROPERTY LABELS 095)`; verify selects with `ctest -L 095 --no-tests=error` against `expected-ctest-095.txt`. |
 | §IX.1 (coverage) | n/a | No library line added. The verify record states it per module. |
 | §IX.4 (static analysis) | yes, on test code | clang-format on the new TUs. clang-tidy follows the repo config for `tests/`. |
 | §VIII.3 (bench with a perf change) | n/a | No library code change. |
 | §X.7 / C-ABI | n/a | No C-ABI change. |
 | §XII.7 (fail closed) | n/a | No production path changes. |
-| §XVI.6 (orchestrator does not implement) | yes | Every test TU, CMake edit, harness and counterparty change goes to `phase-implementer`. The orchestrator may write the spec bundle, `spec/` catalogue / coverage-index / B&L text and parent docs, and files the follow-up issue. |
+| §XVI.6 (orchestrator does not implement) | yes | Every test TU, CMake edit, harness and counterparty change goes to `phase-implementer`. The orchestrator may write the spec bundle, `spec/` catalogue / coverage-index / B&L text and parent docs, places fixpp#625 in the parent's `phases/phase-4/issue-batches.md` if it is not there, and makes and pushes the one post-merge parent commit (the harness files in it are the implementer's). |
 | §XVI.7 (`/simplify` before verify) | yes | `/simplify` runs on the implementation diff before `/speckit-verify` (phase P8). |
 | §XVII.1 (Gate A trigger) | yes | The session and interop test surfaces are touched, and a live-interop vehicle changes in the parent. Gate A runs (`/gate-a 095-tail-evidence-pass`). |
 | §XVII.7 (local pre-PR build gate) | yes | One FULL `ctest --preset linux-clang-debug` on a committed tree runs as the LAST step of verify, after `df -h /mnt/e` and a check of `/mnt/c/temp/fixpp/.sandbox-lock`. Packaging entries compile consumer projects. **Resource gate:** an `AskUserQuestion` precedes the first agent-run local build, and the owner approves it before it runs. |
 | §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs in the main checkout, which owns this branch. |
-| §VII.6 (interop against an independent FIX implementation) | yes — already met by 089/033; this adds to it | Two live cells against both QuickFIX peers, run locally and in `interop-live` on the PR head (SC-003). |
-| §XVIII.7 (v1.0 codegen scope) | read, not amended | Its text keeps "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate". DECISION 2 supersedes that reason for the v50sp2 rows this feature closes; the v44 BE/BF exclusion it describes is unchanged here and is the subject of the follow-up issue, which names this clause. No constitution edit in 095. |
+| §VII.6 (interop against an independent FIX implementation) | yes — already met by 089/033; this adds to it | Two live cells against both QuickFIX peers, run locally before merge and in `interop-live` dispatched on `main` after the post-merge parent commit (SC-003). |
+| §XVIII.7 (v1.0 codegen scope) | read, not amended | Its text keeps "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate". DECISION 2 supersedes that reason for the v50sp2 rows this feature closes; the v44 BE/BF exclusion it describes is unchanged here and is the subject of fixpp#625. No constitution edit in 095. |
 
-**Result:** PASS — no deviation; one pre-existing condition recorded (§VI.2, Gate A round 1
-disagreement on Codex #1b).
+**Result:** PASS — no deviation.
 
 ## Project Structure
 
@@ -183,7 +209,7 @@ specs/095-tail-evidence-pass/
 
 | File | Change |
 |---|---|
-| `tests/session/test_095_tail_rows_roundtrip.cpp` | NEW: 23 witnesses, the walk and `required_members_missing`, the census, the three known-positive tests, the `DISABLED_` selection check (R-3, R-7) |
+| `tests/session/test_095_tail_rows_roundtrip.cpp` | NEW: 23 witnesses, the walk (taking a `pugi::xml_document`) and `required_members_missing`, the census, the known-positive tests of contracts W6 (synthetic dictionaries inline), the `DISABLED_` selection check (R-3, R-7) |
 | `tests/session/CMakeLists.txt` | add the TU to `test_077_allversions_builder_roundtrip`; link pugixml if the target does not already; a compile definition naming `tools/quickfix_required_golden/golden.csv`; `APPEND PROPERTY LABELS 095` on it and on `session_pure_tests` |
 | `tests/codegen/test_077_v50sp2_builder_completeness.cpp` | +2 named pins (N-002, N-003), in target `codegen_077_v50sp2_builder_completeness_test` |
 | `tests/codegen/CMakeLists.txt` | `APPEND PROPERTY LABELS 095` on `codegen_077_v50sp2_builder_completeness_test` |
@@ -196,7 +222,8 @@ specs/095-tail-evidence-pass/
 | `specs/095-tail-evidence-pass/expected-ctest-095.txt` | NEW: one ctest name per line |
 | `spec/feature-catalogue.md`, `spec/coverage-index.md`, `spec/behaviors-and-limitations.md` | rows → `done`; version narrowing (four rows); existing coverage rows' gap notes; B&L delta |
 
-**Parent (`phase-9-harness/`, pushed to parent `main` first):**
+**Parent (`phase-9-harness/`): uncommitted until the fixpp PR merges, then one parent commit with
+the gitlink bump (research R-10):**
 
 | File | Change |
 |---|---|
@@ -205,7 +232,7 @@ specs/095-tail-evidence-pass/
 | `tools/interop_capability_minimums.yaml` | +2 entries |
 | `quickfixj/.../InteropCounterparty.java` | move the conversation-mode seqnum bump + Heartbeat inside the A-TESTREQ check |
 | `golden/<2 cells>.fix` | captured with `--update-goldens`, then reviewed |
-| `tools/emit_matrix.py`, `tools/test_emit_matrix.py` | the L0 `run_kind` branches: probe rule narrowed to `"validator-positive-control"`, promotion skipped, N2 unchanged, the before-gitlink raise — each tested |
+| `tools/emit_matrix.py`, `tools/test_emit_matrix.py` | the L0 `run_kind` branches: probe rule narrowed to `"validator-positive-control"` (stubbed-template raise tested), promotion skipped, N2 unchanged, and a both-directions pin for the two cells beside `RegistryAgreesWithTheRealTemplateTest` — each tested |
 
 **Structure decision:** tests only, in existing ctest targets (no new entry). Parent harness changes stay
 limited to the files above.
@@ -213,24 +240,25 @@ limited to the files above.
 ## Phases
 
 0. **Before the first local build:** `AskUserQuestion` for the build (`[const §XVII.7]` resource
-   gate). Orchestrator, at any point before P7: file the follow-up issue for lifting the v44 BE/BF
-   exclusion — cite `kN002N003Excluded` / `is_n002_n003_excluded` in
-   `tools/codegen/fixpp-codegen/emit_builders.cpp`, `kN002N003PresentInFix44` in
-   `tests/session/test_067_completeness.cpp`, `[const §XVIII.7]`'s deferral sentence, and DECISION 2;
-   labels chosen from `gh label list`; no closing keyword in the body; place it in the parent's
-   `phases/phase-4/issue-batches.md`. Its number goes in N-002's Verified cell.
+   gate). Orchestrator, at any point before P7: place fixpp#625 (the v44 BE/BF exclusion) in the
+   parent's `phases/phase-4/issue-batches.md` if it is not already placed.
 1. **P0 — walk, helper, census and known positives (US1 foundation).**
-   - Build the runtime walk (`WalkResult` per MsgType) and `required_members_missing`.
-   - Add the golden field-leg test, the deficient 35=E frames and the 35=i fail-loud. Prove the
-     deficient-frame test RED under Mutant C.
+   - Build the runtime walk (`WalkResult` per MsgType, over a `pugi::xml_document`) and
+     `required_members_missing` over W4's enumeration.
+   - Add the golden field-leg test, the deficient 35=E and 35=CC frames, the 35=i fail-loud and the
+     synthetic dictionaries S1/S2 (contracts W6). Confirm the parser accepts every deficient frame
+     (W6: if it refuses one, stop and report). Prove the deficient-frame test RED under Mutant C, and
+     each walk detector RED under its disabled-detector mutant.
    - Add the labels and `expected-ctest-095.txt`.
 2. **P1 — 23 witnesses and the census (US1).** One test per MsgType (data-model §A), each with its
-   intent list and bidirectional readback. Run the RED arms A, B, D, E, F and the changed literal
-   (contracts W6).
+   intent list and bidirectional readback. Run every remaining mutant row of contracts W6 (A, B, D,
+   E, F, G, H, I, J, K and the changed literal).
 3. **P2 — N-002/N-003 (US2).** Add the two pins and the routing cell. Run the routing cell's two
    RED arms (scratch classifier mutants, `"BE"` then `"BW"`).
-4. **P3 — parent harness (US3, parent side).**
-   - Apply R-9's items 1–4 and 6 (contracts L0), with their tests.
+4. **P3 — parent harness (US3, parent side), uncommitted.**
+   - Apply R-9's items 1–4 and 6 (contracts L0), with their tests, as uncommitted edits in the parent
+     working copy (research R-10 step 1: nothing staged under `phase-9-harness/`, a copy kept outside
+     the tree, no `git stash`).
    - Build QFJ.
    - Extract the QF-cpp counterparty from the image.
 5. **P4 — fixpp live cell (US3).**
@@ -240,47 +268,82 @@ limited to the files above.
    - Run the RED arms: change one chosen value after the expected record is written, and force a
      peer reject by sending an unknown required-field violation, e.g. omit ExecID(17) with the
      peer's dictionary on.
-   - Re-run 089's CONV and PROBE cells against the patched QFJ to show item 4 changes nothing for
-     them.
 6. **P5 — evidence files and pins (US3).**
-   - Edit `cell_results.yaml` and the skip list.
+   - Run the parent's `RegistryAgreesWithTheRealTemplateTest` locally with the registration in place
+     and before the rows exist, and record its RED naming the two cells.
+   - Edit `cell_results.yaml` (research R-11) and the skip list.
    - Edit the `EXPECTED_IDS` pin, RED first.
-7. **P6 — parent push and image.**
-   - Commit the parent harness change.
-   - Push parent `main` (owner authorization 2026-10-24). This carries the unpushed 094 close-out
-     commits.
-   - Wait for `publish-counterparties` to finish. Record the image digest.
+7. **P6 — local live evidence (stands in for the PR's `interop-live`).** Run quickstart §5 in full:
+   the whole-population `--list` reconcile, every live cell through `ci/run-interop-live.py` against
+   the local harness (the 089 CONV and PROBE cells and the 033 FIXT cells included, L7), the harness
+   suites, and the real-template test, now green.
 8. **P7 — records (US4).**
+   - Run quickstart §7 first and record its RED (no row is `done` yet).
    - Catalogue flips with witness names.
    - Version narrowing: A-018, A-029, A-030, N-002 (data-model §E).
-   - coverage-index: each existing tail row's gap note names its witness.
+   - coverage-index: each existing tail row's gap note names its witness. Beside 067's "ART VI §3
+     DISPOSITION" comment, add a one-line comment beginning `ART VI §3 DISPOSITION
+     (095-tail-evidence-pass` that extends it to the 12 rows (spec Normative References).
    - B&L delta: the live cell's validation-off disclosure under L-041-2, a B-row naming what the
      live cell does and does not witness, and a line that FIX 4.4 BE/BF have no typed builder (the
-     v44 exclusion, with the follow-up issue).
+     v44 exclusion, fixpp#625).
+   - Run quickstart §7 again; it must pass.
 9. **P8 — simplify, verify, Gate B, PR.**
    - `/simplify` on the implementation diff (`[const §XVI.7]`).
-   - `/speckit-verify`.
-   - Push the fixpp branch, open the PR, run `/gate-b`.
-   - `interop-live` must be green on the head (SC-003).
+   - `/speckit-verify`, which carries the local live evidence of P4–P6 (commands, outputs, peer
+     builds) and quickstart §7's output.
+   - Push the fixpp branch, open the PR, run `/gate-b`. The PR body discloses what its
+     `interop-live` will show (below).
+10. **P9 — after the merge (close-out, research R-10 steps 4–6).**
+   - The fixpp close-out resets the main checkout to `main` (close-out rows 16–17).
+   - One parent commit: the harness changes, the goldens, and the gitlink bump to the merged fixpp
+     `main` (alone, without the bump, if another parent commit already moved the gitlink past the
+     merge). Check `git ls-tree HEAD research/G19-fix-fpml-iso20022/library` and the staged paths
+     first.
+   - Push parent `main` (owner authorization 2026-10-24). This carries any unpushed parent commits.
+   - Record `harness-tests` green on that commit.
+   - Wait for `publish-counterparties`, and record the digest. Re-dispatch the parent
+     `interop-matrix` if its push run started before the publish.
+   - Dispatch `interop-live` on fixpp `main`. Both new cells must pass; record the run id and digest.
+     If they do not, the close-out stops and goes to the owner (SC-003).
+
+### What the fixpp PR's `interop-live` shows (advisory; disclosed in the PR body)
+
+The PR head adds two ids to `expected-skips-without-counterparty.txt`, and the pulled pre-095 image
+does not register them. `ci/run-interop-live.py` builds the image's `--list-binaries` targets (the
+033 FIXT target, with the new cell source, among them), then fails its coverage reconcile and stops
+with "population reconciliation FAILED -- not running any cell". So the PR's lane compiles the new
+cell but runs **no** live cell, the existing ones included; P6's local full run carries that coverage
+(research R-10). The lane is advisory (`interop-live.yml`'s header) and not in branch protection.
+Gate B and the merge do not wait on it.
 
 ## Risks
 
 - **The live cell fails for a harness reason, not a message reason.** Two such reasons are already
   known and fixed in P3. Others may surface on the first local run (e.g. the hello record's
-  dictionary digest under FIXT). Mitigation: run P4 locally before any parent push.
-- **The image republish breaks other PRs' `interop-live`.** This is advisory, disclosed, and a
-  bounded window (R-10). fixpp#613's PR may see it.
+  dictionary digest under FIXT). Mitigation: P4–P6 run everything locally before the PR.
+- **The uncommitted harness edits are lost or swept into someone else's parent commit.** The parent
+  checkout and its index are shared with other sessions, which commit and push the parent. Mitigation:
+  nothing under `phase-9-harness/` is staged before P9; every committer in the window checks `git
+  status` and stages explicit paths; a copy of every changed and new harness file is kept outside
+  the tree (research R-10).
+- **Other fixpp PRs' `interop-live` around the merge.** Between the merge and the republish, a PR
+  based on the post-095 `main` fails reconcile the same way; after it, a PR based on a pre-095 `main`
+  fails reconcile's skew check until it rebases. Advisory and disclosed; fixpp#613's PR may see it
+  (research R-10).
 - **The walk fails loudly on a tail MsgType** (a nested required group, a group among siblings, a
-  tag at two levels). The implementer stops and reports; extending the walk is a design change that
+  delimiter chain). The implementer stops and reports; extending the walk is a design change that
   returns to the orchestrator.
+- **A deficient frame cannot be parsed**, so its W5 leg cannot be reached from a parsed frame. The
+  implementer stops and reports (contracts W6).
 - **The FR-014 selection check disagrees on BN** (for instance, a QuickFIX/J file requires more).
   The live cell is not built on BN; the orchestrator re-selects with the check's output.
 - **The rule-derived check finds a member no witness can set.** For example, a required field whose
   typed `Args` member is absent. If that happens, the implementer stops and reports. It would be a
   codegen defect (FR-020) and goes to the owner.
-- **Parent push carries unrelated parent commits.** The owner accepted this on 2026-10-24. The push
-  also triggers the parent's own workflows. Check `ls-tree HEAD <submodule>` before pushing, so the
-  pushed gitlink is the intended one.
+- **The post-merge parent push carries unrelated parent commits.** The owner accepted this on
+  2026-10-24. The push also triggers the parent's own workflows. Check `ls-tree HEAD <submodule>`
+  before pushing, so the pushed gitlink is the intended one.
 - **A peer (another Claude session) pushes the parent meanwhile.** Before pushing, check
   `git status` for staged files that are not ours (shared staging), and run `git fetch`.
 
