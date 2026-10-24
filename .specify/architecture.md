@@ -503,6 +503,15 @@ include/
 > clauses below are now checkable rather than aspirational. Read this table first; the prose that
 > follows is retained as the design intent it was written as, not as a description of what ships.
 >
+> **⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`).** The set described here is the
+> BASE export set, which every configuration still exports. Wherever the typed tier is in effect
+> (`FIXPP_INSTALL_TYPED_TIER` resolves ON: `AUTO` in a single-config `Release` tree, which is every released
+> package, or an explicit `ON`), the export also carries, for each generated version (`v42`, `v44`, `v50sp2`,
+> and `vlatest` iff `FIXPP_CODEGEN_FIX_LATEST`), the STATIC pair `fixpp::builders::<ver>` /
+> `fixpp::validators::<ver>`. A consumer links that pair by name; `fixpp::fixpp` does not reach it. The counts
+> written below are the base set's, as 084/086 measured it, and are history; a configured tree's
+> `fixpp-export-names.txt` lists the current set.
+>
 > **Delivered export set: 18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT** (counted in the shipped
 > `fixppTargets.cmake`).
 >
@@ -547,6 +556,15 @@ include/
 > code and `fixpp::service-iface` as the plugin target. **None of that is what ships**, and leaving it as
 > "design intent" left a second, superseded implementation recipe inside the normative architecture — one that
 > contradicted both the 084 reconciliation table above and `api-contract.md` §8. It is replaced, not annotated.
+
+> **⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`).** The set described here is the
+> BASE export set, which every configuration still exports. Wherever the typed tier is in effect
+> (`FIXPP_INSTALL_TYPED_TIER` resolves ON: `AUTO` in a single-config `Release` tree, which is every released
+> package, or an explicit `ON`), the export also carries, for each generated version (`v42`, `v44`, `v50sp2`,
+> and `vlatest` iff `FIXPP_CODEGEN_FIX_LATEST`), the STATIC pair `fixpp::builders::<ver>` /
+> `fixpp::validators::<ver>`. A consumer links that pair by name; `fixpp::fixpp` does not reach it. The counts
+> written below are the base set's, as 084/086 measured it, and are history; a configured tree's
+> `fixpp-export-names.txt` lists the current set.
 
 The delivered export set is **18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT**, measured in the shipped
 `fixppTargets.cmake`:

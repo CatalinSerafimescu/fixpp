@@ -211,6 +211,15 @@ Per `[const §X.5]` / `[2i]`: every C-ABI symbol is annotated **thread-safe** / 
 
 Per `[arch §7.4]`:
 
+> **⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`).** The set described here is the
+> BASE export set, which every configuration still exports. Wherever the typed tier is in effect
+> (`FIXPP_INSTALL_TYPED_TIER` resolves ON: `AUTO` in a single-config `Release` tree, which is every released
+> package, or an explicit `ON`), the export also carries, for each generated version (`v42`, `v44`, `v50sp2`,
+> and `vlatest` iff `FIXPP_CODEGEN_FIX_LATEST`), the STATIC pair `fixpp::builders::<ver>` /
+> `fixpp::validators::<ver>`. A consumer links that pair by name; `fixpp::fixpp` does not reach it. The counts
+> written below are the base set's, as 084/086 measured it, and are history; a configured tree's
+> `fixpp-export-names.txt` lists the current set.
+
 | Target | Type | Purpose | Stability |
 |---|---|---|---|
 | `fixpp::core` … `fixpp::tap` | **`STATIC`, except `tap` and `dict::dispatch` which are `INTERFACE`** | One per module. **SUPERSEDED (086/FR-013): **13 STATIC / 4 INTERFACE / 1 OBJECT**, measured in the shipped `fixppTargets.cmake`: STATIC = `core`, `sync`, `wire`, `dictionary`, `dict_dispatch_bridge`, `session`, `transport`, `tls`, `log`, `otel`, `config_toml`, `log_otlp`, `capi`; INTERFACE = `fixpp`, `service`, `tap`, `dict::dispatch`; OBJECT = `capi_objects`. There is no combined umbrella shared/static library** — `fixpp::fixpp` is an INTERFACE target. Measured in the shipped `fixppTargets.cmake`. | Internal contract; not redistributed standalone. |
