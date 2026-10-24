@@ -12,6 +12,8 @@
 - Post-exhaustion pass applied 2026-10-24 (owner: hand-edit + one Opus round, skip Codex): residuals R-1..R-7 + §VI amendment drafted; amendment clauses still owe a scoped Codex Gate A review per [const §XX.2].
 - Post-exhaustion review applied 2026-10-24: Opus P1=0 P2=3 P3=3 (research/reviews/opus_095-tail-evidence-pass_gate_a_4_postexhaustion_review.md); F-1 (a), F-2..F-6 applied; scoped Codex+Opus round on the amendment + these fixes owed (owner, 2026-10-24).
 - Scoped round 5 (amendment) 2026-10-24: Codex P1=1 P2=1; Opus P1=0 P2=2 P3=1 (research/reviews/codex_095-tail-evidence-pass_gate_a_5_amendment_review.md, research/reviews/opus_095-tail-evidence-pass_gate_a_5_amendment_triage.md); fixes 1, 2, N-1 applied; a narrow scoped Codex round on the §VI.2 clause body is owed (FR-021).
+- Narrow scoped round 6 (§VI.2 clause body and its mirrors) 2026-10-24: Codex P1=0 P2=0 P3=0, §E recipe re-run by Codex (research/reviews/codex_095-tail-evidence-pass_gate_a_6_clause_review.md). **Gate A CONVERGED** (record decisions/speckit/095-tail-evidence-pass-gatea.md; owner rule 2026-10-24: convergence counts as sign-off). The FR-021 Codex review of the amendment is discharged by rounds 5–6.
+- Orchestrator rulings at /speckit-tasks (2026-10-24): catalogue flips stay in US4 (plan P7), the final close-out task re-checks them; `expected-ctest-095.txt` is the implementer's; the three extra RED arms (golden field-leg mutants, census-alone Mutant G, pin RED) are kept; the PR cell is filled by a docs-only commit after the PR opens and before the gate labels (tiers skip until both labels land, so no extra wave); the two new `cell_results.yaml` rows record what the existing schema admits for a locally-run cell (the implementer reads `cell_results_schema_check_test.py` and 089's rows to decide; no schema change), and the post-merge `interop-live` run id goes in the Gate B close-out record.
 
 ### Round 1 — disagreements
 
@@ -366,8 +368,9 @@ limited to the files above.
      builds) and quickstart §7's output.
    - Push the fixpp branch and open the PR, titled in `[const §XX.2]` form (FR-021). The PR body
      discloses what its `interop-live` will show (below).
-   - The scoped Codex Gate A round on the amendment (data-model §F.1–§F.3), under the owner's own
-     `/gate-a` invocation, if it has not already run on the bundle before implementation.
+   - The scoped Codex Gate A review of the amendment converged at round 6 (2026-10-24). A change to a
+     clause body after it needs another scoped Codex round before the RATIFIED flip; a records-only
+     change (Status line, SIR outside the clause bodies) needs only Gate B's re-check.
    - Run `/gate-b`. Then owner sign-off on the amendment. Then the last commit before merge flips
      the Sync Impact Report and the Status line to RATIFIED (data-model §F.3, §F.4).
 10. **P9 — after the merge (close-out, research R-10 steps 4–6).**

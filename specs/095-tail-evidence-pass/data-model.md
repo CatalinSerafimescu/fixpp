@@ -321,10 +321,9 @@ PENDING form (lands with the amendment, P7):
 ```
 <!--
 Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
-  Not ratified. Article XX §2 sequence, in order: a scoped Codex Gate A round on this amendment's
-    two clause bodies and this report (pending; feature 095's Gate A loop exhausted at round 3 and
-    the owner's post-exhaustion pass skipped Codex), Gate B on the 095 PR (pending), owner sign-off
-    (pending). This header reads PENDING until all three have happened. The flip to RATIFIED, with
+  Not ratified. Article XX §2 sequence, in order: a scoped Codex Gate A review of this amendment's
+    clause bodies (done: feature 095's scoped rounds 5 and 6, converged at round 6 with no finding),
+    Gate B on the 095 PR (pending), owner sign-off (pending). This header reads PENDING until all three have happened. The flip to RATIFIED, with
     the rounds and the sign-off date filled in below, is the last commit before merge, not a claim
     made in advance (the v1.0 and v4.0 precedent).
   Bump: MINOR, per Article XX §4; no CHANGELOG.md entry. The test is the v4.0 report's: does any PR
@@ -390,11 +389,11 @@ round converges needs another scoped round (FR-021).
 
 PENDING form — the line's current opening `> **Status:** ` is replaced by:
 
-`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: pending a scoped Codex Gate A round on the amendment, Gate B, and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose `Title` names its application MsgTypes as `35=<MT>`; Article VI §5 lets Normative References list such refs. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
+`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: scoped Codex Gate A on the amendment converged (feature 095, round 6); pending Gate B and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose `Title` names its application MsgTypes as `35=<MT>`; Article VI §5 lets Normative References list such refs. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
 
 The rest of the line, from `user-ratified **v4.0** (2026-10-23) — **backwards-incompatible**`
 onward, is unchanged.
 
 RATIFIED form: `**v4.1 — PENDING** (2026-10-24)` becomes `user-ratified **v4.1** (<sign-off date>)`,
-and `not ratified: pending a scoped Codex Gate A round on the amendment, Gate B, and the owner's Article XX §2 sign-off`
-becomes `scoped Codex Gate A on feature 095 converged at round <n>, then owner sign-off <date>; amendment PR #<pr>`.
+and `not ratified: scoped Codex Gate A on the amendment converged (feature 095, round 6); pending Gate B and the owner's Article XX §2 sign-off`
+becomes `scoped Codex Gate A on feature 095 converged at round 6, then Gate B and owner sign-off <date>; amendment PR #<pr>`.
