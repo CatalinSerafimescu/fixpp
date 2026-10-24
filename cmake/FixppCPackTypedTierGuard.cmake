@@ -19,13 +19,10 @@
 # Inputs, written into CPackConfig.cmake by cmake/FixppPackaging.cmake:
 #   CPACK_FIXPP_PKG_CONFIG            the lowercased build type in the artifact name
 #   CPACK_FIXPP_TYPED_TIER_EFFECTIVE  FIXPP_INSTALL_TYPED_TIER_EFFECTIVE (ON|OFF)
-if(NOT CPACK_FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "ON" AND NOT CPACK_FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "OFF")
-  message(FATAL_ERROR
-    "#613: CPACK_FIXPP_TYPED_TIER_EFFECTIVE is '${CPACK_FIXPP_TYPED_TIER_EFFECTIVE}', expected ON or OFF. "
-    "cmake/FixppPackaging.cmake must set it before include(CPack); refusing to package "
-    "without knowing whether the typed tier is in the payload.")
-endif()
-if(CPACK_FIXPP_PKG_CONFIG STREQUAL "release" AND CPACK_FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "OFF")
+#
+# Keyed on "not ON" rather than on "OFF", so a release package is refused unless the
+# tier is in effect: a value that did not reach CPackConfig.cmake refuses, not passes.
+if(CPACK_FIXPP_PKG_CONFIG STREQUAL "release" AND NOT CPACK_FIXPP_TYPED_TIER_EFFECTIVE STREQUAL "ON")
   message(FATAL_ERROR
     "#613: refusing to generate a release package without the typed builder/validator tier: "
     "FIXPP_INSTALL_TYPED_TIER resolved OFF in this Release tree. Released packages carry it "
