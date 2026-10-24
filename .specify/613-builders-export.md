@@ -1,11 +1,16 @@
 # #613 — export the typed builder/validator libraries and install the slim typed headers
 
-> **Status: draft v0.4, 2026-10-24.** Round 1 applied 2026-10-24: Codex P1=0 P2=6 P3=2; Opus post-judging P1=0 P2=8
+> **Status: draft v0.5, 2026-10-24.** Round 1 applied 2026-10-24: Codex P1=0 P2=6 P3=2; Opus post-judging P1=0 P2=8
 > P3=10; rewrite addresses root causes 1–5 (named in `## Gate A`); owner ruling R-2a applied. Reviews:
 > research/reviews/codex_613_1_builders-export_review.md, research/reviews/opus_613_1_builders-export_triage.md.
 > **R-2b applied (owner amendment, between rounds 1 and 2):** the typed tier sits behind the cache setting
 > `FIXPP_INSTALL_TYPED_TIER`, in effect by default for Release trees only and switchable ON by anyone who builds fixpp
 > themselves, in any configuration (D-0).
+> **Round 2 applied 2026-10-24: Codex P1=0 P2=3 P3=2; Opus post-judging P1=0 P2=3 P3=9; rewrite addresses root causes
+> 1 (mechanism written without the configure order and the per-lane flags it runs under), 2 (guards that do not check
+> their own input's domain), 3 (a settled ruling applied to the prose but not to every mechanism encoding it) and 4
+> (precision defects). Reviews: research/reviews/codex_613_2_builders-export_review.md,
+> research/reviews/opus_613_2_builders-export_triage.md.**
 >
 > Issue mode, which is the owner's ruling of 2026-10-24: this note plus issue-mode Gate A and Gate B, with no
 > `specs/` bundle. Branch `613-builders-export` in `fixpp-parallel`, based on `origin/main` `4e8b3779`. Batch B66.
@@ -76,7 +81,7 @@ accordingly (§4).
 | P-6 | "about 150 MB uncompressed" | **True of the gcc-release archives, and incomplete as a cost.** The slim headers add about as much again; MSVC release archives are about 4× the gcc size; Debug archives are GB-scale, which is why R-2a keeps them out of the default. Numbers in §5. | §5 |
 | P-7 | "lift the five exclusions" | **The rule has eight patterns.** The five are 078's (`messages`, `groups`, `validators`, `all.hpp`, `groups.hpp`). `_dispatch`, `vt11` and `Manifest.txt` stay. One pattern is added, for the `.cpp` translation units (D-7). The five are lifted only where the typed tier is in effect (D-0). | the generated-header `install(DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/" …)` rule in `CMakeLists.txt` |
 | P-8 | — | **Two docs are already wrong about v42.** `specs/078-precompiled-builder-libs/contracts/include-layout.md` says "`v42` emits none (deferred to #196)". `docs/src/dictionary/codegen.md` says v42 is "descoped" and "emit[s] NO builders", tells readers to "construct v42 messages via the runtime `wire::body_builder`", and lists `<ver>` ∈ {v44, v50sp2, vlatest}. 082 (issue #196) added v42 to the emitter and to the library loop. Both are corrected in this PR (§6). | `cmake/Codegen.cmake`'s 082 T035 comment on the library loop |
-| P-9 | — | **The Python wheel is unaffected.** `wheel.exclude = ["include/**", "lib/**", "share/fixpp/**"]` already drops both new file kinds. The wheel already builds the libs, because they are in `all`. | `bindings/python/pyproject.toml` |
+| P-9 | — | **The Python wheel's content is unaffected; its build stages more.** `wheel.exclude = ["include/**", "lib/**", "share/fixpp/**"]` already drops both new file kinds. The wheel already builds the libs, because they are in `all`. Its build sets `cmake.build-type = "Release"` and `FIXPP_BUILD_OTEL = "OFF"`, so `AUTO` resolves ON there while packaging is disabled: scikit-build-core stages the full install, typed archives and slim headers included, before `wheel.exclude` drops them, so the wheel lane's staging and copy time grow. `FIXPP_INSTALL_TYPED_TIER = "OFF"` in the wheel's `cmake.define` would avoid that and is compatible with every guard (packaging is disabled there); it is offered to the owner, not made in this PR. | `bindings/python/pyproject.toml` (`cmake.build-type`, `[tool.scikit-build.cmake.define]`, `wheel.exclude`) |
 | P-10 | — | **The packaging presets use exactly two build types, Release and Debug.** Every sanitizer, coverage and libc++ preset is Debug. 084 `contracts/package-layout.md` §1 ships six configurations: Linux clang and gcc, Windows MSVC, each Release and Debug. | Recipe: resolve `CMAKE_BUILD_TYPE` through `inherits` for every non-hidden `configurePresets` entry of `CMakePresets.json` (a short `json` walk), 2026-10-24, `4e8b3779`. No configure preset inherits another (each inherits only `_base`), so a cache variable set on one preset reaches no other |
 | P-11 | — | **Only Release packages are released.** 084 §1 defines Debug configurations, but `tier1.yml`'s `Build packages` comment records "RELEASE-ONLY IN CI (user decision 2026-08-03) … No -Debug configuration uploads packages", and says Debug packaging works only locally. R-2b reaffirms it: a Debug consumer builds fixpp itself. | `.github/workflows/tier1.yml`, the `Build packages` / `Upload packages` steps' comment |
 
@@ -84,8 +89,21 @@ accordingly (§4).
 
 ### D-0 — R-2a + R-2b: the typed tier behind `FIXPP_INSTALL_TYPED_TIER`
 
-**The setting.** One cache entry, declared in the root `CMakeLists.txt` immediately before the generated-header
-install rule:
+**The setting.** One cache entry, declared and resolved in the root `CMakeLists.txt` directly after the
+`if(FIXPP_BUILD_CODEGEN_TOOL) include(cmake/Codegen.cmake) endif()` block, **outside** that `if`, beside D-6's root
+decision, and before the `if(FIXPP_BUILD_TESTS)` block.
+
+**Why there (round 2).** `add_test()` expands `${…}` when it executes. Both witness registrations read the setting:
+`fixpp::consumer::install-witness` inside the root's tests block, and `fixpp::packaging::contents` inside
+`add_subdirectory(tests/packaging)`, which that block enters first. Both precede the generated-header install rule
+and the export block, so a declaration beside the header rule (v0.4) would hand them empty values: the effective
+value always (a plain variable), the raw setting on a fresh tree at `AUTO`. `tests/packaging/CMakeLists.txt` records
+the same trap for `FIXPP_EXPORT_TARGETS` ("set in the root CMakeLists AFTER this subdirectory is added, so reading it
+here yields an empty list"). The setting needs nothing from `cmake/Codegen.cmake`, so it can sit after it; it must
+precede every reader. Only the conditional pattern list stays beside the header rule (D-7). Re-derive the order with
+`grep -n -E 'include\(cmake/Codegen.cmake\)|^if\(FIXPP_BUILD_TESTS|add_subdirectory\(tests/packaging\)|install-witness|_codegen/include/"|APPEND FIXPP_EXPORT_TARGETS' CMakeLists.txt`.
+An ordering slip is also caught by the instrument: each witness refuses an empty or out-of-domain value (§4,
+guard 0).
 
 ```cmake
 set(FIXPP_INSTALL_TYPED_TIER "AUTO" CACHE STRING
@@ -114,8 +132,8 @@ message(STATUS "#613: typed builder/validator tier "
                "CMAKE_BUILD_TYPE='${CMAKE_BUILD_TYPE}')")
 ```
 
-`FIXPP_INSTALL_TYPED_TIER_EFFECTIVE` has exactly three readers: the generated-header install rule (D-7), the D-1
-append, and the `add_test` registrations that pass it to the two witnesses together with the raw setting (§4).
+Every surface whose content depends on the tier keys on `FIXPP_INSTALL_TYPED_TIER_EFFECTIVE`, never on the build
+type, and is placed after its resolution. The witnesses receive it together with the raw setting (§4).
 
 **Why a tri-state STRING and not a BOOL `option()`.** For the user the two are the same: `-DFIXPP_INSTALL_TYPED_TIER=ON`
 forces it, and any CMake boolean spelling is accepted. The difference is the default:
@@ -132,12 +150,38 @@ lowercases the build type for the artifact name). OFF for `Debug`, `RelWithDebIn
 and every multi-config generator. No preset produces anything but Release or Debug (P-10). RelWithDebInfo stays out
 of the default on R-2a's own reason: it carries the debug information that made the Debug archives GB-scale.
 
-**Released packages cannot end up OFF.** `cmake/FixppPackaging.cmake`, right after it computes `_fixpp_pkg_config`,
-FATALs when that is `release` and `FIXPP_INSTALL_TYPED_TIER_EFFECTIVE` is OFF, naming the setting and R-2. The
-module is included only where packaging is enabled, so:
-- a Release tree with OTel ON (every released configuration) cannot configure with the tier OFF;
-- a Release tree may run with `OFF` only where packaging is disabled (an OTel-OFF development build);
-- a local Debug package (P-11: never released) may be built with either value; the contents witness follows the
+**Released packages cannot end up OFF: the refusal fires at package generation, never at configure.** A FATAL in
+`cmake/FixppPackaging.cmake` itself would run on every OTel-ON configure, because the root includes the module
+whenever `FIXPP_PACKAGING_ENABLED` is ON, and would refuse a Release self-build configured OFF before anyone asked for
+a package. The module's own T062a comment records why that shape was removed once for OTel ("The first cut refused
+to CONFIGURE an OTel-OFF build, which was wrong because FR-011 explicitly permits such development builds"). So:
+- **Mechanism.** The module sets `CPACK_FIXPP_PKG_CONFIG` (`_fixpp_pkg_config`) and
+  `CPACK_FIXPP_TYPED_TIER_EFFECTIVE` before its `include(CPack)`, so both are written into `CPackConfig.cmake` (only
+  `CPACK_*` variables are), and sets `CPACK_PROJECT_CONFIG_FILE` to a new script, `cmake/FixppCPackTypedTierGuard.cmake`.
+  cpack reads that script when it initialises each generator; it FATALs when the configuration is `release` and the
+  effective value is OFF, naming the setting and R-2. No code sets `CPACK_PROJECT_CONFIG_FILE` today:
+  `git grep -n CPACK_PROJECT_CONFIG_FILE -- CMakeLists.txt cmake tests .github bindings` was empty on 2026-10-24 on
+  this branch, whose code is `4e8b3779`'s (scoped to code because this note now names the variable).
+- **Reach.** Every package is generated by `cpack --config "${…}/CPackConfig.cmake"`: the `fixpp-package` target's
+  command, CI's `Build packages` steps through it, and the packaging witnesses that execute cpack themselves. List
+  those with `git grep -n 'COMMAND "${CMAKE_CPACK_COMMAND}"' -- tests/packaging` and read each hit; a bare
+  `CPackConfig.cmake` grep overcounts, because `run_package_target_witness.cmake` only looks for that string in the
+  build graph and runs no cpack. One cpack-time guard covers all of them; a guard on the wrapper target alone would
+  miss the witnesses.
+- **Not in the provenance `install(CODE)` block.** That block runs on every `cmake --install`, the consumer witness's
+  stage install included, so it would refuse a permitted install.
+- **Toy observation** (CMake/CPack 3.30.0, 2026-10-24, a one-file project in the session scratch directory, since
+  deleted): with the guard's input OFF, `cpack --config CPackConfig.cmake` printed the FATAL, then "CPack Error: Cannot
+  initialize the generator TGZ", exited 1, and its `install(CODE)` message never printed, so the refusal precedes
+  staging; with the input ON it packaged and exited 0. The implementation repeats the exit-code check once on a real
+  tree (M-20).
+
+What follows:
+- a Release tree with OTel ON may configure, build, install and run its consumer witness with the tier OFF; it cannot
+  generate a package, and on such a tree each `packaging`-labelled witness that executes cpack is RED (M-20 records
+  which);
+- a Release tree with packaging disabled (an OTel-OFF development build) has no CPack configuration at all;
+- a local Debug package (P-11: never released) may be generated with either value; the contents witness follows the
   effective value there (§4.2).
 
 **Single-config generators (every preset, Ninja).**
@@ -147,9 +191,10 @@ module is included only where packaging is enabled, so:
   (they are in `all`, for the in-tree tests) and none is installed.
 - **Effective ON in a Debug tree** (a consumer's own build, R-2b): exactly the Release shape, with that tree's Debug
   archives. The export is unfiltered, so `fixppTargets-debug.cmake` gives each typed target its
-  `IMPORTED_LOCATION_DEBUG`, and the slim headers are installed beside it. On MSVC the libs are then export members,
-  so `cmake/FixppPackaging.cmake`'s PDB loop names their compiler PDBs into `lib/` and its `*.pdb` rule installs them
-  (D-9): a debuggable, coherent Debug typed tier. The `windows-msvc-debug` CI lane runs this case (§4.4).
+  `IMPORTED_LOCATION_DEBUG`, and the slim headers are installed beside it: a coherent Debug typed tier. Its debug
+  information follows the tree's MSVC debug-information format and, for separate PDBs, whether packaging is enabled
+  (D-9): the PDB plumbing lives only in `cmake/FixppPackaging.cmake`, which is pre-existing for every export member.
+  The `windows-msvc-debug` CI lane runs this case (§4.4).
 
 **Multi-config generators.** `AUTO` is OFF in every configuration, which gives a coherent prefix with no typed tier.
 Set ON, the libs join the export set unfiltered and the header rule lifts the five patterns for every configuration.
@@ -314,9 +359,12 @@ included only when packaging is enabled, so the guard is latent while the root d
 - deleting the module guard leaves the root decision in force;
 - the developer OFF configure that `codegen.md` documents still works.
 
-No CI lane configures OFF (no preset or workflow sets the option), so these two deletion arms are recorded once
-(M-8a, M-8b), and the contents witness's expected version list is **unconditional** (all four, as R-2 rules for
-every package), so it cannot track the defect it should catch (§4.2).
+No CI lane configures OFF (no preset or workflow sets the option), so the root-decision deletion is recorded once as
+a RED mutant (M-8a, whose observed RED is the module guard's FATAL, so M-8a is also the guard's mutation proof).
+Deleting the module guard alone cannot go RED while the root decision holds; that arm is an expected-green
+independence check (§4.3, outside the RED table), not a mutation kill, and the guard is belt-and-braces by design.
+The contents witness's expected version list is **unconditional** (all four, as R-2 rules for every package), so it
+cannot track the defect it should catch (§4.2).
 
 A FATAL_ERROR at the root is rejected. `FIXPP_PACKAGING_ENABLED` is ON in every OTel-ON configure, so a root FATAL
 would break the documented developer configure.
@@ -381,8 +429,9 @@ This is a one-time observation; the contents witness's build-tree equality (§4.
 
 ### D-8 — CPack, Conan, wheel
 
-- **CPack:** no change (P-5). `fixpp-package` depends on every non-INTERFACE member of `FIXPP_EXPORT_TARGETS`, so
-  it picks the libs up from the list with the tier ON, and not with it OFF.
+- **CPack:** no component change (P-5). `fixpp-package` depends on every non-INTERFACE member of
+  `FIXPP_EXPORT_TARGETS`, so it picks the libs up from the list with the tier ON, and not with it OFF. The one CPack
+  addition is D-0's cpack-time guard (`CPACK_PROJECT_CONFIG_FILE` and two `CPACK_FIXPP_*` inputs).
 - **Conan:** no change. This repository defines no Conan package (P-4).
 - **Wheel:** no change (P-9).
 
@@ -398,15 +447,33 @@ This is a one-time observation; the contents witness's build-tree equality (§4.
   the ones linked (§4.4).
 - **PDBs.** `cmake/FixppPackaging.cmake`'s `if(MSVC)` loop sets `COMPILE_PDB_NAME` / `COMPILE_PDB_OUTPUT_DIRECTORY`
   on every STATIC/OBJECT member of `FIXPP_EXPORT_TARGETS`, and its `install(DIRECTORY lib/ FILES_MATCHING PATTERN
-  "*.pdb")` ships every PDB in `lib/`.
-  - Release: the libs are members, but Release compiles without `/Zi`, so no PDB is written. The contents witness
+  "*.pdb")` ships every PDB in `lib/`. Two conditions decide whether a typed PDB exists to ship, and the note keys
+  every PDB expectation on both:
+  - **Packaging enabled.** The loop and the rule exist only where the root includes the module, i.e.
+    `FIXPP_PACKAGING_ENABLED` (not in an OTel-OFF build, and not, under D-6, in a `FIXPP_CODEGEN_FIX_LATEST=OFF` one).
+    This is pre-existing for every export member: an OTel-OFF MSVC Debug install ships no PDB for `fixpp_core`
+    either. The typed tier inherits it; this PR does not move the plumbing (that would change every member's
+    behaviour, out of scope).
+  - **The debug-information format.** CI's MSVC legs compile Debug with `/Z7`: `tier2.yml`'s configure passes
+    `"-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"` because sccache cannot cache
+    `/Zi`, and its own comment records "Under /Z7 there is no compiler PDB at all … It WOULD bite the day packaging
+    is enabled on a Debug leg." Debug records are then embedded in each object of each `.lib`, which meets FR-019's
+    "debuggable" without a PDB. A local tree configured from the preset alone (the shared sandbox among them: its
+    `CMakeCache.txt` has no `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT` entry, and its `lib/` holds `.pdb` files) uses
+    CMake's default, which under CMP0141 (NEW at `cmake_minimum_required(VERSION 3.28)`) is documented as
+    `$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>`, i.e. `/Zi` and a compiler PDB. That default is CMake's
+    documentation, not a probe of this repository; the sandbox's state is consistent with it.
+  - Release: the libs are members, but Release emits no debug information, so no PDB is written. The contents witness
     already FATALs on a Release ZIP carrying `lib/*.pdb` (its SC-005/T061 Release arm).
-  - Debug, tier OFF: the libs are not members, so their compiler PDBs stay under their own object directories and
-    never reach `lib/`. That glob is still the one leak path, so the absence check (§4.1) includes `.pdb` files by
-    name.
-  - Debug, tier ON: the libs are members, so the loop names `fixpp_builders_<ver>.pdb` / `fixpp_validators_<ver>.pdb`
-    into `lib/` and the rule installs them beside their `.lib`. That is FR-019's "debuggable Debug libraries" for the
-    typed tier; the presence check (§4.1) requires each typed `.lib` to have its `.pdb` on an MSVC Debug stage.
+  - Debug, tier OFF: the libs are not members, so where a compiler PDB exists it stays under its own object directory
+    and never reaches `lib/`. That glob is still the one leak path, so the absence check (§4.1) includes `.pdb` files
+    by name.
+  - Debug, tier ON, packaging enabled, a PDB format (`/Zi`): the libs are members, so the loop names
+    `fixpp_builders_<ver>.pdb` / `fixpp_validators_<ver>.pdb` into `lib/` and the rule installs them beside their
+    `.lib`. The presence check (§4.1) requires each typed `.lib` to have its `.pdb` there. That case runs in the
+    sandbox, not on CI (M-18).
+  - Debug, tier ON, `/Z7` (CI's `windows-msvc-debug`): no typed PDB exists, and the check requires none. It requires
+    the reverse instead, that no typed `.pdb` is staged, so a wrong reading of the format is not silent.
 - **`/W4`.** No new compile of fixpp code: the libs are already built on every MSVC lane. Their own
   `.builder.cpp` / `.validator.cpp` TUs include the shipped headers and compile in-tree under
   `fixpp_apply_common_flags` (`cmake/Helpers.cmake`), which gives MSVC `/W4` (and `/WX` under `FIXPP_WERROR`) and
@@ -423,24 +490,37 @@ This is a one-time observation; the contents witness's build-tree equality (§4.
   extracts the Release ZIP under a root longer than about 180 characters would hit `MAX_PATH`. That is the general
   Windows constraint, and it is not recorded as a fixpp limitation.
 
-### D-10 — withdrawn by R-2a: the consumer witness keeps its stage
+### D-10 — after a PASS the driver removes `stage/lib/`, and keeps the staged headers and the sub-build
 
-v0.2 deleted `${FIXPP_WITNESS_WORK_DIR}` after a PASS, because every Debug, sanitizer and coverage lane would have
-copied 5–11 GB of builder archives into it. Under R-2a those lanes default to no typed tier, so their stage is
-unchanged from today. The Release stages grow by the Release archives and slim headers (§5), hundreds of MB, not GB.
-R-2b adds one GB-scale stage, on the one Debug lane set ON (`windows-msvc-debug`, §4.4): it is overwritten at the
-start of every run (the driver's existing `file(REMOVE_RECURSE)`), so it is bounded, and on CI the runner is
-discarded. A developer who runs that preset's `ctest` locally keeps it under `build/windows-msvc-debug/`, which is
-disclosed rather than deleted, for the reason below.
+v0.2 deleted all of `${FIXPP_WITNESS_WORK_DIR}` after a PASS, because every Debug, sanitizer and coverage lane would
+have copied 5–11 GB of builder archives into it. v0.3 dropped the deletion: under R-2a those lanes default to no
+typed tier, and the whole-directory deletion broke a reader (below). R-2b brought the reason back for one lane: the
+one Debug lane set ON (`windows-msvc-debug`, §4.4) stages that tree's Debug typed archives, GB-scale, and a local run
+of that preset (the shared sandbox's `build/windows-msvc-debug/`, which already holds the same archives once in
+`lib/`) would keep a second copy. So the deletion returns, narrowed to the part that has no reader.
 
-The deletion is therefore dropped. That also removes the defect the triage found in it (N-1): 086 `plan.md`'s
-verifier step runs `clang-tidy -p build/linux-clang-release/_consumer_witness/build tests/consumer/probe_*.cpp`
-against the compile database that 086 T053 added to the sub-build, and that procedure must keep working for this
-PR's new TUs. v0.2's "nothing else reads the stage" came from a grep restricted to build-file globs, which could not
-see a reader in a `plan.md`. The unfiltered recipe, `git grep -n _consumer_witness`, finds it (run 2026-10-24 on
-`97748d1e`: its hits include `specs/086-capi-include-isolation/plan.md`'s `clang-tidy -p` line).
+**Readers of the stage after a PASS** (re-derive with the unfiltered `git grep -n _consumer_witness`; v0.2's
+"nothing else reads the stage" came from a grep restricted to build-file globs, which could not see a reader in a
+`plan.md`; run 2026-10-24 on `97748d1e`, its hits include `specs/086-capi-include-isolation/plan.md`'s `clang-tidy -p`
+line):
+- 086 `plan.md`'s verifier step, `clang-tidy -p build/linux-clang-release/_consumer_witness/build tests/consumer/probe_*.cpp`,
+  reads the compile database that 086 T053 added to the sub-build (`${FIXPP_WITNESS_WORK_DIR}/build`, the driver's
+  `_sub_build`) and the staged `stage/include` it points at. It reads no archive.
+- M-6 (§4.3) edits a staged archive with `ar d` and relinks C-1 by hand.
+- §4.4's peak-RSS obligation rebuilds C-1, C-2a and C-2b by hand; C-1 links the staged archives.
 
-The `tier1.yml` `#254` job-end disk comment is therefore **not** amended. The in-test disk instrument of §4.4 is kept.
+**Rule.** As its last step, after every check and every execution has passed, the driver removes `stage/lib/`, and
+nothing else: `stage/include` and the sub-build with its compile database stay. A FATAL anywhere earlier leaves the
+whole stage in place for diagnosis. With the environment variable `FIXPP_WITNESS_KEEP_STAGE_LIB` set to a true value
+the driver skips the removal and prints that it did; M-6 and the peak-RSS rebuild run with it. An environment
+variable rather than a cache option: the hand procedures then need no reconfigure, and `ctest` passes its environment
+to the test. After the removal the sub-build can neither rebuild nor reconfigure (the package config under
+`stage/lib/cmake/` is gone, and CMake's generated `fixppTargets*.cmake` would refuse missing imported files anyway),
+which is why those procedures set the variable first; 086's `clang-tidy -p` needs neither.
+
+The stage is also overwritten at the start of every run (the driver's existing `file(REMOVE_RECURSE)`). The
+`tier1.yml` `#254` job-end disk comment is **not** amended. The in-test disk instrument of §4.4 reads the stage
+before the removal.
 
 ## 3. What becomes reachable, and from where
 
@@ -463,22 +543,48 @@ registration would have to bump them.
 **What the expectation is keyed on (R-2b).** The two witnesses' `add_test` registrations pass both the raw setting
 (`-DFIXPP_TYPED_TIER_SETTING=${FIXPP_INSTALL_TYPED_TIER}`) and the effective value
 (`-DFIXPP_TYPED_TIER_EFFECTIVE=${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE}`). PRESENT/ABSENT is the **effective** value,
-so a self-built Debug tree set ON is checked as PRESENT. The effective value is never trusted alone; three guards
-check it against sources the mechanism does not control, so a defaulting bug cannot turn both sides green:
+so a self-built Debug tree set ON is checked as PRESENT. The effective value is never trusted alone; the guards below
+check it against sources the mechanism does not control, so a defaulting bug cannot turn both sides green. Both
+registrations are resolved after the setting (D-0); the guards do not rely on that, they check their own inputs
+first. The install driver runs guards 0 and 1 **before** its `file(REMOVE_RECURSE)` and `cmake --install`, so a
+defaulting bug on a Debug lane (M-10) fails before the multi-GB copy rather than after it.
 
+0. **Domain first.** Each witness FATALs, naming the value, unless the raw setting, uppercased, is `AUTO` or one of
+   D-0's boolean spellings (`ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0`), and the effective value is exactly `ON` or `OFF`.
+   Empty is out of domain on both; the test is `STREQUAL ""`, not `NOT DEFINED`, because `-DX=` defines `X` as empty.
+   This is what keeps the next ordering slip loud: with v0.4's placement both values were empty on a fresh Debug tree,
+   guard 1 took its explicit branch, compared `''` with `''`, and the lanes whose ABSENT branch is the standing gate
+   passed (round 2, Codex #1).
 1. **The default, re-derived.** If the setting is `AUTO`, the witness computes its own default (case-insensitive
    `Release` build type ⇒ ON; anything else ⇒ OFF; the install driver takes the build type from `FIXPP_BUILD_TYPE`,
    whose empty value it already treats as Debug; the contents witness from the configuration component of the
    artifact's own name, §4.2) and FATALs if it differs from the effective value. If the setting is explicit, the
-   effective value must equal it. A wrong default in either direction is RED on every lane (M-10, M-13).
-2. **Released packages are ON.** `cmake/FixppPackaging.cmake` refuses to configure a `release` package with the tier
-   OFF (D-0). Independently of that guard, the install driver FATALs when it is told packaging is enabled
-   (`-DFIXPP_PACKAGING_ENABLED`, added to its registration), the build type is Release and the effective value is
-   OFF, and the contents witness FATALs on any artifact whose configuration component is `release` and whose
-   effective value is OFF. Deleting the module guard leaves both (M-13b).
+   witness normalises it to a truth value (`ON|YES|TRUE|Y|1` ⇒ ON, `OFF|NO|FALSE|N|0` ⇒ OFF) and the effective value
+   must equal that, so `-DFIXPP_INSTALL_TYPED_TIER=1`, `yes` or `on` is not a false RED. A wrong default in either
+   direction is RED on every lane (M-10, M-13).
+2. **Released packages are ON.** The refusal is at package generation (D-0): the cpack-time guard
+   `cmake/FixppCPackTypedTierGuard.cmake` refuses to generate a `release` package with the tier OFF. Independently of
+   it, the contents witness, which runs cpack, FATALs on any artifact whose configuration component is `release` and
+   whose effective value is OFF. Deleting the cpack-time guard leaves that (M-13b). The install driver has **no**
+   guard 2: a Release tree configured OFF is permitted to install, and its consumer witness must run ABSENT and pass
+   (M-20); at `AUTO`, "Release resolved OFF" is already guard 1's "re-derived ON ≠ effective OFF".
 3. **The ON-in-Debug lane is pinned.** `windows-msvc-debug` sets the tier ON in its preset (§4.4). A tier2 step pins
    the CMakeCache value on every MSVC leg, two-sided: `ON` on `windows-msvc-debug`, `AUTO` on the others. Without it,
    dropping the preset entry would silently turn that lane ABSENT, and green (M-16).
+
+**What else the install driver's registration passes**, for the stage check's PDB expectation (§4.1, D-9):
+`-DFIXPP_PACKAGING_ENABLED=${FIXPP_PACKAGING_ENABLED}`, `-DFIXPP_IS_MSVC=$<CXX_COMPILER_ID:MSVC>`, and the typed
+libs' evaluated debug-information format with whether the property is set at all:
+- `-DFIXPP_TYPED_DEBUG_INFO=$<TARGET_GENEX_EVAL:fixpp_builders_v44,$<TARGET_PROPERTY:fixpp_builders_v44,MSVC_DEBUG_INFORMATION_FORMAT>>`.
+  A bare `$<TARGET_PROPERTY:…>` is **not** enough: it passes a genex-valued property through unevaluated, and
+  tier2 sets the format as a genex. Toy probe (CMake 3.30.0, 2026-10-24, Ninja, a one-library project in the session
+  scratch directory, since deleted; property evaluation does not depend on the generator or compiler): with
+  `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>`, the bare form gave the genex text
+  in both Debug and Release, and `TARGET_GENEX_EVAL` (and `GENEX_EVAL`) gave `Embedded` in Debug and empty in
+  Release; with the variable unset, every form gave empty.
+- `-DFIXPP_TYPED_DEBUG_INFO_SET=0|1`, from `get_target_property` at configure (`-NOTFOUND` ⇒ 0). An evaluated empty
+  value is ambiguous without it: unset means CMake's default (a PDB format in Debug), set-but-empty means no debug
+  information.
 
 ### 4.1 `fixpp::consumer::install-witness` (tests/consumer) — every lane, two-sided
 
@@ -488,16 +594,28 @@ the consumer configure. **Both branches add
 required targets** to the driver's `_required_targets`, so neither branch can pass by registering nothing, and
 deleting a target fails the build by name (the 086 Gate B r1 rule recorded in `run_consumer_witness.cmake`).
 
-**Stage check, both branches (driver, after the install).** For each version directory present under
-`include/fixpp/`, the set of immediate children (first path component, deduplicated) must equal exactly:
+**Stage check, both branches (driver, after the install).** The versions are an **expected list**, never the
+directories found in the stage: v42, v44 and v50sp2, plus vlatest iff `FIXPP_CODEGEN_FIX_LATEST` (passed to the
+driver; keying vlatest on the option is right here, unlike in §4.2, because the consumer witness legitimately runs in
+FIX_LATEST=OFF trees). This extends the driver's existing FR-008 sub-assertion, which already requires
+`include/fixpp/<ver>/Messages.hpp` for v42, v44 and v50sp2. Each expected version directory must exist, and its set of
+immediate children (first path component, deduplicated) must equal exactly:
 - ABSENT: the five read-side files;
 - PRESENT: the five read-side files plus `all.hpp`, `groups.hpp`, `messages`, `groups` and `validators`.
 
 In the ABSENT branch, the driver also FATALs on any file under the stage's `lib/` whose name contains
 `fixpp_builders_` or `fixpp_validators_` (archives and `.pdb` alike), and on any staged `lib/cmake/fixpp/fixppTargets*.cmake`
-containing `fixpp::builders::` or `fixpp::validators::`. In the PRESENT branch on an MSVC Debug stage, it FATALs
-unless every staged `lib/fixpp_(builders|validators)_<ver>.lib` has its `lib/fixpp_(builders|validators)_<ver>.pdb`
-(D-9; FR-019 for the typed tier).
+containing `fixpp::builders::` or `fixpp::validators::`.
+
+**PDB expectation, PRESENT branch (D-9).** The driver first FATALs unless `FIXPP_TYPED_DEBUG_INFO` is empty,
+`ProgramDatabase`, `EditAndContinue` or `Embedded`. It then resolves the format: set ⇒ the value; unset ⇒ CMake's
+documented default (`ProgramDatabase` for a Debug or RelWithDebInfo build type, none otherwise). A typed PDB is
+**required** iff `FIXPP_IS_MSVC`, `FIXPP_PACKAGING_ENABLED`, and the resolved format is `ProgramDatabase` or
+`EditAndContinue`: then every staged `lib/fixpp_(builders|validators)_<ver>.lib` must have its
+`lib/fixpp_(builders|validators)_<ver>.pdb`. Where the resolved format is `Embedded`, no typed `.pdb` may be staged.
+Otherwise nothing is checked. On CI's `windows-msvc-debug` (`/Z7`) that makes the requirement arm vacuous by design;
+it is exercised in the sandbox (`/Zi`, OTel ON), once (M-18). The line the driver prints names the resolved format and
+which arm applied.
 
 #### PRESENT branch (Release lanes, and `windows-msvc-debug` set ON)
 
@@ -526,8 +644,10 @@ Debug-into-Release link (D-9), so a green link there is evidence that the Debug 
   - The two validation outcomes are what prove a real `validate_` body ran, rather than a stub.
 - **Links exactly the eight imported libs, by name.** No `if(TARGET …)`, and not `fixpp::fixpp`, so the by-name
   targets must carry their own closure.
-- **Own include interface (D-5).** Before `add_executable`, the consumer configure reads each linked typed target's
-  own `INTERFACE_INCLUDE_DIRECTORIES` and FATALs unless it is exactly the staged include root (both sides through
+- **Own include interface (D-5).** Before `add_executable`, the consumer configure checks each typed target it will
+  link: first `if(NOT TARGET <t>)` ⇒ FATAL `#613: <t> is not exported`, so a missing export fails on that line rather
+  than on `get_target_property`'s error for a non-existent target; then it reads the target's own
+  `INTERFACE_INCLUDE_DIRECTORIES` and FATALs unless it is exactly the staged include root (both sides through
   `file(REAL_PATH)`).
 - **vlatest is two-sided** on `FIXPP_CODEGEN_FIX_LATEST`, which `add_test` passes to the driver and the driver to the
   consumer configure.
@@ -557,9 +677,12 @@ pull the large versions' `ListStatus.validator.inl`, then `validators/traits.hpp
 **C-3 `probe_typed_absent` (compile-only OBJECT, linked to `fixpp::fixpp`, required).** It follows 086's ❌-cell
 form (rule 2 in `tests/consumer/CMakeLists.txt`'s 086 block: `__has_include` plus a unique-token `#error`, asserted by
 compiling):
-- **Positive control first:** `#error` unless `__has_include(<fixpp/v44/Messages.hpp>)`. Without it, a missing
-  include root would make every absence below true for the wrong reason.
-- Then, for each of the four versions, `#error` naming the path if any of these resolves: `all.hpp`, `groups.hpp`,
+- **A positive control per version it asserts absence for:** `#error` unless
+  `__has_include(<fixpp/<ver>/Messages.hpp>)`, for v42, v44, v50sp2, and vlatest under the same
+  `FIXPP_CODEGEN_FIX_LATEST` condition the consumer configure passes as a compile definition. Without it, a version
+  tree that was not staged at all would make that version's absences true for the wrong reason
+  (`consumer_witness.cpp` includes only `<fixpp/v44/Messages.hpp>`, so nothing else requires the other versions).
+- Then, for each of those versions, `#error` naming the path if any of these resolves: `all.hpp`, `groups.hpp`,
   `validators/traits.hpp`, and one message header (`messages/NewOrderSingle.hpp` for v42/v44,
   `messages/ListStatus.hpp` for v50sp2/vlatest).
 
@@ -570,15 +693,21 @@ compiling):
 
 ### 4.2 `fixpp::packaging::contents` (tests/packaging) — linux-gcc-release and windows-msvc-release
 
-Changes to `tests/packaging/run_package_contents_witness.cmake`. **PRESENT/ABSENT is the effective value passed by
-the build; the artifact's own name is the independent check on it**, as the FR-019 PDB block uses the name. The name
+Changes to `tests/packaging/run_package_contents_witness.cmake`. The `fixpp::packaging::contents` registration runs
+`run_package_contents_gate.cmake`, which `execute_process`es the witness with a fixed list of `-D`s, so the
+registration's two new values (`FIXPP_TYPED_TIER_SETTING`, `FIXPP_TYPED_TIER_EFFECTIVE`) must also be required and
+forwarded by the gate; a value the gate does not forward reaches the witness empty, which guard 0 refuses.
+**PRESENT/ABSENT is the effective value passed by the build; the artifact's own name is the independent check on it**, as the FR-019 PDB block uses the name. The name
 is `CPACK_PACKAGE_FILE_NAME`'s `fixpp-<version>-<platform>-<toolchain>-<config>`, optionally followed by
 `-otel-off-fixture`, then the extension (`cmake/FixppPackaging.cmake`, T051). The witness **parses** the
 configuration component (`^fixpp-[^-]+-[^-]+-[^-]+-([^-.]+)`) rather than matching a suffix, and FATALs if the name
-does not parse. Then:
-- component `release` with the effective value OFF → FATAL (guard 2: a released configuration without the tier);
-- setting `AUTO` → the default re-derived from the component (`release` ⇒ ON, anything else, `debug`,
-  `relwithdebinfo` or `minsizerel` included, ⇒ OFF) must equal the effective value (guard 1);
+does not parse. Then, in this order:
+- guard 0: the raw setting and the effective value in domain (§4);
+- component `release` with the effective value OFF → FATAL (guard 2: a released configuration without the tier;
+  reachable only when the cpack-time guard is gone, M-13b);
+- guard 1: setting `AUTO` → the default re-derived from the component (`release` ⇒ ON, anything else, `debug`,
+  `relwithdebinfo` or `minsizerel` included, ⇒ OFF) must equal the effective value; an explicit setting, normalised,
+  must equal it;
 - effective ON → PRESENT: the slim set is expected; effective OFF → ABSENT: today's read-side-only set.
 
 Below, "PRESENT artifacts" and "ABSENT artifacts" mean these two outcomes.
@@ -626,34 +755,39 @@ Each mutant is applied on the implementation branch, in a scratch commit that is
 
 | # | Mutant | Lane | Expected RED | Where it shows |
 |---|---|---|---|---|
-| M-1 | Delete the D-1 append (no lib exported) | gcc-release | consumer configure: CMP0028 — `consumer_typed_witness` links `fixpp::builders::v42` "but the target was not found". The headers still ship, which is the incoherent package 078 feared. | install-witness ("consumer configure failed") |
+| M-1 | Delete the D-1 append (no lib exported) | gcc-release | consumer configure: `#613: fixpp::builders::v42 is not exported` (the own-include-interface check's `if(NOT TARGET)` line, which runs before any link is generated). The headers still ship, which is the incoherent package 078 feared. | install-witness ("consumer configure failed") |
 | M-2a | Restore `PATTERN "messages" EXCLUDE` in the tier-ON branch | gcc-release | C-1 compile: `fixpp/v44/messages/NewOrderSingle.hpp` not found. Stage children ≠ PRESENT set. Contents: children and schema/equality RED. | both |
 | M-2b | Restore `PATTERN "groups" EXCLUDE` (Release) | gcc-release | C-1 compile: a `../groups/G_*Args.hpp` not found (v44 NewOrderSingle; v50sp2/vlatest ListStatus). Contents RED. | both |
 | M-2c | Restore `PATTERN "validators" EXCLUDE` (Release) | gcc-release | C-2a compile: `../validators/traits.hpp` not found. Link-mode C-1 stays green, which is why C-2a exists. Contents RED. | both |
 | M-2d | Restore `PATTERN "all.hpp" EXCLUDE` (Release) | gcc-release | C-2a compile: `fixpp/v42/all.hpp` not found. Stage children and contents RED. | both |
 | M-2e | Restore `PATTERN "groups.hpp" EXCLUDE` (Release) | gcc-release | C-2a compile: `../groups.hpp` (from `traits.hpp`) not found. Contents RED. | both |
 | M-2f | Add `PATTERN "*.inl" EXCLUDE` | gcc-release | C-2a and C-2b compile: `<Msg>.builder.inl` not found. Contents: schema (a `.hpp` without its `.inl`) and equality RED. | both |
-| M-3 | Drop one version from the append: vlatest, then v42 | gcc-release | consumer configure: CMP0028 on that version's targets | install-witness |
-| M-3b | Drop only `fixpp_validators_v44` | gcc-release | consumer configure: CMP0028 on `fixpp::validators::v44` | install-witness |
+| M-3 | Drop one version from the append: vlatest, then v42 | gcc-release | consumer configure: `#613: fixpp::builders::<ver> is not exported` for that version | install-witness |
+| M-3b | Drop only `fixpp_validators_v44` | gcc-release | consumer configure: `#613: fixpp::validators::v44 is not exported` | install-witness |
 | M-4 | Remove `PATTERN "*.cpp" EXCLUDE` | gcc-release | Contents: must-be-absent lists `include/fixpp/<ver>/messages/*.builder.cpp`; schema RED too. The consumer stays green, correctly: a leaked TU breaks no compile. | contents |
 | M-5 | Remove the D-2 loop | gcc-release | configure: T026 FATAL. Already observed by probe (P-3). | configure |
-| M-6 | Spurious-HIT arm: with everything exported, delete the `NewOrderSingle.builder.cpp.o` member from the **staged** `libfixpp_builders_v44.a`. Procedure (GNU `ar`, so Linux): run the witness once to PASS (the stage persists, D-10); `ar d <work>/stage/lib/libfixpp_builders_v44.a NewOrderSingle.builder.cpp.o`; then `cmake --build <work>/_sub_build --target consumer_typed_witness` by hand | gcc-release | C-1 link: undefined `fixpp::v44::build_NewOrderSingle`. Proves the symbol resolves from that archive and from nothing else in the closure. | the hand build |
+| M-6 | Spurious-HIT arm: with everything exported, delete the `NewOrderSingle.builder.cpp.o` member from the **staged** `libfixpp_builders_v44.a`. Procedure (GNU `ar`, so Linux): run the witness once to PASS with `FIXPP_WITNESS_KEEP_STAGE_LIB=1` in the environment, so the staged archives survive the PASS (D-10); `ar d <work>/stage/lib/libfixpp_builders_v44.a NewOrderSingle.builder.cpp.o`; then `cmake --build <work>/build --target consumer_typed_witness` by hand (`<work>/build` is the driver's `_sub_build`) | gcc-release | C-1 link: undefined `fixpp::v44::build_NewOrderSingle`. Proves the symbol resolves from that archive and from nothing else in the closure. | the hand build |
 | M-7 | Change one byte of C-1's v44 expected literal | any Release | C-1 run: no `PASS` line. Proves the byte comparison is live. | install-witness |
 | M-8a | FIX_LATEST=OFF, root D-6 decision deleted | configure only | the `cmake/FixppPackaging.cmake` guard FATALs naming `FIXPP_CODEGEN_FIX_LATEST` | configure, recorded once |
-| M-8b | FIX_LATEST=OFF, module guard deleted | configure only | still no `CPackConfig.cmake` and the D-6 STATUS line (the root decision holds) | configure, recorded once |
 | M-8c | FIX_LATEST=OFF, unmutated | one full OFF build | D-6 configure evidence (STATUS line, no `CPackConfig.cmake`, 24 imported names, already observed by probe) plus the consumer witness's vlatest-OFF arm green | recorded once; no CI lane configures OFF |
 | M-9 | Remove the `INSTALL_INTERFACE` entry from `fixpp_validators_v50sp2` only | gcc-release | consumer configure: the own-include-interface check FATALs naming `fixpp::validators::v50sp2`, although its headers would still resolve through `fixpp::wire` | install-witness |
-| M-10 | Defaulting bug, Debug side: make `AUTO` resolve ON for every build type | a Debug tree at `AUTO` (linux-clang-debug) | driver guard 1: `AUTO` resolved ON but the re-derived default for `FIXPP_BUILD_TYPE=Debug` is OFF. Without guard 1 the lane would run PRESENT and pass; that is the both-sides-green case R-2b names | install-witness |
+| M-10 | Defaulting bug, Debug side: make `AUTO` resolve ON for every build type | a Debug tree at `AUTO` (linux-clang-debug) | driver guard 1, before the install: `AUTO` resolved ON but the re-derived default for `FIXPP_BUILD_TYPE=Debug` is OFF. Without guard 1 the lane would run PRESENT and pass; that is the both-sides-green case R-2b names | install-witness |
 | M-11 | In the tier-OFF branch, drop only the restored `PATTERN "groups.hpp" EXCLUDE` | a Debug tree at `AUTO` | driver: `groups.hpp` among a version's children; C-3 `#error` on `fixpp/<ver>/groups.hpp`. | install-witness |
 | M-12 | Append `fixpp_validators_v44` to `FIXPP_EXPORT_TARGETS` outside the `if(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE)` | a Debug tree at `AUTO` | consumer: `IMPORTED_TARGETS` lists `fixpp::validators::v44`; driver: `lib/libfixpp_validators_v44.a` (or `.lib`) staged. T026 stays green (the D-2 loop names it), which is why the consumer check exists. | install-witness |
-| M-13 | Defaulting bug, Release side: make `AUTO` resolve OFF for every build type | gcc-release | configure: the `cmake/FixppPackaging.cmake` guard FATALs (a `release` package with the tier OFF) | configure |
-| M-13b | M-13 with the `cmake/FixppPackaging.cmake` guard also deleted | gcc-release | driver guard 1 (`AUTO` resolved OFF, re-derived default ON) and guard 2 (packaging enabled, Release, OFF); contents guard 2 (`release` artifact, OFF). linux-clang-release, which runs no contents witness, is RED through the driver alone | install-witness, contents |
-| M-16 | Delete `FIXPP_INSTALL_TYPED_TIER: ON` from the `windows-msvc-debug` preset | windows-msvc-debug (tier2 CI, or the sandbox for the configure half) | the tier2 pin step: CMakeCache holds `AUTO`, expected `ON`. The witness itself would go ABSENT and green, which is why the pin exists | tier2 pin step |
+| M-13 | Defaulting bug, Release side: make `AUTO` resolve OFF for every build type | gcc-release | configure succeeds (the refusal is not at configure). Driver guard 1, before the install: `AUTO` resolved OFF but the re-derived default for `FIXPP_BUILD_TYPE=Release` is ON. The cpack-time guard: `cpack` refuses the `release` package with the tier OFF, in each `packaging` witness that executes cpack (D-0's recipe) on linux-gcc-release and windows-msvc-release, and in the `Build packages` step on every Release lane | install-witness, packaging tests, `Build packages` |
+| M-13b | M-13 with `cmake/FixppCPackTypedTierGuard.cmake`'s FATAL also deleted | gcc-release | driver guard 1 as in M-13; contents guard 2 (`release` artifact, effective OFF). linux-clang-release, which runs no contents witness, is RED through the driver alone | install-witness, contents |
+| M-16 | Delete `FIXPP_INSTALL_TYPED_TIER: ON` from the `windows-msvc-debug` preset | windows-msvc-debug: tier2 CI (fresh tree), or locally only on a **fresh** build directory or after `cmake -U FIXPP_INSTALL_TYPED_TIER`: deleting a preset entry does not remove the value an existing `CMakeCache.txt` already holds, so a reconfigured tree keeps `ON` and the arm fails toward clean | the tier2 pin step: CMakeCache holds `AUTO`, expected `ON`. The witness itself would go ABSENT and green, which is why the pin exists | tier2 pin step |
 | M-17 | Key the generated-header rule's OFF branch on the build type instead of the effective value | windows-msvc-debug (ON) | C-1 compile: `fixpp/v44/messages/NewOrderSingle.hpp` not found (Debug libs exported, slim headers withheld: the incoherent install); stage children ≠ PRESENT set | install-witness |
-| M-18 | Remove `fixpp_validators_v44` from the PDB loop's reach (skip it in the `if(MSVC)` loop) | windows-msvc-debug (ON) | driver: `lib/fixpp_validators_v44.lib` staged without its `.pdb` (FR-019 for the typed tier) | install-witness |
-| M-19 | `-DFIXPP_INSTALL_TYPED_TIER=maybe` | configure only | D-0's FATAL naming the accepted values | configure, recorded once |
+| M-18 | Remove `fixpp_validators_v44` from the PDB loop's reach (skip it in the `if(MSVC)` loop) | **the sandbox only**: `windows-msvc-debug` set ON, configured from the preset (so `/Zi`, no `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT` entry) with OTel ON (so packaging is enabled), under the sandbox lock procedure. CI's leg is `/Z7`, where no typed PDB exists to misplace | driver: `lib/fixpp_validators_v44.lib` staged without its `.pdb`, the resolved format `ProgramDatabase` named in the line | install-witness, recorded once |
+| M-19 | `-DFIXPP_INSTALL_TYPED_TIER=maybe` | configure only, in a **scratch** build directory, never a preset tree and least of all the shared sandbox: the value stays in that cache, so every later configure of the tree FATALs until the entry is cleared | D-0's FATAL naming the accepted values | configure, recorded once |
+| M-20 | Unmutated: the ruling as a test. A Release tree, OTel ON, configured with explicit `-DFIXPP_INSTALL_TYPED_TIER=OFF` | linux-gcc-release's settings in a scratch build directory (or the preset tree, restored with `-DFIXPP_INSTALL_TYPED_TIER=AUTO` afterwards) | configure GREEN; `fixpp::consumer::install-witness` GREEN on its ABSENT branch; `cpack --config <tree>/CPackConfig.cmake` RED with the guard's line and a non-zero exit, before any staging (D-0's toy observation, here on the real tree); then `ctest -L packaging`, recording which tests went RED on the guard's line (expected: those D-0's recipe lists as executing cpack) and which stayed green | configure, install-witness, cpack, `-L packaging`; recorded once |
 | M-14 | Debug package contents: run `packaging::contents` once unmutated, then with M-11 applied | a Debug tree at `AUTO` with packaging enabled | unmutated GREEN on the ABSENT arm; with M-11, children set and must-be-absent RED naming `include/fixpp/<ver>/groups.hpp` | contents, recorded once |
 | M-15 | New emitted kind: after the build and before `ctest`, create `_codegen/include/fixpp/v44/messages/X.json` in the build tree | gcc-release | contents: schema allowlist RED naming `include/fixpp/v44/messages/X.json`; build-tree equality stays green, correctly | contents |
+
+**Expected-green independence check, not a mutant (was M-8b).** FIX_LATEST=OFF with only the module's D-6 guard
+deleted, configure only: still no `CPackConfig.cmake` and the D-6 STATUS line, because the root decision holds. It
+has no failing line to record and is not cited as a mutation kill; M-8a is the guard's behavioural proof (D-6).
+Recorded once beside M-8a.
 
 ### 4.4 Lanes and first-run obligations
 
@@ -664,11 +798,15 @@ its configure preset sets `FIXPP_INSTALL_TYPED_TIER` ON, or leaves it `AUTO` and
 - **PRESENT, default:** linux-clang-release and linux-gcc-release (tier1), windows-msvc-release (tier2).
 - **PRESENT, set ON in Debug (R-2b's self-build case):** windows-msvc-debug (tier2), by a
   `"FIXPP_INSTALL_TYPED_TIER": "ON"` entry in its `CMakePresets.json` `cacheVariables`. No other preset inherits it
-  (P-10). Chosen over a Linux Debug lane because:
-  - its typed archives are the smallest Debug set measured (§5);
-  - it is the only lane where a Debug consumer resolving to the wrong configuration's archives fails the link instead
-    of passing silently (D-9);
-  - it exercises the PDB path that ON in Debug adds (D-9, M-18).
+  (P-10). Chosen over a Linux Debug lane because it is the only lane where a Debug consumer resolving to the wrong
+  configuration's archives fails the link instead of passing silently (LNK2038, D-9). Two reasons v0.4 gave are
+  withdrawn, because they were read from the sandbox (`/Zi`) while the CI leg is `/Z7` (D-9):
+  - "its typed archives are the smallest Debug set measured": §5's MSVC Debug figure is a `/Zi` archive set; CI's
+    `/Z7` archives embed the debug records in every object and are a different quantity, **unmeasured**. The first
+    run measures it (below), and the lane stays chosen on the LNK2038 reason alone;
+  - "it exercises the PDB path": on CI it exercises the `Embedded` arm (no typed PDB, and none staged); the PDB arm is
+    the sandbox's (M-18).
+  The lane still runs ON in Debug end to end on CI: export, slim headers, a Debug consumer's compile, link and run.
 - **ABSENT, default:** linux-clang-debug, linux-clang-asan, linux-clang-ubsan, linux-clang-tsan and
   linux-clang-coverage (tier1), windows-msvc-asan (tier2), the four libc++ legs (tier3).
 - **The pin (guard 3).** A tier2 step after configure, on every MSVC leg, reads `FIXPP_INSTALL_TYPED_TIER` from
@@ -686,9 +824,10 @@ its configure preset sets `FIXPP_INSTALL_TYPED_TIER` ON, or leaves it `AUTO` and
 the bindings), and the `tests/packaging` witnesses (their cpack staging, on the two packaging lanes). Only the
 PRESENT lanes copy anything new. On the Linux Release legs the consumer and Python stages can coexist under `ctest`
 parallelism, so their growth adds. On windows-msvc-debug only the consumer witness stages (the Python witness is
-`UNIX`-only), and it copies the Debug typed archives and their PDBs.
+`UNIX`-only), and it copies the Debug typed archives (on CI `/Z7`, so no PDBs).
 
-**In-test disk instrument (driver).** Before deleting nothing and before configuring the consumer, the driver prints
+**In-test disk instrument (driver).** After the install and before configuring the consumer (so before D-10's
+removal), the driver prints
 one line: the stage's total bytes (summed with `file(GLOB_RECURSE)` + `file(SIZE)`, so it works on every platform; a
 zero sum is a FATAL, because the glob then saw nothing), and the free bytes of the work directory before and after
 the install where `df` is found (`df -B1 --output=avail`); elsewhere it prints `free: unavailable`. It reports; it
@@ -697,7 +836,8 @@ gates nothing.
 **Implementation obligations, read from the PR's first CI run** (copying a remembered number is not allowed):
 - **Disk.** Read the driver's line on every lane, coverage included. ABSENT lanes: stage bytes should match a run of
   `main` taken the same way. PRESENT lanes: the growth should match §5's projection; record it.
-- **windows-msvc-debug first.** It is the one GB-scale stage this PR adds. Read its stage bytes, its free space
+- **windows-msvc-debug first.** It is the one GB-scale stage this PR adds, and its `/Z7` archive size is unmeasured
+  (§5). Read its stage bytes (they replace §5's `/Zi` estimate as the lane's cost), its free space
   (`free: unavailable` is expected on Windows, so also read the job's own disk figure if the runner reports one) and
   the `install-witness` elapsed time against `TIMEOUT 300` before anything else.
 - **Elapsed time.** Read the elapsed time of `install-witness` on every PRESENT lane, of the Python install witness on
@@ -705,8 +845,9 @@ gates nothing.
   If any uses more than half its budget, raise its `TIMEOUT` to twice the largest measured value.
 - **Compile cost of C-1, C-2a, C-2b.** Wall time from the sub-build's `.ninja_log` on each PRESENT lane, the Debug
   one included (C-1 links Debug archives there, the largest of them GB-scale). Peak RSS
-  once, locally on linux-gcc-release: with the stage kept (D-10), clean and rebuild each target under
-  `/usr/bin/time -v cmake --build <work>/_sub_build --target <t>`, and record `Maximum resident set size`.
+  once, locally on linux-gcc-release: run the witness with `FIXPP_WITNESS_KEEP_STAGE_LIB=1` so the staged archives
+  survive (D-10), then clean and rebuild each target under
+  `/usr/bin/time -v cmake --build <work>/build --target <t>`, and record `Maximum resident set size`.
 - **Configure probe, both build types and both Debug settings** (D-1's last bullet), recorded in the verify record.
 
 ## 5. Size: method, baseline, after
@@ -746,7 +887,7 @@ packages (P-11). The Debug rows are what a consumer's own build set ON installs,
 | Windows MSVC Release | released, ON by default | 611,122,156 (`gzip -6` 84,704,020); no PDBs (Release has no `/Zi`) | read from the artifact | **estimate**: the shared sandbox's `windows-msvc-release/lib`, built 2026-10-08/14 at unrecorded commits |
 | Linux clang Debug | **not released**; OFF by default, ON in a self-build | 0 at `AUTO`; ON: 4,861,863,620 summed, largest single archive (`libfixpp_validators_vlatest.a`) 1,355,449,906 | 0 at `AUTO`; ON: as Release | **estimate**: main checkout `build/linux-clang-debug/lib`, newest archive 2026-10-23, commit unrecorded |
 | Linux gcc Debug | **not released**; OFF by default, ON in a self-build | 0 at `AUTO`; ON: unmeasured (no local gcc-debug tree holds builder archives) | 0 at `AUTO`; ON: as Release | — |
-| Windows MSVC Debug | **not released**; OFF by default; **ON on the `windows-msvc-debug` CI lane** | 0 at `AUTO`; ON: 2,281,281,176 of `.lib` plus 61,931,520 of compiler PDBs | 0 at `AUTO`; ON: as Release | **estimate**: the shared sandbox's `build/windows-msvc-debug`, read 2026-10-24 (the `stat` recipe above over `lib/fixpp_{builders,validators}_*.lib`, and over the eight `CMakeFiles/fixpp_{builders,validators}_*.dir/*.pdb` where the PDBs sit while the libs are not export members), newest file 2026-10-20, commit unrecorded; the lane's first run measures it (§4.4) |
+| Windows MSVC Debug | **not released**; OFF by default; **ON on the `windows-msvc-debug` CI lane** | 0 at `AUTO`; ON, **`/Zi` (local default)**: 2,281,281,176 of `.lib` plus 61,931,520 of compiler PDBs; ON, **`/Z7` (CI)**: unmeasured, a different quantity (debug records embedded in each object, no PDB) | 0 at `AUTO`; ON: as Release | **estimate**, `/Zi` row only: the shared sandbox's `build/windows-msvc-debug` (no `CMAKE_MSVC_DEBUG_INFORMATION_FORMAT` in its cache, so CMake's `/Zi` default), read 2026-10-24 (the `stat` recipe above over `lib/fixpp_{builders,validators}_*.lib`, and over the eight `CMakeFiles/fixpp_{builders,validators}_*.dir/*.pdb` where the PDBs sit while the libs are not export members), newest file 2026-10-20, commit unrecorded; the lane's first run measures it (§4.4) |
 
 About the gcc archives: `git diff 99d499df 4e8b3779` over the builder inputs (`tools/codegen`, `dictionaries`,
 `include/fixpp/{core,wire}`, `cmake/`, `CMakeLists.txt`, presets, Conan profiles) changes only three things:
@@ -763,8 +904,9 @@ Expected order of growth (projected, constructed rather than cpack'd; the PR's C
 | every Debug package (local only, never released) | unchanged at `AUTO` | unchanged at `AUTO` | 0 at `AUTO` |
 
 **Stage costs paid by tests (§4.4).** On PRESENT lanes each stage-installing test grows by that configuration's row
-above: the three Release lanes by their Release rows, and windows-msvc-debug by the MSVC Debug ON row, about 2.3 GB
-plus PDBs per run, the one GB-scale stage this PR adds. On ABSENT lanes, every other Debug, sanitizer, coverage and
+above: the three Release lanes by their Release rows, and windows-msvc-debug by the MSVC Debug ON row, the one
+GB-scale stage this PR adds. On CI that row is the unmeasured `/Z7` quantity; the about 2.3 GB plus PDBs figure is
+the sandbox's `/Zi` set and describes a local run of that preset. D-10 removes the staged archives after a PASS. On ABSENT lanes, every other Debug, sanitizer, coverage and
 libc++ lane, the stage does not grow. v0.2's 5–11 GB per-lane stage table no longer describes any lane and is
 withdrawn.
 
@@ -877,7 +1019,8 @@ to exist in EVERY in-scope configuration" was found by reading the region instea
 | `CMakeLists.txt`, the `FIXPP_EXPORT_TARGETS` banner ("Membership basis: the ELEVEN measured … plus the SIX derived") | F1, F6 | Add: the builder/validator members appended after the umbrella where `FIXPP_INSTALL_TYPED_TIER` is in effect, with their probe in this note. Leave the dated 084 measurement as history. |
 | `CMakeLists.txt`, the umbrella comment ("is the whole contract"; "⚠️ The umbrella is deliberately NOT the whole export set …"; "FOUR are exported so a consumer can link them BY NAME") | F1, F6, F8 | Name the eight libs in the BY-NAME class, under `FIXPP_INSTALL_TYPED_TIER`, with the D-3 reason; replace "FOUR are" with the condition (the by-name members are the ones the umbrella does not reach) |
 | `CMakeLists.txt`, "fixpp_log_otlp is the one genuinely configuration-dependent member" | F8 | State the condition instead of "the one": `fixpp_log_otlp` depends on the OTel SDK, and the typed tier on `FIXPP_INSTALL_TYPED_TIER` (D-0) |
-| `CMakeLists.txt`, the D-0 setting itself and the two `add_test` registrations (`fixpp::consumer::install-witness` here, `fixpp::packaging::contents` in `tests/packaging/CMakeLists.txt`) | F8 | The setting's comment quotes R-2a/R-2b and names the released-package guard; the registrations pass the raw setting and the effective value (§4), and the install witness also `FIXPP_PACKAGING_ENABLED` |
+| `CMakeLists.txt`, the D-0 setting itself and the two `add_test` registrations (`fixpp::consumer::install-witness` here, `fixpp::packaging::contents` in `tests/packaging/CMakeLists.txt`) | F8 | The setting's comment quotes R-2a/R-2b, says why it sits before the tests block (D-0), and names the cpack-time guard; the registrations pass the raw setting and the effective value (§4), and the install witness also `FIXPP_PACKAGING_ENABLED`, `FIXPP_IS_MSVC` and the typed debug-information format with its set flag |
+| `tests/packaging/run_package_contents_gate.cmake`, its required-variable list and its `execute_process` of the witness | F8 | Require and forward `FIXPP_TYPED_TIER_SETTING` and `FIXPP_TYPED_TIER_EFFECTIVE` (§4.2) |
 | `CMakePresets.json`, `windows-msvc-debug` | F8 | `"FIXPP_INSTALL_TYPED_TIER": "ON"` in its `cacheVariables` (§4.4) |
 | `.github/workflows/tier2.yml` | F8 | The two-sided pin step (guard 3), with a comment naming this note and the mutant that proves it (M-16) |
 | `CMakeLists.txt`, "One target diverges from the prefix-strip rule" | F3 | State the rule: nested in-tree aliases get a nested `EXPORT_NAME`; `fixpp_dict_dispatch` by override, the typed libs by the D-2 loop |
@@ -885,7 +1028,8 @@ to exist in EVERY in-scope configuration" was found by reading the region instea
 | `CMakeLists.txt`, the 084 FR-011 block ("is PACKAGING available in this configuration?") | F5 | Name the second condition (D-6) next to the OTel one |
 | `CMakeLists.txt`, the generated-header rule and the `Manifest.txt` block | F2, F8 | §6.1(b) |
 | `cmake/Codegen.cmake`, the library-loop comment "Build-tree + in-tree consumers only; NO install() (R3, Gate A round 1)" | F1, F8 | Replace with: export-set members installed by the top-level `install(TARGETS)` where `FIXPP_INSTALL_TYPED_TIER` is in effect since #613, build-tree only otherwise; `fixpp_dict_<ver>` stays build-tree only (084 R2) |
-| `cmake/FixppPackaging.cmake` | F5 | The D-6 guard and the D-0 released-package guard, each with its reason |
+| `cmake/FixppPackaging.cmake` | F5 | The D-6 guard with its reason; `CPACK_FIXPP_PKG_CONFIG`, `CPACK_FIXPP_TYPED_TIER_EFFECTIVE` and `CPACK_PROJECT_CONFIG_FILE` set before `include(CPack)`, with a comment saying the released-package refusal is at generation, not configure, and citing the T062a precedent |
+| `cmake/FixppCPackTypedTierGuard.cmake` (**new file**) | F5, F8 | The cpack-time released-package guard (D-0). Its header comment names `.specify/613-builders-export.md`, quotes R-2/R-2b, and says why it is a project config file (it covers every `cpack --config` run, the wrapper target's and the witnesses') and not an `install(CODE)` block (which every stage install runs) |
 | `cmake/fixppConfig.cmake.in`, the "Usage" block ("That is the whole contract.") | F1, F8 | Add the by-name typed line, `target_link_libraries(app PRIVATE fixpp::builders::v44 fixpp::validators::v44)`, with "present in Release packages, and in a self-built tree configured with `FIXPP_INSTALL_TYPED_TIER=ON`" |
 | `docs/src/dictionary/codegen.md`, the generated-tree listing ("NO builder/validator tier — v42 descoped"), "Precompiled Builder/Validator Libraries (078)", the typed-builders note ("descoped", "emit NO builders", "construct v42 messages via the runtime `wire::body_builder`") and the `<ver>` ∈ {v44, v50sp2, vlatest} rows | F1, F7, F8 | Installed consumers: the same names through `find_package(fixpp)`, not through `fixpp::fixpp`. Document `FIXPP_INSTALL_TYPED_TIER` (`AUTO`/`ON`/`OFF`, the default, the released-package guard) and the Debug recipe: Debug packages are not released, so build fixpp with `-DFIXPP_INSTALL_TYPED_TIER=ON`. Correct every v42 statement and the `<ver>` list (P-8) |
 | `tests/consumer/CMakeLists.txt` header ("The whole contract is") | F1 | Say it is the umbrella's contract, and that the by-name members, including the typed tier where it is installed, are linked below |
@@ -913,6 +1057,10 @@ pointer must run forward, and #334: a reader who opens the stale file directly m
 - **v42 "descoped" in 069, 077, 079 and 082 records**, `.specify/constitution.md`'s 082 rationale, and
   `tests/codegen/determinism_test.cpp` (whose comment already records the inversion): 082 superseded that fact, not
   this PR.
+- **`.github/workflows/tier2.yml`'s `/Z7` risk comment** ("Under /Z7 there is no compiler PDB at all … It WOULD bite
+  the day packaging is enabled on a Debug leg."): still true. This PR enables no `Build packages` on a Debug leg, and
+  its own PDB expectation keys on the evaluated format (§4.1), so the `/Z7` Debug leg is not the case the comment warns
+  about.
 - **Other merged notes and history:** `.specify/ci254-python-fold.md` ("7-pattern denylist", a dated description of
   the witness at the time) and `CLAUDE-history.md`.
 - **Same words, different subject:** every "four are" hit outside the umbrella comment; `specs/035…` "14 targets";
@@ -937,9 +1085,9 @@ and that a Debug consumer builds fixpp with `FIXPP_INSTALL_TYPED_TIER=ON` (R-2a,
 
 | #613 item | Planned change | Planned test / evidence |
 |---|---|---|
-| 1 export + names + umbrella | D-0, D-1, D-2, D-3, D-5, D-6 | C-1 links all eight by name with its own-include-interface check, on the Release lanes and on windows-msvc-debug set ON; C-3 and the ABSENT checks on the Debug lanes at `AUTO`; the three guards of §4; M-1, M-3, M-3b, M-5, M-9, M-10, M-12, M-13, M-13b, M-16, M-18, M-19; `packaging::export-names` (derived) |
+| 1 export + names + umbrella | D-0, D-1, D-2, D-3, D-5, D-6 | C-1 links all eight by name with its own-include-interface check, on the Release lanes and on windows-msvc-debug set ON; C-3 and the ABSENT checks on the Debug lanes at `AUTO`; the guards of §4 (domain, default, cpack-time released-package refusal, pin); M-1, M-3, M-3b, M-5, M-9, M-10, M-12, M-13, M-13b, M-16, M-18 (sandbox), M-19, M-20; `packaging::export-names` (derived) |
 | 2 slim layout, TUs out, `.inl` decided | D-0, D-7 (five patterns lifted where the tier is in effect, `*.cpp` added, `.inl` shipped) | C-1, C-2, C-3, the stage children check; `packaging::contents` schema allowlist and build-tree equality; M-2a…f, M-4, M-11, M-14, M-15, M-17 |
-| 3 out-of-tree consumer test with RED mutants | §4.1 inside the existing install witness, two-sided | M-1…M-19, recorded in the verify record |
+| 3 out-of-tree consumer test with RED mutants | §4.1 inside the existing install witness, two-sided | the §4.3 table (M-1…M-20), each failing line recorded in the verify record; the M-8b independence check recorded beside M-8a, not as a mutant |
 | 4 size before/after | §5 method | baseline in §5; "after" from the PR's CI artifacts by the same commands; §4.4's in-test stage line |
 | 5 amend 078 contract + install comment | §6.1 texts | `check-comment-claims.py`; `check_line_citations.py --shift-audit`; §6.2 recipe re-run, every hit adjudicated |
 
@@ -957,8 +1105,14 @@ and that a Debug consumer builds fixpp with `FIXPP_INSTALL_TYPED_TIER=ON` (R-2a,
   fixpp with FIXPP_INSTALL_TYPED_TIER=ON". Details a user needs:
   - `FIXPP_INSTALL_TYPED_TIER` is `AUTO` by default: the typed tier (the `fixpp::builders::*` /
     `fixpp::validators::*` targets and the slim headers, and with them header-only inline mode) is installed from a
-    single-config Release tree only. `ON` installs it from any configuration; `OFF` withholds it, and is refused
-    where a Release package is configured.
+    single-config Release tree only. `ON` installs it from any configuration; `OFF` withholds it. A Release tree may
+    be configured, built and installed with `OFF`, but its package generation is refused (cpack exits non-zero naming
+    the setting), so on such a tree the `packaging`-labelled tests that generate a package fail by design; run
+    `ctest -LE packaging` there.
+  - On MSVC the installed typed tier's debug information follows the build's debug-information format: with `/Zi`
+    (CMake's default) and packaging enabled, each typed `.lib` ships with its `.pdb`; with `/Z7` the records are in
+    the `.lib` and no PDB ships. A tree with packaging disabled (OTel OFF) installs no compiler PDB for any fixpp
+    library, the typed tier included; that is pre-existing, not new.
   - A consumer must match the installed configuration, as for every fixpp library (084). On MSVC a Debug consumer
     cannot link Release libraries at all (runtime-library and iterator-debug-level mismatch, LNK2038).
   - With a multi-config generator (outside the supported Ninja-only build), install each configuration into its own
@@ -1004,7 +1158,8 @@ arise, and D-10 is withdrawn with them.
 of the typed API had no supported package, and on MSVC no fallback. The ruling keeps R-2a's released-package scope and
 removes the dead end:
 - the typed tier sits behind `FIXPP_INSTALL_TYPED_TIER`, in effect by default for Release (`AUTO`), which a released
-  package cannot turn off (the `cmake/FixppPackaging.cmake` guard);
+  package cannot turn off (the cpack-time guard, `cmake/FixppCPackTypedTierGuard.cmake`, which refuses package
+  generation and leaves configure, build and install of an OFF Release tree alone);
 - a consumer who builds fixpp itself may set it ON in any configuration and gets a coherent install of that
   configuration's typed tier (D-0);
 - Debug configurations are never released, which restates the 2026-08-03 decision `tier1.yml` records (P-11).
@@ -1076,3 +1231,55 @@ reason is recorded here:
   standing test. A multi-config tree is outside Article III and no lane configures one. At `AUTO` it has no typed tier;
   set ON it is the ordinary unfiltered multi-config export, whose per-configuration behaviour D-0's second toy probe
   recorded, including the pre-existing one-prefix archive collision that applies to every fixpp library (L-613-3).
+
+**Round 2 applied 2026-10-24: Codex P1=0 P2=3 P3=2; Opus post-judging P1=0 P2=3 P3=9; rewrite addresses root causes
+1 (the mechanism was written without the configure order and the per-lane build flags it runs under), 2 (a guard
+that does not check its own input's domain fails toward clean), 3 (a settled ruling applied to the prose but not to
+every mechanism that encodes it) and 4 (precision defects). Reviews: research/reviews/codex_613_2_builders-export_review.md,
+research/reviews/opus_613_2_builders-export_triage.md.** v0.5.
+
+Where each finding landed:
+- **Root cause 1.**
+  - Codex #1 (P2) → D-0: the setting is declared after the `cmake/Codegen.cmake` include and before the tests block,
+    with the reason and a re-derivation recipe.
+  - N-1 (P2) → D-9's PDB bullets (two conditions, `/Z7` on CI, `/Zi` locally); §4's registration passes the
+    `TARGET_GENEX_EVAL`-evaluated format plus a set flag (a toy probe showed the triage's bare `$<TARGET_PROPERTY:…>`
+    passes the genex text unevaluated); §4.1's PDB expectation keyed on the resolved format, two-sided under
+    `Embedded`; M-18 sandbox-only with its preconditions; §4.4's lane reasons reduced to LNK2038; §5's MSVC Debug
+    row and stage-cost paragraph labelled `/Zi`, with the CI `/Z7` quantity unmeasured and read on the first run.
+  - Codex #4 (P3) → D-0, D-9 and L-613-3 qualified to packaging-enabled trees, stated as pre-existing for every
+    member; the PDB expectation also keys on `FIXPP_PACKAGING_ENABLED`.
+- **Root cause 2.** Codex #1's empty-value bypass → §4 guard 0 (domain first, `STREQUAL ""`). N-2 → guard 1
+  normalises an explicit setting; guards 0 and 1 run before the install. N-5 → §4.1's expected version list and
+  C-3's per-version positive controls. N-4 → M-16's fresh-tree / `-U` precondition and M-19's scratch-directory
+  precondition.
+- **Root cause 3.** Codex #2 (P2) → D-0's cpack-time guard (`CPACK_PROJECT_CONFIG_FILE`,
+  `cmake/FixppCPackTypedTierGuard.cmake`), with a toy observation of cpack's exit code and the real-tree check as
+  M-20; driver guard 2 dropped; M-13 and M-13b re-expressed; M-20 added (the explicit-OFF Release arm); L-613-3,
+  §9's R-2b bullet, D-8 and the §6.2 rows moved to the generation-time shape.
+- **Root cause 4.** Codex #3 → M-8b moved out of the RED table as an expected-green independence check (D-6,
+  §4.3, §7). Codex #5 → D-10 rewritten: after a PASS the driver removes `stage/lib/` and keeps `stage/include` and
+  the sub-build, with `FIXPP_WITNESS_KEEP_STAGE_LIB` for M-6 and the peak-RSS rebuild. N-3 → D-0's reader count replaced by its condition. N-6 → the `if(NOT TARGET)` line
+  and M-1/M-3/M-3b's expected line. N-7 → P-9's wheel-build disclosure and owner option. Also fixed in passing: M-6
+  and §4.4 named the sub-build directory by its variable (`_sub_build`) instead of its path (`<work>/build`); §4.2
+  and §6.2 now name `run_package_contents_gate.cmake`, which forwards a fixed `-D` list to the witness; D-0's
+  cpack-reach recipe executes-cpack-scoped (a bare `CPackConfig.cmake` grep overcounts) and its
+  `CPACK_PROJECT_CONFIG_FILE` recipe scoped to code.
+
+### Round 2 — disagreements
+
+The triage disagreed with no Codex finding. Where v0.5 does not apply a counter-proposal as written, the reason is:
+- **Codex #1, a configure-time assertion before each `add_test` registration.** Not added. The witnesses' guard 0
+  checks the same domain on every lane where the value is consumed, so a second check at the producer would guard
+  nothing more.
+- **Codex #2, a separate guard on the `fixpp-package` wrapper target.** Not added. The wrapper runs
+  `cpack --config`, so the one project-config guard already covers it.
+- **Codex #3, a structural assertion for the module's D-6 guard.** Not added. M-8a proves it behaviourally; the
+  guard is belt-and-braces by design.
+- **Codex #4, moving the PDB plumbing out of `cmake/FixppPackaging.cmake` onto the general install surface.** Not
+  applied. It would change every export member's install behaviour, which is out of scope; the gap is disclosed
+  as pre-existing instead.
+- **Triage N-1's registration form, a bare `$<TARGET_PROPERTY:fixpp_builders_v44,MSVC_DEBUG_INFORMATION_FORMAT>`.**
+  Replaced by `TARGET_GENEX_EVAL` around it, on the toy probe recorded in §4.
+- **Codex #5's keep switch as a `-D` (the triage's "one `-D`").** An environment variable instead, so the hand
+  procedures need no reconfigure (D-10).
