@@ -12,8 +12,8 @@
 # reaches must release the guard before its drain. A miss branch that does not leaves the
 # drain a RESIDUAL. The same holds for the `keep` that
 # SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose
-# (tests/session/logout_exchange_test.cpp) holds above quiesce_on_exit; its labels are the
-# last block.
+# (tests/session/logout_exchange_test.cpp) declares after quiesce_on_exit, so it is destroyed,
+# releasing the guard, before that drain; its labels are the last block.
 #
 # How the callback-send labels were chosen, as a procedure: take every string literal in
 # test_563_564_callback_send.cpp shaped `Suite::name`; force each in turn with
@@ -36,6 +36,8 @@ CallbackSend::close_and_send_teardown
 CallbackSend::close_cell_store_next
 CallbackSend::first
 CallbackSend::in_to_app
+CallbackSend::late_stop_next
+CallbackSend::late_stop_order
 CallbackSend::lifecycle_logout_wait
 CallbackSend::lifecycle_open
 CallbackSend::lifecycle_teardown
