@@ -491,7 +491,7 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     A-030 and N-003 named Orchestra's category in a heading spelling. Which of the other rows
     conform is fixpp#626's first-run output. Article XVIII §7's correction concerns the same 12 rows,
     which feature 095 flips to done.
-  Affected feature specs: specs/095-tail-evidence-pass. Merged specs/<id>/ bundles stay as written.
+  Affected feature specs: specs/095-tail-evidence-pass. Merged specs/<id>/ bundles stay as written. Companion document annotated by feature 095: .specify/architecture.md (§4.2 marker, Appendix Z-10).
   Process: rides feature 095 (specs/095-tail-evidence-pass). Its PR is titled in Article XX §2 form,
     "Constitution: amend §VI.2, §VI.5, §XVIII.7 — message-level Spec refs for application-message
     rows; FIX50-only tail rows delivered (v4.1) (+ 095 tail evidence pass)", and its description states the change, the rationale and the

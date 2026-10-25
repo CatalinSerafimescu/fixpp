@@ -208,7 +208,7 @@ For each module: the public-facing types/functions, the design-doc that owns the
 **Catalogue rows:**
 
 - **Dictionary itself:** D-001..D-011, OSS-001, OSS-010.
-- **Application-message generated typed-message classes and `constexpr` field metadata** (typed-message *classes*; parse/serialise/validate behaviour belongs to wire §4.3): A-001..A-013 (order-management; codegen). A-014..A-034 (additional order-management variants; runtime-XML only in v1.0; codegen deferred to v1.x — see `[const §XVIII.7]`). M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral/positions/account), R-001..R-005 (reg/IOI/news), N-001..N-003 (network counterparty / user request). Per `[const §XVIII]` the FIX-Latest range A-035..A-065 is post-1.0 and not owned by v1.0 codegen.
+- **Application-message generated typed-message classes and `constexpr` field metadata** (typed-message *classes*; parse/serialise/validate behaviour belongs to wire §4.3): A-001..A-013 (order-management; codegen). A-014..A-034 (additional order-management variants; which of them have a typed tier, and under which namespace, is `[const §XVIII.7]`'s — ⚠️ **Z-10**). M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral/positions/account), R-001..R-005 (reg/IOI/news), N-001..N-003 (network counterparty / user request). Per `[const §XVIII]` the FIX-Latest range A-035..A-065 is post-1.0 and not owned by v1.0 codegen.
 - **Drop:** A-024 (catalogue note: duplicate of A-018 — recommend removing per `[SYN §4.4]`).
 
 ### 4.3 `wire`
@@ -887,3 +887,14 @@ nothing in `src/` reads it (L-094-1 in `spec/behaviors-and-limitations.md`).
 **Re-derive:** `grep -n "service wrapper" .specify/constitution.md` for the timing;
 `grep -rn control_plane_factory src/` (empty means the field is still unread);
 `grep -rn "class ControlPlane\b" include/ src/` (empty means the interface still does not exist).
+
+### Z-10 — §4.2's A-014..A-034 entry predates the typed-tier deliveries `[const §XVIII.7]` records
+
+§4.2 described A-014..A-034 as runtime-XML only in v1.0, with codegen deferred to v1.x.
+`[const §XVIII.7]` has since recorded typed tiers for those rows: the FIX44 application set under
+`fixpp::v44` (feature 069), and the `fixpp::v50sp2` tier (feature 077), on which feature 095 closes
+the FIX50-only rows (constitution v4.1), together with the exclusions the clause names. The clause and
+the catalogue rows are the authority; this file does not restate them.
+
+**Re-derive:** `grep -n '^7\. \*\*Application-message codegen scope' .specify/constitution.md` for the clause;
+a row's state is its Status cell, `grep -n "^| A-0" spec/feature-catalogue.md`.
