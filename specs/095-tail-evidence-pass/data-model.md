@@ -436,7 +436,7 @@ PENDING form (lands with the amendment, P7):
 Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
   Not ratified. Article XX §2 sequence, in order: a scoped Codex Gate A review of this amendment's
     clause bodies (done: feature 095's scoped rounds 5 and 6 on Article VI §2/§5, converged at round
-    6 with no finding, and its narrow scoped round on the Article XVIII §7 correction, converged),
+    6 with no finding, and its narrow scoped rounds on the Article XVIII §7 correction (round 7; then rounds 8 and 9 on Gate B round 1's opening-sentence and BE/BF changes), converged at round 9 with no finding),
     Gate B on the 095 PR (pending), owner sign-off (pending). This header reads PENDING until all three have happened. The flip to RATIFIED, with
     the rounds and the sign-off date filled in below, is the last commit before merge, not a claim
     made in advance (the v1.0 and v4.0 precedent).
@@ -449,7 +449,7 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     versions. A §5 that REQUIRED message-level entries would make such an artifact fail. That would be
     MAJOR, and it was not adopted. The Article XVIII §7 correction replaces two deferral statements
     that feature 077 and owner DECISION 2 had already ended, and records which feature closes those
-    rows, and widens its opening sentence to the A- rows the clause already names, by row ID, as delivered. It adds no banned pattern, tightens no budget and imposes no obligation, so no PR mergeable
+    rows, and widens its opening sentence to the A- rows the clause already names, by row ID, as delivered or closed. It adds no banned pattern, tightens no budget and imposes no obligation, so no PR mergeable
     under v4.0 fails under v4.1 because of it.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article VI §2 — an OFFICIAL row whose Title names at least one MsgType as `35=<MT>` may carry the
@@ -510,13 +510,13 @@ copied from plan `## Gate A`.
 ```
   Ratified. Article XX §2 sequence observed in order: a scoped Codex Gate A review of this
     amendment's clause bodies (feature 095's scoped round 5 on Article VI §2/§5, Codex P1=1 P2=1,
-    Opus post-judging P1=0 P2=2 P3=1; round 6, Codex P1=0 P2=0 P3=0, converged; narrow round 7 on
-    the Article XVIII §7 correction, Codex P1=0 P2=0 P3=0, converged), THEN Gate B on PR #<pr>
+    Opus post-judging P1=0 P2=2 P3=1; round 6, Codex P1=0 P2=0 P3=0, converged; narrow rounds 7–9 on
+    the Article XVIII §7 correction, round 7 Codex P1=0 P2=0 P3=0, round 8 Codex P1=0 P2=0 P3=0 and Opus judge P1=0 P2=1 P3=0, round 9 Codex P1=0 P2=0 P3=0 and Opus judge P1=0 P2=0 P3=0, converged), THEN Gate B on PR #<pr>
     (<gate-b rounds>), THEN owner sign-off <sign-off date>. This header read PENDING until all three
     had happened.
 ```
 - `  Review and sign-off: pending.` becomes
-  `  Review and sign-off: scoped Codex Gate A rounds 5–7 (above); Gate B on PR #<pr>, <gate-b rounds>; owner sign-off <sign-off date>.`
+  `  Review and sign-off: scoped Codex Gate A rounds 5–9 (above); Gate B on PR #<pr>, <gate-b rounds>; owner sign-off <sign-off date>.`
 
 Only these record lines change at the flip. A change to any of the three amended clause texts (§F.1,
 §F.2, §F.5) after its scoped Gate A round converges needs another scoped round (FR-021).
@@ -525,21 +525,21 @@ Only these record lines change at the flip. A change to any of the three amended
 
 PENDING form — the line's current opening `> **Status:** ` is replaced by:
 
-`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose `Title` names its application MsgTypes as `35=<MT>`; Article VI §5 lets Normative References list such refs; Article XVIII §7 records the FIX50-only tail rows and N-002/N-003 as closed by feature 095 on the `fixpp::v50sp2` tier. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
+`> **Status:** **v4.1 — PENDING** (2026-10-24) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then narrow rounds 7–9 on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off. Article VI §2 admits a message-level Spec ref, `[DocAbbrev] Category`, for a row whose `Title` names its application MsgTypes as `35=<MT>`; Article VI §5 lets Normative References list such refs; Article XVIII §7 records the FIX50-only tail rows and N-002/N-003 as closed by feature 095 on the `fixpp::v50sp2` tier. Rides feature 095; its PR is titled in Article XX §2 form. Prior: `
 
 The rest of the line, from `user-ratified **v4.0** (2026-10-23) — **backwards-incompatible**`
 onward, is unchanged.
 
 RATIFIED form: `**v4.1 — PENDING** (2026-10-24)` becomes `user-ratified **v4.1** (<sign-off date>)`,
-and `not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off`
-becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then narrow round 7 on Article XVIII §7), then Gate B and owner sign-off <sign-off date>; amendment PR #<pr>` (slots as in §F.3).
+and `not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then narrow rounds 7–9 on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off`
+becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then narrow rounds 7–9 on Article XVIII §7), then Gate B and owner sign-off <sign-off date>; amendment PR #<pr>` (slots as in §F.3).
 
 ### F.5 Article XVIII §7 — four sentences (owner ruling 2026-10-24)
 
 The owner folded this correction into v4.1. Only the four sentences below change; the rest of the
 clause, which is one line, stays byte-identical. Locate it by `## Article XVIII` and its leading
 `7.`; `grep -F` each before-text and require exactly one match. Narrow scoped Codex Gate A round 7
-reviewed the first two pairs and converged with no finding (plan `## Gate A`); the last two pairs come from Gate B round 1 and go through T090's narrow round.
+reviewed the first two pairs and converged with no finding (plan `## Gate A`); the last two pairs come from Gate B round 1; T090's narrow rounds 8 and 9 reviewed them, and round 9 converged with no finding.
 
 Before (the end of the sentence that lists the FIX50-only rows; its bold opening, "The FIX50-only
 rows … are NOT delivered by 069", is unchanged):
