@@ -67,6 +67,7 @@
 #include <vector>
 
 #include "_fixtures_/store_temp_dir.hpp"
+#include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -1234,6 +1235,12 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // destructs before them, draining `ioc` while `sess`, `clock`, `ioc`,
         // cfg, transport, and the file pool are still alive.
         fixpp::test_support::quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
+
+        // Keeps `ioc` from stopping between the open pump and the Logon-ack pump when the
+        // FileStore offload's work is released on `file_pool`'s thread
+        // (tests/support/keep_running.hpp; Refs #433). Declared after `quiesce`, so it is
+        // released before that drain, which waits for `ioc` to stop.
+        [[maybe_unused]] const auto keep = fixpp::test_support::keep_running_for(ioc);
 
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
         //
