@@ -445,8 +445,9 @@ This used a partial `cmake --install`: the header rules run before `install(TARG
 archives. Its generated tree under `include/fixpp/v*` was `diff`ed against the recipe's output with no difference.
 This is a one-time observation; the contents witness's build-tree equality (§4.2) is the standing gate.
 
-**The rule is a denylist, so a new emitted kind ships by default.** What catches one is the contents witness's
-**schema allowlist** (§4.2), whose expectation is written from the 078 file-set contract, not from this rule.
+**The rule is a denylist, so a new emitted kind ships by default.** Inside a version directory, the contents
+witness's per-version children check and **schema allowlist** (§4.2) catch it; its codegen-root census catches a new
+generated root or root-level file.
 
 ### D-8 — CPack, Conan, wheel
 
@@ -762,6 +763,8 @@ does not parse. Then, in this order:
 
 Below, "PRESENT artifacts" and "ABSENT artifacts" mean these two outcomes.
 
+- **Codegen-root census, both outcomes.** Once, before the per-artifact checks, the generated include root must
+  contain only `fixpp`, and `fixpp` must contain exactly the expected versions plus `_dispatch` and `vt11`.
 - **Must-be-absent, every artifact.** Keep `_dispatch`, `vt11`, `core/test` and `transport/test`. Add
   `^include/.*\.cpp$`. ABSENT artifacts also keep the `messages|groups|validators` and `(all|groups)\.hpp`
   alternatives, and add `^lib/.*fixpp_(builders|validators)_`.
@@ -790,7 +793,8 @@ Below, "PRESENT artifacts" and "ABSENT artifacts" mean these two outcomes.
 an appended list), so only the first failing check of a run prints. The typed-tier checks run in this order:
 1. guard 0, before cpack runs (the two values need no artifact);
 2. after cpack, per artifact name: the name parse, guard 2, guard 1;
-3. per artifact, after the existing 084/086 checks: must-be-absent, then the unconditional version list, then the
+3. once, the codegen-root census;
+4. per artifact, after the existing 084/086 checks: must-be-absent, then the unconditional version list, then the
    per-version children, then (PRESENT only) the schema allowlist, then (PRESENT only) build-tree equality.
 
 So a mutant's contents half names the first of these that fails, and an arm whose defect only equality can see
@@ -874,6 +878,8 @@ ones.
 | M-21 | v0.4's ordering slip: move D-0's block below `if(FIXPP_BUILD_TESTS)` | any tree; on a **fresh** build directory the raw setting is empty too | driver guard 0, before the install: `FIXPP_TYPED_TIER_EFFECTIVE` empty (a plain variable read by `add_test` before it is set), and on a fresh tree `FIXPP_TYPED_TIER_SETTING` empty as well. Proves D-0's "an ordering slip is also caught by the instrument". Recorded once | install-witness |
 | M-22 | Drop `FIXPP_TYPED_TIER_SETTING` from `run_package_contents_gate.cmake`'s forwarded `-D` list (keep it required) | gcc-release | contents guard 0 naming `FIXPP_TYPED_TIER_SETTING` (not forwarded, so empty or undefined; the domain regex refuses both). Recorded once | contents |
 | M-23 | Equality-only arm (v0.7): in the tier-ON header rule, exclude one v50sp2 message's three files with a REGEX scoped to that version, `REGEX "fixpp/v50sp2/messages/<Msg>\\.(hpp\|builder\\.inl\|validator\\.inl)$" EXCLUDE`, for a `<Msg>` outside every consumer closure (not `ListStatus`; v42 and v44 are reached whole by C-2a's `all.hpp`, so the message is a v50sp2 one). A `PATTERN` on the basename would match that message in every version | gcc-release | contents (first firing): build-tree equality naming the three dropped files; must-be-absent, the versions, the children and the schema pairing all hold. The driver stays green, correctly: its stage check is the children set, and no consumer target reaches the message | contents, recorded once |
+| M-27 | After codegen and before `ctest`, create `_codegen/include/fixpp/v-next/messages/X.hpp`, `X.builder.inl` and `X.validator.inl` in the build tree | gcc-release | contents (before the per-artifact checks): `#613 codegen roots:` names `v-next` among the unexpected entries | contents |
+| M-27b | After codegen and before `ctest`, create `_codegen/include/fixpp/_reflect/R.hpp` in the build tree | gcc-release | contents (before the per-artifact checks): `#613 codegen roots:` names `_reflect` among the unexpected entries | contents |
 
 **Expected-green independence check, not a mutant (was M-8b).** FIX_LATEST=OFF with only the module's D-6 guard
 deleted, configure only: still no `CPackConfig.cmake` and the D-6 STATUS line, because the root decision holds. It
