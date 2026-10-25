@@ -426,14 +426,14 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
 
 ### Parent harness, uncommitted (plan P3; research R-9, R-10; contracts L0)
 
-- [ ] T043 [US3] (implementer) **FR-014 selection check** `TailRows095Selection.DISABLED_LiveMessageAgreesOnBothAxes`
+- [X] T043 [US3] (implementer) **FR-014 selection check** `TailRows095Selection.DISABLED_LiveMessageAgreesOnBothAxes`
   in `tests/session/test_095_tail_rows_roundtrip.cpp`, reusing the walk (research R-7): reads the
   vendored `dictionaries/FIX50SP2.xml` and, from `FIXPP_095_QFJ_DICT_DIR`, the QuickFIX/J 3.0.1 jar's
   `FIX50SP2.xml` and `FIX50SP2.modified.xml`; prints axes (a) and (b) for the tail set; hard-asserts
   only what selects BN (present in every file, equal on every axis, closure-required set within the
   R-7 sent fields, every sent field a member in every file); asserts the same equality predicate is
   false for BM; **fails, never skips**, when the variable is unset or a file is missing.
-- [ ] T044 [P] [US3] (implementer) **Registration and dictionary digest, test-first** (R-9 items 1–2;
+- [X] T044 [P] [US3] (implementer) **Registration and dictionary digest, test-first** (R-9 items 1–2;
   `[const §VII.3]` applies to the parent harness, orchestrator ruling 2026-10-24) in
   `phase-9-harness/tools/run_interop_cell.py`. **First** write the tests in
   `phase-9-harness/tools/test_run_interop_cell.py`: the registration fields of both cells (contracts
@@ -449,13 +449,13 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   other). The tests pass; record the GREEN. Re-derive the readers of `combo_id` and `run_kind`
   (contracts L0, Combo and `run_kind` rows) and record each with its effect on the two cells; a
   reader that is not neutral for them stops the task. Refresh the outside-tree copy.
-- [ ] T045 [P] [US3] (implementer) **Capability minimums** (R-9 item 3): two entries in
+- [X] T045 [P] [US3] (implementer) **Capability minimums** (R-9 item 3): two entries in
   `phase-9-harness/tools/interop_capability_minimums.yaml`, keyed by the two cell ids, each copying
   the capability keys and minimum values of the entries for its own counterparty build (contracts
   L0): the QF-cpp cell from `CONV-PROBE-*` / `CONV-C1-*` (the QuickFIX-cpp counterparty), the QFJ
   cell from `CONV-C3-*` (the QuickFIX/J counterparty). Re-read the file's comments for which build
   each entry was derived from before copying. Refresh the copy.
-- [ ] T046 [US3] (implementer) **QuickFIX/J A-TESTREQ blocker, RED first** (R-9 item 4; the same
+- [X] T046 [US3] (implementer) **QuickFIX/J A-TESTREQ blocker, RED first** (R-9 item 4; the same
   ruling as T044). Runs **after** T051 and T052's QF-cpp half: it needs the cell, T044/T045's
   registration and T048's **unpatched** jar.
   - **RED:** `python3 ../phase-9-harness/tools/run_interop_cell.py HP-QFj-init-fixt11-fix50sp2-app-bn --build-root build`
@@ -473,7 +473,7 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
     because the cell logs out within the induction's 800 ms sleep; the observed symptom, a stray
     `OUT 0` after the peer's `LOGOUT` line, is the RED. See the evidence file, Phase 5, "T046 premise
     correction".)*
-- [ ] T047 [US3] (implementer) **`emit_matrix` `run_kind` handling, test-first** (R-9 item 6; L0
+- [X] T047 [US3] (implementer) **`emit_matrix` `run_kind` handling, test-first** (R-9 item 6; L0
   rows Select, Select `--conversation-only`, Promote, N2, Registration; the same ruling as T044).
   After T044: its tests need the two cells registered, so that each RED is the rule's and not an
   absent cell's. **First** add each test to `phase-9-harness/tools/test_emit_matrix.py` and run it against the
@@ -487,7 +487,7 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   pin's RED is T054's (the template rows do not exist until T055). **Then** change `emit_matrix.py`
   (the probe rule narrowed to `"validator-positive-control"`, the promotion skip); every test but the
   pin passes. Refresh the copy.
-- [ ] T048 [US3] (implementer) **Peers and harness unit run.** `mvn -f ../phase-9-harness/quickfixj/pom.xml package -DskipTests`
+- [X] T048 [US3] (implementer) **Peers and harness unit run.** `mvn -f ../phase-9-harness/quickfixj/pom.xml package -DskipTests`
   **before** T046's fix, so this jar is the unpatched one T046's RED needs (detached, marker);
   quickstart §5's docker pull / inspect / create / cp of the QF-cpp counterparty, recording the image
   digest; `cmp dictionaries/FIX50SP2.xml "$P/qfcpp-spec/FIX50SP2.xml"` prints nothing.
@@ -497,15 +497,15 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
 
 ### fixpp live cell (plan P4)
 
-- [ ] T049 [US3] (orchestrator) **Run the selection check** — quickstart §3 as a `bash -e` script:
+- [X] T049 [US3] (orchestrator) **Run the selection check** — quickstart §3 as a `bash -e` script:
   the unzip from the `~/.m2` jar T048's build fetched; the run passes (`[  PASSED  ] 1 test`); the
   input-absent arms FAIL: the variable unset (`env -u FIXPP_095_QFJ_DICT_DIR`), and the variable
   naming an empty directory. The printed axes go in the evidence file,
   never in an artifact (FR-005). If BN does not pass, stop: the live cell is not built on BN and the
   orchestrator re-selects from the output (plan Risks).
-- [ ] T050 [US3] (implementer) **Selection check, predicate mutant** — scratch: the equality predicate
+- [X] T050 [US3] (implementer) **Selection check, predicate mutant** — scratch: the equality predicate
   returns `true` unconditionally → the run fails on the BM assertion. Revert, `git diff --exit-code`.
-- [ ] T051 [US3] (implementer) **The cell, its fixture, CMake and script** (contracts L1–L4, research
+- [X] T051 [US3] (implementer) **The cell, its fixture, CMake and script** (contracts L1–L4, research
   R-6, R-8):
   - `tests/interop/happy/hp_support.hpp`: the shared production FIXT11/FIX50SP2 engine-config fixture
     (loads production `FIXT11.xml` and `FIX50SP2.xml`, registers FIX50SP2 under ApplVerID 9, returns
@@ -542,7 +542,7 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   033's own cells are unchanged. After the build, `--gtest_list_tests` on the target lists the two
   ids of contracts L0 exactly once each, and 033's `Fixt/HappyFixtLogonHbLogout.*` cases unchanged
   (compare with the list taken before the edit); record both lists in the evidence file.
-- [ ] T052 [US3] (implementer) **Local run and goldens** — first run quickstart §5's environment and
+- [X] T052 [US3] (implementer) **Local run and goldens** — first run quickstart §5's environment and
   certificate lines (the `export` of `INTEROP_QFC_COUNTERPARTY_BIN`, `LD_LIBRARY_PATH`,
   `INTEROP_QFCPP_SPEC_DIR` and `INTEROP_QFJ_JAR` over T048's extraction and jar, `test -f "$INTEROP_QFJ_JAR"`,
   and `bash ../phase-9-harness/tls/gen-interop-certs.sh`); build the 033 FIXT target (Builds rule).
@@ -557,7 +557,7 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   against these criteria and records each: the Logon carries BeginString FIXT.1.1 and `1137=9`; one
   35=BN from fixpp is present; neither side sends a 35=3; the golden ends with that `LOGOUT` line. A
   golden that fails one is not approved.
-- [ ] T053 [US3] (implementer) **L5 RED arms**, each against both peers, scratch, reverted:
+- [X] T053 [US3] (implementer) **L5 RED arms**, each against both peers, scratch, reverted:
   (a) one value in `ExecutionAckArgs` altered after the `sent` record is fixed, the F-01 literal
   unchanged → RED (a comparison mismatch naming that field); (b) `args.exec_id` left unset,
   `build_ExecutionAck` called directly (never `validate_ExecutionAck`) → the peer rejects → RED, the
@@ -577,12 +577,12 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
 
 ### Evidence files and pins (plan P5)
 
-- [ ] T054 [US3] (implementer) **Real-template RED first.** With T044's registration in place and
+- [X] T054 [US3] (implementer) **Real-template RED first.** With T044's registration in place and
   before any template row exists: `python3 -m pytest -q -p no:cacheprovider test_emit_matrix.py -k RegistryAgreesWithTheRealTemplate`
   (from `phase-9-harness/tools`) FAILS naming both cells, in both of the class's tests that read them
   (`test_no_registered_cell_is_undeclared_by_the_submodule_template` and T047's both-directions pin).
   Record it.
-- [ ] T055a [US3] (implementer) **Skip-list gate, RED first** (`ci/assert-interop-skips.py`,
+- [X] T055a [US3] (implementer) **Skip-list gate, RED first** (`ci/assert-interop-skips.py`,
   which the ctest-interop steps of `tier1.yml`, `tier2.yml` and `tier3-libcxx.yml` run). Before T055
   adds the two skip lines, run that step's recipe on `linux-clang-debug`, reading it from
   `tier1.yml`'s "Interop gate" step (its count pin against `ci/expected-interop-tests.txt` is left
@@ -600,7 +600,7 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   Expected RED: exit 1, "unexpected skips" naming exactly the two new gtest ids and no other
   violation. Exit 2 is an instrument failure, never this RED; any other violation stops the task.
   Record the command, the count and the output; keep `$D`.
-- [ ] T055 [US3] (implementer) **Template rows and skip list** (R-11): two rows next to 033's FIXT rows
+- [X] T055 [US3] (implementer) **Template rows and skip list** (R-11): two rows next to 033's FIXT rows
   in `tests/interop/cell_results.yaml` (`id`, `config: normal`, `kind: happy`,
   `status: "skip:counterparty-unavailable"`, `matrix_disposition: live`, `spec_ref: "FIX-SL §5.3.1/§5.3.3"`).
   The status stays that pre-live value on the PR and after it: the file header's convention (live
@@ -612,23 +612,23 @@ carrying a typed-built 35=BN, run locally against both peers before the merge (p
   verbatim, each in sorted position (the file's FORMAT header). Then
   `python3 -m pytest tests/interop/cell_results_schema_check_test.py -q` FAILS on the `EXPECTED_IDS`
   pin (FR-016's RED first). Record it.
-- [ ] T055b [US3] (implementer) **Skip-list gate, GREEN.** With T055's two lines in place, re-run only
+- [X] T055b [US3] (implementer) **Skip-list gate, GREEN.** With T055's two lines in place, re-run only
   T055a's `assert-interop-skips.py` command over the same `$D` (the binaries are unchanged, so the
   pair is attributable to the two lines): exit 0. Record it.
-- [ ] T056 [US3] (implementer) **The pin** — add the two ids to `EXPECTED_IDS` in
+- [X] T056 [US3] (implementer) **The pin** — add the two ids to `EXPECTED_IDS` in
   `tests/interop/cell_results_schema_check_test.py`; the schema test passes with no other edit (no
   `CENSUS_KEY_COUNT`, e7a inventory, `CONV_COMBO_IDS` or `witness_evidence.yaml` change). The
   real-template test of T054 and T047's pin now pass.
 
 ### Local live evidence (plan P6; stands in for the PR's `interop-live`, contracts L7)
 
-- [ ] T057 [US3] (implementer) **Quickstart §5 in full**, as a script: `python3 ci/run-interop-live.py --harness ../phase-9-harness --list`
+- [X] T057 [US3] (implementer) **Quickstart §5 in full**, as a script: `python3 ci/run-interop-live.py --harness ../phase-9-harness --list`
   reconciles the whole population; `--list-binaries` builds; the full `python3 ci/run-interop-live.py --harness ../phase-9-harness --build-root build`
   ends "all … live interop cell(s) passed" (the two new cells, 033's FIXT cells, 089's CONV-C1…C4
   and PROBE cells against the patched QuickFIX/J); the schema test; both harness suites; the
   real-template test. Record in the evidence file: every output, the image digest, the jar's source
   state (`git -C .. status --short -- phase-9-harness`), the peer builds (FR-015).
-- [ ] T058 [US3] (implementer) **Commit C-US3** (fixpp only: `tests/session/test_095_tail_rows_roundtrip.cpp`'s
+- [X] T058 [US3] (implementer) **Commit C-US3** (fixpp only: `tests/session/test_095_tail_rows_roundtrip.cpp`'s
   selection check, `tests/interop/**` changes, `hp_support.hpp`). The parent harness stays
   uncommitted: parent `git diff --cached --name-only` prints nothing, and the outside-tree copy
   matches the working copy (`diff -r`). Report the hash; orchestrator runs `codegraph sync` and ticks
@@ -774,7 +774,7 @@ delta (plan P7).
 
 ### `/speckit-verify` (`[const §XVII.8]`)
 
-- [ ] T085 (orchestrator) **Run `/speckit-verify 095-tail-evidence-pass`** in the main checkout, with
+- [X] T085 (orchestrator) **Run `/speckit-verify 095-tail-evidence-pass`** in the main checkout, with
   the owner's local scope (ruling 2026-10-24: `linux-clang-debug` only):
   `--skip=linux-clang-release,linux-clang-asan,linux-clang-ubsan,linux-clang-tsan,linux-clang-coverage,linux-clang-libc++,windows-msvc-debug,windows-msvc-asan`
   and, for each preset in that `--skip`, `--waive=T085-<preset>:test-only change, no library code; CI runs it once both labels land; owner ruling 2026-10-24`.
@@ -841,7 +841,7 @@ delta (plan P7).
   and dispose of every hit in the docs task's record.
   After the skill writes the verify record, commit it with the evidence file in one parent commit,
   explicit paths only, under the Execution rules' parent-commit checks.
-- [ ] T086 (orchestrator) `codegraph sync` in this tree after the last code-changing commit; read
+- [X] T086 (orchestrator) `codegraph sync` in this tree after the last code-changing commit; read
   back `codegraph status --json`.
 
 ### PR, gates, ratification, merge and post-merge
