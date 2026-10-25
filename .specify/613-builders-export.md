@@ -141,7 +141,7 @@ elseif(_fixpp_typed_setting_uc MATCHES "^(ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0)$")
     set(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE OFF)
   endif()
 else()
-  message(FATAL_ERROR "#613: FIXPP_INSTALL_TYPED_TIER must be AUTO, ON or OFF, got '${FIXPP_INSTALL_TYPED_TIER}'")
+  message(FATAL_ERROR "#613: FIXPP_INSTALL_TYPED_TIER must be AUTO or a boolean (ON/YES/TRUE/Y/1, OFF/NO/FALSE/N/0; case-insensitive), got '${FIXPP_INSTALL_TYPED_TIER}'")
 endif()
 message(STATUS "#613: typed builder/validator tier "
                "${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE} (FIXPP_INSTALL_TYPED_TIER=${FIXPP_INSTALL_TYPED_TIER}, "
@@ -152,7 +152,7 @@ Every surface whose content depends on the tier keys on `FIXPP_INSTALL_TYPED_TIE
 type, and is placed after its resolution. The witnesses receive it together with the raw setting (§4).
 
 **Why a tri-state STRING and not a BOOL `option()`.** For the user the two are the same: `-DFIXPP_INSTALL_TYPED_TIER=ON`
-forces it, and any CMake boolean spelling is accepted. The difference is the default:
+forces it, and AUTO or a boolean (ON/YES/TRUE/Y/1, OFF/NO/FALSE/N/0; case-insensitive) is accepted. The difference is the default:
 - a BOOL whose default is computed from `CMAKE_BUILD_TYPE` is frozen into the cache at the first configure, so a tree
   reconfigured from Debug to Release (or back) keeps the other build type's value. `AUTO` is re-evaluated at every
   configure;
@@ -1230,6 +1230,7 @@ pointer must run forward, and #334: a reader who opens the stale file directly m
 | Surface | Banner |
 |---|---|
 | `specs/084-packaging-cpack-export/spec.md`, **FR-010** ("If the final export set does reach either tree, work MUST STOP") and the edge case saying the libs "are absent from the export set by design" | Discharged by R-1 and superseded by #613 wherever `FIXPP_INSTALL_TYPED_TIER` is in effect (by default: Release); names this note and the 078 banner |
+| `specs/084-packaging-cpack-export/spec.md`, **AS-5** ("the header is absent"), **FR-007** ("MUST remain outside the export set") and the "Do not export the builder/validator libraries" non-goal | An in-place clause on each line (same line count, the r1 `238378ab` form): superseded by #613 wherever `FIXPP_INSTALL_TYPED_TIER` is in effect; AS-5's clause says the slim headers are present on that condition and absent elsewhere |
 | `specs/084-packaging-cpack-export/contracts/export-set.md`: the "Never exported" table, B2's pattern list, B3, and the "No typed-builder API" bullet | Banner naming this note. Under FR-010, B3's "standing obligation" is discharged by R-1, which the banner quotes and points at the 078 banner for |
 | `specs/084-packaging-cpack-export/contracts/package-layout.md`, §1 "Package model" and the "7-pattern exclusion set" rows | Banner naming this note, with R-2a/R-2b: the Release and (local, never released, P-11) Debug packages of one toolchain differ in typed content at the default |
 | `specs/078-precompiled-builder-libs/spec.md`, the Clarifications Q on "Install/export scope" and the "Scope (Gate A round 1): … build-tree + in-tree consumers only" paragraph | Banner naming this note and the 078 contract banner |
@@ -1238,8 +1239,9 @@ pointer must run forward, and #334: a reader who opens the stale file directly m
 
 **Adjudicated and left unchanged:**
 - **Merged-feature records under the bannered bundles:** 084 `plan.md`, `tasks.md`, `research.md`, `data-model.md`
-  and `checklists/`; 078 `plan.md`, `research.md`, `tasks.md` and `checklists/codegen-linkage.md`. Each bundle's
-  `spec.md` and contracts carry the forward banner. Banners on tasks and checklists are optional (P3) and not added.
+  and `checklists/`; 078 `plan.md`, `research.md`, `tasks.md` and `checklists/codegen-linkage.md`. The bundles' `spec.md`
+  and contracts carry banners or clauses at the statements in the table above, found by the subject-keyed census in
+  the evidence file (E-N4; its known positive is r1's head). Banners on tasks and checklists are optional (P3) and not added.
 - **v42 "descoped" in 069, 077, 079 and 082 records**, `.specify/constitution.md`'s 082 rationale, and
   `tests/codegen/determinism_test.cpp` (whose comment already records the inversion): 082 superseded that fact, not
   this PR.
