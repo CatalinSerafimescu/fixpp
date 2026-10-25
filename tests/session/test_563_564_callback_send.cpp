@@ -90,6 +90,10 @@
 //                             the same on a persistent FileStore, whose store()
 //                             suspends on a file-I/O pool. The fixture's pool
 //                             has one thread.
+//   FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNextPump
+//                             fixpp#602. Work on the fixture's io_context that
+//                             ends on the file pool's thread, between two pumps,
+//                             must not leave the next pump a stopped io_context.
 //   FromAppSendsReply_NestedToAppThrows
 //                             batch B41. fromApp starts a send whose toApp
 //                             throws, which makes Session::send await a
@@ -2323,6 +2327,86 @@ TEST(CallbackSend, OverlappingSends_NoStore) { run_overlapping_sends(StoreKind::
 
 TEST(CallbackSend, OverlappingSends_NoStore_LiveWrite) {
     run_overlapping_sends(StoreKind::none, TransportKind::live_suspending_write);
+}
+
+// ── The FileStore fixture's io_context, when work on it ends on the pool thread (#602) ──
+//
+// A job on the fixture's file pool takes a work guard on the fixture's io_context once the
+// session is Active, a pump runs a handler to its end while that guard is held, and then the
+// job releases the guard and ends: the io_context's last outstanding work reaches zero on the
+// pool thread, after the pump has restarted the io_context. A FileStore offload's frame can
+// release the work it keeps on the io_context in that order (tests/support/keep_running.hpp).
+// The pool has one thread, so the job starts after every earlier offload has returned and its
+// release is the last one. The send after it must still complete within the fixture's pump.
+// The io_context is read as not stopped before the first pump, as in OffloadPump
+// (tests/session/test_598_store_offload.cpp).
+TEST(CallbackSend, FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNextPump) {
+    // Before the fixture: the pool's job reads them until the fixture joins its pool.
+    std::atomic<bool> holding{false};
+    std::atomic<bool> release{false};
+    std::atomic<bool> ended{false};
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    // After the fixture: lets the job go on every exit, before the fixture joins its pool.
+    struct release_on_exit {
+        std::atomic<bool>& r;
+        ~release_on_exit() { r.store(true); }
+    } const release_guard{release};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    const auto payload = bytes_of(std::string("35=D\x01"
+                                              "11=POOL-1\x01"
+                                              "55=AAA\x01"));
+
+    const auto spin_until = [](auto pred) {
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= until) return false;
+            std::this_thread::yield();
+        }
+        return true;
+    };
+    asio::post(f.file_pool, [&] {
+        auto guard = asio::make_work_guard(f.ioc);
+        holding.store(true);
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kHoldBound;
+        while (!release.load() && std::chrono::steady_clock::now() < until) {
+            std::this_thread::yield();
+        }
+        guard.reset();
+        ended.store(true);
+    });
+    const bool held = spin_until([&] { return holding.load(); });
+    const bool stopped_before_first = f.ioc.stopped();
+    bool first = false;
+    asio::post(f.ioc, [&first] { first = true; });
+    const bool first_ran = f.pump_done([&first] { return first; }, "CallbackSend::pool_work_first");
+    release.store(true);
+    const bool job_ended = spin_until([&] { return ended.load(); });
+    const bool stopped = f.ioc.stopped();
+
+    SendOutcome sent;
+    const auto send_started = std::chrono::steady_clock::now();
+    asio::co_spawn(sess.executor().underlying(), sess.send(payload), record_into(sent));
+    const bool send_done =
+        f.pump_done([&sent] { return sent.done; }, "CallbackSend::pool_work_send");
+    const auto send_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - send_started)
+                             .count();
+    const std::string context =
+        "held=" + std::to_string(held) +
+        " stopped_before_first=" + std::to_string(stopped_before_first) +
+        " first_ran=" + std::to_string(first_ran) + " job_ended=" + std::to_string(job_ended) +
+        " stopped=" + std::to_string(stopped) + " send: " + describe(sent) +
+        " send_ms=" + std::to_string(send_ms);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    ASSERT_TRUE(held && !stopped_before_first && first_ran && job_ended)
+        << "the path was not exercised: " << context;
+    EXPECT_FALSE(stopped) << "the fixture's io_context stopped when the pool thread's work ended. "
+                          << context;
+    EXPECT_TRUE(send_done && !sent.err && !sent.threw)
+        << "the send after it did not complete. " << context;
 }
 
 // ── The close cells ──────────────────────────────────────────────────────────
