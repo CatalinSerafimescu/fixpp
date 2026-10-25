@@ -313,7 +313,7 @@ there (FR-019 edits gap notes, plus the one comment below).
 - gap note of each tail MsgType's existing row (its last column): a cell reading `—` becomes
   `` 095 witness: `TailRows095.<RowId>_<Name>` `` (the row's witness ID of §A); a cell with text keeps
   it and gains `` ; 095 witness: `TailRows095.<RowId>_<Name>` `` at its end. No row is added or moved.
-- one line, directly after the closing `-->` of 067's "ART VI §3 DISPOSITION" comment:
+- one comment, appended after a space to the line holding the closing `-->` of 067's "ART VI §3 DISPOSITION" comment, so the index's line count is unchanged and no line citation into it moves (T085, 2026-10-25; a separate line moved 39 frozen citations):
   `<!-- SUPERSEDED (095-tail-evidence-pass, constitution v4.1): message-level Spec refs on application-message rows are governed by Article VI §2 as amended in v4.1, not by §3; the comment above is history. -->`
 
 **B&L delta (T067, FR-013, FR-019, contracts L8), byte for byte**, as a new section at the end of

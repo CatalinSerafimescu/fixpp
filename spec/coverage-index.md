@@ -274,8 +274,7 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
      the pre-existing project-wide convention for the whole FIX44 application-message domain
      (every app-message row here is message-level) — NOT an omission. The frozen 061 shape-oracle
      + QuickFIX goldens + `body_builder` are the design authority 067 reproduces byte-for-byte
-     (see spec.md `## Normative References`, "Design authority" block). Recorded per T029(c). -->
-<!-- SUPERSEDED (095-tail-evidence-pass, constitution v4.1): message-level Spec refs on application-message rows are governed by Article VI §2 as amended in v4.1, not by §3; the comment above is history. -->
+     (see spec.md `## Normative References`, "Design authority" block). Recorded per T029(c). --> <!-- SUPERSEDED (095-tail-evidence-pass, constitution v4.1): message-level Spec refs on application-message rows are governed by Article VI §2 as amended in v4.1, not by §3; the comment above is history. -->
 
 <!-- 069-v44-all-families COVERAGE-CLAIM LEGEND (Gate B PR#187 round 1 F2,
      2026-07-11): wherever a row below carries the 069 gap-note phrase
