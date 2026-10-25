@@ -708,8 +708,9 @@ install(
 # contracts/cmake-targets.md "Install / export scope". The .builder.inl/.validator.inl files ship with the layout:
 # they are the FIXPP_{BUILDERS,VALIDATORS}_HEADER_ONLY[_<Msg>] surface the installed .hpp files include.
 # Translation units never ship (*.cpp below).
-# This rule is a DENYLIST: a new emitted kind ships by default. What catches one is the schema allowlist in
-# tests/packaging/run_package_contents_witness.cmake, written from 078 contracts/include-layout.md, not from this rule.
+# This rule is a DENYLIST: a new emitted kind ships by default. Inside a version directory, the per-version children
+# check and schema allowlist catch it; the codegen-root census catches a new generated root or root-level file. Both
+# are in tests/packaging/run_package_contents_witness.cmake.
 if(FIXPP_BUILD_CODEGEN_TOOL)
   # The five 078 patterns, kept only where the typed tier is NOT in effect. Keyed on
   # the effective value, never on the build type: a Debug tree set ON installs the

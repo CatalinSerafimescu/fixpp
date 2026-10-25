@@ -482,6 +482,43 @@ endfunction()
 # generated files under the tier-ON rule (D-7: no *.cpp, no Manifest.txt) are globbed
 # once per version for the build-tree equality check.
 set(_expected_versions v42 v44 v50sp2 vlatest)
+# The checks below see only expected version roots; because the install rule is a
+# denylist, any other generated root or root-level file would ship unchecked.
+file(GLOB _cg_inc LIST_DIRECTORIES true
+  RELATIVE "${FIXPP_MAIN_BUILD_DIR}/_codegen/include"
+  "${FIXPP_MAIN_BUILD_DIR}/_codegen/include/*")
+list(SORT _cg_inc)
+set(_cg_expected_inc fixpp)
+if(NOT "${_cg_inc}" STREQUAL "${_cg_expected_inc}")
+  set(_cg_unexpected ${_cg_inc})
+  list(REMOVE_ITEM _cg_unexpected ${_cg_expected_inc})
+  message(FATAL_ERROR
+    "#613 codegen roots: generated include root differs from the expected layout.\n"
+    "  expected:   ${_cg_expected_inc}\n"
+    "  actual:     ${_cg_inc}\n"
+    "  unexpected: ${_cg_unexpected}\n"
+    "The install rule ships every generated entry it does not exclude by name, so a new root is a decision. "
+    "If it is meant to ship, add it to _expected_versions here and to the install witness. "
+    "If it is build-private, add an install PATTERN ... EXCLUDE and a must-be-absent alternative.")
+endif()
+file(GLOB _cg_roots LIST_DIRECTORIES true
+  RELATIVE "${FIXPP_MAIN_BUILD_DIR}/_codegen/include/fixpp"
+  "${FIXPP_MAIN_BUILD_DIR}/_codegen/include/fixpp/*")
+list(SORT _cg_roots)
+set(_cg_expected_roots ${_expected_versions} _dispatch vt11)
+list(SORT _cg_expected_roots)
+if(NOT "${_cg_roots}" STREQUAL "${_cg_expected_roots}")
+  set(_cg_unexpected ${_cg_roots})
+  list(REMOVE_ITEM _cg_unexpected ${_cg_expected_roots})
+  message(FATAL_ERROR
+    "#613 codegen roots: generated fixpp roots differ from the expected layout.\n"
+    "  expected:   ${_cg_expected_roots}\n"
+    "  actual:     ${_cg_roots}\n"
+    "  unexpected: ${_cg_unexpected}\n"
+    "The install rule ships every generated entry it does not exclude by name, so a new root is a decision. "
+    "If it is meant to ship, add it to _expected_versions here and to the install witness. "
+    "If it is build-private, add an install PATTERN ... EXCLUDE and a must-be-absent alternative.")
+endif()
 fixpp_typed_tier_expected_children(${FIXPP_TYPED_TIER_EFFECTIVE} _expected_children)
 if(FIXPP_TYPED_TIER_EFFECTIVE)
   foreach(_ver IN LISTS _expected_versions)
@@ -930,8 +967,9 @@ foreach(_artifact IN LISTS _artifacts)
   # passes over it. That is the silent leak T059 exists to prove catchable, and only
   # exact-set assertions can catch it.
   #
-  # #613 — three checks, in this order (`.specify/613-builders-export.md` §4.2), each
-  # a FATAL, so the first that fails is the one that prints:
+  # #613 — checks run in this order (`.specify/613-builders-export.md` §4.2), each
+  # a FATAL, so the first that fails is the one that prints. The codegen-root census
+  # runs once before the per-artifact loop:
   #   1. the shipped versions are an UNCONDITIONAL expected list: R-2 rules all four
   #      into every package and D-6 makes a FIX_LATEST=OFF tree unpackageable, so
   #      keying the list on FIXPP_CODEGEN_FIX_LATEST would track the regression;
