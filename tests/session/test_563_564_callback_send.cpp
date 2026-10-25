@@ -905,8 +905,9 @@ struct Fixture {
         // has run, the job the pool's thread was running at the re-take has returned, with any
         // stop() it made. That holds on these conditions: `file_pool` has one thread; the
         // release runs inside a pool job, as an offload frame's destruction does; no f.run()
-        // runs while a cell's FileGate holds the pool's thread; no cell calls f.ioc.stop()
-        // itself. A fence that has not run within kRetakeFenceBound fails the cell
+        // runs while a cell's FileGate holds the pool's thread; a cell calls f.ioc.stop()
+        // only from a `file_pool` job posted before the re-take, so that job is queued ahead
+        // of this fence. A fence that has not run within kRetakeFenceBound fails the cell
         // (kRetakeFenceExpired).
         std::optional<asio::io_context::executor_type> kept_on;
         if (keep) kept_on = keep->get_executor();
@@ -2570,8 +2571,9 @@ TEST(CallbackSend, FileStoreFixture_ReleaseBetweenTheWindowAndTheRetake_DoesNotS
 }
 
 // How long the next cell's pool job holds the pool's thread before it stops the fixture's
-// io_context. The condition it meets: its stop() lands after the fence of any bound under
-// which the cell is meant to read RED, and well below Fixture::kRetakeFenceBound.
+// io_context. The conditions it meets: it is well inside Fixture::kRetakeFenceBound (the
+// static_assert below), so run()'s fence waits the job out; and a fence bound shortened
+// below it expires before the job's stop() lands, so the stop() lands after run() returns.
 constexpr std::chrono::milliseconds kLateStopAfter{500};
 static_assert(kLateStopAfter * kGraceOverPumpBound <= Fixture::kRetakeFenceBound,
               "the late-stop cell's job must end well inside run()'s fence bound");
