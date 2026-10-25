@@ -850,7 +850,7 @@ delta (plan P7).
 > chronologically, and are numbered before the close-out tasks so that T105 stays FINAL (recorded
 > deviation, header); each of them is open at the audit, under the waiver written in it.
 
-- [ ] T087 (orchestrator) **Draft the PR description** in the parent's `research/reviews/` scratch
+- [X] T087 (orchestrator) **Draft the PR description** in the parent's `research/reviews/` scratch
   area: title exactly `Constitution: amend §VI.2, §VI.5, §XVIII.7 — message-level Spec refs for application-message rows; FIX50-only tail rows delivered (v4.1) (+ 095 tail evidence pass)`
   (FR-021); body states the change, the rationale, the affected rows and specs; discloses what the
   PR's own `interop-live` will show (plan, "What the fixpp PR's `interop-live` shows": compiles the
@@ -862,14 +862,14 @@ delta (plan P7).
   pre-recorded waivers are stated with their rationale; `local build: green on linux-clang-debug @ <sha>`
   from T085; T082's grep over the body, so `closingIssuesReferences` is empty. T096 applies the final
   body.
-- [ ] T088 (orchestrator) **Re-run T080–T082 as the last action, then push and open the PR without
+- [X] T088 (orchestrator) **Re-run T080–T082 as the last action, then push and open the PR without
   gate labels**: `git push -u origin 095-tail-evidence-pass`; `gh pr create` with T087's title and
   body. Read `closingIssuesReferences` (empty) and record the PR number. Read the ungated checks; a red
   one goes back through the fixer. The PR's `interop-live` result is recorded as advisory only after
   its log is read (quickstart §6): the build step succeeded, and the reconcile failed naming exactly
   the two new skip-list ids; any other failure is triaged like a red check. T104
   follows (it needs the PR number).
-- [ ] T089 (orchestrator) **Verify-delta check and the pre-audit tick commit**, after T104's C-PRCELL:
+- [X] T089 (orchestrator) **Verify-delta check and the pre-audit tick commit**, after T104's C-PRCELL:
   `git diff --name-only <T085 full-ctest SHA>..HEAD` lists only `spec/` and `specs/` paths; the
   verify record states the delta is docs-only (otherwise T085's full `ctest` re-runs last). Then
   commit the `tasks.md` ticks of T001–T089 and T104 (`specs/` only, placeholder grep and T082's
@@ -998,7 +998,7 @@ delta (plan P7).
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
-- [ ] T104 (orchestrator) **Catalogue close-out** (after T088, before T105 and T091). The 12 flips
+- [X] T104 (orchestrator) **Catalogue close-out** (after T088, before T105 and T091). The 12 flips
   themselves land in US4 (T062–T064, C-RECORDS), because quickstart §7 and `/speckit-verify` must see
   them; this task fills what could not exist then and re-checks the rest:
   - fill the PR cell of the 12 rows with T088's PR number, commit C-PRCELL (`spec/feature-catalogue.md`
