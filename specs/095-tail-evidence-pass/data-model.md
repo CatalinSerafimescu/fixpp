@@ -449,7 +449,7 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     versions. A §5 that REQUIRED message-level entries would make such an artifact fail. That would be
     MAJOR, and it was not adopted. The Article XVIII §7 correction replaces two deferral statements
     that feature 077 and owner DECISION 2 had already ended, and records which feature closes those
-    rows, and widens its opening sentence to the A- rows the clause already records as delivered. It adds no banned pattern, tightens no budget and imposes no obligation, so no PR mergeable
+    rows, and widens its opening sentence to the A- rows the clause already names, by row ID, as delivered. It adds no banned pattern, tightens no budget and imposes no obligation, so no PR mergeable
     under v4.0 fails under v4.1 because of it.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article VI §2 — an OFFICIAL row whose Title names at least one MsgType as `35=<MT>` may carry the
@@ -468,7 +468,7 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     typed tier is `fixpp::v50sp2`, delivered by feature 077, and feature 095 closes them on it.
     N-002/N-003 are application messages (owner DECISION 2, 2026-10-21), no longer a session-FSM pair
     deferred to the v1.0-tagging gate; feature 095 closes both rows on `fixpp::v50sp2`. Feature 095
-    leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged (fixpp#625). Its opening scope sentence also names the further A- rows the clause records as delivered or closed; since feature 069 it had named only A-001..A-013 among the A- rows.
+    leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged (fixpp#625). Its opening scope sentence also takes in the further A- rows the clause names, by row ID, as delivered or closed; since feature 069 it had named only A-001..A-013 among the A- rows. Its `fixpp::v44` sentence now labels BE/BF as N-002's, matching the N-002/N-003 sentence, which assigns BE/BF to N-002 and BW/BX/BY to N-003.
   Read and unchanged: Article VI §3 covers design-decision rows (`[impl]`/`[constitution]`). It does
     not reach normative message rows; the 067 coverage-index comment that read it so is history, not
     an amendment. Article VI §6 is unchanged: feature 095 meets its (a)–(d) as written. Article IX §6 is unchanged: its Tier-1 "catalogue
@@ -558,7 +558,7 @@ Before (the scope sentence that opens the clause):
 `v1.0's typed-message scope under `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2` is A-001..A-013 plus the M-/P-/C-/R-/N- families per the catalogue.`
 
 After:
-`v1.0's typed-message scope under `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2` is A-001..A-013, the M-/P-/C-/R-/N- families, and the further A- rows this clause records as delivered or closed below, per the catalogue.`
+`v1.0's typed-message scope under `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2` is A-001..A-013, the M-/P-/C-/R-/N- families, and the further A- rows this clause names below, by row ID, as delivered or closed, per the catalogue.`
 
 Before (inside the bold `fixpp::v44` sentence, whose other words are unchanged; the N-002/N-003 sentence assigns BE/BF to N-002 alone):
 `85 app minus the N-002/N-003 pair BE/BF`
@@ -581,9 +581,9 @@ Design notes (not clause text):
   (`grep -o "<message [^>]*msgtype='B[EF]'[^>]*>" dictionaries/FIX44.xml`), and not the symbol, which
   can be renamed.
 - No count is written: the rows are named, so nothing is derived.
-- The opening sentence names the further A- rows by pointer to the clause's own records, not by list or count, so it stays true when a later feature closes another row.
+- The opening sentence names the further A- rows by pointer to the rows the clause itself names by row ID, not by list or count, so it stays true when a later feature names another row here. A message set the clause records as delivered (v50sp2's is_application set) brings in no row the clause does not name; re-derive why that matters by intersecting the backlog A- rows' MsgTypes with msgcat='app' in dictionaries/FIX50SP2.xml.
 - Classification: MINOR (§F.3 "Bump"). The two statements described a deferral that feature 077
   and DECISION 2 had already ended; replacing them adds no banned pattern, tightens no budget and
-  imposes no obligation. Widening the opening sentence to rows the clause already records as delivered imposes none either.
+  imposes no obligation. Widening the opening sentence to rows the clause already names as delivered imposes none either.
 - Check after C-AMEND (T061): `command grep -qF 'are application messages, not a session-FSM pair'`
   on the constitution, and the `## Article XVIII` diff changes the §7 line only.
