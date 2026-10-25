@@ -1281,8 +1281,8 @@ and that a Debug consumer builds fixpp with `FIXPP_INSTALL_TYPED_TIER=ON` (R-2a,
 
 ## 8. B&L delta (`spec/behaviors-and-limitations.md`)
 
-- **B-613-1.** An installed consumer of a **Release** package, or of a fixpp it built itself with
-  `FIXPP_INSTALL_TYPED_TIER=ON`, can build and validate typed messages for v42, v44, v50sp2 and vlatest. It links `fixpp::builders::<ver>` and/or `fixpp::validators::<ver>` by name. `fixpp::fixpp`
+- **B-613-1.** An installed consumer of a **Release** package, or of a fixpp it built itself with the tier in
+  effect (B-613-2), can build and validate typed messages for v42, v44 and v50sp2, plus vlatest iff that tree was configured with `FIXPP_CODEGEN_FIX_LATEST=ON` (every package requires it, L-613-1). It links `fixpp::builders::<ver>` and/or `fixpp::validators::<ver>` by name. `fixpp::fixpp`
   does not reach them, and a `build_<Msg>` call from an umbrella-only consumer fails at link time naming the
   function. The 078 header-only macros work in the installed tree, under 078's same-message ODR rule.
 - **L-613-1.** A tree configured with `FIXPP_CODEGEN_FIX_LATEST=OFF` exports and installs no vlatest typed tier and
