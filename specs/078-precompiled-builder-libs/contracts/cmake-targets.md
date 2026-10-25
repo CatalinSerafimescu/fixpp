@@ -38,6 +38,23 @@ being `inline` explicit specializations they contribute no standalone object.
 
 ## Install / export scope — DECIDED: build-tree + in-tree only (Gate A round 1, R3)
 
+> **⚠️ SUPERSEDED by fixpp#613 (`.specify/613-builders-export.md`).** The blocker named below, "it would open the
+> tier's first export surface", was removed by 084, which built that surface. Since #613, wherever
+> `FIXPP_INSTALL_TYPED_TIER` is in effect, `fixpp_builders_<ver>` and `fixpp_validators_<ver>` are members of
+> `FIXPP_EXPORT_TARGETS` for v42, v44 and v50sp2, and for vlatest when `FIXPP_CODEGEN_FIX_LATEST=ON`. They are
+> exported as `fixpp::builders::<ver>` / `fixpp::validators::<ver>` and linked by name; the `fixpp::fixpp` umbrella
+> does not reach them. The slim typed layout is installed, except its `.cpp` translation units. The setting defaults
+> to `AUTO`: in effect for a single-config Release tree, which every released package is, and not otherwise; anyone
+> who builds fixpp may set it ON in any configuration (owner rulings R-2a, 2026-10-24: "Release packages only.", and
+> R-2b, 2026-10-24, which put it behind the setting; Debug configurations are never released, 2026-08-03). The
+> **coherence rule still holds in both states**: ON installs every `build_`/`validate_` declaration with an exported
+> definition, and OFF installs neither. The rest of this section is the Gate A round 1 record. Its version list
+> predates 082, which added v42.
+>
+> **`Args` freeze (owner ruling, 2026-10-24):** "FREEZE span-based Args as the v1.0 public shape (Option 3 stays
+> deferred; a later change would be a 2.0 break)." Installing the layout makes `<Msg>Args` and `groups::G_*Args`
+> public API in their span-based shape; L-078-1's compile cost is part of that shape (B&L L-613-2).
+
 Today the tier is header-only-installed (`CMakeLists.txt:326-345`); there is no
 `install(TARGETS)` for `src/` static libs. **Decision (Gate A round 1):** the six
 new libs are **build-tree targets consumed by the library's own tests + in-tree

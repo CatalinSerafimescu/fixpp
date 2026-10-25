@@ -477,6 +477,31 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"
 
+      # #613 (`.specify/613-builders-export.md` §4, guard 3) — pin the typed-tier
+      # setting each leg configured, TWO-SIDED: ON on windows-msvc-debug (its preset
+      # sets it, the R-2b self-build case: a Debug consumer of the Debug typed tier,
+      # where a wrong-configuration link fails at LNK2038 instead of passing), AUTO
+      # on every other leg. Without it, dropping the preset entry would silently move
+      # windows-msvc-debug to the ABSENT branch, which its install witness accepts for
+      # a Debug tree at AUTO. Read the way tier1's "Verify full v44 coverage preset (FR-008)" step
+      # reads a cache value. Mutants that prove it: M-16 (delete the preset entry ->
+      # this step reads AUTO, expected ON) and M-16b (add ON to windows-msvc-release
+      # -> reads ON, expected AUTO), both on a fresh tree.
+      - name: Pin the typed-tier setting (#613)
+        shell: bash
+        run: |
+          set -euo pipefail
+          P="${{ matrix.preset }}"
+          if [ "$P" = "windows-msvc-debug" ]; then want=ON; else want=AUTO; fi
+          line=$(grep '^FIXPP_INSTALL_TYPED_TIER:' "build/$P/CMakeCache.txt" || true)
+          value="${line#*=}"
+          value="${value%$'\r'}"
+          if [ -z "$line" ] || [ "$value" != "$want" ]; then
+            echo "::error::$P configured FIXPP_INSTALL_TYPED_TIER='${value}' (cache line: '${line}'), expected '$want'. windows-msvc-debug pins ON in CMakePresets.json; every other MSVC leg leaves it AUTO."
+            exit 1
+          fi
+          echo "OK: FIXPP_INSTALL_TYPED_TIER=$value on $P"
+
       # AC3 (#231) — assert the premise on the REAL command line, do not infer it.
       #
       # This is a gate, not an excerpt. Every claim sccache rests on is invisible
@@ -769,7 +794,8 @@ jobs:
       # 084 T066 — the packaging tier is GATED ON windows-msvc-release.
       #
       # Turning OTel ON here also turned PACKAGING on (084 FR-011:
-      # FIXPP_PACKAGING_ENABLED tracks FIXPP_BUILD_OTEL), so these six witnesses
+      # FIXPP_PACKAGING_ENABLED follows FIXPP_BUILD_OTEL and FIXPP_CODEGEN_FIX_LATEST
+      # (#613 D-6), which no lane turns off), so these six witnesses
       # now register on all three lanes where they never have before. Each one
       # stage-installs a prefix and then configures and compiles a sub-project —
       # including a 1700-line TU in the real-client tier — which is not something
@@ -900,6 +926,42 @@ jobs:
           path: ${{ github.workspace }}/_artifacts/*
           if-no-files-found: error
           retention-days: 14
+
+      # ── #613 (`.specify/613-builders-export.md` §4.4) — disk at JOB END ──────────
+      # tier1's `Measure disk at job end (#254)` has no Windows counterpart.
+      # Same split as #254: the MEASUREMENT asserts (a df/du that cannot run reds
+      # the leg), the REPORTING does not. No floor is asserted; #254's re-open rule
+      # applies ("Re-open if job-end free space ever drops below ~2x the tree on any
+      # leg").
+      #
+      # Per stager directory as well as the whole tree: the typed share of each
+      # copy is read from one run (each copy's size minus the same copy without the
+      # typed tier).
+      - name: Measure disk at job end (#613)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          P="${{ matrix.preset }}"
+          if [ ! -d "build/$P" ]; then
+            echo "build/$P absent — the job did not reach a configured tree; nothing to measure."
+            : > /tmp/disk.txt
+            exit 0
+          fi
+          df -h "$GITHUB_WORKSPACE" > /tmp/disk.txt || { echo "::error::df failed — instrument unavailable."; exit 1; }
+          du -sh "build/$P" >> /tmp/disk.txt || { echo "::error::du on build/$P failed — instrument unavailable."; exit 1; }
+          for d in "build/$P"/_packaging_tests/* "build/$P/_packages" "build/$P/_consumer_witness/stage"; do
+            if [ -e "$d" ]; then
+              du -sb "$d" >> /tmp/disk.txt || { echo "::error::du on $d failed — instrument unavailable."; exit 1; }
+            fi
+          done
+          cat /tmp/disk.txt
+
+      - name: Report disk to the job summary (#613)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: cat /tmp/disk.txt >> "$GITHUB_STEP_SUMMARY"
 
   # NOTE: the "ABI golden — fixpp_decimal_t" abidiff job moved to tier1.yml
   # (2026-06-22) — it is a Linux C-ABI layout gate with nothing Windows-specific,

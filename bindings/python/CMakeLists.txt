@@ -456,8 +456,8 @@ if(FIXPP_BUILD_TESTS AND UNIX AND NOT DEFINED SKBUILD)
   set_tests_properties("fixpp::python::install-${_fixpp_py_witness_mode}-witness" PROPERTIES
     LABELS "python;install"
     # A full stage-install of the C++ closure plus the python payload. The
-    # consumer witness, which additionally CONFIGURES AND BUILDS a sub-project
-    # off its staged prefix, sits at 300; this one only installs.
+    # consumer witness additionally CONFIGURES AND BUILDS a sub-project off its
+    # staged prefix; this one only installs and has its own budget.
     TIMEOUT 300)
 
   unset(_fixpp_py_witness_mode)

@@ -503,8 +503,8 @@ include/
 > clauses below are now checkable rather than aspirational. Read this table first; the prose that
 > follows is retained as the design intent it was written as, not as a description of what ships.
 >
-> **Delivered export set: 18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT** (counted in the shipped
-> `fixppTargets.cmake`).
+> **Delivered export set: 18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT** (counted in the shipped `fixppTargets.cmake`; 084's base set, ⚠️ superseded in part by fixpp#613:
+> with `FIXPP_INSTALL_TYPED_TIER` in effect the export adds a STATIC `fixpp::builders::<ver>` / `fixpp::validators::<ver>` pair per generated version, linked by name; see the #613 note at the end of this file).
 >
 > | Clause | Disposition | Measured reality |
 > |---|---|---|
@@ -548,8 +548,8 @@ include/
 > "design intent" left a second, superseded implementation recipe inside the normative architecture — one that
 > contradicted both the 084 reconciliation table above and `api-contract.md` §8. It is replaced, not annotated.
 
-The delivered export set is **18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT**, measured in the shipped
-`fixppTargets.cmake`:
+The delivered export set is **18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT**, measured in the shipped `fixppTargets.cmake` (the base set; ⚠️ superseded in part by fixpp#613:
+with `FIXPP_INSTALL_TYPED_TIER` in effect the export adds a STATIC `fixpp::builders::<ver>` / `fixpp::validators::<ver>` pair per generated version, linked by name; see the #613 note at the end of this file):
 
 - **STATIC (13)** — `fixpp::core`, `fixpp::sync`, `fixpp::wire`, `fixpp::dictionary`,
   `fixpp::dict_dispatch_bridge`, `fixpp::session`, `fixpp::transport`, `fixpp::tls`, `fixpp::log`,
@@ -898,3 +898,13 @@ the catalogue rows are the authority; this file does not restate them.
 
 **Re-derive:** `grep -n '^7\. \*\*Application-message codegen scope' .specify/constitution.md` for the clause;
 a row's state is its Status cell, `grep -n "^| A-0" spec/feature-catalogue.md`.
+
+## #613 note — the typed builder/validator export pair
+
+**⚠️ Superseded in part by fixpp#613 (`.specify/613-builders-export.md`).** The export sets this file states are the
+BASE export set, which every configuration still exports. Wherever the typed tier is in effect
+(`FIXPP_INSTALL_TYPED_TIER` resolves ON: `AUTO` in a single-config `Release` tree, which is every released package,
+or an explicit `ON`), the export also carries, for each generated version (`v42`, `v44`, `v50sp2`, and `vlatest` iff
+`FIXPP_CODEGEN_FIX_LATEST`), the STATIC pair `fixpp::builders::<ver>` / `fixpp::validators::<ver>`. A consumer links
+that pair by name; `fixpp::fixpp` does not reach it. The counts this file writes are the base set's, as 084/086
+measured it, and are history; a configured tree's `fixpp-export-names.txt` lists the current set.

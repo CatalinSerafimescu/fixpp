@@ -218,6 +218,12 @@ FIXPP_BUILD_OTEL = "OFF"
 # tree (defaults ON) nor bench/fuzz. Without this the wheel build compiles ~1500
 # test targets it then discards (the bulk of the in-container build time + size).
 FIXPP_BUILD_TESTS = "OFF"
+# #613 (`.specify/613-builders-export.md` P-9, D-8): the wheel build is Release, so
+# FIXPP_INSTALL_TYPED_TIER's AUTO default would resolve ON and scikit-build-core would
+# stage the full typed install (typed archives and slim headers) only for
+# `wheel.exclude` above to drop it. OFF stages none of it; the wheel's content does
+# not change. Packaging is disabled here (OTel OFF), so no CPack guard reads it.
+FIXPP_INSTALL_TYPED_TIER = "OFF"
 # ── C++20 module scanning OFF — a PREREQUISITE for the ccache, not a tweak (#259) ──
 #
 # ⚠️ WITHOUT THIS THE WHEEL LANE'S ccache CACHES NOTHING AT ALL. Measured on the
