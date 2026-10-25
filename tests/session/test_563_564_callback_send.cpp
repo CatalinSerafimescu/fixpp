@@ -90,6 +90,18 @@
 //                             the same on a persistent FileStore, whose store()
 //                             suspends on a file-I/O pool. The fixture's pool
 //                             has one thread.
+//   FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNextPump
+//                             fixpp#602. Work on the fixture's io_context that
+//                             ends on the file pool's thread, between two pumps,
+//                             must not leave the next pump a stopped io_context.
+//   FileStoreFixture_ReleaseBetweenTheWindowAndTheRetake_DoesNotStopTheNextPump
+//                             fixpp#602. The same, for work that ends after
+//                             run()'s window has returned and before run() takes
+//                             the fixture's guard again.
+//   FileStoreFixture_StopFromThePoolAfterTheRetake_DoesNotStopTheNextPump
+//                             fixpp#602. The same, for a stop() from the file
+//                             pool's running job that lands after run() has taken
+//                             the fixture's guard again.
 //   FromAppSendsReply_NestedToAppThrows
 //                             batch B41. fromApp starts a send whose toApp
 //                             throws, which makes Session::send await a
@@ -429,6 +441,7 @@
 #include <vector>
 
 #include "support/hooked_store.hpp"
+#include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -754,6 +767,11 @@ static_assert(fixpp::test_support::kPumpBudget * kGraceOverPumpBound <=
 
 struct Fixture {
     asio::io_context ioc;
+    // With a FileStore: keeps `ioc` from stopping between two pumps when an offload's work
+    // is released on the pool thread (tests/support/keep_running.hpp). Engaged by cfg();
+    // run() releases it for its window and takes it again after a window that returned
+    // ready. Released before every drain, which waits for the io_context to stop.
+    std::optional<fixpp::test_support::keep_running> keep;
     // The FileStore cell's file-I/O executor. Declared after ioc, so it is
     // joined before ioc is destroyed.
     asio::thread_pool file_pool{1};
@@ -793,6 +811,10 @@ struct Fixture {
                                                          "108=30\x01");
     // Called with every frame the session transmits, after it is appended to `wire`.
     std::function<void(const std::string&)> on_transmit;
+    // Test-only: run() calls it after its window has returned and before it takes `keep`
+    // again, on the miss path too, before that path's drain. It receives whether the window
+    // returned ready.
+    std::function<void(bool)> between_window_and_retake;
     LiveWrites live_writes;
     asio::any_io_executor exec;
     std::shared_ptr<fixpp::core::mock_clock> clock;
@@ -849,6 +871,7 @@ struct Fixture {
             fc.max_frame_bytes = 4096;
             fc.file_io_executor = file_pool.get_executor();
             c.store_factory = std::make_shared<FileStoreFactory>(fc);
+            keep.emplace(fixpp::test_support::keep_running_for(ioc));
         } else {
             MemoryStore::Config sc;
             sc.inbound_capacity = 16;
@@ -859,13 +882,52 @@ struct Fixture {
         return c;
     }
 
+    // How long run() waits for its fence on `file_pool`: a pump's budget, because a pool job
+    // that holds the pool's thread longer than that fails the cell's next pump anyway.
+    static constexpr auto kRetakeFenceBound = fixpp::test_support::kPumpBudget;
+    // The failure run() reports when its fence has not run within kRetakeFenceBound.
+    static constexpr const char* kRetakeFenceExpired =
+        "Fixture::run: the file pool's fence did not run within kRetakeFenceBound, so a stop() "
+        "of the pool's job can still land; site: ";
+
     template <class T>
     expected_t<T> run(asio::awaitable<expected_t<T>> a, const char* site) {
         auto fut = asio::co_spawn(exec, std::move(a), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site)) {
+        // `keep` is released for the window, after the co_spawn, whose own work keeps `ioc`
+        // from stopping at the release. The window then returns when `ioc` runs out of work,
+        // as it does with no FileStore, and that includes work an offload releases on the
+        // pool thread. After a window that returned ready, `keep` is taken again on the
+        // executor it was released from; then a no-op is run on `file_pool` and waited for;
+        // then `ioc` is restarted if it is stopped. The restart is there because a release
+        // whose decrement came before the re-take can have stopped `ioc`. The fence is there
+        // because asio::detail::scheduler::work_finished decrements the count and only then
+        // calls stop(), so a pool thread's stop() can land after the re-take: once the no-op
+        // has run, the job the pool's thread was running at the re-take has returned, with any
+        // stop() it made. That holds on these conditions: `file_pool` has one thread; the
+        // release runs inside a pool job, as an offload frame's destruction does; no f.run()
+        // runs while a cell's FileGate holds the pool's thread; a cell calls f.ioc.stop()
+        // only from a `file_pool` job posted before the re-take, so that job is queued ahead
+        // of this fence. A fence that has not run within kRetakeFenceBound fails the cell
+        // (kRetakeFenceExpired).
+        std::optional<asio::io_context::executor_type> kept_on;
+        if (keep) kept_on = keep->get_executor();
+        keep.reset();
+        const bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site);
+        if (between_window_and_retake) between_window_and_retake(ready);
+        if (!ready) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
             return std::unexpected(fixpp::test_support::kWindowMissSentinel);
+        }
+        if (kept_on) {
+            keep.emplace(*kept_on);
+            const auto fenced = std::make_shared<std::promise<void>>();
+            auto ran = fenced->get_future();
+            asio::post(file_pool, [fenced] { fenced->set_value(); });
+            if (ran.wait_for(kRetakeFenceBound) != std::future_status::ready) {
+                ADD_FAILURE() << kRetakeFenceExpired << site;
+            }
+            if (ioc.stopped()) ioc.restart();
         }
         return fut.get();
     }
@@ -875,6 +937,7 @@ struct Fixture {
     template <class Pred>
     [[nodiscard]] bool pump_done(Pred pred, const char* site) {
         if (fixpp::test_support::pump_until(ioc, pred, site)) return true;
+        keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
         ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << site;
         return false;
@@ -2325,6 +2388,279 @@ TEST(CallbackSend, OverlappingSends_NoStore_LiveWrite) {
     run_overlapping_sends(StoreKind::none, TransportKind::live_suspending_write);
 }
 
+// ── The FileStore fixture's io_context, when work on it ends on the pool thread (#602) ──
+//
+// A job on the fixture's file pool takes a work guard on the fixture's io_context once the
+// session is Active, a pump runs a handler to its end while that guard is held, and then the
+// job releases the guard and ends: the io_context's last outstanding work reaches zero on the
+// pool thread, after the pump has restarted the io_context. A FileStore offload's frame can
+// release the work it keeps on the io_context in that order (tests/support/keep_running.hpp).
+// The pool has one thread, so the job starts after every earlier offload has returned and its
+// release is the last one. The send after it must still complete within the fixture's pump.
+// The io_context is read as not stopped before the first pump, as in OffloadPump
+// (tests/session/test_598_store_offload.cpp).
+TEST(CallbackSend, FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNextPump) {
+    // Before the fixture: the pool's job reads them until the fixture joins its pool.
+    std::atomic<bool> holding{false};
+    std::atomic<bool> release{false};
+    std::atomic<bool> ended{false};
+    std::atomic<bool> released_by_the_cell{false};
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    // After the fixture: lets the job go on every exit, before the fixture joins its pool.
+    struct release_on_exit {
+        std::atomic<bool>& r;
+        ~release_on_exit() { r.store(true); }
+    } const release_guard{release};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    const auto payload =
+        bytes_of(std::string("35=D\x01"
+                             "11=POOL-1\x01"
+                             "55=AAA\x01"));
+
+    const auto spin_until = [](auto pred) {
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= until) return false;
+            std::this_thread::yield();
+        }
+        return true;
+    };
+    asio::post(f.file_pool, [&] {
+        auto guard = asio::make_work_guard(f.ioc);
+        holding.store(true);
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kHoldBound;
+        while (!release.load() && std::chrono::steady_clock::now() < until) {
+            std::this_thread::yield();
+        }
+        // False when the job's own bound ended the hold, during the first pump or before it.
+        released_by_the_cell.store(release.load());
+        guard.reset();
+        ended.store(true);
+    });
+    const bool held = spin_until([&] { return holding.load(); });
+    const bool stopped_before_first = f.ioc.stopped();
+    bool first = false;
+    asio::post(f.ioc, [&first] { first = true; });
+    const bool first_ran = f.pump_done([&first] { return first; }, "CallbackSend::pool_work_first");
+    release.store(true);
+    const bool job_ended = spin_until([&] { return ended.load(); });
+    const bool stopped = f.ioc.stopped();
+
+    SendOutcome sent;
+    const auto send_started = std::chrono::steady_clock::now();
+    asio::co_spawn(sess.executor().underlying(), sess.send(payload), record_into(sent));
+    const bool send_done =
+        f.pump_done([&sent] { return sent.done; }, "CallbackSend::pool_work_send");
+    const auto send_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - send_started)
+                             .count();
+    const std::string context =
+        "held=" + std::to_string(held) +
+        " stopped_before_first=" + std::to_string(stopped_before_first) +
+        " first_ran=" + std::to_string(first_ran) + " job_ended=" + std::to_string(job_ended) +
+        " released_by_the_cell=" + std::to_string(released_by_the_cell.load()) +
+        " stopped=" + std::to_string(stopped) + " send: " + describe(sent) +
+        " send_ms=" + std::to_string(send_ms);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    ASSERT_TRUE(held && !stopped_before_first && first_ran && job_ended &&
+                released_by_the_cell.load())
+        << "the path was not exercised: " << context;
+    EXPECT_FALSE(stopped) << "the fixture's io_context stopped when the pool thread's work ended. "
+                          << context;
+    EXPECT_TRUE(send_done && !sent.err && !sent.threw)
+        << "the send after it did not complete. " << context;
+}
+
+// The same io_context, when work on it ends after run()'s window has returned and before
+// run() takes the fixture's guard again. A thread of the cell's own holds a work guard on
+// the io_context through the window, so the window runs to its deadline with the call ready;
+// the fixture's hook between the window and the re-take then lets that thread release its
+// guard, which is then the io_context's last outstanding work. The pump after run() must
+// still run a handler posted to it. The thread is not one of the file pool's: the pool has
+// one thread, and the call's own offloads run on it.
+TEST(CallbackSend, FileStoreFixture_ReleaseBetweenTheWindowAndTheRetake_DoesNotStopTheNextPump) {
+    // Before the thread: it reads them until it is joined.
+    std::atomic<bool> holding{false};
+    std::atomic<bool> release{false};
+    std::atomic<bool> ended{false};
+    std::atomic<bool> released_by_the_cell{false};
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    const auto order = peer_frame("D", 2,
+                                  "11=PEER-RT\x01"
+                                  "54=1\x01"
+                                  "55=AAPL\x01");
+
+    const auto spin_until = [](auto pred) {
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= until) return false;
+            std::this_thread::yield();
+        }
+        return true;
+    };
+    std::jthread holder{[&] {
+        auto guard = asio::make_work_guard(f.ioc);
+        holding.store(true);
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kHoldBound;
+        while (!release.load() && std::chrono::steady_clock::now() < until) {
+            std::this_thread::yield();
+        }
+        // False when the thread's own bound ended the hold, inside the window or before it.
+        released_by_the_cell.store(release.load());
+        guard.reset();
+        ended.store(true);
+    }};
+    // After the thread: lets it go on every exit, before it is joined.
+    struct release_on_exit {
+        std::atomic<bool>& r;
+        ~release_on_exit() { r.store(true); }
+    } const release_guard{release};
+    const bool held = spin_until([&] { return holding.load(); });
+
+    bool armed = true;
+    bool stopped_at_hook = false;
+    bool holder_ended = false;
+    bool stopped_by_release = false;
+    f.between_window_and_retake = [&](bool /*window_ready*/) {
+        if (!armed) return;
+        armed = false;
+        stopped_at_hook = f.ioc.stopped();
+        release.store(true);
+        holder_ended = spin_until([&] { return ended.load(); });
+        stopped_by_release = f.ioc.stopped();
+    };
+    const auto run_started = std::chrono::steady_clock::now();
+    const auto r = f.run(sess.on_inbound_frame(std::span<const std::byte>{order}),
+                         "CallbackSend::retake_order");
+    f.between_window_and_retake = nullptr;
+    const auto window_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - run_started)
+                               .count();
+    const bool stopped_after_run = f.ioc.stopped();
+
+    bool next = false;
+    asio::post(f.ioc, [&next] { next = true; });
+    const auto next_started = std::chrono::steady_clock::now();
+    const bool next_done = f.pump_done([&next] { return next; }, "CallbackSend::retake_next");
+    const auto next_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - next_started)
+                             .count();
+    const std::string context =
+        "held=" + std::to_string(held) + " run=" + std::string(r ? "ok" : "error") +
+        " window_ms=" + std::to_string(window_ms) +
+        " stopped_at_hook=" + std::to_string(stopped_at_hook) +
+        " holder_ended=" + std::to_string(holder_ended) +
+        " released_by_the_cell=" + std::to_string(released_by_the_cell.load()) +
+        " stopped_by_release=" + std::to_string(stopped_by_release) +
+        " stopped_after_run=" + std::to_string(stopped_after_run) +
+        " next_done=" + std::to_string(next_done) + " next_ms=" + std::to_string(next_ms);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    ASSERT_TRUE(held && r.has_value() && !stopped_at_hook && holder_ended &&
+                released_by_the_cell.load() && stopped_by_release)
+        << "the path was not exercised: " << context;
+    EXPECT_FALSE(stopped_after_run)
+        << "run() returned with the fixture's io_context stopped. " << context;
+    EXPECT_TRUE(next_done) << "the pump after run() ran nothing. " << context;
+}
+
+// How long the next cell's pool job holds the pool's thread before it stops the fixture's
+// io_context. The conditions it meets: it is well inside Fixture::kRetakeFenceBound (the
+// static_assert below), so run()'s fence waits the job out; and a fence bound shortened
+// below it expires before the job's stop() lands, so the stop() lands after run() returns.
+constexpr std::chrono::milliseconds kLateStopAfter{500};
+static_assert(kLateStopAfter * kGraceOverPumpBound <= Fixture::kRetakeFenceBound,
+              "the late-stop cell's job must end well inside run()'s fence bound");
+
+// The same io_context, when a stop() from the job the file pool's thread is running lands
+// after run() has taken the fixture's guard again. The model: a job J, posted to the pool
+// from the fixture's hook between the window and the re-take, holds the pool's one thread
+// for kLateStopAfter and then calls stop() on the io_context. J stands for the job whose
+// work-guard release decremented the work count before the re-take and whose stop() comes
+// after it (asio::detail::scheduler::work_finished decrements the count, then calls
+// stop()). The decrement half is not modelled: the re-take restores the count, so only the
+// stop() reaches the fixture. run() must not return while such a stop() can still land, and
+// the pump after it must still run a handler posted to it.
+TEST(CallbackSend, FileStoreFixture_StopFromThePoolAfterTheRetake_DoesNotStopTheNextPump) {
+    // Before the fixture: the pool's job reads them until the fixture joins its pool.
+    std::atomic<bool> holding{false};
+    std::atomic<bool> stop_sent{false};
+    std::atomic<bool> ended{false};
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    const auto order = peer_frame("D", 2,
+                                  "11=PEER-LS\x01"
+                                  "54=1\x01"
+                                  "55=AAPL\x01");
+
+    const auto spin_until = [](auto pred) {
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= until) return false;
+            std::this_thread::yield();
+        }
+        return true;
+    };
+    bool armed = true;
+    bool hook_ran = false;
+    bool held = false;
+    f.between_window_and_retake = [&](bool window_ready) {
+        if (!armed || !window_ready) return;
+        armed = false;
+        hook_ran = true;
+        asio::post(f.file_pool, [&] {
+            holding.store(true);
+            std::this_thread::sleep_for(kLateStopAfter);
+            f.ioc.stop();
+            stop_sent.store(true);
+            ended.store(true);
+        });
+        held = spin_until([&] { return holding.load(); });
+    };
+    const auto run_started = std::chrono::steady_clock::now();
+    const auto r = f.run(sess.on_inbound_frame(std::span<const std::byte>{order}),
+                         "CallbackSend::late_stop_order");
+    const bool stop_landed_before_return = stop_sent.load();
+    f.between_window_and_retake = nullptr;
+    const auto run_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - run_started)
+                            .count();
+    const bool job_ended = spin_until([&] { return ended.load(); });
+    const bool stopped_after_job = f.ioc.stopped();
+
+    bool next = false;
+    asio::post(f.ioc, [&next] { next = true; });
+    const auto next_started = std::chrono::steady_clock::now();
+    const bool next_done = f.pump_done([&next] { return next; }, "CallbackSend::late_stop_next");
+    const auto next_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - next_started)
+                             .count();
+    const std::string context =
+        "hook_ran=" + std::to_string(hook_ran) + " held=" + std::to_string(held) +
+        " run=" + std::string(r ? "ok" : "error") + " run_ms=" + std::to_string(run_ms) +
+        " stop_landed_before_return=" + std::to_string(stop_landed_before_return) +
+        " job_ended=" + std::to_string(job_ended) +
+        " stopped_after_job=" + std::to_string(stopped_after_job) +
+        " next_done=" + std::to_string(next_done) + " next_ms=" + std::to_string(next_ms);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    ASSERT_TRUE(hook_ran && held && r.has_value() && job_ended)
+        << "the path was not exercised: " << context;
+    EXPECT_TRUE(stop_landed_before_return)
+        << "run() returned while a stop() of the pool's job could still land. " << context;
+    EXPECT_FALSE(stopped_after_job)
+        << "the fixture's io_context was left stopped by the pool's job. " << context;
+    EXPECT_TRUE(next_done) << "the pump after run() ran nothing. " << context;
+}
+
 // ── The close cells ──────────────────────────────────────────────────────────
 //
 // A callback of an Active session starts Session::close, or starts a send whose
@@ -2706,6 +3042,7 @@ void run_nested_to_app_throws(StoreKind store, FromAppReturns from_app_returns,
                                                            "CallbackSend::nested_to_app_throws");
     if (!completed) {
         cell.record_pending();
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::nested_to_app_throws");
     }
@@ -3033,6 +3370,7 @@ void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store,
             "CallbackSend::callback_starts_close");
     if (!completed) {
         cell.record_pending();
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::callback_starts_close");
     }
@@ -3587,6 +3925,7 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     if (starts != Starts::send) {
         if (!completed) {
             cell.record_pending();
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(
                 f.ioc, *f.clock, "CallbackSend::outbound_callback_starts");
         }
@@ -3699,6 +4038,7 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::outbound_callback_starts");
     }
@@ -4803,6 +5143,7 @@ void run_close_and_send_in_one_callback(OneCallbackStarts shape, StoreKind store
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::close_and_send");
     }
@@ -6061,6 +6402,7 @@ void run_close_behind_another_close(close_mode mode, StoreKind store, TransportK
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::behind_another_close");
     }
@@ -6581,6 +6923,7 @@ void run_two_frames_in_one_read(StoreKind store, TransportKind transport, const 
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::two_frames_in_one_read");
     }
@@ -6843,6 +7186,7 @@ void run_waiting_close_cancelled(close_mode mode, asio::cancellation_type emissi
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::waiting_close_cancelled");
     }
@@ -7789,6 +8133,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
     const SleepCountingClock::Counts sleeps = clock->counts();
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (setup_ok && !completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "CallbackSend::lifecycle");
     }
 
@@ -8510,6 +8855,7 @@ void run_graceful_close_with_no_close_started(StoreKind store, TransportKind tra
             kClosePumpBound, fixpp::test_support::kPumpSlice, "CallbackSend::no_close_started");
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::no_close_started");
     }
@@ -8624,6 +8970,7 @@ void run_terminal_close_that_waited_before_the_logout_step(StoreKind store) {
         "CallbackSend::terminal_close_waited_before_the_logout_step");
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "CallbackSend::terminal_close_waited_before_the_logout_step");
     }
@@ -9228,6 +9575,7 @@ TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_OutboundNumberAtIt
     const std::string terminal_result = result_of(cell.started);
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "CallbackSend::outbound_number_at_its_maximum");
     }
@@ -9525,6 +9873,7 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::held_lock_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::held_lock");
         }
@@ -9777,6 +10126,7 @@ void run_cut_logout_on_a_store_that_holds(SteppedStoreState::Kind kind) {
                                                            fixpp::test_support::kPumpSlice,
                                                            "CallbackSend::store_that_holds");
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::store_that_holds");
     }
@@ -9936,6 +10286,7 @@ void run_frame_after_the_cut_logouts_store_call(StoreKind store) {
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::frame_after_the_store_call_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(
                 f.ioc, *f.clock, "CallbackSend::frame_after_the_store_call");
         }
@@ -10199,6 +10550,7 @@ void run_arrival_while_the_cut_logouts_store_call_is_held(StoreCallHold::By by, 
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::arrival_in_the_hold_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::arrival_in_the_hold");
         }
@@ -10525,6 +10877,7 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::logouts_write_held_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::logouts_write_held");
         }
@@ -10725,6 +11078,7 @@ void run_send_in_its_store_call_when_the_logout_is_cut(StoreCallHold::By by) {
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::send_in_its_store_call_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::send_in_its_store_call");
         }
@@ -10994,6 +11348,7 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::on_logout_starts_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::on_logout_starts");
         }
@@ -11879,6 +12234,7 @@ void run_deferred_send_cancelled(Emission emission) {
     // does not read a fixture's member as one.
     if (!fixpp::test_support::pump_until(
             f.ioc, [&] { return first.done && second.done; }, "CallbackSend::cancelled")) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "CallbackSend::cancelled");
         ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "CallbackSend::cancelled";
         return;
