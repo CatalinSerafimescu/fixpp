@@ -1,0 +1,4 @@
+codegen_077_v50sp2_builder_completeness_test
+interop_hp_fixt50sp2_logon_hb_logout_test
+session_pure_tests
+test_077_allversions_builder_roundtrip

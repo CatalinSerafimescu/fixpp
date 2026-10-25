@@ -256,15 +256,15 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | y | SecurityList | A-025 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | z | DerivativeSecurityListRequest | A-026 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | AA | DerivativeSecurityList | A-026 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
-| BK | SecurityListUpdateReport | A-029 | — |
-| BP | SecurityDefinitionUpdateReport | A-029 | — |
+| BK | SecurityListUpdateReport | A-029 | 095 witness: `TailRows095.A029_SecurityListUpdateReport` |
+| BP | SecurityDefinitionUpdateReport | A-029 | 095 witness: `TailRows095.A029_SecurityDefinitionUpdateReport` |
 | BR | DerivativeSecurityListUpdateReport | A-026 | — |
-| BI | TradingSessionListRequest | A-027 | — |
-| BJ | TradingSessionList | A-027 | — |
-| BS | TradingSessionListUpdateReport | A-027 | — |
-| BT | MarketDefinitionRequest | A-028 | — |
-| BU | MarketDefinition | A-028 | — |
-| BV | MarketDefinitionUpdateReport | A-028 | — |
+| BI | TradingSessionListRequest | A-027 | 095 witness: `TailRows095.A027_TradingSessionListRequest` |
+| BJ | TradingSessionList | A-027 | 095 witness: `TailRows095.A027_TradingSessionList` |
+| BS | TradingSessionListUpdateReport | A-027 | 095 witness: `TailRows095.A027_TradingSessionListUpdateReport` |
+| BT | MarketDefinitionRequest | A-028 | 095 witness: `TailRows095.A028_MarketDefinitionRequest` |
+| BU | MarketDefinition | A-028 | 095 witness: `TailRows095.A028_MarketDefinition` |
+| BV | MarketDefinitionUpdateReport | A-028 | 095 witness: `TailRows095.A028_MarketDefinitionUpdateReport` |
 
 <!-- ART VI §3 DISPOSITION (067-codegen-writer-emitter, 2026-07-10): the 33 OFFICIAL
      application-message write rows advanced by 067 (Trade A-001..A-013 / Market Data &
@@ -274,7 +274,7 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
      the pre-existing project-wide convention for the whole FIX44 application-message domain
      (every app-message row here is message-level) — NOT an omission. The frozen 061 shape-oracle
      + QuickFIX goldens + `body_builder` are the design authority 067 reproduces byte-for-byte
-     (see spec.md `## Normative References`, "Design authority" block). Recorded per T029(c). -->
+     (see spec.md `## Normative References`, "Design authority" block). Recorded per T029(c). --> <!-- SUPERSEDED (095-tail-evidence-pass, constitution v4.1): message-level Spec refs on application-message rows are governed by Article VI §2 as amended in v4.1, not by §3; the comment above is history. -->
 
 <!-- 069-v44-all-families COVERAGE-CLAIM LEGEND (Gate B PR#187 round 1 F2,
      2026-07-11): wherever a row below carries the 069 gap-note phrase
@@ -326,9 +326,9 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | AB | NewOrderMultileg | A-017 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | AC | MultilegOrderCancelReplace | A-011 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | AF | OrderMassStatusRequest | A-010 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| BN | ExecutionAcknowledgement | A-018, A-024 | note: A-018 and A-024 are duplicates (same MsgType BN); see gap note |
-| BZ | OrderMassActionReport | A-023 | — |
-| CA | OrderMassActionRequest | A-023 | — |
+| BN | ExecutionAcknowledgement | A-018, A-024 | note: A-018 and A-024 are duplicates (same MsgType BN); see gap note; 095 witness: `TailRows095.A018_ExecutionAck` |
+| BZ | OrderMassActionReport | A-023 | 095 witness: `TailRows095.A023_OrderMassActionReport` |
+| CA | OrderMassActionRequest | A-023 | 095 witness: `TailRows095.A023_OrderMassActionRequest` |
 
 ### Application Messages — Post-Trade (FIX 4.0+)
 
@@ -362,9 +362,9 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | BG | CollateralInquiryAck | C-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BH | ConfirmationRequest | P-005 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BL | AdjustedPositionReport | C-002 | — |
-| BM | AllocationInstructionAlert | A-031 | — |
+| BM | AllocationInstructionAlert | A-031 | 095 witness: `TailRows095.A031_AllocationInstructionAlert` |
 | BO | ContraryIntentionReport | A-022 | — |
-| BQ | SettlementObligationReport | A-030 | — |
+| BQ | SettlementObligationReport | A-030 | 095 witness: `TailRows095.A030_SettlementObligationReport` |
 
 ### Application Messages — Infrastructure (FIX 4.2+)
 
@@ -374,16 +374,16 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | n | XMLnonFIX | A-034 | **done** (070-fix44-closeout, test-only): fromApp passthrough, byte-exact 213, accepted under validation; `test_070_xmlnonfix_passthrough_test.cpp`. |
 | BC | NetworkCounterpartySystemStatusRequest | N-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BD | NetworkCounterpartySystemStatusResponse | N-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
-| BE | UserRequest | N-002 | — |
-| BF | UserResponse | N-002 | — |
-| BW | ApplicationMessageRequest | N-003 | — |
-| BX | ApplicationMessageRequestAck | N-003 | — |
-| BY | ApplicationMessageReport | N-003 | — |
-| CB | UserNotification | A-032 | — |
-| CC | StreamAssignmentRequest | A-033 | — |
-| CD | StreamAssignmentReport | A-033 | — |
-| CE | StreamAssignmentReportACK | A-033 | — |
-| CQ | AccountSummaryReport | C-003 | — |
+| BE | UserRequest | N-002 | 095 witness: `TailRows095.N002_UserRequest` |
+| BF | UserResponse | N-002 | 095 witness: `TailRows095.N002_UserResponse` |
+| BW | ApplicationMessageRequest | N-003 | 095 witness: `TailRows095.N003_ApplicationMessageRequest` |
+| BX | ApplicationMessageRequestAck | N-003 | 095 witness: `TailRows095.N003_ApplicationMessageRequestAck` |
+| BY | ApplicationMessageReport | N-003 | 095 witness: `TailRows095.N003_ApplicationMessageReport` |
+| CB | UserNotification | A-032 | 095 witness: `TailRows095.A032_UserNotification` |
+| CC | StreamAssignmentRequest | A-033 | 095 witness: `TailRows095.A033_StreamAssignmentRequest` |
+| CD | StreamAssignmentReport | A-033 | 095 witness: `TailRows095.A033_StreamAssignmentReport` |
+| CE | StreamAssignmentReportACK | A-033 | 095 witness: `TailRows095.A033_StreamAssignmentReportACK` |
+| CQ | AccountSummaryReport | C-003 | 095 witness: `TailRows095.C003_AccountSummaryReport` |
 
 ### Duplicate MsgType A-018 / A-024
 

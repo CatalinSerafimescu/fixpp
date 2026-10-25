@@ -1579,6 +1579,9 @@ EXPECTED_IDS = frozenset({
     "HP-QFj-acc-fixt11-fix50sp2-logon-hb-logout",
     "HP-QFj-init-fixt11-fix44-logon-hb-logout",
     "HP-QFj-acc-fixt11-fix44-logon-hb-logout",
+    # 095 US3: the FIXT.1.1 / FIX.5.0SP2 app-message cells (one typed-built 35=BN each).
+    "HP-QFcpp-init-fixt11-fix50sp2-app-bn",
+    "HP-QFj-init-fixt11-fix50sp2-app-bn",
     # Deferred rows (2)
     "HP-fix8-happy-cells",
     "HP-mutual-mtls-cells",

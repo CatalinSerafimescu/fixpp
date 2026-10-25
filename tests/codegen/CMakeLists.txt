@@ -401,6 +401,9 @@ target_compile_options(codegen_077_v50sp2_builder_completeness_test PRIVATE
 add_test(NAME codegen_077_v50sp2_builder_completeness_test COMMAND codegen_077_v50sp2_builder_completeness_test)
 set_tests_properties(codegen_077_v50sp2_builder_completeness_test PROPERTIES
   LABELS "codegen;077;builder-completeness")
+# 095-tail-evidence-pass: label 095 (expected-ctest-095.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST codegen_077_v50sp2_builder_completeness_test APPEND PROPERTY LABELS 095)
 
 # 077-builder-args-dedup T026 [US4]: vt11 + v42 completeness (C3c) + the C4
 # structural-key safety pin. Cheap/ungated (no Builders.hpp #include —

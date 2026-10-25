@@ -1,0 +1,52 @@
+# fixt_app_script.yaml — 095-tail-evidence-pass (US3): the one-step script of
+# the two FIXT.1.1 / FIX.5.0SP2 app-message cells
+# (HP-QFcpp-init-fixt11-fix50sp2-app-bn, HP-QFj-init-fixt11-fix50sp2-app-bn;
+# the live-cell contract's clauses L0 to L4, specs/095-tail-evidence-pass/contracts/).
+#
+# NOT the conversation (conversation_script.yaml) and NOT the probe
+# (probe_script.yaml): neither file is touched. This script opts the cell into
+# the 089 readback machinery only: the harness renders it into the run's intent
+# file, fixpp builds 35=BN from F-01's values with
+# fixpp::v50sp2::build_ExecutionAck and writes its `sent` record from the same
+# values, and the peer writes its generic per-field readback of what it
+# received. hp_fixt50sp2_app_message_test.cpp compares the two.
+#
+# `applicable_combos: [C1, C3]`: 089's fixpp-initiator combos, QuickFIX-cpp and
+# QuickFIX-J. Not in the census (census.yaml) and no conformance slot: the
+# cells' run_kind is "app-message-evidence", never promoted.
+#
+# step_id F-01 (not "A-*"/"B-0N"/"P-01"): no collision with the conversation's
+# or the probe's step ids. No admin_steps: Logon and Logout are session-layer,
+# and the peers' stage-0 lookup of B-02 finds no entry here, so they reply
+# with nothing.
+#
+# Field set: research R-7 (OrderID, ExecAckStatus, ExecID, Side, Symbol,
+# OrderQty, ClOrdID, CumQty, AvgPx). Values follow data-model §C's literal
+# rules (an enum field takes its first declared value in
+# dictionaries/FIX50SP2.xml; a decimal is "10.5"), with the step id as the
+# string prefix, so they are not the A-018 witness's values.
+business_steps:
+  - step_id: F-01
+    step: 1
+    phase: business
+    msg_type: "BN"       # ExecutionAck
+    originator: fixpp
+    direction: fixpp-to-peer
+    expects_witness: false   # app-message evidence, not a conformance witness
+    applicable_combos: [C1, C3]
+    occurrences:
+      C1: [0]
+      C3: [0]
+    depends_on: []
+    intent_fields:
+      - { path: "37", value: "F01_ExecutionAck_order_id" }
+      - { path: "1036", value: "0" }    # ExecAckStatus = RECEIVED
+      - { path: "17", value: "F01_ExecutionAck_exec_id" }
+      - { path: "54", value: "1" }      # Side = BUY
+      - { path: "55", value: "F01_ExecutionAck_symbol" }
+      - { path: "38", value: "10.5" }
+      - { path: "11", value: "F01_ExecutionAck_cl_ord_id" }
+      - { path: "14", value: "10.5" }
+      - { path: "6", value: "10.5" }
+    typed_reads: []
+    runtime_generated: []
