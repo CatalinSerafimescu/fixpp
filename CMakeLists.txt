@@ -546,7 +546,7 @@ if(FIXPP_BUILD_TESTS)
     )
     set_tests_properties("fixpp::consumer::install-witness" PROPERTIES
       LABELS consumer
-      TIMEOUT 600)  # #613 §4.4: twice the largest elapsed time any CI lane has measured
+      TIMEOUT 600)  # #613 §4.4's rule: twice the slowest lane's run of this witness
   endif()
 endif()
 
