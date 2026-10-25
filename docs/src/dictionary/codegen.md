@@ -163,8 +163,8 @@ umbrella-only consumer that calls `build_<Msg>` gets an undefined symbol at link
 time naming the function (B&L B-613-1).
 
 Whether a tree exports and installs the typed tier is the configure setting
-**`FIXPP_INSTALL_TYPED_TIER`** (`AUTO` / `ON` / `OFF`; any other value fails the
-configure, naming the accepted ones):
+**`FIXPP_INSTALL_TYPED_TIER`** (`AUTO`, or a boolean: ON/YES/TRUE/Y/1 as `ON`, OFF/NO/FALSE/N/0 as `OFF`,
+case-insensitive; any other value fails the configure, naming those spellings):
 
 | Value | Effect |
 |---|---|

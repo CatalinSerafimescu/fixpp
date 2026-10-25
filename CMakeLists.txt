@@ -385,7 +385,7 @@ elseif(_fixpp_typed_setting_uc MATCHES "^(ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0)$")
     set(FIXPP_INSTALL_TYPED_TIER_EFFECTIVE OFF)
   endif()
 else()
-  message(FATAL_ERROR "#613: FIXPP_INSTALL_TYPED_TIER must be AUTO, ON or OFF, got '${FIXPP_INSTALL_TYPED_TIER}'")
+  message(FATAL_ERROR "#613: FIXPP_INSTALL_TYPED_TIER must be AUTO or a boolean (ON/YES/TRUE/Y/1, OFF/NO/FALSE/N/0; case-insensitive), got '${FIXPP_INSTALL_TYPED_TIER}'")
 endif()
 message(STATUS "#613: typed builder/validator tier "
                "${FIXPP_INSTALL_TYPED_TIER_EFFECTIVE} (FIXPP_INSTALL_TYPED_TIER=${FIXPP_INSTALL_TYPED_TIER}, "

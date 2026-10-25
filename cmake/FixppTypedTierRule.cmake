@@ -22,8 +22,8 @@ function(fixpp_typed_tier_check_domain setting effective multi_config
   string(TOUPPER "${setting}" _uc)
   if("${setting}" STREQUAL "" OR NOT _uc MATCHES "^(AUTO|ON|YES|TRUE|Y|1|OFF|NO|FALSE|N|0)$")
     message(FATAL_ERROR
-      "#613 guard 0: FIXPP_TYPED_TIER_SETTING='${setting}' is not AUTO or a CMake "
-      "boolean spelling. ${setting_hint}")
+      "#613 guard 0: FIXPP_TYPED_TIER_SETTING='${setting}' is not AUTO or a boolean "
+      "(ON/YES/TRUE/Y/1, OFF/NO/FALSE/N/0; case-insensitive). ${setting_hint}")
   endif()
   if(NOT "${effective}" STREQUAL "ON" AND NOT "${effective}" STREQUAL "OFF")
     message(FATAL_ERROR
