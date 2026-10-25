@@ -341,7 +341,7 @@ agreed for every tail MsgType the Repository has, and the Repository has no CQ.
 
 ## F. Constitution amendment, v4.0 → v4.1 (FR-021)
 
-Three clauses change, `[const §VI.2]`, `[const §VI.5]` and two sentences of `[const §XVIII.7]`
+Three clauses change, `[const §VI.2]`, `[const §VI.5]` and four sentences of `[const §XVIII.7]`
 (§F.5, owner ruling 2026-10-24), and so do the Status line and a new Sync Impact Report.
 `[const §VI.3]`, `[const §VI.6]` and `[const §IX.6]` are read and left as they are. The before-texts
 are `.specify/constitution.md` at `95fdf4c9` (§F.1, §F.2) and at `ee39a894` (§F.5; `git diff
@@ -449,7 +449,7 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     versions. A §5 that REQUIRED message-level entries would make such an artifact fail. That would be
     MAJOR, and it was not adopted. The Article XVIII §7 correction replaces two deferral statements
     that feature 077 and owner DECISION 2 had already ended, and records which feature closes those
-    rows. It adds no banned pattern, tightens no budget and imposes no obligation, so no PR mergeable
+    rows, and widens its opening sentence to the A- rows the clause already records as delivered. It adds no banned pattern, tightens no budget and imposes no obligation, so no PR mergeable
     under v4.0 fails under v4.1 because of it.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article VI §2 — an OFFICIAL row whose Title names at least one MsgType as `35=<MT>` may carry the
@@ -468,7 +468,7 @@ Sync Impact Report — v4.0 → v4.1 (2026-10-24) — PENDING
     typed tier is `fixpp::v50sp2`, delivered by feature 077, and feature 095 closes them on it.
     N-002/N-003 are application messages (owner DECISION 2, 2026-10-21), no longer a session-FSM pair
     deferred to the v1.0-tagging gate; feature 095 closes both rows on `fixpp::v50sp2`. Feature 095
-    leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged (fixpp#625).
+    leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged (fixpp#625). Its opening scope sentence also names the further A- rows the clause records as delivered or closed; since feature 069 it had named only A-001..A-013 among the A- rows.
   Read and unchanged: Article VI §3 covers design-decision rows (`[impl]`/`[constitution]`). It does
     not reach normative message rows; the 067 coverage-index comment that read it so is history, not
     an amendment. Article VI §6 is unchanged: feature 095 meets its (a)–(d) as written. Article IX §6 is unchanged: its Tier-1 "catalogue
@@ -534,12 +534,12 @@ RATIFIED form: `**v4.1 — PENDING** (2026-10-24)` becomes `user-ratified **v4.1
 and `not ratified: scoped Codex Gate A on the amendment converged (feature 095: round 6 on Article VI §2/§5, then a narrow round on Article XVIII §7); pending Gate B and the owner's Article XX §2 sign-off`
 becomes `scoped Codex Gate A on feature 095 converged (round 6 on Article VI §2/§5, then narrow round 7 on Article XVIII §7), then Gate B and owner sign-off <sign-off date>; amendment PR #<pr>` (slots as in §F.3).
 
-### F.5 Article XVIII §7 — two sentences (owner ruling 2026-10-24)
+### F.5 Article XVIII §7 — four sentences (owner ruling 2026-10-24)
 
-The owner folded this correction into v4.1. Only the two sentences below change; the rest of the
+The owner folded this correction into v4.1. Only the four sentences below change; the rest of the
 clause, which is one line, stays byte-identical. Locate it by `## Article XVIII` and its leading
 `7.`; `grep -F` each before-text and require exactly one match. Narrow scoped Codex Gate A round 7
-reviewed this section and converged with no finding (plan `## Gate A`).
+reviewed the first two pairs and converged with no finding (plan `## Gate A`); the last two pairs come from Gate B round 1 and go through T090's narrow round.
 
 Before (the end of the sentence that lists the FIX50-only rows; its bold opening, "The FIX50-only
 rows … are NOT delivered by 069", is unchanged):
@@ -554,12 +554,24 @@ Before:
 After:
 `N-002 (BE UserRequest / BF UserResponse) and N-003 (BW / BX / BY) are application messages, not a session-FSM pair (owner DECISION 2, 2026-10-21); feature 095 closes both rows on the `fixpp::v50sp2` tier. Feature 095 leaves the `fixpp::v44` codegen exclusion of BE/BF unchanged.`
 
+Before (the scope sentence that opens the clause):
+`v1.0's typed-message scope under `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2` is A-001..A-013 plus the M-/P-/C-/R-/N- families per the catalogue.`
+
+After:
+`v1.0's typed-message scope under `fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2` is A-001..A-013, the M-/P-/C-/R-/N- families, and the further A- rows this clause records as delivered or closed below, per the catalogue.`
+
+Before (inside the bold `fixpp::v44` sentence, whose other words are unchanged; the N-002/N-003 sentence assigns BE/BF to N-002 alone):
+`85 app minus the N-002/N-003 pair BE/BF`
+
+After:
+`85 app minus N-002's BE/BF`
+
 Design notes (not clause text):
 - "Their typed tier" covers every MsgType the sentence lists, the mixed-row siblings BO, BR and BL
   included (each is `msgcat='app'` in `dictionaries/FIX50SP2.xml`). "Closes" names only the tail
   rows: A-022, A-026 and C-002, the siblings' rows, are not 095's. Re-derive the siblings' class with
   `grep -o "<message [^>]*msgtype='<MT>'[^>]*>" dictionaries/FIX50SP2.xml`.
-- Both after-texts are history tied to a feature (077 delivered, 095 closes, 095 leaves the v44
+- The first two after-texts are history tied to a feature (077 delivered, 095 closes, 095 leaves the v44
   exclusion unchanged), not a state of the tree, so none turns false when the exclusion is lifted.
   Per §F.1's note, no issue number sits in the clause (orchestrator ruling 2026-10-24); the lifting
   is tracked as fixpp#625 in the SIR's Modified entry.
@@ -569,8 +581,9 @@ Design notes (not clause text):
   (`grep -o "<message [^>]*msgtype='B[EF]'[^>]*>" dictionaries/FIX44.xml`), and not the symbol, which
   can be renamed.
 - No count is written: the rows are named, so nothing is derived.
+- The opening sentence names the further A- rows by pointer to the clause's own records, not by list or count, so it stays true when a later feature closes another row.
 - Classification: MINOR (§F.3 "Bump"). The two statements described a deferral that feature 077
   and DECISION 2 had already ended; replacing them adds no banned pattern, tightens no budget and
-  imposes no obligation.
+  imposes no obligation. Widening the opening sentence to rows the clause already records as delivered imposes none either.
 - Check after C-AMEND (T061): `command grep -qF 'are application messages, not a session-FSM pair'`
   on the constitution, and the `## Article XVIII` diff changes the §7 line only.

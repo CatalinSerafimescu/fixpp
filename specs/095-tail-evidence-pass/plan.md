@@ -120,7 +120,7 @@ replaced; the reason is the one the bundle acts on.
 
 This feature closes 12 OFFICIAL catalogue rows (23 FIX 5.0SP2 MsgTypes) on the owner's amended bar.
 It adds **tests and records**, plus one constitution amendment (`[const §VI.2]`, `[const §VI.5]`,
-two sentences of `[const §XVIII.7]`; FR-021), and changes no production code (FR-020):
+the data-model §F.5 sentences of `[const §XVIII.7]`; FR-021), and changes no production code (FR-020):
 
 1. **US1, offline witnesses.** A new TU joins the existing `test_077_allversions_builder_roundtrip`
    executable. It has one test per MsgType, named `TailRows095.<RowId>_<Msg>` (`<RowId>` without its
@@ -161,9 +161,9 @@ two sentences of `[const §XVIII.7]`; FR-021), and changes no production code (F
    delta is added. The v44 BE/BF exclusion is fixpp#625.
 5. **The amendment (FR-021, owner ruling 2026-10-24).** `[const §VI.2]` admits the message-level
    form `[DocAbbrev] Category` for application-message rows, decidable from the vendored dictionary
-   and Orchestra file; `[const §VI.5]` lets Normative References list such refs; two sentences of
+   and Orchestra file; `[const §VI.5]` lets Normative References list such refs; the §F.5 sentences of
    `[const §XVIII.7]` stop calling the tail rows and N-002/N-003 deferred and record that 095 closes
-   them on the `fixpp::v50sp2` tier (owner ruling 2026-10-24, data-model §F.5). Constitution v4.0 →
+   them on the `fixpp::v50sp2` tier, widen its opening scope sentence to match and label BE/BF as N-002's (owner ruling 2026-10-24, data-model §F.5). Constitution v4.0 →
    v4.1 (MINOR). It lands before the catalogue edits, and reads PENDING until the scoped Codex Gate A
    rounds, Gate B and the owner's sign-off (data-model §F).
 
@@ -239,7 +239,7 @@ two sentences of `[const §XVIII.7]`; FR-021), and changes no production code (F
 | §XVII.7 (local pre-PR build gate) | yes | One FULL `ctest --preset linux-clang-debug` on a committed tree runs as the LAST step of verify, after `df -h /mnt/e` and a check of `/mnt/c/temp/fixpp/.sandbox-lock`. Packaging entries compile consumer projects. **Resource gate:** an `AskUserQuestion` precedes the first agent-run local build, and the owner approves it before it runs. **Local scope (owner ruling 2026-10-24):** `linux-clang-debug` is the only preset tree built locally. Every other leg the verify skill lists (`linux-clang-{release,asan,ubsan,tsan,coverage,libc++}`, `windows-msvc-debug`, `windows-msvc-asan`) is not built here; `tasks.md` T085 waives each. |
 | §XVII.8 (verify before Gate B) | yes | `/speckit-verify` runs in the main checkout, which owns this branch, with `--skip` of every leg above, each paired with a pre-recorded `--waive` whose rationale is "test-only change, no library code; CI runs it once both labels land; owner ruling 2026-10-24". The verdict is therefore YELLOW, so the labels are `gate-a-done` and `gate-b-waived` (094 precedent), and the PR body carries the literal heading `## Gate B — waived` with the waivers. Evidence recorded before verify lives in `.specify/decisions/095-tail-evidence-pass-evidence.md`; verify's own write replaces the verify record, so `tasks.md` T085 copies those entries into it by hand, each marked re-run or carried. |
 | §VII.6 (interop against an independent FIX implementation) | yes — already met by 089/033; this adds to it | Two live cells against both QuickFIX peers, run locally before merge and in `interop-live` dispatched on `main` after the post-merge parent commit (SC-003). |
-| §XVIII.7 (v1.0 codegen scope) | yes, amended by FR-021 (owner ruling 2026-10-24) | Two sentences change (data-model §F.5): the FIX50-only rows' "remain deferred to future `fixpp::v50sp2`/all-version widening" becomes their typed tier, `fixpp::v50sp2` (077), with 095 closing them on it; "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate" becomes N-002/N-003 as application messages (DECISION 2) that 095 closes on `fixpp::v50sp2`, the `fixpp::v44` BE/BF exclusion left unchanged (fixpp#625). The rest of the clause is byte-identical. Narrow scoped Codex Gate A round 7 on §F.5 converged with no finding (`## Gate A`). *(Supersedes the row's earlier "read, not amended" disposition.)* |
+| §XVIII.7 (v1.0 codegen scope) | yes, amended by FR-021 (owner ruling 2026-10-24) | Four sentences change (data-model §F.5): the FIX50-only rows' "remain deferred to future `fixpp::v50sp2`/all-version widening" becomes their typed tier, `fixpp::v50sp2` (077), with 095 closing them on it; "The N-002/N-003 session-FSM pair … remains deferred to the separate v1.0-tagging gate" becomes N-002/N-003 as application messages (DECISION 2) that 095 closes on `fixpp::v50sp2`, the `fixpp::v44` BE/BF exclusion left unchanged (fixpp#625); Gate B round 1 adds the opening scope sentence, widened to the further A- rows the clause records as delivered or closed, and the `fixpp::v44` sentence's label of BE/BF as N-002's. The rest of the clause is byte-identical. Narrow scoped Codex Gate A round 7 on §F.5's first two pairs converged with no finding (`## Gate A`); the other two go through T090's narrow round. *(Supersedes the row's earlier "read, not amended" disposition.)* |
 | §XX.1 (amend first) | yes | 095 writes the four corrected Spec ref cells of FR-018 in the message-level form. Under v4.0's §VI.2 that form does not conform, so the article is amended first, in the same PR. The rationale is committed in the Sync Impact Report (data-model §F.3). The constitution commit precedes P7's catalogue commit. |
 | §XX.2 (amendment process) | yes | The PR is titled `Constitution: amend §VI.2, §VI.5, §XVIII.7 — message-level Spec refs for application-message rows; FIX50-only tail rows delivered (v4.1) (+ 095 tail evidence pass)`. Its description states the change, the rationale and the affected rows and specs. **Codex Gate A on the amendment:** scoped Codex Gate A rounds on the two §VI clause bodies and the Sync Impact Report (data-model §F.1–§F.3), with an Opus judge, under the owner's `/gate-a` invocation, ran because the post-exhaustion pass skipped Codex: rounds 5 and 6, converged at round 6 (`## Gate A`). The §XVIII.7 correction (§F.5), folded in afterwards, had its own narrow scoped round, round 7, which converged with no finding. Then Gate B, then owner sign-off. Like 094's, the amendment rides the feature PR rather than a standalone PR, and the title form meets §2's first step. |
 | §XX.3 (Sync Impact Report) | yes | data-model §F.3 has a new block above the v3.0 → v4.0 report, naming all three amended clauses. It records the date, the bump and its §4 classification, the clauses changed, the rationale, the affected rows and specs, the review and sign-off, and the feature and PR. Its header and the Status line (§F.4) read PENDING until the scoped Gate A rounds (converged: rounds 5–7), Gate B and the owner's sign-off. The RATIFIED flip is the last commit before merge. |
@@ -362,7 +362,7 @@ limited to the files above.
 8. **P7 — amendment, then records (US4).**
    - Run quickstart §7 first and record its RED (no row is `done` yet).
    - **Amend first** (`[const §XX.1]`, FR-021): apply data-model §F to `.specify/constitution.md`
-     (§VI.2, §VI.5, §XVIII.7's two sentences, the Status line and the Sync Impact Report, all
+     (§VI.2, §VI.5, §XVIII.7's two sentences (§F.5 has two more since Gate B round 1), the Status line and the Sync Impact Report, all
      PENDING), in a commit of its own, before any catalogue edit.
    - Catalogue flips with witness names.
    - Version narrowing: A-018, A-029, A-030, N-002 (data-model §E).

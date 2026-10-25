@@ -656,7 +656,7 @@ delta (plan P7).
 ### Amendment (its own commit, before any catalogue edit)
 
 - [X] T061 [US4] (orchestrator) **Commit C-AMEND** — `.specify/constitution.md` only, data-model §F
-  verbatim: `## Article VI` §2 and §5 (§F.1, §F.2), `## Article XVIII` §7's two sentences (§F.5)
+  verbatim: `## Article VI` §2 and §5 (§F.1, §F.2), `## Article XVIII` §7's two sentences (§F.5's first two pairs; Gate B round 1 added the other two)
   (every before-text `grep -F`-matched first, exactly once), the Status line's PENDING form (§F.4),
   and the PENDING Sync Impact Report block above the v3.0 → v4.0 block (§F.3). No `CHANGELOG.md`
   change (MINOR). Copy only data-model text a converged scoped round has seen: §F.1 and §F.2 as

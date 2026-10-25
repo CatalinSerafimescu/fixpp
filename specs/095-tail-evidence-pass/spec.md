@@ -598,7 +598,7 @@ test name exists in the tree.
     tier is the `fixpp::v50sp2` tier (077) and their catalogue rows close in 095; BE, BF, BW, BX and
     BY are application messages (owner DECISION 2, 2026-10-21), and 095 closes N-002 and N-003 on
     `fixpp::v50sp2`; `fixpp::v44` still excludes BE/BF, which 095 leaves unchanged (fixpp#625). Only
-    those two sentences change.
+    those two sentences change, with the clause's opening scope sentence, which now also names the further A- rows the clause records as delivered or closed, and the `fixpp::v44` sentence's label of BE/BF as N-002's (data-model §F.5).
 
   The exact before → after text, the Status line and the Sync Impact Report are data-model §F
   (§F.5 for `[const §XVIII.7]`).
