@@ -98,6 +98,10 @@
 //                             fixpp#602. The same, for work that ends after
 //                             run()'s window has returned and before run() takes
 //                             the fixture's guard again.
+//   FileStoreFixture_StopFromThePoolAfterTheRetake_DoesNotStopTheNextPump
+//                             fixpp#602. The same, for a stop() from the file
+//                             pool's running job that lands after run() has taken
+//                             the fixture's guard again.
 //   FromAppSendsReply_NestedToAppThrows
 //                             batch B41. fromApp starts a send whose toApp
 //                             throws, which makes Session::send await a
@@ -808,8 +812,9 @@ struct Fixture {
     // Called with every frame the session transmits, after it is appended to `wire`.
     std::function<void(const std::string&)> on_transmit;
     // Test-only: run() calls it after its window has returned and before it takes `keep`
-    // again, on the miss path too, before that path's drain.
-    std::function<void()> between_window_and_retake;
+    // again, on the miss path too, before that path's drain. It receives whether the window
+    // returned ready.
+    std::function<void(bool)> between_window_and_retake;
     LiveWrites live_writes;
     asio::any_io_executor exec;
     std::shared_ptr<fixpp::core::mock_clock> clock;
@@ -900,7 +905,7 @@ struct Fixture {
         if (keep) kept_on = keep->get_executor();
         keep.reset();
         const bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site);
-        if (between_window_and_retake) between_window_and_retake();
+        if (between_window_and_retake) between_window_and_retake(ready);
         if (!ready) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
@@ -2513,7 +2518,7 @@ TEST(CallbackSend, FileStoreFixture_ReleaseBetweenTheWindowAndTheRetake_DoesNotS
     bool stopped_at_hook = false;
     bool holder_ended = false;
     bool stopped_by_release = false;
-    f.between_window_and_retake = [&] {
+    f.between_window_and_retake = [&](bool /*window_ready*/) {
         if (!armed) return;
         armed = false;
         stopped_at_hook = f.ioc.stopped();
@@ -2554,6 +2559,94 @@ TEST(CallbackSend, FileStoreFixture_ReleaseBetweenTheWindowAndTheRetake_DoesNotS
         << "the path was not exercised: " << context;
     EXPECT_FALSE(stopped_after_run)
         << "run() returned with the fixture's io_context stopped. " << context;
+    EXPECT_TRUE(next_done) << "the pump after run() ran nothing. " << context;
+}
+
+// How long the next cell's pool job holds the pool's thread before it stops the fixture's
+// io_context. The condition it meets: its stop() lands after the fence of any bound under
+// which the cell is meant to read RED, and well below Fixture::kRetakeFenceBound.
+constexpr std::chrono::milliseconds kLateStopAfter{500};
+
+// The same io_context, when a stop() from the job the file pool's thread is running lands
+// after run() has taken the fixture's guard again. The model: a job J, posted to the pool
+// from the fixture's hook between the window and the re-take, holds the pool's one thread
+// for kLateStopAfter and then calls stop() on the io_context. J stands for the job whose
+// work-guard release decremented the work count before the re-take and whose stop() comes
+// after it (asio::detail::scheduler::work_finished decrements the count, then calls
+// stop()). The decrement half is not modelled: the re-take restores the count, so only the
+// stop() reaches the fixture. run() must not return while such a stop() can still land, and
+// the pump after it must still run a handler posted to it.
+TEST(CallbackSend, FileStoreFixture_StopFromThePoolAfterTheRetake_DoesNotStopTheNextPump) {
+    // Before the fixture: the pool's job reads them until the fixture joins its pool.
+    std::atomic<bool> holding{false};
+    std::atomic<bool> stop_sent{false};
+    std::atomic<bool> ended{false};
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    Session sess{f.engine, f.cfg()};
+    ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
+    const auto order = peer_frame("D", 2,
+                                  "11=PEER-LS\x01"
+                                  "54=1\x01"
+                                  "55=AAPL\x01");
+
+    const auto spin_until = [](auto pred) {
+        const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
+        while (!pred()) {
+            if (std::chrono::steady_clock::now() >= until) return false;
+            std::this_thread::yield();
+        }
+        return true;
+    };
+    bool armed = true;
+    bool hook_ran = false;
+    bool held = false;
+    f.between_window_and_retake = [&](bool window_ready) {
+        if (!armed || !window_ready) return;
+        armed = false;
+        hook_ran = true;
+        asio::post(f.file_pool, [&] {
+            holding.store(true);
+            std::this_thread::sleep_for(kLateStopAfter);
+            f.ioc.stop();
+            stop_sent.store(true);
+            ended.store(true);
+        });
+        held = spin_until([&] { return holding.load(); });
+    };
+    const auto run_started = std::chrono::steady_clock::now();
+    const auto r = f.run(sess.on_inbound_frame(std::span<const std::byte>{order}),
+                         "CallbackSend::late_stop_order");
+    const bool stop_landed_before_return = stop_sent.load();
+    f.between_window_and_retake = nullptr;
+    const auto run_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - run_started)
+                            .count();
+    const bool job_ended = spin_until([&] { return ended.load(); });
+    const bool stopped_after_job = f.ioc.stopped();
+
+    bool next = false;
+    asio::post(f.ioc, [&next] { next = true; });
+    const auto next_started = std::chrono::steady_clock::now();
+    const bool next_done = f.pump_done([&next] { return next; }, "CallbackSend::late_stop_next");
+    const auto next_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - next_started)
+                             .count();
+    const std::string context =
+        "hook_ran=" + std::to_string(hook_ran) + " held=" + std::to_string(held) +
+        " run=" + std::string(r ? "ok" : "error") + " run_ms=" + std::to_string(run_ms) +
+        " stop_landed_before_return=" + std::to_string(stop_landed_before_return) +
+        " job_ended=" + std::to_string(job_ended) +
+        " stopped_after_job=" + std::to_string(stopped_after_job) +
+        " next_done=" + std::to_string(next_done) + " next_ms=" + std::to_string(next_ms);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+
+    ASSERT_TRUE(hook_ran && held && r.has_value() && job_ended)
+        << "the path was not exercised: " << context;
+    EXPECT_TRUE(stop_landed_before_return)
+        << "run() returned while a stop() of the pool's job could still land. " << context;
+    EXPECT_FALSE(stopped_after_job)
+        << "the fixture's io_context was left stopped by the pool's job. " << context;
     EXPECT_TRUE(next_done) << "the pump after run() ran nothing. " << context;
 }
 
