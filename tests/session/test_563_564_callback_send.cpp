@@ -433,6 +433,7 @@
 #include <vector>
 
 #include "support/hooked_store.hpp"
+#include "support/keep_running.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -758,6 +759,11 @@ static_assert(fixpp::test_support::kPumpBudget * kGraceOverPumpBound <=
 
 struct Fixture {
     asio::io_context ioc;
+    // With a FileStore: keeps `ioc` from stopping between two pumps when an offload's work
+    // is released on the pool thread (tests/support/keep_running.hpp). Engaged by cfg();
+    // run() releases it for its window and takes it again after. Released before every
+    // drain, which waits for the io_context to stop.
+    std::optional<fixpp::test_support::keep_running> keep;
     // The FileStore cell's file-I/O executor. Declared after ioc, so it is
     // joined before ioc is destroyed.
     asio::thread_pool file_pool{1};
@@ -853,6 +859,7 @@ struct Fixture {
             fc.max_frame_bytes = 4096;
             fc.file_io_executor = file_pool.get_executor();
             c.store_factory = std::make_shared<FileStoreFactory>(fc);
+            keep.emplace(fixpp::test_support::keep_running_for(ioc));
         } else {
             MemoryStore::Config sc;
             sc.inbound_capacity = 16;
@@ -866,11 +873,21 @@ struct Fixture {
     template <class T>
     expected_t<T> run(asio::awaitable<expected_t<T>> a, const char* site) {
         auto fut = asio::co_spawn(exec, std::move(a), asio::use_future);
+        // `keep` is released for the window, after the co_spawn, whose own work keeps `ioc`
+        // from stopping at the release. The window then returns when `ioc` runs out of work,
+        // as it does with no FileStore, and that includes work an offload releases on the
+        // pool thread. It is taken again, on the executor it was released from, once the
+        // window has returned ready. A window or grace that returns at its deadline with the
+        // call ready can leave such a release pending until after it is taken again.
+        std::optional<asio::io_context::executor_type> kept_on;
+        if (keep) kept_on = keep->get_executor();
+        keep.reset();
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site)) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
             return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
+        if (kept_on) keep.emplace(*kept_on);
         return fut.get();
     }
 
@@ -879,6 +896,7 @@ struct Fixture {
     template <class Pred>
     [[nodiscard]] bool pump_done(Pred pred, const char* site) {
         if (fixpp::test_support::pump_until(ioc, pred, site)) return true;
+        keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
         ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << site;
         return false;
@@ -2353,9 +2371,10 @@ TEST(CallbackSend, FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNext
     } const release_guard{release};
     Session sess{f.engine, f.cfg()};
     ASSERT_TRUE(f.open_to_active(sess)) << "setup: session did not reach Active";
-    const auto payload = bytes_of(std::string("35=D\x01"
-                                              "11=POOL-1\x01"
-                                              "55=AAA\x01"));
+    const auto payload =
+        bytes_of(std::string("35=D\x01"
+                             "11=POOL-1\x01"
+                             "55=AAA\x01"));
 
     const auto spin_until = [](auto pred) {
         const auto until = std::chrono::steady_clock::now() + fixpp::test_support::kPumpBudget;
@@ -2392,12 +2411,12 @@ TEST(CallbackSend, FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNext
     const auto send_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::steady_clock::now() - send_started)
                              .count();
-    const std::string context =
-        "held=" + std::to_string(held) +
-        " stopped_before_first=" + std::to_string(stopped_before_first) +
-        " first_ran=" + std::to_string(first_ran) + " job_ended=" + std::to_string(job_ended) +
-        " stopped=" + std::to_string(stopped) + " send: " + describe(sent) +
-        " send_ms=" + std::to_string(send_ms);
+    const std::string context = "held=" + std::to_string(held) +
+                                " stopped_before_first=" + std::to_string(stopped_before_first) +
+                                " first_ran=" + std::to_string(first_ran) +
+                                " job_ended=" + std::to_string(job_ended) +
+                                " stopped=" + std::to_string(stopped) + " send: " + describe(sent) +
+                                " send_ms=" + std::to_string(send_ms);
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
 
@@ -2790,6 +2809,7 @@ void run_nested_to_app_throws(StoreKind store, FromAppReturns from_app_returns,
                                                            "CallbackSend::nested_to_app_throws");
     if (!completed) {
         cell.record_pending();
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::nested_to_app_throws");
     }
@@ -3117,6 +3137,7 @@ void run_callback_starts_close(CloseFrom from, close_mode mode, StoreKind store,
             "CallbackSend::callback_starts_close");
     if (!completed) {
         cell.record_pending();
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::callback_starts_close");
     }
@@ -3671,6 +3692,7 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     if (starts != Starts::send) {
         if (!completed) {
             cell.record_pending();
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(
                 f.ioc, *f.clock, "CallbackSend::outbound_callback_starts");
         }
@@ -3783,6 +3805,7 @@ void run_outbound_callback_starts(OuterSite site, Starts starts, StoreKind store
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::outbound_callback_starts");
     }
@@ -4887,6 +4910,7 @@ void run_close_and_send_in_one_callback(OneCallbackStarts shape, StoreKind store
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::close_and_send");
     }
@@ -6145,6 +6169,7 @@ void run_close_behind_another_close(close_mode mode, StoreKind store, TransportK
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::behind_another_close");
     }
@@ -6665,6 +6690,7 @@ void run_two_frames_in_one_read(StoreKind store, TransportKind transport, const 
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::two_frames_in_one_read");
     }
@@ -6927,6 +6953,7 @@ void run_waiting_close_cancelled(close_mode mode, asio::cancellation_type emissi
     // Recorded before the drain, which completes what it cancels.
     const std::string pending_at_the_bound = completed ? std::string{} : pending();
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::waiting_close_cancelled");
     }
@@ -7873,6 +7900,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
     const SleepCountingClock::Counts sleeps = clock->counts();
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (setup_ok && !completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "CallbackSend::lifecycle");
     }
 
@@ -8594,6 +8622,7 @@ void run_graceful_close_with_no_close_started(StoreKind store, TransportKind tra
             kClosePumpBound, fixpp::test_support::kPumpSlice, "CallbackSend::no_close_started");
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::no_close_started");
     }
@@ -8708,6 +8737,7 @@ void run_terminal_close_that_waited_before_the_logout_step(StoreKind store) {
         "CallbackSend::terminal_close_waited_before_the_logout_step");
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "CallbackSend::terminal_close_waited_before_the_logout_step");
     }
@@ -9312,6 +9342,7 @@ TEST(CallbackSend, ToAdminOfGracefulCloseStartsClose_Terminal_OutboundNumberAtIt
     const std::string terminal_result = result_of(cell.started);
     const bool clock_advanced = f.clock->steady_now() != clock_before;
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "CallbackSend::outbound_number_at_its_maximum");
     }
@@ -9609,6 +9640,7 @@ void run_cut_logout_behind_a_held_store_lock(TransportKind transport, HeldFor he
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::held_lock_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::held_lock");
         }
@@ -9861,6 +9893,7 @@ void run_cut_logout_on_a_store_that_holds(SteppedStoreState::Kind kind) {
                                                            fixpp::test_support::kPumpSlice,
                                                            "CallbackSend::store_that_holds");
     if (!completed) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "CallbackSend::store_that_holds");
     }
@@ -10020,6 +10053,7 @@ void run_frame_after_the_cut_logouts_store_call(StoreKind store) {
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::frame_after_the_store_call_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(
                 f.ioc, *f.clock, "CallbackSend::frame_after_the_store_call");
         }
@@ -10283,6 +10317,7 @@ void run_arrival_while_the_cut_logouts_store_call_is_held(StoreCallHold::By by, 
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::arrival_in_the_hold_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::arrival_in_the_hold");
         }
@@ -10609,6 +10644,7 @@ void run_logouts_write_held_past_the_logout_timeout(LogoutRoute route) {
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::logouts_write_held_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::logouts_write_held");
         }
@@ -10809,6 +10845,7 @@ void run_send_in_its_store_call_when_the_logout_is_cut(StoreCallHold::By by) {
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::send_in_its_store_call_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::send_in_its_store_call");
         }
@@ -11078,6 +11115,7 @@ void run_on_logout_of_the_cut_logout_starts(CutStore store, TransportKind transp
         if (!fixpp::test_support::pump_until(f.ioc, all_done, kClosePumpBound,
                                              fixpp::test_support::kPumpSlice,
                                              "CallbackSend::on_logout_starts_after_the_clock")) {
+            f.keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                             "CallbackSend::on_logout_starts");
         }
@@ -11963,6 +12001,7 @@ void run_deferred_send_cancelled(Emission emission) {
     // does not read a fixture's member as one.
     if (!fixpp::test_support::pump_until(
             f.ioc, [&] { return first.done && second.done; }, "CallbackSend::cancelled")) {
+        f.keep.reset();
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock, "CallbackSend::cancelled");
         ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "CallbackSend::cancelled";
         return;
