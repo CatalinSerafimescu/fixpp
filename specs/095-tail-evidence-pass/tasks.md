@@ -874,7 +874,7 @@ delta (plan P7).
   verify record states the delta is docs-only (otherwise T085's full `ctest` re-runs last). Then
   commit the `tasks.md` ticks of T001–T089 and T104 (`specs/` only, placeholder grep and T082's
   grep first), so T105's check (i) reads committed state, re-run T080–T082 and push.
-- [ ] T090 (orchestrator) **Amendment review check** (FR-021, `[const §XX.2]`). The scoped Codex Gate A
+- [X] T090 (orchestrator) **Amendment review check** (FR-021, `[const §XX.2]`). The scoped Codex Gate A
   review converged at round 6 on the §VI.2/§VI.5 clause bodies and, in its own narrow round, on the
   §XVIII.7 sentences (plan `## Gate A`). Diff the three amended clause texts in
   `.specify/constitution.md` against data-model §F.1, §F.2 and §F.5 at this point: identical → tick
@@ -884,7 +884,7 @@ delta (plan P7).
   bodies) needs only Gate B's re-check.
   - *Open at the audit — waiver: it is a post-audit check by construction (it compares the head that
     Gate B reviews).*
-- [ ] T091 (orchestrator) **Run `/gate-b 095-tail-evidence-pass`.** First `git fetch origin`; if
+- [X] T091 (orchestrator) **Run `/gate-b 095-tail-evidence-pass`.** First `git fetch origin`; if
   `origin/main` moved past T001's base, merge it (`phase-implementer` resolves code/build conflicts),
   then re-run T080–T084 and record the new base. Preconditions: T085 non-RED, T105's `## Completeness`
   present, `check_bl_delta.py gate` green. Fixer: `phase-implementer` for code/test findings, the
@@ -896,7 +896,7 @@ delta (plan P7).
   reviews the PENDING amendment text. The Gate B record carries the B&L delta
   disposition (T067's rows).
   - *Open at the audit — waiver: Gate B needs the audit record first (pre-flight 4d).*
-- [ ] T092 (orchestrator) **SecondBrain pass on the branch** (pipeline step 15a; close-out row 3), after
+- [X] T092 (orchestrator) **SecondBrain pass on the branch** (pipeline step 15a; close-out row 3), after
   Gate B converges: brain pages that describe the touched surfaces (`brain/components/` for session,
   interop, codegen tests) are checked and updated if needed; then both freshness halves run
   locally, neither standing in for the other: the in-repo `refs` half, every `run:` step of
@@ -905,7 +905,7 @@ delta (plan P7).
   parent's `tools/brain-external-sweep.sh` wrapper, never a bare `check_brain.py sweep`. Record each
   command and rc in the verify record and the evidence file.
   - *Open at the audit — waiver: after Gate B.*
-- [ ] T093 (orchestrator) **Sign-off packet, then ASK THE OWNER** for the Art. XX §2 sign-off: the
+- [X] T093 (orchestrator) **Sign-off packet, then ASK THE OWNER** for the Art. XX §2 sign-off: the
   amended §VI.2 and §VI.5 and the corrected §XVIII.7 sentences, the PENDING SIR and Status line as on the PR head, the Gate A tallies
   (including the scoped amendment rounds), Gate B's rounds, and the RATIFIED-form text T095 will write
   (data-model §F.3, §F.4). Gate A's "convergence counts as sign-off" rule (plan `## Gate A`, round
@@ -1013,7 +1013,7 @@ delta (plan P7).
   - `spec/coverage-index.md`: each of the 23 tail MsgTypes' existing row names its witness in its
     gap-note column (quickstart §7's coverage-index loop), and no row was added;
   - re-run quickstart §7 and data-model §E's recipe on the C-PRCELL head: both pass.
-- [ ] T105 (orchestrator) **Feature-completeness audit (MUST be the FINAL task).** Assert against the
+- [X] T105 (orchestrator) **Feature-completeness audit (MUST be the FINAL task).** Assert against the
   branch head:
   - **(i)** every `tasks.md` row through T089, and T104, is `[X]` in the committed head (T089's tick
     commit) or carries an explicit waiver; `git diff --quiet HEAD -- specs/095-tail-evidence-pass/tasks.md`
