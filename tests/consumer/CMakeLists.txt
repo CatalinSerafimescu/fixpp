@@ -442,6 +442,45 @@ if(FIXPP_TYPED_EXPECTED)
     endforeach()
   endif()
 
+  # D-3 (B-613-1): fixpp::fixpp does not reach the typed tier. Breadth-first over the
+  # imported targets' INTERFACE_LINK_LIBRARIES from the umbrella, each entry unwrapped
+  # from $<LINK_ONLY:...> (a PRIVATE link of a STATIC library exports in that form) and
+  # skipped unless it names a target. Reaching any fixpp::builders:: or
+  # fixpp::validators:: target is a FATAL naming the path. Positive control: the walk
+  # must have visited fixpp::session, so a walk that reads nothing cannot pass.
+  set(_fixpp_613_queue fixpp::fixpp)
+  set(_fixpp_613_visited fixpp::fixpp)
+  set(_fixpp_613_path_fixpp__fixpp "fixpp::fixpp")
+  while(NOT "${_fixpp_613_queue}" STREQUAL "")
+    list(POP_FRONT _fixpp_613_queue _fixpp_613_node)
+    string(MAKE_C_IDENTIFIER "${_fixpp_613_node}" _fixpp_613_node_key)
+    get_target_property(_fixpp_613_links ${_fixpp_613_node} INTERFACE_LINK_LIBRARIES)
+    if(NOT _fixpp_613_links)
+      continue()
+    endif()
+    foreach(_l IN LISTS _fixpp_613_links)
+      string(REGEX REPLACE "^\\$<LINK_ONLY:(.+)>$" "\\1" _l "${_l}")
+      if(NOT TARGET "${_l}" OR "${_l}" IN_LIST _fixpp_613_visited)
+        continue()
+      endif()
+      list(APPEND _fixpp_613_visited "${_l}")
+      string(MAKE_C_IDENTIFIER "${_l}" _fixpp_613_key)
+      set(_fixpp_613_path_${_fixpp_613_key} "${_fixpp_613_path_${_fixpp_613_node_key}} -> ${_l}")
+      if(_l MATCHES "^fixpp::(builders|validators)::")
+        message(FATAL_ERROR
+          "#613 (D-3): fixpp::fixpp reaches the typed tier through its link interface: "
+          "${_fixpp_613_path_${_fixpp_613_key}}. The umbrella must not link a typed library; "
+          "a consumer links fixpp::builders::<ver> / fixpp::validators::<ver> by name.")
+      endif()
+      list(APPEND _fixpp_613_queue "${_l}")
+    endforeach()
+  endwhile()
+  if(NOT "fixpp::session" IN_LIST _fixpp_613_visited)
+    message(FATAL_ERROR
+      "#613 (D-3): the link-interface walk from fixpp::fixpp never visited fixpp::session, so it "
+      "cannot be trusted to have found no typed target. Visited: [${_fixpp_613_visited}]")
+  endif()
+
   # C-1: built, linked and RUN by the driver.
   add_executable(consumer_typed_witness consumer_typed_witness.cpp)
   target_link_libraries(consumer_typed_witness PRIVATE ${_fixpp_613_typed_targets})
