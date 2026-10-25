@@ -17,6 +17,7 @@
 // admin allow-list excludes "n") and the 212/213 pair already parses SOH-safe.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
@@ -42,6 +43,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 
@@ -283,6 +285,94 @@ TEST(XmlNonFixPassthrough, AcceptedUnderInboundValidation) {
 
     EXPECT_EQ(app->from_app_calls, 1) << "35=n must reach fromApp even with validation on (FR-011)";
     EXPECT_FALSE(f.any_reject_emitted()) << "validator must accept a well-formed 35=n (FR-011)";
+}
+
+// ── 095-tail-evidence-pass FR-008 (research R-5): BE / BW are application messages ──
+//
+// N-002 (BE UserRequest) and N-003 (BW ApplicationMessageRequest) are not admin
+// MsgTypes (detail::is_admin_msgtype), so on an established session with a
+// registered Application and inbound validation off they reach fromApp, never
+// fromAdmin, and draw no Reject. The session here is this file's: BeginString
+// FIX.4.4, dictionary dictionaries/FIX44.xml (which does not define BW). Each leg
+// asserts only on its own MsgType's callbacks and on the frames emitted while its
+// own message was fed, so that each leg can fail on its own (FR-008).
+
+// Records the MsgType of every fromApp / fromAdmin call.
+class MsgTypeRecorderApp : public Application {
+public:
+    std::vector<std::string> from_app_types;
+    std::vector<std::string> from_admin_types;
+
+    expected_t<void> fromApp(const MessageView<access_mode::Index>& msg,
+                             const SessionId& /*id*/) override {
+        from_app_types.emplace_back(msg.msg_type());
+        return {};
+    }
+    expected_t<void> fromAdmin(const MessageView<access_mode::Index>& msg,
+                               const SessionId& /*id*/) override {
+        from_admin_types.emplace_back(msg.msg_type());
+        return {};
+    }
+};
+
+std::vector<std::byte> make_app_frame(std::uint32_t seq, std::string_view msg_type,
+                                      std::string_view body_fields) {
+    std::string body = "35=" + std::string(msg_type) + "\x01";
+    body += "34=" + std::to_string(seq) + "\x01";
+    body +=
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01";
+    body += body_fields;
+    return to_frame(finalize(body));
+}
+
+// True when a frame in [from, to) is a Reject (35=3) or a BusinessMessageReject (35=j).
+[[nodiscard]] bool reject_among(const std::vector<std::vector<std::byte>>& frames, std::size_t from,
+                                std::size_t to) {
+    for (std::size_t i = from; i < to && i < frames.size(); ++i) {
+        std::string const mt = fixpp::test_support::extract_tag(frames[i], 35);
+        if (mt == "3" || mt == "j") {
+            return true;
+        }
+    }
+    return false;
+}
+
+TEST(TailRouting095, InboundBeAndBwReachFromApp) {
+    auto app = std::make_shared<MsgTypeRecorderApp>();
+    Fixture f;
+    f.engine.application = app;
+    auto cfg = f.make_cfg(load_fix44_dictionary(), /*validate=*/false);
+    Session sess(f.engine, cfg);
+    f.open_to_active(sess);
+    ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
+
+    const std::size_t before_be = f.captured_frames.size();
+    f.feed(sess, make_app_frame(2, "BE",
+                                "923=TailRouting095_user_request_id\x01"
+                                "924=1\x01"
+                                "553=TailRouting095_username\x01"));
+    const std::size_t before_bw = f.captured_frames.size();
+    f.feed(sess, make_app_frame(3, "BW",
+                                "1346=TailRouting095_appl_req_id\x01"
+                                "1347=0\x01"));
+
+    // BE leg (N-002).
+    EXPECT_EQ(std::ranges::count(app->from_app_types, "BE"), 1)
+        << "BE leg: an inbound 35=BE must reach fromApp exactly once";
+    EXPECT_EQ(std::ranges::count(app->from_admin_types, "BE"), 0)
+        << "BE leg: an inbound 35=BE must not reach fromAdmin";
+    EXPECT_FALSE(reject_among(f.captured_frames, before_be, before_bw))
+        << "BE leg: an inbound 35=BE must draw no Reject";
+
+    // BW leg (N-003).
+    EXPECT_EQ(std::ranges::count(app->from_app_types, "BW"), 1)
+        << "BW leg: an inbound 35=BW must reach fromApp exactly once";
+    EXPECT_EQ(std::ranges::count(app->from_admin_types, "BW"), 0)
+        << "BW leg: an inbound 35=BW must not reach fromAdmin";
+    EXPECT_FALSE(reject_among(f.captured_frames, before_bw, f.captured_frames.size()))
+        << "BW leg: an inbound 35=BW must draw no Reject";
 }
 
 }  // namespace
