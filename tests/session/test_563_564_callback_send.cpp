@@ -882,10 +882,13 @@ struct Fixture {
         return c;
     }
 
-    // How long run() waits for its fence on `file_pool`. It bounds how long a pool job that
-    // is held or busy delays run(); the fence is needed only while the pool's thread is
-    // between asio's decrement of the work count and its stop().
-    static constexpr auto kRetakeFenceBound = std::chrono::milliseconds{100};
+    // How long run() waits for its fence on `file_pool`: a pump's budget, because a pool job
+    // that holds the pool's thread longer than that fails the cell's next pump anyway.
+    static constexpr auto kRetakeFenceBound = fixpp::test_support::kPumpBudget;
+    // The failure run() reports when its fence has not run within kRetakeFenceBound.
+    static constexpr const char* kRetakeFenceExpired =
+        "Fixture::run: the file pool's fence did not run within kRetakeFenceBound, so a stop() "
+        "of the pool's job can still land; site: ";
 
     template <class T>
     expected_t<T> run(asio::awaitable<expected_t<T>> a, const char* site) {
@@ -894,13 +897,17 @@ struct Fixture {
         // from stopping at the release. The window then returns when `ioc` runs out of work,
         // as it does with no FileStore, and that includes work an offload releases on the
         // pool thread. After a window that returned ready, `keep` is taken again on the
-        // executor it was released from, and `ioc` is restarted if it is stopped: a release
-        // whose decrement came before the re-take can have stopped it. In between, a no-op is
-        // run on `file_pool` and waited for, up to kRetakeFenceBound, because
-        // asio::detail::scheduler::work_finished decrements the count and only then calls
-        // stop(), so a pool thread's stop() can land after the re-take. The no-op runs only
-        // once the job the pool's thread is running has returned, with any stop() it made,
-        // on the condition that `file_pool` has one thread.
+        // executor it was released from; then a no-op is run on `file_pool` and waited for;
+        // then `ioc` is restarted if it is stopped. The restart is there because a release
+        // whose decrement came before the re-take can have stopped `ioc`. The fence is there
+        // because asio::detail::scheduler::work_finished decrements the count and only then
+        // calls stop(), so a pool thread's stop() can land after the re-take: once the no-op
+        // has run, the job the pool's thread was running at the re-take has returned, with any
+        // stop() it made. That holds on these conditions: `file_pool` has one thread; the
+        // release runs inside a pool job, as an offload frame's destruction does; no f.run()
+        // runs while a cell's FileGate holds the pool's thread; no cell calls f.ioc.stop()
+        // itself. A fence that has not run within kRetakeFenceBound fails the cell
+        // (kRetakeFenceExpired).
         std::optional<asio::io_context::executor_type> kept_on;
         if (keep) kept_on = keep->get_executor();
         keep.reset();
@@ -913,11 +920,11 @@ struct Fixture {
         }
         if (kept_on) {
             keep.emplace(*kept_on);
-            const auto fenced = std::make_shared<std::atomic<bool>>(false);
-            asio::post(file_pool, [fenced] { fenced->store(true); });
-            const auto until = std::chrono::steady_clock::now() + kRetakeFenceBound;
-            while (!fenced->load() && std::chrono::steady_clock::now() < until) {
-                std::this_thread::yield();
+            const auto fenced = std::make_shared<std::promise<void>>();
+            auto ran = fenced->get_future();
+            asio::post(file_pool, [fenced] { fenced->set_value(); });
+            if (ran.wait_for(kRetakeFenceBound) != std::future_status::ready) {
+                ADD_FAILURE() << kRetakeFenceExpired << site;
             }
             if (ioc.stopped()) ioc.restart();
         }
@@ -2566,6 +2573,8 @@ TEST(CallbackSend, FileStoreFixture_ReleaseBetweenTheWindowAndTheRetake_DoesNotS
 // io_context. The condition it meets: its stop() lands after the fence of any bound under
 // which the cell is meant to read RED, and well below Fixture::kRetakeFenceBound.
 constexpr std::chrono::milliseconds kLateStopAfter{500};
+static_assert(kLateStopAfter * kGraceOverPumpBound <= Fixture::kRetakeFenceBound,
+              "the late-stop cell's job must end well inside run()'s fence bound");
 
 // The same io_context, when a stop() from the job the file pool's thread is running lands
 // after run() has taken the fixture's guard again. The model: a job J, posted to the pool
