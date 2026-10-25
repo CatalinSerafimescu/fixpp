@@ -320,11 +320,11 @@ there (FR-019 edits gap notes, plus the one comment below).
 the live `spec/behaviors-and-limitations.md`:
 
 ```
-## 095-tail-evidence-pass — the 12 FIX 5.0SP2 tail rows close on offline witnesses and one live FIXT cell (2026-10-24)
+## 095-tail-evidence-pass — the 12 FIX 5.0SP2 tail rows close on offline witnesses and one live FIXT scenario, run as one cell per QuickFIX peer (2026-10-24)
 
 ### Behaviors
 
-- **B-095-1 — one live FIXT.1.1 / FIX.5.0SP2 interop cell carries a typed-built application message.** fixpp, as initiator, sends one 35=BN built by `fixpp::v50sp2::build_ExecutionAck`, and QuickFIX-cpp v1.16.0 (`HP-QFcpp-init-fixt11-fix50sp2-app-bn`) and QuickFIX/J 3.0.1 (`HP-QFj-init-fixt11-fix50sp2-app-bn`) each read it back field by field with their data dictionaries on. fixpp's inbound validation is off on that session (`SessionConfig::validate_inbound_messages`, its default) because of L-041-2: the session validator takes one dictionary. The cell witnesses that one MsgType in that one direction; every other MsgType of the rows A-018, A-023, A-027 … A-033, C-003, N-002 and N-003 closes on its offline witness only (`TailRows095.*`, `tests/session/test_095_tail_rows_roundtrip.cpp`). *(095 FR-009…FR-013; contracts L8.)*
+- **B-095-1 — one live FIXT.1.1 / FIX.5.0SP2 interop scenario, run as two cells (one per QuickFIX peer), carries a typed-built application message.** fixpp, as initiator, sends one 35=BN built by `fixpp::v50sp2::build_ExecutionAck`, and QuickFIX-cpp v1.16.0 (`HP-QFcpp-init-fixt11-fix50sp2-app-bn`) and QuickFIX/J 3.0.1 (`HP-QFj-init-fixt11-fix50sp2-app-bn`) each read it back field by field with their data dictionaries on; each cell has its own evidence row and passes or fails on its own. fixpp's inbound validation is off on both sessions (`SessionConfig::validate_inbound_messages`, its default) because of L-041-2: the session validator takes one dictionary. The two cells witness that one MsgType in that one direction; every other MsgType of the rows A-018, A-023, A-027 … A-033, C-003, N-002 and N-003 closes on its offline witness only (`TailRows095.*`, `tests/session/test_095_tail_rows_roundtrip.cpp`). *(095 FR-009…FR-013; contracts L8.)*
 
 ### Limitations
 
