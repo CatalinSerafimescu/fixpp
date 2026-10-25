@@ -928,15 +928,15 @@ jobs:
           retention-days: 14
 
       # ── #613 (`.specify/613-builders-export.md` §4.4) — disk at JOB END ──────────
-      # tier1's `Measure disk at job end (#254)` has no Windows counterpart, and the
-      # typed tier's largest projected growth is on windows-msvc-release. Same split
-      # as #254: the MEASUREMENT asserts (a df/du that cannot run reds the leg), the
-      # REPORTING does not. No floor is asserted; #254's re-open rule applies ("Re-open
-      # if job-end free space ever drops below ~2x the tree on any leg").
+      # tier1's `Measure disk at job end (#254)` has no Windows counterpart.
+      # Same split as #254: the MEASUREMENT asserts (a df/du that cannot run reds
+      # the leg), the REPORTING does not. No floor is asserted; #254's re-open rule
+      # applies ("Re-open if job-end free space ever drops below ~2x the tree on any
+      # leg").
       #
-      # Per stager directory as well as the whole tree: main has no MSVC figure to
-      # compare with, so the typed share of each copy is read from one run (each
-      # copy's size minus the same copy without the typed tier).
+      # Per stager directory as well as the whole tree: the typed share of each
+      # copy is read from one run (each copy's size minus the same copy without the
+      # typed tier).
       - name: Measure disk at job end (#613)
         if: always()
         shell: bash
