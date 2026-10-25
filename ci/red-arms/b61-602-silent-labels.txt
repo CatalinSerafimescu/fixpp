@@ -1,0 +1,54 @@
+# ci/red-arms/b61-602-silent-labels.txt -- forceable pump sites of fixpp#602 (batch B61) whose
+# miss branch reports through the cell's own failure text, not kWindowMiss or
+# kPumpBudgetMiss.
+#
+# ci/pump-seam-arm.sh reads each of these SILENT, and a SILENT verdict is returned before
+# that driver looks for a residual, so it cannot grade them. They are the miss branches of
+# the cells' own drains, the `f.keep.reset();` + `cancel_and_drain_or_report(f.ioc, ...)`
+# sites of tests/session/test_563_564_callback_send.cpp, which is what
+# b61-602-labels.txt's header says the population is for.
+#
+# Graded by, from the repo root, after building session_563_564_callback_send:
+#   grep -vE '^\s*(#|$)' ci/red-arms/b61-602-silent-labels.txt | while IFS= read -r l; do
+#     o=$(FIXPP_FORCE_WINDOW_MISS="$l" build/linux-clang-debug/bin/session_563_564_callback_send \
+#           --gtest_filter='CallbackSend.*' 2>&1)
+#     printf 'announced=%s residual=%s %s\n' \
+#       "$(grep -cF "#289 FORCED window miss at site: $l" <<<"$o")" \
+#       "$(grep -cF '#289: the io_context did not run out of work within the teardown drain' <<<"$o")" "$l"
+#   done
+# Every line must read announced above 0 and residual=0.
+#
+# Chosen by the procedure in b61-602-labels.txt's header. Left out:
+#   CallbackSend::no_close_started_reaches_the_wait -- its miss branch drains while the
+#   graceful close still waits on close()'s real-time grace timer (kLogoutWaitMs), so the
+#   drain leaves a residual in its MemoryStore and no-store cells as well as its FileStore
+#   ones, whatever the guard does.
+#
+# Not CI enforcement: no workflow runs this. It is a re-runnable population.
+
+CallbackSend::arrival_in_the_hold
+CallbackSend::arrival_sleeps_ended
+CallbackSend::arrival_store_held
+CallbackSend::behind_another_close
+CallbackSend::callback_starts_close
+CallbackSend::close_and_send
+CallbackSend::held_lock
+CallbackSend::held_lock_close_started
+CallbackSend::held_lock_past_the_timeout
+CallbackSend::held_lock_persist_kept
+CallbackSend::lifecycle
+CallbackSend::lifecycle_control
+CallbackSend::lifecycle_gate_holds
+CallbackSend::lifecycle_sleeps_ended
+CallbackSend::logouts_write_held
+CallbackSend::logouts_write_held_after
+CallbackSend::logouts_write_held_jobs_ended
+CallbackSend::logouts_write_held_past_the_timeout
+CallbackSend::nested_to_app_throws
+CallbackSend::no_close_started
+CallbackSend::on_logout_starts
+CallbackSend::on_logout_starts_close_started
+CallbackSend::on_logout_starts_persist_kept
+CallbackSend::outbound_callback_starts
+CallbackSend::two_frames_in_one_read
+CallbackSend::waiting_close_cancelled

@@ -1,0 +1,65 @@
+# ci/red-arms/b61-602-labels.txt -- forceable pump sites of fixpp#602 (batch B61), and of the
+# fixpp#433 cell folded into it, that ci/pump-seam-arm.sh can grade.
+#
+# Graded by:  bash ci/pump-seam-arm.sh linux-clang-debug ci/red-arms/b61-602-labels.txt
+#
+# One label per line: a pump site label that FIXPP_FORCE_WINDOW_MISS matches. Every one is
+# expected RED with no RESIDUAL.
+#
+# What it is for. While a FileStore cell runs, tests/session/test_563_564_callback_send.cpp's
+# Fixture holds a keep_running guard on its io_context (tests/support/keep_running.hpp), and
+# every drain on that io_context waits for it to stop, so every miss branch a FileStore cell
+# reaches must release the guard before its drain. A miss branch that does not leaves the
+# drain a RESIDUAL. The same holds for the `keep` that
+# SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose
+# (tests/session/logout_exchange_test.cpp) holds above quiesce_on_exit; its labels are the
+# last block.
+#
+# How the callback-send labels were chosen, as a procedure: take every string literal in
+# test_563_564_callback_send.cpp shaped `Suite::name`; force each in turn with
+# FIXPP_FORCE_WINDOW_MISS=<label> over the cells whose fixture is StoreKind::file (a TEST
+# body that names StoreKind::file, or calls a run_* helper that builds
+# `Fixture f{..., StoreKind::file}`); keep the labels that announce
+# (`#289 FORCED window miss at site: <label>`). Of those, the labels whose miss branch reports
+# through kWindowMiss or kPumpBudgetMiss are here; the ones whose miss branch reports through
+# the cell's own failure text are in b61-602-silent-labels.txt, because this driver reads
+# them SILENT and does not look for a residual on a SILENT label. Re-derive both after a
+# change to the file's cells.
+#
+# Not CI enforcement: no workflow runs ci/pump-seam-arm.sh over this file. It is a
+# re-runnable population.
+
+CallbackSend::behind_another_close_logout_wait
+CallbackSend::callback_starts_close_logout_wait
+CallbackSend::close_and_send_logout_wait
+CallbackSend::close_and_send_teardown
+CallbackSend::close_cell_store_next
+CallbackSend::first
+CallbackSend::in_to_app
+CallbackSend::lifecycle_logout_wait
+CallbackSend::lifecycle_open
+CallbackSend::lifecycle_teardown
+CallbackSend::logon
+CallbackSend::logon_on_session_executor
+CallbackSend::no_close_started_logout_wait
+CallbackSend::open
+CallbackSend::open_before_logon_on_session_executor
+CallbackSend::outbound_callback_starts_logout_wait
+CallbackSend::overlapping
+CallbackSend::overlapping_retrieve
+CallbackSend::pool_work_first
+CallbackSend::pool_work_send
+CallbackSend::poss_dup
+CallbackSend::reject_send
+CallbackSend::retake_next
+CallbackSend::retake_order
+CallbackSend::retrieve
+CallbackSend::second
+CallbackSend::store_next
+CallbackSend::waiting_close_cancelled_logout_wait
+
+# tests/session/logout_exchange_test.cpp, FlushRunsAndFramesDurableAfterClose (Refs #433)
+FlushRunsAndFramesDurableAfterClose/open
+FlushRunsAndFramesDurableAfterClose/logon-ack
+FlushRunsAndFramesDurableAfterClose/stage
+FlushRunsAndFramesDurableAfterClose/close
