@@ -761,8 +761,8 @@ struct Fixture {
     asio::io_context ioc;
     // With a FileStore: keeps `ioc` from stopping between two pumps when an offload's work
     // is released on the pool thread (tests/support/keep_running.hpp). Engaged by cfg();
-    // run() releases it for its window and takes it again after. Released before every
-    // drain, which waits for the io_context to stop.
+    // run() releases it for its window and takes it again after a window that returned
+    // ready. Released before every drain, which waits for the io_context to stop.
     std::optional<fixpp::test_support::keep_running> keep;
     // The FileStore cell's file-I/O executor. Declared after ioc, so it is
     // joined before ioc is destroyed.
@@ -878,7 +878,8 @@ struct Fixture {
         // as it does with no FileStore, and that includes work an offload releases on the
         // pool thread. It is taken again, on the executor it was released from, once the
         // window has returned ready. A window or grace that returns at its deadline with the
-        // call ready can leave such a release pending until after it is taken again.
+        // call ready can leave such a release pending; one that lands after the window's
+        // last restart() and before the guard is taken again stops `ioc`.
         std::optional<asio::io_context::executor_type> kept_on;
         if (keep) kept_on = keep->get_executor();
         keep.reset();
@@ -2363,6 +2364,7 @@ TEST(CallbackSend, FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNext
     std::atomic<bool> holding{false};
     std::atomic<bool> release{false};
     std::atomic<bool> ended{false};
+    std::atomic<bool> released_by_the_cell{false};
     Fixture f{ExecKind::io_context, StoreKind::file};
     // After the fixture: lets the job go on every exit, before the fixture joins its pool.
     struct release_on_exit {
@@ -2391,6 +2393,8 @@ TEST(CallbackSend, FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNext
         while (!release.load() && std::chrono::steady_clock::now() < until) {
             std::this_thread::yield();
         }
+        // False when the job's own bound ended the hold, during the first pump or before it.
+        released_by_the_cell.store(release.load());
         guard.reset();
         ended.store(true);
     });
@@ -2411,16 +2415,18 @@ TEST(CallbackSend, FileStoreFixture_WorkEndingOnThePoolThread_DoesNotStopTheNext
     const auto send_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::steady_clock::now() - send_started)
                              .count();
-    const std::string context = "held=" + std::to_string(held) +
-                                " stopped_before_first=" + std::to_string(stopped_before_first) +
-                                " first_ran=" + std::to_string(first_ran) +
-                                " job_ended=" + std::to_string(job_ended) +
-                                " stopped=" + std::to_string(stopped) + " send: " + describe(sent) +
-                                " send_ms=" + std::to_string(send_ms);
+    const std::string context =
+        "held=" + std::to_string(held) +
+        " stopped_before_first=" + std::to_string(stopped_before_first) +
+        " first_ran=" + std::to_string(first_ran) + " job_ended=" + std::to_string(job_ended) +
+        " released_by_the_cell=" + std::to_string(released_by_the_cell.load()) +
+        " stopped=" + std::to_string(stopped) + " send: " + describe(sent) +
+        " send_ms=" + std::to_string(send_ms);
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
 
-    ASSERT_TRUE(held && !stopped_before_first && first_ran && job_ended)
+    ASSERT_TRUE(held && !stopped_before_first && first_ran && job_ended &&
+                released_by_the_cell.load())
         << "the path was not exercised: " << context;
     EXPECT_FALSE(stopped) << "the fixture's io_context stopped when the pool thread's work ended. "
                           << context;
