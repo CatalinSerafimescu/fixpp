@@ -947,7 +947,7 @@ last install rule, includes `cmake/FixppStampProvenance.cmake`, which SHA256s ev
 runs on **every** `cmake --install` and every cpack staging in a packaging-enabled tree, so each stager above pays a
 full hash of the typed payload as well as its copy. Every MSVC leg configures `-DFIXPP_BUILD_OTEL=ON` (tier2's
 `Configure (OTel-ON)` step has no `if:`), so on windows-msvc-debug set ON the consumer witness's stage install hashes
-that tree's GB-scale `/Z7` typed archives inside `TIMEOUT 300`. A `TIMEOUT` raise below is attributed to copy plus
+that tree's GB-scale `/Z7` typed archives inside its `TIMEOUT`. A `TIMEOUT` raise below is attributed to copy plus
 hash.
 
 **In-test disk instrument (driver).** After the install and before configuring the consumer (so before D-10's
@@ -978,7 +978,7 @@ gates nothing.
 - **windows-msvc-release and windows-msvc-debug first.** windows-msvc-release carries the largest projected growth
   (§5) and had no disk instrument before this PR. windows-msvc-debug's `/Z7` archive size is unmeasured (§5): read its
   stage bytes (they replace §5's `/Zi` estimate as the lane's cost; the driver prints `free: unavailable` there, so
-  free space comes from the new job-end step) and the `install-witness` elapsed time against `TIMEOUT 300`, before
+  free space comes from the new job-end step) and the `install-witness` elapsed time against its `TIMEOUT`, before
   anything else.
 - **Conditional cleanup, stated in advance (and disclosed in the PR body).** If any lane's job-end free space reads
   below tier1's own #254 re-open rule ("Re-open if job-end free space ever drops below ~2x the tree on any leg"), the
