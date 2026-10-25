@@ -877,16 +877,25 @@ struct Fixture {
         return c;
     }
 
+    // How long run() waits for its fence on `file_pool`. It bounds how long a pool job that
+    // is held or busy delays run(); the fence is needed only while the pool's thread is
+    // between asio's decrement of the work count and its stop().
+    static constexpr auto kRetakeFenceBound = std::chrono::milliseconds{100};
+
     template <class T>
     expected_t<T> run(asio::awaitable<expected_t<T>> a, const char* site) {
         auto fut = asio::co_spawn(exec, std::move(a), asio::use_future);
         // `keep` is released for the window, after the co_spawn, whose own work keeps `ioc`
         // from stopping at the release. The window then returns when `ioc` runs out of work,
         // as it does with no FileStore, and that includes work an offload releases on the
-        // pool thread. It is taken again, on the executor it was released from, once the
-        // window has returned ready. A window or grace that returns at its deadline with the
-        // call ready can leave such a release pending; one that lands after the window's
-        // last restart() and before the guard is taken again stops `ioc`.
+        // pool thread. After a window that returned ready, `keep` is taken again on the
+        // executor it was released from, and `ioc` is restarted if it is stopped: a release
+        // whose decrement came before the re-take can have stopped it. In between, a no-op is
+        // run on `file_pool` and waited for, up to kRetakeFenceBound, because
+        // asio::detail::scheduler::work_finished decrements the count and only then calls
+        // stop(), so a pool thread's stop() can land after the re-take. The no-op runs only
+        // once the job the pool's thread is running has returned, with any stop() it made,
+        // on the condition that `file_pool` has one thread.
         std::optional<asio::io_context::executor_type> kept_on;
         if (keep) kept_on = keep->get_executor();
         keep.reset();
@@ -897,7 +906,16 @@ struct Fixture {
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << site;
             return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
-        if (kept_on) keep.emplace(*kept_on);
+        if (kept_on) {
+            keep.emplace(*kept_on);
+            const auto fenced = std::make_shared<std::atomic<bool>>(false);
+            asio::post(file_pool, [fenced] { fenced->store(true); });
+            const auto until = std::chrono::steady_clock::now() + kRetakeFenceBound;
+            while (!fenced->load() && std::chrono::steady_clock::now() < until) {
+                std::this_thread::yield();
+            }
+            if (ioc.stopped()) ioc.restart();
+        }
         return fut.get();
     }
 
