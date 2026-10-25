@@ -605,8 +605,8 @@ test name exists in the tree.
   Further requirements:
   - The amendment lands **before** the catalogue edits of FR-017/FR-018 (`[const §XX.1]`).
   - Its Sync Impact Report and Status line read PENDING until the scoped Codex Gate A rounds on the
-    amended clauses converge (rounds 5–6 for §VI.2/§VI.5, converged at round 6; narrow round 7 on
-    §XVIII.7, converged with no finding), Gate B converges and the owner signs off, in that order. The flip to
+    amended clauses converge (rounds 5–6 for §VI.2/§VI.5, converged at round 6; narrow rounds 7–9 on
+    §XVIII.7, converged at round 9 with no finding), Gate B converges and the owner signs off, in that order. The flip to
     RATIFIED is the last commit before merge (094's FR-003a precedent).
   - If a row leaves the flip set (FR-020; tasks T085), the §XVIII.7 after-text that names it
     changes. That is a clause-body change: data-model §F.5 is edited first, then the constitution

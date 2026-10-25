@@ -584,6 +584,6 @@ Design notes (not clause text):
 - The opening sentence names the further A- rows by pointer to the rows the clause itself names by row ID, not by list or count, so it stays true when a later feature names another row here. A message set the clause records as delivered (v50sp2's is_application set) brings in no row the clause does not name; re-derive why that matters by intersecting the backlog A- rows' MsgTypes with msgcat='app' in dictionaries/FIX50SP2.xml.
 - Classification: MINOR (§F.3 "Bump"). The two statements described a deferral that feature 077
   and DECISION 2 had already ended; replacing them adds no banned pattern, tightens no budget and
-  imposes no obligation. Widening the opening sentence to rows the clause already names as delivered imposes none either.
+  imposes no obligation. Widening the opening sentence to rows the clause already names, by row ID, as delivered or closed imposes none either.
 - Check after C-AMEND (T061): `command grep -qF 'are application messages, not a session-FSM pair'`
   on the constitution, and the `## Article XVIII` diff changes the §7 line only.
