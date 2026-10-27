@@ -249,7 +249,9 @@ static constexpr std::size_t kAlignment = 8;
 //     hand-back's temporaries) is destroyed in that same scope;
 //   - the final action is a release-store to a flag in offload_to's own frame, reached
 //     through a raw pointer; after it the job touches nothing of the caller's, and
-//     the job object asio destroys afterwards owns nothing of the caller's;
+//     the job object asio destroys afterwards owns nothing of the caller's executor
+//     or execution context (its body may co-own heap state with the caller's frame
+//     through a thread-safe reference count, which touches neither);
 //   - offload_to, once resumed, waits (acquire load, yield) for that flag before it
 //     returns. The wait is bounded by the pool thread's unwind of the job after its
 //     hand-back, not by any I/O, which the job finished before handing back.
@@ -401,9 +403,9 @@ struct offload_job {
                 }
             }
             // The handler and the caller's executor are moved out into locals, and both
-            // members are disengaged, inside this scope: everything of the caller's the job
-            // held is destroyed before the flag store, and the job asio destroys after it
-            // holds nothing of the caller's.
+            // members are disengaged, inside this scope: the caller's executor and handler
+            // the job held are destroyed before the flag store, and the job asio destroys
+            // after it holds nothing of the caller's executor or execution context.
             // initiate_offload engages both, and asio runs the job once.
             if (!handler || !caller_work) {
                 std::terminate();
@@ -468,7 +470,8 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 // starts (offload_write_fault_scope), and the raw helpers below consult it. The plan
 // is thread_local because the job runs synchronously on one pool thread; a job that
 // does not install the scope (reset, flush) sees no plan. Production cost per job:
-// two relaxed loads; per raw call: one thread_local read and one branch not taken.
+// one relaxed load per fault flag; per raw call: one thread_local read and one branch
+// not taken.
 struct offload_write_fault_plan {
     int pwrite_nth = 0;  // fail this pwrite of the job, counting from 1; 0: none
     bool datasync = false;

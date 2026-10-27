@@ -237,7 +237,7 @@ execution context while the file I/O pool lived on met a use-after-free. D-598-1
 cancellation reaches the job; the body's own result is returned) are kept. Re-derive the current shape
 from `offload_to` in `src/session/file_store.cpp`; this paragraph is a pointer, not the code.
 
-Documents that describe `offload_to` as a nested `co_spawn`. The live B&L row is amended; the others are not edited, and each is flagged here.
+Documents that describe `offload_to` as a nested `co_spawn`. The live surfaces (B&L `B-035-1`, catalogue S-013, coverage-index §4.8) and the `message_store.hpp` comment are amended; the others are not edited, and each is flagged here.
 
 | Document | The claim | Status |
 |---|---|---|
@@ -246,7 +246,9 @@ Documents that describe `offload_to` as a nested `co_spawn`. The live B&L row is
 | `specs/035-filestore-io-offload/plan.md`; `checklists/api-abi-nfr.md` CHK010 | the sites become "nested co_spawn"; the nested-co_spawn allocation per op | ⚠️ **SUPERSEDED as the mechanism by D-624-1.** History of feature 035. |
 | `spec/behaviors-and-limitations.md`, `B-035-1` | the offload ran "via genuine `co_await asio::co_spawn(…)`" with one `co_spawn` frame per disk op | ✅ **AMENDED for fixpp#624**: the mechanism sentence now describes the posted job and the last touch, and the allocation is stated as a condition. `B-624-1` is the host-facing row. |
 | `.specify/563-564-callback-send.md` §2.6, "How a cancellation reaches the write" | `offload_to` "awaits a `co_spawn` onto the file executor", and asio's cancellation handler hands the executor a second job | ⚠️ **HISTORY.** True of the tree before fixpp#598 for the cancellation, and before D-624-1 for the `co_spawn`. |
-| `include/fixpp/session/message_store.hpp`, `store`'s comment | "before the nested co_spawn that offloads pwrite / fdatasync to file_io_executor" | ⚠️ **STALE on the mechanism since D-624-1**; the obligation it states (deep-copy before any suspension) holds. |
+| `spec/feature-catalogue.md`, S-013 | the 035 note: "genuine `co_spawn(file_io_executor, syscall_lambda, use_awaitable)` across all four disk-I/O sites" | ✅ **AMENDED for fixpp#624** by a dated B57 note appended to the row; the 035 text is kept as history and the row's state does not change. |
+| `spec/coverage-index.md` §4.8 | "S-013 amended by 035": the disk I/O is "offloaded to `file_io_executor` via `co_spawn`" | ✅ **AMENDED for fixpp#624** by a parallel "S-013 amended by B57" sentence. |
+| `include/fixpp/session/message_store.hpp`, `store`'s comment | "before the nested co_spawn that offloads pwrite / fdatasync to file_io_executor" | ✅ **AMENDED for fixpp#624**: the mechanism clause now names the offload and D-624-1; the obligation it states (deep-copy before any suspension) is unchanged. |
 
 **D-632-1 (fixpp#632): the `FileStore` index keeps the last record of a sequence number.** A
 `store()` that failed after its frame record was written leaves that record in the log; a later
@@ -258,7 +260,8 @@ about the file and still holds.) Design: `.specify/624-offload-completion-lifeti
 
 **D-635-1 (fixpp#635): a failed `FileStore` write restores the log's committed end.** A failed
 `store()` or increment truncates the log back to where the call started and flushes that; if it cannot,
-the store is poisoned until it is opened again. So in a live process a failed store leaves no record,
+the store is poisoned until it is opened again (its graceful-close flush still drains the open log, then
+reports the poison). So in a live process a failed store leaves no record,
 and D-632-1 governs only what a crash leaves. Design: `.specify/624-offload-completion-lifetime.md` §9;
 B&L `B-635-1`, and `B-632-1`'s amendment.
 
