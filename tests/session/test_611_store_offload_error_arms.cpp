@@ -481,7 +481,7 @@ TEST(StoreOffloadErrorArms, AFrameRecordBelowTheLastNumber_RefusesTheOpen) {
 
 // ── A store() retried in the same process after it failed at its counter write ───────────
 //
-// OPEN QUESTION (a finding of fixpp#611's counter arms, measured and not decided): store(2)
+// OPEN QUESTION (from fixpp#611's counter arms; not decided): store(2)
 // fails at its counter write, so its frame record is on disk and the store's write position
 // is not advanced. Retried in the SAME process, store(2) writes its frame record and its
 // counter record from that same position, over the failed one. When the retry's frame record
