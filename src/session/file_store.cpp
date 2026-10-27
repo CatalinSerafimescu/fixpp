@@ -2059,8 +2059,8 @@ constexpr int kResetStepThrowAfterRename = 5;
 }
 
 // True, and counted, when `step` is the armed step.
-[[nodiscard]] bool reset_step_fault_fires(int armed, int step) noexcept {
-    if (armed != step) return false;
+[[nodiscard]] bool reset_step_fault_fires(int armed_step, int step) noexcept {
+    if (armed_step != step) return false;
     g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
@@ -2154,7 +2154,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
-            const int armed = take_reset_step_fault();  // fixpp#611 seam
+            const int armed_step = take_reset_step_fault();  // fixpp#611 seam
 
 #ifndef _WIN32
             // ── Linux atomic-rename path ─────────────────────────────────────
@@ -2175,7 +2175,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 tmp_impl.next_inbound = next_in;
                 tmp_impl.next_outbound = next_out;
 
-                if (reset_step_fault_fires(armed, kResetStepInitialiseFresh) ||
+                if (reset_step_fault_fires(armed_step, kResetStepInitialiseFresh) ||
                     !tmp_impl.initialise_fresh(next_in, next_out)) {
                     // Move file back so it closes properly, then unlink tmp.
                     tmp_file = std::move(tmp_impl.file);
@@ -2206,7 +2206,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             }
 
             // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
-            if (reset_step_fault_fires(armed, kResetStepRename) ||
+            if (reset_step_fault_fires(armed_step, kResetStepRename) ||
                 ::rename(tmp_path.c_str(), path.c_str()) != 0) {
                 ::unlink(tmp_path.c_str());
                 return false;
@@ -2217,7 +2217,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // the directory fsync (093 Gate B, fixpp#554).
             *rename_done = true;
             // fixpp#599: the throw-after-rename step of the reset-step fault seam.
-            if (reset_step_fault_fires(armed, kResetStepThrowAfterRename)) {
+            if (reset_step_fault_fires(armed_step, kResetStepThrowAfterRename)) {
                 throw std::bad_alloc{};
             }
 
@@ -2264,11 +2264,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 }
             }
             OsFile new_file;
-            if (reset_step_fault_fires(armed, kResetStepReopenOpen) ||
+            if (reset_step_fault_fires(armed_step, kResetStepReopenOpen) ||
                 !new_file.open(path.c_str())) {
                 return false;
             }
-            if (reset_step_fault_fires(armed, kResetStepReopenLock) || !new_file.try_lock()) {
+            if (reset_step_fault_fires(armed_step, kResetStepReopenLock) || !new_file.try_lock()) {
                 return false;
             }
             // Publish to result slot; the sole owner stays here until Region 3 moves it.
@@ -2292,7 +2292,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 tmp_impl.write_pos = 0;
                 tmp_impl.next_inbound = next_in;
                 tmp_impl.next_outbound = next_out;
-                if (reset_step_fault_fires(armed, kResetStepInitialiseFresh) ||
+                if (reset_step_fault_fires(armed_step, kResetStepInitialiseFresh) ||
                     !tmp_impl.initialise_fresh(next_in, next_out)) {
                     tmp_file = std::move(tmp_impl.file);
                     DeleteFileW(wide_tmp.c_str());
@@ -2314,7 +2314,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // WRITE_THROUGH durability the old MoveFileEx flag gave.
             // D-599-1 (a) holds on this branch as written: every path the steps after the
             // rename use (wide_live) is built above, before it.
-            const rename_outcome renamed = reset_step_fault_fires(armed, kResetStepRename)
+            const rename_outcome renamed = reset_step_fault_fires(armed_step, kResetStepRename)
                                                ? rename_outcome::not_renamed
                                                : posix_rename_over_open(wide_tmp, wide_live);
             if (renamed == rename_outcome::not_renamed) {
@@ -2326,7 +2326,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // no longer exists, so there is nothing to delete.
             *rename_done = true;
             // fixpp#599: the throw-after-rename step of the reset-step fault seam.
-            if (reset_step_fault_fires(armed, kResetStepThrowAfterRename)) {
+            if (reset_step_fault_fires(armed_step, kResetStepThrowAfterRename)) {
                 throw std::bad_alloc{};
             }
             if (renamed == rename_outcome::renamed_not_flushed) {
@@ -2349,11 +2349,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 }
             }
             OsFile new_file;
-            if (reset_step_fault_fires(armed, kResetStepReopenOpen) ||
+            if (reset_step_fault_fires(armed_step, kResetStepReopenOpen) ||
                 !new_file.open(wide_live.c_str())) {
                 return false;
             }
-            if (reset_step_fault_fires(armed, kResetStepReopenLock) || !new_file.try_lock()) {
+            if (reset_step_fault_fires(armed_step, kResetStepReopenLock) || !new_file.try_lock()) {
                 return false;
             }
             *result_file = std::move(new_file);
