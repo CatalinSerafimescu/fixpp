@@ -271,15 +271,20 @@ void arm_force_store_pwrite_fail_once() noexcept;
 int read_and_reset_store_pwrite_fail_count() noexcept;
 // fixpp#611: arm a one-shot fault for the NEXT offloaded store() or
 // next_seqnum(increment) job. `pwrite_nth` fails that job's Nth pwrite, counting from 1
-// (0: none); `datasync` fails its fdatasync. A failed step writes nothing and reports
+// (0: none); `datasync` fails the job's own fdatasync (the restore's is armed by
+// arm_force_offload_restore_fail_once). A failed step writes nothing and reports
 // failure, so the call returns store_io_failure. The read returns how many times such a
-// fault fired since the last read.
+// fault fired since the last read. The plan is taken by the next write job on any
+// thread: arm it only while no other FileStore's write job can run on the file-I/O
+// executor.
 void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept;
 // fixpp#635: arm a one-shot fault in the NEXT offloaded store() or next_seqnum(increment)
 // job's restore of the log's committed end, which runs when that job fails: its truncate
 // (`truncate`) or the datasync after it (`datasync`) fails, and the store is poisoned.
 // Arm it with arm_force_offload_write_fail_once, so the job fails and restores; each
-// fault that fires counts in read_and_reset_offload_write_fail_count().
+// fault that fires counts in read_and_reset_offload_write_fail_count(). The plan is taken
+// by the next write job on any thread: arm it only while no other FileStore's write job
+// can run on the file-I/O executor.
 void arm_force_offload_restore_fail_once(bool truncate, bool datasync) noexcept;
 int read_and_reset_offload_write_fail_count() noexcept;
 // fixpp#635: read and reset the restore-ran counter: how many times a failed job's
