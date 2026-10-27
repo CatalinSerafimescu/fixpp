@@ -659,6 +659,8 @@ set_tests_properties(session_538_store_lookup_after_reset PROPERTIES LABELS "ses
 # ([const §VII.8]): genuine concurrency, a file I/O thread pool and a caller pool.
 add_threading_test(session_624_offload_completion_lifetime
   test_624_offload_completion_lifetime.cpp)
+# FIXPP_TEST_HOOKS declares the offload's caller-wait probe and its throw seam.
+target_compile_definitions(session_624_offload_completion_lifetime PRIVATE FIXPP_TEST_HOOKS)
 set_tests_properties(session_624_offload_completion_lifetime PROPERTIES LABELS "session;624")
 
 # ── fixpp#537 (B28), D-537-7 — frames the session cannot build ─────────────────────

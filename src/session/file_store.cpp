@@ -45,12 +45,14 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fixpp/session/file_store.hpp>
 #include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -77,11 +79,14 @@
 
 #include <crc32c/crc32c.h>
 
+#include <asio/associated_executor.hpp>
+#include <asio/async_result.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
-#include <asio/co_spawn.hpp>
+#include <asio/execution/outstanding_work.hpp>
 #include <asio/post.hpp>
+#include <asio/prefer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <fixpp/core/error.hpp>
@@ -170,22 +175,53 @@ static constexpr std::size_t kAlignment = 8;
 
 // ── 035-filestore-io-offload: file-local offload helper ──────────────────────
 //
-// offload_to — run a single blocking syscall on pool_ex; resume the caller on
-// its own (session-strand) executor.  This is the nested-co_spawn idiom:
-// co_spawn pins the inner body to pool_ex; use_awaitable resumes the outer
-// coroutine on the spawner's associated executor (the session strand).
+// D-624-1 (offload completion: the caller waits for the job's last touch).
+// Supersedes 035's nested-co_spawn idiom here; the decision, its mechanism and the
+// alternatives it rejects are in .specify/624-offload-completion-lifetime.md.
 //
-// FINAL NO-REAPER SHAPE (data-model §2 / contracts C1 / Decision 5). The spawn's
-// token is fixpp#598's (.specify/536-537-538-recovery-liveness.md §11, D-598-1 and
+// offload_to — run a single blocking syscall on pool_ex; resume the caller on its
+// own (session-strand) executor. The call hands pool_ex a job of its own (an
+// asio::async_initiate under use_awaitable, posted to pool_ex). The job runs `fn`
+// and posts the completion back to the handler's associated executor with
+// asio::post, never dispatch: a dispatch from a job running on the caller's own
+// executor would resume the caller inside the job, before the job's last touch,
+// and the caller's wait below would never end.
+//
+// THE LAST TOUCH. A hand-off from the pool thread to the caller's executor touches
+// the caller's execution context after the completion is already runnable there: the
+// post itself (asio's scheduler signals its waiters after it has released its lock;
+// see asio/detail/posix_event.hpp, maybe_unlock_and_signal_one), and the copies of the
+// caller's executor the hand-off holds, whose destructors release outstanding work or
+// the last reference to a strand. No arrangement of copies on the pool side removes
+// that touch, so the CALLER waits for it:
+//   - the caller's outstanding work is held by a tracked executor taken on the
+//     caller's side, which the job MOVES into the posted completion, so it is
+//     released on the caller's side;
+//   - every other reference to the caller the job holds (the handler, the executor
+//     copies, the post's temporaries) is destroyed in a scope that closes before the
+//     job's final action;
+//   - the final action is a release-store to a flag in offload_to's own frame, reached
+//     through a raw pointer; after it the job touches nothing of the caller's, and
+//     the job object asio destroys afterwards owns nothing of the caller's;
+//   - offload_to, once resumed, waits (acquire load, yield) for that flag before it
+//     returns. The wait is bounded by the pool thread's unwind of the job after its
+//     post, not by any I/O, which the job finished before posting.
+// The flag lives in the awaiting frame, so the caller's execution context must not be
+// destroyed while a store call is in flight; that is the direct caller's existing
+// obligation at FileStore::Config::file_io_executor.
+//
+// NO CANCELLATION (data-model §2 / contracts C1 / Decision 5). The completion token
+// is fixpp#598's (.specify/536-537-538-recovery-liveness.md §11, D-598-1 and
 // D-598-2), which supersedes contract C3's sentence that the implementation MUST
 // unconditionally catch operation_aborted and return the durable success:
-//   The spawn has no cancellation slot: it completes through a token bound to an
-//   EMPTY slot, so no cancellation, of any type, reaches the spawned coroutine.
-//   Once a store call has handed its job over, the job runs its body, and the call
-//   returns the body's own result when it has. That holds on a file executor that
-//   runs the jobs handed to it; on one that does not, the call does not return (the host's
-//   precondition is stated at FileStore::Config::file_io_executor). A cancellation recorded on the
-//   caller's thread stays recorded there. Teardown drains by AWAITING completion (Engine::stop() /
+//   The await has no cancellation slot: it completes through a token bound to an
+//   EMPTY slot, and the initiation connects nothing, so no cancellation, of any type,
+//   reaches the job. Once a store call has handed its job over, the job runs its body,
+//   and the call returns the body's own result when it has, or rethrows what the body
+//   threw. That holds on a file executor that runs the jobs handed to it; on one that
+//   does not, the call does not return (the host's precondition is stated at
+//   FileStore::Config::file_io_executor). A cancellation recorded on the caller's thread
+//   stays recorded there. Teardown drains by AWAITING completion (Engine::stop() /
 //   T016), not by cancelling in-flight syscalls. An implementer MUST NOT bolt a
 //   cancellation-slot/flag reaper onto this helper; the empty slot is not one.
 //
@@ -199,7 +235,6 @@ static constexpr std::size_t kAlignment = 8;
 //   All impl_ field mutations happen in the OUTER coroutine, on the strand,
 //   before or after the co_await — never inside 'fn'. (data-model §3)
 //
-// Idiom precedent: asio_tls_transport.hpp's D-18 reminder, below.
 // [feedback_asio_post_resume_bounces_to_spawn_executor]
 
 namespace {
@@ -223,11 +258,10 @@ namespace {
 //
 // It is also the CHEAPER placement, which is worth keeping when someone tries
 // to make it symmetric with the entry probe. A per-site exit pointer would be
-// captured into each lambda -- and each lambda IS the by-value `Fn fn`
-// parameter of the inner coroutine below, so it lands in a heap-allocated
-// coroutine frame. This guard is a local whose lifetime ENDS BEFORE the final
-// suspend, so an implementation has no reason to reserve frame storage for it.
-// That is the durable condition; do not replace it with a frame-size number,
+// captured into each lambda -- and each lambda IS the by-value `Fn fn` the
+// posted job below carries, so it lands in the job's allocation. This guard is
+// a local of the job's call operator, so it takes no storage in the job.
+// That is the durable condition; do not replace it with a size number,
 // which no build gate re-checks and which a compiler upgrade can falsify while
 // the comment goes on certifying it.
 //
@@ -263,17 +297,108 @@ struct store_offload_exit_guard {
     }
 };
 
+// The test seams of decision D-624-1, compiled unconditionally (like g_store_offload_probe);
+// declarations in file_store.hpp gated by FIXPP_TEST_HOOKS. Production values:
+// nullptr and false.
+//   g_store_offload_caller_wait_probe: called on the caller's thread when offload_to,
+//     resumed, starts waiting for its job's last touch.
+//   g_force_store_offload_throw_once: the next offloaded job throws in place of
+//     running its body. Consumed once.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<void (*)() noexcept> g_store_offload_caller_wait_probe{nullptr};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> g_force_store_offload_throw_once{false};
+
+// What the job hands back: the body's result, or what the body threw.
+template <class R>
+struct offload_outcome {
+    std::optional<R> value;
+    std::exception_ptr error;
+};
+
+// Runs on the caller's executor. It owns the handler and the caller's tracked
+// executor, so both are released on the caller's side.
+template <class Handler, class CallerWork, class R>
+struct offload_completion {
+    Handler handler;
+    CallerWork caller_work;
+    offload_outcome<R> outcome;
+
+    void operator()() { std::move(handler)(std::move(outcome)); }
+};
+
+// Runs on pool_ex. See "THE LAST TOUCH" above for why every reference to the caller
+// is gone before `last_touch` is stored, and why nothing follows that store.
+template <class Handler, class CallerWork, class Fn>
+struct offload_job {
+    using result_type = std::invoke_result_t<Fn>;
+
+    std::optional<Handler> handler;
+    std::optional<CallerWork> caller_work;
+    Fn fn;
+    std::atomic<bool>* last_touch;
+
+    void operator()() {
+        std::atomic<bool>* const done = last_touch;
+        {
+            offload_outcome<result_type> outcome;
+            {
+                store_offload_exit_guard exit_guard;
+                try {
+                    if (g_force_store_offload_throw_once.exchange(false,
+                                                                  std::memory_order_relaxed)) {
+                        throw std::runtime_error("fixpp test seam: the offloaded job threw");
+                    }
+                    outcome.value.emplace(fn());  // raw blocking syscall runs HERE, on pool_ex
+                } catch (...) {
+                    outcome.error = std::current_exception();
+                }
+            }
+            Handler h = std::move(*handler);
+            handler.reset();
+            CallerWork work = std::move(*caller_work);
+            caller_work.reset();
+            auto const handler_ex = asio::get_associated_executor(h);
+            asio::post(handler_ex, offload_completion<Handler, CallerWork, result_type>{
+                                       std::move(h), std::move(work), std::move(outcome)});
+        }
+        done->store(true, std::memory_order_release);
+    }
+};
+
+struct initiate_offload {
+    template <class Handler, class Fn>
+    void operator()(Handler&& handler, asio::any_io_executor const& pool_ex, Fn&& fn,
+                    std::atomic<bool>* last_touch) const {
+        using handler_t = std::decay_t<Handler>;
+        auto caller_work = asio::prefer(asio::get_associated_executor(handler),
+                                        asio::execution::outstanding_work.tracked);
+        using job_t = offload_job<handler_t, decltype(caller_work), std::decay_t<Fn>>;
+        asio::post(pool_ex, job_t{std::optional<handler_t>{std::move(handler)},
+                                  std::optional<decltype(caller_work)>{std::move(caller_work)},
+                                  std::forward<Fn>(fn), last_touch});
+    }
+};
+
 template <class Fn>
 asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_ex, Fn fn) {
-    co_return co_await asio::co_spawn(
-        pool_ex,
-        [fn = std::move(fn)]() -> asio::awaitable<std::invoke_result_t<Fn>> {
-            // Destroyed when this body completes — before final suspend, on the
-            // pool thread, because the body has no suspension point of its own.
-            store_offload_exit_guard exit_guard;
-            co_return fn();  // raw blocking syscall runs HERE, pinned to pool_ex
-        },
-        asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
+    using result_type = std::invoke_result_t<Fn>;
+    static_assert(!std::is_void_v<result_type>, "an offloaded body returns a value");
+    std::atomic<bool> last_touch{false};
+    auto const token = asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable);
+    auto outcome =
+        co_await asio::async_initiate<decltype(token), void(offload_outcome<result_type>)>(
+            initiate_offload{}, token, std::move(pool_ex), std::move(fn), &last_touch);
+    if (auto const probe_fn = g_store_offload_caller_wait_probe.load(std::memory_order_relaxed)) {
+        probe_fn();
+    }
+    while (!last_touch.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    if (outcome.error) {
+        std::rethrow_exception(outcome.error);
+    }
+    co_return std::move(*outcome.value);
 }
 
 // ── Raw syscall helpers for the offload lambda ────────────────────────────────
@@ -363,6 +488,15 @@ void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexce
 // there for why the pair brackets the blocking callable and NOT submit→post-back.
 void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) noexcept {
     g_store_offload_exit_probe.store(probe, std::memory_order_relaxed);
+}
+
+// D-624-1: the caller-wait probe and the throw seam; their globals live beside
+// `offload_to` above, which is their only reader.
+void install_store_offload_caller_wait_probe(void (*probe)() noexcept) noexcept {
+    g_store_offload_caller_wait_probe.store(probe, std::memory_order_relaxed);
+}
+void arm_force_store_offload_throw_once() noexcept {
+    g_force_store_offload_throw_once.store(true, std::memory_order_relaxed);
 }
 
 // Read and reset the T015 retrieve pread-attempt counter.
@@ -1143,9 +1277,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                                                                 [[clang::lifetimebound]],
                                                                 direction_t dir) noexcept {
     // Capture the session executor for the leading pump-break post below. (035:
-    // the offload uses nested co_spawn(use_awaitable), which resumes on this
-    // spawning executor — there is no longer a file_io_executor hop to rebind
-    // from; session_ex now serves only the leading post.)
+    // the offload resumes on this executor — D-624-1 posts its completion to the
+    // awaiting handler's executor — so there is no file_io_executor hop to rebind
+    // from; session_ex serves only the leading post.)
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive awaitable_thread::pump() chain
@@ -1489,7 +1623,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direction_t dir,
                                                                           bool increment) noexcept {
     // Capture the session executor for the leading pump-break post below (035: no
-    // offload rebind hop remains — nested co_spawn resumes on this executor).
+    // offload rebind hop remains — the offload resumes on this executor, D-624-1).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.
@@ -1671,7 +1805,7 @@ namespace {
 asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& impl, seqnum_t next_in,
                                                               seqnum_t next_out) noexcept {
     // Capture the session executor for the leading pump-break post below (035: no
-    // offload rebind hop remains — nested co_spawn resumes on this executor).
+    // offload rebind hop remains — the offload resumes on this executor, D-624-1).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.

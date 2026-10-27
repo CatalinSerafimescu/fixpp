@@ -1445,17 +1445,20 @@ idiom — `co_await asio::post(file_io_executor, use_awaitable)` — was inert (
 duration of an `fdatasync` (~100 µs–10 ms on NVMe). As of **035-filestore-io-offload (PR #119)**,
 all four disk-I/O sites in `FileStore` (`store()` pwrite/fdatasync, `next_seqnum()` pwrite/fdatasync,
 `reset()` tmp-open/initialise/rename/parent-fsync, `flush_for_session_close()` fdatasync) run on the
-`file_io_executor` thread pool via genuine `co_await asio::co_spawn(file_io_executor, syscall_lambda,
-asio::use_awaitable)`. The outer `co_await` resumes on the session strand; the blocking syscalls are
-pinned to the pool thread. `MemoryStore` is unaffected (zero-alloc, strand-only — unchanged). The
-`FileStore` offload carries exactly one bounded O(1) `co_spawn` frame (PMR-opaque global heap; its size is the spawned coroutine's entry-point frame, which depends on the compiler and on the completion token)
-per disk op, permitted by the `[const §XV.1]` v0.2 §XV.4-offload exemption in `.specify/constitution.md`.
+`file_io_executor` thread pool: each offloaded op is a job posted to the file-I/O executor, which runs
+the blocking syscalls on the pool thread and posts the completion back to the caller's executor, and
+the store call returns only after that job's last touch of the caller's executor (D-624-1,
+`.specify/624-offload-completion-lifetime.md`; `B-624-1`). The outer `co_await` resumes on the session
+strand. `MemoryStore` is unaffected (zero-alloc, strand-only — unchanged). The `FileStore` offload
+allocates no per-op coroutine frame; its per-op job and completion go through asio's recycling
+allocator. That is within the `[const §XV.1]` v0.2 §XV.4-offload exemption in
+`.specify/constitution.md`, which is a ceiling.
 This is the project's deliberate `[const §XV.4]` async-journal posture (no strand block) — **not**
 reference-engine parity: QuickFIX-cpp / QuickFIX-J perform **synchronous** FileStore flushes on the
 calling thread (see `specs/035-filestore-io-offload/spec.md`); the async offload is a deliberate divergence, not a conformance
 fix. [gate-b/r2 R#2: corrected PR #118→#119; replaced "parity with reference-engine behavior" with
 the correct deliberate-divergence statement matching `specs/035-filestore-io-offload/spec.md`.]
-*(Amended 2026-10-14, fixpp#598:)* the spawn has no cancellation slot (`offload_to` completes through a token bound to an empty slot), so a cancellation never skips a write that was handed over: once the store holds its lock, the job runs its body on a file executor that runs its jobs, and the call returns its result (`B-598-1`, `B-598-2`). The frame's size was given here as a number of bytes; it is a condition now, because the measured size differs by compiler. *(035 FR-001..FR-007, FR-010; `src/session/file_store.cpp`; witnesses
+*(Amended 2026-10-14, fixpp#598; mechanism reworded 2026-10-27, fixpp#624:)* the offload has no cancellation slot (`offload_to` completes through a token bound to an empty slot, and connects nothing), so a cancellation never skips a write that was handed over: once the store holds its lock, the job runs its body on a file executor that runs its jobs, and the call returns its result (`B-598-1`, `B-598-2`). The frame's size was given here as a number of bytes; it is a condition now, because the measured size differs by compiler. *(035 FR-001..FR-007, FR-010; `src/session/file_store.cpp`; witnesses
 `tests/session/test_file_store_offload_thread.cpp` + `test_file_store_cancellation.cpp` +
 `test_file_store_concurrent_tsan.cpp`.)*
 
@@ -3835,3 +3838,9 @@ Terms. **NextNumIn** is the session's next expected inbound MsgSeqNum(34). **HB*
   - In-tree builds are unaffected: the libs are built and linkable in every configuration.
 
   *(fixpp#613 D-0, D-9, §8.)* **Status: by design.**
+
+## fixpp#624 — a `FileStore` call's completion and the caller's execution context (2026-10-27)
+
+### Behaviors
+
+- **B-624-1 — a host may destroy the execution context it awaited a `FileStore` call on once that call has returned, even while the file-I/O executor lives on (fixpp#624, D-624-1).** A `FileStore` call that writes hands its system calls to the file-I/O executor as a job, and the job hands the completion back to the caller's executor. The call now returns only after that job's last touch of the caller's executor: the job releases every reference to the caller it held, then marks itself done, and the resumed call waits for that mark before it returns. *Before this change* the file-I/O thread could still be releasing the caller's executor after the call had returned (its outstanding work, or the last reference to a strand), so a host that destroyed its caller's context before joining the file-I/O pool met a heap-use-after-free on the file-I/O thread; one file-I/O pool shared by several engines or sessions could meet it on any teardown. *Still required:* every store call is awaited to completion before its caller's context is destroyed (the direct caller's obligation under `FileStore::Config::file_io_executor`), and the file-I/O executor keeps running the jobs handed to it until every store call has returned (`B-598-2`). *What the caller's thread does:* after it resumes, it waits by yielding until the job has finished unwinding after its hand-back; that wait follows the job's system calls, which are already done, and does not include any I/O. *The file-I/O executor may be the caller's own* (a one-thread pool, an `io_context`, a strand): the job hands back by posting, so the call completes there too. The job's result, or the exception its body threw, reaches the awaiter as before; no cancellation reaches the job (`B-598-1`). *(fixpp#624; `.specify/624-offload-completion-lifetime.md` D-624-1; `offload_to` in `src/session/file_store.cpp`; witnesses `tests/session/test_624_offload_completion_lifetime.cpp`: `OffloadCompletionLifetime.CallerPool_DestroyedBeforeTheFileIoPool`, `.CallerStrand_DestroyedBeforeTheFileIoPool`, `.ThrowingJob_CallerPool_DestroyedBeforeTheFileIoPool` and the three `.SameExecutor_*_Completes` cells.)*

@@ -232,6 +232,13 @@ void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexce
 // operation identity. Read the block comment at the definition in
 // file_store.cpp before drawing any conclusion from a count.
 void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) noexcept;
+// D-624-1 (.specify/624-offload-completion-lifetime.md): install a probe called on
+// the caller's thread when a store call, resumed after its offloaded job, starts
+// waiting for that job's last touch. Pass nullptr to disable (production default).
+void install_store_offload_caller_wait_probe(void (*probe)() noexcept) noexcept;
+// D-624-1: arm a one-shot fault so the NEXT offloaded job throws std::runtime_error in
+// place of running its body; the store call rethrows it to its awaiter.
+void arm_force_store_offload_throw_once() noexcept;
 // Read and reset the T015 retrieve pread-attempt counter.
 // Returns the number of read_frame_payload() calls in retrieve()'s walk since
 // the last reset. Discriminates guard-before-pread (==1) from stale-pread-failed

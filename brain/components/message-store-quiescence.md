@@ -13,6 +13,7 @@ refs:
   - include/fixpp/core/sync/async_mutex.hpp
   - .specify/544-hot-path-zero-alloc.md
   - .specify/536-537-538-recovery-liveness.md
+  - .specify/624-offload-completion-lifetime.md
   - .specify/2e-msgstore.md
   - specs/035-filestore-io-offload/contracts/file-offload.md
   - specs/093-inbound-frame-dispositions/spec.md
@@ -21,6 +22,7 @@ refs:
   - spec/behaviors-and-limitations.md
   - tests/session/test_file_store_crash_survival.cpp
   - tests/session/test_598_store_offload.cpp
+  - tests/session/test_624_offload_completion_lifetime.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
@@ -212,6 +214,29 @@ the user-facing rows are B&L `B-598-1`, `B-598-2`, `L-598-1` and `B-035-1`'s ame
 - **`retrieve` after a reset (fixpp#538).** Both stores look a number up relative to the first frame
   the direction retains; `.specify/2e-msgstore.md` carries an erratum for it at its end, and
   `message_store.hpp`'s `retrieve` comment binds third-party stores (B&L `B-538-1`, `B-538-3`).
+
+## The offload's completion hand-off (fixpp#624)
+
+The design is `.specify/624-offload-completion-lifetime.md`, decision **D-624-1** (offload completion:
+the caller waits for the job's last touch). `offload_to` no longer awaits a nested `co_spawn`: it posts a
+job of its own to the file executor, the job posts the completion back to the caller's executor and
+then stores a flag in the awaiting frame as its last action, and the caller waits for that flag before
+the store call returns. Before it, the file I/O thread released copies of the caller's executor (and
+could drop a strand's last reference) after the caller had resumed, so a host that destroyed its own
+execution context while the file I/O pool lived on met a use-after-free. D-598-1 and D-598-2 (no
+cancellation reaches the job; the body's own result is returned) are kept. Re-derive the current shape
+from `offload_to` in `src/session/file_store.cpp`; this paragraph is a pointer, not the code.
+
+Documents that describe `offload_to` as a nested `co_spawn`. The live B&L row is amended; the others are not edited, and each is flagged here.
+
+| Document | The claim | Status |
+|---|---|---|
+| `specs/035-filestore-io-offload/research.md`, Decision 1 | the offload is a nested `co_spawn(pool, fn, use_awaitable)`; a hand-rolled `async_initiate` two-post is rejected as "strictly worse (2 allocs)" | ⚠️ **SUPERSEDED as the mechanism by D-624-1**, which is an `async_initiate` with two posts. The allocation comparison was 035's measurement of its own probes; re-measure, do not cite it (the note's §3, "Allocation", gives the procedure). |
+| `specs/035-filestore-io-offload/data-model.md` §2 | `offload_to(...) // = co_await co_spawn(pool_ex, run(fn), use_awaitable)`, "the final, intended shape" | ⚠️ **SUPERSEDED by D-624-1.** The bundle is frozen and not edited. |
+| `specs/035-filestore-io-offload/plan.md`; `checklists/api-abi-nfr.md` CHK010 | the sites become "nested co_spawn"; the nested-co_spawn allocation per op | ⚠️ **SUPERSEDED as the mechanism by D-624-1.** History of feature 035. |
+| `spec/behaviors-and-limitations.md`, `B-035-1` | the offload ran "via genuine `co_await asio::co_spawn(…)`" with one `co_spawn` frame per disk op | ✅ **AMENDED for fixpp#624**: the mechanism sentence now describes the posted job and the last touch, and the allocation is stated as a condition. `B-624-1` is the host-facing row. |
+| `.specify/563-564-callback-send.md` §2.6, "How a cancellation reaches the write" | `offload_to` "awaits a `co_spawn` onto the file executor", and asio's cancellation handler hands the executor a second job | ⚠️ **HISTORY.** True of the tree before fixpp#598 for the cancellation, and before D-624-1 for the `co_spawn`. |
+| `include/fixpp/session/message_store.hpp`, `store`'s comment | "before the nested co_spawn that offloads pwrite / fdatasync to file_io_executor" | ⚠️ **STALE on the mechanism since D-624-1**; the obligation it states (deep-copy before any suspension) holds. |
 
 ## Note for reviewers
 
