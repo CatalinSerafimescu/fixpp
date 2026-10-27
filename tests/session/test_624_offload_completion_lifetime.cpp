@@ -75,7 +75,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <exception>
 #include <filesystem>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
@@ -121,7 +120,7 @@ struct hold_state {
 
     void release() {
         {
-            std::lock_guard lock{m};
+            std::scoped_lock const lock{m};
             released = true;
         }
         cv.notify_all();
@@ -132,6 +131,7 @@ struct hold_state {
     void engage() noexcept {
         held.fetch_add(1);
         // Printed before the wait, so a run that a sanitizer ends still shows the hold.
+        // NOLINTNEXTLINE(modernize-use-std-print): libstdc++ 13 has no <print>
         std::fprintf(stderr, "[fixpp#624] hold engaged on the file I/O thread\n");
     }
 
@@ -146,15 +146,17 @@ struct hold_state {
     void caller_starts_waiting() noexcept {
         caller_waits.fetch_add(1);
         {
-            std::lock_guard lock{m};
+            std::scoped_lock const lock{m};
             if (held.load() > 0 && !released) caller_waited_while_held = true;
         }
+        // NOLINTNEXTLINE(modernize-use-std-print): libstdc++ 13 has no <print>
         std::fprintf(stderr, "[fixpp#624] the caller starts waiting for the job's last touch\n");
         release();
     }
 };
 
 // The probe is a plain function pointer, so it reaches the cell's state through this.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables): the probe's only route
 std::atomic<hold_state*> g_hold{nullptr};
 
 void on_caller_wait() noexcept {
@@ -192,33 +194,35 @@ public:
         st_->hold();
     }
 
-    asio::execution_context& query(asio::execution::context_t /*prop*/) const noexcept {
+    [[nodiscard]] asio::execution_context& query(
+        asio::execution::context_t /*prop*/) const noexcept {
         return asio::query(inner_, asio::execution::context);
     }
 
     // any_io_executor probes context_as<execution_context&>, which the constrained
     // template below does not admit for a strand (as in session_executor.hpp).
     template <class U>
-    U query(asio::execution::context_as_t<U> /*prop*/) const noexcept {
+    [[nodiscard]] U query(asio::execution::context_as_t<U> /*prop*/) const noexcept {
         return asio::query(inner_, asio::execution::context);
     }
 
     template <class Property>
         requires asio::can_query_v<Inner const&, Property>
-    auto query(Property const& p) const noexcept(asio::is_nothrow_query_v<Inner const&, Property>) {
+    [[nodiscard]] auto query(Property const& p) const
+        noexcept(asio::is_nothrow_query_v<Inner const&, Property>) {
         return asio::query(inner_, p);
     }
 
     template <class Property>
         requires asio::can_require_v<Inner const&, Property>
-    auto require(Property const& p) const {
+    [[nodiscard]] auto require(Property const& p) const {
         using next = std::decay_t<asio::require_result_t<Inner const&, Property>>;
         return holding_executor<next>{asio::require(inner_, p), st_};
     }
 
     template <class Property>
         requires asio::can_prefer_v<Inner const&, Property>
-    auto prefer(Property const& p) const {
+    [[nodiscard]] auto prefer(Property const& p) const {
         using next = std::decay_t<asio::prefer_result_t<Inner const&, Property>>;
         return holding_executor<next>{asio::prefer(inner_, p), st_};
     }
@@ -320,7 +324,7 @@ void run_cell(MakeCaller make_caller, job_kind const kind) {
     caller.reset();   // step 2: the caller's execution context is destroyed
     st.release();     // step 3
     file_io.reset();  // step 4
-    store.reset();
+    store = nullptr;
 
     if (kind == job_kind::returns) {
         EXPECT_TRUE(out.returned && out.stored && !out.threw)
@@ -334,13 +338,14 @@ void run_cell(MakeCaller make_caller, job_kind const kind) {
         << "the hold never engaged: no completion was handed to the caller's executor from "
            "the file I/O thread";
     {
-        std::lock_guard lock{st.m};
+        std::scoped_lock const lock{st.m};
         EXPECT_TRUE(st.caller_waited_while_held)
             << "the store call's caller did not wait for the file I/O job while the file I/O "
                "thread was still inside the hand-off (caller-wait probe fired "
             << st.caller_waits.load() << " time(s))";
     }
     EXPECT_FALSE(st.timed_out.load()) << "the hold was not released within its bound";
+    // NOLINTNEXTLINE(modernize-use-std-print): libstdc++ 13 has no <print>
     std::printf("[fixpp#624] hand-offs held: %d; caller waits: %d\n", st.held.load(),
                 st.caller_waits.load());
 }
@@ -376,6 +381,7 @@ TEST(OffloadCompletionLifetime, ThrowingJob_CallerPool_DestroyedBeforeTheFileIoP
 // no teardown can join, so the process ends here with the failure on stderr.
 void complete_or_exit(std::future<void>& done, char const* cell) {
     if (done.wait_for(kBound) == std::future_status::ready) return;
+    // NOLINTNEXTLINE(modernize-use-std-print): libstdc++ 13 has no <print>
     std::fprintf(stderr, "[fixpp#624] %s: the store call did not complete; exiting\n", cell);
     std::fflush(stderr);
     std::_Exit(1);

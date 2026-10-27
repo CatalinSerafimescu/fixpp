@@ -40,7 +40,6 @@
 #include <asio/thread_pool.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
@@ -273,8 +272,9 @@ void reset_arm(int const step, bool const poisons) {
             fixpp::session::arm_force_reset_step_fault_once(step);
             bool reset_threw = false;
             fixpp::core::expected_t<void> reset{};
+            MessageStore& ms = *store;
             try {
-                reset = co_await store->reset();
+                reset = co_await ms.reset();
             } catch (std::exception const&) {
                 reset_threw = true;
             }
