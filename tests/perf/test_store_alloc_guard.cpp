@@ -38,12 +38,14 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/strand.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
@@ -340,9 +342,12 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
 // pool. Two arms, by the driver's cancellation slot. Bound: a connected slot that is never
 // emitted, as a session's calls run under its root slot; only then does the offload's spawn
 // see a connected slot to install a handler in. Unbound: no slot, as the retrieve window
-// above runs.
+// above runs. SessionExecutorCaller (fixpp#624): no slot, with the driver spawned on a
+// fixpp::core::session_executor over a strand, the shape of a session's executor under
+// per_session_strand, which asio::any_io_executor stores as a shared target.
 namespace {
-void run_filestore_store_window(bool bind_slot) {
+enum class store_window_caller : std::uint8_t { bound_slot, no_slot, session_executor };
+void run_filestore_store_window(store_window_caller const caller) {
     constexpr int kWarm = 16;
     constexpr int kMeasured = 64;
     constexpr int kTotal = kWarm + kMeasured;
@@ -381,9 +386,13 @@ void run_filestore_store_window(bool bind_slot) {
     asio::cancellation_signal sig;
     auto drv =
         rd::driver<1>(store_next, rd::window_spec{.warm = kWarm, .measured = kMeasured}, out);
-    if (bind_slot) {
+    if (caller == store_window_caller::bound_slot) {
         asio::co_spawn(ioc, std::move(drv),
                        asio::bind_cancellation_slot(sig.slot(), asio::detached));
+    } else if (caller == store_window_caller::session_executor) {
+        fixpp::core::session_executor const sx{asio::any_io_executor{asio::make_strand(ioc)},
+                                               nullptr, true};
+        asio::co_spawn(sx, std::move(drv), asio::detached);
     } else {
         asio::co_spawn(ioc, std::move(drv), asio::detached);
     }
@@ -398,6 +407,13 @@ void run_filestore_store_window(bool bind_slot) {
 }
 }  // namespace
 
-TEST(StoreAllocGuard, FileStoreStoreWindow_BoundSlot) { run_filestore_store_window(true); }
-TEST(StoreAllocGuard, FileStoreStoreWindow_NoSlot) { run_filestore_store_window(false); }
+TEST(StoreAllocGuard, FileStoreStoreWindow_BoundSlot) {
+    run_filestore_store_window(store_window_caller::bound_slot);
+}
+TEST(StoreAllocGuard, FileStoreStoreWindow_NoSlot) {
+    run_filestore_store_window(store_window_caller::no_slot);
+}
+TEST(StoreAllocGuard, FileStoreStoreWindow_SessionExecutorCaller) {
+    run_filestore_store_window(store_window_caller::session_executor);
+}
 #endif  // !_WIN32}
