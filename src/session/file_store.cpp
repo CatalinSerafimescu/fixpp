@@ -371,8 +371,8 @@ template <class Handler, class CallerWork, class Fn>
 struct offload_job {
     using result_type = std::invoke_result_t<Fn>;
 
-    Handler handler;
-    CallerWork caller_work;
+    std::optional<Handler> handler;
+    std::optional<CallerWork> caller_work;
     Fn fn;
     std::atomic<bool>* last_touch;
 
@@ -392,12 +392,18 @@ struct offload_job {
                     outcome.error = std::current_exception();
                 }
             }
-            // The handler and the caller's executor are moved out here, once, into locals
-            // this scope destroys before the flag store. Their move constructors null what
-            // the moved-from members referred to (an awaitable's frame, an executor's
-            // target), so the job asio destroys after the flag owns nothing of the caller's.
-            Handler h = std::move(handler);
-            CallerWork const ex = std::move(caller_work);
+            // The handler and the caller's executor are moved out into locals, and both
+            // members are disengaged, inside this scope: everything of the caller's the job
+            // held is destroyed before the flag store, and the job asio destroys after it
+            // holds nothing of the caller's.
+            // initiate_offload engages both, and asio runs the job once.
+            if (!handler || !caller_work) {
+                std::terminate();
+            }
+            Handler h = std::move(*handler);
+            handler.reset();
+            CallerWork const ex = std::move(*caller_work);
+            caller_work.reset();
             ex.execute(offload_completion<Handler, result_type>{std::move(h), std::move(outcome)});
         }
         done->store(true, std::memory_order_release);
@@ -420,8 +426,9 @@ struct initiate_offload {
             asio::execution::outstanding_work.tracked);
         // NOLINTEND(readability-static-accessed-through-instance)
         using job_t = offload_job<Handler, decltype(caller_work), std::decay_t<Fn>>;
-        asio::post(pool_ex, job_t{std::move(handler), std::move(caller_work), std::forward<Fn>(fn),
-                                  last_touch});
+        asio::post(pool_ex, job_t{std::optional<Handler>{std::move(handler)},
+                                  std::optional<decltype(caller_work)>{std::move(caller_work)},
+                                  std::forward<Fn>(fn), last_touch});
     }
 };
 
