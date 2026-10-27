@@ -50,6 +50,7 @@
 #include <fixpp/session/file_store.hpp>
 #include <memory>
 #include <memory_resource>
+#include <new>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -166,6 +167,11 @@ static std::atomic<bool> g_force_reset_dir_fsync_fail{false};
 //     POSIX-semantics rename fails (posix_rename_over_open).
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_reset_rename_flush_fail{false};
+// fixpp#599: the next reset's offloaded job throws std::bad_alloc right after its
+// rename has replaced the live log (after rename_done is set), on both platforms.
+// Consumed once; counts in g_reset_atomicity_fault_count when it fires.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_force_reset_throw_after_rename{false};
 // T004 probe counter — incremented each time g_force_store_pwrite_fail_once
 // actually fires (i.e. the injected failure took effect), so a test can
 // confirm the seam fired for the right reason rather than trust a bare RED.
@@ -640,6 +646,9 @@ void arm_force_reset_dir_fsync_fail_once() noexcept {
 }
 void arm_force_reset_rename_flush_fail_once() noexcept {
     g_force_reset_rename_flush_fail.store(true, std::memory_order_relaxed);
+}
+void arm_force_reset_throw_after_rename_once() noexcept {
+    g_force_reset_throw_after_rename.store(true, std::memory_order_relaxed);
 }
 
 // ── Record kinds ──────────────────────────────────────────────────────────────
@@ -1884,6 +1893,23 @@ namespace {
 // counters the fresh log starts at as parameters. reset() passes (1, 1); reset_to passes
 // its targets. The rename is the single commit point for the cleared log and both
 // counters, so a crash or a fault at any step leaves the old log or the new one.
+// D-599-1 (b): the reset's offload, with an exception leaving it turned into a failure
+// like a returned one. reset_store_to then takes Region 3's failure branch, which reads
+// rename_done: after the rename it poisons the store, before it the old log stands, and
+// either way the reset returns store_io_failure. D-599-1 (a), in the job, removes the
+// known throw after the rename by building every path before it; this catch is the guard
+// for the class, so a step added after the rename that can throw cannot leave the store
+// writing to the replaced log's inode. Both are needed: (a) alone leaves the class open,
+// (b) alone still lets a known allocation fail after the rename.
+template <class Fn>
+asio::awaitable<bool> offload_reset_job(asio::any_io_executor pool_ex, Fn fn) {
+    try {
+        co_return co_await offload_to(std::move(pool_ex), std::move(fn));
+    } catch (...) {
+        co_return false;
+    }
+}
+
 asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& impl, seqnum_t next_in,
                                                               seqnum_t next_out) noexcept {
     // Capture the session executor for the leading pump-break post below (035: no
@@ -1946,7 +1972,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     auto result_file = std::make_shared<OsFile>();
     auto rename_done = std::make_shared<bool>(false);
 
-    const bool reset_ok = co_await offload_to(
+    // D-599-1 (b): see offload_reset_job above.
+    const bool reset_ok = co_await offload_reset_job(
         impl.cfg.file_io_executor,
         [path, hash, probe_fn, result_file, rename_done, next_in, next_out]() -> bool {
             if (probe_fn) {
@@ -1985,6 +2012,15 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // Close tmp file before rename (required on some POSIX implementations)
             tmp_file = OsFile{};  // destructs: close()
 
+            // D-599-1 (a): everything the steps after the rename need is built here, before
+            // it, so nothing after the rename allocates. A throw after the rename is still
+            // a failure after the rename; offload_reset_job's catch (D-599-1 (b)) makes it
+            // one.
+            const std::string dir_path = [&path] {
+                const auto dir_fs_path = std::filesystem::path{path}.parent_path();
+                return dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
+            }();
+
             // 093 (tasks.md T079): the fault-before-rename seam.
             if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
                 g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
@@ -2002,13 +2038,15 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // reopen, lock) must take Region 3's poison branch, so the mark precedes
             // the directory fsync (093 Gate B, fixpp#554).
             *rename_done = true;
+            // fixpp#599: the throw-after-rename seam.
+            if (g_force_reset_throw_after_rename.exchange(false, std::memory_order_relaxed)) {
+                g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                throw std::bad_alloc{};
+            }
 
-            // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
+            // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5]. Its path was
+            // built before the rename (D-599-1 (a)).
             {
-                const std::filesystem::path log_fs_path{path};
-                const auto dir_fs_path = log_fs_path.parent_path();
-                const std::string dir_path =
-                    dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
                 // 093 Gate B (fixpp#554): the directory-open fault seam.
                 if (g_force_reset_dir_open_fail.exchange(false, std::memory_order_relaxed)) {
                     g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
@@ -2095,6 +2133,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
             // posix_rename_over_open. FlushFileBuffers inside provides the
             // WRITE_THROUGH durability the old MoveFileEx flag gave.
+            // D-599-1 (a) holds on this branch as written: every path the steps after the
+            // rename use (wide_live) is built above, before it.
             const rename_outcome renamed = posix_rename_over_open(wide_tmp, wide_live);
             if (renamed == rename_outcome::not_renamed) {
                 DeleteFileW(wide_tmp.c_str());
@@ -2104,6 +2144,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // every failure from here takes Region 3's poison branch. The tmp name
             // no longer exists, so there is nothing to delete.
             *rename_done = true;
+            // fixpp#599: the throw-after-rename seam.
+            if (g_force_reset_throw_after_rename.exchange(false, std::memory_order_relaxed)) {
+                g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                throw std::bad_alloc{};
+            }
             if (renamed == rename_outcome::renamed_not_flushed) {
                 return false;  // the store's handle names the replaced file → poison
             }
@@ -2150,7 +2195,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     //   the stale snapshot on its next iteration (data-model §4 / I-03 / FR-006).
     if (!reset_ok) {
         if (*rename_done) {
-            // Any failure after the rename (directory durability, reopen, lock): the old
+            // Any failure after the rename (directory durability, reopen, lock, or an
+            // exception out of the job, D-599-1): the old
             // fd names a dead inode (unlinked by rename); poison the store so no write
             // reaches it. A later reset() will poison-check open_ok and return
             // store_io_failure immediately.

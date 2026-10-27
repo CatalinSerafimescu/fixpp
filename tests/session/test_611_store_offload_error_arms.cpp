@@ -22,18 +22,25 @@
 // relying on the order. The next_seqnum(increment) job writes the counter header and
 // the counter payload, then the fdatasync.
 //
+// ResetThrowAfterRename (fixpp#599, D-599-1 in .specify/624-offload-completion-lifetime.md):
+// the reset's job throws after its rename has replaced the live log
+// (arm_force_reset_throw_after_rename_once). The reset must end as a failure after the
+// rename ends: store_io_failure, the store poisoned so no later write reaches the
+// replaced log's inode, and the reopened log the reset's own.
+//
 // Not here: the arms of reset_store_to's job that fixpp#611 also names (initialise_fresh
-// on the temporary file, the rename, the reopen after it, the reopen's lock). No seam
-// reaches them: the reset seams fail the job before the rename, at the directory's open
-// or fsync, or, through install_post_rename_reopen_fail_hook, at a return placed BEFORE
-// the reopen's own `open` call, so the reopen's and the lock's failure statements are not
-// executed by any of them. Re-derive by reading the reset job in reset_store_to.
+// on the temporary file, the rename, the reopen after it, the reopen's lock). The reset
+// seams sit before the rename, at the directory's open or fsync, and (for
+// install_post_rename_reopen_fail_hook) at a return placed before the reopen's own `open`
+// call; none sits at those four statements. Re-derive by reading the reset job in
+// reset_store_to.
 
 #include <gtest/gtest.h>
 
 #include <asio/awaitable.hpp>
 #include <asio/thread_pool.hpp>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/direction.hpp>
@@ -233,5 +240,49 @@ TEST(StoreOffloadErrorArms, NextSeqnum_CounterPayloadPwriteFails) { next_seqnum_
 
 // The counter record was written; only the flush reported failure.
 TEST(StoreOffloadErrorArms, NextSeqnum_DatasyncFails) { next_seqnum_arm(0, true, 3); }
+
+// ── reset() whose job throws after the rename (fixpp#599) ─────────────────────
+
+TEST(ResetThrowAfterRename, PoisonsTheStoreAndReturnsTheResetsError) {
+    (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
+    Fixture fx;
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        {
+            auto store = fx.open();
+            EXPECT_NE(store, nullptr) << "setup: the FileStore";
+            if (!store) co_return;
+            auto const one = co_await store_seq(*store, 1);
+            auto const two = co_await store_seq(*store, 2);
+            EXPECT_TRUE(one.has_value() && two.has_value()) << "setup: store(1), store(2)";
+            if (!one || !two) co_return;
+
+            fixpp::session::arm_force_reset_throw_after_rename_once();
+            bool reset_threw = false;
+            fixpp::core::expected_t<void> reset{};
+            try {
+                reset = co_await store->reset();
+            } catch (std::exception const&) {
+                reset_threw = true;
+            }
+            EXPECT_EQ(fixpp::session::read_and_reset_reset_atomicity_fault_count(), 1)
+                << "the throw-after-rename seam did not fire";
+            EXPECT_FALSE(reset_threw) << "the reset's job threw, and the reset passed it on";
+            EXPECT_TRUE(!reset_threw && !reset && reset.error() == error::store_io_failure)
+                << "the reset must return store_io_failure";
+
+            // A store after the failed reset: the store is poisoned, so it is refused.
+            auto const later = co_await store_seq(*store, 3);
+            EXPECT_TRUE(!later && later.error() == error::store_io_failure)
+                << "store(3) after the failed reset must be refused; it returned "
+                << (later ? "success" : "an error other than store_io_failure");
+        }
+        // The live name is the reset's fresh log: no frame, next outbound 1. store(3) is
+        // not in it, whatever store(3) returned.
+        auto const again = co_await reopen(fx);
+        EXPECT_TRUE(again.accepted) << "the open after the failed reset must accept the log";
+        EXPECT_EQ(again.next_outbound, seqnum_t{1}) << "next outbound number after reopen";
+        EXPECT_TRUE(again.frames.empty()) << "frames after reopen:" << text(again.frames);
+    });
+}
 
 }  // namespace

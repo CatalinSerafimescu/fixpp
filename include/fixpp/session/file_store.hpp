@@ -293,6 +293,10 @@ int read_and_reset_reset_atomicity_fault_count() noexcept;
 void arm_force_reset_dir_open_fail_once() noexcept;
 void arm_force_reset_dir_fsync_fail_once() noexcept;
 void arm_force_reset_rename_flush_fail_once() noexcept;
+// fixpp#599: one-shot; the next reset's offloaded job throws std::bad_alloc right after
+// its rename has replaced the live log. Counts in
+// read_and_reset_reset_atomicity_fault_count() when it fires.
+void arm_force_reset_throw_after_rename_once() noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session

@@ -102,6 +102,18 @@ O(1) coroutine frame per offloaded I/O op. It is a ceiling, and D-624-1 allocate
 frame, so the constitution is not amended. `spec/behaviors-and-limitations.md` `B-035-1` states the
 mechanism and the allocation as conditions, and `B-624-1` states what a host may now do.
 
+**Not handled: an allocation failure in the job's hand-back.** Read, not run. If the job's
+`asio::post` to the caller's executor throws (`std::bad_alloc` from the posted operation, or from a
+property conversion on an executor stored as a shared target), the exception leaves the job's call
+operator before the flag is stored, so the job touches no caller frame afterwards. Unwinding destroys
+the completion object, and with it the handler, on the file I/O thread; the handler's
+`awaitable_thread` destructor (`asio/impl/awaitable.hpp`) then posts the destruction of the caller's
+coroutine stack to the caller's executor, and that post can fail the same way. The exception then
+leaves asio's operation: on an `asio::thread_pool`, `thread_pool::thread_function`
+(`asio/impl/thread_pool.ipp`) catches it and calls `std::terminate`; on an `io_context` the host
+runs, it leaves the host's `run()`. The awaiting store call is never resumed. Before D-624-1 the
+same failure in `co_spawn_entry_point`'s dispatch had the same reach.
+
 ## 4. Rejected
 
 1. **Narrowing the host contract: the file I/O pool must be joined before the caller's context is
@@ -148,3 +160,39 @@ describe `offload_to` as a nested `co_spawn`. They are not edited; each is flagg
 `checklists/api-abi-nfr.md` CHK010; `.specify/563-564-callback-send.md`
 §2.6, "How a cancellation reaches the write"; `include/fixpp/session/message_store.hpp`, `store`'s
 comment ("before the nested co_spawn that offloads …").
+
+## 7. D-599-1 — an exception after a reset's rename poisons the store (fixpp#599)
+
+**The condition.** `reset_store_to`'s job sets `rename_done` as soon as the rename has replaced the
+live log. A failure the job RETURNS after that takes Region 3's poison branch. Before D-599-1, a failure
+the job THREW did not: the exception left `offload_to`'s await and `reset_store_to` without reaching
+Region 3. The store kept the replaced log's descriptor, later writes reported success into an unlinked
+inode, and the next open read the fresh log without them. The job built the directory's path for the
+directory fsync after the rename, and each of those constructions can throw `std::bad_alloc`.
+
+**The statement.** Both of these:
+- (a) Every path and string the steps after the rename need is built before the rename (the POSIX
+  branch's directory path). Nothing after the rename allocates. On the Windows branch this already
+  held: every path its post-rename steps use is built before the rename.
+- (b) `offload_reset_job`, through which `reset_store_to` awaits the job, catches any exception leaving
+  the offload and returns false. Region 3 then reads `rename_done` exactly as for a returned failure:
+  after the rename the store is poisoned, before it the old log stands, and either way the reset
+  returns `store_io_failure`. It does not rethrow. One condition, one observable ending.
+
+(a) removes the known throw; (b) is the guard for the class, so a step added after the rename that can
+throw cannot reopen the hole. (b) is a helper rather than a `try` written inside `reset_store_to` so that
+the job's body keeps its indentation; `reset_store_to` is its only caller.
+
+**The cell** (run): `ResetThrowAfterRename.PoisonsTheStoreAndReturnsTheResetsError` in
+`tests/session/test_611_store_offload_error_arms.cpp`, through the seam
+`arm_force_reset_throw_after_rename_once` (FIXPP_TEST_HOOKS), which throws `std::bad_alloc` right after
+`rename_done` is set on both branches. It asserts that the seam fired, that the reset returns
+`store_io_failure` and does not throw, that a later `store()` is refused, and that the reopened log is
+the reset's own (no frame, next outbound 1). The Windows branch compiles only under MSVC; its witness
+is this cell on POSIX plus the shared structure: the same seam at its `rename_done` site, and the same
+`offload_reset_job` and Region 3.
+
+**Mutant to re-run** (not committed): remove (b)'s catch, so that `offload_reset_job` only returns what
+`offload_to` returns. The cell must go RED, with the reset passing the exception on and the later
+`store()` reporting success.
+
