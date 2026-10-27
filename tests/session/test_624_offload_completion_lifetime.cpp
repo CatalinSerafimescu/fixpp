@@ -45,6 +45,11 @@
 //                 implementation, whose destructor uses the pool's strand service. A
 //                 change that only drops work tracking from the hand-off can therefore
 //                 not make this cell pass.
+//   CallerSessionExecutor  CallerStrand, with the held strand inside a session_executor
+//                 inside asio::any_io_executor, as Session::open builds the caller's
+//                 executor under per_session_strand (src/session/session_executor.cpp):
+//                 the conversions and the hand-back go through session_executor's
+//                 re-wrapping require/prefer and two type-erasure layers.
 //   ThrowingJob   CallerPool, with the offloaded job throwing (the one-shot seam
 //                 arm_force_store_offload_throw_once): the exception reaches the caller
 //                 through the same hand-off.
@@ -57,6 +62,7 @@
 
 #include <gtest/gtest.h>
 
+#include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/execution.hpp>
@@ -76,6 +82,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fixpp/core/session_executor.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
@@ -363,12 +370,25 @@ auto strand_caller() {
     };
 }
 
+auto session_executor_caller() {
+    return [](asio::thread_pool& pool, hold_state* st) {
+        return fixpp::core::session_executor{
+            asio::any_io_executor{holding_executor<asio::strand<asio::thread_pool::executor_type>>{
+                asio::make_strand(pool.get_executor()), st}},
+            nullptr, true};
+    };
+}
+
 TEST(OffloadCompletionLifetime, CallerPool_DestroyedBeforeTheFileIoPool) {
     run_cell(bare_caller(), job_kind::returns);
 }
 
 TEST(OffloadCompletionLifetime, CallerStrand_DestroyedBeforeTheFileIoPool) {
     run_cell(strand_caller(), job_kind::returns);
+}
+
+TEST(OffloadCompletionLifetime, CallerSessionExecutor_DestroyedBeforeTheFileIoPool) {
+    run_cell(session_executor_caller(), job_kind::returns);
 }
 
 TEST(OffloadCompletionLifetime, ThrowingJob_CallerPool_DestroyedBeforeTheFileIoPool) {
