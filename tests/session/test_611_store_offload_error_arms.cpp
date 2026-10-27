@@ -8,13 +8,16 @@
 // next_seqnum(increment) job without writing. Each cell asserts:
 //   - the call's returned error;
 //   - that the seam fired, so a failure cannot come from another cause;
+//   - that the log's size after the failed call is its size before it (fixpp#635, D-635-1:
+//     a failed call restores the log's committed end);
 //   - what the log holds after the store is closed and opened again: whether the open
 //     accepts it, the next outbound number, and the frames a retrieve visits.
 //
-// What the reopen holds follows from FileStoreImpl::restart_scan in
-// src/session/file_store.cpp: a record cut short at the tail is truncated away, a
-// complete frame record is indexed, and the counters come from the last complete
-// counter record. Re-derive an expectation from that scan, not from this file.
+// What the reopen holds follows from D-635-1 and FileStoreImpl::restart_scan in
+// src/session/file_store.cpp: a failed call leaves the committed records only, unless its
+// restore failed too; then a record cut short at the tail is truncated away, a complete
+// frame record is indexed, and the counters come from the last complete counter record.
+// Re-derive an expectation from those, not from this file.
 //
 // The store() job writes, in order: the frame header, the payload, the padding, the
 // counter header, the counter payload, then the fdatasync (commit_per_message). The
@@ -98,11 +101,20 @@ struct Fixture {
     }
 };
 
+// The size of the fixture's log file; 0 when there is none.
+std::uintmax_t log_size(Fixture const& fx) {
+    for (auto const& e : std::filesystem::directory_iterator(fx.dir.path)) {
+        if (e.path().extension() == ".log") return std::filesystem::file_size(e.path());
+    }
+    return 0;
+}
+
 // Clears an armed fault that a cell's call did not take, so it cannot reach a later cell.
 struct disarm_on_exit {
     disarm_on_exit() { (void)fixpp::session::read_and_reset_offload_write_fail_count(); }
     ~disarm_on_exit() {
         fixpp::session::arm_force_offload_write_fail_once(0, false);
+        fixpp::session::arm_force_offload_restore_fail_once(false, false);
         (void)fixpp::session::read_and_reset_offload_write_fail_count();
     }
     disarm_on_exit(disarm_on_exit const&) = delete;
@@ -168,12 +180,15 @@ void store_arm(int const pwrite_nth, bool const datasync, std::vector<seqnum_t> 
             auto const first = co_await store_seq(*store, 1);
             EXPECT_TRUE(first.has_value()) << "setup: store(1)";
             if (!first) co_return;
+            auto const committed_end = log_size(fx);
             fixpp::session::arm_force_offload_write_fail_once(pwrite_nth, datasync);
             auto const second = co_await store_seq(*store, 2);
             EXPECT_TRUE(!second && second.error() == error::store_io_failure)
                 << "store(2) must return store_io_failure";
             EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 1)
                 << "the seam did not fire for store(2)";
+            // D-635-1: a failed store leaves no byte past the log's committed end.
+            EXPECT_EQ(log_size(fx), committed_end) << "the log's size after the failed store(2)";
         }
         auto const again = co_await reopen(fx);
         EXPECT_TRUE(again.accepted) << "the open after the failure must accept the log";
@@ -196,12 +211,15 @@ void next_seqnum_arm(int const pwrite_nth, bool const datasync, seqnum_t const n
             auto const first = co_await store->next_seqnum(direction_t::outbound, true);
             EXPECT_TRUE(first.has_value() && *first == 1) << "setup: the first increment";
             if (!first) co_return;
+            auto const committed_end = log_size(fx);
             fixpp::session::arm_force_offload_write_fail_once(pwrite_nth, datasync);
             auto const second = co_await store->next_seqnum(direction_t::outbound, true);
             EXPECT_TRUE(!second && second.error() == error::store_io_failure)
                 << "the second increment must return store_io_failure";
             EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 1)
                 << "the seam did not fire for the second increment";
+            // D-635-1: a failed increment leaves no byte past the log's committed end.
+            EXPECT_EQ(log_size(fx), committed_end) << "the log's size after the failed increment";
         }
         auto const again = co_await reopen(fx);
         EXPECT_TRUE(again.accepted) << "the open after the failure must accept the log";
@@ -212,34 +230,29 @@ void next_seqnum_arm(int const pwrite_nth, bool const datasync, seqnum_t const n
 
 // ── store() ───────────────────────────────────────────────────────────────────
 
-// Only the frame header is on disk: a record cut short at the tail, truncated away.
+// D-635-1: every arm of a failed store() restores the log's committed end, so the reopen
+// finds store(1)'s records only, whatever the failed job wrote before it failed.
 TEST(StoreOffloadErrorArms, Store_PayloadPwriteFails) { store_arm(2, false, {1}, false, 2); }
 
-// Header and payload, no padding: the record is short of its padded size, truncated.
 TEST(StoreOffloadErrorArms, Store_PaddingPwriteFails) { store_arm(3, false, {1}, false, 2); }
 
-// The frame record is complete and no counter record follows it: the frame is indexed,
-// and the counters come from store(1)'s counter record, so the tail ends at 1 and the
-// frame is read only by its own number.
-TEST(StoreOffloadErrorArms, Store_CounterHeaderPwriteFails) { store_arm(4, false, {1}, true, 2); }
+TEST(StoreOffloadErrorArms, Store_CounterHeaderPwriteFails) { store_arm(4, false, {1}, false, 2); }
 
-// A counter header with no payload is cut short and truncated; the complete frame
-// record before it is indexed, as in the cell above.
-TEST(StoreOffloadErrorArms, Store_CounterPayloadPwriteFails) { store_arm(5, false, {1}, true, 2); }
+TEST(StoreOffloadErrorArms, Store_CounterPayloadPwriteFails) { store_arm(5, false, {1}, false, 2); }
 
-// Every record was written; only the flush reported failure.
-TEST(StoreOffloadErrorArms, Store_DatasyncFails) { store_arm(0, true, {1, 2}, true, 3); }
+// The records were written and the flush reported failure: the store reports failure, so
+// the records are removed with the rest.
+TEST(StoreOffloadErrorArms, Store_DatasyncFails) { store_arm(0, true, {1}, false, 2); }
 
 // ── next_seqnum(outbound, increment) ──────────────────────────────────────────
 
-// Nothing of the second counter record is on disk.
+// D-635-1: every arm of a failed increment restores the log's committed end, so the
+// reopen reads the first increment's counter record.
 TEST(StoreOffloadErrorArms, NextSeqnum_CounterHeaderPwriteFails) { next_seqnum_arm(1, false, 2); }
 
-// A counter header with no payload, truncated.
 TEST(StoreOffloadErrorArms, NextSeqnum_CounterPayloadPwriteFails) { next_seqnum_arm(2, false, 2); }
 
-// The counter record was written; only the flush reported failure.
-TEST(StoreOffloadErrorArms, NextSeqnum_DatasyncFails) { next_seqnum_arm(0, true, 3); }
+TEST(StoreOffloadErrorArms, NextSeqnum_DatasyncFails) { next_seqnum_arm(0, true, 2); }
 
 // ── reset(): one cell per step of the reset's job (fixpp#611, fixpp#599) ───────
 
@@ -320,9 +333,11 @@ TEST(ResetThrowAfterRename, PoisonsTheStoreAndReturnsTheResetsError) {
 
 // ── A failed store()'s frame record, then a second store() of the same number ─────────
 //
-// Fixes #632 (D-632-1 in .specify/624-offload-completion-lifetime.md): store(n) fails at its
-// counter write, so the log holds a complete frame record for n that the call reported as
-// not stored, and the reopened store's next number is still n. A second store(n), with
+// Fixes #632 (D-632-1 in .specify/624-offload-completion-lifetime.md): the log holds a
+// complete frame record for n with no counter record after it, as a crash between the two
+// leaves it, and the reopened store's next number is still n. (In a live process a failed
+// store restores the log's end, D-635-1; the cells reach that state by failing the restore
+// too, through arm_force_offload_restore_fail_once.) A second store(n), with
 // different bytes, appends another record for n. The last record of a number wins: a lookup
 // of n returns the second store's frame, in the process that stored it and after every
 // reopen, and the numbers after n are looked up at their own place.
@@ -389,10 +404,15 @@ void last_record_of_a_number_wins(direction_t const dir) {
             EXPECT_NE(store, nullptr) << "setup: the FileStore";
             if (!store) co_return;
             EXPECT_TRUE((co_await put(*store, 1, expected[1])).has_value()) << "setup: store(1)";
+            // The state a crash leaves between the frame record and the counter record:
+            // store(2) fails at its counter write and its restore of the committed end
+            // (D-635-1) fails too, so the frame record stays and the store is poisoned
+            // until the next open.
             fixpp::session::arm_force_offload_write_fail_once(4, false);  // counter header
+            fixpp::session::arm_force_offload_restore_fail_once(true, false);
             auto const r = co_await put(*store, 2, failed);
-            EXPECT_TRUE(!r && fixpp::session::read_and_reset_offload_write_fail_count() == 1)
-                << "setup: store(2) fails at its counter write";
+            EXPECT_TRUE(!r && fixpp::session::read_and_reset_offload_write_fail_count() == 2)
+                << "setup: store(2) fails at its counter write, and its restore fails";
         }
         {
             auto store = fx.open();
@@ -479,19 +499,16 @@ TEST(StoreOffloadErrorArms, AFrameRecordBelowTheLastNumber_RefusesTheOpen) {
     EXPECT_EQ(fx.open(), nullptr) << "the open must refuse a frame record below the last number";
 }
 
-// ── A store() retried in the same process after it failed at its counter write ───────────
+// ── A store() retried in the same process after it failed (fixpp#635, D-635-1) ──────────
 //
-// OPEN QUESTION (from fixpp#611's counter arms; not decided): store(2)
-// fails at its counter write, so its frame record is on disk and the store's write position
-// is not advanced. Retried in the SAME process, store(2) writes its frame record and its
-// counter record from that same position, over the failed one. When the retry's frame record
-// plus its counter record (and the records after them) end before the failed frame record's
-// end, the failed record's last bytes stay in the log behind them. What does the next open
-// make of those bytes: a torn tail it truncates, or a log it refuses; and are the frames
-// stored after them still read? Equal and longer retries are the controls. This cell prints
-// and asserts nothing; it is disabled until that is decided. Run it with
-// --gtest_also_run_disabled_tests.
-void retry_in_the_same_process(char const* label, std::vector<std::byte> const& retry) {
+// store(2) fails at one arm. The retry store(2) runs in the SAME process, from the same
+// write position, with a frame of its own, then store(3) runs, then the store is opened
+// again. The reopen must accept the log, with next outbound 4 and the frames 1, the retry's
+// 2 and 3. A retry shorter than the failed frame is the case fixpp#635 found: before
+// D-635-1 the failed record's last bytes stayed behind store(3) and the open refused the
+// log. Equal and longer retries are the controls.
+void retry_after_a_failed_store(int const pwrite_nth, bool const datasync,
+                                std::vector<std::byte> const& retry) {
     disarm_on_exit const disarm;
     Fixture fx;
     auto const failed = make_test_frame(2, direction_t::outbound, 200);
@@ -499,14 +516,78 @@ void retry_in_the_same_process(char const* label, std::vector<std::byte> const& 
     expected[1] = make_test_frame(1, direction_t::outbound);
     expected[2] = retry;
     expected[3] = make_test_frame(3, direction_t::outbound);
-    auto const log_size = [&] {
-        for (auto const& e : std::filesystem::directory_iterator(fx.dir.path)) {
-            if (e.path().extension() == ".log") return std::filesystem::file_size(e.path());
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        {
+            auto store = fx.open();
+            EXPECT_NE(store, nullptr) << "setup: the FileStore";
+            if (!store) co_return;
+            EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
+            fixpp::session::arm_force_offload_write_fail_once(pwrite_nth, datasync);
+            auto const r =
+                co_await store->store(2, std::span<const std::byte>{failed}, direction_t::outbound);
+            EXPECT_TRUE(!r && fixpp::session::read_and_reset_offload_write_fail_count() == 1)
+                << "setup: store(2) fails at the armed step";
+            auto const two =
+                co_await store->store(2, std::span<const std::byte>{retry}, direction_t::outbound);
+            EXPECT_TRUE(two.has_value()) << "the retry store(2)";
+            EXPECT_TRUE((co_await store_seq(*store, 3)).has_value()) << "store(3)";
         }
-        return std::uintmax_t{0};
-    };
-    std::printf("[fixpp#611 retry %s] failed frame %zu bytes, retry frame %zu bytes\n", label,
-                failed.size(), retry.size());
+        auto const store = fx.open();
+        EXPECT_NE(store, nullptr) << "the reopen must accept the log";
+        if (!store) co_return;
+        auto const next = co_await store->next_seqnum(direction_t::outbound, false);
+        EXPECT_TRUE(next && *next == 4) << "next outbound after reopen";
+        auto const all = co_await walk(*store, direction_t::outbound, 1, 0, expected);
+        EXPECT_TRUE(all.ok && all.seqs == (std::vector<seqnum_t>{1, 2, 3}) && all.bytes_match)
+            << "the walk after reopen visited" << text(all.seqs)
+            << (all.bytes_match ? "" : ", with other bytes than stored last");
+    });
+}
+
+std::vector<std::byte> shorter_retry() { return make_test_frame(2, direction_t::outbound); }
+
+TEST(StoreOffloadErrorArms, RetryInTheSameProcess_Shorter) {
+    retry_after_a_failed_store(4, false, shorter_retry());
+}
+
+TEST(StoreOffloadErrorArms, RetryInTheSameProcess_EqualLength) {
+    auto frame = make_test_frame(2, direction_t::outbound, 200);
+    frame.back() = std::byte{0xEE};  // the same length, different bytes
+    retry_after_a_failed_store(4, false, frame);
+}
+
+TEST(StoreOffloadErrorArms, RetryInTheSameProcess_Longer) {
+    retry_after_a_failed_store(4, false, make_test_frame(2, direction_t::outbound, 400));
+}
+
+// One shorter retry per other failing arm of store().
+TEST(StoreOffloadErrorArms, RetryAfterPayloadPwriteFails_Shorter) {
+    retry_after_a_failed_store(2, false, shorter_retry());
+}
+
+TEST(StoreOffloadErrorArms, RetryAfterPaddingPwriteFails_Shorter) {
+    retry_after_a_failed_store(3, false, shorter_retry());
+}
+
+TEST(StoreOffloadErrorArms, RetryAfterCounterPayloadPwriteFails_Shorter) {
+    retry_after_a_failed_store(5, false, shorter_retry());
+}
+
+TEST(StoreOffloadErrorArms, RetryAfterDatasyncFails_Shorter) {
+    retry_after_a_failed_store(0, true, shorter_retry());
+}
+
+// ── The restore of the committed end fails (fixpp#635, D-635-1) ───────────────────────
+//
+// store(2) fails at its counter write, and the job's restore of the log's committed end
+// fails at its truncate or at the datasync after it. The store is poisoned: a later store()
+// and a later increment are refused, and nothing more is written to the log. The reopen
+// accepts the log; after a failed truncate it holds store(2)'s frame record with no counter
+// record (read by its own number, D-632-1), after a failed datasync it ends at the committed
+// end.
+void restore_fails(bool const truncate, bool const frame2_on_disk) {
+    disarm_on_exit const disarm;
+    Fixture fx;
     run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
         {
             auto store = fx.open();
@@ -514,47 +595,64 @@ void retry_in_the_same_process(char const* label, std::vector<std::byte> const& 
             if (!store) co_return;
             EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
             fixpp::session::arm_force_offload_write_fail_once(4, false);  // counter header
-            auto const r =
-                co_await store->store(2, std::span<const std::byte>{failed}, direction_t::outbound);
-            EXPECT_TRUE(!r && fixpp::session::read_and_reset_offload_write_fail_count() == 1)
-                << "setup: store(2) fails at its counter write";
-            auto const two =
-                co_await store->store(2, std::span<const std::byte>{retry}, direction_t::outbound);
-            auto const three = co_await store_seq(*store, 3);
-            std::printf("[fixpp#611 retry %s] same process: retry store(2) -> %s, store(3) -> %s\n",
-                        label, two ? "ok" : "error", three ? "ok" : "error");
+            fixpp::session::arm_force_offload_restore_fail_once(truncate, !truncate);
+            auto const r = co_await store_seq(*store, 2);
+            EXPECT_TRUE(!r && r.error() == error::store_io_failure)
+                << "store(2) must return store_io_failure";
+            EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 2)
+                << "the write fault and the restore fault must both fire";
+            auto const after_failure = log_size(fx);
+            auto const again = co_await store_seq(*store, 2);
+            EXPECT_TRUE(!again && again.error() == error::store_io_failure)
+                << "a store() after a failed restore must be refused";
+            auto const increment = co_await store->next_seqnum(direction_t::outbound, true);
+            EXPECT_TRUE(!increment && increment.error() == error::store_io_failure)
+                << "an increment after a failed restore must be refused";
+            EXPECT_EQ(log_size(fx), after_failure)
+                << "nothing may be written to the log after a failed restore";
         }
-        std::printf("[fixpp#611 retry %s] log size before the reopen: %ju bytes\n", label,
-                    static_cast<std::uintmax_t>(log_size()));
-        auto const store = fx.open();
-        std::printf("[fixpp#611 retry %s] reopen: %s; log size after it: %ju bytes\n", label,
-                    store ? "accepted" : "REFUSED", static_cast<std::uintmax_t>(log_size()));
-        if (!store) co_return;
-        auto const next = co_await store->next_seqnum(direction_t::outbound, false);
-        std::printf("[fixpp#611 retry %s] next outbound %u\n", label,
-                    next ? static_cast<unsigned>(*next) : 0U);
-        for (auto const& [b, e] : {std::pair<seqnum_t, seqnum_t>{2, 2}, {3, 3}, {1, 0}}) {
-            auto const w = co_await walk(*store, direction_t::outbound, b, e, expected);
-            std::printf("[fixpp#611 retry %s] retrieve(%u, %u) -> %s, visited%s%s\n", label,
-                        static_cast<unsigned>(b), static_cast<unsigned>(e), w.ok ? "ok" : "error",
-                        text(w.seqs).c_str(),
-                        w.bytes_match ? "" : " (bytes differ from what was stored last)");
-        }
+        auto const again = co_await reopen(fx);
+        EXPECT_TRUE(again.accepted) << "the open after the failed restore must accept the log";
+        EXPECT_EQ(again.next_outbound, seqnum_t{2}) << "next outbound number after reopen";
+        EXPECT_EQ(again.frames, (std::vector<seqnum_t>{1}))
+            << "frames after reopen:" << text(again.frames);
+        EXPECT_EQ(again.frame2_on_disk, frame2_on_disk) << "retrieve(2, 2) after reopen";
     });
 }
 
-TEST(StoreOffloadErrorArms, DISABLED_RetryInTheSameProcess_Shorter) {
-    retry_in_the_same_process("shorter", make_test_frame(2, direction_t::outbound));
-}
+TEST(StoreOffloadErrorArms, RestoreTruncateFails_PoisonsTheStore) { restore_fails(true, true); }
 
-TEST(StoreOffloadErrorArms, DISABLED_RetryInTheSameProcess_EqualLength) {
-    auto frame = make_test_frame(2, direction_t::outbound, 200);
-    frame.back() = std::byte{0xEE};  // the same length, different bytes
-    retry_in_the_same_process("equal", frame);
-}
+TEST(StoreOffloadErrorArms, RestoreDatasyncFails_PoisonsTheStore) { restore_fails(false, false); }
 
-TEST(StoreOffloadErrorArms, DISABLED_RetryInTheSameProcess_Longer) {
-    retry_in_the_same_process("longer", make_test_frame(2, direction_t::outbound, 400));
+// The same for a failed increment: next_seqnum(increment) fails at its counter payload,
+// after its counter header is written, and the restore's truncate fails.
+TEST(StoreOffloadErrorArms, IncrementRestoreTruncateFails_PoisonsTheStore) {
+    disarm_on_exit const disarm;
+    Fixture fx;
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        {
+            auto store = fx.open();
+            EXPECT_NE(store, nullptr) << "setup: the FileStore";
+            if (!store) co_return;
+            EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
+            fixpp::session::arm_force_offload_write_fail_once(2, false);  // counter payload
+            fixpp::session::arm_force_offload_restore_fail_once(true, false);
+            auto const r = co_await store->next_seqnum(direction_t::outbound, true);
+            EXPECT_TRUE(!r && r.error() == error::store_io_failure)
+                << "the increment must return store_io_failure";
+            EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 2)
+                << "the write fault and the restore fault must both fire";
+            auto const after_failure = log_size(fx);
+            auto const later = co_await store_seq(*store, 2);
+            EXPECT_TRUE(!later && later.error() == error::store_io_failure)
+                << "a store() after a failed restore must be refused";
+            EXPECT_EQ(log_size(fx), after_failure)
+                << "nothing may be written to the log after a failed restore";
+        }
+        auto const again = co_await reopen(fx);
+        EXPECT_TRUE(again.accepted) << "the open after the failed restore must accept the log";
+        EXPECT_EQ(again.next_outbound, seqnum_t{2}) << "next outbound number after reopen";
+    });
 }
 
 }  // namespace

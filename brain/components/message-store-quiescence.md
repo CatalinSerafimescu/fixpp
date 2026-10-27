@@ -246,6 +246,12 @@ append-only by number. (The log stays append-only; that sentence in `.specify/2e
 about the file and still holds.) Design: `.specify/624-offload-completion-lifetime.md` §8; B&L
 `B-632-1`.
 
+**D-635-1 (fixpp#635): a failed `FileStore` write restores the log's committed end.** A failed
+`store()` or increment truncates the log back to where the call started and flushes that; if it cannot,
+the store is poisoned until it is opened again. So in a live process a failed store leaves no record,
+and D-632-1 governs only what a crash leaves. Design: `.specify/624-offload-completion-lifetime.md` §9;
+B&L `B-635-1`, and `B-632-1`'s amendment.
+
 ## Note for reviewers
 
 A symbol grep for `cancel_and_drain` across the decision records produces **false leads**:

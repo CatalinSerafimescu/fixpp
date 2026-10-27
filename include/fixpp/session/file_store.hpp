@@ -275,6 +275,12 @@ int read_and_reset_store_pwrite_fail_count() noexcept;
 // failure, so the call returns store_io_failure. The read returns how many times such a
 // fault fired since the last read.
 void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept;
+// fixpp#635: arm a one-shot fault in the NEXT offloaded store() or next_seqnum(increment)
+// job's restore of the log's committed end, which runs when that job fails: its truncate
+// (`truncate`) or the datasync after it (`datasync`) fails, and the store is poisoned.
+// Arm it with arm_force_offload_write_fail_once, so the job fails and restores; each
+// fault that fires counts in read_and_reset_offload_write_fail_count().
+void arm_force_offload_restore_fail_once(bool truncate, bool datasync) noexcept;
 int read_and_reset_offload_write_fail_count() noexcept;
 // 093 (tasks.md T079, Q-29) reset-atomicity fault injection. The first arms a one-shot
 // fault in the next reset's offloaded sequence after its temp log is written and closed,

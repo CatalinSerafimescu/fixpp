@@ -264,3 +264,79 @@ store of that number replaces it).
 - `store()` appending in place of `index_frame`: the same two cells go RED at their same-process checks;
 - the scan's refusal removed: `AFrameRecordBelowTheLastNumber_RefusesTheOpen` goes RED.
 
+## 9. D-635-1 — a failed store leaves no bytes past the committed end (fixpp#635)
+
+**The condition.** `FileStore` keeps a write position and writes each call's records there; a failed
+call leaves the position where it was. Before D-635-1, a failed `store()` or `next_seqnum(increment)`
+could still have written past it: part of a frame record, a whole one, a counter header, or every record
+with only the flush failing. The next write at the same position overwrote only as far as it reached. A
+`store()` retried with a frame shorter than the failed one left the failed record's tail behind the new
+records, and `restart_scan` read those bytes as a header with an oversized length (or a CRC mismatch)
+with data after it, and refused the log (run: the three `RetryInTheSameProcess_*` cells, before
+D-635-1: the shorter one refused, the equal and longer ones read clean).
+
+**The rule.** A failed store leaves no bytes past the committed end: the log is always the committed
+records and nothing else.
+- On every failure path of an offloaded `store()` or `next_seqnum(increment)` job from its first write
+  on (the frame header, payload and padding, the counter header and payload, the `fdatasync`), the job
+  truncates the log back to the call's offset (`write_pos` when it started) and then datasyncs
+  (`restore_committed_end`). A failure path before any write (the T003 seam, the
+  counter-write-after-reset-commit seam) restores nothing.
+- The datasync after the truncate is what keeps a crash from undoing it: without it, a crash could keep
+  a later retry's records (written and flushed after the truncate) and lose the truncate, so the old
+  tail would come back behind them.
+- If the truncate or its datasync fails, the job reports `failed_unrestored`, and the caller poisons the
+  store with the flag the reset's poison sets (`open_ok = false`). Unlike the reset's poison, it does not
+  close the file, which still names the live log. Every later call returns `store_io_failure`, and
+  nothing more is written, until the store is opened again.
+- Windows: `SetFilePointerEx` and `SetEndOfFile`, then `FlushFileBuffers`. It compiles only under MSVC
+  and is not built here.
+
+**Why not append at the end, as QuickFIX does** (read at filing, fixpp#635; not re-read here):
+
+| Engine | Where it writes a message |
+|---|---|
+| QuickFIX C++ `2ce8a60` | `FILE_SEEK(..., SEEK_END)` before each write: the end of the file |
+| QuickFIX/J `4969564` | a `FileOutputStream` in append mode |
+| QuickFIX/Go `eff945dd` | `Seek(0, io.SeekEnd)` before each write |
+| fixpp | the store's write position, which a failed call does not advance |
+
+None of them ever writes over a failed write's bytes, so none meets this. fixpp keeps its write-position
+model (the restart scan, the reset and the counters rely on it) and restores the end instead.
+
+**Consequences.**
+- In a live process a failed `store()` now leaves no record, so D-632-1's last-record-wins governs only
+  a log a crash left with a frame record and no counter record after it, or one a failed restore left
+  (which poisons the store). The #632 cells reach that state by failing the restore too.
+- A `store()` whose `fdatasync` fails reports failure and its records are removed; a failed increment
+  leaves the counter on disk where it was (the live counter stays advanced, as feature 035 chose).
+
+**The pins that changed** (the #611 arm cells, re-derived from D-635-1; each also asserts the log's
+size after the failed call equals its size before it):
+- `Store_CounterHeaderPwriteFails`, `Store_CounterPayloadPwriteFails`: seq 2's frame record is no
+  longer on disk after the reopen (it was: the complete record stayed).
+- `Store_DatasyncFails`: the reopen finds frames {1} and next outbound 2, with seq 2 not on disk (it
+  found {1, 2} and 3: every record stayed).
+- `NextSeqnum_DatasyncFails`: next outbound 2 after the reopen (it was 3).
+- Unchanged pins: `Store_PayloadPwriteFails`, `Store_PaddingPwriteFails` (the scan truncated their
+  short records already), `NextSeqnum_CounterHeaderPwriteFails`, `NextSeqnum_CounterPayloadPwriteFails`.
+- The #632 cells' setup fails the restore too, so the duplicate record they test is still on disk.
+
+**The cells** (run), in `tests/session/test_611_store_offload_error_arms.cpp`:
+`RetryInTheSameProcess_{Shorter,EqualLength,Longer}` (after the counter-header arm) and
+`RetryAfter{Payload,Padding,CounterPayload,Datasync}…_Shorter`: the reopen accepts the log, next
+outbound 4, frames 1, the retry's 2 and 3. `RestoreTruncateFails_PoisonsTheStore`,
+`RestoreDatasyncFails_PoisonsTheStore` (through `arm_force_offload_restore_fail_once`) and
+`IncrementRestoreTruncateFails_PoisonsTheStore`: a later call is refused, the log's size does not move,
+and the reopen accepts the log. `next_seqnum` has no shorter-retry cell: every record a later call writes
+at that position is at least a counter record long, so it covers a failed counter record's bytes; its
+arm cells assert the size instead.
+
+**Mutants to re-run** (not committed):
+- the truncate not called: every arm cell whose failed call wrote past the committed end, and every
+  shorter-retry cell except the payload one, go RED; so does `RestoreDatasyncFails_PoisonsTheStore`;
+- the datasync after the truncate removed: no cell goes RED. It is a crash-only property, since a live
+  process reads its own unflushed truncate back, and no cell crashes the process;
+- the poison removed from `store()`'s Region 3: the two `Restore*Fails_PoisonsTheStore` cells go RED;
+  from `next_seqnum`'s: `IncrementRestoreTruncateFails_PoisonsTheStore` goes RED.
+

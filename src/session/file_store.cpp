@@ -142,6 +142,13 @@ static std::atomic<int> g_offload_fault_pwrite_nth{0};
 static std::atomic<bool> g_offload_fault_datasync{false};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_offload_write_fail_count{0};
+// fixpp#635: the same job's restore of the committed end (D-635-1) fails at its truncate
+// or at the datasync after it. Taken with the write fault, by the same job; each fault
+// that fires counts in g_offload_write_fail_count.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_offload_fault_restore_truncate{false};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_offload_fault_restore_datasync{false};
 // 093 (tasks.md T079, Q-29) reset-atomicity fault seams. Compiled unconditionally (like
 // g_store_offload_probe); declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
 //   g_force_reset_fail_before_rename: the next reset's offloaded sequence fails after
@@ -445,6 +452,8 @@ struct offload_write_fault_plan {
     int pwrite_nth = 0;  // fail this pwrite of the job, counting from 1; 0: none
     bool datasync = false;
     int pwrites_seen = 0;
+    bool restore_truncate = false;  // fixpp#635: fail the restore's truncate
+    bool restore_datasync = false;  // fixpp#635: fail the restore's datasync
 };
 thread_local offload_write_fault_plan t_offload_write_fault{};
 
@@ -456,6 +465,14 @@ struct offload_write_fault_scope {
         }
         if (g_offload_fault_datasync.load(std::memory_order_relaxed)) {
             plan.datasync = g_offload_fault_datasync.exchange(false, std::memory_order_relaxed);
+        }
+        if (g_offload_fault_restore_truncate.load(std::memory_order_relaxed)) {
+            plan.restore_truncate =
+                g_offload_fault_restore_truncate.exchange(false, std::memory_order_relaxed);
+        }
+        if (g_offload_fault_restore_datasync.load(std::memory_order_relaxed)) {
+            plan.restore_datasync =
+                g_offload_fault_restore_datasync.exchange(false, std::memory_order_relaxed);
         }
         t_offload_write_fault = plan;
     }
@@ -469,6 +486,17 @@ struct offload_write_fault_scope {
     if (plan.pwrite_nth == 0 || ++plan.pwrites_seen != plan.pwrite_nth) {
         return false;
     }
+    g_offload_write_fail_count.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+// fixpp#635: one of the restore's two steps is armed to fail (consumed, counted).
+[[nodiscard]] bool offload_restore_fault_fires(bool offload_write_fault_plan::* step) noexcept {
+    auto& plan = t_offload_write_fault;
+    if (!(plan.*step)) {
+        return false;
+    }
+    plan.*step = false;
     g_offload_write_fail_count.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
@@ -517,6 +545,11 @@ struct offload_write_fault_scope {
     return ::fdatasync(fd) == 0;
 }
 
+// ftruncate to `size` — the file's end moves back to it.
+[[nodiscard]] bool raw_truncate(int fd, std::int64_t size) noexcept {
+    return ::ftruncate(fd, static_cast<off_t>(size)) == 0;
+}
+
 #else  // _WIN32
 
 [[nodiscard]] bool raw_pwrite_all(HANDLE h, const void* buf, std::size_t n,
@@ -546,7 +579,40 @@ struct offload_write_fault_scope {
     return FlushFileBuffers(h) != 0;
 }
 
+// SetFilePointerEx + SetEndOfFile to `size` — the file's end moves back to it. The
+// offloaded writes give their offsets explicitly, so the moved file pointer is unused.
+[[nodiscard]] bool raw_truncate(HANDLE h, std::int64_t size) noexcept {
+    LARGE_INTEGER pos{};
+    pos.QuadPart = size;
+    return SetFilePointerEx(h, pos, nullptr, FILE_BEGIN) != 0 && SetEndOfFile(h) != 0;
+}
+
 #endif  // _WIN32
+
+// fixpp#635, D-635-1 (.specify/624-offload-completion-lifetime.md §9): a failed store or
+// increment leaves no byte past the log's committed end. The store keeps a write position
+// and writes the next record there, so bytes a failed job left past it would sit behind a
+// later, shorter record, where the next open reads them as a damaged log and refuses it.
+// The job that failed after it may have written truncates the file back to the committed
+// end, then datasyncs, so a crash cannot keep a later record and lose the truncate.
+enum class offload_write_result : std::uint8_t {
+    ok,
+    failed,             // the call failed, and the log ends at its committed end
+    failed_unrestored,  // the call failed, and the restore did too: the caller poisons the store
+};
+
+template <class Fd>
+[[nodiscard]] offload_write_result restore_committed_end(Fd fd, std::int64_t end) noexcept {
+    if (offload_restore_fault_fires(&offload_write_fault_plan::restore_truncate) ||
+        !raw_truncate(fd, end)) {
+        return offload_write_result::failed_unrestored;
+    }
+    if (offload_restore_fault_fires(&offload_write_fault_plan::restore_datasync) ||
+        !raw_datasync(fd)) {
+        return offload_write_result::failed_unrestored;
+    }
+    return offload_write_result::failed;
+}
 
 // ── Store offload probe hook (test seam) ──────────────────────────────────────
 //
@@ -634,6 +700,10 @@ int read_and_reset_store_pwrite_fail_count() noexcept {
 void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept {
     g_offload_fault_pwrite_nth.store(pwrite_nth, std::memory_order_relaxed);
     g_offload_fault_datasync.store(datasync, std::memory_order_relaxed);
+}
+void arm_force_offload_restore_fail_once(bool truncate, bool datasync) noexcept {
+    g_offload_fault_restore_truncate.store(truncate, std::memory_order_relaxed);
+    g_offload_fault_restore_datasync.store(datasync, std::memory_order_relaxed);
 }
 int read_and_reset_offload_write_fail_count() noexcept {
     return g_offload_write_fail_count.exchange(0, std::memory_order_acq_rel);
@@ -1520,10 +1590,15 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     // frame_span (span into store_scratch_ — stable while mutex held), pad,
     // flush decision, and the (nullable) probe function pointer.
     // It touches NO impl_ field and mutates nothing in impl_. (data-model §2/§3)
-    const bool io_ok = co_await offload_to(
+    const offload_write_result io = co_await offload_to(
         impl_->cfg.file_io_executor,
         [raw_fd, frame_hdr, frame_span, frame_off, frame_pad, counter_hdr, counter_pl, counter_off,
-         do_flush, probe_fn]() -> bool {
+         do_flush, probe_fn]() -> offload_write_result {
+            // D-635-1: every failure from the first write on restores the committed end,
+            // which is this store's frame offset.
+            const auto failed = [raw_fd, frame_off] {
+                return restore_committed_end(raw_fd, frame_off);
+            };
             // Call the test probe (if installed) BEFORE the first pwrite so the
             // test can confirm the syscall ran on a pool thread ≠ strand thread.
             // In production probe_fn is nullptr; the branch is dead-code-eliminated.
@@ -1540,19 +1615,19 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
             // (not captured); reachable on the pool thread.
             if (g_force_store_pwrite_fail_once.exchange(false, std::memory_order_relaxed)) {
                 g_store_pwrite_fail_count.fetch_add(1, std::memory_order_relaxed);
-                return false;
+                return offload_write_result::failed;  // before any write: nothing to restore
             }
 
             // pwrite frame header at frame_off.
             if (!raw_pwrite_all(raw_fd, &frame_hdr, kHeaderSize, static_cast<off_t>(frame_off))) {
-                return false;
+                return failed();
             }
             // pwrite frame payload.
             if (!frame_span.empty()) {
                 if (!raw_pwrite_all(
                         raw_fd, frame_span.data(), frame_span.size(),
                         static_cast<off_t>(frame_off + static_cast<std::int64_t>(kHeaderSize)))) {
-                    return false;
+                    return failed();
                 }
             }
             // pwrite frame padding.
@@ -1562,33 +1637,40 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                         raw_fd, zeros, frame_pad,
                         static_cast<off_t>(frame_off + static_cast<std::int64_t>(
                                                            kHeaderSize + frame_span.size())))) {
-                    return false;
+                    return failed();
                 }
             }
             // pwrite counter header.
             if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
                                 static_cast<off_t>(counter_off))) {
-                return false;
+                return failed();
             }
             // pwrite counter payload.
             if (!raw_pwrite_all(
                     raw_fd, &counter_pl, kCounterPayloadSize,
                     static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
-                return false;
+                return failed();
             }
             // datasync: linearisation point (FR-003 / C2). Blocks until durable.
             if (do_flush && !raw_datasync(raw_fd)) {
-                return false;
+                return failed();
             }
-            return true;
+            return offload_write_result::ok;
         });
 
     // ── Region 3: STRAND — apply mutations on success (mutex still held) ──────
     //
-    // On I/O failure: no impl_ mutation — counters, index, write_pos unchanged.
+    // On I/O failure: no impl_ mutation — counters, index, write_pos unchanged, and the
+    // job restored the log's end to write_pos (D-635-1). When that restore failed too,
+    // the log may hold bytes past write_pos, and the next write there could leave some of
+    // them behind it: the store is poisoned (open_ok = false, the flag the reset's poison
+    // sets), so every later call returns store_io_failure until the store is opened again.
     // On success: push index entry, set counters to the pre-computed values,
     // advance write_pos. (035 data-model §3 / brief §3)
-    if (!io_ok) {
+    if (io != offload_write_result::ok) {
+        if (io == offload_write_result::failed_unrestored) {
+            impl_->open_ok = false;
+        }
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
@@ -1808,9 +1890,14 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
         const auto probe_fn = g_store_offload_probe.load(std::memory_order_relaxed);
 
         // ── Region 2: POOL — raw syscalls in the offloaded lambda ─────────────────
-        const bool io_ok = co_await offload_to(
+        const offload_write_result io = co_await offload_to(
             impl_->cfg.file_io_executor,
-            [raw_fd, counter_hdr, counter_pl, counter_off, probe_fn]() -> bool {
+            [raw_fd, counter_hdr, counter_pl, counter_off, probe_fn]() -> offload_write_result {
+                // D-635-1: every failure from the first write on restores the committed
+                // end, which is this counter record's offset.
+                const auto failed = [raw_fd, counter_off] {
+                    return restore_committed_end(raw_fd, counter_off);
+                };
                 if (probe_fn) {
                     probe_fn(std::this_thread::get_id());
                 }
@@ -1820,25 +1907,33 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
                 if (g_fail_counter_write_after_reset_commit.compare_exchange_strong(
                         committed, 0, std::memory_order_relaxed)) {
                     g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
-                    return false;
+                    return offload_write_result::failed;  // before any write
                 }
                 // pwrite counter header.
                 if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
                                     static_cast<off_t>(counter_off))) {
-                    return false;
+                    return failed();
                 }
                 // pwrite counter payload.
                 if (!raw_pwrite_all(
                         raw_fd, &counter_pl, kCounterPayloadSize,
                         static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
-                    return false;
+                    return failed();
                 }
                 // datasync: linearisation point (counter-record pwrite + datasync).
-                return raw_datasync(raw_fd);
+                if (!raw_datasync(raw_fd)) {
+                    return failed();
+                }
+                return offload_write_result::ok;
             });
 
         // ── Region 3: STRAND — advance write_pos on success (mutex still held) ──
-        if (!io_ok) {
+        // On failure the job restored the log's end (D-635-1); when it could not, the
+        // store is poisoned, as store()'s Region 3 does.
+        if (io != offload_write_result::ok) {
+            if (io == offload_write_result::failed_unrestored) {
+                impl_->open_ok = false;
+            }
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         impl_->write_pos += static_cast<std::int64_t>(record_disk_size(kCounterPayloadSize));
