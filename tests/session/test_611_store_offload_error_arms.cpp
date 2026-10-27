@@ -22,24 +22,21 @@
 // relying on the order. The next_seqnum(increment) job writes the counter header and
 // the counter payload, then the fdatasync.
 //
-// ResetThrowAfterRename (fixpp#599, D-599-1 in .specify/624-offload-completion-lifetime.md):
-// the reset's job throws after its rename has replaced the live log
-// (arm_force_reset_throw_after_rename_once). The reset must end as a failure after the
-// rename ends: store_io_failure, the store poisoned so no later write reaches the
-// replaced log's inode, and the reopened log the reset's own.
-//
-// Not here: the arms of reset_store_to's job that fixpp#611 also names (initialise_fresh
-// on the temporary file, the rename, the reopen after it, the reopen's lock). The reset
-// seams sit before the rename, at the directory's open or fsync, and (for
-// install_post_rename_reopen_fail_hook) at a return placed before the reopen's own `open`
-// call; none sits at those four statements. Re-derive by reading the reset job in
-// reset_store_to.
+// The reset arms drive reset() through the reset-step fault seam
+// (arm_force_reset_step_fault_once), which fails the next reset's job at one step:
+// initialise_fresh on the temporary log, the rename, the reopen's open or its lock, or
+// throws right after the rename (fixpp#599, D-599-1 in
+// .specify/624-offload-completion-lifetime.md). Every arm must end the reset with
+// store_io_failure and no exception. A step before the rename leaves the old log the
+// live one and the store usable; a step after it poisons the store, so a later store()
+// is refused and the reopened log is the reset's own.
 
 #include <gtest/gtest.h>
 
 #include <asio/awaitable.hpp>
 #include <asio/thread_pool.hpp>
 #include <cstddef>
+#include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
@@ -241,9 +238,10 @@ TEST(StoreOffloadErrorArms, NextSeqnum_CounterPayloadPwriteFails) { next_seqnum_
 // The counter record was written; only the flush reported failure.
 TEST(StoreOffloadErrorArms, NextSeqnum_DatasyncFails) { next_seqnum_arm(0, true, 3); }
 
-// ── reset() whose job throws after the rename (fixpp#599) ─────────────────────
+// ── reset(): one cell per step of the reset's job (fixpp#611, fixpp#599) ───────
 
-TEST(ResetThrowAfterRename, PoisonsTheStoreAndReturnsTheResetsError) {
+// store(1) and store(2), then reset() with `step` failing, then store(3).
+void reset_arm(int const step, bool const poisons) {
     (void)fixpp::session::read_and_reset_reset_atomicity_fault_count();
     Fixture fx;
     run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
@@ -256,7 +254,7 @@ TEST(ResetThrowAfterRename, PoisonsTheStoreAndReturnsTheResetsError) {
             EXPECT_TRUE(one.has_value() && two.has_value()) << "setup: store(1), store(2)";
             if (!one || !two) co_return;
 
-            fixpp::session::arm_force_reset_throw_after_rename_once();
+            fixpp::session::arm_force_reset_step_fault_once(step);
             bool reset_threw = false;
             fixpp::core::expected_t<void> reset{};
             try {
@@ -265,23 +263,127 @@ TEST(ResetThrowAfterRename, PoisonsTheStoreAndReturnsTheResetsError) {
                 reset_threw = true;
             }
             EXPECT_EQ(fixpp::session::read_and_reset_reset_atomicity_fault_count(), 1)
-                << "the throw-after-rename seam did not fire";
+                << "the reset-step fault did not fire";
             EXPECT_FALSE(reset_threw) << "the reset's job threw, and the reset passed it on";
             EXPECT_TRUE(!reset_threw && !reset && reset.error() == error::store_io_failure)
                 << "the reset must return store_io_failure";
 
-            // A store after the failed reset: the store is poisoned, so it is refused.
             auto const later = co_await store_seq(*store, 3);
-            EXPECT_TRUE(!later && later.error() == error::store_io_failure)
-                << "store(3) after the failed reset must be refused; it returned "
-                << (later ? "success" : "an error other than store_io_failure");
+            if (poisons) {
+                EXPECT_TRUE(!later && later.error() == error::store_io_failure)
+                    << "store(3) after a failure past the rename must be refused; it returned "
+                    << (later ? "success" : "an error other than store_io_failure");
+            } else {
+                EXPECT_TRUE(later.has_value())
+                    << "store(3) after a failure before the rename must be accepted";
+            }
         }
-        // The live name is the reset's fresh log: no frame, next outbound 1. store(3) is
-        // not in it, whatever store(3) returned.
         auto const again = co_await reopen(fx);
         EXPECT_TRUE(again.accepted) << "the open after the failed reset must accept the log";
-        EXPECT_EQ(again.next_outbound, seqnum_t{1}) << "next outbound number after reopen";
-        EXPECT_TRUE(again.frames.empty()) << "frames after reopen:" << text(again.frames);
+        if (poisons) {
+            // The live name is the reset's fresh log: no frame, next outbound 1. store(3)
+            // is not in it, whatever store(3) returned.
+            EXPECT_EQ(again.next_outbound, seqnum_t{1}) << "next outbound number after reopen";
+            EXPECT_TRUE(again.frames.empty()) << "frames after reopen:" << text(again.frames);
+        } else {
+            // The old log is still the live one, with store(3) appended.
+            EXPECT_EQ(again.next_outbound, seqnum_t{4}) << "next outbound number after reopen";
+            EXPECT_EQ(again.frames, (std::vector<seqnum_t>{1, 2, 3}))
+                << "frames after reopen:" << text(again.frames);
+            EXPECT_TRUE(again.frames_intact) << "a frame read back differs from what was stored";
+        }
+    });
+}
+
+TEST(ResetStepArms, InitialiseFreshFails_TheOldLogStands) {
+    reset_arm(fixpp::session::kResetStepFaultInitialiseFresh, false);
+}
+
+TEST(ResetStepArms, RenameFails_TheOldLogStands) {
+    reset_arm(fixpp::session::kResetStepFaultRename, false);
+}
+
+TEST(ResetStepArms, ReopenOpenFails_PoisonsTheStore) {
+    reset_arm(fixpp::session::kResetStepFaultReopenOpen, true);
+}
+
+TEST(ResetStepArms, ReopenLockFails_PoisonsTheStore) {
+    reset_arm(fixpp::session::kResetStepFaultReopenLock, true);
+}
+
+TEST(ResetThrowAfterRename, PoisonsTheStoreAndReturnsTheResetsError) {
+    reset_arm(fixpp::session::kResetStepFaultThrowAfterRename, true);
+}
+
+// ── A failed store()'s frame record, then a second store() of the same number ─────────
+
+// OPEN QUESTION (fixpp#611, a finding of the counter-header arm above): store(2) fails at
+// its counter write, so the log holds a complete frame record for 2 that the call
+// reported as not stored, and the reopened store's next outbound number is still 2. A
+// second store(2), with different bytes, then appends another record for 2. Which of the
+// two does a lookup of 2 return, before and after a reopen? If it is the first, a resend
+// would carry a frame whose store() failed and which was never sent. This cell only
+// prints what the store returns and asserts nothing about which record wins; it is
+// disabled until that is decided. Run it with --gtest_also_run_disabled_tests.
+asio::awaitable<void> print_lookup_of_two(MessageStore& store, char const* when,
+                                          std::vector<std::byte> const& failed,
+                                          std::vector<std::byte> const& second) {
+    auto const name = [&](std::vector<std::byte> const& bytes) {
+        if (bytes == failed) return "the FAILED store(2)'s frame";
+        if (bytes == second) return "the second store(2)'s frame";
+        return "a frame matching neither";
+    };
+    byte_collecting_visitor one;
+    auto const r = co_await store.retrieve(2, 2, direction_t::outbound, one);
+    std::printf("[fixpp#611] %s: retrieve(2, 2) -> %s, visited %zu frame(s)\n", when,
+                r ? "ok" : "error", one.entries().size());
+    for (auto const& e : one.entries()) {
+        std::printf("[fixpp#611]   seq %u: %s\n", static_cast<unsigned>(e.seq), name(e.bytes));
+    }
+    byte_collecting_visitor walk;
+    auto const w = co_await store.retrieve(1, 0, direction_t::outbound, walk);
+    std::printf("[fixpp#611] %s: retrieve(1, tail) -> %s, visited %zu frame(s)\n", when,
+                w ? "ok" : "error", walk.entries().size());
+    for (auto const& e : walk.entries()) {
+        std::printf("[fixpp#611]   seq %u: %s\n", static_cast<unsigned>(e.seq),
+                    e.seq == 2 ? name(e.bytes) : "-");
+    }
+    auto const next = co_await store.next_seqnum(direction_t::outbound, false);
+    std::printf("[fixpp#611] %s: next outbound %u\n", when,
+                next ? static_cast<unsigned>(*next) : 0U);
+}
+
+TEST(StoreOffloadErrorArms, DISABLED_FailedFrameRecordThenASecondStoreOfTheSameNumber) {
+    disarm_on_exit const disarm;
+    Fixture fx;
+    auto const failed = make_test_frame(2, direction_t::outbound);
+    auto const second = make_test_frame(2, direction_t::outbound, 8);
+    ASSERT_NE(failed, second) << "precondition: the two frames for 2 differ";
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        {
+            auto store = fx.open();
+            EXPECT_NE(store, nullptr) << "setup: the FileStore";
+            if (!store) co_return;
+            EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
+            fixpp::session::arm_force_offload_write_fail_once(4, false);  // counter header
+            auto const r =
+                co_await store->store(2, std::span<const std::byte>{failed}, direction_t::outbound);
+            EXPECT_TRUE(!r && fixpp::session::read_and_reset_offload_write_fail_count() == 1)
+                << "setup: store(2) fails at its counter write";
+        }
+        {
+            auto store = fx.open();
+            EXPECT_NE(store, nullptr) << "the first reopen";
+            if (!store) co_return;
+            auto const r =
+                co_await store->store(2, std::span<const std::byte>{second}, direction_t::outbound);
+            std::printf("[fixpp#611] the second store(2) -> %s\n", r ? "ok" : "error");
+            co_await print_lookup_of_two(*store, "after the first reopen", failed, second);
+        }
+        auto store = fx.open();
+        EXPECT_NE(store, nullptr) << "the second reopen";
+        if (!store) co_return;
+        co_await print_lookup_of_two(*store, "after the second reopen", failed, second);
     });
 }
 

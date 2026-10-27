@@ -293,10 +293,17 @@ int read_and_reset_reset_atomicity_fault_count() noexcept;
 void arm_force_reset_dir_open_fail_once() noexcept;
 void arm_force_reset_dir_fsync_fail_once() noexcept;
 void arm_force_reset_rename_flush_fail_once() noexcept;
-// fixpp#599: one-shot; the next reset's offloaded job throws std::bad_alloc right after
-// its rename has replaced the live log. Counts in
+// fixpp#611 / fixpp#599: one-shot reset-step fault. The next reset's offloaded job fails
+// at `step`: initialise_fresh on the temporary log, the rename, the reopen's open or the
+// reopen's lock, each reporting failure as that step's own failure does; or it throws
+// std::bad_alloc right after the rename has replaced the live log. Counts in
 // read_and_reset_reset_atomicity_fault_count() when it fires.
-void arm_force_reset_throw_after_rename_once() noexcept;
+inline constexpr int kResetStepFaultInitialiseFresh = 1;
+inline constexpr int kResetStepFaultRename = 2;
+inline constexpr int kResetStepFaultReopenOpen = 3;
+inline constexpr int kResetStepFaultReopenLock = 4;
+inline constexpr int kResetStepFaultThrowAfterRename = 5;
+void arm_force_reset_step_fault_once(int step) noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session

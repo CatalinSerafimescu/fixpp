@@ -1486,9 +1486,10 @@ poison branch of `reset_store_to` in `src/session/file_store.cpp`; witnesses
 `FileStoreResetTo.Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore`,
 `FileStoreResetTo.Q29_ResetWithADirectoryFsyncFaultPoisonsTheStore` (POSIX),
 `FileStoreResetTo.Q29_AFlushFaultAfterTheRenamePoisonsTheStore` (Windows),
-`ResetThrowAfterRename.PoisonsTheStoreAndReturnsTheResetsError` in
-`tests/session/test_611_store_offload_error_arms.cpp` (fixpp#599, a thrown failure; run on POSIX,
-the Windows branch carries the same seam and shares the catch).)*
+`ResetThrowAfterRename.PoisonsTheStoreAndReturnsTheResetsError` (fixpp#599, a thrown failure),
+`ResetStepArms.ReopenOpenFails_PoisonsTheStore` and `ResetStepArms.ReopenLockFails_PoisonsTheStore`
+(fixpp#611), all in `tests/session/test_611_store_offload_error_arms.cpp`; run on POSIX, the Windows
+branch carries the same seam at the same steps and shares the catch.)*
 
 **L-035-3 — A `FileStore` (or any `MessageStore`) used OUTSIDE `Engine`/`Session` ownership must be quiesced by the caller before destruction; there is no public drain to call, and getting it wrong is `std::terminate()`, not an error return.** The store holds an `async_mutex`, whose destructor fires `std::terminate()` if it still has a holder or waiters (B-006-2 — a hard precondition enforced in both debug and release). `MessageStore` deliberately exposes **no** public drain entry point, so the obligation is discharged by **quiescence, not by a call**: a store method only returns after its `file_io_executor` pool work completes, and `Engine::stop()` guarantees no store `co_await` is still in flight for **Session-owned** stores — its JOIN step yields until every role loop has exited (tracked by `outstanding_counter_`) *before* the step that clears the registry and so destroys the sessions and their stores. **That guarantee does not extend to a store a consumer constructs and drives directly**, outside `Engine` ownership: `stop()` neither sees nor can drain those awaitables. Such a caller MUST (1) `co_await` every `store`/`flush` call to completion, (2) then `pool.stop()` + `pool.join()`, (3) only then destroy the store. **Status: by-design boundary** — the quiescence contract is structural, and a public drain on the store interface is deliberately not offered. *(Contract stated on `FileStore::Config` in `include/fixpp/session/file_store.hpp`; the destructor precondition it depends on is `~MessageStore() noexcept(false)` in `include/fixpp/session/message_store.hpp` and B-006-2; the Session-owned guarantee is the JOIN-before-clear ordering in `Engine::stop()`, `src/session/engine.cpp`, whose `outstanding_counter_` publication was itself TOCTOU-hardened by a Gate B round-1 finding.)*
 

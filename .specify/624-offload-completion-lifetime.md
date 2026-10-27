@@ -195,9 +195,11 @@ throw cannot reopen the hole. (b) is a helper rather than a `try` written inside
 the job's body keeps its indentation; `reset_store_to` is its only caller.
 
 **The cell** (run): `ResetThrowAfterRename.PoisonsTheStoreAndReturnsTheResetsError` in
-`tests/session/test_611_store_offload_error_arms.cpp`, through the seam
-`arm_force_reset_throw_after_rename_once` (FIXPP_TEST_HOOKS), which throws `std::bad_alloc` right after
-`rename_done` is set on both branches. It asserts that the seam fired, that the reset returns
+`tests/session/test_611_store_offload_error_arms.cpp`, through the reset-step fault seam
+`arm_force_reset_step_fault_once(kResetStepFaultThrowAfterRename)` (FIXPP_TEST_HOOKS), which throws
+`std::bad_alloc` right after `rename_done` is set on both branches. The same seam fails the reset's
+other steps (initialise_fresh on the temporary log, the rename, the reopen's open and its lock), each
+with a cell of its own under `ResetStepArms` (fixpp#611). It asserts that the seam fired, that the reset returns
 `store_io_failure` and does not throw, that a later `store()` is refused, and that the reopened log is
 the reset's own (no frame, next outbound 1). The Windows branch compiles only under MSVC; its witness
 is this cell on POSIX plus the shared structure: the same seam at its `rename_done` site, and the same
