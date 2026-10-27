@@ -654,6 +654,12 @@ set_tests_properties(session_538_volatile_store_after_reset_logon PROPERTIES LAB
 add_threading_test(session_538_store_lookup_after_reset
   test_538_store_lookup_after_reset.cpp)
 set_tests_properties(session_538_store_lookup_after_reset PROPERTIES LABELS "session;538")
+# fixpp#624 — a FileStore offload's completion hand-off and the caller's execution context,
+# destroyed while the file I/O pool is still alive. Standalone, not a grouped bucket
+# ([const §VII.8]): genuine concurrency, a file I/O thread pool and a caller pool.
+add_threading_test(session_624_offload_completion_lifetime
+  test_624_offload_completion_lifetime.cpp)
+set_tests_properties(session_624_offload_completion_lifetime PROPERTIES LABELS "session;624")
 
 # ── fixpp#537 (B28), D-537-7 — frames the session cannot build ─────────────────────
 # Standalone, not a grouped bucket ([const §VII.8]): its cells open Sessions and drive
