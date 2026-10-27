@@ -269,6 +269,13 @@ void arm_force_store_pwrite_fail_once() noexcept;
 // number of times the T003 seam actually fired since the last reset. Used by
 // tests to confirm the seam fired for the right reason.
 int read_and_reset_store_pwrite_fail_count() noexcept;
+// fixpp#611: arm a one-shot fault for the NEXT offloaded store() or
+// next_seqnum(increment) job. `pwrite_nth` fails that job's Nth pwrite, counting from 1
+// (0: none); `datasync` fails its fdatasync. A failed step writes nothing and reports
+// failure, so the call returns store_io_failure. The read returns how many times such a
+// fault fired since the last read.
+void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept;
+int read_and_reset_offload_write_fail_count() noexcept;
 // 093 (tasks.md T079, Q-29) reset-atomicity fault injection. The first arms a one-shot
 // fault in the next reset's offloaded sequence after its temp log is written and closed,
 // before the rename. The second arms a fault at the first next_seqnum() counter-record

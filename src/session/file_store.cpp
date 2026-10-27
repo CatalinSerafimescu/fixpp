@@ -127,6 +127,18 @@ static std::atomic<int> g_flush_datasync_count{0};
 // declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_store_pwrite_fail_once{false};
+// fixpp#611: the generalised offload write-fault seam. Arms a fault for the NEXT
+// offloaded store() or next_seqnum(increment) job: its Nth raw pwrite (counting from 1),
+// or its fdatasync, reports failure without writing. Consumed once, by the job that
+// takes it; g_offload_write_fail_count counts each fault that fired. Compiled
+// unconditionally (like g_store_offload_probe); declarations in file_store.hpp gated
+// by FIXPP_TEST_HOOKS.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_offload_fault_pwrite_nth{0};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_offload_fault_datasync{false};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_offload_write_fail_count{0};
 // 093 (tasks.md T079, Q-29) reset-atomicity fault seams. Compiled unconditionally (like
 // g_store_offload_probe); declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
 //   g_force_reset_fail_before_rename: the next reset's offloaded sequence fails after
@@ -401,6 +413,55 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
     co_return std::move(*outcome.value);
 }
 
+// ── fixpp#611: the offload write-fault plan of the job running on this thread ──
+//
+// A store() or next_seqnum(increment) job takes the armed fault, if any, when it
+// starts (offload_write_fault_scope), and the raw helpers below consult it. The plan
+// is thread_local because the job runs synchronously on one pool thread; a job that
+// does not install the scope (reset, flush) sees no plan. Production cost per job:
+// two relaxed loads; per raw call: one thread_local read and one branch not taken.
+struct offload_write_fault_plan {
+    int pwrite_nth = 0;  // fail this pwrite of the job, counting from 1; 0: none
+    bool datasync = false;
+    int pwrites_seen = 0;
+};
+thread_local offload_write_fault_plan t_offload_write_fault{};
+
+struct offload_write_fault_scope {
+    offload_write_fault_scope() noexcept {
+        offload_write_fault_plan plan{};
+        if (g_offload_fault_pwrite_nth.load(std::memory_order_relaxed) != 0) {
+            plan.pwrite_nth = g_offload_fault_pwrite_nth.exchange(0, std::memory_order_relaxed);
+        }
+        if (g_offload_fault_datasync.load(std::memory_order_relaxed)) {
+            plan.datasync = g_offload_fault_datasync.exchange(false, std::memory_order_relaxed);
+        }
+        t_offload_write_fault = plan;
+    }
+    ~offload_write_fault_scope() { t_offload_write_fault = {}; }
+    offload_write_fault_scope(const offload_write_fault_scope&) = delete;
+    offload_write_fault_scope& operator=(const offload_write_fault_scope&) = delete;
+};
+
+[[nodiscard]] bool offload_pwrite_fault_fires() noexcept {
+    auto& plan = t_offload_write_fault;
+    if (plan.pwrite_nth == 0 || ++plan.pwrites_seen != plan.pwrite_nth) {
+        return false;
+    }
+    g_offload_write_fail_count.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+[[nodiscard]] bool offload_datasync_fault_fires() noexcept {
+    auto& plan = t_offload_write_fault;
+    if (!plan.datasync) {
+        return false;
+    }
+    plan.datasync = false;
+    g_offload_write_fail_count.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
 // ── Raw syscall helpers for the offload lambda ────────────────────────────────
 //
 // These operate on a raw fd (Linux) / HANDLE (Windows) captured BY VALUE in the
@@ -413,6 +474,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 
 // pwrite_all with EINTR loop — mirrors OsFile::pwrite_all.
 [[nodiscard]] bool raw_pwrite_all(int fd, const void* buf, std::size_t n, off_t offset) noexcept {
+    if (offload_pwrite_fault_fires()) return false;  // fixpp#611 seam
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
     while (remaining > 0) {
@@ -429,12 +491,16 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 }
 
 // fdatasync wrapper — mirrors OsFile::datasync.
-[[nodiscard]] bool raw_datasync(int fd) noexcept { return ::fdatasync(fd) == 0; }
+[[nodiscard]] bool raw_datasync(int fd) noexcept {
+    if (offload_datasync_fault_fires()) return false;  // fixpp#611 seam
+    return ::fdatasync(fd) == 0;
+}
 
 #else  // _WIN32
 
 [[nodiscard]] bool raw_pwrite_all(HANDLE h, const void* buf, std::size_t n,
                                   std::int64_t offset) noexcept {
+    if (offload_pwrite_fault_fires()) return false;  // fixpp#611 seam
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
     std::int64_t off = offset;
@@ -454,7 +520,10 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
     return true;
 }
 
-[[nodiscard]] bool raw_datasync(HANDLE h) noexcept { return FlushFileBuffers(h) != 0; }
+[[nodiscard]] bool raw_datasync(HANDLE h) noexcept {
+    if (offload_datasync_fault_fires()) return false;  // fixpp#611 seam
+    return FlushFileBuffers(h) != 0;
+}
 
 #endif  // _WIN32
 
@@ -536,6 +605,17 @@ void arm_force_store_pwrite_fail_once() noexcept {
 // FIXPP_TEST_HOOKS.
 int read_and_reset_store_pwrite_fail_count() noexcept {
     return g_store_pwrite_fail_count.exchange(0, std::memory_order_acq_rel);
+}
+
+// fixpp#611: arm the generalised offload write fault, and read and reset how many
+// times it fired (see their globals above). Compiled unconditionally; declarations in
+// file_store.hpp gated by FIXPP_TEST_HOOKS.
+void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept {
+    g_offload_fault_pwrite_nth.store(pwrite_nth, std::memory_order_relaxed);
+    g_offload_fault_datasync.store(datasync, std::memory_order_relaxed);
+}
+int read_and_reset_offload_write_fail_count() noexcept {
+    return g_offload_write_fail_count.exchange(0, std::memory_order_acq_rel);
 }
 
 // 093 (tasks.md T079): the reset-atomicity fault seams (see their globals above).
@@ -1400,6 +1480,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
+            const offload_write_fault_scope write_fault_scope;  // fixpp#611 seam
 
             // T003 fault-injection: return false at the FIRST pwrite — BEFORE
             // any durable byte — so nothing is retained and the durable counter
@@ -1684,6 +1765,7 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
                 if (probe_fn) {
                     probe_fn(std::this_thread::get_id());
                 }
+                const offload_write_fault_scope write_fault_scope;  // fixpp#611 seam
                 // 093 (tasks.md T079): the counter-write-after-reset-commit seam.
                 int committed = 2;
                 if (g_fail_counter_write_after_reset_commit.compare_exchange_strong(

@@ -662,6 +662,13 @@ add_threading_test(session_624_offload_completion_lifetime
 # FIXPP_TEST_HOOKS declares the offload's caller-wait probe and its throw seam.
 target_compile_definitions(session_624_offload_completion_lifetime PRIVATE FIXPP_TEST_HOOKS)
 set_tests_properties(session_624_offload_completion_lifetime PROPERTIES LABELS "session;624")
+# fixpp#611 — FileStore's offload error arms, one cell per arm. Standalone, not a grouped
+# bucket ([const §VII.8]): a per-`-D` variant (FIXPP_TEST_HOOKS, for the offload write-fault
+# seam) with genuine concurrency (a file I/O thread pool and a caller pool).
+add_threading_test(session_611_store_offload_error_arms
+  test_611_store_offload_error_arms.cpp)
+target_compile_definitions(session_611_store_offload_error_arms PRIVATE FIXPP_TEST_HOOKS)
+set_tests_properties(session_611_store_offload_error_arms PROPERTIES LABELS "session;611")
 
 # ── fixpp#537 (B28), D-537-7 — frames the session cannot build ─────────────────────
 # Standalone, not a grouped bucket ([const §VII.8]): its cells open Sessions and drive
