@@ -350,6 +350,20 @@ void reset_arm(int const step, bool const poisons) {
                 EXPECT_TRUE(!later && later.error() == error::store_io_failure)
                     << "store(3) after a failure past the rename must be refused; it returned "
                     << (later ? "success" : "an error other than store_io_failure");
+                // The reset's poison closed the log, so the graceful-close flush has
+                // nothing to drain and returns success (D-635-1).
+                auto const flush = store->flush_hook();
+                EXPECT_NE(flush, nullptr) << "setup: the FileStore's graceful-close flush";
+                if (!flush) co_return;
+                (void)fixpp::session::read_and_reset_flush_datasync_count();
+                auto const flushed = co_await flush(*store);
+                EXPECT_TRUE(flushed.has_value())
+                    << "the graceful-close flush of a store the reset poisoned must return "
+                       "success; it returned "
+                    << (flushed.error() == error::store_io_failure ? "store_io_failure"
+                                                                   : "another error");
+                EXPECT_EQ(fixpp::session::read_and_reset_flush_datasync_count(), 0)
+                    << "the graceful-close flush of a store with no open log drained a log";
             } else {
                 EXPECT_TRUE(later.has_value())
                     << "store(3) after a failure before the rename must be accepted";
