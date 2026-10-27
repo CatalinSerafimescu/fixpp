@@ -231,6 +231,34 @@ void next_seqnum_arm(int const pwrite_nth, bool const datasync, seqnum_t const n
 
 // D-635-1: every arm of a failed store() restores the log's committed end, so the reopen
 // finds store(1)'s records only, whatever the failed job wrote before it failed.
+TEST(StoreOffloadErrorArms, Store_FrameHeaderPwriteFails) { store_arm(1, false, {1}, false, 2); }
+
+// The seam fails the frame header's pwrite before it writes a byte, so the log's size
+// cannot show whether this arm restores the committed end. Arming the restore's truncate
+// fault as well can: the restore runs only if this arm calls it, and when it runs and
+// fails the store is poisoned. (No shorter-retry cell for this arm: nothing of the failed
+// call is on disk to be left behind a shorter record.)
+TEST(StoreOffloadErrorArms, Store_FrameHeaderPwriteFails_RunsTheRestore) {
+    disarm_on_exit const disarm;
+    Fixture fx;
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        auto store = fx.open();
+        EXPECT_NE(store, nullptr) << "setup: the FileStore";
+        if (!store) co_return;
+        EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
+        fixpp::session::arm_force_offload_write_fail_once(1, false);  // the frame header
+        fixpp::session::arm_force_offload_restore_fail_once(true, false);
+        auto const r = co_await store_seq(*store, 2);
+        EXPECT_TRUE(!r && r.error() == error::store_io_failure)
+            << "store(2) must return store_io_failure";
+        EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 2)
+            << "the frame header's fault and the restore's fault must both fire";
+        auto const later = co_await store_seq(*store, 2);
+        EXPECT_TRUE(!later && later.error() == error::store_io_failure)
+            << "the failed restore must poison the store";
+    });
+}
+
 TEST(StoreOffloadErrorArms, Store_PayloadPwriteFails) { store_arm(2, false, {1}, false, 2); }
 
 TEST(StoreOffloadErrorArms, Store_PaddingPwriteFails) { store_arm(3, false, {1}, false, 2); }
