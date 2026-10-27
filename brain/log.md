@@ -6,6 +6,14 @@ status: stable
 
 # Log
 
+- **2026-10-27 — B57 (fixpp#624, #611, #599, #632, #635): the FileStore offload's completion, error
+  arms, reset throw, duplicate record and committed end.** `components/message-store-quiescence.md`
+  gains: D-624-1, the offload's caller waiting for the job's last touch, with a table flagging the
+  documents that still describe the nested `co_spawn` (035's research, data-model, plan and CHK010;
+  the 563 note's §2.6; `message_store.hpp`'s `store` comment), none edited, and `B-035-1` amended;
+  D-599-1's thrown-failure catch in the FileStore reset section; and pointers to D-632-1 (the index
+  keeps the last record of a number) and D-635-1 (a failed write restores the log's committed end).
+  The design is `.specify/624-offload-completion-lifetime.md` §3 to §9.
 - **2026-10-23 — 094-v1-tier0-bookkeeping close-out (PR #620): class 1 gains a status-witness form.**
   `failure-classes.md` class 1 adds *a `done` row witnessed by its precondition, not its property*:
   a presence check for a value claim, or a sample or same-loader oracle for a completeness claim,

@@ -371,8 +371,8 @@ template <class Handler, class CallerWork, class Fn>
 struct offload_job {
     using result_type = std::invoke_result_t<Fn>;
 
-    std::optional<Handler> handler;
-    std::optional<CallerWork> caller_work;
+    Handler handler;
+    CallerWork caller_work;
     Fn fn;
     std::atomic<bool>* last_touch;
 
@@ -392,10 +392,12 @@ struct offload_job {
                     outcome.error = std::current_exception();
                 }
             }
-            Handler h = std::move(*handler);
-            handler.reset();
-            CallerWork const ex = std::move(*caller_work);
-            caller_work.reset();
+            // The handler and the caller's executor are moved out here, once, into locals
+            // this scope destroys before the flag store. Their move constructors null what
+            // the moved-from members referred to (an awaitable's frame, an executor's
+            // target), so the job asio destroys after the flag owns nothing of the caller's.
+            Handler h = std::move(handler);
+            CallerWork const ex = std::move(caller_work);
             ex.execute(offload_completion<Handler, result_type>{std::move(h), std::move(outcome)});
         }
         done->store(true, std::memory_order_release);
@@ -403,20 +405,23 @@ struct offload_job {
 };
 
 struct initiate_offload {
+    // The handler is taken by value: async_initiate passes it as an rvalue, so this is
+    // one move, and the job owns it from here.
     template <class Handler, class Fn>
-    void operator()(Handler&& handler, asio::any_io_executor const& pool_ex, Fn&& fn,
+    void operator()(Handler handler, asio::any_io_executor const& pool_ex, Fn&& fn,
                     std::atomic<bool>* last_touch) const {
-        using handler_t = std::decay_t<Handler>;
         // The only conversions of the caller's executor in an op: blocking.never (the
         // hand-back never runs inline) and outstanding_work.tracked (the caller's context
         // keeps running while the job does).
+        // NOLINTBEGIN(readability-static-accessed-through-instance): asio's property-object
+        // spelling
         auto caller_work = asio::prefer(
             asio::require(asio::get_associated_executor(handler), asio::execution::blocking.never),
             asio::execution::outstanding_work.tracked);
-        using job_t = offload_job<handler_t, decltype(caller_work), std::decay_t<Fn>>;
-        asio::post(pool_ex, job_t{std::optional<handler_t>{std::move(handler)},
-                                  std::optional<decltype(caller_work)>{std::move(caller_work)},
-                                  std::forward<Fn>(fn), last_touch});
+        // NOLINTEND(readability-static-accessed-through-instance)
+        using job_t = offload_job<Handler, decltype(caller_work), std::decay_t<Fn>>;
+        asio::post(pool_ex, job_t{std::move(handler), std::move(caller_work), std::forward<Fn>(fn),
+                                  last_touch});
     }
 };
 
@@ -435,10 +440,11 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
     while (!last_touch.load(std::memory_order_acquire)) {
         std::this_thread::yield();
     }
-    if (outcome.error) {
-        std::rethrow_exception(outcome.error);
+    // The job sets exactly one of the two: the body's value, or what the body threw.
+    if (outcome.value) {
+        co_return std::move(*outcome.value);
     }
-    co_return std::move(*outcome.value);
+    std::rethrow_exception(outcome.error);
 }
 
 // ── fixpp#611: the offload write-fault plan of the job running on this thread ──
@@ -455,6 +461,7 @@ struct offload_write_fault_plan {
     bool restore_truncate = false;  // fixpp#635: fail the restore's truncate
     bool restore_datasync = false;  // fixpp#635: fail the restore's datasync
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local offload_write_fault_plan t_offload_write_fault{};
 
 struct offload_write_fault_scope {
@@ -2133,11 +2140,14 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     // D-599-1 (b): see offload_reset_job above.
     const bool reset_ok = co_await offload_reset_job(
         impl.cfg.file_io_executor,
+        // The job lambda is not noexcept: its throw (the reset-step seam's) is caught by
+        // offload_job and then by offload_reset_job, inside this noexcept coroutine.
+        // cppcheck-suppress throwInNoexceptFunction
         [path, hash, probe_fn, result_file, rename_done, next_in, next_out]() -> bool {
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
-            const int step_fault = take_reset_step_fault();  // fixpp#611 seam
+            const int armed = take_reset_step_fault();  // fixpp#611 seam
 
 #ifndef _WIN32
             // ── Linux atomic-rename path ─────────────────────────────────────
@@ -2158,7 +2168,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 tmp_impl.next_inbound = next_in;
                 tmp_impl.next_outbound = next_out;
 
-                if (reset_step_fault_fires(step_fault, kResetStepInitialiseFresh) ||
+                if (reset_step_fault_fires(armed, kResetStepInitialiseFresh) ||
                     !tmp_impl.initialise_fresh(next_in, next_out)) {
                     // Move file back so it closes properly, then unlink tmp.
                     tmp_file = std::move(tmp_impl.file);
@@ -2189,7 +2199,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             }
 
             // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
-            if (reset_step_fault_fires(step_fault, kResetStepRename) ||
+            if (reset_step_fault_fires(armed, kResetStepRename) ||
                 ::rename(tmp_path.c_str(), path.c_str()) != 0) {
                 ::unlink(tmp_path.c_str());
                 return false;
@@ -2200,7 +2210,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // the directory fsync (093 Gate B, fixpp#554).
             *rename_done = true;
             // fixpp#599: the throw-after-rename step of the reset-step fault seam.
-            if (reset_step_fault_fires(step_fault, kResetStepThrowAfterRename)) {
+            if (reset_step_fault_fires(armed, kResetStepThrowAfterRename)) {
                 throw std::bad_alloc{};
             }
 
@@ -2247,11 +2257,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 }
             }
             OsFile new_file;
-            if (reset_step_fault_fires(step_fault, kResetStepReopenOpen) ||
+            if (reset_step_fault_fires(armed, kResetStepReopenOpen) ||
                 !new_file.open(path.c_str())) {
                 return false;
             }
-            if (reset_step_fault_fires(step_fault, kResetStepReopenLock) || !new_file.try_lock()) {
+            if (reset_step_fault_fires(armed, kResetStepReopenLock) || !new_file.try_lock()) {
                 return false;
             }
             // Publish to result slot; the sole owner stays here until Region 3 moves it.
@@ -2275,7 +2285,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 tmp_impl.write_pos = 0;
                 tmp_impl.next_inbound = next_in;
                 tmp_impl.next_outbound = next_out;
-                if (reset_step_fault_fires(step_fault, kResetStepInitialiseFresh) ||
+                if (reset_step_fault_fires(armed, kResetStepInitialiseFresh) ||
                     !tmp_impl.initialise_fresh(next_in, next_out)) {
                     tmp_file = std::move(tmp_impl.file);
                     DeleteFileW(wide_tmp.c_str());
@@ -2297,7 +2307,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // WRITE_THROUGH durability the old MoveFileEx flag gave.
             // D-599-1 (a) holds on this branch as written: every path the steps after the
             // rename use (wide_live) is built above, before it.
-            const rename_outcome renamed = reset_step_fault_fires(step_fault, kResetStepRename)
+            const rename_outcome renamed = reset_step_fault_fires(armed, kResetStepRename)
                                                ? rename_outcome::not_renamed
                                                : posix_rename_over_open(wide_tmp, wide_live);
             if (renamed == rename_outcome::not_renamed) {
@@ -2309,7 +2319,7 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // no longer exists, so there is nothing to delete.
             *rename_done = true;
             // fixpp#599: the throw-after-rename step of the reset-step fault seam.
-            if (reset_step_fault_fires(step_fault, kResetStepThrowAfterRename)) {
+            if (reset_step_fault_fires(armed, kResetStepThrowAfterRename)) {
                 throw std::bad_alloc{};
             }
             if (renamed == rename_outcome::renamed_not_flushed) {
@@ -2332,11 +2342,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 }
             }
             OsFile new_file;
-            if (reset_step_fault_fires(step_fault, kResetStepReopenOpen) ||
+            if (reset_step_fault_fires(armed, kResetStepReopenOpen) ||
                 !new_file.open(wide_live.c_str())) {
                 return false;
             }
-            if (reset_step_fault_fires(step_fault, kResetStepReopenLock) || !new_file.try_lock()) {
+            if (reset_step_fault_fires(armed, kResetStepReopenLock) || !new_file.try_lock()) {
                 return false;
             }
             *result_file = std::move(new_file);

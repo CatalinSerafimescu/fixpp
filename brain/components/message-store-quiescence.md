@@ -151,11 +151,21 @@ replaced log, so every write to it would vanish on restart, and the store is poi
   can name two different files: a byte-wise widening and `std::filesystem::path` decode a byte at or
   above 0x80 differently, and a CompID may contain one. The reset then renames onto a file the
   store never opened and still reports success.
+- **A failure the job THROWS is a failure like a returned one (fixpp#599, D-599-1).** ⚠️ Until
+  B57, an exception out of the reset's job (an allocation after the rename) left the offload's await
+  and `reset_store_to` without reaching Region 3: no poison, and later writes went to the unlinked
+  inode. Now (a) the POSIX branch builds every post-rename path before the rename, and (b)
+  `offload_reset_job`, through which `reset_store_to` awaits the job, catches any exception and
+  returns false, so Region 3 reads `rename_done` and poisons after the rename. Design:
+  `.specify/624-offload-completion-lifetime.md` §7; witness
+  `ResetThrowAfterRename.PoisonsTheStoreAndReturnsTheResetsError` and the `ResetStepArms.*` cells in
+  `tests/session/test_611_store_offload_error_arms.cpp`.
 
 ⚠️ **Re-derive before relying on it:** read `reset_store_to` and check that `*rename_done = true`
 directly follows the successful rename on both branches, before the directory open on POSIX and
 before the flush verdict on Windows; and that `store_wide_path` is the only narrow-to-wide
-conversion in `open_log` and the reset worker.
+conversion in `open_log` and the reset worker; and that `reset_store_to` awaits its job through
+`offload_reset_job`, whose `catch (...)` returns false.
 
 Witnesses, in `tests/session/test_file_store_crash_survival.cpp`: POSIX
 `FileStoreResetTo.Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore`,
