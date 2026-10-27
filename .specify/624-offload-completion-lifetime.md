@@ -48,16 +48,21 @@ cell that ran there).
 `asio::async_initiate` under `bind_cancellation_slot(cancellation_slot{}, use_awaitable)` and posted
 to `pool_ex`:
 
-1. On the caller's side the initiation takes the caller's outstanding work: a tracked executor,
-   `prefer(get_associated_executor(handler), outstanding_work.tracked)`.
+1. On the caller's side the initiation converts the caller's executor, there and nowhere else:
+   `prefer(require(get_associated_executor(handler), blocking.never), outstanding_work.tracked)`.
+   `blocking.never` keeps the hand-back from running inline; the tracked work keeps the caller's
+   context running while the job does.
 2. The job runs the body under `store_offload_exit_guard`, keeping its result or the exception it
    threw (`std::exception_ptr`).
-3. In a scope that closes before the job's final action, the job moves the handler and the tracked
-   executor out of itself and hands the completion back with `asio::post`, never `dispatch`, to the
-   handler's associated executor. The tracked executor is MOVED into the posted completion, so the
-   caller's work is released on the caller's side. Every other reference to the caller the job held
-   (the moved-from handler and executor, the copy of the handler's executor, the post's temporaries)
-   is destroyed when that scope closes.
+3. In a scope that closes before the job's final action, the job moves the handler and the
+   converted executor out of itself into locals, and hands the completion (which owns the handler)
+   back through that executor's `execute()`; it never converts the executor again. The local
+   executor, and with it the job's tracked work, is destroyed when that scope closes, on the pool
+   thread, before the flag. That is safe because the caller is still waiting for the flag, so its
+   context is alive, and because the queued completion is itself outstanding work of the caller's
+   scheduler (or of the strand that queued it), so releasing the job's work first cannot let the
+   caller's context run out of work. Every other reference to the caller the job held (the
+   moved-from handler and executor, the hand-back's temporaries) is destroyed in the same scope.
 4. The job's final action is a release-store to a `std::atomic<bool>` that lives in `offload_to`'s
    own frame, reached through a raw pointer. After it the job touches nothing: no notify, no member.
    The job object asio destroys after the call operator returns then owns nothing of the caller's.
@@ -65,8 +70,9 @@ to `pool_ex`:
    `std::this_thread::yield()`) before it returns; then it returns the body's result or rethrows what
    the body threw.
 
-**The wait's bound.** The wait covers the pool thread's unwind of the job after its post: the post's
-return and the scope's destructors. It does not cover any I/O, which the job finished before posting.
+**The wait's bound.** The wait covers the pool thread's unwind of the job after its hand-back: the
+`execute()`'s return and the scope's destructors. It does not cover any I/O, which the job finished
+before handing back.
 
 **Why the caller must be the one that waits.** asio's scheduler makes a posted operation runnable and
 only then signals its waiters: `asio/detail/posix_event.hpp`, `maybe_unlock_and_signal_one`, releases
@@ -76,9 +82,10 @@ caller can by then have resumed. The same holds from the other side for a strand
 thread holds the last reference to a shared executor target, it destroys it. No arrangement of copies
 on the pool side removes the last touch; only the caller can make sure it is over.
 
-**`post`, never `dispatch`.** With the caller's own executor as the file I/O executor, the job runs on
-the caller's thread (or the caller's strand). A dispatch from there could run the completion inline,
-inside the job, before the flag is stored, and the caller's wait would never end.
+**Never inline (`blocking.never`, never `dispatch`).** With the caller's own executor as the file I/O
+executor, the job runs on the caller's thread (or the caller's strand). A hand-back that could run the
+completion inline from there, a dispatch or an `execute()` without `blocking.never`, would resume the
+caller inside the job, before the flag is stored, and the caller's wait would never end.
 
 **Kept from fixpp#598.** D-598-1: the await's token is bound to an empty cancellation slot and the
 initiation connects nothing, so no cancellation reaches the job. D-598-2: the call returns the body's
@@ -88,14 +95,18 @@ own result, or rethrows what the body threw; nothing is caught and turned into a
 destroyed while a store call is in flight — the direct caller's existing obligation at
 `FileStore::Config::file_io_executor` ("co_await every store/flush call to completion").
 
-**Allocation.** The per-call allocations are the job's and the completion's posted operations, both
-through asio's recycling allocator for `std::allocator` handlers; the coroutine frames `co_spawn`
-allocated per call (the spawned body's and `co_spawn_entry_point`'s) are gone. A caller whose executor
-is stored as a shared target in `asio::any_io_executor` (a strand, or `fixpp::core::session_executor`)
-allocates a new target when `prefer(…, outstanding_work.tracked)` is applied; `co_spawn_state` did the
-same for its `handler_work`. To measure the `store()` window, run the arms of
-`StoreAllocGuard.FileStoreStoreWindow_*` under the interceptor as `tests/perf/CMakeLists.txt` shows,
-on the tree before this decision and on the tree after it, and compare.
+**Allocation.** Stated as conditions; re-measure rather than cite a figure.
+- The offload makes no per-op coroutine frame. The job and the completion are posted operations
+  through asio's recycling allocator for `std::allocator` handlers.
+- On a caller whose executor `asio::any_io_executor` holds as a shared target (a
+  `fixpp::core::session_executor`, or a strand inside an `any_io_executor`), each property conversion
+  of that executor builds a new target, which allocates. The offload converts that executor a bounded
+  number of times per op, all on the caller's side (step 1), and the hand-back converts it no further.
+- That was already so before D-624-1: `co_spawn_state`'s work guard converted the caller's executor
+  per op, besides the per-op frame.
+- To measure, run the arms of `StoreAllocGuard.FileStoreStoreWindow_*` (among them
+  `_SessionExecutorCaller`, the shared-target shape) under the interceptor as
+  `tests/perf/CMakeLists.txt` shows, on the tree before a change and on the tree after it, and compare.
 
 **Constitution.** `[const §XV.1]`'s §XV.4-offload exemption (amended v0.2) permits a single bounded
 O(1) coroutine frame per offloaded I/O op. It is a ceiling, and D-624-1 allocates no per-op coroutine

@@ -1450,9 +1450,12 @@ the blocking syscalls on the pool thread and posts the completion back to the ca
 the store call returns only after that job's last touch of the caller's executor (D-624-1,
 `.specify/624-offload-completion-lifetime.md`; `B-624-1`). The outer `co_await` resumes on the session
 strand. `MemoryStore` is unaffected (zero-alloc, strand-only — unchanged). The `FileStore` offload
-allocates no per-op coroutine frame; its per-op job and completion go through asio's recycling
-allocator. That is within the `[const §XV.1]` v0.2 §XV.4-offload exemption in
-`.specify/constitution.md`, which is a ceiling.
+makes no per-op coroutine frame; its per-op job and completion go through asio's recycling
+allocator. On a caller whose executor `asio::any_io_executor` holds as a shared target (a
+`session_executor`, or a strand inside an `any_io_executor`), each property conversion of that
+executor allocates, and the offload converts it a bounded number of times per op; that was already so
+before D-624-1, alongside the per-op frame. That is within the `[const §XV.1]` v0.2 §XV.4-offload
+exemption in `.specify/constitution.md`, which is a ceiling.
 This is the project's deliberate `[const §XV.4]` async-journal posture (no strand block) — **not**
 reference-engine parity: QuickFIX-cpp / QuickFIX-J perform **synchronous** FileStore flushes on the
 calling thread (see `specs/035-filestore-io-offload/spec.md`); the async offload is a deliberate divergence, not a conformance

@@ -85,9 +85,11 @@
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
+#include <asio/execution/blocking.hpp>
 #include <asio/execution/outstanding_work.hpp>
 #include <asio/post.hpp>
 #include <asio/prefer.hpp>
+#include <asio/require.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <fixpp/core/error.hpp>
@@ -200,30 +202,39 @@ static constexpr std::size_t kAlignment = 8;
 // offload_to — run a single blocking syscall on pool_ex; resume the caller on its
 // own (session-strand) executor. The call hands pool_ex a job of its own (an
 // asio::async_initiate under use_awaitable, posted to pool_ex). The job runs `fn`
-// and posts the completion back to the handler's associated executor with
-// asio::post, never dispatch: a dispatch from a job running on the caller's own
-// executor would resume the caller inside the job, before the job's last touch,
-// and the caller's wait below would never end.
+// and hands the completion back through execute() on the caller's executor taken
+// with blocking.never, which never runs it inline: a hand-back that could run inline
+// (a dispatch) from a job running on the caller's own executor would resume the
+// caller inside the job, before the job's last touch, and the caller's wait below
+// would never end.
+//
+// The caller's executor is converted on the caller's side only, to blocking.never
+// and outstanding_work.tracked, and the job hands back through that executor without
+// converting it again. On a caller whose executor asio::any_io_executor holds
+// as a shared target, each property conversion builds a new target, so the number of
+// conversions per op is the cost to keep down.
 //
 // THE LAST TOUCH. A hand-off from the pool thread to the caller's executor touches
 // the caller's execution context after the completion is already runnable there: the
-// post itself (asio's scheduler signals its waiters after it has released its lock;
+// hand-back itself (asio's scheduler signals its waiters after it has released its lock;
 // see asio/detail/posix_event.hpp, maybe_unlock_and_signal_one), and the copies of the
 // caller's executor the hand-off holds, whose destructors release outstanding work or
 // the last reference to a strand. No arrangement of copies on the pool side removes
 // that touch, so the CALLER waits for it:
-//   - the caller's outstanding work is held by a tracked executor taken on the
-//     caller's side, which the job MOVES into the posted completion, so it is
-//     released on the caller's side;
-//   - every other reference to the caller the job holds (the handler, the executor
-//     copies, the post's temporaries) is destroyed in a scope that closes before the
-//     job's final action;
+//   - the caller's outstanding work is held by the tracked executor taken on the
+//     caller's side. The job moves it into a local, hands the completion back through
+//     it, and destroys it in the scope that closes before the job's final action. The
+//     handed-back completion keeps the caller's context running by itself: once
+//     queued, it is outstanding work of the caller's scheduler (or of the strand that
+//     queued it), so the job's work can be released first;
+//   - every other reference to the caller the job holds (the handler and the
+//     hand-back's temporaries) is destroyed in that same scope;
 //   - the final action is a release-store to a flag in offload_to's own frame, reached
 //     through a raw pointer; after it the job touches nothing of the caller's, and
 //     the job object asio destroys afterwards owns nothing of the caller's;
 //   - offload_to, once resumed, waits (acquire load, yield) for that flag before it
 //     returns. The wait is bounded by the pool thread's unwind of the job after its
-//     post, not by any I/O, which the job finished before posting.
+//     hand-back, not by any I/O, which the job finished before handing back.
 // The flag lives in the awaiting frame, so the caller's execution context must not be
 // destroyed while a store call is in flight; that is the direct caller's existing
 // obligation at FileStore::Config::file_io_executor.
@@ -334,12 +345,11 @@ struct offload_outcome {
     std::exception_ptr error;
 };
 
-// Runs on the caller's executor. It owns the handler and the caller's tracked
-// executor, so both are released on the caller's side.
-template <class Handler, class CallerWork, class R>
+// Runs on the caller's executor. It owns the handler, so the handler is invoked and
+// released on the caller's side.
+template <class Handler, class R>
 struct offload_completion {
     Handler handler;
-    CallerWork caller_work;
     offload_outcome<R> outcome;
 
     void operator()() { std::move(handler)(std::move(outcome)); }
@@ -374,11 +384,9 @@ struct offload_job {
             }
             Handler h = std::move(*handler);
             handler.reset();
-            CallerWork work = std::move(*caller_work);
+            CallerWork const ex = std::move(*caller_work);
             caller_work.reset();
-            auto const handler_ex = asio::get_associated_executor(h);
-            asio::post(handler_ex, offload_completion<Handler, CallerWork, result_type>{
-                                       std::move(h), std::move(work), std::move(outcome)});
+            ex.execute(offload_completion<Handler, result_type>{std::move(h), std::move(outcome)});
         }
         done->store(true, std::memory_order_release);
     }
@@ -389,8 +397,12 @@ struct initiate_offload {
     void operator()(Handler&& handler, asio::any_io_executor const& pool_ex, Fn&& fn,
                     std::atomic<bool>* last_touch) const {
         using handler_t = std::decay_t<Handler>;
-        auto caller_work = asio::prefer(asio::get_associated_executor(handler),
-                                        asio::execution::outstanding_work.tracked);
+        // The only conversions of the caller's executor in an op: blocking.never (the
+        // hand-back never runs inline) and outstanding_work.tracked (the caller's context
+        // keeps running while the job does).
+        auto caller_work = asio::prefer(
+            asio::require(asio::get_associated_executor(handler), asio::execution::blocking.never),
+            asio::execution::outstanding_work.tracked);
         using job_t = offload_job<handler_t, decltype(caller_work), std::decay_t<Fn>>;
         asio::post(pool_ex, job_t{std::optional<handler_t>{std::move(handler)},
                                   std::optional<decltype(caller_work)>{std::move(caller_work)},
