@@ -2470,7 +2470,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset_to(seqnum_t next
 // pwritten frame and counter records are durable before the session closes,
 // regardless of the configured flush policy.
 //
-// Returns expected_t<void>{} on success, store_io_failure on I/O error.
+// Returns expected_t<void>{} on success, store_io_failure on I/O error or on a store
+// poisoned with its log still open (D-635-1, below).
 // Does NOT surface store_cancelled under graceful close (FR-028 / I-17).
 //
 // Engine-internal: dispatched via the A1 typed thunk (flush_thunk_for<FileStore>())
@@ -2481,8 +2482,13 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset_to(seqnum_t next
 // applies to this call; the session's phase-2 root cancel fires AFTER this
 // returns, not during it — Appendix D §D.2 ordering).
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_close() noexcept {
-    // If the store was never successfully opened, return success (nothing to drain).
-    if (!impl_->open_ok) {
+    // A store with no open log (never successfully opened, or poisoned by a reset after
+    // its rename, which closes the file) returns success: nothing to drain.
+    // D-635-1 (fixpp#635): a store poisoned by a failed restore keeps its log open, and
+    // the records acknowledged since the last flush are still in it. The flush drains
+    // them as on any graceful close, then returns store_io_failure for the poison.
+    const bool poisoned = !impl_->open_ok;
+    if (poisoned && !impl_->file.valid()) {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -2516,7 +2522,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_clos
             return ok;
         });
 
-    if (!io_ok) {
+    if (!io_ok || poisoned) {
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 

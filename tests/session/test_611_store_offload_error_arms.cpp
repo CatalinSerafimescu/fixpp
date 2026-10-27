@@ -642,7 +642,8 @@ TEST(StoreOffloadErrorArms, RetryAfterDatasyncFails_Shorter) {
 //
 // store(2) fails at its counter write, and the job's restore of the log's committed end
 // fails at its truncate or at the datasync after it. The store is poisoned: a later store()
-// and a later increment are refused, and nothing more is written to the log. The reopen
+// and a later increment are refused, and nothing more is written to the log; the graceful
+// close's flush still drains the open log and returns store_io_failure. The reopen
 // accepts the log; after a failed truncate it holds store(2)'s frame record with no counter
 // record (read by its own number, D-632-1), after a failed datasync it ends at the committed
 // end.
@@ -673,6 +674,17 @@ void restore_fails(bool const truncate, bool const frame2_on_disk) {
                 << "an increment after a failed restore must be refused";
             EXPECT_EQ(log_size(fx), after_failure)
                 << "nothing may be written to the log after a failed restore";
+            // The graceful close's flush (B-008-5) still drains the open log, and reports
+            // the poison like every other call (B-635-1).
+            auto const flush = store->flush_hook();
+            EXPECT_NE(flush, nullptr) << "setup: the FileStore's graceful-close flush";
+            if (!flush) co_return;
+            (void)fixpp::session::read_and_reset_flush_datasync_count();
+            auto const flushed = co_await flush(*store);
+            EXPECT_TRUE(!flushed && flushed.error() == error::store_io_failure)
+                << "the graceful-close flush of a poisoned store must return store_io_failure";
+            EXPECT_EQ(fixpp::session::read_and_reset_flush_datasync_count(), 1)
+                << "the graceful-close flush of a poisoned store did not drain the log";
         }
         auto const again = co_await reopen(fx);
         EXPECT_TRUE(again.accepted) << "the open after the failed restore must accept the log";
