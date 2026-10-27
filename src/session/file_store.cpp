@@ -45,12 +45,15 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fixpp/session/file_store.hpp>
 #include <memory>
 #include <memory_resource>
+#include <new>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -77,11 +80,16 @@
 
 #include <crc32c/crc32c.h>
 
+#include <asio/associated_executor.hpp>
+#include <asio/async_result.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
-#include <asio/co_spawn.hpp>
+#include <asio/execution/blocking.hpp>
+#include <asio/execution/outstanding_work.hpp>
 #include <asio/post.hpp>
+#include <asio/prefer.hpp>
+#include <asio/require.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <fixpp/core/error.hpp>
@@ -113,6 +121,14 @@ static std::atomic<int> g_retrieve_pread_count{0};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_flush_datasync_count{0};
 
+// fixpp#635 restore-ran witness counter — incremented inside sync_restored_end() after
+// the restore's own datasync returns true, and nowhere else. Compiled unconditionally,
+// for the reason R#1a's counter above is; declaration in file_store.hpp gated by
+// FIXPP_TEST_HOOKS. The increment is on a failed write's restore (cold failure path),
+// never a successful store's path, so there is no §XV.1/§VIII.5 concern.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_restore_datasync_count{0};
+
 // T003 fault-injection seam: makes the NEXT store() call's offloaded pwrite
 // sequence return false at the FIRST pwrite — before any durable byte is
 // written — so nothing is retained and the durable counter is not advanced,
@@ -122,6 +138,25 @@ static std::atomic<int> g_flush_datasync_count{0};
 // declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_store_pwrite_fail_once{false};
+// fixpp#611: the generalised offload write-fault seam. Arms a fault for the NEXT
+// offloaded store() or next_seqnum(increment) job: its Nth raw pwrite (counting from 1),
+// or its fdatasync, reports failure without writing. Consumed once, by the job that
+// takes it; g_offload_write_fail_count counts each fault that fired. Compiled
+// unconditionally (like g_store_offload_probe); declarations in file_store.hpp gated
+// by FIXPP_TEST_HOOKS.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_offload_fault_pwrite_nth{0};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_offload_fault_datasync{false};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_offload_write_fail_count{0};
+// fixpp#635: the same job's restore of the committed end (D-635-1) fails at its truncate
+// or at the datasync after it. Taken with the write fault, by the same job; each fault
+// that fires counts in g_offload_write_fail_count.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_offload_fault_restore_truncate{false};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_offload_fault_restore_datasync{false};
 // 093 (tasks.md T079, Q-29) reset-atomicity fault seams. Compiled unconditionally (like
 // g_store_offload_probe); declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
 //   g_force_reset_fail_before_rename: the next reset's offloaded sequence fails after
@@ -149,6 +184,14 @@ static std::atomic<bool> g_force_reset_dir_fsync_fail{false};
 //     POSIX-semantics rename fails (posix_rename_over_open).
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_reset_rename_flush_fail{false};
+// fixpp#611 / fixpp#599: the reset-step fault seam. The next reset's offloaded job fails
+// at one step, on both platforms: initialise_fresh on the temporary log, the rename,
+// the reopen's open, the reopen's lock (each reports failure as that step's own failure
+// does), or throws std::bad_alloc right after the rename has replaced the live log. The
+// step values are the kResetStepFault* constants below and in file_store.hpp. Consumed
+// once, by the job that takes it; counts in g_reset_atomicity_fault_count when it fires.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_reset_step_fault{0};
 // T004 probe counter — incremented each time g_force_store_pwrite_fail_once
 // actually fires (i.e. the injected failure took effect), so a test can
 // confirm the seam fired for the right reason rather than trust a bare RED.
@@ -170,22 +213,64 @@ static constexpr std::size_t kAlignment = 8;
 
 // ── 035-filestore-io-offload: file-local offload helper ──────────────────────
 //
-// offload_to — run a single blocking syscall on pool_ex; resume the caller on
-// its own (session-strand) executor.  This is the nested-co_spawn idiom:
-// co_spawn pins the inner body to pool_ex; use_awaitable resumes the outer
-// coroutine on the spawner's associated executor (the session strand).
+// D-624-1 (offload completion: the caller waits for the job's last touch).
+// Supersedes 035's nested-co_spawn idiom here; the decision, its mechanism and the
+// alternatives it rejects are in .specify/624-offload-completion-lifetime.md.
 //
-// FINAL NO-REAPER SHAPE (data-model §2 / contracts C1 / Decision 5). The spawn's
-// token is fixpp#598's (.specify/536-537-538-recovery-liveness.md §11, D-598-1 and
+// offload_to — run a single blocking syscall on pool_ex; resume the caller on its
+// own (session-strand) executor. The call hands pool_ex a job of its own (an
+// asio::async_initiate under use_awaitable, posted to pool_ex). The job runs `fn`
+// and hands the completion back through execute() on the caller's executor taken
+// with blocking.never, which never runs it inline: a hand-back that could run inline
+// (a dispatch) from a job running on the caller's own executor would resume the
+// caller inside the job, before the job's last touch, and the caller's wait below
+// would never end.
+//
+// The caller's executor is converted on the caller's side only, to blocking.never
+// and outstanding_work.tracked, and the job hands back through that executor without
+// converting it again. On a caller whose executor asio::any_io_executor holds
+// as a shared target, each property conversion builds a new target, so the number of
+// conversions per op is the cost to keep down.
+//
+// THE LAST TOUCH. A hand-off from the pool thread to the caller's executor touches
+// the caller's execution context after the completion is already runnable there: the
+// hand-back itself (asio's scheduler signals its waiters after it has released its lock;
+// see asio/detail/posix_event.hpp, maybe_unlock_and_signal_one), and the copies of the
+// caller's executor the hand-off holds, whose destructors release outstanding work or
+// the last reference to a strand. No arrangement of copies on the pool side removes
+// that touch, so the CALLER waits for it:
+//   - the caller's outstanding work is held by the tracked executor taken on the
+//     caller's side. The job moves it into a local, hands the completion back through
+//     it, and destroys it in the scope that closes before the job's final action. The
+//     handed-back completion keeps the caller's context running by itself: once
+//     queued, it is outstanding work of the caller's scheduler (or of the strand that
+//     queued it), so the job's work can be released first;
+//   - every other reference to the caller the job holds (the handler and the
+//     hand-back's temporaries) is destroyed in that same scope;
+//   - the final action is a release-store to a flag in offload_to's own frame, reached
+//     through a raw pointer; after it the job touches nothing of the caller's, and
+//     the job object asio destroys afterwards owns nothing of the caller's executor
+//     or execution context (its body may co-own heap state with the caller's frame
+//     through a thread-safe reference count, which touches neither);
+//   - offload_to, once resumed, waits (acquire load, yield) for that flag before it
+//     returns. The wait is bounded by the pool thread's unwind of the job after its
+//     hand-back, not by any I/O, which the job finished before handing back.
+// The flag lives in the awaiting frame, so the caller's execution context must not be
+// destroyed while a store call is in flight; that is the direct caller's existing
+// obligation at FileStore::Config::file_io_executor.
+//
+// NO CANCELLATION (data-model §2 / contracts C1 / Decision 5). The completion token
+// is fixpp#598's (.specify/536-537-538-recovery-liveness.md §11, D-598-1 and
 // D-598-2), which supersedes contract C3's sentence that the implementation MUST
 // unconditionally catch operation_aborted and return the durable success:
-//   The spawn has no cancellation slot: it completes through a token bound to an
-//   EMPTY slot, so no cancellation, of any type, reaches the spawned coroutine.
-//   Once a store call has handed its job over, the job runs its body, and the call
-//   returns the body's own result when it has. That holds on a file executor that
-//   runs the jobs handed to it; on one that does not, the call does not return (the host's
-//   precondition is stated at FileStore::Config::file_io_executor). A cancellation recorded on the
-//   caller's thread stays recorded there. Teardown drains by AWAITING completion (Engine::stop() /
+//   The await has no cancellation slot: it completes through a token bound to an
+//   EMPTY slot, and the initiation connects nothing, so no cancellation, of any type,
+//   reaches the job. Once a store call has handed its job over, the job runs its body,
+//   and the call returns the body's own result when it has, or rethrows what the body
+//   threw. That holds on a file executor that runs the jobs handed to it; on one that
+//   does not, the call does not return (the host's precondition is stated at
+//   FileStore::Config::file_io_executor). A cancellation recorded on the caller's thread
+//   stays recorded there. Teardown drains by AWAITING completion (Engine::stop() /
 //   T016), not by cancelling in-flight syscalls. An implementer MUST NOT bolt a
 //   cancellation-slot/flag reaper onto this helper; the empty slot is not one.
 //
@@ -199,7 +284,6 @@ static constexpr std::size_t kAlignment = 8;
 //   All impl_ field mutations happen in the OUTER coroutine, on the strand,
 //   before or after the co_await — never inside 'fn'. (data-model §3)
 //
-// Idiom precedent: asio_tls_transport.hpp's D-18 reminder, below.
 // [feedback_asio_post_resume_bounces_to_spawn_executor]
 
 namespace {
@@ -223,11 +307,10 @@ namespace {
 //
 // It is also the CHEAPER placement, which is worth keeping when someone tries
 // to make it symmetric with the entry probe. A per-site exit pointer would be
-// captured into each lambda -- and each lambda IS the by-value `Fn fn`
-// parameter of the inner coroutine below, so it lands in a heap-allocated
-// coroutine frame. This guard is a local whose lifetime ENDS BEFORE the final
-// suspend, so an implementation has no reason to reserve frame storage for it.
-// That is the durable condition; do not replace it with a frame-size number,
+// captured into each lambda -- and each lambda IS the by-value `Fn fn` the
+// posted job below carries, so it lands in the job's allocation. This guard is
+// a local of the job's call operator, so it takes no storage in the job.
+// That is the durable condition; do not replace it with a size number,
 // which no build gate re-checks and which a compiler upgrade can falsify while
 // the comment goes on certifying it.
 //
@@ -263,17 +346,194 @@ struct store_offload_exit_guard {
     }
 };
 
+// The test seams of decision D-624-1, compiled unconditionally (like g_store_offload_probe);
+// declarations in file_store.hpp gated by FIXPP_TEST_HOOKS. Production values:
+// nullptr and false.
+//   g_store_offload_caller_wait_probe: called on the caller's thread when offload_to,
+//     resumed, starts waiting for its job's last touch.
+//   g_force_store_offload_throw_once: the next offloaded job throws in place of
+//     running its body. Consumed once.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<void (*)() noexcept> g_store_offload_caller_wait_probe{nullptr};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> g_force_store_offload_throw_once{false};
+
+// What the job hands back: the body's result, or what the body threw.
+template <class R>
+struct offload_outcome {
+    std::optional<R> value;
+    std::exception_ptr error;
+};
+
+// Runs on the caller's executor. It owns the handler, so the handler is invoked and
+// released on the caller's side.
+template <class Handler, class R>
+struct offload_completion {
+    Handler handler;
+    offload_outcome<R> outcome;
+
+    void operator()() { std::move(handler)(std::move(outcome)); }
+};
+
+// Runs on pool_ex. See "THE LAST TOUCH" above for why every reference to the caller
+// is gone before `last_touch` is stored, and why nothing follows that store.
+template <class Handler, class CallerWork, class Fn>
+struct offload_job {
+    using result_type = std::invoke_result_t<Fn>;
+
+    std::optional<Handler> handler;
+    std::optional<CallerWork> caller_work;
+    Fn fn;
+    std::atomic<bool>* last_touch;
+
+    void operator()() {
+        std::atomic<bool>* const done = last_touch;
+        {
+            offload_outcome<result_type> outcome;
+            {
+                store_offload_exit_guard exit_guard;
+                try {
+                    if (g_force_store_offload_throw_once.exchange(false,
+                                                                  std::memory_order_relaxed)) {
+                        throw std::runtime_error("fixpp test seam: the offloaded job threw");
+                    }
+                    outcome.value.emplace(fn());  // raw blocking syscall runs HERE, on pool_ex
+                } catch (...) {
+                    outcome.error = std::current_exception();
+                }
+            }
+            // The handler and the caller's executor are moved out into locals, and both
+            // members are disengaged, inside this scope: the caller's executor and handler
+            // the job held are destroyed before the flag store, and the job asio destroys
+            // after it holds nothing of the caller's executor or execution context.
+            // initiate_offload engages both, and asio runs the job once.
+            if (!handler || !caller_work) {
+                std::terminate();
+            }
+            Handler h = std::move(*handler);
+            handler.reset();
+            CallerWork const ex = std::move(*caller_work);
+            caller_work.reset();
+            ex.execute(offload_completion<Handler, result_type>{std::move(h), std::move(outcome)});
+        }
+        done->store(true, std::memory_order_release);
+    }
+};
+
+struct initiate_offload {
+    // The handler is taken by value: async_initiate passes it as an rvalue, so this is
+    // one move, and the job owns it from here.
+    template <class Handler, class Fn>
+    void operator()(Handler handler, asio::any_io_executor const& pool_ex, Fn&& fn,
+                    std::atomic<bool>* last_touch) const {
+        // The only conversions of the caller's executor in an op: blocking.never (the
+        // hand-back never runs inline) and outstanding_work.tracked (the caller's context
+        // keeps running while the job does).
+        // NOLINTBEGIN(readability-static-accessed-through-instance): asio's property-object
+        // spelling
+        auto caller_work = asio::prefer(
+            asio::require(asio::get_associated_executor(handler), asio::execution::blocking.never),
+            asio::execution::outstanding_work.tracked);
+        // NOLINTEND(readability-static-accessed-through-instance)
+        using job_t = offload_job<Handler, decltype(caller_work), std::decay_t<Fn>>;
+        asio::post(pool_ex, job_t{std::optional<Handler>{std::move(handler)},
+                                  std::optional<decltype(caller_work)>{std::move(caller_work)},
+                                  std::forward<Fn>(fn), last_touch});
+    }
+};
+
 template <class Fn>
 asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_ex, Fn fn) {
-    co_return co_await asio::co_spawn(
-        pool_ex,
-        [fn = std::move(fn)]() -> asio::awaitable<std::invoke_result_t<Fn>> {
-            // Destroyed when this body completes — before final suspend, on the
-            // pool thread, because the body has no suspension point of its own.
-            store_offload_exit_guard exit_guard;
-            co_return fn();  // raw blocking syscall runs HERE, pinned to pool_ex
-        },
-        asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable));
+    using result_type = std::invoke_result_t<Fn>;
+    static_assert(!std::is_void_v<result_type>, "an offloaded body returns a value");
+    std::atomic<bool> last_touch{false};
+    auto const token = asio::bind_cancellation_slot(asio::cancellation_slot{}, asio::use_awaitable);
+    auto outcome =
+        co_await asio::async_initiate<decltype(token), void(offload_outcome<result_type>)>(
+            initiate_offload{}, token, std::move(pool_ex), std::move(fn), &last_touch);
+    if (auto const probe_fn = g_store_offload_caller_wait_probe.load(std::memory_order_relaxed)) {
+        probe_fn();
+    }
+    while (!last_touch.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    // The job sets exactly one of the two: the body's value, or what the body threw.
+    if (outcome.value) {
+        co_return std::move(*outcome.value);
+    }
+    std::rethrow_exception(outcome.error);
+}
+
+// ── fixpp#611: the offload write-fault plan of the job running on this thread ──
+//
+// A store() or next_seqnum(increment) job takes the armed fault, if any, when it
+// starts (offload_write_fault_scope), and the raw helpers below consult it. The plan
+// is thread_local because the job runs synchronously on one pool thread; a job that
+// does not install the scope (reset, flush) sees no plan. Production cost per job:
+// one relaxed load per fault flag; per raw call: one thread_local read and one branch
+// not taken.
+struct offload_write_fault_plan {
+    int pwrite_nth = 0;  // fail this pwrite of the job, counting from 1; 0: none
+    bool datasync = false;
+    int pwrites_seen = 0;
+    bool restore_truncate = false;  // fixpp#635: fail the restore's truncate
+    bool restore_datasync = false;  // fixpp#635: fail the restore's datasync
+};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+thread_local offload_write_fault_plan t_offload_write_fault{};
+
+struct offload_write_fault_scope {
+    offload_write_fault_scope() noexcept {
+        offload_write_fault_plan plan{};
+        if (g_offload_fault_pwrite_nth.load(std::memory_order_relaxed) != 0) {
+            plan.pwrite_nth = g_offload_fault_pwrite_nth.exchange(0, std::memory_order_relaxed);
+        }
+        if (g_offload_fault_datasync.load(std::memory_order_relaxed)) {
+            plan.datasync = g_offload_fault_datasync.exchange(false, std::memory_order_relaxed);
+        }
+        if (g_offload_fault_restore_truncate.load(std::memory_order_relaxed)) {
+            plan.restore_truncate =
+                g_offload_fault_restore_truncate.exchange(false, std::memory_order_relaxed);
+        }
+        if (g_offload_fault_restore_datasync.load(std::memory_order_relaxed)) {
+            plan.restore_datasync =
+                g_offload_fault_restore_datasync.exchange(false, std::memory_order_relaxed);
+        }
+        t_offload_write_fault = plan;
+    }
+    ~offload_write_fault_scope() { t_offload_write_fault = {}; }
+    offload_write_fault_scope(const offload_write_fault_scope&) = delete;
+    offload_write_fault_scope& operator=(const offload_write_fault_scope&) = delete;
+};
+
+[[nodiscard]] bool offload_pwrite_fault_fires() noexcept {
+    auto& plan = t_offload_write_fault;
+    if (plan.pwrite_nth == 0 || ++plan.pwrites_seen != plan.pwrite_nth) {
+        return false;
+    }
+    g_offload_write_fail_count.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+// fixpp#635: one of the restore's two steps is armed to fail (consumed, counted).
+[[nodiscard]] bool offload_restore_fault_fires(bool offload_write_fault_plan::* step) noexcept {
+    auto& plan = t_offload_write_fault;
+    if (!(plan.*step)) {
+        return false;
+    }
+    plan.*step = false;
+    g_offload_write_fail_count.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+[[nodiscard]] bool offload_datasync_fault_fires() noexcept {
+    auto& plan = t_offload_write_fault;
+    if (!plan.datasync) {
+        return false;
+    }
+    plan.datasync = false;
+    g_offload_write_fail_count.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 
 // ── Raw syscall helpers for the offload lambda ────────────────────────────────
@@ -288,6 +548,7 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
 
 // pwrite_all with EINTR loop — mirrors OsFile::pwrite_all.
 [[nodiscard]] bool raw_pwrite_all(int fd, const void* buf, std::size_t n, off_t offset) noexcept {
+    if (offload_pwrite_fault_fires()) return false;  // fixpp#611 seam
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
     while (remaining > 0) {
@@ -303,13 +564,25 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
     return true;
 }
 
-// fdatasync wrapper — mirrors OsFile::datasync.
-[[nodiscard]] bool raw_datasync(int fd) noexcept { return ::fdatasync(fd) == 0; }
+// fdatasync, with no seam — mirrors OsFile::datasync.
+[[nodiscard]] bool os_datasync(int fd) noexcept { return ::fdatasync(fd) == 0; }
+
+// The job's own fdatasync: the fixpp#611 seam, then os_datasync.
+[[nodiscard]] bool raw_datasync(int fd) noexcept {
+    if (offload_datasync_fault_fires()) return false;  // fixpp#611 seam
+    return os_datasync(fd);
+}
+
+// ftruncate to `size` — the file's end moves back to it.
+[[nodiscard]] bool raw_truncate(int fd, std::int64_t size) noexcept {
+    return ::ftruncate(fd, static_cast<off_t>(size)) == 0;
+}
 
 #else  // _WIN32
 
 [[nodiscard]] bool raw_pwrite_all(HANDLE h, const void* buf, std::size_t n,
                                   std::int64_t offset) noexcept {
+    if (offload_pwrite_fault_fires()) return false;  // fixpp#611 seam
     const auto* p = static_cast<const char*>(buf);
     std::size_t remaining = n;
     std::int64_t off = offset;
@@ -329,9 +602,61 @@ asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_
     return true;
 }
 
-[[nodiscard]] bool raw_datasync(HANDLE h) noexcept { return FlushFileBuffers(h) != 0; }
+// FlushFileBuffers, with no seam.
+[[nodiscard]] bool os_datasync(HANDLE h) noexcept { return FlushFileBuffers(h) != 0; }
+
+// The job's own flush: the fixpp#611 seam, then os_datasync.
+[[nodiscard]] bool raw_datasync(HANDLE h) noexcept {
+    if (offload_datasync_fault_fires()) return false;  // fixpp#611 seam
+    return os_datasync(h);
+}
+
+// SetFilePointerEx + SetEndOfFile to `size` — the file's end moves back to it. The
+// offloaded writes give their offsets explicitly, so the moved file pointer is unused.
+[[nodiscard]] bool raw_truncate(HANDLE h, std::int64_t size) noexcept {
+    LARGE_INTEGER pos{};
+    pos.QuadPart = size;
+    return SetFilePointerEx(h, pos, nullptr, FILE_BEGIN) != 0 && SetEndOfFile(h) != 0;
+}
 
 #endif  // _WIN32
+
+// fixpp#635, D-635-1 (.specify/624-offload-completion-lifetime.md §9): a failed store or
+// increment leaves no byte past the log's committed end. The store keeps a write position
+// and writes the next record there, so bytes a failed job left past it would sit behind a
+// later, shorter record, where the next open reads them as a damaged log and refuses it.
+// The job that failed after it may have written truncates the file back to the committed
+// end, then datasyncs, so a crash cannot keep a later record and lose the truncate.
+enum class offload_write_result : std::uint8_t {
+    ok,
+    failed,             // the call failed, and the log ends at its committed end
+    failed_unrestored,  // the call failed, and the restore did too: the caller poisons the store
+};
+
+// The restore's datasync. It does not take the job's datasync fault, which is the job's
+// own flush; the restore's is its own step (restore_datasync in the plan). Counts each
+// success in g_restore_datasync_count.
+template <class Fd>
+[[nodiscard]] bool sync_restored_end(Fd fd) noexcept {
+    const bool ok = os_datasync(fd);
+    if (ok) {
+        g_restore_datasync_count.fetch_add(1, std::memory_order_relaxed);
+    }
+    return ok;
+}
+
+template <class Fd>
+[[nodiscard]] offload_write_result restore_committed_end(Fd fd, std::int64_t end) noexcept {
+    if (offload_restore_fault_fires(&offload_write_fault_plan::restore_truncate) ||
+        !raw_truncate(fd, end)) {
+        return offload_write_result::failed_unrestored;
+    }
+    if (offload_restore_fault_fires(&offload_write_fault_plan::restore_datasync) ||
+        !sync_restored_end(fd)) {
+        return offload_write_result::failed_unrestored;
+    }
+    return offload_write_result::failed;
+}
 
 // ── Store offload probe hook (test seam) ──────────────────────────────────────
 //
@@ -365,6 +690,15 @@ void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) n
     g_store_offload_exit_probe.store(probe, std::memory_order_relaxed);
 }
 
+// D-624-1: the caller-wait probe and the throw seam; their globals live beside
+// `offload_to` above, which is their only reader.
+void install_store_offload_caller_wait_probe(void (*probe)() noexcept) noexcept {
+    g_store_offload_caller_wait_probe.store(probe, std::memory_order_relaxed);
+}
+void arm_force_store_offload_throw_once() noexcept {
+    g_force_store_offload_throw_once.store(true, std::memory_order_relaxed);
+}
+
 // Read and reset the T015 retrieve pread-attempt counter.
 // Returns number of read_frame_payload() calls in retrieve()'s walk loop since
 // the last reset. Used by MidWalkReset tests to confirm the generation guard
@@ -381,6 +715,12 @@ int read_and_reset_retrieve_pread_count() noexcept {
 // FIXPP_TEST_HOOKS.
 int read_and_reset_flush_datasync_count() noexcept {
     return g_flush_datasync_count.exchange(0, std::memory_order_acq_rel);
+}
+
+// fixpp#635: read and reset the restore-ran counter (see its global above). Compiled
+// unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
+int read_and_reset_restore_datasync_count() noexcept {
+    return g_restore_datasync_count.exchange(0, std::memory_order_acq_rel);
 }
 
 // gate-b/r1 A.1: install (or clear) the post-rename reopen-fail hook.
@@ -402,6 +742,21 @@ void arm_force_store_pwrite_fail_once() noexcept {
 // FIXPP_TEST_HOOKS.
 int read_and_reset_store_pwrite_fail_count() noexcept {
     return g_store_pwrite_fail_count.exchange(0, std::memory_order_acq_rel);
+}
+
+// fixpp#611: arm the generalised offload write fault, and read and reset how many
+// times it fired (see their globals above). Compiled unconditionally; declarations in
+// file_store.hpp gated by FIXPP_TEST_HOOKS.
+void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept {
+    g_offload_fault_pwrite_nth.store(pwrite_nth, std::memory_order_relaxed);
+    g_offload_fault_datasync.store(datasync, std::memory_order_relaxed);
+}
+void arm_force_offload_restore_fail_once(bool truncate, bool datasync) noexcept {
+    g_offload_fault_restore_truncate.store(truncate, std::memory_order_relaxed);
+    g_offload_fault_restore_datasync.store(datasync, std::memory_order_relaxed);
+}
+int read_and_reset_offload_write_fail_count() noexcept {
+    return g_offload_write_fail_count.exchange(0, std::memory_order_acq_rel);
 }
 
 // 093 (tasks.md T079): the reset-atomicity fault seams (see their globals above).
@@ -426,6 +781,9 @@ void arm_force_reset_dir_fsync_fail_once() noexcept {
 }
 void arm_force_reset_rename_flush_fail_once() noexcept {
     g_force_reset_rename_flush_fail.store(true, std::memory_order_relaxed);
+}
+void arm_force_reset_step_fault_once(int step) noexcept {
+    g_reset_step_fault.store(step, std::memory_order_relaxed);
 }
 
 // ── Record kinds ──────────────────────────────────────────────────────────────
@@ -862,6 +1220,25 @@ struct FileStoreImpl {
         return true;
     }
 
+    // ── Frame index ────────────────────────────────────────────────────────
+
+    // fixpp#632, D-632-1 (.specify/624-offload-completion-lifetime.md): the last record
+    // of a sequence number wins. Each direction's index holds one entry per number, in
+    // strictly increasing order, and retrieve() looks a number up by its distance from
+    // the first entry. A frame record for the number at the back REPLACES that entry
+    // (the log holds an earlier record for it when a store() of that number failed after
+    // its frame record was written); a record above the back is appended.
+    // Precondition: ie.seq >= the back's number. store() admits only the next number,
+    // which is never below the back; restart_scan refuses a log that breaks it.
+    void index_frame(const IndexEntry& ie) {
+        auto& idx = (ie.dir == direction_t::inbound) ? inbound_index : outbound_index;
+        if (!idx.empty() && idx.back().seq == ie.seq) {
+            idx.back() = ie;
+            return;
+        }
+        idx.push_back(ie);
+    }
+
     // ── Frame record write ─────────────────────────────────────────────────
 
     bool write_frame(seqnum_t seq, direction_t dir, std::span<const std::byte> frame) noexcept {
@@ -1058,8 +1435,14 @@ struct FileStoreImpl {
                 ie.dir = static_cast<direction_t>(hdr.dir);
                 ie.file_offset = scan_pos;
                 ie.len = static_cast<std::uint32_t>(payload_len);
-                auto& idx = (ie.dir == direction_t::inbound) ? inbound_index : outbound_index;
-                idx.push_back(ie);
+                // D-632-1: a frame record below the direction's last number cannot be
+                // written by store(), which admits only the next number; a log holding
+                // one is refused as corrupt, so the index stays strictly increasing.
+                const auto& idx = (ie.dir == direction_t::inbound) ? inbound_index : outbound_index;
+                if (!idx.empty() && ie.seq < idx.back().seq) {
+                    return false;
+                }
+                index_frame(ie);
             } else if (kind == RecordKind::counter) {
                 if (payload_len == kCounterPayloadSize) {
                     CounterPayload cp{};
@@ -1088,8 +1471,9 @@ struct FileStoreImpl {
             next_inbound = recovered_ni;
             next_outbound = recovered_no;
         } else {
-            // Infer from index: vectors are built in seqnum-monotonic order,
-            // so back().seq is the maximum (O(1) per direction).
+            // Infer from index: each direction's index is strictly increasing by
+            // number (index_frame, and the refusal above), so back().seq is the
+            // maximum (O(1) per direction).
             const seqnum_t max_in = inbound_index.empty() ? seqnum_t{0} : inbound_index.back().seq;
             const seqnum_t max_out =
                 outbound_index.empty() ? seqnum_t{0} : outbound_index.back().seq;
@@ -1143,9 +1527,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                                                                 [[clang::lifetimebound]],
                                                                 direction_t dir) noexcept {
     // Capture the session executor for the leading pump-break post below. (035:
-    // the offload uses nested co_spawn(use_awaitable), which resumes on this
-    // spawning executor — there is no longer a file_io_executor hop to rebind
-    // from; session_ex now serves only the leading post.)
+    // the offload resumes on this executor — D-624-1 posts its completion to the
+    // awaiting handler's executor — so there is no file_io_executor hop to rebind
+    // from; session_ex serves only the leading post.)
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive awaitable_thread::pump() chain
@@ -1256,16 +1640,22 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
     // frame_span (span into store_scratch_ — stable while mutex held), pad,
     // flush decision, and the (nullable) probe function pointer.
     // It touches NO impl_ field and mutates nothing in impl_. (data-model §2/§3)
-    const bool io_ok = co_await offload_to(
+    const offload_write_result io = co_await offload_to(
         impl_->cfg.file_io_executor,
         [raw_fd, frame_hdr, frame_span, frame_off, frame_pad, counter_hdr, counter_pl, counter_off,
-         do_flush, probe_fn]() -> bool {
+         do_flush, probe_fn]() -> offload_write_result {
+            // D-635-1: every failure from the first write on restores the committed end,
+            // which is this store's frame offset.
+            const auto failed = [raw_fd, frame_off] {
+                return restore_committed_end(raw_fd, frame_off);
+            };
             // Call the test probe (if installed) BEFORE the first pwrite so the
             // test can confirm the syscall ran on a pool thread ≠ strand thread.
             // In production probe_fn is nullptr; the branch is dead-code-eliminated.
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
+            const offload_write_fault_scope write_fault_scope;  // fixpp#611 seam
 
             // T003 fault-injection: return false at the FIRST pwrite — BEFORE
             // any durable byte — so nothing is retained and the durable counter
@@ -1275,19 +1665,19 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
             // (not captured); reachable on the pool thread.
             if (g_force_store_pwrite_fail_once.exchange(false, std::memory_order_relaxed)) {
                 g_store_pwrite_fail_count.fetch_add(1, std::memory_order_relaxed);
-                return false;
+                return offload_write_result::failed;  // before any write: nothing to restore
             }
 
             // pwrite frame header at frame_off.
             if (!raw_pwrite_all(raw_fd, &frame_hdr, kHeaderSize, static_cast<off_t>(frame_off))) {
-                return false;
+                return failed();
             }
             // pwrite frame payload.
             if (!frame_span.empty()) {
                 if (!raw_pwrite_all(
                         raw_fd, frame_span.data(), frame_span.size(),
                         static_cast<off_t>(frame_off + static_cast<std::int64_t>(kHeaderSize)))) {
-                    return false;
+                    return failed();
                 }
             }
             // pwrite frame padding.
@@ -1297,44 +1687,50 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                         raw_fd, zeros, frame_pad,
                         static_cast<off_t>(frame_off + static_cast<std::int64_t>(
                                                            kHeaderSize + frame_span.size())))) {
-                    return false;
+                    return failed();
                 }
             }
             // pwrite counter header.
             if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
                                 static_cast<off_t>(counter_off))) {
-                return false;
+                return failed();
             }
             // pwrite counter payload.
             if (!raw_pwrite_all(
                     raw_fd, &counter_pl, kCounterPayloadSize,
                     static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
-                return false;
+                return failed();
             }
             // datasync: linearisation point (FR-003 / C2). Blocks until durable.
             if (do_flush && !raw_datasync(raw_fd)) {
-                return false;
+                return failed();
             }
-            return true;
+            return offload_write_result::ok;
         });
 
     // ── Region 3: STRAND — apply mutations on success (mutex still held) ──────
     //
-    // On I/O failure: no impl_ mutation — counters, index, write_pos unchanged.
+    // On I/O failure: no impl_ mutation — counters, index, write_pos unchanged, and the
+    // job restored the log's end to write_pos (D-635-1). When that restore failed too,
+    // the log may hold bytes past write_pos, and the next write there could leave some of
+    // them behind it: the store is poisoned (open_ok = false, the flag the reset's poison
+    // sets), so every later call returns store_io_failure until the store is opened again.
     // On success: push index entry, set counters to the pre-computed values,
     // advance write_pos. (035 data-model §3 / brief §3)
-    if (!io_ok) {
+    if (io != offload_write_result::ok) {
+        if (io == offload_write_result::failed_unrestored) {
+            impl_->open_ok = false;
+        }
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
-    // Push index entry (mirrors write_frame, stripped of pwrite).
+    // Index the frame; D-632-1: it replaces an entry for the same number (index_frame).
     IndexEntry ie;
     ie.seq = seq;
     ie.dir = dir;
     ie.file_offset = frame_off;
     ie.len = static_cast<std::uint32_t>(frame_span.size());
-    auto& idx = (dir == direction_t::inbound) ? impl_->inbound_index : impl_->outbound_index;
-    idx.push_back(ie);
+    impl_->index_frame(ie);
 
     // Set in-memory counters to the pre-computed post-increment values.
     impl_->next_inbound = ni;
@@ -1489,7 +1885,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::retrieve(
 asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direction_t dir,
                                                                           bool increment) noexcept {
     // Capture the session executor for the leading pump-break post below (035: no
-    // offload rebind hop remains — nested co_spawn resumes on this executor).
+    // offload rebind hop remains — the offload resumes on this executor, D-624-1).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.
@@ -1544,36 +1940,50 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
         const auto probe_fn = g_store_offload_probe.load(std::memory_order_relaxed);
 
         // ── Region 2: POOL — raw syscalls in the offloaded lambda ─────────────────
-        const bool io_ok = co_await offload_to(
+        const offload_write_result io = co_await offload_to(
             impl_->cfg.file_io_executor,
-            [raw_fd, counter_hdr, counter_pl, counter_off, probe_fn]() -> bool {
+            [raw_fd, counter_hdr, counter_pl, counter_off, probe_fn]() -> offload_write_result {
+                // D-635-1: every failure from the first write on restores the committed
+                // end, which is this counter record's offset.
+                const auto failed = [raw_fd, counter_off] {
+                    return restore_committed_end(raw_fd, counter_off);
+                };
                 if (probe_fn) {
                     probe_fn(std::this_thread::get_id());
                 }
+                const offload_write_fault_scope write_fault_scope;  // fixpp#611 seam
                 // 093 (tasks.md T079): the counter-write-after-reset-commit seam.
                 int committed = 2;
                 if (g_fail_counter_write_after_reset_commit.compare_exchange_strong(
                         committed, 0, std::memory_order_relaxed)) {
                     g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
-                    return false;
+                    return offload_write_result::failed;  // before any write
                 }
                 // pwrite counter header.
                 if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
                                     static_cast<off_t>(counter_off))) {
-                    return false;
+                    return failed();
                 }
                 // pwrite counter payload.
                 if (!raw_pwrite_all(
                         raw_fd, &counter_pl, kCounterPayloadSize,
                         static_cast<off_t>(counter_off + static_cast<std::int64_t>(kHeaderSize)))) {
-                    return false;
+                    return failed();
                 }
                 // datasync: linearisation point (counter-record pwrite + datasync).
-                return raw_datasync(raw_fd);
+                if (!raw_datasync(raw_fd)) {
+                    return failed();
+                }
+                return offload_write_result::ok;
             });
 
         // ── Region 3: STRAND — advance write_pos on success (mutex still held) ──
-        if (!io_ok) {
+        // On failure the job restored the log's end (D-635-1); when it could not, the
+        // store is poisoned, as store()'s Region 3 does.
+        if (io != offload_write_result::ok) {
+            if (io == offload_write_result::failed_unrestored) {
+                impl_->open_ok = false;
+            }
             co_return std::unexpected(fixpp::core::error::store_io_failure);
         }
         impl_->write_pos += static_cast<std::int64_t>(record_disk_size(kCounterPayloadSize));
@@ -1668,10 +2078,50 @@ namespace {
 // counters the fresh log starts at as parameters. reset() passes (1, 1); reset_to passes
 // its targets. The rename is the single commit point for the cleared log and both
 // counters, so a crash or a fault at any step leaves the old log or the new one.
+// The reset-step fault seam's steps (see g_reset_step_fault). The same values are the
+// kResetStepFault* constants of file_store.hpp, which tests include; a cell per step
+// checks that its step is the one that fired.
+constexpr int kResetStepInitialiseFresh = 1;
+constexpr int kResetStepRename = 2;
+constexpr int kResetStepReopenOpen = 3;
+constexpr int kResetStepReopenLock = 4;
+constexpr int kResetStepThrowAfterRename = 5;
+
+// Takes the armed step for this reset job: 0 when none is armed.
+[[nodiscard]] int take_reset_step_fault() noexcept {
+    return g_reset_step_fault.load(std::memory_order_relaxed) == 0
+               ? 0
+               : g_reset_step_fault.exchange(0, std::memory_order_relaxed);
+}
+
+// True, and counted, when `step` is the armed step.
+[[nodiscard]] bool reset_step_fault_fires(int armed_step, int step) noexcept {
+    if (armed_step != step) return false;
+    g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+// D-599-1 (b): the reset's offload, with an exception leaving it turned into a failure
+// like a returned one. reset_store_to then takes Region 3's failure branch, which reads
+// rename_done: after the rename it poisons the store, before it the old log stands, and
+// either way the reset returns store_io_failure. D-599-1 (a), in the job, removes the
+// known throw after the rename by building every path before it; this catch is the guard
+// for the class, so a step added after the rename that can throw cannot leave the store
+// writing to the replaced log's inode. Both are needed: (a) alone leaves the class open,
+// (b) alone still lets a known allocation fail after the rename.
+template <class Fn>
+asio::awaitable<bool> offload_reset_job(asio::any_io_executor pool_ex, Fn fn) {
+    try {
+        co_return co_await offload_to(std::move(pool_ex), std::move(fn));
+    } catch (...) {
+        co_return false;
+    }
+}
+
 asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& impl, seqnum_t next_in,
                                                               seqnum_t next_out) noexcept {
     // Capture the session executor for the leading pump-break post below (035: no
-    // offload rebind hop remains — nested co_spawn resumes on this executor).
+    // offload rebind hop remains — the offload resumes on this executor, D-624-1).
     const auto session_ex = co_await asio::this_coro::executor;
 
     // T041/US3: leading post to break recursive pump() chain.
@@ -1730,12 +2180,17 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     auto result_file = std::make_shared<OsFile>();
     auto rename_done = std::make_shared<bool>(false);
 
-    const bool reset_ok = co_await offload_to(
+    // D-599-1 (b): see offload_reset_job above.
+    const bool reset_ok = co_await offload_reset_job(
         impl.cfg.file_io_executor,
+        // The job lambda is not noexcept: its throw (the reset-step seam's) is caught by
+        // offload_job and then by offload_reset_job, inside this noexcept coroutine.
+        // cppcheck-suppress throwInNoexceptFunction
         [path, hash, probe_fn, result_file, rename_done, next_in, next_out]() -> bool {
             if (probe_fn) {
                 probe_fn(std::this_thread::get_id());
             }
+            const int armed_step = take_reset_step_fault();  // fixpp#611 seam
 
 #ifndef _WIN32
             // ── Linux atomic-rename path ─────────────────────────────────────
@@ -1756,7 +2211,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 tmp_impl.next_inbound = next_in;
                 tmp_impl.next_outbound = next_out;
 
-                if (!tmp_impl.initialise_fresh(next_in, next_out)) {
+                if (reset_step_fault_fires(armed_step, kResetStepInitialiseFresh) ||
+                    !tmp_impl.initialise_fresh(next_in, next_out)) {
                     // Move file back so it closes properly, then unlink tmp.
                     tmp_file = std::move(tmp_impl.file);
                     ::unlink(tmp_path.c_str());
@@ -1769,6 +2225,15 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // Close tmp file before rename (required on some POSIX implementations)
             tmp_file = OsFile{};  // destructs: close()
 
+            // D-599-1 (a): everything the steps after the rename need is built here, before
+            // it, so nothing after the rename allocates. A throw after the rename is still
+            // a failure after the rename; offload_reset_job's catch (D-599-1 (b)) makes it
+            // one.
+            const std::string dir_path = [&path] {
+                const auto dir_fs_path = std::filesystem::path{path}.parent_path();
+                return dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
+            }();
+
             // 093 (tasks.md T079): the fault-before-rename seam.
             if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
                 g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
@@ -1777,7 +2242,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             }
 
             // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
-            if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
+            if (reset_step_fault_fires(armed_step, kResetStepRename) ||
+                ::rename(tmp_path.c_str(), path.c_str()) != 0) {
                 ::unlink(tmp_path.c_str());
                 return false;
             }
@@ -1786,13 +2252,14 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // reopen, lock) must take Region 3's poison branch, so the mark precedes
             // the directory fsync (093 Gate B, fixpp#554).
             *rename_done = true;
+            // fixpp#599: the throw-after-rename step of the reset-step fault seam.
+            if (reset_step_fault_fires(armed_step, kResetStepThrowAfterRename)) {
+                throw std::bad_alloc{};
+            }
 
-            // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5].
+            // Linux: parent-dir fsync MANDATORY per I-15 / [2e §6.3.5]. Its path was
+            // built before the rename (D-599-1 (a)).
             {
-                const std::filesystem::path log_fs_path{path};
-                const auto dir_fs_path = log_fs_path.parent_path();
-                const std::string dir_path =
-                    dir_fs_path.empty() ? std::string{"."} : dir_fs_path.string();
                 // 093 Gate B (fixpp#554): the directory-open fault seam.
                 if (g_force_reset_dir_open_fail.exchange(false, std::memory_order_relaxed)) {
                     g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
@@ -1833,10 +2300,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 }
             }
             OsFile new_file;
-            if (!new_file.open(path.c_str())) {
+            if (reset_step_fault_fires(armed_step, kResetStepReopenOpen) ||
+                !new_file.open(path.c_str())) {
                 return false;
             }
-            if (!new_file.try_lock()) {
+            if (reset_step_fault_fires(armed_step, kResetStepReopenLock) || !new_file.try_lock()) {
                 return false;
             }
             // Publish to result slot; the sole owner stays here until Region 3 moves it.
@@ -1860,7 +2328,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 tmp_impl.write_pos = 0;
                 tmp_impl.next_inbound = next_in;
                 tmp_impl.next_outbound = next_out;
-                if (!tmp_impl.initialise_fresh(next_in, next_out)) {
+                if (reset_step_fault_fires(armed_step, kResetStepInitialiseFresh) ||
+                    !tmp_impl.initialise_fresh(next_in, next_out)) {
                     tmp_file = std::move(tmp_impl.file);
                     DeleteFileW(wide_tmp.c_str());
                     return false;
@@ -1879,7 +2348,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
             // posix_rename_over_open. FlushFileBuffers inside provides the
             // WRITE_THROUGH durability the old MoveFileEx flag gave.
-            const rename_outcome renamed = posix_rename_over_open(wide_tmp, wide_live);
+            // D-599-1 (a) holds on this branch as written: every path the steps after the
+            // rename use (wide_live) is built above, before it.
+            const rename_outcome renamed = reset_step_fault_fires(armed_step, kResetStepRename)
+                                               ? rename_outcome::not_renamed
+                                               : posix_rename_over_open(wide_tmp, wide_live);
             if (renamed == rename_outcome::not_renamed) {
                 DeleteFileW(wide_tmp.c_str());
                 return false;
@@ -1888,6 +2361,10 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
             // every failure from here takes Region 3's poison branch. The tmp name
             // no longer exists, so there is nothing to delete.
             *rename_done = true;
+            // fixpp#599: the throw-after-rename step of the reset-step fault seam.
+            if (reset_step_fault_fires(armed_step, kResetStepThrowAfterRename)) {
+                throw std::bad_alloc{};
+            }
             if (renamed == rename_outcome::renamed_not_flushed) {
                 return false;  // the store's handle names the replaced file → poison
             }
@@ -1908,10 +2385,11 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
                 }
             }
             OsFile new_file;
-            if (!new_file.open(wide_live.c_str())) {
+            if (reset_step_fault_fires(armed_step, kResetStepReopenOpen) ||
+                !new_file.open(wide_live.c_str())) {
                 return false;
             }
-            if (!new_file.try_lock()) {
+            if (reset_step_fault_fires(armed_step, kResetStepReopenLock) || !new_file.try_lock()) {
                 return false;
             }
             *result_file = std::move(new_file);
@@ -1934,7 +2412,8 @@ asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& imp
     //   the stale snapshot on its next iteration (data-model §4 / I-03 / FR-006).
     if (!reset_ok) {
         if (*rename_done) {
-            // Any failure after the rename (directory durability, reopen, lock): the old
+            // Any failure after the rename (directory durability, reopen, lock, or an
+            // exception out of the job, D-599-1): the old
             // fd names a dead inode (unlinked by rename); poison the store so no write
             // reaches it. A later reset() will poison-check open_ok and return
             // store_io_failure immediately.
@@ -1994,7 +2473,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset_to(seqnum_t next
 // pwritten frame and counter records are durable before the session closes,
 // regardless of the configured flush policy.
 //
-// Returns expected_t<void>{} on success, store_io_failure on I/O error.
+// Returns expected_t<void>{} on success, store_io_failure on I/O error or on a store
+// poisoned with its log still open (D-635-1, below).
 // Does NOT surface store_cancelled under graceful close (FR-028 / I-17).
 //
 // Engine-internal: dispatched via the A1 typed thunk (flush_thunk_for<FileStore>())
@@ -2005,8 +2485,13 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset_to(seqnum_t next
 // applies to this call; the session's phase-2 root cancel fires AFTER this
 // returns, not during it — Appendix D §D.2 ordering).
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_close() noexcept {
-    // If the store was never successfully opened, return success (nothing to drain).
-    if (!impl_->open_ok) {
+    // A store with no open log (never successfully opened, or poisoned by a reset after
+    // its rename, which closes the file) returns success: nothing to drain.
+    // D-635-1 (fixpp#635): a store poisoned by a failed restore keeps its log open, and
+    // the records acknowledged since the last flush are still in it. The flush drains
+    // them as on any graceful close, then returns store_io_failure for the poison.
+    const bool poisoned = !impl_->open_ok;
+    if (poisoned && !impl_->file.valid()) {
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -2040,7 +2525,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_clos
             return ok;
         });
 
-    if (!io_ok) {
+    if (!io_ok || poisoned) {
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 

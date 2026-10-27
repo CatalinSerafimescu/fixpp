@@ -232,6 +232,13 @@ void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexce
 // operation identity. Read the block comment at the definition in
 // file_store.cpp before drawing any conclusion from a count.
 void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) noexcept;
+// D-624-1 (.specify/624-offload-completion-lifetime.md): install a probe called on
+// the caller's thread when a store call, resumed after its offloaded job, starts
+// waiting for that job's last touch. Pass nullptr to disable (production default).
+void install_store_offload_caller_wait_probe(void (*probe)() noexcept) noexcept;
+// D-624-1: arm a one-shot fault so the NEXT offloaded job throws std::runtime_error in
+// place of running its body; the store call rethrows it to its awaiter.
+void arm_force_store_offload_throw_once() noexcept;
 // Read and reset the T015 retrieve pread-attempt counter.
 // Returns the number of read_frame_payload() calls in retrieve()'s walk since
 // the last reset. Discriminates guard-before-pread (==1) from stale-pread-failed
@@ -262,6 +269,28 @@ void arm_force_store_pwrite_fail_once() noexcept;
 // number of times the T003 seam actually fired since the last reset. Used by
 // tests to confirm the seam fired for the right reason.
 int read_and_reset_store_pwrite_fail_count() noexcept;
+// fixpp#611: arm a one-shot fault for the NEXT offloaded store() or
+// next_seqnum(increment) job. `pwrite_nth` fails that job's Nth pwrite, counting from 1
+// (0: none); `datasync` fails the job's own fdatasync (the restore's is armed by
+// arm_force_offload_restore_fail_once). A failed step writes nothing and reports
+// failure, so the call returns store_io_failure. The read returns how many times such a
+// fault fired since the last read. The plan is taken by the next write job on any
+// thread: arm it only while the one FileStore whose call takes it is the only one with
+// write jobs on the file-I/O executor.
+void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept;
+// fixpp#635: arm a one-shot fault in the NEXT offloaded store() or next_seqnum(increment)
+// job's restore of the log's committed end, which runs when that job fails: its truncate
+// (`truncate`) or the datasync after it (`datasync`) fails, and the store is poisoned.
+// Arm it with arm_force_offload_write_fail_once, so the job fails and restores; each
+// fault that fires counts in read_and_reset_offload_write_fail_count(). The plan is taken
+// by the next write job on any thread: arm it only while the one FileStore whose call
+// takes it is the only one with write jobs on the file-I/O executor.
+void arm_force_offload_restore_fail_once(bool truncate, bool datasync) noexcept;
+int read_and_reset_offload_write_fail_count() noexcept;
+// fixpp#635: read and reset the restore-ran counter: how many times a failed job's
+// restore of the committed end made its datasync and the datasync succeeded, since the
+// last read. Incremented unconditionally in file_store.cpp, as the flush-ran counter is.
+int read_and_reset_restore_datasync_count() noexcept;
 // 093 (tasks.md T079, Q-29) reset-atomicity fault injection. The first arms a one-shot
 // fault in the next reset's offloaded sequence after its temp log is written and closed,
 // before the rename. The second arms a fault at the first next_seqnum() counter-record
@@ -279,6 +308,17 @@ int read_and_reset_reset_atomicity_fault_count() noexcept;
 void arm_force_reset_dir_open_fail_once() noexcept;
 void arm_force_reset_dir_fsync_fail_once() noexcept;
 void arm_force_reset_rename_flush_fail_once() noexcept;
+// fixpp#611 / fixpp#599: one-shot reset-step fault. The next reset's offloaded job fails
+// at `step`: initialise_fresh on the temporary log, the rename, the reopen's open or the
+// reopen's lock, each reporting failure as that step's own failure does; or it throws
+// std::bad_alloc right after the rename has replaced the live log. Counts in
+// read_and_reset_reset_atomicity_fault_count() when it fires.
+inline constexpr int kResetStepFaultInitialiseFresh = 1;
+inline constexpr int kResetStepFaultRename = 2;
+inline constexpr int kResetStepFaultReopenOpen = 3;
+inline constexpr int kResetStepFaultReopenLock = 4;
+inline constexpr int kResetStepFaultThrowAfterRename = 5;
+void arm_force_reset_step_fault_once(int step) noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session

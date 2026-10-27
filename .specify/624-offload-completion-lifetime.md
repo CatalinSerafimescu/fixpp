@@ -1,0 +1,367 @@
+# fixpp#624 — a `FileStore` offload's completion and the caller's execution context (B57)
+
+> **Status: v0.2, implementation note (2026-10-27).** It records batch B57's decisions and the
+> alternatives each rejects: D-624-1 (§3, built in `offload_to`, `src/session/file_store.cpp`),
+> D-599-1 (§7), D-632-1 (§8) and D-635-1 (§9). fixpp#611's seams and cells, the error arms of
+> `FileStore`'s offloaded writes, are their error-arm verification. It is a sibling of
+> `.specify/536-537-538-recovery-liveness.md` §11 (fixpp#598), whose decisions D-598-1 and D-598-2 it
+> keeps. That note belongs to a merged batch (B28) with its own Gate A history, so these decisions are
+> written here rather than as new subsections there. v0.2 (Gate B round 1) adds to D-635-1 the
+> graceful-close flush of a poisoned store and the witness of the restore's datasync.
+>
+> *Read* means read from source: fixpp at this branch's head, and asio at the version the build compiles
+> against (`asio/version.hpp`). *Run* names a cell or command a reader can re-run. Neither records a
+> count.
+
+## 1. The condition
+
+A `FileStore` call that writes (`store`, `next_seqnum` with `increment` set, `reset`, `reset_to`,
+`flush_for_session_close`) hands its blocking system calls to the file I/O executor through
+`offload_to`, and is resumed on its own (the caller's) executor when they are done. The hand-back runs
+on the file I/O thread.
+
+The host is allowed to destroy the caller's execution context once every store call on it has
+returned, while the file I/O pool lives on. `FileStore::Config::file_io_executor`'s precondition
+(`include/fixpp/session/file_store.hpp`) asks only that the file I/O pool keep running its jobs until
+every store call has returned; it never asks the host to join that pool before its own context goes.
+A file I/O pool shared by several engines is the plain case.
+
+## 2. What happened before D-624-1 (read; run)
+
+`offload_to` was `co_await asio::co_spawn(pool_ex, body, bind_cancellation_slot({}, use_awaitable))`.
+In asio's `co_spawn_entry_point` (`asio/impl/co_spawn.hpp`), after the body has returned, the file
+I/O thread calls `(dispatch)(s.handler_work.get_executor(), …)`. `s.handler_work` is a work-tracking
+copy of the caller's executor, taken by `co_spawn_state`. The dispatch makes the completion runnable
+on the caller's context; the caller can then resume, return from the store call, and its context can
+be destroyed. Only after that does the file I/O thread destroy the dispatch's temporaries
+(`initiate_dispatch_with_executor`, `asio/detail/initiate_dispatch.hpp`) and then the coroutine frame
+that owns `s`. Each tracked copy's destructor calls the caller scheduler's `work_finished()`, and the
+last reference to a strand runs `strand_executor_service::strand_impl`'s destructor
+(`asio/detail/impl/strand_executor_service.ipp`), which uses the caller's strand service. Both were
+reported by ASan as a heap-use-after-free on the file I/O thread.
+
+Run: `tests/session/test_624_offload_completion_lifetime.cpp`, the cells `CallerPool_*` and
+`CallerStrand_*`, against the tree before D-624-1 (the RED cell's own commit carries the form of the
+cell that ran there).
+
+## 3. D-624-1 — the caller waits for the job's last touch
+
+**The statement.** `offload_to` hands `pool_ex` a job of its own, initiated with
+`asio::async_initiate` under `bind_cancellation_slot(cancellation_slot{}, use_awaitable)` and posted
+to `pool_ex`:
+
+1. On the caller's side the initiation converts the caller's executor, there and nowhere else:
+   `prefer(require(get_associated_executor(handler), blocking.never), outstanding_work.tracked)`.
+   `blocking.never` keeps the hand-back from running inline; the tracked work keeps the caller's
+   context running while the job does.
+2. The job runs the body under `store_offload_exit_guard`, keeping its result or the exception it
+   threw (`std::exception_ptr`).
+3. In a scope that closes before the job's final action, the job moves the handler and the
+   converted executor out of itself into locals, and hands the completion (which owns the handler)
+   back through that executor's `execute()`; it never converts the executor again. The local
+   executor, and with it the job's tracked work, is destroyed when that scope closes, on the pool
+   thread, before the flag. That is safe because the caller is still waiting for the flag, so its
+   context is alive, and because the queued completion is itself outstanding work of the caller's
+   scheduler (or of the strand that queued it), so releasing the job's work first cannot let the
+   caller's context run out of work. Every other reference to the caller the job held (the
+   moved-from handler and executor, the hand-back's temporaries) is destroyed in the same scope.
+4. The job's final action is a release-store to a `std::atomic<bool>` that lives in `offload_to`'s
+   own frame, reached through a raw pointer. After it the job touches nothing: no notify, no member.
+   The job object asio destroys after the call operator returns then owns nothing of the caller's
+   executor or execution context. (The body it keeps may co-own heap state with the caller's frame
+   through a thread-safe reference count, as `reset_store_to`'s does; releasing that touches no
+   execution context.)
+5. `offload_to`, once resumed on the caller's executor, waits for that flag (acquire load,
+   `std::this_thread::yield()`) before it returns; then it returns the body's result or rethrows what
+   the body threw.
+
+**The wait's bound.** The wait covers the pool thread's unwind of the job after its hand-back: the
+`execute()`'s return and the scope's destructors. It does not cover any I/O, which the job finished
+before handing back.
+
+**Why the caller must be the one that waits.** asio's scheduler makes a posted operation runnable and
+only then signals its waiters: `asio/detail/posix_event.hpp`, `maybe_unlock_and_signal_one`, releases
+the lock and then calls `pthread_cond_signal` on the scheduler's own event. So even an untracked post
+from the file I/O thread touches the caller's scheduler after the completion is runnable, and the
+caller can by then have resumed. The same holds from the other side for a strand: when the file I/O
+thread holds the last reference to a shared executor target, it destroys it. No arrangement of copies
+on the pool side removes the last touch; only the caller can make sure it is over.
+
+**Never inline (`blocking.never`, never `dispatch`).** With the caller's own executor as the file I/O
+executor, the job runs on the caller's thread (or the caller's strand). A hand-back that could run the
+completion inline from there, a dispatch or an `execute()` without `blocking.never`, would resume the
+caller inside the job, before the flag is stored, and the caller's wait would never end.
+
+**Kept from fixpp#598.** D-598-1: the await's token is bound to an empty cancellation slot and the
+initiation connects nothing, so no cancellation reaches the job. D-598-2: the call returns the body's
+own result, or rethrows what the body threw; nothing is caught and turned into a success.
+
+**Where the flag lives.** In the awaiting frame. So the caller's execution context must not be
+destroyed while a store call is in flight — the direct caller's existing obligation at
+`FileStore::Config::file_io_executor` ("co_await every store/flush call to completion").
+
+**Allocation.** Stated as conditions; re-measure rather than cite a figure.
+- The offload spawns no coroutine per op. `offload_to` is itself an awaitable, so its own frame is
+  one per op, through asio's per-thread recycling allocator; the job and the completion are posted
+  operations through the same allocator for `std::allocator` handlers.
+- On a caller whose executor `asio::any_io_executor` holds as a shared target (a
+  `fixpp::core::session_executor`, or a strand inside an `any_io_executor`), each property conversion
+  of that executor builds a new target, which allocates. The offload converts that executor a bounded
+  number of times per op, all on the caller's side (step 1), and the hand-back converts it no further.
+- That was already so before D-624-1: `co_spawn_state`'s work guard converted the caller's executor
+  per op, besides the per-op frame.
+- To measure, run the arms of `StoreAllocGuard.FileStoreStoreWindow_*` (among them
+  `_SessionExecutorCaller`, the shared-target shape) under the interceptor as
+  `tests/perf/CMakeLists.txt` shows, on the tree before a change and on the tree after it, and compare.
+
+**Constitution.** `[const §XV.1]`'s §XV.4-offload exemption (amended v0.2) permits a single bounded
+O(1) coroutine frame per offloaded I/O op. It is a ceiling, and under D-624-1 the only per-op
+coroutine frame is `offload_to`'s own, so the constitution is not amended. `spec/behaviors-and-limitations.md` `B-035-1` states the
+mechanism and the allocation as conditions, and `B-624-1` states what a host may now do.
+
+**Not handled: an allocation failure in the job's hand-back.** Read, not run. If the job's
+`execute()` on the caller's executor throws (`std::bad_alloc` from type-erasing the completion), the
+exception leaves the job's call
+operator before the flag is stored, so the job touches no caller frame afterwards. Unwinding destroys
+the completion object, and with it the handler, on the file I/O thread; the handler's
+`awaitable_thread` destructor (`asio/impl/awaitable.hpp`) then posts the destruction of the caller's
+coroutine stack to the caller's executor, and that post can fail the same way. The exception then
+leaves asio's operation: on an `asio::thread_pool`, `thread_pool::thread_function`
+(`asio/impl/thread_pool.ipp`) catches it and calls `std::terminate`; on an `io_context` the host
+runs, it leaves the host's `run()`. The awaiting store call is never resumed. Before D-624-1 the
+same failure in `co_spawn_entry_point`'s dispatch had the same reach.
+
+## 4. Rejected
+
+1. **Narrowing the host contract: the file I/O pool must be joined before the caller's context is
+   destroyed.** It makes a shared file I/O pool, outliving several engines or sessions, a contract
+   violation, which nothing a host reads forbids today (§1). It also moves a library defect into every
+   host's teardown order.
+2. **A tracking-only fix: hand back through an untracked copy of the caller's executor.** It removes
+   `work_finished()` on a destroyed scheduler and leaves the strand case: the file I/O thread can still
+   drop the last reference to a strand and run `strand_impl`'s destructor against the destroyed
+   strand service. The cell `CallerStrand_*` stays RED under it by construction (its hold covers every
+   copy the file I/O thread destroys, tracked or not).
+3. **No copies on the pool side: an untracked `post` and nothing else kept.** The post itself touches
+   the caller's scheduler after the completion is runnable (`posix_event.hpp`,
+   `maybe_unlock_and_signal_one`: the signal follows the unlock), so there is still a window in which
+   the caller has resumed, returned and destroyed its context while the file I/O thread is inside the
+   post.
+
+## 5. The cells (run)
+
+`tests/session/test_624_offload_completion_lifetime.cpp`, target
+`session_624_offload_completion_lifetime` (labels `session;624`, `FIXPP_TEST_HOOKS`):
+
+- `CallerPool_DestroyedBeforeTheFileIoPool`, `CallerStrand_DestroyedBeforeTheFileIoPool`,
+  `CallerSessionExecutor_DestroyedBeforeTheFileIoPool` (the held strand inside a
+  `fixpp::core::session_executor` inside `asio::any_io_executor`, the shape `Session::open` builds
+  under `per_session_strand`),
+  `ThrowingJob_CallerPool_DestroyedBeforeTheFileIoPool`: the caller's context is destroyed while the
+  file I/O pool lives. A test-local executor wrapper holds the file I/O thread inside the hand-off's
+  `execute()` until the caller starts its wait (the probe `install_store_offload_caller_wait_probe`)
+  or the caller's context is gone. Each asserts that the hold engaged, that the caller started waiting
+  while the hold was engaged, and that the call's result (or the job's exception, through the seam
+  `arm_force_store_offload_throw_once`) reached the awaiter.
+- `SameExecutor_SingleThreadPool_Completes`, `SameExecutor_IoContext_Completes`,
+  `SameExecutor_Strand_Completes`: the caller's own executor is the file I/O executor; the call must
+  complete within a bound.
+
+**Mutants to re-run** (not committed): delete the caller's wait in `offload_to` (the probe call and
+the loop) — every hazard cell above must go RED; drop `blocking.never` from `initiate_offload`'s
+`require` — every `SameExecutor_*` cell must go RED.
+
+## 6. Documents that describe the superseded idiom
+
+Live surfaces, amended in this change: `spec/behaviors-and-limitations.md` `B-035-1`;
+`spec/feature-catalogue.md` S-013 and `spec/coverage-index.md` §4.8, each by a dated B57 amendment
+that keeps 035's text; `include/fixpp/session/message_store.hpp`, `store`'s comment, whose mechanism
+clause is replaced by a pointer to D-624-1. The others describe `offload_to` as a nested `co_spawn`.
+They are not edited; each is flagged in place in `brain/components/message-store-quiescence.md`, "The
+offload's completion hand-off (fixpp#624)": `specs/035-filestore-io-offload/research.md` Decision 1,
+`data-model.md` §2, `plan.md`, `checklists/api-abi-nfr.md` CHK010; `.specify/563-564-callback-send.md`
+§2.6, "How a cancellation reaches the write".
+
+## 7. D-599-1 — an exception after a reset's rename poisons the store (fixpp#599)
+
+**The condition.** `reset_store_to`'s job sets `rename_done` as soon as the rename has replaced the
+live log. A failure the job RETURNS after that takes Region 3's poison branch. Before D-599-1, a failure
+the job THREW did not: the exception left `offload_to`'s await and `reset_store_to` without reaching
+Region 3. The store kept the replaced log's descriptor, later writes reported success into an unlinked
+inode, and the next open read the fresh log without them. The job built the directory's path for the
+directory fsync after the rename, and each of those constructions can throw `std::bad_alloc`.
+
+**The statement.** Both of these:
+- (a) Every path and string the steps after the rename need is built before the rename (the POSIX
+  branch's directory path). Nothing after the rename allocates. On the Windows branch this already
+  held: every path its post-rename steps use is built before the rename.
+- (b) `offload_reset_job`, through which `reset_store_to` awaits the job, catches any exception leaving
+  the offload and returns false. Region 3 then reads `rename_done` exactly as for a returned failure:
+  after the rename the store is poisoned, before it the old log stands, and either way the reset
+  returns `store_io_failure`. It does not rethrow. One condition, one observable ending.
+
+(a) removes the known throw; (b) is the guard for the class, so a step added after the rename that can
+throw cannot reopen the hole. (b) is a helper rather than a `try` written inside `reset_store_to` so that
+the job's body keeps its indentation; `reset_store_to` is its only caller.
+
+**The cell** (run): `ResetThrowAfterRename.PoisonsTheStoreAndReturnsTheResetsError` in
+`tests/session/test_611_store_offload_error_arms.cpp`, through the reset-step fault seam
+`arm_force_reset_step_fault_once(kResetStepFaultThrowAfterRename)` (FIXPP_TEST_HOOKS), which throws
+`std::bad_alloc` right after `rename_done` is set on both branches. The same seam fails the reset's
+other steps (initialise_fresh on the temporary log, the rename, the reopen's open and its lock), each
+with a cell of its own under `ResetStepArms` (fixpp#611). It asserts that the seam fired, that the reset returns
+`store_io_failure` and does not throw, that a later `store()` is refused, and that the reopened log is
+the reset's own (no frame, next outbound 1). The Windows branch is built and run only by the windows-msvc
+legs; its witness is this cell, which those legs also run, plus the shared structure: the same seam at its
+`rename_done` site, and the same `offload_reset_job` and Region 3.
+
+**Mutant to re-run** (not committed): remove (b)'s catch, so that `offload_reset_job` only returns what
+`offload_to` returns. The cell must go RED, with the reset passing the exception on and the later
+`store()` reporting success.
+
+## 8. D-632-1 — the last record of a sequence number wins (fixpp#632)
+
+**The condition.** `store(n)` can fail after its frame record is on disk, at the counter record's write
+(`StoreOffloadErrorArms.Store_CounterHeaderPwriteFails` and `_CounterPayloadPwriteFails`). The call
+returns `store_io_failure`, so a session does not transmit that frame, and the next number stays `n`.
+After a restart, the scan indexes that frame record, and the next `store(n)` (of whatever the session
+builds next under `n`) appends a second record for `n`. Before D-632-1:
+- each direction's index was a vector that took every frame record in log order;
+- `retrieve` looks a number up by its distance from the first entry (`i = s - front.seq`, then
+  `idx[i].seq != s` is a gap; D-538-1).
+
+So a lookup of `n` returned the FIRST record, the frame that was never sent, and every number after
+`n` was looked up one place short and read as a gap.
+
+**The statement.** The last record of a number wins, and each direction's index stays one entry per
+number, strictly increasing, so the positional lookup holds:
+- `FileStoreImpl::index_frame`, used by the scan and by `store()`'s success path, replaces the back
+  entry when the record's number is the back's number (same place, the new offset and length), and
+  appends otherwise.
+- The scan refuses the log (the open fails) when a frame record's number is BELOW the direction's
+  back. `store()` admits only the next number, which is never below the back, so no log it writes
+  holds such a record; a duplicate can only be of the back's number. Refusing keeps the index
+  strictly increasing, which the scan's own counter inference also relies on (`back().seq` is the
+  maximum).
+
+**The sources behind the ruling** (owner's ruling, LAST RECORD WINS; read at the ruling, not re-read
+here):
+
+| Engine | Where | On a duplicate sequence number |
+|---|---|---|
+| QuickFIX C++ `2ce8a60` | `src/C++/FileStore.cpp`, `populateCache` and `set` | the map entry is overwritten: last wins |
+| QuickFIX/J `4969564` | `quickfixj-core/.../FileStore.java`, `updateMessageIndex` | `TreeMap.put`: last wins |
+| QuickFIX/Go `eff945dd` | `store/file/file_store.go`, `IterateMessages` | no index; every header record is yielded in file order: both |
+| fixpp before D-632-1 | `FileStoreImpl::restart_scan`, `FileStore::retrieve` | a positional vector: the first record is returned and every later number shifts |
+
+**Rejected.** Dropping a frame record that lies beyond the last counter record's next number, as
+uncommitted (fixpp#632's option (b)). No engine does so, and it would change what the #611
+counter-arm cells pin (the failed frame on disk after a reopen, read by its own number until a later
+store of that number replaces it).
+
+**The cells** (run), in `tests/session/test_611_store_offload_error_arms.cpp`:
+- `StoreOffloadErrorArms.FailedFrameRecordThenASecondStore_LastRecordWins_Outbound` and `_Inbound`.
+  The index code is shared by both directions; each direction is a cell of its own. Each asserts that
+  a lookup of 2 returns the second `store(2)`'s frame, that `store(3)` is read as 3 alone and in the
+  walk, and that the walk visits each number once. It checks this in the process that made the second
+  store, then after one, two and three reopens.
+- `StoreOffloadErrorArms.AFrameRecordBelowTheLastNumber_RefusesTheOpen`. A log is built by copying the
+  record for 2 to the end of a log that holds 1, 2 and 3; the open must refuse it.
+
+**Mutants to re-run** (not committed):
+- the scan appending in place of `index_frame`: the two `_LastRecordWins` cells go RED at their checks
+  after a reopen;
+- `store()` appending in place of `index_frame`: the same two cells go RED at their same-process checks;
+- the scan's refusal removed: `AFrameRecordBelowTheLastNumber_RefusesTheOpen` goes RED.
+
+## 9. D-635-1 — a failed store leaves no bytes past the committed end (fixpp#635)
+
+**The condition.** `FileStore` keeps a write position and writes each call's records there; a failed
+call leaves the position where it was. Before D-635-1, a failed `store()` or `next_seqnum(increment)`
+could still have written past it: part of a frame record, a whole one, a counter header, or every record
+with only the flush failing. The next write at the same position overwrote only as far as it reached. A
+`store()` retried with a frame shorter than the failed one left the failed record's tail behind the new
+records, and `restart_scan` read those bytes as a header with an oversized length (or a CRC mismatch)
+with data after it, and refused the log (run: the three `RetryInTheSameProcess_*` cells, before
+D-635-1: the shorter one refused, the equal and longer ones read clean).
+
+**The rule.** A failed store leaves no bytes past the committed end: the log is always the committed
+records and nothing else.
+- On every failure path of an offloaded `store()` or `next_seqnum(increment)` job from its first write
+  on (the frame header, payload and padding, the counter header and payload, the `fdatasync`), the job
+  truncates the log back to the call's offset (`write_pos` when it started) and then datasyncs
+  (`restore_committed_end`). A failure path before any write (the T003 seam, the
+  counter-write-after-reset-commit seam) restores nothing.
+- The datasync after the truncate is what keeps a crash from undoing it: without it, a crash could keep
+  a later retry's records (written and flushed after the truncate) and lose the truncate, so the old
+  tail would come back behind them. It is the restore's own: the job's datasync fault
+  (`arm_force_offload_write_fail_once`'s `datasync`) fails only the job's flush, and the restore's
+  datasync fails only through `arm_force_offload_restore_fail_once`.
+- If the truncate or its datasync fails, the job reports `failed_unrestored`, and the caller poisons the
+  store with the flag the reset's poison sets (`open_ok = false`). Unlike the reset's poison, it does not
+  close the file, which still names the live log. Every later call returns `store_io_failure`, and
+  nothing more is written, until the store is opened again. The graceful close's flush
+  (`flush_for_session_close`) still drains the open log first, as `B-008-5` promises for
+  `close(graceful)`, then returns `store_io_failure`; a store with no open log (never opened, or the
+  reset's poison) returns success with nothing to drain.
+- Windows: `SetFilePointerEx` and `SetEndOfFile`, then `FlushFileBuffers`. It is built and run only by
+  the windows-msvc legs (the verify record's MSVC step).
+
+**Why not append at the end, as QuickFIX does** (read at filing, fixpp#635; not re-read here):
+
+| Engine | Where it writes a message |
+|---|---|
+| QuickFIX C++ `2ce8a60` | `FILE_SEEK(..., SEEK_END)` before each write: the end of the file |
+| QuickFIX/J `4969564` | a `FileOutputStream` in append mode |
+| QuickFIX/Go `eff945dd` | `Seek(0, io.SeekEnd)` before each write |
+| fixpp | the store's write position, which a failed call does not advance |
+
+None of them ever writes over a failed write's bytes, so none meets this. fixpp keeps its write-position
+model (the restart scan, the reset and the counters rely on it) and restores the end instead.
+
+**Consequences.**
+- In a live process a failed `store()` now leaves no record, so D-632-1's last-record-wins governs only
+  a log a crash left with a frame record and no counter record after it, or one a failed restore left
+  (which poisons the store). The #632 cells reach that state by failing the restore too.
+- A `store()` whose `fdatasync` fails reports failure and its records are removed; a failed increment
+  leaves the counter on disk where it was (the live counter stays advanced, as feature 035 chose).
+
+**The pins that changed** (the #611 arm cells, re-derived from D-635-1; each also asserts the log's
+size after the failed call equals its size before it):
+- `Store_CounterHeaderPwriteFails`, `Store_CounterPayloadPwriteFails`: seq 2's frame record is no
+  longer on disk after the reopen (it was: the complete record stayed).
+- `Store_DatasyncFails`: the reopen finds frames {1} and next outbound 2, with seq 2 not on disk (it
+  found {1, 2} and 3: every record stayed).
+- `NextSeqnum_DatasyncFails`: next outbound 2 after the reopen (it was 3).
+- Unchanged pins: `Store_PayloadPwriteFails`, `Store_PaddingPwriteFails` (the scan truncated their
+  short records already), `NextSeqnum_CounterHeaderPwriteFails`, `NextSeqnum_CounterPayloadPwriteFails`.
+- The #632 cells' setup fails the restore too, so the duplicate record they test is still on disk.
+
+**The cells** (run), in `tests/session/test_611_store_offload_error_arms.cpp`:
+`RetryInTheSameProcess_{Shorter,EqualLength,Longer}` (after the counter-header arm) and
+`RetryAfter{Payload,Padding,CounterPayload,Datasync}…_Shorter`: the reopen accepts the log, next
+outbound 4, frames 1, the retry's 2 and 3. `RestoreTruncateFails_PoisonsTheStore`,
+`RestoreDatasyncFails_PoisonsTheStore` (through `arm_force_offload_restore_fail_once`) and
+`IncrementRestoreTruncateFails_PoisonsTheStore`: a later call is refused, the log's size does not move,
+and the reopen accepts the log; in the first two, the restore-ran count is 0 and the graceful-close
+flush drains (the flush-ran count `read_and_reset_flush_datasync_count` is 1) and returns
+`store_io_failure`. Every `Store_*` and `NextSeqnum_*` arm cell asserts that its restore's datasync was
+made and succeeded (the restore-ran count `read_and_reset_restore_datasync_count`, incremented only
+after the restore's own datasync returns success).
+`Store_PwriteFails_TheRestoreDoesNotTakeTheJobsDatasyncFault` arms a pwrite and the job's datasync:
+only the pwrite's fault fires, the restore succeeds, and a later `store()` is accepted. `next_seqnum` has no shorter-retry cell: every record a later call writes
+at that position is at least a counter record long, so it covers a failed counter record's bytes; its
+arm cells assert the size instead.
+
+**Mutants to re-run** (not committed):
+- the truncate not called: every arm cell whose failed call wrote past the committed end, and every
+  shorter-retry cell except the payload one, go RED; so does `RestoreDatasyncFails_PoisonsTheStore`;
+- the datasync after the truncate removed: every `Store_*` and `NextSeqnum_*` arm cell goes RED at its
+  restore-ran count. What a crash between the truncate and its datasync leaves is not run: a live
+  process reads its own unflushed truncate back, and no cell crashes the process;
+- the restore calling the job's seamed datasync again: `Store_PwriteFails_TheRestoreDoesNotTakeTheJobsDatasyncFault`
+  goes RED;
+- the graceful-close flush returning success without a datasync whenever the store is poisoned:
+  the two `Restore*Fails_PoisonsTheStore` cells go RED at their flush checks;
+- the poison removed from `store()`'s Region 3: the two `Restore*Fails_PoisonsTheStore` cells go RED;
+  from `next_seqnum`'s: `IncrementRestoreTruncateFails_PoisonsTheStore` goes RED.

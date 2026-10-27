@@ -13,6 +13,7 @@ refs:
   - include/fixpp/core/sync/async_mutex.hpp
   - .specify/544-hot-path-zero-alloc.md
   - .specify/536-537-538-recovery-liveness.md
+  - .specify/624-offload-completion-lifetime.md
   - .specify/2e-msgstore.md
   - specs/035-filestore-io-offload/contracts/file-offload.md
   - specs/093-inbound-frame-dispositions/spec.md
@@ -21,6 +22,7 @@ refs:
   - spec/behaviors-and-limitations.md
   - tests/session/test_file_store_crash_survival.cpp
   - tests/session/test_598_store_offload.cpp
+  - tests/session/test_624_offload_completion_lifetime.cpp
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
@@ -149,11 +151,21 @@ replaced log, so every write to it would vanish on restart, and the store is poi
   can name two different files: a byte-wise widening and `std::filesystem::path` decode a byte at or
   above 0x80 differently, and a CompID may contain one. The reset then renames onto a file the
   store never opened and still reports success.
+- **A failure the job THROWS is a failure like a returned one (fixpp#599, D-599-1).** ⚠️ Until
+  B57, an exception out of the reset's job (an allocation after the rename) left the offload's await
+  and `reset_store_to` without reaching Region 3: no poison, and later writes went to the unlinked
+  inode. Now (a) the POSIX branch builds every post-rename path before the rename, and (b)
+  `offload_reset_job`, through which `reset_store_to` awaits the job, catches any exception and
+  returns false, so Region 3 reads `rename_done` and poisons after the rename. Design:
+  `.specify/624-offload-completion-lifetime.md` §7; witness
+  `ResetThrowAfterRename.PoisonsTheStoreAndReturnsTheResetsError` and the `ResetStepArms.*` cells in
+  `tests/session/test_611_store_offload_error_arms.cpp`.
 
 ⚠️ **Re-derive before relying on it:** read `reset_store_to` and check that `*rename_done = true`
 directly follows the successful rename on both branches, before the directory open on POSIX and
 before the flush verdict on Windows; and that `store_wide_path` is the only narrow-to-wide
-conversion in `open_log` and the reset worker.
+conversion in `open_log` and the reset worker; and that `reset_store_to` awaits its job through
+`offload_reset_job`, whose `catch (...)` returns false.
 
 Witnesses, in `tests/session/test_file_store_crash_survival.cpp`: POSIX
 `FileStoreResetTo.Q29_ADirectoryFsyncFaultAfterTheRenamePoisonsTheStore`,
@@ -212,6 +224,46 @@ the user-facing rows are B&L `B-598-1`, `B-598-2`, `L-598-1` and `B-035-1`'s ame
 - **`retrieve` after a reset (fixpp#538).** Both stores look a number up relative to the first frame
   the direction retains; `.specify/2e-msgstore.md` carries an erratum for it at its end, and
   `message_store.hpp`'s `retrieve` comment binds third-party stores (B&L `B-538-1`, `B-538-3`).
+
+## The offload's completion hand-off (fixpp#624)
+
+The design is `.specify/624-offload-completion-lifetime.md`, decision **D-624-1** (offload completion:
+the caller waits for the job's last touch). `offload_to` no longer awaits a nested `co_spawn`: it posts a
+job of its own to the file executor, the job posts the completion back to the caller's executor and
+then stores a flag in the awaiting frame as its last action, and the caller waits for that flag before
+the store call returns. Before it, the file I/O thread released copies of the caller's executor (and
+could drop a strand's last reference) after the caller had resumed, so a host that destroyed its own
+execution context while the file I/O pool lived on met a use-after-free. D-598-1 and D-598-2 (no
+cancellation reaches the job; the body's own result is returned) are kept. Re-derive the current shape
+from `offload_to` in `src/session/file_store.cpp`; this paragraph is a pointer, not the code.
+
+Documents that describe `offload_to` as a nested `co_spawn`. The live surfaces (B&L `B-035-1`, catalogue S-013, coverage-index §4.8) and the `message_store.hpp` comment are amended; the others are not edited, and each is flagged here.
+
+| Document | The claim | Status |
+|---|---|---|
+| `specs/035-filestore-io-offload/research.md`, Decision 1 | the offload is a nested `co_spawn(pool, fn, use_awaitable)`; a hand-rolled `async_initiate` two-post is rejected as "strictly worse (2 allocs)" | ⚠️ **SUPERSEDED as the mechanism by D-624-1**, which is an `async_initiate` with two posts. The allocation comparison was 035's measurement of its own probes; re-measure, do not cite it (the note's §3, "Allocation", gives the procedure). |
+| `specs/035-filestore-io-offload/data-model.md` §2 | `offload_to(...) // = co_await co_spawn(pool_ex, run(fn), use_awaitable)`, "the final, intended shape" | ⚠️ **SUPERSEDED by D-624-1.** The bundle is frozen and not edited. |
+| `specs/035-filestore-io-offload/plan.md`; `checklists/api-abi-nfr.md` CHK010 | the sites become "nested co_spawn"; the nested-co_spawn allocation per op | ⚠️ **SUPERSEDED as the mechanism by D-624-1.** History of feature 035. |
+| `spec/behaviors-and-limitations.md`, `B-035-1` | the offload ran "via genuine `co_await asio::co_spawn(…)`" with one `co_spawn` frame per disk op | ✅ **AMENDED for fixpp#624**: the mechanism sentence now describes the posted job and the last touch, and the allocation is stated as a condition. `B-624-1` is the host-facing row. |
+| `.specify/563-564-callback-send.md` §2.6, "How a cancellation reaches the write" | `offload_to` "awaits a `co_spawn` onto the file executor", and asio's cancellation handler hands the executor a second job | ⚠️ **HISTORY.** True of the tree before fixpp#598 for the cancellation, and before D-624-1 for the `co_spawn`. |
+| `spec/feature-catalogue.md`, S-013 | the 035 note: "genuine `co_spawn(file_io_executor, syscall_lambda, use_awaitable)` across all four disk-I/O sites" | ✅ **AMENDED for fixpp#624** by a dated B57 note appended to the row; the 035 text is kept as history and the row's state does not change. |
+| `spec/coverage-index.md` §4.8 | "S-013 amended by 035": the disk I/O is "offloaded to `file_io_executor` via `co_spawn`" | ✅ **AMENDED for fixpp#624** by a parallel "S-013 amended by B57" sentence. |
+| `include/fixpp/session/message_store.hpp`, `store`'s comment | "before the nested co_spawn that offloads pwrite / fdatasync to file_io_executor" | ✅ **AMENDED for fixpp#624**: the mechanism clause now names the offload and D-624-1; the obligation it states (deep-copy before any suspension) is unchanged. |
+
+**D-632-1 (fixpp#632): the `FileStore` index keeps the last record of a sequence number.** A
+`store()` that failed after its frame record was written leaves that record in the log; a later
+`store()` of the same number replaces it in the index, at open and live, and the open refuses a frame
+record below a direction's last number. No document read for this page described the index as
+append-only by number. (The log stays append-only; that sentence in `.specify/2e-msgstore.md` §6.3 is
+about the file and still holds.) Design: `.specify/624-offload-completion-lifetime.md` §8; B&L
+`B-632-1`.
+
+**D-635-1 (fixpp#635): a failed `FileStore` write restores the log's committed end.** A failed
+`store()` or increment truncates the log back to where the call started and flushes that; if it cannot,
+the store is poisoned until it is opened again (its graceful-close flush still drains the open log, then
+reports the poison). So in a live process a failed store leaves no record,
+and D-632-1 governs only what a crash leaves. Design: `.specify/624-offload-completion-lifetime.md` §9;
+B&L `B-635-1`, and `B-632-1`'s amendment.
 
 ## Note for reviewers
 
