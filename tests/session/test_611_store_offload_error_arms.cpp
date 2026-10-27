@@ -8,6 +8,7 @@
 // next_seqnum(increment) job without writing. Each cell asserts:
 //   - the call's returned error;
 //   - that the seam fired, so a failure cannot come from another cause;
+//   - that the restore's datasync was made and succeeded (read_and_reset_restore_datasync_count);
 //   - that the log's size after the failed call is its size before it (fixpp#635, D-635-1:
 //     a failed call restores the log's committed end);
 //   - what the log holds after the store is closed and opened again: whether the open
@@ -110,11 +111,15 @@ std::uintmax_t log_size(Fixture const& fx) {
 
 // Clears an armed fault that a cell's call did not take, so it cannot reach a later cell.
 struct disarm_on_exit {
-    disarm_on_exit() { (void)fixpp::session::read_and_reset_offload_write_fail_count(); }
+    disarm_on_exit() {
+        (void)fixpp::session::read_and_reset_offload_write_fail_count();
+        (void)fixpp::session::read_and_reset_restore_datasync_count();
+    }
     ~disarm_on_exit() {
         fixpp::session::arm_force_offload_write_fail_once(0, false);
         fixpp::session::arm_force_offload_restore_fail_once(false, false);
         (void)fixpp::session::read_and_reset_offload_write_fail_count();
+        (void)fixpp::session::read_and_reset_restore_datasync_count();
     }
     disarm_on_exit(disarm_on_exit const&) = delete;
     disarm_on_exit& operator=(disarm_on_exit const&) = delete;
@@ -186,6 +191,8 @@ void store_arm(int const pwrite_nth, bool const datasync, std::vector<seqnum_t> 
                 << "store(2) must return store_io_failure";
             EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 1)
                 << "the seam did not fire for store(2)";
+            EXPECT_EQ(fixpp::session::read_and_reset_restore_datasync_count(), 1)
+                << "the restore's datasync did not run and succeed for store(2)";
             // D-635-1: a failed store leaves no byte past the log's committed end.
             EXPECT_EQ(log_size(fx), committed_end) << "the log's size after the failed store(2)";
         }
@@ -217,6 +224,8 @@ void next_seqnum_arm(int const pwrite_nth, bool const datasync, seqnum_t const n
                 << "the second increment must return store_io_failure";
             EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 1)
                 << "the seam did not fire for the second increment";
+            EXPECT_EQ(fixpp::session::read_and_reset_restore_datasync_count(), 1)
+                << "the restore's datasync did not run and succeed for the second increment";
             // D-635-1: a failed increment leaves no byte past the log's committed end.
             EXPECT_EQ(log_size(fx), committed_end) << "the log's size after the failed increment";
         }
@@ -270,6 +279,30 @@ TEST(StoreOffloadErrorArms, Store_CounterPayloadPwriteFails) { store_arm(5, fals
 // The records were written and the flush reported failure: the store reports failure, so
 // the records are removed with the rest.
 TEST(StoreOffloadErrorArms, Store_DatasyncFails) { store_arm(0, true, {1}, false, 2); }
+
+// The job's datasync fault is the job's own flush only: a job that fails at a pwrite never
+// reaches its flush, and its restore's datasync does not take that fault. So the restore
+// succeeds, the store is not poisoned, and the fault stays untaken.
+TEST(StoreOffloadErrorArms, Store_PwriteFails_TheRestoreDoesNotTakeTheJobsDatasyncFault) {
+    disarm_on_exit const disarm;
+    Fixture fx;
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        auto store = fx.open();
+        EXPECT_NE(store, nullptr) << "setup: the FileStore";
+        if (!store) co_return;
+        EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
+        fixpp::session::arm_force_offload_write_fail_once(2, true);  // the payload, and the flush
+        auto const r = co_await store_seq(*store, 2);
+        EXPECT_TRUE(!r && r.error() == error::store_io_failure)
+            << "store(2) must return store_io_failure";
+        EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 1)
+            << "only the payload's fault may fire";
+        EXPECT_EQ(fixpp::session::read_and_reset_restore_datasync_count(), 1)
+            << "the restore's datasync did not run and succeed";
+        EXPECT_TRUE((co_await store_seq(*store, 2)).has_value())
+            << "the restore succeeded, so a later store(2) must be accepted";
+    });
+}
 
 // ── next_seqnum(outbound, increment) ──────────────────────────────────────────
 
@@ -629,6 +662,8 @@ void restore_fails(bool const truncate, bool const frame2_on_disk) {
                 << "store(2) must return store_io_failure";
             EXPECT_EQ(fixpp::session::read_and_reset_offload_write_fail_count(), 2)
                 << "the write fault and the restore fault must both fire";
+            EXPECT_EQ(fixpp::session::read_and_reset_restore_datasync_count(), 0)
+                << "a restore that failed reported its datasync as made";
             auto const after_failure = log_size(fx);
             auto const again = co_await store_seq(*store, 2);
             EXPECT_TRUE(!again && again.error() == error::store_io_failure)

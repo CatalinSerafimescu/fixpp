@@ -121,6 +121,14 @@ static std::atomic<int> g_retrieve_pread_count{0};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_flush_datasync_count{0};
 
+// fixpp#635 restore-ran witness counter — incremented inside sync_restored_end() after
+// the restore's own datasync returns true, and nowhere else. Compiled unconditionally,
+// for the reason R#1a's counter above is; declaration in file_store.hpp gated by
+// FIXPP_TEST_HOOKS. The increment is on a failed write's restore (cold failure path),
+// never a successful store's path, so there is no §XV.1/§VIII.5 concern.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_restore_datasync_count{0};
+
 // T003 fault-injection seam: makes the NEXT store() call's offloaded pwrite
 // sequence return false at the FIRST pwrite — before any durable byte is
 // written — so nothing is retained and the durable counter is not advanced,
@@ -553,10 +561,13 @@ struct offload_write_fault_scope {
     return true;
 }
 
-// fdatasync wrapper — mirrors OsFile::datasync.
+// fdatasync, with no seam — mirrors OsFile::datasync.
+[[nodiscard]] bool os_datasync(int fd) noexcept { return ::fdatasync(fd) == 0; }
+
+// The job's own fdatasync: the fixpp#611 seam, then os_datasync.
 [[nodiscard]] bool raw_datasync(int fd) noexcept {
     if (offload_datasync_fault_fires()) return false;  // fixpp#611 seam
-    return ::fdatasync(fd) == 0;
+    return os_datasync(fd);
 }
 
 // ftruncate to `size` — the file's end moves back to it.
@@ -588,9 +599,13 @@ struct offload_write_fault_scope {
     return true;
 }
 
+// FlushFileBuffers, with no seam.
+[[nodiscard]] bool os_datasync(HANDLE h) noexcept { return FlushFileBuffers(h) != 0; }
+
+// The job's own flush: the fixpp#611 seam, then os_datasync.
 [[nodiscard]] bool raw_datasync(HANDLE h) noexcept {
     if (offload_datasync_fault_fires()) return false;  // fixpp#611 seam
-    return FlushFileBuffers(h) != 0;
+    return os_datasync(h);
 }
 
 // SetFilePointerEx + SetEndOfFile to `size` — the file's end moves back to it. The
@@ -615,6 +630,18 @@ enum class offload_write_result : std::uint8_t {
     failed_unrestored,  // the call failed, and the restore did too: the caller poisons the store
 };
 
+// The restore's datasync. It does not take the job's datasync fault, which is the job's
+// own flush; the restore's is its own step (restore_datasync in the plan). Counts each
+// success in g_restore_datasync_count.
+template <class Fd>
+[[nodiscard]] bool sync_restored_end(Fd fd) noexcept {
+    const bool ok = os_datasync(fd);
+    if (ok) {
+        g_restore_datasync_count.fetch_add(1, std::memory_order_relaxed);
+    }
+    return ok;
+}
+
 template <class Fd>
 [[nodiscard]] offload_write_result restore_committed_end(Fd fd, std::int64_t end) noexcept {
     if (offload_restore_fault_fires(&offload_write_fault_plan::restore_truncate) ||
@@ -622,7 +649,7 @@ template <class Fd>
         return offload_write_result::failed_unrestored;
     }
     if (offload_restore_fault_fires(&offload_write_fault_plan::restore_datasync) ||
-        !raw_datasync(fd)) {
+        !sync_restored_end(fd)) {
         return offload_write_result::failed_unrestored;
     }
     return offload_write_result::failed;
@@ -685,6 +712,12 @@ int read_and_reset_retrieve_pread_count() noexcept {
 // FIXPP_TEST_HOOKS.
 int read_and_reset_flush_datasync_count() noexcept {
     return g_flush_datasync_count.exchange(0, std::memory_order_acq_rel);
+}
+
+// fixpp#635: read and reset the restore-ran counter (see its global above). Compiled
+// unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
+int read_and_reset_restore_datasync_count() noexcept {
+    return g_restore_datasync_count.exchange(0, std::memory_order_acq_rel);
 }
 
 // gate-b/r1 A.1: install (or clear) the post-rename reopen-fail hook.

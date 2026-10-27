@@ -282,6 +282,10 @@ void arm_force_offload_write_fail_once(int pwrite_nth, bool datasync) noexcept;
 // fault that fires counts in read_and_reset_offload_write_fail_count().
 void arm_force_offload_restore_fail_once(bool truncate, bool datasync) noexcept;
 int read_and_reset_offload_write_fail_count() noexcept;
+// fixpp#635: read and reset the restore-ran counter: how many times a failed job's
+// restore of the committed end made its datasync and the datasync succeeded, since the
+// last read. Incremented unconditionally in file_store.cpp, as the flush-ran counter is.
+int read_and_reset_restore_datasync_count() noexcept;
 // 093 (tasks.md T079, Q-29) reset-atomicity fault injection. The first arms a one-shot
 // fault in the next reset's offloaded sequence after its temp log is written and closed,
 // before the rename. The second arms a fault at the first next_seqnum() counter-record
