@@ -1100,6 +1100,25 @@ struct FileStoreImpl {
         return true;
     }
 
+    // ── Frame index ────────────────────────────────────────────────────────
+
+    // fixpp#632, D-632-1 (.specify/624-offload-completion-lifetime.md): the last record
+    // of a sequence number wins. Each direction's index holds one entry per number, in
+    // strictly increasing order, and retrieve() looks a number up by its distance from
+    // the first entry. A frame record for the number at the back REPLACES that entry
+    // (the log holds an earlier record for it when a store() of that number failed after
+    // its frame record was written); a record above the back is appended.
+    // Precondition: ie.seq >= the back's number. store() admits only the next number,
+    // which is never below the back; restart_scan refuses a log that breaks it.
+    void index_frame(const IndexEntry& ie) {
+        auto& idx = (ie.dir == direction_t::inbound) ? inbound_index : outbound_index;
+        if (!idx.empty() && idx.back().seq == ie.seq) {
+            idx.back() = ie;
+            return;
+        }
+        idx.push_back(ie);
+    }
+
     // ── Frame record write ─────────────────────────────────────────────────
 
     bool write_frame(seqnum_t seq, direction_t dir, std::span<const std::byte> frame) noexcept {
@@ -1296,8 +1315,14 @@ struct FileStoreImpl {
                 ie.dir = static_cast<direction_t>(hdr.dir);
                 ie.file_offset = scan_pos;
                 ie.len = static_cast<std::uint32_t>(payload_len);
-                auto& idx = (ie.dir == direction_t::inbound) ? inbound_index : outbound_index;
-                idx.push_back(ie);
+                // D-632-1: a frame record below the direction's last number cannot be
+                // written by store(), which admits only the next number; a log holding
+                // one is refused as corrupt, so the index stays strictly increasing.
+                const auto& idx = (ie.dir == direction_t::inbound) ? inbound_index : outbound_index;
+                if (!idx.empty() && ie.seq < idx.back().seq) {
+                    return false;
+                }
+                index_frame(ie);
             } else if (kind == RecordKind::counter) {
                 if (payload_len == kCounterPayloadSize) {
                     CounterPayload cp{};
@@ -1326,8 +1351,9 @@ struct FileStoreImpl {
             next_inbound = recovered_ni;
             next_outbound = recovered_no;
         } else {
-            // Infer from index: vectors are built in seqnum-monotonic order,
-            // so back().seq is the maximum (O(1) per direction).
+            // Infer from index: each direction's index is strictly increasing by
+            // number (index_frame, and the refusal above), so back().seq is the
+            // maximum (O(1) per direction).
             const seqnum_t max_in = inbound_index.empty() ? seqnum_t{0} : inbound_index.back().seq;
             const seqnum_t max_out =
                 outbound_index.empty() ? seqnum_t{0} : outbound_index.back().seq;
@@ -1566,14 +1592,13 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
-    // Push index entry (mirrors write_frame, stripped of pwrite).
+    // Index the frame; D-632-1: it replaces an entry for the same number (index_frame).
     IndexEntry ie;
     ie.seq = seq;
     ie.dir = dir;
     ie.file_offset = frame_off;
     ie.len = static_cast<std::uint32_t>(frame_span.size());
-    auto& idx = (dir == direction_t::inbound) ? impl_->inbound_index : impl_->outbound_index;
-    idx.push_back(ie);
+    impl_->index_frame(ie);
 
     // Set in-memory counters to the pre-computed post-increment values.
     impl_->next_inbound = ni;

@@ -238,6 +238,14 @@ Documents that describe `offload_to` as a nested `co_spawn`. The live B&L row is
 | `.specify/563-564-callback-send.md` §2.6, "How a cancellation reaches the write" | `offload_to` "awaits a `co_spawn` onto the file executor", and asio's cancellation handler hands the executor a second job | ⚠️ **HISTORY.** True of the tree before fixpp#598 for the cancellation, and before D-624-1 for the `co_spawn`. |
 | `include/fixpp/session/message_store.hpp`, `store`'s comment | "before the nested co_spawn that offloads pwrite / fdatasync to file_io_executor" | ⚠️ **STALE on the mechanism since D-624-1**; the obligation it states (deep-copy before any suspension) holds. |
 
+**D-632-1 (fixpp#632): the `FileStore` index keeps the last record of a sequence number.** A
+`store()` that failed after its frame record was written leaves that record in the log; a later
+`store()` of the same number replaces it in the index, at open and live, and the open refuses a frame
+record below a direction's last number. No document read for this page described the index as
+append-only by number. (The log stays append-only; that sentence in `.specify/2e-msgstore.md` §6.3 is
+about the file and still holds.) Design: `.specify/624-offload-completion-lifetime.md` §8; B&L
+`B-632-1`.
+
 ## Note for reviewers
 
 A symbol grep for `cancel_and_drain` across the decision records produces **false leads**:

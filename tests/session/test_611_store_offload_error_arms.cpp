@@ -36,6 +36,7 @@
 #include <asio/awaitable.hpp>
 #include <asio/thread_pool.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -45,6 +46,8 @@
 #include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <string>
@@ -316,58 +319,78 @@ TEST(ResetThrowAfterRename, PoisonsTheStoreAndReturnsTheResetsError) {
 }
 
 // ── A failed store()'s frame record, then a second store() of the same number ─────────
+//
+// Fixes #632 (D-632-1 in .specify/624-offload-completion-lifetime.md): store(n) fails at its
+// counter write, so the log holds a complete frame record for n that the call reported as
+// not stored, and the reopened store's next number is still n. A second store(n), with
+// different bytes, appends another record for n. The last record of a number wins: a lookup
+// of n returns the second store's frame, in the process that stored it and after every
+// reopen, and the numbers after n are looked up at their own place.
 
-// OPEN QUESTION (fixpp#611, a finding of the counter-header arm above): store(2) fails at
-// its counter write, so the log holds a complete frame record for 2 that the call
-// reported as not stored, and the reopened store's next outbound number is still 2. A
-// second store(2), with different bytes, then appends another record for 2. Which of the
-// two does a lookup of 2 return, before and after a reopen? If it is the first, a resend
-// would carry a frame whose store() failed and which was never sent. This cell only
-// prints what the store returns and asserts nothing about which record wins; it is
-// disabled until that is decided. Run it with --gtest_also_run_disabled_tests.
-asio::awaitable<void> print_lookup_of_two(MessageStore& store, char const* when,
-                                          std::vector<std::byte> const& failed,
-                                          std::vector<std::byte> const& second) {
-    auto const name = [&](std::vector<std::byte> const& bytes) {
-        if (bytes == failed) return "the FAILED store(2)'s frame";
-        if (bytes == second) return "the second store(2)'s frame";
-        return "a frame matching neither";
-    };
-    byte_collecting_visitor one;
-    auto const r = co_await store.retrieve(2, 2, direction_t::outbound, one);
-    std::printf("[fixpp#611] %s: retrieve(2, 2) -> %s, visited %zu frame(s)\n", when,
-                r ? "ok" : "error", one.entries().size());
-    for (auto const& e : one.entries()) {
-        std::printf("[fixpp#611]   seq %u: %s\n", static_cast<unsigned>(e.seq), name(e.bytes));
+// What one direction holds: the frames a range walk visits, with the stored bytes checked
+// against `expected` by number.
+struct walked {
+    bool ok = false;
+    std::vector<seqnum_t> seqs;
+    bool bytes_match = true;
+};
+
+asio::awaitable<walked> walk(MessageStore& store, direction_t const dir, seqnum_t const begin,
+                             seqnum_t const end,
+                             std::vector<std::vector<std::byte>> const& expected) {
+    walked out;
+    byte_collecting_visitor v;
+    out.ok = (co_await store.retrieve(begin, end, dir, v)).has_value();
+    for (auto const& e : v.entries()) {
+        out.seqs.push_back(e.seq);
+        if (e.seq >= expected.size() || e.bytes != expected[e.seq]) out.bytes_match = false;
     }
-    byte_collecting_visitor walk;
-    auto const w = co_await store.retrieve(1, 0, direction_t::outbound, walk);
-    std::printf("[fixpp#611] %s: retrieve(1, tail) -> %s, visited %zu frame(s)\n", when,
-                w ? "ok" : "error", walk.entries().size());
-    for (auto const& e : walk.entries()) {
-        std::printf("[fixpp#611]   seq %u: %s\n", static_cast<unsigned>(e.seq),
-                    e.seq == 2 ? name(e.bytes) : "-");
-    }
-    auto const next = co_await store.next_seqnum(direction_t::outbound, false);
-    std::printf("[fixpp#611] %s: next outbound %u\n", when,
-                next ? static_cast<unsigned>(*next) : 0U);
+    co_return out;
 }
 
-TEST(StoreOffloadErrorArms, DISABLED_FailedFrameRecordThenASecondStoreOfTheSameNumber) {
+void last_record_of_a_number_wins(direction_t const dir) {
     disarm_on_exit const disarm;
     Fixture fx;
-    auto const failed = make_test_frame(2, direction_t::outbound);
-    auto const second = make_test_frame(2, direction_t::outbound, 8);
-    ASSERT_NE(failed, second) << "precondition: the two frames for 2 differ";
+    // expected[n]: the bytes a lookup of n must return once every store below has run.
+    std::vector<std::vector<std::byte>> expected(4);
+    expected[1] = make_test_frame(1, dir);
+    auto const failed = make_test_frame(2, dir);
+    expected[2] = make_test_frame(2, dir, 8);
+    expected[3] = make_test_frame(3, dir);
+    ASSERT_NE(failed, expected[2]) << "precondition: the two frames for 2 differ";
+    auto const put = [&](MessageStore& store, seqnum_t const seq,
+                         std::vector<std::byte> const& frame) {
+        return store.store(seq, std::span<const std::byte>{frame}, dir);
+    };
+    // The lookups after each step: 2 alone, 3 alone, and the walk from 1 to the tail.
+    auto const check = [&](MessageStore& store, char const* when,
+                           seqnum_t const last) -> asio::awaitable<void> {
+        SCOPED_TRACE(when);
+        auto const two = co_await walk(store, dir, 2, 2, expected);
+        EXPECT_TRUE(two.ok && two.seqs == std::vector<seqnum_t>{2} && two.bytes_match)
+            << "retrieve(2, 2) must return the second store(2)'s frame; visited" << text(two.seqs)
+            << (two.bytes_match ? "" : ", with other bytes");
+        if (last >= 3) {
+            auto const three = co_await walk(store, dir, 3, 3, expected);
+            EXPECT_TRUE(three.ok && three.seqs == std::vector<seqnum_t>{3} && three.bytes_match)
+                << "retrieve(3, 3) must return store(3)'s frame; visited" << text(three.seqs)
+                << (three.bytes_match ? "" : ", with other bytes");
+        }
+        std::vector<seqnum_t> each;
+        for (seqnum_t s = 1; s <= last; ++s) each.push_back(s);
+        auto const all = co_await walk(store, dir, 1, 0, expected);
+        EXPECT_TRUE(all.ok && all.seqs == each && all.bytes_match)
+            << "the walk to the tail must visit each number once, with its last frame; visited"
+            << text(all.seqs) << (all.bytes_match ? "" : ", with other bytes");
+    };
     run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
         {
             auto store = fx.open();
             EXPECT_NE(store, nullptr) << "setup: the FileStore";
             if (!store) co_return;
-            EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
+            EXPECT_TRUE((co_await put(*store, 1, expected[1])).has_value()) << "setup: store(1)";
             fixpp::session::arm_force_offload_write_fail_once(4, false);  // counter header
-            auto const r =
-                co_await store->store(2, std::span<const std::byte>{failed}, direction_t::outbound);
+            auto const r = co_await put(*store, 2, failed);
             EXPECT_TRUE(!r && fixpp::session::read_and_reset_offload_write_fail_count() == 1)
                 << "setup: store(2) fails at its counter write";
         }
@@ -375,16 +398,85 @@ TEST(StoreOffloadErrorArms, DISABLED_FailedFrameRecordThenASecondStoreOfTheSameN
             auto store = fx.open();
             EXPECT_NE(store, nullptr) << "the first reopen";
             if (!store) co_return;
-            auto const r =
-                co_await store->store(2, std::span<const std::byte>{second}, direction_t::outbound);
-            std::printf("[fixpp#611] the second store(2) -> %s\n", r ? "ok" : "error");
-            co_await print_lookup_of_two(*store, "after the first reopen", failed, second);
+            EXPECT_TRUE((co_await put(*store, 2, expected[2])).has_value())
+                << "the second store(2)";
+            co_await check(*store, "after the second store(2), same process", 2);
+            EXPECT_TRUE((co_await put(*store, 3, expected[3])).has_value()) << "store(3)";
+            co_await check(*store, "after store(3), same process", 3);
+        }
+        {
+            auto store = fx.open();
+            EXPECT_NE(store, nullptr) << "the second reopen";
+            if (!store) co_return;
+            co_await check(*store, "after the second reopen", 3);
         }
         auto store = fx.open();
-        EXPECT_NE(store, nullptr) << "the second reopen";
+        EXPECT_NE(store, nullptr) << "the third reopen";
         if (!store) co_return;
-        co_await print_lookup_of_two(*store, "after the second reopen", failed, second);
+        co_await check(*store, "after the third reopen", 3);
     });
+}
+
+TEST(StoreOffloadErrorArms, FailedFrameRecordThenASecondStore_LastRecordWins_Outbound) {
+    last_record_of_a_number_wins(direction_t::outbound);
+}
+
+TEST(StoreOffloadErrorArms, FailedFrameRecordThenASecondStore_LastRecordWins_Inbound) {
+    last_record_of_a_number_wins(direction_t::inbound);
+}
+
+// D-632-1: store() admits only the next number, so no log it writes holds a frame record
+// below a direction's last number. A log that does is refused at open. The log is built
+// by hand: the record for 2 is copied, byte for byte, to the end of a log that holds 1, 2
+// and 3. A record's CRC covers its header and payload and not its offset, so the copy is
+// a valid record, and the open meets it after 3.
+TEST(StoreOffloadErrorArms, AFrameRecordBelowTheLastNumber_RefusesTheOpen) {
+    Fixture fx;
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        auto store = fx.open();
+        EXPECT_NE(store, nullptr) << "setup: the FileStore";
+        if (!store) co_return;
+        for (seqnum_t s = 1; s <= 3; ++s) {
+            EXPECT_TRUE((co_await store_seq(*store, s)).has_value()) << "setup: store(" << s << ")";
+        }
+    });
+
+    std::filesystem::path log;
+    for (auto const& e : std::filesystem::directory_iterator(fx.dir.path)) {
+        if (e.path().extension() == ".log") log = e.path();
+    }
+    ASSERT_FALSE(log.empty()) << "setup: the store's log file";
+    std::vector<char> bytes;
+    {
+        std::ifstream in{log, std::ios::binary};
+        bytes.assign(std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{});
+    }
+    // Walk the records: a 16-byte header (kind, dir, two reserved bytes, then seq and len,
+    // little-endian u32 each, then the CRC), the payload, padding to 8 bytes. kind 0 is a
+    // frame, dir 1 outbound.
+    auto const u32 = [&](std::size_t const at) {
+        std::uint32_t v = 0;
+        for (std::size_t k = 0; k < 4; ++k) {
+            v |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[at + k])) << (8 * k);
+        }
+        return v;
+    };
+    std::vector<char> record_two;
+    for (std::size_t at = 0; at + kHeaderBytes <= bytes.size();) {
+        std::size_t const len = u32(at + 8);
+        std::size_t const size = (kHeaderBytes + len + kAlign - 1) / kAlign * kAlign;
+        if (bytes[at] == 0 && bytes[at + 1] == 1 && u32(at + 4) == 2) {
+            record_two.assign(bytes.begin() + static_cast<std::ptrdiff_t>(at),
+                              bytes.begin() + static_cast<std::ptrdiff_t>(at + size));
+        }
+        at += size;
+    }
+    ASSERT_FALSE(record_two.empty()) << "setup: the frame record for 2 in the log";
+    {
+        std::ofstream out{log, std::ios::binary | std::ios::app};
+        out.write(record_two.data(), static_cast<std::streamsize>(record_two.size()));
+    }
+    EXPECT_EQ(fx.open(), nullptr) << "the open must refuse a frame record below the last number";
 }
 
 }  // namespace

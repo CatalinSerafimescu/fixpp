@@ -209,3 +209,58 @@ is this cell on POSIX plus the shared structure: the same seam at its `rename_do
 `offload_to` returns. The cell must go RED, with the reset passing the exception on and the later
 `store()` reporting success.
 
+## 8. D-632-1 — the last record of a sequence number wins (fixpp#632)
+
+**The condition.** `store(n)` can fail after its frame record is on disk, at the counter record's write
+(`StoreOffloadErrorArms.Store_CounterHeaderPwriteFails` and `_CounterPayloadPwriteFails`). The call
+returns `store_io_failure`, so a session does not transmit that frame, and the next number stays `n`.
+After a restart, the scan indexes that frame record, and the next `store(n)` (of whatever the session
+builds next under `n`) appends a second record for `n`. Before D-632-1:
+- each direction's index was a vector that took every frame record in log order;
+- `retrieve` looks a number up by its distance from the first entry (`i = s - front.seq`, then
+  `idx[i].seq != s` is a gap; D-538-1).
+
+So a lookup of `n` returned the FIRST record, the frame that was never sent, and every number after
+`n` was looked up one place short and read as a gap.
+
+**The statement.** The last record of a number wins, and each direction's index stays one entry per
+number, strictly increasing, so the positional lookup holds:
+- `FileStoreImpl::index_frame`, used by the scan and by `store()`'s success path, replaces the back
+  entry when the record's number is the back's number (same place, the new offset and length), and
+  appends otherwise.
+- The scan refuses the log (the open fails) when a frame record's number is BELOW the direction's
+  back. `store()` admits only the next number, which is never below the back, so no log it writes
+  holds such a record; a duplicate can only be of the back's number. Refusing keeps the index
+  strictly increasing, which the scan's own counter inference also relies on (`back().seq` is the
+  maximum).
+
+**The sources behind the ruling** (owner's ruling, LAST RECORD WINS; read at the ruling, not re-read
+here):
+
+| Engine | Where | On a duplicate sequence number |
+|---|---|---|
+| QuickFIX C++ `2ce8a60` | `src/C++/FileStore.cpp`, `populateCache` and `set` | the map entry is overwritten: last wins |
+| QuickFIX/J `4969564` | `quickfixj-core/.../FileStore.java`, `updateMessageIndex` | `TreeMap.put`: last wins |
+| QuickFIX/Go `eff945dd` | `store/file/file_store.go`, `IterateMessages` | no index; every header record is yielded in file order: both |
+| fixpp before D-632-1 | `FileStoreImpl::restart_scan`, `FileStore::retrieve` | a positional vector: the first record is returned and every later number shifts |
+
+**Rejected.** Dropping a frame record that lies beyond the last counter record's next number, as
+uncommitted (fixpp#632's option (b)). No engine does so, and it would change what the #611
+counter-arm cells pin (the failed frame on disk after a reopen, read by its own number until a later
+store of that number replaces it).
+
+**The cells** (run), in `tests/session/test_611_store_offload_error_arms.cpp`:
+- `StoreOffloadErrorArms.FailedFrameRecordThenASecondStore_LastRecordWins_Outbound` and `_Inbound`.
+  The index code is shared by both directions; each direction is a cell of its own. Each asserts that
+  a lookup of 2 returns the second `store(2)`'s frame, that `store(3)` is read as 3 alone and in the
+  walk, and that the walk visits each number once. It checks this in the process that made the second
+  store, then after one, two and three reopens.
+- `StoreOffloadErrorArms.AFrameRecordBelowTheLastNumber_RefusesTheOpen`. A log is built by copying the
+  record for 2 to the end of a log that holds 1, 2 and 3; the open must refuse it.
+
+**Mutants to re-run** (not committed):
+- the scan appending in place of `index_frame`: the two `_LastRecordWins` cells go RED at their checks
+  after a reopen;
+- `store()` appending in place of `index_frame`: the same two cells go RED at their same-process checks;
+- the scan's refusal removed: `AFrameRecordBelowTheLastNumber_RefusesTheOpen` goes RED.
+
