@@ -211,9 +211,9 @@ the job's body keeps its indentation; `reset_store_to` is its only caller.
 other steps (initialise_fresh on the temporary log, the rename, the reopen's open and its lock), each
 with a cell of its own under `ResetStepArms` (fixpp#611). It asserts that the seam fired, that the reset returns
 `store_io_failure` and does not throw, that a later `store()` is refused, and that the reopened log is
-the reset's own (no frame, next outbound 1). The Windows branch compiles only under MSVC; its witness
-is this cell on POSIX plus the shared structure: the same seam at its `rename_done` site, and the same
-`offload_reset_job` and Region 3.
+the reset's own (no frame, next outbound 1). The Windows branch is built and run only by the windows-msvc
+legs; its witness is this cell, which those legs also run, plus the shared structure: the same seam at its
+`rename_done` site, and the same `offload_reset_job` and Region 3.
 
 **Mutant to re-run** (not committed): remove (b)'s catch, so that `offload_reset_job` only returns what
 `offload_to` returns. The cell must go RED, with the reset passing the exception on and the later
@@ -304,8 +304,8 @@ records and nothing else.
   (`flush_for_session_close`) still drains the open log first, as `B-008-5` promises for
   `close(graceful)`, then returns `store_io_failure`; a store with no open log (never opened, or the
   reset's poison) returns success with nothing to drain.
-- Windows: `SetFilePointerEx` and `SetEndOfFile`, then `FlushFileBuffers`. It compiles only under MSVC
-  and is not built here.
+- Windows: `SetFilePointerEx` and `SetEndOfFile`, then `FlushFileBuffers`. It is built and run only by
+  the windows-msvc legs (the verify record's MSVC step).
 
 **Why not append at the end, as QuickFIX does** (read at filing, fixpp#635; not re-read here):
 
@@ -365,4 +365,3 @@ arm cells assert the size instead.
   the two `Restore*Fails_PoisonsTheStore` cells go RED at their flush checks;
 - the poison removed from `store()`'s Region 3: the two `Restore*Fails_PoisonsTheStore` cells go RED;
   from `next_seqnum`'s: `IncrementRestoreTruncateFails_PoisonsTheStore` goes RED.
-
