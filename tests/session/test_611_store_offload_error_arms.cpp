@@ -479,4 +479,82 @@ TEST(StoreOffloadErrorArms, AFrameRecordBelowTheLastNumber_RefusesTheOpen) {
     EXPECT_EQ(fx.open(), nullptr) << "the open must refuse a frame record below the last number";
 }
 
+// ── A store() retried in the same process after it failed at its counter write ───────────
+//
+// OPEN QUESTION (a finding of fixpp#611's counter arms, measured and not decided): store(2)
+// fails at its counter write, so its frame record is on disk and the store's write position
+// is not advanced. Retried in the SAME process, store(2) writes its frame record and its
+// counter record from that same position, over the failed one. When the retry's frame record
+// plus its counter record (and the records after them) end before the failed frame record's
+// end, the failed record's last bytes stay in the log behind them. What does the next open
+// make of those bytes: a torn tail it truncates, or a log it refuses; and are the frames
+// stored after them still read? Equal and longer retries are the controls. This cell prints
+// and asserts nothing; it is disabled until that is decided. Run it with
+// --gtest_also_run_disabled_tests.
+void retry_in_the_same_process(char const* label, std::vector<std::byte> const& retry) {
+    disarm_on_exit const disarm;
+    Fixture fx;
+    auto const failed = make_test_frame(2, direction_t::outbound, 200);
+    std::vector<std::vector<std::byte>> expected(4);
+    expected[1] = make_test_frame(1, direction_t::outbound);
+    expected[2] = retry;
+    expected[3] = make_test_frame(3, direction_t::outbound);
+    auto const log_size = [&] {
+        for (auto const& e : std::filesystem::directory_iterator(fx.dir.path)) {
+            if (e.path().extension() == ".log") return std::filesystem::file_size(e.path());
+        }
+        return std::uintmax_t{0};
+    };
+    std::printf("[fixpp#611 retry %s] failed frame %zu bytes, retry frame %zu bytes\n", label,
+                failed.size(), retry.size());
+    run_on_pool(fx.pool, [&]() -> asio::awaitable<void> {
+        {
+            auto store = fx.open();
+            EXPECT_NE(store, nullptr) << "setup: the FileStore";
+            if (!store) co_return;
+            EXPECT_TRUE((co_await store_seq(*store, 1)).has_value()) << "setup: store(1)";
+            fixpp::session::arm_force_offload_write_fail_once(4, false);  // counter header
+            auto const r =
+                co_await store->store(2, std::span<const std::byte>{failed}, direction_t::outbound);
+            EXPECT_TRUE(!r && fixpp::session::read_and_reset_offload_write_fail_count() == 1)
+                << "setup: store(2) fails at its counter write";
+            auto const two =
+                co_await store->store(2, std::span<const std::byte>{retry}, direction_t::outbound);
+            auto const three = co_await store_seq(*store, 3);
+            std::printf("[fixpp#611 retry %s] same process: retry store(2) -> %s, store(3) -> %s\n",
+                        label, two ? "ok" : "error", three ? "ok" : "error");
+        }
+        std::printf("[fixpp#611 retry %s] log size before the reopen: %ju bytes\n", label,
+                    static_cast<std::uintmax_t>(log_size()));
+        auto const store = fx.open();
+        std::printf("[fixpp#611 retry %s] reopen: %s; log size after it: %ju bytes\n", label,
+                    store ? "accepted" : "REFUSED", static_cast<std::uintmax_t>(log_size()));
+        if (!store) co_return;
+        auto const next = co_await store->next_seqnum(direction_t::outbound, false);
+        std::printf("[fixpp#611 retry %s] next outbound %u\n", label,
+                    next ? static_cast<unsigned>(*next) : 0U);
+        for (auto const& [b, e] : {std::pair<seqnum_t, seqnum_t>{2, 2}, {3, 3}, {1, 0}}) {
+            auto const w = co_await walk(*store, direction_t::outbound, b, e, expected);
+            std::printf("[fixpp#611 retry %s] retrieve(%u, %u) -> %s, visited%s%s\n", label,
+                        static_cast<unsigned>(b), static_cast<unsigned>(e), w.ok ? "ok" : "error",
+                        text(w.seqs).c_str(),
+                        w.bytes_match ? "" : " (bytes differ from what was stored last)");
+        }
+    });
+}
+
+TEST(StoreOffloadErrorArms, DISABLED_RetryInTheSameProcess_Shorter) {
+    retry_in_the_same_process("shorter", make_test_frame(2, direction_t::outbound));
+}
+
+TEST(StoreOffloadErrorArms, DISABLED_RetryInTheSameProcess_EqualLength) {
+    auto frame = make_test_frame(2, direction_t::outbound, 200);
+    frame.back() = std::byte{0xEE};  // the same length, different bytes
+    retry_in_the_same_process("equal", frame);
+}
+
+TEST(StoreOffloadErrorArms, DISABLED_RetryInTheSameProcess_Longer) {
+    retry_in_the_same_process("longer", make_test_frame(2, direction_t::outbound, 400));
+}
+
 }  // namespace
