@@ -107,27 +107,27 @@ listed under their exact names.
 
 ### v50sp2 leg (plan P2; one TU, serial)
 
-- [ ] T009 [US1] (implementer) `tests/session/CMakeLists.txt`: add `test_096_tail_rows_roundtrip.cpp` as a source of `test_077_allversions_builder_roundtrip`; append label `096` to that test entry after its last LABELS setter (`set_property(TEST … APPEND PROPERTY LABELS 096)`).
-- [ ] T010 [US1] (implementer) `tests/session/test_096_tail_rows_roundtrip.cpp` header comment (the rule and the re-derive recipe, no result) + data-model §A's literal 31-row table + fixture (loads `FIXPP_DICT_DATA_DIR "/FIX50SP2.xml"` once, walk via the shared `Walker`) + `TailRows096Census.EveryTailMsgTypeHasExactlyOneWitness` (suite selected by `test_suite_name() == "TailRows096"`, every finding collected before asserting) + `TailRows096Census.FieldLegMatchesQuickFixCppGolden` (row-count precondition, then set equality per tail MsgType, read from `FIXPP_095_QUICKFIX_GOLDEN_CSV` at test time). No witness yet. Build and run: the census is RED with 31 multiplicity-0 findings; the golden check is GREEN. Record the census message.
-- [ ] T011 [US1] (implementer) The 31 witnesses `TailRows096.<RowId>_<Name>` (data-model §A order), each per data-model §C and contracts W2–W5 through the shared `check_witness`: every closure-required member set, required groups with ≥ 2 instances each carrying the delimiter and its required members, ≥ 2 intent entries, values written twice (intent entry and setter, neither reading the other). Run `--gtest_filter='TailRows096*'`: all GREEN. Then `--gtest_filter='TailRows096*' --gtest_shuffle --gtest_repeat=3`: all GREEN (FR-005's shuffle leg); record.
-- [ ] T012 [US1] (implementer) Report the clean link of `test_077_allversions_builder_roundtrip` with two TUs including `tail_rows_witness.hpp` (095's and 096's) as W0's `inline` evidence (a missing `inline` is a multiple-definition error). Commit T009–T011: `096 P2: v50sp2 witnesses, census and golden field-leg check (A-035..A-065)`. Report the hash.
+- [X] T009 [US1] (implementer) `tests/session/CMakeLists.txt`: add `test_096_tail_rows_roundtrip.cpp` as a source of `test_077_allversions_builder_roundtrip`; append label `096` to that test entry after its last LABELS setter (`set_property(TEST … APPEND PROPERTY LABELS 096)`).
+- [X] T010 [US1] (implementer) `tests/session/test_096_tail_rows_roundtrip.cpp` header comment (the rule and the re-derive recipe, no result) + data-model §A's literal 31-row table + fixture (loads `FIXPP_DICT_DATA_DIR "/FIX50SP2.xml"` once, walk via the shared `Walker`) + `TailRows096Census.EveryTailMsgTypeHasExactlyOneWitness` (suite selected by `test_suite_name() == "TailRows096"`, every finding collected before asserting) + `TailRows096Census.FieldLegMatchesQuickFixCppGolden` (row-count precondition, then set equality per tail MsgType, read from `FIXPP_095_QUICKFIX_GOLDEN_CSV` at test time). No witness yet. Build and run: the census is RED with 31 multiplicity-0 findings; the golden check is GREEN. Record the census message.
+- [X] T011 [US1] (implementer) The 31 witnesses `TailRows096.<RowId>_<Name>` (data-model §A order), each per data-model §C and contracts W2–W5 through the shared `check_witness`: every closure-required member set, required groups with ≥ 2 instances each carrying the delimiter and its required members, ≥ 2 intent entries, values written twice (intent entry and setter, neither reading the other). Run `--gtest_filter='TailRows096*'`: all GREEN. Then `--gtest_filter='TailRows096*' --gtest_shuffle --gtest_repeat=3`: all GREEN (FR-005's shuffle leg); record.
+- [X] T012 [US1] (implementer) Report the clean link of `test_077_allversions_builder_roundtrip` with two TUs including `tail_rows_witness.hpp` (095's and 096's) as W0's `inline` evidence (a missing `inline` is a multiple-definition error). Commit T009–T011: `096 P2: v50sp2 witnesses, census and golden field-leg check (A-035..A-065)`. Report the hash.
 
 ### v50sp2 RED arms (contracts W6, v50sp2 table; Mutant protocol; record each)
 
-- [ ] T013 [US1] (implementer) Field-leg mutant 1: one tag dropped from the walk's field set for one tail MsgType → RED in `FieldLegMatchesQuickFixCppGolden` naming that MsgType and both sets.
-- [ ] T014 [US1] (implementer) Field-leg mutant 2: a MsgType absent from `golden.csv` added to the asserted set → RED in the row-count precondition.
-- [ ] T015 [US1] (implementer) Mutant G: delete `TailRows096.A065_QuoteAck` → census RED naming CW, multiplicity 0. With G applied, run the census alone (`--gtest_filter='TailRows096Census.EveryTailMsgTypeHasExactlyOneWitness'`) → the same RED with no witness run (order-freedom).
-- [ ] T016 [US1] (implementer) Mutant F: duplicate the A-035 witness as `TailRows096.A036_CrossRequest` → RED naming DS multiplicity 2 and the row mismatch (A036 against A-035).
-- [ ] T017 [US1] (implementer) Mutant I: add `TailRows096.A035_CrossOrderRequest` → RED naming the unmapped name.
-- [ ] T018 [US1] (implementer) Mutant J: add `TailRows096.A001_NewOrderSingle` → RED naming 35=D as extra.
-- [ ] T019 [US1] (implementer) Mutant O (own rebuild): rename `TailRows096.A043_PartyDetailsListRequest` to `TailRows096.A044_PartyDetailsListRequest` → RED naming CF's row mismatch and no multiplicity finding.
-- [ ] T020 [US1] (implementer) Mutant K: the name → MsgType lookup returns DT for `CrossRequest` → RED in the A-035 witness's tag-35 assertion naming DS and DT.
-- [ ] T021 [US1] (implementer) Mutant D: delete one intent entry, setter kept → RED in W4 "parsed, not intended" naming the path.
-- [ ] T022 [US1] (implementer) Mutant H: in the A-065 witness delete an optional field's setter, keep its intent entry → RED in W4 "intended, not parsed" naming the path; W5 stays green.
-- [ ] T023 [US1] (implementer) Value mismatch: after the build and before `make_frame`, change one letter of one string literal in the built buffer → RED in W4 naming the path and both values.
-- [ ] T024 [US1] (implementer) Mutant E: cut the A-064 witness to one entry (setters and intent entries) → RED in the intent-size assertion.
-- [ ] T025 [US1] (implementer) Mutant B: in the A-065 witness delete the `QuoteAckStatus(1865)` setter and its intent entry → RED in W5 (not W4) naming `1865`.
-- [ ] T026 [US1] (implementer) Mutant A: in the A-037 witness delete the required group's assignment and its intent entries → RED in W5 naming the group.
+- [X] T013 [US1] (implementer) Field-leg mutant 1: one tag dropped from the walk's field set for one tail MsgType → RED in `FieldLegMatchesQuickFixCppGolden` naming that MsgType and both sets.
+- [X] T014 [US1] (implementer) Field-leg mutant 2: a MsgType absent from `golden.csv` added to the asserted set → RED in the row-count precondition.
+- [X] T015 [US1] (implementer) Mutant G: delete `TailRows096.A065_QuoteAck` → census RED naming CW, multiplicity 0. With G applied, run the census alone (`--gtest_filter='TailRows096Census.EveryTailMsgTypeHasExactlyOneWitness'`) → the same RED with no witness run (order-freedom).
+- [X] T016 [US1] (implementer) Mutant F: duplicate the A-035 witness as `TailRows096.A036_CrossRequest` → RED naming DS multiplicity 2 and the row mismatch (A036 against A-035).
+- [X] T017 [US1] (implementer) Mutant I: add `TailRows096.A035_CrossOrderRequest` → RED naming the unmapped name.
+- [X] T018 [US1] (implementer) Mutant J: add `TailRows096.A001_NewOrderSingle` → RED naming 35=D as extra.
+- [X] T019 [US1] (implementer) Mutant O (own rebuild): rename `TailRows096.A043_PartyDetailsListRequest` to `TailRows096.A044_PartyDetailsListRequest` → RED naming CF's row mismatch and no multiplicity finding.
+- [X] T020 [US1] (implementer) Mutant K: the name → MsgType lookup returns DT for `CrossRequest` → RED in the A-035 witness's tag-35 assertion naming DS and DT.
+- [X] T021 [US1] (implementer) Mutant D: delete one intent entry, setter kept → RED in W4 "parsed, not intended" naming the path.
+- [X] T022 [US1] (implementer) Mutant H: in the A-065 witness delete an optional field's setter, keep its intent entry → RED in W4 "intended, not parsed" naming the path; W5 stays green.
+- [X] T023 [US1] (implementer) Value mismatch: after the build and before `make_frame`, change one letter of one string literal in the built buffer → RED in W4 naming the path and both values.
+- [X] T024 [US1] (implementer) Mutant E: cut the A-064 witness to one entry (setters and intent entries) → RED in the intent-size assertion.
+- [X] T025 [US1] (implementer) Mutant B: in the A-065 witness delete the `QuoteAckStatus(1865)` setter and its intent entry → RED in W5 (not W4) naming `1865`.
+- [X] T026 [US1] (implementer) Mutant A: in the A-037 witness delete the required group's assignment and its intent entries → RED in W5 naming the group.
 
 ### vlatest leg (plan P3; one TU, serial)
 
