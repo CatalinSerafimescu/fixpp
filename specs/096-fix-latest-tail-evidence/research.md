@@ -13,9 +13,15 @@ except where this file says it is the input to a decision and the tests re-deriv
 message, and `grep -o '<fixr:message [^>]*msgType="<MT>"[^>]*>' dictionaries/orchestra/OrchestraFIXLatest.xml`
 returns a message with `added="FIX.5.0SP2"` and a non-`Session` category. Both generated trees carry
 `messages/<Name>.hpp` for each (`build/<preset>/_codegen/include/fixpp/{v50sp2,vlatest}/messages/`).
-`cmp reference-engines/quickfix-cpp/spec/FIX50SP2.xml dictionaries/FIX50SP2.xml` (parent-repo
-relative for the first path) exits 0. QuickFIX/J 3.0.1's `FIX50SP2.modified.xml` holds none of the
-31 (`grep -c "msgtype=.<MT>."` is 0 for each; `BN` is found).
+From the library root,
+`cmp ../../../reference-engines/quickfix-cpp/spec/FIX50SP2.xml dictionaries/FIX50SP2.xml` exits 0
+(quickstart §0). QuickFIX/J 3.0.1's base edition, `FIX50SP2.modified.xml`, holds none of the 31:
+quickstart §0's QuickFIX/J loop checks it fail-closed (the file exists, the checkout is at tag
+`QFJ_RELEASE_3_0_1`, `BN` is found exactly once, each of the 31 is found zero times). The path is
+`quickfixj-messages/quickfixj-messages-fix50sp2/src/main/resources/FIX50SP2.modified.xml`, tracked
+in QuickFIX/J's own repository, so a fresh clone at that tag has it; the Maven output copy under
+`target/classes/` is not cited, because a fresh clone lacks it. `reference-engines/` is gitignored
+in the parent repo: each engine there is its own clone.
 
 **Alternatives**: vlatest only (the plan of record): rejected by the owner, 2026-10-28, because it
 ignores the v50sp2 tier that already exists for these MsgTypes.
@@ -24,25 +30,31 @@ ignores the v50sp2 tier that already exists for these MsgTypes.
 
 **Decision**:
 - Move 095's machinery out of `tests/session/test_095_tail_rows_roundtrip.cpp` into a new header,
-  `tests/support/tail_rows_witness.hpp`, namespace `fixpp_test_support::tail_rows`. Moved: every
-  declaration of 095's TU from `enum class walk_status` through `join_tags` (the walk section, the
-  QuickFIX-XML `Walker`, `msgtype_for_generated_name`, `split_test_name`, the body enumeration,
-  `value_at`, `parse_count`, `tag_of_path`, `required_members_missing`, `join`, `join_tags`), and
-  `drop_hyphen`, `parse_noting_refusal` and `Intent`. What changes, and nothing else:
-  - each moved function gains a leading `inline` (it now lives in a header); bodies are unchanged;
-  - `walk_status` gains the value `wrapped_group` and `to_string` its case (R-4); the QuickFIX
-    `Walker` never returns it;
+  `tests/support/tail_rows_witness.hpp`, namespace `fixpp_test_support::tail_rows`. Moved, in 095's
+  declaration order: the `IndexView` alias, then every declaration from `enum class walk_status`
+  through `join_tags` (the walk section, the QuickFIX-XML `Walker`, `msgtype_for_generated_name`,
+  `split_test_name`, the body enumeration, `value_at`, `parse_count`, `tag_of_path`,
+  `required_members_missing`, `join`, `join_tags`), then `drop_hyphen`, `parse_noting_refusal` and
+  `Intent`. 095's `using fixpp_test_support::…` declarations stay in its TU: the header's namespace
+  is nested in `fixpp_test_support`, so the moved code sees those names unqualified. What may change
+  is a class, not a list (contracts W0):
+  - outside the moved region: the header's `#pragma once`, `#include`s, namespace wrapper and
+    comments, and in 095's TU the header's `#include`, `using` declarations and the forwarding body;
+  - inside it: a leading `inline` on each function (it now lives in a header), and whitespace,
+    line breaks and comments as clang-format reflows them. No statement, name, type or literal
+    changes, and `walk_status` keeps its values;
   - `Tail095Fixture::check_witness` becomes a free function. Its statements are kept in order, with
     three substitutions: the fixture's `tv()` and `walk()` become parameters, the fixture's
-    `read_arena_` becomes a `std::pmr::memory_resource*` parameter, and the expected MsgType, which
-    the method computed from `current_test_info()` with the QuickFIX-only
-    `msgtype_for_generated_name(doc(), …)`, becomes a `std::string_view` parameter (each tier maps a
-    test name to a MsgType through its own dictionary). 095's fixture method keeps its signature,
+    `&read_arena_` becomes a `std::pmr::memory_resource*` parameter, and the statement that computed
+    the expected MsgType from the test name with the QuickFIX-only `msgtype_for_generated_name(doc(),
+    …)` is dropped in favour of a `std::string_view expected_mt` parameter (each tier maps a test
+    name to a MsgType through its own dictionary). 095's fixture method keeps its signature,
     computes that MsgType as before and forwards.
   095's `TailRow` table, `SetUpTestSuite`, fixture classes, census, known positives, selection check
   and witnesses stay in its TU.
-- The guards on that refactor: 095's committed tests (deficient frames, 35=i, S1/S2, census,
-  23 witnesses), which run in the same binary after the move; quickstart §1's line check; and 096's
+- The guards on that refactor: 095's committed tests (deficient frames, 35=i, S1/S2, census and
+  witnesses), which run in the same binary after the move; quickstart §1's normalised two-way diff
+  of the moved region and of `check_witness`, with its controls; and 096's
   comparator mutants D, H, E and value-mismatch (contracts W6), which run through the shared
   `check_witness` in the same binary.
 - 096's v50sp2 witnesses: new TU `tests/session/test_096_tail_rows_roundtrip.cpp`, a third source of
@@ -104,15 +116,23 @@ Rules (spec Terminology), resolved against the file's structure:
   emission in `OrchestraLoader`'s structure walk (`grep -n capture_first_emission
   src/dictionary/orchestra_loader.cpp`), and the delimiter is the first capture at the open group's
   level;
-- statuses: `nested_required_group` and `delimiter_chain` as 095's walk sets them; `wrapped_group`
-  when a required `fixr:componentRef`'s component has exactly one element child and it is a
-  `fixr:groupRef` without `presence="required"` (the QuickFIX wrapper shape). `group_among_siblings`
-  does not arise: Orchestra references the group directly, and the path rule decides it.
+- statuses: `nested_required_group` and `delimiter_chain` as 095's walk sets them.
+  `group_among_siblings` does not arise: Orchestra references the group directly, and the path rule
+  decides it. The QuickFIX wrapper shape written in Orchestra (a required `fixr:componentRef` whose
+  component holds only a non-required `fixr:groupRef`) gets no status either: the path rule makes
+  the group not required, and if 095's walk inherits required-ness through the QuickFIX form of
+  the same group, the differential reports it (spec Clarifications, Gate A round 1);
+- a `msgType` seen twice fails the walk loudly (fragment S5), unlike 095's `Walker::walk_all`, which
+  assigns by key;
+- a group in `element` is named by its count field's name (the `fixr:field@name` of its
+  `fixr:numInGroup id`), which is how 095's walk names it, so a status's element reads the same on
+  both legs.
 
-**Measured input**: no Orchestra message has the `wrapped_group` shape (scratch walk over every
-`fixr:message`); 35=E and 35=CC have the same required shape in both files and 35=i has a required
-group in a required group's instance in both. So the vlatest leg's known positives reuse 095's frames
-(R-6), and `wrapped_group` is driven by a synthetic fragment.
+**Input to the decision to reuse 095's frames**: the vlatest known positives reuse 095's frames
+(R-6) because 35=E's and 35=CC's required shapes, and 35=i's nested required group, were found the
+same in both files when this plan was written. Re-derive with data-model §B.2's `awk` recipe on
+both files. No committed test compares the two files' shapes; a frame that the parser refuses or
+splits otherwise under the Orchestra dictionary stops the implementer (contracts W6).
 
 **Alternatives**: read required-ness from the `Dictionary` that `OrchestraLoader` builds: circular
 (the vlatest witness's parse uses the same loader). Rejected.
@@ -134,24 +154,36 @@ loader is the production reader of that file and is not the builder.
 - **Orchestra field leg**: `TailRows096LatestCensus.FieldLegMatchesQuickFixCppGolden` — the Orchestra
   walk's message-level field set equals the `golden.csv` row for each of the 31 tail MsgTypes, with
   095's row-count precondition. `golden.csv` is QuickFIX-cpp's measured output on `FIX50SP2.xml`, a
-  file the Orchestra walk does not read: non-circular.
+  file the Orchestra walk does not read: non-circular. Its limit: it is a valid positive only while
+  the two files agree on a tail MsgType's message-level set. Where they truly differ (as they do on
+  35=W's 779, outside the tail), a correct Orchestra walk would go RED here too, so this check
+  cannot tell a walker bug from a dictionary difference. FR-012 stops the row either way, so neither
+  case passes silently.
 - **Group and per-instance legs**: 095's deficient frames (E-absent, E-one, E-short, E-member,
   E-nodelim, CC-nodelim, CC-nested, CC-count2), parsed under the Orchestra dictionary and checked
   with `required_members_missing` over the Orchestra walk, each against its exact list re-derived from
   the Orchestra file (data-model §B.2 gives the recipe); and 35=i's `nested_required_group`.
-- **`delimiter_chain` and `wrapped_group`**: synthetic Orchestra fragments (`load_string`) fed to
-  `OrchestraWalker`.
+- **`delimiter_chain`, the componentRef AND and the duplicate-`msgType` rule**: synthetic Orchestra
+  fragments S2, S4 and S5 (`load_string`) fed to `OrchestraWalker`.
+- **Delimiter rule, both emission kinds**: a nested-group emission has frame CC-nodelim; a
+  component emission has a measured tail positive, 35=DP, whose required group's first child is a
+  `fixr:componentRef` that supplies the delimiter, so its arm runs through `TailMsgTypesAgree`
+  (contracts W6).
 - **Differential**: `TailRows096Differential.KnownDifference_MarketDataSnapshotFullRefresh` — the
-  comparator, run on 35=W, reports exactly one difference: tag 779 (LastUpdateTime), held by the
-  `FIX50SP2.xml` side. Re-derive:
+  comparator, run on 35=W, reports exactly one difference: path 779 (LastUpdateTime), value
+  `required` on the `FIX50SP2.xml` side and `absent` on the Orchestra side. Re-derive:
   `sed -n "/<message name='MarketDataSnapshotFullRefresh'/,/<\/message>/p" dictionaries/FIX50SP2.xml | grep LastUpdateTime`
   (`required='Y'`) and
   `awk '/<fixr:message [^>]*msgType="W"/,/<\/fixr:message>/' dictionaries/orchestra/OrchestraFIXLatest.xml | grep 'id="779"'`
   (no `presence`). `grep '^FIX50SP2,W,' tools/quickfix_required_golden/golden.csv` carries 779, so
-  QuickFIX-cpp agrees with the XML side. No MsgType common to both files differs on the group leg
-  (scratch walk), so the group arms of the differential are synthetic: a pair of fragments that
-  differ only in one group's `presence`, one only in one instance member's, and one only in the
-  delimiter.
+  QuickFIX-cpp agrees with the XML side.
+- **Differential non-`ok` path**: `TailRows096Differential.KnownNonOk_MassQuote` — 35=i, where both
+  walks return `nested_required_group` (R-4's input above), yields exactly one `status` finding.
+- **Differential group, delimiter, instance-member and `delim_group` paths**: synthetic pairs of
+  fragments, one pair per path, identical but for that path. They are synthetic because no MsgType
+  common to both files was found to differ on those paths when this plan was written; re-derive by
+  running the comparator over the MsgTypes common to both files (a scratch run, not a committed
+  assertion). If a measured difference appears later, it stands in for the synthetic pair.
 
 **Rationale**: every output is shown able to fire (spec FR-009); a measured source stands where one
 exists; a synthetic fragment stands only where none does, and the witness contract says which.

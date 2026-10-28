@@ -42,11 +42,11 @@ roadmap clause that still lists these rows as v1.2 work amended."
   - the message's references to the standard header and trailer components are not part of the
     walk (the test's framing writes those tags);
   - a group's delimiter is the first tag it emits in declaration order with components expanded,
-    the group's `fixr:numInGroup` excluded: the rule `dict::OrchestraLoader` applies (the plan cites
-    the loader line).
+    the group's `fixr:numInGroup` excluded: the rule `dict::OrchestraLoader` applies (research R-4
+    gives the recipe that locates it in the loader).
   Orchestra references a group directly (`fixr:groupRef`), so 095's "only child of a component"
-  inheritance has no counterpart here; the walk fails loudly, naming the element, on any shape it
-  does not handle (Edge Cases).
+  inheritance has no counterpart here: the path rule above decides every group. The walk fails
+  loudly, naming the element, on the shapes in Edge Cases that it does not handle.
 - **Offline witness** — per MsgType and per tier: values chosen before the build → that tier's typed
   builder → wire bytes → an independent, dictionary-driven parse → bidirectional per-field and
   per-group-instance readback against the chosen values. "Independent" means the parse uses neither
@@ -71,9 +71,10 @@ by differential verification vs the 181-message baseline". Read at `2de73f3f` on
 - QuickFIX-cpp's `FIX50SP2.xml` is byte-identical to fixpp's, so QuickFIX-cpp's dictionary defines
   all 31;
 - QuickFIX/J 3.0.1's `FIX50SP2.modified.xml` (the 108-message base edition) defines none of the 31
-  (re-derive: grep each MsgType in
-  `reference-engines/quickfixj/quickfixj-messages/quickfixj-messages-fix50sp2/target/classes/FIX50SP2.modified.xml`
-  in the parent repo; `35=BN` is the positive control).
+  (re-derive: quickstart §0's QuickFIX/J loop over
+  `quickfixj-messages/quickfixj-messages-fix50sp2/src/main/resources/FIX50SP2.modified.xml`, a file
+  tracked in QuickFIX/J's own repository at tag `QFJ_RELEASE_3_0_1`; `35=BN` is the positive
+  control).
 
 The coverage index's FIX-Latest section has carried the same premise since Phase 1 ("A-035–A-065
 account for all new MsgTypes in FIX Latest not present in FIX 5.0SP2"): true of the base 5.0SP2
@@ -125,6 +126,27 @@ edition, false of the vendored dictionary.
   Orchestra section and category (`[const §VI.2]` admits both tokens; keeping it changes the fewest
   cells). The coverage-index rows stay in the FIX-Latest section.
 
+### Session 2026-10-28 (Gate A round 1)
+
+- Q: Does the Orchestra walk need a fail-loud status for a required `fixr:componentRef` whose
+  component holds only a non-required `fixr:groupRef` (the QuickFIX wrapper shape)? → A: No. The
+  stated path rule decides it: the group is not required, because an absent `presence` is optional.
+  If QuickFIX's file encodes the same MsgType's group as a wrapper that 095's walk inherits through,
+  the differential reports it at that group's count tag. No walk status is added, so the move of
+  095's machinery (contracts W0) changes no declaration.
+- Q: What does a differential finding carry? → A: The MsgType, the path, and the value each
+  dictionary holds at that path (data-model §D). For a field, group or instance-member path the
+  side that holds the member is the one whose value is `required`; for a delimiter or `delim_group`
+  path both sides hold a value and both are named; for a non-`ok` walk the value is the status and
+  the element.
+- Q: On `fixpp::vlatest`, what does removing a required group from a witness produce? → A: The
+  vlatest Args hold a closure-required group as a non-optional span and the builder opens the group
+  unconditionally, so an empty span is written as `<count_tag>=0`. The presence check then reports
+  the group through its count-below-two leg, and W4 reports the parsed count. The group-absent leg
+  is reached on this tier by deficient frame E-absent (contracts W6). Re-derive by reading the
+  member's type in the generated `vlatest/messages/<Name>.hpp` and its `group_begin` call in the
+  matching `.builder.inl`, against the `std::optional` member of `v50sp2/messages/<Name>.hpp`.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Every tail MsgType has a named, complete witness on each tier (Priority: P1)
@@ -146,7 +168,8 @@ with its row ID (hyphen dropped) and generated message name (FR-001).
    and read back equal to the chosen value, group instances in order.
 2. **Given** a witness from which one required field or group is removed, setter and intent entry
    both, **When** the suite runs, **Then** it fails with the dictionary-derived presence check's
-   message.
+   message (on `fixpp::vlatest` a removed required group is reported by the count, Clarifications
+   Gate A round 1).
 3. **Given** a parsed value that differs from the chosen one, **When** the witness runs, **Then** it
    fails naming the path.
 
@@ -166,7 +189,7 @@ check that the two claims describe the same message.
 
 1. **Given** a tail MsgType, **When** the differential runs, **Then** the two closure-required sets
    are compared by tag (fields; groups by count tag, delimiter and per-instance members) and any
-   difference fails naming the MsgType, the tag and the side that has it.
+   difference fails naming the MsgType, the path (its tag) and the value each side holds there.
 2. **Given** a MsgType whose two sets are known to differ, **When** the same comparator runs on it,
    **Then** it reports the difference (FR-009).
 
@@ -188,7 +211,8 @@ command.
    `done`, each named witness resolves to a test in the tree, and its Verified cell names L-069-1
    (fixpp#637), L-074-1 (no ApplExtID(1156) on the wire, row 4b), and QuickFIX/J 3.0.1's 0 of 31.
 2. **Given** `[const §XVIII.2]` and `[const §XVIII.7]`, **When** read after the merge, **Then**
-   §XVIII.2's v1.2 bullet no longer names A-035..A-065 and §XVIII.7 names them as closed by 096.
+   §XVIII.2's v1.2 bullet no longer names "new MsgTypes A-035..A-065" as milestone content, and
+   §XVIII.7 names each of the rows A-035 … A-065 by its row ID as closed by 096 (FR-010).
 
 ### Edge Cases
 
@@ -198,8 +222,12 @@ command.
   against each before tasks are written; if one fires on a tail MsgType, the implementer stops and the
   orchestrator brings it to the owner rather than widening the walk silently.
 - **Vlatest leg: a required `fixr:componentRef` whose component holds only a group whose
-  `fixr:groupRef` is not required** (the QuickFIX wrapper shape, written in Orchestra) → the walk
-  fails loudly; this feature does not decide an inheritance rule Orchestra does not state.
+  `fixr:groupRef` is not required** (the QuickFIX wrapper shape, written in Orchestra) → the path
+  rule decides it: the group is not required. Where 095's walk inherits required-ness through the
+  QuickFIX form of the same group, the differential reports the difference (Clarifications, Gate A
+  round 1).
+- **Vlatest leg: two `fixr:message` elements with the same `msgType`** → the walk fails loudly
+  naming the MsgType; it never keeps the last one silently.
 - **A tail MsgType with no required field and no required group** on a leg → its witness still sets
   and reads back at least two fields (095 FR-002/FR-003), so it is not vacuous.
 - **A tag both message-level and a group member of the same MsgType** → attribution is by extent, not
@@ -233,7 +261,7 @@ command.
   file (Terminology) that shares no code with `dict::OrchestraLoader` or the codegen IR projection
   (076's non-circularity rule). Its presence check MUST meet 095 FR-004's shape: it returns the members
   it found missing, takes the MsgType from the parsed frame's tag 35, reads entries by extent, and fails
-  loudly on the shapes in Edge Cases.
+  loudly on the shapes Edge Cases marks as failing loudly.
 - **FR-005**: A census per suite MUST show that each tail MsgType has exactly one witness in it,
   independently of run order, `--gtest_filter` and `--gtest_shuffle` (095 FR-004a), with the name's
   row equal to the catalogue row of its MsgType. Each witness also asserts that its parsed tag 35
@@ -250,7 +278,8 @@ command.
 - **FR-008**: A test MUST compare, for each tail MsgType, the vlatest-leg closure-required set with
   the v50sp2-leg set, by tag: required fields; required groups by count tag, delimiter and the
   per-instance required members. It collects every difference before it asserts and names the
-  MsgType, the tag and the side holding it.
+  MsgType, the path (its tag) and the value each side holds there, so the side holding a member is
+  the one whose value is `required` (data-model §D).
 - **FR-009**: Every output of the Orchestra walk, the differential and the two censuses MUST be shown
   able to fire, each arm demonstrated RED with its command and the message that fired (095 FR-004's
   rule, its contracts W6 table extended in this feature's witness contract). The non-circular known
@@ -273,7 +302,9 @@ command.
   - `[const §XVIII.2]`'s v1.2 bullet no longer names "new MsgTypes A-035..A-065"; it keeps the EP-level
     field additions. Its annotation's statements about ApplExtID(1156)=303 are row 4b's and stay as
     they are;
-  - `[const §XVIII.7]` names A-035 … A-065 as closed by feature 096 on both `fixpp::v50sp2` and
+  - `[const §XVIII.7]` names each of the rows A-035 … A-065 by its row ID, written out one by one
+    and not as a range (the clause scopes "the further A- rows this clause names below, by row ID",
+    and 095 named each of its rows so), as closed by feature 096 on both `fixpp::v50sp2` and
     `fixpp::vlatest`, and states that their MsgTypes
     are application messages of the vendored `FIX50SP2.xml` and of the Orchestra file. Its opening
     sentence, which names the typed namespaces, is unchanged (data-model §F.2 gives the reason).
@@ -300,7 +331,8 @@ command.
 - **FR-013**: `spec/coverage-index.md` MUST name each tail MsgType's witnesses in its existing
   FIX-Latest row (no new row), and correct, with a comment naming its superseder in place (the parent
   repo's issue #310 rule), the FIX-Latest section's scope line, its 074 link paragraph ("stay
-  `backlog`"), and the Post-1.0 Gap Registry's reference to A-035–A-065.
+  `backlog`"), its **Conclusion** line ("All 31 FIX Latest new MsgTypes (A-035–A-065) are accounted
+  for"), and the Post-1.0 Gap Registry's reference to A-035–A-065.
 - **FR-014**: `spec/behaviors-and-limitations.md` (the live file) MUST widen L-069-1 to every
   builder-bearing namespace (`fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vlatest`), naming
   fixpp#637, and record anything a witness or the differential exposes.
@@ -312,7 +344,7 @@ command.
   delimiter and instance members, derived from one dictionary by that leg's rules.
 - **Witness**: per MsgType and tier, its intent list and the bidirectional comparison against the
   parsed body.
-- **Differential finding**: MsgType, tag, path, and the dictionary that holds it.
+- **Differential finding**: MsgType, path (its tag), and the value each dictionary holds at it.
 
 ## Success Criteria *(mandatory)*
 

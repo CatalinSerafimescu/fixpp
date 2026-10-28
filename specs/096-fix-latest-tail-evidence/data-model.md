@@ -49,8 +49,8 @@ it (contracts W1).
 
 The result type is 095's (`specs/095-tail-evidence-pass/data-model.md` §B): `WalkMap` of
 `WalkResult{status, element, fields, groups}`, `RequiredGroup{count_tag, delim_tag, delim_group,
-fields}`. It moves to `tests/support/tail_rows_witness.hpp` (research R-2) with one new status value,
-`wrapped_group`.
+fields}`. It moves to `tests/support/tail_rows_witness.hpp` (research R-2) unchanged; no status value
+is added.
 
 ### B.1 v50sp2 leg
 
@@ -73,14 +73,16 @@ walk(doc) -> WalkMap                       # keyed by fixr:message@msgType
   groupRef:   resolve @id in fixr:groups; count_tag = fixr:numInGroup/@id; AND its presence
   delim_tag:  first tag the group emits in declaration order (numInGroup excluded, components
               expanded, a nested groupRef emitting its count tag)
-  statuses:   ok | nested_required_group | delimiter_chain | wrapped_group  (+ the element named)
+  statuses:   ok | nested_required_group | delimiter_chain  (+ the element named)
+  element:    a group is named by its count field's name (the fixr:field@name whose id is the
+              group's fixr:numInGroup id), as 095's walk names it; a component by fixr:component@name
 ```
 
 - `nested_required_group`: a required group inside a required group's instance;
-- `delimiter_chain`: `delim_group`'s own delimiter is again a count tag;
-- `wrapped_group`: a required `fixr:componentRef` whose component, as written, has exactly one
-  element child (`fixr:fieldRef`, `fixr:componentRef` or `fixr:groupRef`), and that child is a
-  `fixr:groupRef` without `presence="required"`.
+- `delimiter_chain`: `delim_group`'s own delimiter is again a count tag.
+
+A required `fixr:componentRef` whose component holds only a non-required `fixr:groupRef` gets no
+status: the path rule makes that group not required (spec Clarifications, Gate A round 1).
 
 The deficient frames' expected lists for this leg are dictionary facts re-derived from the Orchestra
 file, never pasted from the walk:
@@ -92,9 +94,8 @@ awk '/<fixr:component id="<ID>"/,/<\/fixr:component>/'   dictionaries/orchestra/
 ```
 
 applying the rules above to each element on the path (35=E → its `NoOrders` group; 35=CC → its
-`NoAsgnReqs` group → `Parties`), ordering the paths by 095 §B's sequence rule. Where a list equals
-095's list for the same frame, the witness contract says so and the two TUs still each assert their
-own literal.
+`NoAsgnReqs` group → `Parties`), ordering the paths by 095 §B's sequence rule. Each TU asserts its
+own literal for each frame; neither copies the other's.
 
 ## C. Chosen values and the intent list (per witness)
 
@@ -117,21 +118,27 @@ rule for a required group with no string or int member.
 
 ```
 diff(mt) -> vector<Finding>        # collected, then asserted empty for every tail MsgType
-Finding: { msg_type, path, side ∈ {FIX50SP2.xml, Orchestra} }
-compared, by tag:
-  message-level required fields                          path <tag>
-  required groups by count tag                           path <count_tag>
-  per required group: delim_tag                          path <count_tag>/delim
-  per required group: one instance's required fields     path <count_tag>[*].<tag>
-  per required group: delim_group (count, delimiter)     path <count_tag>/delim_group
+Finding: { msg_type, path, fix50sp2, orchestra }   # the value each dictionary holds at path
+compared, by tag:                                        path                      each value
+  message-level required fields                          <tag>                     required | absent
+  required groups by count tag                           <count_tag>               required | absent
+  per group required on both sides: delim_tag            <count_tag>/delim         the delimiter tag
+  per group required on both sides: instance members     <count_tag>[*].<tag>      required | absent
+  per group required on both sides: delim_group          <count_tag>/delim_group   "<count>,<delim>" | none
+  a walk status other than ok on either side             status                    "<status> <element>" | ok
 ```
 
-Both inputs are `WalkResult`s with status `ok`; a non-`ok` status on either side is a finding of its
-own (`path` = the status name, `side` = the file). The comparator lists every finding, sorted by
-MsgType, then path, then side.
+A finding is emitted only where the two values differ, except `status`: when either side's status
+is not `ok`, that MsgType yields exactly one `status` finding carrying both sides' values and no
+other finding, since its sets are not comparable. A group required on one side only yields its
+`<count_tag>` finding and no member, delimiter or `delim_group` finding. The comparator lists every
+finding, sorted by MsgType, then path. Each finding is printed whole; a test asserting a finding
+compares the whole struct.
 
-Known positive (research R-6): 35=W yields exactly one finding, path `779`, side `FIX50SP2.xml`.
-Synthetic pairs drive the group, delimiter and instance-member paths (contracts W6).
+Known positives (research R-6), each a W7 exception re-run on every invocation: 35=W yields exactly
+`[{W, 779, required, absent}]`; 35=i yields exactly one `status` finding whose two values are
+`nested_required_group NoQuoteEntries`. Synthetic pairs drive the group, delimiter, instance-member
+and `delim_group` paths (contracts W6).
 
 ## E. Catalogue edits (US3)
 
@@ -215,18 +222,23 @@ After the edits it exits 0.
 - the last column of each tail MsgType's row in "FIX Latest — MsgType entries only (FIX-Latest)":
   `—` becomes `` 096 witnesses: `TailRows096.<RowId>_<Name>`, `TailRows096Latest.<RowId>_<Name>` ``;
 - appended after a space to the section's `Scope:` line, to its "074-orchestra-native-reader link"
-  paragraph line, and to the Post-1.0 Gap Registry row naming A-035–A-065, the same comment:
+  paragraph line, to its `**Conclusion:**` line, and to the Post-1.0 Gap Registry row naming
+  A-035–A-065, the same comment:
   `<!-- SUPERSEDED (096-fix-latest-tail-evidence, constitution v4.2): the 31 MsgTypes of A-035–A-065 are also application messages of the vendored dictionaries/FIX50SP2.xml (5.0SP2 Extension Packs; absent from the base edition), and their catalogue rows are done, closed on fixpp::v50sp2 and fixpp::vlatest; the text before this comment is history. -->`
 
 **B&L delta**, in the live `spec/behaviors-and-limitations.md`:
 - appended to the L-069-1 bullet, after a space, the text of this block:
 
   ```
-  **Widened by 096-fix-latest-tail-evidence (2026-10-28):** the same holds for every builder-bearing namespace (`fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vlatest`): one emitter (`tools/codegen/fixpp-codegen/emit_builders.cpp`) writes every `validate_<Msg>`, and its generic walk (`fixpp::wire::validate_required`, `include/fixpp/wire/builder_validate.hpp`) checks required presence and group counts only. The rows A-035 … A-065 close with this disclosed. **Re-derive:** `grep -n enum tools/codegen/fixpp-codegen/emit_builders.cpp`. **Status: follow-up** (fixpp#637).
+  **Widened by 096-fix-latest-tail-evidence (2026-10-28):** the same holds for every builder-bearing namespace (`fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vlatest`): one emitter (`tools/codegen/fixpp-codegen/emit_builders.cpp`) writes every `validate_<Msg>`, and its generic walk (`fixpp::wire::validate_required`, `include/fixpp/wire/builder_validate.hpp`) iterates only `writer_traits<T>::required_checks` and `writer_traits<T>::group_checks`, so it checks required presence and group counts and no enum domain; a value's type comes from the C++ member type of `<Msg>Args`, not from the validator. The rows A-035 … A-065 close with this disclosed. **Re-derive:** read the loops of `validate_required` in `include/fixpp/wire/builder_validate.hpp`, and the two arrays in any generated `*.validator.inl`. **Status: follow-up** (fixpp#637).
   ```
 - a new section at the end of the file, holding only what a witness or the differential exposes
   (`B-096-<n>` / `L-096-<n>`, numbered from 1), or, if nothing is exposed, no section. The verify
-  record states which.
+  record states which. One candidate is already known: vlatest Mutant A′ (contracts W6) shows that
+  `fixpp::vlatest::build_<Msg>` writes `<count_tag>=0` for an empty required group and that only
+  `validate_<Msg>` rejects it. The verify record greps the live B&L for an existing disclosure of
+  `build_<Msg>` not calling `validate_<Msg>`; it cites that entry if one exists, and otherwise
+  records whether a new row is written and why.
 
 ## F. Constitution amendment, v4.1 → v4.2 (FR-010)
 
@@ -250,10 +262,17 @@ M-/P-/C-/R-/N- families as v1.0 typed scope under `fixpp::vlatest`, which 096 do
 A new sentence, inserted right after "…feature 095 closes the catalogue rows A-018, A-023, A-027,
 A-028, A-029, A-030, A-031, A-032, A-033 and C-003 on it.":
 
-> **The rows A-035 through A-065** each name one MsgType that is an application message of the
+> **The rows A-035, A-036, A-037, A-038, A-039, A-040, A-041, A-042, A-043, A-044, A-045, A-046,
+> A-047, A-048, A-049, A-050, A-051, A-052, A-053, A-054, A-055, A-056, A-057, A-058, A-059, A-060,
+> A-061, A-062, A-063, A-064 and A-065** each name one MsgType that is an application message of the
 > vendored `FIX50SP2.xml`, which carries the FIX 5.0SP2 Extension Packs that added it, and of the
 > vendored FIX Orchestra file; feature 096 closes these catalogue rows on both `fixpp::v50sp2` and
 > `fixpp::vlatest`.
+
+Each row is written out by its ID, never as a range: the opening sentence scopes "the further A-
+rows this clause names below, by row ID", and the ratified v4.1 text named each of 095's rows
+individually (the v4.1 Sync Impact Report's range spellings are history, not the clause). Quickstart
+§5 checks that each of the 31 IDs appears in the clause.
 
 ### F.3 Sync Impact Report — a new first comment block, above the v4.0 → v4.1 block
 
@@ -270,14 +289,20 @@ Sync Impact Report — v4.1 → v4.2 (2026-10-28) — PENDING
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article XVIII §2 — the v1.2 milestone no longer names "new MsgTypes A-035..A-065"; it
     keeps the EP-level field additions. Its 076/077 annotation is unchanged.
-  Modified: Article XVIII §7 — one new sentence records that the rows A-035 through A-065 name
-    application messages of the vendored FIX50SP2.xml and of the Orchestra file, and that feature 096
-    closes them on both `fixpp::v50sp2` and `fixpp::vlatest`. The opening sentence is unchanged: it
+  Modified: Article XVIII §7 — one new sentence records that the rows A-035, A-036, A-037, A-038,
+    A-039, A-040, A-041, A-042, A-043, A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052,
+    A-053, A-054, A-055, A-056, A-057, A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065,
+    each named by its row ID, name application messages of the vendored FIX50SP2.xml and of the
+    Orchestra file, and that feature 096 closes them on both `fixpp::v50sp2` and `fixpp::vlatest`. The opening sentence is unchanged: it
     already takes in the A- rows the clause names by row ID, and adding `fixpp::vlatest` to its
     namespace list would claim every row it scopes for that namespace.
   Read and unchanged: Article I §1 (its FIX Latest bullet states what the FIX Latest tiers deliver and
     that ApplExtID(1156)=303 and session negotiation remain post-1.0; feature 096 changes neither);
-    Article VI §2 (feature 096 corrects its rows' refs to the form v4.1 admits).
+    Article VI §2 (feature 096 corrects its rows' refs to the form v4.1 admits); Article XVIII §1
+    ("FIX 4.0–5.0SP2 + FIXT.1.1 session + application layers": the 31 MsgTypes are FIX 5.0SP2
+    Extension Pack application messages, inside that scope); Article XVIII §5 (no early shipping of
+    post-1.0 protocols: after §2's edit the rows are not post-1.0 content, and §4 makes that move an
+    amendment, which this is).
   Rationale: the plan of record called A-035..A-065 FIX-Latest-only rows with no QuickFIX peer. The
     vendored FIX50SP2.xml, byte-identical to QuickFIX-cpp v1.16.0's, defines all of their MsgTypes as
     application messages, so each has a `fixpp::v50sp2` typed builder as well as a `fixpp::vlatest`
@@ -298,7 +323,10 @@ Sync Impact Report — v4.1 → v4.2 (2026-10-28) — PENDING
 
 Prepend, before "user-ratified **v4.1**": `PENDING **v4.2** (2026-10-28) — backwards-compatible
 (Article XX §4 minor, no `CHANGELOG.md` entry); Article XVIII §2 drops A-035..A-065 from v1.2 and
-Article XVIII §7 records them as closed by feature 096 on `fixpp::v50sp2` and `fixpp::vlatest`.
+Article XVIII §7 records the rows A-035, A-036, A-037, A-038, A-039, A-040, A-041, A-042, A-043,
+A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052, A-053, A-054, A-055, A-056, A-057,
+A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065 as closed by feature 096 on
+`fixpp::v50sp2` and `fixpp::vlatest`.
 Rides feature 096; its PR is titled in Article XX §2 form. Prior: ` — and at the RATIFIED flip,
 `PENDING` becomes `user-ratified` and the review/sign-off clause is inserted after the date, in
 v4.1's form.

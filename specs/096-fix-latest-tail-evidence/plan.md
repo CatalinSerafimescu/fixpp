@@ -7,11 +7,34 @@
 
 (Filled by `/gate-a`.)
 
+- Round 1 applied 2026-10-28: Codex P1=1 P2=5 P3=1; Opus post-judging P1=0 P2=6 P3=11; rewrite addresses root causes RC-1..RC-4 (+ per-finding fixes). Reviews: research/reviews/codex_096-fix-latest-tail-evidence_gate_a_review.md, research/reviews/opus_096-fix-latest-tail-evidence_gate_a_adversarial_review.md.
+
+### Round 1 — disagreements
+
+The Opus review marks no Codex finding Disagree. Where Codex's counter-proposal was not applied as
+written, the reason is recorded so a later round does not re-raise it:
+- **G096-001** (Codex P1, judged P2): the `Finding` carries the value each dictionary holds at the
+  path (`fix50sp2`, `orchestra`), not `{tag, side}` / `{expected_tag, actual_tag, side}`. A
+  delimiter or `delim_group` difference has a value on both sides, so "the side" has no meaning
+  there; two values cover every path with one shape (data-model §D).
+- **G096-002** (Codex P2, judged P3, re-scoped): no per-leg branch mutants of
+  `required_members_missing` in the vlatest binary. The function is one header's code in both
+  binaries (W0); 095's L/M/N/P already hold RED against it, so re-running them would prove the same
+  function again. Added instead: the two Orchestra-walk outputs that had no arm (instance members,
+  `delim_group`) and an explicit carry-over sentence conditional on quickstart §1 reading clean.
+- **G096-003** (Codex P2, judged P3): applied as Codex proposed (fragment S5, plain-assignment
+  mutant), the second of the two fixes the Opus review allows; dropping the rule was not chosen.
+- **N8** (Opus P3): of the two fixes offered, the status `wrapped_group` is dropped rather than the
+  Edge Case reworded. The stated path rule decides the shape and the differential catches an
+  inheritance mismatch, and the move then changes no declaration (spec Clarifications, Gate A
+  round 1).
+
 ## Summary
 
 Close A-035..A-065 on 095's offline bar on both typed tiers. Tests only, plus records:
 - move 095's dictionary-independent witness machinery into `tests/support/tail_rows_witness.hpp`
-  (byte-identical bodies) and add one walk status, `wrapped_group` (research R-2);
+  as a pure move: no statement, name or status changes; contracts W0 states the allowed class of
+  mechanical changes and quickstart §1 checks it two ways (research R-2);
 - 31 v50sp2 witnesses, their census and a golden field-leg check in a new TU of the existing
   `test_077_allversions_builder_roundtrip` binary (R-3);
 - an independent Orchestra required-walk, 31 vlatest witnesses, their census, its known positives
@@ -44,7 +67,7 @@ writes no library code (the implementer writes every test and CMake line)
 | Clause | Status |
 |---|---|
 | `[const §I.3]` | The feature removes 31 rows from the open set; SC-004 re-derives it. |
-| `[const §VI.2]` | 29 Spec refs corrected to the v4.1 message-level form; data-model §E's script checks all 31. |
+| `[const §VI.2]` | Every tail row's Spec ref but A-037's and A-038's corrected to the v4.1 message-level form; data-model §E's script checks all 31. |
 | `[const §VI.4]` | Each tail MsgType keeps its existing coverage-index row and gains its witnesses; the superseded scope text is commented in place (FR-013). |
 | `[const §VI.5]` | spec Normative References lists section entries and the message-level refs. |
 | `[const §VI.6]` | (a) this bundle; (b) the witnesses; (c) Gate B; (d) Gate A runs (non-trivial: a new walker and an amendment). |
@@ -86,7 +109,7 @@ tests/session/CMakeLists.txt                           MOD  — two sources adde
                                                               define on the vlatest target, label 096
 .specify/constitution.md                               MOD  — v4.2 (data-model §F)
 spec/feature-catalogue.md                              MOD  — 31 rows (data-model §E)
-spec/coverage-index.md                                 MOD  — 31 gap notes + 3 comments
+spec/coverage-index.md                                 MOD  — 31 gap notes + 4 comments
 spec/behaviors-and-limitations.md                      MOD  — L-069-1 widened (+ any exposed row)
 ```
 
@@ -95,7 +118,7 @@ spec/behaviors-and-limitations.md                      MOD  — L-069-1 widened 
 - **P0 — setup.** `expected-ctest-096.txt`; baseline: both binaries build and pass at the branch's
   base; record the vlatest TU's compile RSS method (R-9).
 - **P1 — the move (W0).** Header created, 095's TU forwards; build; 095's suites pass; quickstart §1
-  diff empty. Commit alone.
+  prints nothing, and its controls each print. Commit alone.
 - **P2 — v50sp2 leg.** The 096 v50sp2 TU: literal table, census, golden field-leg check, then the 31
   witnesses. Census and golden check first, RED against an empty witness set (the census reports 31
   multiplicity-0 findings), then witnesses until GREEN. W6 v50sp2 arms.
@@ -121,7 +144,8 @@ P0–P4 is the implementer's.
   the implementer stops at P3; the frame is not adapted silently.
 - **vlatest TU compile cost**: measured alone at P3 before the full build; above 8 GiB peak RSS the
   implementer stops (split the TU by row range as the fallback, orchestrator's call).
-- **The move changes behaviour**: guarded by quickstart §1's checker (with its positive control) and
+- **The move changes behaviour**: guarded by quickstart §1's normalised two-way diff (an edited
+  token and an inserted statement each print; a correct clang-formatted move reads clean) and by
   095's suites.
 
 ## Complexity Tracking
