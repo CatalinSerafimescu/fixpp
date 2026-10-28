@@ -576,45 +576,45 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 
 ## FIX Latest — MsgType entries only (FIX-Latest)
 
-Scope: confirm A-035–A-065 account for all new MsgTypes in FIX Latest not present in FIX 5.0SP2. EP-level field additions to existing messages are a post-1.0 gap (see Post-1.0 Gap Registry).
+Scope: confirm A-035–A-065 account for all new MsgTypes in FIX Latest not present in FIX 5.0SP2. EP-level field additions to existing messages are a post-1.0 gap (see Post-1.0 Gap Registry). <!-- SUPERSEDED (096-fix-latest-tail-evidence, constitution v4.2): the 31 MsgTypes of A-035–A-065 are also application messages of the vendored dictionaries/FIX50SP2.xml (5.0SP2 Extension Packs; absent from the base edition), and their catalogue rows are done, closed on fixpp::v50sp2 and fixpp::vlatest; the text before this comment is history. -->
 
-> **074-orchestra-native-reader link (read/dictionary tier).** All 31 FIX Latest new MsgTypes (A-035–A-065) are now **queryable at the runtime-dictionary read tier** via `dict::OrchestraLoader` (feature 074): they are among the 181 messages of `OrchestraFIXLatest.xml` (EP303) loaded under `session_version::vlatest`, with fields / codesets / group shapes resolvable through the standard `Dictionary`/`table_view` surface. The typed **read** class (`owning_<Message>`/reify/args/validator) for these MsgTypes is additionally generated in v1.0 by feature **076** (part of its all-181 `fixpp::vlatest` read-tier delivery — recorded on **D-011**). The typed `build_<Msg>` **builder** for these MsgTypes is additionally generated in v1.0 by feature **077-builder-args-dedup** (part of its `fixpp::vlatest` 173-message builder-tier delivery — recorded on **D-011**), and **078-precompiled-builder-libs** subsequently restructured that builder/validator tier's *packaging* into precompiled per-version libraries + slim declaration headers + per-plan group headers (no new coverage, no new catalogue row, byte-identical wire output). The catalogue rows below nevertheless stay `backlog`: their FULL delivery now hinges only on **ApplExtID(1156)=303 on-wire differentiation**, which is **v1.2/post-1.0** (see each row's status + Non-Goals in `specs/074-orchestra-native-reader/spec.md`). **Live-wire validation is NOT backlog for these MsgTypes**: feature 075 (live-wire-enum-validation) makes `wire::dictionary_driven_validator`/`table_view::enum_valid()` generic across all ten dictionaries (constitution Article I §1, v0.7 amendment), so a FIX Latest dictionary loaded into a validating session gets required/type/enum-domain/group-structure checking on these messages' fields with no FIX-Latest-specific code — see **W-014**'s 075 delivery note.
+> **074-orchestra-native-reader link (read/dictionary tier).** All 31 FIX Latest new MsgTypes (A-035–A-065) are now **queryable at the runtime-dictionary read tier** via `dict::OrchestraLoader` (feature 074): they are among the 181 messages of `OrchestraFIXLatest.xml` (EP303) loaded under `session_version::vlatest`, with fields / codesets / group shapes resolvable through the standard `Dictionary`/`table_view` surface. The typed **read** class (`owning_<Message>`/reify/args/validator) for these MsgTypes is additionally generated in v1.0 by feature **076** (part of its all-181 `fixpp::vlatest` read-tier delivery — recorded on **D-011**). The typed `build_<Msg>` **builder** for these MsgTypes is additionally generated in v1.0 by feature **077-builder-args-dedup** (part of its `fixpp::vlatest` 173-message builder-tier delivery — recorded on **D-011**), and **078-precompiled-builder-libs** subsequently restructured that builder/validator tier's *packaging* into precompiled per-version libraries + slim declaration headers + per-plan group headers (no new coverage, no new catalogue row, byte-identical wire output). The catalogue rows below nevertheless stay `backlog`: their FULL delivery now hinges only on **ApplExtID(1156)=303 on-wire differentiation**, which is **v1.2/post-1.0** (see each row's status + Non-Goals in `specs/074-orchestra-native-reader/spec.md`). **Live-wire validation is NOT backlog for these MsgTypes**: feature 075 (live-wire-enum-validation) makes `wire::dictionary_driven_validator`/`table_view::enum_valid()` generic across all ten dictionaries (constitution Article I §1, v0.7 amendment), so a FIX Latest dictionary loaded into a validating session gets required/type/enum-domain/group-structure checking on these messages' fields with no FIX-Latest-specific code — see **W-014**'s 075 delivery note. <!-- SUPERSEDED (096-fix-latest-tail-evidence, constitution v4.2): the 31 MsgTypes of A-035–A-065 are also application messages of the vendored dictionaries/FIX50SP2.xml (5.0SP2 Extension Packs; absent from the base edition), and their catalogue rows are done, closed on fixpp::v50sp2 and fixpp::vlatest; the text before this comment is history. -->
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| CF | PartyDetailsListRequest | A-043 | — |
-| CG | PartyDetailsListReport | A-044 | — |
-| CK | PartyDetailsListUpdateReport | A-045 | — |
-| CL | PartyRiskLimitsRequest | A-053 | — |
-| CM | PartyRiskLimitsReport | A-054 | — |
-| CN | SecurityMassStatusRequest | A-063 | — |
-| CO | SecurityMassStatus | A-064 | — |
-| CR | PartyRiskLimitsUpdateReport | A-055 | — |
-| CS | PartyRiskLimitsDefinitionRequest | A-056 | — |
-| CT | PartyRiskLimitsDefinitionRequestAck | A-057 | — |
-| CU | PartyEntitlementsRequest | A-048 | — |
-| CV | PartyEntitlementsReport | A-049 | — |
-| CW | QuoteAck | A-065 | — |
-| CX | PartyDetailsDefinitionRequest | A-046 | — |
-| CY | PartyDetailsDefinitionRequestAck | A-047 | — |
-| CZ | PartyEntitlementsUpdateReport | A-050 | — |
-| DA | PartyEntitlementsDefinitionRequest | A-051 | — |
-| DB | PartyEntitlementsDefinitionRequestAck | A-052 | — |
-| DC | TradeMatchReport | A-039 | — |
-| DE | PartyRiskLimitsReportAck | A-058 | — |
-| DF | PartyRiskLimitCheckRequest | A-061 | — |
-| DG | PartyRiskLimitCheckRequestAck | A-062 | — |
-| DH | PartyActionRequest | A-059 | — |
-| DI | PartyActionReport | A-060 | — |
-| DJ | MassOrder | A-037 | — |
-| DK | MassOrderAck | A-038 | — |
-| DO | MarketDataStatisticsRequest | A-041 | — |
-| DP | MarketDataStatisticsReport | A-042 | — |
-| DR | MarketDataReport | A-040 | — |
-| DS | CrossRequest | A-035 | — |
-| DT | CrossRequestAck | A-036 | — |
+| CF | PartyDetailsListRequest | A-043 | 096 witnesses: `TailRows096.A043_PartyDetailsListRequest`, `TailRows096Latest.A043_PartyDetailsListRequest` |
+| CG | PartyDetailsListReport | A-044 | 096 witnesses: `TailRows096.A044_PartyDetailsListReport`, `TailRows096Latest.A044_PartyDetailsListReport` |
+| CK | PartyDetailsListUpdateReport | A-045 | 096 witnesses: `TailRows096.A045_PartyDetailsListUpdateReport`, `TailRows096Latest.A045_PartyDetailsListUpdateReport` |
+| CL | PartyRiskLimitsRequest | A-053 | 096 witnesses: `TailRows096.A053_PartyRiskLimitsRequest`, `TailRows096Latest.A053_PartyRiskLimitsRequest` |
+| CM | PartyRiskLimitsReport | A-054 | 096 witnesses: `TailRows096.A054_PartyRiskLimitsReport`, `TailRows096Latest.A054_PartyRiskLimitsReport` |
+| CN | SecurityMassStatusRequest | A-063 | 096 witnesses: `TailRows096.A063_SecurityMassStatusRequest`, `TailRows096Latest.A063_SecurityMassStatusRequest` |
+| CO | SecurityMassStatus | A-064 | 096 witnesses: `TailRows096.A064_SecurityMassStatus`, `TailRows096Latest.A064_SecurityMassStatus` |
+| CR | PartyRiskLimitsUpdateReport | A-055 | 096 witnesses: `TailRows096.A055_PartyRiskLimitsUpdateReport`, `TailRows096Latest.A055_PartyRiskLimitsUpdateReport` |
+| CS | PartyRiskLimitsDefinitionRequest | A-056 | 096 witnesses: `TailRows096.A056_PartyRiskLimitsDefinitionRequest`, `TailRows096Latest.A056_PartyRiskLimitsDefinitionRequest` |
+| CT | PartyRiskLimitsDefinitionRequestAck | A-057 | 096 witnesses: `TailRows096.A057_PartyRiskLimitsDefinitionRequestAck`, `TailRows096Latest.A057_PartyRiskLimitsDefinitionRequestAck` |
+| CU | PartyEntitlementsRequest | A-048 | 096 witnesses: `TailRows096.A048_PartyEntitlementsRequest`, `TailRows096Latest.A048_PartyEntitlementsRequest` |
+| CV | PartyEntitlementsReport | A-049 | 096 witnesses: `TailRows096.A049_PartyEntitlementsReport`, `TailRows096Latest.A049_PartyEntitlementsReport` |
+| CW | QuoteAck | A-065 | 096 witnesses: `TailRows096.A065_QuoteAck`, `TailRows096Latest.A065_QuoteAck` |
+| CX | PartyDetailsDefinitionRequest | A-046 | 096 witnesses: `TailRows096.A046_PartyDetailsDefinitionRequest`, `TailRows096Latest.A046_PartyDetailsDefinitionRequest` |
+| CY | PartyDetailsDefinitionRequestAck | A-047 | 096 witnesses: `TailRows096.A047_PartyDetailsDefinitionRequestAck`, `TailRows096Latest.A047_PartyDetailsDefinitionRequestAck` |
+| CZ | PartyEntitlementsUpdateReport | A-050 | 096 witnesses: `TailRows096.A050_PartyEntitlementsUpdateReport`, `TailRows096Latest.A050_PartyEntitlementsUpdateReport` |
+| DA | PartyEntitlementsDefinitionRequest | A-051 | 096 witnesses: `TailRows096.A051_PartyEntitlementsDefinitionRequest`, `TailRows096Latest.A051_PartyEntitlementsDefinitionRequest` |
+| DB | PartyEntitlementsDefinitionRequestAck | A-052 | 096 witnesses: `TailRows096.A052_PartyEntitlementsDefinitionRequestAck`, `TailRows096Latest.A052_PartyEntitlementsDefinitionRequestAck` |
+| DC | TradeMatchReport | A-039 | 096 witnesses: `TailRows096.A039_TradeMatchReport`, `TailRows096Latest.A039_TradeMatchReport` |
+| DE | PartyRiskLimitsReportAck | A-058 | 096 witnesses: `TailRows096.A058_PartyRiskLimitsReportAck`, `TailRows096Latest.A058_PartyRiskLimitsReportAck` |
+| DF | PartyRiskLimitCheckRequest | A-061 | 096 witnesses: `TailRows096.A061_PartyRiskLimitCheckRequest`, `TailRows096Latest.A061_PartyRiskLimitCheckRequest` |
+| DG | PartyRiskLimitCheckRequestAck | A-062 | 096 witnesses: `TailRows096.A062_PartyRiskLimitCheckRequestAck`, `TailRows096Latest.A062_PartyRiskLimitCheckRequestAck` |
+| DH | PartyActionRequest | A-059 | 096 witnesses: `TailRows096.A059_PartyActionRequest`, `TailRows096Latest.A059_PartyActionRequest` |
+| DI | PartyActionReport | A-060 | 096 witnesses: `TailRows096.A060_PartyActionReport`, `TailRows096Latest.A060_PartyActionReport` |
+| DJ | MassOrder | A-037 | 096 witnesses: `TailRows096.A037_MassOrder`, `TailRows096Latest.A037_MassOrder` |
+| DK | MassOrderAck | A-038 | 096 witnesses: `TailRows096.A038_MassOrderAck`, `TailRows096Latest.A038_MassOrderAck` |
+| DO | MarketDataStatisticsRequest | A-041 | 096 witnesses: `TailRows096.A041_MarketDataStatisticsRequest`, `TailRows096Latest.A041_MarketDataStatisticsRequest` |
+| DP | MarketDataStatisticsReport | A-042 | 096 witnesses: `TailRows096.A042_MarketDataStatisticsReport`, `TailRows096Latest.A042_MarketDataStatisticsReport` |
+| DR | MarketDataReport | A-040 | 096 witnesses: `TailRows096.A040_MarketDataReport`, `TailRows096Latest.A040_MarketDataReport` |
+| DS | CrossRequest | A-035 | 096 witnesses: `TailRows096.A035_CrossRequest`, `TailRows096Latest.A035_CrossRequest` |
+| DT | CrossRequestAck | A-036 | 096 witnesses: `TailRows096.A036_CrossRequestAck`, `TailRows096Latest.A036_CrossRequestAck` |
 
-**Conclusion:** All 31 FIX Latest new MsgTypes (A-035–A-065) are accounted for. No FIX-Latest MsgType gaps.
+**Conclusion:** All 31 FIX Latest new MsgTypes (A-035–A-065) are accounted for. No FIX-Latest MsgType gaps. <!-- SUPERSEDED (096-fix-latest-tail-evidence, constitution v4.2): the 31 MsgTypes of A-035–A-065 are also application messages of the vendored dictionaries/FIX50SP2.xml (5.0SP2 Extension Packs; absent from the base edition), and their catalogue rows are done, closed on fixpp::v50sp2 and fixpp::vlatest; the text before this comment is history. -->
 
 ---
 
@@ -720,7 +720,7 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 
 | Item | Spec section | Reason deferred | Target version |
 |---|---|---|---|
-| EP-level field additions to existing FIX 4.x/5.x messages (Extension Packs EP001 onward) | FIX-SL §5.3.6; FIX Latest EPs | FIX Latest EP fields in existing messages require dynamic dictionary extension beyond v1.0 scope; FIX Latest new MsgTypes (A-035–A-065) are already tracked | v1.2 (FIX Latest app messages milestone) |
+| EP-level field additions to existing FIX 4.x/5.x messages (Extension Packs EP001 onward) | FIX-SL §5.3.6; FIX Latest EPs | FIX Latest EP fields in existing messages require dynamic dictionary extension beyond v1.0 scope; FIX Latest new MsgTypes (A-035–A-065) are already tracked | v1.2 (FIX Latest app messages milestone) | <!-- SUPERSEDED (096-fix-latest-tail-evidence, constitution v4.2): the 31 MsgTypes of A-035–A-065 are also application messages of the vendored dictionaries/FIX50SP2.xml (5.0SP2 Extension Packs; absent from the base edition), and their catalogue rows are done, closed on fixpp::v50sp2 and fixpp::vlatest; the text before this comment is history. -->
 | FIXT custom application version identifiers | FIX-SL §5.3.7 | Non-standard; negligible demand vs complexity | post-v1.2 |
 | FIX-SL §7 Attachment group (alt-encoded payloads over FIX envelope) | FIX-SL §7 | SOFH framing (W-016) is the practical path; attachment group is legacy | post-v1.1 (SOFH milestone) |
 | FIXS §3.6 Application-specific TLS (ALPN / SNI extensions) | FIXS §3.6 | Operational/infrastructure concern; not required by any known FIX venue for v1.0 | v1.3 (if requested) |
