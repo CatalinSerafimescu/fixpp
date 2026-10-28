@@ -6,7 +6,8 @@ Run from the library root (`research/G19-fix-fpml-iso20022/library`), preset `li
 
 **One convention, every block.** Each shell block is pasted whole as `bash <<'EOF' … EOF`, and the
 one Python block (§5a) as `python3 - <<'PY' … PY`, so the block's exit status is the interpreter's
-and an `exit` does not close the reader's shell. Inside, one accumulator: `bad=0`, every discrepancy prints a line naming it and sets `bad=1`, and the block
+and an `exit` does not close the reader's shell. Every shell block's first line is `set -o pipefail`,
+so a pipeline's status is its first failing command's, not its last filter's. Inside, one accumulator: `bad=0`, every discrepancy prints a line naming it and sets `bad=1`, and the block
 ends `exit "$bad"`. An expected-zero or expected-one count is written `test "$(grep -c …)" = N`; a
 `diff` keeps its status (`out=$(diff …) || { …; bad=1; }`) and is never piped into a filter that
 masks it. A block is GREEN only at exit 0; its evidence entry records the exit status beside what it
@@ -18,23 +19,27 @@ rewrites a shell `git show <rev>:<path>` built from a variable. Blocks write scr
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 TAIL=${TAIL:-"DS DT DJ DK DC DR DO DP CF CG CK CX CY CU CV CZ DA DB CL CM CR CS CT DE DH DI DF DG CN CO CW"}
 Q=${Q:-../../../reference-engines/quickfixj}
+QC=${QC:-../../../reference-engines/quickfix-cpp}
 bad=0
-cmp ../../../reference-engines/quickfix-cpp/spec/FIX50SP2.xml dictionaries/FIX50SP2.xml || { echo "CMP: FIX50SP2.xml differs"; bad=1; }
+cmp "$QC/spec/FIX50SP2.xml" dictionaries/FIX50SP2.xml || { echo "CMP: FIX50SP2.xml differs"; bad=1; }
+test "$(git -C "$QC" describe --tags 2>/dev/null)" = v1.16.0 || { echo "QuickFIX-cpp checkout is not v1.16.0"; bad=1; }
 for mt in $TAIL; do
   test "$(grep -o "<message [^>]*msgtype='$mt'[^>]*>" dictionaries/FIX50SP2.xml | grep -c "msgcat='app'")" = 1 \
     || { echo "MISSING v50sp2 $mt"; bad=1; }
   test "$(grep -c "<fixr:message [^>]*msgType=\"$mt\"" dictionaries/orchestra/OrchestraFIXLatest.xml)" = 1 \
     || { echo "NOT ONE orchestra $mt"; bad=1; }
 done
-# QuickFIX/J 3.0.1's base edition defines none of the 31 (FR-011's Verified cells)
-QF=$Q/quickfixj-messages/quickfixj-messages-fix50sp2/src/main/resources/FIX50SP2.modified.xml
+# QuickFIX/J 3.0.1's base edition defines none of the 31 (FR-011's Verified cells); the msgtype
+# attribute's value is matched whole, so `BNX` is not `BN`
+QF=${QF:-$Q/quickfixj-messages/quickfixj-messages-fix50sp2/src/main/resources/FIX50SP2.modified.xml}
 test -f "$QF" || { echo "MISSING $QF"; bad=1; }
 test "$(git -C "$Q" describe --tags 2>/dev/null)" = QFJ_RELEASE_3_0_1 || { echo "QuickFIX/J checkout is not QFJ_RELEASE_3_0_1"; bad=1; }
-test "$(grep -c "msgtype=.BN." "$QF" 2>/dev/null)" = 1 || { echo "POSITIVE CONTROL FAILED: BN not found once"; bad=1; }
+test "$(grep -Ec "[[:space:]]msgtype=['\"]BN['\"]" "$QF" 2>/dev/null)" = 1 || { echo "POSITIVE CONTROL FAILED: BN not found once"; bad=1; }
 for mt in $TAIL; do
-  test "$(grep -c "msgtype=.$mt." "$QF" 2>/dev/null)" = 0 || { echo "QuickFIX/J DEFINES $mt"; bad=1; }
+  test "$(grep -Ec "[[:space:]]msgtype=['\"]$mt['\"]" "$QF" 2>/dev/null)" = 0 || { echo "QuickFIX/J DEFINES $mt"; bad=1; }
 done
 exit "$bad"
 EOF
@@ -43,7 +48,11 @@ EOF
 GREEN prints nothing and exits 0. A missing QuickFIX/J file prints `MISSING`, the failed tag check and
 the failed `BN` control, so an absent input cannot read clean. Controls, each recorded with its exit
 status: `TAIL="DS BN"` prints `QuickFIX/J DEFINES BN` and exits 1; `Q=/nonexistent` exits 1;
-`TAIL="DS ZZ"` prints `MISSING v50sp2 ZZ` and `NOT ONE orchestra ZZ` and exits 1.
+`TAIL="DS ZZ"` prints `MISSING v50sp2 ZZ` and `NOT ONE orchestra ZZ` and exits 1; `QF=` a scratch file
+whose only message is `msgtype="BNX"` prints the failed `BN` control and exits 1; `QF=` a scratch file
+holding `msgtype="BN"` and `msgtype="DSX"` exits 0 (`DSX` is not `DS`); `QC=` a scratch directory
+holding only a copy of `spec/FIX50SP2.xml`, outside any git checkout, prints `QuickFIX-cpp checkout
+is not v1.16.0` and exits 1.
 
 ## 1. The move is a move (W0)
 
@@ -88,6 +97,7 @@ Conditions, each with its re-check:
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 H=${H:-tests/support/tail_rows_witness.hpp}
 T095=${T095:-tests/session/test_095_tail_rows_roundtrip.cpp}
 BASE=${TMPDIR:-/tmp}/096-095-base.cpp
@@ -172,6 +182,7 @@ cannot rewrap a frame body.
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 TV=${TV:-tests/session/test_096_tail_rows_roundtrip_vlatest.cpp}
 BASE=${TMPDIR:-/tmp}/096-095-base.cpp
 python3 -c 'import subprocess as s, sys; b = s.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip(); open(sys.argv[1], "wb").write(s.check_output(["git", "show", b + ":tests/session/test_095_tail_rows_roundtrip.cpp"]))' "$BASE"
@@ -195,6 +206,7 @@ a TU without the block → `FRAMES: not exactly one e_head block in each TU`, ex
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 B=${B:-build/linux-clang-debug/bin}
 bad=0
 cmake --build build/linux-clang-debug --target test_077_allversions_builder_roundtrip test_077_allversions_builder_roundtrip_vlatest || bad=1
@@ -203,8 +215,8 @@ $B/test_077_allversions_builder_roundtrip_vlatest --gtest_filter='TailRows096*:A
 # every witness of data-model §A is registered under its exact name, in each suite (a deleted or
 # renamed witness fails here; the census tests hold the converse)
 full() { "$1" --gtest_list_tests | awk '/^[^ ]/{s=$1} /^  /{print s $1}'; }
-full $B/test_077_allversions_builder_roundtrip > "${TMPDIR:-/tmp}/096-v50.lst" || bad=1
-full $B/test_077_allversions_builder_roundtrip_vlatest > "${TMPDIR:-/tmp}/096-vl.lst" || bad=1
+full $B/test_077_allversions_builder_roundtrip > "${TMPDIR:-/tmp}/096-v50.lst" || { echo "LIST: v50sp2 binary's --gtest_list_tests failed"; bad=1; }
+full $B/test_077_allversions_builder_roundtrip_vlatest > "${TMPDIR:-/tmp}/096-vl.lst" || { echo "LIST: vlatest binary's --gtest_list_tests failed"; bad=1; }
 while read -r id mt name; do
   r=${id/-/}
   grep -qxF "TailRows096.${r}_${name}" "${TMPDIR:-/tmp}/096-v50.lst" || { echo "UNLISTED TailRows096.${r}_${name}"; bad=1; }
@@ -252,7 +264,9 @@ EOF
 `find build/linux-clang-debug -name 'test_077_allversions_builder_roundtrip*' -type f -executable`).
 The name loop matches each witness as a whole line, so `CrossRequest` cannot match `CrossRequestAck`.
 Control for the loop: with one witness absent from `--gtest_list_tests` (a scratch rename, or a stub
-binary that omits it) the block prints `UNLISTED …` and exits 1.
+binary that omits it) the block prints `UNLISTED …` and exits 1. Control for `pipefail`: with `B=` a
+stub binary whose `--gtest_list_tests` prints the full list and exits 1 (stub `cmake`/`ctest` first
+on `PATH`), the block prints `LIST:` and exits 1.
 
 ## 3. Non-vacuity (W6)
 
@@ -264,15 +278,17 @@ F, I, J may share one rebuild per suite; O gets its own.
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 bad=0
 out=$(ctest --test-dir build/linux-clang-debug -N -L 096 | grep 'Test *#' | sed 's/.*: //' | sort \
-  | diff - specs/096-fix-latest-tail-evidence/expected-ctest-096.txt) || { printf '%s\n' "$out" | sed 's/^/LABEL: /'; bad=1; }
+  | diff - specs/096-fix-latest-tail-evidence/expected-ctest-096.txt) || { printf '%s\n' "${out:-ctest -N or its filter failed}" | sed 's/^/LABEL: /'; bad=1; }
 exit "$bad"
 EOF
 ```
 
 Control: with one of the two binaries missing from the label set, the block prints a `LABEL:` line and
-exits 1.
+exits 1. Control for `pipefail`: a stub `ctest` first on `PATH` whose `-N` prints the expected list
+and exits 1 → the block exits 1.
 
 ## 5. Records (US3, SC-004, SC-005)
 
@@ -285,11 +301,21 @@ applied, so a wrong cell, a missing comment or an extra change prints:
 - **B** — the catalogue: the merge-base file with exactly the 31 rows' FR-011 cells replaced (version
   `5.0SP2, FIX Latest`, the Spec ref of data-model §E's table, Status `done`, `/specify`, `#$PR`, the
   Tests template, the Verified S0 + S1 with `<MT>` substituted), every other line unchanged;
-- **C** — the constitution: §XVIII.2's v1.2 bullet equals its merge-base text with
-  `(new MsgTypes A-035..A-065 + EP-level` → `(EP-level` and data-model §F.1's annotation appended;
-  §XVIII.7's line equals its merge-base text with §F.2's sentence inserted after "A-033 and C-003 on
-  it." (all 31 row IDs, `feature 096`, both namespaces); the Status line and the v4.1 → v4.2 Sync
-  Impact Report header agree on PENDING (or, after the flip, RATIFIED);
+- **C** — the constitution, the whole file: the merge-base file with
+  - the v4.2 Sync Impact Report inserted immediately above the v4.0 → v4.1 block: its fixed lines
+    byte for byte as data-model §F.3's template, its opening and review spans located by their
+    anchors, and each span's lines fullmatched against §F.3's slot patterns for the state the
+    header names;
+  - the Status line fullmatching the same state's §F.4 template, followed by one space and the
+    merge-base Status text after `> **Status:** ` (the "Prior:" remainder); under RATIFIED the
+    Status line's two dates and the review span's sign-off date are one date, and `{PR}` is `$PR`;
+  - §XVIII.2's v1.2 bullet equal to its merge-base text with `(new MsgTypes A-035..A-065 +
+    EP-level` → `(EP-level` and data-model §F.1's annotation appended;
+  - §XVIII.7's line equal to its merge-base text with §F.2's sentence inserted after "A-033 and C-003
+    on it." (all 31 row IDs, `feature 096`, both namespaces);
+  - every other line equal to the merge-base line. A literal `{OPENING}`, `{REVIEW}`, `{DATE}` or
+    `{PR}` left in the file is an unfilled slot and prints. The templates are read from
+    data-model.md's §F.3 and §F.4 fenced blocks, one per state, so the checker holds no copy of them;
 - **D** — the coverage index: the merge-base file with the 31 gap notes and the SUPERSEDED comment
   appended to each of the four sites (the scope line, the 074 link paragraph, the FIX-Latest
   **Conclusion** line, the Gap Registry row), nothing else;
@@ -297,13 +323,16 @@ applied, so a wrong cell, a missing comment or an extra change prints:
   (four namespaces, fixpp#637); every other merge-base line unchanged; lines past the merge-base
   length are the new `B-096-`/`L-096-` section, read at Gate B;
 - **F** — Verified S1's "Live: no cell carries 35=\<MT\>": no file under `tests/interop/` carries a
-  tail MsgType in either form a cell uses (`35=<MT>`, or `msg_type` followed by `"<MT>"`), and `BN`
-  (row 2's live cell) matches in each form, the instrument's positive.
+  tail message in any form a cell uses: `35=<MT>`; `msg_type` followed by `<MT>` double-quoted,
+  single-quoted or bare (the scripts write `msg_type: "<MT>"`, `witness_evidence.yaml` writes
+  `msg_type: D` or `msg_type: '8'`); or the typed builder `build_<Name>`. Row 2's live cell is each
+  form's positive: `BN` for the first two, `build_ExecutionAck` for the third.
 
-`CAT`, `CON`, `COV`, `BL` and `INTEROP` may point the head side at scratch copies; `PR` is required.
+`CAT`, `CON`, `COV`, `BL` and `INTEROP` may point the head side at scratch copies; `PR` is required
+and must be a PR number (`[1-9][0-9]*`).
 The checker assumes all 31 rows flip. Under FR-012's no-flip path, the scoped Gate A round that
-changes §XVIII.7's after-text also narrows the checker's `ROWS` (and §2's row list) to the rows that
-flip, and records that edit.
+changes §XVIII.7's after-text also narrows the checker's `ROWS` (and §2's row list, and data-model
+§F.3/§F.4's row lists, which family C reads) to the rows that flip, and records that edit.
 
 ```bash
 PR=<number> python3 - <<'PY'
@@ -315,6 +344,7 @@ TCAT, TCON, TCOV, TBL = "spec/feature-catalogue.md", ".specify/constitution.md",
 CAT, CON, COV, BL = E("CAT", TCAT), E("CON", TCON), E("COV", TCOV), E("BL", TBL)
 INTEROP, ORCH = E("INTEROP", "tests/interop"), "dictionaries/orchestra/OrchestraFIXLatest.xml"
 PR = E("PR") or sys.exit("set PR to the feature PR's number")
+re.fullmatch(r"[1-9][0-9]*", PR) or sys.exit(f"PR must be a PR number, not {PR!r}")
 BASEREV = E("BASEREV") or subprocess.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip()
 bad = 0
 
@@ -366,7 +396,7 @@ S0 = ("offline bar (owner 2026-10-21) on both typed tiers (owner 2026-10-28): ty
 S1 = ("5.0SP2 here is the vendored FIX50SP2.xml (QuickFIX-cpp v1.16.0's file, which carries the 5.0SP2 "
       "Extension Pack that added 35=<MT>); QuickFIX/J 3.0.1's base edition does not define it. Live: no "
       "cell carries 35=<MT>; the typed tail's one live FIXT.1.1 scenario is A-018's (B-095-1). "
-      "validate_<Msg> checks presence, not enum domains (L-069-1, fixpp#637). FIX Latest goes on the "
+      "`validate_<Msg>` checks presence, not enum domains (L-069-1, fixpp#637). FIX Latest goes on the "
       "wire as ApplVerID 9 with no ApplExtID(1156) (L-074-1, REMAINING-WORK row 4b).")
 TESTS = ("`tests/session/test_096_tail_rows_roundtrip.cpp`: `TailRows096.<R>_<N>`; "
          "`tests/session/test_096_tail_rows_roundtrip_vlatest.cpp`: `TailRows096Latest.<R>_<N>`, "
@@ -442,32 +472,90 @@ for line in base(TCAT):
     want.append(line)
 same("B", want, head(CAT))
 
-# C — the constitution: §XVIII.2's v1.2 bullet and §XVIII.7's line, each the base line plus the stated edit
+# C — the constitution, the whole file: the base with the v4.2 Sync Impact Report inserted above the
+#     v4.0 → v4.1 block, the Status line in its state's template, §XVIII.2's and §XVIII.7's lines edited
+#     (data-model §F); the templates are data-model's §F.3/§F.4 fenced blocks, one per state
 def one(lines, pat, fam, what):
     hits = [i for i, l in enumerate(lines) if re.match(pat, l)]
     if len(hits) != 1:
         fail(fam, f"{what}: {len(hits)} lines match"); return None
     return hits[0]
+DM = "specs/096-fix-latest-tail-evidence/data-model.md"
+dm = pathlib.Path(DM).read_text()
+def fenced(sec, state):  # the one fenced block after the `**<state>**` line of data-model's `### <sec>`
+    s = re.search(rf"^### {re.escape(sec)} .*?(?=^### |\Z)", dm, re.S | re.M)
+    got = re.findall(rf"^\*\*{state}\*\*[^\n]*\n(?:[^\n]*\n)*?```\n(.*?)\n```$", s.group(0) if s else "", re.S | re.M)
+    if len(got) != 1 or not got[0].strip():
+        sys.exit(f"{DM} §{sec}: not exactly one {state} template")
+    return got[0].splitlines()
+HDR = "Sync Impact Report — v4.1 → v4.2 (2026-10-28) — "
+SIR = {s: fenced("F.3", s) for s in ("PENDING", "RATIFIED")}
+def fixed(tpl):  # a §F.3 template's fixed parts: the lines before the opening span, the middle, the tail
+    ib = [i for i, l in enumerate(tpl) if l.startswith("  Bump:")]
+    ir = [i for i, l in enumerate(tpl) if l.startswith("  Review and sign-off:")]
+    if len(ib) != 1 or len(ir) != 1: sys.exit(f"{DM} §F.3: a template lacks one Bump / Review line")
+    return tpl[:2], tpl[ib[0]:ir[0]], tpl[-1:]
+FIX = {s: fixed(t) for s, t in SIR.items()}
+if FIX["PENDING"][1:] != FIX["RATIFIED"][1:] or [l[:-len(s)] for s in FIX for l in FIX[s][0][1:]] != [HDR, HDR]:
+    sys.exit(f"{DM} §F.3: the two templates differ outside their slots")
+OPEN = {"PENDING": r"  Pending\. Article XX §2 sequence.*",
+        "RATIFIED": r"  Ratified\. Article XX §2 sequence observed in order: .*\S"}
+REVIEW, CONT = r"  Review and sign-off: .*\S", r"    \S.*"
+ST = {s: fenced("F.4", s) for s in ("PENDING", "RATIFIED")}
+if any(len(v) != 1 for v in ST.values()): sys.exit(f"{DM} §F.4: a Status template is not one line")
+def status_rx(state, prior):  # the state's template, one space, the base remainder, as one regex
+    rx = re.escape(ST[state][0]).replace(re.escape("{DATE}"), r"(?P<date>\d{4}-\d{2}-\d{2})", 1)
+    rx = rx.replace(re.escape("{DATE}"), "(?P=date)").replace(re.escape("{REVIEW}"), r"\S.*")
+    return rx.replace(re.escape("{PR}"), re.escape(PR)) + re.escape(" " + prior)
+
 b, h = base(TCON), head(CON)
 P2, P7 = r"   - \*\*v1\.2 — FIX Latest application messages\*\*", r"7\. \*\*Application-message codegen scope for v1\.0\.\*\*"
+PS = r"> \*\*Status:\*\* "
+want = list(b)
 ib, ih = one(b, P2, "C", "base §XVIII.2 bullet"), one(h, P2, "C", "§XVIII.2 bullet")
-if ib is not None and ih is not None:
-    exp = b[ib].replace("(new MsgTypes A-035..A-065 + EP-level", "(EP-level", 1) + " " + ANN
-    if exp == b[ib] + " " + ANN: fail("C", "base §XVIII.2 bullet lacks '(new MsgTypes A-035..A-065 + EP-level'")
-    same("C §XVIII.2", [exp], [h[ih]])
+if ib is not None:
+    want[ib] = b[ib].replace("(new MsgTypes A-035..A-065 + EP-level", "(EP-level", 1) + " " + ANN
+    if want[ib] == b[ib] + " " + ANN: fail("C", "base §XVIII.2 bullet lacks '(new MsgTypes A-035..A-065 + EP-level'")
+    if ih is not None: same("C §XVIII.2", [want[ib]], [h[ih]])
 ib, ih = one(b, P7, "C", "base §XVIII.7"), one(h, P7, "C", "§XVIII.7")
 anchor = "A-033 and C-003 on it."
-if ib is not None and ih is not None:
+if ib is not None:
     if b[ib].count(anchor) != 1: fail("C", "base §XVIII.7 lacks its anchor sentence once")
-    same("C §XVIII.7", [b[ib].replace(anchor, anchor + " " + SENT7)], [h[ih]])
-# at the RATIFIED flip the Status date becomes the sign-off date (data-model §F.4); the SIR header keeps its date
-st = [l for l in h if l.startswith("> **Status:** ")]
-sir = [l for l in h if re.fullmatch(r"Sync Impact Report — v4\.1 → v4\.2 \(2026-10-28\) — (PENDING|RATIFIED)", l)]
-if len(st) != 1 or len(sir) != 1:
-    fail("C", f"{len(st)} Status lines, {len(sir)} v4.1 → v4.2 Sync Impact Report headers")
-elif not ((sir[0].endswith("PENDING") and st[0].startswith("> **Status:** PENDING **v4.2** (2026-10-28)"))
-          or (sir[0].endswith("RATIFIED") and re.match(r"> \*\*Status:\*\* user-ratified \*\*v4\.2\*\* \(\d{4}-\d{2}-\d{2}\)", st[0]))):
-    fail("C", "the Status line and the v4.2 Sync Impact Report header do not agree on PENDING/RATIFIED")
+    want[ib] = b[ib].replace(anchor, anchor + " " + SENT7)
+    if ih is not None: same("C §XVIII.7", [want[ib]], [h[ih]])
+# the state: the v4.2 header's last word, on the head's second line
+state = h[1][len(HDR):] if len(h) > 1 and h[1].startswith(HDR) else None
+if state not in SIR:
+    fail("C", "line 2 is not a v4.1 → v4.2 Sync Impact Report header ending PENDING or RATIFIED"); state = None
+date = None
+ib, ih = one(b, PS, "C", "base Status line"), one(h, PS, "C", "Status line")
+if ib is not None:
+    m = re.fullmatch(status_rx(state, b[ib][len("> **Status:** "):]), h[ih]) if state and ih is not None else None
+    if m and "{REVIEW}" not in h[ih]:
+        want[ib], date = h[ih], m.groupdict().get("date")
+    else:
+        want[ib] = f"<the Status line: data-model §F.4's {state or 'PENDING/RATIFIED'} template + ' ' + the base remainder>"
+        fail("C", f"the Status line does not fullmatch data-model §F.4's {state or 'PENDING/RATIFIED'} template + the base remainder")
+# the v4.2 block: its fixed lines from the template, its two spans from the head once they fullmatch
+block = []
+if state:
+    fh, fm, ft = FIX[state]
+    end = next((i for i in range(2, len(h)) if h[i] == ft[0]), len(h) - 1)
+    k = next((i for i in range(2, end) if h[i] == fm[0]), end)
+    r = next((i for i in range(k, end) if h[i].startswith("  Review and sign-off:")), end)
+    span_o, span_r = h[2:k], h[r:end]
+    ok_o = bool(span_o) and re.fullmatch(OPEN[state], span_o[0]) and all(re.fullmatch(CONT, l) for l in span_o[1:])
+    ok_r = bool(span_r) and re.fullmatch(REVIEW, span_r[0]) and all(re.fullmatch(CONT, l) for l in span_r[1:])
+    if state == "RATIFIED" and ok_r and not span_r[-1].endswith(f" owner sign-off {date}."):
+        ok_r = False
+    if any(s in l for l in span_o + span_r for s in ("{OPENING}", "{REVIEW}", "{DATE}")):
+        ok_o = ok_r = False
+    if not ok_o: fail("C", f"v4.2 report: the opening span does not fullmatch data-model §F.3's {state} slot")
+    if not ok_r: fail("C", f"v4.2 report: the review span does not fullmatch data-model §F.3's {state} slot"
+                           + (f" ending 'owner sign-off {date or '<the Status date>'}.'" if state == "RATIFIED" else ""))
+    block = (fh + (span_o if ok_o else [f"<{state} opening span>"]) + fm
+             + (span_r if ok_r else [f"<{state} review span>"]) + ft)
+same("C", block + want, h)
 
 # D — the coverage index: the base file with the 31 gap notes and the four site comments, nothing else
 SITES = [r"Scope: confirm A-035–A-065 ", r"> \*\*074-orchestra-native-reader link ",
@@ -495,19 +583,22 @@ i = one(b, r"- \*\*L-069-1 — ", "E", "base L-069-1 bullet")
 if i is not None:
     same("E", b[:i] + [b[i] + " " + WIDEN] + b[i + 1:], h[:len(b)])
 
-# F — no interop cell carries a tail MsgType, in either form a cell uses; BN is each form's positive
-forms = {"35=": lambda mt: rf"35={mt}(?![A-Za-z0-9])", "msg_type": lambda mt: rf'msg_type\W{{1,4}}"{mt}"'}
+# F — no interop cell carries a tail message, in any form a cell uses; row 2's BN / ExecutionAck is
+#     each form's positive
+forms = {"35=": lambda mt, name: rf"35={mt}(?![A-Za-z0-9])",
+         "msg_type": lambda mt, name: rf"""msg_type\W{{1,4}}['"]?{mt}(?![A-Za-z0-9])""",
+         "build_": lambda mt, name: rf"(?<![A-Za-z0-9_])build_{name}\b"}
 texts = []
 for p in pathlib.Path(INTEROP).rglob("*"):
     if p.is_file() and "__pycache__" not in p.parts:
         try: texts.append((str(p), p.read_text()))
         except UnicodeDecodeError: pass
-for name, rx in forms.items():
-    if not any(re.search(rx("BN"), t) for _, t in texts):
-        fail("F", f"positive control: no '{name}' match for BN under {INTEROP}")
-    for _, mt, _ in ROWS:
+for form, rx in forms.items():
+    if not any(re.search(rx("BN", "ExecutionAck"), t) for _, t in texts):
+        fail("F", f"positive control: no '{form}' match for BN / ExecutionAck under {INTEROP}")
+    for _, mt, name in ROWS:
         for path, t in texts:
-            if re.search(rx(mt), t): fail("F", f"{path} carries {mt} ({name} form)")
+            if re.search(rx(mt, name), t): fail("F", f"{path} carries {mt} / {name} ({form} form)")
 sys.exit(bad)
 PY
 ```
@@ -515,16 +606,24 @@ PY
 GREEN prints nothing and exits 0. Controls, each recorded with what it printed and its exit status:
 - **before the record edits** (the unedited tree): exit 1, with family A flagging every tail row
   except A-037 and A-038 and families B–E firing; family F reads clean;
-- **after the edits, at the RATIFIED flip** (scratch copies with the v4.2 Sync Impact Report header
-  set to `RATIFIED` and the Status line to `user-ratified **v4.2**` with a later date): exit 0;
+- **after the edits, PENDING** (scratch copies holding every edit, the constitution with data-model
+  §F.3's PENDING block on top and the §F.4 PENDING Status line): exit 0;
+- **after the edits, at the RATIFIED flip** (the same, with §F.3's RATIFIED block and §F.4's RATIFIED
+  Status line, every slot filled: a multi-line opening span, a review span ending `owner sign-off
+  <date>.`, that date at both places in the Status line, a `{REVIEW}` text and `$PR`): exit 0;
+- `PR=banana` and `PR=0`: each exits 1 before any family runs;
 - **after the edits**, on scratch copies, one perturbation per run, each exiting 1 with its family's
   message: (A) A-065's token changed to `[FIX44]`, its Title given `35=A` (Orchestra's Logon is
   category `Session`), its ref written `Pre-Trade — Quotation Negotiation`; (B) one `35=DR` in
   A-040's Verified cell changed to `35=DS`, and a run with another `PR`; (C) `A-050, ` removed from
-  §XVIII.7's sentence, and the Status line left at v4.1; (D) the Conclusion line's comment altered;
-  (E) `` `fixpp::v42`, `` removed from the widening; (F) a scratch copy of `tests/interop/` with a
-  file holding `msg_type: "CW"`, another with `"35=DS\x01"`, and `INTEROP` pointed at an empty
-  directory (the BN positive fails in both forms).
+  §XVIII.7's sentence; the Status line left at v4.1; one line of the v4.2 report's fixed body
+  deleted; the PENDING Status line cut after its date; an unrelated `MUST` → `MAY` (Article XII's
+  `insecure_plain_tcp` bullet); in the RATIFIED copy, the Status line cut after its date; the whole
+  v4.0 → v4.1 report deleted; the Status line written with `...` in place of the 31 row IDs;
+  (D) the Conclusion line's comment altered; (E) `` `fixpp::v42`, `` removed from the widening;
+  (F) a scratch copy of `tests/interop/` with a file holding `msg_type: "CW"`, others with
+  `msg_type: CW`, `msg_type: 'CW'`, `build_QuoteAck(` and `"35=DS\x01"`, and `INTEROP` pointed at
+  an empty directory (each form's positive fails).
 
 ### 5b. The `[const §I.3]` census (SC-004)
 
@@ -534,6 +633,7 @@ equal on both sides.
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 HEADCAT=${HEADCAT:-spec/feature-catalogue.md}
 W=${TMPDIR:-/tmp}
 bad=0
@@ -565,6 +665,7 @@ copy of the edited catalogue in which one tail row is set back to `backlog`, it 
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 R=${R:-$(git merge-base origin/main HEAD)..HEAD}
 out=$(git diff --name-only "$R" -- src include tools/codegen) || exit 1
 test -z "$out" || { printf 'PRODUCTION: %s\n' $out; exit 1; }
@@ -580,6 +681,7 @@ Last, at the final head (the resource gate in tasks.md Execution rules applies):
 
 ```bash
 bash <<'EOF'
+set -o pipefail
 bad=0
 cmake --build build/linux-clang-debug || bad=1
 ctest --test-dir build/linux-clang-debug --output-on-failure || bad=1

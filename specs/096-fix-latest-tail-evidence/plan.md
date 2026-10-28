@@ -9,6 +9,7 @@
 
 - Round 1 applied 2026-10-28: Codex P1=1 P2=5 P3=1; Opus post-judging P1=0 P2=6 P3=11; rewrite addresses root causes RC-1..RC-4 (+ per-finding fixes). Reviews: research/reviews/codex_096-fix-latest-tail-evidence_gate_a_review.md, research/reviews/opus_096-fix-latest-tail-evidence_gate_a_adversarial_review.md.
 - Round 2 applied 2026-10-28: Codex P1=1 P2=3 P3=1; Opus post-judging P1=0 P2=3 P3=6; rewrite addresses root causes RC-1..RC-3 (+ per-finding fixes). Reviews: research/reviews/codex_096-fix-latest-tail-evidence_gate_a_2_review.md, research/reviews/opus_096-fix-latest-tail-evidence_gate_a_2_adversarial_review.md.
+- Round 3 (exhausted) 2026-10-28: Codex P1=0 P2=1 P3=3; Opus post-judging P1=0 P2=1 P3=5. Owner ruling 2026-10-28: hand-edit + one targeted round. Hand-edit applied: G096-R3-001 (+ P3s R3-002, R3-003, R3-004, N1, N2). Reviews: research/reviews/codex_096-fix-latest-tail-evidence_gate_a_3_review.md, research/reviews/opus_096-fix-latest-tail-evidence_gate_a_3_adversarial_review.md.
 
 ### Round 1 — disagreements
 

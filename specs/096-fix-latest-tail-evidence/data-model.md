@@ -190,7 +190,7 @@ message. The same checker holds every other cell below to its template (families
 `<MT>` is the row's MsgType.
 
 - **S0:** `offline bar (owner 2026-10-21) on both typed tiers (owner 2026-10-28): typed builder → wire → independent dict-driven parse → bidirectional per-field + per-group-instance readback, every closure-required field and group set; fixpp::v50sp2 checked against a runtime walk of FIX50SP2.xml, fixpp::vlatest against a runtime walk of OrchestraFIXLatest.xml, and the two walks agree for 35=<MT> (TailRows096Differential).`
-- **S1:** `5.0SP2 here is the vendored FIX50SP2.xml (QuickFIX-cpp v1.16.0's file, which carries the 5.0SP2 Extension Pack that added 35=<MT>); QuickFIX/J 3.0.1's base edition does not define it. Live: no cell carries 35=<MT>; the typed tail's one live FIXT.1.1 scenario is A-018's (B-095-1). validate_<Msg> checks presence, not enum domains (L-069-1, fixpp#637). FIX Latest goes on the wire as ApplVerID 9 with no ApplExtID(1156) (L-074-1, REMAINING-WORK row 4b).`
+- **S1:** `` 5.0SP2 here is the vendored FIX50SP2.xml (QuickFIX-cpp v1.16.0's file, which carries the 5.0SP2 Extension Pack that added 35=<MT>); QuickFIX/J 3.0.1's base edition does not define it. Live: no cell carries 35=<MT>; the typed tail's one live FIXT.1.1 scenario is A-018's (B-095-1). `validate_<Msg>` checks presence, not enum domains (L-069-1, fixpp#637). FIX Latest goes on the wire as ApplVerID 9 with no ApplExtID(1156) (L-074-1, REMAINING-WORK row 4b). ``
 
 **Coverage-index edits**, byte for byte, line count unchanged:
 - the last column of each tail MsgType's row in "FIX Latest — MsgType entries only (FIX-Latest)":
@@ -251,6 +251,13 @@ inserted, byte for byte, and §XVIII.2's bullet likewise to F.1's after-text.
 
 ### F.3 Sync Impact Report — a new first comment block, above the v4.0 → v4.1 block
 
+The block is inserted immediately above the v4.0 → v4.1 block, so it opens the file. It has two
+states, PENDING and RATIFIED. The header's last word selects the state, and the opening span, the
+review span and the Status line (§F.4) must all be in that state, never a mix. The records checker
+(quickstart §5a, family C) reads both templates from this section.
+
+**PENDING** — the text as first committed, in the amendment's commit:
+
 ```
 <!--
 Sync Impact Report — v4.1 → v4.2 (2026-10-28) — PENDING
@@ -294,18 +301,87 @@ Sync Impact Report — v4.1 → v4.2 (2026-10-28) — PENDING
 -->
 ```
 
+**RATIFIED** — the flip commit's form, as v4.1's flip wrote it (`023f2406`). `{OPENING}`, `{REVIEW}`
+and `{DATE}` are slots:
+
+```
+<!--
+Sync Impact Report — v4.1 → v4.2 (2026-10-28) — RATIFIED
+  Ratified. Article XX §2 sequence observed in order: {OPENING}
+  Bump: MINOR, per Article XX §4; no CHANGELOG.md entry. Does a PR mergeable under v4.1 fail under
+    v4.2? None does. §2 removes rows from a post-1.0 milestone because they ship in v1.0; §7 records
+    which feature closes them and on which namespace. Neither adds a banned
+    pattern, tightens a budget or imposes an obligation.
+    NOTE: the constitution's version is independent of the library's and of the C ABI's.
+  Modified: Article XVIII §2 — the v1.2 milestone no longer names "new MsgTypes A-035..A-065"; it
+    keeps the EP-level field additions. Its 076/077 annotation is unchanged.
+  Modified: Article XVIII §7 — one new sentence records that the rows A-035, A-036, A-037, A-038,
+    A-039, A-040, A-041, A-042, A-043, A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052,
+    A-053, A-054, A-055, A-056, A-057, A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065,
+    each named by its row ID, name application messages of the vendored FIX50SP2.xml and of the
+    Orchestra file, and that feature 096 closes them on both `fixpp::v50sp2` and `fixpp::vlatest`. The opening sentence is unchanged: it
+    already takes in the A- rows the clause names by row ID, and adding `fixpp::vlatest` to its
+    namespace list would claim every row it scopes for that namespace.
+  Read and unchanged: Article I §1 (its FIX Latest bullet states what the FIX Latest tiers deliver and
+    that ApplExtID(1156)=303 and session negotiation remain post-1.0; feature 096 changes neither);
+    Article VI §2 (feature 096 corrects its rows' refs to the form v4.1 admits); Article XVIII §1
+    ("FIX 4.0–5.0SP2 + FIXT.1.1 session + application layers": the 31 MsgTypes are FIX 5.0SP2
+    Extension Pack application messages, inside that scope); Article XVIII §5 (no early shipping of
+    post-1.0 protocols: after §2's edit the rows are not post-1.0 content, and §4 makes that move an
+    amendment, which this is).
+  Rationale: the plan of record called A-035..A-065 FIX-Latest-only rows with no QuickFIX peer. The
+    vendored FIX50SP2.xml, byte-identical to QuickFIX-cpp v1.16.0's, defines all of their MsgTypes as
+    application messages, so each has a `fixpp::v50sp2` typed builder as well as a `fixpp::vlatest`
+    one. Owner ruling 2026-10-28: close the rows on both tiers in v1.0. Leaving §2 and §7 as they were
+    would contradict the catalogue (Article XVIII §4, Article XX §1).
+  Affected catalogue rows: A-035 through A-065 (version, Spec ref, Status, /specify, PR, Tests,
+    Verified; specs/096-fix-latest-tail-evidence/data-model.md §E).
+  Affected feature specs: specs/096-fix-latest-tail-evidence. Merged specs/<id>/ bundles stay as written.
+  Process: rides feature 096. Its PR is titled in Article XX §2 form, "Constitution: amend §XVIII.2,
+    §XVIII.7 — FIX Latest tail rows A-035..A-065 delivered in v1.0 on v50sp2 and vlatest (v4.2) (+ 096
+    FIX Latest tail evidence pass)", and its description states the change, the rationale and the
+    affected rows and specs.
+  Review and sign-off: {REVIEW} owner sign-off {DATE}.
+-->
+```
+
+The slots are the only lines that differ between the two templates or change while the gates run.
+Every other line of the block is fixed text, byte for byte the same in both states:
+
+| Slot | PENDING | RATIFIED |
+|---|---|---|
+| the header's last word | `PENDING` | `RATIFIED` |
+| opening span: from the line after the header up to, not including, the `  Bump:` line | first line fullmatches `  Pending\. Article XX §2 sequence.*`; every further line `    \S.*`; it may be filled in as each step completes | first line fullmatches `  Ratified\. Article XX §2 sequence observed in order: .*\S`; every further line `    \S.*`; in v4.1's form, it names each step's rounds and the sign-off |
+| review span: from the `  Review and sign-off:` line up to, not including, `-->` | first line fullmatches `  Review and sign-off: .*\S`; every further line `    \S.*` | the same, and its last line ends `owner sign-off {DATE}.` |
+
+The header's date stays 2026-10-28 in both states. `{DATE}` is the owner's sign-off date,
+`YYYY-MM-DD`, the same here and at both places in the Status line.
+
 ### F.4 Status line (`> **Status:**`)
 
-Prepend, before "user-ratified **v4.1**": `PENDING **v4.2** (2026-10-28) — backwards-compatible
-(Article XX §4 minor, no `CHANGELOG.md` entry); Article XVIII §2 drops A-035..A-065 from v1.2 and
-Article XVIII §7 records the rows A-035, A-036, A-037, A-038, A-039, A-040, A-041, A-042, A-043,
-A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052, A-053, A-054, A-055, A-056, A-057,
-A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065 as closed by feature 096 on
-`fixpp::v50sp2` and `fixpp::vlatest`.
-Rides feature 096; its PR is titled in Article XX §2 form. Prior: ` — and at the RATIFIED flip,
-`PENDING` becomes `user-ratified`, the date becomes the sign-off date and the review/sign-off clause
-is inserted after it, in v4.1's form; the Sync Impact Report header keeps 2026-10-28 and its
-`PENDING` becomes `RATIFIED` (quickstart §5a family C accepts either state, never a mix).
+The line is the state's template below, one space, then `{PRIOR}`: the merge-base Status line's
+text after `> **Status:** `, from `user-ratified **v4.1**` to its end. v4.1's Status text thus
+becomes v4.2's "Prior:". Under PENDING nothing in the template varies. Under RATIFIED the slots are
+`{DATE}`, `{REVIEW}` and `{PR}`, at the positions v4.1's flip used. Everything else is fixed
+text, the 31 row IDs included.
+
+**PENDING** — the amendment's commit:
+
+```
+> **Status:** PENDING **v4.2** (2026-10-28) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); Article XVIII §2 drops A-035..A-065 from v1.2 and Article XVIII §7 records the rows A-035, A-036, A-037, A-038, A-039, A-040, A-041, A-042, A-043, A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052, A-053, A-054, A-055, A-056, A-057, A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065 as closed by feature 096 on `fixpp::v50sp2` and `fixpp::vlatest`. Rides feature 096; its PR is titled in Article XX §2 form. Prior:
+```
+
+**RATIFIED** — the flip commit:
+
+```
+> **Status:** user-ratified **v4.2** ({DATE}) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); {REVIEW} owner sign-off {DATE}; amendment PR #{PR}. Article XVIII §2 drops A-035..A-065 from v1.2 and Article XVIII §7 records the rows A-035, A-036, A-037, A-038, A-039, A-040, A-041, A-042, A-043, A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052, A-053, A-054, A-055, A-056, A-057, A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065 as closed by feature 096 on `fixpp::v50sp2` and `fixpp::vlatest`. Rides feature 096; its PR is titled in Article XX §2 form. Prior:
+```
+
+- `{DATE}`: the owner's sign-off date, the same at both places and in the Sync Impact Report's review
+  span (§F.3);
+- `{REVIEW}`: free text naming the scoped Gate A rounds and Gate B, in v4.1's form (v4.1's reads
+  "scoped Codex Gate A on feature 095 converged (…), then Gate B and");
+- `{PR}`: the feature PR's number, the records checker's `PR`.
 
 The Status line is the file's only current-version marker; every other `v4.1` in the file is in
 the v4.0 → v4.1 Sync Impact Report, which is history and stays as written (re-check with
