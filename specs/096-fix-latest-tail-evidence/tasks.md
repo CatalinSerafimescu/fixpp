@@ -170,25 +170,25 @@ listed under their exact names.
 **Goal**: the cross-dictionary differential (data-model §D) with its measured and synthetic positives.
 **Independent test**: `--gtest_filter='TailRows096Differential.*'` on the vlatest binary.
 
-- [ ] T052 [US2] (implementer) In the vlatest TU: suite `TailRows096Differential` with its own fixture, loading `FIXPP_DICT_DATA_DIR "/FIX50SP2.xml"` through the shared `Walker` (the QuickFIX walk) and the Orchestra file through `OrchestraWalker`, once, copying any load or walk error into `load_error` (asserted empty in `SetUp`); `SyntheticPairs` feeds each pair's QuickFIX fragment to `Walker{doc}.walk_all()` and its Orchestra fragment to `OrchestraWalker`, both after `load_string`. `Finding{msg_type, path, fix50sp2, orchestra}` and `diff(qf_walk, orch_walk, msg_types)` per data-model §D (every finding collected, then sorted by (msg_type, path) as `std::string`; member findings only for a group required on both sides; a non-`ok` status is one `status` finding). Write FIRST `TailRows096Differential.KnownDifference_MarketDataSnapshotFullRefresh` (exactly `[{W, 779, required, absent}]`), `TailRows096Differential.KnownNonOk_MassQuote` (one `status` finding, each side `nested_required_group NoQuoteEntries`) and `TailRows096Differential.SyntheticPairs` (one pair per path — group, delimiter, instance-member, `delim_group` — each exactly one whole `Finding`; pair M per contracts W6: inputs `{SM, SA}`, the exact sorted four-finding vector). Run them RED against a `diff` stub returning nothing; record; implement until GREEN.
-- [ ] T053 [US2] (implementer) `TailRows096Differential.TailMsgTypesAgree`: findings over data-model §A's 31 MsgTypes, asserted empty, printed otherwise. A non-empty result stops the task (FR-012). Run GREEN.
-- [ ] T054 [US2] (implementer) Commit T052–T053: `096 P4: cross-dictionary differential (FIX50SP2.xml vs Orchestra)`. Report the hash.
+- [X] T052 [US2] (implementer) In the vlatest TU: suite `TailRows096Differential` with its own fixture, loading `FIXPP_DICT_DATA_DIR "/FIX50SP2.xml"` through the shared `Walker` (the QuickFIX walk) and the Orchestra file through `OrchestraWalker`, once, copying any load or walk error into `load_error` (asserted empty in `SetUp`); `SyntheticPairs` feeds each pair's QuickFIX fragment to `Walker{doc}.walk_all()` and its Orchestra fragment to `OrchestraWalker`, both after `load_string`. `Finding{msg_type, path, fix50sp2, orchestra}` and `diff(qf_walk, orch_walk, msg_types)` per data-model §D (every finding collected, then sorted by (msg_type, path) as `std::string`; member findings only for a group required on both sides; a non-`ok` status is one `status` finding). Write FIRST `TailRows096Differential.KnownDifference_MarketDataSnapshotFullRefresh` (exactly `[{W, 779, required, absent}]`), `TailRows096Differential.KnownNonOk_MassQuote` (one `status` finding, each side `nested_required_group NoQuoteEntries`) and `TailRows096Differential.SyntheticPairs` (one pair per path — group, delimiter, instance-member, `delim_group` — each exactly one whole `Finding`; pair M per contracts W6: inputs `{SM, SA}`, the exact sorted four-finding vector). Run them RED against a `diff` stub returning nothing; record; implement until GREEN.
+- [X] T053 [US2] (implementer) `TailRows096Differential.TailMsgTypesAgree`: findings over data-model §A's 31 MsgTypes, asserted empty, printed otherwise. A non-empty result stops the task (FR-012). Run GREEN.
+- [X] T054 [US2] (implementer) Commit T052–T053: `096 P4: cross-dictionary differential (FIX50SP2.xml vs Orchestra)`. Report the hash.
 
 ### Differential RED arms (contracts W6; Mutant protocol; record each)
 
-- [ ] T055 [US2] (implementer) 35=W appended to `TailMsgTypesAgree`'s compared list → RED printing `{W, 779, required, absent}`.
-- [ ] T056 [US2] (implementer) Field comparison skipped → RED in `KnownDifference_MarketDataSnapshotFullRefresh` (empty findings).
-- [ ] T057 [US2] (implementer) Non-`ok` check skipped → RED in `KnownNonOk_MassQuote`.
-- [ ] T058 [US2] (implementer) Group comparison skipped → RED in its `SyntheticPairs` pair.
-- [ ] T059 [US2] (implementer) Delimiter comparison skipped → RED in its pair.
-- [ ] T060 [US2] (implementer) Instance-member comparison skipped → RED in its pair.
-- [ ] T061 [US2] (implementer) `delim_group` comparison skipped → RED in its pair.
-- [ ] T062 [US2] (implementer) Pair M, comparator returns after its first finding → RED (one finding).
-- [ ] T063 [US2] (implementer) Pair M, sort removed → RED (collection order). If it reads green, stop: the pair is redesigned, not the assertion.
-- [ ] T064 [US2] (implementer) Pair M, member findings emitted for a one-sided group → RED (extra `{SA, 9200[*].9201, required, absent}`).
-- [ ] T065 [US2] (implementer) Delimiter, component emission (vlatest table row): component emissions ignored when taking the first emission → RED in `TailMsgTypesAgree` naming DP and `<count_tag>/delim` with both values (an A-042 witness RED alongside is not this arm's RED).
+- [X] T055 [US2] (implementer) 35=W appended to `TailMsgTypesAgree`'s compared list → RED printing `{W, 779, required, absent}`.
+- [X] T056 [US2] (implementer) Field comparison skipped → RED in `KnownDifference_MarketDataSnapshotFullRefresh` (empty findings).
+- [X] T057 [US2] (implementer) Non-`ok` check skipped → RED in `KnownNonOk_MassQuote`.
+- [X] T058 [US2] (implementer) Group comparison skipped → RED in its `SyntheticPairs` pair.
+- [X] T059 [US2] (implementer) Delimiter comparison skipped → RED in its pair.
+- [X] T060 [US2] (implementer) Instance-member comparison skipped → RED in its pair.
+- [X] T061 [US2] (implementer) `delim_group` comparison skipped → RED in its pair.
+- [X] T062 [US2] (implementer) Pair M, comparator returns after its first finding → RED (one finding).
+- [X] T063 [US2] (implementer) Pair M, sort removed → RED (collection order). If it reads green, stop: the pair is redesigned, not the assertion.
+- [X] T064 [US2] (implementer) Pair M, member findings emitted for a one-sided group → RED (extra `{SA, 9200[*].9201, required, absent}`).
+- [X] T065 [US2] (implementer) Delimiter, component emission (vlatest table row): component emissions ignored when taking the first emission → RED in `TailMsgTypesAgree` naming DP and `<count_tag>/delim` with both values (an A-042 witness RED alongside is not this arm's RED).
 
-- [ ] T065b [US2] (orchestrator) Run quickstart §2 whole (exit 0) and §4 (exit 0), then their controls on scratch stubs (§2: a witness unlisted → `UNLISTED`, a lister that prints the list and exits 1 → `LIST:`, a failing ctest; §4: one binary unlabelled → `LABEL:`, a `ctest -N` that prints the list and exits 1): each exits 1; record.
+- [X] T065b [US2] (orchestrator) Run quickstart §2 whole (exit 0) and §4 (exit 0), then their controls on scratch stubs (§2: a witness unlisted → `UNLISTED`, a lister that prints the list and exits 1 → `LIST:`, a failing ctest; §4: one binary unlabelled → `LABEL:`, a `ctest -N` that prints the list and exits 1): each exits 1; record.
 
 **Checkpoint**: quickstart §2 and §4 pass with their controls.
 
