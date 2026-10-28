@@ -3265,6 +3265,9 @@ if(TARGET fixpp_codegen_generate)
     # standalone executable (no new ctest entry, [const §VII.8]); the census reads
     # the registered tests of this binary.
     test_095_tail_rows_roundtrip.cpp
+    # 096-fix-latest-tail-evidence: the v50sp2 witnesses of the FIX Latest tail rows and their
+    # census join the same executable; the census reads the registered tests of this binary.
+    test_096_tail_rows_roundtrip.cpp
   )
   add_dependencies(test_077_allversions_builder_roundtrip fixpp_codegen_generate)
   target_link_libraries(test_077_allversions_builder_roundtrip PRIVATE
@@ -3292,6 +3295,9 @@ if(TARGET fixpp_codegen_generate)
   # 095-tail-evidence-pass: label 095 (expected-ctest-095.txt). APPEND, after the
   # last LABELS setter for this entry, so the existing labels survive.
   set_property(TEST test_077_allversions_builder_roundtrip APPEND PROPERTY LABELS 095)
+  # 096-fix-latest-tail-evidence: label 096 (expected-ctest-096.txt), appended after the last
+  # LABELS setter for this entry.
+  set_property(TEST test_077_allversions_builder_roundtrip APPEND PROPERTY LABELS 096)
 
   # vlatest half of T016 -- kept in a SEPARATE TU/executable from the v50sp2
   # one above (not one combined "allversions" TU): compiling both the ~75MB
