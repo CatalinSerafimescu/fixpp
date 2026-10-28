@@ -1476,18 +1476,14 @@ TEST_F(TailRows096Differential, SyntheticPairs) {
             "</fixr:structure></fixr:message>"
             "</fixr:messages></fixr:repository>");
         EXPECT_TRUE(orch.error.empty()) << orch.error;
-        EXPECT_EQ(
-            diff(qf, orch.walk, {"SM", "SA"}),
-            (std::vector<Finding>{
-                {.msg_type = "SA", .path = "9200", .fix50sp2 = "required", .orchestra = "absent"},
-                {.msg_type = "SM",
-                 .path = "9100[*].9104",
-                 .fix50sp2 = "required",
-                 .orchestra = "absent"},
-                {.msg_type = "SM", .path = "9102", .fix50sp2 = "required", .orchestra = "absent"},
-                {.msg_type = "SM",
-                 .path = "9105",
-                 .fix50sp2 = "absent",
-                 .orchestra = "required"}}));
+        std::vector<Finding> const want{
+            {.msg_type = "SA", .path = "9200", .fix50sp2 = "required", .orchestra = "absent"},
+            {.msg_type = "SM",
+             .path = "9100[*].9104",
+             .fix50sp2 = "required",
+             .orchestra = "absent"},
+            {.msg_type = "SM", .path = "9102", .fix50sp2 = "required", .orchestra = "absent"},
+            {.msg_type = "SM", .path = "9105", .fix50sp2 = "absent", .orchestra = "required"}};
+        EXPECT_EQ(diff(qf, orch.walk, {"SM", "SA"}), want);
     }
 }
