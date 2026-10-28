@@ -31,6 +31,8 @@ refs:
   - tests/support/tail_rows_witness.hpp
   - tests/support/tail_rows_096.hpp
   - tests/session/test_096_tail_rows_roundtrip_vlatest.cpp
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/096-fix-latest-tail-evidence-gatea.md
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
