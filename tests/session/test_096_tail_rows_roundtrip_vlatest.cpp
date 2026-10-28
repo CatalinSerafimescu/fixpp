@@ -1401,8 +1401,7 @@ TEST_F(TailRows096Differential, KnownNonOk_MassQuote) {
                                      .orchestra = "nested_required_group NoQuoteEntries"}}));
 }
 
-// The 31 tail MsgTypes of the tail table: the two dictionaries agree on each (FR-012 stops a row on
-// any finding).
+// Asserts no finding over the tail table's MsgTypes; a finding stops that row (FR-012).
 TEST_F(TailRows096Differential, TailMsgTypesAgree) {
     std::vector<std::string> msg_types;
     for (TailRow const& r : tail_rows()) msg_types.emplace_back(r.msgtype);
