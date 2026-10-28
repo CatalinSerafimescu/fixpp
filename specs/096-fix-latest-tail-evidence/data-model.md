@@ -66,6 +66,7 @@ the same entry point. Its output feeds the same `required_members_missing` and r
 
 ```
 walk(doc) -> WalkMap                       # keyed by fixr:message@msgType
+  keys:       a msgType seen twice fails the walk loudly, naming it (no last-writer-wins)
   start:      fixr:message/fixr:structure
   fieldRef:   tag = @id;  required on the path iff every element on it has presence="required"
   componentRef: resolve @id in fixr:components; skip StandardHeader / StandardTrailer; AND its presence
@@ -239,17 +240,20 @@ After (the annotation unchanged and kept in place, then the new one):
 
 > - **v1.2 — FIX Latest application messages** (EP-level field additions to existing messages, per coverage-index Post-1.0 Gap Registry). *(Annotation, … [unchanged])* *(Amended v4.2, feature 096: the rows A-035..A-065 leave this milestone. Their MsgTypes are application messages of the vendored `FIX50SP2.xml`, which carries the FIX 5.0SP2 Extension Packs that added them, as well as of the vendored FIX Orchestra file, and feature 096 closes the rows in v1.0 (§7).)*
 
-### F.2 Article XVIII §7 — two sentences
+### F.2 Article XVIII §7 — one new sentence
 
-1. The opening sentence's namespace list, before: "v1.0's typed-message scope under `fixpp::v42`,
-   `fixpp::v44`, `fixpp::v50sp2` is …"; after: "v1.0's typed-message scope under `fixpp::v42`,
-   `fixpp::v44`, `fixpp::v50sp2` and `fixpp::vlatest` is …". The rest of the sentence is unchanged.
-2. A new sentence, inserted right after "…feature 095 closes the catalogue rows A-018, A-023, A-027,
-   A-028, A-029, A-030, A-031, A-032, A-033 and C-003 on it.":
-   "**The rows A-035 through A-065** each name one MsgType that is an application message of the
-   vendored `FIX50SP2.xml`, which carries the FIX 5.0SP2 Extension Packs that added it, and of the
-   vendored FIX Orchestra file; feature 096 closes these catalogue rows on `fixpp::v50sp2` and on
-   `fixpp::vlatest`."
+The opening sentence is unchanged. It already names `fixpp::v50sp2` and "the further A- rows this
+clause names below, by row ID, as delivered or closed", so naming the rows below brings them into
+the scope it states. Adding `fixpp::vlatest` to its namespace list would claim A-001..A-013 and the
+M-/P-/C-/R-/N- families as v1.0 typed scope under `fixpp::vlatest`, which 096 does not verify.
+
+A new sentence, inserted right after "…feature 095 closes the catalogue rows A-018, A-023, A-027,
+A-028, A-029, A-030, A-031, A-032, A-033 and C-003 on it.":
+
+> **The rows A-035 through A-065** each name one MsgType that is an application message of the
+> vendored `FIX50SP2.xml`, which carries the FIX 5.0SP2 Extension Packs that added it, and of the
+> vendored FIX Orchestra file; feature 096 closes these catalogue rows on both `fixpp::v50sp2` and
+> `fixpp::vlatest`.
 
 ### F.3 Sync Impact Report — a new first comment block, above the v4.0 → v4.1 block
 
@@ -261,15 +265,16 @@ Sync Impact Report — v4.1 → v4.2 (2026-10-28) — PENDING
     happened; the flip to RATIFIED is the last commit before merge.
   Bump: MINOR, per Article XX §4; no CHANGELOG.md entry. Does a PR mergeable under v4.1 fail under
     v4.2? None does. §2 removes rows from a post-1.0 milestone because they ship in v1.0; §7 records
-    which feature closes them and names the namespace it closes them on. Neither adds a banned
+    which feature closes them and on which namespace. Neither adds a banned
     pattern, tightens a budget or imposes an obligation.
     NOTE: the constitution's version is independent of the library's and of the C ABI's.
   Modified: Article XVIII §2 — the v1.2 milestone no longer names "new MsgTypes A-035..A-065"; it
     keeps the EP-level field additions. Its 076/077 annotation is unchanged.
-  Modified: Article XVIII §7 — the opening sentence names `fixpp::vlatest` among the typed-message
-    namespaces; a new sentence records that the rows A-035 through A-065 name application messages
-    of the vendored FIX50SP2.xml and of the Orchestra file, and that feature 096 closes them on
-    `fixpp::v50sp2` and `fixpp::vlatest`.
+  Modified: Article XVIII §7 — one new sentence records that the rows A-035 through A-065 name
+    application messages of the vendored FIX50SP2.xml and of the Orchestra file, and that feature 096
+    closes them on both `fixpp::v50sp2` and `fixpp::vlatest`. The opening sentence is unchanged: it
+    already takes in the A- rows the clause names by row ID, and adding `fixpp::vlatest` to its
+    namespace list would claim every row it scopes for that namespace.
   Read and unchanged: Article I §1 (its FIX Latest bullet states what the FIX Latest tiers deliver and
     that ApplExtID(1156)=303 and session negotiation remain post-1.0; feature 096 changes neither);
     Article VI §2 (feature 096 corrects its rows' refs to the form v4.1 admits).

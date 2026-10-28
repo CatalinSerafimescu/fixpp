@@ -20,17 +20,25 @@ done                                                                            
 git diff origin/main -- tests/session/test_095_tail_rows_roundtrip.cpp | grep '^[-+]' | grep -v '^[-+][-+]' > /tmp/096-move.diff
 ```
 
-Every removed line of a moved item must appear verbatim in `tests/support/tail_rows_witness.hpp`
-(the checker below prints each one that does not); every added line in 095's TU is an `#include`, a
-`using` declaration, or the one-line forward of `check_witness`.
+Every removed line outside `Tail095Fixture::check_witness` must appear in
+`tests/support/tail_rows_witness.hpp`, either verbatim or with a leading `inline ` (research R-2);
+the checker below prints each one that does not. `check_witness`'s removed statements are compared
+by reading: each must appear in the free function, in order, with only R-2's three substitutions.
+Every added line in 095's TU is an `#include`, a `using` declaration, or a line of the forwarding
+method.
 
 ```bash
-grep '^-' /tmp/096-move.diff | sed 's/^-//' | grep -v '^\s*$' | while IFS= read -r l; do
-  grep -qxF -- "$l" tests/support/tail_rows_witness.hpp || printf 'NOT MOVED: %s\n' "$l"; done
+H=${H:-tests/support/tail_rows_witness.hpp}
+awk '/^    void check_witness\(/{skip=1} skip&&/^    }$/{skip=0; next} !skip' \
+    <(git show origin/main:tests/session/test_095_tail_rows_roundtrip.cpp) > /tmp/096-095-sans-cw.cpp
+git diff origin/main -- tests/session/test_095_tail_rows_roundtrip.cpp | grep '^-[^-]' | sed 's/^-//' \
+  | grep -v '^\s*$' | while IFS= read -r l; do
+    grep -qxF -- "$l" /tmp/096-095-sans-cw.cpp || continue          # a check_witness line: read by hand
+    grep -qxF -- "$l" "$H" || grep -qxF -- "inline $l" "$H" || printf 'NOT MOVED: %s\n' "$l"; done
 ```
 
-Positive control: run the checker against a header with one moved line edited (scratch copy); it
-must print that line.
+Positive control: `H` pointed at a scratch copy of the header with one moved line edited; the
+checker must print that line.
 
 ## 2. Witnesses, censuses, differential (US1, US2)
 

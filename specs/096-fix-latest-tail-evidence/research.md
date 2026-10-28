@@ -23,18 +23,28 @@ ignores the v50sp2 tier that already exists for these MsgTypes.
 ## R-2 Where the witnesses live, and the shared machinery (FR-001..FR-003, `[const §VII.8]`)
 
 **Decision**:
-- Move 095's dictionary-independent machinery out of `tests/session/test_095_tail_rows_roundtrip.cpp`
-  into a new header, `tests/support/tail_rows_witness.hpp`, namespace `fixpp_test_support::tail_rows`,
-  every function `inline`, bodies byte-identical: `walk_status` and `to_string`, `RequiredGroup`,
-  `WalkResult`, `WalkMap`, the QuickFIX-XML `Walker` and its helpers, `msgtype_for_generated_name`,
-  `split_test_name`, `BodyEntry`/`BodyEnumeration`/`enumerate_body`, `value_at`, `parse_count`,
-  `required_members_missing`, `join`/`join_tags`, `drop_hyphen`, `parse_noting_refusal`, `Intent`,
-  and the readback comparator that `Tail095Fixture::check_witness` runs, lifted into a free function
-  that takes the walk map, the parsed view, the intent list and the test's own name. 095's fixture
-  then calls it. Its `TailRow` table, `SetUpTestSuite`, fixture class names, census, known positives
-  and witnesses stay in 095's TU.
-- One addition the vlatest leg needs: a `walk_status` value `wrapped_group` (R-4). The QuickFIX
-  `Walker` never returns it; `to_string` gains its case.
+- Move 095's machinery out of `tests/session/test_095_tail_rows_roundtrip.cpp` into a new header,
+  `tests/support/tail_rows_witness.hpp`, namespace `fixpp_test_support::tail_rows`. Moved: every
+  declaration of 095's TU from `enum class walk_status` through `join_tags` (the walk section, the
+  QuickFIX-XML `Walker`, `msgtype_for_generated_name`, `split_test_name`, the body enumeration,
+  `value_at`, `parse_count`, `tag_of_path`, `required_members_missing`, `join`, `join_tags`), and
+  `drop_hyphen`, `parse_noting_refusal` and `Intent`. What changes, and nothing else:
+  - each moved function gains a leading `inline` (it now lives in a header); bodies are unchanged;
+  - `walk_status` gains the value `wrapped_group` and `to_string` its case (R-4); the QuickFIX
+    `Walker` never returns it;
+  - `Tail095Fixture::check_witness` becomes a free function. Its statements are kept in order, with
+    three substitutions: the fixture's `tv()` and `walk()` become parameters, the fixture's
+    `read_arena_` becomes a `std::pmr::memory_resource*` parameter, and the expected MsgType, which
+    the method computed from `current_test_info()` with the QuickFIX-only
+    `msgtype_for_generated_name(doc(), …)`, becomes a `std::string_view` parameter (each tier maps a
+    test name to a MsgType through its own dictionary). 095's fixture method keeps its signature,
+    computes that MsgType as before and forwards.
+  095's `TailRow` table, `SetUpTestSuite`, fixture classes, census, known positives, selection check
+  and witnesses stay in its TU.
+- The guards on that refactor: 095's committed tests (deficient frames, 35=i, S1/S2, census,
+  23 witnesses), which run in the same binary after the move; quickstart §1's line check; and 096's
+  comparator mutants D, H, E and value-mismatch (contracts W6), which run through the shared
+  `check_witness` in the same binary.
 - 096's v50sp2 witnesses: new TU `tests/session/test_096_tail_rows_roundtrip.cpp`, a third source of
   the existing executable `test_077_allversions_builder_roundtrip` (it already links
   `fixpp::builders::v50sp2` and `pugixml::pugixml` and defines `FIXPP_DICT_DATA_DIR` and the golden

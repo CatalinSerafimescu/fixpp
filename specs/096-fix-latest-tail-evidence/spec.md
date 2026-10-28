@@ -273,9 +273,10 @@ command.
   - `[const §XVIII.2]`'s v1.2 bullet no longer names "new MsgTypes A-035..A-065"; it keeps the EP-level
     field additions. Its annotation's statements about ApplExtID(1156)=303 are row 4b's and stay as
     they are;
-  - `[const §XVIII.7]` names A-035 … A-065 as closed by feature 096 on `fixpp::v50sp2` and
-    `fixpp::vlatest`, and states that their MsgTypes are application messages of the vendored
-    `FIX50SP2.xml` and of the Orchestra file.
+  - `[const §XVIII.7]` names A-035 … A-065 as closed by feature 096 on both `fixpp::v50sp2` and
+    `fixpp::vlatest`, and states that their MsgTypes
+    are application messages of the vendored `FIX50SP2.xml` and of the Orchestra file. Its opening
+    sentence, which names the typed namespaces, is unchanged (data-model §F.2 gives the reason).
   The plan classifies the version bump under `[const §XX.4]`. The exact before → after text, the
   Status line and the Sync Impact Report are data-model's. The Status line and the Sync Impact Report
   read PENDING until the scoped Gate A rounds on the amended clauses converge, Gate B converges and

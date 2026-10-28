@@ -6,19 +6,23 @@ with `TailRows095` read as the suite named below and `FIX50SP2.xml`/`XmlLoader` 
 dictionary and loader.
 
 **W0 — the move (FR-003).** The items research R-2 lists leave `test_095_tail_rows_roundtrip.cpp`
-for `tests/support/tail_rows_witness.hpp` with byte-identical bodies (`inline` added, namespace
-`fixpp_test_support::tail_rows`), plus `walk_status::wrapped_group` and its `to_string` case.
-`check_witness`'s body becomes a free function `check_witness(WalkMap const&, IndexView const&,
-std::vector<std::byte> const& frame, Intent const&, std::string_view test_name, …)` with the same
-statements; 095's fixture method forwards to it. Verified by quickstart §1's body diff and by 095's
-suites passing unchanged; no 095 test, assertion or literal changes.
+for `tests/support/tail_rows_witness.hpp`, namespace `fixpp_test_support::tail_rows`, with exactly
+the changes R-2 lists: a leading `inline` on each moved function, `walk_status::wrapped_group` and
+its `to_string` case, and `check_witness` as a free function
+`check_witness(WalkMap const& walk, fixpp::dict::table_view const& tv, std::pmr::memory_resource* read_arena, std::string_view expected_mt, std::string const& body, Intent const& intent)`
+whose statements are the method's, in order, with `walk()`, `tv()`, `&read_arena_` and the computed
+expected MsgType replaced by those parameters. 095's fixture method forwards to it. No 095 test,
+assertion or literal changes. Verified by quickstart §1's line check and by 095's suites passing.
 
 **W1 — one per MsgType, per suite.** `TailRows096Census.EveryTailMsgTypeHasExactlyOneWitness` holds
 suite `TailRows096` to data-model §A's table, and
 `TailRows096LatestCensus.EveryTailMsgTypeHasExactlyOneWitness` holds `TailRows096Latest` to the same
 table, each mapping a generated name to its MsgType through its own tier's dictionary (`<message
-name=… msgtype=…>`; `fixr:message@name`/`@msgType`). Both are 095 W1 otherwise (registered tests,
-order-free, every finding collected before asserting; each witness asserts its parsed tag 35).
+name=… msgtype=…>`; `fixr:message@name`/`@msgType`). A census selects its suite by exact name,
+`test_suite_name() == "TailRows096"` (resp. `"TailRows096Latest"`), never by prefix:
+`TailRows096` is a prefix of `TailRows096Census`, `TailRows096Latest`, `TailRows096LatestCensus` and
+`TailRows096Differential`. Both are 095 W1 otherwise (registered tests, order-free, every finding
+collected before asserting; each witness asserts its parsed tag 35).
 
 **W2 — build.** v50sp2: `fixpp::v50sp2::build_<Name>`; vlatest: `fixpp::vlatest::build_<Name>`;
 each against its own walk's closure-required set (data-model §B, §C).
@@ -40,9 +44,10 @@ Orchestra walk's statuses and rules (data-model §B.2), W1's five census finding
 for each suite, W4's three directions and size assertion, W5's legs, the differential's paths
 (data-model §D) and its non-`ok` finding; each must have a row.
 
-*v50sp2 TU (`test_077_allversions_builder_roundtrip`).* 095's walk, comparator and presence legs are
-not re-armed: the code is 095's, moved byte-identically (W0), and 095's committed known positives
-(deficient frames, 35=i, S1/S2) keep running in its TU.
+*v50sp2 TU (`test_077_allversions_builder_roundtrip`).* 095's walk and presence legs get no new
+mutants here. What guards them after the move: 095's committed known positives (deficient frames,
+35=i, S1/S2) still run in the same binary, and the comparator mutants D, H, E and value-mismatch
+below run through the shared `check_witness`.
 
 | Output | Arm | Expected RED / assertion |
 |---|---|---|
