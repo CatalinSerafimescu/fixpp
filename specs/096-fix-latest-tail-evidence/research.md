@@ -94,9 +94,11 @@ MsgTypes against `golden.csv` (`TailRows096Census.FieldLegMatchesQuickFixCppGold
 frames, its 35=i fail-loud and its synthetic dictionaries keep re-running in 095's TU; they are not
 duplicated.
 
-**Measured input** (scratch walk applying 095's rules, re-derived by the tests at runtime): no tail
-MsgType reaches `nested_required_group`, `delimiter_chain` or `group_among_siblings` in
-`FIX50SP2.xml`. If the real walk disagrees at implement time, the Edge Cases stop rule applies.
+**Condition** (spec Edge Cases): every tail MsgType's walk status is `ok` on both legs.
+`TailRows096Differential.TailMsgTypesAgree` asserts it on every run: a non-`ok` status on either side
+is a `status` finding (data-model §D). The plan's scratch walk applied 095's rules before tasks were
+written; if the real walk yields a non-`ok` status for a tail MsgType, the Edge Cases stop rule
+applies.
 
 ## R-4 The Orchestra required-walk (FR-004)
 

@@ -351,11 +351,11 @@ Every other line of the block is fixed text, byte for byte the same in both stat
 | Slot | PENDING | RATIFIED |
 |---|---|---|
 | the header's last word | `PENDING` | `RATIFIED` |
-| opening span: from the line after the header up to, not including, the `  Bump:` line | first line fullmatches `  Pending\. Article XX §2 sequence.*`; every further line `    \S.*`; it may be filled in as each step completes | first line fullmatches `  Ratified\. Article XX §2 sequence observed in order: .*\S`; every further line `    \S.*`; in v4.1's form, it names each step's rounds and the sign-off |
-| review span: from the `  Review and sign-off:` line up to, not including, `-->` | first line fullmatches `  Review and sign-off: .*\S`; every further line `    \S.*` | the same, and its last line ends `owner sign-off {DATE}.` |
+| opening span: from the line after the header up to, not including, the `  Bump:` line | first line fullmatches `  Pending\. Article XX §2 sequence.*`; every further line `    \S.*`; it may be filled in as each step completes | first line fullmatches `  Ratified\. Article XX §2 sequence observed in order: .*\S`; every further line `    \S.*`; the span's lines, joined with one space, contain in this order `Gate A`, `Gate B` and `owner sign-off {DATE}`, and no `[filled` |
+| review span: from the `  Review and sign-off:` line up to, not including, `-->` | first line fullmatches `  Review and sign-off: .*\S`; every further line `    \S.*` | the same as PENDING; its joined lines contain in this order `Gate A`, `Gate B` and `owner sign-off {DATE}`, and no `[filled`; its last line ends `owner sign-off {DATE}.` |
 
 The header's date stays 2026-10-28 in both states. `{DATE}` is the owner's sign-off date,
-`YYYY-MM-DD`, the same here and at both places in the Status line.
+`YYYY-MM-DD`, the same in the opening span, the review span and at both places in the Status line.
 
 ### F.4 Status line (`> **Status:**`)
 
@@ -377,10 +377,11 @@ text, the 31 row IDs included.
 > **Status:** user-ratified **v4.2** ({DATE}) — backwards-compatible (Article XX §4 minor, no `CHANGELOG.md` entry); {REVIEW} owner sign-off {DATE}; amendment PR #{PR}. Article XVIII §2 drops A-035..A-065 from v1.2 and Article XVIII §7 records the rows A-035, A-036, A-037, A-038, A-039, A-040, A-041, A-042, A-043, A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052, A-053, A-054, A-055, A-056, A-057, A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065 as closed by feature 096 on `fixpp::v50sp2` and `fixpp::vlatest`. Rides feature 096; its PR is titled in Article XX §2 form. Prior:
 ```
 
-- `{DATE}`: the owner's sign-off date, the same at both places and in the Sync Impact Report's review
-  span (§F.3);
+- `{DATE}`: the owner's sign-off date, the same at both places and in the Sync Impact Report's
+  opening and review spans (§F.3);
 - `{REVIEW}`: free text naming the scoped Gate A rounds and Gate B, in v4.1's form (v4.1's reads
-  "scoped Codex Gate A on feature 095 converged (…), then Gate B and");
+  "scoped Codex Gate A on feature 095 converged (…), then Gate B and"); it contains `Gate A`, then
+  `Gate B`, and no `[filled` (the records checker holds this; v4.1's text meets it);
 - `{PR}`: the feature PR's number, the records checker's `PR`.
 
 The Status line is the file's only current-version marker; every other `v4.1` in the file is in

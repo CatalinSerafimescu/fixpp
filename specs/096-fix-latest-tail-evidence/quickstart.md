@@ -308,7 +308,8 @@ applied, so a wrong cell, a missing comment or an extra change prints:
     header names;
   - the Status line fullmatching the same state's §F.4 template, followed by one space and the
     merge-base Status text after `> **Status:** ` (the "Prior:" remainder); under RATIFIED the
-    Status line's two dates and the review span's sign-off date are one date, and `{PR}` is `$PR`;
+    Status line's two dates and the opening and review spans' sign-off date are one date, and
+    `{PR}` is `$PR`;
   - §XVIII.2's v1.2 bullet equal to its merge-base text with `(new MsgTypes A-035..A-065 +
     EP-level` → `(EP-level` and data-model §F.1's annotation appended;
   - §XVIII.7's line equal to its merge-base text with §F.2's sentence inserted after "A-033 and C-003
@@ -505,7 +506,7 @@ ST = {s: fenced("F.4", s) for s in ("PENDING", "RATIFIED")}
 if any(len(v) != 1 for v in ST.values()): sys.exit(f"{DM} §F.4: a Status template is not one line")
 def status_rx(state, prior):  # the state's template, one space, the base remainder, as one regex
     rx = re.escape(ST[state][0]).replace(re.escape("{DATE}"), r"(?P<date>\d{4}-\d{2}-\d{2})", 1)
-    rx = rx.replace(re.escape("{DATE}"), "(?P=date)").replace(re.escape("{REVIEW}"), r"\S.*")
+    rx = rx.replace(re.escape("{DATE}"), "(?P=date)").replace(re.escape("{REVIEW}"), r"(?!.*\[filled)\S.*\bGate A\b.*\bGate B\b.*")
     return rx.replace(re.escape("{PR}"), re.escape(PR)) + re.escape(" " + prior)
 
 b, h = base(TCON), head(CON)
@@ -548,6 +549,10 @@ if state:
     ok_r = bool(span_r) and re.fullmatch(REVIEW, span_r[0]) and all(re.fullmatch(CONT, l) for l in span_r[1:])
     if state == "RATIFIED" and ok_r and not span_r[-1].endswith(f" owner sign-off {date}."):
         ok_r = False
+    if state == "RATIFIED":  # each span names, in order, Gate A, Gate B and the dated sign-off (data-model §F.3)
+        ev = rf"(?s)(?!.*\[filled).*\bGate A\b.*\bGate B\b.*\bowner sign-off {date}\b.*"
+        ok_o = ok_o and bool(date) and bool(re.fullmatch(ev, " ".join(span_o)))
+        ok_r = ok_r and bool(date) and bool(re.fullmatch(ev, " ".join(span_r)))
     if any(s in l for l in span_o + span_r for s in ("{OPENING}", "{REVIEW}", "{DATE}")):
         ok_o = ok_r = False
     if not ok_o: fail("C", f"v4.2 report: the opening span does not fullmatch data-model §F.3's {state} slot")
@@ -609,8 +614,12 @@ GREEN prints nothing and exits 0. Controls, each recorded with what it printed a
 - **after the edits, PENDING** (scratch copies holding every edit, the constitution with data-model
   §F.3's PENDING block on top and the §F.4 PENDING Status line): exit 0;
 - **after the edits, at the RATIFIED flip** (the same, with §F.3's RATIFIED block and §F.4's RATIFIED
-  Status line, every slot filled: a multi-line opening span, a review span ending `owner sign-off
-  <date>.`, that date at both places in the Status line, a `{REVIEW}` text and `$PR`): exit 0;
+  Status line, every slot filled in v4.1's form: a multi-line opening span and a review span ending
+  `owner sign-off <date>.`, each naming Gate A, Gate B and `owner sign-off <date>` in that order,
+  that date at both places in the Status line, a `{REVIEW}` text naming Gate A then Gate B, and
+  `$PR`): exit 0; and a RATIFIED copy whose opening span, review span and `{REVIEW}` are v4.1's
+  own texts, read from its v4.0 → v4.1 report and Status line, with v4.1's sign-off date at both
+  Status positions and `$PR` kept: exit 0;
 - `PR=banana` and `PR=0`: each exits 1 before any family runs;
 - **after the edits**, on scratch copies, one perturbation per run, each exiting 1 with its family's
   message: (A) A-065's token changed to `[FIX44]`, its Title given `35=A` (Orchestra's Logon is
@@ -619,7 +628,13 @@ GREEN prints nothing and exits 0. Controls, each recorded with what it printed a
   §XVIII.7's sentence; the Status line left at v4.1; one line of the v4.2 report's fixed body
   deleted; the PENDING Status line cut after its date; an unrelated `MUST` → `MAY` (Article XII's
   `insecure_plain_tcp` bullet); in the RATIFIED copy, the Status line cut after its date; the whole
-  v4.0 → v4.1 report deleted; the Status line written with `...` in place of the 31 row IDs;
+  v4.0 → v4.1 report deleted; the Status line written with `...` in place of the 31 row IDs; three
+  RATIFIED copies whose slots carry no ratification content: the opening `Ratified. Article XX §2
+  sequence observed in order: x`, the review `Review and sign-off: x owner sign-off <date>.` and
+  `{REVIEW}` = `x`; the minimal flip, the PENDING opening with only `Pending. Article XX §2
+  sequence:` swapped to `Ratified. Article XX §2 sequence observed in order:` and the review
+  `[filled at each step]. owner sign-off <date>.`; an opening of `… observed in order: [filled at
+  each step].`;
   (D) the Conclusion line's comment altered; (E) `` `fixpp::v42`, `` removed from the widening;
   (F) a scratch copy of `tests/interop/` with a file holding `msg_type: "CW"`, others with
   `msg_type: CW`, `msg_type: 'CW'`, `build_QuoteAck(` and `"35=DS\x01"`, and `INTEROP` pointed at
