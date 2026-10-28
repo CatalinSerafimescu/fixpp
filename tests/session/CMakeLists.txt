@@ -3310,12 +3310,17 @@ if(TARGET fixpp_codegen_generate)
   if(FIXPP_CODEGEN_FIX_LATEST)
     add_executable(test_077_allversions_builder_roundtrip_vlatest
       test_077_allversions_builder_roundtrip_vlatest.cpp
+      # 096-fix-latest-tail-evidence: the vlatest witnesses of the FIX Latest tail rows, the
+      # Orchestra required-walk and their census join this executable; the census reads the
+      # registered tests of this binary.
+      test_096_tail_rows_roundtrip_vlatest.cpp
     )
     add_dependencies(test_077_allversions_builder_roundtrip_vlatest fixpp_codegen_generate)
     target_link_libraries(test_077_allversions_builder_roundtrip_vlatest PRIVATE
       fixpp_wire
       fixpp_dictionary
       fixpp::builders::vlatest
+      pugixml::pugixml
       GTest::gtest
       GTest::gtest_main
     )
@@ -3331,11 +3336,17 @@ if(TARGET fixpp_codegen_generate)
       # though this TU never calls it (uses load_dict()/OrchestraLoader
       # instead). Mirrors test_077_vlatest_builder_roundtrip's definition.
       "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+      # 096: the QuickFIX-cpp golden the Orchestra walk's field leg is compared with, read at
+      # test time (the same file as the v50sp2 target's).
+      "FIXPP_095_QUICKFIX_GOLDEN_CSV=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/golden.csv\""
     )
     add_test(NAME test_077_allversions_builder_roundtrip_vlatest
       COMMAND test_077_allversions_builder_roundtrip_vlatest)
     set_tests_properties(test_077_allversions_builder_roundtrip_vlatest PROPERTIES
       LABELS "077;us2;builder-roundtrip;vlatest;091")
+    # 096-fix-latest-tail-evidence: label 096 (expected-ctest-096.txt), appended after the last
+    # LABELS setter for this entry.
+    set_property(TEST test_077_allversions_builder_roundtrip_vlatest APPEND PROPERTY LABELS 096)
   endif()
 
   # ── 078-precompiled-builder-libs T021 [US1]: byte-identical wire round-trip
