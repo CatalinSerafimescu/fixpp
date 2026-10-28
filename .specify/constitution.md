@@ -31,7 +31,7 @@ Sync Impact Report — v4.1 → v4.2 (2026-10-28) — PENDING
     would contradict the catalogue (Article XVIII §4, Article XX §1).
   Affected catalogue rows: A-035 through A-065 (version, Spec ref, Status, /specify, PR, Tests,
     Verified; specs/096-fix-latest-tail-evidence/data-model.md §E).
-  Affected feature specs: specs/096-fix-latest-tail-evidence. Merged specs/<id>/ bundles stay as written.
+  Affected feature specs: specs/096-fix-latest-tail-evidence. Merged specs/<id>/ bundles stay as written. Companion document annotated by feature 096: .specify/architecture.md (§4.2, §4.3 and traceability-table markers, Appendix Z-11).
   Process: rides feature 096. Its PR is titled in Article XX §2 form, "Constitution: amend §XVIII.2,
     §XVIII.7 — FIX Latest tail rows A-035..A-065 delivered in v1.0 on v50sp2 and vlatest (v4.2) (+ 096
     FIX Latest tail evidence pass)", and its description states the change, the rationale and the

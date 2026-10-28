@@ -208,7 +208,7 @@ For each module: the public-facing types/functions, the design-doc that owns the
 **Catalogue rows:**
 
 - **Dictionary itself:** D-001..D-011, OSS-001, OSS-010.
-- **Application-message generated typed-message classes and `constexpr` field metadata** (typed-message *classes*; parse/serialise/validate behaviour belongs to wire §4.3): A-001..A-013 (order-management; codegen). A-014..A-034 (additional order-management variants; which of them have a typed tier, and under which namespace, is `[const §XVIII.7]`'s — ⚠️ **Z-10**). M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral/positions/account), R-001..R-005 (reg/IOI/news), N-001..N-003 (network counterparty / user request). Per `[const §XVIII]` the FIX-Latest range A-035..A-065 is post-1.0 and not owned by v1.0 codegen.
+- **Application-message generated typed-message classes and `constexpr` field metadata** (typed-message *classes*; parse/serialise/validate behaviour belongs to wire §4.3): A-001..A-013 (order-management; codegen). A-014..A-034 (additional order-management variants; which of them have a typed tier, and under which namespace, is `[const §XVIII.7]`'s — ⚠️ **Z-10**). M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral/positions/account), R-001..R-005 (reg/IOI/news), N-001..N-003 (network counterparty / user request). A-035..A-065 (the FIX-Latest-range rows; their milestone is `[const §XVIII.2]`'s and which typed tiers close them is `[const §XVIII.7]`'s — ⚠️ **Z-11**).
 - **Drop:** A-024 (catalogue note: duplicate of A-018 — recommend removing per `[SYN §4.4]`).
 
 ### 4.3 `wire`
@@ -232,7 +232,7 @@ For each module: the public-facing types/functions, the design-doc that owns the
 **Catalogue rows:**
 
 - **Wire infrastructure:** W-001..W-014, OSS-006..OSS-008, OSS-013.
-- **Application-message parse / serialise / validate behaviour** (the *typed classes themselves* are owned by dictionary/codegen §4.2; wire owns how their bytes go on/off the wire): A-001..A-034, M-001..M-012, P-001..P-008, C-001..C-003, R-001..R-005, N-001..N-003. Each generated typed message reuses the same `wire::Parser` / `wire::Writer` / `wire::Validator` infrastructure; the validator consumes `dict::FieldRef` metadata to enforce required/optional/conditional rules per message.
+- **Application-message parse / serialise / validate behaviour** (the *typed classes themselves* are owned by dictionary/codegen §4.2; wire owns how their bytes go on/off the wire): A-001..A-034, A-035..A-065 (⚠️ **Z-11**), M-001..M-012, P-001..P-008, C-001..C-003, R-001..R-005, N-001..N-003. Each generated typed message reuses the same `wire::Parser` / `wire::Writer` / `wire::Validator` infrastructure; the validator consumes `dict::FieldRef` metadata to enforce required/optional/conditional rules per message.
 
 ### 4.4 `session`
 
@@ -761,7 +761,7 @@ The remaining `SYNTHESIS §3` items are decided shape-wise at `[const]` and are 
 | Application messages — post-trade | `[FIX44 §...]` / `[FIX50SP2 §...]` post-trade tables | §4.2 codegen; §4.3 wire; P-001..P-008, C-001..C-003 |
 | Reg / IOI / news / network | `[FIX44 §...]` / `[FIX50SP2 §...]` regulatory and ancillary tables | §4.2 codegen; §4.3 wire; R-001..R-005, N-001..N-003 |
 | Conformance | `[FIX-TC §1]`..`[FIX-TC §20]` 20 official scenarios | §1.1 test-seam goal; §4.4 session interop suite; TC-001..TC-017 |
-| FIX-Latest application | `[FIX-Latest §...]` new MsgTypes A-035..A-065 | **Out of v1.0 scope**; v1.2 per `[const §XVIII.2]`; tracked in `coverage-index.md` Post-1.0 Gap Registry |
+| FIX-Latest application | `[FIX-Latest §...]` new MsgTypes A-035..A-065 | §4.2 codegen; §4.3 wire; A-035..A-065 — milestone per `[const §XVIII.2]`, typed tiers per `[const §XVIII.7]` (⚠️ **Z-11**) |
 
 Architectural decisions whose primary driver is engineering judgment rather than a specific spec section (the executor model, the ≤5-pure-virtual rule, the C-ABI legal isolation, the strand-stored trace context, the async-mutex discipline) cite `[const §X.y]` and `[SYN §3.x Q#]` inline at point of use; they are not spec normatives and are intentionally omitted from this appendix.
 
@@ -908,3 +908,14 @@ or an explicit `ON`), the export also carries, for each generated version (`v42`
 `FIXPP_CODEGEN_FIX_LATEST`), the STATIC pair `fixpp::builders::<ver>` / `fixpp::validators::<ver>`. A consumer links
 that pair by name; `fixpp::fixpp` does not reach it. The counts this file writes are the base set's, as 084/086
 measured it, and are history; a configured tree's `fixpp-export-names.txt` lists the current set.
+
+### Z-11 — §4.2, §4.3 and the traceability table placed A-035..A-065 outside v1.0
+
+§4.2 called the FIX-Latest range A-035..A-065 post-1.0 and not owned by v1.0 codegen; §4.3's wire
+inventory stopped before it; the traceability table put it out of v1.0 scope, in v1.2. Constitution
+v4.2 (feature 096) amends `[const §XVIII.2]` and `[const §XVIII.7]` for these rows. The clauses and the
+catalogue rows are the authority; this file does not restate which tiers close them or what stays
+post-1.0.
+
+**Re-derive:** `grep -n -E '^(2\. \*\*Post-1\.0 roadmap|7\. \*\*Application-message codegen scope)' .specify/constitution.md`
+for the two clauses; a row's state is its Status cell, `grep -n "^| A-0[3-6]" spec/feature-catalogue.md`.
