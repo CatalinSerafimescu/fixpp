@@ -147,6 +147,25 @@ edition, false of the vendored dictionary.
   member's type in the generated `vlatest/messages/<Name>.hpp` and its `group_begin` call in the
   matching `.builder.inl`, against the `std::optional` member of `v50sp2/messages/<Name>.hpp`.
 
+### Session 2026-10-28 (Gate A round 2)
+
+- Q: How is "the move changes no logic" (FR-003) checked, given that a normalising text diff hid
+  whitespace edits inside literals and never read 095's own TU? → A: The moved code sits in the
+  header between `// clang-format off` / `// clang-format on` lines and equals the merge-base region
+  under one stated transform (`inline` before each function head); `check_witness` equals the base
+  method under one stated transform; 095's TU equals its base minus exactly that code plus the
+  stated `#include`, `using` lines and forwarder. Each is a plain `diff` with positive and negative
+  controls (contracts W0, quickstart §1).
+- Q: How does the Orchestra walk report a `msgType` seen twice, given that the shared result type
+  gains no status? → A: Through an error string beside the map (`OrchestraWalk::error`, local to the
+  vlatest TU), which the fixture copies into `load_error`, failing every test of the suite in
+  `SetUp`; fragment S5 asserts the exact string (data-model §B.2).
+- Q: In what order does the differential report several findings? → A: It collects every finding of
+  every MsgType it is given, then sorts by MsgType, then path, each compared as a `std::string`
+  (data-model §D); synthetic pair M shows both the collection and the order (contracts W6).
+- Q: Does the vlatest TU reuse 095's deficient frames by copy? → A: Yes, byte for byte except the
+  `.expected` lists, which it re-derives from the Orchestra file; quickstart §1b diffs the copy.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Every tail MsgType has a named, complete witness on each tier (Priority: P1)

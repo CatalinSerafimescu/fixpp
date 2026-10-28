@@ -8,6 +8,7 @@
 (Filled by `/gate-a`.)
 
 - Round 1 applied 2026-10-28: Codex P1=1 P2=5 P3=1; Opus post-judging P1=0 P2=6 P3=11; rewrite addresses root causes RC-1..RC-4 (+ per-finding fixes). Reviews: research/reviews/codex_096-fix-latest-tail-evidence_gate_a_review.md, research/reviews/opus_096-fix-latest-tail-evidence_gate_a_adversarial_review.md.
+- Round 2 applied 2026-10-28: Codex P1=1 P2=3 P3=1; Opus post-judging P1=0 P2=3 P3=6; rewrite addresses root causes RC-1..RC-3 (+ per-finding fixes). Reviews: research/reviews/codex_096-fix-latest-tail-evidence_gate_a_2_review.md, research/reviews/opus_096-fix-latest-tail-evidence_gate_a_2_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -29,12 +30,48 @@ written, the reason is recorded so a later round does not re-raise it:
   inheritance mismatch, and the move then changes no declaration (spec Clarifications, Gate A
   round 1).
 
+### Round 2 — disagreements
+
+The Opus review marks no Codex finding Disagree; it downgrades G096-R2-001 (P1→P2), G096-R2-003
+(P2→P3) and G096-R2-004 (P2→P3), and every finding is applied. Where a fix differs from a
+counter-proposal, the reason is recorded:
+- **G096-R2-001**: neither a C++ tokenizer (Codex) nor a literal-exact leg beside `norm()` (Opus's
+  fallback). `norm()` is deleted: the region sits between `// clang-format off` / `on` lines, so the
+  header leg is a byte-exact `diff` against the base region under one stated transform (Opus RC-1's
+  preferred route). The lint scope was measured first: pre-commit's clang-format honours the markers,
+  clang-tidy's `HeaderFilterRegex` excludes `tests/support/`, and no workflow runs clang-format or a
+  line-length check (quickstart §1 gives the re-checks).
+- **G096-R2-002 / G096-R2-005**: applied as proposed (pair M; fragment S6 with a required decoy
+  rather than dropping "start" from the list, the brief's choice). Pair M also carries the
+  one-sided-group rule, which had no arm either.
+- **N4**: the frames are not moved into the header (that would edit 095's known positive, which the
+  residual leg forbids); the vlatest TU copies the block byte for byte except the `.expected` lists
+  and quickstart §1b diffs it.
+
+### Round 2 — decisions
+
+- **The carry-over of 095's presence-leg mutants L, M, N, P is kept, now on a sound gate.** Round 1
+  recorded "no per-leg mutants re-run in the vlatest binary" (G096-002 above) conditional on
+  quickstart §1 reading clean; round 2 showed that gate blind on two axes (literal whitespace, and
+  095's own TU). With the gate rebuilt, the header's functions are 095's base bytes plus `inline`,
+  and 095's TU is its base minus exactly those bytes plus the stated `#include`, `using` lines and
+  forwarder, each checked by an exact `diff` with its controls. `inline` and the namespace change no
+  function's behaviour, so 095's verify-record RED for L, M, N and P holds for the same code in both
+  binaries; a re-run would prove the same function again. A non-empty quickstart §1 leg voids the
+  carry-over (contracts W6).
+- **`using fixpp_test_support::parse_dict;` leaves 095's TU.** Its only users move; kept, clang-tidy's
+  `misc-unused-using-decls` fails it under `WarningsAsErrors` (measured on a scratch residual TU).
+- **The duplicate-`msgType` channel** is an error string beside the map (`OrchestraWalk::error`),
+  copied into the fixture's `load_error`; no `walk_status` value is added, so W0 stays
+  declaration-neutral, and no `ADD_FAILURE` is raised in `SetUpTestSuite`.
+
 ## Summary
 
 Close A-035..A-065 on 095's offline bar on both typed tiers. Tests only, plus records:
 - move 095's dictionary-independent witness machinery into `tests/support/tail_rows_witness.hpp`
-  as a pure move: no statement, name or status changes; contracts W0 states the allowed class of
-  mechanical changes and quickstart §1 checks it two ways (research R-2);
+  as a pure move: no statement, name or status changes; contracts W0 fixes the moved bytes by two
+  stated transforms and quickstart §1 checks the header and 095's residual TU with exact `diff`s
+  (research R-2);
 - 31 v50sp2 witnesses, their census and a golden field-leg check in a new TU of the existing
   `test_077_allversions_builder_roundtrip` binary (R-3);
 - an independent Orchestra required-walk, 31 vlatest witnesses, their census, its known positives
@@ -48,7 +85,7 @@ No production code, no codegen change, no new executable, no live cell.
 
 ## Technical Context
 
-**Language/Version**: C++23 (tests), Bash/awk (records checks)
+**Language/Version**: C++23 (tests), Bash/awk and Python 3 (move and records checks)
 **Primary Dependencies**: GoogleTest, pugixml (both already linked by the v50sp2 binary; pugixml added
 to the vlatest binary), `fixpp_wire`, `fixpp_dictionary` (`XmlLoader`, `OrchestraLoader`),
 `fixpp::builders::v50sp2`, `fixpp::builders::vlatest`
@@ -67,7 +104,7 @@ writes no library code (the implementer writes every test and CMake line)
 | Clause | Status |
 |---|---|
 | `[const §I.3]` | The feature removes 31 rows from the open set; SC-004 re-derives it. |
-| `[const §VI.2]` | Every tail row's Spec ref but A-037's and A-038's corrected to the v4.1 message-level form; data-model §E's script checks all 31. |
+| `[const §VI.2]` | Every tail row's Spec ref but A-037's and A-038's corrected to the v4.1 message-level form; quickstart §5a's records checker (family A) checks all 31. |
 | `[const §VI.4]` | Each tail MsgType keeps its existing coverage-index row and gains its witnesses; the superseded scope text is commented in place (FR-013). |
 | `[const §VI.5]` | spec Normative References lists section entries and the message-level refs. |
 | `[const §VI.6]` | (a) this bundle; (b) the witnesses; (c) Gate B; (d) Gate A runs (non-trivial: a new walker and an amendment). |
@@ -118,7 +155,7 @@ spec/behaviors-and-limitations.md                      MOD  — L-069-1 widened 
 - **P0 — setup.** `expected-ctest-096.txt`; baseline: both binaries build and pass at the branch's
   base; record the vlatest TU's compile RSS method (R-9).
 - **P1 — the move (W0).** Header created, 095's TU forwards; build; 095's suites pass; quickstart §1
-  prints nothing, and its controls each print. Commit alone.
+  exits 0, and its controls each exit 1 with their leg's line. Commit alone.
 - **P2 — v50sp2 leg.** The 096 v50sp2 TU: literal table, census, golden field-leg check, then the 31
   witnesses. Census and golden check first, RED against an empty witness set (the census reports 31
   multiplicity-0 findings), then witnesses until GREEN. W6 v50sp2 arms.
@@ -129,8 +166,8 @@ spec/behaviors-and-limitations.md                      MOD  — L-069-1 widened 
   then `TailMsgTypesAgree`. A tail difference stops the implementer (FR-012).
 - **P5 — amendment.** Constitution v4.2, PENDING (orchestrator; `.specify/*.md` is documentation).
   Scoped Codex Gate A round on §XVIII.2/§XVIII.7.
-- **P6 — records.** Catalogue, coverage index, B&L (orchestrator), after P5; data-model §E's script
-  RED before, GREEN after; quickstart §5.
+- **P6 — records.** Catalogue, coverage index, B&L (orchestrator), after P5; quickstart §5a's
+  records checker RED before, GREEN after, with its perturbation arms; quickstart §5b and §5c.
 - **P7 — verify, Gate B, owner sign-off, RATIFIED flip last, PR, labels, merge.**
 
 The orchestrator writes P5/P6 (Markdown records). Every `.cpp`, `.hpp`, CMake and `.txt` change in
@@ -144,9 +181,9 @@ P0–P4 is the implementer's.
   the implementer stops at P3; the frame is not adapted silently.
 - **vlatest TU compile cost**: measured alone at P3 before the full build; above 8 GiB peak RSS the
   implementer stops (split the TU by row range as the fallback, orchestrator's call).
-- **The move changes behaviour**: guarded by quickstart §1's normalised two-way diff (an edited
-  token and an inserted statement each print; a correct clang-formatted move reads clean) and by
-  095's suites.
+- **The move changes behaviour**: guarded by quickstart §1's byte-exact legs (header region,
+  `check_witness`, 095's residual TU, the forwarder; whitespace inside a literal, a deleted 095
+  assertion and a left-behind copy each print, a correct move reads clean) and by 095's suites.
 
 ## Complexity Tracking
 

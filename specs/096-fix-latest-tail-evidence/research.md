@@ -35,16 +35,19 @@ ignores the v50sp2 tier that already exists for these MsgTypes.
   through `join_tags` (the walk section, the QuickFIX-XML `Walker`, `msgtype_for_generated_name`,
   `split_test_name`, the body enumeration, `value_at`, `parse_count`, `tag_of_path`,
   `required_members_missing`, `join`, `join_tags`), then `drop_hyphen`, `parse_noting_refusal` and
-  `Intent`. 095's `using fixpp_test_support::…` declarations stay in its TU: the header's namespace
-  is nested in `fixpp_test_support`, so the moved code sees those names unqualified. What may change
-  is a class, not a list (contracts W0):
-  - outside the moved region: the header's `#pragma once`, `#include`s, namespace wrapper and
-    comments, and in 095's TU the header's `#include`, `using` declarations and the forwarding body;
-  - inside it: a leading `inline` on each function (it now lives in a header), and whitespace,
-    line breaks and comments as clang-format reflows them. No statement, name, type or literal
-    changes, and `walk_status` keeps its values;
-  - `Tail095Fixture::check_witness` becomes a free function. Its statements are kept in order, with
-    three substitutions: the fixture's `tv()` and `walk()` become parameters, the fixture's
+  `Intent`. 095's `using fixpp_test_support::…` declarations stay in its TU, except
+  `using fixpp_test_support::parse_dict;`, which goes because only moved code uses it; the header's
+  namespace is nested in `fixpp_test_support`, so the moved code sees those names unqualified. What
+  may change is fixed byte for byte by two stated transforms (contracts W0):
+  - outside the moved region: the header's `#pragma once`, `#include`s, namespace wrapper, comment
+    and blank lines; in 095's TU the header's `#include`, `using` lines naming
+    `fixpp_test_support::tail_rows`, comment lines naming the header, and the forwarding method;
+  - inside it: the region sits between `// clang-format off` / `// clang-format on` lines, so no
+    formatter reflows it, and differs from the base only by a leading `inline` on each function head
+    (it now lives in a header). No statement, name, type, literal or comment changes, and
+    `walk_status` keeps its values;
+  - `Tail095Fixture::check_witness` becomes a free function. Its statements are kept in order,
+    four columns less indented (it leaves the class body), with three substitutions: the fixture's `tv()` and `walk()` become parameters, the fixture's
     `&read_arena_` becomes a `std::pmr::memory_resource*` parameter, and the statement that computed
     the expected MsgType from the test name with the QuickFIX-only `msgtype_for_generated_name(doc(),
     …)` is dropped in favour of a `std::string_view expected_mt` parameter (each tier maps a test
@@ -53,8 +56,8 @@ ignores the v50sp2 tier that already exists for these MsgTypes.
   095's `TailRow` table, `SetUpTestSuite`, fixture classes, census, known positives, selection check
   and witnesses stay in its TU.
 - The guards on that refactor: 095's committed tests (deficient frames, 35=i, S1/S2, census and
-  witnesses), which run in the same binary after the move; quickstart §1's normalised two-way diff
-  of the moved region and of `check_witness`, with its controls; and 096's
+  witnesses), which run in the same binary after the move; quickstart §1's byte-exact diffs of the
+  header region, of `check_witness` and of 095's residual TU, with their controls; and 096's
   comparator mutants D, H, E and value-mismatch (contracts W6), which run through the shared
   `check_witness` in the same binary.
 - 096's v50sp2 witnesses: new TU `tests/session/test_096_tail_rows_roundtrip.cpp`, a third source of
@@ -123,15 +126,18 @@ Rules (spec Terminology), resolved against the file's structure:
   the group not required, and if 095's walk inherits required-ness through the QuickFIX form of
   the same group, the differential reports it (spec Clarifications, Gate A round 1);
 - a `msgType` seen twice fails the walk loudly (fragment S5), unlike 095's `Walker::walk_all`, which
-  assigns by key;
+  assigns by key. The channel is an error string beside the map (`OrchestraWalk::error`, data-model
+  §B.2), copied into the fixture's `load_error`, so no `walk_status` value is added;
+- a reference outside `fixr:structure` is not walked (fragment S6's decoy);
 - a group in `element` is named by its count field's name (the `fixr:field@name` of its
   `fixr:numInGroup id`), which is how 095's walk names it, so a status's element reads the same on
   both legs.
 
 **Input to the decision to reuse 095's frames**: the vlatest known positives reuse 095's frames
 (R-6) because 35=E's and 35=CC's required shapes, and 35=i's nested required group, were found the
-same in both files when this plan was written. Re-derive with data-model §B.2's `awk` recipe on
-both files. No committed test compares the two files' shapes; a frame that the parser refuses or
+same in both files when this plan was written. Re-derive: on the Orchestra file with data-model
+§B.2's `awk` recipe; on `FIX50SP2.xml` with the `sed` lines of the "To re-derive one by hand"
+recipe in the header comment of 095's TU (095 data-model §B). No committed test compares the two files' shapes; a frame that the parser refuses or
 splits otherwise under the Orchestra dictionary stops the implementer (contracts W6).
 
 **Alternatives**: read required-ness from the `Dictionary` that `OrchestraLoader` builds: circular
@@ -163,8 +169,8 @@ loader is the production reader of that file and is not the builder.
   E-nodelim, CC-nodelim, CC-nested, CC-count2), parsed under the Orchestra dictionary and checked
   with `required_members_missing` over the Orchestra walk, each against its exact list re-derived from
   the Orchestra file (data-model §B.2 gives the recipe); and 35=i's `nested_required_group`.
-- **`delimiter_chain`, the componentRef AND and the duplicate-`msgType` rule**: synthetic Orchestra
-  fragments S2, S4 and S5 (`load_string`) fed to `OrchestraWalker`.
+- **`delimiter_chain`, the componentRef AND, the duplicate-`msgType` rule and the start node**:
+  synthetic Orchestra fragments S2, S4, S5 and S6 (`load_string`) fed to `OrchestraWalker`.
 - **Delimiter rule, both emission kinds**: a nested-group emission has frame CC-nodelim; a
   component emission has a measured tail positive, 35=DP, whose required group's first child is a
   `fixr:componentRef` that supplies the delimiter, so its arm runs through `TailMsgTypesAgree`
@@ -180,10 +186,12 @@ loader is the production reader of that file and is not the builder.
 - **Differential non-`ok` path**: `TailRows096Differential.KnownNonOk_MassQuote` — 35=i, where both
   walks return `nested_required_group` (R-4's input above), yields exactly one `status` finding.
 - **Differential group, delimiter, instance-member and `delim_group` paths**: synthetic pairs of
-  fragments, one pair per path, identical but for that path. They are synthetic because no MsgType
-  common to both files was found to differ on those paths when this plan was written; re-derive by
-  running the comparator over the MsgTypes common to both files (a scratch run, not a committed
-  assertion). If a measured difference appears later, it stands in for the synthetic pair.
+  fragments, one pair per path, identical but for that path. They are synthetic because no measured
+  source was selected for those paths (FR-009's stated limit); a measured difference may replace a
+  pair later.
+- **Differential collect-every-difference, sort and one-sided-group rules**: synthetic pair M, two
+  MsgTypes passed out of order with several differences across paths (contracts W6); the 35=W and
+  35=i positives each carry one finding and cannot show either rule.
 
 **Rationale**: every output is shown able to fire (spec FR-009); a measured source stands where one
 exists; a synthetic fragment stands only where none does, and the witness contract says which.

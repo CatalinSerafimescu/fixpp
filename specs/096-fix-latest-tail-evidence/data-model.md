@@ -65,9 +65,10 @@ once in the vlatest fixture's `SetUpTestSuite`; the synthetic arms pass `load_st
 the same entry point. Its output feeds the same `required_members_missing` and readback comparator.
 
 ```
-walk(doc) -> WalkMap                       # keyed by fixr:message@msgType
-  keys:       a msgType seen twice fails the walk loudly, naming it (no last-writer-wins)
-  start:      fixr:message/fixr:structure
+walk_all() -> OrchestraWalk{WalkMap walk; std::string error}   # walk keyed by fixr:message@msgType
+  keys:       a msgType seen twice sets error = "duplicate fixr:message msgType <MT>" (no
+              last-writer-wins); error is empty otherwise
+  start:      fixr:message/fixr:structure (a reference outside it is not walked)
   fieldRef:   tag = @id;  required on the path iff every element on it has presence="required"
   componentRef: resolve @id in fixr:components; skip StandardHeader / StandardTrailer; AND its presence
   groupRef:   resolve @id in fixr:groups; count_tag = fixr:numInGroup/@id; AND its presence
@@ -80,6 +81,12 @@ walk(doc) -> WalkMap                       # keyed by fixr:message@msgType
 
 - `nested_required_group`: a required group inside a required group's instance;
 - `delimiter_chain`: `delim_group`'s own delimiter is again a count tag.
+
+The duplicate-`msgType` rule reports through `OrchestraWalk::error`, a type local to the vlatest TU,
+so the shared `WalkMap`, `WalkResult` and `walk_status` stay as W0 moves them. The fixture's
+`SetUpTestSuite` copies a non-empty `error` into its `load_error`, so `SetUp` fails every test of the
+suite with it (095's fixture pattern; no `ADD_FAILURE` in `SetUpTestSuite`, which throws under
+`--gtest_throw_on_failure`). Fragment S5 asserts the exact string (contracts W6).
 
 A required `fixr:componentRef` whose component holds only a non-required `fixr:groupRef` gets no
 status: the path rule makes that group not required (spec Clarifications, Gate A round 1).
@@ -95,7 +102,8 @@ awk '/<fixr:component id="<ID>"/,/<\/fixr:component>/'   dictionaries/orchestra/
 
 applying the rules above to each element on the path (35=E → its `NoOrders` group; 35=CC → its
 `NoAsgnReqs` group → `Parties`), ordering the paths by 095 §B's sequence rule. Each TU asserts its
-own literal for each frame; neither copies the other's.
+own expected list for each frame; neither copies the other's lists. The frame bodies are 095's,
+copied byte for byte into the vlatest TU (quickstart §1b).
 
 ## C. Chosen values and the intent list (per witness)
 
@@ -117,7 +125,7 @@ rule for a required group with no string or int member.
 ## D. Cross-dictionary differential
 
 ```
-diff(mt) -> vector<Finding>        # collected, then asserted empty for every tail MsgType
+diff(qf_walk, orch_walk, msg_types) -> vector<Finding>   # every finding of every given MsgType, then sorted
 Finding: { msg_type, path, fix50sp2, orchestra }   # the value each dictionary holds at path
 compared, by tag:                                        path                      each value
   message-level required fields                          <tag>                     required | absent
@@ -131,14 +139,18 @@ compared, by tag:                                        path                   
 A finding is emitted only where the two values differ, except `status`: when either side's status
 is not `ok`, that MsgType yields exactly one `status` finding carrying both sides' values and no
 other finding, since its sets are not comparable. A group required on one side only yields its
-`<count_tag>` finding and no member, delimiter or `delim_group` finding. The comparator lists every
-finding, sorted by MsgType, then path. Each finding is printed whole; a test asserting a finding
-compares the whole struct.
+`<count_tag>` finding and no member, delimiter or `delim_group` finding. The comparator collects
+every finding of every MsgType it is given before it returns, then sorts them by `msg_type`, then
+`path`, each compared as a `std::string` (`operator<`, so `"1865"` sorts before `"779"` and
+`"9100[*].9104"` before `"9102"`). `TailMsgTypesAgree` passes the 31 tail MsgTypes and asserts the
+result empty; each known positive passes its own MsgTypes. Each finding is printed whole; a test
+asserting a finding compares the whole struct.
 
 Known positives (research R-6), each a W7 exception re-run on every invocation: 35=W yields exactly
 `[{W, 779, required, absent}]`; 35=i yields exactly one `status` finding whose two values are
 `nested_required_group NoQuoteEntries`. Synthetic pairs drive the group, delimiter, instance-member
-and `delim_group` paths (contracts W6).
+and `delim_group` paths, and pair M drives collect-every-difference, the sort and the one-sided-group
+rule (contracts W6).
 
 ## E. Catalogue edits (US3)
 
@@ -162,53 +174,15 @@ these rows, and no other row, changes.
 | A-063, A-064 | CN, CO | SecuritiesReferenceData / PreTrade | `[FIX-Latest] Pre Trade — Securities Reference Data` | `[FIX-Latest] Pre-Trade — Securities Reference Data` |
 | A-065 | CW | QuotationNegotiation / PreTrade | `[FIX-Latest] Pre Trade — Quotation Negotiation` | `[FIX-Latest] Pre-Trade — Quotation Negotiation` |
 
-**Re-check the 31 refs against `[const §VI.2]`** (run from the library root as `bash`; `CAT` may point
-at a scratch copy). It reads each row's MsgType from its Title (`35=<MT>`), as the clause does, and
-checks: the token is `FIX-Latest` (registry leg; the DocAbbrev Registry lists it); the Orchestra file
-defines the MsgType once with a category that is not `Session` (application-message leg); the ref is
-`<category words>` or `<section words> — <category words>`, where `<section words>` are those of that
-category's `section` (category leg). `words()` is the clause's rule: a space before each capital but
-the first.
-
-```bash
-CAT=${CAT:-spec/feature-catalogue.md}
-O=dictionaries/orchestra/OrchestraFIXLatest.xml
-col() {   # 095 quickstart §7's: column $2 of the one well-formed row with ID $1
-  awk -F'|' -v want="$1" -v c="$2" '{id=$2; gsub(/ /,"",id)} id==want {n++; nf=NF; v=$c}
-    END {gsub(/^ +| +$/,"",v); if (n!=1 || nf!=13) exit 1; print v}' "$CAT"
-}
-words() { sed 's/\([A-Z]\)/ \1/g; s/^ //'; }
-bad=0
-for n in $(seq 35 65); do
-  id=$(printf 'A-%03d' "$n")
-  ref=$(col "$id" 7) || { echo "$id: not exactly one well-formed row"; bad=1; continue; }
-  tok=$(printf '%s\n' "$ref" | sed -n 's/^\[\([A-Za-z0-9-]*\)\] .*/\1/p'); words_ref=${ref#*] }
-  test "$tok" = FIX-Latest || { echo "$id: token '$tok' is not FIX-Latest"; bad=1; continue; }
-  mts=$(col "$id" 5 | grep -o '35=[A-Za-z0-9]*' | cut -d= -f2)
-  test -n "$mts" || { echo "$id: Title names no 35=<MT>"; bad=1; continue; }
-  for mt in $mts; do
-    m=$(grep -o "<fixr:message [^>]*msgType=\"$mt\"[^>]*>" "$O")
-    test "$(printf '%s\n' "$m" | grep -c .)" = 1 || { echo "$id $mt: not one Orchestra message"; bad=1; continue; }
-    c=$(printf '%s\n' "$m" | grep -o 'category="[^"]*"' | cut -d'"' -f2)
-    test -n "$c" -a "$c" != Session || { echo "$id $mt: category '$c' is not an application category"; bad=1; continue; }
-    s=$(grep -o "<fixr:category [^>]*name=\"$c\"[^>]*>" "$O" | grep -o 'section="[^"]*"' | cut -d'"' -f2)
-    cw=$(printf '%s\n' "$c" | words); sw=$(printf '%s\n' "$s" | words)
-    test "$words_ref" = "$cw" -o "$words_ref" = "$sw — $cw" \
-      || { echo "$id $mt: Orchestra '$s — $c', ref names '$words_ref'"; bad=1; }
-  done
-done
-exit $bad
-```
-
-Its RED arms, each recorded with what it printed:
-- **positive control, before the catalogue edits:** on the unedited catalogue it exits 1 and flags
-  every tail row except A-037 and A-038, and no other row;
-- after the edits, on a scratch copy, one perturbation per run, each exiting 1 with its leg's
-  message: (a) A-065's token changed to `[FIX44]` (registry leg); (b) A-065's Title given `35=A`
-  (application-message leg: Orchestra's Logon is category `Session`); (c) A-065's ref written
-  `Pre-Trade — Quotation Negotiation` (category leg, the hyphen spelling).
-
-After the edits it exits 0.
+**Re-check the 31 refs against `[const §VI.2]`**: family A of quickstart §5a's records checker. It
+reads each row's MsgType from its Title (`35=<MT>`), as the clause does, and checks: the token is
+`FIX-Latest` (registry leg; the DocAbbrev Registry lists it); the Orchestra file defines the MsgType
+once with a category that is not `Session` (application-message leg); the ref is `<category words>`
+or `<section words> — <category words>`, where `<section words>` are those of that category's
+`section` (category leg). A word break is a space before each capital but the first (the clause's
+"identifier's words" rule). Its RED arms are quickstart §5a's: before the edits it flags every tail
+row except A-037 and A-038, and the three family-A perturbations each exit 1 with their leg's
+message. The same checker holds every other cell below to its template (families B–E).
 
 **Tests cells**: `` `tests/session/test_096_tail_rows_roundtrip.cpp`: `TailRows096.<RowId>_<Name>`; `tests/session/test_096_tail_rows_roundtrip_vlatest.cpp`: `TailRows096Latest.<RowId>_<Name>`, `TailRows096Differential.TailMsgTypesAgree` ``.
 
@@ -271,8 +245,9 @@ A-028, A-029, A-030, A-031, A-032, A-033 and C-003 on it.":
 
 Each row is written out by its ID, never as a range: the opening sentence scopes "the further A-
 rows this clause names below, by row ID", and the ratified v4.1 text named each of 095's rows
-individually (the v4.1 Sync Impact Report's range spellings are history, not the clause). Quickstart
-§5 checks that each of the 31 IDs appears in the clause.
+individually (the v4.1 Sync Impact Report's range spellings are history, not the clause). Family C
+of quickstart §5a's records checker holds §XVIII.7's line to its merge-base text with this sentence
+inserted, byte for byte, and §XVIII.2's bullet likewise to F.1's after-text.
 
 ### F.3 Sync Impact Report — a new first comment block, above the v4.0 → v4.1 block
 
@@ -328,8 +303,9 @@ A-044, A-045, A-046, A-047, A-048, A-049, A-050, A-051, A-052, A-053, A-054, A-0
 A-058, A-059, A-060, A-061, A-062, A-063, A-064 and A-065 as closed by feature 096 on
 `fixpp::v50sp2` and `fixpp::vlatest`.
 Rides feature 096; its PR is titled in Article XX §2 form. Prior: ` — and at the RATIFIED flip,
-`PENDING` becomes `user-ratified` and the review/sign-off clause is inserted after the date, in
-v4.1's form.
+`PENDING` becomes `user-ratified`, the date becomes the sign-off date and the review/sign-off clause
+is inserted after it, in v4.1's form; the Sync Impact Report header keeps 2026-10-28 and its
+`PENDING` becomes `RATIFIED` (quickstart §5a family C accepts either state, never a mix).
 
 The Status line is the file's only current-version marker; every other `v4.1` in the file is in
 the v4.0 → v4.1 Sync Impact Report, which is history and stays as written (re-check with
