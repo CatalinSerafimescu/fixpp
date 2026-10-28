@@ -89,12 +89,14 @@
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <ostream>
 #include <pugixml.hpp>
 #include <set>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -401,6 +403,189 @@ OrchestraWalk walk_fragment(char const* xml) {
     }
     return OrchestraWalker{d}.walk_all();
 }
+
+// ── The cross-dictionary differential (data-model §D) ────────────────────────
+//
+// THE RULE: for each given MsgType, the QuickFIX walk of FIX50SP2.xml and the Orchestra walk are
+// compared by tag, and a finding carries the value each dictionary holds at a path where they
+// differ:
+//   - message-level required fields, path <tag>, value required | absent;
+//   - required groups by count tag, path <count_tag>, value required | absent;
+//   - for a group required on both sides only: its delimiter, path <count_tag>/delim, the
+//     delimiter tag; its instance members, path <count_tag>[*].<tag>, required | absent; its
+//     nested delimiter group, path <count_tag>/delim_group, "<count>,<delim>" | none;
+//   - a walk status other than ok on either side gives that MsgType exactly one finding, path
+//     status, value "<status> <element>" | ok, and no other finding. (claim-ok: the rule)
+// Every finding of every given MsgType is collected, then sorted by MsgType, then path, each as a
+// std::string. A MsgType absent from either walk fails the calling test.
+// To re-derive one MsgType's values by hand, apply this TU's rule above to the Orchestra file and
+// the rule in the header comment of test_095_tail_rows_roundtrip.cpp to FIX50SP2.xml:
+//   sed -n "/<message name='<Name>'/,/<\/message>/p" dictionaries/FIX50SP2.xml
+//   awk '/<fixr:message [^>]*msgType="<MT>"/,/<\/fixr:message>/' "$O"
+// with O as in this file's header comment.
+
+struct Finding {
+    std::string msg_type;
+    std::string path;
+    std::string fix50sp2;
+    std::string orchestra;
+    bool operator==(Finding const&) const = default;
+};
+
+void PrintTo(Finding const& f, std::ostream* os) {
+    *os << '{' << f.msg_type << ", " << f.path << ", " << f.fix50sp2 << ", " << f.orchestra << '}';
+}
+
+std::string status_value(WalkResult const& r) {
+    if (r.status == walk_status::ok) return "ok";
+    return std::string{to_string(r.status)} + " " + r.element;
+}
+
+std::string presence_value(bool required) { return required ? "required" : "absent"; }
+
+std::string delim_group_value(RequiredGroup const& g) {
+    if (!g.delim_group) return "none";
+    return std::to_string(g.delim_group->first) + "," + std::to_string(g.delim_group->second);
+}
+
+std::vector<std::uint16_t> count_tags(WalkResult const& r) {
+    std::vector<std::uint16_t> out;
+    out.reserve(r.groups.size());
+    for (RequiredGroup const& g : r.groups) out.push_back(g.count_tag);
+    return out;
+}
+
+RequiredGroup const* find_group(WalkResult const& r, std::uint16_t count_tag) {
+    auto const it = std::ranges::find_if(
+        r.groups, [&](RequiredGroup const& g) { return g.count_tag == count_tag; });
+    return it == r.groups.end() ? nullptr : &*it;
+}
+
+// One finding per tag required on exactly one side, at path `prefix` + the tag.
+void compare_tags(std::string const& mt, std::string const& prefix,
+                  std::vector<std::uint16_t> const& qf, std::vector<std::uint16_t> const& orch,
+                  std::vector<Finding>& out) {
+    std::set<std::uint16_t> tags(qf.begin(), qf.end());
+    tags.insert(orch.begin(), orch.end());
+    for (std::uint16_t const t : tags) {
+        bool const in_qf = std::ranges::find(qf, t) != qf.end();
+        bool const in_orch = std::ranges::find(orch, t) != orch.end();
+        if (in_qf != in_orch) {
+            out.push_back({.msg_type = mt,
+                           .path = prefix + std::to_string(t),
+                           .fix50sp2 = presence_value(in_qf),
+                           .orchestra = presence_value(in_orch)});
+        }
+    }
+}
+
+void compare_msgtype(std::string const& mt, WalkResult const& qf, WalkResult const& orch,
+                     std::vector<Finding>& out) {
+    // A non-ok status on either side: one status finding, no other. (claim-ok: the rule)
+    if (qf.status != walk_status::ok || orch.status != walk_status::ok) {
+        out.push_back({.msg_type = mt,
+                       .path = "status",
+                       .fix50sp2 = status_value(qf),
+                       .orchestra = status_value(orch)});
+        return;
+    }
+    // Message-level required fields.
+    compare_tags(mt, "", qf.fields, orch.fields, out);
+    // Required groups, by count tag.
+    compare_tags(mt, "", count_tags(qf), count_tags(orch), out);
+    // Each group required on both sides: delimiter, instance members, delim_group.
+    for (RequiredGroup const& g : qf.groups) {
+        RequiredGroup const* const o = find_group(orch, g.count_tag);
+        if (o == nullptr) continue;
+        std::string const ct = std::to_string(g.count_tag);
+        if (g.delim_tag != o->delim_tag) {
+            out.push_back({.msg_type = mt,
+                           .path = ct + "/delim",
+                           .fix50sp2 = std::to_string(g.delim_tag),
+                           .orchestra = std::to_string(o->delim_tag)});
+        }
+        compare_tags(mt, ct + "[*].", g.fields, o->fields, out);
+        if (delim_group_value(g) != delim_group_value(*o)) {
+            out.push_back({.msg_type = mt,
+                           .path = ct + "/delim_group",
+                           .fix50sp2 = delim_group_value(g),
+                           .orchestra = delim_group_value(*o)});
+        }
+    }
+}
+
+std::vector<Finding> diff(WalkMap const& qf_walk, WalkMap const& orch_walk,
+                          std::vector<std::string> const& msg_types) {
+    std::vector<Finding> out;
+    for (std::string const& mt : msg_types) {
+        auto const qf = qf_walk.find(mt);
+        auto const orch = orch_walk.find(mt);
+        if (qf == qf_walk.end() || orch == orch_walk.end()) {
+            ADD_FAILURE() << "35=" << mt << " is not in "
+                          << (qf == qf_walk.end() ? "the FIX50SP2.xml walk" : "the Orchestra walk");
+            continue;
+        }
+        compare_msgtype(mt, qf->second, orch->second, out);
+    }
+    std::ranges::sort(out, [](Finding const& a, Finding const& b) {
+        return std::tie(a.msg_type, a.path) < std::tie(b.msg_type, b.path);
+    });
+    return out;
+}
+
+// Walks one inline QuickFIX-XML document through the shared Walker.
+WalkMap walk_qf_fragment(char const* xml) {
+    pugi::xml_document d;
+    if (!d.load_string(xml)) {
+        ADD_FAILURE() << "pugixml could not load the QuickFIX fragment";
+        return {};
+    }
+    return Walker{d}.walk_all();
+}
+
+// Fixture: FIX50SP2.xml through the shared Walker and the Orchestra file through OrchestraWalker,
+// each loaded and walked once.
+class TailRows096Differential : public ::testing::Test {
+protected:
+    struct Shared {
+        std::string load_error;
+        WalkMap qf_walk;
+        WalkMap orch_walk;
+    };
+
+    static void SetUpTestSuite() {
+        if (shared_) return;
+        shared_ = std::make_unique<Shared>();
+        std::string const qf_path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX50SP2.xml";
+        pugi::xml_document qf_doc;
+        if (pugi::xml_parse_result const r = qf_doc.load_file(qf_path.c_str()); !r) {
+            shared_->load_error = "pugixml could not load " + qf_path + ": " + r.description();
+            return;
+        }
+        shared_->qf_walk = Walker{qf_doc}.walk_all();
+        std::string const orch_path =
+            std::string(FIXPP_ORCHESTRA_DATA_DIR) + "/OrchestraFIXLatest.xml";
+        pugi::xml_document orch_doc;
+        if (pugi::xml_parse_result const r = orch_doc.load_file(orch_path.c_str()); !r) {
+            shared_->load_error = "pugixml could not load " + orch_path + ": " + r.description();
+            return;
+        }
+        OrchestraWalk w = OrchestraWalker{orch_doc}.walk_all();
+        shared_->orch_walk = std::move(w.walk);
+        if (!w.error.empty()) {
+            shared_->load_error = "Orchestra walk of " + orch_path + ": " + w.error;
+        }
+    }
+
+    void SetUp() override { ASSERT_TRUE(shared_->load_error.empty()) << shared_->load_error; }
+
+    static WalkMap const& qf_walk() { return shared_->qf_walk; }
+    static WalkMap const& orch_walk() { return shared_->orch_walk; }
+
+    static std::unique_ptr<Shared> shared_;
+};
+
+std::unique_ptr<TailRows096Differential::Shared> TailRows096Differential::shared_;
 
 }  // namespace
 
@@ -1196,4 +1381,251 @@ TEST_F(TailRows096Latest, A065_QuoteAck) {
     ASSERT_TRUE(built.has_value()) << "build_QuoteAck refused the witness build";
     std::string const body = bytes_to_string(*built);
     check_witness(body, intent);
+}
+
+// ── The differential's known positives (contracts W6, W7 exceptions) ────────────
+
+// Re-derive 35=W's difference: research R-6's sed/awk pair and its golden.csv grep.
+TEST_F(TailRows096Differential, KnownDifference_MarketDataSnapshotFullRefresh) {
+    EXPECT_EQ(
+        diff(qf_walk(), orch_walk(), {"W"}),
+        (std::vector<Finding>{
+            {.msg_type = "W", .path = "779", .fix50sp2 = "required", .orchestra = "absent"}}));
+}
+
+TEST_F(TailRows096Differential, KnownNonOk_MassQuote) {
+    EXPECT_EQ(diff(qf_walk(), orch_walk(), {"i"}),
+              (std::vector<Finding>{{.msg_type = "i",
+                                     .path = "status",
+                                     .fix50sp2 = "nested_required_group NoQuoteEntries",
+                                     .orchestra = "nested_required_group NoQuoteEntries"}}));
+}
+
+// The 31 tail MsgTypes of the tail table: the two dictionaries agree on each (FR-012 stops a row on
+// any finding).
+TEST_F(TailRows096Differential, TailMsgTypesAgree) {
+    std::vector<std::string> msg_types;
+    for (TailRow const& r : tail_rows()) msg_types.emplace_back(r.msgtype);
+    std::vector<Finding> const findings = diff(qf_walk(), orch_walk(), msg_types);
+    EXPECT_TRUE(findings.empty())
+        << "FIX50SP2.xml and the Orchestra file differ on the tail MsgTypes: "
+        << ::testing::PrintToString(findings);
+}
+
+// One QuickFIX-XML fragment and one Orchestra fragment per path, identical but for that path; pair
+// M drives collect-every-difference, the sort and the one-sided-group rule.
+TEST_F(TailRows096Differential, SyntheticPairs) {
+    // Group path: group 9110 required in the QuickFIX fragment, optional in the Orchestra one.
+    {
+        SCOPED_TRACE("pair G");
+        WalkMap const qf = walk_qf_fragment(
+            "<fix><header/><trailer/><messages>"
+            "<message name='SynthGroup' msgtype='SG' msgcat='app'>"
+            "<field name='SynthGKey' required='Y'/>"
+            "<group name='NoSynthG' required='Y'><field name='SynthGMember' required='N'/></group>"
+            "</message></messages><components/><fields>"
+            "<field number='9110' name='NoSynthG' type='NUMINGROUP'/>"
+            "<field number='9111' name='SynthGMember' type='STRING'/>"
+            "<field number='9112' name='SynthGKey' type='STRING'/>"
+            "</fields></fix>");
+        OrchestraWalk const orch = walk_fragment(
+            "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository'>"
+            "<fixr:fields>"
+            "<fixr:field id='9110' name='NoSynthG' type='NumInGroup'/>"
+            "<fixr:field id='9111' name='SynthGMember' type='String'/>"
+            "<fixr:field id='9112' name='SynthGKey' type='String'/>"
+            "</fixr:fields><fixr:components/><fixr:groups>"
+            "<fixr:group id='9610' name='SynthGGrp'><fixr:numInGroup id='9110'/>"
+            "<fixr:fieldRef id='9111'/></fixr:group>"
+            "</fixr:groups><fixr:messages>"
+            "<fixr:message name='SynthGroup' msgType='SG'><fixr:structure>"
+            "<fixr:fieldRef id='9112' presence='required'/>"
+            "<fixr:groupRef id='9610'/>"
+            "</fixr:structure></fixr:message>"
+            "</fixr:messages></fixr:repository>");
+        EXPECT_TRUE(orch.error.empty()) << orch.error;
+        EXPECT_EQ(diff(qf, orch.walk, {"SG"}), (std::vector<Finding>{{.msg_type = "SG",
+                                                                      .path = "9110",
+                                                                      .fix50sp2 = "required",
+                                                                      .orchestra = "absent"}}));
+    }
+    // Delimiter path: group 9120 required on both sides, its two optional members declared in
+    // opposite orders.
+    {
+        SCOPED_TRACE("pair D");
+        WalkMap const qf = walk_qf_fragment(
+            "<fix><header/><trailer/><messages>"
+            "<message name='SynthDelim' msgtype='SD' msgcat='app'>"
+            "<group name='NoSynthD' required='Y'>"
+            "<field name='SynthDOne' required='N'/><field name='SynthDTwo' required='N'/>"
+            "</group></message></messages><components/><fields>"
+            "<field number='9120' name='NoSynthD' type='NUMINGROUP'/>"
+            "<field number='9121' name='SynthDOne' type='STRING'/>"
+            "<field number='9122' name='SynthDTwo' type='STRING'/>"
+            "</fields></fix>");
+        OrchestraWalk const orch = walk_fragment(
+            "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository'>"
+            "<fixr:fields>"
+            "<fixr:field id='9120' name='NoSynthD' type='NumInGroup'/>"
+            "<fixr:field id='9121' name='SynthDOne' type='String'/>"
+            "<fixr:field id='9122' name='SynthDTwo' type='String'/>"
+            "</fixr:fields><fixr:components/><fixr:groups>"
+            "<fixr:group id='9620' name='SynthDGrp'><fixr:numInGroup id='9120'/>"
+            "<fixr:fieldRef id='9122'/><fixr:fieldRef id='9121'/></fixr:group>"
+            "</fixr:groups><fixr:messages>"
+            "<fixr:message name='SynthDelim' msgType='SD'><fixr:structure>"
+            "<fixr:groupRef id='9620' presence='required'/>"
+            "</fixr:structure></fixr:message>"
+            "</fixr:messages></fixr:repository>");
+        EXPECT_TRUE(orch.error.empty()) << orch.error;
+        EXPECT_EQ(diff(qf, orch.walk, {"SD"}), (std::vector<Finding>{{.msg_type = "SD",
+                                                                      .path = "9120/delim",
+                                                                      .fix50sp2 = "9121",
+                                                                      .orchestra = "9122"}}));
+    }
+    // Instance-member path: group 9130 required on both sides, member 9132 required inside it in
+    // the QuickFIX fragment only.
+    {
+        SCOPED_TRACE("pair I");
+        WalkMap const qf = walk_qf_fragment(
+            "<fix><header/><trailer/><messages>"
+            "<message name='SynthMember' msgtype='SI' msgcat='app'>"
+            "<group name='NoSynthI' required='Y'>"
+            "<field name='SynthIDelim' required='N'/><field name='SynthIMember' required='Y'/>"
+            "</group></message></messages><components/><fields>"
+            "<field number='9130' name='NoSynthI' type='NUMINGROUP'/>"
+            "<field number='9131' name='SynthIDelim' type='STRING'/>"
+            "<field number='9132' name='SynthIMember' type='STRING'/>"
+            "</fields></fix>");
+        OrchestraWalk const orch = walk_fragment(
+            "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository'>"
+            "<fixr:fields>"
+            "<fixr:field id='9130' name='NoSynthI' type='NumInGroup'/>"
+            "<fixr:field id='9131' name='SynthIDelim' type='String'/>"
+            "<fixr:field id='9132' name='SynthIMember' type='String'/>"
+            "</fixr:fields><fixr:components/><fixr:groups>"
+            "<fixr:group id='9630' name='SynthIGrp'><fixr:numInGroup id='9130'/>"
+            "<fixr:fieldRef id='9131'/><fixr:fieldRef id='9132'/></fixr:group>"
+            "</fixr:groups><fixr:messages>"
+            "<fixr:message name='SynthMember' msgType='SI'><fixr:structure>"
+            "<fixr:groupRef id='9630' presence='required'/>"
+            "</fixr:structure></fixr:message>"
+            "</fixr:messages></fixr:repository>");
+        EXPECT_TRUE(orch.error.empty()) << orch.error;
+        EXPECT_EQ(diff(qf, orch.walk, {"SI"}), (std::vector<Finding>{{.msg_type = "SI",
+                                                                      .path = "9130[*].9132",
+                                                                      .fix50sp2 = "required",
+                                                                      .orchestra = "absent"}}));
+    }
+    // delim_group path: group 9140 required on both sides, its first child the optional nested
+    // group 9141, whose two optional members are declared in opposite orders.
+    {
+        SCOPED_TRACE("pair X");
+        WalkMap const qf = walk_qf_fragment(
+            "<fix><header/><trailer/><messages>"
+            "<message name='SynthDelimGroup' msgtype='SX' msgcat='app'>"
+            "<group name='NoSynthX' required='Y'>"
+            "<group name='NoSynthXInner' required='N'>"
+            "<field name='SynthXOne' required='N'/><field name='SynthXTwo' required='N'/>"
+            "</group></group></message></messages><components/><fields>"
+            "<field number='9140' name='NoSynthX' type='NUMINGROUP'/>"
+            "<field number='9141' name='NoSynthXInner' type='NUMINGROUP'/>"
+            "<field number='9142' name='SynthXOne' type='STRING'/>"
+            "<field number='9143' name='SynthXTwo' type='STRING'/>"
+            "</fields></fix>");
+        OrchestraWalk const orch = walk_fragment(
+            "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository'>"
+            "<fixr:fields>"
+            "<fixr:field id='9140' name='NoSynthX' type='NumInGroup'/>"
+            "<fixr:field id='9141' name='NoSynthXInner' type='NumInGroup'/>"
+            "<fixr:field id='9142' name='SynthXOne' type='String'/>"
+            "<fixr:field id='9143' name='SynthXTwo' type='String'/>"
+            "</fixr:fields><fixr:components/><fixr:groups>"
+            "<fixr:group id='9640' name='SynthXGrp'><fixr:numInGroup id='9140'/>"
+            "<fixr:groupRef id='9641'/></fixr:group>"
+            "<fixr:group id='9641' name='SynthXInnerGrp'><fixr:numInGroup id='9141'/>"
+            "<fixr:fieldRef id='9143'/><fixr:fieldRef id='9142'/></fixr:group>"
+            "</fixr:groups><fixr:messages>"
+            "<fixr:message name='SynthDelimGroup' msgType='SX'><fixr:structure>"
+            "<fixr:groupRef id='9640' presence='required'/>"
+            "</fixr:structure></fixr:message>"
+            "</fixr:messages></fixr:repository>");
+        EXPECT_TRUE(orch.error.empty()) << orch.error;
+        EXPECT_EQ(diff(qf, orch.walk, {"SX"}), (std::vector<Finding>{{.msg_type = "SX",
+                                                                      .path = "9140/delim_group",
+                                                                      .fix50sp2 = "9141,9142",
+                                                                      .orchestra = "9141,9143"}}));
+    }
+    // Pair M (contracts W6): SM declares 9105 (required in the Orchestra fragment only), 9102
+    // (required in the QuickFIX fragment only), group 9100 (required on both sides; members 9104,
+    // required in the QuickFIX fragment only, and 9103, required on both) and 9101 (required on
+    // both). SA declares group 9200, required in the QuickFIX fragment only, whose member 9201 is
+    // required inside it on both sides. Passed in the order SM, SA.
+    {
+        SCOPED_TRACE("pair M");
+        WalkMap const qf = walk_qf_fragment(
+            "<fix><header/><trailer/><messages>"
+            "<message name='SynthMulti' msgtype='SM' msgcat='app'>"
+            "<field name='SynthMFive' required='N'/>"
+            "<field name='SynthMTwo' required='Y'/>"
+            "<group name='NoSynthM' required='Y'>"
+            "<field name='SynthMFour' required='Y'/><field name='SynthMThree' required='Y'/>"
+            "</group>"
+            "<field name='SynthMOne' required='Y'/>"
+            "</message>"
+            "<message name='SynthAlone' msgtype='SA' msgcat='app'>"
+            "<group name='NoSynthA' required='Y'><field name='SynthAMember' required='Y'/></group>"
+            "</message></messages><components/><fields>"
+            "<field number='9100' name='NoSynthM' type='NUMINGROUP'/>"
+            "<field number='9101' name='SynthMOne' type='STRING'/>"
+            "<field number='9102' name='SynthMTwo' type='STRING'/>"
+            "<field number='9103' name='SynthMThree' type='STRING'/>"
+            "<field number='9104' name='SynthMFour' type='STRING'/>"
+            "<field number='9105' name='SynthMFive' type='STRING'/>"
+            "<field number='9200' name='NoSynthA' type='NUMINGROUP'/>"
+            "<field number='9201' name='SynthAMember' type='STRING'/>"
+            "</fields></fix>");
+        OrchestraWalk const orch = walk_fragment(
+            "<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository'>"
+            "<fixr:fields>"
+            "<fixr:field id='9100' name='NoSynthM' type='NumInGroup'/>"
+            "<fixr:field id='9101' name='SynthMOne' type='String'/>"
+            "<fixr:field id='9102' name='SynthMTwo' type='String'/>"
+            "<fixr:field id='9103' name='SynthMThree' type='String'/>"
+            "<fixr:field id='9104' name='SynthMFour' type='String'/>"
+            "<fixr:field id='9105' name='SynthMFive' type='String'/>"
+            "<fixr:field id='9200' name='NoSynthA' type='NumInGroup'/>"
+            "<fixr:field id='9201' name='SynthAMember' type='String'/>"
+            "</fixr:fields><fixr:components/><fixr:groups>"
+            "<fixr:group id='9700' name='SynthMGrp'><fixr:numInGroup id='9100'/>"
+            "<fixr:fieldRef id='9104'/><fixr:fieldRef id='9103' presence='required'/>"
+            "</fixr:group>"
+            "<fixr:group id='9800' name='SynthAGrp'><fixr:numInGroup id='9200'/>"
+            "<fixr:fieldRef id='9201' presence='required'/></fixr:group>"
+            "</fixr:groups><fixr:messages>"
+            "<fixr:message name='SynthMulti' msgType='SM'><fixr:structure>"
+            "<fixr:fieldRef id='9105' presence='required'/>"
+            "<fixr:fieldRef id='9102'/>"
+            "<fixr:groupRef id='9700' presence='required'/>"
+            "<fixr:fieldRef id='9101' presence='required'/>"
+            "</fixr:structure></fixr:message>"
+            "<fixr:message name='SynthAlone' msgType='SA'><fixr:structure>"
+            "<fixr:groupRef id='9800'/>"
+            "</fixr:structure></fixr:message>"
+            "</fixr:messages></fixr:repository>");
+        EXPECT_TRUE(orch.error.empty()) << orch.error;
+        EXPECT_EQ(
+            diff(qf, orch.walk, {"SM", "SA"}),
+            (std::vector<Finding>{
+                {.msg_type = "SA", .path = "9200", .fix50sp2 = "required", .orchestra = "absent"},
+                {.msg_type = "SM",
+                 .path = "9100[*].9104",
+                 .fix50sp2 = "required",
+                 .orchestra = "absent"},
+                {.msg_type = "SM", .path = "9102", .fix50sp2 = "required", .orchestra = "absent"},
+                {.msg_type = "SM",
+                 .path = "9105",
+                 .fix50sp2 = "absent",
+                 .orchestra = "required"}}));
+    }
 }
