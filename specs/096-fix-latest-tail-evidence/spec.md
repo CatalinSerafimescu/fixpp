@@ -348,7 +348,11 @@ command.
   catalogue and coverage-index text as on `origin/main`, the §XVIII.2 and §XVIII.7 after-texts, the
   Sync Impact Report and the Status line that name it change (another scoped Gate A round), every
   other bundle surface that carries the full row set is narrowed with them (quickstart §5a gives the
-  recipe that finds them), and the success criteria are read over the rows that flip.
+  recipe that finds them), and the success criteria are read over the rows that flip. The owner's
+  no-flip ruling also decides the row's tests: its witnesses kept and the literal tables, censuses and
+  `TailMsgTypesAgree`'s MsgType set left whole (the defect then stays visible as a RED test, and
+  verify cannot be non-RED until it is fixed or waived), or its witnesses removed and those tables and
+  sets narrowed in the same edit.
 - **FR-013**: `spec/coverage-index.md` MUST name each tail MsgType's witnesses in its existing
   FIX-Latest row (no new row), and correct, with a comment naming its superseder in place (the parent
   repo's issue #310 rule), the FIX-Latest section's scope line, its 074 link paragraph ("stay

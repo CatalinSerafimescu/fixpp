@@ -193,10 +193,10 @@ message. The same checker holds every other cell below to its template (families
 - **S1:** `` 5.0SP2 here is the vendored FIX50SP2.xml (QuickFIX-cpp v1.16.0's file, which carries the 5.0SP2 Extension Pack that added 35=<MT>); QuickFIX/J 3.0.1's base edition does not define it. Live: no cell carries 35=<MT>; the typed tail's one live FIXT.1.1 scenario is A-018's (B-095-1). `validate_<Msg>` checks presence, not enum domains (L-069-1, fixpp#637). FIX Latest goes on the wire as ApplVerID 9 with no ApplExtID(1156) (L-074-1, REMAINING-WORK row 4b). ``
 
 Re-derive S1's last sentence, rather than trusting it: L-074-1 in the live B&L (ApplExtID(1156)=303
-modelling is row 4b's follow-on), and `grep -n -A3 'FIX Latest carries no distinct ApplVerID'
+modelling is row 4b's follow-on), and `grep -n -A1 'case session_version::vlatest'
 src/dictionary/version_registry.cpp` (`session_to_application` maps `vlatest` to `v50sp2`, so a
-FIX Latest session carries 5.0SP2's ApplVerID); for the ApplExtID half, `grep -rn '1156' src/session`
-and read each hit: a hit that only classifies a header tag already present writes nothing.
+FIX Latest session carries 5.0SP2's ApplVerID); for the ApplExtID half,
+`grep -rnE '\b1156\b|ApplExtID' src include` and read each hit: a hit that only classifies a header tag already present writes nothing.
 
 **Coverage-index edits**, byte for byte, line count unchanged:
 - the last column of each tail MsgType's row in "FIX Latest — MsgType entries only (FIX-Latest)":

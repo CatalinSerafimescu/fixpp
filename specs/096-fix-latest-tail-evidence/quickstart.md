@@ -332,14 +332,13 @@ applied, so a wrong cell, a missing comment or an extra change prints:
 `CAT`, `CON`, `COV`, `BL` and `INTEROP` may point the head side at scratch copies; `PR` is required
 and must be a PR number (`[1-9][0-9]*`).
 The checker assumes all 31 rows flip. Under FR-012's no-flip path, the scoped Gate A round that
-changes §XVIII.7's after-text also narrows the checker's `ROWS` (and §2's row list, and data-model
+changes the §XVIII.2 and §XVIII.7 after-texts, the Sync Impact Report and the Status line also narrows the checker's `ROWS` (and §2's row list, and data-model
 §F.3/§F.4's row lists, which family C reads) to the rows that flip, and records that edit. Every
 other surface that carries the full row set or its count is narrowed in the same edit; find them by
 re-derivation, never from a remembered list:
-`grep -n -e 'A-035' -e 'A-065' -e '\b31\b' -e '\b35 65\b' specs/096-fix-latest-tail-evidence/*.md specs/096-fix-latest-tail-evidence/contracts/*.md`
-(it finds, among others, §5b's count and row range, the `ANN`, `SUPERSEDED` and `WIDEN` constants
-and their data-model §E/§F sources, and tasks.md's close-out rows; `SENT7` and `IDS` are built from
-`ROWS` and narrow with it).
+`grep -n -e 'A-035' -e 'A-065' -e '\b31\b' -e '\b35 65\b' specs/096-fix-latest-tail-evidence/*.md specs/096-fix-latest-tail-evidence/contracts/*.md tests/session/test_096_tail_rows_roundtrip*.cpp`
+— read each hit's whole block: a MsgType-only list in that block carries no hit line of its own.
+`SENT7` and `IDS` are built from `ROWS` and narrow with it; the tests follow FR-012's owner ruling.
 
 ```bash
 PR=<number> python3 - <<'PY'
@@ -716,4 +715,5 @@ exit "$bad"
 EOF
 ```
 
-Control: with a stub `ctest` first on `PATH` that exits 1, the block exits 1.
+Controls, with stubs first on `PATH`: `cmake` exiting 0 and `ctest` exiting 1 → the block exits 1;
+`cmake` exiting 1 → the block exits 1.
