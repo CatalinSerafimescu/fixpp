@@ -201,21 +201,21 @@ listed under their exact names.
 
 ### RED before records
 
-- [ ] T066 [US3] (orchestrator) Run quickstart §5a on the unedited tree with `PR=<the PR number, or a placeholder number until T084>`: it exits 1, family A flagging every tail row except A-037 and A-038, families B–E firing, F silent. Record.
+- [X] T066 [US3] (orchestrator) Run quickstart §5a on the unedited tree with `PR=<the PR number, or a placeholder number until T084>`: it exits 1, family A flagging every tail row except A-037 and A-038, families B–E firing, F silent. Record.
 
 ### Amendment (its own commit, before any catalogue edit; `[const §XX.1]`)
 
-- [ ] T067 [US3] (orchestrator) Edit `.specify/constitution.md` verbatim from data-model §F: the §F.3 PENDING Sync Impact Report block above the v4.0 → v4.1 block, §F.4's PENDING Status line, §F.1's §XVIII.2 bullet, §F.2's §XVIII.7 sentence (all 31 row IDs). Commit alone: `Constitution: amend §XVIII.2, §XVIII.7 — v4.2 PENDING (096)`.
+- [X] T067 [US3] (orchestrator) Edit `.specify/constitution.md` verbatim from data-model §F: the §F.3 PENDING Sync Impact Report block above the v4.0 → v4.1 block, §F.4's PENDING Status line, §F.1's §XVIII.2 bullet, §F.2's §XVIII.7 sentence (all 31 row IDs). Commit alone: `Constitution: amend §XVIII.2, §XVIII.7 — v4.2 PENDING (096)`.
 - [ ] T068 [US3] (orchestrator) Scoped Codex Gate A round on the amended clause bodies (§XVIII.2 bullet, §XVIII.7 sentence, the SIR's Bump/Modified/Rationale) via `.claude/scripts/codex-tool.sh --mode review`, then an Opus judge; fix and repeat until P1=0 P2=0 (each change to a clause body gets another scoped round; exhaustion at round 3 goes to the owner). Archive the reviews in PARENT `research/G19-fix-fpml-iso20022/research/reviews/` as `{codex,opus}_096-fix-latest-tail-evidence_amendment_<n>_*.md`; fill the SIR's review line. A fix to a clause body changes data-model §F.1–§F.4 and quickstart §5a's `ANN`/`SENT7` constants in the same commit, and T073 re-runs after it.
 
 ### Records (after T067)
 
-- [ ] T069 [US3] (orchestrator) `spec/feature-catalogue.md`: the 31 rows per data-model §E (version `5.0SP2, FIX Latest`; Spec ref per its table, A-037/A-038 unchanged; Status `done`; `/specify` `096-fix-latest-tail-evidence`; PR `#<pr>`; Tests cell; Verified = S0 + space + S1 with `<MT>` substituted). No other row changes.
-- [ ] T070 [P] [US3] (orchestrator) `spec/coverage-index.md`: the 31 gap notes and the SUPERSEDED comment at its four sites (data-model §E), line count unchanged.
-- [ ] T071 [P] [US3] (orchestrator) `spec/behaviors-and-limitations.md`: append data-model §E's widening text to the L-069-1 bullet; add a `096-fix-latest-tail-evidence` section only for what a witness or the differential exposed (none pre-numbered), and state in the evidence file which it was.
-- [ ] T072 [US3] (orchestrator) Commit T069–T071: `096: catalogue A-035..A-065 done, coverage index, L-069-1 widened (fixpp#637)`.
+- [X] T069 [US3] (orchestrator) `spec/feature-catalogue.md`: the 31 rows per data-model §E (version `5.0SP2, FIX Latest`; Spec ref per its table, A-037/A-038 unchanged; Status `done`; `/specify` `096-fix-latest-tail-evidence`; PR `#<pr>`; Tests cell; Verified = S0 + space + S1 with `<MT>` substituted). No other row changes.
+- [X] T070 [P] [US3] (orchestrator) `spec/coverage-index.md`: the 31 gap notes and the SUPERSEDED comment at its four sites (data-model §E), line count unchanged.
+- [X] T071 [P] [US3] (orchestrator) `spec/behaviors-and-limitations.md`: append data-model §E's widening text to the L-069-1 bullet; add a `096-fix-latest-tail-evidence` section only for what a witness or the differential exposed (none pre-numbered), and state in the evidence file which it was.
+- [X] T072 [US3] (orchestrator) Commit T069–T071: `096: catalogue A-035..A-065 done, coverage index, L-069-1 widened (fixpp#637)`.
 - [ ] T073 [US3] (orchestrator) After T068 converges: run quickstart §5a: exit 0 (PENDING). Then every perturbation arm it lists on scratch copies (families A–F, the C mutants for both states, `PR=banana`, `PR=0`): each exits 1 with its family's line; the filled RATIFIED scratch copy and the v4.1-text copy exit 0. Record all.
-- [ ] T074 [US3] (orchestrator) Run quickstart §5b (census: open count down by 31, only A-035 … A-065 changed, skipped counts equal) and §5c (SC-005) with their controls; record.
+- [X] T074 [US3] (orchestrator) Run quickstart §5b (census: open count down by 31, only A-035 … A-065 changed, skipped counts equal) and §5c (SC-005) with their controls; record.
 
 **Checkpoint**: records and amendment PENDING in place; quickstart §5 passes.
 
