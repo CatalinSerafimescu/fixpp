@@ -6,7 +6,7 @@
 //   - the census (contracts W1): the findings for one suite, selected by its exact name from the
 //     gtest registry, held to the tail table through the tier's own name → MsgType lookup;
 //   - the walk's field leg against the QuickFIX-cpp golden (contracts W6), read at test time from
-//     FIXPP_095_QUICKFIX_GOLDEN_CSV, which every including target defines.
+//     FIXPP_095_QUICKFIX_GOLDEN_CSV, which an including target must define.
 // Each tier keeps its own walk, dictionary and witnesses; only the table and the two checks above
 // live here. The namespace is distinct from fixpp_test_support::tail_rows because 095's TU, built
 // into the same executable as the v50sp2 tier, defines its own TailRow and tail_rows() and imports
