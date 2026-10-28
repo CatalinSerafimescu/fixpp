@@ -6,6 +6,12 @@ status: stable
 
 # Log
 
+- **2026-10-29 — 096-fix-latest-tail-evidence close-out (PR #638): class 1 gains a static-analyzer form.**
+  `failure-classes.md` class 1 adds *a translation unit the tool gave up on, reported as clean*: cppcheck
+  aborts a whole TU (`internalAstError`) on a braced-init designated-initializer value inside a gtest macro
+  and reports nothing for it. The procedure is seeded controls in the TU, before and after the construct,
+  and hoisting the value into a named `const`. Owner-approved 2026-10-28 from the Gate B record's
+  anti-pattern candidate.
 - **2026-10-28 — 096-fix-latest-tail-evidence, pre-push (pipeline step 15a): the tail-row witness
   machinery.** `components/test.md` gains a section on 095/096's offline tail witnesses: the frozen
   walker in `tests/support/tail_rows_witness.hpp` (a byte-exact move, so a new helper goes in a new

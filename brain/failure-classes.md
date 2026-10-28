@@ -292,6 +292,14 @@ prints `0` for a whole syntax.
   - RED-prove the witness with a mutant that keeps the precondition and breaks the property: `97=N`, two tags swapped, the loader dropping one field.
 - **Sibling.** Test-shape item (g) in the parent's `.claude/agents/phase-implementer.md` is the implementer-facing copy.
 
+**The same class, in a static analyzer: a translation unit the tool gave up on, reported as clean.**
+- cppcheck can stop analysing a whole TU when its parser cannot build an AST for one construct. The run then reports no finding for that file and does not fail. The abort shows up only as an `internalAstError` line, which a filtered or `--quiet` run may not print.
+- The 096 case (PR #638, verify): a braced-init vector of C++20 designated initializers, written inline as the expected value of a gtest `EXPECT_EQ`, made cppcheck abort the vlatest witness TU. Both 2.13 and 2.22 abort on it. Seeded controls placed before and after that line were not reported. The first control run was also void: it was seeded in a header and ran without `--library=googletest`.
+- **Trigger:** a static analyzer reports a TU clean, especially a test TU dense with macros and C++20 initializers.
+- **Procedure:**
+  - Run the analyzer per TU through a one-entry compile database, with seeded controls in the TU itself (one before the suspect construct, one after). Both must be reported before the zero counts.
+  - If they are not reported, hoist the braced-init value out of the macro into a named `const` local, then re-run the controls.
+
 ### 2. A fix that replaces a wrong claim with a NEW claim reproduces the defect
 
 Rounds of review converge only when a claim is **deleted**, not refreshed. A corrected claim is still a
