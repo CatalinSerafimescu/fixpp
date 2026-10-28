@@ -33,8 +33,9 @@ is trusted (`[const §VII.3]`).
   difference; the parser refuses a deficient frame or splits E-nodelim, CC-nodelim or CC-count2 into
   instances otherwise than 095's contract W6 states (an expected list is never rewritten to fit the
   parser); the parser refuses a witness frame the typed builder produced; a closure-required set holds
-  a tag the framing writes; a required group has no string or int member for an instance-distinguishing
-  literal (data-model §C); a closure-required member has no typed `Args` member; the typed builder
+  a tag the framing writes; a required group has no string or int member AND no enum member whose code set
+  declares at least as many values as the group has instances (data-model §C's implementation
+  decision); a closure-required member has no typed `Args` member; the typed builder
   refuses a build a witness or an arm needs; the vlatest TU's compile peak RSS exceeds 8 GiB (research
   R-9; the fallback, splitting the TU by row range, is the orchestrator's call); any quickstart §1 leg
   is non-empty after the move. A parse error, a compile error or a build failure is never recorded as

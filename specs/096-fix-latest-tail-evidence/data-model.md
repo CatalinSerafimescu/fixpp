@@ -119,8 +119,19 @@ copied byte for byte into the vlatest TU (quickstart §1b).
 
 Every other rule of 095 §C holds as written: two statements per value (intent entry and setter, neither
 reading the other), NumInGroup = instance count (≥ 2; 1 for a delimiter's nested group), an int
-without an enum = its tag (plus k in instance k), per-instance distinguishing literals, and the stop
-rule for a required group with no string or int member.
+without an enum = its tag (plus k in instance k), and per-instance distinguishing literals.
+
+**Implementation decision (orchestrator, 2026-10-28, at tasks T011):** 095's stop rule for a required
+group with no string or int member is replaced here by one narrower rule, because A-046's
+`NoPartyUpdates(1676)` carries, per instance, only the enum `ListUpdateAction(1324)` (setting its
+optional nested group would add a repeating group outside the closure-required set, which FR-002
+forbids). In a required group whose instance entries hold no string or int member, the instance
+enum member that is the group's delimiter or its first enum member takes, in instance k (k from 0),
+the k-th declared value of its code set in that tier's dictionary instead of the first, so the
+instances differ and every value stays in the declared domain. Re-derive the declared values:
+`sed -n "/<field number='<tag>'/,/<\/field>/p" dictionaries/FIX50SP2.xml` and
+`awk '/<fixr:codeSet [^>]*name="<Type>CodeSet"/,/<\/fixr:codeSet>/' dictionaries/orchestra/OrchestraFIXLatest.xml`.
+A code set with fewer declared values than the group's instances still stops the implementer.
 
 ## D. Cross-dictionary differential
 
