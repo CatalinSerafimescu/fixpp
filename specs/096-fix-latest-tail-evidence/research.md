@@ -135,12 +135,15 @@ Rules (spec Terminology), resolved against the file's structure:
   `fixr:numInGroup id`), which is how 095's walk names it, so a status's element reads the same on
   both legs.
 
-**Input to the decision to reuse 095's frames**: the vlatest known positives reuse 095's frames
-(R-6) because 35=E's and 35=CC's required shapes, and 35=i's nested required group, were found the
-same in both files when this plan was written. Re-derive: on the Orchestra file with data-model
-§B.2's `awk` recipe; on `FIX50SP2.xml` with the `sed` lines of the "To re-derive one by hand"
-recipe in the header comment of 095's TU (095 data-model §B). No committed test compares the two files' shapes; a frame that the parser refuses or
-splits otherwise under the Orchestra dictionary stops the implementer (contracts W6).
+**Condition for reusing 095's frames**: the vlatest known positives reuse 095's frames (R-6) on
+the condition that 35=E's and 35=CC's required shapes, and 35=i's nested required group, are the
+same in both files. Re-derive: on the Orchestra file with data-model §B.2's `awk` recipe; on
+`FIX50SP2.xml` with the `sed` lines of the "To re-derive one by hand" recipe in the header comment
+of 095's TU (095 data-model §B). No committed test compares the two files' shapes. What guards the
+condition on every run: each vlatest frame asserts its own exact list, re-derived from the Orchestra
+file (data-model §B.2), and `KnownNonOk_MassQuote` asserts 35=i's status on both walks; a frame that
+the parser refuses or splits otherwise under the Orchestra dictionary stops the implementer
+(contracts W6).
 
 **Alternatives**: read required-ness from the `Dictionary` that `OrchestraLoader` builds: circular
 (the vlatest witness's parse uses the same loader). Rejected.

@@ -345,8 +345,10 @@ command.
 - **FR-012**: No production source changes (`src/`, non-generated `include/`, `tools/codegen/`). If a
   witness or the differential exposes a defect or a dictionary disagreement, it is filed as an issue
   and brought to the owner before the affected row flips. A row that does not flip keeps its
-  catalogue and coverage-index text as on `origin/main`, the §XVIII.7 after-text that names it changes
-  (another scoped Gate A round), and the success criteria are read over the rows that flip.
+  catalogue and coverage-index text as on `origin/main`, the §XVIII.2 and §XVIII.7 after-texts, the
+  Sync Impact Report and the Status line that name it change (another scoped Gate A round), every
+  other bundle surface that carries the full row set is narrowed with them (quickstart §5a gives the
+  recipe that finds them), and the success criteria are read over the rows that flip.
 - **FR-013**: `spec/coverage-index.md` MUST name each tail MsgType's witnesses in its existing
   FIX-Latest row (no new row), and correct, with a comment naming its superseder in place (the parent
   repo's issue #310 rule), the FIX-Latest section's scope line, its 074 link paragraph ("stay

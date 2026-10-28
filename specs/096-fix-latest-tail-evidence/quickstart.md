@@ -101,7 +101,7 @@ set -o pipefail
 H=${H:-tests/support/tail_rows_witness.hpp}
 T095=${T095:-tests/session/test_095_tail_rows_roundtrip.cpp}
 BASE=${TMPDIR:-/tmp}/096-095-base.cpp
-python3 -c 'import subprocess as s, sys; b = s.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip(); open(sys.argv[1], "wb").write(s.check_output(["git", "show", b + ":tests/session/test_095_tail_rows_roundtrip.cpp"]))' "$BASE"
+python3 -c 'import subprocess as s, sys; b = s.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip(); open(sys.argv[1], "wb").write(s.check_output(["git", "show", b + ":tests/session/test_095_tail_rows_roundtrip.cpp"]))' "$BASE" || { echo "NO BASE"; exit 1; }
 bad=0
 test -s "$BASE" || { echo "NO BASE"; exit 1; }
 # R-2's moved region of 095's TU ("in") or the rest of it ("out")
@@ -185,7 +185,7 @@ bash <<'EOF'
 set -o pipefail
 TV=${TV:-tests/session/test_096_tail_rows_roundtrip_vlatest.cpp}
 BASE=${TMPDIR:-/tmp}/096-095-base.cpp
-python3 -c 'import subprocess as s, sys; b = s.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip(); open(sys.argv[1], "wb").write(s.check_output(["git", "show", b + ":tests/session/test_095_tail_rows_roundtrip.cpp"]))' "$BASE"
+python3 -c 'import subprocess as s, sys; b = s.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip(); open(sys.argv[1], "wb").write(s.check_output(["git", "show", b + ":tests/session/test_095_tail_rows_roundtrip.cpp"]))' "$BASE" || { echo "NO BASE"; exit 1; }
 bad=0
 # the deficient-frame block: from `std::string const e_head =` to the `};` closing `frames`,
 # every `.expected = {…}` emptied (each tier asserts its own lists, data-model §B.2)
@@ -333,7 +333,13 @@ applied, so a wrong cell, a missing comment or an extra change prints:
 and must be a PR number (`[1-9][0-9]*`).
 The checker assumes all 31 rows flip. Under FR-012's no-flip path, the scoped Gate A round that
 changes §XVIII.7's after-text also narrows the checker's `ROWS` (and §2's row list, and data-model
-§F.3/§F.4's row lists, which family C reads) to the rows that flip, and records that edit.
+§F.3/§F.4's row lists, which family C reads) to the rows that flip, and records that edit. Every
+other surface that carries the full row set or its count is narrowed in the same edit; find them by
+re-derivation, never from a remembered list:
+`grep -n -e 'A-035' -e 'A-065' -e '\b31\b' -e '\b35 65\b' specs/096-fix-latest-tail-evidence/*.md specs/096-fix-latest-tail-evidence/contracts/*.md`
+(it finds, among others, §5b's count and row range, the `ANN`, `SUPERSEDED` and `WIDEN` constants
+and their data-model §E/§F sources, and tasks.md's close-out rows; `SENT7` and `IDS` are built from
+`ROWS` and narrow with it).
 
 ```bash
 PR=<number> python3 - <<'PY'
@@ -658,7 +664,7 @@ census() {  # ID<TAB>Status of every OFFICIAL row that splits cleanly; the skipp
     id=$2; st=$8; gsub(/^ +| +$/,"",id); gsub(/^ +| +$/,"",st); print id "\t" st }
     END { print skip+0 > sk }' "$1"
 }
-python3 -c 'import subprocess as s, sys; b = s.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip(); open(sys.argv[1], "wb").write(s.check_output(["git", "show", b + ":spec/feature-catalogue.md"]))' "$W/096-base-cat.md"
+python3 -c 'import subprocess as s, sys; b = s.check_output(["git", "merge-base", "origin/main", "HEAD"], text=True).strip(); open(sys.argv[1], "wb").write(s.check_output(["git", "show", b + ":spec/feature-catalogue.md"]))' "$W/096-base-cat.md" || { echo "NO BASE CATALOGUE"; exit 1; }
 test -s "$W/096-base-cat.md" || { echo "NO BASE CATALOGUE"; exit 1; }
 census "$W/096-base-cat.md" "$W/096-base.skip" > "$W/096-base.tsv"; census "$HEADCAT" "$W/096-head.skip" > "$W/096-head.tsv"
 cmp -s "$W/096-base.skip" "$W/096-head.skip" || { echo "SKIPPED: base $(cat "$W/096-base.skip") head $(cat "$W/096-head.skip")"; bad=1; }
@@ -681,14 +687,20 @@ copy of the edited catalogue in which one tail row is set back to `backlog`, it 
 ```bash
 bash <<'EOF'
 set -o pipefail
-R=${R:-$(git merge-base origin/main HEAD)..HEAD}
-out=$(git diff --name-only "$R" -- src include tools/codegen) || exit 1
-test -z "$out" || { printf 'PRODUCTION: %s\n' $out; exit 1; }
+bad=0
+if [ -z "${R:-}" ]; then
+  MB=$(git merge-base origin/main HEAD) && test -n "$MB" || { echo "NO MERGE-BASE"; exit 1; }
+  R=$MB..HEAD
+fi
+out=$(git diff --name-only "$R" -- src include tools/codegen) || { echo "DIFF FAILED: $R"; bad=1; }
+test -z "$out" || { printf 'PRODUCTION: %s\n' $out; bad=1; }
+exit "$bad"
 EOF
 ```
 
 Control: `R=2de73f3f~1..2de73f3f` (PR #636's merge, which touched `src/` and `include/`) prints
-`PRODUCTION:` lines and exits 1.
+`PRODUCTION:` lines and exits 1. A failed `git merge-base` prints `NO MERGE-BASE` and exits 1 rather
+than diffing the empty range `..HEAD`.
 
 ## 6. Full build and ctest (`[const §XVII.7]`)
 
@@ -703,3 +715,5 @@ ctest --test-dir build/linux-clang-debug --output-on-failure || bad=1
 exit "$bad"
 EOF
 ```
+
+Control: with a stub `ctest` first on `PATH` that exits 1, the block exits 1.
