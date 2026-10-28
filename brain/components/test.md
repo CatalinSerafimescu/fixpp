@@ -28,6 +28,11 @@ refs:
   - tests/support/hooked_store.hpp
   - tests/support/recording_store.hpp
   - tests/support/recording_file_executor.hpp
+  - tests/support/tail_rows_witness.hpp
+  - tests/support/tail_rows_096.hpp
+  - tests/session/test_096_tail_rows_roundtrip_vlatest.cpp
+refs_external:
+  - research/G19-fix-fpml-iso20022/decisions/speckit/096-fix-latest-tail-evidence-gatea.md
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -938,6 +943,42 @@ The design is `.specify/536-537-538-recovery-liveness.md`; these are the test-si
   of an instrument that could not read anything else. Its second form, with relaxed atomics only and
   a seeded pair of plain accesses, is the known positive for the ThreadSanitizer run: a recorder that
   takes a mutex in every job orders the two jobs and makes the run clean by construction.
+
+## Tail-row witnesses (095, 096): a frozen walker, an independent Orchestra walk, one shared table
+
+The tail catalogue rows close on offline witnesses: a typed builder's bytes are parsed by a
+dictionary-driven parser and read back field by field against a required set that a walk derives
+from the dictionary file itself, never from fixpp's loader output, which would be circular. The
+contract is `specs/096-fix-latest-tail-evidence/contracts/witness-contract.md` (W0–W8); 095's
+bundle is the precedent.
+
+- **`tests/support/tail_rows_witness.hpp` is a byte-exact MOVE of 095's walker and readback
+  comparator** (`check_witness`, `required_members_missing`), between `// clang-format off/on`.
+  quickstart §1 of the 096 bundle diffs the region against 095's pre-move TU and rejects any line
+  outside it that is not an include, a namespace line, a comment or a blank. A new helper therefore
+  goes in a NEW header, never in this one. **Rejected:** copying the walker into the 096 TUs (two
+  walkers that drift, research R-2).
+- **`tests/support/tail_rows_096.hpp` holds the one 31-row tail table and both tiers' census and
+  golden field-leg checks**, so the v50sp2 and vlatest tiers cannot hold their suites to different
+  tables. It uses its own namespace because 095's TU imports `fixpp_test_support::tail_rows` whole and
+  defines its own `TailRow`. **Rejected:** a per-TU table (the /simplify pass found two identical
+  copies with nothing comparing them).
+- **The vlatest tier's `OrchestraWalker` is deliberately NOT `src/dictionary/orchestra_loader.cpp`.**
+  It walks `presence="required"` over fieldRef/componentRef/groupRef itself; reusing the loader's
+  required data would make the witness check the loader against itself. Its delimiter rule (the first
+  emission, component and nested-group emissions included) is restated in the 096 data-model §B.2 as
+  the loader's behaviour it must match; verify that against `capture_first_emission`, not the page.
+- **The cross-dictionary differential** (`TailRows096Differential`) compares the FIX50SP2.xml walk
+  with the Orchestra walk. Its measured known positive is 35=W `LastUpdateTime(779)`, required in
+  FIX50SP2.xml and in `golden.csv`, absent in Orchestra. The group, delimiter and instance-member
+  paths are proven on synthetic fragment pairs, so they do not depend on the real files happening to
+  differ there. The test asserts the 35=W finding exactly (contracts W7's one exception), so a
+  dictionary update that removes it goes RED rather than silently vacuous.
+- ⚠️ **On vlatest, no real witness can omit a required group's count tag**: the builder writes
+  `<count>=0` for an empty required span (e.g. `2428=0` on 35=DJ). The "group absent" leg on that
+  tier is proven on a hand-built frame, not on a witness.
+- ⚠️ **clang-tidy does not see `tests/support/*.hpp`**: `.clang-tidy`'s `HeaderFilterRegex` covers
+  `include/fixpp/` and `include/fix/` only. The TUs are checked as main files.
 
 ## Related
 ## Related

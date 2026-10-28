@@ -6,6 +6,14 @@ status: stable
 
 # Log
 
+- **2026-10-28 — 096-fix-latest-tail-evidence, pre-push (pipeline step 15a): the tail-row witness
+  machinery.** `components/test.md` gains a section on 095/096's offline tail witnesses: the frozen
+  walker in `tests/support/tail_rows_witness.hpp` (a byte-exact move, so a new helper goes in a new
+  header), the shared tail table and census checks in `tests/support/tail_rows_096.hpp`, why the
+  vlatest `OrchestraWalker` is deliberately not the Orchestra loader, the differential's asserted
+  known positive, the vlatest `<count>=0` trap, and clang-tidy's header filter excluding
+  `tests/support`. `components/dictionary.md` records that the 096 data-model restates the Orchestra
+  loader's delimiter rule as a description to verify, not a decision.
 - **2026-10-27 — B57 (fixpp#624, #611, #599, #632, #635): the FileStore offload's completion, error
   arms, reset throw, duplicate record and committed end.** `components/message-store-quiescence.md`
   gains: D-624-1, the offload's caller waiting for the job's last touch, with a table flagging the
