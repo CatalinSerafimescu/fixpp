@@ -336,7 +336,7 @@ changes the §XVIII.2 and §XVIII.7 after-texts, the Sync Impact Report and the 
 §F.3/§F.4's row lists, which family C reads) to the rows that flip, and records that edit. Every
 other surface that carries the full row set or its count is narrowed in the same edit; find them by
 re-derivation, never from a remembered list:
-`grep -n -e 'A-035' -e 'A-065' -e '\b31\b' -e '\b35 65\b' specs/096-fix-latest-tail-evidence/*.md specs/096-fix-latest-tail-evidence/contracts/*.md tests/session/test_096_tail_rows_roundtrip*.cpp`
+`grep -n -e 'A-035' -e 'A-065' -e '\b31\b' -e '\b35 65\b' specs/096-fix-latest-tail-evidence/*.md specs/096-fix-latest-tail-evidence/contracts/*.md tests/session/test_096_tail_rows_roundtrip*.cpp tests/support/tail_rows_096.hpp`
 — read each hit's whole block: a MsgType-only list in that block carries no hit line of its own.
 `SENT7` and `IDS` are built from `ROWS` and narrow with it; the tests follow FR-012's owner ruling.
 

@@ -36,7 +36,9 @@ Sync Impact Report — v4.1 → v4.2 (2026-10-28) — PENDING
     §XVIII.7 — FIX Latest tail rows A-035..A-065 delivered in v1.0 on v50sp2 and vlatest (v4.2) (+ 096
     FIX Latest tail evidence pass)", and its description states the change, the rationale and the
     affected rows and specs.
-  Review and sign-off: [filled at each step].
+  Review and sign-off: scoped Codex Gate A round 1 on the amended clause bodies (Codex P1=0 P2=0
+    P3=1; Opus judge P1=0 P2=0 P3=2, converged, both P3 left as worded); Gate B and owner sign-off
+    pending.
 -->
 <!--
 Sync Impact Report — v4.0 → v4.1 (2026-10-24) — RATIFIED

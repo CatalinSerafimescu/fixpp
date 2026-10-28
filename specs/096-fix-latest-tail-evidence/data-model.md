@@ -8,8 +8,8 @@ same name for every tail MsgType, and it is the name in the catalogue Title. Re-
 `grep -o '<fixr:message [^>]*msgType="<MT>"' dictionaries/orchestra/OrchestraFIXLatest.xml`.
 
 Witness IDs: `TailRows096.<RowId>_<Name>` (v50sp2) and `TailRows096Latest.<RowId>_<Name>` (vlatest),
-`<RowId>` without its hyphen. The TU's literal tail table is this one; each census holds its suite to
-it (contracts W1).
+`<RowId>` without its hyphen. The literal tail table in `tests/support/tail_rows_096.hpp`, shared by
+both 096 TUs, is this one; each census holds its suite to it (contracts W1).
 
 | Row | MsgType | Name |
 |---|---|---|
