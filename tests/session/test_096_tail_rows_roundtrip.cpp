@@ -2,11 +2,12 @@
 // test_096_tail_rows_roundtrip.cpp
 //
 // 096-fix-latest-tail-evidence, v50sp2 leg: one offline witness per FIX Latest tail MsgType (suite
-// TailRows096), the census holding that suite to the tail table below, and the walk's field leg
+// TailRows096), the census holding that suite to the tail table, and the walk's field leg
 // compared with the QuickFIX-cpp golden (suite TailRows096Census). A source of the
 // test_077_allversions_builder_roundtrip executable, beside 095's TU; the walk, the body
 // enumeration, the presence check and check_witness are 095's, shared through
-// support/tail_rows_witness.hpp (contracts W0).
+// support/tail_rows_witness.hpp (contracts W0). The tail table, the census and the field-leg
+// comparison are shared with the vlatest tier through support/tail_rows_096.hpp.
 //
 // THE RULE (095 spec Terminology; 096 data-model §B.1), applied to dictionaries/FIX50SP2.xml at
 // test runtime by the shared Walker:
@@ -77,21 +78,18 @@
 #include <fixpp/v50sp2/messages/SecurityMassStatus.hpp>
 #include <fixpp/v50sp2/messages/SecurityMassStatusRequest.hpp>
 #include <fixpp/v50sp2/messages/TradeMatchReport.hpp>
-#include <fstream>
-#include <map>
 #include <memory>
 #include <memory_resource>
 #include <optional>
 #include <pugixml.hpp>
-#include <set>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "support/app_message_read_scaffold.hpp"
+#include "support/tail_rows_096.hpp"
 #include "support/tail_rows_witness.hpp"
 
 namespace {
@@ -99,51 +97,11 @@ namespace {
 using fixpp_test_support::bytes_to_string;
 // The walk, the body enumeration and check_witness live in support/tail_rows_witness.hpp.
 using namespace fixpp_test_support::tail_rows;
-
-// ── The tail table (data-model §A; the catalogue row is the authority) ───────
-
-struct TailRow {
-    char const* row;
-    char const* msgtype;
-    char const* name;
-};
-
-std::vector<TailRow> const& tail_rows() {
-    static std::vector<TailRow> const rows = {
-        {.row = "A-035", .msgtype = "DS", .name = "CrossRequest"},
-        {.row = "A-036", .msgtype = "DT", .name = "CrossRequestAck"},
-        {.row = "A-037", .msgtype = "DJ", .name = "MassOrder"},
-        {.row = "A-038", .msgtype = "DK", .name = "MassOrderAck"},
-        {.row = "A-039", .msgtype = "DC", .name = "TradeMatchReport"},
-        {.row = "A-040", .msgtype = "DR", .name = "MarketDataReport"},
-        {.row = "A-041", .msgtype = "DO", .name = "MarketDataStatisticsRequest"},
-        {.row = "A-042", .msgtype = "DP", .name = "MarketDataStatisticsReport"},
-        {.row = "A-043", .msgtype = "CF", .name = "PartyDetailsListRequest"},
-        {.row = "A-044", .msgtype = "CG", .name = "PartyDetailsListReport"},
-        {.row = "A-045", .msgtype = "CK", .name = "PartyDetailsListUpdateReport"},
-        {.row = "A-046", .msgtype = "CX", .name = "PartyDetailsDefinitionRequest"},
-        {.row = "A-047", .msgtype = "CY", .name = "PartyDetailsDefinitionRequestAck"},
-        {.row = "A-048", .msgtype = "CU", .name = "PartyEntitlementsRequest"},
-        {.row = "A-049", .msgtype = "CV", .name = "PartyEntitlementsReport"},
-        {.row = "A-050", .msgtype = "CZ", .name = "PartyEntitlementsUpdateReport"},
-        {.row = "A-051", .msgtype = "DA", .name = "PartyEntitlementsDefinitionRequest"},
-        {.row = "A-052", .msgtype = "DB", .name = "PartyEntitlementsDefinitionRequestAck"},
-        {.row = "A-053", .msgtype = "CL", .name = "PartyRiskLimitsRequest"},
-        {.row = "A-054", .msgtype = "CM", .name = "PartyRiskLimitsReport"},
-        {.row = "A-055", .msgtype = "CR", .name = "PartyRiskLimitsUpdateReport"},
-        {.row = "A-056", .msgtype = "CS", .name = "PartyRiskLimitsDefinitionRequest"},
-        {.row = "A-057", .msgtype = "CT", .name = "PartyRiskLimitsDefinitionRequestAck"},
-        {.row = "A-058", .msgtype = "DE", .name = "PartyRiskLimitsReportAck"},
-        {.row = "A-059", .msgtype = "DH", .name = "PartyActionRequest"},
-        {.row = "A-060", .msgtype = "DI", .name = "PartyActionReport"},
-        {.row = "A-061", .msgtype = "DF", .name = "PartyRiskLimitCheckRequest"},
-        {.row = "A-062", .msgtype = "DG", .name = "PartyRiskLimitCheckRequestAck"},
-        {.row = "A-063", .msgtype = "CN", .name = "SecurityMassStatusRequest"},
-        {.row = "A-064", .msgtype = "CO", .name = "SecurityMassStatus"},
-        {.row = "A-065", .msgtype = "CW", .name = "QuoteAck"},
-    };
-    return rows;
-}
+// The tail table, the census and the field-leg comparison live in support/tail_rows_096.hpp.
+using fixpp_test_support::tail_rows_096::census_findings;
+using fixpp_test_support::tail_rows_096::golden_field_leg_findings;
+using fixpp_test_support::tail_rows_096::tail_rows;
+using fixpp_test_support::tail_rows_096::TailRow;
 
 // ── Fixture: the dictionary, loaded once ─────────────────────────────────────
 
@@ -194,7 +152,6 @@ protected:
 
     std::array<std::byte, 131072> out_{};
     std::pmr::monotonic_buffer_resource read_arena_{65536};
-    std::pmr::monotonic_buffer_resource arena_{4096};
 
     static std::unique_ptr<Shared> shared_;
 };
@@ -211,99 +168,18 @@ class TailRows096Census : public Tail096Fixture {};
 // Holds suite TailRows096 (selected by its exact name: TailRows096 is a prefix of other suites in
 // this binary) to the tail table: every finding is collected before the one assertion.
 TEST_F(TailRows096Census, EveryTailMsgTypeHasExactlyOneWitness) {
-    std::map<std::string, std::string> row_of_msgtype;
-    std::map<std::string, int> multiplicity;
-    for (TailRow const& r : tail_rows()) {
-        row_of_msgtype[r.msgtype] = r.row;
-        multiplicity[r.msgtype] = 0;
-    }
-    std::vector<std::string> findings;
-    ::testing::UnitTest const* const ut = ::testing::UnitTest::GetInstance();
-    for (int s = 0; s < ut->total_test_suite_count(); ++s) {
-        ::testing::TestSuite const* const suite = ut->GetTestSuite(s);
-        if (std::string_view{suite->name()} != "TailRows096") continue;
-        for (int t = 0; t < suite->total_test_count(); ++t) {
-            std::string const name = suite->GetTestInfo(t)->name();
-            auto const [row, generated] = split_test_name(name);
-            std::string const mt = msgtype_for_generated_name(doc(), generated);
-            if (mt.empty()) {
-                std::string f = "unmapped name TailRows096.";
-                f += name;
-                f += ": no <message name='";
-                f += generated;
-                f += "'> in FIX50SP2.xml";
-                findings.push_back(std::move(f));
-                continue;
-            }
-            auto const it = row_of_msgtype.find(mt);
-            if (it == row_of_msgtype.end()) {
-                std::string f = "extra MsgType 35=";
-                f += mt;
-                f += " (TailRows096.";
-                f += name;
-                f += ")";
-                findings.push_back(std::move(f));
-                continue;
-            }
-            ++multiplicity[mt];
-            if (drop_hyphen(it->second) != row) {
-                std::string f = "row mismatch: TailRows096.";
-                f += name;
-                f += " names row ";
-                f += row;
-                f += ", 35=";
-                f += mt;
-                f += " is row ";
-                f += it->second;
-                findings.push_back(std::move(f));
-            }
-        }
-    }
-    for (auto const& [mt, n] : multiplicity) {
-        if (n != 1) {
-            findings.push_back("35=" + mt + " has multiplicity " + std::to_string(n) +
-                               " (exactly one witness required)");
-        }
-    }
+    std::vector<std::string> const findings = census_findings(
+        "TailRows096", tail_rows(),
+        [](std::string_view generated) { return msgtype_for_generated_name(doc(), generated); },
+        "message", "FIX50SP2.xml");
     EXPECT_TRUE(findings.empty()) << "census findings: " << join(findings);
 }
 
 TEST_F(TailRows096Census, FieldLegMatchesQuickFixCppGolden) {
     std::vector<std::string> asserted;
     for (TailRow const& r : tail_rows()) asserted.emplace_back(r.msgtype);
-
-    std::ifstream in{FIXPP_095_QUICKFIX_GOLDEN_CSV};
-    ASSERT_TRUE(in) << "cannot open " << FIXPP_095_QUICKFIX_GOLDEN_CSV;
-    std::map<std::string, std::vector<std::set<std::uint16_t>>> rows;
-    for (std::string line; std::getline(in, line);) {
-        if (!line.starts_with("FIX50SP2,")) continue;
-        std::size_t const c2 = line.find(',', 9);
-        if (c2 == std::string::npos) continue;
-        std::string const mt = line.substr(9, c2 - 9);
-        std::string tags = line.substr(c2 + 1);
-        std::erase(tags, '"');
-        std::set<std::uint16_t> set;
-        std::istringstream ts{tags};
-        for (unsigned t = 0; ts >> t;) set.insert(static_cast<std::uint16_t>(t));
-        rows[mt].push_back(std::move(set));
-    }
-    bool rows_ok = true;
-    for (std::string const& mt : asserted) {
-        std::size_t const n = rows.contains(mt) ? rows[mt].size() : 0;
-        if (n != 1) {
-            rows_ok = false;
-            ADD_FAILURE() << "golden.csv holds " << n << " rows FIX50SP2," << mt
-                          << ", (exactly one required)";
-        }
-    }
-    ASSERT_TRUE(rows_ok);
-    for (std::string const& mt : asserted) {
-        auto const it = walk().find(mt);
-        ASSERT_NE(it, walk().end()) << "35=" << mt << " is not in the walk";
-        std::set<std::uint16_t> const walked(it->second.fields.begin(), it->second.fields.end());
-        std::set<std::uint16_t> const& golden = rows[mt].front();
-        EXPECT_EQ(walked, golden) << "35=" << mt << ": walk " << join_tags(walked)
-                                  << ", golden.csv " << join_tags(golden);
+    for (std::string const& f : golden_field_leg_findings(walk(), asserted, "walk")) {
+        ADD_FAILURE() << f;
     }
 }
 

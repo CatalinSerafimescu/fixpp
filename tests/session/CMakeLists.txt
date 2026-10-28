@@ -3311,8 +3311,9 @@ if(TARGET fixpp_codegen_generate)
     add_executable(test_077_allversions_builder_roundtrip_vlatest
       test_077_allversions_builder_roundtrip_vlatest.cpp
       # 096-fix-latest-tail-evidence: the vlatest witnesses of the FIX Latest tail rows, the
-      # Orchestra required-walk and their census join this executable; the census reads the
-      # registered tests of this binary.
+      # Orchestra required-walk, their census and the cross-dictionary differential (the
+      # QuickFIX walk of FIX50SP2.xml against the Orchestra walk) join this executable; the
+      # census reads the registered tests of this binary.
       test_096_tail_rows_roundtrip_vlatest.cpp
     )
     add_dependencies(test_077_allversions_builder_roundtrip_vlatest fixpp_codegen_generate)

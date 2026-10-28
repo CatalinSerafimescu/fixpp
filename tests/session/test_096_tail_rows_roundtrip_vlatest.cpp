@@ -2,12 +2,16 @@
 // test_096_tail_rows_roundtrip_vlatest.cpp
 //
 // 096-fix-latest-tail-evidence, vlatest leg: one offline witness per FIX Latest tail MsgType (suite
-// TailRows096Latest), the census holding that suite to the tail table below, the Orchestra
-// required-walk with its known positives (suite TailRows096LatestCensus). A source of the
-// test_077_allversions_builder_roundtrip_vlatest executable, beside 077's vlatest TU; the body
-// enumeration, the presence check and check_witness are 095's, shared through
-// support/tail_rows_witness.hpp (contracts W0). The walk below reads the Orchestra file with
-// pugixml directly; it shares no code with src/dictionary/orchestra_loader.cpp or tools/codegen/.
+// TailRows096Latest), the census holding that suite to the tail table, the Orchestra
+// required-walk with its known positives (suite TailRows096LatestCensus), and the cross-dictionary
+// differential between the QuickFIX walk of FIX50SP2.xml and the Orchestra walk (suite
+// TailRows096Differential). A source of the test_077_allversions_builder_roundtrip_vlatest
+// executable, beside 077's vlatest TU; the body enumeration, the presence check, check_witness and
+// the QuickFIX Walker the differential runs are 095's, shared through
+// support/tail_rows_witness.hpp (contracts W0). The tail table, the census and the field-leg
+// comparison are shared with the v50sp2 tier through support/tail_rows_096.hpp. The Orchestra walk
+// below reads the Orchestra file with pugixml directly; it shares no code with
+// src/dictionary/orchestra_loader.cpp or tools/codegen/.
 //
 // THE RULE (096 data-model §B.2), applied to dictionaries/orchestra/OrchestraFIXLatest.xml at test
 // runtime:
@@ -35,7 +39,8 @@
 //   awk '/<fixr:component id="<ID>"/,/<\/fixr:component>/' "$O"
 // and apply the rule above to each element on the path. The field leg is compared with
 //   grep '^FIX50SP2,<MT>,' tools/quickfix_required_golden/golden.csv
-// (QuickFIX-cpp's message-level set over FIX50SP2.xml, a file this walk does not read).
+// (QuickFIX-cpp's message-level set over FIX50SP2.xml, which the Orchestra walk does not read;
+// only the differential reads that file, through the shared Walker).
 
 #include <gtest/gtest.h>
 
@@ -83,7 +88,6 @@
 #include <fixpp/vlatest/messages/SecurityMassStatus.hpp>
 #include <fixpp/vlatest/messages/SecurityMassStatusRequest.hpp>
 #include <fixpp/vlatest/messages/TradeMatchReport.hpp>
-#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
@@ -93,7 +97,6 @@
 #include <pugixml.hpp>
 #include <set>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -101,60 +104,21 @@
 #include <vector>
 
 #include "support/app_message_read_scaffold.hpp"
+#include "support/tail_rows_096.hpp"
 #include "support/tail_rows_witness.hpp"
 
 namespace {
 
-// The walk's result types, the body enumeration and check_witness live in
-// support/tail_rows_witness.hpp.
+// The walk's result types, the body enumeration, check_witness and the QuickFIX Walker the
+// differential runs live in support/tail_rows_witness.hpp.
 using fixpp_test_support::bytes_to_string;
 using fixpp_test_support::make_frame;
 using namespace fixpp_test_support::tail_rows;
-
-// ── The tail table (data-model §A; the catalogue row is the authority) ───────
-
-struct TailRow {
-    char const* row;
-    char const* msgtype;
-    char const* name;
-};
-
-std::vector<TailRow> const& tail_rows() {
-    static std::vector<TailRow> const rows = {
-        {.row = "A-035", .msgtype = "DS", .name = "CrossRequest"},
-        {.row = "A-036", .msgtype = "DT", .name = "CrossRequestAck"},
-        {.row = "A-037", .msgtype = "DJ", .name = "MassOrder"},
-        {.row = "A-038", .msgtype = "DK", .name = "MassOrderAck"},
-        {.row = "A-039", .msgtype = "DC", .name = "TradeMatchReport"},
-        {.row = "A-040", .msgtype = "DR", .name = "MarketDataReport"},
-        {.row = "A-041", .msgtype = "DO", .name = "MarketDataStatisticsRequest"},
-        {.row = "A-042", .msgtype = "DP", .name = "MarketDataStatisticsReport"},
-        {.row = "A-043", .msgtype = "CF", .name = "PartyDetailsListRequest"},
-        {.row = "A-044", .msgtype = "CG", .name = "PartyDetailsListReport"},
-        {.row = "A-045", .msgtype = "CK", .name = "PartyDetailsListUpdateReport"},
-        {.row = "A-046", .msgtype = "CX", .name = "PartyDetailsDefinitionRequest"},
-        {.row = "A-047", .msgtype = "CY", .name = "PartyDetailsDefinitionRequestAck"},
-        {.row = "A-048", .msgtype = "CU", .name = "PartyEntitlementsRequest"},
-        {.row = "A-049", .msgtype = "CV", .name = "PartyEntitlementsReport"},
-        {.row = "A-050", .msgtype = "CZ", .name = "PartyEntitlementsUpdateReport"},
-        {.row = "A-051", .msgtype = "DA", .name = "PartyEntitlementsDefinitionRequest"},
-        {.row = "A-052", .msgtype = "DB", .name = "PartyEntitlementsDefinitionRequestAck"},
-        {.row = "A-053", .msgtype = "CL", .name = "PartyRiskLimitsRequest"},
-        {.row = "A-054", .msgtype = "CM", .name = "PartyRiskLimitsReport"},
-        {.row = "A-055", .msgtype = "CR", .name = "PartyRiskLimitsUpdateReport"},
-        {.row = "A-056", .msgtype = "CS", .name = "PartyRiskLimitsDefinitionRequest"},
-        {.row = "A-057", .msgtype = "CT", .name = "PartyRiskLimitsDefinitionRequestAck"},
-        {.row = "A-058", .msgtype = "DE", .name = "PartyRiskLimitsReportAck"},
-        {.row = "A-059", .msgtype = "DH", .name = "PartyActionRequest"},
-        {.row = "A-060", .msgtype = "DI", .name = "PartyActionReport"},
-        {.row = "A-061", .msgtype = "DF", .name = "PartyRiskLimitCheckRequest"},
-        {.row = "A-062", .msgtype = "DG", .name = "PartyRiskLimitCheckRequestAck"},
-        {.row = "A-063", .msgtype = "CN", .name = "SecurityMassStatusRequest"},
-        {.row = "A-064", .msgtype = "CO", .name = "SecurityMassStatus"},
-        {.row = "A-065", .msgtype = "CW", .name = "QuoteAck"},
-    };
-    return rows;
-}
+// The tail table, the census and the field-leg comparison live in support/tail_rows_096.hpp.
+using fixpp_test_support::tail_rows_096::census_findings;
+using fixpp_test_support::tail_rows_096::golden_field_leg_findings;
+using fixpp_test_support::tail_rows_096::tail_rows;
+using fixpp_test_support::tail_rows_096::TailRow;
 
 // ── The Orchestra required-walk (data-model §B.2) ────────────────────────────
 
@@ -341,12 +305,23 @@ protected:
         std::optional<fixpp::dict::Dictionary> dict;
         std::optional<fixpp::dict::table_view> tv;
         WalkMap walk;
+        // FIX50SP2.xml through the shared QuickFIX Walker, for the differential only; its load
+        // failure fails only the differential's tests.
+        std::string qf_load_error;
+        WalkMap qf_walk;
     };
 
     static void SetUpTestSuite() {
         if (shared_) return;
         shared_ = std::make_unique<Shared>();
         std::string const path = std::string(FIXPP_ORCHESTRA_DATA_DIR) + "/OrchestraFIXLatest.xml";
+        std::string const qf_path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX50SP2.xml";
+        pugi::xml_document qf_doc;
+        if (pugi::xml_parse_result const r = qf_doc.load_file(qf_path.c_str()); !r) {
+            shared_->qf_load_error = "pugixml could not load " + qf_path + ": " + r.description();
+        } else {
+            shared_->qf_walk = Walker{qf_doc}.walk_all();
+        }
         if (pugi::xml_parse_result const r = shared_->doc.load_file(path.c_str()); !r) {
             shared_->load_error = "pugixml could not load " + path + ": " + r.description();
             return;
@@ -543,49 +518,18 @@ WalkMap walk_qf_fragment(char const* xml) {
     return Walker{d}.walk_all();
 }
 
-// Fixture: FIX50SP2.xml through the shared Walker and the Orchestra file through OrchestraWalker,
-// each loaded and walked once.
-class TailRows096Differential : public ::testing::Test {
+// Fixture: the Orchestra file's parse and walk are Tail096LatestFixture's, and FIX50SP2.xml's walk
+// through the shared Walker sits in the same shared state; each is loaded and walked once.
+class TailRows096Differential : public Tail096LatestFixture {
 protected:
-    struct Shared {
-        std::string load_error;
-        WalkMap qf_walk;
-        WalkMap orch_walk;
-    };
-
-    static void SetUpTestSuite() {
-        if (shared_) return;
-        shared_ = std::make_unique<Shared>();
-        std::string const qf_path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX50SP2.xml";
-        pugi::xml_document qf_doc;
-        if (pugi::xml_parse_result const r = qf_doc.load_file(qf_path.c_str()); !r) {
-            shared_->load_error = "pugixml could not load " + qf_path + ": " + r.description();
-            return;
-        }
-        shared_->qf_walk = Walker{qf_doc}.walk_all();
-        std::string const orch_path =
-            std::string(FIXPP_ORCHESTRA_DATA_DIR) + "/OrchestraFIXLatest.xml";
-        pugi::xml_document orch_doc;
-        if (pugi::xml_parse_result const r = orch_doc.load_file(orch_path.c_str()); !r) {
-            shared_->load_error = "pugixml could not load " + orch_path + ": " + r.description();
-            return;
-        }
-        OrchestraWalk w = OrchestraWalker{orch_doc}.walk_all();
-        shared_->orch_walk = std::move(w.walk);
-        if (!w.error.empty()) {
-            shared_->load_error = "Orchestra walk of " + orch_path + ": " + w.error;
-        }
+    void SetUp() override {
+        Tail096LatestFixture::SetUp();
+        ASSERT_TRUE(shared_->qf_load_error.empty()) << shared_->qf_load_error;
     }
 
-    void SetUp() override { ASSERT_TRUE(shared_->load_error.empty()) << shared_->load_error; }
-
     static WalkMap const& qf_walk() { return shared_->qf_walk; }
-    static WalkMap const& orch_walk() { return shared_->orch_walk; }
-
-    static std::unique_ptr<Shared> shared_;
+    static WalkMap const& orch_walk() { return walk(); }
 };
-
-std::unique_ptr<TailRows096Differential::Shared> TailRows096Differential::shared_;
 
 }  // namespace
 
@@ -684,99 +628,18 @@ TEST_F(TailRows096LatestCensus, OrchestraWalkOnSyntheticFragments) {
 // Holds suite TailRows096Latest (selected by its exact name: TailRows096Latest is a prefix of
 // TailRows096LatestCensus) to the tail table: every finding is collected before the one assertion.
 TEST_F(TailRows096LatestCensus, EveryTailMsgTypeHasExactlyOneWitness) {
-    std::map<std::string, std::string> row_of_msgtype;
-    std::map<std::string, int> multiplicity;
-    for (TailRow const& r : tail_rows()) {
-        row_of_msgtype[r.msgtype] = r.row;
-        multiplicity[r.msgtype] = 0;
-    }
-    std::vector<std::string> findings;
-    ::testing::UnitTest const* const ut = ::testing::UnitTest::GetInstance();
-    for (int s = 0; s < ut->total_test_suite_count(); ++s) {
-        ::testing::TestSuite const* const suite = ut->GetTestSuite(s);
-        if (std::string_view{suite->name()} != "TailRows096Latest") continue;
-        for (int t = 0; t < suite->total_test_count(); ++t) {
-            std::string const name = suite->GetTestInfo(t)->name();
-            auto const [row, generated] = split_test_name(name);
-            std::string const mt = msgtype_for_orchestra_name(doc(), generated);
-            if (mt.empty()) {
-                std::string f = "unmapped name TailRows096Latest.";
-                f += name;
-                f += ": no <fixr:message name='";
-                f += generated;
-                f += "'> in OrchestraFIXLatest.xml";
-                findings.push_back(std::move(f));
-                continue;
-            }
-            auto const it = row_of_msgtype.find(mt);
-            if (it == row_of_msgtype.end()) {
-                std::string f = "extra MsgType 35=";
-                f += mt;
-                f += " (TailRows096Latest.";
-                f += name;
-                f += ")";
-                findings.push_back(std::move(f));
-                continue;
-            }
-            ++multiplicity[mt];
-            if (drop_hyphen(it->second) != row) {
-                std::string f = "row mismatch: TailRows096Latest.";
-                f += name;
-                f += " names row ";
-                f += row;
-                f += ", 35=";
-                f += mt;
-                f += " is row ";
-                f += it->second;
-                findings.push_back(std::move(f));
-            }
-        }
-    }
-    for (auto const& [mt, n] : multiplicity) {
-        if (n != 1) {
-            findings.push_back("35=" + mt + " has multiplicity " + std::to_string(n) +
-                               " (exactly one witness required)");
-        }
-    }
+    std::vector<std::string> const findings = census_findings(
+        "TailRows096Latest", tail_rows(),
+        [](std::string_view generated) { return msgtype_for_orchestra_name(doc(), generated); },
+        "fixr:message", "OrchestraFIXLatest.xml");
     EXPECT_TRUE(findings.empty()) << "census findings: " << join(findings);
 }
 
 TEST_F(TailRows096LatestCensus, FieldLegMatchesQuickFixCppGolden) {
     std::vector<std::string> asserted;
     for (TailRow const& r : tail_rows()) asserted.emplace_back(r.msgtype);
-
-    std::ifstream in{FIXPP_095_QUICKFIX_GOLDEN_CSV};
-    ASSERT_TRUE(in) << "cannot open " << FIXPP_095_QUICKFIX_GOLDEN_CSV;
-    std::map<std::string, std::vector<std::set<std::uint16_t>>> rows;
-    for (std::string line; std::getline(in, line);) {
-        if (!line.starts_with("FIX50SP2,")) continue;
-        std::size_t const c2 = line.find(',', 9);
-        if (c2 == std::string::npos) continue;
-        std::string const mt = line.substr(9, c2 - 9);
-        std::string tags = line.substr(c2 + 1);
-        std::erase(tags, '"');
-        std::set<std::uint16_t> set;
-        std::istringstream ts{tags};
-        for (unsigned t = 0; ts >> t;) set.insert(static_cast<std::uint16_t>(t));
-        rows[mt].push_back(std::move(set));
-    }
-    bool rows_ok = true;
-    for (std::string const& mt : asserted) {
-        std::size_t const n = rows.contains(mt) ? rows[mt].size() : 0;
-        if (n != 1) {
-            rows_ok = false;
-            ADD_FAILURE() << "golden.csv holds " << n << " rows FIX50SP2," << mt
-                          << ", (exactly one required)";
-        }
-    }
-    ASSERT_TRUE(rows_ok);
-    for (std::string const& mt : asserted) {
-        auto const it = walk().find(mt);
-        ASSERT_NE(it, walk().end()) << "35=" << mt << " is not in the Orchestra walk";
-        std::set<std::uint16_t> const walked(it->second.fields.begin(), it->second.fields.end());
-        std::set<std::uint16_t> const& golden = rows[mt].front();
-        EXPECT_EQ(walked, golden) << "35=" << mt << ": Orchestra walk " << join_tags(walked)
-                                  << ", golden.csv " << join_tags(golden);
+    for (std::string const& f : golden_field_leg_findings(walk(), asserted, "Orchestra walk")) {
+        ADD_FAILURE() << f;
     }
 }
 
