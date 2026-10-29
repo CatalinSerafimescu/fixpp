@@ -25,7 +25,7 @@ rows of §1.2, which run in the scratch worktree that contracts' preamble create
      a fixture defect, fixed before any arm is read (plan phase 2's stop rule). Under validation, `kMinimalFix44Xml` rejects every Logon, which
      is why W-7 names its own session dictionaries.
    - Stop rule: plan phase 2.
-2. At the implementation head, for each mutant M-1..M-9e in contracts, **in the scratch worktree**
+2. At the implementation head, for each mutant M-1..M-9f in contracts, **in the scratch worktree**
    (contracts preamble; never the main checkout, never `fixpp-parallel`):
    - commit it on the scratch worktree's detached head;
    - rebuild the named binaries in that worktree's own build tree (on `/mnt/wsl/fixppbuild`; M-9c and

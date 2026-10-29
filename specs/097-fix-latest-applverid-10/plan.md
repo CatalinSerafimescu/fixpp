@@ -10,6 +10,7 @@
   - **Owner attention**: RC-A's canonical residue sentence (data-model §E.0) is constitution text, which
     the owner ratifies. It is shown to the owner verbatim with this rewrite. It changes no ruling.
 - Round 3 (exhausted) 2026-10-29: Codex P1=1 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=2. Owner ruling 2026-10-29: hand-edit + one targeted round. Hand-edit applied: G097-019, G097-020, O097-201. Reviews: research/reviews/codex_097-fix-latest-applverid-10_gate_a_3_review.md, research/reviews/opus_097-fix-latest-applverid-10_gate_a_3_adversarial_review.md.
+- Targeted round 2026-10-29 (owner ruling: hand-edit + one targeted round): Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=2. Owner ruling 2026-10-29: apply the specified fixes and accept Gate A without a further round. Applied: G097-021 (W-9 census + M-9f), O097-301 (W-9 call paths), O097-302 (2c note as a condition). Reviews: research/reviews/codex_097-fix-latest-applverid-10_gate_a_4_review.md, research/reviews/opus_097-fix-latest-applverid-10_gate_a_4_adversarial_review.md. Gate A: converged by owner ruling.
 
 ### Round 1 — disagreements
 
@@ -148,7 +149,7 @@ test and CMake line. Additive public enum. No C-ABI change. No `src/session/` ch
 | `[const §VI.4]`, `§VI.5` | Coverage-index rows updated (data-model §F). spec Normative References lists the Spec refs in `[DocAbbrev §X.Y.Z] Title` form, using the coverage index's spellings. §11.2 has no coverage-index entry and is listed as a supporting citation. |
 | `[const §XVI.3]` | **Deviated.** `/speckit-clarify` is mandatory before `/speckit-plan` for a wire/codegen feature. Here it ran after: `/speckit-plan` at `cebca1eb` (reconciled with the second Q1 ruling at `afb8f92a`), then `/speckit-clarify` at `886e587f`. The owner was informed on 2026-10-29. Remedy: the one clarify answer was carried into the plan artifacts in the same commit (W-6(d), B-097-1); the checklist was regenerated at Gate A round 1; `/speckit-analyze` checks plan↔spec drift explicitly (next row). No re-plan, for the reason given under Gate A, Round 1 — disagreements. See Complexity Tracking. |
 | `[const §XVI.4]` | `/speckit-analyze` runs after `/speckit-tasks` and MUST include an explicit plan↔spec drift pass over every Clarifications answer: Q1 (both rulings), Q2, the `/speckit-clarify` answer and the Gate A round-1 answer. That pass is the gate the order rule protects. |
-| `[const §XVI.6]` | Mutation proofs M-1..M-9e run in a scratch worktree, never in the PR's worktree (contracts preamble). |
+| `[const §XVI.6]` | Mutation proofs M-1..M-9f run in a scratch worktree, never in the PR's worktree (contracts preamble). |
 | `[const §VII.3]`/`§VII.4` | TDD order: every witness shown RED (unfixed tree or named mutant) before GREEN (contracts). |
 | `[const §VII.8]` | No new executable. Witnesses join existing binaries; selected by `ctest -L 097`. |
 | `[const §IX.1]` | Touched modules ≥ 95/85 or a per-line assessment, at verify. |
@@ -175,7 +176,7 @@ specs/097-fix-latest-applverid-10/
 ├── data-model.md      # §A identities, §B surfaces, §C superseded text, §D B&L, §E amendment, §F catalogue
 ├── quickstart.md      # §0..§5 validation
 ├── contracts/
-│   └── witnesses.md   # W-1..W-11, mutants M-1..M-9e
+│   └── witnesses.md   # W-1..W-11, mutants M-1..M-9f
 └── checklists/
     └── requirements.md
 ```
@@ -192,7 +193,9 @@ specs/097-fix-latest-applverid-10/
   `test_load_happy_path.cpp` that restates the `"2".."9"` range, FR-012(c)),
   `tests/session/test_fixt_logon_establishment.cpp` (W-6..W-8, with named session dictionaries for W-7),
   `tests/codegen/{vlatest_dispatch_exclusion_test,vlatest_compile_smoke_test}.cpp`, the W-9(c)
-  OFF-only case and its CMake guard, the CMake label lines
+  OFF-only case and its CMake guard, the CMake label lines, and in `tests/codegen/CMakeLists.txt`
+  `FIXPP_DICT_DATA_DIR` added to `codegen_vlatest_tests`'s `target_compile_definitions` (the W-9(a3)
+  census; Gate A round 4, G097-021)
 - records: `.specify/constitution.md`, `.specify/2c-codegen.md` (§4.3/§4.8/§6.3/§6.6 notes),
   `spec/behaviors-and-limitations{,-closed}.md`, `spec/feature-catalogue.md`, `spec/coverage-index.md`,
   `brain/components/dictionary.md`, the library `CLAUDE.md` (the "Also open, no issue filed" line is
@@ -232,7 +235,7 @@ specs/097-fix-latest-applverid-10/
 4. **Session witnesses**: W-6..W-8 (no session source change). Mutants M-1n, M-7a..e, M-8a..c, and
    M-2 against W-8's `1137=10` assertion.
 5. **Codegen**: dispatch row, the emitter skipping an arm whose IR is absent, `ir.cpp`, `gen_util.hpp`,
-   golden regenerated (quickstart §3), W-9. Mutants M-9a..e.
+   golden regenerated (quickstart §3), W-9. Mutants M-9a..f.
 6. **Comments and records**: data-model §C–§F, including the canonical residue sentence (§E.0) at
    every locus, the in-place 097 supersession comments (§F), and the deletion of the library
    `CLAUDE.md`'s "Also open, no issue filed: ApplExtID(1156)=303 …" line; quickstart §4 checks, the

@@ -268,19 +268,50 @@ and run first (plan phase 2), and that run's result is recorded too.
 
 ## W-9 — FIX Latest reify arm and typed version (FR-009, FR-012(c), US3)
 
-- **Files**: `tests/codegen/vlatest_dispatch_exclusion_test.cpp` (rewritten header and halves),
-  `tests/dictionary/reify_dispatch_test.cpp`, `tests/codegen/vlatest_compile_smoke_test.cpp`,
-  `tests/codegen/determinism_test.cpp`'s `VlatestGeneratedMatchesGolden` (golden regenerated).
+- **Files**: `tests/codegen/vlatest_dispatch_exclusion_test.cpp` (rewritten header and halves; the
+  (a3) census, the (a3) samples and (a4)), `tests/dictionary/reify_dispatch_test.cpp` (the (a3) admin
+  sub-case and (c)), `tests/codegen/vlatest_compile_smoke_test.cpp`,
+  `tests/codegen/determinism_test.cpp`'s `VlatestGeneratedMatchesGolden` (golden regenerated),
+  `tests/codegen/CMakeLists.txt` (`FIXPP_DICT_DATA_DIR` added to `codegen_vlatest_tests`'s
+  `target_compile_definitions`, for the census; `codegen_vlatest_census_test` in the same file is the
+  precedent).
 - **Asserts (FIX Latest tier ON, the default)**:
   - (a1) and (a2) are kept: under a v50sp2 profile, `D` reifies as `v50sp2` and `EC` fails loud.
   - (a3) is new, the runtime outcome FR-009(a), whose partition it restates: under a `vlatest`
     resolution, every MsgType the FIX Latest dictionary defines other than the seven FIXT admin
     MsgTypes `dict::reify` intercepts first reifies to an `owning_message_handle` whose
     `version().application == vlatest`, and a MsgType that dictionary does not define gives
-    `dict_reify_unknown_msg_type`. Its cases: `EC` (FIX-Latest-only) and `D` reify with
-    `application == vlatest`; a MsgType absent from FIX Latest gives `dict_reify_unknown_msg_type`; a
-    FIXT admin MsgType under the same profile keeps its session-admin label.
-  - (a4) is new, in the same file as (a3) (Gate A round 3, G097-019): under a `vlatest` resolution,
+    `dict_reify_unknown_msg_type`. Its sub-cases, each with its file and call path (Gate A round 4,
+    G097-021 and O097-301):
+    - **(a3) census**, in `tests/codegen/vlatest_dispatch_exclusion_test.cpp`, through direct
+      `dispatch::dispatch_application` with an empty `MV`. Its binary, `codegen_vlatest_tests`, is
+      built only when the FIX Latest tier is ON (`tests/codegen/CMakeLists.txt`,
+      `if(FIXPP_CODEGEN_FIX_LATEST)`) and already includes the dispatch header. It is not in
+      `reify_dispatch_test.cpp`, because that binary also hosts the OFF-only (c). It loads
+      `dictionaries/orchestra/OrchestraFIXLatest.xml` (under `FIXPP_DICT_DATA_DIR`) with
+      `OrchestraLoader`. For every `MessageEntry` in `Dictionary::messages()` whose MsgType is not one
+      of the seven `is_fixt_admin` MsgTypes, it calls
+      `dispatch_application(mv, msg_type, application_version::vlatest, profile, &arena)` and asserts
+      `has_value()`, `version().k == kind::application` and `version().application == vlatest`; each
+      failure message names the MsgType. Non-vacuity: it asserts that all seven admin MsgTypes were
+      found in `messages()` and skipped, and that the dispatched count equals `messages().size()`
+      minus the seven skipped. Any comment states that derivation, never a literal count. Scope: the
+      vlatest IR is built from the same `OrchestraLoader` `Dictionary::messages()`
+      (`tools/codegen/fixpp-codegen/ir.cpp`), so the census guards the emitter loop, not the loader.
+      Loader drops stay `VlatestCompletenessCensus`'s and `OrchestraLoad.LoadsEP303`'s.
+    - **(a3) samples**, in `tests/codegen/vlatest_dispatch_exclusion_test.cpp`, through the same direct
+      `dispatch_application` with an empty `MV`: `EC` (FIX-Latest-only) and `D` reify with
+      `application == vlatest`; a MsgType absent from FIX Latest gives `dict_reify_unknown_msg_type`.
+    - **(a3) admin interception**, in `tests/dictionary/reify_dispatch_test.cpp`, through `dict::reify`
+      on a framed message (that file's `ReifyFixture`): a FIXT admin MsgType under the same profile
+      keeps its session-admin label. It is witnessed only through `dict::reify`, because only
+      `dict::reify` intercepts the admin MsgTypes: the emitter does not filter them, so a direct
+      `dispatch_application` of one returns `application` / `vlatest`. The case is compiled only when
+      the FIX Latest tier is ON, behind the compile definition (c) asks `/speckit-tasks` to name, with
+      the opposite polarity.
+  - (a4) is new (Gate A round 3, G097-019), in `tests/codegen/vlatest_dispatch_exclusion_test.cpp`,
+    through the same direct `dispatch_application` with an empty `MV` as the (a3) samples (Gate A
+    round 4, O097-301): under a `vlatest` resolution,
     XMLnonFIX (35=n) reifies to a handle with `version().k == kind::application` and
     `version().application == vlatest`. It is the one MsgType where reify's partition and the
     Orchestra message category differ (the Orchestra file files it under `category="Session"`, and the
@@ -300,7 +331,8 @@ and run first (plan phase 2), and that run's result is recorded too.
   OFF configure+build that plan phase 7 and `/speckit-verify` perform, its tree on
   `/mnt/wsl/fixppbuild`, and its result is recorded in the verify record.
 - **RED**:
-  - M-9a deletes the `kAppVersions` vlatest row. It turns (a3), (a4) and (b) RED.
+  - M-9a deletes the `kAppVersions` vlatest row. It turns the (a3) census, the (a3) `EC`/`D` samples,
+    (a4) and (b) RED.
   - M-9b reverts `app_version_enum("vlatest")` to `"v50sp2"`. It turns the smoke test and the golden RED.
   - M-9c restores emitting an outer `case` for a row whose IR is absent: today's shape, an unread
     `rmv_app`. The OFF build fails with `-Werror=unused-variable` in the generated header. Its stated
@@ -314,8 +346,16 @@ and run first (plan phase 2), and that run's result is recorded too.
     mutant having taken: the regenerated `_dispatch/reify_dispatch_application.hpp`'s `vlatest` arm
     holds no `XMLnonFIX` case, while its v44 arm still does. It turns (a4) RED: 35=n falls to the
     `vlatest` arm's inner default and gets `dict_reify_unknown_msg_type` where an `application` /
-    `vlatest` handle was expected. (a3) stays green, since `EC` and `D` are application messages and
-    the admin MsgTypes are intercepted before dispatch; that is why M-9a cannot play this role.
+    `vlatest` handle was expected. The (a3) census is RED too, and names `n`. The (a3) samples stay
+    green, since `EC` and `D` are application messages, and so does the (a3) admin interception case,
+    since `dict::reify` intercepts the admin MsgTypes before dispatch; that is why M-9a cannot play
+    this role.
+  - M-9f (Gate A round 4, G097-021): in `emit_dispatch_application`, skip `m.msg_type == "8"` only
+    when `av.ns == "vlatest"`. It builds in the ON tree. Gate the row, as for M-9e, on build rc 0 and
+    on the mutant having taken: the regenerated `_dispatch/reify_dispatch_application.hpp`'s `vlatest`
+    arm holds no `case '8'`, while its v50sp2 arm keeps one. It turns the (a3) census RED, naming `8`.
+    The (a3) samples (`D`, `EC`) and (a4) stay green, which is why M-9a and M-9e cannot play this
+    role.
 - **Golden diff rule**: `git diff --stat` on the golden shows one file, and `git diff -U0` shows only
   lines where `application_version::v50sp2;` becomes `application_version::vlatest;`. Their count equals
   `grep -c` of the pre-change file. Quickstart §3 gives the check and its seeded positive.
