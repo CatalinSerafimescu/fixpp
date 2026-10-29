@@ -87,6 +87,11 @@ version and registry slot; the abort goes; inbound 1407/1156 are accepted and ig
   generated switch, not the 8 MB `vlatest/Reify.hpp`. The error option would only defer the same switch
   to a follow-up. When the FIX Latest codegen tier is disabled (`FIXPP_CODEGEN_FIX_LATEST=OFF`) there is
   no arm and FIX Latest falls to the existing fail-loud outer default.
+- Q (Q1): An engine holding only the FIX Latest dictionary, asked to serve a peer's `1137=9` — strict
+  (refuse) or fall back to the FIX Latest dictionary? → A: **Strict** (owner, 2026-10-29). One
+  deterministic ending; matches QuickFIX/J, which selects the dictionary per ApplVerID. To serve both, an
+  operator registers both dictionaries, which FR-005 makes possible. The changed answer is declared
+  BREAKING in the B&L (FR-011); fixpp is pre-release.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -192,7 +197,10 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 - **Inbound header `1156=…`** — accepted and ignored (FR-008).
 - **Registry given two dictionaries with the same session version** — unchanged, last writer wins (not
   FR-010's case and not this feature's).
-- **FIX-Latest-only registry asked for FIX50SP2** — [NEEDS CLARIFICATION: Q1 — strict or fallback.]
+- **FIX-Latest-only registry asked for FIX50SP2** — no dictionary (FR-006, strict): a FIX-Latest-only
+  acceptor refuses `1137=9` with Reject 373=5; the reverse (FIX50SP2-only, `1137=10`) is refused the same
+  way. A FIXT session whose own default is FIX50SP2 but whose engine holds only FIX Latest now fails the
+  `open()` check (BREAKING, FR-011).
 - **Config token** — `default_appl_ver_id = "10"` is accepted; any other new token is not added.
 - **A consumer's exhaustive `switch` over `application_version`** — a new enumerator is source-visible
   to a `-Wswitch` build; this is an additive public C++ change, disclosed (FR-011).
@@ -213,9 +221,12 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   Latest application version; FIX50SP2 MUST keep mapping to FIX50SP2.
 - **FR-005 (registry)**: The registry MUST hold a FIX50SP2 and a FIX Latest dictionary at once, each in its
   own slot, and MUST NOT abort or write a diagnostic for that combination. The FR-010 abort is removed.
-- **FR-006 (registry lookup for FIX50SP2 with only FIX Latest registered)**: [NEEDS CLARIFICATION: Q1 —
-  (A) strict: no dictionary, so a FIX-Latest-only acceptor refuses `1137=9`; (B) fallback: the FIX Latest
-  dictionary answers, today's behaviour.] Whichever is chosen is one deterministic ending, witnessed.
+- **FR-006 (strict lookup)**: Each application version MUST be answered only by a dictionary that maps to
+  it (FR-004). A registry holding only the FIX Latest dictionary MUST answer FIX50SP2 with "no dictionary",
+  and one holding only FIX50SP2 MUST answer FIX Latest with "no dictionary" — no fallback in either
+  direction (Clarifications, Q1). This changes a shipped answer: `OrchestraFR010Guard.SingleDictConfigsSucceed`'s
+  FIX-Latest-alone arm, which pins the FIX50SP2 lookup to the FIX Latest dictionary, is rewritten to the
+  strict answer.
 - **FR-007 (Logon)**: The FIXT acceptor's DefaultApplVerID check and the `open()` check of the session's
   own default MUST treat FIX Latest like every other application version: serviceable iff FR-001 parses
   and FR-005/FR-006 return a dictionary. The initiator MUST record a peer's `1137=10` as FIX Latest. The

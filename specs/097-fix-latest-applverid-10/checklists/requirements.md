@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain — Q1 (FR-006) pending the owner; Q2 (FR-009) resolved on measurement (spec Clarifications)
+- [x] No [NEEDS CLARIFICATION] markers remain — Q1 (FR-006) ruled by the owner (strict); Q2 (FR-009) resolved on measurement (spec Clarifications)
 - [x] Requirements are testable and unambiguous (apart from the two open markers)
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic — see note 1
