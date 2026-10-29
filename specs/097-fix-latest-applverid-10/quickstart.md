@@ -25,7 +25,7 @@ rows of §1.2, which run in the scratch worktree that contracts' preamble create
      a fixture defect, fixed before any arm is read (plan phase 2's stop rule). Under validation, `kMinimalFix44Xml` rejects every Logon, which
      is why W-7 names its own session dictionaries.
    - Stop rule: plan phase 2.
-2. At the implementation head, for each mutant M-1..M-9d in contracts, **in the scratch worktree**
+2. At the implementation head, for each mutant M-1..M-9e in contracts, **in the scratch worktree**
    (contracts preamble; never the main checkout, never `fixpp-parallel`):
    - commit it on the scratch worktree's detached head;
    - rebuild the named binaries in that worktree's own build tree (on `/mnt/wsl/fixppbuild`; M-9c and
@@ -166,7 +166,7 @@ expected at the head; the `origin/main` run must give the "base" value, which pr
 | L-074-1 / L-080-1 left the live B&L | `command grep -cE '^- \*\*L-0(74\|80)-1 ' "$R/spec/behaviors-and-limitations.md"` | 0 | 2 |
 | …and arrived in the closed file | `command grep -cE '^<!-- L-0(74\|80)-1 — closed: resolved by 097' "$R/spec/behaviors-and-limitations-closed.md"` | 2 | 0 |
 | New B&L rows | `command grep -cE '^- \*\*(B-097-[1-4]\|L-097-1) ' "$R/spec/behaviors-and-limitations.md"` | 5 | 0 |
-| 2c notes | `command grep -c 'Updated (097-fix-latest-applverid-10)' "$R/.specify/2c-codegen.md"` | 3 | 0 |
+| 2c notes (one per note data-model §C prescribes; Gate A round 3, G097-020) | `command grep -c 'Updated (097-fix-latest-applverid-10)' "$R/.specify/2c-codegen.md"` | 6 | 0 |
 | Component page flags 074 and points at 2c | `command grep -c '097-fix-latest-applverid-10' "$R/brain/components/dictionary.md"` | ≥ 1 | 0 |
 
 In the "L-074-1 / L-080-1 left the live B&L" and the `emit_dispatch.cpp` rows the polarity is

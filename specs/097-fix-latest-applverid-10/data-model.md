@@ -43,7 +43,7 @@
 | `specs/076-…/contracts/golden/vlatest_Messages.golden.hpp` | regenerated: the vlatest classes' `application_version::v50sp2;` → `::vlatest;`, nothing else | FR-012(c), research R-4 |
 | `tests/config/fixtures/pos_fixt_appl_ver_ids.toml`, `tests/config/test_load_happy_path.cpp` | the comment restating `"2".."9"` / an arm count points at the mapper instead | FR-012(c) |
 | tests | see contracts §W | FR-010 |
-| `.specify/2c-codegen.md` | §4.3 enum and wire table, §4.8 runtime-dispatch paragraph: in-place `Updated (097 …)` notes (§C) | FR-012(f) |
+| `.specify/2c-codegen.md` | §4.3 enum and wire table, §4.8 runtime-dispatch paragraph and application-dispatch sketch, §6.3 step 3, §6.6 item 8: in-place `Updated (097 …)` notes (§C) | FR-012(f) |
 | records | §C, §D, §E, §F | FR-011, FR-012 |
 
 No change: `src/session/*` (research R-6), the validator (`include/fixpp/wire/validator.hpp`,
@@ -62,19 +62,36 @@ deleted **in implementation** (plan phase 6, Gate A round 2, G097-018), not at c
 gone at verify. The grep cannot see an
 **omitted addition**, so quickstart §4's positive-presence checks (W-11) confirm each addition below.
 
-- **`.specify/2c-codegen.md`** (the live owning design doc, `brain/components/dictionary.md`). Three
-  in-place notes, in 2c's own `Updated (fixpp#458 …)` form, with the text before each kept as history:
+- **`.specify/2c-codegen.md`** (the live owning design doc, `brain/components/dictionary.md`). These
+  in-place notes, in 2c's own `Updated (fixpp#458 …)` form, with the text before each kept as history.
+  Each is on a line of its own or appended to the end of its own paragraph or list item, so no two
+  notes share a line (quickstart §4.2 counts lines):
   - at §4.3's `enum class application_version` sketch:
     `Updated (097-fix-latest-applverid-10): the enum gains vlatest = 9 (FIX Latest, wire "10"), appended after v50sp2; see include/fixpp/dict/version_profile.hpp.`;
   - at §4.3's "Wire `ApplVerID(1128)` → C++ `application_version` enum mapping" table:
     `Updated (097-fix-latest-applverid-10): "10" (FIX Latest; FIXLatest in FIX Session Layer §11.2 and the Orchestra ApplVerID codeset) → application_version::vlatest.`;
   - at §4.8's "Runtime-dispatch switch" paragraph:
     `Updated (097-fix-latest-applverid-10): the application switch gains a vlatest arm when the FIX Latest codegen tier is on; under FIXPP_CODEGEN_FIX_LATEST=OFF there is no vlatest case and it falls to the outer fail-loud default.`
+  - at §4.8's `reify_dispatch_application.hpp` sketch, as a paragraph immediately after the sketch's
+    closing code fence (not inside the code block), covering its version-list comment
+    ("(v50sp2, v44, v42; vt11 carries no application messages)") and its outer-default comment
+    ("Runtime-XML-only versions … hit the default arm"):
+    `Updated (097-fix-latest-applverid-10): the sketch's version list predates 097. The generated switch has one outer case per kAppVersions row whose IR is present, so vlatest has one when the FIX Latest codegen tier is on; under FIXPP_CODEGEN_FIX_LATEST=OFF vlatest also falls to the outer default. dict::reify intercepts the seven FIXT admin MsgTypes first; every other MsgType a version's dictionary defines has a case in that version's arm, so XMLnonFIX (35=n) reifies under the v44 and vlatest arms. See tools/codegen/fixpp-codegen/emit_dispatch.cpp.`
+  - at §6.3 step 3 ("Pass the resolved `application_version` to the dispatch switch
+    (`fixpp::v42::*` / `v44::*` / `v50sp2::*`)"), appended to the end of that step:
+    `Updated (097-fix-latest-applverid-10): the switch also dispatches application_version::vlatest (fixpp::vlatest, wire "10") when the FIX Latest codegen tier is on; its version set is the kAppVersions rows whose IR is present (tools/codegen/fixpp-codegen/emit_dispatch.cpp).`
+  - at §6.6 item 8 ("Runtime-dispatch table generation"), appended to the end of that item:
+    `Updated (097-fix-latest-applverid-10): the application switch's codegen versions include vlatest when the FIX Latest codegen tier is on; under FIXPP_CODEGEN_FIX_LATEST=OFF vlatest is among the versions that hit the default arm and return dict_reify_unknown_msg_type. The version set is the kAppVersions rows whose IR is present (tools/codegen/fixpp-codegen/emit_dispatch.cpp).`
 
-  2c's "four codegen versions" statements elsewhere predate 097 (076 added `vlatest` without annotating
-  them) and are not 097's to fix. `brain/components/dictionary.md` says 2c carries the 097 notes. 2c's
-  C-ABI application-version constant set was never implemented and is untouched (plan Gate A,
-  disagreements).
+  The rule (FR-012(f); Gate A round 3, G097-020) is keyed on the claim, not on a phrase: every
+  statement in 2c's §4.8 runtime-dispatch description and §6 behavioural contract that gives the
+  application switch's version set gets a note. FR-012(f) names what is left alone: §6.3's registry
+  sentence, §9 seam 15b, the generic "four codegen versions" / "~470 cases" wording outside §4.8 and §6
+  (§1, §4.3's `resolved_message_version` sketch comment, §7.6), §4.8's algorithm-sketch comment "(the
+  ~470-case application switch)", which gives a count and no version set, and the appendices. Each predates 097
+  (076 added `vlatest` without annotating them) and is not 097's to fix. `brain/components/dictionary.md`
+  says 2c carries the 097 notes. 2c's C-ABI application-version constant set was never implemented and
+  is untouched (plan Gate A, disagreements).
 
 - Frozen records not edited (flagged in `brain/components/dictionary.md` instead):
   `specs/074-orchestra-native-reader/` (the reconcile, FR-010, L-074-1), `specs/076-…` prose describing
@@ -127,19 +144,25 @@ Live file, a new `## 097 — FIX Latest is ApplVerID 10 (2026-10-29)` section:
 
   For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone. *(FR-008; owner ruling, Gate A round 1; W-7, W-8.)*
 - **B-097-4 — An application message resolved to FIX Latest reifies with a FIX Latest label.**
-  `dict::reify` under a FIX Latest resolution returns an `owning_message_handle` whose
-  `version().application` is `vlatest` for every application MsgType of the FIX Latest dictionary, and
-  `dict_reify_unknown_msg_type` for any other MsgType. It returns that error too when the build disables
-  the FIX Latest codegen tier. FIXT admin MsgTypes (Logon, Heartbeat, …) keep routing to the FIXT admin
-  dispatch and are labelled as session-admin, unchanged. The generated
+  `dict::reify` intercepts the seven FIXT admin MsgTypes (`0 1 2 3 4 5 A`: Logon, Heartbeat, …) first;
+  they keep routing to the FIXT admin dispatch and are labelled as session-admin, unchanged. Under a
+  FIX Latest resolution, every other MsgType the FIX Latest dictionary defines returns an
+  `owning_message_handle` whose `version().application` is `vlatest`, and a MsgType that dictionary
+  does not define returns `dict_reify_unknown_msg_type` (the partition of spec FR-009(a)). It returns
+  that error too when the build disables the FIX Latest codegen tier. XMLnonFIX (35=n) is not
+  intercepted, so it reifies as `application` / `vlatest`, as it reifies as `application` / `v44`
+  under FIX 4.4 today; QuickFIX C++ and QuickFIX/J also treat it as an application message (admin set
+  `0A12345`), and catalogue row A-034 records that the session classifier routes it to `Application::fromApp`. The generated
   `fixpp::vlatest::owning_<Msg>::which()` returns `vlatest` (B-097-2).
   - **Condition:** a message resolves to FIX Latest when its header 1128 is `10`, or when 1128 is absent
     and the session negotiated `10`.
   - A session whose own dictionary is FIX Latest but which is configured `default_appl_ver_id = "9"`
     (the FIX50SP2 value, admitted by the one-way fallback) negotiates FIX50SP2. Its messages without
     1128 reify under the FIX50SP2 arm: they come back as `v50sp2`-labelled handles, and MsgTypes outside
-    that arm get `dict_reify_unknown_msg_type`. This is as before 097. To be reified as FIX Latest, such
-    a session is configured `"10"`.
+    that arm get `dict_reify_unknown_msg_type`, for example XMLnonFIX (35=n), which the FIX50SP2 arm
+    does not define. So for the same FIX Latest dictionary, 35=n fails to reify under `"9"` and
+    reifies as `application` / `vlatest` under `"10"` (Gate A round 3, O097-201). The `"9"`
+    outcome is as before 097. To be reified as FIX Latest, such a session is configured `"10"`.
 
   Before 097 no input resolved to FIX Latest. *(FR-009; W-9.)*
 
@@ -214,7 +237,7 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
      L-074-1), `specs/076-fix-latest-typed-codegen/` (prose on `.a = v50sp2` / `app_version_enum`; its
      golden is regenerated as a test oracle) and `specs/080-orchestra-runtime-load/` (L-080-1), flagged
      in `brain/components/dictionary.md`. The companion design document annotated by 097 is
-     `.specify/2c-codegen.md` (§4.3, §4.8; §C);
+     `.specify/2c-codegen.md` (§4.3, §4.8, §6.3, §6.6; §C);
    - **Process**: rides feature 097. Its PR is titled in Article XX §2 form, "Constitution: amend §I.1,
      §XVIII.2 — FIX Latest is ApplVerID 10 (v4.3) (+ 097 FIX Latest ApplVerID 10)";
    - **Review and sign-off**: Gate A / Gate B / owner sign-off slots, filled in that order before the

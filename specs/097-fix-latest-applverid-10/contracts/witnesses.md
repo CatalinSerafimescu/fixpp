@@ -273,10 +273,18 @@ and run first (plan phase 2), and that run's result is recorded too.
   `tests/codegen/determinism_test.cpp`'s `VlatestGeneratedMatchesGolden` (golden regenerated).
 - **Asserts (FIX Latest tier ON, the default)**:
   - (a1) and (a2) are kept: under a v50sp2 profile, `D` reifies as `v50sp2` and `EC` fails loud.
-  - (a3) is new, the runtime outcome FR-009(a). Under a `vlatest` resolution, `EC` (FIX-Latest-only) and
-    `D` reify to an `owning_message_handle` whose `version().application == vlatest`. A MsgType absent
-    from FIX Latest gives `dict_reify_unknown_msg_type`. A FIXT admin MsgType under the same profile
-    keeps its session-admin label.
+  - (a3) is new, the runtime outcome FR-009(a), whose partition it restates: under a `vlatest`
+    resolution, every MsgType the FIX Latest dictionary defines other than the seven FIXT admin
+    MsgTypes `dict::reify` intercepts first reifies to an `owning_message_handle` whose
+    `version().application == vlatest`, and a MsgType that dictionary does not define gives
+    `dict_reify_unknown_msg_type`. Its cases: `EC` (FIX-Latest-only) and `D` reify with
+    `application == vlatest`; a MsgType absent from FIX Latest gives `dict_reify_unknown_msg_type`; a
+    FIXT admin MsgType under the same profile keeps its session-admin label.
+  - (a4) is new, in the same file as (a3) (Gate A round 3, G097-019): under a `vlatest` resolution,
+    XMLnonFIX (35=n) reifies to a handle with `version().k == kind::application` and
+    `version().application == vlatest`. It is the one MsgType where reify's partition and the
+    Orchestra message category differ (the Orchestra file files it under `category="Session"`, and the
+    IR's `is_application` is false for it).
   - (b): the generated outer switch has exactly one `case …::v50sp2:` and exactly one `case …::vlatest:`.
   - The static outcome FR-009(b) is the smoke test: `vlatest::owning_Heartbeat::which() == vlatest`.
   - The golden matches.
@@ -292,7 +300,7 @@ and run first (plan phase 2), and that run's result is recorded too.
   OFF configure+build that plan phase 7 and `/speckit-verify` perform, its tree on
   `/mnt/wsl/fixppbuild`, and its result is recorded in the verify record.
 - **RED**:
-  - M-9a deletes the `kAppVersions` vlatest row. It turns (a3) and (b) RED.
+  - M-9a deletes the `kAppVersions` vlatest row. It turns (a3), (a4) and (b) RED.
   - M-9b reverts `app_version_enum("vlatest")` to `"v50sp2"`. It turns the smoke test and the golden RED.
   - M-9c restores emitting an outer `case` for a row whose IR is absent: today's shape, an unread
     `rmv_app`. The OFF build fails with `-Werror=unused-variable` in the generated header. Its stated
@@ -300,6 +308,14 @@ and run first (plan phase 2), and that run's result is recorded too.
     that diagnostic.
   - M-9d makes the OFF emitter write a `case …::vlatest:` that dispatches through the v50sp2 MsgType
     switch. It turns (c) RED: a handle is returned where the error was expected.
+  - M-9e (Gate A round 3, G097-019) applies the category filter Codex offered as an alternative: when
+    `emit_dispatch_application` writes the `vlatest` arm, and only that arm, it skips every message
+    whose `is_application` is false. It builds in the ON tree. Gate the row on build rc 0 and on the
+    mutant having taken: the regenerated `_dispatch/reify_dispatch_application.hpp`'s `vlatest` arm
+    holds no `XMLnonFIX` case, while its v44 arm still does. It turns (a4) RED: 35=n falls to the
+    `vlatest` arm's inner default and gets `dict_reify_unknown_msg_type` where an `application` /
+    `vlatest` handle was expected. (a3) stays green, since `EC` and `D` are application messages and
+    the admin MsgTypes are intercepted before dispatch; that is why M-9a cannot play this role.
 - **Golden diff rule**: `git diff --stat` on the golden shows one file, and `git diff -U0` shows only
   lines where `application_version::v50sp2;` becomes `application_version::vlatest;`. Their count equals
   `grep -c` of the pre-change file. Quickstart §3 gives the check and its seeded positive.
@@ -322,8 +338,9 @@ final head and recorded in the verify record:
   current-rule list (quickstart §4.1; Gate A round 2, G097-018);
 - the positive-presence checks, each with its seeded negative: the same check run against
   `origin/main`'s copy of the file must report the addition **absent**. This proves the check can fail.
-  They include the count of the canonical residue sentence (data-model §E.0) at each locus. The
-  Status-line row runs at the RATIFIED flip, not at verify;
+  They include the count of the canonical residue sentence (data-model §E.0) at each locus, and the
+  `.specify/2c-codegen.md` notes row, whose expected value is one line per note data-model §C
+  prescribes (Gate A round 3, G097-020). The Status-line row runs at the RATIFIED flip, not at verify;
 - the comment-claims and line-citation checks.
 
 A positive-presence check whose `origin/main` run also reports "present" proves nothing and is

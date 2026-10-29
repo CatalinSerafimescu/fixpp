@@ -214,11 +214,13 @@ anchor (a1)'s FIX50SP2-labelled handle under the profile a FIX Latest session ne
 
 **Acceptance Scenarios**:
 
-1. **Given** a message of an application MsgType the FIX Latest dictionary defines, resolved to FIX
-   Latest, **When** it is reified at runtime (`dict::reify`), **Then** the result is an
-   `owning_message_handle` whose `version().application` is `application_version::vlatest`. Runtime
-   dispatch returns this untyped handle for every version. The typed downcast (`as<Msg>()`) is
-   declared-only and stays out of scope.
+1. **Given** a message of any MsgType the FIX Latest dictionary defines, other than the seven FIXT
+   admin MsgTypes `dict::reify` intercepts first, resolved to FIX Latest, **When** it is reified at
+   runtime (`dict::reify`), **Then** the result is an `owning_message_handle` whose
+   `version().application` is `application_version::vlatest` (the partition of FR-009(a)). This
+   includes XMLnonFIX (35=n): it reifies as `application` / `vlatest`. Runtime dispatch returns this
+   untyped handle for every version. The typed downcast (`as<Msg>()`) is declared-only and stays out
+   of scope.
 2. **Given** the generated typed class `fixpp::vlatest::owning_<Msg>` for any FIX Latest MsgType,
    **When** its static `which()` is read, **Then** it returns `application_version::vlatest`. Before
    097 it returned `v50sp2`.
@@ -281,7 +283,10 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   Latest has no dictionary, so `1137=10` is refused with Reject 373=5.
 - **A session whose own dictionary is FIX Latest, configured `default_appl_ver_id = "9"`** — it sends
   `1137=9` and negotiates FIX50SP2. Its messages reify under the FIX50SP2 arm, so they come back as
-  `v50sp2`-labelled handles, and MsgTypes outside that arm fail loud. This is unchanged from today.
+  `v50sp2`-labelled handles, and MsgTypes outside that arm fail loud. One example is XMLnonFIX
+  (35=n), which the FIX50SP2 arm does not define: it gets `dict_reify_unknown_msg_type` under `"9"`
+  and reifies as `application` / `vlatest` under `"10"`, for the same FIX Latest dictionary. The
+  `"9"` outcome is unchanged from today.
   Such a session negotiates FIX Latest only if it is configured `"10"` (B-097-4).
 - **Both dictionaries registered** — each version is answered by its own (exact match first).
 - **Advertised version differs from the session's own dictionary** (e.g. `1137=10` on a session whose
@@ -335,12 +340,22 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   1156 is moved into the header and sent as given, as today.
 - **FR-009 (reify)**: A message whose resolved application version is FIX Latest MUST NOT yield a
   handle whose application version reads FIX50SP2. Two outcomes, each witnessed separately:
-  - (a) **Runtime**: the generated application dispatch MUST gain a FIX Latest arm. For every
-    application MsgType of the FIX Latest dictionary, `dict::reify` returns an `owning_message_handle`
-    whose `version().application == application_version::vlatest`. Any other MsgType gets the existing
-    `dict_reify_unknown_msg_type` (Clarifications, Q2). FIXT admin MsgTypes keep routing to the FIXT
-    admin dispatch. The handle is untyped, as for every version; no typed `fixpp::vlatest` object is
-    returned at runtime.
+  - (a) **Runtime**: the generated application dispatch MUST gain a FIX Latest arm. The partition is
+    reify's own, stated here once (Gate A round 3, G097-019):
+    - the seven FIXT admin MsgTypes (`0 1 2 3 4 5 A`, the `is_fixt_admin` set) are intercepted by
+      `dict::reify` before application dispatch and keep routing to the FIXT admin dispatch;
+    - every other MsgType the FIX Latest dictionary defines, under a FIX Latest resolution, makes
+      `dict::reify` return an `owning_message_handle` whose
+      `version().application == application_version::vlatest`;
+    - a MsgType the FIX Latest dictionary does not define gets the existing
+      `dict_reify_unknown_msg_type` (Clarifications, Q2).
+
+    So XMLnonFIX (35=n), which the Orchestra file places in `category="Session"`, is not
+    intercepted and reifies as `application` / `vlatest`. This is consistent with the shipped v44 arm
+    (35=n reifies as `application` / `v44`), with QuickFIX C++ and QuickFIX/J (whose admin set is
+    `0A12345`), and with catalogue row A-034 (35=n reaches `Application::fromApp`). The arm is not
+    filtered by message category. The handle is untyped, as for every version; no typed
+    `fixpp::vlatest` object is returned at runtime.
   - (b) **Static**: the generated `fixpp::vlatest::owning_<Msg>::which()` MUST return
     `application_version::vlatest`.
 
@@ -397,10 +412,19 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   as superseded in place, naming `097-fix-latest-applverid-10`, and points at the 2c notes of (f).
   (f) `.specify/2c-codegen.md` §4.3 gets an in-place `Updated (097 …)` note at the `application_version`
   enum and at the wire `1128` → `application_version` table (`"10"` → `vlatest`). This follows 2c's
-  own `Updated (fixpp#458 …)` precedent. The application-dispatch version set gains `vlatest`, noted
-  at §4.8's "Runtime-dispatch switch" paragraph, where the application switch is described. Other
-  "four codegen versions"
-  statements predate 097 (076's staleness) and are left alone.
+  own `Updated (fixpp#458 …)` precedent. The application-dispatch version set gains `vlatest`. The
+  rule is keyed on the claim, not on a phrase (Gate A round 3, G097-020): a note goes at every
+  statement in §4.8's runtime-dispatch description and in §6's behavioural contract that gives the
+  application switch's version set. Those are §4.8's "Runtime-dispatch switch" paragraph, §4.8's
+  `reify_dispatch_application.hpp` sketch (its version list and its outer-default comment), §6.3
+  step 3 ("Pass the resolved `application_version` to the dispatch switch") and §6.6 item 8
+  ("Runtime-dispatch table generation"). Data-model §C gives each note's text. Left alone, each
+  predating 097 and none a statement of the switch's version set inside §4.8 or §6: §6.3's registry
+  sentence ("the four codegen-version dictionaries"), which is about the registry, not the switch, and
+  was never accurate; §9 seam 15b, which is test-seam prose; the generic "four codegen versions" /
+  "~470 cases" wording outside §4.8 and §6 (§1's size bullet, §4.3's `resolved_message_version` sketch
+  comment, §7.6's dispatch row); §4.8's `dict::reify` algorithm-sketch comment "(the ~470-case
+  application switch)", which gives a count and no version set; and the appendices, which are history.
   (g) The constitution's Sync Impact Report lists every affected catalogue row and spec (data-model §E.4).
   The positive-presence checks of quickstart §4 (contracts W-11) confirm (a)–(f) were made, not only that
   superseded text is gone.
@@ -492,7 +516,7 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   check (plan Constitution Check); `[const §XVI.6]` mutation proofs in a scratch copy;
   `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build, verify; `[const §X.7]`
   (C ABI unchanged).
-- **Design doc**: `.specify/2c-codegen.md` §4.3 and §4.8 (annotated in place, FR-012(f)).
+- **Design doc**: `.specify/2c-codegen.md` §4.3, §4.8, §6.3 and §6.6 (annotated in place, FR-012(f)).
 - **B&L**: L-074-1, L-080-1 (retired); L-041-2 (unchanged; decides FR-008's validation outcome); new
   `B-097-*`, `L-097-1`.
 - **Precedent**: `specs/033-fixt-fix50sp2-session/` (the DefaultApplVerID gates); `specs/074-orchestra-native-reader/`
