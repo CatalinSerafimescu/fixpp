@@ -44,6 +44,11 @@ with the recipe given; do not trust a line number after the first implementation
   `engine.dictionaries`) and the C API fills none (`src/capi/config.cpp` sets `SessionConfig::dictionary`
   only). Strict would have moved every TOML FIX Latest FIXT session from `"9"` to `"10"`, a wire change
   peers react to (spec Clarifications Q1). The remaining config-surface gap is `L-097-1`.
+- **Layout**: `version_registry` grows by one `shared_ptr` slot, and `Engine`, which holds it by value,
+  grows with it (B-097-2). No size pin exists for either: `git grep -n -E
+  'sizeof\((fixpp::)?(dict::)?version_registry|sizeof\((fixpp::)?(session::)?Engine\b' -- include src
+  tests tools bindings` is empty. Re-run it at the implementation head; the full build of T070 is the
+  backstop for a pin the pattern misses.
 - **Recipe**: `grep -n "kTableSize\|FR-010\|case session_version::vlatest" include/fixpp/dict/version_registry.hpp src/dictionary/version_registry.cpp`.
 
 ## R-4 — The generated tiers: two different mappings, both corrected
@@ -56,8 +61,12 @@ with the recipe given; do not trust a line number after the first implementation
     `fixpp::vlatest` typed class's static `version_v` (`emit_messages.cpp`, `emit_reify.cpp`). Its comment
     says it exists because `application_version::vlatest` does not exist.
 - **Decision**: correct both. `.a = vlatest`; `app_version_enum("vlatest")` returns `"vlatest"` (the
-  guard deleted, since the enumerator now exists). The vlatest typed classes then report FIX Latest,
-  agreeing with the dispatch arm's handle (R-5).
+  guard, its `ns == "vlatest"` → `"v50sp2"` branch, is deleted, since the enumerator now exists). Its
+  other mappings are unchanged: `vt11` → `Unknown`, and every other namespace verbatim. The vlatest
+  typed classes then report FIX Latest, agreeing with the dispatch arm's handle (R-5).
+- **The `ir.cpp` change has no witness.** Nothing reads `VersionIR::application`, so no test can turn
+  RED for `.a`. It is a data-and-comment correction, checked by review of T045's diff, not by a
+  witness.
 - **Consequence**: the checked-in golden `specs/076-fix-latest-typed-codegen/contracts/golden/vlatest_Messages.golden.hpp`
   changes on exactly the `application_version::v50sp2;` lines that belong to vlatest classes, and
   `tests/codegen/vlatest_compile_smoke_test.cpp`'s `which() == v50sp2` assertion flips. The golden is a
@@ -162,7 +171,8 @@ with the recipe given; do not trust a line number after the first implementation
   `session_to_application`; no distinct ApplVerID" and keeps "ApplExtID(1156)=303 differentiation and
   session negotiation" post-1.0. After 097 the first is false and the second is answered. FIX Latest is
   identified by ApplVerID 10 and negotiated by DefaultApplVerID(1137) like any version, when that value
-  is `10`. A FIX Latest dictionary session configured `"9"` negotiates FIX50SP2 (the fallback). The
+  is `10` (the value the session reads from its peer; data-model §A). A FIX Latest dictionary session
+  configured `"9"`, with a peer that sends `9` too, negotiates FIX50SP2 (the fallback). The
   residue is the canonical sentence (data-model §E.0):
 
   For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.

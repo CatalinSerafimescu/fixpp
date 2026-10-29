@@ -116,9 +116,11 @@ default), the acceptor (parse, then lookup) and the initiator (parse and record)
 only through the parse (R-2) and the registry (R-3). Records: a MINOR constitution amendment, `.specify/2c-codegen.md` §4.3/§4.8/§6.3/§6.6 notes, B&L,
 the catalogue and the coverage index (data-model §C–§F).
 
-FIX Latest is negotiated when the configured or advertised DefaultApplVerID is `10`. A FIX Latest
-dictionary session configured `"9"` negotiates FIX50SP2 and reifies under the FIX50SP2 arm. That is the
-fallback, and B-097-4 discloses it.
+FIX Latest is negotiated when the DefaultApplVerID(1137) a session reads from its peer is `10` (the
+acceptor reads the peer's Logon, the initiator the peer's Logon reply; data-model §A). A session's own
+`default_appl_ver_id` is what it sends. A FIX Latest dictionary session configured `"9"` sends
+`1137=9`; with a peer that sends `9` too it negotiates FIX50SP2 and reifies under the FIX50SP2 arm.
+That is the fallback, and B-097-4 discloses it.
 
 ## Technical Context
 
@@ -226,8 +228,8 @@ specs/097-fix-latest-applverid-10/
    Build and run them in `build/linux-clang-debug`; that run is the RED record and the
    characterization record. **Stop rule, in three parts:**
    - If a **control arm** (the frame without 1407/1156) departs from its expected outcome on this tree
-     (contracts W-7; on `origin/main`, (b0) and (c0) expect the 1137 Reject, (f0) delivery, and the
-     others establishment), the fixture is wrong: the dictionary, the frame or the session setup. Fix the
+     (contracts W-7; on `origin/main`, (b0) and (c0) expect the 1137 Reject, (a0) and (e0)
+     establishment, and (d0) and (f0) delivery to `fromApp` on an established session), the fixture is wrong: the dictionary, the frame or the session setup. Fix the
      fixture, which is test setup and not FR-008, and re-run. Proceed only once every control matches.
    - If a 1407/1156 arm's outcome differs from its matching control's (for example rejected where the
      control is established), under a session dictionary that declares the tag (`FIXT11.xml` or the Orchestra file), RC-1's premise is false: FR-008 would need code, and
@@ -235,7 +237,10 @@ specs/097-fix-latest-applverid-10/
      test.
    - W-7(e) and W-7(f) (the dictionary-decided rejects of 1407 and of header 1156) are
      characterization pins. If an observed Reject shape departs from contracts' text while its control
-     passes, record the observed shape and correct the text. No production code changes.
+     passes, record the observed shape and correct the text. No production code changes. If instead
+     (e) is established or (f) is delivered with no Reject at all while its control passes, the
+     dictionary-decided reject that B-097-3 and research R-6's table describe does not exist on this
+     tree: stop and decide, as for the second part, and do not adjust the test.
 3. **Core**: enumerator, parse, render, registry with the one-way fallback, config. W-1..W-5 green.
    Mutants M-1..M-5c. The W-12 fuzz harness and its seeds land with the parse change; its corpus
    replay passes in `build/linux-clang-asan`, and M-1, M-1n and M-2 are re-run against it in the
@@ -250,9 +255,13 @@ specs/097-fix-latest-applverid-10/
    `CLAUDE.md`'s "Also open, no issue filed: ApplExtID(1156)=303 …" line; quickstart §4 checks, the
    superseded-phrase sweep and the positive-presence checks with their seeded negatives (W-11). A
    rewritten comment states the rule and the derivation, never a count or an enumerated range.
-   `kTableSize` is derived from the enum with a `static_assert`. The `"2".."9"` tables in
+   `kTableSize` is derived from the enum, `static_cast<std::size_t>(application_version::vlatest) + 1`,
+   with no literal (data-model §B; no `static_assert`, which would only restate the definition). The `"2".."9"` tables in
    `version_profile.hpp` and `scalar_mappers.cpp`, and the two `tests/config` comments FR-012(c) names, point at the code instead of re-listing values
-   (CLAUDE.md: a comment may record a procedure, not a result). Check with
+   (CLAUDE.md: a comment may record a procedure, not a result). The unknown-token diagnostic in
+   `scalar_mappers.cpp` is not a comment: it is a runtime string FR-003 requires to name the accepted
+   range, so it keeps its `"2".."10"` text. It is pinned by W-3's text arm, so it cannot drift from the
+   mapper silently, and the comment-claims check is blind to it, so T065 reads it by eye. Check with
    `.claude/scripts/check-comment-claims.py` (quickstart §4).
 7. **Final head**: one full configure + build + ctest (`-j8`). Then one `FIXPP_CODEGEN_FIX_LATEST=OFF`
    configure+build with `FIXPP_WERROR=ON`, which runs W-9(c), its build tree on `/mnt/wsl/fixppbuild`.

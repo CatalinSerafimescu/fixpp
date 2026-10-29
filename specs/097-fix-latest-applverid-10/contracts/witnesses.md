@@ -11,6 +11,11 @@ harness rather than adding one. A row whose rebuild failed proves nothing and is
 exception is M-9c, whose stated reason *is* a build failure. The verify record keeps a table: witness |
 mutant | build rc | test rc | the failing assertion's message.
 
+**Collateral.** Unless a row says "exactly one failing test", a mutant may also turn RED other tests
+that reach the mutated site. The row is read on the assertions it names, and the record lists every
+failing test the unfiltered run reports, so collateral is visible rather than assumed. A failing test
+that does not reach the mutated site is investigated before the row is trusted.
+
 **Where mutants run (`[const §XVI.6]`; Gate A round 1, O097-007).** Mutation proofs run in a scratch
 copy of the tree, never in the PR's worktree. The main checkout holds this branch, and its
 `build/linux-clang-debug` is the tree verify reads, so a mutant there would contaminate a peer's build.
@@ -107,7 +112,8 @@ and run first (plan phase 2), and that run's result is recorded too.
 - **RED**: on `origin/main` the construction aborts with `FR-010`. This is recorded from the death test
   as it exists before the rename: its pass on `origin/main` IS the abort. Mutant M-4 restores
   `case vlatest: return v50sp2;` without the abort: `get(vlatest)` is empty and `get(v50sp2)` returns
-  the last writer, so one order fails.
+  the last writer. So `get(vlatest)` fails in both orders (the fallback answers `v50sp2` only), and
+  `get(v50sp2)` is also wrong in one order.
 
 ## W-5 — one-way fallback (FR-006)
 
@@ -149,6 +155,9 @@ and run first (plan phase 2), and that run's result is recorded too.
   - (a) is string-level on input. On `origin/main` its assertion "reply is a Logon, not a Reject" is
     recorded RED (Reject 373=5). The negotiated-version assertion is added once the enumerator exists.
   - (c) passes on `origin/main`; it is a characterization pin.
+  - (b) passes on `origin/main` for a different reason than at the head: there `"10"` does not
+    parse; at the head it parses and the {FIX50SP2} registry does not serve it. It feeds `1137=10`, so
+    it is inside FR-013's exception (i), not one of its pins. M-5b proves the head's reason.
   - **M-1n** (narrowing: `"10"` → `v50sp2`) turns (a), (d)'s `1137=10` sessions and (e) RED, each on
     its negotiated-version assertion. (e) has no RED on `origin/main`: the initiator never consults the
     registry, and naming `vlatest` does not compile there. M-1n is its only RED.
@@ -182,8 +191,9 @@ and run first (plan phase 2), and that run's result is recorded too.
     refused at the 1137 check, so 1407 is not the cause. **At the implementation head** both are
     established and negotiated `vlatest`.
   - (c) The false-positive arm. Session dictionary `FIXT11.xml`, registry {FIX50SP2}: `1137=10` +
-    `1407=303` gets Reject 373=5, 371=1137, so 1407 does not make the version serviceable. Control
-    (c0): `1137=10` without 1407, the same session dictionary and registry, the same Reject.
+    `1407=303` gets Reject 373=5, 371=1137, then disconnect (W-6(b)'s shape), so 1407 does not make
+    the version serviceable. Control (c0): `1137=10` without 1407, the same session dictionary and
+    registry, the same Reject.
   - (d) Session dictionary the Orchestra FIX Latest file, registry {FIX Latest}, Logon `1137=9`
     (admitted today through the fallback, so this arm runs on `origin/main`). On the Active session, an
     inbound application message of a MsgType the Orchestra file defines, with its required fields and
@@ -214,6 +224,9 @@ and run first (plan phase 2), and that run's result is recorded too.
     shape, correct this text, and change no production code (as for (e)).
 - **RED**:
   - (a), (d), (e) and (f) pass on `origin/main`. They are characterization pins, each with a mutant.
+  - (c) passes on `origin/main` for a different reason than at the head (`"10"` does not parse there;
+    at the head the registry does not serve it). It is inside FR-013's exception (i). M-7c proves the
+    head's reason.
   - (b) is RED on `origin/main` (the `1137=10` refusal, 373=5). Its negotiated-version assertion is
     added once the enumerator exists. **M-1n** (`"10"` → `v50sp2`) turns that negotiated-`vlatest`
     assertion RED, and (b0)'s too: the FIX Latest dictionary answers `v50sp2` through the fallback, so
@@ -264,14 +277,27 @@ and run first (plan phase 2), and that run's result is recorded too.
   - For each of (i) and (ii): its Logon (35=A) is captured at `open()`. A peer Logon reply carrying
     its own 1137 is then fed, and the session is Active. On that session: an inbound TestRequest draws a
     Heartbeat (35=0); the liveness loop's TestRequest (35=1) is driven by letting the heartbeat interval
-    pass with no inbound traffic, in the pattern of `tests/session/heartbeat_testrequest_test.cpp`; and
+    pass with no inbound traffic, in the pattern of `tests/session/heartbeat_testrequest_test.cpp`
+    (time moves on the session's `mock_clock`, never by a wall-clock wait, and each pump is that file's
+    bounded pump, `tests/support/pump_until_ready.hpp`; the clock is advanced past the configured
+    heartbeat interval, so a TestRequest that never comes fails the non-vacuity assertion instead of
+    hanging); and
     `close()` sends a Logout (35=5).
   - (iii) The acceptor's Logon reply (35=A) of W-6(a) (peer `1137=10`) and of W-6(c) (peer `1137=9`),
-    and the acceptor's Reject (35=3) of W-6(b).
+    and the acceptor's Reject (35=3) of W-6(b). These acceptors are configured `"9"`: W-6 clones the
+    W5 v50sp2 acceptor case.
+  - (iv) For the `"10"` default (SC-005's "both defaults"): an acceptor configured `"10"`, registry
+    {FIX Latest}. Its Logon reply (35=A) to a peer `1137=10`, and, on a second session, its Reject
+    (35=3; 373=5, 371=1137) to a peer `1137=6`, which that registry does not serve.
+  - Frames W-8 does not capture: ResendRequest, SequenceReset-GapFill, BusinessMessageReject and
+    Reject-with-text. Their builders in `src/session/admin_messages.cpp` write no 1128, 1156 or 1407
+    (`grep -n "1128\|1156\|1407" src/session/admin_messages.cpp` is empty), and 097 changes no
+    `src/session/` file (tasks T075), so the source fact covers them.
 - **Asserts**:
   - **Non-vacuity first.** Every frame source listed above yields its frame: the initiator Logon,
     Heartbeat, TestRequest and Logout for each of (i) and (ii); the acceptor Logon reply for each of
-    W-6(a) and W-6(c); the Reject for W-6(b). A missing frame fails the test before any count is read.
+    W-6(a) and W-6(c); the Reject for W-6(b); and (iv)'s Logon reply and Reject. A missing frame fails
+    the test before any count is read.
   - In every captured frame, the three counts are 0.
   - (i)'s Logon carries `1137=10`; (ii)'s carries `1137=9`.
   - No W-8 session sends an application payload, so the payload pass-through of 1128/1156 (B-097-3) is
@@ -285,13 +311,15 @@ and run first (plan phase 2), and that run's result is recorded too.
     each `build_*` writes its own standard header. So there is one mutant per tag, each in a different
     builder:
     - M-8a: `build_logout` appends `1156=303` after TargetCompID. The Logout's 1156 count turns RED.
-    - M-8b: `build_logon` appends `1407=303`. (i)'s and (ii)'s Logon 1407 counts turn RED.
+    - M-8b: `build_logon` appends `1407=303`. (i)'s and (ii)'s Logon 1407 counts turn RED, and so do
+      the 1407 counts of (iii)'s and (iv)'s acceptor Logon replies, which the same `build_logon`
+      builds.
     - M-8c: `build_heartbeat` appends `1128=9`. The Heartbeat's 1128 count turns RED.
   - The `1137=10` assertion on (i)'s Logon turns RED under mutant M-2 (`render(vlatest)` returns
     `"9"`).
 - **Phase split**: (ii), and (iii)'s W-6(b)/(c) frames, compile on `origin/main` and run in plan
-  phase 2 as characterization pins (all counts 0, every family present). (i) and W-6(a)'s reply name
-  `"10"` / `vlatest` and run from plan phase 4.
+  phase 2 as characterization pins (all counts 0, every family present). (i), W-6(a)'s reply and (iv)
+  name `"10"` / `vlatest` and run from plan phase 4.
 
 ## W-9 — FIX Latest reify arm and typed version (FR-009, FR-012(c), US3)
 
@@ -357,7 +385,8 @@ and run first (plan phase 2), and that run's result is recorded too.
     `version().application == vlatest`. It is the one MsgType where reify's partition and the
     Orchestra message category differ (the Orchestra file files it under `category="Session"`, and the
     IR's `is_application` is false for it).
-  - (b): the generated outer switch has exactly one `case …::v50sp2:` and exactly one `case …::vlatest:`.
+  - (b), the anchor test's own (b) half, not FR-009(b): the generated outer switch has exactly one
+    `case …::v50sp2:` and exactly one `case …::vlatest:`.
   - The static outcome FR-009(b) is the smoke test: `vlatest::owning_Heartbeat::which() == vlatest`.
   - The golden matches.
 - **(c) FIX Latest tier OFF (US3 scenario 4; Gate A round 1, O097-003)**: one case compiled only when
@@ -408,7 +437,11 @@ and run first (plan phase 2), and that run's result is recorded too.
     filter and the Orchestra file defines all seven. It turns the (a3) admin case RED on
     `version().k == kind::session_admin` (record which assertion fired; a `has_value()` failure also
     counts). Isolation: `is_fixt_admin`'s only caller is `dict::reify`, which has no `src/` caller, and
-    the existing admin reify witnesses use v50sp2 profiles or `dispatch_fixt` directly. So run
+    the existing admin reify witnesses use v50sp2 profiles or `dispatch_fixt` directly. Re-derive at the
+    head: `grep -rn "is_fixt_admin(" src include tools` shows its definition and one call, in
+    `dict::reify`; and `grep -n "application_version::vlatest"` over the sources that
+    `add_executable(dictionary_reify_tests …)` lists in `tests/dictionary/CMakeLists.txt` (derive the
+    list from that block at the head) shows only the 097 cases. So run
     `dictionary_reify_tests` UNFILTERED, gated on build rc 0, and expect exactly one failing test, the
     (a3) admin case.
   - M-9h (analyze C2), the absent-MsgType sample's RED. In `emit_dispatch_application`
