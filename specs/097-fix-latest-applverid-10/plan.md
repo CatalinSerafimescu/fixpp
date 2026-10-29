@@ -13,8 +13,9 @@ FIX Latest gets the wire identity the FIX documents give it, ApplVerID `"10"`, i
 mapping onto FIX50SP2:
 - a new `application_version::vlatest` enumerator, parsed from and rendered to `"10"`, and accepted
   as a config token (research R-1, R-2, R-7);
-- its own `version_registry` slot, which retires the FR-010 abort, L-074-1 and L-080-1, with strict
-  lookup per the owner's Q1 ruling (R-3);
+- its own `version_registry` slot, which retires the FR-010 abort, L-074-1 and L-080-1. Lookup is a
+  one-way fallback per the owner's second Q1 ruling: FIX Latest answers FIX50SP2 when that dictionary is
+  absent, never the reverse (R-3). L-097-1 records that only direct C++ can register both;
 - a FIX Latest arm in the generated reify dispatch, with the vlatest typed classes reporting FIX
   Latest (R-4, R-5);
 - inbound 1407/1156 accepted and ignored, and nothing new emitted (R-6).
@@ -93,12 +94,28 @@ specs/097-fix-latest-applverid-10/
 
 1. **Amendment** (the first commit): data-model §E text and the Sync Impact Report with PENDING
    sign-off slots.
-2. **RED records** on `origin/main` (quickstart §1.1).
-3. **Core**: enumerator, parse, render, registry, config. W-1..W-5 green. Mutants M-1..M-5.
+2. **Unmodified-code witnesses first** (quickstart §1.1). Before any production edit, write the witnesses
+   that compile against unmodified code:
+   - W-1's string half;
+   - W-3's text arm;
+   - W-4 construction-only (the death test, as it stands);
+   - W-5's FIX-Latest-alone arm;
+   - W-6 (a)/(b)/(c);
+   - W-7 (a)/(b)/(c)/(d), with `validate_inbound_messages` ON.
+
+   Build and run them in `build/linux-clang-debug`; that run is the RED record and the
+   characterization record. **Stop rule:** if W-7 (a) or (d) fails on unmodified code, FR-008 needs
+   session code and the plan's "no `src/session/` change" is wrong. Stop and decide, and do not adjust
+   the test.
+3. **Core**: enumerator, parse, render, registry with the one-way fallback, config. W-1..W-5 green.
+   Mutants M-1..M-5c.
 4. **Session witnesses**: W-6..W-8 (no session source change). Mutants M-7a..c.
 5. **Codegen**: dispatch row, `ir.cpp`, `gen_util.hpp`, golden regenerated (quickstart §3), W-9.
    Mutants M-9a/b.
-6. **Comments and records**: data-model §C–§F; quickstart §4 checks.
+6. **Comments and records**: data-model §C–§F; quickstart §4 checks. A rewritten comment states the
+   rule and the derivation, never a count: `kTableSize` is derived from the enum with a `static_assert`,
+   and the `"2".."9"` tables in `version_profile.hpp` and `scalar_mappers.cpp` point at the code instead of
+   re-listing values (CLAUDE.md: a comment may record a procedure, not a result).
 7. **Final head**: one full configure + build + ctest (`-j8`), `/speckit-verify`, then Gate B.
 
 ## Risks
@@ -106,8 +123,9 @@ specs/097-fix-latest-applverid-10/
 - **A generated-code blast radius larger than the golden.** Other checked-in generated output may embed
   the vlatest classes' version. Mitigation: after phase 5, `git status` must list only the files named
   above. Any other changed generated file stops the phase for a decision.
-- **Strict lookup breaks a consumer config not in the tree.** fixpp is pre-release. Declared BREAKING
-  (B-097-2) with the migration in the row itself.
+- **The fallback hides a mis-registration.** A C++ integrator who meant to register FIX50SP2 but did not
+  gets FIX Latest answering `1137=9`. This is today's behaviour, kept by ruling. Inbound validation uses
+  the session's own dictionary in either case.
 - **`-Wswitch` in a consumer** sees the new enumerator. Disclosed in B-097-2.
 - **A witness that cannot fail.** Every row of contracts carries its RED arm, and quickstart §1.2 gates
   each mutant row on build rc 0.

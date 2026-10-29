@@ -88,10 +88,16 @@ version and registry slot; the abort goes; inbound 1407/1156 are accepted and ig
   to a follow-up. When the FIX Latest codegen tier is disabled (`FIXPP_CODEGEN_FIX_LATEST=OFF`) there is
   no arm and FIX Latest falls to the existing fail-loud outer default.
 - Q (Q1): An engine holding only the FIX Latest dictionary, asked to serve a peer's `1137=9` — strict
-  (refuse) or fall back to the FIX Latest dictionary? → A: **Strict** (owner, 2026-10-29). One
-  deterministic ending; matches QuickFIX/J, which selects the dictionary per ApplVerID. To serve both, an
-  operator registers both dictionaries, which FR-005 makes possible. The changed answer is declared
-  BREAKING in the B&L (FR-011); fixpp is pre-release.
+  (refuse) or fall back to the FIX Latest dictionary? → A: **One-way fallback** (owner, 2026-10-29,
+  second ruling). The owner first ruled Strict on an option text that said serving both was a matter of
+  registering FIX50SP2 too; that holds for direct C++ only. TOML config loads exactly one dictionary
+  (`src/config/selector_resolver.cpp`) and the C API never fills `EngineConfig::dictionaries`
+  (`src/capi/config.cpp`), so Strict would have forced every TOML FIX Latest FIXT session from `"9"` to
+  `"10"` — on the wire, QuickFIX/Go then routes app messages under `"10"` (BusinessMessageReject without
+  routes) and QuickFIX C++ skips app validation without `AppDataDictionary.10` — and left a TOML acceptor
+  unable to admit `1137=9`. QuickFIX/J admits `9` with only FIX Latest configured (it loads FIX50SP2.xml
+  from its jar). Ruling: exact match first; FIX Latest answers FIX50SP2 when FIX50SP2 is absent; never the
+  reverse. Not BREAKING for the registry; inbound validation still uses each session's own dictionary.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -125,7 +131,8 @@ version equal to FIX Latest. On the unfixed tree the same input yields Reject(37
 
 ### User Story 2 — One engine serves FIX50SP2 and FIX Latest (Priority: P1)
 
-An operator configures one engine with both the FIX50SP2 dictionary and the FIX Latest dictionary.
+An integrator configures one engine, in C++ (`EngineConfig::dictionaries`; the TOML and C-API surfaces
+load one dictionary — L-097-1), with both the FIX50SP2 dictionary and the FIX Latest dictionary.
 Construction succeeds. A peer advertising `1137=9` resolves to the FIX50SP2 dictionary, a peer advertising
 `1137=10` to the FIX Latest dictionary.
 
@@ -197,10 +204,11 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 - **Inbound header `1156=…`** — accepted and ignored (FR-008).
 - **Registry given two dictionaries with the same session version** — unchanged, last writer wins (not
   FR-010's case and not this feature's).
-- **FIX-Latest-only registry asked for FIX50SP2** — no dictionary (FR-006, strict): a FIX-Latest-only
-  acceptor refuses `1137=9` with Reject 373=5; the reverse (FIX50SP2-only, `1137=10`) is refused the same
-  way. A FIXT session whose own default is FIX50SP2 but whose engine holds only FIX Latest now fails the
-  `open()` check (BREAKING, FR-011).
+- **FIX-Latest-only registry asked for FIX50SP2** — the FIX Latest dictionary answers (FR-006, one-way
+  fallback): a FIX-Latest-only acceptor admits `1137=9` as today, and a session whose own default is `"9"`
+  on such an engine opens as today. The reverse never falls back: a FIX50SP2-only registry asked for FIX
+  Latest has no dictionary, so `1137=10` is refused with Reject 373=5.
+- **Both dictionaries registered** — each version is answered by its own (exact match first).
 - **Config token** — `default_appl_ver_id = "10"` is accepted; any other new token is not added.
 - **A consumer's exhaustive `switch` over `application_version`** — a new enumerator is source-visible
   to a `-Wswitch` build; this is an additive public C++ change, disclosed (FR-011).
@@ -221,12 +229,12 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   Latest application version; FIX50SP2 MUST keep mapping to FIX50SP2.
 - **FR-005 (registry)**: The registry MUST hold a FIX50SP2 and a FIX Latest dictionary at once, each in its
   own slot, and MUST NOT abort or write a diagnostic for that combination. The FR-010 abort is removed.
-- **FR-006 (strict lookup)**: Each application version MUST be answered only by a dictionary that maps to
-  it (FR-004). A registry holding only the FIX Latest dictionary MUST answer FIX50SP2 with "no dictionary",
-  and one holding only FIX50SP2 MUST answer FIX Latest with "no dictionary" — no fallback in either
-  direction (Clarifications, Q1). This changes a shipped answer: `OrchestraFR010Guard.SingleDictConfigsSucceed`'s
-  FIX-Latest-alone arm, which pins the FIX50SP2 lookup to the FIX Latest dictionary, is rewritten to the
-  strict answer.
+- **FR-006 (one-way fallback)**: A lookup MUST return the dictionary that maps to the requested version
+  when one is registered (exact match first). When FIX50SP2 is requested and no FIX50SP2 dictionary is
+  registered, the FIX Latest dictionary, if registered, MUST answer — today's shipped answer, kept
+  (`OrchestraFR010Guard.SingleDictConfigsSucceed`'s FIX-Latest-alone arm stays as it is). When FIX Latest
+  is requested and no FIX Latest dictionary is registered, the lookup MUST return "no dictionary"; no other
+  version falls back to anything (Clarifications, Q1).
 - **FR-007 (Logon)**: The FIXT acceptor's DefaultApplVerID check and the `open()` check of the session's
   own default MUST treat FIX Latest like every other application version: serviceable iff FR-001 parses
   and FR-005/FR-006 return a dictionary. The initiator MUST record a peer's `1137=10` as FIX Latest. The
@@ -248,8 +256,10 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   path rejects today), its witness is a characterization pin and is instead shown RED against a named
   mutant that makes the tag change the outcome.
 - **FR-011 (compatibility disclosure)**: The new application version is an additive public C++ enumerator;
-  the C ABI is unchanged (it carries the raw 1137 string). The B&L records the behaviour change(s) as
-  `B-097-*` rows, BREAKING where FR-006 changes a shipped answer.
+  the C ABI is unchanged (it carries the raw 1137 string). The B&L records the behaviour changes as
+  `B-097-*` rows, BREAKING where a shipped C++ answer changes (the `fixpp::vlatest` typed classes' static
+  application version, FR-012(c)). A new limitation `L-097-1` records that only direct C++ can register
+  FIX50SP2 and FIX Latest together (TOML loads one dictionary; the C API fills none).
 - **FR-012 (the record)**: (a) The constitution's statements that FIX Latest has no distinct ApplVerID and
   that ApplExtID(1156)=303 differentiation is post-1.0 (Article I §1's FIX Latest bullet and post-1.0
   milestone line; Article XVIII §2's v1.2 annotation) are amended under Article XX, riding this
@@ -262,7 +272,7 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   coverage-index §4.3.7 / §5.3.3 / §5.3.5 entries are updated. (e) `brain/components/dictionary.md`
   flags 074's reconcile (frozen `specs/074-orchestra-native-reader/`) as superseded in place.
 - **FR-013 (no regression)**: No FIX.4.x session, and no FIXT session whose default is FIX50SP2 or older,
-  changes observable behaviour (wire bytes, Rejects, state transitions), except as FR-006 decides.
+  changes observable behaviour (wire bytes, Rejects, state transitions), on any registry content.
 
 ### Key Entities
 
@@ -321,7 +331,7 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 - **Constitution**: `[const §I.1]`, `[const §XVIII.2]` amended (FR-012(a)); `[const §XX.1]`–`[const §XX.4]`
   the amendment process; `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build,
   verify; `[const §X.7]` (C ABI unchanged).
-- **B&L**: L-074-1, L-080-1 (retired); new `B-097-*`.
+- **B&L**: L-074-1, L-080-1 (retired); new `B-097-*`, `L-097-1`.
 - **Precedent**: `specs/033-fixt-fix50sp2-session/` (the DefaultApplVerID gates); `specs/074-orchestra-native-reader/`
   (the superseded reconcile, FR-010); `specs/080-orchestra-runtime-load/` (L-080-1).
 - **Evidence**: parent `research/findings/v1-row4b-applverid-10-sweep-2026-10-29.md`.

@@ -34,10 +34,16 @@ with the recipe given; do not trust a line number after the first implementation
 - **Rationale**: with distinct slots no two distinct session versions map to one slot, so the check can
   never fire; an unreachable abort is a claim the code would no longer back. Two dictionaries with the
   same session version keep last-writer-wins (unchanged, not FR-010's case).
-- **Strict lookup (spec FR-006, owner Q1)** falls out of the slot split with no extra code: the v50sp2 slot
-  holds only a FIX50SP2 dictionary. What changes is the shipped answer, pinned today by
-  `OrchestraFR010Guard.SingleDictConfigsSucceed` and `OrchestraVersionIdentity.DistinctVLatestMapsToV50SP2`
-  (`tests/dictionary/orchestra_loader_test.cpp`). Both are rewritten.
+- **One-way fallback (spec FR-006, owner Q1 second ruling)** is the one rule added to `get`: an empty
+  v50sp2 slot answers from the vlatest slot; nothing else falls back. It keeps the shipped answer pinned by
+  `OrchestraFR010Guard.SingleDictConfigsSucceed`'s FIX-Latest-alone arm, so that arm stays unchanged and
+  becomes FR-006's characterization pin. `OrchestraVersionIdentity.DistinctVLatestMapsToV50SP2`
+  (`tests/dictionary/orchestra_loader_test.cpp`) asserts the mapping and is rewritten to `vlatest`.
+- **Why not strict** (owner's first ruling, withdrawn): only direct C++ can register two dictionaries —
+  TOML loads exactly one (`src/config/selector_resolver.cpp`, one `push_back` into
+  `engine.dictionaries`) and the C API fills none (`src/capi/config.cpp` sets `SessionConfig::dictionary`
+  only). Strict would have moved every TOML FIX Latest FIXT session from `"9"` to `"10"`, a wire change
+  peers react to (spec Clarifications Q1). The remaining config-surface gap is `L-097-1`.
 - **Recipe**: `grep -n "kTableSize\|FR-010\|case session_version::vlatest" include/fixpp/dict/version_registry.hpp src/dictionary/version_registry.cpp`.
 
 ## R-4 — The generated tiers: two different mappings, both corrected
@@ -117,8 +123,9 @@ with the recipe given; do not trust a line number after the first implementation
 
 - **Decision**: L-074-1 and L-080-1 move to `spec/behaviors-and-limitations-closed.md` with a
   `closed: resolved by 097` comment line, text unchanged. New live rows in data-model §D:
-  B-097-1 (FIX Latest = ApplVerID 10), B-097-2 (BREAKING: strict lookup and the vlatest classes' static
-  version), B-097-3 (1407/1156 accepted and ignored, never emitted), B-097-4 (FIX Latest reify arm).
+  B-097-1 (FIX Latest = ApplVerID 10; one-way fallback), B-097-2 (BREAKING: the enumerator and the vlatest
+  classes' static version), B-097-3 (1407/1156 accepted and ignored, never emitted), B-097-4 (FIX Latest
+  reify arm), and the limitation L-097-1 (two dictionaries: direct C++ only).
 
 ## R-10 — Line-citation gate
 

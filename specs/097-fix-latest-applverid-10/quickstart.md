@@ -12,12 +12,19 @@ Run from the library root of the tree that owns the branch (the main checkout).
 
 ## §1 — RED before GREEN (contracts, every W)
 
-1. On `origin/main` (a detached scratch worktree, never the shared checkout), record the witnesses that
-   compile there: W-1's string half, W-3's text arm, W-4's FR-010 death test, W-5's FIX-Latest-alone arm,
-   W-6 (a)/(c), W-7 (b). Expected: each fails (or, for the death test, aborts) for its stated reason.
-2. At the implementation head, for each mutant M-1..M-9b in contracts: scratch commit on a detached head,
-   rebuild the named binaries, run each binary UNFILTERED, record rc and the failing message, drop the
-   commit. A mutant whose rebuild failed proves nothing: gate the row on build rc 0 first.
+1. Before any production edit (the branch is code-identical to `origin/main`), build and run the
+   witnesses that compile against unmodified code (plan phase 2), in `build/linux-clang-debug`.
+   - RED for the stated reason: W-1's `"10"` arm, W-3's text arm, W-6 (a), and W-7 (b).
+   - The death test (today's W-4) aborts with `FR-010`.
+   - Characterization pins that pass: W-5's FIX-Latest-alone arm, W-6 (b)/(c), and W-7 (a)/(c)/(d).
+   - Stop rule in plan phase 2.
+2. At the implementation head, for each mutant M-1..M-9b in contracts:
+   - commit it on the branch;
+   - rebuild the named binaries;
+   - run each binary UNFILTERED and record rc and the failing message;
+   - `git reset --hard <head-before-mutant>`.
+
+   A mutant whose rebuild failed proves nothing: gate the row on build rc 0 first.
 3. Green: `ctest --preset linux-clang-debug -L 097 --output-on-failure` — all pass.
 
 ## §2 — Registry and parse (US2, W-1/W-2/W-4/W-5)
@@ -41,9 +48,19 @@ its size is non-zero before counting (a shell hook can mangle `rev:path` argumen
 
 ## §4 — The record (US4, FR-012)
 
-- Superseded statements:
-  `grep -rn -i "no distinct ApplVerID\|caps at 9" include src tools tests .specify/constitution.md` →
-  only hits that state the supersession and name 097.
+- Superseded statements, one union pattern over the whole tree (a broader `vlatest.*v50sp2` arm was
+  tried and rejected: it matches every line that merely lists both namespaces):
+  ```
+  P='no distinct ApplVerID|caps at 9|ApplExtID\(1156\)=303|L-074-1|L-080-1|session_to_application\(vlatest\)|vlatest *(->|→) *v50sp2|maps? to v50sp2|resolves? to (the )?(existing )?v50sp2|v50sp2 (registry )?slot|wire application version (is |IS )?(v50sp2|5\.0SP2)|no .?application_version::vlatest|ApplVerID 9 with no ApplExtID'
+  git grep -n -i -E "$P" -- . ':!specs/0[0-8]*' ':!specs/09[0-6]*' ':!specs/097*'
+  ```
+  Seeded positive, before trusting an empty result:
+  `printf 'session_to_application(vlatest) -> v50sp2\n' | grep -c -i -E "$P"` must print 1.
+  Every hit either states the current rule or flags the supersession naming 097. Explicit exclusions:
+  frozen `specs/` bundles, the constitution's historical Sync Impact Report entries, and the closed B&L
+  file. The surfaces it must reach include the library `CLAUDE.md` ("Also open, no issue filed:
+  ApplExtID(1156)=303 …"), `brain/`, `.specify/*.md` design docs, and the coverage index's Post-1.0 Gap
+  Registry.
 - `grep -n "L-074-1\|L-080-1" spec/behaviors-and-limitations.md` → no row definition (mentions in
   closed-pointer text only); both present in `spec/behaviors-and-limitations-closed.md`.
 - New comments: `.claude/scripts/check-comment-claims.py --root . --base origin/main` (parent repo path)

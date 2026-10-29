@@ -6,12 +6,14 @@ Every witness names its file, what it asserts, and how it is shown RED **for its
 `application_version::vlatest` does not compile on the unfixed tree. A compile failure is RED for the
 wrong reason (it would be RED whatever the behaviour). So, except where noted, each witness's RED is a
 **named mutant applied to the fixed tree**, built, and run unfiltered (`--gtest_filter` only narrows the
-report, never the binary). Each mutant is applied in a scratch commit on a detached head (never
-`git stash`, which every worktree shares), built, run, recorded, and dropped. The verify record keeps a
+report, never the binary). Each mutant is committed on the feature branch, built, run and recorded. It
+is then dropped with `git reset --hard <head-before-mutant>` on that same branch: never `git stash`
+(every worktree shares it), never `checkout`/`switch`, and never a detached head in the shared
+checkout. A row whose rebuild failed proves nothing and is gated on build rc 0. The verify record keeps a
 table: witness | mutant | build rc | test rc | the failing assertion's message.
 
-Where the unfixed tree DOES compile the witness (string-level frames, no new enumerator), its RED on
-`origin/main` is recorded as well.
+Where unmodified code DOES compile the witness (string-level frames, no new enumerator), it is written
+and run first (plan phase 2), and that run's result is recorded too.
 
 ## W-1 — parse (FR-001, SC-004)
 
@@ -54,13 +56,18 @@ Where the unfixed tree DOES compile the witness (string-level frames, no new enu
   `case vlatest: return v50sp2;` without the abort: `get(vlatest)` is empty and `get(v50sp2)` returns
   the last writer, so one order fails.
 
-## W-5 — strict lookup (FR-006)
+## W-5 — one-way fallback (FR-006)
 
-- **File**: `tests/dictionary/orchestra_loader_test.cpp`. `SingleDictConfigsSucceed` is rewritten.
-- **Asserts**: with FIX Latest alone, `get(vlatest)` is that dict and `get(v50sp2)` is
-  `dict_no_dictionary_for_application_version`. With FIX50SP2 alone, the converse holds.
-- **RED**: on `origin/main` the FIX-Latest-alone arm's `get(v50sp2)` HAS a value, which is today's pin.
-  Mutant M-5 adds a fallback (an empty v50sp2 slot answers from the vlatest slot).
+- **File**: `tests/dictionary/orchestra_loader_test.cpp`. `SingleDictConfigsSucceed` is kept and extended
+  with a new `OrchestraRegistry097.OneWayFallback`.
+- **Asserts**: every row of data-model §A's lookup table. With FIX Latest alone, `get(v50sp2)` and
+  `get(vlatest)` are both that dict (the fallback is kept). With FIX50SP2 alone, `get(vlatest)` is
+  `dict_no_dictionary_for_application_version` (no reverse fallback). With both, each version gets its
+  own dict (exact match beats the fallback). Empty gives none for both.
+- **RED**: the FIX-Latest-alone `get(v50sp2)` arm passes on `origin/main` (a characterization pin).
+  Mutant M-5a deletes the fallback, which turns that arm RED. Mutant M-5b adds the reverse fallback, so
+  an empty vlatest slot answers from v50sp2; this turns the FIX50SP2-alone arm RED. Mutant M-5c makes the
+  fallback win over an exact match, which turns the both-registered arm RED.
 
 ## W-6 — FIXT establishment (FR-007, SC-001)
 
@@ -71,15 +78,18 @@ Where the unfixed tree DOES compile the witness (string-level frames, no new enu
   - (a) Acceptor, registry {FIX Latest}, inbound `1137=10`: Logon reply, Active, and the negotiated
     profile reads `vlatest`.
   - (b) Acceptor, registry {FIX50SP2}, inbound `1137=10`: Reject 373=5, 371=1137, then disconnect.
-  - (c) Acceptor, registry {FIX Latest}, inbound `1137=9`: Reject 373=5 (strict, B-097-2).
+  - (c) Acceptor, registry {FIX Latest}, inbound `1137=9`: established, negotiated `v50sp2`. This is the
+    one-way fallback and B-097-1's "still admits".
   - (d) Acceptor, registry {FIX50SP2, FIX Latest}: one session per peer, `1137=9` and `1137=10`, both
     established, each negotiating its own version.
   - (e) Initiator, Logon-ack `1137=10`: negotiated `vlatest`.
   - (f) `open()` with default `"10"` and {FIX Latest} succeeds. `open()` with default `"9"` and
-    {FIX Latest} returns `invalid_session_config`.
+    {FIX Latest} still succeeds (fallback). `open()` with default `"10"` and {FIX50SP2} returns
+    `invalid_session_config`.
 - **RED**: (a) and (e) are string-level on input. On `origin/main`, (a)'s assertion "reply is a Logon,
-  not a Reject" is recorded RED (Reject 373=5). (c) is RED on `origin/main`: it establishes. M-1 (parse)
-  turns (a), (d) and (e) RED; M-5 (fallback) turns (c) and (f)'s second half RED.
+  not a Reject" is recorded RED (Reject 373=5). (c) passes on `origin/main` (a characterization pin).
+  M-1 (parse) turns (a), (d) and (e) RED. M-5a (no fallback) turns (c) and (f)'s second case RED. M-5b
+  (reverse fallback) turns (b) and (f)'s third case RED.
 
 ## W-7 — 1407 / 1156 accepted and ignored (FR-008)
 
