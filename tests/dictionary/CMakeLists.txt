@@ -83,6 +83,9 @@ add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
 # FR-006a / FR-023 dispositions) — labelled `083` so the feature selector
 # reaches it, same rationale as wire_dict_tests above.
 set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083;091")
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 097)
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
@@ -219,6 +222,9 @@ target_compile_definitions(dictionary_orchestra_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
 add_test(NAME dictionary_orchestra_tests COMMAND dictionary_orchestra_tests)
 set_tests_properties(dictionary_orchestra_tests PROPERTIES LABELS "dictionary;orchestra")
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_orchestra_tests APPEND PROPERTY LABELS 097)
 
 # ── 080-orchestra-runtime-load: dict::load_any shared dispatch helper ───────
 # Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra;080";
@@ -383,6 +389,9 @@ if(TARGET fixpp_codegen_generate)
     "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
   add_test(NAME dictionary_reify_tests COMMAND dictionary_reify_tests)
   set_tests_properties(dictionary_reify_tests PROPERTIES LABELS dictionary)
+  # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+  # LABELS setter for this entry, so the existing labels survive.
+  set_property(TEST dictionary_reify_tests APPEND PROPERTY LABELS 097)
 
   # Standalone reify tests (FR-002): a TSan seam + two label-heterogeneous 066
   # witnesses (their distinct label set forbids grouping under the "dictionary"

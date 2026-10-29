@@ -176,6 +176,9 @@ target_compile_definitions(codegen_vlatest_tests PRIVATE
 add_test(NAME codegen_vlatest_tests COMMAND codegen_vlatest_tests)
 set_tests_properties(codegen_vlatest_tests PROPERTIES
   LABELS "codegen;076;vlatest_smoke;vlatest_dispatch_exclusion;077;builder-dedup")
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST codegen_vlatest_tests APPEND PROPERTY LABELS 097)
 
 # 076-fix-latest-typed-codegen T013 [US2]: V-1 completeness census —
 # independent raw-XML walker (pugixml, no ir.cpp/ir.hpp/emit_manifest.cpp
@@ -510,6 +513,9 @@ add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
 set_tests_properties(codegen_determinism_test PROPERTIES
   LABELS codegen
   TIMEOUT 5400)
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST codegen_determinism_test APPEND PROPERTY LABELS 097)
 
 # 077-builder-args-dedup T019 [US2]: only defined when THIS build was
 # configured with the tier ON -- MainTreeVlatestBuildersUnaffectedByOffPathWitness
