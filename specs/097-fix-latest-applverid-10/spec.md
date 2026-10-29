@@ -208,8 +208,9 @@ FIXT admin dispatch before application dispatch and are unchanged.)
 application version the anchor's premise is gone, and the outcome must be stated.
 
 **Independent Test**: reify a FIX Latest MsgType under a FIX Latest profile; inspect the handle's
-version. On the unfixed tree no input can resolve to FIX Latest at all (FR-001), so the RED is the
-anchor (a1)'s FIX50SP2-labelled handle under the profile a FIX Latest session negotiates today, and
+version. On the unfixed tree no input can resolve to FIX Latest at all (FR-001). The anchor's (a1)/(a2)
+are kept under the v50sp2 profile, their comments and assertion messages rewritten; the RED is
+(a3)/(a4) (no `vlatest` arm before the codegen change; contracts W-9) and
 `vlatest_compile_smoke_test.cpp`'s `which() == v50sp2`.
 
 **Acceptance Scenarios**:
@@ -295,7 +296,8 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   Unchanged rule, not a 097 behaviour.
 - **Config token** — `default_appl_ver_id = "10"` is accepted; any other new token is not added.
 - **A consumer's exhaustive `switch` over `application_version`** — a new enumerator is source-visible
-  to a `-Wswitch` build; this is an additive public C++ change, disclosed (FR-011).
+  to a `-Wswitch` build. The enumerator is an additive public C++ change (disclosed); BREAKING applies
+  to `which()` (FR-011, B-097-2).
 
 ## Requirements *(mandatory)*
 
@@ -360,8 +362,9 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
     `application_version::vlatest`.
 
   Under `FIXPP_CODEGEN_FIX_LATEST=OFF` no FIX Latest arm is emitted, and FIX Latest falls to the
-  outer fail-loud `default`. The anchor `vlatest_dispatch_exclusion_test.cpp` (a1) is rewritten to this
-  outcome, and its (a2)/(b) halves are re-derived (one arm per application version whose IR is present).
+  outer fail-loud `default`. In the anchor `vlatest_dispatch_exclusion_test.cpp`, (a1)/(a2) are kept
+  under the v50sp2 profile, their comments and assertion messages rewritten; the RED is (a3)/(a4), and
+  (b) is re-derived (one arm per application version whose IR is present).
 - **FR-010 (witnesses, RED first)**: Each of FR-001, FR-002, FR-003, FR-005, FR-006, FR-007, FR-008 and
   FR-009 MUST have a named test that fails for the reason the requirement states. It fails on the
   unfixed tree where that tree compiles it and the behaviour is new.
@@ -378,8 +381,9 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   (contracts). A seeded positive for an instrument proves the instrument counts; it is not the
   witness's RED. The same applies where a witness names the new enumerator and so cannot
   compile on the unfixed tree.
-- **FR-011 (compatibility disclosure)**: The new application version is an additive public C++ enumerator;
-  the C ABI is unchanged (it carries the raw 1137 string). `dict::version_registry`, and `Engine`, which
+- **FR-011 (compatibility disclosure)**: The enumerator is an additive public C++ change (disclosed);
+  BREAKING applies to `which()`. The C ABI is unchanged (it carries the raw 1137 string).
+  `dict::version_registry`, and `Engine`, which
   holds it by value, grow by one slot; C++ consumers rebuild (B-097-2; no C++ ABI promise
   pre-release). The B&L records the behaviour changes as
   `B-097-*` rows, BREAKING where a shipped C++ answer changes (the `fixpp::vlatest` typed classes' static
@@ -515,7 +519,7 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   process; `[const §XVI.3]`, `[const §XVI.4]` the `/clarify` order deviation and the `/analyze` drift
   check (plan Constitution Check); `[const §XVI.6]` mutation proofs in a scratch copy;
   `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build, verify; `[const §X.7]`
-  (C ABI unchanged).
+  (C ABI unchanged); `[const §VII.7]` (a fuzz harness for the new parse arm, contracts W-12).
 - **Design doc**: `.specify/2c-codegen.md` §4.3, §4.8, §6.3 and §6.6 (annotated in place, FR-012(f)).
 - **B&L**: L-074-1, L-080-1 (retired); L-041-2 (unchanged; decides FR-008's validation outcome); new
   `B-097-*`, `L-097-1`.

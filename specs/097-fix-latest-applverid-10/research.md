@@ -92,11 +92,8 @@ with the recipe given; do not trust a line number after the first implementation
   every target under `src/`. Re-derive: `grep -n "rmv_app\|ir != nullptr\|has_one_char" tools/codegen/fixpp-codegen/emit_dispatch.cpp`.
   The outer switch keeps its `default:`, so omitting an enumerator's `case` raises no `-Wswitch`.
   Witness: contracts W-9(c) (spec US3 scenario 4).
-- **Anchor**: `tests/codegen/vlatest_dispatch_exclusion_test.cpp` keeps passing unchanged (its (a) arms use
-  a v50sp2 profile), but its header states the false premise. It is rewritten: (a1)/(a2) keep the v50sp2
-  facts, a new (a3) asserts a FIX Latest-resolved `EC` yields a handle reading FIX Latest, and (b) asserts
-  exactly one `case …::v50sp2:` and exactly one `case …::vlatest:` (tier ON; under OFF there is no
-  `vlatest` case, W-9(c)).
+- **Anchor**: `tests/codegen/vlatest_dispatch_exclusion_test.cpp` is rewritten; what it asserts after
+  097, and how each half is shown RED, is contracts W-9 (not restated here).
 - **Recipe**: `grep -n "#include\|owning_message_handle_from_frame" build/linux-clang-debug/_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp | head`.
 
 ## R-6 — Session paths need no code change
@@ -184,8 +181,9 @@ with the recipe given; do not trust a line number after the first implementation
 
 - **Decision**: L-074-1 and L-080-1 move to `spec/behaviors-and-limitations-closed.md` with a
   `closed: resolved by 097` comment line, text unchanged. New live rows in data-model §D:
-  B-097-1 (FIX Latest = ApplVerID 10; one-way fallback), B-097-2 (BREAKING: the enumerator and the vlatest
-  classes' static version), B-097-3 (fixpp has no 1407/1156 rule: no effect on resolution or state;
+  B-097-1 (FIX Latest = ApplVerID 10; one-way fallback), B-097-2 (the enumerator is an additive public
+  C++ change, disclosed; BREAKING applies to the vlatest classes' `which()`), B-097-3 (fixpp has no
+  1407/1156 rule: no effect on resolution or state;
   validation decided by the session dictionary; never originated), B-097-4 (FIX Latest reify arm, and
   the `"9"`-configured condition), and the limitation L-097-1 (two dictionaries: direct C++ only).
 
@@ -194,3 +192,28 @@ with the recipe given; do not trust a line number after the first implementation
 - **Risk**: this bundle cites source lines. Per the repo's line-citation gate, the feature's own
   `specs/097-…/` bundle is charged. Mitigation: the bundle cites files and grep recipes, not line
   numbers; run the gate (`--range origin/main..HEAD`) after `/speckit-tasks` and before implement.
+
+## R-11 — The parse under a fuzzer (`[const §VII.7]`; analyze D1)
+
+- **Finding**: T018's two-character arm makes `resolve_application_version`
+  (`src/dictionary/version_profile.cpp`) parser-touching code in `[const §VII.7]`'s sense: it parses the
+  peer's DefaultApplVerID(1137) on the acceptor and initiator paths, and a header ApplVerID(1128) in
+  `dict::reify`. No harness reaches the function: `grep -ln "resolve_application_version\|1137"
+  tests/fuzz/*.cpp` is empty (the same grep without the `*.cpp` filter does hit corpus files, so the
+  pattern can match). The nearest harness, `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`, sets
+  `cfg.begin_string = "FIX.4.2"` (`grep -n begin_string` in it), so the acceptor's FIXT DefaultApplVerID
+  block, which parses 1137 and looks it up in the registry, never runs there.
+- **Decision**: a new harness, contracts W-12. 033's precedent (its plan's `VII.7` row and its task T036)
+  extended an existing harness's corpus; 033 held that the harness reached its new scanner arms (see the
+  lead below). Here no harness reaches the function, so a corpus extension would cover nothing.
+- **Where the ten minutes run**: CI's `linux-clang-asan` lane builds the fuzz targets and replays every
+  corpus as a ctest (`fixpp_add_fuzz_replay` in `cmake/Helpers.cmake`, `-runs=0`). No workflow runs a
+  timed campaign (`git grep -n -e '-max_total_time' -- .github` is empty). The ten-minute run
+  `[const §VII.7]` asks for is therefore `/speckit-verify` Step 7 with `--fuzz-duration=600`. That gap
+  predates 097; it is reported to the owner, not fixed here.
+- **Pre-existing lead, not fixed by 097**: 033's T036 and its verify record
+  (`.specify/decisions/033-fixt-fix50sp2-session-verify.md`) say that `fuzz_session_recovery_admin_parse`
+  drives the `case 1137:/553:/554:` arms 033 added to the inbound Logon scanner. That claim was not
+  checked against the harness's configuration. With `begin_string = "FIX.4.2"`, the FIXT
+  DefaultApplVerID block does not run, so at most the scanner's tag walk is reached. Recorded as a lead
+  for the owner; 097 does not change that harness.

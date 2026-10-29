@@ -43,6 +43,9 @@
 | `specs/076-…/contracts/golden/vlatest_Messages.golden.hpp` | regenerated: the vlatest classes' `application_version::v50sp2;` → `::vlatest;`, nothing else | FR-012(c), research R-4 |
 | `tests/config/fixtures/pos_fixt_appl_ver_ids.toml`, `tests/config/test_load_happy_path.cpp` | the comment restating `"2".."9"` / an arm count points at the mapper instead | FR-012(c) |
 | tests | see contracts §W | FR-010 |
+| `tests/fuzz/fuzz_appl_ver_id.cpp` (new) | libFuzzer harness `fuzz_appl_ver_id`: the input is an ApplVerID value, resolved under an Unknown-default and a v50sp2-default profile; it traps unless an accepted value renders to the input bytes and re-parses to the same version, a refused one is `dict_unknown_appl_ver_id`, and empty input follows the profile default (contracts W-12) | `[const §VII.7]`, FR-001, FR-002 |
+| `tests/fuzz/CMakeLists.txt` | the `fuzz_appl_ver_id` target, in its siblings' shape; its corpus replay `fuzz_replay_appl_ver_id` registers from the corpus directory below | `[const §VII.7]` |
+| `tests/fuzz/corpus/appl_ver_id/` (new) | the seed corpus: `seed_10`, `seed_010`, `seed_1O`, `seed_10_trailing_space`, `seed_11`, `seed_9`, `seed_0`, `seed_empty` | `[const §VII.7]` |
 | `.specify/2c-codegen.md` | §4.3 enum and wire table, §4.8 runtime-dispatch paragraph and application-dispatch sketch, §6.3 step 3, §6.6 item 8: in-place `Updated (097 …)` notes (§C) | FR-012(f) |
 | records | §C, §D, §E, §F | FR-011, FR-012 |
 
@@ -118,13 +121,14 @@ Live file, a new `## 097 — FIX Latest is ApplVerID 10 (2026-10-29)` section:
   `1137=10` peer when the engine holds FIX Latest, and validates that peer's messages with its own
   dictionary.
   *(FR-001..FR-007; owner ruling Q1; witnesses: contracts W-1..W-6.)*
-- **B-097-2 — BREAKING (public C++; C ABI unchanged): `application_version` gains `vlatest`, and the
-  generated `fixpp::vlatest` typed classes report it.** A consumer's exhaustive `switch` over
-  `application_version` sees the new enumerator; `fixpp::vlatest::owning_<Msg>::which()` returns
+- **B-097-2 — `application_version` gains `vlatest`; BREAKING (public C++; C ABI unchanged) for the
+  generated `fixpp::vlatest` typed classes, which report it.** The enumerator is an additive public C++
+  change (disclosed); BREAKING applies to `which()`. A consumer's exhaustive `switch` over
+  `application_version` sees the new enumerator. `fixpp::vlatest::owning_<Msg>::which()` returns
   `application_version::vlatest` (was `v50sp2`). `dict::version_registry` and `Engine` grow by one
   slot; C++ consumers rebuild against the new headers (no C++ ABI promise pre-release). The BREAKING
-  label is for the two answers above, not for the layout. *(FR-011, FR-012(c); Gate A round 2,
-  G097-017.)*
+  label is for the `which()` answer, not for the enumerator or the layout. *(FR-011, FR-012(c); Gate A
+  round 2, G097-017; analyze F4.)*
 - **B-097-3 — fixpp has no rule for DefaultApplExtID(1407) or ApplExtID(1156): neither affects
   version resolution, serviceability or session state, and fixpp originates neither.** No session code
   reads either tag, as in QuickFIX C++, QuickFIX/J and QuickFIX/Go. With `validate_inbound_messages` on,
@@ -164,7 +168,8 @@ Live file, a new `## 097 — FIX Latest is ApplVerID 10 (2026-10-29)` section:
     reifies as `application` / `vlatest` under `"10"` (Gate A round 3, O097-201). The `"9"`
     outcome is as before 097. To be reified as FIX Latest, such a session is configured `"10"`.
 
-  Before 097 no input resolved to FIX Latest. *(FR-009; W-9.)*
+  Before 097 no input resolved to FIX Latest. *(FR-009; W-9, including
+  `ReifyRoundTrip.ApplVerId10InFrameResolvesToVlatest` for the header-1128 condition.)*
 
 - **L-097-1 — Only direct C++ can register the FIX50SP2 and the FIX Latest dictionaries in one engine.**
   The TOML resolver loads one `[dictionary]`, and the C API does not fill `EngineConfig::dictionaries`. A

@@ -149,9 +149,10 @@ test and CMake line. Additive public enum. No C-ABI change. No `src/session/` ch
 | `[const §VI.4]`, `§VI.5` | Coverage-index rows updated (data-model §F). spec Normative References lists the Spec refs in `[DocAbbrev §X.Y.Z] Title` form, using the coverage index's spellings. §11.2 has no coverage-index entry and is listed as a supporting citation. |
 | `[const §XVI.3]` | **Deviated.** `/speckit-clarify` is mandatory before `/speckit-plan` for a wire/codegen feature. Here it ran after: `/speckit-plan` at `cebca1eb` (reconciled with the second Q1 ruling at `afb8f92a`), then `/speckit-clarify` at `886e587f`. The owner was informed on 2026-10-29. Remedy: the one clarify answer was carried into the plan artifacts in the same commit (W-6(d), B-097-1); the checklist was regenerated at Gate A round 1; `/speckit-analyze` checks plan↔spec drift explicitly (next row). No re-plan, for the reason given under Gate A, Round 1 — disagreements. See Complexity Tracking. |
 | `[const §XVI.4]` | `/speckit-analyze` runs after `/speckit-tasks` and MUST include an explicit plan↔spec drift pass over every Clarifications answer: Q1 (both rulings), Q2, the `/speckit-clarify` answer and the Gate A round-1 answer. That pass is the gate the order rule protects. |
-| `[const §XVI.6]` | Mutation proofs M-1..M-9f run in a scratch worktree, never in the PR's worktree (contracts preamble). |
+| `[const §XVI.6]` | Mutation proofs M-1..M-9h (and W-12's re-runs of M-1, M-1n and M-2) run in a scratch worktree, never in the PR's worktree (contracts preamble). |
 | `[const §VII.3]`/`§VII.4` | TDD order: every witness shown RED (unfixed tree or named mutant) before GREEN (contracts). |
-| `[const §VII.8]` | No new executable. Witnesses join existing binaries; selected by `ctest -L 097`. |
+| `[const §VII.7]` | Applies (analyze D1). T018's two-character arm in `resolve_application_version` parses a peer-supplied 1137/1128 value, and no existing harness reaches that function (research R-11). A new libFuzzer harness, `tests/fuzz/fuzz_appl_ver_id.cpp`, is added with its seed corpus (contracts W-12). Precedent: 033's plan carries a `VII.7` row and its tasks T036; 033 extended an existing harness's corpus, holding that the harness reached its new scanner arms (a claim research R-11 records as an unverified lead). Here no harness reaches the function, so the harness is new. CI replays the seeds on every PR (`fuzz_replay_appl_ver_id`, `linux-clang-asan` lane). No CI job runs a timed campaign, so the ten-minute run is `/speckit-verify` Step 7 with `--fuzz-duration=600` (tasks T073). That gap between §VII.7's wording and CI predates 097 and is reported, not fixed. |
+| `[const §VII.8]` | No new gtest executable. Witnesses join existing binaries; selected by `ctest -L 097`. The W-12 fuzz harness is a libFuzzer target outside §VII.8's grouped-gtest scope, built only under `FIXPP_BUILD_FUZZ` (`linux-clang-asan`), so the `linux-clang-debug` ctest total is unchanged. |
 | `[const §IX.1]` | Touched modules ≥ 95/85 or a per-line assessment, at verify. |
 | `[const §IX.4]` | clang-tidy/clang-format on changed files, `tools/codegen/` included. |
 | `[const §X.1]`, `§X.7` | C ABI unchanged; nothing to bump. |
@@ -172,11 +173,11 @@ satisfied.
 specs/097-fix-latest-applverid-10/
 ├── spec.md
 ├── plan.md            # this file
-├── research.md        # R-1..R-10
+├── research.md        # R-1..R-11
 ├── data-model.md      # §A identities, §B surfaces, §C superseded text, §D B&L, §E amendment, §F catalogue
 ├── quickstart.md      # §0..§5 validation
 ├── contracts/
-│   └── witnesses.md   # W-1..W-11, mutants M-1..M-9f
+│   └── witnesses.md   # W-1..W-12, mutants M-1..M-9h
 └── checklists/
     └── requirements.md
 ```
@@ -189,13 +190,18 @@ specs/097-fix-latest-applverid-10/
 - `tools/codegen/fixpp-codegen/emit_dispatch.cpp`, `ir.cpp`, `gen_util.hpp`
 - `specs/076-fix-latest-typed-codegen/contracts/golden/vlatest_Messages.golden.hpp` (regenerated)
 - tests: `tests/dictionary/{version_profile_test,orchestra_loader_test,reify_dispatch_test}.cpp`,
-  `tests/config/` (one case + fixture, and the comment in `pos_fixt_appl_ver_ids.toml` and
-  `test_load_happy_path.cpp` that restates the `"2".."9"` range, FR-012(c)),
+  `tests/config/test_load_happy_path.cpp` and `tests/config/test_load_negative_battery.cpp` (one W-3
+  case each) with the new fixtures `tests/config/fixtures/pos_fixt_appl_ver_id_10.toml` and
+  `tests/config/fixtures/neg_fixt_unknown_appl_ver_id.toml`, and the comment in
+  `pos_fixt_appl_ver_ids.toml` and `test_load_happy_path.cpp` that restates the `"2".."9"` range
+  (FR-012(c)),
   `tests/session/test_fixt_logon_establishment.cpp` (W-6..W-8, with named session dictionaries for W-7),
   `tests/codegen/{vlatest_dispatch_exclusion_test,vlatest_compile_smoke_test}.cpp`, the W-9(c)
   OFF-only case and its CMake guard, the CMake label lines, and in `tests/codegen/CMakeLists.txt`
   `FIXPP_DICT_DATA_DIR` added to `codegen_vlatest_tests`'s `target_compile_definitions` (the W-9(a3)
   census; Gate A round 4, G097-021)
+- fuzz (contracts W-12, `[const §VII.7]`): `tests/fuzz/fuzz_appl_ver_id.cpp` (new), its target in
+  `tests/fuzz/CMakeLists.txt`, and its seeds under `tests/fuzz/corpus/appl_ver_id/` (new)
 - records: `.specify/constitution.md`, `.specify/2c-codegen.md` (§4.3/§4.8/§6.3/§6.6 notes),
   `spec/behaviors-and-limitations{,-closed}.md`, `spec/feature-catalogue.md`, `spec/coverage-index.md`,
   `brain/components/dictionary.md`, the library `CLAUDE.md` (the "Also open, no issue filed" line is
@@ -218,7 +224,7 @@ specs/097-fix-latest-applverid-10/
      every frame family present (contracts W-8).
 
    Build and run them in `build/linux-clang-debug`; that run is the RED record and the
-   characterization record. **Stop rule, in two halves:**
+   characterization record. **Stop rule, in three parts:**
    - If a **control arm** (the frame without 1407/1156) departs from its expected outcome on this tree
      (contracts W-7; on `origin/main`, (b0) and (c0) expect the 1137 Reject, (f0) delivery, and the
      others establishment), the fixture is wrong: the dictionary, the frame or the session setup. Fix the
@@ -231,11 +237,14 @@ specs/097-fix-latest-applverid-10/
      characterization pins. If an observed Reject shape departs from contracts' text while its control
      passes, record the observed shape and correct the text. No production code changes.
 3. **Core**: enumerator, parse, render, registry with the one-way fallback, config. W-1..W-5 green.
-   Mutants M-1..M-5c.
+   Mutants M-1..M-5c. The W-12 fuzz harness and its seeds land with the parse change; its corpus
+   replay passes in `build/linux-clang-asan`, and M-1, M-1n and M-2 are re-run against it in the
+   scratch worktree's ASan tree.
 4. **Session witnesses**: W-6..W-8 (no session source change). Mutants M-1n, M-7a..e, M-8a..c, and
    M-2 against W-8's `1137=10` assertion.
 5. **Codegen**: dispatch row, the emitter skipping an arm whose IR is absent, `ir.cpp`, `gen_util.hpp`,
-   golden regenerated (quickstart §3), W-9. Mutants M-9a..f.
+   golden regenerated (quickstart §3), W-9. Mutants M-9a..h, and M-1n re-run against W-9's in-frame
+   1128 case.
 6. **Comments and records**: data-model §C–§F, including the canonical residue sentence (§E.0) at
    every locus, the in-place 097 supersession comments (§F), and the deletion of the library
    `CLAUDE.md`'s "Also open, no issue filed: ApplExtID(1156)=303 …" line; quickstart §4 checks, the
@@ -247,7 +256,7 @@ specs/097-fix-latest-applverid-10/
    `.claude/scripts/check-comment-claims.py` (quickstart §4).
 7. **Final head**: one full configure + build + ctest (`-j8`). Then one `FIXPP_CODEGEN_FIX_LATEST=OFF`
    configure+build with `FIXPP_WERROR=ON`, which runs W-9(c), its build tree on `/mnt/wsl/fixppbuild`.
-   Then `/speckit-verify`, then Gate B.
+   Then `/speckit-verify` with `--fuzz-duration=600` (W-12's ten-minute fuzz run), then Gate B.
 
 ## Risks
 

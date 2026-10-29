@@ -6,7 +6,8 @@ Every witness names its file, what it asserts, and how it is shown RED **for its
 `application_version::vlatest` does not compile on the unfixed tree. A compile failure is RED for the
 wrong reason (it would be RED whatever the behaviour). So, except where noted, each witness's RED is a
 **named mutant applied to the fixed tree**, built, and run unfiltered (`--gtest_filter` only narrows the
-report, never the binary). A row whose rebuild failed proves nothing and is gated on build rc 0. The one
+report, never the binary). The mutants are M-1..M-9h; W-12 re-runs M-1, M-1n and M-2 against the fuzz
+harness rather than adding one. A row whose rebuild failed proves nothing and is gated on build rc 0. The one
 exception is M-9c, whose stated reason *is* a build failure. The verify record keeps a table: witness |
 mutant | build rc | test rc | the failing assertion's message.
 
@@ -21,9 +22,10 @@ H=$(git -C <main checkout> rev-parse HEAD)          # the implementation head un
 df -h /mnt/wsl/fixppbuild                           # headroom for a Debug tree first
 git -C <main checkout> worktree add --detach ~/Work/Programming/fixpp-097-mutants "$H"
 mkdir -p /mnt/wsl/fixppbuild/build/097-mutants-linux-clang-debug /mnt/wsl/fixppbuild/build/097-mutants-off \
-         ~/Work/Programming/fixpp-097-mutants/build
+         /mnt/wsl/fixppbuild/build/097-mutants-asan ~/Work/Programming/fixpp-097-mutants/build
 ln -s /mnt/wsl/fixppbuild/build/097-mutants-linux-clang-debug ~/Work/Programming/fixpp-097-mutants/build/linux-clang-debug
 ln -s /mnt/wsl/fixppbuild/build/097-mutants-off ~/Work/Programming/fixpp-097-mutants/build/097-mutants-off
+ln -s /mnt/wsl/fixppbuild/build/097-mutants-asan ~/Work/Programming/fixpp-097-mutants/build/linux-clang-asan
 export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache
 cd ~/Work/Programming/fixpp-097-mutants
 # The preset's CMAKE_TOOLCHAIN_FILE lives inside build/linux-clang-debug, so Conan runs first
@@ -32,16 +34,22 @@ conan install . -pr conan/profiles/linux-clang-debug --build=missing -of build/l
 cmake --preset linux-clang-debug
 # The OFF tree for M-9c/M-9d: same preset and toolchain, its own binary dir.
 cmake --preset linux-clang-debug -B build/097-mutants-off -DFIXPP_CODEGEN_FIX_LATEST=OFF -DFIXPP_WERROR=ON
+# The ASan tree for W-12's rows. The fuzz target exists only under FIXPP_BUILD_FUZZ, which the top-level
+# CMakeLists.txt refuses without ASan or UBSan, so neither debug tree builds it:
+conan install . -pr conan/profiles/linux-clang-asan --build=missing -of build/linux-clang-asan
+cmake --preset linux-clang-asan
 ```
 
 Each mutant is committed on that scratch worktree's **detached head**, built there, run and recorded.
-Every mutant but M-9c/M-9d builds in the ON tree (`cmake --build --preset linux-clang-debug --target
-<t> -j8`); M-9c and M-9d build in the OFF tree (`cmake --build build/097-mutants-off --target <t> -j8`),
-since the preset build names the ON tree only.
+Every mutant row but M-9c/M-9d and W-12's builds in the ON tree (`cmake --build --preset
+linux-clang-debug --target <t> -j8`); M-9c and M-9d build in the OFF tree (`cmake --build
+build/097-mutants-off --target <t> -j8`), since the preset build names the ON tree only; W-12's rows
+build `fuzz_appl_ver_id` in the ASan tree (`cmake --build --preset linux-clang-asan --target
+fuzz_appl_ver_id -j8`).
 It is then dropped with `git reset --hard "$H"` in the scratch worktree. Never use `git stash`
 (every worktree shares it), never `checkout`/`switch` in the main checkout, and never put a mutant
 commit on the feature branch. After the last row, run `git worktree remove ~/Work/Programming/fixpp-097-mutants`
-and delete both of its `/mnt/wsl/fixppbuild/build/097-mutants-*` trees (ON and OFF).
+and delete its three `/mnt/wsl/fixppbuild/build/097-mutants-*` trees (ON, OFF and ASan).
 `git worktree add --detach` does not touch the main checkout's branch.
 
 Where unmodified code DOES compile the witness (string-level frames, no new enumerator), it is written
@@ -71,8 +79,14 @@ and run first (plan phase 2), and that run's result is recorded too.
 
 ## W-3 — config token (FR-003)
 
-- **File**: `tests/config/` (beside `test_load_happy_path.cpp`'s ApplVerID cases; new fixture
-  session `default_appl_ver_id = "10"`).
+- **Files** (both in `config_044_tests`, `tests/config/CMakeLists.txt`): the accepted-token arm in
+  `tests/config/test_load_happy_path.cpp`, beside its `pos_fixt_appl_ver_ids.toml` case, loading a new
+  fixture `tests/config/fixtures/pos_fixt_appl_ver_id_10.toml` (one FIXT session,
+  `default_appl_ver_id = "10"`); the unknown-token arm in `tests/config/test_load_negative_battery.cpp`,
+  beside its `neg_fixt_empty_appl_ver_id.toml` case, loading a new fixture
+  `tests/config/fixtures/neg_fixt_unknown_appl_ver_id.toml` (`default_appl_ver_id = "11"`). New files,
+  in the directory's `pos_*` / `neg_*` naming: `pos_fixt_appl_ver_ids.toml` is not extended, because
+  its test iterates an expected array.
 - **Asserts**: `"10"` loads as `vlatest`. An unknown token (`"11"`) yields `reason_class::unknown_enum`,
   and the message contains `"2".."10"`.
 - **RED**: mutant M-3, delete the `"10"` branch: the load yields a diagnostic. The text arm is RED on
@@ -86,8 +100,10 @@ and run first (plan phase 2), and that run's result is recorded too.
   FR-010 death test) becomes the coexistence test `OrchestraRegistry097.BothDictsCoexist`; the death
   assertion is deleted together with the abort.
 - **Asserts**: building from {FIX50SP2, FIX Latest}, in both orders, returns. `get(v50sp2)` is the
-  FIX50SP2 dict and `get(vlatest)` is the FIX Latest dict. `OrchestraVersionIdentity.DistinctVLatestMapsToV50SP2`
-  is rewritten to assert the mapping to `vlatest`.
+  FIX50SP2 dict and `get(vlatest)` is the FIX Latest dict. `BothDictsCoexist` captures stderr around
+  both constructions (`testing::internal::CaptureStderr()` / `GetCapturedStderr()`) and asserts it is
+  empty: no diagnostic is written (US2 AS-1). Quickstart §2's `grep -c FR-010` is a secondary check. `OrchestraVersionIdentity.DistinctVLatestMapsToV50SP2`
+  is rewritten to assert the mapping to `vlatest` and renamed `OrchestraVersionIdentity.DistinctVLatestMapsToVlatest`.
 - **RED**: on `origin/main` the construction aborts with `FR-010`. This is recorded from the death test
   as it exists before the rename: its pass on `origin/main` IS the abort. Mutant M-4 restores
   `case vlatest: return v50sp2;` without the abort: `get(vlatest)` is empty and `get(v50sp2)` returns
@@ -98,7 +114,8 @@ and run first (plan phase 2), and that run's result is recorded too.
 - **File**: `tests/dictionary/orchestra_loader_test.cpp`. `SingleDictConfigsSucceed` is kept and extended
   with a new `OrchestraRegistry097.OneWayFallback`.
 - **Asserts**: every row of data-model §A's lookup table. With FIX Latest alone, `get(v50sp2)` and
-  `get(vlatest)` are both that dict (the fallback is kept). With FIX50SP2 alone, `get(vlatest)` is
+  `get(vlatest)` are both that dict (the fallback is kept), and `get(v44)` is none (the fallback
+  answers v50sp2 only). With FIX50SP2 alone, `get(vlatest)` is
   `dict_no_dictionary_for_application_version` (no reverse fallback). With both, each version gets its
   own dict (exact match beats the fallback). Empty gives none for both.
 - **RED**: the FIX-Latest-alone `get(v50sp2)` arm passes on `origin/main` (a characterization pin).
@@ -135,7 +152,10 @@ and run first (plan phase 2), and that run's result is recorded too.
   - **M-1n** (narrowing: `"10"` → `v50sp2`) turns (a), (d)'s `1137=10` sessions and (e) RED, each on
     its negotiated-version assertion. (e) has no RED on `origin/main`: the initiator never consults the
     registry, and naming `vlatest` does not compile there. M-1n is its only RED.
-  - **M-4** turns (d)'s both-registered arm RED.
+  - **M-4** turns (d)'s both-registered arm RED. It also turns (a) and (f)'s first case RED: the FIX
+    Latest dictionary lands in the v50sp2 slot, so `get(vlatest)` is empty, (a)'s `1137=10` gets
+    Reject 373=5, and (f)'s `open()` with default `"10"` and {FIX Latest} returns
+    `invalid_session_config`.
   - **M-5a** (no fallback) turns (c) and (f)'s second case RED.
   - **M-5b** (reverse fallback) turns (b) and (f)'s third case RED.
 
@@ -149,7 +169,7 @@ and run first (plan phase 2), and that run's result is recorded too.
 - **Control arms.** Every arm `(x)` has a control `(x0)`: the same frame without 1407/1156, the same
   session dictionary and registry. Each control has an expected outcome for **each** tree it runs on,
   and must show that outcome before its arm is read. A control that departs from its expected outcome
-  means the fixture is wrong (plan phase 2's stop rule, first half), and the arm proves nothing until it
+  means the fixture is wrong (plan phase 2's stop rule, first part), and the arm proves nothing until it
   matches. This is the instrument's proof that it can report a pass. The one control whose outcome
   differs between the trees is (b0): on `origin/main`, `"10"` does not parse.
 - **Asserts**:
@@ -174,7 +194,7 @@ and run first (plan phase 2), and that run's result is recorded too.
       carry `1156=` through the FIXT framing surface. It is cited, not rewritten.
   - (e) The dictionary-decided reject (B-097-3, owner ruling, Gate A round 1). Session dictionary
     FIX4.x-shaped with 1137 injected: the shape of `fix44_dictionary_with_1137()` in
-    `tests/session/engine_reset_unit_stop_test.cpp`, copied or moved into a shared test-support header.
+    `tests/session/engine_reset_unit_stop_test.cpp`, copied into the 097 test; no other file changes.
     Registry {FIX50SP2}. Logon `1137=9` + `1407=303` gets a session Reject (35=3) and is never Active.
     The validate-first gate passes the validator's `ref_tag` and
     `wire_error_to_session_reject_reason(...)` into the Reject: 371 is expected to be 1407, and 373 is
@@ -195,13 +215,20 @@ and run first (plan phase 2), and that run's result is recorded too.
 - **RED**:
   - (a), (d), (e) and (f) pass on `origin/main`. They are characterization pins, each with a mutant.
   - (b) is RED on `origin/main` (the `1137=10` refusal, 373=5). Its negotiated-version assertion is
-    added once the enumerator exists.
+    added once the enumerator exists. **M-1n** (`"10"` → `v50sp2`) turns that negotiated-`vlatest`
+    assertion RED, and (b0)'s too: the FIX Latest dictionary answers `v50sp2` through the fallback, so
+    both stay established, negotiated `v50sp2`.
   - M-7a: the acceptor refuses a Logon that carries 1407 (373=5). Site: the acceptor's
     DefaultApplVerID block in `Session::on_inbound_not_connected_` (`src/session/session.cpp`). The
     `logon_interpret_result` that `interpret_logon` returns does not carry 1407, so the mutant reads the
     raw inbound frame for `"\x01" "1407="` itself. It turns (a) and (b) RED while (a0) and (b0) stay
     green.
-  - M-7b: a header carrying 1156 is session-rejected. It turns (d) RED while (d0) stays green.
+  - M-7b: a header carrying 1156 is session-rejected. Site: the inbound application path of
+    `Session::on_inbound_active_` (`src/session/session.cpp`), after its validate-first gate and before
+    the `fromApp` dispatch: when the raw inbound frame contains `"\x01" "1156="`, the mutant sends a
+    session Reject instead of dispatching. Binary: `session_fixt_logon_establishment`. It turns (d) RED
+    while (d0) stays green. (f) is rejected by the validator before that site, so it stays rejected;
+    if its recorded 371/373 move under the mutant, record the observed shape.
   - M-7c, a serviceability bypass (Gate A round 2, G097-014). Same site as M-7a: when the raw inbound
     Logon contains `"\x01" "1407="`, `serviceable` is `resolved.has_value()` alone, so the registry
     lookup is skipped. Under it (c) is established (RED: `"10"` parses to `vlatest` at the head) while
@@ -270,13 +297,14 @@ and run first (plan phase 2), and that run's result is recorded too.
 
 - **Files**: `tests/codegen/vlatest_dispatch_exclusion_test.cpp` (rewritten header and halves; the
   (a3) census, the (a3) samples and (a4)), `tests/dictionary/reify_dispatch_test.cpp` (the (a3) admin
-  sub-case and (c)), `tests/codegen/vlatest_compile_smoke_test.cpp`,
+  sub-case, the (a3) in-frame 1128 sub-case and (c)), `tests/codegen/vlatest_compile_smoke_test.cpp`,
   `tests/codegen/determinism_test.cpp`'s `VlatestGeneratedMatchesGolden` (golden regenerated),
   `tests/codegen/CMakeLists.txt` (`FIXPP_DICT_DATA_DIR` added to `codegen_vlatest_tests`'s
   `target_compile_definitions`, for the census; `codegen_vlatest_census_test` in the same file is the
   precedent).
 - **Asserts (FIX Latest tier ON, the default)**:
-  - (a1) and (a2) are kept: under a v50sp2 profile, `D` reifies as `v50sp2` and `EC` fails loud.
+  - (a1) and (a2) are kept: under a v50sp2 profile, `D` reifies as `v50sp2` and `EC` fails loud. Their
+    comments and assertion messages are rewritten (tasks T040); the RED of this witness is (a3)/(a4).
   - (a3) is new, the runtime outcome FR-009(a), whose partition it restates: under a `vlatest`
     resolution, every MsgType the FIX Latest dictionary defines other than the seven FIXT admin
     MsgTypes `dict::reify` intercepts first reifies to an `owning_message_handle` whose
@@ -301,14 +329,27 @@ and run first (plan phase 2), and that run's result is recorded too.
       Loader drops stay `VlatestCompletenessCensus`'s and `OrchestraLoad.LoadsEP303`'s.
     - **(a3) samples**, in `tests/codegen/vlatest_dispatch_exclusion_test.cpp`, through the same direct
       `dispatch_application` with an empty `MV`: `EC` (FIX-Latest-only) and `D` reify with
-      `application == vlatest`; a MsgType absent from FIX Latest gives `dict_reify_unknown_msg_type`.
+      `application == vlatest`; `ZZ`, a MsgType absent from FIX Latest, gives
+      `dict_reify_unknown_msg_type`. `ZZ` is absent from every arm, not only from FIX Latest:
+      `grep -c 'msgType="ZZ"' dictionaries/orchestra/OrchestraFIXLatest.xml` and
+      `grep -c "msgtype='ZZ'" dictionaries/*.xml` print 0 for every file, while the same greps for `D`
+      print non-zero (the known positive). It is two characters, so under the `vlatest` arm it reaches
+      that arm's two-character `default:`.
     - **(a3) admin interception**, in `tests/dictionary/reify_dispatch_test.cpp`, through `dict::reify`
       on a framed message (that file's `ReifyFixture`): a FIXT admin MsgType under the same profile
       keeps its session-admin label. It is witnessed only through `dict::reify`, because only
       `dict::reify` intercepts the admin MsgTypes: the emitter does not filter them, so a direct
       `dispatch_application` of one returns `application` / `vlatest`. The case is compiled only when
       the FIX Latest tier is ON, behind the compile definition (c) asks `/speckit-tasks` to name, with
-      the opposite polarity.
+      the opposite polarity. The case loops over all seven FIXT admin MsgTypes (`0 1 2 3 4 5 A`), each
+      in its own framed frame, and asserts `has_value()` and `version().k == kind::session_admin` for
+      each, the failure message naming the MsgType.
+    - **(a3) in-frame 1128**, in `tests/dictionary/reify_dispatch_test.cpp`, ON-guarded like the admin
+      case: `ReifyRoundTrip.ApplVerId10InFrameResolvesToVlatest`, on the pattern of
+      `ReifyRoundTrip.ApplVerIdInFrameDrivesResolution`. A framed `35=D` carrying `1128=10`, built
+      inline with `fixpp::test_support::assemble_frame` (no new helper), through `dict::reify` under a v50sp2-default
+      profile, gives `version().k == kind::application` and `version().application == vlatest`: the
+      in-frame value, not the profile default, selects FIX Latest (B-097-4's condition).
   - (a4) is new (Gate A round 3, G097-019), in `tests/codegen/vlatest_dispatch_exclusion_test.cpp`,
     through the same direct `dispatch_application` with an empty `MV` as the (a3) samples (Gate A
     round 4, O097-301): under a `vlatest` resolution,
@@ -332,7 +373,9 @@ and run first (plan phase 2), and that run's result is recorded too.
   `/mnt/wsl/fixppbuild`, and its result is recorded in the verify record.
 - **RED**:
   - M-9a deletes the `kAppVersions` vlatest row. It turns the (a3) census, the (a3) `EC`/`D` samples,
-    (a4) and (b) RED.
+    the (a3) in-frame 1128 case, (a4) and (b) RED.
+  - M-1n (the US1 mutant, `"10"` → `v50sp2`) is re-run here against `dictionary_reify_tests`: the (a3)
+    in-frame 1128 case turns RED on its `application == vlatest` assertion.
   - M-9b reverts `app_version_enum("vlatest")` to `"v50sp2"`. It turns the smoke test and the golden RED.
   - M-9c restores emitting an outer `case` for a row whose IR is absent: today's shape, an unread
     `rmv_app`. The OFF build fails with `-Werror=unused-variable` in the generated header. Its stated
@@ -356,6 +399,29 @@ and run first (plan phase 2), and that run's result is recorded too.
     arm holds no `case '8'`, while its v50sp2 arm keeps one. It turns the (a3) census RED, naming `8`.
     The (a3) samples (`D`, `EC`) and (a4) stay green, which is why M-9a and M-9e cannot play this
     role.
+  - M-9g (analyze C1), the (a3) admin case's RED. In `dict::reify` (`src/dictionary/reify.cpp`), at
+    Step 2's admin-interception call site (not `is_fixt_admin` itself), the condition becomes
+    `mt_sv.size() == 1 && is_fixt_admin(mt_sv.front()) && profile.default_appl != application_version::vlatest`.
+    It builds in the ON tree; it is not a codegen mutant, so no reconfigure gate. Under a `vlatest`
+    profile an admin MsgType then skips interception, resolves to `vlatest` (no 1128 in the frame) and
+    reaches the `vlatest` arm, which has a case for each of the seven, because the emitter has no admin
+    filter and the Orchestra file defines all seven. It turns the (a3) admin case RED on
+    `version().k == kind::session_admin` (record which assertion fired; a `has_value()` failure also
+    counts). Isolation: `is_fixt_admin`'s only caller is `dict::reify`, which has no `src/` caller, and
+    the existing admin reify witnesses use v50sp2 profiles or `dispatch_fixt` directly. So run
+    `dictionary_reify_tests` UNFILTERED, gated on build rc 0, and expect exactly one failing test, the
+    (a3) admin case.
+  - M-9h (analyze C2), the absent-MsgType sample's RED. In `emit_dispatch_application`
+    (`tools/codegen/fixpp-codegen/emit_dispatch.cpp`), for `av.ns == "vlatest"` only, the single-char
+    `default:`, the two-char `default:` and the arm's trailing return emit
+    `::fixpp::dict::detail::owning_message_handle_from_frame(rmv_app, view, mr)` instead of the error.
+    It builds in the ON tree. Gate the row, as for M-9e, on build rc 0, reconfigure rc 0 and the
+    mutant having taken: in the regenerated `_dispatch/reify_dispatch_application.hpp`, the `vlatest`
+    arm has no `dict_reify_unknown_msg_type` after its empty-MsgType guard, while the v50sp2 arm keeps
+    it. It turns the `ZZ` sample RED (a handle where the error was expected). The census, `D`/`EC`, the
+    in-frame 1128 case, the admin case, (a4) and (b) stay green. Before this mutant the `ZZ` sample has
+    no RED: at T043 (no `vlatest` arm yet) it passes, because the outer `default:` returns the same
+    error. That pass is for the wrong reason and proves nothing about the arm.
 - **Golden diff rule**: `git diff --stat` on the golden shows one file, and `git diff -U0` shows only
   lines where `application_version::v50sp2;` becomes `application_version::vlatest;`. Their count equals
   `grep -c` of the pre-change file. Quickstart §3 gives the check and its seeded positive.
@@ -385,3 +451,71 @@ final head and recorded in the verify record:
 
 A positive-presence check whose `origin/main` run also reports "present" proves nothing and is
 rewritten before it is trusted.
+
+## W-12 — the ApplVerID parse under a fuzzer (`[const §VII.7]`; FR-001, FR-002; analyze D1)
+
+`[const §VII.7]`: "New parser-touching code without a fuzz harness is a Gate B blocker." T018's
+two-character arm in `resolve_application_version` (`src/dictionary/version_profile.cpp`) parses a
+peer-supplied DefaultApplVerID(1137) or ApplVerID(1128), and no existing harness reaches that function
+(research R-11).
+
+- **Files**: `tests/fuzz/fuzz_appl_ver_id.cpp` (libFuzzer target `fuzz_appl_ver_id`), registered in
+  `tests/fuzz/CMakeLists.txt` in its siblings' shape: `add_executable`, `target_link_libraries(... PRIVATE
+  fixpp_dictionary fixpp_core)`, `-fsanitize=fuzzer,address,undefined` as both compile and link
+  options, `RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"`, and a comment above it naming 097 and
+  `[const §VII.7]` (no count, no value list). Its seed corpus is `tests/fuzz/corpus/appl_ver_id/`. The
+  directory is named after the target minus `fuzz_`, because the corpus loop in that file registers
+  `fuzz_replay_<dir>` against `fuzz_<dir>`. A harness with no replay fails the configure
+  (`fixpp_assert_every_fuzz_harness_replays`, `cmake/Helpers.cmake`), and an empty corpus directory
+  fails it too (the corpus loop's `FATAL_ERROR` in `tests/fuzz/CMakeLists.txt`). The target exists only under `FIXPP_BUILD_FUZZ` (the `linux-clang-asan` preset; the
+  top-level `CMakeLists.txt` refuses it without ASan or UBSan), so it adds nothing to the
+  `linux-clang-debug` ctest list.
+- **Entry point**: `extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)`. The input
+  bytes, as a `std::string_view`, are the ApplVerID value. It is resolved under two profiles: `{session
+  = vt11, default_appl = Unknown, has_per_message_override = true}` and the same with `default_appl =
+  v50sp2`.
+- **Asserts**. Each violation is `__builtin_trap()`, unconditional so it fires under `NDEBUG`, as
+  `tests/fuzz/fuzz_decimal_parse.cpp` does:
+  - **Empty input** follows the profile-default rule: under the Unknown default the result is the error
+    `dict_unresolved_application_version`; under the v50sp2 default it is the value `v50sp2`.
+  - **Non-empty input** gives the same outcome under both profiles (the same value, or the same
+    error): a non-empty value never consults the default.
+  - **Non-empty input refused**: the error is `dict_unknown_appl_ver_id` (FR-001: a refused value keeps
+    its error).
+  - **Non-empty input accepted**: `render_appl_ver_id(result)` has a value; it equals the input bytes
+    exactly; and `resolve_application_version(profile, rendered)` gives the same
+    `application_version`. Exact byte equality is the strict form. Parse accepts only the strings render
+    produces, so a parse that accepts a second spelling, or a render that moves, fails it. Re-parse
+    equality alone would not: under M-1, `"11"` parses to `vlatest`, renders `"10"`, and `"10"` parses
+    back to `vlatest`.
+  - No input aborts, reads out of bounds or reaches UB (ASan and UBSan).
+- **Seeds** (`tests/fuzz/corpus/appl_ver_id/`, named `seed_<what>` per the provenance rule in
+  `tests/fuzz/CMakeLists.txt`, each written without a trailing newline, e.g. `printf '%s'`): `seed_10`
+  (`10`), `seed_010` (`010`), `seed_1O` (`1O`, letter O), `seed_10_trailing_space` (`10 `), `seed_11`
+  (`11`), `seed_9` (`9`), `seed_0` (`0`), `seed_empty` (zero bytes).
+- **Phase**: the harness names no `vlatest` symbol. It compiles and passes on `origin/main` too, where
+  `"10"` is refused like `"11"`, so like a characterization pin its RED comes from mutants only.
+- **RED** (re-runs of US1's mutants; no new mutant id; scratch worktree's ASan tree; each row gated on
+  build rc 0). Command per row: `build/linux-clang-asan/bin/fuzz_appl_ver_id
+  -artifact_prefix=<scratch dir>/ <seed file>` exits non-zero with libFuzzer's `deadly signal`, and the
+  whole-corpus replay `build/linux-clang-asan/bin/fuzz_appl_ver_id -artifact_prefix=<scratch dir>/
+  -runs=0 tests/fuzz/corpus/appl_ver_id` exits non-zero. Record the seed that fired.
+  - M-1 (two-character strings starting `'1'` widened to `vlatest`): `seed_11` traps on the byte-equality
+    assertion (`"11"` renders `"10"`), and so does `seed_1O`.
+  - M-1n (`"10"` → `v50sp2`): `seed_10` traps (`v50sp2` renders `"9"`).
+  - M-2 (`render(vlatest)` returns `"9"`): `seed_10` traps.
+- **Non-vacuity**: unmutated, at the same head, `build/linux-clang-asan/bin/fuzz_appl_ver_id
+  -artifact_prefix=<scratch dir>/ tests/fuzz/corpus/appl_ver_id/*` exits 0, and every seed file the
+  directory holds (`ls`) is named in an `Executed` line of its output. That is the condition; no count
+  is written down. libFuzzer's `-runs=0` replay also runs an implicit empty input
+  (`fixpp_add_fuzz_replay`'s header in `cmake/Helpers.cmake`), which is one more reason to compare
+  names, not totals. The M-1 row proves the trap path can fire.
+- **Where it runs**:
+  - On every PR, CI's `linux-clang-asan` lane (`FIXPP_BUILD_FUZZ=ON`) replays the seeds as the ctest
+    `fuzz_replay_appl_ver_id` (`-runs=0`, label `fuzz`).
+  - `[const §VII.7]` also asks for a libFuzzer corpus run of at least ten minutes on every PR. No CI
+    job runs a timed libFuzzer campaign (`git grep -n -e '-max_total_time' -- .github` finds none, while `git grep -c -e fuzz -- .github`
+    finds the replay lane's lines), so
+    that run is `/speckit-verify` Step 7 with `--fuzz-duration=600` on this target (tasks T073),
+    recorded in the verify record. The gap between §VII.7's wording and CI's replay-only lane predates
+    097; it is reported, not fixed here.
