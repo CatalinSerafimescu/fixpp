@@ -244,6 +244,9 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   `OrchestraFR010Guard.BothDictsFailLoud` becomes a coexistence test (it aborts on the unfixed tree).
   FR-008's witness MUST include the false-positive arm: a Logon carrying `1137=10` + `1407=303` against a
   registry WITHOUT FIX Latest is still refused (1407 must not make an unserviceable version serviceable).
+  Where a requirement already holds on the unfixed tree (FR-008 with `1137=9`, which no QuickFIX-derived
+  path rejects today), its witness is a characterization pin and is instead shown RED against a named
+  mutant that makes the tag change the outcome.
 - **FR-011 (compatibility disclosure)**: The new application version is an additive public C++ enumerator;
   the C ABI is unchanged (it carries the raw 1137 string). The B&L records the behaviour change(s) as
   `B-097-*` rows, BREAKING where FR-006 changes a shipped answer.
@@ -252,9 +255,10 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   milestone line; Article XVIII §2's v1.2 annotation) are amended under Article XX, riding this
   feature's Gate A, owner-ratified. (b) L-074-1 and L-080-1 move to the closed B&L file naming 097.
   (c) Code comments that state the superseded mapping (`version_profile.hpp`'s `vlatest` comment,
-  `version_registry.cpp`'s mapping and FR-010 comments, `tools/codegen` `ir.cpp`'s `vlatest` row,
-  `vlatest_dispatch_exclusion_test.cpp`'s header) are rewritten, each naming "097" as the superseding
-  feature. (d) The catalogue rows S-025 and S-043 and D-011's note gain FIX Latest / ApplVerID 10;
+  `version_registry.cpp`'s mapping and FR-010 comments, `tools/codegen` `ir.cpp`'s `vlatest` row and
+  `gen_util.hpp`'s `app_version_enum`, `vlatest_dispatch_exclusion_test.cpp`'s header) are rewritten,
+  each naming "097" as the superseding feature. The generated `fixpp::vlatest` typed classes' static
+  application version follows FR-004 (FIX Latest), so the vlatest typed tier and the dispatch arm agree. (d) The catalogue rows S-025 and S-043 and D-011's note gain FIX Latest / ApplVerID 10;
   coverage-index §4.3.7 / §5.3.3 / §5.3.5 entries are updated. (e) `brain/components/dictionary.md`
   flags 074's reconcile (frozen `specs/074-orchestra-native-reader/`) as superseded in place.
 - **FR-013 (no regression)**: No FIX.4.x session, and no FIXT session whose default is FIX50SP2 or older,
@@ -279,8 +283,9 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   RED for its stated reason.
 - **SC-004**: Over all eleven ApplVerID values `"0"`..`"10"` plus the edge-case malformed values,
   parse/render agree with the FIX ApplVerID table and render is injective (one table-driven witness).
-- **SC-005**: Zero emitted 1407 and zero emitted header 1128 across the session test binaries' FIXT
-  scenarios (a counting oracle shown non-zero against a seeded positive).
+- **SC-005**: Zero emitted 1407 and zero emitted header 1128 in every outbound frame the 097 session
+  witnesses capture, FIX Latest and FIX50SP2 defaults both (the counting oracle shown non-zero against
+  a seeded frame carrying each tag).
 - **SC-006**: The full existing test suite passes unchanged, except the tests FR-006/FR-009/FR-010 name
   as rewritten.
 - **SC-007**: L-074-1 and L-080-1 absent from the live B&L; constitution amended with owner sign-off.
