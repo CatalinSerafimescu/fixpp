@@ -13,11 +13,13 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace {
 
@@ -118,6 +120,86 @@ TEST(VersionProfile097, Wire10Resolves) {
         ADD_FAILURE() << "ApplVerID \"10\" must resolve to a value; got error code "
                       << static_cast<int>(got.error());
     }
+}
+
+// 097-fix-latest-applverid-10 W-1 (full table): every ApplVerID wire value from "0" through
+// "10". "2".."9" keep their pre-097 mapping, "10" is FIX Latest (application_version::vlatest),
+// and "0"/"1" stay refused with dict_unknown_appl_ver_id.
+TEST(VersionProfile097, FullWireTableThrough10) {
+    struct Case {
+        std::string_view wire;
+        application_version expect;
+    };
+    constexpr Case accepted[] = {
+        {.wire = "2", .expect = application_version::v40},
+        {.wire = "3", .expect = application_version::v41},
+        {.wire = "4", .expect = application_version::v42},
+        {.wire = "5", .expect = application_version::v43},
+        {.wire = "6", .expect = application_version::v44},
+        {.wire = "7", .expect = application_version::v50},
+        {.wire = "8", .expect = application_version::v50sp1},
+        {.wire = "9", .expect = application_version::v50sp2},
+        {.wire = "10", .expect = application_version::vlatest},
+    };
+    for (auto const& c : accepted) {
+        auto got = resolve_application_version(kFixt, c.wire);
+        ASSERT_TRUE(got.has_value()) << "wire=" << c.wire;
+        EXPECT_EQ(*got, c.expect) << "wire=" << c.wire;
+    }
+    for (std::string_view refused : {"0", "1"}) {
+        auto got = resolve_application_version(kFixt, refused);
+        ASSERT_FALSE(got.has_value()) << "wire=" << refused;
+        EXPECT_EQ(got.error(), error::dict_unknown_appl_ver_id) << "wire=" << refused;
+    }
+}
+
+// 097 W-1 (malformed): near-misses of "10" keep dict_unknown_appl_ver_id: the "10" arm
+// matches the exact string "10".
+TEST(VersionProfile097, MalformedNear10StayRefused) {
+    for (std::string_view bad : {"10 ", "010", "1O", "11", "100", "99"}) {
+        auto got = resolve_application_version(kFixt, bad);
+        ASSERT_FALSE(got.has_value()) << "bad=\"" << bad << "\"";
+        EXPECT_EQ(got.error(), error::dict_unknown_appl_ver_id) << "bad=\"" << bad << "\"";
+    }
+}
+
+// 097 W-2 (render): render(vlatest) is "10"; over every renderable member v40..vlatest,
+// render then parse is the identity and the rendered strings are pairwise distinct.
+TEST(VersionProfile097, RenderVlatestIs10_RoundTripAndDistinct) {
+    using fixpp::dict::render_appl_ver_id;
+    auto latest = render_appl_ver_id(application_version::vlatest);
+    ASSERT_TRUE(latest.has_value());
+    EXPECT_EQ(*latest, "10");
+
+    constexpr application_version renderable[] = {
+        application_version::v40,    application_version::v41,    application_version::v42,
+        application_version::v43,    application_version::v44,    application_version::v50,
+        application_version::v50sp1, application_version::v50sp2, application_version::vlatest,
+    };
+    std::vector<std::string_view> rendered;
+    for (auto v : renderable) {
+        auto wire = render_appl_ver_id(v);
+        ASSERT_TRUE(wire.has_value()) << "render failed for enum=" << static_cast<int>(v);
+        auto back = resolve_application_version(kFixt, *wire);
+        ASSERT_TRUE(back.has_value()) << "re-parse failed for wire=" << *wire;
+        EXPECT_EQ(*back, v) << "round-trip mismatch for enum=" << static_cast<int>(v)
+                            << " wire=" << *wire;
+        rendered.push_back(*wire);
+    }
+    for (std::size_t i = 0; i < rendered.size(); ++i) {
+        for (std::size_t j = i + 1; j < rendered.size(); ++j) {
+            EXPECT_NE(rendered[i], rendered[j])
+                << "members " << static_cast<int>(renderable[i]) << " and "
+                << static_cast<int>(renderable[j]) << " render the same wire value";
+        }
+    }
+}
+
+// 097 W-2: render(Unknown) stays the error dict_unknown_appl_ver_id.
+TEST(VersionProfile097, RenderUnknownIsError) {
+    auto got = fixpp::dict::render_appl_ver_id(application_version::Unknown);
+    ASSERT_FALSE(got.has_value());
+    EXPECT_EQ(got.error(), error::dict_unknown_appl_ver_id);
 }
 
 TEST(VersionProfileAcVp4, CppIndexNotReused) {

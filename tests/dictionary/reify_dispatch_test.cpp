@@ -404,7 +404,7 @@ TEST(ReifyDispatchApplicationResolution, BadApplVerIdYieldsUnknownApplVerId) {
                                   .default_appl = application_version::v50sp2,
                                   .has_per_message_override = true,
                                   ._reserved = 0};
-    for (std::string_view bad : {"0", "1", "A", "x", "10", "99"}) {
+    for (std::string_view bad : {"0", "1", "A", "x", "99"}) {
         auto r = resolve_application_version(profile, bad);
         ASSERT_FALSE(r.has_value()) << "bad ApplVerID=" << bad;
         EXPECT_EQ(r.error(), error::dict_unknown_appl_ver_id)

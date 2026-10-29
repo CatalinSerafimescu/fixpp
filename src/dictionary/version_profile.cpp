@@ -51,6 +51,11 @@ core::expected_t<application_version> resolve_application_version(
                 break;  // '0'/'1' (pre-4.0/unused) and any other → reject
         }
     }
+    // 097-fix-latest-applverid-10: wire "10" is FIX Latest, matched as the exact
+    // string, so any other spelling or neighbour of it is refused below.
+    if (appl_ver_id_value == "10") {
+        return application_version::vlatest;
+    }
     return std::unexpected{core::error::dict_unknown_appl_ver_id};
 }
 

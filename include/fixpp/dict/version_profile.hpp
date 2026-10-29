@@ -58,6 +58,7 @@ enum class application_version : std::uint8_t {
     v50 = 6,
     v50sp1 = 7,
     v50sp2 = 8,
+    vlatest = 9,  // 097-fix-latest-applverid-10: FIX Latest, wire ApplVerID "10"
 };
 
 // ─── 003-OWNED ADDITIONS (RC#1, re-/plan 2026-05-15) ────────────────────────
@@ -169,6 +170,8 @@ static_assert(std::is_trivially_copyable_v<resolved_message_version>);
             return std::string_view{"8"};
         case application_version::v50sp2:
             return std::string_view{"9"};
+        case application_version::vlatest:
+            return std::string_view{"10"};
         case application_version::Unknown:
             break;
     }
