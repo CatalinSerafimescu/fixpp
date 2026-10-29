@@ -1972,6 +1972,25 @@ TEST(FixtLogonEstablishment097, W6c_LatestRegistry_Peer9_EstablishedNegotiatedV5
         << "observed " << a.observed();
 }
 
+// W-6 (c), admission arm: the same registry and peer, but the session's own default is
+// "10" (vlatest). open() then finds the exact vlatest slot, so the only lookup that goes
+// through the one-way fallback is the inbound Logon's 1137=9. A missing fallback shows here
+// as a refused Logon, with open() succeeding; W6c's own default "9" already needs the
+// fallback at open().
+TEST(FixtLogonEstablishment097, W6c2_LatestRegistry_OwnDefault10_Peer9_AdmittedViaFallback) {
+    Acceptor097 a{
+        {make_orchestra_latest_dict()}, nullptr, /*validate=*/false, application_version::vlatest};
+    ASSERT_TRUE(a.open().has_value()) << "precondition: open() with own default vlatest";
+    a.feed(peer_logon("9", /*with_1407=*/false));
+    EXPECT_EQ(find_msg_type(a.out, "3"), a.out.size())
+        << "no Reject may be sent; observed " << a.observed();
+    EXPECT_LT(find_msg_type(a.out, "A"), a.out.size())
+        << "the reply must be a Logon; observed " << a.observed();
+    EXPECT_EQ(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::v50sp2)
+        << "observed " << a.observed();
+}
+
 // W-6 (d): one engine whose registry holds {FIX50SP2, FIX Latest}, one acceptor session per
 // peer, all built on the same FixtSetup (its EngineConfig and its registry). Each peer
 // advertises its own 1137; each session is established and negotiates the version its peer

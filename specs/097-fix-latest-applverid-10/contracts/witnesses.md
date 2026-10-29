@@ -144,6 +144,12 @@ and run first (plan phase 2), and that run's result is recorded too.
   - (b) Acceptor, registry {FIX50SP2}, inbound `1137=10`: Reject 373=5, 371=1137, then disconnect.
   - (c) Acceptor, registry {FIX Latest}, inbound `1137=9`: established, negotiated `v50sp2`. This is the
     one-way fallback and B-097-1's "still admits".
+    - (c2) Admission arm: the same registry and peer, but the session's own default is `"10"`:
+      established, negotiated `v50sp2`. It exists because (c)'s own default `"9"` already needs the
+      fallback at `open()`. With default `"10"`, `open()` hits the exact vlatest slot, so only the
+      inbound Logon's lookup uses the fallback, and a missing fallback shows as a refused Logon with
+      `open()` succeeding. (c) stays as it is: it is the characterization pin that passes on
+      `origin/main`.
   - (d) Acceptor, registry {FIX50SP2, FIX Latest}: one session per peer, `1137=9` and `1137=10`, both
     established, each negotiating its own version. One arm uses a session whose own dictionary is
     FIX50SP2 receiving `1137=10`: admitted, which pins the engine-wide rule (spec Clarifications,
@@ -167,7 +173,9 @@ and run first (plan phase 2), and that run's result is recorded too.
     Latest dictionary lands in the v50sp2 slot, so `get(vlatest)` is empty, (a)'s `1137=10` gets
     Reject 373=5, and (f)'s `open()` with default `"10"` and {FIX Latest} returns
     `invalid_session_config`.
-  - **M-5a** (no fallback) turns (c) and (f)'s second case RED.
+  - **M-5a** (no fallback) turns (c2) RED on its admission assertion (the Logon is refused while
+    `open()` succeeds), and (f)'s second case RED. (c) also goes RED under it, at its `open()`
+    precondition, which is the lookup (f)'s second case pins; (c)'s M-5a RED is read on (c2).
   - **M-5b** (reverse fallback) turns (b) and (f)'s third case RED.
 
 ## W-7 — 1407 / 1156: no rule, dictionary-decided validation (FR-008)
