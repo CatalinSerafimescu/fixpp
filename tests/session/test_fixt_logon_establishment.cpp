@@ -1972,6 +1972,90 @@ TEST(FixtLogonEstablishment097, W6c_LatestRegistry_Peer9_EstablishedNegotiatedV5
         << "observed " << a.observed();
 }
 
+// W-6 (d): one engine whose registry holds {FIX50SP2, FIX Latest}, one acceptor session per
+// peer, all built on the same FixtSetup (its EngineConfig and its registry). Each peer
+// advertises its own 1137; each session is established and negotiates the version its peer
+// advertised, served from that version's own slot. Admission is engine-wide: a session
+// whose own dictionary is FIX50SP2 still admits a 1137=10 peer, because the engine's
+// registry serves vlatest (spec Clarifications, /speckit-clarify). Every session's own
+// default is "9", so open() does not depend on the vlatest slot. Per-peer checks are
+// non-fatal, so one failing session cannot hide another's result.
+// [097 contracts/witnesses.md W-6 (d); FR-004, FR-005, FR-007]
+struct Peer097 {
+    std::string comp_id;
+    std::string appl_ver_id;
+    std::shared_ptr<const fixpp::dict::Dictionary> own_dict;  // null: FixtSetup's
+    application_version expect;
+    Frames out;
+    std::unique_ptr<fixpp::session::Session> sess;
+
+    [[nodiscard]] std::string observed() const {
+        return "peer=" + comp_id + " 1137=" + appl_ver_id +
+               " state=" + std::to_string(static_cast<int>(sess->state())) +
+               " frames: " + describe_frames(out);
+    }
+};
+
+TEST(FixtLogonEstablishment097, W6d_BothRegistry_OneSessionPerPeer_EachNegotiatesOwnVersion) {
+    auto fix50sp2 = make_dict(kMinimalFix50sp2Xml);
+    ASSERT_EQ(fix50sp2->which_session_version(), fixpp::dict::session_version::v50sp2)
+        << "precondition: the FIX50SP2 dictionary";
+    FixtSetup s{{fix50sp2, make_orchestra_latest_dict()}};
+
+    std::vector<std::unique_ptr<Peer097>> peers;
+    peers.push_back(std::make_unique<Peer097>(
+        Peer097{"PEER9", "9", nullptr, application_version::v50sp2, {}, nullptr}));
+    peers.push_back(std::make_unique<Peer097>(
+        Peer097{"PEER10", "10", nullptr, application_version::vlatest, {}, nullptr}));
+    // The engine-wide arm: this session's own dictionary is FIX50SP2.
+    peers.push_back(std::make_unique<Peer097>(
+        Peer097{"PEER10SP2", "10", fix50sp2, application_version::vlatest, {}, nullptr}));
+
+    for (auto& p : peers) {
+        auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
+        cfg.target_comp_id = p->comp_id;
+        if (p->own_dict) {
+            cfg.dictionary = p->own_dict;
+        }
+        cfg.validate_inbound_messages = false;
+        cfg.transport_send = [out = &p->out](std::span<const std::byte> f) {
+            out->emplace_back(f.begin(), f.end());
+        };
+        p->sess = std::make_unique<fixpp::session::Session>(s.engine, cfg, &s.registry);
+    }
+
+    std::vector<bool> opened;
+    for (auto& p : peers) {
+        auto r = run_sync(s, [&] { return p->sess->open(); });
+        EXPECT_TRUE(r.has_value()) << "open() failed; " << p->observed();
+        opened.push_back(r.has_value());
+    }
+    for (std::size_t i = 0; i < peers.size(); ++i) {
+        if (!opened[i]) {
+            continue;
+        }
+        auto& p = *peers[i];
+        auto logon = make_fixt_logon_frame("FIXT.1.1", 1, p.comp_id, "ISLD", 30, p.appl_ver_id);
+        (void)run_sync(s, [&] {
+            return p.sess->on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
+        });
+    }
+
+    for (std::size_t i = 0; i < peers.size(); ++i) {
+        if (!opened[i]) {
+            continue;
+        }
+        const auto& p = *peers[i];
+        EXPECT_EQ(find_msg_type(p.out, "3"), p.out.size())
+            << "no Reject may be sent; " << p.observed();
+        EXPECT_LT(find_msg_type(p.out, "A"), p.out.size())
+            << "the reply must be a Logon; " << p.observed();
+        EXPECT_EQ(p.sess->state(), fsm_state::Active) << p.observed();
+        EXPECT_EQ(p.sess->negotiated_version_profile().default_appl, p.expect)
+            << "negotiated version; " << p.observed();
+    }
+}
+
 // W-6 (e): an initiator records the peer's Logon-ack 1137=10 as vlatest. The initiator
 // makes no registry lookup for the peer's value, so its registry here, {FIX50SP2}, serves
 // only its own configured default ("9") and not vlatest.

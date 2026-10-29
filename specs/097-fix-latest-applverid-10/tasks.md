@@ -202,7 +202,7 @@ answered by its own; two peers `1137=9` and `1137=10` both establish.
 
 ### Tests for User Story 2
 
-- [ ] T033 [US2] (implementer) W-6(d) in `tests/session/test_fixt_logon_establishment.cpp`: acceptor, registry {FIX50SP2, FIX Latest}, one session per peer, `1137=9` and `1137=10`, both established, each negotiating its own version; one arm uses a session whose own dictionary is FIX50SP2 receiving `1137=10`: admitted (the engine-wide rule, spec Clarifications `/speckit-clarify`). Build and run `session_fixt_logon_establishment` UNFILTERED: GREEN. Commit: `097 US2: W-6(d) two peers on one engine`. Report the hash (`H` for T034).
+- [X] T033 [US2] (implementer) W-6(d) in `tests/session/test_fixt_logon_establishment.cpp`: acceptor, registry {FIX50SP2, FIX Latest}, one session per peer, `1137=9` and `1137=10`, both established, each negotiating its own version; one arm uses a session whose own dictionary is FIX50SP2 receiving `1137=10`: admitted (the engine-wide rule, spec Clarifications `/speckit-clarify`). Build and run `session_fixt_logon_establishment` UNFILTERED: GREEN. Commit: `097 US2: W-6(d) two peers on one engine`. Report the hash (`H` for T034).
 
 ### RED arms for User Story 2 (Mutant protocol; record each)
 
