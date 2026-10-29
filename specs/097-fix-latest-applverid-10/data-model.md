@@ -159,7 +159,9 @@ Live file, a new `## 097 — FIX Latest is ApplVerID 10 (2026-10-29)` section:
   round 2, G097-017; analyze F4.)*
 - **B-097-3 — fixpp has no rule for DefaultApplExtID(1407) or ApplExtID(1156): neither affects
   version resolution, serviceability or session state, and fixpp originates neither.** No session code
-  reads either tag, as in QuickFIX C++, QuickFIX/J and QuickFIX/Go. With `validate_inbound_messages` on,
+  uses either tag to resolve a version or select a dictionary, as in QuickFIX C++, QuickFIX/J and
+  QuickFIX/Go (1156 is only typed as a FIXT header field and kept in the header of an
+  application-supplied frame). With `validate_inbound_messages` on,
   whether a frame carrying one passes is decided by the session's own dictionary, as for every tag
   (L-041-2).
   - The vendored `FIXT11.xml` (Logon 1407, header 1156) and the Orchestra FIX Latest file declare both,

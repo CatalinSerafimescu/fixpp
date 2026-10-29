@@ -122,8 +122,9 @@ with the recipe given; do not trust a line number after the first implementation
   recording. None of the call sites is edited.
 - **Outbound Logon**: `admin_messages.cpp` renders `default_appl_ver_id` through `render_appl_ver_id` (the
   only exhaustive `switch` over `application_version` in the tree — `-Wswitch` forces its new case).
-- **Inbound 1407 / 1156 (corrected at Gate A round 1, G097-003 / RC-1)**: no session code reads either
-  tag (`grep -rn "1407" src include` is empty; `grep -rn "1156" src include` finds only the send-header
+- **Inbound 1407 / 1156 (corrected at Gate A round 1, G097-003 / RC-1; wording corrected at T003a
+  round 1, OA097-004)**: no session code uses either tag to resolve a version or select a dictionary
+  (`grep -rn "1407" src include` is empty; `grep -rn "1156" src include` finds only the send-header
   tag list in `src/session/session.cpp`, the FIXT framing table, and comments). An
   earlier draft said that because `dictionaries/FIXT11.xml` defines both, "a dictionary-driven check
   does not reject them". As a general statement that is false. Inbound validation uses the session's
