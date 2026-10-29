@@ -60,7 +60,8 @@ Sync Impact Report — v4.2 → v4.3 (2026-10-29) — PENDING
   Review and sign-off: filled in this order before the RATIFIED flip (tasks T073b). Gate A:
     converged 2026-10-29 by owner ruling (specs/097-fix-latest-applverid-10/plan.md `## Gate A`).
     Scoped amendment round (tasks T003a): round 1 Codex P1=0 P2=1 P3=0, Opus post-judging P1=0 P2=0
-    P3=5; round 2 PENDING (canonical-sentence change). Gate B: PENDING. Owner sign-off: PENDING.
+    P3=5; round 2 converged 2026-10-29, Codex P1=0 P2=0 P3=0, Opus post-judging P1=0 P2=0 P3=0.
+    Gate B: PENDING. Owner sign-off: PENDING.
 -->
 <!--
 Sync Impact Report — v4.1 → v4.2 (2026-10-28) — RATIFIED
