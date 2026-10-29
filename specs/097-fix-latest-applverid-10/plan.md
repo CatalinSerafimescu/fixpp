@@ -5,7 +5,37 @@
 
 ## Gate A
 
-(Filled by `/gate-a`.)
+- Round 1 applied 2026-10-29: Codex P1=7 P2=5 P3=0; Opus post-judging P1=3 P2=8 P3=3; rewrite addresses root causes RC-1..RC-4 (+ per-finding fixes). Owner ruling RC-1: no new rule. Reviews: research/reviews/codex_097-fix-latest-applverid-10_gate_a_review.md, research/reviews/opus_097-fix-latest-applverid-10_gate_a_adversarial_review.md.
+
+### Round 1 — disagreements
+
+Codex fixes that were not applied, following the Opus judgement:
+
+- **G097-003, the counter-proposal's scope.** Codex asked for a new accept-and-ignore mechanism for
+  Logon 1407 and header 1156 across every FIXT application dictionary. Not applied, for two reasons.
+  The owner ruled "no new rule" (spec Clarifications, Gate A round 1). Validation by the session's own
+  dictionary is the shipped rule (L-041-2), and selecting the validation dictionary is Out of Scope.
+  QuickFIX/Go with its shipped FIXT11.xml rejects 1407 too, so a dictionary-agnostic accept would not
+  be QuickFIX-faithful. What was applied: FR-008 restated, W-7 given named session dictionaries and
+  control arms, B-097-3's disclosure, and research R-6 corrected.
+- **G097-001, the re-plan.** Codex asked for `/plan` to be re-run in a clean context after
+  clarification. Not applied. The one `/clarify` answer confirmed the existing engine-wide admission
+  rule and changed no design decision. Its two consequences (W-6(d)'s session-dictionary arm and
+  B-097-1's admission sentence) are already in the artifacts, so a re-plan would reproduce this plan.
+  The deviation is instead recorded honestly in the Constitution Check, with a Complexity Tracking
+  entry, a regenerated checklist, and an explicit plan↔spec drift check in `/speckit-analyze`
+  (`[const §XVI.4]`).
+- **G097-002, the C-ABI sub-point.** Codex asked to amend 2c's C-ABI constant set (2c's C-ABI
+  commitment that lists application-version constants). Not applied. That constant set was never
+  implemented: `git grep -n "APPL_VER\|application_version" include/fix src/capi bindings` finds no
+  version constant, and the C ABI carries only the raw 1137 string. 097 changes nothing there. The
+  §4.3 enum and wire-table annotation was applied (FR-012(f)).
+- **G097-009, a W-row per FR-011/FR-012 leg.** Downgraded to P3 by Opus. FR-010 enumerates the behaviour
+  FRs only, so one compact records witness, W-11, carries the positive-presence checks of quickstart
+  §4 instead of one row per leg. The full-suite witness W-10 is not renumbered.
+- **G097-010, the removal of history.** Codex suggested deleting the withdrawn-Strict discussion from
+  `spec.md` and `research.md`. Not applied. Those passages are labelled history of a withdrawn ruling.
+  Only the checklist's active "strict" / "open markers" statements were removed (regenerated).
 
 ## Summary
 
@@ -16,13 +46,21 @@ mapping onto FIX50SP2:
 - its own `version_registry` slot, which retires the FR-010 abort, L-074-1 and L-080-1. Lookup is a
   one-way fallback per the owner's second Q1 ruling: FIX Latest answers FIX50SP2 when that dictionary is
   absent, never the reverse (R-3). L-097-1 records that only direct C++ can register both;
-- a FIX Latest arm in the generated reify dispatch, with the vlatest typed classes reporting FIX
-  Latest (R-4, R-5);
-- inbound 1407/1156 accepted and ignored, and nothing new emitted (R-6).
+- a FIX Latest arm in the generated reify dispatch, which returns handles labelled `vlatest`, with the
+  vlatest typed classes' static `which()` reporting FIX Latest (R-4, R-5). The arm is not emitted when
+  the FIX Latest codegen tier is off;
+- no 1407/1156-specific rule (owner, Gate A round 1). Neither tag affects resolution, serviceability or
+  state, and a validated frame's outcome stays with the session's own dictionary (L-041-2). Nothing new
+  is originated (R-6).
 
-The session code is unchanged, because its three version checks already go through the parse and the
-registry. Records: a MINOR constitution amendment, B&L, the catalogue and the coverage index (data-model
-§C–§F).
+The session code is unchanged. Its three version paths are `open()` (registry lookup of the typed
+default), the acceptor (parse, then lookup) and the initiator (parse and record). They change answer
+only through the parse (R-2) and the registry (R-3). Records: a MINOR constitution amendment, `.specify/2c-codegen.md` §4.3/§4.8 notes, B&L,
+the catalogue and the coverage index (data-model §C–§F).
+
+FIX Latest is negotiated when the configured or advertised DefaultApplVerID is `10`. A FIX Latest
+dictionary session configured `"9"` negotiates FIX50SP2 and reifies under the FIX50SP2 arm. That is the
+fallback, and B-097-4 discloses it.
 
 ## Technical Context
 
@@ -32,14 +70,17 @@ registry. Records: a MINOR constitution amendment, B&L, the catalogue and the co
 **Storage**: N/A. Inputs are the vendored `dictionaries/FIX50SP2.xml`, `dictionaries/FIXT11.xml` and
 `dictionaries/orchestra/OrchestraFIXLatest.xml`
 **Testing**: existing gtest binaries for dictionary, config, session and codegen, each gaining ctest label `097`
-**Target Platform**: every CI platform. The FIX Latest dispatch arm's MsgType switch exists only under
-`FIXPP_CODEGEN_FIX_LATEST` (default ON); under OFF the arm fails loud (R-5)
+**Target Platform**: every CI platform. The FIX Latest dispatch arm exists only under
+`FIXPP_CODEGEN_FIX_LATEST` (default ON). Under OFF the emitter writes no `vlatest` case, and the value
+falls to the outer fail-loud `default` (R-5). No CI lane builds OFF, so verify runs one OFF
+configure+build (W-9(c))
 **Project Type**: library — production change in `dict`, `config` and `tools/codegen`, plus tests and records
 **Performance Goals**: no hot path changes (the Logon-time parse gains one length check). No bench
 row is expected to move; verify runs the paired gate as usual
 **Constraints**: the orchestrator writes no library code, so `phase-implementer` writes every source,
-test and CMake line. Additive public enum. No C-ABI change. No `src/session/` change
-**Scale/Scope**: about 10 source files, about 8 test files, 1 regenerated golden, 6 record files
+test and CMake line. Additive public enum. No C-ABI change. No `src/session/` change. No validator
+(`include/fixpp/wire`, `src/dictionary` validation) change
+**Scale/Scope**: the files listed under "Files changed"
 
 ## Constitution Check
 
@@ -47,7 +88,10 @@ test and CMake line. Additive public enum. No C-ABI change. No `src/session/` ch
 |---|---|
 | `[const §I.1]` | Amended (FR-012(a); data-model §E). Without the amendment, Article I §1 would contradict the shipped mapping. |
 | `[const §I.3]` | No `backlog` row closes. L-074-1 and L-080-1 retire. |
-| `[const §VI.4]`, `§VI.5` | Coverage-index rows updated (data-model §F); spec Normative References lists the sources. |
+| `[const §VI.4]`, `§VI.5` | Coverage-index rows updated (data-model §F). spec Normative References lists the Spec refs in `[DocAbbrev §X.Y.Z] Title` form, using the coverage index's spellings. §11.2 has no coverage-index entry and is listed as a supporting citation. |
+| `[const §XVI.3]` | **Deviated.** `/speckit-clarify` is mandatory before `/speckit-plan` for a wire/codegen feature. Here it ran after: `/speckit-plan` at `cebca1eb` (reconciled with the second Q1 ruling at `afb8f92a`), then `/speckit-clarify` at `886e587f`. The owner was informed on 2026-10-29. Remedy: the one clarify answer was carried into the plan artifacts in the same commit (W-6(d), B-097-1); the checklist was regenerated at Gate A round 1; `/speckit-analyze` checks plan↔spec drift explicitly (next row). No re-plan, for the reason given under Gate A, Round 1 — disagreements. See Complexity Tracking. |
+| `[const §XVI.4]` | `/speckit-analyze` runs after `/speckit-tasks` and MUST include an explicit plan↔spec drift pass over every Clarifications answer: Q1 (both rulings), Q2, the `/speckit-clarify` answer and the Gate A round-1 answer. That pass is the gate the order rule protects. |
+| `[const §XVI.6]` | Mutation proofs M-1..M-9d run in a scratch worktree, never in the PR's worktree (contracts preamble). |
 | `[const §VII.3]`/`§VII.4` | TDD order: every witness shown RED (unfixed tree or named mutant) before GREEN (contracts). |
 | `[const §VII.8]` | No new executable. Witnesses join existing binaries; selected by `ctest -L 097`. |
 | `[const §IX.1]` | Touched modules ≥ 95/85 or a per-line assessment, at verify. |
@@ -55,10 +99,12 @@ test and CMake line. Additive public enum. No C-ABI change. No `src/session/` ch
 | `[const §X.1]`, `§X.7` | C ABI unchanged; nothing to bump. |
 | `[const §XVII.1]` | Gate A runs: public C++ API change, behaviour change and amendment. |
 | `[const §XVII.7]` | Local full build + ctest of `linux-clang-debug` at the final head. |
+| `[const §XVIII.1]`, `§XVIII.5` | Read and unchanged, argued in the Sync Impact Report (data-model §E.4). |
 | `[const §XVIII.2]` | Annotated (data-model §E.3). |
 | `[const §XX.1]`–`§XX.4` | Amendment first in commit order; MINOR v4.3; PR titled in §XX.2 form; owner sign-off before RATIFIED. |
 
-No violation to justify.
+One deviation, `[const §XVI.3]`, recorded above and in Complexity Tracking. Everything else is
+satisfied.
 
 ## Project Structure
 
@@ -72,7 +118,7 @@ specs/097-fix-latest-applverid-10/
 ├── data-model.md      # §A identities, §B surfaces, §C superseded text, §D B&L, §E amendment, §F catalogue
 ├── quickstart.md      # §0..§5 validation
 ├── contracts/
-│   └── witnesses.md   # W-1..W-10, mutants M-1..M-9b
+│   └── witnesses.md   # W-1..W-11, mutants M-1..M-9d
 └── checklists/
     └── requirements.md
 ```
@@ -85,10 +131,15 @@ specs/097-fix-latest-applverid-10/
 - `tools/codegen/fixpp-codegen/emit_dispatch.cpp`, `ir.cpp`, `gen_util.hpp`
 - `specs/076-fix-latest-typed-codegen/contracts/golden/vlatest_Messages.golden.hpp` (regenerated)
 - tests: `tests/dictionary/{version_profile_test,orchestra_loader_test,reify_dispatch_test}.cpp`,
-  `tests/config/` (one case + fixture), `tests/session/test_fixt_logon_establishment.cpp`,
-  `tests/codegen/{vlatest_dispatch_exclusion_test,vlatest_compile_smoke_test}.cpp`, the CMake label lines
-- records: `.specify/constitution.md`, `spec/behaviors-and-limitations{,-closed}.md`,
-  `spec/feature-catalogue.md`, `spec/coverage-index.md`, `brain/components/dictionary.md`
+  `tests/config/` (one case + fixture, and the comment in `pos_fixt_appl_ver_ids.toml` and
+  `test_load_happy_path.cpp` that restates the `"2".."9"` range, FR-012(c)),
+  `tests/session/test_fixt_logon_establishment.cpp` (W-6..W-8, with named session dictionaries for W-7),
+  `tests/codegen/{vlatest_dispatch_exclusion_test,vlatest_compile_smoke_test}.cpp`, the W-9(c)
+  OFF-only case and its CMake guard, the CMake label lines
+- records: `.specify/constitution.md`, `.specify/2c-codegen.md` (§4.3/§4.8 notes),
+  `spec/behaviors-and-limitations{,-closed}.md`, `spec/feature-catalogue.md`, `spec/coverage-index.md`,
+  `brain/components/dictionary.md`, the library `CLAUDE.md` (the "Also open, no issue filed" line, at
+  close-out)
 
 ## Phases
 
@@ -100,23 +151,38 @@ specs/097-fix-latest-applverid-10/
    - W-3's text arm;
    - W-4 construction-only (the death test, as it stands);
    - W-5's FIX-Latest-alone arm;
-   - W-6 (a)/(b)/(c);
-   - W-7 (a)/(b)/(c)/(d), with `validate_inbound_messages` ON.
+   - W-6 (a)/(b)/(c), with `validate_inbound_messages` at its default (off);
+   - W-7 (a)/(b)/(c)/(d)/(e) and every control arm, with `validate_inbound_messages` ON and the
+     session dictionary each arm names (contracts W-7).
 
    Build and run them in `build/linux-clang-debug`; that run is the RED record and the
-   characterization record. **Stop rule:** if W-7 (a) or (d) fails on unmodified code, FR-008 needs
-   session code and the plan's "no `src/session/` change" is wrong. Stop and decide, and do not adjust
-   the test.
+   characterization record. **Stop rule, in two halves:**
+   - If a **control arm** (the frame without 1407/1156) departs from its expected outcome on this tree
+     (contracts W-7; on `origin/main`, (b0) and (c0) expect the 1137 Reject and the others expect
+     establishment), the fixture is wrong: the dictionary, the frame or the session setup. Fix the
+     fixture, which is test setup and not FR-008, and re-run. Proceed only once every control matches.
+   - If a 1407/1156 arm's outcome differs from its matching control's (for example rejected where the
+     control is established), under a session dictionary that declares the tag (`FIXT11.xml` or the Orchestra file), RC-1's premise is false: FR-008 would need code, and
+     "no `src/session/` change, no validator change" is wrong. Stop and decide, and do not adjust the
+     test.
+   - W-7(e) (the dictionary-decided reject) is a characterization pin. If its observed Reject shape
+     departs from contracts' text while (e0) passes, record the observed shape and correct the text.
+     No production code changes.
 3. **Core**: enumerator, parse, render, registry with the one-way fallback, config. W-1..W-5 green.
    Mutants M-1..M-5c.
-4. **Session witnesses**: W-6..W-8 (no session source change). Mutants M-7a..c.
-5. **Codegen**: dispatch row, `ir.cpp`, `gen_util.hpp`, golden regenerated (quickstart §3), W-9.
-   Mutants M-9a/b.
-6. **Comments and records**: data-model §C–§F; quickstart §4 checks. A rewritten comment states the
-   rule and the derivation, never a count: `kTableSize` is derived from the enum with a `static_assert`,
-   and the `"2".."9"` tables in `version_profile.hpp` and `scalar_mappers.cpp` point at the code instead of
-   re-listing values (CLAUDE.md: a comment may record a procedure, not a result).
-7. **Final head**: one full configure + build + ctest (`-j8`), `/speckit-verify`, then Gate B.
+4. **Session witnesses**: W-6..W-8 (no session source change). Mutants M-1n, M-7a..d.
+5. **Codegen**: dispatch row, the emitter skipping an arm whose IR is absent, `ir.cpp`, `gen_util.hpp`,
+   golden regenerated (quickstart §3), W-9. Mutants M-9a..d.
+6. **Comments and records**: data-model §C–§F; quickstart §4 checks, the superseded-phrase grep and the
+   positive-presence checks with their seeded negatives (W-11). A rewritten comment states the rule and
+   the derivation, never a count or an enumerated range. `kTableSize` is derived from the enum with a
+   `static_assert`. The `"2".."9"` tables in `version_profile.hpp` and `scalar_mappers.cpp`, and the
+   two `tests/config` comments FR-012(c) names, point at the code instead of re-listing values
+   (CLAUDE.md: a comment may record a procedure, not a result). Check with
+   `.claude/scripts/check-comment-claims.py` (quickstart §4).
+7. **Final head**: one full configure + build + ctest (`-j8`). Then one `FIXPP_CODEGEN_FIX_LATEST=OFF`
+   configure+build with `FIXPP_WERROR=ON`, which runs W-9(c), its build tree on `/mnt/wsl/fixppbuild`.
+   Then `/speckit-verify`, then Gate B.
 
 ## Risks
 
@@ -128,8 +194,18 @@ specs/097-fix-latest-applverid-10/
   the session's own dictionary in either case.
 - **`-Wswitch` in a consumer** sees the new enumerator. Disclosed in B-097-2.
 - **A witness that cannot fail.** Every row of contracts carries its RED arm, and quickstart §1.2 gates
-  each mutant row on build rc 0.
+  each mutant row on build rc 0. Every W-7 arm has a control arm that must pass first, so a fixture that
+  rejects everything cannot pass as an FR-008 result.
+- **A validated session whose dictionary does not declare 1407/1156 rejects them.** This is by ruling
+  (no new rule), and B-097-3 discloses it. W-7(e) pins it, so a later validator change cannot drift it
+  silently.
+- **A `"9"`-configured FIX Latest session keeps the FIX50SP2 label.** This is by ruling (the one-way
+  fallback). B-097-4 and the constitution/catalogue text state the condition (RC-4).
+- **The OFF codegen tier has no CI lane.** W-9(c) runs only in verify's local OFF configure+build.
+  Disclosed, not closed.
 
 ## Complexity Tracking
 
-None.
+| Item | Why | Simpler alternative rejected because |
+|---|---|---|
+| `[const §XVI.3]` deviation: `/speckit-clarify` ran after `/speckit-plan` | It was skipped before `/plan` and run before Gate A, once found (spec Clarifications, `/speckit-clarify` block) | A clean-context re-plan would reproduce this plan: the clarify answer changed no design decision, and its two consequences are already in the artifacts. The order rule's purpose, catching plan↔spec drift, is served by the regenerated checklist and `/speckit-analyze`'s explicit drift pass (`[const §XVI.4]` row). |

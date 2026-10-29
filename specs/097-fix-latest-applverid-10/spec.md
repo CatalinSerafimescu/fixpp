@@ -54,20 +54,29 @@ holding both dictionaries `std::abort`s (FR-010; L-074-1, L-080-1).
    FIX Latest cannot log on to fixpp.**
 2. One registry cannot hold FIX50SP2 and FIX Latest at once (the FR-010 abort), so one engine cannot
    serve both.
-3. A message resolved under a FIX Latest session reifies as a `fixpp::v50sp2` typed owner
+3. A message resolved under a FIX Latest session reifies as a `fixpp::v50sp2` handle
    (`tests/codegen/vlatest_dispatch_exclusion_test.cpp` (a1) pins this as a regression anchor "so a
-   future fix is deliberate"). This feature is that fix.
+   future fix is deliberate"). This feature fixes it **for a session that negotiates FIX Latest**,
+   i.e. whose configured (initiator) or advertised (acceptor) DefaultApplVerID is `10`. A session that
+   loads the FIX Latest dictionary but is configured `default_appl_ver_id = "9"` still negotiates
+   FIX50SP2 (the one-way fallback, FR-006) and still reifies under the FIX50SP2 arm; B-097-4 discloses
+   this.
 
 **Peer behaviour this feature must stay compatible with** (same findings file): QuickFIX C++, QuickFIX/J
 and QuickFIX/Go all **accept** an inbound Logon with `1137=10` (1137 is an enum-less STRING in their
-FIXT11.xml), all can be configured to **send** it, and **none reads DefaultApplExtID(1407) or
-ApplExtID(1156)** on any path. QuickFIX C++ and QuickFIX/Go **reject a header `1128=10`** (their 1128
+FIXT11.xml), all can be configured to **send** it, and **no session code in any of them reads
+DefaultApplExtID(1407) or ApplExtID(1156)**. Whether a frame carrying either tag passes **validation** is
+decided by each engine's dictionary: QuickFIX C++ and QuickFIX/J ship a FIXT11.xml declaring both, so they
+pass; QuickFIX/Go's shipped `spec/FIXT11.xml` declares neither, so with that transport dictionary
+configured it fails a Logon carrying 1407 with `InvalidTagNumber` and disconnects (findings file Q4;
+inferred from source, not run). QuickFIX C++ and QuickFIX/Go **reject a header `1128=10`** (their 1128
 enum stops at 9). The FIX documents mandate no receiver behaviour for an unsupported 1407/1156 and state
 engines have "no requirement … to dynamically configure and apply Extension Packs".
 
 **Owner ruling, 2026-10-29:** ApplVerID 10 in both directions; FIX Latest gets its own application
 version and registry slot; the abort goes; inbound 1407/1156 are accepted and ignored; fixpp emits no
-1407; 074's reconcile is recorded as an erratum.
+1407; 074's reconcile is recorded as an erratum. *("Accepted and ignored" is read as "no new rule" by the
+owner's Gate A round-1 ruling — Clarifications, Session 2026-10-29 (Gate A round 1).)*
 
 ## Clarifications
 
@@ -78,8 +87,11 @@ version and registry slot; the abort goes; inbound 1407/1156 are accepted and ig
   because it would have rendered as `"9"` and made the wire map non-injective; with `"10"` distinct, that
   objection does not apply. The composite key is rejected: no QuickFIX engine reads 1407/1156, so it
   would differentiate nothing for a real peer.
-- Q: What does fixpp do with inbound 1407 / 1156? → A: Accept and ignore, on every path (the behaviour of
-  all three QuickFIX engines). No Reject, no disconnect, no effect on version resolution.
+- ~~Q: What does fixpp do with inbound 1407 / 1156? → A: Accept and ignore, on every path (the behaviour
+  of all three QuickFIX engines). No Reject, no disconnect, no effect on version resolution.~~
+  **Superseded by the Gate A round-1 bullet below (owner, 2026-10-29).** Kept as history. It overstated
+  the peers: QuickFIX/Go with its shipped FIXT11.xml rejects 1407. It also read as a dictionary-agnostic
+  validation promise, which the shipped validator does not make.
 - Q (Q2): A message resolved to FIX Latest — a FIX Latest reify-dispatch arm, or an explicit error? →
   A: The arm (orchestrator, technical, 2026-10-29). Measured at `23895374`: the generated
   `_dispatch/reify_dispatch_application.hpp` (1027 lines, 77 KB) includes no per-version `Reify.hpp`;
@@ -102,9 +114,10 @@ version and registry slot; the abort goes; inbound 1407/1156 are accepted and ig
 ### Session 2026-10-29 (`/speckit-clarify`)
 
 > ⚠️ **Out of pipeline order.** `/speckit-clarify` is mandatory before `/speckit-plan` for a wire/codegen
-> feature (`[const §XVI.3]`). It was skipped and is run here after `/speckit-plan` (`afb8f92a`) and before
-> Gate A. The decisions in the session above were taken with the owner directly, ahead of this scan. Any
-> answer below that touches a plan artifact is carried into it in the same commit.
+> feature (`[const §XVI.3]`). It was skipped and is run here after `/speckit-plan` (`cebca1eb`, reconciled
+> with the second Q1 ruling at `afb8f92a`) and before Gate A. The decisions in the session above were taken with the owner directly, ahead of this scan. Any
+> answer below that touches a plan artifact is carried into it in the same commit. The deviation is
+> recorded in `plan.md`'s Constitution Check (`[const §XVI.3]` row) and Complexity Tracking.
 
 - Q: When an acceptor session whose own dictionary is FIX50SP2 runs on an engine that also holds FIX
   Latest, and the peer's Logon says `1137=10`, is the peer admitted? → A: **Yes — admission stays
@@ -113,6 +126,22 @@ version and registry slot; the abort goes; inbound 1407/1156 are accepted and ig
   FIX44 is registered. Validation still uses the session's own dictionary, so such a peer's FIX-Latest-only
   MsgTypes are rejected by that validator. Tying admission to the session's dictionary is a new rule for all
   versions and is out of scope.
+
+### Session 2026-10-29 (Gate A round 1)
+
+- Q: With `validate_inbound_messages` on, inbound validation uses the session's own
+  `SessionConfig::dictionary`, and it rejects a tag that dictionary does not declare for the MsgType.
+  Does "accept and ignore 1407/1156 on every path" mean fixpp adds a validator rule to accept them
+  whatever the session dictionary is, or that fixpp adds no rule? → A: **No new rule** (owner,
+  2026-10-29). fixpp adds no 1407- or 1156-specific code. Neither tag affects version resolution,
+  serviceability or session state. Whether a validated inbound frame carrying either tag passes is
+  decided by the session's own dictionary, as for every tag (L-041-2). The vendored `FIXT11.xml` and the
+  Orchestra FIX Latest file both declare both tags. A session dictionary that does not declare them
+  rejects them when validation is on. One example is a FIX4.x-shaped dictionary with 1137 injected.
+  QuickFIX/Go behaves the same way with its shipped FIXT11.xml, which declares neither tag. B-097-3
+  discloses this. There is no validator change, and "no `src/session/` change" stands. The rejected
+  alternative is a validator-private whitelist for Logon 1407 and header 1156 across all versions. It
+  would have put `src/dictionary` and `include/fixpp/wire` changes into the plan.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -136,8 +165,9 @@ version equal to FIX Latest. On the unfixed tree the same input yields Reject(37
 2. **Given** a FIXT initiator, **When** the peer's Logon reply carries `1137=10`, **Then** the initiator
    records FIX Latest as the negotiated application version.
 3. **Given** a FIXT session configured with FIX Latest as its default application version, **When** it
-   sends its Logon, **Then** the Logon carries `1137=10`, and no message the session emits carries
-   1407 or a header 1128.
+   sends its Logon, **Then** the Logon carries `1137=10`, and no frame the session originates (Logon,
+   Logon reply, Reject, Heartbeat, TestRequest, Logout) carries 1407, 1156 or a header 1128. An
+   application payload that itself carries 1128 or 1156 is sent as given; this is unchanged (FR-008).
 4. **Given** a FIXT acceptor whose registry holds no FIX Latest dictionary, **When** a Logon with
    `1137=10` arrives, **Then** it is refused exactly as any other unserviceable version is today
    (Reject 373=5, 371=1137, then disconnect).
@@ -170,25 +200,35 @@ its own dictionary. On the unfixed tree the construction aborts with the FR-010 
 
 ### User Story 3 — A FIX Latest message is typed as FIX Latest (Priority: P2)
 
-An application reifies an inbound message whose resolved application version is FIX Latest. It never
-receives a `fixpp::v50sp2`-labelled owner for it.
+An application reifies an inbound application message whose resolved application version is FIX
+Latest. It never receives a `fixpp::v50sp2`-labelled handle for it. (FIXT admin MsgTypes route to the
+FIXT admin dispatch before application dispatch and are unchanged.)
 
 **Why this priority**: the silent mis-label is pinned today only as an anchor; once FIX Latest is a real
 application version the anchor's premise is gone, and the outcome must be stated.
 
 **Independent Test**: reify a FIX Latest MsgType under a FIX Latest profile; inspect the handle's
 version. On the unfixed tree no input can resolve to FIX Latest at all (FR-001), so the RED is the
-anchor (a1)'s FIX50SP2-labelled owner under the profile a FIX Latest session negotiates today.
+anchor (a1)'s FIX50SP2-labelled handle under the profile a FIX Latest session negotiates today, and
+`vlatest_compile_smoke_test.cpp`'s `which() == v50sp2`.
 
 **Acceptance Scenarios**:
 
-1. **Given** a message of a MsgType the FIX Latest dictionary defines, resolved to FIX Latest, **When**
-   it is reified, **Then** the owner's application version reads FIX Latest and its type is the
-   `fixpp::vlatest` class for that MsgType.
-2. **Given** a MsgType FIX Latest does not define, resolved to FIX Latest, **When** it is reified,
+1. **Given** a message of an application MsgType the FIX Latest dictionary defines, resolved to FIX
+   Latest, **When** it is reified at runtime (`dict::reify`), **Then** the result is an
+   `owning_message_handle` whose `version().application` is `application_version::vlatest`. Runtime
+   dispatch returns this untyped handle for every version. The typed downcast (`as<Msg>()`) is
+   declared-only and stays out of scope.
+2. **Given** the generated typed class `fixpp::vlatest::owning_<Msg>` for any FIX Latest MsgType,
+   **When** its static `which()` is read, **Then** it returns `application_version::vlatest`. Before
+   097 it returned `v50sp2`.
+3. **Given** a MsgType FIX Latest does not define, resolved to FIX Latest, **When** it is reified,
    **Then** the existing unknown-MsgType error is returned.
-3. **Given** a build with the FIX Latest codegen tier disabled, **When** a message resolved to FIX Latest
-   is reified, **Then** the existing fail-loud default error is returned, never a FIX50SP2 owner.
+4. **Given** a build with the FIX Latest codegen tier disabled (`FIXPP_CODEGEN_FIX_LATEST=OFF`), **When**
+   a message resolved to FIX Latest is reified, **Then** the existing fail-loud outer-default error
+   (`dict_reify_unknown_msg_type`) is returned, never a FIX50SP2 handle. That build compiles under
+   `FIXPP_WERROR=ON`. No CI lane builds OFF, so this scenario is witnessed by the one OFF configure+build
+   that `/speckit-verify` runs (contracts W-9(c)).
 
 ---
 
@@ -203,27 +243,43 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 **Acceptance Scenarios**:
 
 1. **Given** the merged tree, **When** the constitution's FIX Latest clauses are read, **Then** they state
-   that FIX Latest's application version is ApplVerID 10 (delivered by 097) and that only Extension Pack
-   negotiation beyond accept-and-ignore remains post-1.0.
+   that FIX Latest's application version is ApplVerID 10 (delivered by 097), negotiated when the
+   DefaultApplVerID is `10`, and that only Extension Pack negotiation remains post-1.0 (fixpp reads
+   neither 1407 nor 1156).
 2. **Given** the live B&L, **When** it is read, **Then** L-074-1 and L-080-1 are absent from it and
    present in the closed file with the retiring feature.
 
 ### Edge Cases
 
-- **Inbound `1137=10` and `1407=303` together** — accepted; 1407 has no effect (FR-008).
+- **Inbound `1137=10` and `1407=303` together** — 1407 has no effect on resolution, serviceability or
+  state (FR-008). The Logon is admitted when `1137=10` is serviceable, and when validation is off or
+  the session dictionary declares 1407 for Logon (as `FIXT11.xml` and the Orchestra file do).
+- **Inbound `1407` on a validated session whose dictionary does not declare it** (e.g. a FIX4.x-shaped
+  dictionary with 1137 injected) — the validator rejects the Logon on 1407, as it rejects any undeclared
+  tag. This happens before the 1137 check. It is today's behaviour, is unchanged, and is disclosed in
+  B-097-3.
 - **Inbound `1407` with no `1137`** — the existing missing-1137 rule fires (Reject 373=1, 371=1137); 1407
-  changes nothing.
+  changes nothing (validation permitting, as above).
 - **Inbound `1137="10 "`, `"010"`, `"1O"`** — not a valid ApplVerID value; refused as today's
   unparseable values are (373=5).
-- **Inbound header `1128=10` on an application message** — parses to FIX Latest (FR-001); today it is
-  tolerated per 033 FR-010 and that tolerance is unchanged.
-- **Inbound header `1156=…`** — accepted and ignored (FR-008).
+- **Inbound header `1128=10` on an application message** — parses to FIX Latest (FR-001). With
+  validation off it is tolerated per 033 FR-010, unchanged. With validation on, the session dictionary
+  decides, as for any enum value. `FIX50SP2.xml` and the Orchestra file enumerate `10`. `FIXT11.xml`
+  enumerates 1128 only up to `9`, so a session validating with it rejects `1128=10` (373=5), today and
+  after 097.
+- **Inbound header `1156=…`** — no effect on resolution or state (FR-008). With validation on it
+  passes when the session dictionary declares 1156 in the header: `FIXT11.xml`, the Orchestra file, and
+  the FIX50/SP1/SP2 framing surface (081). Otherwise it is rejected as an undeclared tag.
 - **Registry given two dictionaries with the same session version** — unchanged, last writer wins (not
   FR-010's case and not this feature's).
 - **FIX-Latest-only registry asked for FIX50SP2** — the FIX Latest dictionary answers (FR-006, one-way
   fallback): a FIX-Latest-only acceptor admits `1137=9` as today, and a session whose own default is `"9"`
   on such an engine opens as today. The reverse never falls back: a FIX50SP2-only registry asked for FIX
   Latest has no dictionary, so `1137=10` is refused with Reject 373=5.
+- **A session whose own dictionary is FIX Latest, configured `default_appl_ver_id = "9"`** — it sends
+  `1137=9` and negotiates FIX50SP2. Its messages reify under the FIX50SP2 arm, so they come back as
+  `v50sp2`-labelled handles, and MsgTypes outside that arm fail loud. This is unchanged from today.
+  Such a session negotiates FIX Latest only if it is configured `"10"` (B-097-4).
 - **Both dictionaries registered** — each version is answered by its own (exact match first).
 - **Advertised version differs from the session's own dictionary** (e.g. `1137=10` on a session whose
   dictionary is FIX50SP2, the engine holding both) — admitted, as for every version today; the session
@@ -259,25 +315,47 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   own default MUST treat FIX Latest like every other application version: serviceable iff FR-001 parses
   and FR-005/FR-006 return a dictionary from the engine's registry. Serviceability stays engine-wide; it
   does not consult the session's own dictionary. The initiator MUST record a peer's `1137=10` as FIX Latest. The
-  Reject shape for an unserviceable value is unchanged.
-- **FR-008 (extension pack tags)**: Inbound DefaultApplExtID(1407) on a Logon and ApplExtID(1156) in any
-  header MUST be accepted and MUST NOT affect version resolution, serviceability, validation outcome, or
-  session state. fixpp MUST NOT emit 1407. fixpp MUST NOT begin emitting a per-message ApplVerID(1128).
-- **FR-009 (reify)**: A message whose resolved application version is FIX Latest MUST NOT yield an owner
-  whose application version reads FIX50SP2. The generated application dispatch MUST gain a FIX Latest
-  arm returning `fixpp::vlatest` owners for every MsgType of the FIX Latest dictionary, and the existing
-  fail-loud error otherwise (Clarifications, Q2). The anchor `vlatest_dispatch_exclusion_test.cpp` (a1)
-  is rewritten to this outcome, and its (a2)/(b) halves re-derived (one arm per application version).
+  Reject shape for an unserviceable value is unchanged. The three session paths differ and are stated
+  separately (research R-6):
+  - `open()` looks up the session's already-typed configured default in the registry;
+  - the acceptor parses the peer's 1137, then looks it up;
+  - the initiator parses the peer's 1137 and records it, with no registry lookup.
+
+  So the one-way fallback (FR-006) reaches `open()` and acceptor admission, never initiator recording.
+- **FR-008 (extension pack tags — no new rule)**: fixpp MUST add no DefaultApplExtID(1407)- or
+  ApplExtID(1156)-specific rule. 1407 and 1156 MUST NOT affect version resolution, serviceability or
+  session state. Whether a validated inbound frame carrying either tag passes is decided by the session's own
+  dictionary, as for every tag (L-041-2). The vendored `FIXT11.xml` (Logon 1407, header 1156) and the
+  Orchestra FIX Latest file declare both. A session dictionary that declares neither rejects them when
+  `validate_inbound_messages` is on (Clarifications, Gate A round 1). fixpp MUST NOT originate 1407 or
+  1156. It MUST NOT begin originating a header ApplVerID(1128). An application payload's own 1128 or
+  1156 is moved into the header and sent as given, as today.
+- **FR-009 (reify)**: A message whose resolved application version is FIX Latest MUST NOT yield a
+  handle whose application version reads FIX50SP2. Two outcomes, each witnessed separately:
+  - (a) **Runtime**: the generated application dispatch MUST gain a FIX Latest arm. For every
+    application MsgType of the FIX Latest dictionary, `dict::reify` returns an `owning_message_handle`
+    whose `version().application == application_version::vlatest`. Any other MsgType gets the existing
+    `dict_reify_unknown_msg_type` (Clarifications, Q2). FIXT admin MsgTypes keep routing to the FIXT
+    admin dispatch. The handle is untyped, as for every version; no typed `fixpp::vlatest` object is
+    returned at runtime.
+  - (b) **Static**: the generated `fixpp::vlatest::owning_<Msg>::which()` MUST return
+    `application_version::vlatest`.
+
+  Under `FIXPP_CODEGEN_FIX_LATEST=OFF` no FIX Latest arm is emitted, and FIX Latest falls to the
+  outer fail-loud `default`. The anchor `vlatest_dispatch_exclusion_test.cpp` (a1) is rewritten to this
+  outcome, and its (a2)/(b) halves are re-derived (one arm per application version whose IR is present).
 - **FR-010 (witnesses, RED first)**: Each of FR-001, FR-002, FR-003, FR-005, FR-006, FR-007, FR-008 and
   FR-009 MUST have a named test that fails for the reason the requirement states. It fails on the
   unfixed tree where that tree compiles it and the behaviour is new.
   `OrchestraFR010Guard.BothDictsFailLoud` becomes a coexistence test (it aborts on the unfixed tree).
   FR-008's witness MUST include the false-positive arm: a Logon carrying `1137=10` + `1407=303` against a
   registry WITHOUT FIX Latest is still refused (1407 must not make an unserviceable version serviceable).
+  Each FR-008 arm MUST name its session dictionary and carry a control arm (the same frame without
+  1407/1156) that passes first (contracts W-7).
   Where a requirement already holds on the unfixed tree, its witness is a characterization pin. This
-  covers FR-006's FIX50SP2-from-FIX-Latest fallback and FR-008 with `1137=9`, which no QuickFIX-derived
-  path rejects today. Such a witness is instead shown RED against a named mutant that breaks the
-  behaviour it pins (contracts). The same applies where a witness names the new enumerator and so cannot
+  covers FR-006's FIX50SP2-from-FIX-Latest fallback, FR-008 with `1137=9` under a session dictionary
+  that declares 1407, and the dictionary-decided reject under one that does not. Such a witness is
+  instead shown RED against a named mutant that breaks the behaviour it pins (contracts). The same applies where a witness names the new enumerator and so cannot
   compile on the unfixed tree.
 - **FR-011 (compatibility disclosure)**: The new application version is an additive public C++ enumerator;
   the C ABI is unchanged (it carries the raw 1137 string). The B&L records the behaviour changes as
@@ -291,12 +369,37 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   (c) Code comments that state the superseded mapping (`version_profile.hpp`'s `vlatest` comment,
   `version_registry.cpp`'s mapping and FR-010 comments, `tools/codegen` `ir.cpp`'s `vlatest` row and
   `gen_util.hpp`'s `app_version_enum`, `vlatest_dispatch_exclusion_test.cpp`'s header) are rewritten,
-  each naming "097" as the superseding feature. The generated `fixpp::vlatest` typed classes' static
-  application version follows FR-004 (FIX Latest), so the vlatest typed tier and the dispatch arm agree. (d) The catalogue rows S-025 and S-043 and D-011's note gain FIX Latest / ApplVerID 10;
-  coverage-index §4.3.7 / §5.3.3 / §5.3.5 entries are updated. (e) `brain/components/dictionary.md`
-  flags 074's reconcile (frozen `specs/074-orchestra-native-reader/`) as superseded in place.
-- **FR-013 (no regression)**: No FIX.4.x session, and no FIXT session whose default is FIX50SP2 or older,
-  changes observable behaviour (wire bytes, Rejects, state transitions), on any registry content.
+  each naming "097" as the superseding feature. The test comments that state a value range or count
+  which 097 makes false by omission are rewritten to point at the mapper rather than restate a count
+  (`tests/config/fixtures/pos_fixt_appl_ver_ids.toml`'s header and `tests/config/test_load_happy_path.cpp`'s
+  section banner for that fixture; find them with `grep -rn '"2".."9"' tests/config`). The generated
+  `fixpp::vlatest` typed classes' static application version follows FR-004 (FIX Latest), so the
+  vlatest typed tier and the dispatch arm agree.
+  (d) The catalogue rows S-025 and S-043 and D-011's note gain FIX Latest / ApplVerID 10. D-011's Tests
+  cell renames the 074 guard tests that W-4 renames or deletes. Its case count is marked "at 074" and
+  is not recomputed. The coverage-index §4.3.7 / §5.3.3 / §5.3.5 rows and the DefaultApplVerID(1137) /
+  ApplVerID(1128) rows are updated.
+  (e) `brain/components/dictionary.md` flags 074's reconcile (frozen `specs/074-orchestra-native-reader/`)
+  as superseded in place, naming `097-fix-latest-applverid-10`, and points at the 2c notes of (f).
+  (f) `.specify/2c-codegen.md` §4.3 gets an in-place `Updated (097 …)` note at the `application_version`
+  enum and at the wire `1128` → `application_version` table (`"10"` → `vlatest`). This follows 2c's
+  own `Updated (fixpp#458 …)` precedent. The application-dispatch version set gains `vlatest`, noted
+  at §4.8's "Runtime-dispatch switch" paragraph, where the application switch is described. Other
+  "four codegen versions"
+  statements predate 097 (076's staleness) and are left alone.
+  (g) The constitution's Sync Impact Report lists every affected catalogue row and spec (data-model §E.4).
+  The positive-presence checks of quickstart §4 (contracts W-11) confirm (a)–(f) were made, not only that
+  superseded text is gone.
+- **FR-013 (no regression)**: No FIX.4.x session, and no FIXT session whose own default is FIX50SP2 or
+  older, changes observable behaviour (wire bytes, Rejects, state transitions), except in two places:
+  - **(i)** the handling of the inbound value `"10"` wherever it is parsed: DefaultApplVerID(1137) and
+    ApplVerID(1128), through admission and reify. It now resolves to FIX Latest, so a `1137=10` peer
+    is admitted when the engine holds FIX Latest (FR-007, Clarifications `/speckit-clarify`);
+  - **(ii)** registry contents that abort on the unfixed tree (FIX50SP2 together with FIX Latest).
+
+  The claim is finite. It holds when the full existing suite passes unchanged except the tests this
+  feature names as rewritten (SC-006, W-10), and the characterization pins W-5 (FIX-Latest-alone
+  arm), W-6(c), W-6(f)'s second case and W-7(a)/(e) pass.
 
 ### Key Entities
 
@@ -317,9 +420,9 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   unfixed tree or against its named mutant (contracts' per-witness RED arm).
 - **SC-004**: Over all eleven ApplVerID values `"0"`..`"10"` plus the edge-case malformed values,
   parse/render agree with the FIX ApplVerID table and render is injective (one table-driven witness).
-- **SC-005**: Zero emitted 1407 and zero emitted header 1128 in every outbound frame the 097 session
-  witnesses capture, FIX Latest and FIX50SP2 defaults both (the counting oracle shown non-zero against
-  a seeded frame carrying each tag).
+- **SC-005**: Zero 1407, zero 1156 and zero header 1128 in every session-originated outbound frame the
+  097 session witnesses capture, with FIX Latest and FIX50SP2 defaults both. The counting oracle is
+  shown non-zero against a seeded frame carrying each tag.
 - **SC-006**: The full existing test suite passes unchanged, except the tests FR-006/FR-009/FR-010 name
   as rewritten.
 - **SC-007**: L-074-1 and L-080-1 absent from the live B&L; constitution amended with owner sign-off.
@@ -335,8 +438,10 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 
 ## Out of Scope
 
-- Extension Pack negotiation: any behaviour for 1407/1156/1406 beyond accept-and-ignore; RefApplExtID in
-  NoMsgTypes; emitting 1407.
+- Extension Pack negotiation: any behaviour for 1407/1156/1406 (fixpp reads none of them); RefApplExtID
+  in NoMsgTypes; emitting 1407.
+- A validator rule that accepts 1407/1156 whatever the session dictionary declares (rejected by the
+  owner's Gate A round-1 ruling; validation stays dictionary-decided, L-041-2).
 - Emitting per-message ApplVerID(1128); S-026's accessor and override semantics (row 7).
 - Selecting the inbound validation dictionary from the negotiated version (each session still validates
   with its own `SessionConfig::dictionary`).
@@ -346,16 +451,33 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 
 ## Normative References
 
-- **FIX documents** (cited, not vendored): FIX Session Layer with Errata, November 2020 — §11.2 (ApplVerID
-  values), §5.3.3 (session default application version), §5.3.5 (explicit application version per
-  message), §5.3.6 (extension packs); FIXT 1.1 specification (Logon 1137/1407; header 1128/1156).
+- **Spec refs** (`[const §VI.5]` form, titles as `spec/coverage-index.md`'s FIX-SL section table spells
+  them):
+  - `[FIX-SL §4.3.7] Specifying application version (DefaultApplVerID 1137 / FIXT)` (S-025, S-043);
+  - `[FIX-SL §5.3.3] Session default application version identification (DefaultApplVerID 1137)`
+    (S-025);
+  - `[FIX-SL §5.3.5] Explicit application version per message (ApplVerID 1128)` (S-026; FR-001's parse
+    only);
+  - `[FIX-SL §5.3.6] Use of extension packs` (out of scope beyond FR-008; dropped post-1.0).
+
+  The "FIXT.1.1 (FIXT)" table indexes the same sections by concept ("DefaultApplVerID(1137) on Logon —
+  default app version", "ApplVerID(1128) per message — per-message app version override").
+- **Supporting citations** (no coverage-index entry, cited, not vendored): FIX Session Layer with
+  Errata, November 2020, §11.2 (p77), the ApplVerID value list (`FIXLatest = 10`); the FIXT 1.1
+  specification (Logon 1137/1407; header 1128/1156).
 - **FIX Orchestra**: `dictionaries/orchestra/OrchestraFIXLatest.xml` — ApplVerID codeset (`FIXLatest`,
   `value="10"`).
-- **Catalogue rows**: S-025, S-043, D-011 (annotated, FR-012(d)); no `backlog` row closes.
-- **Constitution**: `[const §I.1]`, `[const §XVIII.2]` amended (FR-012(a)); `[const §XX.1]`–`[const §XX.4]`
-  the amendment process; `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build,
-  verify; `[const §X.7]` (C ABI unchanged).
-- **B&L**: L-074-1, L-080-1 (retired); new `B-097-*`, `L-097-1`.
+- **Catalogue rows**: S-025, S-043, D-011 (annotated, FR-012(d)); A-035..A-065 (one sentence each,
+  data-model §F); no `backlog` row closes.
+- **Constitution**: `[const §I.1]`, `[const §XVIII.2]` amended (FR-012(a)); `[const §XVIII.1]`,
+  `[const §XVIII.5]` read and unchanged (data-model §E.4); `[const §XX.1]`–`[const §XX.4]` the amendment
+  process; `[const §XVI.3]`, `[const §XVI.4]` the `/clarify` order deviation and the `/analyze` drift
+  check (plan Constitution Check); `[const §XVI.6]` mutation proofs in a scratch copy;
+  `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` Gate A, local build, verify; `[const §X.7]`
+  (C ABI unchanged).
+- **Design doc**: `.specify/2c-codegen.md` §4.3 and §4.8 (annotated in place, FR-012(f)).
+- **B&L**: L-074-1, L-080-1 (retired); L-041-2 (unchanged; decides FR-008's validation outcome); new
+  `B-097-*`, `L-097-1`.
 - **Precedent**: `specs/033-fixt-fix50sp2-session/` (the DefaultApplVerID gates); `specs/074-orchestra-native-reader/`
   (the superseded reconcile, FR-010); `specs/080-orchestra-runtime-load/` (L-080-1).
 - **Evidence**: parent `research/findings/v1-row4b-applverid-10-sweep-2026-10-29.md`.

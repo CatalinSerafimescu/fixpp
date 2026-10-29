@@ -1,6 +1,7 @@
 # Quickstart: validating 097
 
-Run from the library root of the tree that owns the branch (the main checkout).
+Run from the library root of the tree that owns the branch (the main checkout), except the mutation
+rows of §1.2, which run in the scratch worktree that contracts' preamble creates.
 
 ## §0 — Prerequisites
 
@@ -16,16 +17,29 @@ Run from the library root of the tree that owns the branch (the main checkout).
    witnesses that compile against unmodified code (plan phase 2), in `build/linux-clang-debug`.
    - RED for the stated reason: W-1's `"10"` arm, W-3's text arm, W-6 (a), and W-7 (b).
    - The death test (today's W-4) aborts with `FR-010`.
-   - Characterization pins that pass: W-5's FIX-Latest-alone arm, W-6 (b)/(c), and W-7 (a)/(c)/(d).
-   - Stop rule in plan phase 2.
-2. At the implementation head, for each mutant M-1..M-9b in contracts:
-   - commit it on the branch;
-   - rebuild the named binaries;
+   - Characterization pins that pass: W-5's FIX-Latest-alone arm, W-6 (b)/(c), W-7 (a)/(c)/(d)/(e).
+   - Every W-7 control arm (a0)..(e0) shows its expected `origin/main` outcome: (a0), (d0) and (e0)
+     are established; (b0) and (c0) get the 1137 Reject (373=5, 371=1137), the same as their arms
+     (b)/(c). A control that departs from its expected outcome is a fixture defect, fixed before any arm
+     is read (plan phase 2's stop rule). Under validation, `kMinimalFix44Xml` rejects every Logon, which
+     is why W-7 names its own session dictionaries.
+   - Stop rule: plan phase 2.
+2. At the implementation head, for each mutant M-1..M-9d in contracts, **in the scratch worktree**
+   (contracts preamble; never the main checkout, never `fixpp-parallel`):
+   - commit it on the scratch worktree's detached head;
+   - rebuild the named binaries in that worktree's own build tree (on `/mnt/wsl/fixppbuild`);
    - run each binary UNFILTERED and record rc and the failing message;
-   - `git reset --hard <head-before-mutant>`.
+   - `git reset --hard "$H"` in the scratch worktree.
 
-   A mutant whose rebuild failed proves nothing: gate the row on build rc 0 first.
+   A mutant whose rebuild failed proves nothing: gate the row on build rc 0 first. M-9c is the one
+   exception, because its stated RED is the OFF build failing. Remove the scratch worktree after the
+   last row.
 3. Green: `ctest --preset linux-clang-debug -L 097 --output-on-failure` — all pass.
+4. OFF tier (W-9(c)): one configure+build with `-DFIXPP_CODEGEN_FIX_LATEST=OFF` and `FIXPP_WERROR=ON`
+   in a build tree on `/mnt/wsl/fixppbuild` (check `df -h /mnt/wsl/fixppbuild` first). Build rc 0,
+   then run W-9(c)'s binary unfiltered, and confirm
+   `grep -c "application_version::vlatest:" <OFF tree>/_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp`
+   prints 0. The seeded positive is the same grep on the ON tree, which must print 1.
 
 ## §2 — Registry and parse (US2, W-1/W-2/W-4/W-5)
 
@@ -46,29 +60,79 @@ file. Seeded positive for the check: append one unrelated changed line in a scra
 `uniq -c` output gains a third shape. ⚠️ Extract `origin/main:$G` with `git show` into a file and check
 its size is non-zero before counting (a shell hook can mangle `rev:path` arguments built from variables).
 
-## §4 — The record (US4, FR-012)
+## §4 — The record (US4, FR-011, FR-012; contracts W-11)
 
-- Superseded statements, one union pattern over the whole tree (a broader `vlatest.*v50sp2` arm was
-  tried and rejected: it matches every line that merely lists both namespaces):
-  ```
-  P='no distinct ApplVerID|caps at 9|ApplExtID\(1156\)=303|L-074-1|L-080-1|session_to_application\(vlatest\)|vlatest *(->|→) *v50sp2|maps? to v50sp2|resolves? to (the )?(existing )?v50sp2|v50sp2 (registry )?slot|wire application version (is |IS )?(v50sp2|5\.0SP2)|no .?application_version::vlatest|ApplVerID 9 with no ApplExtID'
-  git grep -n -i -E "$P" -- . ':!specs/0[0-8]*' ':!specs/09[0-6]*' ':!specs/097*'
-  ```
-  Seeded positive, before trusting an empty result:
-  `printf 'session_to_application(vlatest) -> v50sp2\n' | grep -c -i -E "$P"` must print 1.
-  Every hit either states the current rule or flags the supersession naming 097. Explicit exclusions:
-  frozen `specs/` bundles, the constitution's historical Sync Impact Report entries, and the closed B&L
-  file. The surfaces it must reach include the library `CLAUDE.md` ("Also open, no issue filed:
-  ApplExtID(1156)=303 …"), `brain/`, `.specify/*.md` design docs, and the coverage index's Post-1.0 Gap
-  Registry.
-- `grep -n "L-074-1\|L-080-1" spec/behaviors-and-limitations.md` → no row definition (mentions in
-  closed-pointer text only); both present in `spec/behaviors-and-limitations-closed.md`.
+### §4.1 Superseded statements
+
+One union pattern over the whole tree. A broader `vlatest.*v50sp2` arm was tried and rejected: it
+matches every line that merely lists both namespaces.
+```
+P='no distinct ApplVerID|caps at 9|ApplExtID\(1156\)=303|L-074-1|L-080-1|session_to_application\(vlatest\)|vlatest *(->|→) *v50sp2|maps? to v50sp2|resolves? to (the )?(existing )?v50sp2|v50sp2 (registry )?slot|wire application version (is |IS )?(v50sp2|5\.0SP2)|no .?application_version::vlatest|ApplVerID 9 with no ApplExtID'
+git grep -n -i -E "$P" -- . ':!specs/0[0-8]*' ':!specs/09[0-6]*' ':!specs/097*' ':!CLAUDE-history.md'
+```
+Seeded positive, before trusting an empty result:
+`printf 'session_to_application(vlatest) -> v50sp2\n' | grep -c -i -E "$P"` must print 1.
+
+Every hit either states the current rule or flags the supersession naming 097. Explicit exclusions:
+- frozen `specs/` bundles;
+- `CLAUDE-history.md` (a changelog; history is not rewritten);
+- the constitution's historical Sync Impact Report entries;
+- the closed B&L file.
+
+The surfaces the grep must reach include the library `CLAUDE.md` ("Also open, no issue filed:
+ApplExtID(1156)=303 …"), `brain/`, the `.specify/*.md` design docs, and the coverage index's Post-1.0
+Gap Registry.
+
+### §4.2 Positive-presence checks (an omitted addition is invisible to §4.1)
+
+Extract the `origin/main` copies with Python, not a shell `rev:path` built from a variable, and
+assert each is non-empty:
+```
+BASE=<scratch dir>/097-base
+python3 - "$BASE" <<'EOF'
+import pathlib, subprocess, sys
+base = pathlib.Path(sys.argv[1])
+for f in ["spec/feature-catalogue.md", "spec/coverage-index.md", ".specify/constitution.md",
+          ".specify/2c-codegen.md", "spec/behaviors-and-limitations.md",
+          "spec/behaviors-and-limitations-closed.md", "brain/components/dictionary.md"]:
+    out = subprocess.run(["git", "show", f"origin/main:{f}"], capture_output=True, check=True).stdout
+    assert len(out) > 0, f
+    p = base / f; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(out)
+EOF
+```
+Run every check twice, with `R=.` (the head) and with `R="$BASE"` (the seeded negative). In the table, `\|` is the
+Markdown escape for a literal `|`; type `|`. Use
+`command grep`, because the shell's `grep` wrapper mis-reports exit codes. Each row gives the value
+expected at the head; the `origin/main` run must give the "base" value, which proves the check can fail.
+
+| Check | Command (prints a number) | head | base |
+|---|---|---|---|
+| S-025 version cell names FIX Latest | `awk -F'\|' '$2 ~ /^ S-025 $/ {print $6}' "$R/spec/feature-catalogue.md" \| command grep -c 'FIX Latest'` | 1 | 0 |
+| S-043 and D-011 name 097 | `awk -F'\|' '$2 ~ /^ (S-043\|D-011) $/' "$R/spec/feature-catalogue.md" \| command grep -cw '097'` | 2 | 0 |
+| A-035..A-065 sentence replaced | new: `command grep -c 'FIX Latest goes on the wire as ApplVerID 10 when' "$R/spec/feature-catalogue.md"`; old: the same with `'ApplVerID 9 with no ApplExtID(1156)'` | new = base's old; old = 0 | new = 0 |
+| Coverage-index rows updated | `command grep -E '^\| (§4\.3\.7\|§5\.3\.3\|§5\.3\.5) \|\|^\| (DefaultApplVerID\(1137\) on Logon\|ApplVerID\(1128\) per message)' "$R/spec/coverage-index.md"` piped to `wc -l` (selection) and to `command grep -cw '097'` (hits) | hits = selection = 5 | hits 0, selection 5 |
+| Constitution Article I §1 (bullet + milestone line) | `awk '/^## Article I —/,/^## Article II —/' "$R/.specify/constitution.md" \| command grep -c 'feature 097'` | 2 | 0 |
+| Constitution Article XVIII §2 annotation | `awk '/^## Article XVIII —/,/^## Article XIX —/' "$R/.specify/constitution.md" \| command grep -c 'Amended v4.3, feature 097'` | 1 | 0 |
+| Sync Impact Report header | `command grep -c 'Sync Impact Report — v4.2 → v4.3' "$R/.specify/constitution.md"` | 1 | 0 |
+| L-074-1 / L-080-1 left the live B&L | `command grep -cE '^- \*\*L-0(74\|80)-1 ' "$R/spec/behaviors-and-limitations.md"` | 0 | 2 |
+| …and arrived in the closed file | `command grep -cE '^<!-- L-0(74\|80)-1 — closed: resolved by 097' "$R/spec/behaviors-and-limitations-closed.md"` | 2 | 0 |
+| New B&L rows | `command grep -cE '^- \*\*(B-097-[1-4]\|L-097-1) ' "$R/spec/behaviors-and-limitations.md"` | 5 | 0 |
+| 2c notes | `command grep -c 'Updated (097-fix-latest-applverid-10)' "$R/.specify/2c-codegen.md"` | 3 | 0 |
+| Component page flags 074 and points at 2c | `command grep -c '097-fix-latest-applverid-10' "$R/brain/components/dictionary.md"` | ≥ 1 | 0 |
+
+In the "L-074-1 / L-080-1 left the live B&L" row the polarity is reversed: there the base is the
+positive. A row whose base run gives the head value proves nothing and is rewritten before it is
+trusted.
+
+### §4.3 Other checks
+
 - New comments: `.claude/scripts/check-comment-claims.py --root . --base origin/main` (parent repo path)
-  clean, or each hit adjudicated.
+  clean, or each hit adjudicated. No rewritten comment records a count or an enumerated value range
+  (FR-012(c); the `tests/config` comments).
 - Line citations: `python3 tools/check_line_citations.py --range origin/main..HEAD` → OK, and
   `--shift-audit origin/main..HEAD` → OK.
-- Constitution: the Sync Impact Report reads v4.2 → v4.3, MINOR, with Gate A / Gate B / owner sign-off
-  dates filled in that order before the RATIFIED flip.
+- Constitution: the Sync Impact Report reads v4.2 → v4.3, MINOR, and lists every item data-model §E.4
+  names. Its Gate A / Gate B / owner sign-off dates are filled in that order before the RATIFIED flip.
 
 ## §5 — Interop sanity (optional, not a gate)
 

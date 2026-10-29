@@ -77,28 +77,76 @@ with the recipe given; do not trust a line number after the first implementation
   version-independent factory (`src/dictionary/reify.cpp`). No `fixpp::vlatest` header and no new link is
   needed. The arm's case label and `rmv_app.application` are both written from `av.ns`, so the enumerator
   must be spelled `vlatest`. One codegen invocation sees every version's IR (`main.cpp` builds `all`, then
-  emits dispatch once); under `FIXPP_CODEGEN_FIX_LATEST=OFF` the vlatest IR is absent, the arm is still
-  emitted with no MsgType switch, and it returns the existing fail-loud `dict_reify_unknown_msg_type`
-  (spec US3 scenario 3).
+  emits dispatch once).
+- **Under `FIXPP_CODEGEN_FIX_LATEST=OFF` (Gate A round 1, O097-003)**: the vlatest IR is absent. The
+  emitter MUST then **skip the outer `case` for a `kAppVersions` row whose IR is absent**, so `vlatest`
+  falls to the outer `default`, which already returns `dict_reify_unknown_msg_type`. This matches spec
+  Clarifications Q2 ("there is no arm"). An earlier draft of this section said the arm was "still
+  emitted with no MsgType switch". That shape is expected not to build: the Gate A round-1 review
+  derived this from source plus a scratch TU, not from a real OFF build, and mutant M-9c is what
+  observes it in the real build. With `ir == nullptr` the emitter today
+  writes the `const resolved_message_version rmv_app{…}` local, the empty-MsgType early return and the
+  trailing fail-loud return, but neither switch, so `rmv_app` is never read. clang and gcc warn
+  `-Wunused-variable` on it, and the base preset sets `FIXPP_WERROR=ON`. The generated header is a
+  plain (non-SYSTEM) include of `fixpp_dict_dispatch_bridge`, which gets `-Wall -Wextra -Werror` like
+  every target under `src/`. Re-derive: `grep -n "rmv_app\|ir != nullptr\|has_one_char" tools/codegen/fixpp-codegen/emit_dispatch.cpp`.
+  The outer switch keeps its `default:`, so omitting an enumerator's `case` raises no `-Wswitch`.
+  Witness: contracts W-9(c) (spec US3 scenario 4).
 - **Anchor**: `tests/codegen/vlatest_dispatch_exclusion_test.cpp` keeps passing unchanged (its (a) arms use
   a v50sp2 profile), but its header states the false premise. It is rewritten: (a1)/(a2) keep the v50sp2
   facts, a new (a3) asserts a FIX Latest-resolved `EC` yields a handle reading FIX Latest, and (b) asserts
-  exactly one `case …::v50sp2:` and exactly one `case …::vlatest:`.
+  exactly one `case …::v50sp2:` and exactly one `case …::vlatest:` (tier ON; under OFF there is no
+  `vlatest` case, W-9(c)).
 - **Recipe**: `grep -n "#include\|owning_message_handle_from_frame" build/linux-clang-debug/_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp | head`.
 
 ## R-6 — Session paths need no code change
 
-- **Finding**: the acceptor's inbound-Logon check, the initiator's Logon-ack recording and the `open()`
-  check of the session's own default all call `resolve_application_version` then `registry.get`
-  (`src/session/session.cpp`, the three sites named by `grep -n "app_version_registry_->get\|resolve_application_version" src/session/session.cpp`).
-  R-2 and R-3 change both answers; the call sites are untouched.
+- **Finding (corrected at Gate A round 1, G097-011)**: the three session paths are different, and
+  `grep -n "app_version_registry_->get\|resolve_application_version" src/session/session.cpp` names
+  them:
+  - **`open()`** looks up the session's already-typed configured default (`registry.get` only, no
+    parse);
+  - **the acceptor's inbound-Logon check** parses the peer's 1137 with `resolve_application_version`,
+    then calls `registry.get` (serviceability);
+  - **the initiator's Logon-ack handling** parses the peer's 1137 and records it as the negotiated
+    version, with no registry lookup.
+
+  R-2 changes the acceptor's and the initiator's parse. R-3 changes the answer at `open()` and at the
+  acceptor. The one-way fallback therefore reaches `open()` and acceptor admission, never initiator
+  recording. None of the call sites is edited.
 - **Outbound Logon**: `admin_messages.cpp` renders `default_appl_ver_id` through `render_appl_ver_id` (the
   only exhaustive `switch` over `application_version` in the tree — `-Wswitch` forces its new case).
-- **Inbound 1407 / 1156**: `dictionaries/FIXT11.xml` defines 1407 (Logon) and 1156 (header), so a
-  dictionary-driven check does not reject them; no session code reads either tag. FR-008 holds today for
-  `1137=9` (a characterization pin, shown RED against a mutant, contracts W-7).
-- **Emission**: nothing emits 1407 (`grep -rn "1407" src include` is empty) or a header 1128; SC-005's
-  oracle is on captured outbound frames (contracts W-8).
+- **Inbound 1407 / 1156 (corrected at Gate A round 1, G097-003 / RC-1)**: no session code reads either
+  tag (`grep -rn "1407" src include` is empty; `grep -rn "1156" src include` finds only the send-header
+  tag list in `src/session/session.cpp`, the FIXT framing table, and comments). An
+  earlier draft said that because `dictionaries/FIXT11.xml` defines both, "a dictionary-driven check
+  does not reject them". As a general statement that is false. Inbound validation uses the session's
+  own `SessionConfig::dictionary`: the validator is built from `cfg_.dictionary->as_table_view()`, and
+  the validate-first gate (`grep -n "validate_inbound_messages && validator_" src/session/session.cpp`)
+  runs before `interpret_logon` and before the 1137 check. `include/fixpp/wire/validator.hpp` rejects a
+  tag that is neither valid for the MsgType nor a FIXT framing tag (`wire_unexpected_tag`). The framing
+  table (`src/dictionary/fixt_framing_table.hpp`) is installed only for v50/v50sp1/v50sp2 dictionaries.
+  It whitelists header 1156 but no Logon body tag.
+
+  So FIXT11.xml is consulted only when the integrator chose it as the session dictionary. The outcome,
+  by session dictionary:
+
+  | Session dictionary (validation on) | Logon with 1407 | Header 1156 |
+  |---|---|---|
+  | `FIXT11.xml` | accepted (declared in Logon) | accepted (declared in header) |
+  | Orchestra FIX Latest | accepted (Logon fieldRef 1407) | accepted (StandardHeader expanded into every message) |
+  | `FIX50SP2.xml` | n/a: it defines no Logon, so every validated Logon is rejected today | accepted (081 framing surface) |
+  | FIX4.x-shaped with 1137 injected (`fix44_dictionary_with_1137()` in `tests/session/engine_reset_unit_stop_test.cpp`) | rejected (`wire_unexpected_tag`) | rejected |
+
+  Owner ruling (spec Clarifications, Gate A round 1): **no new rule**. The table is today's behaviour
+  and stays so. B-097-3 discloses it. QuickFIX/Go with its shipped FIXT11.xml behaves like the last row
+  for 1407 (findings file Q4). W-7 pins the FIXT11.xml, Orchestra and FIX4.x-shaped rows, each with a
+  control arm. For the FIX50SP2 framing row it cites 081's existing validator-level witness.
+- **Emission**: fixpp originates no 1407 (`grep -rn "1407" src include` is empty), no 1156 and no header
+  1128. But `is_send_header_tag` in `src/session/session.cpp` lists 1128 and 1156, and
+  `build_send_frame_` moves an application payload's own 1128 or 1156 into the header and sends it. So
+  the claim is about session-originated frames only, and that is what SC-005's oracle counts on captured
+  frames (contracts W-8).
 
 ## R-7 — Config token
 
@@ -115,17 +163,24 @@ with the recipe given; do not trust a line number after the first implementation
   Text: data-model §E.
 - **Rationale**: Article I §1 currently states "wire application version `v50sp2` via
   `session_to_application`; no distinct ApplVerID" and keeps "ApplExtID(1156)=303 differentiation and
-  session negotiation" post-1.0. After 097 the first is false and the second is answered: FIX Latest is
-  identified by ApplVerID 10 and negotiated by DefaultApplVerID(1137) like any version; only Extension
-  Pack negotiation (1407/1156 beyond accept-and-ignore) remains post-1.0.
+  session negotiation" post-1.0. After 097 the first is false and the second is answered. FIX Latest is
+  identified by ApplVerID 10 and negotiated by DefaultApplVerID(1137) like any version, when that value
+  is `10`. A FIX Latest dictionary session configured `"9"` negotiates FIX50SP2 (the fallback). Only
+  Extension Pack negotiation remains post-1.0: fixpp reads neither 1407 nor 1156.
+- **§XVIII.1/§XVIII.5 (Gate A round 1, G097-006)**: read and unchanged; the argument goes into the
+  Sync Impact Report (data-model §E.4). FIX Latest negotiation by DefaultApplVerID is S-025's v1.0
+  mechanism (the FIXT.1.1 session layer, inside §XVIII.1's scope) with one more value. It is not a
+  post-1.0 protocol shipped early (§XVIII.5). The post-1.0 list narrows by amendment (§XVIII.4,
+  Article XX), which this is.
 
 ## R-9 — B&L rows
 
 - **Decision**: L-074-1 and L-080-1 move to `spec/behaviors-and-limitations-closed.md` with a
   `closed: resolved by 097` comment line, text unchanged. New live rows in data-model §D:
   B-097-1 (FIX Latest = ApplVerID 10; one-way fallback), B-097-2 (BREAKING: the enumerator and the vlatest
-  classes' static version), B-097-3 (1407/1156 accepted and ignored, never emitted), B-097-4 (FIX Latest
-  reify arm), and the limitation L-097-1 (two dictionaries: direct C++ only).
+  classes' static version), B-097-3 (fixpp has no 1407/1156 rule: no effect on resolution or state;
+  validation decided by the session dictionary; never originated), B-097-4 (FIX Latest reify arm, and
+  the `"9"`-configured condition), and the limitation L-097-1 (two dictionaries: direct C++ only).
 
 ## R-10 — Line-citation gate
 
