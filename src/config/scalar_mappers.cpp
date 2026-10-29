@@ -485,13 +485,15 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
             ver = av::v50sp1;
         } else if (tok == "9") {
             ver = av::v50sp2;
+        } else if (tok == "10") {
+            ver = av::vlatest;
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "default_appl_ver_id"),
                 .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "default_appl_ver_id"),
                 .message = std::string{"unknown default_appl_ver_id token: \""} + std::string{tok} +
-                           R"(" (expected ApplVerID wire values: "2".."9"))",
+                           R"(" (expected ApplVerID wire values: "2".."10"))",
             });
         }
         if (ver.has_value()) {

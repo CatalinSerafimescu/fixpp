@@ -417,6 +417,29 @@ TEST(LoadHappyPath, Cov_FixtApplVerIds) {
     }
 }
 
+// ── pos_fixt_appl_ver_id_10.toml: default_appl_ver_id "10" (FIX Latest) ──────
+// 097-fix-latest-applverid-10 W-3 (accepted-token arm): the token "10" loads as
+// application_version::vlatest, FIX Latest's own application version.
+
+TEST(LoadHappyPath, Fixt097_ApplVerId10_LoadsAsVlatest) {
+    auto result = load_fixture("pos_fixt_appl_ver_id_10.toml");
+
+    ASSERT_TRUE(result.has_value())
+        << "pos_fixt_appl_ver_id_10.toml must load successfully; diagnostics: " << [&] {
+               std::string s;
+               if (!result.has_value())
+                   for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
+               return s;
+           }();
+
+    ASSERT_EQ(result->sessions.size(), std::size_t{1});
+    const auto& cfg = result->sessions[0].config;
+    ASSERT_TRUE(cfg.default_appl_ver_id.has_value())
+        << "session[0] must have default_appl_ver_id set";
+    EXPECT_EQ(*cfg.default_appl_ver_id, fixpp::dict::application_version::vlatest)
+        << "default_appl_ver_id \"10\" must load as application_version::vlatest";
+}
+
 // ── pos_multisession_profile_diverges.toml: per-session divergence scan ───────
 //    session[0] matches engine default (resolve_transport's match-engine-default continue)
 //    session[1] profile diverges but same cert → reuse engine cert (resolve_transport's cert-reuse
