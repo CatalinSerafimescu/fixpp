@@ -254,9 +254,6 @@ inline std::string_view app_version_enum(std::string_view ns) {
     if (ns == "vt11") {
         return "Unknown";
     }
-    if (ns == "vlatest") {
-        return "v50sp2";
-    }
     return ns;
 }
 

@@ -62,6 +62,9 @@ constexpr AppVersion kAppVersions[] = {
     {.ns = "v42", .av = fixpp::dict::application_version::v42},
     {.ns = "v44", .av = fixpp::dict::application_version::v44},
     {.ns = "v50sp2", .av = fixpp::dict::application_version::v50sp2},
+    // 097-fix-latest-applverid-10 (data-model §B): appended last (this keeps the
+    // bytewise order).
+    {.ns = "vlatest", .av = fixpp::dict::application_version::vlatest},
 };
 
 }  // namespace
@@ -230,6 +233,12 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
                 ir = &v;
                 break;
             }
+        }
+        // 097-fix-latest-applverid-10 (research R-5): a row whose IR this run did not
+        // build (the FIX Latest tier OFF) gets no outer case, so its version falls
+        // to the outer fail-loud default.
+        if (ir == nullptr) {
+            continue;
         }
 
         // A length bucket with no messages gets no switch at all: a switch holding

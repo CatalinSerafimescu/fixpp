@@ -622,7 +622,7 @@ constexpr VersionMap kCodegenVersions[] = {
     // namespace selection, which keys on `.ns`). `ns = "vlatest"` is
     // distinct from "v50sp2" — namespace disjointness (uniqueness rule).
     {.s = fixpp::dict::session_version::vlatest,
-     .a = fixpp::dict::application_version::v50sp2,
+     .a = fixpp::dict::application_version::vlatest,
      .ns = "vlatest"},
 };
 

@@ -198,7 +198,10 @@ specs/097-fix-latest-applverid-10/
   `pos_fixt_appl_ver_ids.toml` and `test_load_happy_path.cpp` that restates the `"2".."9"` range
   (FR-012(c)),
   `tests/session/test_fixt_logon_establishment.cpp` (W-6..W-8, with named session dictionaries for W-7),
-  `tests/codegen/{vlatest_dispatch_exclusion_test,vlatest_compile_smoke_test}.cpp`, the W-9(c)
+  `tests/codegen/{vlatest_dispatch_exclusion_test,vlatest_compile_smoke_test}.cpp`,
+  `tests/codegen/determinism_test.cpp` (`AdditiveOffOnByteDiff`'s V-7 clause (b): the dispatch header
+  `_dispatch/reify_dispatch_application.hpp` is checked as the OFF copy plus one inserted `vlatest` arm,
+  every other OFF-run file stays byte-identical; contracts W-10), the W-9(c)
   OFF-only case and its CMake guard, the CMake label lines, and in `tests/codegen/CMakeLists.txt`
   `FIXPP_DICT_DATA_DIR` added to `codegen_vlatest_tests`'s `target_compile_definitions` (the W-9(a3)
   census; Gate A round 4, G097-021)

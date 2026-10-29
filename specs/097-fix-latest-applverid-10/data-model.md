@@ -111,7 +111,12 @@ gone at verify. The grep cannot see an
 
 - Frozen records not edited (flagged in `brain/components/dictionary.md` instead):
   `specs/074-orchestra-native-reader/` (the reconcile, FR-010, L-074-1), `specs/076-…` prose describing
-  `.a = v50sp2` / `app_version_enum` (the golden file is a test oracle and is regenerated, §B),
+  `.a = v50sp2` / `app_version_enum` (the golden file is a test oracle and is regenerated, §B), and
+  076's V-7 claim that the `_dispatch/` output is byte-identical between the OFF and ON runs
+  (`specs/076-fix-latest-typed-codegen/contracts/build-and-verification.md` V-7 and
+  `specs/076-fix-latest-typed-codegen/quickstart.md`), superseded by 097 for
+  `_dispatch/reify_dispatch_application.hpp`, which gains FIX Latest's arm only with the tier ON
+  (contracts W-10),
   `specs/080-orchestra-runtime-load/` (L-080-1).
 - Parent records (not in this repo): REMAINING-WORK row 4b and the 4b detail file already carry the
   owner's re-scope (parent `610eb57e`); the close-out marks row 4b DONE.

@@ -485,6 +485,14 @@ names as rewritten. The expected-ctest list is recorded by `/speckit-tasks`. FR-
 W-6(a)/(d)/(e) assert. The pins that show the rest unchanged are W-5's FIX-Latest-alone arm, W-6(c),
 W-6(f)'s second case, W-7(a)/(d)/(e)/(f) and W-8's phase-2 arms.
 
+Rewritten at implement (T046, orchestrator ruling): `DeterminismTest.AdditiveOffOnByteDiff` (076 V-7),
+clause (b). It required every OFF-run file to be byte-identical to its ON-run copy, which includes the
+shared `_dispatch/reify_dispatch_application.hpp`; 097 adds FIX Latest's own dispatch arm only when the
+tier is ON (W-9, research R-5), so that one file, exempted by its exact relative path, is now checked
+structurally: the ON copy equals the OFF copy plus one contiguous inserted block, the block holds exactly
+one `case ::fixpp::dict::application_version::vlatest:`, and the OFF copy holds none. Every other OFF-run
+file stays byte-identical.
+
 ## W-11 — the record (FR-011, FR-012; Gate A round 1, G097-009 / RC-3)
 
 A records witness, not a test (FR-010 covers the behaviour FRs only). It is quickstart §4, run at the

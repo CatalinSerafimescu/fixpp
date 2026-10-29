@@ -35,6 +35,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
 #include <vector>
@@ -695,6 +696,51 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
                               << ") — codegen output shape may have changed.";
 }
 
+// 097-fix-latest-applverid-10 (V-7 clause (b) for the dispatch header): the
+// ON-run copy must be the OFF-run copy with ONE contiguous block inserted, the
+// block must hold exactly one `vlatest` outer case, and the OFF-run copy none.
+// The block is located by the longest common prefix and then the longest common
+// suffix of what remains; a single insertion is exactly the case where the two
+// together cover the whole OFF-run copy.
+static void expect_dispatch_gains_only_the_vlatest_arm(const std::string& off,
+                                                       const std::string& on) {
+    static constexpr std::string_view kVlatestCase =
+        "case ::fixpp::dict::application_version::vlatest:";
+    auto const count = [](std::string_view text, std::string_view needle) {
+        std::size_t n = 0;
+        for (std::size_t pos = text.find(needle); pos != std::string_view::npos;
+             pos = text.find(needle, pos + needle.size())) {
+            ++n;
+        }
+        return n;
+    };
+    EXPECT_EQ(count(off, kVlatestCase), 0U)
+        << "097 V-7: the OFF-run _dispatch/reify_dispatch_application.hpp must hold no "
+           "vlatest outer case";
+    if (on.size() <= off.size()) {
+        ADD_FAILURE() << "097 V-7: the ON-run _dispatch/reify_dispatch_application.hpp must "
+                         "extend the OFF-run copy with the vlatest arm (ON "
+                      << on.size() << " B, OFF " << off.size() << " B)";
+        return;
+    }
+    std::size_t prefix = 0;
+    while (prefix < off.size() && off[prefix] == on[prefix]) ++prefix;
+    std::size_t suffix = 0;
+    while (suffix < off.size() - prefix &&
+           off[off.size() - 1 - suffix] == on[on.size() - 1 - suffix]) {
+        ++suffix;
+    }
+    EXPECT_EQ(prefix + suffix, off.size())
+        << "097 V-7: the ON-run _dispatch/reify_dispatch_application.hpp must equal the "
+           "OFF-run copy plus ONE contiguous inserted block; they also differ outside it "
+           "(first difference at byte offset "
+        << prefix << ")";
+    std::string_view const block{on.data() + prefix, on.size() - off.size()};
+    EXPECT_EQ(count(block, kVlatestCase), 1U)
+        << "097 V-7: the block the ON run inserts into _dispatch/reify_dispatch_application.hpp "
+           "must hold exactly one vlatest outer case";
+}
+
 // ── 076-fix-latest-typed-codegen T018 [US3]: V-7 additive OFF/ON byte-diff ──
 //
 // FR-004/SC-003, contract V-7: adding the fixpp::vlatest tier MUST NOT
@@ -708,7 +754,9 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
 //       builder-tier output (`all.hpp` + split files, post-078) under
 //       v42/v44/v50sp2/vt11, plus the shared
 //       _dispatch/*.hpp) is byte-identical between the OFF-run and the
-//       ON-run. Neither specs/003 nor specs/069's golden dir carries a
+//       ON-run (097: except _dispatch/reify_dispatch_application.hpp, which
+//       gains only the vlatest arm; expect_dispatch_gains_only_the_vlatest_arm).
+//       Neither specs/003 nor specs/069's golden dir carries a
 //       golden for _dispatch/ or for Fields/Validator/Reify/
 //       NormativeReferences.md/Manifest.txt (only Messages.hpp x4 are
 //       goldened) — this recursive walk is the ONLY gate covering those
@@ -776,6 +824,16 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
         fs::path on_counterpart = on_run.path / rel;
         EXPECT_TRUE(fs::exists(on_counterpart)) << "V-7: legacy file missing from ON-run: " << rel;
         if (!fs::exists(on_counterpart)) continue;
+        // 097-fix-latest-applverid-10 (contracts W-9/W-10): FIX Latest's own
+        // dispatch arm exists only when the tier is ON, so this one shared header
+        // is additive by construction instead of byte-identical. Exempted by its
+        // exact relative path; every other OFF-run file stays byte-identical.
+        if (rel == fs::path("_dispatch") / "reify_dispatch_application.hpp") {
+            expect_dispatch_gains_only_the_vlatest_arm(read_file_binary(e.path()),
+                                                       read_file_binary(on_counterpart));
+            ++compared;
+            continue;
+        }
         expect_bytes_equal(
             read_file_binary(e.path()), read_file_binary(on_counterpart),
             "V-7 additivity violated: " + rel.string() + " differs between OFF-run and ON-run.");
