@@ -21,7 +21,8 @@ rows of §1.2, which run in the scratch worktree that contracts' preamble create
    - The death test (today's W-4) aborts with `FR-010`.
    - Characterization pins that pass (FR-013's list): W-5's FIX-Latest-alone arm, W-6 (c), W-7
      (a)/(d)/(e)/(f), and W-8's phase-2 arms ((ii) and W-6(b)/(c)'s frames: every family present, all
-     counts 0).
+     counts 0). Also passing: W-7's non-vacuity controls (v1) and (v2), the validator's
+     undeclared-tag Reject under `FIXT11.xml` and under the Orchestra file (contracts W-7).
    - Two more arms pass here for a different reason than at the head, W-6 (b) and W-7 (c): on
      `origin/main` `"10"` does not parse; at the head it parses and the registry does not serve it.
      They feed `1137=10`, so they sit inside FR-013's exception (i) and are not in its pin list. Their

@@ -102,10 +102,21 @@ TEST(VersionProfileAcVp3, EmptyWithUnknownDefaultIsUnresolved) {
 }
 
 TEST(VersionProfileAcVp3, NonParsingRejected) {
-    for (std::string_view bad : {"0", "1", "10", "A", "x", "99"}) {
+    for (std::string_view bad : {"0", "1", "A", "x", "99"}) {
         auto got = resolve_application_version(kFixt, bad);
         ASSERT_FALSE(got.has_value()) << "bad=" << bad;
         EXPECT_EQ(got.error(), error::dict_unknown_appl_ver_id) << "bad=" << bad;
+    }
+}
+
+// 097-fix-latest-applverid-10 W-1 (string half): ApplVerID "10" is FIX Latest's own wire
+// value, so it resolves to a value instead of dict_unknown_appl_ver_id. This half names no
+// application_version member; the full wire table is W-1's other half.
+TEST(VersionProfile097, Wire10Resolves) {
+    auto got = resolve_application_version(kFixt, "10");
+    if (!got.has_value()) {
+        ADD_FAILURE() << "ApplVerID \"10\" must resolve to a value; got error code "
+                      << static_cast<int>(got.error());
     }
 }
 

@@ -224,6 +224,14 @@ and run first (plan phase 2), and that run's result is recorded too.
     as recorded. This is a characterization pin. Control (f0): the same `D` without 1156, delivered to
     `fromApp`. If (f)'s observed shape departs from this text while (f0) passes, record the observed
     shape, correct this text, and change no production code (as for (e)).
+  - (v1) and (v2), the non-vacuity controls of (a)-(d) (T012 ruling). (a)-(d) pass when the validator
+    accepts 1407 or 1156, and would also pass if no validation ran under their session dictionaries.
+    (v1) uses session dictionary `FIXT11.xml` and registry {FIX50SP2} ((a)'s); (v2) uses the Orchestra
+    FIX Latest file and registry {FIX Latest} ((d)'s). Each feeds (a0)'s Logon (`1137=9`) plus one
+    field neither file declares, and gets a session Reject (35=3) with 371 = that tag and 373 = what
+    `wire_unexpected_tag` maps to, never Active. Without the validator that Logon would establish, so
+    the Reject shows the gate live under exactly those dictionaries. The tag is checked undeclared by
+    `grep -c` on both files, which prints 0, while the same greps for 1407 print non-zero.
 - **RED**:
   - (a), (d), (e) and (f) pass on `origin/main`. They are characterization pins, each with a mutant.
   - (c) passes on `origin/main` for a different reason than at the head (`"10"` does not parse there;
