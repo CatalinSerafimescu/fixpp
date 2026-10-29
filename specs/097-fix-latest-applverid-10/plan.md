@@ -6,6 +6,9 @@
 ## Gate A
 
 - Round 1 applied 2026-10-29: Codex P1=7 P2=5 P3=0; Opus post-judging P1=3 P2=8 P3=3; rewrite addresses root causes RC-1..RC-4 (+ per-finding fixes). Owner ruling RC-1: no new rule. Reviews: research/reviews/codex_097-fix-latest-applverid-10_gate_a_review.md, research/reviews/opus_097-fix-latest-applverid-10_gate_a_adversarial_review.md.
+- Round 2 applied 2026-10-29: Codex P1=1 P2=5 P3=0; Opus post-judging P1=1 P2=1 P3=6; rewrite addresses root causes RC-A..RC-C (+ per-finding fixes). Reviews: research/reviews/codex_097-fix-latest-applverid-10_gate_a_2_review.md, research/reviews/opus_097-fix-latest-applverid-10_gate_a_2_adversarial_review.md.
+  - **Owner attention**: RC-A's canonical residue sentence (data-model §E.0) is constitution text, which
+    the owner ratifies. It is shown to the owner verbatim with this rewrite. It changes no ruling.
 
 ### Round 1 — disagreements
 
@@ -36,6 +39,34 @@ Codex fixes that were not applied, following the Opus judgement:
 - **G097-010, the removal of history.** Codex suggested deleting the withdrawn-Strict discussion from
   `spec.md` and `research.md`. Not applied. Those passages are labelled history of a withdrawn ruling.
   Only the checklist's active "strict" / "open markers" statements were removed (regenerated).
+
+### Round 2 — disagreements
+
+Codex fixes that were not applied, or applied in a different shape, following the Opus judgement:
+
+- **G097-016, the `ir.cpp` / `ir.hpp` parts.** Codex asked to rewrite `ir.cpp`'s "four codegen-target
+  versions" banner, its unmapped-version diagnostic and `VersionIR::ns`'s namespace list in `ir.hpp`.
+  Not applied. That staleness dates from 076, which added the `vlatest` row without updating them, and
+  the bundle's policy leaves pre-097 "four codegen versions" statements alone (FR-012(f); data-model
+  §C; "clean up only your own mess"). 097 edits only the `vlatest` row's own comment in `ir.cpp`; the
+  nearby pre-existing staleness is mentioned in the PR body as pre-existing. Applied: every
+  `emit_dispatch.cpp` comment 097 makes false (data-model §B), and Codex's request to add these
+  strings to W-11 for that file, as a reversed-polarity quickstart §4.2 row (the §4.1 pattern does not
+  match them). Codex's severity P2 was downgraded to P3 by Opus.
+- **G097-017, the BREAKING label for the layout change.** Codex asked to mark the `version_registry`
+  size change BREAKING. Not applied as BREAKING: `[const §X.7]` and `[const §IX.5]` govern the C ABI
+  only, fixpp is pre-release, the C handles are opaque, no size pin exists, and no B&L precedent labels
+  a C++ layout change BREAKING. Applied: B-097-2 discloses that `dict::version_registry` and `Engine`
+  grow by one slot and that C++ consumers rebuild (no C++ ABI promise pre-release). Downgraded to P3.
+- **G097-014, the alternative M-7c.** Codex offered either a serviceability bypass or a mutant that
+  maps the composite onto the registered FIX50SP2 slot. The bypass (Opus's fix) was taken; one mutant
+  suffices to show (c) RED, so the second is not added.
+- **G097-015, narrowing AS-3 instead.** Codex offered narrowing US1 AS-3 to the captured families as
+  an alternative. Not taken: W-8 now drives every family AS-3 names (Opus's preferred fix), with one
+  production mutant per tag (M-8a..c), which also covers Codex's every-tag request.
+- **G097-018, severity.** Applied in full (executable exclusions, zero unannotated hits, the
+  `CLAUDE.md` line moved into implementation); Opus downgraded it P2→P3 because the prose exclusions
+  were deterministic and the base run fails loud.
 
 ## Summary
 
@@ -138,8 +169,8 @@ specs/097-fix-latest-applverid-10/
   OFF-only case and its CMake guard, the CMake label lines
 - records: `.specify/constitution.md`, `.specify/2c-codegen.md` (§4.3/§4.8 notes),
   `spec/behaviors-and-limitations{,-closed}.md`, `spec/feature-catalogue.md`, `spec/coverage-index.md`,
-  `brain/components/dictionary.md`, the library `CLAUDE.md` (the "Also open, no issue filed" line, at
-  close-out)
+  `brain/components/dictionary.md`, the library `CLAUDE.md` (the "Also open, no issue filed" line is
+  deleted in phase 6, so W-11 sees it gone at verify; Gate A round 2, G097-018)
 
 ## Phases
 
@@ -152,32 +183,37 @@ specs/097-fix-latest-applverid-10/
    - W-4 construction-only (the death test, as it stands);
    - W-5's FIX-Latest-alone arm;
    - W-6 (a)/(b)/(c), with `validate_inbound_messages` at its default (off);
-   - W-7 (a)/(b)/(c)/(d)/(e) and every control arm, with `validate_inbound_messages` ON and the
-     session dictionary each arm names (contracts W-7).
+   - W-7 (a)/(b)/(c)/(d)/(e)/(f) and every control arm, with `validate_inbound_messages` ON and the
+     session dictionary each arm names (contracts W-7);
+   - W-8's arms that name no new enumerator: the `"9"` initiator (ii) and the W-6(b)/(c) frames, with
+     every frame family present (contracts W-8).
 
    Build and run them in `build/linux-clang-debug`; that run is the RED record and the
    characterization record. **Stop rule, in two halves:**
    - If a **control arm** (the frame without 1407/1156) departs from its expected outcome on this tree
-     (contracts W-7; on `origin/main`, (b0) and (c0) expect the 1137 Reject and the others expect
-     establishment), the fixture is wrong: the dictionary, the frame or the session setup. Fix the
+     (contracts W-7; on `origin/main`, (b0) and (c0) expect the 1137 Reject, (f0) delivery, and the
+     others establishment), the fixture is wrong: the dictionary, the frame or the session setup. Fix the
      fixture, which is test setup and not FR-008, and re-run. Proceed only once every control matches.
    - If a 1407/1156 arm's outcome differs from its matching control's (for example rejected where the
      control is established), under a session dictionary that declares the tag (`FIXT11.xml` or the Orchestra file), RC-1's premise is false: FR-008 would need code, and
      "no `src/session/` change, no validator change" is wrong. Stop and decide, and do not adjust the
      test.
-   - W-7(e) (the dictionary-decided reject) is a characterization pin. If its observed Reject shape
-     departs from contracts' text while (e0) passes, record the observed shape and correct the text.
-     No production code changes.
+   - W-7(e) and W-7(f) (the dictionary-decided rejects of 1407 and of header 1156) are
+     characterization pins. If an observed Reject shape departs from contracts' text while its control
+     passes, record the observed shape and correct the text. No production code changes.
 3. **Core**: enumerator, parse, render, registry with the one-way fallback, config. W-1..W-5 green.
    Mutants M-1..M-5c.
-4. **Session witnesses**: W-6..W-8 (no session source change). Mutants M-1n, M-7a..d.
+4. **Session witnesses**: W-6..W-8 (no session source change). Mutants M-1n, M-7a..e, M-8a..c, and
+   M-2 against W-8's `1137=10` assertion.
 5. **Codegen**: dispatch row, the emitter skipping an arm whose IR is absent, `ir.cpp`, `gen_util.hpp`,
    golden regenerated (quickstart §3), W-9. Mutants M-9a..d.
-6. **Comments and records**: data-model §C–§F; quickstart §4 checks, the superseded-phrase grep and the
-   positive-presence checks with their seeded negatives (W-11). A rewritten comment states the rule and
-   the derivation, never a count or an enumerated range. `kTableSize` is derived from the enum with a
-   `static_assert`. The `"2".."9"` tables in `version_profile.hpp` and `scalar_mappers.cpp`, and the
-   two `tests/config` comments FR-012(c) names, point at the code instead of re-listing values
+6. **Comments and records**: data-model §C–§F, including the canonical residue sentence (§E.0) at
+   every locus, the in-place 097 supersession comments (§F), and the deletion of the library
+   `CLAUDE.md`'s "Also open, no issue filed: ApplExtID(1156)=303 …" line; quickstart §4 checks, the
+   superseded-phrase sweep and the positive-presence checks with their seeded negatives (W-11). A
+   rewritten comment states the rule and the derivation, never a count or an enumerated range.
+   `kTableSize` is derived from the enum with a `static_assert`. The `"2".."9"` tables in
+   `version_profile.hpp` and `scalar_mappers.cpp`, and the two `tests/config` comments FR-012(c) names, point at the code instead of re-listing values
    (CLAUDE.md: a comment may record a procedure, not a result). Check with
    `.claude/scripts/check-comment-claims.py` (quickstart §4).
 7. **Final head**: one full configure + build + ctest (`-j8`). Then one `FIXPP_CODEGEN_FIX_LATEST=OFF`
@@ -195,10 +231,13 @@ specs/097-fix-latest-applverid-10/
 - **`-Wswitch` in a consumer** sees the new enumerator. Disclosed in B-097-2.
 - **A witness that cannot fail.** Every row of contracts carries its RED arm, and quickstart §1.2 gates
   each mutant row on build rc 0. Every W-7 arm has a control arm that must pass first, so a fixture that
-  rejects everything cannot pass as an FR-008 result.
+  rejects everything cannot pass as an FR-008 result. Each characterization pin's mutant is derived
+  from the code path that produces the pinned outcome (Gate A round 2, RC-B): M-7c bypasses the
+  registry lookup that decides W-7(c), and M-8a..c make the admin builders originate the tags W-8
+  counts. W-8 asserts that every frame family was captured before it reads a zero count.
 - **A validated session whose dictionary does not declare 1407/1156 rejects them.** This is by ruling
-  (no new rule), and B-097-3 discloses it. W-7(e) pins it, so a later validator change cannot drift it
-  silently.
+  (no new rule), and B-097-3 discloses it. W-7(e) (1407) and W-7(f) (header 1156) pin it, so a later
+  validator change cannot drift it silently.
 - **A `"9"`-configured FIX Latest session keeps the FIX50SP2 label.** This is by ruling (the one-way
   fallback). B-097-4 and the constitution/catalogue text state the condition (RC-4).
 - **The OFF codegen tier has no CI lane.** W-9(c) runs only in verify's local OFF configure+build.

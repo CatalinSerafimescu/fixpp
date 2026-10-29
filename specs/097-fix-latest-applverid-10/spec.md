@@ -244,8 +244,11 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 
 1. **Given** the merged tree, **When** the constitution's FIX Latest clauses are read, **Then** they state
    that FIX Latest's application version is ApplVerID 10 (delivered by 097), negotiated when the
-   DefaultApplVerID is `10`, and that only Extension Pack negotiation remains post-1.0 (fixpp reads
-   neither 1407 nor 1156).
+   DefaultApplVerID is `10`, and Article I §1 (bullet and milestone line), Article XVIII §2, the
+   coverage-index Gap Registry D-011 row and the catalogue D-011 row each carry the canonical residue
+   sentence (data-model §E.0) verbatim:
+
+   For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
 2. **Given** the live B&L, **When** it is read, **Then** L-074-1 and L-080-1 are absent from it and
    present in the closed file with the retiring feature.
 
@@ -354,22 +357,29 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   1407/1156) that passes first (contracts W-7).
   Where a requirement already holds on the unfixed tree, its witness is a characterization pin. This
   covers FR-006's FIX50SP2-from-FIX-Latest fallback, FR-008 with `1137=9` under a session dictionary
-  that declares 1407, and the dictionary-decided reject under one that does not. Such a witness is
-  instead shown RED against a named mutant that breaks the behaviour it pins (contracts). The same applies where a witness names the new enumerator and so cannot
+  that declares 1407, the dictionary-decided rejects of 1407 and of header 1156 under one that does
+  not, and FR-008's no-origination rule. Such a witness is instead shown RED against a named mutant,
+  derived from the code path that produces the pinned outcome, that breaks the behaviour it pins
+  (contracts). A seeded positive for an instrument proves the instrument counts; it is not the
+  witness's RED. The same applies where a witness names the new enumerator and so cannot
   compile on the unfixed tree.
 - **FR-011 (compatibility disclosure)**: The new application version is an additive public C++ enumerator;
-  the C ABI is unchanged (it carries the raw 1137 string). The B&L records the behaviour changes as
+  the C ABI is unchanged (it carries the raw 1137 string). `dict::version_registry`, and `Engine`, which
+  holds it by value, grow by one slot; C++ consumers rebuild (B-097-2; no C++ ABI promise
+  pre-release). The B&L records the behaviour changes as
   `B-097-*` rows, BREAKING where a shipped C++ answer changes (the `fixpp::vlatest` typed classes' static
   application version, FR-012(c)). A new limitation `L-097-1` records that only direct C++ can register
   FIX50SP2 and FIX Latest together (TOML loads one dictionary; the C API fills none).
 - **FR-012 (the record)**: (a) The constitution's statements that FIX Latest has no distinct ApplVerID and
   that ApplExtID(1156)=303 differentiation is post-1.0 (Article I §1's FIX Latest bullet and post-1.0
   milestone line; Article XVIII §2's v1.2 annotation) are amended under Article XX, riding this
-  feature's Gate A, owner-ratified. (b) L-074-1 and L-080-1 move to the closed B&L file naming 097.
+  feature's Gate A, owner-ratified. Each of the three states the post-1.0 residue with the canonical
+  sentence of data-model §E.0, verbatim. (b) L-074-1 and L-080-1 move to the closed B&L file naming 097.
   (c) Code comments that state the superseded mapping (`version_profile.hpp`'s `vlatest` comment,
   `version_registry.cpp`'s mapping and FR-010 comments, `tools/codegen` `ir.cpp`'s `vlatest` row and
-  `gen_util.hpp`'s `app_version_enum`, `vlatest_dispatch_exclusion_test.cpp`'s header) are rewritten,
-  each naming "097" as the superseding feature. The test comments that state a value range or count
+  `gen_util.hpp`'s `app_version_enum`, `vlatest_dispatch_exclusion_test.cpp`'s header,
+  `emit_dispatch.cpp`'s version-set comments and generated comment lines (data-model §B)) are
+  rewritten, each naming "097" as the superseding feature. The test comments that state a value range or count
   which 097 makes false by omission are rewritten to point at the mapper rather than restate a count
   (`tests/config/fixtures/pos_fixt_appl_ver_ids.toml`'s header and `tests/config/test_load_happy_path.cpp`'s
   section banner for that fixture; find them with `grep -rn '"2".."9"' tests/config`). The generated
@@ -377,8 +387,12 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   vlatest typed tier and the dispatch arm agree.
   (d) The catalogue rows S-025 and S-043 and D-011's note gain FIX Latest / ApplVerID 10. D-011's Tests
   cell renames the 074 guard tests that W-4 renames or deletes. Its case count is marked "at 074" and
-  is not recomputed. The coverage-index §4.3.7 / §5.3.3 / §5.3.5 rows and the DefaultApplVerID(1137) /
-  ApplVerID(1128) rows are updated.
+  is not recomputed. D-011's own residue sentence becomes the canonical one (data-model §E.0), and its
+  `v50sp2` / `std::abort` statements are flagged as retired by 097. The coverage-index §4.3.7 / §5.3.3
+  / §5.3.5 rows and the DefaultApplVerID(1137) / ApplVerID(1128) rows are updated. The Post-1.0 Gap
+  Registry D-011 row carries the canonical sentence and the target "v1.2 (EP-level field back-port;
+  Extension Pack negotiation)". The catalogue's 076 partial-progress note, the coverage index's 074
+  link note and the live B&L 074 section intro get an in-place 097 SUPERSEDED comment (data-model §F).
   (e) `brain/components/dictionary.md` flags 074's reconcile (frozen `specs/074-orchestra-native-reader/`)
   as superseded in place, naming `097-fix-latest-applverid-10`, and points at the 2c notes of (f).
   (f) `.specify/2c-codegen.md` §4.3 gets an in-place `Updated (097 …)` note at the `application_version`
@@ -399,7 +413,7 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 
   The claim is finite. It holds when the full existing suite passes unchanged except the tests this
   feature names as rewritten (SC-006, W-10), and the characterization pins W-5 (FIX-Latest-alone
-  arm), W-6(c), W-6(f)'s second case and W-7(a)/(e) pass.
+  arm), W-6(c), W-6(f)'s second case, W-7(a)/(d)/(e)/(f) and W-8's phase-2 arms pass.
 
 ### Key Entities
 
@@ -421,8 +435,10 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 - **SC-004**: Over all eleven ApplVerID values `"0"`..`"10"` plus the edge-case malformed values,
   parse/render agree with the FIX ApplVerID table and render is injective (one table-driven witness).
 - **SC-005**: Zero 1407, zero 1156 and zero header 1128 in every session-originated outbound frame the
-  097 session witnesses capture, with FIX Latest and FIX50SP2 defaults both. The counting oracle is
-  shown non-zero against a seeded frame carrying each tag.
+  097 session witnesses capture, with FIX Latest and FIX50SP2 defaults both, every frame family of
+  US1 AS-3 captured. The counting oracle is shown non-zero against a seeded frame carrying each tag,
+  and the witness is shown RED against production mutants that make an admin builder originate each
+  tag (contracts W-8).
 - **SC-006**: The full existing test suite passes unchanged, except the tests FR-006/FR-009/FR-010 name
   as rewritten.
 - **SC-007**: L-074-1 and L-080-1 absent from the live B&L; constitution amended with owner sign-off.
@@ -458,7 +474,8 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
     (S-025);
   - `[FIX-SL §5.3.5] Explicit application version per message (ApplVerID 1128)` (S-026; FR-001's parse
     only);
-  - `[FIX-SL §5.3.6] Use of extension packs` (out of scope beyond FR-008; dropped post-1.0).
+  - `[FIX-SL §5.3.6] Use of extension packs` (out of scope beyond FR-008; Extension Pack negotiation
+    stays post-1.0, data-model §E.0).
 
   The "FIXT.1.1 (FIXT)" table indexes the same sections by concept ("DefaultApplVerID(1137) on Logon —
   default app version", "ApplVerID(1128) per message — per-message app version override").

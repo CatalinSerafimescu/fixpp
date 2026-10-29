@@ -20,17 +20,29 @@ copy of the tree, never in the PR's worktree. The main checkout holds this branc
 H=$(git -C <main checkout> rev-parse HEAD)          # the implementation head under test
 df -h /mnt/wsl/fixppbuild                           # headroom for a Debug tree first
 git -C <main checkout> worktree add --detach ~/Work/Programming/fixpp-097-mutants "$H"
-mkdir -p /mnt/wsl/fixppbuild/build/097-mutants-linux-clang-debug ~/Work/Programming/fixpp-097-mutants/build
+mkdir -p /mnt/wsl/fixppbuild/build/097-mutants-linux-clang-debug /mnt/wsl/fixppbuild/build/097-mutants-off \
+         ~/Work/Programming/fixpp-097-mutants/build
 ln -s /mnt/wsl/fixppbuild/build/097-mutants-linux-clang-debug ~/Work/Programming/fixpp-097-mutants/build/linux-clang-debug
+ln -s /mnt/wsl/fixppbuild/build/097-mutants-off ~/Work/Programming/fixpp-097-mutants/build/097-mutants-off
 export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache
+cd ~/Work/Programming/fixpp-097-mutants
+# The preset's CMAKE_TOOLCHAIN_FILE lives inside build/linux-clang-debug, so Conan runs first
+# (CONTRIBUTING.md's minimum local cycle):
+conan install . -pr conan/profiles/linux-clang-debug --build=missing -of build/linux-clang-debug
+cmake --preset linux-clang-debug
+# The OFF tree for M-9c/M-9d: same preset and toolchain, its own binary dir.
+cmake --preset linux-clang-debug -B build/097-mutants-off -DFIXPP_CODEGEN_FIX_LATEST=OFF -DFIXPP_WERROR=ON
 ```
 
 Each mutant is committed on that scratch worktree's **detached head**, built there, run and recorded.
+Every mutant but M-9c/M-9d builds in the ON tree (`cmake --build --preset linux-clang-debug --target
+<t> -j8`); M-9c and M-9d build in the OFF tree (`cmake --build build/097-mutants-off --target <t> -j8`),
+since the preset build names the ON tree only.
 It is then dropped with `git reset --hard "$H"` in the scratch worktree. Never use `git stash`
 (every worktree shares it), never `checkout`/`switch` in the main checkout, and never put a mutant
 commit on the feature branch. After the last row, run `git worktree remove ~/Work/Programming/fixpp-097-mutants`
-and delete its `/mnt/wsl/fixppbuild/build/097-mutants-*` tree. `git worktree add --detach` does not
-touch the main checkout's branch.
+and delete both of its `/mnt/wsl/fixppbuild/build/097-mutants-*` trees (ON and OFF).
+`git worktree add --detach` does not touch the main checkout's branch.
 
 Where unmodified code DOES compile the witness (string-level frames, no new enumerator), it is written
 and run first (plan phase 2), and that run's result is recorded too.
@@ -170,29 +182,89 @@ and run first (plan phase 2), and that run's result is recorded too.
     This is a characterization pin. Control (e0): `1137=9` without 1407, established. If (e)'s observed
     shape departs from this text while (e0) passes, record the observed shape (the pin is of today's
     behaviour), correct this text, and change no production code.
+  - (f) The dictionary-decided reject of an undeclared header 1156 (FR-008 "rejects both"; B-097-3;
+    Gate A round 2, G097-014). On (e0)'s Active session (the same FIX4.x-shaped session dictionary and
+    registry {FIX50SP2}), an inbound application message `D` (NewOrderSingle, which that dictionary
+    defines) with its required fields plus header `1156=303` gets a session Reject (35=3) and does not
+    reach `fromApp`. That dictionary is a FIX 4.4 session version, so the FIXT framing surface
+    (installed only for FIX50/SP1/SP2 dictionaries) does not whitelist 1156 for it. 371 is expected to
+    be 1156 and 373 what `wire_unexpected_tag` maps to; both are read from the phase-2 run and asserted
+    as recorded. This is a characterization pin. Control (f0): the same `D` without 1156, delivered to
+    `fromApp`. If (f)'s observed shape departs from this text while (f0) passes, record the observed
+    shape, correct this text, and change no production code (as for (e)).
 - **RED**:
-  - (a), (d) and (e) pass on `origin/main`. They are characterization pins, each with a mutant.
+  - (a), (d), (e) and (f) pass on `origin/main`. They are characterization pins, each with a mutant.
   - (b) is RED on `origin/main` (the `1137=10` refusal, 373=5). Its negotiated-version assertion is
     added once the enumerator exists.
-  - M-7a: the acceptor refuses a Logon that carries 1407 (373=5). It turns (a) and (b) RED while (a0)
-    and (b0) stay green.
+  - M-7a: the acceptor refuses a Logon that carries 1407 (373=5). Site: the acceptor's
+    DefaultApplVerID block in `Session::on_inbound_not_connected_` (`src/session/session.cpp`). The
+    `logon_interpret_result` that `interpret_logon` returns does not carry 1407, so the mutant reads the
+    raw inbound frame for `"\x01" "1407="` itself. It turns (a) and (b) RED while (a0) and (b0) stay
+    green.
   - M-7b: a header carrying 1156 is session-rejected. It turns (d) RED while (d0) stays green.
-  - M-7c: 1407's presence makes the version serviceable (`1407=303` is treated as `vlatest`). It turns
-    (c) RED.
-  - M-7d: the validator's unexpected-tag check (`include/fixpp/wire/validator.hpp`) accepts 1407 for
-    every dictionary. It turns (e) RED (established instead of rejected) while (e0) stays green.
+  - M-7c, a serviceability bypass (Gate A round 2, G097-014). Same site as M-7a: when the raw inbound
+    Logon contains `"\x01" "1407="`, `serviceable` is `resolved.has_value()` alone, so the registry
+    lookup is skipped. Under it (c) is established (RED: `"10"` parses to `vlatest` at the head) while
+    (c0) still gets Reject 373=5, 371=1137. Derivation: (c)'s Reject comes from the registry lookup,
+    not from the parse. A mutant that only changes which version 1407 maps to (round 1's M-7c, "treat
+    `1407=303` as `vlatest`") cannot turn (c) RED, because a FIX50SP2-only registry answers no FIX
+    Latest lookup (FR-006 forbids the reverse fallback; `version_registry::get` returns
+    `dict_no_dictionary_for_application_version` for an empty slot).
+  - M-7d: the validator's unexpected-tag check (`include/fixpp/wire/validator.hpp`, the
+    `wire_unexpected_tag` test of the field walk) accepts 1407 for every dictionary. It turns (e) RED
+    (established instead of rejected) while (e0) stays green. Why one exemption suffices: the walk's
+    later checks pass an undeclared tag. `table_view::enum_valid` accepts a tag with no enum entry,
+    the type check reads `field_type_of_with_framing`, which defaults an undeclared tag outside the
+    framing surface to String (`303` passes), and the required-field and group-structure steps do not
+    consider it.
+  - M-7e (Gate A round 2, G097-014): the same check accepts 1156 for every dictionary. It turns (f) RED
+    (delivered instead of rejected) while (f0) stays green; the later checks pass it for the reason
+    given under M-7d. It exempts the one tag at the check rather than installing the framing table for
+    every version (`src/dictionary/dictionary.cpp`): the table whitelists every FIXT framing tag and
+    retypes them, so a RED under it would not isolate 1156.
 
 ## W-8 — nothing session-originated carries 1407, 1156 or header 1128 (FR-008, SC-005)
 
 - **File**: `tests/session/test_fixt_logon_establishment.cpp`. One helper counts occurrences of
-  `"\x01" "1407="`, `"\x01" "1156="` and `"\x01" "1128="` in a captured outbound frame.
-- **Asserts**: across every session-originated outbound frame that W-6 and W-7 capture (Logon replies,
-  Rejects, heartbeats sent in those tests), all three counts are 0. The FIX Latest default's outbound
-  Logon carries `1137=10`. No W-6/W-7 test sends an application payload, so the payload pass-through of
-  1128/1156 (B-097-3) is outside this count.
-- **RED (the instrument)**: the counter is shown non-zero on three seeded frames, carrying `1407=303`,
-  `1156=303` and `1128=9`. These are positives built inside the test, asserted to count 1 each. The
-  `1137=10` assertion is RED under mutant M-2.
+  `"\x01" "1407="`, `"\x01" "1156="` and `"\x01" "1128="` in a captured outbound frame; a second reads
+  its MsgType (35). Frames are captured from the session's outbound transport double, as the file's
+  existing FIXT handshake tests do.
+- **Frame sources (Gate A round 2, G097-015)**, each a named session, for both defaults SC-005 names:
+  - (i) An initiator configured `default_appl_ver_id = "10"` (`vlatest`), registry {FIX Latest}. Its
+    registry must hold FIX Latest: otherwise `open()` returns `invalid_session_config` (W-6(f)),
+    nothing is captured, and every count reads 0 for the wrong reason.
+  - (ii) An initiator configured `"9"` (`v50sp2`), registry {FIX50SP2}.
+  - For each of (i) and (ii): its Logon (35=A) is captured at `open()`. A peer Logon reply carrying
+    its own 1137 is then fed, and the session is Active. On that session: an inbound TestRequest draws a
+    Heartbeat (35=0); the liveness loop's TestRequest (35=1) is driven by letting the heartbeat interval
+    pass with no inbound traffic, in the pattern of `tests/session/heartbeat_testrequest_test.cpp`; and
+    `close()` sends a Logout (35=5).
+  - (iii) The acceptor's Logon reply (35=A) of W-6(a) (peer `1137=10`) and of W-6(c) (peer `1137=9`),
+    and the acceptor's Reject (35=3) of W-6(b).
+- **Asserts**:
+  - **Non-vacuity first.** Every frame source listed above yields its frame: the initiator Logon,
+    Heartbeat, TestRequest and Logout for each of (i) and (ii); the acceptor Logon reply for each of
+    W-6(a) and W-6(c); the Reject for W-6(b). A missing frame fails the test before any count is read.
+  - In every captured frame, the three counts are 0.
+  - (i)'s Logon carries `1137=10`; (ii)'s carries `1137=9`.
+  - No W-8 session sends an application payload, so the payload pass-through of 1128/1156 (B-097-3) is
+    outside this count.
+- **RED**:
+  - The instrument: the counter is shown non-zero on three seeded frames, carrying `1407=303`,
+    `1156=303` and `1128=9`. These are positives built inside the test, asserted to count 1 each. This
+    proves the counter counts; it is not the witness's RED.
+  - The witness is a characterization pin (no-origination holds on `origin/main`), so FR-010 requires
+    a production mutant. The admin builders in `src/session/admin_messages.cpp` share no header writer:
+    each `build_*` writes its own standard header. So there is one mutant per tag, each in a different
+    builder:
+    - M-8a: `build_logout` appends `1156=303` after TargetCompID. The Logout's 1156 count turns RED.
+    - M-8b: `build_logon` appends `1407=303`. (i)'s and (ii)'s Logon 1407 counts turn RED.
+    - M-8c: `build_heartbeat` appends `1128=9`. The Heartbeat's 1128 count turns RED.
+  - The `1137=10` assertion on (i)'s Logon turns RED under mutant M-2 (`render(vlatest)` returns
+    `"9"`).
+- **Phase split**: (ii), and (iii)'s W-6(b)/(c) frames, compile on `origin/main` and run in plan
+  phase 2 as characterization pins (all counts 0, every family present). (i) and W-6(a)'s reply name
+  `"10"` / `vlatest` and run from plan phase 4.
 
 ## W-9 — FIX Latest reify arm and typed version (FR-009, FR-012(c), US3)
 
@@ -238,15 +310,20 @@ The full `linux-clang-debug` ctest at the final head, with zero failures outside
 names as rewritten. The expected-ctest list is recorded by `/speckit-tasks`. FR-013's two exceptions
 (value `"10"` wherever parsed; registry contents that aborted on `origin/main`) are what W-1, W-4 and
 W-6(a)/(d)/(e) assert. The pins that show the rest unchanged are W-5's FIX-Latest-alone arm, W-6(c),
-W-6(f)'s second case and W-7(a)/(e).
+W-6(f)'s second case, W-7(a)/(d)/(e)/(f) and W-8's phase-2 arms.
 
 ## W-11 — the record (FR-011, FR-012; Gate A round 1, G097-009 / RC-3)
 
 A records witness, not a test (FR-010 covers the behaviour FRs only). It is quickstart §4, run at the
 final head and recorded in the verify record:
-- the superseded-phrase grep, with its seeded positive;
+- the superseded-phrase sweep, with its seeded positive and its seeded negative (`origin/main` must
+  report unannotated hits). Its exclusions are pathspecs and a line range in the command itself, and
+  its pass condition is executable: zero hit lines that do not name `097`, other than the named
+  current-rule list (quickstart §4.1; Gate A round 2, G097-018);
 - the positive-presence checks, each with its seeded negative: the same check run against
   `origin/main`'s copy of the file must report the addition **absent**. This proves the check can fail.
+  They include the count of the canonical residue sentence (data-model §E.0) at each locus. The
+  Status-line row runs at the RATIFIED flip, not at verify;
 - the comment-claims and line-citation checks.
 
 A positive-presence check whose `origin/main` run also reports "present" proves nothing and is

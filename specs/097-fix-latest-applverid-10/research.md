@@ -158,15 +158,22 @@ with the recipe given; do not trust a line number after the first implementation
 ## R-8 — Constitution: MINOR, v4.2 → v4.3
 
 - **Decision**: amend Article I §1 (FIX Latest bullet; post-1.0 milestone line) and annotate Article
-  XVIII §2's v1.2 bullet; record in a Sync Impact Report; Article XX §4 MINOR (a factual correction and a
-  narrowed post-1.0 list, not a banned pattern or a perf-budget tightening); no `CHANGELOG.md` entry.
-  Text: data-model §E.
+  XVIII §2's v1.2 bullet; record in a Sync Impact Report; Article XX §4 MINOR (a factual correction,
+  with Article I's post-1.0 residue restated to match Article XVIII §2; not a banned pattern or a
+  perf-budget tightening); no `CHANGELOG.md` entry. Text: data-model §E.
 - **Rationale**: Article I §1 currently states "wire application version `v50sp2` via
   `session_to_application`; no distinct ApplVerID" and keeps "ApplExtID(1156)=303 differentiation and
   session negotiation" post-1.0. After 097 the first is false and the second is answered. FIX Latest is
   identified by ApplVerID 10 and negotiated by DefaultApplVerID(1137) like any version, when that value
-  is `10`. A FIX Latest dictionary session configured `"9"` negotiates FIX50SP2 (the fallback). Only
-  Extension Pack negotiation remains post-1.0: fixpp reads neither 1407 nor 1156.
+  is `10`. A FIX Latest dictionary session configured `"9"` negotiates FIX50SP2 (the fallback). The
+  residue is the canonical sentence (data-model §E.0):
+
+  For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
+- **Why one sentence (Gate A round 2, RC-A)**: round 1 rewrote each residue locus from the clause it
+  replaced, so Article I dropped the field back-port and Article XVIII §2 dropped Extension Pack
+  negotiation. One sentence, pasted verbatim and counted at each locus (quickstart §4.2), cannot drift
+  that way. It follows the current Article XVIII §2 v1.2 bullet, which already holds the field
+  back-port and the only roadmap text about 1156.
 - **§XVIII.1/§XVIII.5 (Gate A round 1, G097-006)**: read and unchanged; the argument goes into the
   Sync Impact Report (data-model §E.4). FIX Latest negotiation by DefaultApplVerID is S-025's v1.0
   mechanism (the FIXT.1.1 session layer, inside §XVIII.1's scope) with one more value. It is not a
