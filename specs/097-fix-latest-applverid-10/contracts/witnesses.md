@@ -19,26 +19,27 @@ that does not reach the mutated site is investigated before the row is trusted.
 **Where mutants run (`[const §XVI.6]`; Gate A round 1, O097-007).** Mutation proofs run in a scratch
 copy of the tree, never in the PR's worktree. The main checkout holds this branch, and its
 `build/linux-clang-debug` is the tree verify reads, so a mutant there would contaminate a peer's build.
-`~/Work/Programming/fixpp-parallel` may be held by another session, so it is not used either. Procedure
+The scratch copy is the reusable parallel worktree `~/Work/Programming/fixpp-parallel` (owner, T002,
+2026-10-29: it is free; check `git -C ~/Work/Programming/fixpp-parallel status --porcelain` is empty and no
+other session holds it first). Its build trees are already symlinked onto `/mnt/wsl/fixppbuild`. Procedure
 (parent `research/G19-fix-fpml-iso20022/phases/phase-4/parallel-worktrees.md` §3a/§3b):
 
 ```
 H=$(git -C <main checkout> rev-parse HEAD)          # the implementation head under test
 df -h /mnt/wsl/fixppbuild                           # headroom for a Debug tree first
-git -C <main checkout> worktree add --detach ~/Work/Programming/fixpp-097-mutants "$H"
-mkdir -p /mnt/wsl/fixppbuild/build/097-mutants-linux-clang-debug /mnt/wsl/fixppbuild/build/097-mutants-off \
-         /mnt/wsl/fixppbuild/build/097-mutants-asan ~/Work/Programming/fixpp-097-mutants/build
-ln -s /mnt/wsl/fixppbuild/build/097-mutants-linux-clang-debug ~/Work/Programming/fixpp-097-mutants/build/linux-clang-debug
-ln -s /mnt/wsl/fixppbuild/build/097-mutants-off ~/Work/Programming/fixpp-097-mutants/build/097-mutants-off
-ln -s /mnt/wsl/fixppbuild/build/097-mutants-asan ~/Work/Programming/fixpp-097-mutants/build/linux-clang-asan
+git -C ~/Work/Programming/fixpp-parallel switch --detach "$H"   # it is parked detached; never a branch
+# ON tree = build/linux-clang-debug, ASan tree = build/linux-clang-asan: existing symlinks onto
+# /mnt/wsl/fixppbuild/build/parallel-clang-{debug,asan}. The OFF tree is new:
+mkdir -p /mnt/wsl/fixppbuild/build/parallel-097-off
+ln -s /mnt/wsl/fixppbuild/build/parallel-097-off ~/Work/Programming/fixpp-parallel/build/097-off
 export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache
-cd ~/Work/Programming/fixpp-097-mutants
+cd ~/Work/Programming/fixpp-parallel
 # The preset's CMAKE_TOOLCHAIN_FILE lives inside build/linux-clang-debug, so Conan runs first
 # (CONTRIBUTING.md's minimum local cycle):
 conan install . -pr conan/profiles/linux-clang-debug --build=missing -of build/linux-clang-debug
 cmake --preset linux-clang-debug
 # The OFF tree for M-9c/M-9d: same preset and toolchain, its own binary dir.
-cmake --preset linux-clang-debug -B build/097-mutants-off -DFIXPP_CODEGEN_FIX_LATEST=OFF -DFIXPP_WERROR=ON
+cmake --preset linux-clang-debug -B build/097-off -DFIXPP_CODEGEN_FIX_LATEST=OFF -DFIXPP_WERROR=ON
 # The ASan tree for W-12's rows. The fuzz target exists only under FIXPP_BUILD_FUZZ, which the top-level
 # CMakeLists.txt refuses without ASan or UBSan, so neither debug tree builds it:
 conan install . -pr conan/profiles/linux-clang-asan --build=missing -of build/linux-clang-asan
@@ -48,14 +49,15 @@ cmake --preset linux-clang-asan
 Each mutant is committed on that scratch worktree's **detached head**, built there, run and recorded.
 Every mutant row but M-9c/M-9d and W-12's builds in the ON tree (`cmake --build --preset
 linux-clang-debug --target <t> -j8`); M-9c and M-9d build in the OFF tree (`cmake --build
-build/097-mutants-off --target <t> -j8`), since the preset build names the ON tree only; W-12's rows
+build/097-off --target <t> -j8`), since the preset build names the ON tree only; W-12's rows
 build `fuzz_appl_ver_id` in the ASan tree (`cmake --build --preset linux-clang-asan --target
 fuzz_appl_ver_id -j8`).
 It is then dropped with `git reset --hard "$H"` in the scratch worktree. Never use `git stash`
 (every worktree shares it), never `checkout`/`switch` in the main checkout, and never put a mutant
-commit on the feature branch. After the last row, run `git worktree remove ~/Work/Programming/fixpp-097-mutants`
-and delete its three `/mnt/wsl/fixppbuild/build/097-mutants-*` trees (ON, OFF and ASan).
-`git worktree add --detach` does not touch the main checkout's branch.
+commit on the feature branch. After the last row, park `fixpp-parallel` detached at `origin/main`
+(`git -C ~/Work/Programming/fixpp-parallel switch --detach origin/main`, clean status), remove the
+`build/097-off` symlink and delete `/mnt/wsl/fixppbuild/build/parallel-097-off`. Never retire the
+worktree itself (standing owner rule). Detaching `fixpp-parallel` does not touch the main checkout's branch.
 
 Where unmodified code DOES compile the witness (string-level frames, no new enumerator), it is written
 and run first (plan phase 2), and that run's result is recorded too.

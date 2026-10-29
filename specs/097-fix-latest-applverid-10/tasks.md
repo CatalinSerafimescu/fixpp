@@ -29,14 +29,13 @@ before it is trusted GREEN. W-10 is the full-suite run; W-11 is the records witn
   Commits are serial. Never `git stash` (every worktree shares it). An implementer makes NEW commits only
   (no `--amend`).
 - **Where mutants run (contracts preamble, `[const §XVI.6]`).** Only in the scratch worktree
-  `~/Work/Programming/fixpp-097-mutants`, created detached at the implementation head `H` by the
+  `~/Work/Programming/fixpp-parallel` (owner, T002), detached at the implementation head `H` by the
   contracts preamble, with its build trees on `/mnt/wsl/fixppbuild`
-  (`097-mutants-linux-clang-debug` = ON tree, `097-mutants-off` = OFF tree, `097-mutants-asan` = ASan tree,
-  for W-12's rows only). Never in the main checkout,
-  never in `~/Work/Programming/fixpp-parallel`, never on the feature branch.
+  (`build/linux-clang-debug` = ON tree, `build/097-off` = OFF tree, `build/linux-clang-asan` = ASan tree,
+  for W-12's rows only). Never in the main checkout, never on the feature branch.
 - **Mutant protocol (contracts preamble, quickstart §1.2).** For each row: commit the mutant on the scratch
   worktree's detached head; rebuild the named binaries in that worktree's tree (ON:
-  `cmake --build --preset linux-clang-debug --target <t> -j8`; M-9c/M-9d: `cmake --build build/097-mutants-off --target <t> -j8`;
+  `cmake --build --preset linux-clang-debug --target <t> -j8`; M-9c/M-9d: `cmake --build build/097-off --target <t> -j8`;
   W-12's rows: `cmake --build --preset linux-clang-asan --target fuzz_appl_ver_id -j8`);
   gate the row on build rc 0 (M-9c alone inverts this gate); for a `tools/codegen/` mutant, also gate on a
   reconfigure rc 0 and on the mutant-took check the row names, because generation runs at configure time
@@ -177,7 +176,7 @@ W-6(d) and the registry mutant rows.
 
 ### RED arms for User Story 1 (Mutant protocol; scratch worktree only; record each)
 
-- [ ] T022 [US1] (implementer) Create the scratch worktree exactly per the contracts preamble with `H` = T021's hash (`df -h /mnt/wsl/fixppbuild`; `git worktree add --detach ~/Work/Programming/fixpp-097-mutants "$H"`; all three `/mnt/wsl/fixppbuild/build/097-mutants-*` trees and their symlinks; `conan install`; ON configure; OFF configure with `-DFIXPP_CODEGEN_FIX_LATEST=OFF -DFIXPP_WERROR=ON`; the ASan tree's `conan install` and `cmake --preset linux-clang-asan`). Build the US1 binaries in the ON tree unmutated and run them: GREEN, the baseline each row is read against. Build `fuzz_appl_ver_id` in the ASan tree unmutated and run it over its seed files: exit 0, every seed named in an `Executed` line (W-12's non-vacuity).
+- [ ] T022 [US1] (implementer) Create the scratch worktree exactly per the contracts preamble with `H` = T021's hash (`df -h /mnt/wsl/fixppbuild`; `git -C ~/Work/Programming/fixpp-parallel status --porcelain` empty; `git -C ~/Work/Programming/fixpp-parallel switch --detach "$H"`; the ON/ASan trees reconfigured, the new `parallel-097-off` tree and their symlinks; `conan install`; ON configure; OFF configure with `-DFIXPP_CODEGEN_FIX_LATEST=OFF -DFIXPP_WERROR=ON`; the ASan tree's `conan install` and `cmake --preset linux-clang-asan`). Build the US1 binaries in the ON tree unmutated and run them: GREEN, the baseline each row is read against. Build `fuzz_appl_ver_id` in the ASan tree unmutated and run it over its seed files: exit 0, every seed named in an `Executed` line (W-12's non-vacuity).
 - [ ] T023 [US1] (implementer) M-1: the `"10"` arm widened to any two-character string starting `'1'` → W-1's `"11"` row RED (`dictionary_pure_tests`).
 - [ ] T024 [US1] (implementer) M-1n: `"10"` mapped to `v50sp2` → W-1's `"10"` → `vlatest` row RED; W-6(a) and W-6(e) RED on their negotiated-version assertions, and W-7(b)'s negotiated-`vlatest` assertion RED (with (b0)'s) (`session_fixt_logon_establishment`); M-1n is W-6(e)'s only RED. (W-6(d)'s rows re-run in T034.)
 - [ ] T025 [US1] (implementer) M-2: `render(vlatest)` returns `"9"` → W-2's round-trip and distinctness checks RED; W-8's `1137=10` assertion on (i)'s Logon RED.
@@ -207,7 +206,7 @@ answered by its own; two peers `1137=9` and `1137=10` both establish.
 
 ### RED arms for User Story 2 (Mutant protocol; record each)
 
-- [ ] T034 [US2] (implementer) `git -C ~/Work/Programming/fixpp-097-mutants reset --hard "$H"` (T033's hash); rebuild the ON tree baseline, GREEN. Re-run M-1n for W-6(d): its `1137=10` sessions RED on their negotiated-version assertion.
+- [ ] T034 [US2] (implementer) `git -C ~/Work/Programming/fixpp-parallel reset --hard "$H"` (T033's hash); rebuild the ON tree baseline, GREEN. Re-run M-1n for W-6(d): its `1137=10` sessions RED on their negotiated-version assertion.
 - [ ] T035 [US2] (implementer) M-4: restore `case vlatest: return v50sp2;` without the abort → W-4 RED (`get(vlatest)` empty in both orders, since the fallback answers `v50sp2` only, and `get(v50sp2)` the last writer, so also wrong in one order); W-6(d)'s both-registered arm RED; W-6(a) RED (Reject 373=5) and W-6(f)'s first case RED (`invalid_session_config`), since the FIX Latest dictionary lands in the v50sp2 slot.
 - [ ] T036 [US2] (implementer) M-5a: delete the fallback → W-5's FIX-Latest-alone `get(v50sp2)` arm RED; W-6(c) and W-6(f)'s second case RED.
 - [ ] T037 [US2] (implementer) M-5b: add the reverse fallback (an empty vlatest slot answers from v50sp2) → W-5's FIX50SP2-alone arm RED; W-6(b) and W-6(f)'s third case RED.
@@ -240,7 +239,7 @@ GREEN (ON); W-9(c) GREEN in the OFF tree (T071).
 
 ### RED arms for User Story 3 (Mutant protocol; each codegen row also gated on reconfigure rc 0 and its mutant-took check)
 
-- [ ] T047 [US3] (implementer) `git -C ~/Work/Programming/fixpp-097-mutants reset --hard "$H"` (T046's hash); reconfigure and build the ON and OFF scratch trees unmutated: ON tree US3 binaries GREEN; OFF tree builds rc 0 under `FIXPP_WERROR=ON` and W-9(c) in `dictionary_reify_tests` is GREEN there (the baseline for M-9c/M-9d).
+- [ ] T047 [US3] (implementer) `git -C ~/Work/Programming/fixpp-parallel reset --hard "$H"` (T046's hash); reconfigure and build the ON and OFF scratch trees unmutated: ON tree US3 binaries GREEN; OFF tree builds rc 0 under `FIXPP_WERROR=ON` and W-9(c) in `dictionary_reify_tests` is GREEN there (the baseline for M-9c/M-9d).
 - [ ] T047a [US3] (implementer) Re-run M-1n (T024's edit, `"10"` → `v50sp2`) in the ON tree against `dictionary_reify_tests`, UNFILTERED: `ReifyRoundTrip.ApplVerId10InFrameResolvesToVlatest` RED on its `application == vlatest` assertion (witnesses.md W-9).
 - [ ] T048 [US3] (implementer) M-9a: delete the `kAppVersions` vlatest row (ON) → the (a3) census, the (a3) `EC`/`D` samples, `ReifyRoundTrip.ApplVerId10InFrameResolvesToVlatest`, (a4) and (b) RED. Mutant-took: the regenerated ON header has no `case …::vlatest:`.
 - [ ] T049 [US3] (implementer) M-9b: revert `app_version_enum("vlatest")` to `"v50sp2"` (ON) → the smoke test and the golden RED. Mutant-took: the regenerated `vlatest/Messages.hpp` holds `application_version::v50sp2;`.
@@ -250,7 +249,7 @@ GREEN (ON); W-9(c) GREEN in the OFF tree (T071).
 - [ ] T053 [US3] (implementer) M-9f: in `emit_dispatch_application`, skip `m.msg_type == "8"` only when `av.ns == "vlatest"` (ON). Mutant-took: the regenerated header's `vlatest` arm holds no `case '8'` while its v50sp2 arm keeps one. → the (a3) census RED naming `8`; the (a3) samples and (a4) stay green.
 - [ ] T053a [US3] (implementer) M-9g (witnesses.md W-9; analyze C1): in `dict::reify` (`src/dictionary/reify.cpp`), at Step 2's admin-interception call site (not `is_fixt_admin` itself), the condition becomes `mt_sv.size() == 1 && is_fixt_admin(mt_sv.front()) && profile.default_appl != application_version::vlatest` (ON; not a codegen mutant, so no reconfigure gate). Run `dictionary_reify_tests` UNFILTERED, gated on build rc 0: exactly one failing test, the (a3) admin-interception case, on `version().k == kind::session_admin` (record which assertion fired; a `has_value()` failure also counts).
 - [ ] T053b [US3] (implementer) M-9h (witnesses.md W-9; analyze C2): in `emit_dispatch_application` (`tools/codegen/fixpp-codegen/emit_dispatch.cpp`), for `av.ns == "vlatest"` only, the single-char `default:`, the two-char `default:` and the arm's trailing return emit `::fixpp::dict::detail::owning_message_handle_from_frame(rmv_app, view, mr)` instead of the error (ON). Gate on build rc 0, reconfigure rc 0 and the mutant-took check: the regenerated `_dispatch/reify_dispatch_application.hpp`'s `vlatest` arm has no `dict_reify_unknown_msg_type` after its empty-MsgType guard while its v50sp2 arm keeps it. → the `ZZ` sample RED (a handle where the error was expected); the census, `D`/`EC`, the in-frame 1128 case, the admin case, (a4) and (b) stay green.
-- [ ] T054 [US3] (implementer) After the last row: `git worktree remove ~/Work/Programming/fixpp-097-mutants` and delete all three `/mnt/wsl/fixppbuild/build/097-mutants-*` trees (ON, OFF and ASan). Report the mutation table's `H` per story (T021, T033, T046).
+- [ ] T054 [US3] (implementer) After the last row: park `~/Work/Programming/fixpp-parallel` detached at `origin/main` (clean status), remove its `build/097-off` symlink and delete `/mnt/wsl/fixppbuild/build/parallel-097-off`; never retire the worktree. Report the mutation table's `H` per story (T021, T033, T046).
 
 **Checkpoint**: all user-story witnesses GREEN at T046's head; the mutation table complete for M-1..M-9h, with W-12's re-runs of M-1, M-1n and M-2 (T032a).
 
@@ -356,8 +355,8 @@ and its base value at base.
 
 - The orchestrator writes no library code, test, CMake line, fixture, golden or mutant by any tool
   (python and sed included); `phase-implementer` does (`[const §XVI.6]`).
-- Mutants run only in `~/Work/Programming/fixpp-097-mutants` (detached), never in the shared main
-  checkout, never in `fixpp-parallel`, never committed to the feature branch.
+- Mutants run only in `~/Work/Programming/fixpp-parallel` (detached), never in the shared main
+  checkout, never committed to the feature branch.
 - No `git stash`; no `git checkout`/`git switch` in the main checkout; new commits only, no `--amend`.
 - Commit after each task group (T003, T004, T013, T021, T033, T046, T062, T063, plus any fix commit),
   and run the line-citation check after each.

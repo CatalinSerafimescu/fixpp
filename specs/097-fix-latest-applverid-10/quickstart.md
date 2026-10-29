@@ -33,8 +33,7 @@ rows of §1.2, which run in the scratch worktree that contracts' preamble create
      is why W-7 names its own session dictionaries.
    - Stop rule: plan phase 2.
 2. At the implementation head, for each mutant M-1..M-9h in contracts, and for W-12's re-runs of M-1,
-   M-1n and M-2, **in the scratch worktree** (contracts preamble; never the main checkout, never
-   `fixpp-parallel`):
+   M-1n and M-2, **in the scratch worktree** `fixpp-parallel` (contracts preamble; owner, T002; never the main checkout):
    - commit it on the scratch worktree's detached head;
    - rebuild the named binaries in that worktree's own build tree (on `/mnt/wsl/fixppbuild`; M-9c and
      M-9d in its OFF tree, W-12's rows in its ASan tree, each configured by the contracts preamble);
