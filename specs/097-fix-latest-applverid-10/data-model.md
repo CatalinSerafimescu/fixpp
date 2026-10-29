@@ -174,7 +174,7 @@ Live file, a new `## 097 — FIX Latest is ApplVerID 10 (2026-10-29)` section:
     application payload that carries 1128 or 1156 is moved into the header and sent as given,
     unchanged.
 
-  For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone. *(FR-008; owner ruling, Gate A round 1; W-7, W-8.)*
+  For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone. *(FR-008; owner ruling, Gate A round 1; W-7, W-8.)*
 - **B-097-4 — An application message resolved to FIX Latest reifies with a FIX Latest label.**
   `dict::reify` intercepts the seven FIXT admin MsgTypes (`0 1 2 3 4 5 A`: Logon, Heartbeat, …) first;
   they keep routing to the FIXT admin dispatch and are labelled as session-admin, unchanged. Under a
@@ -218,7 +218,7 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
 0. **The canonical residue sentence (Gate A round 2, RC-A).** What stays post-1.0 for FIX Latest after
    097 is stated by this one sentence. It is defined here; every locus below copies it:
 
-   For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
+   For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
 
    - Every locus copies it **byte for byte, on one physical line**, with no markdown or line break
      inside it, so `grep -F` finds every copy (quickstart §4.2 counts them at the head and at base).
@@ -238,15 +238,15 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
    and replace
    `: **ApplExtID(1156)=303 differentiation and session negotiation remain post-1.0** (the typed read tier is delivered by 076, the typed builder tier by 077).`
    with
-   `. **For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.** (The typed read tier is delivered by 076, the typed builder tier by 077, and FIX Latest's ApplVerID 10 identification and negotiation by feature 097; a validated frame carrying 1407 or 1156 passes or fails on the session's own dictionary.)`
+   `. **For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.** (The typed read tier is delivered by 076, the typed builder tier by 077, and FIX Latest's ApplVerID 10 identification and negotiation by feature 097; a validated frame carrying 1407 or 1156 passes or fails on the session's own dictionary.)`
 2. **Article I §1, post-1.0 milestone line** — on that line (the same label also appears in a
    historical Sync Impact Report entry, which is left alone), `FIX Latest (session-negotiation tier)` →
    `FIX Latest (EP-level field back-port and Extension Pack negotiation tiers)`, and the parenthetical's
    closing
    `; only its ApplExtID(1156)=303 differentiation and session-negotiation tiers remain post-1.0.)` →
-   `; its ApplVerID 10 identification and negotiation per feature 097. For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.)`
+   `; its ApplVerID 10 identification and negotiation per feature 097. For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.)`
 3. **Article XVIII §2, v1.2 bullet** — append the annotation
-   `*(Amended v4.3, feature 097: "ApplExtID(1156)=303 on-wire differentiation" as FIX Latest's on-wire identifier is superseded — FIX Latest is ApplVerID 10, delivered in v1.0 by feature 097. For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.)*`
+   `*(Amended v4.3, feature 097: "ApplExtID(1156)=303 on-wire differentiation" as FIX Latest's on-wire identifier is superseded — FIX Latest is ApplVerID 10, delivered in v1.0 by feature 097. For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.)*`
 4. **Sync Impact Report** v4.2 → v4.3 at the top, in the v4.2 report's shape. Amendment is the first
    commit of implementation. Contents:
    - the date, `PENDING`, and the bump: MINOR (Article XX §4; no `CHANGELOG.md` entry). Does a PR
@@ -271,7 +271,7 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
      2026-10-29, including Gate A round 1's "no new rule" for 1407/1156;
    - **Affected catalogue rows**: S-025, S-026, S-043, D-011 (note, residue sentence and Tests cell), and
      A-035 through A-065 (the one sentence of §F); in the coverage index, the Post-1.0 Gap Registry
-     D-011 row (§F);
+     D-011 row and every row §F annotates "097: ApplVerID 10 = FIX Latest" (§F);
    - **Affected feature specs**: `specs/097-fix-latest-applverid-10`. Merged `specs/<id>/` bundles stay
      as written; the superseded records are `specs/074-orchestra-native-reader/` (the reconcile, FR-010,
      L-074-1), `specs/076-fix-latest-typed-codegen/` (prose on `.a = v50sp2` / `app_version_enum`; its
@@ -285,7 +285,7 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
    - **Review and sign-off**: Gate A / scoped amendment round (tasks T003a) / Gate B / owner sign-off
      slots, filled in that order before the RATIFIED flip (tasks T073b), in the shape of v4.2's
      RATIFIED header ("a scoped Codex Gate A review of the amended clause bodies …, THEN Gate B …,
-     THEN owner sign-off").
+     THEN owner sign-off"), with the feature's Gate A as the first of four stages.
    - **Status line (Gate A round 2, O097-103)**: at the RATIFIED flip the live `> **Status:**`
      blockquote is rewritten in v4.2's form, varying only in the named slots `<date>`, `<review>` (the
      review and sign-off summary, in v4.2's wording shape) and `<n>`: `user-ratified **v4.3** (<date>)

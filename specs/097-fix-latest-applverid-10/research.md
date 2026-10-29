@@ -175,7 +175,7 @@ with the recipe given; do not trust a line number after the first implementation
   configured `"9"`, with a peer that sends `9` too, negotiates FIX50SP2 (the fallback). The
   residue is the canonical sentence (data-model §E.0):
 
-  For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
+  For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
 - **Why one sentence (Gate A round 2, RC-A)**: round 1 rewrote each residue locus from the clause it
   replaced, so Article I dropped the field back-port and Article XVIII §2 dropped Extension Pack
   negotiation. One sentence, pasted verbatim and counted at each locus (quickstart §4.2), cannot drift

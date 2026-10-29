@@ -260,7 +260,7 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
    coverage-index Gap Registry D-011 row and the catalogue D-011 row each carry the canonical residue
    sentence (data-model §E.0) verbatim:
 
-   For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
+   For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.
 2. **Given** the live B&L, **When** it is read, **Then** L-074-1 and L-080-1 are absent from it and
    present in the closed file with the retiring feature.
 

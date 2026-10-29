@@ -173,7 +173,7 @@ EOF
 The canonical residue sentence (data-model §E.0), for the rows that count it (single quotes are safe:
 it holds no apostrophe):
 ```
-CANON='For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not read) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.'
+CANON='For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.'
 ```
 Run every check twice, with `R=.` (the head) and with `R="$BASE"` (the seeded negative). In the table, `\|` is the
 Markdown escape for a literal `|`; type `|`. Use
