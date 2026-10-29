@@ -66,7 +66,10 @@ TEST(VlatestCompileSmoke076, FourReadTierHeadersCarryRealSymbols) {
     static_assert(!std::is_void_v<MsgFwdDecl>);
 
     EXPECT_EQ(fixpp::vlatest::owning_Heartbeat::msg_type_v, "0");
-    EXPECT_EQ(fixpp::vlatest::owning_Heartbeat::which(), fixpp::dict::application_version::v50sp2);
+    // 097-fix-latest-applverid-10 (FR-009(b)): a fixpp::vlatest typed class reports
+    // FIX Latest's own application version, the label its reify arm gives it.
+    EXPECT_EQ(fixpp::vlatest::owning_Heartbeat::which(), fixpp::dict::application_version::vlatest)
+        << "097: fixpp::vlatest typed classes must report application_version::vlatest";
     EXPECT_GT(fixpp::vlatest::validator::Heartbeat_rules.size(), 0U);
     EXPECT_EQ(fixpp::vlatest::fields::Heartbeat_fields[4].tag, 35)
         << "MsgType(35) must be present in the generated Heartbeat field table";

@@ -386,7 +386,16 @@ if(TARGET fixpp_codegen_generate)
     "${_REIFY_CODEGEN_INC}"
     "${CMAKE_SOURCE_DIR}/tests")
   target_compile_definitions(dictionary_reify_tests PRIVATE
-    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+    # 097-fix-latest-applverid-10 (contracts W-9 (c)): the generated header the
+    # tier-OFF case reads at run time.
+    "FIXPP_097_REIFY_DISPATCH_APPLICATION_HPP=\"${_REIFY_CODEGEN_INC}/fixpp/_dispatch/reify_dispatch_application.hpp\"")
+  # 097-fix-latest-applverid-10 (contracts W-9 (c)): with the FIX Latest tier OFF
+  # there is no vlatest dispatch arm; this definition selects the OFF-only case and
+  # drops the ON-only ones in reify_dispatch_test.cpp.
+  if(NOT FIXPP_CODEGEN_FIX_LATEST)
+    target_compile_definitions(dictionary_reify_tests PRIVATE FIXPP_097_FIX_LATEST_TIER_OFF)
+  endif()
   add_test(NAME dictionary_reify_tests COMMAND dictionary_reify_tests)
   set_tests_properties(dictionary_reify_tests PROPERTIES LABELS dictionary)
   # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last

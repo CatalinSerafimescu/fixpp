@@ -172,6 +172,9 @@ target_compile_definitions(codegen_vlatest_tests PRIVATE
   "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/all.hpp\""
   "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/all.hpp\""
   "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/all.hpp\""
+  # 097-fix-latest-applverid-10 (contracts W-9 (a3) census): the dispatch census
+  # loads dictionaries/orchestra/OrchestraFIXLatest.xml with OrchestraLoader.
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
 )
 add_test(NAME codegen_vlatest_tests COMMAND codegen_vlatest_tests)
 set_tests_properties(codegen_vlatest_tests PROPERTIES
