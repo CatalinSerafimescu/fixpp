@@ -69,6 +69,9 @@ Live file, a new `## 097 — FIX Latest is ApplVerID 10 (2026-10-29)` section:
   version is then answered by its own. An engine holding only FIX Latest still admits `1137=9` and still
   opens a session whose own default is `"9"` (the FIX Latest dictionary answers FIX50SP2 when no FIX50SP2
   dictionary is registered — never the reverse: an engine holding only FIX50SP2 refuses `1137=10`).
+  Admission is engine-wide, as for every version: a session whose own dictionary is FIX50SP2 admits a
+  `1137=10` peer when the engine holds FIX Latest, and validates that peer's messages with its own
+  dictionary.
   *(FR-001..FR-007; owner ruling Q1; witnesses: contracts W-1..W-6.)*
 - **B-097-2 — BREAKING (public C++; C ABI unchanged): `application_version` gains `vlatest`, and the
   generated `fixpp::vlatest` typed classes report it.** A consumer's exhaustive `switch` over

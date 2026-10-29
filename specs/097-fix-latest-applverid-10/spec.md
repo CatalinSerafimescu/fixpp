@@ -99,6 +99,21 @@ version and registry slot; the abort goes; inbound 1407/1156 are accepted and ig
   from its jar). Ruling: exact match first; FIX Latest answers FIX50SP2 when FIX50SP2 is absent; never the
   reverse. Not BREAKING for the registry; inbound validation still uses each session's own dictionary.
 
+### Session 2026-10-29 (`/speckit-clarify`)
+
+> ⚠️ **Out of pipeline order.** `/speckit-clarify` is mandatory before `/speckit-plan` for a wire/codegen
+> feature (`[const §XVI.3]`). It was skipped and is run here after `/speckit-plan` (`afb8f92a`) and before
+> Gate A. The decisions in the session above were taken with the owner directly, ahead of this scan. Any
+> answer below that touches a plan artifact is carried into it in the same commit.
+
+- Q: When an acceptor session whose own dictionary is FIX50SP2 runs on an engine that also holds FIX
+  Latest, and the peer's Logon says `1137=10`, is the peer admitted? → A: **Yes — admission stays
+  engine-wide** (owner, 2026-10-29). A peer is admitted when the engine's registry serves the advertised
+  version (FR-007). This is today's rule for every version, e.g. `1137=6` on a FIX50SP2 session when
+  FIX44 is registered. Validation still uses the session's own dictionary, so such a peer's FIX-Latest-only
+  MsgTypes are rejected by that validator. Tying admission to the session's dictionary is a new rule for all
+  versions and is out of scope.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A FIX Latest peer can log on (Priority: P1)
@@ -148,7 +163,8 @@ its own dictionary. On the unfixed tree the construction aborts with the FR-010 
 2. **Given** that registry, **When** FIX50SP2 is looked up, **Then** the FIX50SP2 dictionary is returned;
    **When** FIX Latest is looked up, **Then** the FIX Latest dictionary is returned.
 3. **Given** a FIXT acceptor on that engine, **When** two peers log on with `1137=9` and `1137=10`,
-   **Then** both are established.
+   **Then** both are established, each session negotiating the version its peer advertised (admission is
+   engine-wide; each session validates with its own dictionary — Clarifications, `/speckit-clarify`).
 
 ---
 
@@ -209,6 +225,10 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   on such an engine opens as today. The reverse never falls back: a FIX50SP2-only registry asked for FIX
   Latest has no dictionary, so `1137=10` is refused with Reject 373=5.
 - **Both dictionaries registered** — each version is answered by its own (exact match first).
+- **Advertised version differs from the session's own dictionary** (e.g. `1137=10` on a session whose
+  dictionary is FIX50SP2, the engine holding both) — admitted, as for every version today; the session
+  validates with its own dictionary, so FIX-Latest-only MsgTypes from that peer are rejected by validation.
+  Unchanged rule, not a 097 behaviour.
 - **Config token** — `default_appl_ver_id = "10"` is accepted; any other new token is not added.
 - **A consumer's exhaustive `switch` over `application_version`** — a new enumerator is source-visible
   to a `-Wswitch` build; this is an additive public C++ change, disclosed (FR-011).
@@ -237,7 +257,8 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   version falls back to anything (Clarifications, Q1).
 - **FR-007 (Logon)**: The FIXT acceptor's DefaultApplVerID check and the `open()` check of the session's
   own default MUST treat FIX Latest like every other application version: serviceable iff FR-001 parses
-  and FR-005/FR-006 return a dictionary. The initiator MUST record a peer's `1137=10` as FIX Latest. The
+  and FR-005/FR-006 return a dictionary from the engine's registry. Serviceability stays engine-wide; it
+  does not consult the session's own dictionary. The initiator MUST record a peer's `1137=10` as FIX Latest. The
   Reject shape for an unserviceable value is unchanged.
 - **FR-008 (extension pack tags)**: Inbound DefaultApplExtID(1407) on a Logon and ApplExtID(1156) in any
   header MUST be accepted and MUST NOT affect version resolution, serviceability, validation outcome, or
@@ -248,13 +269,16 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   fail-loud error otherwise (Clarifications, Q2). The anchor `vlatest_dispatch_exclusion_test.cpp` (a1)
   is rewritten to this outcome, and its (a2)/(b) halves re-derived (one arm per application version).
 - **FR-010 (witnesses, RED first)**: Each of FR-001, FR-002, FR-003, FR-005, FR-006, FR-007, FR-008 and
-  FR-009 MUST have a named test that fails on the unfixed tree for the reason the requirement states.
+  FR-009 MUST have a named test that fails for the reason the requirement states. It fails on the
+  unfixed tree where that tree compiles it and the behaviour is new.
   `OrchestraFR010Guard.BothDictsFailLoud` becomes a coexistence test (it aborts on the unfixed tree).
   FR-008's witness MUST include the false-positive arm: a Logon carrying `1137=10` + `1407=303` against a
   registry WITHOUT FIX Latest is still refused (1407 must not make an unserviceable version serviceable).
-  Where a requirement already holds on the unfixed tree (FR-008 with `1137=9`, which no QuickFIX-derived
-  path rejects today), its witness is a characterization pin and is instead shown RED against a named
-  mutant that makes the tag change the outcome.
+  Where a requirement already holds on the unfixed tree, its witness is a characterization pin. This
+  covers FR-006's FIX50SP2-from-FIX-Latest fallback and FR-008 with `1137=9`, which no QuickFIX-derived
+  path rejects today. Such a witness is instead shown RED against a named mutant that breaks the
+  behaviour it pins (contracts). The same applies where a witness names the new enumerator and so cannot
+  compile on the unfixed tree.
 - **FR-011 (compatibility disclosure)**: The new application version is an additive public C++ enumerator;
   the C ABI is unchanged (it carries the raw 1137 string). The B&L records the behaviour changes as
   `B-097-*` rows, BREAKING where a shipped C++ answer changes (the `fixpp::vlatest` typed classes' static
@@ -289,8 +313,8 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   Rejects), where the unfixed tree refuses it (1 Reject, 373=5).
 - **SC-002**: A registry built from the FIX50SP2 and FIX Latest dictionaries is constructed and answers
   both lookups with their own dictionary, where the unfixed tree aborts.
-- **SC-003**: Every FR-010 witness is RED on the unfixed tree and GREEN at the head, each shown, with the
-  RED for its stated reason.
+- **SC-003**: Every FR-010 witness is GREEN at the head and shown RED for its stated reason, either on the
+  unfixed tree or against its named mutant (contracts' per-witness RED arm).
 - **SC-004**: Over all eleven ApplVerID values `"0"`..`"10"` plus the edge-case malformed values,
   parse/render agree with the FIX ApplVerID table and render is injective (one table-driven witness).
 - **SC-005**: Zero emitted 1407 and zero emitted header 1128 in every outbound frame the 097 session

@@ -81,7 +81,9 @@ and run first (plan phase 2), and that run's result is recorded too.
   - (c) Acceptor, registry {FIX Latest}, inbound `1137=9`: established, negotiated `v50sp2`. This is the
     one-way fallback and B-097-1's "still admits".
   - (d) Acceptor, registry {FIX50SP2, FIX Latest}: one session per peer, `1137=9` and `1137=10`, both
-    established, each negotiating its own version.
+    established, each negotiating its own version. One arm uses a session whose own dictionary is
+    FIX50SP2 receiving `1137=10`: admitted, which pins the engine-wide rule (spec Clarifications,
+    `/speckit-clarify`).
   - (e) Initiator, Logon-ack `1137=10`: negotiated `vlatest`.
   - (f) `open()` with default `"10"` and {FIX Latest} succeeds. `open()` with default `"9"` and
     {FIX Latest} still succeeds (fallback). `open()` with default `"10"` and {FIX50SP2} returns
