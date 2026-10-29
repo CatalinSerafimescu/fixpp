@@ -256,7 +256,7 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
 
 1. **Given** the merged tree, **When** the constitution's FIX Latest clauses are read, **Then** they state
    that FIX Latest's application version is ApplVerID 10 (delivered by 097), negotiated when the
-   DefaultApplVerID is `10`, and Article I §1 (bullet and milestone line), Article XVIII §2, the
+   DefaultApplVerID a session reads from its peer is `10`, and Article I §1 (bullet and milestone line), Article XVIII §2, the
    coverage-index Gap Registry D-011 row and the catalogue D-011 row each carry the canonical residue
    sentence (data-model §E.0) verbatim:
 
@@ -446,7 +446,8 @@ occurrence is flagged as superseded in place or lives in a frozen record that a 
   status does not change). D-011's Tests
   cell renames the 074 guard tests that W-4 renames or deletes. Its case count is marked "at 074" and
   is not recomputed. D-011's own residue sentence becomes the canonical one (data-model §E.0), and its
-  `v50sp2` / `std::abort` statements are flagged as retired by 097. The coverage-index §4.3.7 / §5.3.3
+  `v50sp2` / `std::abort` statements are flagged as retired by 097. The A-035..A-065 sentence is
+  replaced per data-model §F (count preserved; no status change). The coverage-index §4.3.7 / §5.3.3
   / §5.3.5 rows and the DefaultApplVerID(1137) / ApplVerID(1128) rows are updated. The Post-1.0 Gap
   Registry D-011 row carries the canonical sentence and the target "v1.2 (EP-level field back-port;
   Extension Pack negotiation)". The catalogue's 076 partial-progress note, the coverage index's 074

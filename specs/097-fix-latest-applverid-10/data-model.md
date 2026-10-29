@@ -21,7 +21,7 @@
   (`render_appl_ver_id`) is the inverse of parse over those nine, and its nine strings are pairwise
   distinct. `render(Unknown)` stays the error `dict_unknown_appl_ver_id`.
 - **Which sessions negotiate FIX Latest.** A session negotiates `vlatest` exactly when the 1137 it
-  negotiates is `"10"`: the peer's Logon 1137 as the acceptor reads it, or the Logon reply's 1137 the
+  reads from its peer is `"10"`: the peer's Logon 1137 as the acceptor reads it, or the Logon reply's 1137 the
   initiator records. This is the bundle's one definition; every other statement of it points here.
 - **What the configured value decides.** A session's own `default_appl_ver_id` is what it sends (its
   Logon as the initiator, its Logon reply as the acceptor, whatever the peer sent) and what `open()`
@@ -283,7 +283,7 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
      the change (§E.1–§E.3), the rationale (research R-8) and the affected catalogue rows and specs
      (this report's lists), as Article XX §2 requires;
    - **Review and sign-off**: Gate A / scoped amendment round (tasks T003a) / Gate B / owner sign-off
-     slots, filled in that order before the RATIFIED flip (tasks T076), in the shape of v4.2's
+     slots, filled in that order before the RATIFIED flip (tasks T073b), in the shape of v4.2's
      RATIFIED header ("a scoped Codex Gate A review of the amended clause bodies …, THEN Gate B …,
      THEN owner sign-off").
    - **Status line (Gate A round 2, O097-103)**: at the RATIFIED flip the live `> **Status:**`
@@ -325,10 +325,11 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
     097;
   - its case count is marked "(count at 074)" and is not recomputed.
 
-  The rows A-035..A-065 each carry the sentence `FIX Latest goes on the wire as ApplVerID 9 with no
-  ApplExtID(1156) (L-074-1, REMAINING-WORK row 4b)`, which 097 makes false. Each occurrence is replaced by
-  `FIX Latest goes on the wire as ApplVerID 10 when the session's negotiated DefaultApplVerID is 10; a
-  session configured 9 whose peer also sends 9 negotiates FIX50SP2 (097, B-097-1, B-097-4)`. This is a mechanical replacement. The count
+  The rows A-035..A-065 each carry the sentence
+  `FIX Latest goes on the wire as ApplVerID 9 with no ApplExtID(1156) (L-074-1, REMAINING-WORK row 4b)`,
+  which 097 makes false. Each occurrence is replaced by
+  `FIX Latest goes on the wire as ApplVerID 10 when the session's negotiated DefaultApplVerID is 10; a session configured 9 whose peer also sends 9 negotiates FIX50SP2 (097, B-097-1, B-097-4)`.
+  This is a mechanical replacement. The count
   of old-sentence occurrences before the replacement equals the count of new-sentence occurrences after
   it (quickstart §4 checks both). No status changes.
 - `spec/coverage-index.md`: the §4.3.7, §5.3.3, §5.3.5 rows and the DefaultApplVerID(1137) / ApplVerID(1128)

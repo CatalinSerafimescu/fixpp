@@ -285,7 +285,7 @@ specs/097-fix-latest-applverid-10/
 - **A validated session whose dictionary does not declare 1407/1156 rejects them.** This is by ruling
   (no new rule), and B-097-3 discloses it. W-7(e) (1407) and W-7(f) (header 1156) pin it, so a later
   validator change cannot drift it silently.
-- **A `"9"`-configured FIX Latest session keeps the FIX50SP2 label.** This is by ruling (the one-way
+- **A `"9"`-configured FIX Latest session with a peer that also sends `9` keeps the FIX50SP2 label.** This is by ruling (the one-way
   fallback). B-097-4 and the constitution/catalogue text state the condition (RC-4).
 - **The OFF codegen tier has no CI lane.** W-9(c) runs only in verify's local OFF configure+build.
   Disclosed, not closed.
