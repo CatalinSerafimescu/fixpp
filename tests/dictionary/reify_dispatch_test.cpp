@@ -406,7 +406,10 @@ TEST(ReifyDispatchApplicationResolution, BadApplVerIdYieldsUnknownApplVerId) {
                                   ._reserved = 0};
     for (std::string_view bad : {"0", "1", "A", "x", "99"}) {
         auto r = resolve_application_version(profile, bad);
-        ASSERT_FALSE(r.has_value()) << "bad ApplVerID=" << bad;
+        EXPECT_FALSE(r.has_value()) << "bad ApplVerID=" << bad;
+        if (r.has_value()) {
+            continue;
+        }
         EXPECT_EQ(r.error(), error::dict_unknown_appl_ver_id)
             << "AC-D7: non-parsing ApplVerID '" << bad << "' must yield dict_unknown_appl_ver_id";
     }

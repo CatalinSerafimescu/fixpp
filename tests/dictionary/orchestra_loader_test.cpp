@@ -254,12 +254,16 @@ TEST(OrchestraRegistry097, BothDictsCoexist) {
         auto const order =
             reg == &reg_latest_first ? "{FIX Latest, FIX50SP2}" : "{FIX50SP2, FIX Latest}";
         auto got_sp2 = reg->get(fixpp::dict::application_version::v50sp2);
-        ASSERT_TRUE(got_sp2.has_value()) << order;
-        EXPECT_EQ(*got_sp2, sp2.get()) << order << ": get(v50sp2) must be the FIX50SP2 dict";
+        EXPECT_TRUE(got_sp2.has_value()) << order;
+        if (got_sp2.has_value()) {
+            EXPECT_EQ(*got_sp2, sp2.get()) << order << ": get(v50sp2) must be the FIX50SP2 dict";
+        }
         auto got_latest = reg->get(fixpp::dict::application_version::vlatest);
-        ASSERT_TRUE(got_latest.has_value()) << order;
-        EXPECT_EQ(*got_latest, latest.get())
-            << order << ": get(vlatest) must be the FIX Latest dict";
+        EXPECT_TRUE(got_latest.has_value()) << order;
+        if (got_latest.has_value()) {
+            EXPECT_EQ(*got_latest, latest.get())
+                << order << ": get(vlatest) must be the FIX Latest dict";
+        }
     }
 }
 
