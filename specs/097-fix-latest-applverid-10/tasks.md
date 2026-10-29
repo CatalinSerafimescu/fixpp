@@ -206,11 +206,11 @@ answered by its own; two peers `1137=9` and `1137=10` both establish.
 
 ### RED arms for User Story 2 (Mutant protocol; record each)
 
-- [ ] T034 [US2] (implementer) `git -C ~/Work/Programming/fixpp-parallel reset --hard "$H"` (T033's hash); rebuild the ON tree baseline, GREEN. Re-run M-1n for W-6(d): its `1137=10` sessions RED on their negotiated-version assertion.
-- [ ] T035 [US2] (implementer) M-4: restore `case vlatest: return v50sp2;` without the abort → W-4 RED (`get(vlatest)` empty in both orders, since the fallback answers `v50sp2` only, and `get(v50sp2)` the last writer, so also wrong in one order); W-6(d)'s both-registered arm RED; W-6(a) RED (Reject 373=5) and W-6(f)'s first case RED (`invalid_session_config`), since the FIX Latest dictionary lands in the v50sp2 slot.
+- [X] T034 [US2] (implementer) `git -C ~/Work/Programming/fixpp-parallel reset --hard "$H"` (T033's hash); rebuild the ON tree baseline, GREEN. Re-run M-1n for W-6(d): its `1137=10` sessions RED on their negotiated-version assertion.
+- [X] T035 [US2] (implementer) M-4: restore `case vlatest: return v50sp2;` without the abort → W-4 RED (`get(vlatest)` empty in both orders, since the fallback answers `v50sp2` only, and `get(v50sp2)` the last writer, so also wrong in one order); W-6(d)'s both-registered arm RED; W-6(a) RED (Reject 373=5) and W-6(f)'s first case RED (`invalid_session_config`), since the FIX Latest dictionary lands in the v50sp2 slot.
 - [ ] T036 [US2] (implementer) M-5a: delete the fallback → W-5's FIX-Latest-alone `get(v50sp2)` arm RED; W-6(c) and W-6(f)'s second case RED.
-- [ ] T037 [US2] (implementer) M-5b: add the reverse fallback (an empty vlatest slot answers from v50sp2) → W-5's FIX50SP2-alone arm RED; W-6(b) and W-6(f)'s third case RED.
-- [ ] T038 [US2] (implementer) M-5c: the fallback wins over an exact match → W-5's both-registered arm RED.
+- [X] T037 [US2] (implementer) M-5b: add the reverse fallback (an empty vlatest slot answers from v50sp2) → W-5's FIX50SP2-alone arm RED; W-6(b) and W-6(f)'s third case RED.
+- [X] T038 [US2] (implementer) M-5c: the fallback wins over an exact match → W-5's both-registered arm RED.
 
 **Checkpoint**: US1 and US2 GREEN; every W-4/W-5/W-6 arm has its recorded RED (contracts W-4..W-6).
 
