@@ -167,10 +167,10 @@ TEST(RenderApplVerId, Unknown_ReturnsError) {
 
 TEST(RenderApplVerId, RoundTrip_AllValues) {
     // Symmetry: render then resolve must recover the original application_version
-    // for each pre-097 member listed below. 097-fix-latest-applverid-10's
-    // VersionProfile097.RenderVlatestIs10_RoundTripAndDistinct covers every
-    // renderable member, vlatest included. Each member's checks are non-fatal, so a
-    // failing member does not hide the members after it.
+    // for each pre-097 member listed below. vlatest's round trip is in
+    // 097-fix-latest-applverid-10's VersionProfile097.RenderVlatestIs10_RoundTripAndDistinct.
+    // Each member's checks are non-fatal, so a failing member does not hide the members
+    // after it.
     using fixpp::dict::resolve_application_version;
     using fixpp::dict::session_version;
     using fixpp::dict::version_profile;

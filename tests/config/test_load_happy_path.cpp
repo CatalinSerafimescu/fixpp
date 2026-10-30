@@ -388,9 +388,9 @@ TEST(LoadHappyPath, Cov_ScalarsUnilateral) {
     EXPECT_EQ(cfg.sending_time_precision, fixpp::core::fix_time_precision::nanos);
 }
 
-// ── pos_fixt_appl_ver_ids.toml: one session per default_appl_ver_id token ────
-// map_scalars (scalar_mappers.cpp) is the token list; FIX Latest's token, added by
-// 097-fix-latest-applverid-10, is the next test's fixture.
+// ── pos_fixt_appl_ver_ids.toml: one session per pre-097 default_appl_ver_id token ──
+// map_scalars (scalar_mappers.cpp) is the full token list; FIX Latest's "10"
+// (097-fix-latest-applverid-10) is Fixt097_ApplVerId10_LoadsAsVlatest.
 
 TEST(LoadHappyPath, Cov_FixtApplVerIds) {
     auto result = load_fixture("pos_fixt_appl_ver_ids.toml");
