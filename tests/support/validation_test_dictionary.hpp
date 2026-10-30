@@ -31,6 +31,7 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <memory>
 #include <memory_resource>
+#include <string>
 #include <string_view>
 
 namespace fixpp::test_support {
@@ -138,6 +139,52 @@ make_validation_test_dictionary() {
             delete mr;
             delete raw_buf;
         }};
+}
+
+// The validation test dictionary loaded as FIX 4.4, with DefaultApplVerID(1137) declared
+// on the Logon: a FIXT.1.1 session's dictionary. It declares neither DefaultApplExtID(1407)
+// nor ApplExtID(1156). 097-fix-latest-applverid-10 moved it here from the session tests'
+// file-local copies, so every caller loads this one definition.
+//
+// Each text it rewrites is checked against kValidationTestFix42Xml at compile time: an
+// edit of that XML which drops one fails the build here, instead of loading a dictionary
+// the rewrite never reached. This header stays free of gtest, because a fuzz target
+// includes it.
+[[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary> fix44_dictionary_with_1137() {
+    constexpr std::string_view kVersion = R"(<fix major="4" minor="2">)";
+    constexpr std::string_view kLogonHeartBtInt =
+        R"(<field number="108" name="HeartBtInt"    required="Y"/>)";
+    constexpr std::string_view kTestReqIdField =
+        R"(<field number="112" name="TestReqID"    type="STRING"/>)";
+    static_assert(kValidationTestFix42Xml.find(kVersion) != std::string_view::npos);
+    static_assert(kValidationTestFix42Xml.find(kLogonHeartBtInt) != std::string_view::npos);
+    static_assert(kValidationTestFix42Xml.find(kTestReqIdField) != std::string_view::npos);
+
+    std::string xml{kValidationTestFix42Xml};
+    auto replace_once = [&xml](std::string_view from, std::string_view to) {
+        xml.replace(xml.find(from), from.size(), to);
+    };
+    replace_once(kVersion, R"(<fix major="4" minor="4">)");
+    replace_once(kLogonHeartBtInt,
+                 R"(<field number="108" name="HeartBtInt"    required="Y"/>)"
+                 R"(<field number="1137" name="DefaultApplVerID" required="N"/>)");
+    replace_once(kTestReqIdField,
+                 R"(<field number="112" name="TestReqID"    type="STRING"/>)"
+                 R"(<field number="1137" name="DefaultApplVerID" type="STRING"/>)");
+    constexpr std::size_t kBufSize = 128U * 1024U;
+    // Destroyed in reverse order: the dictionary, then its resource, then the buffer.
+    struct Owned {
+        std::unique_ptr<std::array<std::byte, kBufSize>> buf;
+        std::unique_ptr<std::pmr::monotonic_buffer_resource> mr;
+        std::unique_ptr<const fixpp::dict::Dictionary> dict;
+    };
+    auto owned = std::make_shared<Owned>();
+    owned->buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    owned->mr = std::make_unique<std::pmr::monotonic_buffer_resource>(owned->buf->data(),
+                                                                      owned->buf->size());
+    owned->dict = std::make_unique<const fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load_from_string(xml, owned->mr.get()));
+    return std::shared_ptr<const fixpp::dict::Dictionary>{owned, owned->dict.get()};
 }
 
 // fixpp#215 item 1 (Option C, `.specify/215-dictionary-view.md` §6 seam 1) —

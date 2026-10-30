@@ -690,9 +690,8 @@ VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resou
     }
     if (!mapped) {
         throw std::runtime_error(
-            "fixpp-codegen: XML version is not a codegen-target version "
-            "(v42/v44/v50sp2/vt11); runtime-XML-only versions get no typed "
-            "namespace per [2c §1.3]");
+            "fixpp-codegen: XML version is not a codegen-target version; "
+            "runtime-XML-only versions get no typed namespace per [2c §1.3]");
     }
 
     // Messages — Dictionary::messages() is bytewise-sorted by MsgType

@@ -12,9 +12,9 @@
 //   - non-empty input gives the same outcome under both profiles (a non-empty value
 //     never consults the default);
 //   - a refused non-empty value is dict_unknown_appl_ver_id;
-//   - an accepted value renders, the rendering equals the input bytes exactly, and it
-//     re-parses to the same application_version. Exact byte equality is the strict form:
-//     parse must accept only the strings render produces.
+//   - an accepted value renders, and the rendering equals the input bytes exactly. Exact
+//     byte equality is the strict form: parse must accept only the strings render
+//     produces.
 // ASan and UBSan cover out-of-bounds reads and UB.
 
 #include <cstddef>
@@ -61,12 +61,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         return 0;
     }
 
-    // A non-empty value never consults the profile default.
-    if (under_unknown.has_value() != under_v50sp2.has_value()) {
-        __builtin_trap();
-    }
-    if (under_unknown.has_value() ? *under_unknown != *under_v50sp2
-                                  : under_unknown.error() != under_v50sp2.error()) {
+    // A non-empty value never consults the profile default. std::expected's != compares
+    // the engaged state and then the value or the error.
+    if (under_unknown != under_v50sp2) {
         __builtin_trap();
     }
 
@@ -77,12 +74,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         return 0;
     }
 
+    // No re-parse follows: once the rendering equals `value`, parsing it repeats the
+    // parse above on the same bytes.
     const auto rendered = render_appl_ver_id(*under_unknown);
     if (!rendered.has_value() || *rendered != value) {
-        __builtin_trap();
-    }
-    const auto reparsed = resolve_application_version(kUnknownDefault, *rendered);
-    if (!reparsed.has_value() || *reparsed != *under_unknown) {
         __builtin_trap();
     }
     return 0;

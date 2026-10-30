@@ -205,6 +205,11 @@ specs/097-fix-latest-applverid-10/
   OFF-only case and its CMake guard, the CMake label lines, and in `tests/codegen/CMakeLists.txt`
   `FIXPP_DICT_DATA_DIR` added to `codegen_vlatest_tests`'s `target_compile_definitions` (the W-9(a3)
   census; Gate A round 4, G097-021)
+- tests, from the T068 `/simplify` fixes: `tests/wire/required_scope_two_tier_test.cpp` (its
+  `load_orchestra_dict` guarded on `FIXPP_TEST_HAS_VLATEST`, so the FIX Latest tier OFF builds under
+  `FIXPP_WERROR`; a pre-existing defect, US3 part B ruling), and `tests/support/validation_test_dictionary.hpp`
+  with `tests/session/engine_reset_unit_stop_test.cpp` (`fix44_dictionary_with_1137` moved into the
+  shared header, which both session tests call)
 - fuzz (contracts W-12, `[const §VII.7]`): `tests/fuzz/fuzz_appl_ver_id.cpp` (new), its target in
   `tests/fuzz/CMakeLists.txt`, and its seeds under `tests/fuzz/corpus/appl_ver_id/` (new)
 - records: `.specify/constitution.md`, `.specify/2c-codegen.md` (§4.3/§4.8/§6.3/§6.6 notes),

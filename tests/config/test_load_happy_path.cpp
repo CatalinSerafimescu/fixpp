@@ -404,16 +404,21 @@ TEST(LoadHappyPath, Cov_FixtApplVerIds) {
            }();
 
     ASSERT_EQ(result->sessions.size(), std::size_t{8})
-        << "expected 8 sessions (one per ApplVerID value)";
+        << "expected 8 sessions (one per pre-097 ApplVerID token the fixture lists)";
 
     using av = fixpp::dict::application_version;
     const std::vector<av> expected = {av::v40, av::v41, av::v42,    av::v43,
                                       av::v44, av::v50, av::v50sp1, av::v50sp2};
 
+    // Per-session checks are non-fatal, so one session's failure does not hide the
+    // sessions after it (097-fix-latest-applverid-10).
     for (std::size_t i = 0; i < 8; ++i) {
         const auto& cfg = result->sessions[i].config;
-        ASSERT_TRUE(cfg.default_appl_ver_id.has_value())
+        EXPECT_TRUE(cfg.default_appl_ver_id.has_value())
             << "session[" << i << "] must have default_appl_ver_id set";
+        if (!cfg.default_appl_ver_id.has_value()) {
+            continue;
+        }
         EXPECT_EQ(*cfg.default_appl_ver_id, expected[i])
             << "session[" << i << "] default_appl_ver_id mismatch";
     }
@@ -427,12 +432,8 @@ TEST(LoadHappyPath, Fixt097_ApplVerId10_LoadsAsVlatest) {
     auto result = load_fixture("pos_fixt_appl_ver_id_10.toml");
 
     ASSERT_TRUE(result.has_value())
-        << "pos_fixt_appl_ver_id_10.toml must load successfully; diagnostics: " << [&] {
-               std::string s;
-               if (!result.has_value())
-                   for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
-               return s;
-           }();
+        << "pos_fixt_appl_ver_id_10.toml must load successfully; diagnostics: "
+        << dump_diags(result);
 
     ASSERT_EQ(result->sessions.size(), std::size_t{1});
     const auto& cfg = result->sessions[0].config;

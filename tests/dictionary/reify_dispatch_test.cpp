@@ -641,6 +641,13 @@ constexpr version_profile kFixtVlatestDefault097{.session = session_version::vt1
                                                  .has_per_message_override = true,
                                                  ._reserved = 0};
 
+// A FIXT profile whose default is v50sp2: the in-frame ApplVerID test's profile, and the
+// tier-OFF positive control's.
+constexpr version_profile kFixtV50sp2Default097{.session = session_version::vt11,
+                                                .default_appl = application_version::v50sp2,
+                                                .has_per_message_override = true,
+                                                ._reserved = 0};
+
 // A FIXT.1.1 frame carrying `35=<msg_type>`, built with assemble_frame.
 [[nodiscard]] std::vector<std::byte> make_fixt_frame_097(std::string const& msg_type) {
     return fixpp::test_support::assemble_frame(
@@ -687,11 +694,7 @@ TEST(ReifyRoundTrip, ApplVerId10InFrameResolvesToVlatest) {
                               "56=T\x01" + "11=ORD1\x01")};
     ASSERT_TRUE(f.ok());
     std::pmr::monotonic_buffer_resource mr;
-    version_profile const fixt_v50sp2_default{.session = session_version::vt11,
-                                              .default_appl = application_version::v50sp2,
-                                              .has_per_message_override = true,
-                                              ._reserved = 0};
-    auto r = fixpp::dict::reify(f.view(), fixt_v50sp2_default, &mr);
+    auto r = fixpp::dict::reify(f.view(), kFixtV50sp2Default097, &mr);
     ASSERT_TRUE(r.has_value()) << "097: 35=D with 1128=10 must reify; got error "
                                << fixpp::core::to_string(r.error());
     EXPECT_EQ(r->version().k, resolved_message_version::kind::application);
@@ -730,11 +733,7 @@ TEST(ReifyVlatest097, TierOffHasNoVlatestArm) {
         ReifyFixture f{make_fixt_frame_097("D")};
         ASSERT_TRUE(f.ok());
         std::pmr::monotonic_buffer_resource mr;
-        version_profile const fixt_v50sp2_default{.session = session_version::vt11,
-                                                  .default_appl = application_version::v50sp2,
-                                                  .has_per_message_override = true,
-                                                  ._reserved = 0};
-        auto r = fixpp::dict::reify(f.view(), fixt_v50sp2_default, &mr);
+        auto r = fixpp::dict::reify(f.view(), kFixtV50sp2Default097, &mr);
         EXPECT_TRUE(r.has_value())
             << "097 (tier OFF) positive control: 35=D under a v50sp2 resolution must reify";
     }

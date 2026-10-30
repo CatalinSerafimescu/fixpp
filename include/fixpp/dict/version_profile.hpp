@@ -146,6 +146,9 @@ static_assert(std::is_trivially_copyable_v<resolved_message_version>);
 // value — no garbage string reaches the wire.
 // Inline/constexpr — no out-of-line compilation unit required; the view points
 // into static literal storage (no lifetime hazard).
+// 097-fix-latest-applverid-10: an application_version enumerator added to this switch
+// also moves version_registry::kTableSize (include/fixpp/dict/version_registry.hpp),
+// which is sized one past the enum's last enumerator.
 [[nodiscard]] inline core::expected_t<std::string_view> render_appl_ver_id(
     application_version v) noexcept {
     switch (v) {

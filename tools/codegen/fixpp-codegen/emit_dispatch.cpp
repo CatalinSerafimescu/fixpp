@@ -256,11 +256,9 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         // through to the trailing fail-loud return, the same error `default` gave.
         bool has_one_char = false;
         bool has_two_char = false;
-        if (ir != nullptr) {
-            for (auto const& m : ir->messages) {
-                has_one_char = has_one_char || m.msg_type.size() == 1;
-                has_two_char = has_two_char || m.msg_type.size() == 2;
-            }
+        for (auto const& m : ir->messages) {
+            has_one_char = has_one_char || m.msg_type.size() == 1;
+            has_two_char = has_two_char || m.msg_type.size() == 2;
         }
 
         w.raw("        case ::fixpp::dict::application_version::");
