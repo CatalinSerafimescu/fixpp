@@ -3887,3 +3887,9 @@ Terms. **NextNumIn** is the session's next expected inbound MsgSeqNum(34). **HB*
 ### Limitations
 
 - **L-097-1 — Only direct C++ can register the FIX50SP2 and the FIX Latest dictionaries in one engine.** The TOML resolver loads one `[dictionary]`, and the C API does not fill `EngineConfig::dictionaries`. A TOML engine holding FIX Latest admits `1137=9` and `1137=10` through it (the one-way fallback, B-097-1); one holding FIX50SP2 refuses `1137=10`. The C API, and the Python bindings over it, have no `default_appl_ver_id` setter either, so a C-API session cannot open as FIXT.1.1 at all and negotiates no application version, FIX Latest included; this predates 097 and is unchanged. Status: documented. A multi-dictionary config grammar is not part of 097, and no feature schedules one. *(Successor to L-080-1's config half; FR-011.)*
+
+## fixpp#621 — a `MultiCharValue` field's typed accessor reads one character (2026-10-30)
+
+### Limitations
+
+- **L-621-1 — The generated typed accessor of a `MultiCharValue` field returns `expected_t<char>`, so a valid multi-valued value fails to decode.** FIX defines MultipleCharValue as space-delimited single characters, for example `ExecInst(18)=1 2`. The code generator maps `MultiCharValue` to a one-character kind, and the `char` decoder refuses any value that is not exactly one byte, so `exec_inst()` on `18=1 2` returns a decode failure on `fixpp::v50sp2` and `fixpp::vlatest` (the codegen versions whose dictionaries carry such fields). The value is on the wire and in the message: read it through the untyped field accessor (`field_view::as_string()`) or the C API's string getter. QuickFIX types these fields as a string. Status: open defect, fixpp#621 (batch B67, REMAINING-WORK functional track row 7). *(Found by PR #620's Gate B round 2 triage; recorded by the post-097 records sweep.)*
