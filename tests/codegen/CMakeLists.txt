@@ -123,13 +123,13 @@ target_compile_definitions(codegen_067_emit_builders_unit_test PRIVATE
 add_test(NAME codegen_067_emit_builders_unit_test COMMAND codegen_067_emit_builders_unit_test)
 set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "codegen;067")
 
-# 076-fix-latest-typed-codegen T008/T011: vlatest compile-smoke +
-# dispatch-exclusion witnesses. T008 needs the vlatest {Fields,Messages,
-# Validator,Reify}.hpp read-tier headers (fixpp_codegen_generate); T011 needs
-# ONLY the existing v42/v44/v50sp2 _dispatch/ surface (fixpp_dictionary) —
-# grouped into one binary since both are cheap/isolation-safe (unlike
-# Builders.hpp-dependent work, deliberately NOT attempted here — see the .cpp
-# file headers).
+# 076-fix-latest-typed-codegen T008/T011: vlatest compile-smoke + dispatch-exclusion
+# witnesses. T008 needs the vlatest {Fields,Messages,Validator,Reify}.hpp read-tier
+# headers (fixpp_codegen_generate); T011, rewritten by 097-fix-latest-applverid-10,
+# needs the _dispatch/ surface (fixpp_dictionary), whose vlatest arm exists only with
+# this tier ON, plus the Orchestra dictionary (FIXPP_DICT_DATA_DIR below) — grouped
+# into one binary since both are cheap/isolation-safe (unlike Builders.hpp-dependent
+# work, deliberately NOT attempted here — see the .cpp file headers).
 #
 # gate-b/r1 P1: gated on FIXPP_CODEGEN_FIX_LATEST — with the tier OFF,
 # cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/ entirely, so
