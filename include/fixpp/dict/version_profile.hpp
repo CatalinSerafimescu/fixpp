@@ -40,8 +40,8 @@ enum class session_version : std::uint8_t {
     v50sp1 = 7,    // runtime-XML only — F1
     v50sp2 = 8,    // codegen + runtime-XML
     vt11 = 9,      // codegen (FIXT.1.1 session-layer)
-    vlatest = 10,  // 074: FIX Latest (Orchestra EP303) — runtime-dictionary read tier
-                   // only; wire application version maps to v50sp2 (no distinct ApplVerID).
+    vlatest = 10,  // 074: FIX Latest (Orchestra EP303). 097-fix-latest-applverid-10: its
+                   // application version is application_version::vlatest (wire ApplVerID "10").
 };
 
 // The *default application* version a FIXT.1.1 session resolves to when
@@ -117,23 +117,18 @@ static_assert(std::is_trivially_copyable_v<resolved_message_version>);
 // ─── Wire ApplVerID(1128) → C++ application_version mapping ([2c §4.3:486]) ──
 // [FIXT §5.1] (DefaultApplVerID 1137) / [FIXT §5.3] (per-message ApplVerID
 // 1128). The FIX-defined WIRE enum values do NOT coincide with this header's
-// C++ application_version internal indices (Unknown=0,v40=1,…,v50sp2=8). The
-// parse MUST use this table; reusing the C++ index would mis-map FIX 5.0 and
-// the SP variants (N2-P3-1). ACs AC-VP3 + AC-VP4 pin this table + the
-// "do not reuse the C++ index" negative property.
+// C++ application_version internal indices. The parse MUST use the wire
+// mapping; reusing the C++ index would mis-map FIX 5.0 and the SP variants
+// (N2-P3-1). ACs AC-VP3 + AC-VP4 pin the mapping + the "do not reuse the C++
+// index" negative property.
 //
-//   wire "1128"   FIX version    C++ application_version
-//   "0"           FIX 2.7        (pre-4.0; reject → dict_unknown_appl_ver_id)
-//   "1"           FIX 3.0        (unused;  reject → dict_unknown_appl_ver_id)
-//   "2"           FIX 4.0        application_version::v40
-//   "3"           FIX 4.1        application_version::v41
-//   "4"           FIX 4.2        application_version::v42
-//   "5"           FIX 4.3        application_version::v43
-//   "6"           FIX 4.4        application_version::v44
-//   "7"           FIX 5.0        application_version::v50
-//   "8"           FIX 5.0 SP1    application_version::v50sp1
-//   "9"           FIX 5.0 SP2    application_version::v50sp2
-//   ""  (empty)   →  use profile.default_appl ([FIXT §5.1])
+// The mapping is the code, not a copy of it in this comment
+// (097-fix-latest-applverid-10): resolve_application_version's body
+// (src/dictionary/version_profile.cpp) is the wire → C++ direction and
+// render_appl_ver_id below is its inverse; each application_version
+// enumerator's name gives its FIX version. Empty input uses
+// profile.default_appl ([FIXT §5.1]); a value the parse does not match is
+// dict_unknown_appl_ver_id.
 //
 // Cross-feature dependency note (avoids an RC#1-class phantom-ownership
 // repeat): the "field absent" error returned by

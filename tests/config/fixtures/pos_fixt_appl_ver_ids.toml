@@ -1,5 +1,7 @@
 # pos_fixt_appl_ver_ids.toml
-# Covers all default_appl_ver_id values "2".."9" (v40..v50sp2).
+# One session per default_appl_ver_id token the config mapper accepts (map_scalars in
+# src/config/scalar_mappers.cpp is the list), except FIX Latest's token, which
+# 097-fix-latest-applverid-10 added and pos_fixt_appl_ver_id_10.toml covers.
 # Each [[session]] uses begin_string="FIXT.1.1" with a distinct default_appl_ver_id.
 # The [default] block provides common fields to reduce repetition.
 # Selector: plaintext (no cert_source), FIXT11.xml dictionary.

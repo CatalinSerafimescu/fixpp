@@ -267,9 +267,9 @@ TEST(OrchestraRegistry097, BothDictsCoexist) {
     }
 }
 
-// 097 W-5 (FR-006): every row of the one-way fallback table. Exact slot first; an
-// empty v50sp2 slot answers from the vlatest slot; the fallback serves a v50sp2
-// lookup only.
+// 097 W-5 (FR-006): every row of the one-way fallback table. Exact slot first;
+// under 097 an empty v50sp2 slot answers from the vlatest slot; the fallback
+// serves a v50sp2 lookup only.
 TEST(OrchestraRegistry097, OneWayFallback) {
     using fixpp::dict::application_version;
     std::pmr::monotonic_buffer_resource mr;

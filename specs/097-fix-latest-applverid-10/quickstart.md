@@ -206,6 +206,7 @@ expected at the head; the `origin/main` run must give the "base" value, which pr
 | New B&L rows | `command grep -cE '^- \*\*(B-097-[1-4]\|L-097-1) ' "$R/spec/behaviors-and-limitations.md"` | 5 | 0 |
 | 2c notes (one per note data-model §C prescribes; Gate A round 3, G097-020) | `command grep -c 'Updated (097-fix-latest-applverid-10)' "$R/.specify/2c-codegen.md"` | 6 | 0 |
 | Component page flags 074, 076 and 080 and points at 2c, each separately | for each `X` of `specs/074-orchestra-native-reader`, `specs/076-fix-latest-typed-codegen`, `specs/080-orchestra-runtime-load`, `2c-codegen`, `C-ABI`: `command grep -F "$X" "$R/brain/components/dictionary.md" \| command grep -cw '097'` | ≥ 1 each | 0 each |
+| Component page flags 076's V-7 "byte-identical `_dispatch`" claim as superseded by 097 (the 076 row above is already satisfied by its `.a = v50sp2` line, so it cannot see this flag dropped) | `command grep -F 'V-7' "$R/brain/components/dictionary.md" \| command grep -cw '097'` | 1 | 0 |
 
 In the "L-074-1 / L-080-1 left the live B&L" and the `emit_dispatch.cpp` rows the polarity is
 reversed: there the base is the positive. A row whose base run gives the head value proves nothing and is rewritten before it is

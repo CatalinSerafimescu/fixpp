@@ -69,7 +69,9 @@ TEST(VersionProfileAcVp1, ReservedZeroOnEmit) {
 }
 
 TEST(VersionProfileAcVp3, FullWireToCppMap) {
-    // AC-VP3 — every wire ApplVerID value "2".."9".
+    // AC-VP3 — the pre-097 wire ApplVerID values keep their mapping. FIX Latest's
+    // value is covered by 097-fix-latest-applverid-10's FullWireTableThrough10.
+    // Each case's checks are non-fatal, so a failing case does not hide the cases after it.
     struct Case {
         std::string_view wire;
         application_version expect;
@@ -86,7 +88,10 @@ TEST(VersionProfileAcVp3, FullWireToCppMap) {
     };
     for (auto const& c : cases) {
         auto got = resolve_application_version(kFixt, c.wire);
-        ASSERT_TRUE(got.has_value()) << "wire=" << c.wire;
+        EXPECT_TRUE(got.has_value()) << "wire=" << c.wire;
+        if (!got.has_value()) {
+            continue;
+        }
         EXPECT_EQ(*got, c.expect) << "wire=" << c.wire;
     }
 }

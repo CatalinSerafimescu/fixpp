@@ -460,8 +460,9 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     }
 
     // ── default_appl_ver_id (optional, only for FIXT) ─────────────────────────
-    // Canonical spellings: wire ApplVerID tag values — "2".."9"
-    // (version_profile.hpp application_version enum, wire mapping table)
+    // Canonical spellings: wire ApplVerID tag values, the strings
+    // dict::render_appl_ver_id emits (version_profile.hpp); the token chain below is
+    // the list (097-fix-latest-applverid-10 added FIX Latest's token to it).
     // Note: D-9 says canonical spellings come from the enum defs + wire table.
     // The TOML config uses the same wire-value strings as the FIX protocol.
 

@@ -53,9 +53,9 @@ public:
     // dict_unknown_appl_ver_id, a wire-string parse failure — AC-X2 /
     // data-model error mapping). Returned pointer aliases the registry's
     // storage (lifetime = registry lifetime).
-    // 097-fix-latest-applverid-10 one-way fallback: the exact slot answers first; an
-    // empty v50sp2 slot answers from the vlatest slot; the fallback serves a v50sp2
-    // lookup only.
+    // 097-fix-latest-applverid-10 one-way fallback: the exact slot answers first;
+    // under 097 an empty v50sp2 slot answers from the vlatest slot; the fallback
+    // serves a v50sp2 lookup only.
     [[nodiscard]] core::expected_t<Dictionary const*> get(application_version v) const noexcept
         [[clang::lifetimebound]];
 

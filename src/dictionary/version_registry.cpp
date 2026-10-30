@@ -9,11 +9,13 @@
 // Dictionary>> constructor maps session_version → application_version for
 // non-FIXT.1.1 dicts; vt11 session-layer dicts are skipped.
 //
-// The mapping is:
-//   session_version::v40..v50sp2 → the corresponding application_version
-//   session_version::vt11        → skip (session-admin layer; app-version
-//                                   lookup uses ApplVerID(1128) per-message)
-//   session_version::Unknown     → skip
+// The mapping is session_to_application below (097-fix-latest-applverid-10:
+// FIX Latest's session_version::vlatest maps to its own
+// application_version::vlatest, so a FIX Latest dictionary fills its own slot):
+//   a session_version that names an application version → that application_version
+//   session_version::vt11    → skip (session-admin layer; app-version
+//                              lookup uses ApplVerID(1128) per-message)
+//   session_version::Unknown → skip
 #include <cstddef>
 #include <expected>
 #include <fixpp/core/error.hpp>

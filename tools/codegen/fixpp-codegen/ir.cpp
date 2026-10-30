@@ -617,10 +617,12 @@ constexpr VersionMap kCodegenVersions[] = {
      .a = fixpp::dict::application_version::Unknown,
      .ns = "vt11"},
     // 076-fix-latest-typed-codegen T002 (data-model.md Entity 1 / research
-    // R2): FIX Latest (Orchestra EP303). `.a = v50sp2` mirrors 074's
-    // session_to_application(vlatest) -> v50sp2 (truthful; inert for
-    // namespace selection, which keys on `.ns`). `ns = "vlatest"` is
-    // distinct from "v50sp2" — namespace disjointness (uniqueness rule).
+    // "kCodegenVersions row + version identity"): FIX Latest (Orchestra EP303).
+    // 097-fix-latest-applverid-10: `.a` is FIX Latest's own
+    // application_version::vlatest (wire ApplVerID "10"), the version the
+    // registry maps a FIX Latest dictionary to (inert for namespace selection,
+    // which keys on `.ns`). `ns = "vlatest"` is distinct from "v50sp2" —
+    // namespace disjointness (uniqueness rule).
     {.s = fixpp::dict::session_version::vlatest,
      .a = fixpp::dict::application_version::vlatest,
      .ns = "vlatest"},

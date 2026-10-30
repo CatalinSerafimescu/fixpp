@@ -167,7 +167,10 @@ TEST(RenderApplVerId, Unknown_ReturnsError) {
 
 TEST(RenderApplVerId, RoundTrip_AllValues) {
     // Symmetry: render then resolve must recover the original application_version
-    // (every non-Unknown value must round-trip through the inverse pair).
+    // for each pre-097 member listed below. 097-fix-latest-applverid-10's
+    // VersionProfile097.RenderVlatestIs10_RoundTripAndDistinct covers every
+    // renderable member, vlatest included. Each member's checks are non-fatal, so a
+    // failing member does not hide the members after it.
     using fixpp::dict::resolve_application_version;
     using fixpp::dict::session_version;
     using fixpp::dict::version_profile;
@@ -184,9 +187,15 @@ TEST(RenderApplVerId, RoundTrip_AllValues) {
     };
     for (auto v : kAll) {
         auto wire = render_appl_ver_id(v);
-        ASSERT_TRUE(wire.has_value()) << "render failed for enum=" << static_cast<int>(v);
+        EXPECT_TRUE(wire.has_value()) << "render failed for enum=" << static_cast<int>(v);
+        if (!wire.has_value()) {
+            continue;
+        }
         auto back = resolve_application_version(kProfile, *wire);
-        ASSERT_TRUE(back.has_value()) << "resolve failed for wire=" << *wire;
+        EXPECT_TRUE(back.has_value()) << "resolve failed for wire=" << *wire;
+        if (!back.has_value()) {
+            continue;
+        }
         EXPECT_EQ(*back, v) << "round-trip mismatch for enum=" << static_cast<int>(v);
     }
 }
@@ -1676,7 +1685,8 @@ TEST(FixtLogonEstablishment, W4_042_InboundNonDeadness_PeerUnserviceableSurvives
 //
 // FIX Latest's ApplVerID is "10" (application_version::vlatest). A session negotiates
 // vlatest exactly when the 1137 it reads from its peer is "10"; the registry answers a
-// vlatest lookup from its own slot, and an empty v50sp2 slot from the vlatest slot.
+// vlatest lookup from its own slot, and (097's one-way fallback) an empty v50sp2 slot
+// from the vlatest slot.
 //
 // Every 097 session here appends each outbound frame to a vector, so an arm can name the
 // frame it reads and a W-8 count can cover every frame a session sent.
@@ -1768,9 +1778,10 @@ using Frames = std::vector<std::vector<std::byte>>;
 
 // The peer's (TW → ISLD) inbound NewOrderSingle(35=D), seq 2. `body_fields` are the
 // message's own fields, chosen per session dictionary. When `with_1156`, the header
-// carries ApplExtID(1156)=303 immediately after MsgType, the position FIXT11.xml's and
-// the Orchestra StandardHeader's declarations give it, so arm and control differ only
-// in that one field.
+// carries ApplExtID(1156)=303 (under 097 it selects no version or dictionary)
+// immediately after MsgType, the position FIXT11.xml's and the Orchestra
+// StandardHeader's declarations give it, so arm and control differ only in that one
+// field.
 [[nodiscard]] std::vector<std::byte> peer_new_order_single(std::string_view body_fields,
                                                            bool with_1156) {
     std::string body;
