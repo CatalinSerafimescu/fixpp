@@ -165,7 +165,8 @@ base = pathlib.Path(sys.argv[1])
 for f in ["spec/feature-catalogue.md", "spec/coverage-index.md", ".specify/constitution.md",
           ".specify/2c-codegen.md", "spec/behaviors-and-limitations.md",
           "spec/behaviors-and-limitations-closed.md", "brain/components/dictionary.md",
-          "tools/codegen/fixpp-codegen/emit_dispatch.cpp"]:
+          "tools/codegen/fixpp-codegen/emit_dispatch.cpp", "docs/src/dictionary/codegen.md",
+          ".specify/architecture.md"]:
     out = subprocess.run(["git", "show", f"origin/main:{f}"], capture_output=True, check=True).stdout
     assert len(out) > 0, f
     p = base / f; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(out)
@@ -208,6 +209,8 @@ expected at the head; the `origin/main` run must give the "base" value, which pr
 | 2c notes (one per note data-model §C prescribes; Gate A round 3, G097-020) | `command grep -c 'Updated (097-fix-latest-applverid-10)' "$R/.specify/2c-codegen.md"` | 6 | 0 |
 | Component page flags 074, 076 and 080 and points at 2c, each separately | for each `X` of `specs/074-orchestra-native-reader`, `specs/076-fix-latest-typed-codegen`, `specs/080-orchestra-runtime-load`, `2c-codegen`, `C-ABI`: `command grep -F "$X" "$R/brain/components/dictionary.md" \| command grep -cw '097'` | ≥ 1 each | 0 each |
 | Component page flags 076's V-7 "byte-identical `_dispatch`" claim as superseded by 097 (the 076 row above is already satisfied by its `.a = v50sp2` line, so it cannot see this flag dropped) | `command grep -F 'V-7' "$R/brain/components/dictionary.md" \| command grep -cw '097'` | 1 | 0 |
+| Dispatch diagram derives its arm set (Gate B round 1, G097-B1-001) | `command grep -c 'kAppVersions' "$R/docs/src/dictionary/codegen.md"` | 1 | 0 |
+| Traceability row and Z-12 (Gate B round 1, G097-B1-001) | `command grep -c 'Z-12' "$R/.specify/architecture.md"` | 2 | 0 |
 
 In the "L-074-1 / L-080-1 left the live B&L" and the `emit_dispatch.cpp` rows the polarity is
 reversed: there the base is the positive. A row whose base run gives the head value proves nothing and is rewritten before it is

@@ -109,6 +109,13 @@ gone at verify. The grep cannot see an
   042, states no FIX Latest or ApplVerID claim (`grep -n -i "fix latest\|vlatest\|ApplVerID"
   brain/components/session.md` is empty), so it is out of scope; quickstart §4.1's sweep covers it.
 
+- Gate B round 1 (G097-B1-001, O097-B1-003) added three loci the population above missed:
+  `docs/src/dictionary/codegen.md` (the `dict::reify` dispatch diagram and the
+  `FIXPP_CODEGEN_FIX_LATEST` option row), `.specify/architecture.md`'s "Multi-version transport"
+  traceability row (Appendix Z-12), and `tests/codegen/CMakeLists.txt`'s T011 comment. The namespace
+  inventories in `architecture.md` §2, §3, §4.2 and §7.3 omit `fixpp::vlatest` since 076 and are left
+  alone, as this section rules for 2c's four-version wording.
+
 - Frozen records not edited (flagged in `brain/components/dictionary.md` instead):
   `specs/074-orchestra-native-reader/` (the reconcile, FR-010, L-074-1), `specs/076-…` prose describing
   `.a = v50sp2` / `app_version_enum` (the golden file is a test oracle and is regenerated, §B), and
@@ -284,7 +291,7 @@ Closed file: L-074-1 and L-080-1 moved verbatim, each preceded by
      L-074-1), `specs/076-fix-latest-typed-codegen/` (prose on `.a = v50sp2` / `app_version_enum`; its
      golden is regenerated as a test oracle) and `specs/080-orchestra-runtime-load/` (L-080-1), flagged
      in `brain/components/dictionary.md`. The companion design document annotated by 097 is
-     `.specify/2c-codegen.md` (§4.3, §4.8, §6.3, §6.6; §C);
+     `.specify/2c-codegen.md` (§4.3, §4.8, §6.3, §6.6; §C). At Gate B round 1, 097 also annotated `.specify/architecture.md` (traceability-table marker, Appendix Z-12);
    - **Process**: rides feature 097. Its PR is titled in Article XX §2 form, "Constitution: amend §I.1,
      §XVIII.2 — FIX Latest is ApplVerID 10 (v4.3) (+ 097 FIX Latest ApplVerID 10)". Its PR body states
      the change (§E.1–§E.3), the rationale (research R-8) and the affected catalogue rows and specs

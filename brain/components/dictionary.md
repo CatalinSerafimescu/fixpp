@@ -10,6 +10,7 @@ refs:
   - src/dictionary/reify.cpp
   - include/fixpp/dict/reify.hpp
   - .specify/2c-codegen.md
+  - docs/src/dictionary/codegen.md
   - .specify/215-dictionary-view.md
   - .specify/495-493-486-dict-reify-copy.md
   - .specify/456-table-view-seal.md
