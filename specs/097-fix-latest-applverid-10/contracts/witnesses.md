@@ -360,7 +360,9 @@ and run first (plan phase 2), and that run's result is recorded too.
   `tests/codegen/determinism_test.cpp`'s `VlatestGeneratedMatchesGolden` (golden regenerated),
   `tests/codegen/CMakeLists.txt` (`FIXPP_DICT_DATA_DIR` added to `codegen_vlatest_tests`'s
   `target_compile_definitions`, for the census; `codegen_vlatest_census_test` in the same file is the
-  precedent).
+  precedent), `tests/codegen/test_067_emit_builders_unit.cpp`'s
+  `VersionIr097.FixLatestHasOwnApplicationVersion` (in `codegen_067_emit_builders_unit_test`, which
+  links `ir.cpp` directly and is not gated on `FIXPP_CODEGEN_FIX_LATEST`; Gate B round 2, G097-B2-002).
 - **Asserts (FIX Latest tier ON, the default)**:
   - (a1) and (a2) are kept: under a v50sp2 profile, `D` reifies as `v50sp2` and `EC` fails loud. Their
     comments and assertion messages are rewritten (tasks T040); the RED of this witness is (a3)/(a4).
@@ -420,6 +422,9 @@ and run first (plan phase 2), and that run's result is recorded too.
     `case …::v50sp2:` and exactly one `case …::vlatest:`.
   - The static outcome FR-009(b) is the smoke test: `vlatest::owning_Heartbeat::which() == vlatest`.
   - The golden matches.
+  - `build_ir()` on `dictionaries/orchestra/OrchestraFIXLatest.xml` returns a `VersionIR` whose
+    `session` and `application` are both `vlatest` and whose `ns` is `"vlatest"`
+    (`VersionIr097.FixLatestHasOwnApplicationVersion`; Gate B round 2, G097-B2-002).
 - **(c) FIX Latest tier OFF (US3 scenario 4; Gate A round 1, O097-003)**: one case compiled only when
   `FIXPP_CODEGEN_FIX_LATEST` is OFF. It sits in a dictionary test binary that the OFF build compiles
   (`tests/dictionary/reify_dispatch_test.cpp` if it builds under OFF; `/speckit-tasks` confirms this
@@ -486,6 +491,7 @@ and run first (plan phase 2), and that run's result is recorded too.
     in-frame 1128 case, the admin case, (a4) and (b) stay green. Before this mutant the `ZZ` sample has
     no RED: at T043 (no `vlatest` arm yet) it passes, because the outer `default:` returns the same
     error. That pass is for the wrong reason and proves nothing about the arm.
+  - M-9i (Gate B round 2, G097-B2-002) sets the vlatest kCodegenVersions row's `.a` back to `v50sp2`. It turns `VersionIr097.FixLatestHasOwnApplicationVersion` (codegen_067_emit_builders_unit_test) RED on its application assertion.
 - **Golden diff rule**: `git diff --stat` on the golden shows one file, and `git diff -U0` shows only
   lines where `application_version::v50sp2;` becomes `application_version::vlatest;`. Their count equals
   `grep -c` of the pre-change file. Quickstart §3 gives the check and its seeded positive.

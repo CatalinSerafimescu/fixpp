@@ -122,6 +122,9 @@ target_compile_definitions(codegen_067_emit_builders_unit_test PRIVATE
 )
 add_test(NAME codegen_067_emit_builders_unit_test COMMAND codegen_067_emit_builders_unit_test)
 set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "codegen;067")
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST codegen_067_emit_builders_unit_test APPEND PROPERTY LABELS 097)
 
 # 076-fix-latest-typed-codegen T008/T011: vlatest compile-smoke + dispatch-exclusion
 # witnesses. T008 needs the vlatest {Fields,Messages,Validator,Reify}.hpp read-tier

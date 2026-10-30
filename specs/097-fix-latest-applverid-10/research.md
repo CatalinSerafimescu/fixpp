@@ -64,9 +64,7 @@ with the recipe given; do not trust a line number after the first implementation
   guard, its `ns == "vlatest"` → `"v50sp2"` branch, is deleted, since the enumerator now exists). Its
   other mappings are unchanged: `vt11` → `Unknown`, and every other namespace verbatim. The vlatest
   typed classes then report FIX Latest, agreeing with the dispatch arm's handle (R-5).
-- **The `ir.cpp` change has no witness.** Nothing reads `VersionIR::application`, so no test can turn
-  RED for `.a`. It is a data-and-comment correction, checked by review of T045's diff, not by a
-  witness.
+- **The `ir.cpp` change's witness** reads `build_ir()`'s result directly: `VersionIr097.FixLatestHasOwnApplicationVersion` (contracts W-9, mutant M-9i; Gate B round 2, G097-B2-002).
 - **Consequence**: the checked-in golden `specs/076-fix-latest-typed-codegen/contracts/golden/vlatest_Messages.golden.hpp`
   changes on exactly the `application_version::v50sp2;` lines that belong to vlatest classes, and
   `tests/codegen/vlatest_compile_smoke_test.cpp`'s `which() == v50sp2` assertion flips. The golden is a

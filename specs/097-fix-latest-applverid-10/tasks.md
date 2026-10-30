@@ -95,7 +95,8 @@ answer (Q1 both rulings, Q2, the `/speckit-clarify` answer, the Gate A round-1 a
 ### Expected ctest list (W-10; derived, not counted)
 
 The ctest entries that carry label `097`, one per existing grouped binary hosting a 097 witness
-(contracts W-1..W-9): `codegen_determinism_test`, `codegen_vlatest_tests`, `config_044_tests`,
+(contracts W-1..W-9): `codegen_067_emit_builders_unit_test` (it builds `test_067_emit_builders_unit.cpp`;
+label added at Gate B round 2, G097-B2-002), `codegen_determinism_test`, `codegen_vlatest_tests`, `config_044_tests`,
 `dictionary_orchestra_tests`, `dictionary_pure_tests` (it builds `version_profile_test.cpp`),
 `dictionary_reify_tests`, `session_fixt_logon_establishment`.
 - **Derive** at any head with `ctest --preset linux-clang-debug -N -L 097` (ON tree). In the OFF tree
