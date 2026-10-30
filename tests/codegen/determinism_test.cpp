@@ -726,6 +726,9 @@ static void expect_dispatch_gains_only_the_vlatest_arm(const std::string& off,
     std::size_t prefix = 0;
     while (prefix < off.size() && off[prefix] == on[prefix]) ++prefix;
     std::size_t suffix = 0;
+    // False positive: the prefix loop stops before off.size() whenever the inserted
+    // block is interior, so this condition can hold and the suffix loop runs.
+    // cppcheck-suppress knownConditionTrueFalse
     while (suffix < off.size() - prefix &&
            off[off.size() - 1 - suffix] == on[on.size() - 1 - suffix]) {
         ++suffix;
