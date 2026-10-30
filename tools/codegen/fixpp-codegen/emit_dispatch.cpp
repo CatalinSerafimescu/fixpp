@@ -18,7 +18,6 @@
 //
 // Deterministic LF-only output (TemplateWriter + bytewise-sorted message list
 // from build_ir / 002 D-6); idempotent across runs (AC-T1 / NFR-003-7).
-#include <fixpp/dict/version_profile.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -57,19 +56,20 @@ constexpr FixtAdmin kFixtAdminTypes[] = {
 // stay sorted bytewise by namespace name, the file's determinism convention, so a
 // new row goes where that order puts it; the order fixes only the order the outer
 // cases are emitted in, not dispatch semantics. A row gets an outer case only when
-// the run built its IR (emit_dispatch_application).
+// the run built its IR (emit_dispatch_application). A row is namespace-only while
+// the outer case label and rmv_app's application enumerator are both written from
+// `ns` (097-fix-latest-applverid-10, G097-B3-001).
 struct AppVersion {
-    std::string_view ns;                  // C++ namespace fragment ("v42", etc.)
-    fixpp::dict::application_version av;  // enum value
+    std::string_view ns;  // C++ namespace fragment ("v42", etc.)
 };
 
 constexpr AppVersion kAppVersions[] = {
-    {.ns = "v42", .av = fixpp::dict::application_version::v42},
-    {.ns = "v44", .av = fixpp::dict::application_version::v44},
-    {.ns = "v50sp2", .av = fixpp::dict::application_version::v50sp2},
+    {.ns = "v42"},
+    {.ns = "v44"},
+    {.ns = "v50sp2"},
     // 097-fix-latest-applverid-10 (data-model §B): appended last (this keeps the
     // bytewise order).
-    {.ns = "vlatest", .av = fixpp::dict::application_version::vlatest},
+    {.ns = "vlatest"},
 };
 
 }  // namespace

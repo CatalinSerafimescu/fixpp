@@ -77,7 +77,7 @@ with the recipe given; do not trust a line number after the first implementation
 
 ## R-5 — The dispatch arm
 
-- **Decision**: `emit_dispatch.cpp`'s `kAppVersions` gains `{ns = "vlatest", av = vlatest}`.
+- **Decision**: `emit_dispatch.cpp`'s `kAppVersions` gains `{ns = "vlatest"}`. (Gate B round 3, G097-B3-001: the rows carried an `av` enum member that nothing read; it was removed from every row, since the Rationale below already writes both outputs from `ns`.)
 - **Rationale (measured)**: the generated `_dispatch/reify_dispatch_application.hpp` includes only
   `core/error.hpp`, `dict/reify.hpp`, `dict/version_profile.hpp`, `wire/message_view_contract.hpp`; every
   arm returns `detail::owning_message_handle_from_frame(rmv_app, view, mr)`, a hand-written,
