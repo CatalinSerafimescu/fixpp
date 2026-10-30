@@ -52,8 +52,8 @@ set_target_properties(fuzz_orchestra_loader PROPERTIES
 )
 
 # 097-fix-latest-applverid-10 W-12 — ApplVerID parse fuzzer per `[const §VII.7]`:
-# dict::resolve_application_version over arbitrary bytes, render/re-parse round-trip
-# checked; its seeds are corpus/appl_ver_id/.
+# dict::resolve_application_version over arbitrary bytes, an accepted value's rendering
+# checked against the input bytes; its seeds are corpus/appl_ver_id/.
 add_executable(fuzz_appl_ver_id fuzz_appl_ver_id.cpp)
 target_link_libraries(fuzz_appl_ver_id PRIVATE fixpp_dictionary fixpp_core)
 target_compile_options(fuzz_appl_ver_id PRIVATE -fsanitize=fuzzer,address,undefined)
