@@ -7,12 +7,10 @@ status: stable
 # Log
 
 - **2026-10-30 — 097-fix-latest-applverid-10, `/speckit-verify` (Step 10b): FIX Latest is ApplVerID 10.**
-  `components/dictionary.md` gains the section "FIX Latest is ApplVerID 10 (097)". It flags these records
-  as superseded in place: 074's reconcile, its FR-010 and L-074-1; 076's prose on `.a = v50sp2` /
-  `app_version_enum`, and its V-7 "byte-identical `_dispatch`" claim; 080's L-080-1; and the `2c-codegen`
-  notes. It also links 097's Gate A record. The facts were checked against source:
-  `application_version::vlatest` ↔ wire `"10"`, an own `version_registry` slot, and a one-way fallback in
-  which an empty v50sp2 slot answers from vlatest and never the reverse.
+  `components/dictionary.md` gains the section "FIX Latest is ApplVerID 10 (097)". In place, it flags the
+  frozen 074, 076 and 080 records and the `2c-codegen` notes that 097 superseded, and it links 097's Gate A
+  record. The facts were checked against source: `application_version::vlatest` ↔ wire `"10"`, its own
+  registry slot, and 097's one-way fallback.
 - **2026-10-29 — 096-fix-latest-tail-evidence close-out (PR #638): class 1 gains a static-analyzer form.**
   `failure-classes.md` class 1 adds *a translation unit the tool gave up on, reported as clean*: cppcheck
   aborts a whole TU (`internalAstError`) on a braced-init designated-initializer value inside a gtest macro
