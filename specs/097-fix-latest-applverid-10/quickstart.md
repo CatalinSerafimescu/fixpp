@@ -177,7 +177,8 @@ it holds no apostrophe):
 CANON='For FIX Latest, only the EP-level field back-port into the legacy dictionaries and Extension Pack negotiation (DefaultApplExtID(1407) / ApplExtID(1156), which fixpp does not use to resolve a version or select a dictionary) remain post-1.0, both in the Article XVIII §2 v1.2 milestone.'
 ```
 Run every check twice, with `R=.` (the head) and with `R="$BASE"` (the seeded negative). In the table, `\|` is the
-Markdown escape for a literal `|`; type `|`. Use
+Markdown escape for a literal `|`; type `|`. Where a regex needs an escaped pipe (`\|`, a literal `|` in ERE), the
+row writes `\\|`; type `\|`. Use
 `command grep`, because the shell's `grep` wrapper mis-reports exit codes. Each row gives the value
 expected at the head; the `origin/main` run must give the "base" value, which proves the check can fail.
 
@@ -188,7 +189,7 @@ expected at the head; the `origin/main` run must give the "base" value, which pr
 | D-011's named edits, each (data-model §F) | for each `X` of `retired by 097: FIX Latest is ApplVerID 10, own registry slot`, `superseded by 097: FIX Latest is ApplVerID 10, its own application version`, `retired by 097: FIX Latest has its own registry slot`, `(count at 074)`, `OrchestraRegistry097.BothDictsCoexist`, `OrchestraRegistry097.OneWayFallback`: `awk -F'\|' '$2 ~ /^ D-011 $/' "$R/spec/feature-catalogue.md" \| command grep -cF "$X"` | 1 each | 0 each |
 | No catalogue status changes (`[const §I.3]`; A-035..A-065 included; prints a digest, not a number) | `awk -F'\|' '$2 ~ /^ [A-Z]+-[0-9]+ $/ {print $2 "\|" $8}' "$R/spec/feature-catalogue.md" \| sort \| sha256sum` | the base digest | the comparand; seeded negative: the same command over a scratch copy of the base file with one row's status edited prints a different digest |
 | A-035..A-065 sentence replaced | new: `command grep -cF "FIX Latest goes on the wire as ApplVerID 10 when the session's negotiated DefaultApplVerID is 10; a session configured 9 whose peer also sends 9 negotiates FIX50SP2 (097, B-097-1, B-097-4)" "$R/spec/feature-catalogue.md"`; old: `command grep -cF "FIX Latest goes on the wire as ApplVerID 9 with no ApplExtID(1156) (L-074-1, REMAINING-WORK row 4b)" "$R/spec/feature-catalogue.md"` | new = base's old; old = 0 | new = 0 |
-| Coverage-index rows updated | `command grep -E '^\| (§4\.3\.7\|§5\.3\.3\|§5\.3\.5) \|\|^\| (DefaultApplVerID\(1137\) on Logon\|ApplVerID\(1128\) per message)' "$R/spec/coverage-index.md"` piped to `wc -l` (selection) and to `command grep -cw '097'` (hits) | hits = selection = 5 | hits 0, selection 5 |
+| Coverage-index rows updated | `command grep -E '^\\| (§4\.3\.7\|§5\.3\.3\|§5\.3\.5) \\|\|^\\| (DefaultApplVerID\(1137\) on Logon\|ApplVerID\(1128\) per message)' "$R/spec/coverage-index.md"` piped to `wc -l` (selection) and to `command grep -cw '097'` (hits) | hits = selection = 5 | hits 0, selection 5 |
 | Constitution Article I §1 (bullet + milestone line) | `awk '/^## Article I —/,/^## Article II —/' "$R/.specify/constitution.md" \| command grep -c 'feature 097'` | 2 | 0 |
 | Constitution Article XVIII §2 annotation | `awk '/^## Article XVIII —/,/^## Article XIX —/' "$R/.specify/constitution.md" \| command grep -c 'Amended v4.3, feature 097'` | 1 | 0 |
 | Canonical residue, Article I §1 (bullet + milestone line) | `awk '/^## Article I —/,/^## Article II —/' "$R/.specify/constitution.md" \| command grep -cF "$CANON"` | 2 | 0 |
