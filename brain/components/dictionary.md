@@ -10,7 +10,6 @@ refs:
   - src/dictionary/reify.cpp
   - include/fixpp/dict/reify.hpp
   - .specify/2c-codegen.md
-  - docs/src/dictionary/codegen.md
   - .specify/215-dictionary-view.md
   - .specify/495-493-486-dict-reify-copy.md
   - .specify/456-table-view-seal.md
@@ -25,6 +24,7 @@ refs:
   - specs/057-behavioral-reify-unblock/research.md
   - specs/057-behavioral-reify-unblock/contracts/reify-dispatch-bridge.md
   - spec/behaviors-and-limitations.md
+  - docs/src/dictionary/codegen.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/002-dictionary-xml-loader-gatea.md
