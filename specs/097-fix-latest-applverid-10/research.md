@@ -143,7 +143,7 @@ with the recipe given; do not trust a line number after the first implementation
   | `FIXT11.xml` | accepted (declared in Logon) | accepted (declared in header) |
   | Orchestra FIX Latest | accepted (Logon fieldRef 1407) | accepted (StandardHeader expanded into every message) |
   | `FIX50SP2.xml` | n/a: it defines no Logon, so every validated Logon is rejected today | accepted (081 framing surface) |
-  | FIX4.x-shaped with 1137 injected (`fix44_dictionary_with_1137()` in `tests/session/engine_reset_unit_stop_test.cpp`) | rejected (`wire_unexpected_tag`) | rejected |
+  | FIX4.x-shaped with 1137 injected (`fix44_dictionary_with_1137()` in `tests/support/validation_test_dictionary.hpp`, moved there from `tests/session/engine_reset_unit_stop_test.cpp` at T068 F3) | rejected (`wire_unexpected_tag`) | rejected |
 
   Owner ruling (spec Clarifications, Gate A round 1): **no new rule**. The table is today's behaviour
   and stays so. B-097-3 discloses it. QuickFIX/Go with its shipped FIXT11.xml behaves like the last row

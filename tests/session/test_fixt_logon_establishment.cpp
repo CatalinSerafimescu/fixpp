@@ -1801,11 +1801,18 @@ struct OwnedFileDict {
 //
 // 097-fix-latest-applverid-10: loaded once per binary, on first use, and every caller gets
 // the same object, so the binary pays for one Orchestra load and not one per call. Sharing is
-// sound while a Dictionary is immutable after load and no test here compares dictionary
-// identity or use_count; an arm that passes it as both registry and session dictionary
-// therefore passes one object twice. Re-check with
-//   grep -n 'mutable' include/fixpp/dict/dictionary.hpp
-//   grep -n 'use_count\|\.get() ==' tests/session/test_fixt_logon_establishment.cpp
+// sound while a Dictionary is immutable after load, no test here asserts dictionary identity
+// or use_count, and production compares the session's dictionary pointer only with nullptr
+// and with the snapshot's source(); an arm that passes it as both registry and session
+// dictionary therefore passes one object twice. Re-check each condition:
+//   no mutable member under the dictionary headers (empty means it holds):
+//     grep -rnw 'mutable' include/fixpp/dict/
+//   no identity or use_count assertion in this file (comment lines filtered out, since this
+//   comment names both; empty means it holds):
+//     grep -n 'use_count\|\.get() ==' <this file> | grep -v '^[0-9]*: *//'
+//   every production read of the session's dictionary pointer, including the C-ABI handle
+//   copy it is cached into; read each hit for a comparison other than nullptr or source():
+//     grep -rn '\.dictionary\b\|->dict_\b' src include
 [[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_orchestra_latest_dict() {
     static const std::shared_ptr<const fixpp::dict::Dictionary> loaded = [] {
         auto owned = std::make_shared<OwnedFileDict>();

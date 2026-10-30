@@ -213,8 +213,10 @@ and run first (plan phase 2), and that run's result is recorded too.
       081's existing validator-level witness, `tests/wire/fixt_header_validate_test.cpp`, whose frames
       carry `1156=` through the FIXT framing surface. It is cited, not rewritten.
   - (e) The dictionary-decided reject (B-097-3, owner ruling, Gate A round 1). Session dictionary
-    FIX4.x-shaped with 1137 injected: the shape of `fix44_dictionary_with_1137()` in
-    `tests/session/engine_reset_unit_stop_test.cpp`, copied into the 097 test; no other file changes.
+    FIX4.x-shaped with 1137 injected: `fix44_dictionary_with_1137()`, which lives in
+    `tests/support/validation_test_dictionary.hpp` and is called by both the 097 test and
+    `tests/session/engine_reset_unit_stop_test.cpp` (moved there at T068 F3; before it, the 097 test
+    held a copy of the latter file's helper).
     Registry {FIX50SP2}. Logon `1137=9` + `1407=303` gets a session Reject (35=3) and is never Active.
     The validate-first gate passes the validator's `ref_tag` and
     `wire_error_to_session_reject_reason(...)` into the Reject: 371 is expected to be 1407, and 373 is
@@ -541,12 +543,13 @@ peer-supplied DefaultApplVerID(1137) or ApplVerID(1128), and no existing harness
     error): a non-empty value never consults the default.
   - **Non-empty input refused**: the error is `dict_unknown_appl_ver_id` (FR-001: a refused value keeps
     its error).
-  - **Non-empty input accepted**: `render_appl_ver_id(result)` has a value; it equals the input bytes
-    exactly; and `resolve_application_version(profile, rendered)` gives the same
-    `application_version`. Exact byte equality is the strict form. Parse accepts only the strings render
+  - **Non-empty input accepted**: `render_appl_ver_id(result)` has a value, and it equals the input
+    bytes exactly. Exact byte equality is the strict form. Parse accepts only the strings render
     produces, so a parse that accepts a second spelling, or a render that moves, fails it. Re-parse
     equality alone would not: under M-1, `"11"` parses to `vlatest`, renders `"10"`, and `"10"` parses
-    back to `vlatest`.
+    back to `vlatest`. The harness does not re-parse the rendering: once the rendered bytes equal the
+    input, the parse is a pure function on the same bytes and profile, so a re-parse check cannot fire.
+    It was removed at T068 F7.
   - No input aborts, reads out of bounds or reaches UB (ASan and UBSan).
 - **Seeds** (`tests/fuzz/corpus/appl_ver_id/`, named `seed_<what>` per the provenance rule in
   `tests/fuzz/CMakeLists.txt`, each written without a trailing newline, e.g. `printf '%s'`): `seed_10`

@@ -50,8 +50,11 @@ Codex fixes that were not applied, or applied in a different shape, following th
   versions" banner, its unmapped-version diagnostic and `VersionIR::ns`'s namespace list in `ir.hpp`.
   Not applied. That staleness dates from 076, which added the `vlatest` row without updating them, and
   the bundle's policy leaves pre-097 "four codegen versions" statements alone (FR-012(f); data-model
-  §C; "clean up only your own mess"). 097 edits only the `vlatest` row's own comment in `ir.cpp`; the
-  nearby pre-existing staleness is mentioned in the PR body as pre-existing. Applied: every
+  §C; "clean up only your own mess"). 097 edits the `vlatest` row's own comment in `ir.cpp`; the
+  nearby pre-existing staleness is mentioned in the PR body as pre-existing. Later change: the
+  unmapped-version diagnostic's version list was removed at T068 F9 (`/simplify`), so the diagnostic
+  is no longer a lead; the "four codegen-target versions" banner in `ir.cpp` and `VersionIR::ns`'s
+  namespace list in `ir.hpp` are unchanged and stay leads. Applied: every
   `emit_dispatch.cpp` comment 097 makes false (data-model §B), and Codex's request to add these
   strings to W-11 for that file, as a reversed-polarity quickstart §4.2 row (the §4.1 pattern does not
   match them). Codex's severity P2 was downgraded to P3 by Opus.
