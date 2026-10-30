@@ -31,6 +31,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-implement-log.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/096-fix-latest-tail-evidence-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/097-fix-latest-applverid-10-gatea.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
 constitution: ["§I.1"]
 ---
