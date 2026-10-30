@@ -54,10 +54,17 @@
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
+#ifdef FIXPP_097_FIX_LATEST_TIER_OFF
+#include <array>
+#include <cstddef>
+#include <fstream>
+#include <sstream>
+#endif
 
 #include "support/copy_site_fixtures.hpp"    // fixpp#493: shared copy-site frames + comparisons
 #include "support/failing_pmr_resource.hpp"  // 057: view()-OOM degrade witness
@@ -404,9 +411,12 @@ TEST(ReifyDispatchApplicationResolution, BadApplVerIdYieldsUnknownApplVerId) {
                                   .default_appl = application_version::v50sp2,
                                   .has_per_message_override = true,
                                   ._reserved = 0};
-    for (std::string_view bad : {"0", "1", "A", "x", "10", "99"}) {
+    for (std::string_view bad : {"0", "1", "A", "x", "99"}) {
         auto r = resolve_application_version(profile, bad);
-        ASSERT_FALSE(r.has_value()) << "bad ApplVerID=" << bad;
+        EXPECT_FALSE(r.has_value()) << "bad ApplVerID=" << bad;
+        if (r.has_value()) {
+            continue;
+        }
         EXPECT_EQ(r.error(), error::dict_unknown_appl_ver_id)
             << "AC-D7: non-parsing ApplVerID '" << bad << "' must yield dict_unknown_appl_ver_id";
     }
@@ -614,6 +624,142 @@ TEST(ReifyRoundTrip, ApplVerIdInFrameDrivesResolution) {
     ASSERT_TRUE(r->field_value(11).has_value());
     EXPECT_EQ(r->field_value(11)->as_string(), "ORD1");
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 097-fix-latest-applverid-10 (contracts W-9). FIX Latest is its own application
+// version, `vlatest` (wire ApplVerID "10"). With the FIX Latest tier ON the
+// generated dispatch has a `vlatest` arm; with it OFF there is none and a
+// vlatest resolution falls to the outer fail-loud default. The ON cases and the
+// OFF case are selected by FIXPP_097_FIX_LATEST_TIER_OFF (tests/dictionary/
+// CMakeLists.txt, set from NOT FIXPP_CODEGEN_FIX_LATEST).
+// ═════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+constexpr version_profile kFixtVlatestDefault097{.session = session_version::vt11,
+                                                 .default_appl = application_version::vlatest,
+                                                 .has_per_message_override = true,
+                                                 ._reserved = 0};
+
+// A FIXT profile whose default is v50sp2: the in-frame ApplVerID test's profile, and the
+// tier-OFF positive control's.
+constexpr version_profile kFixtV50sp2Default097{.session = session_version::vt11,
+                                                .default_appl = application_version::v50sp2,
+                                                .has_per_message_override = true,
+                                                ._reserved = 0};
+
+// A FIXT.1.1 frame carrying `35=<msg_type>`, built with assemble_frame.
+[[nodiscard]] std::vector<std::byte> make_fixt_frame_097(std::string const& msg_type) {
+    return fixpp::test_support::assemble_frame(
+        "8=FIXT.1.1\x01", "35=" + msg_type + "\x01" + "34=1\x01" + "49=S\x01" + "56=T\x01");
+}
+
+}  // namespace
+
+#ifndef FIXPP_097_FIX_LATEST_TIER_OFF
+
+// W-9 (a3) admin interception: under a vlatest profile each FIXT admin MsgType
+// keeps its session-admin label, because dict::reify intercepts the admin
+// MsgTypes before application dispatch (the emitter does not filter them, so a
+// direct dispatch_application of one would label it vlatest). Per-MsgType
+// checks are non-fatal so every MsgType reports.
+TEST(ReifyVlatest097, FixtAdminMsgTypesKeepSessionAdminUnderVlatest) {
+    constexpr char kAdminTypes[] = {'0', '1', '2', '3', '4', '5', 'A'};
+    for (char mt : kAdminTypes) {
+        ReifyFixture f{make_fixt_frame_097(std::string(1, mt))};
+        EXPECT_TRUE(f.ok()) << "097: the 35=" << mt << " frame must frame";
+        if (!f.ok()) {
+            continue;
+        }
+        std::pmr::monotonic_buffer_resource mr;
+        auto r = fixpp::dict::reify(f.view(), kFixtVlatestDefault097, &mr);
+        EXPECT_TRUE(r.has_value())
+            << "097: admin MsgType '" << mt << "' under a vlatest profile must reify; got error "
+            << fixpp::core::to_string(r.error());
+        if (!r.has_value()) {
+            continue;
+        }
+        EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin)
+            << "097: admin MsgType '" << mt
+            << "' must keep its session-admin label under a vlatest profile";
+    }
+}
+
+// W-9 (a3) in-frame 1128: a framed 35=D carrying ApplVerID(1128)=10 under a
+// v50sp2-default profile reifies as vlatest. The in-frame value, not the
+// profile default, selects FIX Latest (B-097-4's condition).
+TEST(ReifyRoundTrip, ApplVerId10InFrameResolvesToVlatest) {
+    ReifyFixture f{fixpp::test_support::assemble_frame(
+        "8=FIXT.1.1\x01", std::string("35=D\x01") + "34=1\x01" + "1128=10\x01" + "49=S\x01" +
+                              "56=T\x01" + "11=ORD1\x01")};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kFixtV50sp2Default097, &mr);
+    ASSERT_TRUE(r.has_value()) << "097: 35=D with 1128=10 must reify; got error "
+                               << fixpp::core::to_string(r.error());
+    EXPECT_EQ(r->version().k, resolved_message_version::kind::application);
+    EXPECT_EQ(r->version().application, application_version::vlatest)
+        << "097: in-frame ApplVerID(1128)=10 selects FIX Latest over the profile default";
+    ASSERT_TRUE(r->field_value(11).has_value());
+    EXPECT_EQ(r->field_value(11)->as_string(), "ORD1");
+}
+
+#else  // FIXPP_097_FIX_LATEST_TIER_OFF
+
+// W-9 (c), FIX Latest tier OFF: there is no vlatest arm, so under a vlatest
+// resolution dict::reify fails loud for D and for EC, and the generated header
+// holds no vlatest case. The same D frame under a v50sp2 resolution reifies,
+// so the error comes from the missing arm and not from the frame.
+TEST(ReifyVlatest097, TierOffHasNoVlatestArm) {
+    constexpr std::array<std::string_view, 2> kMsgTypes = {"D", "EC"};
+    for (std::string_view mt : kMsgTypes) {
+        ReifyFixture f{make_fixt_frame_097(std::string(mt))};
+        EXPECT_TRUE(f.ok()) << "097: the 35=" << mt << " frame must frame";
+        if (!f.ok()) {
+            continue;
+        }
+        std::pmr::monotonic_buffer_resource mr;
+        auto r = fixpp::dict::reify(f.view(), kFixtVlatestDefault097, &mr);
+        EXPECT_FALSE(r.has_value())
+            << "097 (tier OFF): MsgType " << mt << " under a vlatest resolution must not reify";
+        if (!r.has_value()) {
+            EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type)
+                << "097 (tier OFF): MsgType " << mt
+                << " under vlatest must fail loud with dict_reify_unknown_msg_type";
+        }
+    }
+
+    {
+        ReifyFixture f{make_fixt_frame_097("D")};
+        ASSERT_TRUE(f.ok());
+        std::pmr::monotonic_buffer_resource mr;
+        auto r = fixpp::dict::reify(f.view(), kFixtV50sp2Default097, &mr);
+        EXPECT_TRUE(r.has_value())
+            << "097 (tier OFF) positive control: 35=D under a v50sp2 resolution must reify";
+    }
+
+    std::ifstream in{FIXPP_097_REIFY_DISPATCH_APPLICATION_HPP};
+    ASSERT_TRUE(in.is_open()) << "failed to open " << FIXPP_097_REIFY_DISPATCH_APPLICATION_HPP;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    std::string const text = ss.str();
+    auto const count = [&text](std::string_view needle) {
+        std::size_t n = 0;
+        for (std::size_t pos = text.find(needle); pos != std::string::npos;
+             pos = text.find(needle, pos + needle.size())) {
+            ++n;
+        }
+        return n;
+    };
+    // Known positive: the same file holds the v50sp2 arm, so a zero below is not
+    // an empty or wrong file.
+    EXPECT_EQ(count("case ::fixpp::dict::application_version::v50sp2:"), 1U)
+        << "097 (tier OFF): the generated header must still carry the v50sp2 arm";
+    EXPECT_EQ(count("application_version::vlatest:"), 0U)
+        << "097 (tier OFF): the generated header must hold no vlatest case";
+}
+
+#endif  // FIXPP_097_FIX_LATEST_TIER_OFF
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 057 US1 (T014) — preserved error-contract witnesses (FR-009, SC-004). Each

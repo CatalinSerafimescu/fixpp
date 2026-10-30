@@ -82,6 +82,9 @@ set_tests_properties(config_044_tests PROPERTIES LABELS "config;044;080")
 # 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST config_044_tests APPEND PROPERTY LABELS 093)
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST config_044_tests APPEND PROPERTY LABELS 097)
 
 # ── 068-test-binary-grouping US2: config_045_tests grouped bucket (4 .cpp) ──
 # T008/T009 logger equivalence + T014/T014a/T015 logger negative battery +

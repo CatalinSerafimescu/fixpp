@@ -54,11 +54,14 @@
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 #include <fixpp/dict/xml_loader.hpp>
@@ -75,12 +78,16 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reify_test_frame.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
+#include "support/validation_test_dictionary.hpp"
 
 namespace {
 
@@ -163,7 +170,10 @@ TEST(RenderApplVerId, Unknown_ReturnsError) {
 
 TEST(RenderApplVerId, RoundTrip_AllValues) {
     // Symmetry: render then resolve must recover the original application_version
-    // (every non-Unknown value must round-trip through the inverse pair).
+    // for each pre-097 member listed below. vlatest's round trip is in
+    // 097-fix-latest-applverid-10's VersionProfile097.RenderVlatestIs10_RoundTripAndDistinct.
+    // Each member's checks are non-fatal, so a failing member does not hide the members
+    // after it.
     using fixpp::dict::resolve_application_version;
     using fixpp::dict::session_version;
     using fixpp::dict::version_profile;
@@ -180,9 +190,15 @@ TEST(RenderApplVerId, RoundTrip_AllValues) {
     };
     for (auto v : kAll) {
         auto wire = render_appl_ver_id(v);
-        ASSERT_TRUE(wire.has_value()) << "render failed for enum=" << static_cast<int>(v);
+        EXPECT_TRUE(wire.has_value()) << "render failed for enum=" << static_cast<int>(v);
+        if (!wire.has_value()) {
+            continue;
+        }
         auto back = resolve_application_version(kProfile, *wire);
-        ASSERT_TRUE(back.has_value()) << "resolve failed for wire=" << *wire;
+        EXPECT_TRUE(back.has_value()) << "resolve failed for wire=" << *wire;
+        if (!back.has_value()) {
+            continue;
+        }
         EXPECT_EQ(*back, v) << "round-trip mismatch for enum=" << static_cast<int>(v);
     }
 }
@@ -1666,6 +1682,904 @@ TEST(FixtLogonEstablishment, W4_042_InboundNonDeadness_PeerUnserviceableSurvives
                         "373=1\x01"),
               std::string::npos)
         << "Unserviceable peer path must emit 373=5, NOT 373=1; got: " << wire;
+}
+
+// ── 097-fix-latest-applverid-10 — W-6, W-7, W-8 ──────────────────────────────
+//
+// FIX Latest's ApplVerID is "10" (application_version::vlatest). A session negotiates
+// vlatest exactly when the 1137 it reads from its peer is "10"; the registry answers a
+// vlatest lookup from its own slot, and (097's one-way fallback) an empty v50sp2 slot
+// from the vlatest slot.
+//
+// Every 097 session here appends each outbound frame to a vector, so an arm can name the
+// frame it reads and a W-8 count can cover every frame a session sent.
+//
+// [097 contracts/witnesses.md W-6, W-7, W-8; research R-6; quickstart §1.1]
+
+using Frames = std::vector<std::vector<std::byte>>;
+using fixpp::test_support::assemble_frame;
+using fixpp::test_support::extract_tag;
+
+// MsgType(35) of a captured frame ("" when absent).
+[[nodiscard]] std::string msg_type_of(std::span<const std::byte> f) { return extract_tag(f, 35); }
+
+// One line per captured frame, naming the fields an arm's outcome is read from, so a
+// failure message carries the frames and the state it was read from.
+[[nodiscard]] std::string describe_frames(const Frames& frames) {
+    std::string out;
+    for (const auto& f : frames) {
+        out += "[35=" + msg_type_of(f);
+        for (std::uint32_t tag : {371U, 372U, 373U, 1137U}) {
+            auto v = extract_tag(f, tag);
+            if (!v.empty()) {
+                out += " " + std::to_string(tag) + "=" + v;
+            }
+        }
+        out += "] ";
+    }
+    return out.empty() ? std::string{"(no frame)"} : out;
+}
+
+// Index of the first frame at or after `from` whose MsgType is `mt`, or frames.size().
+[[nodiscard]] std::size_t find_msg_type(const Frames& frames, std::string_view mt,
+                                        std::size_t from = 0) {
+    for (std::size_t i = from; i < frames.size(); ++i) {
+        if (msg_type_of(frames[i]) == mt) {
+            return i;
+        }
+    }
+    return frames.size();
+}
+
+// The peer's (TW → ISLD) inbound Logon: 1137 = `appl_ver_id`; when `with_1407`, the body
+// also carries DefaultApplExtID(1407)=303 right after 1137, where FIXT11.xml and the
+// Orchestra Logon both declare it. `extra_field` (a whole "tag=value" field, SOH-terminated)
+// is appended last when non-empty.
+[[nodiscard]] std::vector<std::byte> peer_logon(std::string_view appl_ver_id, bool with_1407,
+                                                std::string_view extra_field = {}) {
+    std::string body;
+    body += "35=A\x01";
+    body += "34=1\x01";
+    body += "49=TW\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=ISLD\x01";
+    body += "98=0\x01";
+    body += "108=30\x01";
+    body += "1137=" + std::string(appl_ver_id) + "\x01";
+    if (with_1407) {
+        body += "1407=303\x01";
+    }
+    body += std::string(extra_field);
+    return assemble_frame("8=FIXT.1.1\x01", body);
+}
+
+// The peer's (TW → ISLD) inbound NewOrderSingle(35=D), seq 2. `body_fields` are the
+// message's own fields, chosen per session dictionary. When `with_1156`, the header
+// carries ApplExtID(1156)=303 (under 097 it selects no version or dictionary)
+// immediately after MsgType, the position FIXT11.xml's and the Orchestra
+// StandardHeader's declarations give it, so arm and control differ only in that one
+// field.
+[[nodiscard]] std::vector<std::byte> peer_new_order_single(std::string_view body_fields,
+                                                           bool with_1156) {
+    std::string body;
+    body += "35=D\x01";
+    if (with_1156) {
+        body += "1156=303\x01";
+    }
+    body += "34=2\x01";
+    body += "49=TW\x01";
+    body += "52=20240101-00:00:00.000\x01";
+    body += "56=ISLD\x01";
+    body += std::string(body_fields);
+    return assemble_frame("8=FIXT.1.1\x01", body);
+}
+
+// NewOrderSingle body for the Orchestra FIX Latest dictionary: its required fields
+// ClOrdID, Side, TransactTime and OrdType, with valid enum codes.
+constexpr std::string_view kOrchestraNosFields =
+    "11=ORD1\x01"
+    "54=1\x01"
+    "60=20240101-00:00:00.000\x01"
+    "40=1\x01";
+
+// NewOrderSingle body for the FIX4.x-shaped dictionary below: the required fields its
+// message declares, and nothing it does not declare.
+constexpr std::string_view kFix4xNosFields =
+    "11=ORD1\x01"
+    "54=1\x01"
+    "60=20240101-00:00:00.000\x01";
+
+// A dictionary loaded from a file, owning the memory resource it was loaded into.
+// Destroyed in reverse member order: the dictionary, then its resource.
+struct OwnedFileDict {
+    std::unique_ptr<std::pmr::monotonic_buffer_resource> mr;
+    std::unique_ptr<const fixpp::dict::Dictionary> dict;
+};
+
+// The vendored Orchestra FIX Latest repository, loaded with OrchestraLoader: the FIX
+// Latest dictionary (which_session_version() == vlatest).
+//
+// 097-fix-latest-applverid-10: loaded once per binary, on first use, and every caller gets
+// the same object, so the binary pays for one Orchestra load and not one per call. Sharing is
+// sound while a Dictionary is immutable after load, no test here asserts dictionary identity
+// or use_count, and production compares the session's dictionary pointer only with nullptr
+// and with the snapshot's source(); an arm that passes it as both registry and session
+// dictionary therefore passes one object twice. Re-check each condition:
+//   no mutable member under the dictionary headers (empty means it holds):
+//     grep -rnw 'mutable' include/fixpp/dict/
+//   no identity or use_count assertion in this file (comment lines filtered out, since this
+//   comment names both; empty means it holds):
+//     grep -n 'use_count\|\.get() ==' <this file> | grep -v '^[0-9]*: *//'
+//   every production read of the session's dictionary pointer, including the C-ABI handle
+//   copy it is cached into; read each hit for a comparison other than nullptr or source():
+//     grep -rn '\.dictionary\b\|->dict_\b' src include
+[[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_orchestra_latest_dict() {
+    static const std::shared_ptr<const fixpp::dict::Dictionary> loaded = [] {
+        auto owned = std::make_shared<OwnedFileDict>();
+        owned->mr = std::make_unique<std::pmr::monotonic_buffer_resource>();
+        owned->dict =
+            std::make_unique<const fixpp::dict::Dictionary>(fixpp::dict::OrchestraLoader{}.load(
+                std::filesystem::path{FIXPP_DICT_DATA_DIR} / "orchestra" / "OrchestraFIXLatest.xml",
+                owned->mr.get()));
+        return std::shared_ptr<const fixpp::dict::Dictionary>{owned, owned->dict.get()};
+    }();
+    return loaded;
+}
+
+// The shipped dictionaries/FIXT11.xml (the FIXT session layer), loaded with XmlLoader.
+[[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_fixt11_dict() {
+    auto owned = std::make_shared<OwnedFileDict>();
+    owned->mr = std::make_unique<std::pmr::monotonic_buffer_resource>();
+    owned->dict = std::make_unique<const fixpp::dict::Dictionary>(fixpp::dict::XmlLoader{}.load(
+        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIXT11.xml", owned->mr.get()));
+    return std::shared_ptr<const fixpp::dict::Dictionary>{owned, owned->dict.get()};
+}
+
+// A FIXT acceptor (ISLD; peer TW) over its own FixtSetup, capturing every outbound frame
+// and counting fromApp. The registry is `registry_dicts`; the session dictionary is
+// `session_dict` when non-null (else FixtSetup's), and inbound validation is
+// `validate`. The session's own default is `own_default`; the default "9" (v50sp2) is the
+// W5 v50sp2 acceptor case this clones.
+struct Acceptor097 {
+    FixtSetup s;
+    std::shared_ptr<W8CountingApp> app = std::make_shared<W8CountingApp>();
+    Frames out;
+    std::unique_ptr<fixpp::session::Session> sess;
+
+    Acceptor097(std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> registry_dicts,
+                std::shared_ptr<const fixpp::dict::Dictionary> session_dict, bool validate,
+                application_version own_default = application_version::v50sp2)
+        : s{std::move(registry_dicts)} {
+        s.engine.application = app;
+        auto cfg = s.make_acceptor_cfg(own_default);
+        if (session_dict) {
+            cfg.dictionary = std::move(session_dict);
+        }
+        cfg.validate_inbound_messages = validate;
+        cfg.transport_send = [this](std::span<const std::byte> f) {
+            out.emplace_back(f.begin(), f.end());
+        };
+        sess = std::make_unique<fixpp::session::Session>(s.engine, cfg, &s.registry);
+    }
+    Acceptor097(const Acceptor097&) = delete;
+    Acceptor097& operator=(const Acceptor097&) = delete;
+    Acceptor097(Acceptor097&&) = delete;
+    Acceptor097& operator=(Acceptor097&&) = delete;
+    ~Acceptor097() = default;
+
+    [[nodiscard]] fixpp::core::expected_t<void> open() {
+        return run_sync(s, [&] { return sess->open(); });
+    }
+    // The outcome is read from state and frames, not from this result: a refused Logon
+    // may return either way (the pre-097 W2/W3 cells discard it too).
+    void feed(const std::vector<std::byte>& frame) {
+        (void)run_sync(s, [&] {
+            return sess->on_inbound_frame(std::span<const std::byte>{frame.data(), frame.size()});
+        });
+    }
+    [[nodiscard]] std::string observed() const {
+        return "state=" + std::to_string(static_cast<int>(sess->state())) +
+               " frames: " + describe_frames(out) +
+               " fromApp=" + std::to_string(app->from_app_calls);
+    }
+};
+
+// Asserts the acceptor's reply is the DefaultApplVerID(1137) Reject: a 35=3 frame with
+// 373=5 (ValueIsIncorrect) and 371=1137, no Logon reply, and the session Disconnected.
+void expect_1137_reject_then_disconnect(const Acceptor097& a) {
+    const auto rj = find_msg_type(a.out, "3");
+    ASSERT_LT(rj, a.out.size()) << "expected a Reject (35=3); observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 373), "5") << "observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 371), "1137") << "observed " << a.observed();
+    EXPECT_EQ(find_msg_type(a.out, "A"), a.out.size())
+        << "no Logon reply may precede or follow the 1137 Reject; observed " << a.observed();
+    EXPECT_EQ(a.sess->state(), fsm_state::Disconnected) << "observed " << a.observed();
+}
+
+// Asserts the acceptor established: its reply is a Logon (35=A), there is no Reject, and
+// the session is Active.
+void expect_established(const Acceptor097& a) {
+    ASSERT_FALSE(a.out.empty()) << "the acceptor sent nothing; observed " << a.observed();
+    EXPECT_EQ(msg_type_of(a.out.front()), "A")
+        << "the reply must be a Logon, not a Reject; observed " << a.observed();
+    EXPECT_EQ(find_msg_type(a.out, "3"), a.out.size()) << "observed " << a.observed();
+    EXPECT_EQ(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
+}
+
+// ── W-6 — FIXT establishment, validate_inbound_messages at its default (off) ──
+//
+// The registry is the dictionary set under test; FixtSetup's session dictionary takes no
+// part while validation is off.
+
+// W-6 (a): registry {FIX Latest}, peer 1137=10 → a Logon reply, Active, and the negotiated
+// version is FIX Latest's own (vlatest).
+TEST(FixtLogonEstablishment097, W6a_LatestRegistry_Peer10_LogonReplyNotReject) {
+    Acceptor097 a{{make_orchestra_latest_dict()}, nullptr, /*validate=*/false};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("10", /*with_1407=*/false));
+    expect_established(a);
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::vlatest)
+        << "observed " << a.observed();
+}
+
+// W-6 (b): registry {FIX50SP2}, peer 1137=10 → Reject 373=5, 371=1137, then disconnect.
+TEST(FixtLogonEstablishment097, W6b_Fix50sp2Registry_Peer10_Rejected373_5_371_1137) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)}, nullptr, /*validate=*/false};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("10", /*with_1407=*/false));
+    expect_1137_reject_then_disconnect(a);
+}
+
+// W-6 (c): registry {FIX Latest}, peer 1137=9 → established, negotiated v50sp2 (the
+// one-way fallback answers v50sp2 from the FIX Latest dictionary).
+TEST(FixtLogonEstablishment097, W6c_LatestRegistry_Peer9_EstablishedNegotiatedV50sp2) {
+    Acceptor097 a{{make_orchestra_latest_dict()}, nullptr, /*validate=*/false};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("9", /*with_1407=*/false));
+    expect_established(a);
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::v50sp2)
+        << "observed " << a.observed();
+}
+
+// W-6 (c), admission arm: the same registry and peer, but the session's own default is
+// "10" (vlatest). open() then finds the exact vlatest slot, so the only lookup that goes
+// through the one-way fallback is the inbound Logon's 1137=9. A missing fallback shows here
+// as a refused Logon, with open() succeeding; W6c's own default "9" already needs the
+// fallback at open().
+TEST(FixtLogonEstablishment097, W6c2_LatestRegistry_OwnDefault10_Peer9_AdmittedViaFallback) {
+    Acceptor097 a{
+        {make_orchestra_latest_dict()}, nullptr, /*validate=*/false, application_version::vlatest};
+    ASSERT_TRUE(a.open().has_value()) << "precondition: open() with own default vlatest";
+    a.feed(peer_logon("9", /*with_1407=*/false));
+    EXPECT_EQ(find_msg_type(a.out, "3"), a.out.size())
+        << "no Reject may be sent; observed " << a.observed();
+    EXPECT_LT(find_msg_type(a.out, "A"), a.out.size())
+        << "the reply must be a Logon; observed " << a.observed();
+    EXPECT_EQ(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::v50sp2)
+        << "observed " << a.observed();
+}
+
+// W-6 (d): one engine whose registry holds {FIX50SP2, FIX Latest}, one acceptor session per
+// peer, all built on the same FixtSetup (its EngineConfig and its registry). Each peer
+// advertises its own 1137; each session is established and negotiates the version its peer
+// advertised, served from that version's own slot. Admission is engine-wide: a session
+// whose own dictionary is FIX50SP2 still admits a 1137=10 peer, because the engine's
+// registry serves vlatest (spec Clarifications, /speckit-clarify). Every session's own
+// default is "9", so open() does not depend on the vlatest slot. Per-peer checks are
+// non-fatal, so one failing session cannot hide another's result.
+// [097 contracts/witnesses.md W-6 (d); FR-004, FR-005, FR-007]
+struct Peer097 {
+    std::string comp_id;
+    std::string appl_ver_id;
+    std::shared_ptr<const fixpp::dict::Dictionary> own_dict;  // null: FixtSetup's
+    application_version expect;
+    Frames out;
+    std::unique_ptr<fixpp::session::Session> sess;
+
+    [[nodiscard]] std::string observed() const {
+        return "peer=" + comp_id + " 1137=" + appl_ver_id +
+               " state=" + std::to_string(static_cast<int>(sess->state())) +
+               " frames: " + describe_frames(out);
+    }
+};
+
+TEST(FixtLogonEstablishment097, W6d_BothRegistry_OneSessionPerPeer_EachNegotiatesOwnVersion) {
+    auto fix50sp2 = make_dict(kMinimalFix50sp2Xml);
+    ASSERT_EQ(fix50sp2->which_session_version(), fixpp::dict::session_version::v50sp2)
+        << "precondition: the FIX50SP2 dictionary";
+    FixtSetup s{{fix50sp2, make_orchestra_latest_dict()}};
+
+    std::vector<std::unique_ptr<Peer097>> peers;
+    peers.push_back(std::make_unique<Peer097>(Peer097{.comp_id = "PEER9",
+                                                      .appl_ver_id = "9",
+                                                      .own_dict = nullptr,
+                                                      .expect = application_version::v50sp2,
+                                                      .out = {},
+                                                      .sess = nullptr}));
+    peers.push_back(std::make_unique<Peer097>(Peer097{.comp_id = "PEER10",
+                                                      .appl_ver_id = "10",
+                                                      .own_dict = nullptr,
+                                                      .expect = application_version::vlatest,
+                                                      .out = {},
+                                                      .sess = nullptr}));
+    // The engine-wide arm: this session's own dictionary is FIX50SP2.
+    peers.push_back(std::make_unique<Peer097>(Peer097{.comp_id = "PEER10SP2",
+                                                      .appl_ver_id = "10",
+                                                      .own_dict = fix50sp2,
+                                                      .expect = application_version::vlatest,
+                                                      .out = {},
+                                                      .sess = nullptr}));
+
+    for (auto& p : peers) {
+        auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
+        cfg.target_comp_id = p->comp_id;
+        if (p->own_dict) {
+            cfg.dictionary = p->own_dict;
+        }
+        cfg.validate_inbound_messages = false;
+        cfg.transport_send = [out = &p->out](std::span<const std::byte> f) {
+            out->emplace_back(f.begin(), f.end());
+        };
+        p->sess = std::make_unique<fixpp::session::Session>(s.engine, cfg, &s.registry);
+    }
+
+    std::vector<bool> opened;
+    for (auto& p : peers) {
+        auto r = run_sync(s, [&] { return p->sess->open(); });
+        EXPECT_TRUE(r.has_value()) << "open() failed; " << p->observed();
+        opened.push_back(r.has_value());
+    }
+    for (std::size_t i = 0; i < peers.size(); ++i) {
+        if (!opened[i]) {
+            continue;
+        }
+        auto& p = *peers[i];
+        auto logon = make_fixt_logon_frame("FIXT.1.1", 1, p.comp_id, "ISLD", 30, p.appl_ver_id);
+        (void)run_sync(s, [&] {
+            return p.sess->on_inbound_frame(std::span<const std::byte>{logon.data(), logon.size()});
+        });
+    }
+
+    for (std::size_t i = 0; i < peers.size(); ++i) {
+        if (!opened[i]) {
+            continue;
+        }
+        const auto& p = *peers[i];
+        EXPECT_EQ(find_msg_type(p.out, "3"), p.out.size())
+            << "no Reject may be sent; " << p.observed();
+        EXPECT_LT(find_msg_type(p.out, "A"), p.out.size())
+            << "the reply must be a Logon; " << p.observed();
+        EXPECT_EQ(p.sess->state(), fsm_state::Active) << p.observed();
+        EXPECT_EQ(p.sess->negotiated_version_profile().default_appl, p.expect)
+            << "negotiated version; " << p.observed();
+    }
+}
+
+// W-6 (e): an initiator records the peer's Logon-ack 1137=10 as vlatest. The initiator
+// makes no registry lookup for the peer's value, so its registry here, {FIX50SP2}, serves
+// only its own configured default ("9") and not vlatest.
+TEST(FixtLogonEstablishment097, W6e_Initiator_Ack10_NegotiatedVlatest_NoRegistryLookup) {
+    FixtSetup s{{make_dict(kMinimalFix50sp2Xml)}};
+    Frames out;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    cfg.transport_send = [&out](std::span<const std::byte> f) {
+        out.emplace_back(f.begin(), f.end());
+    };
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    ASSERT_TRUE(run_sync(s, [&] { return sess.open(); }).has_value());
+    ASSERT_LT(find_msg_type(out, "A"), out.size()) << "the initiator sent no Logon";
+    ASSERT_FALSE(s.registry.get(application_version::vlatest).has_value())
+        << "precondition: the registry must not serve vlatest";
+
+    auto ack = make_fixt_logon_frame("FIXT.1.1", 1, "ISLD", "TW", 30, "10");
+    (void)run_sync(s, [&] {
+        return sess.on_inbound_frame(std::span<const std::byte>{ack.data(), ack.size()});
+    });
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "frames: " << describe_frames(out);
+    EXPECT_EQ(sess.negotiated_version_profile().default_appl, application_version::vlatest)
+        << "frames: " << describe_frames(out);
+}
+
+// W-6 (f): open() looks the session's own configured default up in the registry.
+// [FR-007; data-model §A's lookup table]
+[[nodiscard]] fixpp::core::expected_t<void> open_acceptor_with(
+    std::shared_ptr<const fixpp::dict::Dictionary> registry_dict, application_version own_default) {
+    Acceptor097 a{{std::move(registry_dict)}, nullptr, /*validate=*/false, own_default};
+    return a.open();
+}
+
+// W-6 (f), first case: default "10" with registry {FIX Latest} → open() succeeds.
+TEST(FixtLogonEstablishment097, W6f1_OpenDefault10_LatestRegistry_Succeeds) {
+    auto r = open_acceptor_with(make_orchestra_latest_dict(), application_version::vlatest);
+    EXPECT_TRUE(r.has_value()) << "open() failed with error code " << static_cast<int>(r.error());
+}
+
+// W-6 (f), second case: default "9" with registry {FIX Latest} → open() still succeeds
+// (the one-way fallback answers v50sp2 from the FIX Latest dictionary).
+TEST(FixtLogonEstablishment097, W6f2_OpenDefault9_LatestRegistry_SucceedsViaFallback) {
+    auto r = open_acceptor_with(make_orchestra_latest_dict(), application_version::v50sp2);
+    EXPECT_TRUE(r.has_value()) << "open() failed with error code " << static_cast<int>(r.error());
+}
+
+// W-6 (f), third case: default "10" with registry {FIX50SP2} → invalid_session_config (no
+// reverse fallback).
+TEST(FixtLogonEstablishment097, W6f3_OpenDefault10_Fix50sp2Registry_InvalidSessionConfig) {
+    auto r = open_acceptor_with(make_dict(kMinimalFix50sp2Xml), application_version::vlatest);
+    ASSERT_FALSE(r.has_value()) << "open() must fail: {FIX50SP2} does not serve vlatest";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config)
+        << "got error code " << static_cast<int>(r.error());
+}
+
+// ── W-7 — 1407 and 1156 under validation: no rule, the session dictionary decides ──
+//
+// validate_inbound_messages is ON and each arm names its session dictionary (what
+// validates) and its registry (what serves the version) separately. FixtSetup's session
+// dictionary defines no Logon, so no arm here uses it. Each arm (x) has a control (x0):
+// the same frame without 1407 or 1156, the same session dictionary and registry.
+
+// W-7 (a): session dictionary FIXT11.xml, registry {FIX50SP2}: 1137=9 + 1407 →
+// established, negotiated v50sp2.
+TEST(FixtLogonEstablishment097, W7a_Fixt11_Fix50sp2Registry_9With1407_Established) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)}, make_fixt11_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("9", /*with_1407=*/true));
+    expect_established(a);
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::v50sp2)
+        << "observed " << a.observed();
+}
+
+// W-7 (a0): control of (a), without 1407.
+TEST(FixtLogonEstablishment097, W7a0_Fixt11_Fix50sp2Registry_9_Established) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)}, make_fixt11_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("9", /*with_1407=*/false));
+    expect_established(a);
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::v50sp2)
+        << "observed " << a.observed();
+}
+
+// W-7 (b): session dictionary FIXT11.xml, registry {FIX Latest}: 1137=10 + 1407 →
+// established, negotiated vlatest.
+TEST(FixtLogonEstablishment097, W7b_Fixt11_LatestRegistry_10With1407_Established) {
+    Acceptor097 a{{make_orchestra_latest_dict()}, make_fixt11_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("10", /*with_1407=*/true));
+    expect_established(a);
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::vlatest)
+        << "observed " << a.observed();
+}
+
+// W-7 (b0): control of (b), without 1407: established, negotiated vlatest.
+TEST(FixtLogonEstablishment097, W7b0_Fixt11_LatestRegistry_10_EstablishedNegotiatedVlatest) {
+    Acceptor097 a{{make_orchestra_latest_dict()}, make_fixt11_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("10", /*with_1407=*/false));
+    expect_established(a);
+    EXPECT_EQ(a.sess->negotiated_version_profile().default_appl, application_version::vlatest)
+        << "observed " << a.observed();
+}
+
+// W-7 (c): session dictionary FIXT11.xml, registry {FIX50SP2}: 1137=10 + 1407 →
+// Reject 373=5, 371=1137, then disconnect. 1407 does not make the version serviceable.
+TEST(FixtLogonEstablishment097, W7c_Fixt11_Fix50sp2Registry_10With1407_Rejected) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)}, make_fixt11_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("10", /*with_1407=*/true));
+    expect_1137_reject_then_disconnect(a);
+}
+
+// W-7 (c0): control of (c), without 1407: the same Reject.
+TEST(FixtLogonEstablishment097, W7c0_Fixt11_Fix50sp2Registry_10_Rejected) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)}, make_fixt11_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("10", /*with_1407=*/false));
+    expect_1137_reject_then_disconnect(a);
+}
+
+// W-7 (v1)/(v2): the non-vacuity controls of (a)-(d). (a)-(d) pass when the validator
+// accepts 1407 or 1156, and they would also pass if no validation ran under their session
+// dictionaries. These two show the validate gate rejecting under exactly those
+// dictionaries: (a0)'s Logon plus one field neither dictionary declares gets a session
+// Reject naming that tag, with 373 the unexpected-tag mapping. The tag is chosen
+// undeclared in both files; re-derive with
+//   grep -c "number='9876'" dictionaries/FIXT11.xml
+//   grep -c 'id="9876"' dictionaries/orchestra/OrchestraFIXLatest.xml
+// (each must print 0; the same greps for 1407 print non-zero, the known positive).
+constexpr std::string_view kUndeclaredLogonField = "9876=1\x01";
+
+void expect_undeclared_tag_reject(const Acceptor097& a) {
+    const auto rj = find_msg_type(a.out, "3");
+    ASSERT_LT(rj, a.out.size()) << "expected a session Reject (35=3); observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 371), "9876") << "observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 373), "2") << "observed " << a.observed();
+    EXPECT_EQ(find_msg_type(a.out, "A"), a.out.size()) << "observed " << a.observed();
+    EXPECT_NE(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
+}
+
+// W-7 (v1): session dictionary FIXT11.xml, registry {FIX50SP2} ((a)'s), 1137=9 plus an
+// undeclared tag → the validator's session Reject.
+TEST(FixtLogonEstablishment097, W7v1_Fixt11_UndeclaredTag_ValidatorRejects) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)}, make_fixt11_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("9", /*with_1407=*/false, kUndeclaredLogonField));
+    expect_undeclared_tag_reject(a);
+}
+
+// W-7 (v2): session dictionary the Orchestra FIX Latest file, registry {FIX Latest}
+// ((d)'s), 1137=9 plus an undeclared tag → the validator's session Reject.
+TEST(FixtLogonEstablishment097, W7v2_OrchestraLatest_UndeclaredTag_ValidatorRejects) {
+    Acceptor097 a{{make_orchestra_latest_dict()}, make_orchestra_latest_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("9", /*with_1407=*/false, kUndeclaredLogonField));
+    expect_undeclared_tag_reject(a);
+}
+
+// Drives an acceptor to Active with a 1137=9 Logon and asserts it, then feeds the
+// NewOrderSingle `nos`. Returns the index of the first frame sent after the Logon reply,
+// so the caller reads only what the application message drew.
+[[nodiscard]] std::size_t establish_then_feed(Acceptor097& a, const std::vector<std::byte>& nos) {
+    a.feed(peer_logon("9", /*with_1407=*/false));
+    EXPECT_EQ(a.sess->state(), fsm_state::Active)
+        << "setup: the 1137=9 Logon must establish; observed " << a.observed();
+    EXPECT_EQ(a.app->from_app_calls, 0) << "setup: nothing reaches fromApp before the order";
+    const std::size_t before = a.out.size();
+    a.feed(nos);
+    return before;
+}
+
+// Asserts the NewOrderSingle reached fromApp with no Reject drawn, the session Active.
+void expect_delivered(const Acceptor097& a, std::size_t from) {
+    EXPECT_EQ(a.app->from_app_calls, 1) << "observed " << a.observed();
+    EXPECT_EQ(find_msg_type(a.out, "3", from), a.out.size())
+        << "no session Reject may follow the order; observed " << a.observed();
+    EXPECT_EQ(find_msg_type(a.out, "j", from), a.out.size())
+        << "no BusinessMessageReject may follow the order; observed " << a.observed();
+    EXPECT_EQ(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
+}
+
+// W-7 (d): session dictionary the Orchestra FIX Latest file, registry {FIX Latest},
+// Logon 1137=9: a NewOrderSingle with header 1156=303 reaches fromApp with no Reject.
+TEST(FixtLogonEstablishment097, W7d_OrchestraLatest_Header1156_DeliveredToFromApp) {
+    Acceptor097 a{{make_orchestra_latest_dict()}, make_orchestra_latest_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    const auto from =
+        establish_then_feed(a, peer_new_order_single(kOrchestraNosFields, /*with_1156=*/true));
+    expect_delivered(a, from);
+}
+
+// W-7 (d0): control of (d), without 1156.
+TEST(FixtLogonEstablishment097, W7d0_OrchestraLatest_No1156_DeliveredToFromApp) {
+    Acceptor097 a{{make_orchestra_latest_dict()}, make_orchestra_latest_dict(), /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    const auto from =
+        establish_then_feed(a, peer_new_order_single(kOrchestraNosFields, /*with_1156=*/false));
+    expect_delivered(a, from);
+}
+
+// W-7 (e): the dictionary-decided reject. Session dictionary FIX4.x-shaped with 1137
+// declared and 1407 not, registry {FIX50SP2}: 1137=9 + 1407 → a session Reject, never
+// Active. 371 is the validator's ref tag; 373 is what the unexpected-tag error maps to
+// (include/fixpp/wire/reject_reason_map.hpp). A characterization pin of this tree.
+TEST(FixtLogonEstablishment097, W7e_Fix4xShaped_9With1407_SessionReject) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+                  fixpp::test_support::fix44_dictionary_with_1137(),
+                  /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("9", /*with_1407=*/true));
+    const auto rj = find_msg_type(a.out, "3");
+    ASSERT_LT(rj, a.out.size()) << "expected a session Reject (35=3); observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 371), "1407") << "observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 373), "2") << "observed " << a.observed();
+    EXPECT_EQ(find_msg_type(a.out, "A"), a.out.size()) << "observed " << a.observed();
+    EXPECT_NE(a.sess->state(), fsm_state::Active) << "observed " << a.observed();
+}
+
+// W-7 (e0): control of (e), without 1407: established.
+TEST(FixtLogonEstablishment097, W7e0_Fix4xShaped_9_Established) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+                  fixpp::test_support::fix44_dictionary_with_1137(),
+                  /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    a.feed(peer_logon("9", /*with_1407=*/false));
+    expect_established(a);
+}
+
+// W-7 (f): on (e0)'s Active session, a NewOrderSingle with header 1156=303 → a session
+// Reject, not fromApp. That dictionary is a FIX 4.4 session version, so the FIXT framing
+// surface does not whitelist 1156 for it. 371 and 373 as for (e). A characterization pin.
+TEST(FixtLogonEstablishment097, W7f_Fix4xShaped_Header1156_SessionReject) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+                  fixpp::test_support::fix44_dictionary_with_1137(),
+                  /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    const auto from =
+        establish_then_feed(a, peer_new_order_single(kFix4xNosFields, /*with_1156=*/true));
+    const auto rj = find_msg_type(a.out, "3", from);
+    ASSERT_LT(rj, a.out.size()) << "expected a session Reject (35=3); observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 371), "1156") << "observed " << a.observed();
+    EXPECT_EQ(extract_tag(a.out[rj], 373), "2") << "observed " << a.observed();
+    EXPECT_EQ(a.app->from_app_calls, 0) << "observed " << a.observed();
+}
+
+// W-7 (f0): control of (f), without 1156: delivered to fromApp.
+TEST(FixtLogonEstablishment097, W7f0_Fix4xShaped_No1156_DeliveredToFromApp) {
+    Acceptor097 a{{make_dict(kMinimalFix50sp2Xml)},
+                  fixpp::test_support::fix44_dictionary_with_1137(),
+                  /*validate=*/true};
+    ASSERT_TRUE(a.open().has_value());
+    const auto from =
+        establish_then_feed(a, peer_new_order_single(kFix4xNosFields, /*with_1156=*/false));
+    expect_delivered(a, from);
+}
+
+// ── W-8 — no session-originated frame carries 1407, 1156 or header 1128 ──────
+
+// Occurrences of DefaultApplExtID(1407), ApplExtID(1156) and ApplVerID(1128) as fields of
+// a captured frame. Each needle starts at the SOH before the tag, and each literal is split
+// at that SOH so the hex escape cannot swallow the tag's first digit.
+struct W8Counts {
+    std::size_t tag1407 = 0;
+    std::size_t tag1156 = 0;
+    std::size_t tag1128 = 0;
+};
+
+[[nodiscard]] std::size_t count_needle(std::string_view hay, std::string_view needle) {
+    std::size_t n = 0;
+    for (auto pos = hay.find(needle); pos != std::string_view::npos;
+         pos = hay.find(needle, pos + 1)) {
+        ++n;
+    }
+    return n;
+}
+
+[[nodiscard]] W8Counts count_w8_tags(std::span<const std::byte> f) {
+    const std::string w = bytes_to_string(f);
+    return {.tag1407 = count_needle(w,
+                                    "\x01"
+                                    "1407="),
+            .tag1156 = count_needle(w,
+                                    "\x01"
+                                    "1156="),
+            .tag1128 = count_needle(w,
+                                    "\x01"
+                                    "1128=")};
+}
+
+// The instrument's seeded positives: a frame built here with exactly one of the three
+// tags counts 1 for that tag and 0 for the other two. This proves the counter counts and
+// honours its tag; it is not W-8's RED.
+TEST(FixtLogonEstablishment097, W8_CounterSeededPositives) {
+    const auto with_1407 = peer_logon("9", /*with_1407=*/true);
+    const auto with_1156 = peer_new_order_single(kOrchestraNosFields, /*with_1156=*/true);
+    std::string body1128 = "35=D\x01";
+    body1128 += "1128=9\x01";
+    body1128 +=
+        "34=2\x01"
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01";
+    body1128 += std::string(kOrchestraNosFields);
+    const auto with_1128 = assemble_frame("8=FIXT.1.1\x01", body1128);
+
+    const auto c1407 = count_w8_tags(with_1407);
+    EXPECT_EQ(c1407.tag1407, 1U);
+    EXPECT_EQ(c1407.tag1156, 0U);
+    EXPECT_EQ(c1407.tag1128, 0U);
+    const auto c1156 = count_w8_tags(with_1156);
+    EXPECT_EQ(c1156.tag1407, 0U);
+    EXPECT_EQ(c1156.tag1156, 1U);
+    EXPECT_EQ(c1156.tag1128, 0U);
+    const auto c1128 = count_w8_tags(with_1128);
+    EXPECT_EQ(c1128.tag1407, 0U);
+    EXPECT_EQ(c1128.tag1156, 0U);
+    EXPECT_EQ(c1128.tag1128, 1U);
+}
+
+// Frame sources (i) and (ii): an initiator (TW → ISLD) configured `own_default`, with
+// `registry_dict` as its registry. Its Logon at open(); the peer's Logon reply (1137 =
+// `peer_1137`) makes it Active; an inbound TestRequest draws a Heartbeat; inbound silence
+// past the heartbeat interval, on the session's mock_clock, draws the liveness loop's
+// TestRequest; close() sends a Logout, which the peer's Logout confirms. Every outbound
+// frame is captured. A step that fails is reported (prefixed by `source`) and the source
+// returns what it captured; the caller's non-vacuity assertions then name the missing frame.
+[[nodiscard]] Frames capture_initiator_frames(
+    std::shared_ptr<const fixpp::dict::Dictionary> registry_dict, application_version own_default,
+    std::string_view peer_1137, std::string_view source) {
+    FixtSetup s{{std::move(registry_dict)}};
+    Frames out;
+    auto cfg = s.make_initiator_cfg(own_default);
+    cfg.transport_send = [&out](std::span<const std::byte> f) {
+        out.emplace_back(f.begin(), f.end());
+    };
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto feed = [&](const std::vector<std::byte>& frame) {
+        (void)run_sync(s, [&] {
+            return sess.on_inbound_frame(std::span<const std::byte>{frame.data(), frame.size()});
+        });
+    };
+
+    if (!run_sync(s, [&] { return sess.open(); }).has_value()) {
+        ADD_FAILURE() << "source " << source << ": open() failed";
+        return out;
+    }
+    auto ack = make_fixt_logon_frame("FIXT.1.1", 1, "ISLD", "TW", 30, peer_1137);
+    feed(ack);
+    if (sess.state() != fsm_state::Active) {
+        ADD_FAILURE() << "source " << source << ": not Active after the peer's Logon reply; "
+                      << "frames: " << describe_frames(out);
+        return out;
+    }
+
+    std::string tr_body;
+    tr_body += "35=1\x01";
+    tr_body +=
+        "34=2\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=TW\x01";
+    tr_body += "112=W8TR\x01";
+    feed(assemble_frame("8=FIXT.1.1\x01", tr_body));
+
+    // The liveness loop's sleep is armed from the last inbound/outbound instants, so an
+    // advance past one heartbeat interval wakes it whether it parked before or after the
+    // advance. The pump waits for the TestRequest itself, bounded, so a TestRequest that
+    // never comes is a reported miss, not a hang.
+    s.clock->advance(cfg.heartbeat_interval.value_or(std::chrono::seconds{30}) + 1s);
+    auto has_type = [&out](std::string_view mt) {
+        return [&out, mt] { return find_msg_type(out, mt) < out.size(); };
+    };
+    if (!fixpp::test_support::pump_until(s.ioc, has_type("1"), 2s, fixpp::test_support::kPumpSlice,
+                                         "W8/initiator-source/liveness-test-request")) {
+        ADD_FAILURE() << "source " << source
+                      << ": no liveness TestRequest after the heartbeat interval; "
+                      << "frames: " << describe_frames(out);
+    }
+
+    // close(graceful) sends the Logout and then waits for the peer's. The Logout frame is
+    // the observation; the pump waits for that frame, not for close() to return.
+    auto close_fut =
+        asio::co_spawn(s.ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
+    if (!fixpp::test_support::pump_until(s.ioc, has_type("5"), 1s, fixpp::test_support::kPumpSlice,
+                                         "W8/initiator-source/close-logout")) {
+        ADD_FAILURE() << "source " << source
+                      << ": close() sent no Logout; frames: " << describe_frames(out);
+    }
+    std::string lo_body;
+    lo_body += "35=5\x01";
+    lo_body +=
+        "34=3\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=TW\x01";
+    feed(assemble_frame("8=FIXT.1.1\x01", lo_body));
+    // The close's own grace timer bounds it from the other side; the budget exceeds it.
+    const auto close_budget =
+        std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms} + std::chrono::seconds{2};
+    if (!fixpp::test_support::pump_until_ready(s.ioc, close_fut, close_budget,
+                                               "W8/initiator-source/close")) {
+        fixpp::test_support::cancel_and_drain_or_report(s.ioc, *s.clock,
+                                                        "W8/initiator-source/close");
+        ADD_FAILURE() << "source " << source << ": close() did not return";
+        return out;
+    }
+    (void)close_fut.get();
+    return out;
+}
+
+// The Heartbeat answering capture_initiator_frames' inbound TestRequest (112=W8TR) is
+// among `frames`.
+[[nodiscard]] bool has_w8_test_request_answer(const Frames& frames) {
+    return std::ranges::any_of(frames, [](const auto& f) {
+        return msg_type_of(f) == "0" && extract_tag(f, 112) == "W8TR";
+    });
+}
+
+// W-8's count: every frame in `frames` holds no 1407, no 1156 and no 1128. The checks are
+// non-fatal, so every frame of every source reports; `source` names the frame source in
+// each message.
+void expect_no_w8_tags(const Frames& frames, std::string_view source) {
+    for (const auto& f : frames) {
+        const auto c = count_w8_tags(f);
+        EXPECT_EQ(c.tag1407, 0U) << source << " 35=" << msg_type_of(f) << ": "
+                                 << bytes_to_string(f);
+        EXPECT_EQ(c.tag1156, 0U) << source << " 35=" << msg_type_of(f) << ": "
+                                 << bytes_to_string(f);
+        EXPECT_EQ(c.tag1128, 0U) << source << " 35=" << msg_type_of(f) << ": "
+                                 << bytes_to_string(f);
+    }
+}
+
+// W-8, plan phase 2's frame sources: (ii) above, and (iii)'s W-6 (b) Reject and W-6 (c)
+// Logon reply (acceptors configured "9"). Non-vacuity first: every listed frame is
+// captured before any count is read. Then every captured frame counts 0 of each tag.
+TEST(FixtLogonEstablishment097, W8_Phase2Sources_NoOriginated1407_1156_1128) {
+    const Frames ii = capture_initiator_frames(make_dict(kMinimalFix50sp2Xml),
+                                               application_version::v50sp2, "9", "(ii)");
+
+    Acceptor097 w6b{{make_dict(kMinimalFix50sp2Xml)}, nullptr, /*validate=*/false};
+    ASSERT_TRUE(w6b.open().has_value());
+    w6b.feed(peer_logon("10", /*with_1407=*/false));
+
+    Acceptor097 w6c{{make_orchestra_latest_dict()}, nullptr, /*validate=*/false};
+    ASSERT_TRUE(w6c.open().has_value());
+    w6c.feed(peer_logon("9", /*with_1407=*/false));
+
+    // ── Non-vacuity: every frame source yields its frame. ──
+    const auto ii_logon = find_msg_type(ii, "A");
+    ASSERT_LT(ii_logon, ii.size()) << "(ii) Logon missing; frames: " << describe_frames(ii);
+    ASSERT_TRUE(has_w8_test_request_answer(ii))
+        << "(ii) Heartbeat answering the inbound TestRequest missing; "
+        << "frames: " << describe_frames(ii);
+    ASSERT_LT(find_msg_type(ii, "1"), ii.size())
+        << "(ii) liveness TestRequest missing; frames: " << describe_frames(ii);
+    ASSERT_LT(find_msg_type(ii, "5"), ii.size())
+        << "(ii) Logout missing; frames: " << describe_frames(ii);
+    const auto b_reject = find_msg_type(w6b.out, "3");
+    ASSERT_LT(b_reject, w6b.out.size()) << "(iii) W-6 (b) Reject missing; " << w6b.observed();
+    const auto c_reply = find_msg_type(w6c.out, "A");
+    ASSERT_LT(c_reply, w6c.out.size()) << "(iii) W-6 (c) Logon reply missing; " << w6c.observed();
+
+    // (ii)'s Logon advertises its configured default.
+    EXPECT_EQ(extract_tag(ii[ii_logon], 1137), "9");
+
+    // ── Every captured frame: no 1407, no 1156, no 1128. ──
+    expect_no_w8_tags(ii, "(ii)");
+    expect_no_w8_tags(w6b.out, "(iii) W-6 (b)");
+    expect_no_w8_tags(w6c.out, "(iii) W-6 (c)");
+}
+
+// W-8, the FIX Latest frame sources: (i) an initiator configured "10" with registry
+// {FIX Latest}, the same frame families as (ii); (iii)'s W-6 (a) Logon reply (acceptor
+// configured "9", peer 1137=10); and (iv) an acceptor configured "10" with registry
+// {FIX Latest}, its Logon reply to a peer 1137=10 and, on a second session, its Reject to
+// a peer 1137=6, which that registry does not serve. Non-vacuity first: every listed frame
+// is captured before any count is read. Then every captured frame counts 0 of each tag.
+TEST(FixtLogonEstablishment097, W8_FixLatestSources_NoOriginated1407_1156_1128) {
+    const Frames i = capture_initiator_frames(make_orchestra_latest_dict(),
+                                              application_version::vlatest, "10", "(i)");
+
+    Acceptor097 w6a{{make_orchestra_latest_dict()}, nullptr, /*validate=*/false};
+    ASSERT_TRUE(w6a.open().has_value());
+    w6a.feed(peer_logon("10", /*with_1407=*/false));
+
+    Acceptor097 iv_reply{
+        {make_orchestra_latest_dict()}, nullptr, /*validate=*/false, application_version::vlatest};
+    ASSERT_TRUE(iv_reply.open().has_value());
+    iv_reply.feed(peer_logon("10", /*with_1407=*/false));
+
+    Acceptor097 iv_reject{
+        {make_orchestra_latest_dict()}, nullptr, /*validate=*/false, application_version::vlatest};
+    ASSERT_TRUE(iv_reject.open().has_value());
+    iv_reject.feed(peer_logon("6", /*with_1407=*/false));
+
+    // ── Non-vacuity: every frame source yields its frame. ──
+    const auto i_logon = find_msg_type(i, "A");
+    ASSERT_LT(i_logon, i.size()) << "(i) Logon missing; frames: " << describe_frames(i);
+    ASSERT_TRUE(has_w8_test_request_answer(i))
+        << "(i) Heartbeat answering the inbound TestRequest missing; "
+        << "frames: " << describe_frames(i);
+    ASSERT_LT(find_msg_type(i, "1"), i.size())
+        << "(i) liveness TestRequest missing; frames: " << describe_frames(i);
+    ASSERT_LT(find_msg_type(i, "5"), i.size())
+        << "(i) Logout missing; frames: " << describe_frames(i);
+    ASSERT_LT(find_msg_type(w6a.out, "A"), w6a.out.size())
+        << "(iii) W-6 (a) Logon reply missing; " << w6a.observed();
+    ASSERT_LT(find_msg_type(iv_reply.out, "A"), iv_reply.out.size())
+        << "(iv) Logon reply missing; " << iv_reply.observed();
+    const auto iv_rj = find_msg_type(iv_reject.out, "3");
+    ASSERT_LT(iv_rj, iv_reject.out.size()) << "(iv) Reject missing; " << iv_reject.observed();
+    EXPECT_EQ(extract_tag(iv_reject.out[iv_rj], 373), "5") << iv_reject.observed();
+    EXPECT_EQ(extract_tag(iv_reject.out[iv_rj], 371), "1137") << iv_reject.observed();
+
+    // (i)'s Logon advertises its configured default.
+    EXPECT_EQ(extract_tag(i[i_logon], 1137), "10");
+
+    // ── Every captured frame: no 1407, no 1156, no 1128. ──
+    expect_no_w8_tags(i, "(i)");
+    expect_no_w8_tags(w6a.out, "(iii) W-6 (a)");
+    expect_no_w8_tags(iv_reply.out, "(iv) Logon reply");
+    expect_no_w8_tags(iv_reject.out, "(iv) Reject");
 }
 
 }  // namespace fixpp_fixt_inbound

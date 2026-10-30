@@ -1,0 +1,27 @@
+# pos_fixt_appl_ver_id_10.toml
+# One FIXT session with default_appl_ver_id = "10", the ApplVerID wire value of FIX Latest:
+# it loads as application_version::vlatest (the default_appl_ver_id chain in
+# src/config/scalar_mappers.cpp). 097-fix-latest-applverid-10 W-3 (accepted-token arm).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIXT11.xml"
+
+[[session]]
+sender_comp_id       = "SERVER1"
+target_comp_id       = "CLIENT1"
+begin_string         = "FIXT.1.1"
+role                 = "acceptor"
+default_appl_ver_id  = "10"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

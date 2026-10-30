@@ -46,20 +46,6 @@ std::string read_file(std::filesystem::path const& p) {
     return ss.str();
 }
 
-// Builds a registry with BOTH a FIX50SP2 and a FIX Latest dict — the FR-010
-// case. Hoisted out of the ASSERT_DEATH macro because the braced-init commas
-// would otherwise be parsed as extra macro arguments.
-void build_both_dict_registry() {
-    std::pmr::monotonic_buffer_resource mr;
-    auto latest = std::make_shared<const fixpp::dict::Dictionary>(
-        fixpp::dict::OrchestraLoader{}.load(orchestra_file(), &mr));
-    auto sp2 = std::make_shared<const fixpp::dict::Dictionary>(
-        fixpp::dict::XmlLoader{}.load(fix50sp2_file(), &mr));
-    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> const dicts{latest, sp2};
-    fixpp::dict::version_registry reg{dicts};
-    (void)reg;
-}
-
 // True if `mt` appears in the loaded message set.
 bool has_msg_type(fixpp::dict::Dictionary const& d, std::string_view mt) {
     for (auto const& m : d.messages()) {
@@ -214,10 +200,11 @@ TEST(OrchestraGroups, DeepAndReused) {
 }
 
 // T018 — SC-005/FR-005: FIX Latest has a real DISTINCT session identity
-// (session_version::vlatest), not a FIX.5.0SP2 relabel; its wire application
-// version maps to v50sp2 (observed through the registry). Distinct from all
-// nine legacy session_versions and from vt11.
-TEST(OrchestraVersionIdentity, DistinctVLatestMapsToV50SP2) {
+// (session_version::vlatest), not a FIX.5.0SP2 relabel. Since
+// 097-fix-latest-applverid-10 its application version is its own,
+// application_version::vlatest (wire ApplVerID "10"), checked through the
+// registry. Distinct from every legacy session_version and from vt11.
+TEST(OrchestraVersionIdentity, DistinctVLatestMapsToVlatest) {
     std::pmr::monotonic_buffer_resource mr;
     fixpp::dict::OrchestraLoader loader;
     auto dict = loader.load(orchestra_file(), &mr);
@@ -233,28 +220,104 @@ TEST(OrchestraVersionIdentity, DistinctVLatestMapsToV50SP2) {
         EXPECT_NE(sv, legacy);
     }
 
-    // vlatest → application_version::v50sp2 (observed: a registry holding ONLY
-    // the FIX Latest dict answers a v50sp2 lookup with it — the standards-correct
-    // wire app-version arm, no distinct ApplVerID).
+    // 097: session_version::vlatest → application_version::vlatest, its own
+    // registry slot: a registry holding ONLY the FIX Latest dict must answer a
+    // vlatest lookup with it.
     auto shared = std::make_shared<const fixpp::dict::Dictionary>(std::move(dict));
     fixpp::dict::version_registry reg{{shared}};
-    auto got = reg.get(fixpp::dict::application_version::v50sp2);
+    auto got = reg.get(fixpp::dict::application_version::vlatest);
     ASSERT_TRUE(got.has_value());
     EXPECT_EQ(*got, shared.get());
 }
 
-// T019 — FR-010: a version_registry carrying BOTH a real FIX50SP2 dict and a
-// FIX Latest dict (both resolving to the shared application_version::v50sp2
-// slot) MUST fail loud, not silently last-writer-wins. Single-dict configs
-// (each alone) succeed unaffected. Death-test lives in this grouped bucket
-// (fork-safe); the regex matches our own portable fatal message (NOT the
-// libstdc++-only "terminate called" banner — feedback_death_test_terminate_
-// banner_not_portable).
-TEST(OrchestraFR010Guard, BothDictsFailLoud) {
-    GTEST_FLAG_SET(death_test_style, "threadsafe");
-    ASSERT_DEATH(build_both_dict_registry(), "FR-010");
+// 097-fix-latest-applverid-10 W-4 (FR-004, FR-005): a version_registry holds a
+// FIX50SP2 and a FIX Latest dictionary at once, each in its own slot, in either
+// registration order, and writes no diagnostic. This replaces 074's FR-010 death
+// test: 097 deleted the FR-010 collision check and its abort.
+TEST(OrchestraRegistry097, BothDictsCoexist) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto latest = std::make_shared<const fixpp::dict::Dictionary>(
+        fixpp::dict::OrchestraLoader{}.load(orchestra_file(), &mr));
+    auto sp2 = std::make_shared<const fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load(fix50sp2_file(), &mr));
+    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> const latest_first{latest, sp2};
+    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> const sp2_first{sp2, latest};
+
+    testing::internal::CaptureStderr();
+    fixpp::dict::version_registry const reg_latest_first{latest_first};
+    fixpp::dict::version_registry const reg_sp2_first{sp2_first};
+    std::string const stderr_text = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(stderr_text, "") << "building a registry from {FIX50SP2, FIX Latest} must write "
+                                  "no diagnostic";
+
+    for (auto const* reg : {&reg_latest_first, &reg_sp2_first}) {
+        auto const* const order =
+            reg == &reg_latest_first ? "{FIX Latest, FIX50SP2}" : "{FIX50SP2, FIX Latest}";
+        auto got_sp2 = reg->get(fixpp::dict::application_version::v50sp2);
+        EXPECT_TRUE(got_sp2.has_value()) << order;
+        if (got_sp2.has_value()) {
+            EXPECT_EQ(*got_sp2, sp2.get()) << order << ": get(v50sp2) must be the FIX50SP2 dict";
+        }
+        auto got_latest = reg->get(fixpp::dict::application_version::vlatest);
+        EXPECT_TRUE(got_latest.has_value()) << order;
+        if (got_latest.has_value()) {
+            EXPECT_EQ(*got_latest, latest.get())
+                << order << ": get(vlatest) must be the FIX Latest dict";
+        }
+    }
 }
 
+// 097 W-5 (FR-006): every row of the one-way fallback table. Exact slot first;
+// under 097 an empty v50sp2 slot answers from the vlatest slot; the fallback
+// serves a v50sp2 lookup only.
+TEST(OrchestraRegistry097, OneWayFallback) {
+    using fixpp::dict::application_version;
+    std::pmr::monotonic_buffer_resource mr;
+    auto latest = std::make_shared<const fixpp::dict::Dictionary>(
+        fixpp::dict::OrchestraLoader{}.load(orchestra_file(), &mr));
+    auto sp2 = std::make_shared<const fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load(fix50sp2_file(), &mr));
+    auto expect_none = [](fixpp::dict::version_registry const& reg, application_version v,
+                          std::string_view row) {
+        auto got = reg.get(v);
+        ASSERT_FALSE(got.has_value()) << row << ": get(" << static_cast<int>(v) << ") must be none";
+        EXPECT_EQ(got.error(), fixpp::core::error::dict_no_dictionary_for_application_version)
+            << row;
+    };
+    auto expect_dict = [](fixpp::dict::version_registry const& reg, application_version v,
+                          fixpp::dict::Dictionary const* want, std::string_view row) {
+        auto got = reg.get(v);
+        ASSERT_TRUE(got.has_value()) << row << ": get(" << static_cast<int>(v) << ") must answer";
+        EXPECT_EQ(*got, want) << row << ": get(" << static_cast<int>(v)
+                              << ") answered the wrong dict";
+    };
+
+    {
+        fixpp::dict::version_registry const reg{{sp2}};
+        expect_dict(reg, application_version::v50sp2, sp2.get(), "{FIX50SP2}");
+        expect_none(reg, application_version::vlatest, "{FIX50SP2}");
+    }
+    {
+        fixpp::dict::version_registry const reg{{latest}};
+        expect_dict(reg, application_version::v50sp2, latest.get(), "{FIX Latest}");
+        expect_dict(reg, application_version::vlatest, latest.get(), "{FIX Latest}");
+        expect_none(reg, application_version::v44, "{FIX Latest}");
+    }
+    {
+        fixpp::dict::version_registry const reg{{sp2, latest}};
+        expect_dict(reg, application_version::v50sp2, sp2.get(), "{FIX50SP2, FIX Latest}");
+        expect_dict(reg, application_version::vlatest, latest.get(), "{FIX50SP2, FIX Latest}");
+    }
+    {
+        fixpp::dict::version_registry const reg{};
+        expect_none(reg, application_version::v50sp2, "{}");
+        expect_none(reg, application_version::vlatest, "{}");
+    }
+}
+
+// 097-fix-latest-applverid-10: the FR-010 guard this suite was written under (074)
+// is deleted; these single-dict lookups are the one-way fallback's characterization
+// pin (the FIX-Latest-alone arm answers v50sp2 through the fallback).
 TEST(OrchestraFR010Guard, SingleDictConfigsSucceed) {
     // FIX Latest alone.
     {

@@ -41,6 +41,7 @@
 #include <fixpp/config/toml_config_loader.hpp>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 
 // On Windows, route CRT abort()/assert() to stderr instead of a modal dialog so
@@ -1314,6 +1315,31 @@ TEST(LoadNegativeBattery, Cov_FixtEmptyApplVerId) {
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[0].default_appl_ver_id"))
         << "expected empty_required at default_appl_ver_id for FIXT.1.1 with empty value";
+}
+
+// ── FIXT.1.1 with an unknown default_appl_ver_id token → unknown_enum ────────
+// 097-fix-latest-applverid-10 W-3 (text arm). "11" is not an ApplVerID wire value, so the
+// default_appl_ver_id chain (src/config/scalar_mappers.cpp) emits unknown_enum, and its
+// message names the accepted range, which ends at FIX Latest's "10". The expected range
+// text is spelled here independently of the mapper's literal, so a change to either is a
+// deliberate edit in two places.
+
+TEST(LoadNegativeBattery, Fixt097_UnknownApplVerIdToken_MessageNamesRangeTo10) {
+    auto result = load(neg_fixture("neg_fixt_unknown_appl_ver_id.toml"));
+    ASSERT_FALSE(result.has_value()) << "expected load failure for default_appl_ver_id = \"11\"";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].default_appl_ver_id"))
+        << "expected unknown_enum at session[0].default_appl_ver_id for token \"11\"";
+
+    auto it = std::find_if(
+        result.error().begin(), result.error().end(), [](const fixpp::config::LoadDiagnostic& d) {
+            return d.reason == RC::unknown_enum && d.key_path == "session[0].default_appl_ver_id";
+        });
+    ASSERT_NE(it, result.error().end());
+    constexpr std::string_view kRange = R"("2".."10")";
+    EXPECT_NE(it->message.find(kRange), std::string::npos)
+        << "the unknown-token diagnostic must name the accepted range " << kRange
+        << "; got message: " << it->message;
 }
 
 // ── security_profile.kind = "" → empty_required ──────────────────────────────

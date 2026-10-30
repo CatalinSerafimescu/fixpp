@@ -483,6 +483,8 @@ resolve_application_version(version_profile profile,
 }  // namespace fixpp::dict
 ```
 
+Updated (097-fix-latest-applverid-10): the enum gains vlatest = 9 (FIX Latest, wire "10"), appended after v50sp2; see include/fixpp/dict/version_profile.hpp.
+
 **Wire `ApplVerID(1128)` → C++ `application_version` enum mapping.** Per `[FIXT §5.1]` (`DefaultApplVerID(1137)`) and `[FIXT §5.3]` (per-message `ApplVerID(1128)`), the FIX-defined wire enum carries values that do *not* coincide with this doc's C++ `application_version` internal indices. The parse implementation of `dict::resolve_application_version` (and the member wrapper on `Dictionary`) must use the spec mapping below — recreating the conflation by reusing the C++ enum's internal index would mis-map FIX 5.0 and the SP variants. Cited inline so a future implementer doesn't repeat the mistake (per N2-P3-1):
 
 | Wire `1128` value | FIX version | C++ `application_version` |
@@ -497,6 +499,8 @@ resolve_application_version(version_profile profile,
 | `"7"` | FIX 5.0 | `application_version::v50` |
 | `"8"` | FIX 5.0 SP1 | `application_version::v50sp1` |
 | `"9"` | FIX 5.0 SP2 | `application_version::v50sp2` |
+
+Updated (097-fix-latest-applverid-10): "10" (FIX Latest; FIXLatest in FIX Session Layer §11.2 and the Orchestra ApplVerID codeset) → application_version::vlatest.
 
 Empty `appl_ver_id_value` → use `profile.default_appl` (per `[FIXT §5.1]`). The C++ `application_version` enum's internal indices (`Unknown=0, v40=1, …, v50sp2=8`) are NOT the wire values; do not reuse them in the parse switch.
 
@@ -1468,6 +1472,8 @@ using owning_message_t = typename owning_message_traits<Msg>::type;
 
 **Runtime-dispatch switch (per RC#1).** The `dict::reify(view, profile, mr)` runtime variant peeks `MsgType(35)` and tests it against the FIXT admin set (the 7 names from §6.3 step 2: `0`/Heartbeat, `1`/TestRequest, `2`/ResendRequest, `3`/Reject, `4`/SequenceReset, `5`/Logout, `A`/Logon). On hit, it dispatches through the FIXT-admin switch in `_codegen/include/fixpp/_dispatch/reify_dispatch_fixt.hpp` (7 cases) into `vt11::owning_<Msg>`. On miss, it reads `ApplVerID(1128)` via `view.template get<1128>()` (per `[2b §4.3]`, the only typed-tag accessor `MessageView<Index>` exposes), decodes the returned `field_view` to a `std::string_view` via `dict::field_traits<std::string_view>::from_field_view(...)` (§4.1.3), maps a `dict_field_not_present` error from `get<1128>()` to an empty `std::string_view{}` for the resolution input, calls the free function `dict::resolve_application_version(profile, appl_ver_id_value)` (per C-R2-P2-1 — `dict::reify` has no `Dictionary` in scope; the algorithm is profile-only and now errors on unresolved Unknown — see §4.3 / RC#1), and dispatches through the application switch in `_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp` (~470 cases across the four codegen versions). Sketches (codegen output):
 
+Updated (097-fix-latest-applverid-10): the application switch gains a vlatest arm when the FIX Latest codegen tier is on; under FIXPP_CODEGEN_FIX_LATEST=OFF there is no vlatest case and it falls to the outer fail-loud default.
+
 ```cpp
 // build/<preset>/_codegen/include/fixpp/_dispatch/reify_dispatch_fixt.hpp
 // 7 cases — FIXT.1.1 session-layer admin MsgTypes per `[FIXT §5]`.
@@ -1522,6 +1528,8 @@ reify_dispatch_application(
 
 }  // namespace fixpp::dict::detail
 ```
+
+Updated (097-fix-latest-applverid-10): the sketch's version list predates 097. The generated switch has one outer case per kAppVersions row whose IR is present, so vlatest has one when the FIX Latest codegen tier is on; under FIXPP_CODEGEN_FIX_LATEST=OFF vlatest also falls to the outer default. dict::reify intercepts the seven FIXT admin MsgTypes first; every other MsgType a version's dictionary defines has a case in that version's arm, so XMLnonFIX (35=n) reifies under every arm whose dictionary defines it. See tools/codegen/fixpp-codegen/emit_dispatch.cpp.
 
 The `dict::reify` entry point above (§4.8) drives the two-stage walk: peek MsgType → FIXT admin set test → either `reify_dispatch_fixt` or `dict::resolve_application_version(profile, appl_ver_id_value)` (the free-function form; per C-R2-P2-1) + `reify_dispatch_application`. Both dispatch headers live under the dispatch-shared CMake target `fixpp::dict::dispatch` (§7.6). The `application_version` enum cannot represent vt11 (and is not asked to, post-RC#1); the dispatch axis is `kind` first, application_version second.
 
@@ -1656,7 +1664,7 @@ Per `[SYN §3.3 Q12]` and `[FIXT §5]` resolution. Per RC-1.
 
   1. Read `MsgType(35)` from the frame.
   2. If `MsgType` matches one of the 7 FIXT session-vocabulary admin types per `[FIXT §5]` (`Logon`, `Heartbeat`, `Logout`, `TestRequest`, `ResendRequest`, `SequenceReset`, `Reject`), dispatch as `fixpp::vt11::*` (the session-layer namespace).
-  3. Otherwise, walk the application-version resolution: read `ApplVerID(1128)` if present and `which().has_per_message_override` is true; if absent, use `which().default_appl_version`. Pass the resolved `application_version` to the dispatch switch (`fixpp::v42::*` / `v44::*` / `v50sp2::*`).
+  3. Otherwise, walk the application-version resolution: read `ApplVerID(1128)` if present and `which().has_per_message_override` is true; if absent, use `which().default_appl_version`. Pass the resolved `application_version` to the dispatch switch (`fixpp::v42::*` / `v44::*` / `v50sp2::*`). Updated (097-fix-latest-applverid-10): the switch also dispatches application_version::vlatest (fixpp::vlatest, wire "10") when the FIX Latest codegen tier is on; its version set is the kAppVersions rows whose IR is present (tools/codegen/fixpp-codegen/emit_dispatch.cpp).
 
   Worked example: a single FIXT.1.1 session carries the byte stream
 
@@ -1728,7 +1736,7 @@ Per RC-2:
 
 7. **Cross-strand safety.** Once constructed, the `owning_message_t<Msg>` (or `owning_message_handle`) is safe to `std::move` across thread/strand boundaries. The receiving thread's accessors return views aliasing the owning copy's bytes; `[[clang::lifetimebound]]` on `*this` chains the lifetime warning correctly.
 
-8. **Runtime-dispatch table generation (per RC#1).** Two dispatch headers live under `_codegen/include/fixpp/_dispatch/` and are auto-generated alongside the typed messages: `reify_dispatch_fixt.hpp` (7 cases — the FIXT admin set `0`/`1`/`2`/`3`/`4`/`5`/`A`) and `reify_dispatch_application.hpp` (~470 cases — one per (application_version, MsgType) pair across the four codegen versions; runtime-XML-only versions hit a default arm and return `dict_reify_unknown_msg_type`). Total dispatch-shared cost is ~50 KiB once per all-versions TU (per N-P2-6). `dict::reify`'s two-stage walk (FIXT-admin test → application resolution + dispatch) lives in the `fixpp::dict::dispatch` CMake target (§7.6).
+8. **Runtime-dispatch table generation (per RC#1).** Two dispatch headers live under `_codegen/include/fixpp/_dispatch/` and are auto-generated alongside the typed messages: `reify_dispatch_fixt.hpp` (7 cases — the FIXT admin set `0`/`1`/`2`/`3`/`4`/`5`/`A`) and `reify_dispatch_application.hpp` (~470 cases — one per (application_version, MsgType) pair across the four codegen versions; runtime-XML-only versions hit a default arm and return `dict_reify_unknown_msg_type`). Total dispatch-shared cost is ~50 KiB once per all-versions TU (per N-P2-6). `dict::reify`'s two-stage walk (FIXT-admin test → application resolution + dispatch) lives in the `fixpp::dict::dispatch` CMake target (§7.6). Updated (097-fix-latest-applverid-10): the application switch's codegen versions include vlatest when the FIX Latest codegen tier is on; under FIXPP_CODEGEN_FIX_LATEST=OFF vlatest is among the versions that hit the default arm and return dict_reify_unknown_msg_type. The version set is the kAppVersions rows whose IR is present (tools/codegen/fixpp-codegen/emit_dispatch.cpp).
 
 ### 6.7 Errors introduced by this design
 

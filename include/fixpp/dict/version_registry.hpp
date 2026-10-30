@@ -53,15 +53,19 @@ public:
     // dict_unknown_appl_ver_id, a wire-string parse failure — AC-X2 /
     // data-model error mapping). Returned pointer aliases the registry's
     // storage (lifetime = registry lifetime).
+    // 097-fix-latest-applverid-10 one-way fallback: the exact slot answers first;
+    // under 097 an empty v50sp2 slot answers from the vlatest slot; the fallback
+    // serves a v50sp2 lookup only.
     [[nodiscard]] core::expected_t<Dictionary const*> get(application_version v) const noexcept
         [[clang::lifetimebound]];
 
 private:
-    // Keepalive + lookup table. Indexed by application_version (0-based:
-    // Unknown=0 is never stored; v40=1..v50sp2=8). Null shared_ptr means
-    // not registered for that version.
-    // Small fixed-size array (9 entries) — application_version::v50sp2 == 8.
-    static constexpr std::size_t kTableSize = 9;
+    // Keepalive + lookup table, one slot per application_version, indexed by its
+    // value (Unknown is never stored). Null shared_ptr means not registered for that
+    // version. 097-fix-latest-applverid-10: sized one past the enum's last enumerator,
+    // so an enumerator appended after vlatest must move this line.
+    static constexpr std::size_t kTableSize =
+        static_cast<std::size_t>(application_version::vlatest) + 1;
     std::shared_ptr<const Dictionary> entries_[kTableSize]{};
 };
 

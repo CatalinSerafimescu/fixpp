@@ -75,7 +75,7 @@ a generated-but-unincluded version costs nothing at the consumer's compile
 | CMake option | Default | Effect |
 |---|---|---|
 | `FIXPP_BUILD_CODEGEN_TOOL` | `ON` | Build the `fixpp-codegen` host tool. |
-| `FIXPP_CODEGEN_FIX_LATEST` | `ON` | Generate the `fixpp::vlatest` (FIX Latest / EP303) read/reify/validator tier from `dictionaries/orchestra/OrchestraFIXLatest.xml`. `OFF` removes the `vlatest/` output dir entirely; the four legacy tiers are **byte-identical** either way. |
+| `FIXPP_CODEGEN_FIX_LATEST` | `ON` | Generate the `fixpp::vlatest` (FIX Latest / EP303) read/reify/validator tier from `dictionaries/orchestra/OrchestraFIXLatest.xml`. `OFF` removes the `vlatest/` output dir entirely and the `vlatest` case of `_dispatch/reify_dispatch_application.hpp`, so `dict::reify` refuses a frame resolved to FIX Latest (097; see the `dict::reify` dispatch section); the four legacy tiers are **byte-identical** either way. |
 | `FIXPP_CODEGEN_V44_FAMILIES` | `all` | Breadth of the v44 **builder** tier (`all.hpp` + the split layout): `all` = 83 `msgcat='app'` messages; `official` = the frozen 33 OFFICIAL MsgTypes. Read tier is unaffected (always universal). |
 
 ```bash
@@ -325,12 +325,19 @@ never silently misdispatches.
               │                         │
     _dispatch/reify_dispatch_fixt   _dispatch/reify_dispatch_application
               │                         │
-       vt11::owning_<Msg>       v42/v44/v50sp2::owning_<Msg>
+       vt11::owning_<Msg>         <ver>::owning_<Msg>
               │                         │
          from_view(mv, mr)        from_view(mv, mr)
               │
         owning_message_handle  (type-erased cross-strand holder)
 ```
+
+`<ver>` is a codegen application version. The application switch has one outer case per
+`kAppVersions` row (`tools/codegen/fixpp-codegen/emit_dispatch.cpp`) whose IR the codegen run
+built, so FIX Latest (`fixpp::vlatest`, wire ApplVerID `10`) has a case only when
+`FIXPP_CODEGEN_FIX_LATEST=ON` (097-fix-latest-applverid-10). With the option `OFF`, a frame resolved
+to FIX Latest reaches the outer fail-loud default and returns `dict_reify_unknown_msg_type`
+(B-097-4).
 
 ### Trait specialisations
 

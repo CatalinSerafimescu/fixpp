@@ -37,8 +37,12 @@
 #include <fixpp/transport/reconnect_policy.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fstream>
+#include <limits>
+#include <optional>
+#include <random>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -388,7 +392,9 @@ TEST(LoadHappyPath, Cov_ScalarsUnilateral) {
     EXPECT_EQ(cfg.sending_time_precision, fixpp::core::fix_time_precision::nanos);
 }
 
-// ── pos_fixt_appl_ver_ids.toml: default_appl_ver_id "2".."9" (all 8 arms) ───
+// ── pos_fixt_appl_ver_ids.toml: one session per pre-097 default_appl_ver_id token ──
+// map_scalars (scalar_mappers.cpp) is the full token list; FIX Latest's "10"
+// (097-fix-latest-applverid-10) is Fixt097_ApplVerId10_LoadsAsVlatest.
 
 TEST(LoadHappyPath, Cov_FixtApplVerIds) {
     auto result = load_fixture("pos_fixt_appl_ver_ids.toml");
@@ -402,19 +408,101 @@ TEST(LoadHappyPath, Cov_FixtApplVerIds) {
            }();
 
     ASSERT_EQ(result->sessions.size(), std::size_t{8})
-        << "expected 8 sessions (one per ApplVerID value)";
+        << "expected 8 sessions (one per pre-097 ApplVerID token the fixture lists)";
 
     using av = fixpp::dict::application_version;
     const std::vector<av> expected = {av::v40, av::v41, av::v42,    av::v43,
                                       av::v44, av::v50, av::v50sp1, av::v50sp2};
 
+    // Per-session checks are non-fatal, so one session's failure does not hide the
+    // sessions after it (097-fix-latest-applverid-10).
     for (std::size_t i = 0; i < 8; ++i) {
         const auto& cfg = result->sessions[i].config;
-        ASSERT_TRUE(cfg.default_appl_ver_id.has_value())
+        EXPECT_TRUE(cfg.default_appl_ver_id.has_value())
             << "session[" << i << "] must have default_appl_ver_id set";
+        if (!cfg.default_appl_ver_id.has_value()) {
+            continue;
+        }
         EXPECT_EQ(*cfg.default_appl_ver_id, expected[i])
             << "session[" << i << "] default_appl_ver_id mismatch";
     }
+}
+
+// ── pos_fixt_appl_ver_id_10.toml: default_appl_ver_id "10" (FIX Latest) ──────
+// 097-fix-latest-applverid-10 W-3 (accepted-token arm): the token "10" loads as
+// application_version::vlatest, FIX Latest's own application version.
+
+TEST(LoadHappyPath, Fixt097_ApplVerId10_LoadsAsVlatest) {
+    auto result = load_fixture("pos_fixt_appl_ver_id_10.toml");
+
+    ASSERT_TRUE(result.has_value())
+        << "pos_fixt_appl_ver_id_10.toml must load successfully; diagnostics: "
+        << dump_diags(result);
+
+    ASSERT_EQ(result->sessions.size(), std::size_t{1});
+    const auto& cfg = result->sessions[0].config;
+    ASSERT_TRUE(cfg.default_appl_ver_id.has_value())
+        << "session[0] must have default_appl_ver_id set";
+    EXPECT_EQ(cfg.default_appl_ver_id, std::optional{fixpp::dict::application_version::vlatest})
+        << "default_appl_ver_id \"10\" must load as application_version::vlatest";
+}
+
+// 097-fix-latest-applverid-10 (G097-B2-004), contracts W-3 (parity arm): the config token map
+// (map_scalars, scalar_mappers.cpp) and the wire map (resolve_application_version) agree on
+// every token render_appl_ver_id emits. The token set is derived from render, so an
+// application_version added to render and the wire but not to config makes this test fail.
+// render never emits "", so the config-vs-wire empty-token difference is out of scope here.
+TEST(LoadHappyPath, Fixt097_ConfigAndWireAgreeOnEveryRenderedToken) {
+    using av = fixpp::dict::application_version;
+    using U = std::underlying_type_t<av>;
+    // Only resolve_application_version's non-empty-token branch runs, so the default is unused.
+    constexpr fixpp::dict::version_profile kFixt{.session = fixpp::dict::session_version::vt11,
+                                                 .default_appl = av::v50sp2,
+                                                 .has_per_message_override = true,
+                                                 ._reserved = 0};
+    const std::filesystem::path dict =
+        (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "FIXT11.xml")
+            .lexically_normal();
+    std::size_t rendered = 0;
+    for (unsigned u = 0; u <= std::numeric_limits<U>::max(); ++u) {
+        const auto v = static_cast<av>(static_cast<U>(u));
+        const auto tok = fixpp::dict::render_appl_ver_id(v);
+        if (!tok.has_value()) {
+            continue;
+        }
+        ++rendered;
+        // wire side
+        const auto wire = fixpp::dict::resolve_application_version(kFixt, *tok);
+        EXPECT_TRUE(wire.has_value() && *wire == v) << "wire map disagrees for token " << *tok;
+        // config side
+        // Unique per run: presets running at the same time on one host share the temp dir.
+        const auto tmp = std::filesystem::temp_directory_path() /
+                         ("fixpp_097_parity_" + std::string{*tok} + "_" +
+                          std::to_string(std::random_device{}()) + ".toml");
+        {
+            std::ofstream out{tmp};
+            // TOML literal string (single quotes) for the dictionary path, as in
+            // Cov_AbsoluteDictPath: a Windows absolute path holds backslashes.
+            out << "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n"
+                << "[dictionary]\nkind = \"path\"\npath = '" << dict.string() << "'\n\n"
+                << "[[session]]\nsender_comp_id = \"SERVER1\"\ntarget_comp_id = \"CLIENT1\"\n"
+                << "begin_string = \"FIXT.1.1\"\nrole = \"acceptor\"\n"
+                << "default_appl_ver_id = \"" << *tok << "\"\n\n"
+                << "[session.transport]\nkind = \"plaintext\"\n\n"
+                << "[session.security_profile]\nkind = \"insecure_plain_tcp\"\n";
+        }
+        auto result = load_path(tmp);
+        std::error_code ec;
+        std::filesystem::remove(tmp, ec);
+        EXPECT_TRUE(result.has_value())
+            << "config rejects token " << *tok << ": " << dump_diags(result);
+        if (!result.has_value()) {
+            continue;
+        }
+        EXPECT_EQ(result->sessions.at(0).config.default_appl_ver_id, std::optional{v})
+            << "config map disagrees for token " << *tok;
+    }
+    EXPECT_GT(rendered, std::size_t{0}) << "render emitted no token: the loop checked nothing";
 }
 
 // ── pos_multisession_profile_diverges.toml: per-session divergence scan ───────

@@ -122,14 +122,17 @@ target_compile_definitions(codegen_067_emit_builders_unit_test PRIVATE
 )
 add_test(NAME codegen_067_emit_builders_unit_test COMMAND codegen_067_emit_builders_unit_test)
 set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "codegen;067")
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST codegen_067_emit_builders_unit_test APPEND PROPERTY LABELS 097)
 
-# 076-fix-latest-typed-codegen T008/T011: vlatest compile-smoke +
-# dispatch-exclusion witnesses. T008 needs the vlatest {Fields,Messages,
-# Validator,Reify}.hpp read-tier headers (fixpp_codegen_generate); T011 needs
-# ONLY the existing v42/v44/v50sp2 _dispatch/ surface (fixpp_dictionary) —
-# grouped into one binary since both are cheap/isolation-safe (unlike
-# Builders.hpp-dependent work, deliberately NOT attempted here — see the .cpp
-# file headers).
+# 076-fix-latest-typed-codegen T008/T011: vlatest compile-smoke + dispatch-exclusion
+# witnesses. T008 needs the vlatest {Fields,Messages,Validator,Reify}.hpp read-tier
+# headers (fixpp_codegen_generate); T011, rewritten by 097-fix-latest-applverid-10,
+# needs the _dispatch/ surface (fixpp_dictionary), whose vlatest arm exists only with
+# this tier ON, plus the Orchestra dictionary (FIXPP_DICT_DATA_DIR below) — grouped
+# into one binary since both are cheap/isolation-safe (unlike Builders.hpp-dependent
+# work, deliberately NOT attempted here — see the .cpp file headers).
 #
 # gate-b/r1 P1: gated on FIXPP_CODEGEN_FIX_LATEST — with the tier OFF,
 # cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/ entirely, so
@@ -172,10 +175,16 @@ target_compile_definitions(codegen_vlatest_tests PRIVATE
   "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/all.hpp\""
   "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/all.hpp\""
   "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/all.hpp\""
+  # 097-fix-latest-applverid-10 (contracts W-9 (a3) census): the dispatch census
+  # loads dictionaries/orchestra/OrchestraFIXLatest.xml with OrchestraLoader.
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
 )
 add_test(NAME codegen_vlatest_tests COMMAND codegen_vlatest_tests)
 set_tests_properties(codegen_vlatest_tests PROPERTIES
   LABELS "codegen;076;vlatest_smoke;vlatest_dispatch_exclusion;077;builder-dedup")
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST codegen_vlatest_tests APPEND PROPERTY LABELS 097)
 
 # 076-fix-latest-typed-codegen T013 [US2]: V-1 completeness census —
 # independent raw-XML walker (pugixml, no ir.cpp/ir.hpp/emit_manifest.cpp
@@ -510,6 +519,9 @@ add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
 set_tests_properties(codegen_determinism_test PROPERTIES
   LABELS codegen
   TIMEOUT 5400)
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST codegen_determinism_test APPEND PROPERTY LABELS 097)
 
 # 077-builder-args-dedup T019 [US2]: only defined when THIS build was
 # configured with the tier ON -- MainTreeVlatestBuildersUnaffectedByOffPathWitness

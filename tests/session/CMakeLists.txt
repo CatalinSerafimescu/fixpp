@@ -2472,10 +2472,15 @@ target_link_libraries(session_fixt_logon_establishment PRIVATE
 target_include_directories(session_fixt_logon_establishment PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
+target_compile_definitions(session_fixt_logon_establishment PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 add_test(NAME session_fixt_logon_establishment
   COMMAND session_fixt_logon_establishment)
 set_tests_properties(session_fixt_logon_establishment PROPERTIES
   LABELS "033;s020;s025;fixt-logon-establishment;foundational")
+# 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_fixt_logon_establishment APPEND PROPERTY LABELS 097)
 
 # T002: credentials test target.
 # T009/T010: logon_credentials operator<< redaction + redact_tag554 utility.

@@ -34767,7 +34767,7 @@ class Heartbeat {
 public:
     static constexpr ::std::string_view msg_type_v = "0";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Heartbeat(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -34889,7 +34889,7 @@ class TestRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "1";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TestRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -35011,7 +35011,7 @@ class ResendRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "2";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ResendRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -35136,7 +35136,7 @@ class Reject {
 public:
     static constexpr ::std::string_view msg_type_v = "3";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Reject(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -35285,7 +35285,7 @@ class SequenceReset {
 public:
     static constexpr ::std::string_view msg_type_v = "4";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SequenceReset(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -35410,7 +35410,7 @@ class Logout {
 public:
     static constexpr ::std::string_view msg_type_v = "5";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Logout(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -35541,7 +35541,7 @@ class IOI {
 public:
     static constexpr ::std::string_view msg_type_v = "6";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit IOI(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -36713,7 +36713,7 @@ class Advertisement {
 public:
     static constexpr ::std::string_view msg_type_v = "7";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Advertisement(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -37791,7 +37791,7 @@ class ExecutionReport {
 public:
     static constexpr ::std::string_view msg_type_v = "8";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ExecutionReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -39883,7 +39883,7 @@ class OrderCancelReject {
 public:
     static constexpr ::std::string_view msg_type_v = "9";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderCancelReject(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -40086,7 +40086,7 @@ class Logon {
 public:
     static constexpr ::std::string_view msg_type_v = "A";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Logon(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -40277,7 +40277,7 @@ class DerivativeSecurityList {
 public:
     static constexpr ::std::string_view msg_type_v = "AA";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit DerivativeSecurityList(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -41583,7 +41583,7 @@ class NewOrderMultileg {
 public:
     static constexpr ::std::string_view msg_type_v = "AB";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit NewOrderMultileg(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -43019,7 +43019,7 @@ class MultilegOrderCancelReplace {
 public:
     static constexpr ::std::string_view msg_type_v = "AC";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MultilegOrderCancelReplace(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -44451,7 +44451,7 @@ class TradeCaptureReportRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "AD";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeCaptureReportRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -45584,7 +45584,7 @@ class TradeCaptureReport {
 public:
     static constexpr ::std::string_view msg_type_v = "AE";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeCaptureReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -47208,7 +47208,7 @@ class OrderMassStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "AF";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderMassStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -49030,7 +49030,7 @@ class QuoteRequestReject {
 public:
     static constexpr ::std::string_view msg_type_v = "AG";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit QuoteRequestReject(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -49182,7 +49182,7 @@ class RFQRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "AH";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit RFQRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -49316,7 +49316,7 @@ class QuoteStatusReport {
 public:
     static constexpr ::std::string_view msg_type_v = "AI";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit QuoteStatusReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -50677,7 +50677,7 @@ class QuoteResponse {
 public:
     static constexpr ::std::string_view msg_type_v = "AJ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit QuoteResponse(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -51983,7 +51983,7 @@ class Confirmation {
 public:
     static constexpr ::std::string_view msg_type_v = "AK";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Confirmation(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -53332,7 +53332,7 @@ class PositionMaintenanceRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "AL";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PositionMaintenanceRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -54315,7 +54315,7 @@ class PositionMaintenanceReport {
 public:
     static constexpr ::std::string_view msg_type_v = "AM";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PositionMaintenanceReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -55359,7 +55359,7 @@ class RequestForPositions {
 public:
     static constexpr ::std::string_view msg_type_v = "AN";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit RequestForPositions(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -56323,7 +56323,7 @@ class RequestForPositionsAck {
 public:
     static constexpr ::std::string_view msg_type_v = "AO";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit RequestForPositionsAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -57296,7 +57296,7 @@ class PositionReport {
 public:
     static constexpr ::std::string_view msg_type_v = "AP";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PositionReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -58514,7 +58514,7 @@ class TradeCaptureReportRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "AQ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeCaptureReportRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -59498,7 +59498,7 @@ class TradeCaptureReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "AR";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeCaptureReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -60820,7 +60820,7 @@ class AllocationReport {
 public:
     static constexpr ::std::string_view msg_type_v = "AS";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AllocationReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -62206,7 +62206,7 @@ class AllocationReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "AT";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AllocationReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -63183,7 +63183,7 @@ class ConfirmationAck {
 public:
     static constexpr ::std::string_view msg_type_v = "AU";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ConfirmationAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -63341,7 +63341,7 @@ class SettlementInstructionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "AV";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SettlementInstructionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -63514,7 +63514,7 @@ class AssignmentReport {
 public:
     static constexpr ::std::string_view msg_type_v = "AW";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AssignmentReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -64512,7 +64512,7 @@ class CollateralRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "AX";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CollateralRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -65645,7 +65645,7 @@ class CollateralAssignment {
 public:
     static constexpr ::std::string_view msg_type_v = "AY";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CollateralAssignment(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -66826,7 +66826,7 @@ class CollateralResponse {
 public:
     static constexpr ::std::string_view msg_type_v = "AZ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CollateralResponse(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -68010,7 +68010,7 @@ class News {
 public:
     static constexpr ::std::string_view msg_type_v = "B";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit News(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -68198,7 +68198,7 @@ class CollateralReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BA";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CollateralReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -69394,7 +69394,7 @@ class CollateralInquiry {
 public:
     static constexpr ::std::string_view msg_type_v = "BB";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CollateralInquiry(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -70542,7 +70542,7 @@ class NetworkCounterpartySystemStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "BC";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit NetworkCounterpartySystemStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -70670,7 +70670,7 @@ class NetworkCounterpartySystemStatusResponse {
 public:
     static constexpr ::std::string_view msg_type_v = "BD";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit NetworkCounterpartySystemStatusResponse(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -70804,7 +70804,7 @@ class UserRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "BE";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit UserRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -70959,7 +70959,7 @@ class UserResponse {
 public:
     static constexpr ::std::string_view msg_type_v = "BF";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit UserResponse(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -71093,7 +71093,7 @@ class CollateralInquiryAck {
 public:
     static constexpr ::std::string_view msg_type_v = "BG";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CollateralInquiryAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -72159,7 +72159,7 @@ class ConfirmationRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "BH";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ConfirmationRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -72317,7 +72317,7 @@ class TradingSessionListRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "BI";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradingSessionListRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -72463,7 +72463,7 @@ class TradingSessionList {
 public:
     static constexpr ::std::string_view msg_type_v = "BJ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradingSessionList(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -72600,7 +72600,7 @@ class SecurityListUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BK";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityListUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -72791,7 +72791,7 @@ class AdjustedPositionReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BL";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AdjustedPositionReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -72942,7 +72942,7 @@ class AllocationInstructionAlert {
 public:
     static constexpr ::std::string_view msg_type_v = "BM";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AllocationInstructionAlert(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -74280,7 +74280,7 @@ class ExecutionAck {
 public:
     static constexpr ::std::string_view msg_type_v = "BN";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ExecutionAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -75253,7 +75253,7 @@ class ContraryIntentionReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BO";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ContraryIntentionReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -76187,7 +76187,7 @@ class SecurityDefinitionUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BP";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityDefinitionUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -77336,7 +77336,7 @@ class SettlementObligationReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BQ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SettlementObligationReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -77494,7 +77494,7 @@ class DerivativeSecurityListUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BR";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit DerivativeSecurityListUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -78794,7 +78794,7 @@ class TradingSessionListUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BS";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradingSessionListUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -78931,7 +78931,7 @@ class MarketDefinitionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "BT";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDefinitionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -79065,7 +79065,7 @@ class MarketDefinition {
 public:
     static constexpr ::std::string_view msg_type_v = "BU";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDefinition(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -79357,7 +79357,7 @@ class MarketDefinitionUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BV";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDefinitionUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -79649,7 +79649,7 @@ class ApplicationMessageRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "BW";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ApplicationMessageRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -79789,7 +79789,7 @@ class ApplicationMessageRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "BX";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ApplicationMessageRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -79938,7 +79938,7 @@ class ApplicationMessageReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BY";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ApplicationMessageReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -80078,7 +80078,7 @@ class OrderMassActionReport {
 public:
     static constexpr ::std::string_view msg_type_v = "BZ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderMassActionReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -81970,7 +81970,7 @@ class Email {
 public:
     static constexpr ::std::string_view msg_type_v = "C";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Email(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -82137,7 +82137,7 @@ class OrderMassActionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CA";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderMassActionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -83999,7 +83999,7 @@ class UserNotification {
 public:
     static constexpr ::std::string_view msg_type_v = "CB";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit UserNotification(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -84136,7 +84136,7 @@ class StreamAssignmentRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CC";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit StreamAssignmentRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -84264,7 +84264,7 @@ class StreamAssignmentReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CD";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit StreamAssignmentReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -84395,7 +84395,7 @@ class StreamAssignmentReportACK {
 public:
     static constexpr ::std::string_view msg_type_v = "CE";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit StreamAssignmentReportACK(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -84532,7 +84532,7 @@ class PartyDetailsListRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CF";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyDetailsListRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -84678,7 +84678,7 @@ class PartyDetailsListReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CG";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyDetailsListReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -84848,7 +84848,7 @@ class MarginRequirementInquiry {
 public:
     static constexpr ::std::string_view msg_type_v = "CH";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarginRequirementInquiry(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -85779,7 +85779,7 @@ class MarginRequirementInquiryAck {
 public:
     static constexpr ::std::string_view msg_type_v = "CI";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarginRequirementInquiryAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -86719,7 +86719,7 @@ class MarginRequirementReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CJ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarginRequirementReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -87686,7 +87686,7 @@ class PartyDetailsListUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CK";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyDetailsListUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -87847,7 +87847,7 @@ class PartyRiskLimitsRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CL";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitsRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -88002,7 +88002,7 @@ class PartyRiskLimitsReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CM";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitsReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -88178,7 +88178,7 @@ class SecurityMassStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CN";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityMassStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -88391,7 +88391,7 @@ class SecurityMassStatus {
 public:
     static constexpr ::std::string_view msg_type_v = "CO";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityMassStatus(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -88646,7 +88646,7 @@ class AccountSummaryReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CQ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AccountSummaryReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -88821,7 +88821,7 @@ class PartyRiskLimitsUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CR";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitsUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -88985,7 +88985,7 @@ class PartyRiskLimitsDefinitionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CS";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitsDefinitionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -89122,7 +89122,7 @@ class PartyRiskLimitsDefinitionRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "CT";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitsDefinitionRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -89265,7 +89265,7 @@ class PartyEntitlementsRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CU";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyEntitlementsRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -89423,7 +89423,7 @@ class PartyEntitlementsReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CV";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyEntitlementsReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -89593,7 +89593,7 @@ class QuoteAck {
 public:
     static constexpr ::std::string_view msg_type_v = "CW";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit QuoteAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -89760,7 +89760,7 @@ class PartyDetailsDefinitionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "CX";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyDetailsDefinitionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -89897,7 +89897,7 @@ class PartyDetailsDefinitionRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "CY";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyDetailsDefinitionRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -90040,7 +90040,7 @@ class PartyEntitlementsUpdateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "CZ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyEntitlementsUpdateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -90201,7 +90201,7 @@ class NewOrderSingle {
 public:
     static constexpr ::std::string_view msg_type_v = "D";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit NewOrderSingle(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -91820,7 +91820,7 @@ class PartyEntitlementsDefinitionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DA";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyEntitlementsDefinitionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -91957,7 +91957,7 @@ class PartyEntitlementsDefinitionRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DB";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyEntitlementsDefinitionRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -92100,7 +92100,7 @@ class TradeMatchReport {
 public:
     static constexpr ::std::string_view msg_type_v = "DC";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeMatchReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -92279,7 +92279,7 @@ class TradeMatchReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DD";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeMatchReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -92437,7 +92437,7 @@ class PartyRiskLimitsReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DE";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitsReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -92592,7 +92592,7 @@ class PartyRiskLimitCheckRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DF";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitCheckRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -93548,7 +93548,7 @@ class PartyRiskLimitCheckRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DG";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyRiskLimitCheckRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -94523,7 +94523,7 @@ class PartyActionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DH";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyActionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -94751,7 +94751,7 @@ class PartyActionReport {
 public:
     static constexpr ::std::string_view msg_type_v = "DI";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PartyActionReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -95003,7 +95003,7 @@ class MassOrder {
 public:
     static constexpr ::std::string_view msg_type_v = "DJ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MassOrder(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -95191,7 +95191,7 @@ class MassOrderAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DK";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MassOrderAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -95418,7 +95418,7 @@ class PositionTransferInstruction {
 public:
     static constexpr ::std::string_view msg_type_v = "DL";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PositionTransferInstruction(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -96368,7 +96368,7 @@ class PositionTransferInstructionAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DM";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PositionTransferInstructionAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -96535,7 +96535,7 @@ class PositionTransferReport {
 public:
     static constexpr ::std::string_view msg_type_v = "DN";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PositionTransferReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -97503,7 +97503,7 @@ class MarketDataStatisticsRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DO";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataStatisticsRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -98567,7 +98567,7 @@ class MarketDataStatisticsReport {
 public:
     static constexpr ::std::string_view msg_type_v = "DP";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataStatisticsReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -99658,7 +99658,7 @@ class CollateralReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DQ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CollateralReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -99810,7 +99810,7 @@ class MarketDataReport {
 public:
     static constexpr ::std::string_view msg_type_v = "DR";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -99971,7 +99971,7 @@ class CrossRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DS";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CrossRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -100879,7 +100879,7 @@ class CrossRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DT";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CrossRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -101787,7 +101787,7 @@ class AllocationInstructionAlertRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DU";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AllocationInstructionAlertRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -101921,7 +101921,7 @@ class AllocationInstructionAlertRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DV";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AllocationInstructionAlertRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -102055,7 +102055,7 @@ class TradeAggregationRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DW";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeAggregationRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -102985,7 +102985,7 @@ class TradeAggregationReport {
 public:
     static constexpr ::std::string_view msg_type_v = "DX";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradeAggregationReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -103920,7 +103920,7 @@ class PayManagementRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "DY";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PayManagementRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -104897,7 +104897,7 @@ class PayManagementRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "DZ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PayManagementRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -105022,7 +105022,7 @@ class NewOrderList {
 public:
     static constexpr ::std::string_view msg_type_v = "E";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit NewOrderList(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -105212,7 +105212,7 @@ class PayManagementReport {
 public:
     static constexpr ::std::string_view msg_type_v = "EA";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PayManagementReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -106207,7 +106207,7 @@ class PayManagementReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "EB";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit PayManagementReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -106344,7 +106344,7 @@ class SettlementStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "EC";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SettlementStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -107341,7 +107341,7 @@ class SettlementStatusRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "ED";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SettlementStatusRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -107475,7 +107475,7 @@ class SettlementStatusReport {
 public:
     static constexpr ::std::string_view msg_type_v = "EE";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SettlementStatusReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -108487,7 +108487,7 @@ class SettlementStatusReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "EF";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SettlementStatusReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -108621,7 +108621,7 @@ class SecurityRiskMetricsReport {
 public:
     static constexpr ::std::string_view msg_type_v = "EG";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityRiskMetricsReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -109682,7 +109682,7 @@ class AlgoCertificateRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "EH";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AlgoCertificateRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -109852,7 +109852,7 @@ class AlgoCertificateRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "EI";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AlgoCertificateRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -109989,7 +109989,7 @@ class AlgoCertificateReport {
 public:
     static constexpr ::std::string_view msg_type_v = "EJ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AlgoCertificateReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -110171,7 +110171,7 @@ class AlgoCertificateReportAck {
 public:
     static constexpr ::std::string_view msg_type_v = "EK";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AlgoCertificateReportAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -110308,7 +110308,7 @@ class TestSuiteDefinitionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "EL";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TestSuiteDefinitionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -110466,7 +110466,7 @@ class TestSuiteDefinitionRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "EM";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TestSuiteDefinitionRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -110603,7 +110603,7 @@ class TestActionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "EN";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TestActionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -110749,7 +110749,7 @@ class TestActionRequestAck {
 public:
     static constexpr ::std::string_view msg_type_v = "EO";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TestActionRequestAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -110889,7 +110889,7 @@ class TestActionReport {
 public:
     static constexpr ::std::string_view msg_type_v = "EP";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TestActionReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -111035,7 +111035,7 @@ class MarketDataAck {
 public:
     static constexpr ::std::string_view msg_type_v = "EQ";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -111178,7 +111178,7 @@ class SecurityStatusAck {
 public:
     static constexpr ::std::string_view msg_type_v = "ER";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityStatusAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -111315,7 +111315,7 @@ class TradingSessionStatusAck {
 public:
     static constexpr ::std::string_view msg_type_v = "ES";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradingSessionStatusAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -111452,7 +111452,7 @@ class OrderCancelRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "F";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderCancelRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -112518,7 +112518,7 @@ class OrderCancelReplaceRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "G";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderCancelReplaceRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -114108,7 +114108,7 @@ class OrderStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "H";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -115113,7 +115113,7 @@ class AllocationInstruction {
 public:
     static constexpr ::std::string_view msg_type_v = "J";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AllocationInstruction(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -116460,7 +116460,7 @@ class ListCancelRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "K";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ListCancelRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -116603,7 +116603,7 @@ class ListExecute {
 public:
     static constexpr ::std::string_view msg_type_v = "L";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ListExecute(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -116743,7 +116743,7 @@ class ListStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "M";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ListStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -116874,7 +116874,7 @@ class ListStatus {
 public:
     static constexpr ::std::string_view msg_type_v = "N";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ListStatus(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -117035,7 +117035,7 @@ class AllocationInstructionAck {
 public:
     static constexpr ::std::string_view msg_type_v = "P";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit AllocationInstructionAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -117990,7 +117990,7 @@ class DontKnowTrade {
 public:
     static constexpr ::std::string_view msg_type_v = "Q";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit DontKnowTrade(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -118936,7 +118936,7 @@ class QuoteRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "R";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit QuoteRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -119109,7 +119109,7 @@ class Quote {
 public:
     static constexpr ::std::string_view msg_type_v = "S";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit Quote(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -120500,7 +120500,7 @@ class SettlementInstructions {
 public:
     static constexpr ::std::string_view msg_type_v = "T";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SettlementInstructions(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -120649,7 +120649,7 @@ class MarketDataRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "V";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -120819,7 +120819,7 @@ class MarketDataSnapshotFullRefresh {
 public:
     static constexpr ::std::string_view msg_type_v = "W";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataSnapshotFullRefresh(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -121929,7 +121929,7 @@ class MarketDataIncrementalRefresh {
 public:
     static constexpr ::std::string_view msg_type_v = "X";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataIncrementalRefresh(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -122096,7 +122096,7 @@ class MarketDataRequestReject {
 public:
     static constexpr ::std::string_view msg_type_v = "Y";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MarketDataRequestReject(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -122236,7 +122236,7 @@ class QuoteCancel {
 public:
     static constexpr ::std::string_view msg_type_v = "Z";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit QuoteCancel(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -122400,7 +122400,7 @@ class QuoteStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "a";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit QuoteStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -123408,7 +123408,7 @@ class MassQuoteAck {
 public:
     static constexpr ::std::string_view msg_type_v = "b";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MassQuoteAck(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -123596,7 +123596,7 @@ class SecurityDefinitionRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "c";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityDefinitionRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -124718,7 +124718,7 @@ class SecurityDefinition {
 public:
     static constexpr ::std::string_view msg_type_v = "d";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityDefinition(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -125876,7 +125876,7 @@ class SecurityStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "e";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -126919,7 +126919,7 @@ class SecurityStatus {
 public:
     static constexpr ::std::string_view msg_type_v = "f";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityStatus(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -128083,7 +128083,7 @@ class TradingSessionStatusRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "g";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradingSessionStatusRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -128229,7 +128229,7 @@ class TradingSessionStatus {
 public:
     static constexpr ::std::string_view msg_type_v = "h";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit TradingSessionStatus(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -129212,7 +129212,7 @@ class MassQuote {
 public:
     static constexpr ::std::string_view msg_type_v = "i";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit MassQuote(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -129390,7 +129390,7 @@ class BusinessMessageReject {
 public:
     static constexpr ::std::string_view msg_type_v = "j";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit BusinessMessageReject(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -129539,7 +129539,7 @@ class BidRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "k";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit BidRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -129753,7 +129753,7 @@ class BidResponse {
 public:
     static constexpr ::std::string_view msg_type_v = "l";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit BidResponse(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -129881,7 +129881,7 @@ class ListStrikePrice {
 public:
     static constexpr ::std::string_view msg_type_v = "m";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit ListStrikePrice(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -130012,7 +130012,7 @@ class XMLnonFIX {
 public:
     static constexpr ::std::string_view msg_type_v = "n";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit XMLnonFIX(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -130134,7 +130134,7 @@ class RegistrationInstructions {
 public:
     static constexpr ::std::string_view msg_type_v = "o";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit RegistrationInstructions(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -130292,7 +130292,7 @@ class RegistrationInstructionsResponse {
 public:
     static constexpr ::std::string_view msg_type_v = "p";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit RegistrationInstructionsResponse(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -130441,7 +130441,7 @@ class OrderMassCancelRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "q";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderMassCancelRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -132278,7 +132278,7 @@ class OrderMassCancelReport {
 public:
     static constexpr ::std::string_view msg_type_v = "r";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit OrderMassCancelReport(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -134139,7 +134139,7 @@ class NewOrderCross {
 public:
     static constexpr ::std::string_view msg_type_v = "s";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit NewOrderCross(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -135395,7 +135395,7 @@ class CrossOrderCancelReplaceRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "t";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CrossOrderCancelReplaceRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -136660,7 +136660,7 @@ class CrossOrderCancelRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "u";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit CrossOrderCancelRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -137588,7 +137588,7 @@ class SecurityTypeRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "v";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityTypeRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -137740,7 +137740,7 @@ class SecurityTypes {
 public:
     static constexpr ::std::string_view msg_type_v = "w";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityTypes(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -137913,7 +137913,7 @@ class SecurityListRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "x";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityListRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -138977,7 +138977,7 @@ class SecurityList {
 public:
     static constexpr ::std::string_view msg_type_v = "y";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit SecurityList(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}
@@ -139165,7 +139165,7 @@ class DerivativeSecurityListRequest {
 public:
     static constexpr ::std::string_view msg_type_v = "z";
     static constexpr ::fixpp::dict::application_version version_v =
-        ::fixpp::dict::application_version::v50sp2;
+        ::fixpp::dict::application_version::vlatest;
 
     explicit DerivativeSecurityListRequest(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& view [[clang::lifetimebound]]) noexcept
         : view_(view) {}

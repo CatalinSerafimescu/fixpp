@@ -47,7 +47,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -69,7 +68,6 @@
 #include <functional>
 #include <future>
 #include <memory>
-#include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>
@@ -1006,48 +1004,12 @@ TEST(Od26, CloseDuringTheInitiatorsSendingTimeLogoutWritesNoLogout) {
                   {.type = "5", .tag = "58", .value = "SendingTime(52)"}, fsm_state::LogonSent);
 }
 
-// The validation test dictionary loaded as FIX 4.4, with DefaultApplVerID(1137) declared
-// on the Logon: a FIXT.1.1 session's dictionary, and the engine's one application
-// version.
-std::shared_ptr<const fixpp::dict::Dictionary> fix44_dictionary_with_1137() {
-    std::string xml{fixpp::test_support::kValidationTestFix42Xml};
-    auto replace_once = [&xml](std::string_view from, std::string_view to) {
-        auto const pos = xml.find(from);
-        if (pos == std::string::npos) {
-            ADD_FAILURE() << "fix44_dictionary_with_1137: text not found: " << from;
-            return;
-        }
-        xml.replace(pos, from.size(), to);
-    };
-    replace_once(R"(<fix major="4" minor="2">)", R"(<fix major="4" minor="4">)");
-    replace_once(R"(<field number="108" name="HeartBtInt"    required="Y"/>)",
-                 R"(<field number="108" name="HeartBtInt"    required="Y"/>)"
-                 R"(<field number="1137" name="DefaultApplVerID" required="N"/>)");
-    replace_once(R"(<field number="112" name="TestReqID"    type="STRING"/>)",
-                 R"(<field number="112" name="TestReqID"    type="STRING"/>)"
-                 R"(<field number="1137" name="DefaultApplVerID" type="STRING"/>)");
-    constexpr std::size_t kBufSize = 128U * 1024U;
-    // Destroyed in reverse order: the dictionary, then its resource, then the buffer.
-    struct Owned {
-        std::unique_ptr<std::array<std::byte, kBufSize>> buf;
-        std::unique_ptr<std::pmr::monotonic_buffer_resource> mr;
-        std::unique_ptr<const fixpp::dict::Dictionary> dict;
-    };
-    auto owned = std::make_shared<Owned>();
-    owned->buf = std::make_unique<std::array<std::byte, kBufSize>>();
-    owned->mr = std::make_unique<std::pmr::monotonic_buffer_resource>(owned->buf->data(),
-                                                                      owned->buf->size());
-    owned->dict = std::make_unique<const fixpp::dict::Dictionary>(
-        fixpp::dict::XmlLoader{}.load_from_string(xml, owned->mr.get()));
-    return std::shared_ptr<const fixpp::dict::Dictionary>{owned, owned->dict.get()};
-}
-
 // The acceptor's DefaultApplVerID(1137) Reject: a FIXT session, a Logon without 1137.
 TEST(Od26, CloseDuringTheAcceptors1137RejectWritesNoReject) {
     run_od26_site({.role = session_role::acceptor,
                    .configure =
                        [](SessionConfig& cfg, plain_rig::Rig& rig) {
-                           auto const dict = fix44_dictionary_with_1137();
+                           auto const dict = fixpp::test_support::fix44_dictionary_with_1137();
                            rig.engine_dictionaries = {dict};
                            cfg.dictionary = dict;
                            cfg.begin_string = "FIXT.1.1";

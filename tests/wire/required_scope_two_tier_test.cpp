@@ -185,10 +185,15 @@ Dictionary load_real_dict(char const* file, std::pmr::memory_resource* mr) {
     return fixpp::dict::XmlLoader{}.load(path, mr);
 }
 
+// Its only caller is the vlatest case, so it is guarded on the same macro: with the FIX
+// Latest tier OFF it would be an unused function, an error under FIXPP_WERROR
+// (097-fix-latest-applverid-10).
+#ifdef FIXPP_TEST_HAS_VLATEST
 Dictionary load_orchestra_dict(std::pmr::memory_resource* mr) {
     auto const path = std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
     return fixpp::dict::OrchestraLoader{}.load(path, mr);
 }
+#endif  // FIXPP_TEST_HAS_VLATEST
 
 decimal_t make_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
     auto bytes =
