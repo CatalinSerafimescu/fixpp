@@ -6,7 +6,7 @@ Every witness names its file, what it asserts, and how it is shown RED **for its
 `application_version::vlatest` does not compile on the unfixed tree. A compile failure is RED for the
 wrong reason (it would be RED whatever the behaviour). So, except where noted, each witness's RED is a
 **named mutant applied to the fixed tree**, built, and run unfiltered (`--gtest_filter` only narrows the
-report, never the binary). The mutants are M-1..M-9h; W-12 re-runs M-1, M-1n and M-2 against the fuzz
+report, never the binary). The mutants are M-1..M-9h, plus M-3b (W-3) and M-8d (W-8); W-12 re-runs M-1, M-1n and M-2 against the fuzz
 harness rather than adding one. A row whose rebuild failed proves nothing and is gated on build rc 0. The one
 exception is M-9c, whose stated reason *is* a build failure. The verify record keeps a table: witness |
 mutant | build rc | test rc | the failing assertion's message.
@@ -98,6 +98,10 @@ and run first (plan phase 2), and that run's result is recorded too.
   and the message contains `"2".."10"`.
 - **RED**: mutant M-3, delete the `"10"` branch: the load yields a diagnostic. The text arm is RED on
   `origin/main` (it reads `"2".."9"`).
+- **RED, the value**: mutant M-3b, the `"10"` branch in `src/config/scalar_mappers.cpp` maps to `v50sp2`
+  instead of `vlatest`. The load succeeds, so the accepted-token arm turns RED on its value assertion
+  alone (`"10"` loads as `vlatest`). M-3's RED lands on the load's `has_value()` precondition and never
+  reaches that assertion (re-run 2 ruling).
 - The existing comments that restate the `"2".."9"` range for the old fixture are rewritten to point at
   the mapper (FR-012(c)). That is checked by quickstart §4's comment-claims run, not by a test.
 
@@ -335,6 +339,13 @@ and run first (plan phase 2), and that run's result is recorded too.
       the 1407 counts of (iii)'s and (iv)'s acceptor Logon replies, which the same `build_logon`
       builds.
     - M-8c: `build_heartbeat` appends `1128=9`. The Heartbeat's 1128 count turns RED.
+  - The non-vacuity assertion's own RED (re-run 2 ruling): mutant M-8d deletes the mechanism it
+    observes. The session no longer answers an inbound TestRequest with a Heartbeat:
+    `Session::inbound_heartbeat_reply_leaf_` in `src/session/session.cpp` (called only from
+    `on_inbound_active_test_request_`) builds the Heartbeat and emits nothing. Both W-8 tests turn RED
+    on `ASSERT_TRUE(has_w8_test_request_answer(...))`, the check that a Heartbeat echoing the inbound
+    TestRequest's `112=W8TR` is present. A liveness Heartbeat carries no 112, so it cannot satisfy
+    that check. Other tests that need a TestRequest answer may also turn RED; the record lists them.
   - The `1137=10` assertion on (i)'s Logon turns RED under mutant M-2 (`render(vlatest)` returns
     `"9"`).
 - **Phase split**: (ii), and (iii)'s W-6(b)/(c) frames, compile on `origin/main` and run in plan
