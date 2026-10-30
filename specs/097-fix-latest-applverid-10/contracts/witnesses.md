@@ -81,8 +81,17 @@ and run first (plan phase 2), and that run's result is recorded too.
   parse is the identity, and the nine rendered strings are pairwise distinct. As a separate assertion,
   `render(Unknown)` is `dict_unknown_appl_ver_id`. (W-1's eleven wire inputs `"0"`..`"10"` are a different
   set from these nine members.)
+- **Asserts, out of range** (`VersionProfile097.RenderOutOfRangeIsError`; Gate B round 2, G097-B2-003):
+  the underlying value one past `vlatest`, and the largest underlying value, each render as
+  `dict_unknown_appl_ver_id`, never as a wire string.
 - **RED**: mutant M-2, `render(vlatest)` returns `"9"`. The round-trip and the distinctness checks both
   fail.
+- **RED, out of range**: mutant M-2b (Gate B round 2, G097-B2-003), two edits in `render_appl_ver_id`
+  (`include/fixpp/dict/version_profile.hpp`) with no `default:` added: `case application_version::Unknown:
+  break;` becomes `case application_version::Unknown: return std::unexpected{core::error::dict_unknown_appl_ver_id};`,
+  and the trailing `return std::unexpected{core::error::dict_unknown_appl_ver_id};` becomes
+  `return std::string_view{"10"};`. `RenderOutOfRangeIsError` turns RED for both values, and
+  `RenderUnknownIsError` stays GREEN.
 
 ## W-3 — config token (FR-003)
 
@@ -115,11 +124,22 @@ and run first (plan phase 2), and that run's result is recorded too.
   both constructions (`testing::internal::CaptureStderr()` / `GetCapturedStderr()`) and asserts it is
   empty: no diagnostic is written (US2 AS-1). Quickstart §2's `grep -c FR-010` is a secondary check. `OrchestraVersionIdentity.DistinctVLatestMapsToV50SP2`
   is rewritten to assert the mapping to `vlatest` and renamed `OrchestraVersionIdentity.DistinctVLatestMapsToVlatest`.
+- **File, out of range** (Gate B round 2, G097-B2-003): `tests/dictionary/version_registry_test.cpp`'s
+  `VersionRegistry097.OutOfRangeKeyReportsNoDictionary`. On a local default registry, `get()` of the
+  underlying value one past `vlatest`, and of the largest underlying value, each return
+  `dict_no_dictionary_for_application_version`; `get()` never indexes past its table.
 - **RED**: on `origin/main` the construction aborts with `FR-010`. This is recorded from the death test
   as it exists before the rename: its pass on `origin/main` IS the abort. Mutant M-4 restores
   `case vlatest: return v50sp2;` without the abort: `get(vlatest)` is empty and `get(v50sp2)` returns
   the last writer. So `get(vlatest)` fails in both orders (the fallback answers `v50sp2` only), and
   `get(v50sp2)` is also wrong in one order.
+- **RED, out of range (linux-clang-asan)**: mutant M-4b (Gate B round 2, G097-B2-003), in
+  `version_registry::get` (`src/dictionary/version_registry.cpp`), `if (idx == 0 || idx >= kTableSize)`
+  becomes `if (idx == 0)`. On `linux-clang-asan`, `dictionary_pure_tests` run unfiltered reports
+  `stack-buffer-overflow` in `version_registry::get` under `OutOfRangeKeyReportsNoDictionary`, on the
+  first value (`entries_[kTableSize]`). In a non-ASan build the mutant is undefined behaviour and may read
+  a null slot and pass, so this row's RED is recorded on ASan only. No `kTableSize`-too-large mutant is
+  claimed: its extra slot is null, so `get` returns the same error.
 
 ## W-5 — one-way fallback (FR-006)
 

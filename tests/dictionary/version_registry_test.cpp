@@ -16,6 +16,7 @@
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
+#include <limits>
 #include <type_traits>
 
 namespace {
@@ -40,6 +41,24 @@ TEST(VersionRegistryAcX2, EmptyRegistryReportsNoDictionary) {
         auto got = reg.get(v);
         ASSERT_FALSE(got.has_value());
         EXPECT_EQ(got.error(), error::dict_no_dictionary_for_application_version);
+    }
+}
+
+// 097 W-4 (G097-B2-003): a key past the table, and the largest underlying value, report the
+// AC-X2 error; get() never indexes past its table. The registry is a local so that, under
+// ASan, an index past the table lands in a stack redzone.
+TEST(VersionRegistry097, OutOfRangeKeyReportsNoDictionary) {
+    version_registry const reg{};
+    using U = std::underlying_type_t<application_version>;
+    for (U raw : {static_cast<U>(static_cast<U>(application_version::vlatest) + 1),
+                  std::numeric_limits<U>::max()}) {
+        auto got = reg.get(static_cast<application_version>(raw));
+        EXPECT_FALSE(got.has_value()) << "raw=" << +raw;
+        if (got.has_value()) {
+            continue;
+        }
+        EXPECT_EQ(got.error(), error::dict_no_dictionary_for_application_version)
+            << "raw=" << +raw;
     }
 }
 

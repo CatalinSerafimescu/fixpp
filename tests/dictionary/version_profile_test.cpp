@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>
+#include <limits>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -228,6 +229,22 @@ TEST(VersionProfile097, RenderUnknownIsError) {
     auto got = fixpp::dict::render_appl_ver_id(application_version::Unknown);
     ASSERT_FALSE(got.has_value());
     EXPECT_EQ(got.error(), error::dict_unknown_appl_ver_id);
+}
+
+// 097 W-2 (G097-B2-003): the value one past the last enumerator, and the largest underlying
+// value, render as dict_unknown_appl_ver_id, never as a wire string. An enumerator appended
+// after vlatest makes the first value valid: move it.
+TEST(VersionProfile097, RenderOutOfRangeIsError) {
+    using U = std::underlying_type_t<application_version>;
+    for (U raw : {static_cast<U>(static_cast<U>(application_version::vlatest) + 1),
+                  std::numeric_limits<U>::max()}) {
+        auto got = fixpp::dict::render_appl_ver_id(static_cast<application_version>(raw));
+        EXPECT_FALSE(got.has_value()) << "raw=" << +raw;
+        if (got.has_value()) {
+            continue;
+        }
+        EXPECT_EQ(got.error(), error::dict_unknown_appl_ver_id) << "raw=" << +raw;
+    }
 }
 
 TEST(VersionProfileAcVp4, CppIndexNotReused) {
