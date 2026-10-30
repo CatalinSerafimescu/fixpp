@@ -1991,13 +1991,25 @@ TEST(FixtLogonEstablishment097, W6d_BothRegistry_OneSessionPerPeer_EachNegotiate
     FixtSetup s{{fix50sp2, make_orchestra_latest_dict()}};
 
     std::vector<std::unique_ptr<Peer097>> peers;
-    peers.push_back(std::make_unique<Peer097>(
-        Peer097{"PEER9", "9", nullptr, application_version::v50sp2, {}, nullptr}));
-    peers.push_back(std::make_unique<Peer097>(
-        Peer097{"PEER10", "10", nullptr, application_version::vlatest, {}, nullptr}));
+    peers.push_back(std::make_unique<Peer097>(Peer097{.comp_id = "PEER9",
+                                                      .appl_ver_id = "9",
+                                                      .own_dict = nullptr,
+                                                      .expect = application_version::v50sp2,
+                                                      .out = {},
+                                                      .sess = nullptr}));
+    peers.push_back(std::make_unique<Peer097>(Peer097{.comp_id = "PEER10",
+                                                      .appl_ver_id = "10",
+                                                      .own_dict = nullptr,
+                                                      .expect = application_version::vlatest,
+                                                      .out = {},
+                                                      .sess = nullptr}));
     // The engine-wide arm: this session's own dictionary is FIX50SP2.
-    peers.push_back(std::make_unique<Peer097>(
-        Peer097{"PEER10SP2", "10", fix50sp2, application_version::vlatest, {}, nullptr}));
+    peers.push_back(std::make_unique<Peer097>(Peer097{.comp_id = "PEER10SP2",
+                                                      .appl_ver_id = "10",
+                                                      .own_dict = fix50sp2,
+                                                      .expect = application_version::vlatest,
+                                                      .out = {},
+                                                      .sess = nullptr}));
 
     for (auto& p : peers) {
         auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
@@ -2458,7 +2470,7 @@ TEST(FixtLogonEstablishment097, W8_CounterSeededPositives) {
 // The Heartbeat answering capture_initiator_frames' inbound TestRequest (112=W8TR) is
 // among `frames`.
 [[nodiscard]] bool has_w8_test_request_answer(const Frames& frames) {
-    return std::any_of(frames.begin(), frames.end(), [](const auto& f) {
+    return std::ranges::any_of(frames, [](const auto& f) {
         return msg_type_of(f) == "0" && extract_tag(f, 112) == "W8TR";
     });
 }

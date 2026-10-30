@@ -156,9 +156,9 @@ make_validation_test_dictionary() {
         R"(<field number="108" name="HeartBtInt"    required="Y"/>)";
     constexpr std::string_view kTestReqIdField =
         R"(<field number="112" name="TestReqID"    type="STRING"/>)";
-    static_assert(kValidationTestFix42Xml.find(kVersion) != std::string_view::npos);
-    static_assert(kValidationTestFix42Xml.find(kLogonHeartBtInt) != std::string_view::npos);
-    static_assert(kValidationTestFix42Xml.find(kTestReqIdField) != std::string_view::npos);
+    static_assert(kValidationTestFix42Xml.contains(kVersion));
+    static_assert(kValidationTestFix42Xml.contains(kLogonHeartBtInt));
+    static_assert(kValidationTestFix42Xml.contains(kTestReqIdField));
 
     std::string xml{kValidationTestFix42Xml};
     auto replace_once = [&xml](std::string_view from, std::string_view to) {

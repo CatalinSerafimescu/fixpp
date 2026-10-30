@@ -37,6 +37,7 @@
 #include <fixpp/transport/reconnect_policy.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -439,7 +440,7 @@ TEST(LoadHappyPath, Fixt097_ApplVerId10_LoadsAsVlatest) {
     const auto& cfg = result->sessions[0].config;
     ASSERT_TRUE(cfg.default_appl_ver_id.has_value())
         << "session[0] must have default_appl_ver_id set";
-    EXPECT_EQ(*cfg.default_appl_ver_id, fixpp::dict::application_version::vlatest)
+    EXPECT_EQ(cfg.default_appl_ver_id, std::optional{fixpp::dict::application_version::vlatest})
         << "default_appl_ver_id \"10\" must load as application_version::vlatest";
 }
 

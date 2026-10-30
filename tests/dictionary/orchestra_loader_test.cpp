@@ -251,7 +251,7 @@ TEST(OrchestraRegistry097, BothDictsCoexist) {
                                   "no diagnostic";
 
     for (auto const* reg : {&reg_latest_first, &reg_sp2_first}) {
-        auto const order =
+        auto const* const order =
             reg == &reg_latest_first ? "{FIX Latest, FIX50SP2}" : "{FIX50SP2, FIX Latest}";
         auto got_sp2 = reg->get(fixpp::dict::application_version::v50sp2);
         EXPECT_TRUE(got_sp2.has_value()) << order;
