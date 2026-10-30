@@ -37,9 +37,12 @@
 #include <fixpp/transport/reconnect_policy.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fstream>
+#include <limits>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -442,6 +445,64 @@ TEST(LoadHappyPath, Fixt097_ApplVerId10_LoadsAsVlatest) {
         << "session[0] must have default_appl_ver_id set";
     EXPECT_EQ(cfg.default_appl_ver_id, std::optional{fixpp::dict::application_version::vlatest})
         << "default_appl_ver_id \"10\" must load as application_version::vlatest";
+}
+
+// 097-fix-latest-applverid-10 (G097-B2-004), contracts W-3 (parity arm): the config token map
+// (map_scalars, scalar_mappers.cpp) and the wire map (resolve_application_version) agree on
+// every token render_appl_ver_id emits. The token set is derived from render, so an
+// application_version added to render and the wire but not to config makes this test fail.
+// render never emits "", so the config-vs-wire empty-token difference is out of scope here.
+TEST(LoadHappyPath, Fixt097_ConfigAndWireAgreeOnEveryRenderedToken) {
+    using av = fixpp::dict::application_version;
+    using U = std::underlying_type_t<av>;
+    // Only resolve_application_version's non-empty-token branch runs, so the default is unused.
+    constexpr fixpp::dict::version_profile kFixt{.session = fixpp::dict::session_version::vt11,
+                                                 .default_appl = av::v50sp2,
+                                                 .has_per_message_override = true,
+                                                 ._reserved = 0};
+    const std::filesystem::path dict =
+        (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "FIXT11.xml")
+            .lexically_normal();
+    std::size_t rendered = 0;
+    for (unsigned u = 0; u <= std::numeric_limits<U>::max(); ++u) {
+        const auto v = static_cast<av>(static_cast<U>(u));
+        const auto tok = fixpp::dict::render_appl_ver_id(v);
+        if (!tok.has_value()) {
+            continue;
+        }
+        ++rendered;
+        // wire side
+        const auto wire = fixpp::dict::resolve_application_version(kFixt, *tok);
+        EXPECT_TRUE(wire.has_value() && *wire == v) << "wire map disagrees for token " << *tok;
+        // config side
+        // Unique per run: presets running at the same time on one host share the temp dir.
+        const auto tmp = std::filesystem::temp_directory_path() /
+                         ("fixpp_097_parity_" + std::string{*tok} + "_" +
+                          std::to_string(std::random_device{}()) + ".toml");
+        {
+            std::ofstream out{tmp};
+            // TOML literal string (single quotes) for the dictionary path, as in
+            // Cov_AbsoluteDictPath: a Windows absolute path holds backslashes.
+            out << "[clock]\nkind = \"system\"\n\n[store]\nkind = \"memory\"\n\n"
+                << "[dictionary]\nkind = \"path\"\npath = '" << dict.string() << "'\n\n"
+                << "[[session]]\nsender_comp_id = \"SERVER1\"\ntarget_comp_id = \"CLIENT1\"\n"
+                << "begin_string = \"FIXT.1.1\"\nrole = \"acceptor\"\n"
+                << "default_appl_ver_id = \"" << *tok << "\"\n\n"
+                << "[session.transport]\nkind = \"plaintext\"\n\n"
+                << "[session.security_profile]\nkind = \"insecure_plain_tcp\"\n";
+        }
+        auto result = load_path(tmp);
+        std::error_code ec;
+        std::filesystem::remove(tmp, ec);
+        EXPECT_TRUE(result.has_value())
+            << "config rejects token " << *tok << ": " << dump_diags(result);
+        if (!result.has_value()) {
+            continue;
+        }
+        EXPECT_EQ(result->sessions.at(0).config.default_appl_ver_id, std::optional{v})
+            << "config map disagrees for token " << *tok;
+    }
+    EXPECT_GT(rendered, std::size_t{0}) << "render emitted no token: the loop checked nothing";
 }
 
 // ── pos_multisession_profile_diverges.toml: per-session divergence scan ───────

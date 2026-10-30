@@ -103,14 +103,27 @@ and run first (plan phase 2), and that run's result is recorded too.
   `tests/config/fixtures/neg_fixt_unknown_appl_ver_id.toml` (`default_appl_ver_id = "11"`). New files,
   in the directory's `pos_*` / `neg_*` naming: `pos_fixt_appl_ver_ids.toml` is not extended, because
   its test iterates an expected array.
+- **File, parity arm** (Gate B round 2, G097-B2-004): `tests/config/test_load_happy_path.cpp`'s
+  `LoadHappyPath.Fixt097_ConfigAndWireAgreeOnEveryRenderedToken`, in the same binary. It writes its TOML
+  at run time under `std::filesystem::temp_directory_path()` (a unique name per run, removed before
+  asserting) with an absolute dictionary path in a TOML literal string.
 - **Asserts**: `"10"` loads as `vlatest`. An unknown token (`"11"`) yields `reason_class::unknown_enum`,
   and the message contains `"2".."10"`.
+- **Asserts, parity arm**: for every underlying value of `application_version` that
+  `render_appl_ver_id` accepts, its rendered token resolves on the wire (`resolve_application_version`)
+  and loads from config (`default_appl_ver_id`) to that same value, and render accepts at least one
+  value. The token set is derived from render, not listed, so a token map that misses an enumerator
+  render emits fails here. Render never emits `""`, so the config-vs-wire empty-token difference is out
+  of scope.
 - **RED**: mutant M-3, delete the `"10"` branch: the load yields a diagnostic. The text arm is RED on
   `origin/main` (it reads `"2".."9"`).
 - **RED, the value**: mutant M-3b, the `"10"` branch in `src/config/scalar_mappers.cpp` maps to `v50sp2`
   instead of `vlatest`. The load succeeds, so the accepted-token arm turns RED on its value assertion
   alone (`"10"` loads as `vlatest`). M-3's RED lands on the load's `has_value()` precondition and never
   reaches that assertion (re-run 2 ruling).
+- **RED, parity arm**: M-3 re-run (Gate B round 2, G097-B2-004), following the M-1n re-run precedent:
+  with config's `"10"` branch deleted, `Fixt097_ConfigAndWireAgreeOnEveryRenderedToken` turns RED on
+  "config rejects token 10".
 - The existing comments that restate the `"2".."9"` range for the old fixture are rewritten to point at
   the mapper (FR-012(c)). That is checked by quickstart §4's comment-claims run, not by a test.
 
