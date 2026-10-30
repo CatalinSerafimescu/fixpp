@@ -6,8 +6,9 @@ Every witness names its file, what it asserts, and how it is shown RED **for its
 `application_version::vlatest` does not compile on the unfixed tree. A compile failure is RED for the
 wrong reason (it would be RED whatever the behaviour). So, except where noted, each witness's RED is a
 **named mutant applied to the fixed tree**, built, and run unfiltered (`--gtest_filter` only narrows the
-report, never the binary). The mutants are M-1..M-9h, plus M-3b (W-3) and M-8d (W-8); W-12 re-runs M-1, M-1n and M-2 against the fuzz
-harness rather than adding one. A row whose rebuild failed proves nothing and is gated on build rc 0. The one
+report, never the binary). The mutants are M-1..M-9h, plus M-3b (W-3) and M-8d (W-8), plus M-2b (W-2),
+M-4b (W-4, linux-clang-asan) and M-9i (W-9) from Gate B round 2; W-12 re-runs M-1, M-1n and M-2 against the fuzz
+harness rather than adding one, and W-3's parity arm re-runs M-3. A row whose rebuild failed proves nothing and is gated on build rc 0. The one
 exception is M-9c, whose stated reason *is* a build failure. The verify record keeps a table: witness |
 mutant | build rc | test rc | the failing assertion's message.
 
