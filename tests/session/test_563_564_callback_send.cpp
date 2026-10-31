@@ -1030,11 +1030,15 @@ struct Fixture {
 
     // What note_window_miss records for one miss of run()'s window. `ready_ms` runs from the
     // end of the window's grace, and is empty when the call did not become ready in a wait.
+    // `to_ready_ms` runs from the window's start to ready, and is floored once from the sum
+    // of the two durations rather than added from the two floored parts, which can read 1 ms
+    // short of the true total.
     struct WindowMiss {
         std::string site;
         long long window_ms = -1;
         bool window_stopped = false;
         std::optional<long long> ready_ms;
+        std::optional<long long> to_ready_ms;
         bool recovered = false;
     };
     // One entry per window miss of run(), in the order they happened.
@@ -1075,8 +1079,12 @@ struct Fixture {
                      .window_ms = to_ms(r.window_elapsed),
                      .window_stopped = r.window_stopped,
                      .ready_ms = std::nullopt,
+                     .to_ready_ms = std::nullopt,
                      .recovered = r.recovered};
-        if (r.wait_to_ready) m.ready_ms = to_ms(*r.wait_to_ready);
+        if (r.wait_to_ready) {
+            m.ready_ms = to_ms(*r.wait_to_ready);
+            m.to_ready_ms = to_ms(r.window_elapsed + *r.wait_to_ready);
+        }
         const long long inflight = (at_miss.begun - counts_at_construction.begun) -
                                    (at_miss.exited - counts_at_construction.exited);
         std::printf(
@@ -2909,6 +2917,8 @@ std::string describe(const Fixture& f, const FileGate& gate) {
         out += "; site=" + m.site + " window_ms=" + std::to_string(m.window_ms) +
                " window_stopped=" + std::to_string(m.window_stopped) +
                " ready_ms=" + (m.ready_ms ? std::to_string(*m.ready_ms) : std::string("none")) +
+               " to_ready_ms=" +
+               (m.to_ready_ms ? std::to_string(*m.to_ready_ms) : std::string("none")) +
                " recovered=" + std::to_string(m.recovered);
     }
     out += "; gate:";
@@ -2917,10 +2927,12 @@ std::string describe(const Fixture& f, const FileGate& gate) {
 }
 
 // What a setup cell asserts of the one miss it causes at `site`, where `held` says the cell's
-// hold-ups ran once and `held_ms` is their total: the window ran its whole length and was not
-// stopped, the call became ready within the setup wait, the time from the window's start to
-// ready is at least `held_ms` and less than kSetupBandSlack more, and run() went on to take
-// the fixture's guard again. Prints the cell's context line first.
+// hold-ups ran once and `held_ms` is their total: there is exactly one miss at `site`; the
+// window ran its whole length and was not stopped, the call became ready within the setup
+// wait, the time from the window's start to ready is at least `held_ms` and less than
+// kSetupBandSlack more, and run() went on to take the fixture's guard again. A miss at another
+// setup site, which a slow disk can cause on its own, must have recovered: a failed one fails
+// the cell. Prints the cell's context line first.
 void expect_one_recovered_setup_miss(const Fixture& f, const FileGate& gate, bool held,
                                      std::chrono::milliseconds held_ms, const char* site,
                                      bool active, const std::string& prefix) {
@@ -2928,18 +2940,26 @@ void expect_one_recovered_setup_miss(const Fixture& f, const FileGate& gate, boo
         prefix + " active=" + std::to_string(active) + " " + describe(f, gate);
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
-    ASSERT_TRUE(held && !f.window_misses.empty() && f.window_misses.front().site == site)
-        << "the path was not exercised: " << context;
-    const Fixture::WindowMiss& m = f.window_misses.front();
-    EXPECT_EQ(f.window_misses.size(), 1U) << context;
+    const auto at_site = [site](const Fixture::WindowMiss& m) { return m.site == site; };
+    const auto it = std::find_if(f.window_misses.begin(), f.window_misses.end(), at_site);
+    ASSERT_TRUE(held && it != f.window_misses.end()) << "the path was not exercised: " << context;
+    const Fixture::WindowMiss& m = *it;
+    EXPECT_EQ(std::count_if(f.window_misses.begin(), f.window_misses.end(), at_site), 1)
+        << context;
+    for (const auto& other : f.window_misses) {
+        if (other.site != site) {
+            EXPECT_TRUE(other.recovered)
+                << "a miss at " << other.site << " did not recover. " << context;
+        }
+    }
     EXPECT_FALSE(m.window_stopped) << context;
     EXPECT_GE(m.window_ms, Fixture::kRunWindow.count())
         << "the window returned before its end. " << context;
-    EXPECT_TRUE(m.recovered && m.ready_ms.has_value())
+    EXPECT_TRUE(m.recovered && m.to_ready_ms.has_value())
         << "the setup wait did not recover from the miss. " << context;
-    if (m.ready_ms) {
-        EXPECT_GE(m.window_ms + *m.ready_ms, held_ms.count()) << context;
-        EXPECT_LT(m.window_ms + *m.ready_ms, (held_ms + kSetupBandSlack).count()) << context;
+    if (m.to_ready_ms) {
+        EXPECT_GE(*m.to_ready_ms, held_ms.count()) << context;
+        EXPECT_LT(*m.to_ready_ms, (held_ms + kSetupBandSlack).count()) << context;
     }
     EXPECT_TRUE(active) << "setup: session did not reach Active. " << context;
     EXPECT_TRUE(f.keep.has_value())
@@ -2972,19 +2992,20 @@ TEST(CallbackSend, FileStoreFixture_SetupOpenBlockedPastTheWindow_IsWaitedFor) {
 }
 
 // The same for the setup's peer Logon, its store job held up on the file pool past an
-// on-time window. The gate is armed when the session transmits its own Logon, which open()
-// stores before it transmits it, so the job held up is the first one handed over after
-// that: one of the inbound Logon's. No miss at the open shows that open() did not wait on it.
+// on-time window. The gate is armed after open()'s run has returned, so the job held up is
+// the first one handed over after that: one of the inbound Logon's.
 TEST(CallbackSend, FileStoreFixture_SetupLogonPastTheWindow_IsWaitedFor) {
     Fixture f{ExecKind::io_context, StoreKind::file};
     auto cfg = f.cfg();
     const auto gate = delay_a_store_job(f, cfg, kSetupJobDelay);
     Session sess{f.engine, cfg};
-    f.on_transmit = [&](const std::string& frame) {
-        if (field(frame, 35) == "A") gate->arm();
-    };
-    const bool active = f.open_to_active(sess);
-    f.on_transmit = nullptr;
+    bool active = false;
+    if (f.run_setup(sess.open(), "CallbackSend::open")) {
+        gate->arm();
+        active = f.run_setup(sess.on_inbound_frame(std::span<const std::byte>{f.peer_logon}),
+                             "CallbackSend::logon") &&
+                 sess.state() == fsm_state::Active;
+    }
     expect_one_recovered_setup_miss(f, *gate, gate->acted(), kSetupJobDelay, "CallbackSend::logon",
                                     active, "logon");
 }
