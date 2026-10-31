@@ -2515,7 +2515,7 @@ TEST(PumpWindowMiss, RecoveredWaitRunsTheWindowOnceMore) {
     ASSERT_TRUE(r.ready && r.recovered && !r.window_stopped && r.wait_to_ready.has_value())
         << "the path was not exercised: ready=" << r.ready << " recovered=" << r.recovered
         << " window_stopped=" << r.window_stopped;
-    EXPECT_TRUE(fake.witness_posted) << "the future double never answered ready";
+    EXPECT_TRUE(fake.witness_posted) << "the future double never posted its witness";
     EXPECT_TRUE(after) << "the handler posted when the call became ready inside the wait had "
                           "not run when run_window_or_wait_until_ready returned";
 }
