@@ -11,6 +11,23 @@
     on a field with no values closes its domain: accepted and disclosed, B-098-7); N-11 (a `[default]`
     overlay cannot be cleared for one session: disclosed, no "none" value); N-5 (the pre-existing
     `first_field_index` wrap is probed, filed and excluded from the census check, not fixed in 098).
+    N-5 is superseded at round 2 (below).
+- Round 2 applied 2026-10-31: Codex P1=4 P2=2 P3=0; Opus post-judging P1=2 P2=6 P3=4; rewrite addresses root causes A–D and G098-R2-001, G098-R2-002, G098-R2-003, G098-R2-004, G098-R2-005, G098-R2-006, N-1, N-2, N-3, N-4, N-5, N-6, N-7, N-8, N-9, N-10, and the round-1 residuals A-002 (Root cause C), A-006 (N-10), A-011 (N-6), N-1 (N-2), N-4 (Root cause A), N-5 (N-3) and N-10 (N-9). Reviews: research/reviews/codex_098-dialect-overlay_gate_a_2_review.md, research/reviews/opus_098-dialect-overlay_gate_a_2_adversarial_review.md.
+  - **A (pairs):** one relation check, base against spliced, between splice and build, using each
+    loader's own factored pair detection (research R-3, R-5 step 8a; W-3's pair table; M-16).
+  - **B (budget):** the budget counts steps (child nodes visited), so empty-component chains are
+    charged; a step counter in both `expand_field_list`s refuses on the overlay path once it passes the
+    pre-walk's prediction, and tests assert counter = prediction; the header store is a visited-set walk
+    (research R-5, R-7; M-17).
+  - **C (comparator):** the compared stores are a declared list; W-0's seeds equal the list (research
+    R-10).
+  - **D (formats):** W-3 is refusal kinds × formats with N/A reasons; the shared walk returns structured
+    results and each loader throws its own type (research R-5, contracts W-3).
+  - **Owner attention** (orchestrator default, spec Clarifications "Gate A round 2"): the side-table
+    wrap. Round 1's premise ("pre-existing and not caused by an overlay") was false: an overlay can cause
+    it within the budget on a base that does not wrap today. The default is now **refused at load** for a
+    base whose side tables fit; a base that already does not fit stays out of scope (probed, filed if
+    shown). N-2 and N-11 are unchanged.
 
 ### Round 1 — disagreements
 
@@ -40,6 +57,25 @@ shape, following the Opus judgement:
 - **A-012.** Downgraded to P3. Codex's alternative of a separate Orchestra row was not taken: both rows'
   scope cells widen (data-model §E).
 
+### Round 2 — disagreements
+
+Opus marked no Codex finding **Disagree**. Two were downgraded (G098-R2-004 P1→P2; G098-R2-006 P2→P3).
+These Codex counter-proposals were applied in a different shape, following the Opus judgement:
+
+- **G098-R2-002.** Codex asked the merge to model `detect_length_pairs` exactly. Not applied: that is a
+  fourth hand copy of the loader's rule, the class that failed twice. The loader's own detection is
+  factored and run on base and spliced documents (research R-3, step 8a).
+- **G098-R2-003.** Codex offered charging one standalone header expansion in the budget. Not applied:
+  the header store is a set, computed by a visited-set walk that no budget needs to charge, and the step
+  counter refuses any expansion the pre-walk does not model (research R-5, R-7).
+- **G098-R2-004.** Codex asked for a dedicated context-required seed and mutant, and a census of
+  required membership per context. Applied as Root cause C instead: the seeded rows are derived from the
+  declared store list, which includes context `required_members`; the census extension was not taken
+  (research R-10).
+- **G098-R2-005.** Codex offered a `(msgType, scenario)` identity for Orchestra messages. Not applied: it
+  would change the loader contract. A lookup that hits a repeated base key is refused instead, for every
+  key kind (research R-3).
+
 ## Summary
 
 A user loads a base dictionary with one overlay and gets an ordinary `dict::Dictionary`, which they put in
@@ -48,12 +84,14 @@ Orchestra) holding only additions.
 
 - **Mechanism (research R-1).** Each loader parses the base and the overlay into pugixml documents and
   runs the guards in research R-5's order: the overlay's shape (bytes, DOCTYPE, depth, entry and
-  reference caps); one iterative, memoized walk of the merged reference graph that refuses a cycle and
-  any overlay whose expansion would exceed a fixed budget; then the conflict checks (R-4). It then
-  splices the overlay into the base document by "an edit lands on the definition it names" (R-3) and
-  runs its existing `build_handle_from_doc` unchanged. The spliced document *is* the equivalent edited
-  file (each addition appended to its container, in overlay order), so the result equals that file's
-  load by construction, store for store.
+  reference caps); one iterative, memoized walk of the merged reference graph that refuses a cycle, any
+  overlay whose expansion would exceed a fixed budget of steps, and any overlay that would push a
+  fitting side table past its 16-bit index; then the conflict checks (R-4). It then splices the overlay
+  into the base document by "an edit lands on the definition it names" (R-3), compares the spliced
+  document's Length+Data relation with the base's using the loader's own detection, and runs its
+  existing `build_handle_from_doc` with a step counter armed at the walk's prediction. The spliced
+  document *is* the equivalent edited file (each addition appended to its container, in overlay order),
+  so the result equals that file's load by construction, store for store.
 - **Two formats (R-2).** The Orchestra overlay is an Orchestra fragment, because translating a
   QuickFIX-XML fragment onto Orchestra's id-referenced, shared-definition model is a second design of
   its own (measured reasons in R-2). Disclosed: Orchestra code sets and groups are shared, so an edit
@@ -143,7 +181,7 @@ specs/098-dialect-overlay/
 | Area | Files |
 |---|---|
 | Dictionary API | `include/fixpp/dict/{xml_loader,orchestra_loader,load_any,error,table_view,dictionary,field_ref}.hpp` |
-| Dictionary impl | `src/dictionary/{xml_loader,orchestra_loader,load_any,dictionary}.cpp`, `src/dictionary/dictionary_internal.hpp`; a new `src/dictionary/overlay_merge.{hpp,cpp}` for the guards, the conflict checks and the two splice walks (shared helpers: bounded read, depth walk, the merged-graph cycle and budget walk); `src/dictionary/CMakeLists.txt` (lists `fixpp_dictionary`'s sources explicitly, so `overlay_merge.cpp` is added there) |
+| Dictionary impl | `src/dictionary/{xml_loader,orchestra_loader,load_any,dictionary}.cpp` (the factored pair detection, the step counter, the header-store walk), `src/dictionary/dictionary_internal.hpp`; a new `src/dictionary/overlay_merge.{hpp,cpp}` for the guards, the conflict checks and the two splice walks (shared helpers: bounded read, parse-status mapping, depth walk, the match-index helper, the merged-graph cycle, budget and side-table walk, and the test-facing read seam for the step counter); `src/dictionary/CMakeLists.txt` (lists `fixpp_dictionary`'s sources explicitly, so `overlay_merge.cpp` is added there) |
 | Session | `src/session/session.cpp` (the send classification line); a new private header `src/session/send_header_tags.hpp` (`kSendHeaderTags` and `is_send_header_tag`, moved out of `session.cpp`, research R-7); `include/fixpp/session/session_config.hpp` (field and forward declaration removed) |
 | Config | `src/config/toml_config_loader.cpp` (scope-aware `dialect_overlay`), `src/config/selector_resolver.cpp` (per-session dictionary step), `src/config/loader_internal.hpp` (doc) |
 | C ABI | `include/fix/c_api/dict.h`, `include/fix/c_api/version.h`, `src/capi/dictionary.cpp`, `src/capi/capi_internal.hpp` (the exception-to-code mapping function, research R-6), `tests/abi/golden/fixpp_capi_symbols.txt`, `tools/capi_freeze.sha256` |
@@ -164,14 +202,19 @@ specs/098-dialect-overlay/
    pair clean, over every store except the header store (`is_header_tag` does not exist yet). Nothing
    reads W-1/W-2 before this is green.
 3. **QuickFIX-XML overlay**: errors, the overlay guards in R-5's order (shape caps, the merged-graph
-   cycle and expansion-budget walk, then the conflict checks of R-4), the XML splice (R-3);
+   cycle, budget and side-table walk, then the conflict checks of R-4), the XML splice (R-3), the step 8a
+   pair-relation check over the factored `detect_length_pairs`, the step counter and its read seam;
    `XmlLoader::load_with_overlay[_from_string]`. W-1 (qf), W-2 (FIX44, FIX50SP2, with the wrap probe),
-   W-3 (XML rows). Mutants M-0..M-7, M-12..M-14. Full suite.
-4. **Orchestra overlay**: the Orchestra splice and checks; `OrchestraLoader::load_with_overlay[_from_string]`;
-   `dict::load_any_with_overlay`. W-1 (orch), W-2 (Orchestra), W-3 (Orchestra rows), W-4. Mutant M-8.
+   W-3 (XML column). Mutants M-0..M-7, M-12..M-14, M-16..M-18. Full suite.
+4. **Orchestra overlay**: the Orchestra splice and checks, the factored `resolve_length_pairs`, the
+   Orchestra step counter; `OrchestraLoader::load_with_overlay[_from_string]`;
+   `dict::load_any_with_overlay`. W-1 (orch), W-2 (Orchestra), W-3 (Orchestra column: every cell of the
+   product that is not N/A), W-4. Mutant M-8, and M-4..M-7, M-12..M-14, M-16..M-18 once more for the
+   Orchestra rows.
    **Stop rule:** if the Orchestra W-2 row shows a difference that comes from the loader's own
    order-dependent rules rather than the splice, record it and decide before continuing.
-5. **Header on send**: handle member, `table_view::header_bits_` + `is_header_tag`, builder forwarder,
+5. **Header on send**: handle member filled by the visited-set header walk (research R-7, not an
+   `expand_field_list` call), `table_view::header_bits_` + `is_header_tag`, builder forwarder,
    `as_table_view` fill, `src/session/send_header_tags.hpp`, the send classification; the comparator's
    `is_header_tag` comparison and its W-0 seeded row, then W-1/W-2 re-run with it. W-6, W-7. Mutant
    M-9. Full suite: the existing header-order witnesses unchanged.
@@ -179,7 +222,7 @@ specs/098-dialect-overlay/
    function and its mapping function, 1.13 pins, symbol golden, freeze hash; the SWIG audit row and
    Python test. W-8, W-9, W-10. Mutants M-10, M-11, M-15.
 7. **Removal, fuzz, comments**: delete `SessionConfig::dialect_overlay` and the forward declaration;
-   the fuzz harness and seeds (W-11, M-7 re-run against it); the comment fixes (research R-14). A
+   the fuzz harness and seeds (W-11, M-7 and M-12 re-run against it per format); the comment fixes (research R-14). A
    rewritten comment states the rule and the derivation, never a count. Full suite.
 8. **Records** (data-model §D–§G): run §G's inventory recipe and disposition every hit; B&L, closed
    B&L, catalogue (scope cells widened), coverage index, the design-doc and brain notes; W-13 checks with
@@ -194,17 +237,24 @@ specs/098-dialect-overlay/
   an addition placed elsewhere than a hand edit would put it yields a different dictionary. Mitigation:
   the splice only appends to the matched container; W-1/W-2 compare against hand-written references
   with the comparator proven on every store (W-0); M-1 proves a position change is caught.
-- **A comparator that cannot see a store.** Mitigation: W-0's one seeded row per claimed store; keys
+- **A comparator that cannot see a store.** Mitigation: the compared stores are a declared list, and
+  W-0's seeded rows must equal it, one per entry (research R-10); keys
   from a raw-document census, a test-only read of the handle's indexes and the public API; bare, exact
   and context stores compared separately (research R-10).
 - **A store both sides get wrong.** Both sides go through the same `build_handle_from_doc`, so a loader
   defect is invisible side against side. Mitigation: `component_fields` / `group_fields` checked against
   the raw census; the FIX50SP2 wrap probe recorded (research R-10).
-- **An overlay that makes the loader do unbounded work.** Definition caps do not bound expansion.
-  Mitigation: the merged-graph budget walk before any recursive step (research R-5), W-3's bomb row,
-  M-12.
+- **An overlay that makes the loader do unbounded work.** Definition caps and emitted entries do not
+  bound expansion. Mitigation: the merged-graph budget walk in steps before any recursive step, and the
+  step counter in both `expand_field_list`s, which refuses once the build passes the walk's prediction
+  (research R-5); W-3's bomb and empty-chain rows, M-12, M-17.
+- **A model of a loader rule drifts from the loader.** The pair rule and the expansion count were each
+  modelled by hand in earlier drafts and missed cases. Mitigation: the pair check calls the loader's
+  own factored detection; the expansion model is checked against the counter by equality in W-1, W-2 and
+  the fuzz harness.
 - **The XML loader's silent duplicate rules.** A duplicate field name or msgtype would load without an
-  error. Mitigation: the merge refuses both before the splice (R-4), with W-3 rows for each.
+  error. Mitigation: the merge refuses both within the overlay and, for a repeated base key, on the
+  overlay's lookup, before the splice (R-3, R-4), with W-3 rows for each.
 - **Orchestra shared definitions surprise a user.** An enum value added to a shared code set reaches
   other fields. By construction (it is what a hand edit does), disclosed in B-098-2 and the spec Edge
   Cases.

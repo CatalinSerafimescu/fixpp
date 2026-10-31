@@ -11,12 +11,14 @@ public:
     // ... load, load_from_string unchanged ...
 
     // Parses `base` and `overlay`, runs research R-5's guards in order (shape caps, then one
-    // iterative walk of the merged reference graph for cycles and the expansion budget, then the R-4
-    // conflict checks), splices the overlay into the base document (R-3) and builds the Dictionary
-    // from the spliced document exactly as `load` builds one from a file. Throws: xml_parse_error
-    // (base or overlay malformed, unknown reference, cycle), unknown_version_error (base),
-    // overlay_conflict_error, overlay_limit_error (a cap or the expansion budget), xml_oom_error
-    // (including pugixml's status_out_of_memory).
+    // iterative walk of the merged reference graph for cycles, the expansion budget and side-table
+    // fit, then the R-4 conflict checks), splices the overlay into the base document (R-3), checks
+    // the spliced document's Length+Data relation against the base's (R-5 step 8a) and builds the
+    // Dictionary from the spliced document as `load` builds one from a file, with the expansion
+    // step counter armed. Throws: xml_parse_error (base or overlay malformed, unknown reference,
+    // cycle), unknown_version_error (base), overlay_conflict_error, overlay_limit_error (a cap, the
+    // expansion budget, the step counter, or a side table that would stop fitting 16 bits),
+    // xml_oom_error (pugixml's status_out_of_memory on the base or the overlay parse).
     [[nodiscard]] Dictionary load_with_overlay(
         std::filesystem::path const& base, std::filesystem::path const& overlay,
         std::pmr::memory_resource* mr,
@@ -28,7 +30,9 @@ public:
 
 // include/fixpp/dict/orchestra_loader.hpp — Orchestra base, fixr:repository overlay
 // OrchestraLoader::load_with_overlay / load_with_overlay_from_string: the same two members; base and
-// overlay schema errors throw orchestra_parse_error (a subclass of xml_parse_error), as `load` does.
+// overlay schema errors, a cycle included, throw orchestra_parse_error (a subclass of
+// xml_parse_error), as `load` does. A Length a new Data's lengthId would give a second partner is
+// overlay_conflict_error, not the loader's "already paired" orchestra_parse_error (research R-3).
 //
 // xml_oom_error derives from std::bad_alloc, not from xml_parse_error. The C ABI catches, in order:
 // overlay_limit_error, then std::bad_alloc (which covers xml_oom_error and every bare bad_alloc the
@@ -76,7 +80,8 @@ Overlay attribute vocabulary: `required` is `Y`, `N` or absent (QuickFIX XML); `
  *
  *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
  *  @return FIXPP_ERR_NULL_HANDLE          a NULL argument; *out_dict = NULL when out_dict is not NULL
- *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the overlay exceeds a cap; *out_dict = NULL
+ *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the overlay exceeds a cap or the expansion budget, or
+ *                                         would push a side table past 16 bits; *out_dict = NULL
  *  @return FIXPP_ERR_DICT_OOM             allocation failed anywhere in the call, including the
  *                                         handle's own allocation; *out_dict = NULL
  *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure; *out_dict = NULL

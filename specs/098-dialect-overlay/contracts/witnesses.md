@@ -39,10 +39,10 @@ as a RED arm before production code.
 |---|---|---|---|---|
 | W-0 seeded rows | no (test-only, but written in plan Phase 2 against Phase 2's code; the header-store row joins in Phase 5) | a difference naming the store | — | the seeded rows themselves; M-0 |
 | W-0 identical pair | no (as above) | zero differences | — | control |
-| W-1 rows | no | zero differences vs the complete reference | — | M-1, M-2 |
+| W-1 rows | no | zero differences vs the complete reference; step counter = prediction | — | M-1, M-2, M-17 |
 | W-2 rows, side against side and against the census | no | zero differences vs the patched base | — | M-3; a zero- or two-match hunk fails the cell; W-0's census row |
 | W-2 wrap probe (FIX50SP2) | yes | records `component_fields` of the first component past the wrap point against its raw members | either | probe, recorded in the verify record (research R-10); not a RED arm |
-| W-3 rows | no | the named exception, its message naming the key | — | M-4, M-5, M-6, M-7, M-12, M-13, M-14 (per row, below) |
+| W-3 rows | no | the named exception, its message naming the key | — | M-4, M-5, M-6, M-7, M-12, M-13, M-14, M-16, M-17, M-18 (per row and format, below) |
 | W-4 rows | no | dispatch matches the direct loader | — | M-8 |
 | W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame | — | M-8 |
 | W-5 edited session | yes | accepts or refuses each frame as the edited dictionary dictates | passes | characterization pin (a complete edited file already works today) |
@@ -62,20 +62,22 @@ as a RED arm before production code.
 | W-9 rows | no | codes per research R-6 | — | M-11, M-15 |
 | W-10 import surface | yes | the exact set includes `dict_load_from_xml_with_overlay` | **fails** (name absent) | **U** |
 | W-10 other rows | no (the function is absent) | as W-9 | — | M-11 for the cap row |
-| W-11 fuzz | no | only `dict::` errors escape | — | M-7 and M-12 against the harness |
+| W-11 fuzz | no | only `dict::` errors escape (Orchestra by derived type); counter = prediction on every load | — | M-7 and M-12 against the harness, once per format |
 
 ## Comparator self-test (runs first; a zero is trusted only after it)
 
-**W-0** `tests/dictionary/dictionary_equivalence_test.cpp`. For each store category the comparator
-claims (research R-10, "Seeded rows": a field type, a valid tag, a required tag, an enum value, an enum order, a
-component member, a component id, a group member, a group delimiter, an exact-store entry, a
-context-store member, a Length+Data pair, a header tag, a message, a field name), one seeded pair of
-small dictionaries differing in exactly that store: the comparator MUST report a difference naming that
-store. Also seeded: an unused extra component on one side; a context record that differs only where the
-bare value would mask it; a bare-only `group_required_members` difference; and a census mismatch (the
-census of a document that differs from the loaded one in one component member). A pair of identical
-loads MUST report none. **RED**: the seeded rows are the RED arms; mutant **M-0** (the comparator skips
-the context stores) turns the context-store row RED.
+**W-0** `tests/dictionary/dictionary_equivalence_test.cpp`. The comparator declares its compared stores
+as data (research R-10 §3). For each entry of that list, one seeded pair of small dictionaries
+differing in exactly that store (or the entry's stated reason, such as `fixt_framing_*`'s). W-0 asserts
+that the set of seeded entries equals the declared list (a member with no seed, or a seed with no
+member, fails) and that each seed produces a difference naming exactly its entry. A context-store seed
+leaves the bare and exact stores equal (for example the context `required_members` seed has equal bare
+`group_required_members`). Also seeded, for the key sources: an unused extra component on one side; a
+context record that differs only where the bare value would mask it; and a census mismatch (the census
+of a document that differs from the loaded one in one component member). A pair of identical loads MUST
+report none. **RED**: the seeded rows are the RED arms; mutant **M-0** (the comparison of one declared
+entry, the context `required_members` one, removed while the entry stays listed) turns that entry's row
+RED.
 
 ## Loading and merging
 
@@ -87,9 +89,14 @@ existing Orchestra code set), new component, new message (with a required field,
 component), field added to an existing message, member added to an existing group (inline and inside a
 component), field and group added to the header, Required promotion on a message, component and group
 child, custom Length+Data pair, an enum value on a base field with no values (N-2: the domain closes;
-`enum_valid` refuses a value not listed), a new container the base lacks (R-3). **RED**: **M-1** (the
-splice prepends a new group member instead of appending) and **M-2** (the splice skips enum-value
-additions); each turns its row RED with the comparator naming the store.
+`enum_valid` refuses a value not listed), a new container the base lacks (R-3), a member appended to a
+group whose existing members emit nothing (an empty component), which becomes the delimiter as in the
+edited file (spec Edge Cases), and a new DATA after a base LENGTH whose base pair forms earlier in
+`detect_length_pairs`'s visit order (loads, R-3).
+Every row loads through research R-5's read seam and asserts the step counter equals step 6's
+prediction. **RED**: **M-1** (the splice prepends a new group member instead of appending) and **M-2**
+(the splice skips enum-value additions); each turns its row RED with the comparator naming the store.
+**M-17** (one extra `expand_field_list` call in `finalize`) turns every row RED through the counter.
 
 **W-2 Equivalence on the vendored bases.** Same file. FIX44, FIX50SP2 and the Orchestra file, each with an
 overlay under `tests/dictionary/fixtures/098/real/` and a hand-written insertion patch (research R-10:
@@ -98,40 +105,89 @@ line), applied by a line-based test helper. `load_with_overlay(base, overlay)` v
 `load_from_string(patched base)` → zero differences, side against side and, for `component_fields` /
 `group_fields`, against the raw census under R-10's wrap condition. Kind coverage per FR-017; the FIX44
 overlay also extends more than 64 existing messages (N-7: accepted, since the entry caps count new
-definitions). The FIX50SP2 wrap probe (research R-10) runs here and is recorded, not asserted.
+definitions). Each row also asserts step counter = prediction (research R-5). The FIX50SP2 wrap probe
+(research R-10) runs here and is recorded, not asserted; where a base side table does not fit, the
+overlay's appended definitions past the wrap point are compared side against side only, and the verify
+record says so.
 **RED**: (a) a deliberately non-applying patch (a context block that matches zero places, and one that
 matches two) MUST fail the cell before any comparison; (b) **M-3** (header/trailer additions are
 dropped) turns the FIX44 and Orchestra rows RED.
 
-**W-3 Refusals.** `tests/dictionary/overlay_refusal_test.cpp`, table-driven, one row per refusal. Each row
-asserts the exception type and that its message names the key or cap.
-- **R-4 conflicts:** type, name, msgtype name, required relaxed, redescribed enum value, child redeclared
-  directly that the parent reaches through a component, duplicate within the overlay, two root containers
-  of one name, version mismatch, overlay of the other format; `required="y"` and `required="false"` on a
-  base-Required child, and `presence="require"` (A-013); an Orchestra code set with a new `id` and an
-  existing name (N-6); an overlay DATA field right after a base LENGTH field (N-4); a root child outside
-  data-model §A.1's list, such as `fixr:datatypes` (N-10).
-- **R-5 guards:** bytes at cap + 1 through both the path and the string form, depth 33, each entry cap + 1
-  counting new definitions (new messages = cap + 1, N-7), the reference cap + 1, a DOCTYPE, an unknown
-  reference, a cycle that closes through a base component.
-- **Expansion bomb (A-001):** the doubling overlay
+**W-3 Refusals.** `tests/dictionary/overlay_refusal_test.cpp`, table-driven. The table is the
+product of the refusal kinds below × {QuickFIX XML, Orchestra}. Every cell is a row, or N/A with the
+reason written in the table (for example "`<fields>` adjacency: Orchestra has none"); the verify record
+lists the N/A cells. Each row asserts the exception's exact type for its format (an Orchestra schema
+error is `orchestra_parse_error`, caught by the derived type, not by `xml_parse_error`) and that its
+message names the key or cap.
+- **R-4 conflicts:** identifying attribute changed (type; name; msgtype name; Orchestra message `id`,
+  code-set `id` / `type`); field name already used by another number; an Orchestra code set with a new
+  `id` and an existing name (N-6; XML N/A, no code sets); required relaxed; redescribed enum value or
+  code; `required="y"`, `required="false"` and `presence="require"` (A-013); duplicate within the
+  overlay; two root containers of one name; version mismatch; overlay of the other format; a root child
+  outside data-model §A.1's list, such as `fixr:datatypes` (N-10); an Orchestra group whose
+  `fixr:numInGroup` `id` differs, and a new group with none or two (N-9; XML N/A, the NumInGroup is the
+  group's `name`).
+- **One tag twice at one level (research R-3):** a child redeclared directly that the parent reaches
+  through a component, including through a two-level component chain (N-2); a new component reference
+  that reaches a tag the parent already declares (N-7); for XML, a header addition whose tag a message
+  body already has.
+- **Repeated base key (G098-R2-005):** one row per match-key kind in research R-3's two tables that the
+  base loader admits repeated (a repeated MsgType, a repeated `<field>` name, a repeated direct child;
+  Orchestra a repeated `msgType` or direct child). A kind the loader itself refuses repeated is N/A
+  with that reason (for example a duplicate Orchestra field, component or group `id`, or code-set name);
+  the overlay names the key, and the row asserts both base occurrences in the message. A control: the
+  same base with an empty overlay loads.
+- **Length+Data relation (research R-3, step 8a).** One row per cell; "load" rows assert the load
+  succeeds and the relation is unchanged. "Earlier" and "later" are `detect_length_pairs`'s visit order
+  (`<fields>`, header, trailer, messages, components, groups):
+
+  | Site | new Data → unpaired base Length | new Data → base Length paired earlier | new Data → base Length paired later | new Length → base Data |
+  |---|---|---|---|---|
+  | `<fields>` | refuse | N/A: a Length `<fields>` pairs is followed by its Data, so it is never last | refuse (base pair lost) | N/A: a redeclared base Data is a match, not an append |
+  | strict container (component, group) | refuse | load | refuse | refuse |
+  | non-strict container (message, header, trailer), base group between | refuse | load | refuse | refuse |
+  | non-strict container, overlay component between | refuse | load | refuse | refuse |
+  | Orchestra `lengthId` | refuse | refuse, as `overlay_conflict_error` (not the loader's `orchestra_parse_error`); Orchestra has no visit order | (same cell) | N/A: a base Data's `lengthId` is fixed by R-3's equal-`lengthId` rule |
+
+- **R-5 guards:** bytes at cap + 1 through both the path and the string form, depth 33, each entry cap +
+  1 counting new definitions (new messages = cap + 1, N-7), the reference cap + 1, a DOCTYPE, an unknown
+  reference, a cycle that closes through a base component (XML `xml_parse_error`; Orchestra
+  `orchestra_parse_error`).
+- **Expansion bomb (A-001):** XML, the doubling overlay
   `C_n = { component C_{n-1}; group NoG_n { field F_n; component C_{n-1} } }` over the 63 levels the caps
-  allow, rooted at the base's `Instrument`, referenced by no message. It MUST fail with
-  `overlay_limit_error` naming the budget, and the call MUST return within ten times the same binary's
-  load of the base alone, timed in the same test (the bound is derived from the competing work, not
-  fixed).
+  allow, rooted at the base's `Instrument`; Orchestra, `C_n = { componentRef C_{n-1}; groupRef G_n }` with
+  `G_n = { numInGroup; fieldRef F_n; componentRef C_{n-1} }`. Both referenced by no message. A third row
+  per format: two empty-bodied component chains, each level referencing both chains' previous level,
+  which emit nothing (research R-5). Each MUST fail with `overlay_limit_error` naming the budget, and
+  the call MUST return within ten times the same binary's load of the base alone, timed in the same test
+  (the bound is derived from the competing work, not fixed).
+- **Header expansion (G098-R2-003; XML only, Orchestra N/A: its header is component 1024, charged
+  standalone):** a base with an empty `<messages>`, whose overlay puts nested groups under `<header>`
+  that each reference one large component. It MUST load, with step counter = prediction and the
+  declared header store holding the component's tags (the visited-set walk, research R-7).
+- **Side-table fit (N-3):** on a small base whose tables fit, an overlay that grows an early-declared
+  component until a later base component's start passes 65535; an overlay component whose own entry
+  count passes 65535; for groups, a large group with a low NumInGroup tag that pushes base groups past
+  65535. Each MUST fail with `overlay_limit_error` naming the table. A control: the same shape kept just
+  inside the fit loads.
 - **Guard order (N-1):** an overlay that closes a cycle through a base component **and** redeclares a
-  child that the parent reaches through that component. It MUST fail with the cycle error, not with the
-  redeclare conflict and not by recursion.
+  child that the parent reaches through that component. It MUST fail with the cycle error of its format,
+  not with the redeclare conflict and not by recursion.
 
 FR-008 has no row: it holds by construction (spec FR-008), and no mutant short of global state can make
-two fresh base loads differ. **RED**: **M-4** (conflict checks removed: the conflict rows load), **M-5**
-(byte cap removed), **M-6** (`parse_doctype` dropped: the DOCTYPE row loads), **M-7** (cycle check
-removed: the cycle row no longer fails with the cycle error; it loops, overflows, or fails differently;
-run under `linux-clang-asan`, whose report is the recorded RED), **M-12** (the expansion budget removed:
-the bomb row exceeds its time bound or exhausts memory; run under `linux-clang-asan`), **M-13** (guard
-steps 6 and 7 swapped: the guard-order row reports the redeclare conflict, or crashes, instead of the
-cycle error), **M-14** (step 5's entry and reference caps removed: those rows load).
+two fresh base loads differ. **RED**, each mutant run once per format where its rows exist: **M-4**
+(conflict checks removed: the conflict rows load), **M-5** (byte cap removed), **M-6** (`parse_doctype`
+dropped: the DOCTYPE row loads), **M-7** (cycle check removed: the cycle row no longer fails with the
+cycle error; it loops, overflows, or fails differently; run under `linux-clang-asan`, whose report is
+the recorded RED), **M-12** (the step 6 budget comparison removed: the bomb rows exceed their time bound
+or exhaust memory, since the counter's limit is then the bomb's own saturated prediction; run under
+`linux-clang-asan`), **M-13** (guard steps 6 and 7 swapped: the guard-order row reports the redeclare
+conflict, or crashes, instead of the cycle error), **M-14** (step 5's entry and reference caps removed:
+those rows load), **M-16** (step 8a replaced by the previous draft's adjacency rule: the interposed,
+paired-later and new-Length refuse rows and the Orchestra rows go RED, and the load rows stay GREEN,
+since that rule never refused a paired base Length), **M-17**
+(one extra `expand_field_list` call in `finalize`: the header-expansion row is refused by the counter),
+**M-18** (the side-table fit check removed: those rows load).
 
 **W-4 Load-any dispatch.** Same file as W-1. `load_any_with_overlay` on each format matches the loader
 called directly; a mixed-format pair is refused. **RED**: **M-8** (`load_any_with_overlay` ignores the
@@ -204,7 +260,10 @@ with `fixpp_session_config_set_dictionary`, a session opens and reads a custom t
 conflict → 200 and NULL; NULL arguments → `FIXPP_ERR_NULL_HANDLE`. The exception-to-code mapping
 function (research R-6, declared in `src/capi/capi_internal.hpp`) is fed each type directly:
 `overlay_limit_error` → 201; `xml_oom_error` and a bare `std::bad_alloc` → 202; `xml_parse_error`,
-`overlay_conflict_error` and a `std::runtime_error` → 200; a non-`std::exception` → 200.
+`overlay_conflict_error` and a `std::runtime_error` → 200; a non-`std::exception` → 200. In the
+dictionary binary, research R-5 step 2's status mapping, the one function both parses of an overlay
+call use (N-10), is fed `status_out_of_memory` (→ `xml_oom_error`) and one other failed status (→ the
+format's parse error); that both parses call it is structural, since no allocation-failure seam is added.
 `tests/capi/version_test.cpp` pins 1.13; `tests/abi/golden/fixpp_capi_symbols.txt` gains the symbol;
 `tools/capi_freeze.sha256` refreshed; `tools/check_capi_reentrancy.sh` passes. **RED**: **M-11** (the
 limit branch maps to 200) turns the cap rows RED; **M-15** (`std::exception` caught before
@@ -219,10 +278,13 @@ import-surface row (the name is absent on the unfixed tree).
 
 **W-11 Fuzz (`[const §VII.7]`).** `tests/fuzz/fuzz_dict_overlay.cpp` with a seed corpus
 (`tests/fuzz/corpus/dict_overlay/`): the W-1 overlays, the W-3 refusal overlays, a DOCTYPE overlay.
-Every exception escaping the harness must be a `dict::` error type. The seeds include the expansion
-bomb (A-001). CI replays the seeds (`linux-clang-asan`); the ten-minute run is `/speckit-verify`'s fuzz
-step. **RED**: **M-7** re-run against the harness with the cycle seed, and **M-12** with the bomb seed
-(the harness must crash or exhaust its limits).
+Every exception escaping the harness must be a `dict::` error type; the Orchestra half catches
+`orchestra_parse_error` by its derived type, as `tests/fuzz/fuzz_orchestra_loader.cpp` does (research
+R-11). On every input that loads, the harness aborts if the step counter differs from step 6's
+prediction. The seeds include the expansion bombs and the empty-component chain of both formats and an
+Orchestra cycle. CI replays the seeds (`linux-clang-asan`); the ten-minute run is `/speckit-verify`'s
+fuzz step. **RED**: **M-7** re-run against the harness with each format's cycle seed, and **M-12** with
+each bomb seed (the harness must crash or exhaust its limits).
 
 **W-12 Performance (SC-005, `[const §VIII.2]`).** Measured in the verify record, not a ctest:
 `load_with_overlay(FIX50SP2, the named at-cap fixture overlay)` vs `load(FIX50SP2)`, ratio ≤ 1.5, same

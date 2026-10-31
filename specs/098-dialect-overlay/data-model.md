@@ -27,9 +27,11 @@ document (R-1). Its `which_session_version()` is the base's. It is placed by the
 ### A.3 Declared header tags (new store, FR-022)
 
 - **Metadata handle:** a sorted, de-duplicated `std::pmr::vector<std::uint16_t>` of the header tags the
-  dictionary declares, computed at finalize: QuickFIX XML from the `<header>` expansion (fields,
-  component members, NumInGroup tags and group members); Orchestra from component 1024's expansion by
-  the same rule. Empty for FIX50/FIX50SP1/FIX50SP2, whose `<header>` is empty (research R-7 table).
+  dictionary declares, computed at finalize by an iterative visited-set walk from the header (fields,
+  component members, NumInGroup tags and group members; each definition walked once): QuickFIX XML from
+  `<header>`, Orchestra from component 1024. It is a set walk, not an `expand_field_list` call, so the
+  overlay path's step counter does not charge it (research R-5, R-7). Empty for
+  FIX50/FIX50SP1/FIX50SP2, whose `<header>` is empty (research R-7 table).
 - **`table_view`:** `header_bits_`, a `std::vector<std::uint64_t>` bit store in the `group_bits_` shape,
   filled by `as_table_view()` through a `table_view_builder` forwarder; public query
   `[[nodiscard]] bool is_header_tag(std::uint16_t tag) const noexcept`. No allocation at query time.
@@ -102,7 +104,7 @@ Signatures: research R-8. `DialectExtension` stays a reserved enumerator.
 | L-098-1 | new | the engine registry holds base dictionaries; row 6 (fixpp#643) must keep the session's own dictionary for its own version |
 | L-098-2 | new | the typed (codegen) tier reflects the base dictionary only; overlay fields are read and written by tag |
 | L-098-3 | new | the base load paths have no caps or cycle guard (issue filed, R-15) |
-| L-098-4 | new, only if research R-10's probe shows the wrap | `ComponentRef` / `GroupRef::first_field_index` is `std::uint16_t`, so a side table past 65535 entries makes `component_fields` / `group_fields` return another definition's fields (issue filed, R-15) |
+| L-098-4 | new, only if research R-10's probe shows the wrap | `ComponentRef` / `GroupRef::first_field_index` is `std::uint16_t` and `field_count` clamps at 65535, so on a base whose side table already passes that, `component_fields` / `group_fields` return another definition's fields, with or without an overlay; an overlay that would make a fitting table stop fitting is refused (issue filed, R-15) |
 
 ## §E — Catalogue and coverage index
 
@@ -117,7 +119,9 @@ Signatures: research R-8. `DialectExtension` stays a reserved enumerator.
 
 Every hit of §G's recipe gets an "Updated (098-dialect-overlay)" note in place, naming what 098 shipped
 instead, or a verify-record line saying why the hit is history or still true. The 2c sections known at
-plan time are a floor, not the set: §1.2 (merge-cost line), §4.3 (`with_overlay` /
+plan time are a floor, not the set: §1.2 (merge-cost line), §2 (the Non-goals bullet "No mid-session
+overlay grammar extension"), §4.1 (the `FieldRef` listing comment naming
+`dict_overlay_unsupported_length_pair`), §4.3 (`with_overlay` /
 `was_dialect_promoted`), §4.4 (the `DialectOverlay` value type), §4.4.1 (the restricted grammar), §4.4.2
 (the caps: the values kept, the `FIXPP_DICT_*` knobs not), §6.4 (merge contract, conflict policy).
 `brain/components/dictionary.md` gains a flagged entry for each 2c note.
@@ -132,19 +136,25 @@ hit (§F). The verify record keeps the commands and the disposition of each hit,
 
    ```
    git grep -n -i -e 'DialectOverlay' -e 'dialect.overlay' -e 'with_overlay' -e 'load_overlay' \
-       -e 'was_dialect_promoted' -e 'L-422-1' -e 'L-002-2' -e 'D-009' -e 'COM-011' \
+       -e 'was_dialect_promoted' -e 'dict_overlay_' -e 'L-422-1' -e 'L-002-2' -e 'D-009' -e 'COM-011' \
        -- '*.md' ':!specs/' ':!CLAUDE-history.md'
+   git grep -n -i -w 'overlay' -- .specify/2c-codegen.md
    ```
 
    `dialect.overlay` matches the prose spellings ("dialect overlay", "dialect-overlay") as well as the
-   key. Hits in a document's own history (a changelog row, a superseded draft such as
+   key; `dict_overlay_` matches 2c's error names. The second command lists every `overlay` line of 2c,
+   because 2c also states the old grammar in lines none of the first patterns reach; its hits are
+   dispositioned by the heading they sit under. Hits in a document's own history (a changelog row, a superseded draft such as
    `.specify/2c-codegen.draft-r1.md`) are dispositioned as history with that reason.
 2. **Brain pages for the code 098 changes:** every `brain/components/*.md` whose front-matter `refs` list
    names a file in `git diff --name-only origin/main...HEAD`. Read each for a statement 098 makes false
    (for example a "not taken" or "deferred" claim, or a C-ABI history that ends before 1.13), and fix it
    in place.
 
-**Proving the recipe can report.** Before trusting a clean disposition, run part 1 on a scratch copy
-with one known hit (for example the B&L's L-002-2 row) and part 2 against a diff that names a file in a
-brain page's `refs`, and see each report it. W-13's presence check for each new note has its own seeded
+**Proving the recipe can report.** Before trusting a clean disposition, check that part 1 reports each
+of the hits Gate A rounds 1 and 2 named, as known positives: 2c §1's goal 4, §2's Non-goals bullet,
+§4.1's `FieldRef` comment, §4.3, §7.1, the D-009 rows, `.specify/2d-threading.md`'s `SessionConfig`
+listing and `.specify/2m-pybind.md`'s Python key. A known positive the recipe does not report means a
+pattern is missing; widen the recipe, never the list. Run part 2 against a diff that names a file in a
+brain page's `refs`, and see it report that page. W-13's presence check for each new note has its own seeded
 negative (contracts).

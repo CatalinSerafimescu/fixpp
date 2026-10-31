@@ -150,13 +150,15 @@ Asked with the QuickFIX C++/J/Go source above already read.
 ### Session 2026-10-31 (Gate A round 1)
 
 Technical answers, each integrated into the FR, SC or edge case it affects. Three are orchestrator
-defaults on product behaviour; they are marked, and the owner confirms them at Gate A sign-off.
+defaults on product behaviour; they are marked, and the owner confirms them at Gate A sign-off. The
+third (the side-table wrap) is superseded at Gate A round 2.
 
 - Q: Which hand edit is "the" equivalent edited XML? → A: The one that appends each addition at the end
   of its matched container, in overlay document order (Terminology, FR-002). Other edits can differ in
   document-order stores.
 - Q: What bounds the work an overlay can cause? → A: Besides the shape caps, an expansion budget on the
-  entries `finalize()` will emit, checked by one iterative, memoized walk of the merged reference graph
+  ~~entries `finalize()` will emit~~ steps `finalize()`'s expansion takes (amended at Gate A round 2),
+  checked by one iterative, memoized walk of the merged reference graph
   before any check that follows references and before the splice; a reference cap; and caps that count **new** definitions only
   (FR-009, FR-010).
 - Q: Which class does a counted Data value take on send? → A: Its Length's, as today, so the pair stays
@@ -172,10 +174,38 @@ defaults on product behaviour; they are marked, and the owner confirms them at G
   **orchestrator default, owner to confirm at Gate A sign-off.** TOML has no null, and a reserved "none"
   value would be new surface. QuickFIX's `[DEFAULT]` behaves the same (FR-016, edge cases, B-098-3).
 - Q: The base loaders store a side-table start index as `std::uint16_t`, which the review's model shows
-  wrapping on FIX50SP2. Is that fixed in 098? → A: **No** — **orchestrator default, owner to confirm at
+  wrapping on FIX50SP2. Is that fixed in 098? → A: ~~**No** — **orchestrator default, owner to confirm at
   Gate A sign-off.** It is pre-existing and not caused by an overlay. 098 runs a probe, records it, files
   the defect if the probe shows it, and keeps the oracle's census check to definitions below the wrap
-  point (plan research R-10).
+  point (plan research R-10).~~ **Superseded at Gate A round 2** (the premise was false; see that session).
+
+### Session 2026-10-31 (Gate A round 2)
+
+Technical answers, each integrated into the FR, edge case or research section it affects. One is an
+orchestrator default on product behaviour, marked; the owner confirms it at Gate A sign-off.
+
+- Q: When is a Length+Data pair a conflict? → A: When the loader's own pair detection, run on the base
+  and on the spliced document, gives a different relation for any base tag: a pair gained, lost or given
+  a second partner, in either direction and in either format. Element-shape rules are not used (FR-005,
+  research R-3, R-5 step 8a).
+- Q: What unit does the expansion budget count, and what makes it hold? → A: Steps: every child node the
+  loaders' `expand_field_list` loop visits, so a reference to an empty component is charged too. A
+  pre-walk predicts the steps and refuses early. The build also counts steps on the overlay path and
+  refuses with a limit error the moment the count passes the prediction, so an expansion the pre-walk
+  does not model causes a refusal, never unbounded work. Tests assert count equals prediction (FR-009,
+  research R-5).
+- Q: How is the declared header store computed? → A: By a visited-set walk from the header, which yields
+  a set, not by an expansion; the step counter does not charge it (FR-022, research R-7).
+- Q: What if a base repeats a key the overlay matches on (two messages of one MsgType, two fields of one
+  name)? → A: The base is still admitted; an overlay element whose lookup hits the repeated key is a
+  conflict error, because it cannot say which one it extends (edge cases, research R-3).
+- Q: Can an overlay make the `std::uint16_t` side-table index wrap? → A: **Yes**, within the budget, on a
+  base that does not wrap today, so round 1's premise was false. **Refused at load** — **orchestrator
+  default, owner to confirm at Gate A sign-off.** An overlay that makes a side table whose starts and
+  counts all fit in 16 bits stop fitting fails with a limit error. On a base whose table already does
+  not fit, the overlay is admitted, the result equals the equivalent edited XML, and the defect stays
+  pre-existing: probed, filed if shown, and excluded from the census check. The alternative, widening the
+  index, changes the pinned 12-byte `ComponentRef` / `GroupRef` layout (research R-10).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -241,9 +271,9 @@ error.
    the load fails with a conflict error naming the field and the MsgType.
 3. **Given** an overlay larger than the byte cap, deeper than the depth cap, carrying a DOCTYPE or entity
    declaration, adding more entries or references than a cap allows, or whose references would make the
-   loader expand more entries than the expansion budget allows, **When** it is loaded, **Then** the load
-   fails with a limit error naming the cap, without first doing the expansion, and through the C ABI it
-   returns `FIXPP_ERR_DICT_LIMIT_EXCEEDED`.
+   loader's expansion take more steps than the expansion budget allows, **When** it is loaded, **Then** the load
+   fails with a limit error naming the cap, before the expansion exceeds the budget, and through the C
+   ABI it returns `FIXPP_ERR_DICT_LIMIT_EXCEEDED`.
 4. **Given** an overlay whose component references form a cycle with base components, **When** it is
    loaded, **Then** the load fails with a schema error naming the cycle, and does not recurse without
    bound.
@@ -342,8 +372,20 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **Enum value on a field with no values**: the field's domain closes to the listed values, as a hand
   edit would close it. Example: a private MsgType code added to MsgType(35) on a FIXT11 base makes
   validation refuse every standard MsgType. Disclosed (B-098-7); orchestrator default, owner to confirm.
-- **New DATA field right after a base LENGTH field** (in `<fields>` or in a container): refused, because
-  the loader would pair the base LENGTH tag with it, which changes a base field.
+- **Length+Data pair touching a base field**: refused when the merge would give a base tag a pair it
+  did not have, take one away, or give it a second partner: a new DATA the loader pairs with an unpaired
+  base LENGTH (in `<fields>`, in any container, or through Orchestra's `lengthId`), and a new LENGTH the
+  loader pairs with a base DATA. A new DATA after a base LENGTH the base already pairs is accepted only
+  when the loader forms the base pair first (it visits `<fields>`, then containers, in a fixed order, and
+  keeps a LENGTH's first DATA); otherwise the base pair would be lost, and it is refused.
+- **Base with a repeated key** (two messages of one MsgType, two `<field>`s of one name, a repeated
+  direct child): the base is accepted with an empty overlay; an overlay element that names the repeated
+  key is refused, because it cannot say which one it extends.
+- **One tag twice at one level**: an addition that puts a tag twice in the level of a message, component
+  or group (a direct child the parent already reaches through a component, or a component reference
+  that reaches a tag the parent already has) is refused.
+- **Side table past 16 bits**: an overlay that would push a fitting component or group side table past
+  the `std::uint16_t` index is refused with a limit error (orchestrator default, owner to confirm).
 - **Overlay root child outside the allowed list** (for example `fixr:datatypes`, `fixr:sections`, or a
   non-QuickFIX element under `<fix>`): refused. `fixr:annotation` and `fixr:documentation` inside a
   definition are accepted and dropped.
@@ -352,8 +394,10 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **New member in a group defined inside a component**: applies wherever that component is used, as an
   edit to the component in the equivalent edited XML would.
 - **New group on an existing message**: its first declared child is its delimiter, as for any group.
-- **New member appended to an existing group**: it is placed after the group's existing members; it can
-  never become the delimiter. The equivalent edited XML places it at the same position.
+- **New member appended to an existing group**: it is placed after the group's existing members, so it
+  is not the delimiter unless every existing member emits nothing (an empty component, or under
+  `unresolved_group_policy::tolerant` a group the base left unregistered). The equivalent edited XML
+  places it at the same position, so the outcome matches in both cases.
 - **Group-delimiter collision** created by the merge (fixpp's existing `group_delimiter_collision_error`
   rule): refused as it would be for the equivalent edited XML.
 - **Component cycle** closed through a base component: refused (US2 AS-4).
@@ -425,8 +469,9 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **FR-005 (grammar: may not)**: An overlay MUST NOT change a base field's number, name or type, rename an
   existing MsgType, relax a Required child to Optional, or remove anything (including a base enum value);
   each attempt is a load error (FR-007). A `required` / `presence` value outside `Y` / `N` (QuickFIX XML)
-  or `required` / `optional` (Orchestra) is also a load error, so that no typo relaxes a rule. A new DATA
-  field that the loader would pair with a base LENGTH field is a load error. Adding the first enum value
+  or `required` / `optional` (Orchestra) is also a load error, so that no typo relaxes a rule. An overlay
+  MUST NOT change the Length+Data pair relation of a base field: a pair touching a base tag that the
+  loader would gain, lose or give a second partner is a load error. Adding the first enum value
   to a base field with no values is **not** a removal, but it narrows what validation accepts for that
   field; it is accepted and disclosed (Clarifications, Gate A round 1).
 - **FR-006 (version match)**: The overlay's root MUST identify the same version as the base: the
@@ -447,11 +492,12 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   element nesting depth, its count of **new** field, message and component definitions (2c §4.4.2 gives
   starting values; plan fixes them), and its count of added references, and MUST refuse a DOCTYPE or
   entity declaration. It MUST also bound the **work** the overlay causes: before any check that follows
-  references, the splice and the dictionary build, it MUST compute, without recursion and without performing the expansion,
-  how many entries the loader would emit when it expands the merged messages, components and groups, and
-  refuse when the overlay's increase over the base exceeds a fixed budget. Any base the base loader
-  accepts is admitted with an empty overlay. Exceeding any cap or the budget fails the load with a limit
-  error naming it.
+  references, the splice and the dictionary build, it MUST compute, without recursion, how many steps
+  (child nodes visited, references included) the loader's expansion of the merged messages, components
+  and groups will take, and refuse when the overlay's increase over the base exceeds a fixed budget. The
+  build MUST refuse as soon as its own step count passes that prediction, so every refusal happens
+  before the expansion exceeds the budget, even if the prediction misses an expansion. Any base the base loader accepts is admitted with an
+  empty overlay. Exceeding any cap or the budget fails the load with a limit error naming it.
 - **FR-010 (cycles)**: The merged component graph MUST be checked for reference cycles, including cycles
   that pass through base components; a cycle fails the load with a schema error instead of unbounded
   recursion. The check runs in the same non-recursive walk as FR-009's budget, before any other step
@@ -516,7 +562,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   that 098 makes false, MUST carry an in-place "Updated (098-dialect-overlay)" note naming what 098
   replaced, or a recorded reason why it is history or still true. The set is found by the plan's grep
   recipe (data-model §G), not by a hand list. It includes at least `.specify/2c-codegen.md` §1.2's
-  merge-cost line, §4.3, §4.4, §4.4.1, §4.4.2 and §6.4, and the brain component pages for the code 098
+  merge-cost line, §2's Non-goals bullet on overlay grammar, §4.1's `FieldRef` comment naming
+  `dict_overlay_unsupported_length_pair`, §4.3, §4.4, §4.4.1, §4.4.2 and §6.4, and the brain component pages for the code 098
   changes; `brain/components/dictionary.md` MUST flag the 2c notes.
 
 **Send-side header membership (L-422-1)**
@@ -559,7 +606,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   equivalent edited XML, and shows today's behaviour on the unmodified base, on at least one base version
   each; AS-7 is measured by SC-008.
 - **SC-003**: Each US2 refusal is produced with its named error (one table-driven witness, every row
-  named), and the expansion-budget refusal completes without performing the expansion.
+  named, in both formats where the refusal applies), and the expansion-budget refusal completes before
+  the expansion exceeds the budget.
 - **SC-004**: A TOML file whose sessions name no host-side dictionary opens every session (US3 AS-1),
   where the unmodified tree fails `open()` with `invalid_session_config`.
 - **SC-005**: Loading FIX50SP2 with the named at-cap fixture overlay (the cap's maximum count of new
@@ -599,8 +647,9 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - Changing `field_data`'s standard-pairs-only rule (091 R-2), or re-pairing standard tags (L-426-2).
 - Per-session overlays in the engine registry; per-application-version dictionaries (row 6, fixpp#643).
 - More than one overlay per load (Clarifications, `/speckit-clarify`).
-- Fixing the base loaders' `std::uint16_t` side-table start index, if it wraps (pre-existing; probed and,
-  if shown, filed; Clarifications, Gate A round 1).
+- Fixing the base loaders' `std::uint16_t` side-table start index on a base whose side table already
+  does not fit (pre-existing; probed and, if shown, filed). An overlay that would make a fitting table
+  stop fitting is refused instead (Clarifications, Gate A round 2).
 - A TOML value meaning "no overlay" (Clarifications, Gate A round 1).
 - A QuickFIX `.cfg` parser or `AppDataDictionary` keys.
 

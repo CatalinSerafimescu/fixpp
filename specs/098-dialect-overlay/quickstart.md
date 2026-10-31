@@ -57,8 +57,9 @@ W-6 must stay green with unchanged expected bytes.
 
 In the mutants tree, per contracts: apply one mutant, rebuild (rc 0 or the row proves nothing), run the
 named binary **unfiltered**, record witness | mutant | build rc | test rc | message | collateral, revert.
-M-7 and M-12 run in `build/linux-clang-asan` (the sanitizer's report is the RED), and again against the
-W-11 harness.
+A mutant whose W-3 rows exist in both formats runs once per format (contracts W-3). M-7 and M-12 run in
+`build/linux-clang-asan` (the sanitizer's report is the RED), and again against the W-11 harness with
+each format's seed.
 
 ## 5. Fuzz
 

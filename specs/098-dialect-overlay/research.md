@@ -8,7 +8,9 @@ implementer and will drift; re-derive with the `grep` given where one is given.
 **Decision.** Each loader parses the base into a pugixml document, parses the overlay into a second
 document, runs the guards in R-5's order (document shape, then the merged-graph cycle and expansion
 budget walk, then the R-4 conflict checks), splices the overlay's elements into the base document
-(R-3), and then runs the loader's existing post-parse path unchanged. For QuickFIX XML that path
+(R-3), compares the Length+Data pair relation of the spliced document with the base's (R-5 step 8a),
+and then runs the loader's existing post-parse path. That path is shared with `load`; the overlay path
+only arms an expansion step counter in it, which `load` leaves unarmed (R-5). For QuickFIX XML that path
 is `build_handle_from_doc(doc, mr, policy)` in `src/dictionary/xml_loader.cpp` (`LoaderState::parse_document`
 then `finalize`); for Orchestra it is the function of the same name in `src/dictionary/orchestra_loader.cpp`.
 
@@ -25,8 +27,10 @@ then `finalize`); for Orchestra it is the function of the same name in `src/dict
   FR-002 does not claim equivalence with it.
 - **No new state class.** Both loaders keep components, groups and messages as pugi node handles and
   expand at finalize; the DOM is the natural seam. `build_handle_from_doc` takes a `const` document, and
-  in `load`/`load_from_string` the document is a local, so the splice happens before the call with no
-  change to the post-parse code.
+  in `load`/`load_from_string` the document is a local, so the splice happens before the call. The
+  post-parse code changes in three places only, each shared with `load`: the pair detection is factored
+  into a function the step 8a check also calls (R-5), `expand_field_list` gains the step counter (R-5),
+  and finalize gains the declared header store (R-7).
 
 **Alternatives rejected.**
 - *Merge into `LoaderState` / `OrchestraLoaderState` between `parse_document` and `finalize`.* Two
@@ -105,19 +109,56 @@ base child.
 | `<component>` ref inside a parent | `name`, among direct children | `required` promotes | appended |
 | `<group>` inside a parent | `name`, among direct children | children merged; `required` promotes | appended |
 
-A `<group>` or `<field>` that the parent already reaches through a component (for example `NoPartyIDs`
-inside component `Parties` used by NewOrderSingle), redeclared as a direct child, is a conflict: it would
-put one tag twice in the message. The overlay must extend the component instead. "Already reaches" is
-answered from the R-5 graph walk's memo, never by a second recursive walk.
+**One tag twice at one level (both directions).** A parent's *level set* is the set of tags it emits at
+its own level: its direct fields, the NumInGroup tag of each direct group, and the level sets of the
+components it references (inlined). A group's members are the group's own level, not the parent's. For
+a QuickFIX-XML message, the level is header + body + trailer, because the loader folds all three into
+one run. The overlay is refused when an addition makes a tag occur twice in the level of a parent where
+the base had it at most once. Both directions are covered: a field or group redeclared as a direct child
+that the parent already reaches through a component (for example `NoPartyIDs` inside component
+`Parties` used by NewOrderSingle), and a new component reference that reaches a tag the parent already
+declares directly or through another component. The overlay must extend the component instead. The
+level sets come from R-5 step 6's walk, never from a second recursive walk (R-5).
 
-**Length+Data adjacency across the boundary.** The XML loader pairs a DATA field with the LENGTH field
-immediately before it (`detect_length_pairs`: first in `<fields>` declaration order, then in the
-containers its secondary walk visits; first writer kept). An overlay DATA field or field ref appended
-right after a **base** LENGTH entry would pair a base tag, which changes a base field (FR-005). R-4
-refuses it, before the splice: in any container `detect_length_pairs` walks, the first overlay entry
-appended to a base container whose last entry is a LENGTH field that the base left **unpaired** may not be
-a DATA field. A base LENGTH already paired by the base's own detection cannot be re-paired (the first
-writer is kept), so it is no conflict.
+**Match keys must be unique in the base.** The loaders accept some duplicates (no duplicate-msgtype
+check in either `collect_messages`; `by_name_.emplace` drops a second `<field>` of one name; repeated
+direct children). Every match index the splice uses (messages, field definitions by number and by
+name, direct children, Orchestra ids and code-set names) is built by one helper. The helper records a
+duplicated base key instead of refusing it, so a base that `load` accepts is still admitted with an empty
+overlay. A lookup by an overlay element that hits a duplicated key is refused with
+`overlay_conflict_error`, naming the key and both base occurrences: the overlay cannot say which one
+it extends.
+
+**Length+Data pairs are checked as a relation, not as a shape.** Each loader's own pair detection
+(`LoaderState::detect_length_pairs`, `OrchestraLoaderState::resolve_length_pairs`) is the only
+definition of which tags pair. So the merge does not model it. R-5 step 8a runs that detection on the
+base document and on the spliced document and refuses with `overlay_conflict_error` when any pair that
+touches a **base** tag (a field number the base declares) is gained, lost or given a second partner. The
+detection is factored out of each loader into a function of a parsed document that the loader's own
+pairing and the check both call, so the two cannot drift. It returns the relation in both directions,
+and it reports a collision instead of throwing:
+- **XML:** the forward map is `detect_length_pairs`'s Length → Data map (what
+  `FieldRef::length_pair_data_tag` carries; `mark_pair` keeps a Length's first Data). The reverse
+  direction is its inverse with **every** Length kept, because `mark_pair` guards only the Length half:
+  two Lengths can name one Data. That is the case `table_view::set_length_pair_data_tag` displaces
+  ("Re-pairing either tag drops its old partner"), so the check must see both.
+- **Orchestra:** the function records a Length named by two Data fields' `lengthId` as a collision, where
+  `resolve_length_pairs` throws "names a Length field already paired with another field". On the base
+  document the loader still throws its own `orchestra_parse_error`, as `load` does. On the spliced
+  document a collision that touches a base tag is an `overlay_conflict_error`. The other
+  `resolve_length_pairs` refusals (a zero tag, a non-Data field with `lengthId`, a `lengthId` that is not a
+  Length) stay the loader's `orchestra_parse_error`, as a hand edit gives.
+
+This replaces the previous draft's adjacency rule, which missed the non-strict container walk (a
+component or group between a base LENGTH and an overlay DATA does not break adjacency in header,
+trailer and message containers), the reverse case (a new LENGTH before a base DATA), and Orchestra's
+`lengthId` (Gate A round 2, Root cause A). Detection order matters, because `mark_pair` keeps the first
+Data a Length meets: `detect_length_pairs` visits `<fields>`, then header, trailer and messages in
+order, then components in document order, then every group in pre-order. A new DATA after a base
+LENGTH that the base already pairs loads only when the base pair forms **earlier** in that order than
+the overlay's adjacency; the relation is then unchanged. When the base pair forms later (for example a
+base LENGTH last in `<fields>`, paired only by a container walk), the overlay's adjacency now takes the
+LENGTH first, the base pair is lost, and the check refuses it.
 
 **Orchestra** (`fixr:repository` overlay):
 
@@ -126,8 +167,8 @@ writer is kept), so it is no conflict.
 | `fixr:codeSet` | `name` (the loader's key, R-2) | `id` and `type` MUST equal; listed `fixr:code`s are added by `value` (description/name MUST equal on match) | appended to `fixr:codeSets` |
 | `fixr:field` | `id` | `name`, `type` and `lengthId` MUST equal | appended to `fixr:fields` |
 | `fixr:component` | `id` | `name` MUST equal; children merged | appended to `fixr:components` |
-| `fixr:group` | `id` | `name` and `numInGroup` MUST equal; children merged | appended to `fixr:groups` |
-| `fixr:message` | `msgType` (unique in the vendored file, which carries no `scenario` attribute; checked 2026-10-31) | `id` and `name` MUST equal; `fixr:structure` children merged | appended to `fixr:messages` |
+| `fixr:group` | `id` | `name` MUST equal; the overlay's `fixr:numInGroup` child MUST have the base's `id` and is not spliced; other children merged | appended to `fixr:groups`; it MUST have exactly one `fixr:numInGroup` child |
+| `fixr:message` | `msgType` (a duplicated base `msgType` is refused on lookup, above) | `id` and `name` MUST equal; `fixr:structure` children merged | appended to `fixr:messages` |
 | `fixr:fieldRef` / `componentRef` / `groupRef` in a structure, component or group | `id`, among the parent's direct children | `presence="required"` promotes (R-4) | appended to the parent |
 
 Header and trailer additions extend component 1024 / 1025 by `id`, like any component.
@@ -142,14 +183,20 @@ which may be inline in one message or inside a component shared by several.
 The loaders do not catch every duplicate: the XML loader silently drops a second `<field>` with an
 existing name (`by_name_.emplace`) and has no duplicate-msgtype check, so two `<message>` elements with
 one msgtype become two message entries; the Orchestra loader has no duplicate-message check either.
-So the merge MUST detect, at the step R-5's order gives each check (the root checks at step 4a, the
-rest at step 7, all before the splice), and refuse with `overlay_conflict_error` naming the element:
+So the merge MUST detect, at the step R-5's order gives each check, and refuse with
+`overlay_conflict_error` naming the element. The root checks run at step 4a and the rest at step 7, all
+before the splice, with one named exception: the Length+Data relation check runs at step 8a, after the
+splice and before the build, because it compares the spliced document's relation with the base's (R-3).
+It follows no references (it reads `<fields>` and walks containers in document order), so it does not
+break FR-010's order.
 
 - **Overlay against base:** a matched definition whose identifying attributes differ (table above); a
   field name already used by another number; an Orchestra code-set name already used by another `id`
   (N-6); a code/enum value redescribed; `required="N"` (XML) or `presence="optional"` (Orchestra) on a
-  child the base marks required; a child redeclared directly that the parent already reaches through a
-  component (R-3); an overlay DATA entry that would pair with a base LENGTH entry (R-3).
+  child the base marks required; a tag that an addition makes occur twice in one level of a parent, in
+  either direction (R-3); a lookup that hits a duplicated base key (R-3); an Orchestra group whose
+  `fixr:numInGroup` differs from the base's, or a new one without exactly one (R-3); a Length+Data pair
+  touching a base tag that is gained, lost or given a second partner (R-3, step 8a).
 - **Overlay against itself:** two overlay elements with one match key in one container; two new fields
   with one name; two root containers of one name.
 - **Vocabulary:** a `required` / `presence` value outside R-3's list; a root child outside data-model
@@ -180,7 +227,10 @@ recursively, with no memo and no budget. `finalize()` expands every message (hea
 then every component on its own (even one no message reaches), then every first-seen group on its own.
 So a small acyclic overlay can still cause exponential expansion, for example
 `C_n = { component C_{n-1}; group NoG_n { field F_n; component C_{n-1} } }` over 63 levels (Gate A
-round 1, A-001). Definition counts and nesting depth do not bound that. The guard stage below does.
+round 1, A-001). Emitted entries do not bound it either: `collect_components` accepts an empty
+`<component>`, so two empty-bodied chains that each reference both chains' previous level recurse
+exponentially and emit nothing (Gate A round 2). Definition counts and nesting depth do not bound that.
+The guard stage below does, in a unit that charges every reference followed.
 
 The guards run in this order. Each step is non-recursive or iterative, and none reaches
 `build_handle_from_doc` until every earlier step passed.
@@ -188,33 +238,54 @@ The guards run in this order. Each step is non-recursive or iterative, and none 
 | # | Guard | Rule |
 |---|---|---|
 | 1 | Byte cap | **4 MiB**. Read at most cap + 1 bytes into a buffer (path form) or check `size()` (string form); refuse when more were available. Never trust a `stat` size (a FIFO or `/proc` file reports a wrong size). Before parse. |
-| 2 | Parse | `pugi::parse_default \| pugi::parse_doctype`. A result of `xml_parse_status::status_out_of_memory` (pugixml reports allocation failure as a parse status, not a throw) becomes `xml_oom_error`, never `xml_parse_error` (A-006). Any other failed status is `xml_parse_error` as today. |
+| 2 | Parse | `pugi::parse_default \| pugi::parse_doctype`. A result of `xml_parse_status::status_out_of_memory` (pugixml reports allocation failure as a parse status, not a throw) becomes `xml_oom_error`, never `xml_parse_error` (A-006). Any other failed status is `xml_parse_error` (`orchestra_parse_error` for Orchestra) as today. One mapping function serves both parses of an overlay call, the base's and the overlay's, so a base-parse allocation failure inside `load_with_overlay[_from_string]` is also `xml_oom_error` (N-10). `load` and `load_from_string` keep their own mapping (FR-001). |
 | 3 | DOCTYPE | refuse any `node_doctype` child of the document. pugixml 1.15 never loads external entities and expands only the five predefined entities and character references (its `parse_default` discards a DOCTYPE without a node, which is why the flag is set: to see it). Defence in depth: no DTD is ever loaded. |
 | 4 | Depth | **32** element levels; an iterative (explicit stack) walk of the overlay document. |
 | 4a | Root | R-4's root checks: the overlay's format matches the base's, its version matches (FR-006), its root children are in data-model §A.1's list, and no container name repeats. Steps 5 and 6 count and walk by element name, so they presume a checked format. |
 | 5 | Entry and reference caps | one flat pass over the overlay document. **New** definitions only (N-7): fields **1024**; components **64**; messages **64**; Orchestra groups **64**; Orchestra code sets **256**. Enum values / codes added **4096**. References added (QuickFIX `<field>` / `<component>` / `<group>` refs, Orchestra `fixr:fieldRef` / `componentRef` / `groupRef`) **8192** in total, to new and existing definitions alike. An existing definition the overlay extends is not a "new" definition; how many are touched is bounded by the base's own count, the reference cap and step 6. |
-| 6 | Merged-graph walk: cycles and expansion budget | one iterative depth-first walk over the base's definitions plus the **unspliced** overlay (an overlay child counts as a child of the definition it matches, R-3), so no splice is needed first. XML: `component` → `component` (directly or through `<group>`); Orchestra: `component` / `group` → `componentRef` / `groupRef` ids. A visited set with three colours: a back edge refuses with `xml_parse_error` naming the cycle, including a cycle that closes through base definitions (spec US2 AS-4). A memoized, **saturating** expanded size per component and per group (a field counts 1; a group counts 1 plus its body; a component is inlined), exactly as `expand_field_list` emits. From the memo it computes the total `finalize()` will emit: every message's header + body + trailer (a header or trailer reference is charged once per message), every component standalone, every group standalone. It refuses with `overlay_limit_error` naming the budget when the merged total exceeds the base's own total by more than the budget. (Every standalone component and group and every message is in that total, so no separate per-definition check is needed.) |
-| 7 | Conflicts | R-4's remaining checks. Every reachability question R-4 asks ("does the parent already reach this tag through a component?") is answered from step 6's memo. There is no second recursive walk. |
+| 6 | Merged-graph walk: cycles, expansion budget, side-table fit | One iterative walk (explicit stack) over the base's definitions plus the **unspliced** overlay, so no splice is needed first. Steps 6, 7 and 8 share one classifier that decides, per overlay node, whether the splice matches it (a promotion or merge in place), appends it, or drops it (`fixr:annotation`, `fixr:documentation`, a matched group's `fixr:numInGroup`, non-element nodes). Step 6 counts the base's children plus the children that classifier appends, and nothing else, so it walks the shape the splice will produce. Edges: XML, a definition → the components it references and the groups it holds; Orchestra, `component` / `group` → `componentRef` / `groupRef` ids. An unknown reference is a leaf here; the loader refuses it after the splice (R-4). **Cycles:** three colours. A back edge ends the walk with a structured cycle result naming the definitions on the cycle, including a cycle that closes through base definitions (spec US2 AS-4). Each loader throws its own type for it: `xml_parse_error` (XML) or `orchestra_parse_error` (Orchestra), the type `load` uses for a schema error. **Memo**, per component and group, filled in post-order and saturating: *steps*, the number of child nodes `expand_field_list`'s loop visits when it expands the definition (each child counts 1, and a component reference or a group adds the steps of its target); *entries*, the `FieldRef`s it emits (a field 1; a group 1 plus its body; a component its body); and, for step 7, *level sets* (R-3, below). **First-seen groups:** the walk visits definitions in `finalize`'s order (each message's header, body and trailer, in message order; then each component in declaration order) and records, per NumInGroup tag, the first group it meets. That is the group `finalize` expands standalone. A definition already visited is not walked again, which keeps the order of first encounters. **Budget:** the merged total is the steps `finalize` will take, from the memo: every message's expansion (a header or trailer is charged once per message), every component standalone, every first-seen group standalone. The walk returns a structured budget result, and the loader throws `overlay_limit_error` naming the budget when the merged total exceeds the base's own total by more than the budget. **Side-table fit (N-3):** a side table (components; groups) *fits* when every definition's start index and entry count is at most 65535, the most a `std::uint16_t` holds. Starts are prefix sums of *entries* in `finalize`'s order (components in declaration order; first-seen groups sorted by NumInGroup tag). When the base's table fits and the merged table does not, the loader throws `overlay_limit_error` naming the table. The budget is checked first, so an overlay that fails both is reported as over the budget. A base whose table already does not fit is out of scope (R-10). |
+| 7 | Conflicts | R-4's remaining checks. Every reachability question R-4 asks is answered from step 6's level sets; there is no second recursive walk. Level sets are built only for the parents the overlay extends and the definitions they reach at their own level (for a QuickFIX-XML header or trailer addition, every message), as sorted tag vectors memoized per definition. Each is no larger than the base's declared field count, which bounds the memory: the code comment states that recipe. SC-005's fixture does not measure this cost. |
 | 8 | Splice | R-3. |
-| 9 | Build | the loader's unchanged `build_handle_from_doc`. |
+| 8a | Length+Data relation | the factored pair detection (R-3) on the base document, run before step 8 changes it, and on the spliced document; refused with `overlay_conflict_error` when a pair touching a base tag differs. It reads `<fields>` and walks containers in document order (XML) or reads `lengthId` attributes (Orchestra), following no references. Errors it raises on the spliced document other than a collision (for example an unknown field type) are the loader's own, as the build would raise them. |
+| 9 | Build | the loader's `build_handle_from_doc`, with the step counter armed at step 6's merged total (below). |
+
+**The step counter: the bound holds by construction (Gate A round 2, Root cause B).** Step 6 is a model
+of `finalize`'s expansion. A model can miss an expansion site that a later change adds (round 2 found
+one: a header-store walk). So the build does not trust it:
+- Each loader's state class (`LoaderState`, `OrchestraLoaderState`) gains a step counter. `expand_field_list` increments it once at the head of
+  its child loop, for every child node, which is the unit step 6 counts. When the counter is armed and
+  passes its limit, `expand_field_list` throws `overlay_limit_error` naming the budget.
+- The overlay path arms it with step 6's merged total. The `load` path leaves it unarmed (a null limit),
+  so `load`'s behaviour is unchanged by construction.
+- An `expand_field_list` call step 6 does not model can therefore cause a loud refusal, never unbounded
+  work. The counter does not see other recursive walks; none is added (the header store is a
+  visited-set walk, R-7).
+- Read seam: `src/dictionary/overlay_merge.hpp` (internal, already on the dictionary tests' include
+  path) declares a test-facing entry that loads with an overlay and also returns the counter's final value
+  and step 6's predicted total. W-1, W-2 and the W-11 harness assert the two are **equal** on every input
+  that loads. Equality, not `≤`, is what catches model drift in either direction. It holds only because
+  step 6 counts what the loop visits before any de-duplication, counts the spliced shape (the shared
+  classifier, step 6), and charges the first-seen group per NumInGroup tag, as `finalize` does.
+- Mutant M-17 adds one extra `expand_field_list` call in `finalize`; the counter must refuse and W-1 must
+  go RED.
 
 **The expansion budget.** A fixed constant, compared against the overlay's **increase** over the base,
 so any base the base loader accepts is admitted with an empty overlay. Derivation (the code comment
 records this recipe, not a number): run step 6's count over every vendored base (`dictionaries/*.xml`
 and `dictionaries/orchestra/OrchestraFIXLatest.xml`), take the largest total, and set the budget to the
 next power of two at or above twice it. An overlay may then add at most about the expansion work of the
-largest vendored base. Starting estimate: **2^20** emitted entries, from the Gate A round-1 review's
-Python model of `expand_field_list` over FIX50SP2 (2026-10-31: messages 307 480 + components 106 374 +
-first-seen groups ≈ 28 263, about 4.4 × 10^5; the Orchestra file was not modelled). The implementer
-re-derives it with the step 6 code itself and records the value in the verify record; where the two
-differ, the recipe wins. The budget is a safety bound, not a performance target: an overlay near it
+largest vendored base. Starting estimate: **2^20** steps, from the Gate A round-1 review's Python model
+of `expand_field_list` over FIX50SP2, which counted emitted entries; the Orchestra file was not
+modelled, and steps are at least entries. The implementer re-derives the value with the step 6 code
+itself and records it in the verify record; where the two differ, the recipe wins. The budget is a safety bound, not a performance target: an overlay near it
 can make a small base load many times slower. SC-005 measures one named fixture (W-12's at-cap overlay on
 FIX50SP2), with its expansion count recorded, not every overlay the caps admit.
 
 The values in step 5 are 2c §4.4.2's for fields, components and messages, plus the two Orchestra
 containers 2c did not know about, an enum-value cap the byte cap would otherwise bound only loosely, and
 the reference cap Gate A round 1 added. Fixed constants in `src/dictionary/`, no configuration knob (2c's
-`FIXPP_DICT_*` names were never implemented). A cap or budget failure throws `overlay_limit_error`.
+`FIXPP_DICT_*` names were never implemented). A cap, budget, side-table or step-counter failure throws
+`overlay_limit_error`.
 
 The base path is not hardened (spec FR-011): the caps apply to the overlay document; the cycle check and
 the budget cover the merged graph, and so cover the base's own graph only on the overlay path.
@@ -278,9 +349,14 @@ declaring a header tag outside the fixed set changes anything. Re-derive with a 
 `dictionaries/*.xml` and `dictionaries/orchestra/*.xml` minus `kSendHeaderTags`.
 
 **Decision.**
-- The metadata handle gains the dictionary's **declared header tags**, computed at finalize from the
-  header expansion (XML `header_node_`; Orchestra component 1024), NumInGroup tags and group members
-  included.
+- The metadata handle gains the dictionary's **declared header tags**, computed at finalize by an
+  iterative **visited-set walk** from the header (XML `header_node_`; Orchestra component 1024): it
+  collects fields, NumInGroup tags and group members, and walks each component or group definition at
+  most once. The store is a set, so multiplicity cannot arise, and the walk's work is bounded by the
+  document's size. It is not an `expand_field_list` call, so the step counter (R-5) does not charge it;
+  an implementation that used `expand_field_list` instead would trip the counter on the overlay path
+  (Gate A round 2, G098-R2-003). The walk runs on the `load` path too, where it is the only header
+  computation.
 - `table_view` gains `header_bits_` in the `group_bits_` / `enum_bits_` shape (`std::vector<std::uint64_t>`
   sized to the highest set tag; a query past the end answers false), filled by `as_table_view()` through
   a `table_view_builder` forwarder, and a public `bool is_header_tag(std::uint16_t) const noexcept`.
@@ -388,7 +464,7 @@ No existing helper compares two dictionaries store by store (`determinism_test.c
 `reused_tag_census.hpp`, `required_scope_oracle.hpp` and the 096 walk each cover a slice). A new test
 helper, `tests/dictionary/dictionary_equivalence.hpp`, compares two `Dictionary` values and their
 `table_view`s and returns a list of differences. Gate A round 1 (A-002, A-004, N-4, N-5) fixed the four
-things below together.
+things below together; round 2 (Root cause C) made the compared stores data.
 
 **1. What it is compared against.** The equivalent edited XML is the base with each overlay addition
 appended at the end of its matched container, in overlay document order (spec Terminology). It is
@@ -411,7 +487,20 @@ union of three sources, over both sides:
 An extra message, field, component (including one no message uses), group or context on either side is
 therefore reported, not hidden.
 
-**3. What it compares.**
+**3. What it compares: a declared store list.** The comparator declares the stores it compares as
+data, one entry each, and every comparison and every diagnostic is keyed by an entry. The list has:
+- one entry per `table_view` data member, and per sub-member of a member that holds several stores
+  (for example `group_ctx_entry`'s `members` and `required_members`, and `enum_domain`'s `codes` and
+  `multi_value`), with the two pair directions as two entries;
+- one entry per `Dictionary` query field, including `FieldRef::component_index` and `group_no_tag`, and
+  `ComponentRef::component_id` and `parent_component_id`;
+- the census entries (`component_fields` and `group_fields` against the raw document, below).
+
+The comparator's header comment carries the recipe that re-derives the list: read `table_view.hpp`'s
+`private:` block and the `Dictionary` query and `*Ref` field declarations. The comment holds the recipe,
+not the list. An entry a version-matched overlay cannot change carries a stated reason instead of a seed.
+For example the `fixt_framing_*` members are a function of `which_session_version()`
+(`Dictionary::as_table_view`), and FR-006 fixes the version. The entries cover:
 - **Dictionary API**: `messages()`, per message `message_fields` / `field_ref` / `required_fields`,
   `field` / `field_by_name` / `field_name` for every tag on either side, `enum_values` (in order),
   `component` (including `component_id` and `parent_component_id`) / `component_fields`, `group` /
@@ -430,36 +519,48 @@ therefore reported, not hidden.
   `component_fields` and `group_fields` are therefore also compared with the members the raw census
   expands for that definition.
 
-**The side-table index wrap (N-5).** `ComponentRef::first_field_index` and `GroupRef::first_field_index`
-are `std::uint16_t` (`include/fixpp/dict/component_ref.hpp`, `group_ref.hpp`), and both loaders' `finalize`
-assign them by `static_cast<std::uint16_t>` of the side table's size. The Gate A round-1 review's model
-(2026-10-31) puts FIX50SP2's `component_fields_` past 65535 entries, so later components would read
-another component's fields. This is pre-existing, and 098 does not fix it (orchestrator default, owner to
-confirm; spec Clarifications Gate A round 1). So:
-- The census comparison covers each component and group whose start in its side table, computed by the
-  test from the census sizes in the order `finalize` assigns them (re-derive the order from the two
-  `finalize` loops that set `first_idx`; today components go in declaration order and groups after a
-  sort by NumInGroup tag), is below 65536. A
-  definition past that point is listed in the verify record as a wrap case, not compared. This is a
-  condition, re-evaluated on every run, not a count.
+**The side-table index wrap (N-5, revised at Gate A round 2, N-3).** `ComponentRef::first_field_index`
+and `GroupRef::first_field_index` are `std::uint16_t` (`include/fixpp/dict/component_ref.hpp`,
+`group_ref.hpp`). Both loaders' `finalize` assign them by `static_cast<std::uint16_t>` of the side table's
+size, and clamp `field_count` with `std::min<std::size_t>(…, 65535U)`. The Gate A round-1 review's model
+puts FIX50SP2's `component_fields_` past 65535 entries, so later components would read another
+component's fields. An overlay can also cause the wrap or the clamp on a base that does not have it
+today: growing an early-declared component shifts every later start, a large group with a low NumInGroup
+tag sorts before base groups, and one component can expand past 65535 entries, all within the budget.
+So the round-1 rationale ("pre-existing and not caused by an overlay") was false. The disposition now
+(orchestrator default, owner to confirm; spec Clarifications Gate A round 2):
+- **Refused at load where the base fits.** R-5 step 6 refuses an overlay that makes a fitting side table
+  stop fitting. On such a base an overlay load never wraps or clamps.
+- **Out of scope where the base does not fit.** The base already returns wrong `component_fields` /
+  `group_fields` for its later definitions, and the overlay is admitted. The result still equals the
+  equivalent edited XML (FR-002), whose load has the same wrong answers. Widening the index is a layout
+  change to `ComponentRef` / `GroupRef`, whose 12-byte size is pinned (2c §4.2 AC-F2,
+  `tests/dictionary/ref_shape_test.cpp`); it is left to the owner.
+- The census comparison covers each component and group whose start and count, computed by the test from
+  the census sizes in the order `finalize` assigns them (re-derive the order from the two `finalize` loops
+  that set `first_idx`), fit in 16 bits. A definition that does not fit is listed in the verify record as
+  a wrap case, not compared. This is a condition, re-evaluated on every run, not a count. Where the base
+  table does not fit, every definition the overlay appends after the wrap point is compared side against
+  side only, and the verify record says so.
 - A probe (a gtest in the dictionary binary, not a 098 witness that must go GREEN) compares
   `component_fields` of the first component past the wrap point on FIX50SP2 with its raw members. Its
   result goes in the verify record. If it shows the wrap, the defect is filed with R-15's issues and
   gets an `L-098-*` row; if it does not, the condition above admits every definition and the note says
   the model was wrong.
 
-**4. Seeded rows (W-0).** One seeded mismatch per store category the helper claims (a field type, a valid
-tag, a required tag, an enum value, an enum order, a component member, a component id, a group member, a
-group delimiter, an exact-store entry, a context-store member, a Length+Data pair, a header tag, a
-message, a field name), plus:
+**4. Seeded rows (W-0), derived from the list.** One seeded pair of small dictionaries per entry of the
+declared list (or the entry's stated reason), differing in exactly that store. W-0 asserts two things:
+the set of seeded entries equals the declared list (a member with no seed, or a seed with no member,
+fails), and each seed produces a difference naming exactly its entry. A seed for a context store leaves
+the bare and exact stores equal, so a comparator that reads only the bare fallback misses it; for
+example the context `required_members` seed has the same bare `group_required_members` on both sides
+(G098-R2-004). Three more seeds test the key sources, not a store:
 - an **unused extra component** on one side, visible only through the census and the internal read;
 - a **context record that differs only where the bare value would mask it**;
-- a **bare-only `group_required_members` difference**;
 - a **census mismatch**: the census of a document that differs from the loaded one in one component
   member, which the census comparison must report.
 
-Each is shown to produce a reported difference naming its store before the clean comparisons are
-trusted.
+Each is shown to produce a reported difference before the clean comparisons are trusted.
 
 **References.** Two kinds, both written by hand from the base file and never derived from the merge
 (FR-017):
@@ -489,8 +590,14 @@ trusted.
 The overlay loader is new parser-touching code over untrusted XML. Add
 `tests/fuzz/fuzz_dict_overlay.cpp`: a fixed small base (one per format, chosen by the first input byte),
 the rest of the input as the overlay, both C++ entry points; every throw must be one of the `dict::`
-error types. Seeds: the hand-written overlays (R-10), the conflict and cap overlays, a DOCTYPE
-overlay, and the expansion-doubling overlay of R-5 (A-001). Registered like `fuzz_dict_xml_loader` / `fuzz_orchestra_loader` (`tests/fuzz/CMakeLists.txt`,
+error types. The Orchestra half catches `orchestra_parse_error` by its derived type before the base, as
+`tests/fuzz/fuzz_orchestra_loader.cpp` does, so an Orchestra schema error thrown as a bare
+`xml_parse_error` falls through to the terminal rethrow (Gate A round 2, Root cause D). The harness loads
+through R-5's read seam and aborts when an input loads and the step counter differs from step 6's
+prediction. The fuzz targets do not have `src/dictionary` on their include path today, so the new
+target adds it with `target_include_directories`, as `fuzz_decimal_compare` adds `tests`. Seeds: the hand-written overlays (R-10), the conflict and cap overlays, a DOCTYPE
+overlay, the expansion-doubling overlay of R-5 (A-001) in both formats, the empty-component chain
+(R-5), and an Orchestra cycle. Registered like `fuzz_dict_xml_loader` / `fuzz_orchestra_loader` (`tests/fuzz/CMakeLists.txt`,
 built under `FIXPP_BUILD_FUZZ`). The ten-minute run is `/speckit-verify`'s fuzz step.
 
 ## R-12 — C ABI and Python
@@ -533,7 +640,8 @@ removed at close-out.
 - **New `L-098-*`:** the FIXT registry holds base dictionaries only, so row 6 (fixpp#643) must keep the
   session's own dictionary for its own version (FR-021); the typed (codegen) tier reflects the base only;
   the base `XmlLoader::load` / `OrchestraLoader::load` paths have no caps or cycle guard (with the filed
-  issue); and, if R-10's probe shows it, the `first_field_index` side-table wrap (N-5, with its filed
+  issue); and, if R-10's probe shows it, the `first_field_index` side-table wrap on a base whose side
+  table already does not fit, where an overlay is admitted (N-5, Gate A round 2 N-3; with its filed
   issue).
 - **Catalogue:** D-009 and COM-011 `done`. D-009's Spec ref `[FIX50SP2 §3.2]` is borrowed from D-010 and
   is replaced by `[impl] implementation` with a coverage-index supplemental note, as D-007 has (FIX
@@ -560,5 +668,5 @@ removed at close-out.
 Labelled per `gh label list` at filing time: (1) base loaders have no XML caps or component-cycle guard;
 (2) the dictionary-axis engine fallback in `session_config.hpp`'s header comment is not implemented;
 (3) `redact_tag554` has no production caller; (4) one `wire_unexpected_tag` for both QuickFIX 373=0 and
-373=2 cases; (5) only if R-10's probe shows it: the `std::uint16_t` `first_field_index` wraps past 65535
-side-table entries (N-5).
+373=2 cases; (5) only if R-10's probe shows it: the `std::uint16_t` `first_field_index` wraps, and `field_count`
+clamps, past 65535 side-table entries on a base whose table does not fit (N-5, N-3).
