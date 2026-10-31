@@ -6,6 +6,8 @@ status: stable
 
 # Log
 
+- **2026-10-31 — fixpp#602 + #640 (B61), Gate B close-out: `failure-classes.md` class 1 gains the two-timer
+  pump-step witness form (PR #648).**
 - **2026-10-31 — fixpp#602 + #640 (B61), pre-push: FileStore setup waits are bounded by completion.**
   `components/test.md` gains the section "When the window must stay, a slow FileStore setup must not fail it
   (#602, #640 — B61)": the measured cause (B&L `L-602-1`), the shared `run_window_or_wait_until_ready`

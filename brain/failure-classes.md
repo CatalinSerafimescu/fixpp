@@ -268,6 +268,24 @@ prints `0` for a whole syntax.
   - **Sibling.** Class 17: the no-op step is an alias that shares every proxy the pin compares. Class 6:
     a `continue-on-error` step and a skipped one are the same green without a measurement.
 
+- ⚠️ **A WITNESS FOR A PUMP STEP THAT ORDERS TWO REAL-TIME EVENTS FAILS IN BOTH DIRECTIONS UNDER LOAD.**
+  The cell puts the event that completes the awaited call and the event under test on timers a
+  fraction of a window apart. A descheduled slice or a late window reorders them. The cell then fails
+  on a correct tree under load, and also lets the deletion mutant pass. A repeat run on an idle
+  machine shows neither, because the timers keep their order there.
+  - **Trigger:** you are writing a cell that proves a pump step ran (a window run once more, a drain,
+    a re-take), and the work it watches is posted by a timer or a sleeping thread.
+  - **Procedure:** make the step under test the only thing that can dispatch the witnessed work. Use
+    a counting test double whose first `ready` answer posts the witness, with no timers. State how
+    many not-ready answers come first as a condition, with the recipe that re-derives it from the
+    helper's calls, never as a number. Prove it under CPU contention: the deletion mutant, a witness
+    that is never posted, and a double that is ready from its first call must each be RED, and the
+    clean tree GREEN. A fake that a timer still makes ready closes only the vacuous-pass half.
+  - **Instance (fixpp#602, PR #648, Gate B rounds 1–2).**
+    `PumpWindowMiss.RecoveredWaitRunsTheWindowOnceMore` first used two real-time timers. A fake future
+    made ready by a timer closed only the half where the mutant passed. A counting fake future with no
+    timers closed both.
+
 **The same class, in a benchmark: a timing row that never runs the code it is cited for.**
 - A flat paired delta reads as "no cost". It is only evidence if the timed loop reaches the changed path.
 - The 090 case (PR #494, Gate B): the existing reify row passed a view with no MsgType, so `reify()` returned before the factory it was cited for.
