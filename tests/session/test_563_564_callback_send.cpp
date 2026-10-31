@@ -102,15 +102,13 @@
 //                             fixpp#602. The same, for a stop() from the file
 //                             pool's running job that lands after run() has taken
 //                             the fixture's guard again.
-//   FileStoreFixture_SetupOpenPastTheWindow_IsWaitedFor,
 //   FileStoreFixture_SetupOpenBlockedPastTheWindow_IsWaitedFor,
 //   FileStoreFixture_SetupLogonPastTheWindow_IsWaitedFor
-//                             fixpp#602 / fixpp#640. A store job of the setup's
-//                             open() held up on the file pool, the store's
-//                             make() blocking the session's thread inside the
+//                             fixpp#602 / fixpp#640. The store's make() blocking
+//                             the session's thread past the setup open()'s
 //                             window, or a store job of the setup's peer Logon
-//                             held up: the setup must wait past the window and
-//                             reach Active.
+//                             held up on the file pool past its window: the
+//                             setup must wait past the window and reach Active.
 //   FileStoreFixture_SetupPastTheExtension_StillReportsTheMiss,
 //   FileStoreFixture_SetupWindowReturningEarly_StillReportsTheMiss
 //                             the same wait must still report the miss when the
@@ -2901,13 +2899,26 @@ TEST(CallbackSend, FileStoreFixture_StopFromThePoolAfterTheRetake_DoesNotStopThe
 
 namespace {
 
-// How long the setup cells hold up one store job: a window past run()'s window, so the
-// window misses by a margin that a slow lane's scheduling does not close. It ends well
-// inside a pump's budget, so a setup wait outlasts it, and inside the drain's quiesce
-// budget, so that a drain after a miss still ends after the job does.
-constexpr std::chrono::milliseconds kSetupJobDelay = 2 * Fixture::kRunWindow;
-static_assert(kSetupJobDelay * kGraceOverPumpBound <= fixpp::test_support::kPumpBudget,
-              "a setup wait must outlast the held store job");
+// The margin of every real-time hold-up in the setup cells: a hold-up meant to outlast a
+// deadline outlasts it by this much, so that the test's thread can be descheduled for up to
+// this long between the deadline and the check after it, and the miss stays a miss. Each
+// hold-up is that deadline plus this margin and no more, because every one of them is paid
+// in real time on every run of the binary.
+constexpr std::chrono::milliseconds kSetupMargin = Fixture::kRunWindow / 5;
+// How long a setup cell holds up the store work its window waits on: past the window and its
+// one-slice grace by kSetupMargin.
+constexpr std::chrono::milliseconds kSetupJobDelay = Fixture::kRunWindow + kSetupMargin;
+static_assert(kSetupJobDelay > Fixture::kRunWindow + fixpp::test_support::kPumpSlice,
+              "the held job must outlast the window and its grace");
+// How much longer than its hold-ups a recovered setup cell may take, from the window's start
+// to ready: slack for the work around the hold-ups on a slow lane. It ends well inside a
+// pump's budget, so a setup wait that pumped out its whole budget instead of stopping at
+// ready fails the cell.
+constexpr std::chrono::milliseconds kSetupBandSlack = 4 * Fixture::kRunWindow;
+static_assert((kSetupJobDelay + kSetupMargin + kSetupBandSlack) * 2 <=
+                  fixpp::test_support::kPumpBudget,
+              "a setup wait must outlast the held store work, and the band must exclude a "
+              "wait that pumps its whole budget");
 static_assert(kSetupJobDelay < fixpp::test_support::kQuiesceBudget,
               "a drain after a miss must outlast the held store job");
 
@@ -2969,11 +2980,12 @@ std::string describe(const std::vector<Fixture::WindowMiss>& misses) {
 }
 
 // Asserts what a setup cell asserts of the one miss it causes at `site`, where `held` says
-// the cell's hold-up ran once: the window ran its whole length, the call became ready within
-// the setup wait, from the window's start to ready took at least kSetupJobDelay and less
-// than a window more, and run() went on to take the fixture's guard again.
-void expect_one_recovered_setup_miss(const Fixture& f, bool held, const char* site, bool active,
-                                     const std::string& context) {
+// the cell's hold-ups ran once and `held_ms` is their total: the window ran its whole
+// length, the call became ready within the setup wait, from the window's start to ready
+// took at least `held_ms` and less than kSetupBandSlack more, and run() went on to take the
+// fixture's guard again.
+void expect_one_recovered_setup_miss(const Fixture& f, bool held, std::chrono::milliseconds held_ms,
+                                     const char* site, bool active, const std::string& context) {
     ASSERT_TRUE(held && !f.window_misses.empty() && f.window_misses.front().site == site)
         << "the path was not exercised: " << context;
     const Fixture::WindowMiss& m = f.window_misses.front();
@@ -2981,8 +2993,8 @@ void expect_one_recovered_setup_miss(const Fixture& f, bool held, const char* si
     EXPECT_GE(m.window_ms, Fixture::kRunWindow.count())
         << "the window returned before its end. " << context;
     EXPECT_TRUE(m.recovered) << "the setup wait did not recover from the miss. " << context;
-    EXPECT_GE(m.window_ms + m.ready_ms, kSetupJobDelay.count()) << context;
-    EXPECT_LT(m.window_ms + m.ready_ms, (kSetupJobDelay + Fixture::kRunWindow).count()) << context;
+    EXPECT_GE(m.window_ms + m.ready_ms, held_ms.count()) << context;
+    EXPECT_LT(m.window_ms + m.ready_ms, (held_ms + kSetupBandSlack).count()) << context;
     EXPECT_TRUE(active) << "setup: session did not reach Active. " << context;
     EXPECT_TRUE(f.keep.has_value())
         << "run() did not take the fixture's guard again after the setup wait. " << context;
@@ -2990,46 +3002,33 @@ void expect_one_recovered_setup_miss(const Fixture& f, bool held, const char* si
 
 }  // namespace
 
-// fixpp#602 / fixpp#640: a FileStore cell's setup open() whose store work outlasts run()'s
-// window. The fixture's file executor holds up the first store job of open() by
-// kSetupJobDelay; the setup must still reach Active, by waiting past the window.
-TEST(CallbackSend, FileStoreFixture_SetupOpenPastTheWindow_IsWaitedFor) {
-    Fixture f{ExecKind::io_context, StoreKind::file};
-    auto cfg = f.cfg();
-    const auto delay = delay_a_store_job(f, cfg, kSetupJobDelay);
-    Session sess{f.engine, cfg};
-    delay->arm();
-    const bool active = f.open_to_active(sess);
-    const std::string context = "active=" + std::to_string(active) +
-                                " delayed_jobs=" + std::to_string(delay->delayed_jobs.load()) +
-                                " " + describe(f.window_misses);
-    std::printf("[ MEASURED ] %s\n", context.c_str());
-    std::fflush(stdout);
-    expect_one_recovered_setup_miss(f, delay->delayed_jobs.load() == 1, "CallbackSend::open",
-                                    active, context);
-}
-
-// fixpp#602 / fixpp#640: the same, when what outlasts the window blocks the thread the window
-// runs on. The FileStore's factory sleeps past the window inside make(), which open() calls
-// inline, so the window's run_for cannot return before make() does; the Logon's store job is
-// then handed to the pool after the window, and the window's one-slice grace does not cover
-// it.
+// fixpp#602 / fixpp#640: a FileStore cell's setup open() whose work outlasts run()'s window
+// by blocking the thread the window runs on. The FileStore's factory sleeps past the window
+// inside make(), which open() calls inline, so the window's run_for cannot return before
+// make() does, and the Logon's store job is handed to the pool after the window. That job is
+// held up by kSetupMargin, so the window's one-slice grace cannot cover it on a fast disk.
+// The setup must still reach Active, by waiting past the window.
 TEST(CallbackSend, FileStoreFixture_SetupOpenBlockedPastTheWindow_IsWaitedFor) {
     Fixture f{ExecKind::io_context, StoreKind::file};
     auto cfg = f.cfg();
+    const auto delay = delay_a_store_job(f, cfg, kSetupMargin);
     const auto slow = std::make_shared<SlowMakeStoreFactory>(cfg.store_factory, kSetupJobDelay);
     cfg.store_factory = slow;
     Session sess{f.engine, cfg};
+    delay->arm();
     const bool active = f.open_to_active(sess);
     const std::string context =
         "active=" + std::to_string(active) + " makes=" + std::to_string(slow->makes.load()) +
         " made_on_the_test_thread=" + std::to_string(slow->made_on_the_constructing_thread.load()) +
-        " " + describe(f.window_misses);
+        " delayed_jobs=" + std::to_string(delay->delayed_jobs.load()) + " " +
+        describe(f.window_misses);
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
     expect_one_recovered_setup_miss(
-        f, slow->makes.load() == 1 && slow->made_on_the_constructing_thread.load(),
-        "CallbackSend::open", active, context);
+        f,
+        slow->makes.load() == 1 && slow->made_on_the_constructing_thread.load() &&
+            delay->delayed_jobs.load() == 1,
+        kSetupJobDelay + kSetupMargin, "CallbackSend::open", active, context);
 }
 
 // The same for the setup's peer Logon. The delay is armed when the session transmits its
@@ -3051,23 +3050,26 @@ TEST(CallbackSend, FileStoreFixture_SetupLogonPastTheWindow_IsWaitedFor) {
                                 " " + describe(f.window_misses);
     std::printf("[ MEASURED ] %s\n", context.c_str());
     std::fflush(stdout);
-    expect_one_recovered_setup_miss(f, delay->delayed_jobs.load() == 1, "CallbackSend::logon",
-                                    active, context);
+    expect_one_recovered_setup_miss(f, delay->delayed_jobs.load() == 1, kSetupJobDelay,
+                                    "CallbackSend::logon", active, context);
 }
 
 namespace {
 
 // The setup-wait budget of the next cell, and the delay of its held job: the job outlasts
-// the window and the budget together by a window more, and still ends inside the drain's
-// quiesce budget, so the drain after the miss ends after it.
-constexpr std::chrono::milliseconds kShortSetupBudget = 2 * Fixture::kRunWindow;
+// the window and the budget together by kSetupMargin, and ends inside the drain's quiesce
+// budget, so the drain after the miss ends after it.
+constexpr std::chrono::milliseconds kShortSetupBudget = kSetupMargin;
 constexpr std::chrono::milliseconds kPastTheShortBudget =
-    Fixture::kRunWindow + kShortSetupBudget + Fixture::kRunWindow;
+    Fixture::kRunWindow + kShortSetupBudget + kSetupMargin;
 static_assert(kPastTheShortBudget < fixpp::test_support::kQuiesceBudget,
               "a drain after a miss must outlast the held store job");
 // How long the stopping cell's pool job waits before it stops the fixture's io_context:
-// well inside the window, so the window returns before its end.
-constexpr std::chrono::milliseconds kStopInsideTheWindow = Fixture::kRunWindow / 5;
+// well inside the window, so the window returns before its end. The store job queued behind
+// it is then held up by kSetupMargin, past the stop and the grace after it.
+constexpr std::chrono::milliseconds kStopInsideTheWindow = kSetupMargin;
+static_assert(kStopInsideTheWindow * 2 < Fixture::kRunWindow,
+              "the stop must land well inside the window");
 
 // Writes every failure the death-test child's test has recorded to stderr, which is what
 // EXPECT_EXIT reads: the failure reports themselves, not a text the child wrote for them.
@@ -3101,7 +3103,7 @@ int setup_miss_that_must_fail(SetupMiss what) {
     Fixture f{ExecKind::io_context, StoreKind::file};
     if (!early) f.setup_extension_budget = kShortSetupBudget;
     auto cfg = f.cfg();
-    const auto delay = delay_a_store_job(f, cfg, early ? kSetupJobDelay : kPastTheShortBudget);
+    const auto delay = delay_a_store_job(f, cfg, early ? kSetupMargin : kPastTheShortBudget);
     Session sess{f.engine, cfg};
     if (early) {
         // The job takes the pool's one thread, so the held store job queues behind it.
