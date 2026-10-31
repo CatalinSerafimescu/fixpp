@@ -949,7 +949,7 @@ struct Fixture {
     std::function<void(const std::string&)> on_transmit;
     // Test-only: run() calls it after its window has returned and before it takes `keep`
     // again, on the miss path too, before that path's drain. It receives whether the window
-    // returned ready.
+    // returned ready or a setup wait recovered from its miss.
     std::function<void(bool)> between_window_and_retake;
     LiveWrites live_writes;
     asio::any_io_executor exec;
@@ -1062,9 +1062,15 @@ struct Fixture {
     // which function arms each.
     std::chrono::steady_clock::duration setup_extension_budget = fixpp::test_support::kPumpBudget;
 
-    // Called by run() when its window missed, before the drain. Prints one line that says
-    // what the window did and what the store's offloads did, then pumps on for a pump's
-    // budget and adds how long the call took to become ready, or that it did not. The
+    // Called by run() when its window missed, before the drain. Pumps on, for
+    // setup_extension_budget at a setup wait and for a pump's budget elsewhere, then prints
+    // one line that says what the window did, what the store's offloads did, and how long
+    // the call took to become ready, or that it did not. Returns whether a setup wait
+    // recovered: the call became ready inside the pump after a window that ran its whole
+    // length. A window that returned before its end means `ioc` stopped, or ran out of work,
+    // with the call not ready; the pump holds a work guard on a restarted `ioc`, so it would
+    // hide that, and such a miss is reported like any other. On a recovery the window runs
+    // once more, as the window of a call that was ready would have. The
     // window's own time is the discriminator: run_window_then_ready restarts `ioc` before it
     // returns, so whether `ioc` stopped cannot be read after it, and its run_for(kRunWindow)
     // returns before kRunWindow only when `ioc` has stopped or run out of work. The offload
@@ -1073,9 +1079,9 @@ struct Fixture {
     // as close()'s grace timer, can complete it inside the pump, so a time to ready does
     // not say that the call would have completed without one.
     template <class Fut>
-    void report_window_miss(Fut& fut, const char* site,
-                            std::chrono::steady_clock::time_point window_started,
-                            const FileStoreSeams::Counts& at_entry) {
+    [[nodiscard]] bool report_window_miss(Fut& fut, const char* site, bool setup,
+                                          std::chrono::steady_clock::time_point window_started,
+                                          const FileStoreSeams::Counts& at_entry) {
         const auto missed_at = std::chrono::steady_clock::now();
         const FileStoreSeams::Counts at_miss = FileStoreSeams::counts();
         const auto ms_between = [](auto from, auto to) {
@@ -1089,34 +1095,58 @@ struct Fixture {
                 missed_at);
         };
         const long long window_ms = ms_between(window_started, missed_at);
-        const bool became_ready =
-            fixpp::test_support::pump_until_ready(ioc, fut, fixpp::test_support::kPumpBudget, site);
+        const bool became_ready = fixpp::test_support::pump_until_ready(
+            ioc, fut, setup ? setup_extension_budget : fixpp::test_support::kPumpBudget, site);
         const long long ready_ms = ms_between(missed_at, std::chrono::steady_clock::now());
+        const bool recovered = setup && became_ready && window_ms >= kRunWindow.count();
         // window_returned_early stands for ioc.stopped(), which the helper's restart() clears.
         std::printf(
             "[ MEASURED ] Fixture::run window miss: site=%s window_ms=%lld "
             "window_returned_early=%d store=%s probes_installed=%d begun=%lld exited=%lld "
-            "inflight=%lld last_begin_age_ms=%lld last_exit_age_ms=%lld then: %s %lld ms\n",
+            "inflight=%lld last_begin_age_ms=%lld last_exit_age_ms=%lld setup=%d then: %s %lld ms "
+            "recovered=%d\n",
             site, window_ms, window_ms < kRunWindow.count() ? 1 : 0,
             store_kind == StoreKind::file ? "file" : "not file", at_miss.installed ? 1 : 0,
             at_miss.begun - at_entry.begun, at_miss.exited - at_entry.exited, at_miss.inflight,
-            age_ms(at_miss.last_begin_ticks), age_ms(at_miss.last_exit_ticks),
-            became_ready ? "ready after" : "not ready within the budget, pumped", ready_ms);
+            age_ms(at_miss.last_begin_ticks), age_ms(at_miss.last_exit_ticks), setup ? 1 : 0,
+            became_ready ? "ready after" : "not ready within the budget, pumped", ready_ms,
+            recovered ? 1 : 0);
         std::fflush(stdout);
         window_misses.push_back({.site = site,
                                  .window_ms = window_ms,
                                  .became_ready = became_ready,
                                  .ready_ms = became_ready ? ready_ms : -1,
-                                 .recovered = false});
+                                 .recovered = recovered});
+        if (recovered) {
+            ioc.run_for(kRunWindow);
+            ioc.restart();
+        }
+        return recovered;
     }
 
     template <class T>
     expected_t<T> run(asio::awaitable<expected_t<T>> a, const char* site) {
+        return run_impl(std::move(a), site, /*setup=*/false);
+    }
+
+    // run() for a setup wait: a session's open() and the setup peer Logon. A FileStore's
+    // offloaded store work there can outlast the window on a slow lane, so a miss is followed
+    // by report_window_miss's pump for setup_extension_budget, and a call that recovers in it
+    // goes on as after a window that returned ready. Not for close() or any call a real-time
+    // timer can end: setup_extension_budget says why.
+    template <class T>
+    expected_t<T> run_setup(asio::awaitable<expected_t<T>> a, const char* site) {
+        return run_impl(std::move(a), site, /*setup=*/true);
+    }
+
+    template <class T>
+    expected_t<T> run_impl(asio::awaitable<expected_t<T>> a, const char* site, bool setup) {
         auto fut = asio::co_spawn(exec, std::move(a), asio::use_future);
         // `keep` is released for the window, after the co_spawn, whose own work keeps `ioc`
         // from stopping at the release. The window then returns when `ioc` runs out of work,
         // as it does with no FileStore, and that includes work an offload releases on the
-        // pool thread. After a window that returned ready, `keep` is taken again on the
+        // pool thread. After a window that returned ready, or a setup wait that recovered
+        // from its miss (report_window_miss), `keep` is taken again on the
         // executor it was released from; then a no-op is run on `file_pool` and waited for;
         // then `ioc` is restarted if it is stopped. The restart is there because a release
         // whose decrement came before the re-take can have stopped `ioc`. The fence is there
@@ -1134,8 +1164,8 @@ struct Fixture {
         keep.reset();
         const FileStoreSeams::Counts at_entry = FileStoreSeams::counts();
         const auto window_started = std::chrono::steady_clock::now();
-        const bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, kRunWindow, site);
-        if (!ready) report_window_miss(fut, site, window_started, at_entry);
+        bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, kRunWindow, site);
+        if (!ready) ready = report_window_miss(fut, site, setup, window_started, at_entry);
         if (between_window_and_retake) between_window_and_retake(ready);
         if (!ready) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
@@ -1183,9 +1213,9 @@ struct Fixture {
     // Initiator: open() emits the Logon, then the peer's Logon acknowledges it.
     // Acceptor: open() emits nothing, and the session answers the peer's Logon.
     bool open_to_active(Session& s) {
-        if (!run(s.open(), "CallbackSend::open")) return false;
-        if (!run(s.on_inbound_frame(std::span<const std::byte>{peer_logon}),
-                 "CallbackSend::logon")) {
+        if (!run_setup(s.open(), "CallbackSend::open")) return false;
+        if (!run_setup(s.on_inbound_frame(std::span<const std::byte>{peer_logon}),
+                       "CallbackSend::logon")) {
             return false;
         }
         return s.state() == fsm_state::Active;
@@ -1204,7 +1234,9 @@ struct Fixture {
 
     // open_to_active(), with the peer's Logon fed on the session's own executor.
     bool open_to_active_on_session_executor(Session& s) {
-        if (!run(s.open(), "CallbackSend::open_before_logon_on_session_executor")) return false;
+        if (!run_setup(s.open(), "CallbackSend::open_before_logon_on_session_executor")) {
+            return false;
+        }
         SendOutcome fed;
         feed_peer_logon_on_session_executor(s, record_into(fed));
         if (!pump_done([&] { return fed.done; }, "CallbackSend::logon_on_session_executor")) {
@@ -2089,7 +2121,7 @@ void run_send_started_in(StartedIn site) {
     Fixture f{ExecKind::io_context};
     Session sess{f.engine, f.cfg()};
     if (in_on_logon) {
-        ASSERT_TRUE(f.run(sess.open(), "CallbackSend::send_started_in_open").has_value())
+        ASSERT_TRUE(f.run_setup(sess.open(), "CallbackSend::send_started_in_open").has_value())
             << "setup: open failed";
         ASSERT_EQ(next_in(sess), 1U) << "setup: no inbound frame may have been consumed yet";
     } else {
@@ -8501,7 +8533,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
         outer_name = "open";
         asio::co_spawn(f.exec, sess.open(), cell.completes(cell.outer, outer_name));
     } else if (logon_arm) {
-        setup_ok = f.run(sess.open(), "CallbackSend::lifecycle_open").has_value();
+        setup_ok = f.run_setup(sess.open(), "CallbackSend::lifecycle_open").has_value();
         if (setup_ok) {
             f.feed_peer_logon_on_session_executor(sess, cell.completes(cell.outer, outer_name));
         }
@@ -13222,7 +13254,7 @@ enum class FedFrame {
     // std::exit reports this death-test child's verdict as its exit code.
     // NOLINTBEGIN(concurrency-mt-unsafe)
     const bool up = from == FedFrom::on_logon
-                        ? f.run(sess.open(), "CallbackGuard::open").has_value()
+                        ? f.run_setup(sess.open(), "CallbackGuard::open").has_value()
                         : f.open_to_active(sess);
     if (!up) std::exit(2);
     const auto ex = sess.executor().underlying();
