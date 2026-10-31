@@ -102,6 +102,20 @@
 //                             fixpp#602. The same, for a stop() from the file
 //                             pool's running job that lands after run() has taken
 //                             the fixture's guard again.
+//   FileStoreFixture_SetupOpenPastTheWindow_IsWaitedFor,
+//   FileStoreFixture_SetupOpenBlockedPastTheWindow_IsWaitedFor,
+//   FileStoreFixture_SetupLogonPastTheWindow_IsWaitedFor
+//                             fixpp#602 / fixpp#640. A store job of the setup's
+//                             open() held up on the file pool, the store's
+//                             make() blocking the session's thread inside the
+//                             window, or a store job of the setup's peer Logon
+//                             held up: the setup must wait past the window and
+//                             reach Active.
+//   FileStoreFixture_SetupPastTheExtension_StillReportsTheMiss,
+//   FileStoreFixture_SetupWindowReturningEarly_StillReportsTheMiss
+//                             the same wait must still report the miss when the
+//                             job outlasts it, or when the window returned early
+//                             on a stopped io_context.
 //   FromAppSendsReply_NestedToAppThrows
 //                             batch B41. fromApp starts a send whose toApp
 //                             throws, which makes Session::send await a
@@ -1026,6 +1040,28 @@ struct Fixture {
     // The real time run() gives the call before it reports a miss.
     static constexpr auto kRunWindow = 500ms;
 
+    // What report_window_miss measured at one miss of run()'s window. `ready_ms` runs from
+    // the end of the window, -1 when the call did not become ready within the pump.
+    struct WindowMiss {
+        std::string site;
+        long long window_ms = -1;
+        bool became_ready = false;
+        long long ready_ms = -1;
+        bool recovered = false;
+    };
+    // One entry per window miss of run(), in the order they happened.
+    std::vector<WindowMiss> window_misses;
+
+    // How long a setup wait (run_setup) pumps on after a window miss. It must stay below
+    // every real-time timer that can complete or fail a setup call, or the pump could let
+    // one end the call. With a Session driven directly, as here, open() and the peer
+    // Logon's arm start none: the establishment deadline is armed by the Engine's loops, the
+    // liveness loop sleeps on the session's mock clock, and close()'s grace timer belongs to
+    // close(). Re-derive that before relying on it: grep src/session/session.cpp and
+    // src/session/engine.cpp for steady_timer, sleep_until and logon_timeout_ms, and read
+    // which function arms each.
+    std::chrono::steady_clock::duration setup_extension_budget = fixpp::test_support::kPumpBudget;
+
     // Called by run() when its window missed, before the drain. Prints one line that says
     // what the window did and what the store's offloads did, then pumps on for a pump's
     // budget and adds how long the call took to become ready, or that it did not. The
@@ -1056,6 +1092,7 @@ struct Fixture {
         const bool became_ready =
             fixpp::test_support::pump_until_ready(ioc, fut, fixpp::test_support::kPumpBudget, site);
         const long long ready_ms = ms_between(missed_at, std::chrono::steady_clock::now());
+        // window_returned_early stands for ioc.stopped(), which the helper's restart() clears.
         std::printf(
             "[ MEASURED ] Fixture::run window miss: site=%s window_ms=%lld "
             "window_returned_early=%d store=%s probes_installed=%d begun=%lld exited=%lld "
@@ -1066,6 +1103,11 @@ struct Fixture {
             age_ms(at_miss.last_begin_ticks), age_ms(at_miss.last_exit_ticks),
             became_ready ? "ready after" : "not ready within the budget, pumped", ready_ms);
         std::fflush(stdout);
+        window_misses.push_back({.site = site,
+                                 .window_ms = window_ms,
+                                 .became_ready = became_ready,
+                                 .ready_ms = became_ready ? ready_ms : -1,
+                                 .recovered = false});
     }
 
     template <class T>
@@ -1383,6 +1425,63 @@ struct GatedFileExecutor {
     }
     friend bool operator==(const GatedFileExecutor& a, const GatedFileExecutor& b) noexcept {
         return a.inner == b.inner && a.gate == b.gate;
+    }
+};
+
+// What a DelayingFileExecutor shares with the cell: after arm(), the next job handed to the
+// executor sleeps for `by` on the pool's thread before it runs, and the jobs after it run
+// as handed. The sleep comes before the job's body, so the store's entry probe has not
+// fired while it lasts and FileStoreSeams reads nothing in flight. The times are on
+// std::chrono::steady_clock.
+struct FileDelay {
+    explicit FileDelay(std::chrono::milliseconds delay) : by{delay} {}
+    std::chrono::milliseconds by;
+    std::atomic<bool> armed{false};
+    std::atomic<int> delayed_jobs{0};
+    std::atomic<bool> delayed_job_ended{false};
+    std::chrono::steady_clock::time_point handed_at{};
+    // Called from the session's thread.
+    void arm() { armed.store(true); }
+};
+
+// The executor a cell gives the FileStore as its file_io_executor, in front of the
+// fixture's pool, to hold up one store job by a set real time.
+struct DelayingFileExecutor {
+    asio::thread_pool::executor_type inner;
+    std::shared_ptr<FileDelay> delay;
+
+    [[nodiscard]] asio::execution_context& query(
+        asio::execution::context_t /*unused*/) const noexcept {
+        return asio::query(inner, asio::execution::context);
+    }
+    static constexpr asio::execution::blocking_t query(
+        asio::execution::blocking_t /*unused*/) noexcept {
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
+        return asio::execution::blocking.never;
+    }
+    [[nodiscard]] DelayingFileExecutor require(
+        asio::execution::blocking_t::never_t /*unused*/) const {
+        return *this;
+    }
+    template <class F>
+    void execute(F&& f) const {
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance): asio's spelling
+        const auto never = asio::require(inner, asio::execution::blocking.never);
+        if (!delay->armed.exchange(false)) {
+            never.execute(std::forward<F>(f));
+            return;
+        }
+        delay->handed_at = std::chrono::steady_clock::now();
+        delay->delayed_jobs.fetch_add(1);
+        auto job = std::make_shared<std::decay_t<F>>(std::forward<F>(f));
+        never.execute([d = delay, job] {
+            std::this_thread::sleep_for(d->by);
+            std::move (*job)();
+            d->delayed_job_ended.store(true);
+        });
+    }
+    friend bool operator==(const DelayingFileExecutor& a, const DelayingFileExecutor& b) noexcept {
+        return a.inner == b.inner && a.delay == b.delay;
     }
 };
 
@@ -2766,6 +2865,265 @@ TEST(CallbackSend, FileStoreFixture_StopFromThePoolAfterTheRetake_DoesNotStopThe
     EXPECT_FALSE(stopped_after_job)
         << "the fixture's io_context was left stopped by the pool's job. " << context;
     EXPECT_TRUE(next_done) << "the pump after run() ran nothing. " << context;
+}
+
+namespace {
+
+// How long the setup cells hold up one store job: a window past run()'s window, so the
+// window misses by a margin that a slow lane's scheduling does not close. It ends well
+// inside a pump's budget, so a setup wait outlasts it, and inside the drain's quiesce
+// budget, so that a drain after a miss still ends after the job does.
+constexpr std::chrono::milliseconds kSetupJobDelay = 2 * Fixture::kRunWindow;
+static_assert(kSetupJobDelay * kGraceOverPumpBound <= fixpp::test_support::kPumpBudget,
+              "a setup wait must outlast the held store job");
+static_assert(kSetupJobDelay < fixpp::test_support::kQuiesceBudget,
+              "a drain after a miss must outlast the held store job");
+
+// Gives `cfg` a FileStore in `f.file_dir` whose file executor holds up the next job handed
+// to it after the returned delay's arm(), by `by`.
+std::shared_ptr<FileDelay> delay_a_store_job(Fixture& f, SessionConfig& cfg,
+                                             std::chrono::milliseconds by) {
+    auto delay = std::make_shared<FileDelay>(by);
+    FileStore::Config fc;
+    fc.directory = f.file_dir;
+    fc.max_frame_bytes = 4096;
+    fc.file_io_executor = DelayingFileExecutor{.inner = f.file_pool.get_executor(), .delay = delay};
+    cfg.store_factory = std::make_shared<FileStoreFactory>(fc);
+    return delay;
+}
+
+// A store factory in front of another, whose make() sleeps for `by` on the thread that calls
+// it before it delegates. Session::open() calls make() inline on the session's executor, so
+// the sleep blocks the io_context that run()'s window is running, as a FileStore's open
+// scan does while it syncs the log to disk.
+class SlowMakeStoreFactory final : public fixpp::session::MessageStoreFactory {
+public:
+    SlowMakeStoreFactory(std::shared_ptr<fixpp::session::MessageStoreFactory> inner,
+                         std::chrono::milliseconds by)
+        : inner_{std::move(inner)}, by_{by} {}
+    // Set by make(): how often it ran, and whether the last call ran on this thread.
+    std::atomic<int> makes{0};
+    std::atomic<bool> made_on_the_constructing_thread{false};
+
+    [[nodiscard]] bool yields_persistent_store() const noexcept override {
+        return inner_->yields_persistent_store();
+    }
+    [[nodiscard]] expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view sender, std::string_view target, std::pmr::memory_resource* mr,
+        std::size_t max_store_memory_bytes,
+        asio::any_io_executor file_io_executor) noexcept override {
+        makes.fetch_add(1);
+        made_on_the_constructing_thread.store(std::this_thread::get_id() == constructed_on_);
+        std::this_thread::sleep_for(by_);
+        return inner_->make(sender, target, mr, max_store_memory_bytes,
+                            std::move(file_io_executor));
+    }
+
+private:
+    std::shared_ptr<fixpp::session::MessageStoreFactory> inner_;
+    std::chrono::milliseconds by_;
+    std::thread::id constructed_on_ = std::this_thread::get_id();
+};
+
+std::string describe(const std::vector<Fixture::WindowMiss>& misses) {
+    std::string out = std::to_string(misses.size()) + " window miss(es)";
+    for (const auto& m : misses) {
+        out += "; site=" + m.site + " window_ms=" + std::to_string(m.window_ms) +
+               " became_ready=" + std::to_string(m.became_ready) +
+               " ready_ms=" + std::to_string(m.ready_ms) +
+               " recovered=" + std::to_string(m.recovered);
+    }
+    return out;
+}
+
+// Asserts what a setup cell asserts of the one miss it causes at `site`, where `held` says
+// the cell's hold-up ran once: the window ran its whole length, the call became ready within
+// the setup wait, and from the window's start to ready took at least kSetupJobDelay and less
+// than a window more.
+void expect_one_recovered_setup_miss(const Fixture& f, bool held, const char* site, bool active,
+                                     const std::string& context) {
+    ASSERT_TRUE(held && !f.window_misses.empty() && f.window_misses.front().site == site)
+        << "the path was not exercised: " << context;
+    const Fixture::WindowMiss& m = f.window_misses.front();
+    EXPECT_EQ(f.window_misses.size(), 1U) << context;
+    EXPECT_GE(m.window_ms, Fixture::kRunWindow.count())
+        << "the window returned before its end. " << context;
+    EXPECT_TRUE(m.recovered) << "the setup wait did not recover from the miss. " << context;
+    EXPECT_GE(m.window_ms + m.ready_ms, kSetupJobDelay.count()) << context;
+    EXPECT_LT(m.window_ms + m.ready_ms, (kSetupJobDelay + Fixture::kRunWindow).count()) << context;
+    EXPECT_TRUE(active) << "setup: session did not reach Active. " << context;
+}
+
+}  // namespace
+
+// fixpp#602 / fixpp#640: a FileStore cell's setup open() whose store work outlasts run()'s
+// window. The fixture's file executor holds up the first store job of open() by
+// kSetupJobDelay; the setup must still reach Active, by waiting past the window.
+TEST(CallbackSend, FileStoreFixture_SetupOpenPastTheWindow_IsWaitedFor) {
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    auto cfg = f.cfg();
+    const auto delay = delay_a_store_job(f, cfg, kSetupJobDelay);
+    Session sess{f.engine, cfg};
+    delay->arm();
+    const bool active = f.open_to_active(sess);
+    const std::string context = "active=" + std::to_string(active) +
+                                " delayed_jobs=" + std::to_string(delay->delayed_jobs.load()) +
+                                " " + describe(f.window_misses);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+    expect_one_recovered_setup_miss(f, delay->delayed_jobs.load() == 1, "CallbackSend::open",
+                                    active, context);
+}
+
+// fixpp#602 / fixpp#640: the same, when what outlasts the window blocks the thread the window
+// runs on. The FileStore's factory sleeps past the window inside make(), which open() calls
+// inline, so the window's run_for cannot return before make() does; the Logon's store job is
+// then handed to the pool after the window, and the window's one-slice grace does not cover
+// it.
+TEST(CallbackSend, FileStoreFixture_SetupOpenBlockedPastTheWindow_IsWaitedFor) {
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    auto cfg = f.cfg();
+    const auto slow = std::make_shared<SlowMakeStoreFactory>(cfg.store_factory, kSetupJobDelay);
+    cfg.store_factory = slow;
+    Session sess{f.engine, cfg};
+    const bool active = f.open_to_active(sess);
+    const std::string context =
+        "active=" + std::to_string(active) + " makes=" + std::to_string(slow->makes.load()) +
+        " made_on_the_test_thread=" + std::to_string(slow->made_on_the_constructing_thread.load()) +
+        " " + describe(f.window_misses);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+    expect_one_recovered_setup_miss(
+        f, slow->makes.load() == 1 && slow->made_on_the_constructing_thread.load(),
+        "CallbackSend::open", active, context);
+}
+
+// The same for the setup's peer Logon. The delay is armed when the session transmits its
+// own Logon, which open() stores before it transmits it, so the job held up is the first
+// one handed over after that: one of the inbound Logon's. No miss at the open shows that
+// open() did not wait on it.
+TEST(CallbackSend, FileStoreFixture_SetupLogonPastTheWindow_IsWaitedFor) {
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    auto cfg = f.cfg();
+    const auto delay = delay_a_store_job(f, cfg, kSetupJobDelay);
+    Session sess{f.engine, cfg};
+    f.on_transmit = [&](const std::string& frame) {
+        if (field(frame, 35) == "A") delay->arm();
+    };
+    const bool active = f.open_to_active(sess);
+    f.on_transmit = nullptr;
+    const std::string context = "active=" + std::to_string(active) +
+                                " delayed_jobs=" + std::to_string(delay->delayed_jobs.load()) +
+                                " " + describe(f.window_misses);
+    std::printf("[ MEASURED ] %s\n", context.c_str());
+    std::fflush(stdout);
+    expect_one_recovered_setup_miss(f, delay->delayed_jobs.load() == 1, "CallbackSend::logon",
+                                    active, context);
+}
+
+namespace {
+
+// The setup-wait budget of the next cell, and the delay of its held job: the job outlasts
+// the window and the budget together by a window more, and still ends inside the drain's
+// quiesce budget, so the drain after the miss ends after it.
+constexpr std::chrono::milliseconds kShortSetupBudget = 2 * Fixture::kRunWindow;
+constexpr std::chrono::milliseconds kPastTheShortBudget =
+    Fixture::kRunWindow + kShortSetupBudget + Fixture::kRunWindow;
+static_assert(kPastTheShortBudget < fixpp::test_support::kQuiesceBudget,
+              "a drain after a miss must outlast the held store job");
+// How long the stopping cell's pool job waits before it stops the fixture's io_context:
+// well inside the window, so the window returns before its end.
+constexpr std::chrono::milliseconds kStopInsideTheWindow = Fixture::kRunWindow / 5;
+
+// Writes every failure the death-test child's test has recorded to stderr, which is what
+// EXPECT_EXIT reads: the failure reports themselves, not a text the child wrote for them.
+// gtest does not forward events to listeners in a death-test child, so the child reads its
+// test's result instead.
+void echo_failures_to_stderr() {
+    const ::testing::TestInfo* info = ::testing::UnitTest::GetInstance()->current_test_info();
+    if (info == nullptr) return;
+    const ::testing::TestResult* result = info->result();
+    for (int i = 0; i < result->total_part_count(); ++i) {
+        const ::testing::TestPartResult& r = result->GetTestPartResult(i);
+        if (r.failed()) std::fprintf(stderr, "child failure: %s\n", r.message());
+    }
+    std::fflush(stderr);
+}
+
+enum class SetupMiss {
+    // The held job outlasts the setup wait's budget.
+    past_the_budget,
+    // A pool job stops the io_context inside the window while the held job is pending.
+    window_returns_early,
+};
+
+// The child of the next cells' EXPECT_EXIT. Returns 0 when the setup open() missed its window
+// once, did not recover, failed, and reported a failure; 2 when the path was not exercised;
+// 3 when no failure was reported; 4 when the setup recovered or the session reached Active.
+int setup_miss_that_must_fail(SetupMiss what) {
+    const bool early = what == SetupMiss::window_returns_early;
+    // Before the fixture: the pool's job writes it until the fixture joins its pool.
+    std::atomic<bool> stopped_by_the_job{false};
+    Fixture f{ExecKind::io_context, StoreKind::file};
+    if (!early) f.setup_extension_budget = kShortSetupBudget;
+    auto cfg = f.cfg();
+    const auto delay = delay_a_store_job(f, cfg, early ? kSetupJobDelay : kPastTheShortBudget);
+    Session sess{f.engine, cfg};
+    if (early) {
+        // The job takes the pool's one thread, so the held store job queues behind it.
+        asio::post(f.file_pool, [&] {
+            std::this_thread::sleep_for(kStopInsideTheWindow);
+            f.ioc.stop();
+            stopped_by_the_job.store(true);
+        });
+    }
+    delay->arm();
+    const bool active = f.open_to_active(sess);
+    const bool reported = ::testing::Test::HasNonfatalFailure();
+    echo_failures_to_stderr();
+    const std::string context = std::string(early ? "window_returns_early" : "past_the_budget") +
+                                " active=" + std::to_string(active) +
+                                " reported=" + std::to_string(reported) +
+                                " delayed_jobs=" + std::to_string(delay->delayed_jobs.load()) +
+                                " stopped_by_the_job=" + std::to_string(stopped_by_the_job.load()) +
+                                " " + describe(f.window_misses);
+    std::fprintf(stderr, "child: %s\n", context.c_str());
+    std::fflush(stderr);
+    if (delay->delayed_jobs.load() != 1 || f.window_misses.size() != 1 ||
+        f.window_misses.front().site != "CallbackSend::open" ||
+        (early && (!stopped_by_the_job.load() ||
+                   f.window_misses.front().window_ms >= Fixture::kRunWindow.count()))) {
+        return 2;
+    }
+    if (!reported) return 3;
+    if (active || f.window_misses.front().recovered) return 4;
+    return 0;
+}
+
+}  // namespace
+
+// fixpp#602 / fixpp#640: a setup wait must not hide a call that does not complete. The held
+// store job outlasts the window and the setup wait's budget together; the miss must still
+// be reported, and the setup must fail. The cell's child is its own process, so the
+// failure it reports there does not fail this cell.
+TEST(CallbackSend, FileStoreFixture_SetupPastTheExtension_StillReportsTheMiss) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): the death-test child's verdict is its exit code
+    EXPECT_EXIT(
+        std::exit(setup_miss_that_must_fail(SetupMiss::past_the_budget)),
+        ::testing::ExitedWithCode(0),
+        ::testing::AllOf(::testing::HasSubstr("was not ready when its preserved window returned"),
+                         ::testing::HasSubstr("Site: CallbackSend::open")));
+}
+
+// The same for a window that returns before its end because the io_context was stopped,
+// with the call not ready: a setup wait must not recover from it either.
+TEST(CallbackSend, FileStoreFixture_SetupWindowReturningEarly_StillReportsTheMiss) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): the death-test child's verdict is its exit code
+    EXPECT_EXIT(
+        std::exit(setup_miss_that_must_fail(SetupMiss::window_returns_early)),
+        ::testing::ExitedWithCode(0),
+        ::testing::AllOf(::testing::HasSubstr("was not ready when its preserved window returned"),
+                         ::testing::HasSubstr("Site: CallbackSend::open")));
 }
 
 // ── The close cells ──────────────────────────────────────────────────────────
