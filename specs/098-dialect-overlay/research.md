@@ -215,7 +215,7 @@ domain ("Floor 1", the floor that keeps FIXT11's MsgType(35), which declares no 
 enforces the listed codes once a domain exists. An overlay that lists a `<value>` on a base field with no
 values therefore **closes** that field's domain: only the listed values pass validation. A QuickFIX hand
 edit does the same, so the merge accepts it (orchestrator default under the QuickFIX-equivalent ruling;
-owner to confirm, spec Clarifications Gate A round 1). It is disclosed in B-098-7 and witnessed (W-1,
+owner confirmed 2026-11-01, spec Clarifications Gate A round 1). It is disclosed in B-098-7 and witnessed (W-1,
 W-5). It is not a "removal" under FR-005, which forbids deleting a listed base value, but it narrows
 what the base accepted, and the disclosure says so.
 
@@ -270,10 +270,11 @@ one: a header-store walk). So the build does not trust it:
   visited-set walk, R-7).
 - Read seam: `src/dictionary/overlay_merge.hpp` (internal, already on the dictionary tests' include
   path) declares a test-facing entry that loads with an overlay and also returns the counter's final value
-  and step 6's predicted total, and reports whether a refusal came from the pre-walk budget or the build
-  counter. W-1 and W-2 assert no counter-origin refusal and, on every input that loads, that the two
-  counts are **equal**. W-11 also aborts on a counter-origin refusal. Equality plus the distinct refusal
-  origin catches model drift in either direction. It holds only because
+  and step 6's predicted total, and reports which of three origins a refusal came from: the pre-walk
+  budget, the pre-walk side-table fit, or the build counter. W-1 and W-2 assert no counter-origin
+  refusal and, on every input that loads, that the two counts are **equal**. W-11 also aborts on a
+  counter-origin refusal. Equality plus the distinct refusal origin catches model drift in either
+  direction. It holds only because
   step 6 counts what the loop visits before any de-duplication, counts the spliced shape (the shared
   classifier, step 6), and charges the first-seen group per NumInGroup tag, as `finalize` does.
 - Mutant M-17 adds one extra `expand_field_list` call in `finalize`; the counter must refuse with the
@@ -458,7 +459,7 @@ deferred are replaced by a pointer to the shipped calls (a comment states the pr
 - **No "none" value (N-11).** TOML has no null, and 098 defines no reserved value meaning "no
   overlay". A `[default]` overlay therefore cannot be cleared for one session; the operator moves the
   key out of `[default]` into each session that wants it. QuickFIX's `[DEFAULT]` `DataDictionary` has
-  the same property. Disclosed in B-098-3 and the TOML contract (orchestrator default, owner to confirm;
+  the same property. Disclosed in B-098-3 and the TOML contract (orchestrator default, owner confirmed 2026-11-01;
   a reserved value would be new surface).
 - `trap_throw_to_expected`'s doc (`src/config/loader_internal.hpp`) lists "ONLY these three throwing
   sites"; the overlay load is a fourth and the doc changes to the rule, not a count.
@@ -538,7 +539,7 @@ component's fields. An overlay can also cause the wrap or the clamp on a base th
 today: growing an early-declared component shifts every later start, a large group with a low NumInGroup
 tag sorts before base groups, and one component can expand past 65535 entries, all within the budget.
 So the round-1 rationale ("pre-existing and not caused by an overlay") was false. The disposition now
-(orchestrator default, owner to confirm; spec Clarifications Gate A round 2):
+(orchestrator default, owner confirmed 2026-11-01; spec Clarifications Gate A round 2):
 - **Refused at load where the base fits.** R-5 step 6 refuses an overlay that makes a fitting side table
   stop fitting. On such a base an overlay load never wraps or clamps.
 - **Out of scope where the base does not fit.** The base already returns wrong `component_fields` /
@@ -611,7 +612,7 @@ error types. The Orchestra half catches `orchestra_parse_error` by its derived t
 `tests/fuzz/fuzz_orchestra_loader.cpp` does, so an Orchestra schema error thrown as a bare
 `xml_parse_error` falls through to the terminal rethrow (Gate A round 2, Root cause D). The harness loads
 through R-5's read seam and aborts on any counter-origin refusal; when an input loads, it also aborts
-if the step counter differs from step 6's prediction. A pre-walk budget refusal remains an accepted
+if the step counter differs from step 6's prediction. A pre-walk budget or side-table refusal remains an accepted
 `dict::` error. The fuzz targets do not have `src/dictionary` on their include path today, so the new
 target adds it with `target_include_directories`, as `fuzz_decimal_compare` adds `tests`. Seeds: the hand-written overlays (R-10), the conflict and cap overlays, a DOCTYPE
 overlay, the expansion-doubling overlay of R-5 (A-001) in both formats, the empty-component chain

@@ -19,7 +19,7 @@ arm also carries `capi`.
 | W-6 | `session_pure_tests` | Pure session send tests with no isolation hazard. |
 | W-7 | dictionary half: standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`; session half: `session_pure_tests` | The dictionary half is an exact census over shipped dictionaries; the session half is a pure test and its bucket supplies `src` and `FIXPP_DICT_DATA_DIR`. |
 | W-8 | `config_045_tests` | Pure configuration parsing and resolution tests. |
-| W-9 | pure rows: `capi_pure_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. |
+| W-9 | pure rows: `capi_pure_tests`; status-mapping rows: `dictionary_pure_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The status-mapping rows are pure, single-threaded calls of a dictionary-library function. The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. |
 | W-10 | in-tree Python suite (`bindings/python/tests/`); the import-surface row in the wheel suite | Not a gtest executable. The new test has no wheel twin: its overlay fixtures are not in the wheel. |
 | W-11 | `fuzz_dict_overlay` and its replay | Fuzz target outside §VII.8, built only under `FIXPP_BUILD_FUZZ`. |
 | W-12 | verify measurement | Not a test executable. |
@@ -65,7 +65,7 @@ as a RED arm before production code.
 | W-1 rows | no | zero differences vs the complete reference; no counter-origin refusal; step counter = prediction | — | M-1, M-2, M-17 |
 | W-2 rows, side against side and against the census | no | zero differences vs the patched base; no counter-origin refusal; step counter = prediction | — | M-3; a zero- or two-match hunk fails the cell; W-0's census row |
 | W-2 wrap probe (FIX50SP2) | yes | records `component_fields` of the first component past the wrap point against its raw members | either | probe, recorded in the verify record (research R-10); not a RED arm |
-| W-3 rows | no | the named exception, its message naming the key, cap, table or counter origin as applicable | — | M-4, M-5, M-6, M-7, M-12, M-13, M-14, M-16, M-17, M-18 (per row and format, below) |
+| W-3 rows | no | the named exception, its message naming the key, cap, table or counter origin as applicable | — | M-4, M-5, M-6, M-7, M-12 (by the side-table fit on the doubling rows, by the counter on the empty-chain rows), M-13, M-14, M-16, M-17, M-18 (per row and format, below) |
 | W-4 rows | no | dispatch matches the direct loader | — | M-8 |
 | W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame; each accepted frame's scenario read holds | — | M-8 |
 | W-5 edited session | yes | accepts or refuses each frame as the edited dictionary dictates; each accepted frame's scenario read holds | passes | characterization pin (a complete edited file already works today) |
@@ -82,15 +82,19 @@ as a RED arm before production code.
 | W-8 AS-3, AS-4, value checks, two origins, no `[dictionary]` | yes | the stated reason class at the stated key path | **fails** (`recognized_not_yet_supported_step2` instead) | **U** |
 | W-8 rewritten T018 / T020 / T028 cells, `T020_DeferredSetExactCoverage` over the remaining keys | yes | the new outcomes | **fails** (the old outcomes) | **U** |
 | W-8 `T020_MissingRequired_Dictionary` | yes | unchanged | passes | negative control (N-3) |
-| W-9 pure rows (cap, conflict, NULL arguments, the mapping function) | no | codes per research R-6 | — | M-11 (cap rows), M-15 (bad-alloc rows) |
+| W-9 cap rows (the thunk's cap row; the mapping function fed `overlay_limit_error`) | no | 201 (and NULL from the thunk) | — | M-11 |
+| W-9 bad-alloc rows (the mapping function fed `xml_oom_error` and a bare `std::bad_alloc`) | no | 202 | — | M-15 |
+| W-9 code-200 rows (the thunk's conflict row; the mapping function fed `xml_parse_error`, `overlay_conflict_error`, a `std::runtime_error` and a non-`std::exception`) | no | 200 (and NULL from the thunk) | — | M-20 |
+| W-9 NULL-argument rows | no | `FIXPP_ERR_NULL_HANDLE` | — | control |
+| W-9 status-mapping rows (`dictionary_pure_tests`) | no (the shared status-mapping function is new) | `status_out_of_memory` → `xml_oom_error`; another failed status → the format's parse error | — | M-21 |
 | W-9 pure handle row (the handle is accepted by `fixpp_session_config_set_dictionary` and `fixpp_session_open` on an unstarted engine) | no | both calls return `FIXPP_ERR_OK` | — | control: a base-only handle passes it too; the live arm is the discriminating row |
 | W-9 version pin (`version_test.cpp`) | yes | the version is 1.13 | **fails** (MINOR is 12) | **U** |
 | W-9 symbol golden (`fixpp_capi_symbols.txt` gains the symbol) | yes | the library's exported set equals the golden | **fails** (the symbol is absent from the library) | **U** |
-| W-9 live arm | no | the counted 5011 value read intact through `fixpp_msg_get_bytes` | — | **M-19** |
+| W-9 live arm (raw `fixpp_session_send` payload) | no | the counted 5011 value read intact through `fixpp_msg_get_bytes` | — | **M-19** |
 | W-10 import surface | yes | the exact set includes `dict_load_from_xml_with_overlay` | **fails**: the exact-set assertion, with that name as its only difference | **U** |
 | W-10 inbound read | no (the function is absent) | `msg_get_string(5011)` equals the full counted value | — | **M-19** |
 | W-10 cap row | no | `ValidatorError` with `.code == 201` | — | M-11 |
-| W-11 fuzz | no | only `dict::` errors escape (Orchestra by derived type); abort on a counter-origin refusal; counter = prediction on every load | — | M-7, M-12 and M-17 against the harness |
+| W-11 fuzz | no | only `dict::` errors escape (Orchestra by derived type); abort on a counter-origin refusal; counter = prediction on every load | — | M-7 (cycle seeds), M-12 (empty-chain seeds) and M-17 against the harness |
 
 ## Comparator self-test (runs first; a zero is trusted only after it)
 
@@ -213,11 +217,21 @@ FR-008 has no row: it holds by construction (spec FR-008), and no mutant short o
 two fresh base loads differ. **RED**, each mutant run once per format where its rows exist: **M-4**
 (conflict checks removed: the conflict rows load), **M-5** (byte cap removed), **M-6** (`parse_doctype`
 dropped: the DOCTYPE row loads), **M-7** (cycle check removed: the cycle row no longer fails with the
-cycle error; it loops, overflows, or fails differently; run under `linux-clang-asan`, whose report is
-the recorded RED), **M-12** (the step 6 budget comparison removed: the build is reached, and the counter,
-armed at the smaller of the prediction and the base's total plus the budget (research R-5), refuses
-once the build passes the base's total plus the budget; each bomb row goes RED with "counter origin,
-expected budget origin", in bounded time, in the Debug tree), **M-13** (guard steps 6 and 7 swapped: the guard-order row reports the redeclare
+cycle error; it loops, overflows, or fails differently, for example with a counter-origin refusal where
+the walk's prediction stays finite; the RED is the cycle row's cycle-error assertion, the run uses
+`linux-clang-asan` so that an overflow is reported, and the verify record states how the run ended),
+**M-12** (the step 6 budget comparison removed; step 6's side-table fit check stays). The RED differs
+per bomb row, and the verify record's message column confirms which check fired on each:
+  - a **doubling** row: on a base whose side tables fit, the chain's emitted entries pass 65535, so
+    step 6's side-table fit refuses it before the build; the row goes RED with "side-table origin,
+    expected budget origin" and the table's message instead of the budget's;
+  - an **empty-chain** row: it emits nothing, so it fits and the build is reached; the counter, armed at
+    the smaller of the prediction and the base's total plus the budget (research R-5), refuses once the
+    build passes the base's total plus the budget; the row goes RED with "counter origin, expected
+    budget origin";
+  - both end in bounded time, in the Debug tree.
+
+**M-13** (guard steps 6 and 7 swapped: the guard-order row reports the redeclare
 conflict, or crashes, instead of the cycle error), **M-14** (step 5's entry and reference caps removed:
 those rows load), **M-16** (step 8a replaced by the previous draft's adjacency rule: the interposed,
 paired-later and new-Length refuse rows and the Orchestra rows go RED, and the load rows stay GREEN,
@@ -326,10 +340,20 @@ rewritten to the new outcomes, and `T020_DeferredSetExactCoverage` keeps every o
   over plaintext loopback. Each session's dictionary is a handle that
   `fixpp_dict_load_from_xml_with_overlay(FIX44.xml, the W-2 FIX44 overlay)` returns, set with
   `fixpp_session_config_set_dictionary`, not the support header's base-dictionary seam. The sender
-  sends a hand-built application payload carrying the overlay's custom pair 5010 (LENGTH) / 5011 (DATA).
+  passes a raw application payload to `fixpp_session_send` (a byte pointer and a length), as
+  `dict066_group_membership_red_test.cpp` does: bytes written in the test that lead with
+  `35=<application MsgType><SOH>`, carry no session framing tag, and carry the overlay's custom pair
+  5010 (LENGTH, the byte count of the 5011 value) / 5011 (DATA). The payload is not built with
+  `fixpp_msg_set_data`: under M-19 the sender's handle is base-only too, so that call returns
+  `FIXPP_ERR_TYPE_MISMATCH` for 5011 (`pair_hooks(h).length_tag_for_data` returns 0,
+  `src/capi/message_write.cpp`) and the arm would fail at the sender, not with the value mismatch.
+  `fixpp_session_send` does no C-ABI-level check of the pair (`src/capi/session.cpp`), and on a
+  base-only dictionary `Session::build_send_frame_` scans the payload as well-formed fields, none in its
+  `kRefusedTags` (`src/session/session.cpp`), so the raw bytes reach the wire unchanged under M-19.
   The Data value holds an SOH followed by text shaped as a field, for example `AB<SOH>58=CD`, with 58 not
   otherwise in the frame. The registered callback reads 5011 with `fixpp_msg_get_bytes`, the reader
-  091's `length_data_send_recv_test.cpp` uses for an inbound Data value; the test asserts that it equals
+  091's `length_data_send_recv_test.cpp` uses for an inbound Data value (only its reader is taken from
+  091, not its builder); the test asserts that it equals
   the full counted value.
   - *Why this observable.* A C-ABI session never validates inbound
     (`SessionConfig::validate_inbound_messages` defaults to `false`, and nothing in `src/capi/` sets it),
@@ -344,7 +368,13 @@ rewritten to the new outcomes, and `T020_DeferredSetExactCoverage` keeps every o
 caught before `std::bad_alloc`) turns the bad-alloc rows RED; **U** for the version pin and the symbol
 golden, which compile on the unfixed tree and fail there; **M-19** (`fixpp_dict_load_from_xml_with_overlay`
 calls `load_any(base)` and drops the overlay) turns the live arm RED with the value mismatch, and the W-10
-inbound row too. The pure handle row is a control, not a RED arm.
+inbound row too; **M-20** (the mapping function's `std::exception` and `...` branches return
+`FIXPP_ERR_CAPI_CONFIG_INVALID`, as `fixpp_dict_load_from_xml` does) turns the code-200 rows RED: the
+thunk's conflict row and the mapping function's `xml_parse_error`, `overlay_conflict_error`,
+`std::runtime_error` and non-`std::exception` rows; **M-21** (research R-5 step 2's status mapping with
+its two branches swapped: `status_out_of_memory` → the format's parse error, any other failed status →
+`xml_oom_error`) turns both status-mapping rows RED. The pure handle row and the NULL-argument rows are
+controls, not RED arms.
 
 **W-10 Python.** `bindings/python/tests/test_098_dialect_overlay.py`, in-tree only (run with
 `PYTHONPATH=<build>/lib`, as `test_093_inbound_frame_dispositions.py` is). It has no wheel twin: the
@@ -383,7 +413,9 @@ R-11). The harness aborts on a counter-origin refusal even though its public typ
 6's prediction. The seeds include the expansion bombs and the empty-component chain of both formats and an
 Orchestra cycle. CI replays the seeds (`linux-clang-asan`); the ten-minute run is `/speckit-verify`'s
 fuzz step. **RED**: **M-7** re-run against the harness with each format's cycle seed, **M-12** with
-each bomb seed (the harness aborts on the counter origin), and **M-17** with a valid overlay (the
+each format's empty-chain seed (the harness aborts on the counter origin; under M-12 a doubling seed is
+refused by step 6's side-table fit, an accepted `dict::` error, so it never reaches the counter), and
+**M-17** with a valid overlay (the
 harness aborts on the counter origin).
 
 **W-12 Performance (SC-005, `[const §VIII.2]`).** Measured in the verify record, not a ctest:

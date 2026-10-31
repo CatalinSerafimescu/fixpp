@@ -42,6 +42,7 @@
     test against the built `lib/` and states what counts as its RED; §3 adds `field-order` and checks
     each selection with `ctest -N`.
   - **N-4:** W-5 asserts each accepted scenario's read, not only accept/reject.
+- Loop 2 round 2 converged 2026-11-01: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=3; the three P3s applied post-convergence (M-12 RED per row, W-9 RED sources and dispositions, W-9 raw-send sender). Reviews: research/reviews/codex_098-dialect-overlay_gate_a_5_review.md, research/reviews/opus_098-dialect-overlay_gate_a_5_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -184,7 +185,7 @@ and parser are not changed. Mutants never run in the PR's tree (contracts preamb
 | `[const §XVI.4]` | `/speckit-analyze` after `/speckit-tasks`, with an explicit plan↔spec drift pass over every Clarifications answer, including the `/speckit-plan` supersession of the clarify-time Orchestra-format reading. |
 | `[const §XVI.6]` | Mutants in a third worktree on `/mnt/wsl/fixppbuild`, detached (contracts preamble). |
 | `[const §XVII.1]` | Gate A runs: public C++ API change (new members, a removed field), C-ABI addition, config surface. |
-| `[const §X.6]`, Appendix A | Triggered ("ABI surface change", "Codegen layout: dictionary loader"): all four controls. `/clarify` done; Codex Gate A running; `/analyze` after `/speckit-tasks`; **user `/plan` sign-off: pending, required before `/speckit-tasks`**. |
+| `[const §X.6]`, Appendix A | Triggered ("ABI surface change", "Codegen layout: dictionary loader"): all four controls. `/clarify` done; Codex Gate A running; `/analyze` after `/speckit-tasks`; **user `/plan` sign-off: given 2026-11-01** (pre-authorised by the owner 2026-10-31 on Gate A convergence; Gate A converged at loop 2 round 2). |
 | `[const §XVII.7]` | Local full build + ctest of `linux-clang-debug` at the final head. Resource gate: every local build (quickstart §1, §3, §4, §5, §6, §8) is preceded by an `AskUserQuestion`, and runs only once the user approves. |
 | `[const §XVII.8]` | `/speckit-verify` before Gate B. |
 | `[const §XX]` | No amendment (research R-14); fixpp#642 goes to a docs PR. |
@@ -256,7 +257,7 @@ specs/098-dialect-overlay/
 6. **Config, C ABI, Python**: TOML scope and resolver step, the T018/T020/T028 rewrites; the C-ABI
    function and its mapping function, 1.13 pins, symbol golden, freeze hash; the SWIG audit row and
    Python test. W-8, W-9 (pure rows and the standalone live arm), W-10 (run by pytest; no ctest label
-   reaches it). Mutants M-10, M-11, M-15, M-19 (M-11 and M-19 also against W-10).
+   reaches it). Mutants M-10, M-11, M-15, M-19, M-20, M-21 (M-11 and M-19 also against W-10).
 7. **Removal, fuzz, comments**: delete `SessionConfig::dialect_overlay` and the forward declaration;
    the fuzz harness and seeds (W-11, M-7 and M-12 re-run against it per format, M-17 for the counter
    origin); the comment fixes (research R-14). A
@@ -307,7 +308,8 @@ specs/098-dialect-overlay/
 - **A cycle or budget mutant crashes or hangs the binary.** M-7's RED may be a stack overflow, run under
   ASan where the report names it. M-12's run is bounded by the counter's arming at the smaller of the
   prediction and the base's total plus the budget (research R-5): the counter refuses with its own
-  origin, and the bomb rows report that origin. The refusal rows themselves never recurse or expand once
+  origin, and the empty-chain rows report that origin; step 6's side-table fit refuses the doubling rows
+  before the build (contracts W-3). The refusal rows themselves never recurse or expand once
   the walk exists, because it runs before every recursive step.
 
 ## Complexity Tracking

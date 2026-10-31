@@ -167,11 +167,11 @@ third (the side-table wrap) is superseded at Gate A round 2.
   `required`, `optional` or absent (Orchestra). Anything else is a conflict error (FR-005, edge cases).
 - Q: An overlay lists an enum value on a base field that has no values (an open domain, such as Text(58)
   or FIXT11's MsgType(35)). Is that accepted? → A: **Yes, and disclosed** — **orchestrator default,
-  owner to confirm at Gate A sign-off.** Validation then accepts only the listed values for that field,
+  owner confirmed at Gate A sign-off 2026-11-01.** Validation then accepts only the listed values for that field,
   as a QuickFIX hand edit would. The alternative, refusing it as a narrowing, departs from QuickFIX's
   behaviour (FR-005, edge cases, B-098-7).
 - Q: Can a `[default]` `dialect_overlay` be cleared for one session? → A: **No; disclosed** —
-  **orchestrator default, owner to confirm at Gate A sign-off.** TOML has no null, and a reserved "none"
+  **orchestrator default, owner confirmed at Gate A sign-off 2026-11-01.** TOML has no null, and a reserved "none"
   value would be new surface. QuickFIX's `[DEFAULT]` behaves the same (FR-016, edge cases, B-098-3).
 - Q: The base loaders store a side-table start index as `std::uint16_t`, which the review's model shows
   wrapping on FIX50SP2. Is that fixed in 098? → A: ~~**No** — **orchestrator default, owner to confirm at
@@ -201,7 +201,7 @@ orchestrator default on product behaviour, marked; the owner confirms it at Gate
   conflict error, because it cannot say which one it extends (edge cases, research R-3).
 - Q: Can an overlay make the `std::uint16_t` side-table index wrap? → A: **Yes**, within the budget, on a
   base that does not wrap today, so round 1's premise was false. **Refused at load** — **orchestrator
-  default, owner to confirm at Gate A sign-off.** An overlay that makes a side table whose starts and
+  default, owner confirmed at Gate A sign-off 2026-11-01.** An overlay that makes a side table whose starts and
   counts all fit in 16 bits stop fitting fails with a limit error. On a base whose table already does
   not fit, the overlay is admitted, the result equals the equivalent edited XML, and the defect stays
   pre-existing: probed, filed if shown, and excluded from the census check. The alternative, widening the
@@ -225,6 +225,10 @@ matter: the shipped surfaces (C++, C ABI, Python through SWIG, TOML) are unchang
   refuses with its own origin in bounded time (FR-009, research R-5).
 - Q: Is a wall-clock bound part of the expansion-budget refusal? → A: No. The refusal's budget origin
   shows that the pre-walk refused before the build started (SC-003). Timing is measured only by W-12.
+
+### Session 2026-11-01 (Gate A sign-off, owner)
+
+- Q: Does the owner sign off Gate A, the `[const §X.6]` `/plan` review, and the orchestrator defaults marked for confirmation? → A: **Yes** (owner, 2026-10-31: "If gate-a converges, I sign off and you may continue with other steps from pipeline.md"). Gate A converged at loop 2 round 2 on 2026-11-01. The three defaults stand as written: an enum value on a base field with no values closes that field's domain (B-098-7); a `[default]` `dialect_overlay` cannot be cleared for one session (B-098-3); an overlay that would push a fitting side table past its 16-bit index is refused at load.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -394,7 +398,7 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   than `required` / `optional`, is a conflict error: the base loader would read it as Optional.
 - **Enum value on a field with no values**: the field's domain closes to the listed values, as a hand
   edit would close it. Example: a private MsgType code added to MsgType(35) on a FIXT11 base makes
-  validation refuse every standard MsgType. Disclosed (B-098-7); orchestrator default, owner to confirm.
+  validation refuse every standard MsgType. Disclosed (B-098-7); orchestrator default, owner confirmed 2026-11-01.
 - **Length+Data pair touching a base field**: refused when the merge would give a base tag a pair it
   did not have, take one away, or give it a second partner: a new DATA the loader pairs with an unpaired
   base LENGTH (in `<fields>`, in any container, or through Orchestra's `lengthId`), and a new LENGTH the
@@ -408,7 +412,7 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   or group (a direct child the parent already reaches through a component, or a component reference
   that reaches a tag the parent already has) is refused.
 - **Side table past 16 bits**: an overlay that would push a fitting component or group side table past
-  the `std::uint16_t` index is refused with a limit error (orchestrator default, owner to confirm).
+  the `std::uint16_t` index is refused with a limit error (orchestrator default, owner confirmed 2026-11-01).
 - **Overlay root child outside the allowed list** (for example `fixr:datatypes`, `fixr:sections`, or a
   non-QuickFIX element under `<fix>`): refused. `fixr:annotation` and `fixr:documentation` inside a
   definition are accepted and dropped.
@@ -437,7 +441,7 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **Two sessions on one engine with different overlays on the same base**: each parses and validates
   with its own merged dictionary.
 - **TOML `[default]` overlay and one session that wants none**: not expressible; the key moves out of
-  `[default]` into the sessions that want it (B-098-3). Orchestrator default, owner to confirm.
+  `[default]` into the sessions that want it (B-098-3). Orchestrator default, owner confirmed 2026-11-01.
 - **FIXT.1.1 session**: the overlay applies to the session's own dictionary. The engine registry is
   engine-wide (one dictionary per application version), so a per-session overlay is not visible through
   it; today the registry only answers serviceability (FR-021).

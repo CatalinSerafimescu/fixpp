@@ -86,9 +86,12 @@ W-6 must stay green with unchanged expected bytes.
 In the mutants tree, per contracts: apply one mutant, rebuild (rc 0 or the row proves nothing), run the
 named binary **unfiltered**, record witness | mutant | build rc | test rc | message | collateral, revert.
 A mutant whose W-3 rows exist in both formats runs once per format (contracts W-3). M-7 runs in
-`build/linux-clang-asan` (the sanitizer's report is the RED). M-12 runs in the Debug tree: its RED is each
-bomb row's origin assertion ("counter origin, expected budget origin"), and the counter's arming bounds
-the run (research R-5). Both run again against the W-11 harness with each format's seed. M-11 and M-19
+`build/linux-clang-asan` so that an overflow is reported; its RED is the cycle row's cycle-error
+assertion, and the record states how the run ended (contracts W-3). M-12 runs in the Debug tree: its RED
+is each bomb row's origin assertion, and the origin it reports differs per row (contracts W-3: step 6's
+side-table fit refuses the doubling rows, the counter refuses the empty-chain rows, and the counter's
+arming bounds the run, research R-5). Both run again against the W-11 harness, M-7 with each format's
+cycle seed and M-12 with each format's empty-chain seed. M-11 and M-19
 also run against W-10: the mutants tree is configured with `-DFIXPP_BUILD_PYTHON=ON` (contracts
 preamble), and pytest uses that tree's `build/linux-clang-debug/lib`, as in §3. `_fixpp.so` links
 `fixpp_capi` statically, so check that it was relinked after the mutant (its timestamp is newer than the
