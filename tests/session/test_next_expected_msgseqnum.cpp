@@ -27,6 +27,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
+#include <asio/steady_timer.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
@@ -2446,6 +2447,53 @@ TEST(PumpWindowMiss, ZeroWindowStillReadyViaBoundaryGrace) {
     asio::post(ioc, [&p] { p.set_value(); });  // queued, not dispatched
     EXPECT_TRUE(fixpp::test_support::run_window_then_ready(
         ioc, fut, std::chrono::steady_clock::duration::zero()));  // grace = kPumpSlice
+}
+
+// fixpp#602: after a wait that recovers from a missed window, `run_window_or_wait_until_ready`
+// runs the window once more, so that a recovered call leaves `ioc` as a call that was ready
+// in its window does. A handler that falls due inside that second window has run when the
+// helper returns; without the second window it is still pending, because nothing runs `ioc`
+// after the call.
+//
+// How the delays are chosen, each a fraction of the window so the cell costs about two
+// windows of real time:
+// - T1 completes the future half a window after the window ends. The window then returns at
+//   its deadline with T1 pending, so it is not stopped, and the wait recovers when T1 fires.
+//   Half a window is several Windows timer ticks wide, so a window that returns late does not
+//   run T1 inside it.
+// - T1 arms T2 half a window later. The wait stops in the pump slice in which the future
+//   becomes ready, T2 is due many slices after that, and the second window is longer than
+//   T2's delay. T2 could run inside the wait only if the pumping thread were descheduled for
+//   that half window inside the wait's last slice: `run_one_until` tests its deadline on
+//   entry, and a timer that expires during the reactor's bounded wait is dispatched in the
+//   same call. That would make the cell pass with the second window deleted; it cannot make
+//   the cell fail with it present.
+// - `site` is null, and `forced_miss_here` returns false for a null site, so
+//   FIXPP_FORCE_WINDOW_MISS cannot force this call.
+TEST(PumpWindowMiss, RecoveredWaitRunsTheWindowOnceMore) {
+    constexpr auto kWindow = std::chrono::milliseconds{100};
+    bool after = false;
+    std::promise<void> p;
+    auto fut = p.get_future();
+    asio::io_context ioc;
+    asio::steady_timer t1{ioc};
+    asio::steady_timer t2{ioc};
+    t1.expires_after(kWindow + kWindow / 2);
+    t1.async_wait([&](const asio::error_code& ec) {
+        if (ec) return;
+        p.set_value();
+        t2.expires_after(kWindow / 2);
+        t2.async_wait([&after](const asio::error_code& e) {
+            if (!e) after = true;
+        });
+    });
+    const auto r = fixpp::test_support::run_window_or_wait_until_ready(
+        ioc, fut, kWindow, fixpp::test_support::kPumpBudget, nullptr);
+    ASSERT_TRUE(r.ready && r.recovered && !r.window_stopped && r.wait_to_ready.has_value())
+        << "the path was not exercised: ready=" << r.ready << " recovered=" << r.recovered
+        << " window_stopped=" << r.window_stopped;
+    EXPECT_TRUE(after) << "the handler due after the recovered wait had not run when "
+                          "run_window_or_wait_until_ready returned";
 }
 
 }  // namespace
