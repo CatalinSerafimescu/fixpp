@@ -6,6 +6,14 @@ status: stable
 
 # Log
 
+- **2026-10-31 — fixpp#602 + #640 (B61), Gate B close-out: `failure-classes.md` class 1 gains the two-timer
+  pump-step witness form (PR #648).**
+- **2026-10-31 — fixpp#602 + #640 (B61), pre-push: FileStore setup waits are bounded by completion.**
+  `components/test.md` gains the section "When the window must stay, a slow FileStore setup must not fail it
+  (#602, #640 — B61)": the measured cause (B&L `L-602-1`), the shared `run_window_or_wait_until_ready`
+  helper, why only setup waits get a budget, why an early-returning window stays a failure, and what was
+  rejected. No earlier document is superseded: the B24 section's "widening the window is rejected" still holds.
+
 - **2026-10-30 — 097-fix-latest-applverid-10, `/speckit-verify` (Step 10b): FIX Latest is ApplVerID 10.**
   `components/dictionary.md` gains the section "FIX Latest is ApplVerID 10 (097)". In place, it flags the
   frozen 074, 076 and 080 records and the `2c-codegen` notes that 097 superseded, and it links 097's Gate A

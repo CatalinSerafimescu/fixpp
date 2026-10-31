@@ -31,6 +31,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <future>
+#include <optional>
 
 // The self-driving-executor twin (#315). Included here, not defined here, so
 // that every existing pump caller sees `wait_until_observed` through the include it
@@ -810,6 +811,68 @@ template <class Fut>
                                          std::chrono::steady_clock::duration window,
                                          const char* site) {
     return run_window_then_ready(ioc, fut, window, kPumpSlice, site);
+}
+
+// What `run_window_or_wait_until_ready` saw. `window_elapsed` is the real time of the
+// window and its grace; `wait_to_ready` is set when the call became ready inside the wait,
+// and runs from the end of the grace.
+struct window_or_wait_result {
+    bool ready = false;
+    bool forced = false;
+    bool window_stopped = false;
+    bool recovered = false;
+    std::chrono::steady_clock::duration window_elapsed{};
+    std::optional<std::chrono::steady_clock::duration> wait_to_ready;
+};
+
+// `run_window_then_ready`, then, on a miss, a wait of up to `wait_budget` for the call to
+// become ready, for a call whose work can outlast the window and that no real-time timer
+// can complete or fail inside the wait (fixpp#602). A call that becomes ready inside the
+// wait is RECOVERED, and the window then runs once more, as it would have run after a call
+// that was ready. A zero budget is `run_window_then_ready` with the stopped signal.
+//
+// ⚠️ NO WAIT AFTER A WINDOW THAT RETURNED STOPPED. `ioc.stopped()` is read after each
+// `run_for` and before its `restart()`: true means the window ended because `ioc` was
+// stopped or ran out of work with the call not ready, and a wait, which holds a work guard
+// on a restarted `ioc`, would hide that. Such a miss is returned as a miss.
+//
+// Forcing (`FIXPP_FORCE_WINDOW_MISS=<site>`) behaves exactly as at `run_window_then_ready`:
+// the call returns a miss without dispatching and without waiting. Its rationale is there.
+template <class Fut>
+[[nodiscard]] window_or_wait_result run_window_or_wait_until_ready(
+    asio::io_context& ioc, Fut& fut, std::chrono::steady_clock::duration window,
+    std::chrono::steady_clock::duration wait_budget, const char* site) {
+    window_or_wait_result r;
+    if (forced_miss_here(site)) {
+        ioc.restart();
+        r.forced = true;
+        return r;
+    }
+    const auto ready = [&fut] {
+        return fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
+    };
+    const auto started = std::chrono::steady_clock::now();
+    ioc.run_for(window);
+    r.window_stopped = ioc.stopped();
+    ioc.restart();
+    if (!ready()) {
+        ioc.run_for(kPumpSlice);
+        r.window_stopped = r.window_stopped || ioc.stopped();
+        ioc.restart();
+    }
+    const auto window_ended = std::chrono::steady_clock::now();
+    r.window_elapsed = window_ended - started;
+    r.ready = ready();
+    if (r.ready || r.window_stopped || wait_budget <= std::chrono::steady_clock::duration::zero()) {
+        return r;
+    }
+    if (!pump_until_ready(ioc, fut, wait_budget, kPumpSlice, site)) return r;
+    r.wait_to_ready = std::chrono::steady_clock::now() - window_ended;
+    r.recovered = true;
+    r.ready = true;
+    ioc.run_for(window);
+    ioc.restart();
+    return r;
 }
 
 // Default grace for `yield_window_then_ready`, in YIELDS. Generous by design, and it

@@ -85,8 +85,9 @@
 //
 // run_sync runs each call in a window of kWindow, as the cells always have, and when the
 // call is not ready at the window's end, waits for it within kPumpBudget and then runs the
-// window once more, so the handlers the window would have run after the call still run. A
-// FileStore's call completes when its file I/O does, and a slow disk can outlast the window.
+// window once more, so the handlers the window would have run after the call still run
+// (run_window_or_wait_until_ready, which does not wait after a window that returned stopped).
+// A FileStore's call completes when its file I/O does, and a slow disk can outlast the window.
 // No call here can be completed by a real-time timer: the cells never close a session, and
 // the session's own steady_timers are on its close paths. Re-derive that with
 // `git grep -n steady_timer -- src/session/session.cpp`. The wait is a stop-at-ready pump,
@@ -348,12 +349,9 @@ protected:
     template <class T>
     expected_t<T> run_sync(asio::awaitable<expected_t<T>> coro, const char* site) {
         auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
-        bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, site);
-        if (!ready) {
-            ready = fixpp::test_support::pump_until_ready(ioc, fut,
-                                                          fixpp::test_support::kPumpBudget, site);
-            if (ready) (void)fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, site);
-        }
+        const bool ready = fixpp::test_support::run_window_or_wait_until_ready(
+                               ioc, fut, kWindow, fixpp::test_support::kPumpBudget, site)
+                               .ready;
         if (!ready) {
             keep.reset();
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
