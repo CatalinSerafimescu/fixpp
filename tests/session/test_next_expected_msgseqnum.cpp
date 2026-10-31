@@ -27,7 +27,6 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
-#include <asio/steady_timer.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
@@ -2449,51 +2448,76 @@ TEST(PumpWindowMiss, ZeroWindowStillReadyViaBoundaryGrace) {
         ioc, fut, std::chrono::steady_clock::duration::zero()));  // grace = kPumpSlice
 }
 
+// A future double for `run_window_or_wait_until_ready`, which reads its future only as
+// `fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready`, there and in
+// `pump_until_ready`. Re-derive that by reading every use of `fut` in both functions.
+//
+// It answers not ready for its first `not_ready_calls` calls and ready after that. On its
+// first ready answer it posts the witness, which sets `*after` and releases `*guard`.
+struct CountingFuture {
+    int not_ready_calls = 0;
+    int calls = 0;
+    bool witness_posted = false;
+    asio::io_context* ioc = nullptr;
+    bool* after = nullptr;
+    asio::executor_work_guard<asio::io_context::executor_type>* guard = nullptr;
+
+    template <class Rep, class Period>
+    std::future_status wait_for(const std::chrono::duration<Rep, Period>& /*unused*/) {
+        if (++calls <= not_ready_calls) return std::future_status::timeout;
+        if (!witness_posted) {
+            asio::post(*ioc, [after = after, guard = guard] {
+                *after = true;
+                guard->reset();
+            });
+            witness_posted = true;
+        }
+        return std::future_status::ready;
+    }
+};
+
 // fixpp#602: after a wait that recovers from a missed window, `run_window_or_wait_until_ready`
 // runs the window once more, so that a recovered call leaves `ioc` as a call that was ready
-// in its window does. A handler that falls due inside that second window has run when the
-// helper returns; without the second window it is still pending, because nothing runs `ioc`
-// after the call.
+// in its window does. A handler posted when the call becomes ready inside the wait has run
+// when the helper returns; without the second window it is still pending, because nothing
+// runs `ioc` after the call.
 //
-// How the delays are chosen, each a fraction of the window so the cell costs about two
-// windows of real time:
-// - T1 completes the future half a window after the window ends. The window then returns at
-//   its deadline with T1 pending, so it is not stopped, and the wait recovers when T1 fires.
-//   Half a window is several Windows timer ticks wide, so a window that returns late does not
-//   run T1 inside it.
-// - T1 arms T2 half a window later. The wait stops in the pump slice in which the future
-//   becomes ready, T2 is due many slices after that, and the second window is longer than
-//   T2's delay. T2 could run inside the wait only if the pumping thread were descheduled for
-//   that half window inside the wait's last slice: `run_one_until` tests its deadline on
-//   entry, and a timer that expires during the reactor's bounded wait is dispatched in the
-//   same call. That would make the cell pass with the second window deleted; it cannot make
-//   the cell fail with it present.
+// No timer decides the order, so the cell does not depend on the scheduler:
+// - The future's readiness is keyed on the count of its own `wait_for` calls. Re-derive the
+//   checks the helper makes before it waits by counting the `ready()` calls that precede
+//   `pump_until_ready(` in `run_window_or_wait_until_ready`; `pump_until`'s loop condition
+//   makes the next one, before its first slice.
+// - `kNotReadyCalls` exceeds the helper's own pre-wait checks, so the first ready answer
+//   comes from `pump_until`'s loop after at least one slice, and the call is recovered.
+//   Equal to those checks, the call is still recovered but the wait pumps no slice. Below
+//   them, the helper sees the call ready itself, and the ASSERT reports the path was not
+//   exercised.
+// - The witness exists only after the first ready answer, which `pump_until`'s loop makes
+//   after its last `run_for`, so only the second window can run it.
+// - The work guard keeps the window from returning stopped, so the helper waits rather than
+//   returning a stopped miss. The witness releases it, so the second window ends once the
+//   witness has run, and the cell releases it again after the call on every path.
+// - Real time is the window and the grace slice, each run to its deadline under the guard,
+//   plus the wait's slices; the second window ends when the guard is released.
 // - `site` is null, and `forced_miss_here` returns false for a null site, so
 //   FIXPP_FORCE_WINDOW_MISS cannot force this call.
 TEST(PumpWindowMiss, RecoveredWaitRunsTheWindowOnceMore) {
-    constexpr auto kWindow = std::chrono::milliseconds{100};
+    constexpr auto kWindow = std::chrono::milliseconds{10};
+    constexpr int kNotReadyCalls = 3;
     bool after = false;
-    std::promise<void> p;
-    auto fut = p.get_future();
     asio::io_context ioc;
-    asio::steady_timer t1{ioc};
-    asio::steady_timer t2{ioc};
-    t1.expires_after(kWindow + kWindow / 2);
-    t1.async_wait([&](const asio::error_code& ec) {
-        if (ec) return;
-        p.set_value();
-        t2.expires_after(kWindow / 2);
-        t2.async_wait([&after](const asio::error_code& e) {
-            if (!e) after = true;
-        });
-    });
+    auto wg = asio::make_work_guard(ioc);
+    CountingFuture fake{
+        .not_ready_calls = kNotReadyCalls, .ioc = &ioc, .after = &after, .guard = &wg};
     const auto r = fixpp::test_support::run_window_or_wait_until_ready(
-        ioc, fut, kWindow, fixpp::test_support::kPumpBudget, nullptr);
+        ioc, fake, kWindow, fixpp::test_support::kPumpBudget, nullptr);
+    wg.reset();
     ASSERT_TRUE(r.ready && r.recovered && !r.window_stopped && r.wait_to_ready.has_value())
         << "the path was not exercised: ready=" << r.ready << " recovered=" << r.recovered
         << " window_stopped=" << r.window_stopped;
-    EXPECT_TRUE(after) << "the handler due after the recovered wait had not run when "
-                          "run_window_or_wait_until_ready returned";
+    EXPECT_TRUE(fake.witness_posted) << "the future double never answered ready";
+    EXPECT_TRUE(after) << "the handler posted when the call became ready inside the wait had "
+                          "not run when run_window_or_wait_until_ready returned";
 }
 
 }  // namespace
