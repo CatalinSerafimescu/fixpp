@@ -14,8 +14,10 @@ grammar; C++ + C ABI + TOML; merge in the loader."
 
 ## Terminology
 
-- **Base dictionary** — a complete QuickFIX-XML dictionary file, e.g. the vendored
-  `dictionaries/FIX44.xml`, loaded today by `dict::XmlLoader::load` / `dict::load_any`.
+- **Base dictionary** — a complete dictionary file, either QuickFIX XML (e.g. the vendored
+  `dictionaries/FIX44.xml`) or a FIX Orchestra repository (the vendored
+  `dictionaries/orchestra/OrchestraFIXLatest.xml`), loaded today by `dict::XmlLoader::load`,
+  `dict::OrchestraLoader` or `dict::load_any`.
 - **Overlay** — a QuickFIX-XML document with the base's `<fix>` root and schema that holds **only
   additions**: new `<field>` definitions and enum `<value>`s, new or extended `<header>`, `<trailer>`,
   `<component>`, `<message>` and `<group>` elements. It is never loaded on its own.
@@ -99,6 +101,28 @@ Asked with the QuickFIX C++/J/Go source above already read.
 - Q: Is the result checked against an independent reference? → A: Yes. The equivalent edited XML is
   hand-written and checked in, never generated from the merge (FR-017, SC-001).
 
+### Session 2026-10-31 (`/speckit-clarify`)
+
+- Q: Should an overlay be allowed on top of the FIX Latest dictionary, which fixpp loads from FIX
+  Orchestra rather than from QuickFIX XML? → A: **Yes, in 098** (owner): a second merge path for an
+  Orchestra base, with its own equivalence witness. The overlay keeps one grammar, a QuickFIX-XML
+  fragment, for both kinds of base (orchestrator reading, for plan and Gate A to confirm); for an
+  Orchestra base the equivalent edited reference is a hand-edited copy of the Orchestra repository
+  carrying the same additions.
+- Q: May an overlay add allowed values to an existing standard field's enumeration (e.g. a venue
+  OrdType(40) value)? → A: **Yes** (owner). Values the overlay lists are added to the base field's;
+  a value already present is a no-op; a base value cannot be removed or renamed (FR-003, US1 AS-6).
+- Q: When an overlay adds a custom header field, should the send side move that field into the header
+  when the caller places it among body fields, as it does for standard header fields? → A: **Yes, fix
+  it in 098** (owner), closing L-422-1 for overlays and complete edited dictionaries alike. The
+  send-side header set becomes the union of today's fixed set and the session dictionary's declared
+  `<header>` fields (FR-022), as QuickFIX C++ and J take the union of their hardcoded list and the
+  dictionary header.
+- Q: Should one load accept a single overlay, or an ordered list of overlays? → A: **One overlay per
+  load** (owner). A user with several layers combines them into one file; an overlay meets only the
+  base. The C++ call, the C-ABI function and the TOML key each take one overlay path (FR-001, FR-013,
+  FR-016).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session understands a venue's dialect without an edited vendored file (Priority: P1)
@@ -135,6 +159,10 @@ the outcomes.
    arrives without the field, **Then** it is refused; other MsgTypes are unaffected.
 6. **Given** an overlay adding enum value `"Z"` to OrdType(40), **When** a 35=D with 40=Z arrives at a
    validating session, **Then** it is accepted, where the base alone refuses it.
+7. **Given** an overlay adding custom header field 5020, **When** the application sends a message with
+   5020 placed after a body field, **Then** the frame on the wire carries 5020 in the header, before the
+   first body field, as a standard header field placed the same way would be; the unmodified tree sends
+   it in the body.
 
 ---
 
@@ -264,15 +292,19 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   (`wire_unexpected_tag`, 091 R-2). A hand-written pair through `field()` is checked at commit when the
   builder holds the session's hooks (091 FR-009). Unchanged by 098, and documented in the B&L row.
 - **Custom header field** added by the overlay: accepted inbound (header fields are valid on every
-  message); on send, `is_send_header_tag` does not know it, so it is not reordered into the header
-  (L-422-1, reworded to name the overlay case).
+  message), and on send moved into the header like a standard header field (FR-022, US1 AS-7).
+- **Dictionary header narrower than the fixed set** (e.g. a FIX 4.x header that does not declare a tag
+  the fixed set names): the fixed set still applies; the union only adds tags, so no standard header tag
+  changes position.
 - **Two sessions on one engine with different overlays on the same base**: each parses and validates
   with its own merged dictionary.
 - **FIXT.1.1 session**: the overlay applies to the session's own dictionary. The engine registry is
   engine-wide (one dictionary per application version), so a per-session overlay is not visible through
   it; today the registry only answers serviceability (FR-021).
-- **Orchestra base** (FIX Latest): not supported in 098 (Assumptions); the overlay load refuses a base
-  that is not QuickFIX-XML with a documented error.
+- **Orchestra base** (FIX Latest): supported (FR-001). The merged dictionary's session version stays
+  `vlatest`, and it is indistinguishable from the dictionary loaded from a hand-edited copy of the
+  Orchestra repository carrying the same additions (FR-002).
+- **Base of neither format**: refused with the error `load_any` gives for an unrecognised root.
 - **Typed (codegen'd) tier**: generated `fixpp::vXX` classes, builders and `validate_<Msg>` functions
   reflect the base dictionary only. Overlay fields are read and written by tag number. The session's
   inbound validator is dictionary-driven and does see the overlay.
@@ -283,12 +315,15 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 
 **Loading and merging**
 
-- **FR-001 (C++ load with overlay)**: `dict::XmlLoader` MUST offer a load that takes a base dictionary
-  and one overlay, each as a file path, and a string form of the same for in-process use, and returns an
-  ordinary `dict::Dictionary`. The existing `load` / `load_from_string` / `load_any` signatures and
-  behaviour MUST NOT change.
+- **FR-001 (C++ load with overlay)**: The dictionary library MUST offer a load that takes a base
+  dictionary and one overlay, each as a file path, and a string form of the same for in-process use, and
+  returns an ordinary `dict::Dictionary`. The base MAY be QuickFIX XML or a FIX Orchestra repository
+  (the two formats `dict::load_any` recognises today); the overlay is QuickFIX XML in both cases. The
+  existing `load` / `load_from_string` / `load_any` signatures and behaviour, and `OrchestraLoader`'s,
+  MUST NOT change.
 - **FR-002 (equivalence)**: For every overlay the grammar admits, the merged dictionary MUST be
-  indistinguishable from the dictionary loaded from the equivalent edited XML: every public `Dictionary`
+  indistinguishable from the dictionary loaded from the equivalent edited XML (for an Orchestra base,
+  the hand-edited Orchestra repository carrying the same additions): every public `Dictionary`
   query, and every store of the `table_view` it produces (valid tags per MsgType, required tags, field
   types, enum values, group bare and context stores, group delimiters, Length+Data pair tables and
   `has_nonstandard_pair`), MUST answer the same.
@@ -300,10 +335,11 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   honoured on receive by the existing `dict_hooks` precedence. `body_builder::field_data` stays
   standard-pairs-only (091 R-2 / FR-009, not reversed).
 - **FR-005 (grammar: may not)**: An overlay MUST NOT change a base field's number, name or type, rename an
-  existing MsgType, relax a Required child to Optional, or remove anything; each attempt is a load error
-  (FR-007).
-- **FR-006 (version match)**: The overlay's `<fix>` element MUST carry the same version attributes as the
-  base; a mismatch is a load error.
+  existing MsgType, relax a Required child to Optional, or remove anything (including a base enum value);
+  each attempt is a load error (FR-007).
+- **FR-006 (version match)**: The overlay's `<fix>` element MUST identify the same version as the base;
+  a mismatch is a load error. For an Orchestra (FIX Latest) base, plan fixes the `<fix>` attribute form
+  that identifies FIX Latest.
 - **FR-007 (conflict = refusal)**: Every conflict between the overlay and the base MUST fail the whole
   load with an error that names the conflicting element (tag, name or MsgType). There is no conflict
   policy knob.
@@ -347,18 +383,28 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 
 - **FR-017 (independent oracle)**: The equivalence of FR-002 MUST be witnessed against hand-written,
   checked-in equivalent edited XML files, never generated from the merge, covering every FR-003 / FR-004
-  addition kind on at least two base versions (one FIX 4.x, one FIX 5.0SP2). The differential MUST be
-  shown RED against a seeded mismatch before it is trusted.
+  addition kind on at least three bases (one FIX 4.x, FIX 5.0SP2, and the Orchestra FIX Latest base).
+  Each differential MUST be shown RED against a seeded mismatch before it is trusted.
 - **FR-018 (wire witnesses)**: Inbound session witnesses MUST show each US1 acceptance scenario on the
   shipped receive path, each RED on the unmodified base, and each matching the equivalent edited XML.
 - **FR-019 (records)**: D-009 and COM-011 flip to `done` with their witnesses; D-009 gains a
-  coverage-index entry. L-002-2 retires. B-066-1's extension story is updated to the shipped overlay.
-  L-004-1, L-422-1, L-426-1, L-426-2 and L-426-3 are each assessed and either left, reworded to cover the
+  coverage-index entry. L-002-2 and L-422-1 retire. B-066-1's extension story is updated to the shipped
+  overlay. L-004-1, L-426-1, L-426-2 and L-426-3 are each assessed and either left, reworded to cover the
   overlay, or retired, with the reason recorded. New `B-098-*` rows record the overlay's behaviour, the
   TOML session-dictionary change and the removed field; new `L-098-*` rows record the limits below.
 - **FR-020 (design-doc supersession)**: `.specify/2c-codegen.md` §1.2's merge-cost line, §4.3, §4.4,
   §4.4.1, §4.4.2 and §6.4 MUST carry in-place "Updated (098-dialect-overlay)" notes naming what 098
   replaced; `brain/components/dictionary.md` MUST flag them.
+
+**Send-side header membership (L-422-1)**
+
+- **FR-022 (header set from the dictionary)**: The set of tags the send path treats as header-class MUST
+  be the union of today's fixed set and every field the session dictionary declares in its `<header>`
+  (base or overlay; QuickFIX-XML or Orchestra). The dictionary MUST expose that header membership, which
+  today is lost because the loader folds header fields into every message's field list. A tag in the
+  fixed set MUST keep its position rule unchanged. Plan MUST also assess the second fixed header set the
+  session keeps for replay (`kReplayHeaderTags`, `src/session/session.cpp`) and state whether it needs
+  the same treatment.
 
 **FIXT / row 6**
 
@@ -383,8 +429,9 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **SC-001**: For every checked-in overlay / equivalent-edited-XML pair, the differential over every
   `Dictionary` query and `table_view` store reports zero differences, and reports at least one
   difference against its seeded mismatch.
-- **SC-002**: Each US1 acceptance scenario is GREEN on base + overlay and on the equivalent edited XML,
-  and RED on the unmodified base (6 scenarios × at least one base version).
+- **SC-002**: Each inbound US1 acceptance scenario (AS-1..AS-6) is GREEN on base + overlay and on the
+  equivalent edited XML, and RED on the unmodified base, on at least one base version each; AS-7 is
+  measured by SC-008.
 - **SC-003**: Each US2 refusal is produced with its named error, and the base loaded alone is unchanged
   before and after (one table-driven witness, every row named).
 - **SC-004**: A TOML file whose sessions name no host-side dictionary opens every session (US3 AS-1),
@@ -394,21 +441,18 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   record). This replaces 2c §1.2's "merge ≤ 1 ms", which assumed a separate merge step.
 - **SC-006**: The full existing test suite passes unchanged, apart from the tests that name
   `SessionConfig::dialect_overlay` or the TOML deferred key, which are rewritten.
-- **SC-007**: D-009 and COM-011 are `done`; L-002-2 is in the closed B&L file.
+- **SC-007**: D-009 and COM-011 are `done`; L-002-2 and L-422-1 are in the closed B&L file.
+- **SC-008**: For every header field a witness dictionary declares beyond the fixed set, a message whose
+  caller places that field after a body field is sent with it in the header (US1 AS-7), RED on the
+  unmodified tree; and the send-side output of every existing header-ordering witness is byte-identical
+  before and after.
 
 ## Assumptions
 
-- **Base is QuickFIX-XML.** An Orchestra-loaded base (FIX Latest) is out of scope: the overlay is a
-  QuickFIX-XML document and the merge is defined over that schema. *Open for `/speckit-clarify`*: the
-  owner may want FIX Latest covered; the cost is a merge defined over the loader's internal state
-  instead of the XML document.
-- **One overlay per load.** A user with several layers combines them into one overlay file. *Open for
-  `/speckit-clarify`.*
-- **Enum values on existing fields are additions** (FR-003). QuickFIX users add venue values to standard
-  enums by editing the XML; the owner's grammar ruling forbids changing a type, and a new value does not.
-  *Confirm in `/speckit-clarify`.*
-- **Hot path unchanged.** The merged dictionary is an ordinary `Dictionary`, so parse, validate and send
-  costs per message are those of any dictionary of the same size.
+- **Hot path.** The merged dictionary is an ordinary `Dictionary`, so parse and validate costs per message
+  are those of any dictionary of the same size. FR-022 adds a header-membership lookup on the send path:
+  it MUST NOT allocate (`[const §XV.1]`), and its per-message cost is measured against the unmodified
+  tree in the verify record (paired bench, `[const §VIII.2]`).
 - **Pre-release.** Removing a never-read public field is a permitted pre-release breaking change to the C++
   API; the C ABI change is additive (`[const §X.7]`).
 - **No constitution amendment is expected.** `[const §XV.13]` mandates the hybrid "runtime XML loader for
@@ -427,7 +471,7 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   for the message) distinction (filed).
 - Changing `field_data`'s standard-pairs-only rule (091 R-2), or re-pairing standard tags (L-426-2).
 - Per-session overlays in the engine registry; per-application-version dictionaries (row 6, fixpp#643).
-- An overlay on an Orchestra base; more than one overlay per load (see Assumptions).
+- More than one overlay per load (Clarifications, `/speckit-clarify`).
 - A QuickFIX `.cfg` parser or `AppDataDictionary` keys.
 
 ## Normative References
@@ -441,14 +485,15 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   `Message`, `customising-quickfixj.md`), QuickFIX/Go `eff945dd` (`datadictionary`, `validation.go`,
   `session_factory.go`).
 - **Catalogue rows**: D-009, COM-011 (close); D-007 (the loader this extends); W-008 (Length+Data).
-- **Constitution**: `[const §XV.13]` (the hybrid this delivers); `[const §I.1]` (version surface,
+- **Constitution**: `[const §XV.13]` (the hybrid this delivers); `[const §XV.1]` and `[const §VIII.2]`
+  (FR-022's send-path lookup: no allocation, paired bench); `[const §I.1]` (version surface,
   unchanged); `[const §VI]` (coverage-index entry); `[const §X.7]` (C ABI pre-release rule, additive);
   `[const §XVI.3]` (clarify mandatory: dictionary, ABI); `[const §XVII.1]` (Gate A: public API);
   `[const §XVII.8]` (verify).
 - **Design docs**: `.specify/2c-codegen.md` §1.2, §4.3, §4.4, §4.4.1, §4.4.2, §6.4 (superseded in part,
   FR-020); `.specify/426-428-length-data-pairs.md` §3 (pair precedence); `.specify/215-dictionary-view.md`
   (the snapshot identity check that motivates merge-in-loader).
-- **B&L**: L-002-2 (retire); B-066-1 (update); L-004-1, L-422-1, L-426-1, L-426-2, L-426-3 (assess);
+- **B&L**: L-002-2, L-422-1 (retire); B-066-1 (update); L-004-1, L-426-1, L-426-2, L-426-3 (assess);
   L-097-1 (TOML / C ABI single engine dictionary, read and unchanged).
 - **Precedent**: `specs/002-dictionary-xml-loader/` (the loader, F2 deferral of `load_overlay`);
   `specs/091-data-field-bytes/` (R-2 / FR-009); `specs/066-dict-backed-inbound-parse/` (B-066-1).

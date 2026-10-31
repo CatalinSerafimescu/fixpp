@@ -14,9 +14,9 @@
 ## Requirement Completeness
 
 - [x] No [NEEDS CLARIFICATION] markers remain. The owner's three scope rulings and the orchestrator's two
-  technical answers are in spec Clarifications. Three defaults are recorded in Assumptions as open for
-  `/speckit-clarify` (Orchestra base, one overlay per load, enum values on existing fields), which is
-  mandatory for this feature (`[const §XVI.3]`: dictionary, ABI).
+  technical answers are in spec Clarifications. `/speckit-clarify` (mandatory, `[const §XVI.3]`:
+  dictionary, ABI) settled the four open points: Orchestra base in scope, enum values on existing fields
+  allowed, L-422-1 fixed in 098, one overlay per load.
 - [x] Requirements are testable and unambiguous. Each behaviour FR maps to an acceptance scenario or a
   success criterion; FR-017 requires each differential to be shown RED against a seeded mismatch.
 - [x] Success criteria are measurable
