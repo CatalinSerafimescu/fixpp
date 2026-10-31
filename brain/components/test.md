@@ -264,6 +264,34 @@ Rejected, on the record:
   `_DISABLE_*_ANNOTATION` defined to link). The base test hung there too, so that build is evidence
   neither way.
 
+### When the window must stay, a slow FileStore setup must not fail it (#602, #640 — B61)
+
+`CallbackSend`'s `Fixture::run` keeps its window: PR #630 (#602's first half) depends on it returning when
+`ioc` runs out of work. Its FileStore *setup* waits still missed the window under disk-sync contention.
+Read the decision this way:
+
+- **Cause (measured, then read in source).** `Session::open()` calls the store factory's `make()` inline.
+  On a fresh log a `FileStore`'s open scan syncs the disk on that thread, so `run_for(window)` returns
+  *late*, and the Logon's offloaded write is submitted only then. The library behaviour is disclosed, not
+  changed: B&L `L-602-1`. The miss instrument (the `[ MEASURED ] Fixture::run window miss` line) is what
+  told "late" from "stopped". The window call's own elapsed time and `ioc.stopped()` before the helper's
+  `restart()` are the discriminating fields.
+- **Shape.** `run_window_or_wait_until_ready` in `tests/support/pump_until_ready.hpp`: the window; on a miss
+  whose window ran its full length and was not stopped, a bounded pump to ready; after a recovery, the window
+  once more. A forced miss waits for nothing. `test_538`'s `run_sync` uses the same helper.
+- **Only the setup waits get a budget** (`run_setup`: `open()` and the setup peer Logon). Every other `run()`
+  passes zero. `close()` arms a real-time `steady_timer` (`close_grace`) that could complete a close inside a
+  long real-time pump. Before giving another site a budget, list every timer on its path and the clock each
+  one runs on.
+- **A window that returned early stays a failure.** An extension holds a work guard, so it would hide
+  PR #630's stopped-context class. Witness `FileStoreFixture_SetupWindowReturningEarly_StillReportsTheMiss`.
+- **CI cannot show a recovered miss.** No workflow keeps a passing cell's stdout. Only a miss the
+  extension does not recover reaches a CI log.
+
+Rejected, on the record: widening the window or the grace (above); an extension on every `run()` (the
+`close_grace` reason); offloading `make()` here (a public factory API change, outside a test fix).
+Records: `decisions/speckit/602-640-filestore-setup-window-verify.md` and its Gate B record, in the parent repo.
+
 ### The SECOND shape: `ioc.run()` with no window at all (#289 batch 17)
 
 `run_window_then_ready` is not the whole story, and a reader who finds only it will reach for the
