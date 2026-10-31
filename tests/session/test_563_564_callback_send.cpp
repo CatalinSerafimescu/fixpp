@@ -765,6 +765,128 @@ static_assert(fixpp::test_support::kPumpBudget * kGraceOverPumpBound <=
                   std::chrono::milliseconds{kLogoutWaitMs},
               "the default pump budget must end well before the close's real-time timer");
 
+// What happened in a cell, in order, each entry with the real time since start(), on
+// std::chrono::steady_clock. The session's mock clock stands in these cells, and
+// close()'s grace timer is a real timer, so the mock clock is not the clock that is
+// read. Written from the session's thread and from the file pool's threads.
+struct EventLog {
+    void start() {
+        const std::scoped_lock lock{m_};
+        from_ = std::chrono::steady_clock::now();
+        started_ = true;
+    }
+    // Milliseconds since start(); -1 before it.
+    [[nodiscard]] long long ms() const {
+        const std::scoped_lock lock{m_};
+        return started_ ? since_start_() : -1;
+    }
+    // Notes nothing before start(). Returns what ms() returns.
+    long long note(const std::string& what) {
+        const std::scoped_lock lock{m_};
+        if (!started_) return -1;
+        const long long at = since_start_();
+        events_.push_back(what + " at " + std::to_string(at) + " ms");
+        return at;
+    }
+    [[nodiscard]] std::vector<std::string> events() const {
+        const std::scoped_lock lock{m_};
+        return events_;
+    }
+
+private:
+    [[nodiscard]] long long since_start_() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - from_)
+            .count();
+    }
+    mutable std::mutex m_;
+    std::chrono::steady_clock::time_point from_;
+    bool started_ = false;
+    std::vector<std::string> events_;
+};
+
+// The test seams of src/session/file_store.cpp that these cells read (declared at the
+// top of this file): the offload probe and its exit companion. The exit probe fires on the pool
+// thread when an offloaded callable has returned, before the offload's completion is handed back to
+// the caller's executor, and for every offload of the store, whichever operation it serves.
+// Fixture::run's miss report reads counts(); the Fixture of a FileStore cell installs the
+// probes for that (Fixture's constructor says how that stays out of a cell's way).
+struct FileStoreSeams {
+    // What the probes have seen. `begun` and `exited` are never reset, so a reader takes the
+    // difference between two reads. `inflight` is begun minus exited since reset_inflight(),
+    // read at once. Neither carries the identity of an operation: a body counted here may
+    // serve another operation than the one a caller awaits. The entry probe is the pointer
+    // the store loaded when it submitted the body, and the exit probe the one loaded when
+    // the body returned, so a body submitted before install_probes() or returning after
+    // remove() is counted at one end only, and `inflight` is then off by one until the
+    // next reset_inflight(). The stamps are steady_clock ticks; 0 before the first.
+    struct Counts {
+        long long begun = 0;
+        long long exited = 0;
+        long long inflight = 0;
+        long long last_begin_ticks = 0;
+        long long last_exit_ticks = 0;
+        bool installed = false;
+    };
+    [[nodiscard]] static Counts counts() noexcept {
+        return {.begun = begun_.load(),
+                .exited = exited_.load(),
+                .inflight = inflight_.load(),
+                .last_begin_ticks = last_begin_ticks_.load(),
+                .last_exit_ticks = last_exit_ticks_.load(),
+                .installed = installed_.load()};
+    }
+    static void reset_inflight() noexcept { inflight_.store(0); }
+    // The bodies of offloaded store work begun since reset_bodies().
+    [[nodiscard]] static int bodies_begun() noexcept { return bodies_.load(); }
+    static void reset_bodies() noexcept { bodies_.store(0); }
+    // Installs the offload probe, which counts a body and, where `log` is not null,
+    // notes it there, and the exit probe, which notes there that an offloaded callable
+    // has returned. remove() takes both out again.
+    static void install(EventLog* log) noexcept {
+        log_.store(log);
+        install_probes();
+    }
+    // install() without touching the log.
+    static void install_probes() noexcept {
+        install_store_offload_probe(&on_body_);
+        install_store_offload_exit_probe(&on_exit_);
+        installed_.store(true);
+    }
+    static void remove() noexcept {
+        install_store_offload_exit_probe(nullptr);
+        install_store_offload_probe(nullptr);
+        installed_.store(false);
+        log_.store(nullptr);
+    }
+
+private:
+    [[nodiscard]] static long long now_ticks() noexcept {
+        return static_cast<long long>(std::chrono::steady_clock::now().time_since_epoch().count());
+    }
+    static void on_body_(std::thread::id /*unused*/) noexcept {
+        bodies_.fetch_add(1, std::memory_order_relaxed);
+        begun_.fetch_add(1);
+        inflight_.fetch_add(1);
+        last_begin_ticks_.store(now_ticks());
+        if (EventLog* log = log_.load()) log->note("the write's body begins");
+    }
+    static void on_exit_(std::thread::id /*unused*/) noexcept {
+        exited_.fetch_add(1);
+        inflight_.fetch_sub(1);
+        last_exit_ticks_.store(now_ticks());
+        if (EventLog* log = log_.load()) log->note("an offloaded body returns");
+    }
+    static inline std::atomic<int> bodies_{0};
+    static inline std::atomic<long long> begun_{0};
+    static inline std::atomic<long long> exited_{0};
+    static inline std::atomic<long long> inflight_{0};
+    static inline std::atomic<long long> last_begin_ticks_{0};
+    static inline std::atomic<long long> last_exit_ticks_{0};
+    static inline std::atomic<bool> installed_{false};
+    static inline std::atomic<EventLog*> log_{nullptr};
+};
+
 struct Fixture {
     asio::io_context ioc;
     // With a FileStore: keeps `ioc` from stopping between two pumps when an offload's work
@@ -832,12 +954,23 @@ struct Fixture {
         engine.clock = clock;
         engine.executor = exec;
         engine.application = app;
+        // A FileStore cell's offloads are counted for run()'s miss report. The probes are
+        // FileStoreSeams' own, the ones a cell's FileStoreSeams::install(log) installs, and
+        // install_probes() leaves the log alone: so a cell that installs them later only adds
+        // its log, and this does not take a cell's log away. A cell's remove() does take the
+        // probes out; the report then reads installed=0. The in-flight gauge is reset here,
+        // before this fixture's pool has a job.
+        if (store_kind == StoreKind::file) {
+            FileStoreSeams::reset_inflight();
+            FileStoreSeams::install_probes();
+        }
     }
 
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
 
     ~Fixture() {
+        if (store_kind == StoreKind::file) FileStoreSeams::remove();
         if (!file_dir.empty()) {
             std::error_code ec;
             std::filesystem::remove_all(file_dir, ec);
@@ -890,6 +1023,51 @@ struct Fixture {
         "Fixture::run: the file pool's fence did not run within kRetakeFenceBound, so a stop() "
         "of the pool's job can still land; site: ";
 
+    // The real time run() gives the call before it reports a miss.
+    static constexpr auto kRunWindow = 500ms;
+
+    // Called by run() when its window missed, before the drain. Prints one line that says
+    // what the window did and what the store's offloads did, then pumps on for a pump's
+    // budget and adds how long the call took to become ready, or that it did not. The
+    // window's own time is the discriminator: run_window_then_ready restarts `ioc` before it
+    // returns, so whether `ioc` stopped cannot be read after it, and its run_for(kRunWindow)
+    // returns before kRunWindow only when `ioc` has stopped or run out of work. The offload
+    // counts are differences from run()'s entry, and `inflight` is read at the miss
+    // (FileStoreSeams::Counts says what neither tells). A real-time timer of the call, such
+    // as close()'s grace timer, can complete it inside the pump, so a time to ready does
+    // not say that the call would have completed without one.
+    template <class Fut>
+    void report_window_miss(Fut& fut, const char* site,
+                            std::chrono::steady_clock::time_point window_started,
+                            const FileStoreSeams::Counts& at_entry) {
+        const auto missed_at = std::chrono::steady_clock::now();
+        const FileStoreSeams::Counts at_miss = FileStoreSeams::counts();
+        const auto ms_between = [](auto from, auto to) {
+            return static_cast<long long>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count());
+        };
+        const auto age_ms = [&](long long ticks) {
+            if (ticks == 0) return -1LL;
+            return ms_between(
+                std::chrono::steady_clock::time_point{std::chrono::steady_clock::duration{ticks}},
+                missed_at);
+        };
+        const long long window_ms = ms_between(window_started, missed_at);
+        const bool became_ready =
+            fixpp::test_support::pump_until_ready(ioc, fut, fixpp::test_support::kPumpBudget, site);
+        const long long ready_ms = ms_between(missed_at, std::chrono::steady_clock::now());
+        std::printf(
+            "[ MEASURED ] Fixture::run window miss: site=%s window_ms=%lld "
+            "window_returned_early=%d store=%s probes_installed=%d begun=%lld exited=%lld "
+            "inflight=%lld last_begin_age_ms=%lld last_exit_age_ms=%lld then: %s %lld ms\n",
+            site, window_ms, window_ms < kRunWindow.count() ? 1 : 0,
+            store_kind == StoreKind::file ? "file" : "not file", at_miss.installed ? 1 : 0,
+            at_miss.begun - at_entry.begun, at_miss.exited - at_entry.exited, at_miss.inflight,
+            age_ms(at_miss.last_begin_ticks), age_ms(at_miss.last_exit_ticks),
+            became_ready ? "ready after" : "not ready within the budget, pumped", ready_ms);
+        std::fflush(stdout);
+    }
+
     template <class T>
     expected_t<T> run(asio::awaitable<expected_t<T>> a, const char* site) {
         auto fut = asio::co_spawn(exec, std::move(a), asio::use_future);
@@ -912,7 +1090,10 @@ struct Fixture {
         std::optional<asio::io_context::executor_type> kept_on;
         if (keep) kept_on = keep->get_executor();
         keep.reset();
-        const bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, 500ms, site);
+        const FileStoreSeams::Counts at_entry = FileStoreSeams::counts();
+        const auto window_started = std::chrono::steady_clock::now();
+        const bool ready = fixpp::test_support::run_window_then_ready(ioc, fut, kRunWindow, site);
+        if (!ready) report_window_miss(fut, site, window_started, at_entry);
         if (between_window_and_retake) between_window_and_retake(ready);
         if (!ready) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, site);
@@ -1051,80 +1232,6 @@ struct Fixture {
 // ── The fixtures of the cells of `.specify/563-564-callback-send.md` §2.6 ─────
 //
 // §3 "§2.6's rows", "Fixture additions". Each is used only by a cell that asks for it.
-
-// What happened in a cell, in order, each entry with the real time since start(), on
-// std::chrono::steady_clock. The session's mock clock stands in these cells, and
-// close()'s grace timer is a real timer, so the mock clock is not the clock that is
-// read. Written from the session's thread and from the file pool's threads.
-struct EventLog {
-    void start() {
-        const std::scoped_lock lock{m_};
-        from_ = std::chrono::steady_clock::now();
-        started_ = true;
-    }
-    // Milliseconds since start(); -1 before it.
-    [[nodiscard]] long long ms() const {
-        const std::scoped_lock lock{m_};
-        return started_ ? since_start_() : -1;
-    }
-    // Notes nothing before start(). Returns what ms() returns.
-    long long note(const std::string& what) {
-        const std::scoped_lock lock{m_};
-        if (!started_) return -1;
-        const long long at = since_start_();
-        events_.push_back(what + " at " + std::to_string(at) + " ms");
-        return at;
-    }
-    [[nodiscard]] std::vector<std::string> events() const {
-        const std::scoped_lock lock{m_};
-        return events_;
-    }
-
-private:
-    [[nodiscard]] long long since_start_() const {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
-                   std::chrono::steady_clock::now() - from_)
-            .count();
-    }
-    mutable std::mutex m_;
-    std::chrono::steady_clock::time_point from_;
-    bool started_ = false;
-    std::vector<std::string> events_;
-};
-
-// The test seams of src/session/file_store.cpp that these cells read (declared at the
-// top of this file): the offload probe and its exit companion. The exit probe fires on the pool
-// thread when an offloaded callable has returned, before the offload's completion is handed back to
-// the caller's executor, and for every offload of the store, whichever operation it serves.
-struct FileStoreSeams {
-    // The bodies of offloaded store work begun since reset_bodies().
-    [[nodiscard]] static int bodies_begun() noexcept { return bodies_.load(); }
-    static void reset_bodies() noexcept { bodies_.store(0); }
-    // Installs the offload probe, which counts a body and, where `log` is not null,
-    // notes it there, and the exit probe, which notes there that an offloaded callable
-    // has returned. remove() takes both out again.
-    static void install(EventLog* log) noexcept {
-        log_.store(log);
-        install_store_offload_probe(&on_body_);
-        install_store_offload_exit_probe(&on_exit_);
-    }
-    static void remove() noexcept {
-        install_store_offload_exit_probe(nullptr);
-        install_store_offload_probe(nullptr);
-        log_.store(nullptr);
-    }
-
-private:
-    static void on_body_(std::thread::id /*unused*/) noexcept {
-        bodies_.fetch_add(1, std::memory_order_relaxed);
-        if (EventLog* log = log_.load()) log->note("the write's body begins");
-    }
-    static void on_exit_(std::thread::id /*unused*/) noexcept {
-        if (EventLog* log = log_.load()) log->note("an offloaded body returns");
-    }
-    static inline std::atomic<int> bodies_{0};
-    static inline std::atomic<EventLog*> log_{nullptr};
-};
 
 // The gate on the FileStore's file executor: the state a GatedFileExecutor shares with
 // the cell. Until arm() it lets every job through untouched. Once armed it numbers the
