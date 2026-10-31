@@ -238,7 +238,7 @@ The guards run in this order. Each step is non-recursive or iterative, and none 
 | # | Guard | Rule |
 |---|---|---|
 | 1 | Byte cap | **4 MiB**. Read at most cap + 1 bytes into a buffer (path form) or check `size()` (string form); refuse when more were available. Never trust a `stat` size (a FIFO or `/proc` file reports a wrong size). Before parse. |
-| 2 | Parse | `pugi::parse_default \| pugi::parse_doctype`. A result of `xml_parse_status::status_out_of_memory` (pugixml reports allocation failure as a parse status, not a throw) becomes `xml_oom_error`, never `xml_parse_error` (A-006). Any other failed status is `xml_parse_error` (`orchestra_parse_error` for Orchestra) as today. One mapping function serves both parses of an overlay call, the base's and the overlay's, so a base-parse allocation failure inside `load_with_overlay[_from_string]` is also `xml_oom_error` (N-10). `load` and `load_from_string` keep their own mapping (FR-001). |
+| 2 | Parse | The overlay uses `pugi::parse_default \| pugi::parse_doctype`. A result of `xml_parse_status::status_out_of_memory` (pugixml reports allocation failure as a parse status, not a throw) becomes `xml_oom_error`, never `xml_parse_error` (A-006). Any other failed status is `xml_parse_error` (`orchestra_parse_error` for Orchestra) as today. One status-mapping function serves both parses of an overlay call, so a base-parse allocation failure inside `load_with_overlay[_from_string]` is also `xml_oom_error` (N-10). The base is read without a byte cap and parsed with the same flags as `load`; only the status mapping is shared. Steps 1, 3, 4 and 5 apply only to the overlay document. `load` and `load_from_string` keep their own mapping (FR-001). |
 | 3 | DOCTYPE | refuse any `node_doctype` child of the document. pugixml 1.15 never loads external entities and expands only the five predefined entities and character references (its `parse_default` discards a DOCTYPE without a node, which is why the flag is set: to see it). Defence in depth: no DTD is ever loaded. |
 | 4 | Depth | **32** element levels; an iterative (explicit stack) walk of the overlay document. |
 | 4a | Root | R-4's root checks: the overlay's format matches the base's, its version matches (FR-006), its root children are in data-model §A.1's list, and no container name repeats. Steps 5 and 6 count and walk by element name, so they presume a checked format. |
@@ -254,7 +254,9 @@ of `finalize`'s expansion. A model can miss an expansion site that a later chang
 one: a header-store walk). So the build does not trust it:
 - Each loader's state class (`LoaderState`, `OrchestraLoaderState`) gains a step counter. `expand_field_list` increments it once at the head of
   its child loop, for every child node, which is the unit step 6 counts. When the counter is armed and
-  passes its limit, `expand_field_list` throws `overlay_limit_error` naming the budget.
+  passes its limit, `expand_field_list` throws `overlay_limit_error` with the distinct counter origin
+  and message "expansion step count exceeded the pre-walk prediction (internal model drift)". Step 6's
+  legitimate budget refusal retains its budget origin and message.
 - The overlay path arms it with step 6's merged total. The `load` path leaves it unarmed (a null limit),
   so `load`'s behaviour is unchanged by construction.
 - An `expand_field_list` call step 6 does not model can therefore cause a loud refusal, never unbounded
@@ -262,12 +264,14 @@ one: a header-store walk). So the build does not trust it:
   visited-set walk, R-7).
 - Read seam: `src/dictionary/overlay_merge.hpp` (internal, already on the dictionary tests' include
   path) declares a test-facing entry that loads with an overlay and also returns the counter's final value
-  and step 6's predicted total. W-1, W-2 and the W-11 harness assert the two are **equal** on every input
-  that loads. Equality, not `≤`, is what catches model drift in either direction. It holds only because
+  and step 6's predicted total, and reports whether a refusal came from the pre-walk budget or the build
+  counter. W-1 and W-2 assert no counter-origin refusal and, on every input that loads, that the two
+  counts are **equal**. W-11 also aborts on a counter-origin refusal. Equality plus the distinct refusal
+  origin catches model drift in either direction. It holds only because
   step 6 counts what the loop visits before any de-duplication, counts the spliced shape (the shared
   classifier, step 6), and charges the first-seen group per NumInGroup tag, as `finalize` does.
-- Mutant M-17 adds one extra `expand_field_list` call in `finalize`; the counter must refuse and W-1 must
-  go RED.
+- Mutant M-17 adds one extra `expand_field_list` call in `finalize`; the counter must refuse with the
+  counter origin and W-1 must go RED.
 
 **The expansion budget.** A fixed constant, compared against the overlay's **increase** over the base,
 so any base the base loader accepts is admitted with an empty overlay. Derivation (the code comment
@@ -376,7 +380,7 @@ declaring a header tag outside the fixed set changes anything. Re-derive with a 
   the file-static `is_send_header_tag` in `src/session/session.cpp`, so no test can read it. It moves,
   with `is_send_header_tag`, into a new private header `src/session/send_header_tags.hpp`, as
   `scan_frame_header.hpp` was moved out of `session.cpp` for its tests. W-7's union assertion includes
-  that header from the session binary, so a drift between the production set and the test is
+  that header from `session_pure_tests`, so a drift between the production set and the test is
   impossible (N-9).
 
 **`kReplayHeaderTags` needs no change.** It is local to `build_replay_frame` (ResendRequest replay of
@@ -548,13 +552,20 @@ So the round-1 rationale ("pre-existing and not caused by an overlay") was false
   gets an `L-098-*` row; if it does not, the condition above admits every definition and the note says
   the model was wrong.
 
-**4. Seeded rows (W-0), derived from the list.** One seeded pair of small dictionaries per entry of the
-declared list (or the entry's stated reason), differing in exactly that store. W-0 asserts two things:
-the set of seeded entries equals the declared list (a member with no seed, or a seed with no member,
-fails), and each seed produces a difference naming exactly its entry. A seed for a context store leaves
-the bare and exact stores equal, so a comparator that reads only the bare fallback misses it; for
-example the context `required_members` seed has the same bare `group_required_members` on both sides
-(G098-R2-004). Three more seeds test the key sources, not a store:
+**4. Seeded rows (W-0), derived from the list.** Each seeded pair of valid small dictionaries declares
+the set of stores the comparator must report. W-0 asserts that the reported set equals that seed's
+declared expected set. The union of all expected sets equals the seedable part of the declared store
+list; that union plus entries a version-matched overlay cannot change, each with its stated reason,
+equals the full list. A
+separable store gets a separating seed; for example, promoting an already-valid optional tag changes
+`required` without changing `valid`. Every coupled or derived entry carries a reason naming the
+invariant that prevents an independent difference and the query through which it is observed. This
+includes `group_bits_` and `enum_bits_` derived from their maps, the reverse pair map as the inverse of
+the forward map, and each `Dictionary`/`table_view` twin produced by `as_table_view`. An entry a
+version-matched overlay cannot change keeps the same stated-reason form and needs no invalid seed. A context-store seed keeps the
+bare and exact stores equal while its expected set names the independently observable context entry;
+for example, the context `required_members` seed has the same bare `group_required_members` on both
+sides (G098-R2-004). Three more seeds test the key sources, not a store:
 - an **unused extra component** on one side, visible only through the census and the internal read;
 - a **context record that differs only where the bare value would mask it**;
 - a **census mismatch**: the census of a document that differs from the loaded one in one component
@@ -593,8 +604,9 @@ the rest of the input as the overlay, both C++ entry points; every throw must be
 error types. The Orchestra half catches `orchestra_parse_error` by its derived type before the base, as
 `tests/fuzz/fuzz_orchestra_loader.cpp` does, so an Orchestra schema error thrown as a bare
 `xml_parse_error` falls through to the terminal rethrow (Gate A round 2, Root cause D). The harness loads
-through R-5's read seam and aborts when an input loads and the step counter differs from step 6's
-prediction. The fuzz targets do not have `src/dictionary` on their include path today, so the new
+through R-5's read seam and aborts on any counter-origin refusal; when an input loads, it also aborts
+if the step counter differs from step 6's prediction. A pre-walk budget refusal remains an accepted
+`dict::` error. The fuzz targets do not have `src/dictionary` on their include path today, so the new
 target adds it with `target_include_directories`, as `fuzz_decimal_compare` adds `tests`. Seeds: the hand-written overlays (R-10), the conflict and cap overlays, a DOCTYPE
 overlay, the expansion-doubling overlay of R-5 (A-001) in both formats, the empty-component chain
 (R-5), and an Orchestra cycle. Registered like `fuzz_dict_xml_loader` / `fuzz_orchestra_loader` (`tests/fuzz/CMakeLists.txt`,

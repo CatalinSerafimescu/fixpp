@@ -10,15 +10,19 @@ class XmlLoader {
 public:
     // ... load, load_from_string unchanged ...
 
-    // Parses `base` and `overlay`, runs research R-5's guards in order (shape caps, then one
+    // Reads and parses `base` exactly as `load` does: no overlay byte cap and `load`'s parse flags.
+    // Only the parse-status mapping is shared with the overlay parse. Parses `overlay` with
+    // parse_default | parse_doctype, then runs research R-5's guards in order (shape caps, then one
     // iterative walk of the merged reference graph for cycles, the expansion budget and side-table
     // fit, then the R-4 conflict checks), splices the overlay into the base document (R-3), checks
     // the spliced document's Length+Data relation against the base's (R-5 step 8a) and builds the
     // Dictionary from the spliced document as `load` builds one from a file, with the expansion
     // step counter armed. Throws: xml_parse_error (base or overlay malformed, unknown reference,
     // cycle), unknown_version_error (base), overlay_conflict_error, overlay_limit_error (a cap, the
-    // expansion budget, the step counter, or a side table that would stop fitting 16 bits),
-    // xml_oom_error (pugixml's status_out_of_memory on the base or the overlay parse).
+    // expansion budget, the step counter, or a side table that would stop fitting 16 bits). A step-
+    // counter refusal keeps this public type but has a distinct internal origin and model-drift
+    // message exposed by R-5's test read seam; it is not a budget refusal. Also throws xml_oom_error
+    // (pugixml's status_out_of_memory on the base or the overlay parse).
     [[nodiscard]] Dictionary load_with_overlay(
         std::filesystem::path const& base, std::filesystem::path const& overlay,
         std::pmr::memory_resource* mr,

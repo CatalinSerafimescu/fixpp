@@ -1,7 +1,26 @@
 # Contract: 098 witnesses and their RED arms
 
-Every witness names its file, what it asserts, and how it is shown RED **for its stated reason**. All
-gtest witnesses join existing grouped binaries (`[const §VII.8]`) and carry ctest label `098`.
+Every witness names its file, what it asserts, and how it is shown RED **for its stated reason**. Every
+CTest bucket carries label `098`; the standalone census also carries `dictionary` and `census`.
+
+**Test-binary disposition (`[const §VII.8]`).**
+
+| Witness | Bucket | Reason |
+|---|---|---|
+| W-0 | `dictionary_pure_tests` | Self-test of test-local declared data, with no isolation hazard, like `T020_DeferredSetExactCoverage`. |
+| W-1 | `dictionary_pure_tests` | Pure, single-threaded dictionary read/parse/compare tests. |
+| W-2 | `dictionary_pure_tests` | Pure, single-threaded vendored-base comparisons. |
+| W-3 | `dictionary_pure_tests` | Pure, single-threaded refusal tests. |
+| W-4 | `dictionary_pure_tests` | Pure, single-threaded dispatch tests. |
+| W-5 | `session_pure_tests` | Pure session test; this bucket supplies `src` and `FIXPP_DICT_DATA_DIR`. |
+| W-6 | `session_pure_tests` | Pure session send tests with no isolation hazard. |
+| W-7 | dictionary half: standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`; session half: `session_pure_tests` | The dictionary half is an exact census over shipped dictionaries; the session half is a pure test and its bucket supplies `src` and `FIXPP_DICT_DATA_DIR`. |
+| W-8 | `config_045_tests` | Pure configuration parsing and resolution tests. |
+| W-9 | `capi_pure_tests` | Pure C-ABI mapping and load tests. |
+| W-10 | Python source and wheel suites | Not a gtest executable. |
+| W-11 | `fuzz_dict_overlay` and its replay | Fuzz target outside §VII.8, built only under `FIXPP_BUILD_FUZZ`. |
+| W-12 | verify measurement | Not a test executable. |
+| W-13 | record-check scripts | Not a gtest executable. |
 
 **RED arms.** A witness that calls a new symbol does not compile on the unfixed tree, and a compile
 failure is RED for the wrong reason. Such a witness is shown RED by a **named mutant** applied to the
@@ -37,12 +56,12 @@ as a RED arm before production code.
 
 | Arm | Compiles on unfixed tree? | Assertion | Unfixed outcome | RED source, or role |
 |---|---|---|---|---|
-| W-0 seeded rows | no (test-only, but written in plan Phase 2 against Phase 2's code; the header-store row joins in Phase 5) | a difference naming the store | — | the seeded rows themselves; M-0 |
+| W-0 seeded rows | no (test-only, but written in plan Phase 2 against Phase 2's code; the header-store row joins in Phase 5) | reported set equals the seed's declared expected set | — | the seeded rows themselves; M-0 |
 | W-0 identical pair | no (as above) | zero differences | — | control |
-| W-1 rows | no | zero differences vs the complete reference; step counter = prediction | — | M-1, M-2, M-17 |
-| W-2 rows, side against side and against the census | no | zero differences vs the patched base | — | M-3; a zero- or two-match hunk fails the cell; W-0's census row |
+| W-1 rows | no | zero differences vs the complete reference; no counter-origin refusal; step counter = prediction | — | M-1, M-2, M-17 |
+| W-2 rows, side against side and against the census | no | zero differences vs the patched base; no counter-origin refusal; step counter = prediction | — | M-3; a zero- or two-match hunk fails the cell; W-0's census row |
 | W-2 wrap probe (FIX50SP2) | yes | records `component_fields` of the first component past the wrap point against its raw members | either | probe, recorded in the verify record (research R-10); not a RED arm |
-| W-3 rows | no | the named exception, its message naming the key | — | M-4, M-5, M-6, M-7, M-12, M-13, M-14, M-16, M-17, M-18 (per row and format, below) |
+| W-3 rows | no | the named exception, its message naming the key, cap, table or counter origin as applicable | — | M-4, M-5, M-6, M-7, M-12, M-13, M-14, M-16, M-17, M-18 (per row and format, below) |
 | W-4 rows | no | dispatch matches the direct loader | — | M-8 |
 | W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame | — | M-8 |
 | W-5 edited session | yes | accepts or refuses each frame as the edited dictionary dictates | passes | characterization pin (a complete edited file already works today) |
@@ -62,17 +81,20 @@ as a RED arm before production code.
 | W-9 rows | no | codes per research R-6 | — | M-11, M-15 |
 | W-10 import surface | yes | the exact set includes `dict_load_from_xml_with_overlay` | **fails** (name absent) | **U** |
 | W-10 other rows | no (the function is absent) | as W-9 | — | M-11 for the cap row |
-| W-11 fuzz | no | only `dict::` errors escape (Orchestra by derived type); counter = prediction on every load | — | M-7 and M-12 against the harness, once per format |
+| W-11 fuzz | no | only `dict::` errors escape (Orchestra by derived type); abort on a counter-origin refusal; counter = prediction on every load | — | M-7, M-12 and M-17 against the harness |
 
 ## Comparator self-test (runs first; a zero is trusted only after it)
 
 **W-0** `tests/dictionary/dictionary_equivalence_test.cpp`. The comparator declares its compared stores
-as data (research R-10 §3). For each entry of that list, one seeded pair of small dictionaries
-differing in exactly that store (or the entry's stated reason, such as `fixt_framing_*`'s). W-0 asserts
-that the set of seeded entries equals the declared list (a member with no seed, or a seed with no
-member, fails) and that each seed produces a difference naming exactly its entry. A context-store seed
-leaves the bare and exact stores equal (for example the context `required_members` seed has equal bare
-`group_required_members`). Also seeded, for the key sources: an unused extra component on one side; a
+as data (research R-10 §3). Each seeded pair of valid small dictionaries declares its expected reported
+set. W-0 asserts that the comparator reports exactly that set. The union of all expected sets equals
+the seedable part of the declared list; adding the reason-only entries that a version-matched overlay
+cannot change yields the full list. Separable entries have separating seeds. Every coupled or derived entry has
+a stated reason naming its invariant, the entry it cannot differ independently from, and the query
+that observes it; this covers the group and enum bit caches, both pair-map directions and the
+`Dictionary`/`table_view` twins. A context-store seed leaves the bare and exact stores equal (for
+example the context `required_members` seed has equal bare `group_required_members`). Also seeded, for
+the key sources: an unused extra component on one side; a
 context record that differs only where the bare value would mask it; and a census mismatch (the census
 of a document that differs from the loaded one in one component member). A pair of identical loads MUST
 report none. **RED**: the seeded rows are the RED arms; mutant **M-0** (the comparison of one declared
@@ -93,10 +115,11 @@ child, custom Length+Data pair, an enum value on a base field with no values (N-
 group whose existing members emit nothing (an empty component), which becomes the delimiter as in the
 edited file (spec Edge Cases), and a new DATA after a base LENGTH whose base pair forms earlier in
 `detect_length_pairs`'s visit order (loads, R-3).
-Every row loads through research R-5's read seam and asserts the step counter equals step 6's
-prediction. **RED**: **M-1** (the splice prepends a new group member instead of appending) and **M-2**
+Every row loads through research R-5's read seam and asserts no counter-origin refusal and that the
+step counter equals step 6's prediction. **RED**: **M-1** (the splice prepends a new group member instead of appending) and **M-2**
 (the splice skips enum-value additions); each turns its row RED with the comparator naming the store.
-**M-17** (one extra `expand_field_list` call in `finalize`) turns every row RED through the counter.
+**M-17** (one extra `expand_field_list` call in `finalize`) turns every row RED through the distinct
+counter origin.
 
 **W-2 Equivalence on the vendored bases.** Same file. FIX44, FIX50SP2 and the Orchestra file, each with an
 overlay under `tests/dictionary/fixtures/098/real/` and a hand-written insertion patch (research R-10:
@@ -105,7 +128,8 @@ line), applied by a line-based test helper. `load_with_overlay(base, overlay)` v
 `load_from_string(patched base)` → zero differences, side against side and, for `component_fields` /
 `group_fields`, against the raw census under R-10's wrap condition. Kind coverage per FR-017; the FIX44
 overlay also extends more than 64 existing messages (N-7: accepted, since the entry caps count new
-definitions). Each row also asserts step counter = prediction (research R-5). The FIX50SP2 wrap probe
+definitions). Each row also asserts no counter-origin refusal and step counter = prediction (research
+R-5). The FIX50SP2 wrap probe
 (research R-10) runs here and is recorded, not asserted; where a base side table does not fit, the
 overlay's appended definitions past the wrap point are compared side against side only, and the verify
 record says so.
@@ -118,7 +142,8 @@ product of the refusal kinds below × {QuickFIX XML, Orchestra}. Every cell is a
 reason written in the table (for example "`<fields>` adjacency: Orchestra has none"); the verify record
 lists the N/A cells. Each row asserts the exception's exact type for its format (an Orchestra schema
 error is `orchestra_parse_error`, caught by the derived type, not by `xml_parse_error`) and that its
-message names the key or cap.
+message names the key, cap or table as applicable. M-17's counter refusal instead names the distinct
+counter origin.
 - **R-4 conflicts:** identifying attribute changed (type; name; msgtype name; Orchestra message `id`,
   code-set `id` / `type`); field name already used by another number; an Orchestra code set with a new
   `id` and an existing name (N-6; XML N/A, no code sets); required relaxed; redescribed enum value or
@@ -163,7 +188,7 @@ message names the key or cap.
   (the bound is derived from the competing work, not fixed).
 - **Header expansion (G098-R2-003; XML only, Orchestra N/A: its header is component 1024, charged
   standalone):** a base with an empty `<messages>`, whose overlay puts nested groups under `<header>`
-  that each reference one large component. It MUST load, with step counter = prediction and the
+  that each reference one large component. It MUST load, with no counter-origin refusal, step counter = prediction and the
   declared header store holding the component's tags (the visited-set walk, research R-7).
 - **Side-table fit (N-3):** on a small base whose tables fit, an overlay that grows an early-declared
   component until a later base component's start passes 65535; an overlay component whose own entry
@@ -186,7 +211,8 @@ conflict, or crashes, instead of the cycle error), **M-14** (step 5's entry and 
 those rows load), **M-16** (step 8a replaced by the previous draft's adjacency rule: the interposed,
 paired-later and new-Length refuse rows and the Orchestra rows go RED, and the load rows stay GREEN,
 since that rule never refused a paired base Length), **M-17**
-(one extra `expand_field_list` call in `finalize`: the header-expansion row is refused by the counter),
+(one extra `expand_field_list` call in `finalize`: the header-expansion row is refused with the counter
+origin),
 **M-18** (the side-table fit check removed: those rows load).
 
 **W-4 Load-any dispatch.** Same file as W-1. `load_any_with_overlay` on each format matches the loader
@@ -195,8 +221,8 @@ overlay) turns the match rows RED.
 
 ## Wire behaviour
 
-**W-5 Inbound (US1 AS-1..AS-6, SC-002).** `tests/session/test_098_dialect_overlay_inbound.cpp` (joins the
-session binary). Three sessions with `validate_inbound_messages = true`: FIX44 base alone, FIX44 base +
+**W-5 Inbound (US1 AS-1..AS-6, SC-002).** `tests/session/test_098_dialect_overlay_inbound.cpp` (joins
+`session_pure_tests`). Three sessions with `validate_inbound_messages = true`: FIX44 base alone, FIX44 base +
 the W-2 overlay loaded through `dict::load_any_with_overlay` (so M-8 reaches it), FIX44 patched (the
 edited reference). One frame per scenario: custom field on 35=D; custom member inside Parties; private
 MsgType `U1` with and without its required field; custom Length+Data value containing SOH;
@@ -209,7 +235,8 @@ or the same Reject 373 and 371); the base session's outcome is the one recorded 
 **M-8** for the overlay arm. The base-session arm is a **negative control** and the edited-session arm a
 **characterization pin**: both pass on the unfixed tree and after the fix (arm table).
 
-**W-6 Send (US1 AS-7, FR-022, SC-008).** `tests/session/test_098_header_send.cpp`. A session whose
+**W-6 Send (US1 AS-7, FR-022, SC-008).** `tests/session/test_098_header_send.cpp` in
+`session_pure_tests`. A session whose
 dictionary declares header tag 5020 (a complete edited FIX44, loaded with the existing `load_from_string`,
 so the witness compiles on the unfixed tree) sends a message with 5020 after a body field; the frame
 carries 5020 before the first body field. A second edited-dictionary arm declares a custom pair
@@ -225,18 +252,20 @@ half (the unfixed tree sends the custom tags in the body); **M-9** (`as_table_vi
 store) for every arm.
 
 **W-7 Header store per vendored dictionary.** Two halves.
-- `tests/dictionary/header_tags_test.cpp`: for each of the ten vendored dictionaries, `is_header_tag`
+- `tests/dictionary/header_tags_test.cpp`, the standalone `dictionary_098_header_census_test`: enumerate
+  the vendored QuickFIX XML files plus the vendored Orchestra file by the existing dictionary-census
+  recipe; for each result, `is_header_tag`
   answers true exactly for the tags of an independent raw-XML header walk in the test (QuickFIX
   `<header>` expansion; Orchestra component 1024), and false for 5020. **RED**: **M-9**.
-- `tests/session/test_098_header_send.cpp` (the session binary): the same raw walk's tags, unioned with
+- `tests/session/test_098_header_send.cpp` (`session_pure_tests`): the same raw walk's tags, unioned with
   the production fixed set read from `src/session/send_header_tags.hpp` (research R-7), equal the fixed
   set. It is a characterization pin of R-7's measurement, not a RED arm. Its instrument is proven by a
   seeded FIX44 copy with 5020 in `<header>`, which MUST make the union assertion fail.
 
 ## Configuration
 
-**W-8 TOML (US3 AS-1..AS-5, SC-004).** `tests/config/test_098_dialect_overlay.cpp` (joins the config
-binary) and fixtures under `tests/config/fixtures/098/`. A session without an overlay gets
+**W-8 TOML (US3 AS-1..AS-5, SC-004).** `tests/config/test_098_dialect_overlay.cpp` (joins
+`config_045_tests`) and fixtures under `tests/config/fixtures/098/`. A session without an overlay gets
 `engine.dictionaries.front()` and opens with no host code (AS-1, SC-004); a session with one gets the
 merged dictionary (pointer differs from the base, a custom tag is valid); two sessions naming one path
 share one pointer; `[default]` inheritance and override (AS-5); a missing file and a conflicting overlay
@@ -255,13 +284,13 @@ rewritten to the new outcomes, and `T020_DeferredSetExactCoverage` keeps every o
 
 ## C ABI and Python
 
-**W-9 C ABI.** `tests/capi/dict_overlay_capi_test.cpp` (joins the capi binary): happy path → handle usable
+**W-9 C ABI.** `tests/capi/dict_overlay_capi_test.cpp` (joins `capi_pure_tests`): happy path → handle usable
 with `fixpp_session_config_set_dictionary`, a session opens and reads a custom tag; cap → 201 and NULL;
 conflict → 200 and NULL; NULL arguments → `FIXPP_ERR_NULL_HANDLE`. The exception-to-code mapping
 function (research R-6, declared in `src/capi/capi_internal.hpp`) is fed each type directly:
 `overlay_limit_error` → 201; `xml_oom_error` and a bare `std::bad_alloc` → 202; `xml_parse_error`,
 `overlay_conflict_error` and a `std::runtime_error` → 200; a non-`std::exception` → 200. In the
-dictionary binary, research R-5 step 2's status mapping, the one function both parses of an overlay
+`dictionary_pure_tests`, research R-5 step 2's status mapping, the one function both parses of an overlay
 call use (N-10), is fed `status_out_of_memory` (→ `xml_oom_error`) and one other failed status (→ the
 format's parse error); that both parses call it is structural, since no allocation-failure seam is added.
 `tests/capi/version_test.cpp` pins 1.13; `tests/abi/golden/fixpp_capi_symbols.txt` gains the symbol;
@@ -280,11 +309,13 @@ import-surface row (the name is absent on the unfixed tree).
 (`tests/fuzz/corpus/dict_overlay/`): the W-1 overlays, the W-3 refusal overlays, a DOCTYPE overlay.
 Every exception escaping the harness must be a `dict::` error type; the Orchestra half catches
 `orchestra_parse_error` by its derived type, as `tests/fuzz/fuzz_orchestra_loader.cpp` does (research
-R-11). On every input that loads, the harness aborts if the step counter differs from step 6's
-prediction. The seeds include the expansion bombs and the empty-component chain of both formats and an
+R-11). The harness aborts on a counter-origin refusal even though its public type is
+`overlay_limit_error`; on every input that loads, it also aborts if the step counter differs from step
+6's prediction. The seeds include the expansion bombs and the empty-component chain of both formats and an
 Orchestra cycle. CI replays the seeds (`linux-clang-asan`); the ten-minute run is `/speckit-verify`'s
-fuzz step. **RED**: **M-7** re-run against the harness with each format's cycle seed, and **M-12** with
-each bomb seed (the harness must crash or exhaust its limits).
+fuzz step. **RED**: **M-7** re-run against the harness with each format's cycle seed, **M-12** with
+each bomb seed (the harness must crash or exhaust its limits), and **M-17** with a valid overlay (the
+harness aborts on the counter origin).
 
 **W-12 Performance (SC-005, `[const §VIII.2]`).** Measured in the verify record, not a ctest:
 `load_with_overlay(FIX50SP2, the named at-cap fixture overlay)` vs `load(FIX50SP2)`, ratio ≤ 1.5, same

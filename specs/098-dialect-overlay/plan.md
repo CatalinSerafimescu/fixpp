@@ -17,10 +17,11 @@
     loader's own factored pair detection (research R-3, R-5 step 8a; W-3's pair table; M-16).
   - **B (budget):** the budget counts steps (child nodes visited), so empty-component chains are
     charged; a step counter in both `expand_field_list`s refuses on the overlay path once it passes the
-    pre-walk's prediction, and tests assert counter = prediction; the header store is a visited-set walk
-    (research R-5, R-7; M-17).
-  - **C (comparator):** the compared stores are a declared list; W-0's seeds equal the list (research
-    R-10).
+    pre-walk's prediction with a distinct origin; tests assert no such refusal and counter = prediction;
+    the header store is a visited-set walk (research R-5, R-7; M-17).
+  - **C (comparator):** the compared stores are a declared list; each valid seed's reported set must
+    equal its expected set, and the union of expected sets plus reason-only unchangeable entries equals
+    the list (research R-10).
   - **D (formats):** W-3 is refusal kinds × formats with N/A reasons; the shared walk returns structured
     results and each loader throws its own type (research R-5, contracts W-3).
   - **Owner attention** (orchestrator default, spec Clarifications "Gate A round 2"): the side-table
@@ -28,6 +29,7 @@
     it within the budget on a base that does not wrap today. The default is now **refused at load** for a
     base whose side tables fit; a base that already does not fit stays out of scope (probed, filed if
     shown). N-2 and N-11 are unchanged.
+- Codex fixer applied 2026-10-31 after round 3 (Step F, owner choice): Opus round-3 post-judging P1=0 P2=2 P3=3; fixes G098-R3-002, N-1, G098-R3-001, N-2, N-3. Reviews: research/reviews/codex_098-dialect-overlay_gate_a_3_review.md, research/reviews/opus_098-dialect-overlay_gate_a_3_adversarial_review.md.
 
 ### Round 1 — disagreements
 
@@ -98,8 +100,9 @@ Orchestra) holding only additions.
   reaches every user (B-098-2).
 - **Header on send (R-7, FR-022).** The dictionary gains its declared header set; the session's send
   partition treats a tag as header-class when it is in the fixed 34-tag set **or** the dictionary's
-  header, and a counted Data value keeps following its Length. Measured: for all ten vendored
-  dictionaries the union equals the fixed set, so no existing session's frames change.
+  header, and a counted Data value keeps following its Length. Measured: for every file found by the
+  vendored-dictionary census recipe the union equals the fixed set, so no existing session's frames
+  change.
 - **Surfaces.** C++ (`XmlLoader` / `OrchestraLoader::load_with_overlay[_from_string]`,
   `dict::load_any_with_overlay`); C ABI 1.13 (`fixpp_dict_load_from_xml_with_overlay`, the first
   producer of `FIXPP_ERR_DICT_LIMIT_EXCEEDED`); Python through SWIG; TOML `dialect_overlay` in
@@ -140,7 +143,7 @@ and parser are not changed. Mutants never run in the PR's tree (contracts preamb
 | `[const §VI.4]`, `§VI.5` | D-009 gains a coverage-index supplemental note in D-007's `[impl]` form; spec Normative References use `[DocAbbrev §X] Title`. |
 | `[const §VII.3]`, `§VII.4` | TDD: every witness RED (unfixed tree or named mutant) before GREEN; the **U** arms run before any production edit (phase 1). |
 | `[const §VII.7]` | Applies: the overlay loader parses untrusted XML. New harness `tests/fuzz/fuzz_dict_overlay.cpp` with seeds; CI replays them on `linux-clang-asan`; the ten-minute run is verify's fuzz step (research R-11). |
-| `[const §VII.8]` | No new gtest executable: witnesses join the existing dictionary, session, config and capi binaries, selected by `ctest -L 098`. The fuzz target is outside §VII.8's scope (built only under `FIXPP_BUILD_FUZZ`). |
+| `[const §VII.8]` | Per-witness dispositions are in contracts W-0–W-13. W-7's shipped-dictionary census is standalone `dictionary_098_header_census_test`, labelled `dictionary;098;census`; its session half and W-5/W-6 join `session_pure_tests`. W-0 remains in `dictionary_pure_tests` because it is a self-test of test-local data with no isolation hazard. Other pure gtests join their named dictionary, config and capi buckets; W-10–W-13 are Python, fuzz, measurement or scripts rather than grouped gtests. All CTest selection is by label. |
 | `[const §VIII.2]` | The send-path change is measured by the paired bench at verify (W-12). |
 | `[const §IX.1]` | Touched modules ≥ 95/85 or a per-line assessment, at verify. |
 | `[const §IX.4]` | clang-tidy / clang-format / cppcheck on changed files, at verify. |
@@ -181,12 +184,12 @@ specs/098-dialect-overlay/
 | Area | Files |
 |---|---|
 | Dictionary API | `include/fixpp/dict/{xml_loader,orchestra_loader,load_any,error,table_view,dictionary,field_ref}.hpp` |
-| Dictionary impl | `src/dictionary/{xml_loader,orchestra_loader,load_any,dictionary}.cpp` (the factored pair detection, the step counter, the header-store walk), `src/dictionary/dictionary_internal.hpp`; a new `src/dictionary/overlay_merge.{hpp,cpp}` for the guards, the conflict checks and the two splice walks (shared helpers: bounded read, parse-status mapping, depth walk, the match-index helper, the merged-graph cycle, budget and side-table walk, and the test-facing read seam for the step counter); `src/dictionary/CMakeLists.txt` (lists `fixpp_dictionary`'s sources explicitly, so `overlay_merge.cpp` is added there) |
+| Dictionary impl | `src/dictionary/{xml_loader,orchestra_loader,load_any,dictionary}.cpp` (the factored pair detection, the step counter, the header-store walk), `src/dictionary/dictionary_internal.hpp`; a new `src/dictionary/overlay_merge.{hpp,cpp}` for the guards, the conflict checks and the two splice walks (shared helpers: overlay-only bounded read, shared parse-status mapping, depth walk, the match-index helper, the merged-graph cycle, budget and side-table walk, and the test-facing read seam for the step counter and refusal origin); `src/dictionary/CMakeLists.txt` (lists `fixpp_dictionary`'s sources explicitly, so `overlay_merge.cpp` is added there) |
 | Session | `src/session/session.cpp` (the send classification line); a new private header `src/session/send_header_tags.hpp` (`kSendHeaderTags` and `is_send_header_tag`, moved out of `session.cpp`, research R-7); `include/fixpp/session/session_config.hpp` (field and forward declaration removed) |
 | Config | `src/config/toml_config_loader.cpp` (scope-aware `dialect_overlay`), `src/config/selector_resolver.cpp` (per-session dictionary step), `src/config/loader_internal.hpp` (doc) |
 | C ABI | `include/fix/c_api/dict.h`, `include/fix/c_api/version.h`, `src/capi/dictionary.cpp`, `src/capi/capi_internal.hpp` (the exception-to-code mapping function, research R-6), `tests/abi/golden/fixpp_capi_symbols.txt`, `tools/capi_freeze.sha256` |
 | Python | `bindings/python/fixpp.i` (GIL audit table), `bindings/python/tests/test_098_dialect_overlay.py`, `bindings/python/tests/wheel/test_import_surface.py` |
-| Tests | `tests/dictionary/{dictionary_equivalence.hpp,dictionary_equivalence_test.cpp,overlay_equivalence_test.cpp,overlay_refusal_test.cpp,header_tags_test.cpp}`, `tests/dictionary/fixtures/098/**`, `tests/session/{test_098_dialect_overlay_inbound,test_098_header_send}.cpp`, `tests/config/test_098_dialect_overlay.cpp`, `tests/config/fixtures/098/**`, the rewritten T018/T020/T028 cells and their fixtures, `tests/capi/{dict_overlay_capi_test,version_test}.cpp`, `tests/session/test_resend_answer_field_order.cpp` (stale comment only), `tests/session/engine_establishment_timeout_test.cpp` (relies on the filled bundle), the CMakeLists of each binary |
+| Tests | `tests/dictionary/{dictionary_equivalence.hpp,dictionary_equivalence_test.cpp,overlay_equivalence_test.cpp,overlay_refusal_test.cpp,header_tags_test.cpp}` (`header_tags_test.cpp` is standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`; W-0–W-4 join `dictionary_pure_tests`), `tests/dictionary/fixtures/098/**`, `tests/session/{test_098_dialect_overlay_inbound,test_098_header_send}.cpp` (join `session_pure_tests`), `tests/config/test_098_dialect_overlay.cpp`, `tests/config/fixtures/098/**`, the rewritten T018/T020/T028 cells and their fixtures, `tests/capi/{dict_overlay_capi_test,version_test}.cpp`, `tests/session/test_resend_answer_field_order.cpp` (stale comment only), `tests/session/engine_establishment_timeout_test.cpp` (relies on the filled bundle), the CMakeLists of each bucket and standalone executable |
 | Fuzz | `tests/fuzz/fuzz_dict_overlay.cpp`, `tests/fuzz/corpus/dict_overlay/`, `tests/fuzz/CMakeLists.txt` |
 | Records | `spec/{feature-catalogue,coverage-index,behaviors-and-limitations,behaviors-and-limitations-closed}.md`; every hit of data-model §G's inventory recipe (including `.specify/2c-codegen.md`, other design docs such as `.specify/2d-threading.md` and `.specify/2m-pybind.md`, and the brain pages whose `refs` name a changed file, such as `brain/components/{dictionary,session,c-api}.md`; `config.md` and `python-api.md` assessed); `CLAUDE.md` / `CLAUDE-history.md` at close-out |
 
@@ -198,8 +201,10 @@ specs/098-dialect-overlay/
    `build/linux-clang-debug` after the §XVII.7 ask; that run is the RED record. **Stop rule:** a listed
    arm that passes on the unfixed tree means its premise is false; stop and decide, never adjust the
    test.
-2. **Comparator** (test-only): `dictionary_equivalence.hpp` and W-0, every seeded row RED, the identical
-   pair clean, over every store except the header store (`is_header_tag` does not exist yet). Nothing
+2. **Comparator** (test-only): `dictionary_equivalence.hpp` and W-0, every seeded row reports exactly
+   its declared expected set, the union of those sets plus reason-only unchangeable entries equals the
+   declared store list, and the identical pair is clean, over every store except the header store
+   (`is_header_tag` does not exist yet). Nothing
    reads W-1/W-2 before this is green.
 3. **QuickFIX-XML overlay**: errors, the overlay guards in R-5's order (shape caps, the merged-graph
    cycle, budget and side-table walk, then the conflict checks of R-4), the XML splice (R-3), the step 8a
@@ -222,7 +227,8 @@ specs/098-dialect-overlay/
    function and its mapping function, 1.13 pins, symbol golden, freeze hash; the SWIG audit row and
    Python test. W-8, W-9, W-10. Mutants M-10, M-11, M-15.
 7. **Removal, fuzz, comments**: delete `SessionConfig::dialect_overlay` and the forward declaration;
-   the fuzz harness and seeds (W-11, M-7 and M-12 re-run against it per format); the comment fixes (research R-14). A
+   the fuzz harness and seeds (W-11, M-7 and M-12 re-run against it per format, M-17 for the counter
+   origin); the comment fixes (research R-14). A
    rewritten comment states the rule and the derivation, never a count. Full suite.
 8. **Records** (data-model §D–§G): run §G's inventory recipe and disposition every hit; B&L, closed
    B&L, catalogue (scope cells widened), coverage index, the design-doc and brain notes; W-13 checks with
@@ -237,8 +243,10 @@ specs/098-dialect-overlay/
   an addition placed elsewhere than a hand edit would put it yields a different dictionary. Mitigation:
   the splice only appends to the matched container; W-1/W-2 compare against hand-written references
   with the comparator proven on every store (W-0); M-1 proves a position change is caught.
-- **A comparator that cannot see a store.** Mitigation: the compared stores are a declared list, and
-  W-0's seeded rows must equal it, one per entry (research R-10); keys
+- **A comparator that cannot see a store.** Mitigation: the compared stores are a declared list; every
+  valid seed declares the exact set invariants allow it to change, the comparator must report exactly
+  that set, and the union of expected sets plus reason-only unchangeable entries must equal the list
+  (research R-10); keys
   from a raw-document census, a test-only read of the handle's indexes and the public API; bare, exact
   and context stores compared separately (research R-10).
 - **A store both sides get wrong.** Both sides go through the same `build_handle_from_doc`, so a loader
@@ -246,12 +254,12 @@ specs/098-dialect-overlay/
   the raw census; the FIX50SP2 wrap probe recorded (research R-10).
 - **An overlay that makes the loader do unbounded work.** Definition caps and emitted entries do not
   bound expansion. Mitigation: the merged-graph budget walk in steps before any recursive step, and the
-  step counter in both `expand_field_list`s, which refuses once the build passes the walk's prediction
-  (research R-5); W-3's bomb and empty-chain rows, M-12, M-17.
+  step counter in both `expand_field_list`s, which refuses with a distinct counter origin once the
+  build passes the walk's prediction (research R-5); W-3's bomb and empty-chain rows, M-12, M-17.
 - **A model of a loader rule drifts from the loader.** The pair rule and the expansion count were each
   modelled by hand in earlier drafts and missed cases. Mitigation: the pair check calls the loader's
-  own factored detection; the expansion model is checked against the counter by equality in W-1, W-2 and
-  the fuzz harness.
+  own factored detection; the expansion model is checked against the counter by equality in W-1 and
+  W-2, while the fuzz harness also aborts on the distinct counter-origin refusal.
 - **The XML loader's silent duplicate rules.** A duplicate field name or msgtype would load without an
   error. Mitigation: the merge refuses both within the overlay and, for a repeated base key, on the
   overlay's lookup, before the splice (R-3, R-4), with W-3 rows for each.

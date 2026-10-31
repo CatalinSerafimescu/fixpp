@@ -27,7 +27,7 @@ need code that lands in plan phase 5.
 ```
 cd ~/Work/Programming/fixpp-parallel
 cmake --build --preset linux-clang-debug -j2
-ctest --preset linux-clang-debug -L 098 --output-on-failure
+ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure
 pytest bindings/python/tests/wheel/test_import_surface.py      # W-10, against the built bindings
 ```
 
@@ -39,18 +39,22 @@ the test.
 
 ## 2. Comparator first
 
-W-0 GREEN on its identical pair and RED (a reported difference naming the store) on every seeded row,
+W-0 GREEN on its identical pair and every seeded row's reported set equal to its declared expected set,
 before W-1/W-2 are read.
 
 ## 3. After each implementation phase
 
 ```
 cmake --build --preset linux-clang-debug -j2
-ctest --preset linux-clang-debug -L 098 --output-on-failure
-ctest --preset linux-clang-debug -R "dict|config|capi|session_send|resend" --output-on-failure
+ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure
+ctest --preset linux-clang-debug -L "dictionary|config|capi|session|091" --no-tests=error --output-on-failure
 ```
 
-and the full suite at the end of phases 3, 5 and 7 (plan). The existing header-order witnesses named in
+The `098` selection includes the standalone W-7 census and every grouped 098 witness. The module-label
+selection includes the standalone census through its `dictionary` label and the existing W-6 byte pins
+through their `session` or `091` labels.
+
+Run the full suite at the end of phases 3, 5 and 7 (plan). The existing header-order witnesses named in
 W-6 must stay green with unchanged expected bytes.
 
 ## 4. Mutants
@@ -65,7 +69,7 @@ each format's seed.
 
 ```
 cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON && cmake --build --preset linux-clang-asan -j2
-ctest --preset linux-clang-asan -R fuzz_replay_dict_overlay --output-on-failure
+ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure
 ```
 
 The ten-minute campaign is `/speckit-verify` Step 7 (`--fuzz-duration=600`).
