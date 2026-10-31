@@ -1038,7 +1038,7 @@ struct Fixture {
     // The real time run() gives the call before it reports a miss.
     static constexpr auto kRunWindow = 500ms;
 
-    // What report_window_miss measured at one miss of run()'s window. `ready_ms` runs from
+    // What report_window_miss records for one miss of run()'s window. `ready_ms` runs from
     // the end of the window, -1 when the call did not become ready within the pump.
     struct WindowMiss {
         std::string site;
@@ -1062,8 +1062,8 @@ struct Fixture {
 
     // Called by run() when its window missed, before the drain. Pumps on, for
     // setup_extension_budget at a setup wait and for a pump's budget elsewhere, then prints
-    // one line that says what the window did, what the store's offloads did, and how long
-    // the call took to become ready, or that it did not. Returns whether a setup wait
+    // one line that says what the window did, what the store's offloads did, and the time
+    // the call needed to become ready, or that it did not. Returns whether a setup wait
     // recovered: the call became ready inside the pump after a window that ran its whole
     // length. A window that returned before its end means `ioc` stopped, or ran out of work,
     // with the call not ready; the pump holds a work guard on a restarted `ioc`, so it would
@@ -2981,8 +2981,8 @@ std::string describe(const std::vector<Fixture::WindowMiss>& misses) {
 
 // Asserts what a setup cell asserts of the one miss it causes at `site`, where `held` says
 // the cell's hold-ups ran once and `held_ms` is their total: the window ran its whole
-// length, the call became ready within the setup wait, from the window's start to ready
-// took at least `held_ms` and less than kSetupBandSlack more, and run() went on to take the
+// length, the call became ready within the setup wait, the time from the window's start to
+// ready is at least `held_ms` and less than kSetupBandSlack more, and run() went on to take the
 // fixture's guard again.
 void expect_one_recovered_setup_miss(const Fixture& f, bool held, std::chrono::milliseconds held_ms,
                                      const char* site, bool active, const std::string& context) {
