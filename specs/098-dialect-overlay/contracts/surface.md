@@ -10,10 +10,13 @@ class XmlLoader {
 public:
     // ... load, load_from_string unchanged ...
 
-    // Parses `base` and `overlay`, refuses an overlay that breaks research R-4/R-5, splices it into
-    // the base document (R-3) and builds the Dictionary from the spliced document exactly as `load`
-    // builds one from a file. Throws: xml_parse_error (base or overlay malformed, unknown reference,
-    // cycle), unknown_version_error (base), overlay_conflict_error, overlay_limit_error, xml_oom_error.
+    // Parses `base` and `overlay`, runs research R-5's guards in order (shape caps, then one
+    // iterative walk of the merged reference graph for cycles and the expansion budget, then the R-4
+    // conflict checks), splices the overlay into the base document (R-3) and builds the Dictionary
+    // from the spliced document exactly as `load` builds one from a file. Throws: xml_parse_error
+    // (base or overlay malformed, unknown reference, cycle), unknown_version_error (base),
+    // overlay_conflict_error, overlay_limit_error (a cap or the expansion budget), xml_oom_error
+    // (including pugixml's status_out_of_memory).
     [[nodiscard]] Dictionary load_with_overlay(
         std::filesystem::path const& base, std::filesystem::path const& overlay,
         std::pmr::memory_resource* mr,
@@ -27,8 +30,9 @@ public:
 // OrchestraLoader::load_with_overlay / load_with_overlay_from_string: the same two members; base and
 // overlay schema errors throw orchestra_parse_error (a subclass of xml_parse_error), as `load` does.
 //
-// xml_oom_error derives from std::bad_alloc, not from xml_parse_error, so the C ABI maps it by its own
-// catch branch (FIXPP_ERR_DICT_OOM) ahead of the xml_parse_error branches.
+// xml_oom_error derives from std::bad_alloc, not from xml_parse_error. The C ABI catches, in order:
+// overlay_limit_error, then std::bad_alloc (which covers xml_oom_error and every bare bad_alloc the
+// thunk itself can raise), then std::exception, then `...` (research R-6).
 
 // include/fixpp/dict/load_any.hpp
 // Sniffs the base root as load_any does; the overlay root MUST be the same format, else
@@ -52,7 +56,11 @@ Removed from `include/fixpp/session/session_config.hpp`: `class DialectOverlay;`
 and `std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;`.
 
 Preconditions as `load`: `mr != nullptr`. Thread safety as `load`: stateless loaders, no shared state.
-The returned `Dictionary` is independent of the base `Dictionary` any other call returned (FR-008).
+No `Dictionary` is an input to these calls (they take paths or strings), so a load with an overlay
+cannot change any other `Dictionary` (FR-008, structural).
+
+Overlay attribute vocabulary: `required` is `Y`, `N` or absent (QuickFIX XML); `presence` is `required`,
+`optional` or absent (Orchestra); anything else is `overlay_conflict_error` (research R-3).
 
 ## C ABI (`include/fix/c_api/dict.h`, C-ABI 1.13)
 
@@ -69,7 +77,8 @@ The returned `Dictionary` is independent of the base `Dictionary` any other call
  *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
  *  @return FIXPP_ERR_NULL_HANDLE          a NULL argument; *out_dict = NULL when out_dict is not NULL
  *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the overlay exceeds a cap; *out_dict = NULL
- *  @return FIXPP_ERR_DICT_OOM             allocation failed; *out_dict = NULL
+ *  @return FIXPP_ERR_DICT_OOM             allocation failed anywhere in the call, including the
+ *                                         handle's own allocation; *out_dict = NULL
  *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure; *out_dict = NULL
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml_with_overlay(
@@ -101,4 +110,12 @@ dialect_overlay = "venue-b.xml"           # overrides [default]
 
 Relative paths resolve against the configuration file's directory (`resolve_path`, as
 `dictionary.path`). Root-scope `dialect_overlay` is refused (data-model §A.4). Every session in the
-returned bundle has `config.dictionary` set (data-model §A.4).
+returned bundle has `config.dictionary` set when the load succeeds (data-model §A.4).
+
+- A non-string value is `malformed_value`; an empty string is `empty_required`; a `dialect_overlay`
+  with no usable `[dictionary]` is `invalid_or_contradictory_selector`, "dialect_overlay requires
+  [dictionary]". Each is reported at the key path where the value was written.
+- A failing overlay is reported once per authoring origin: `[default]` and `session[1]` naming one
+  failing file give two diagnostics.
+- There is no value meaning "no overlay": a `[default]` `dialect_overlay` cannot be cleared for one
+  session (B-098-3). Move the key into the sessions that want it.

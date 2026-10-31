@@ -13,8 +13,9 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain. The owner's three scope rulings and the orchestrator's two
-  technical answers are in spec Clarifications. `/speckit-clarify` (mandatory, `[const §XVI.3]`:
+- [x] No [NEEDS CLARIFICATION] markers remain. The owner's three scope rulings and the orchestrator's
+  technical answers (including Gate A round 1's, three of them owner-to-confirm defaults) are in spec
+  Clarifications. `/speckit-clarify` (mandatory, `[const §XVI.3]`:
   dictionary, ABI) settled the four open points: Orchestra base in scope, enum values on existing fields
   allowed, L-422-1 fixed in 098, one overlay per load.
 - [x] Requirements are testable and unambiguous. Each behaviour FR maps to an acceptance scenario or a
@@ -24,7 +25,7 @@
 - [x] All acceptance scenarios are defined
 - [x] Edge cases are identified, including the custom-header send case (L-422-1), the custom Data send
   case (091 R-2), the FIXT registry case (FR-021) and the typed-tier case
-- [x] Scope is clearly bounded (Out of Scope lists the five side findings to be filed as issues)
+- [x] Scope is clearly bounded (Out of Scope lists the side findings to be filed as issues)
 - [x] Dependencies and assumptions identified
 
 ## Feature Readiness
