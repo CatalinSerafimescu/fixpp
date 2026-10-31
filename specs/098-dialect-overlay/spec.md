@@ -18,9 +18,15 @@ grammar; C++ + C ABI + TOML; merge in the loader."
   `dictionaries/FIX44.xml`) or a FIX Orchestra repository (the vendored
   `dictionaries/orchestra/OrchestraFIXLatest.xml`), loaded today by `dict::XmlLoader::load`,
   `dict::OrchestraLoader` or `dict::load_any`.
-- **Overlay** — a QuickFIX-XML document with the base's `<fix>` root and schema that holds **only
-  additions**: new `<field>` definitions and enum `<value>`s, new or extended `<header>`, `<trailer>`,
-  `<component>`, `<message>` and `<group>` elements. It is never loaded on its own.
+- **Overlay** — a document in its base's format that holds **only additions**. For a QuickFIX-XML
+  base: the `<fix>` root and schema, with new `<field>` definitions and enum `<value>`s, and new or
+  extended `<header>`, `<trailer>`, `<component>`, `<message>` and `<group>` elements. For an
+  Orchestra base: the `fixr:repository` root and schema, with new or extended code sets, fields,
+  components, groups and messages. It is never loaded on its own.
+- **Definition an edit lands on** — every overlay element names one base definition (a field, code
+  set, component, group or message, or a group element at one position in the XML), and the edit
+  changes that definition. Every place the base uses that definition sees the edit, exactly as a hand
+  edit of the same element would.
 - **Merged dictionary** — the ordinary `dict::Dictionary` that results from applying one overlay to one
   base. Nothing downstream can tell it apart from a dictionary loaded from a file.
 - **Equivalent edited XML** — the complete file a QuickFIX user would have written by copying the base
@@ -32,7 +38,8 @@ grammar; C++ + C ABI + TOML; merge in the loader."
 ## Context: why this feature exists
 
 **What QuickFIX does.** Read at QuickFIX C++ `386ce46e`, QuickFIX/J `bc7e8b23` and QuickFIX/Go
-`eff945dd` (2026-10-31; citations in the parent repo's research notes for this feature). None of the
+`eff945dd` (2026-10-31; citations in the parent repo's
+`research/findings/v1-d009-quickfix-dictionary-model-2026-10-31.md`). None of the
 three has an overlay, a dialect or a merge mechanism at runtime. A user who needs venue fields edits a copy
 of the dictionary XML and points the session at it (`DataDictionary`, or `TransportDataDictionary` +
 `AppDataDictionary`). The dictionary decides parse structure (groups, header/trailer membership, DATA
@@ -105,10 +112,17 @@ Asked with the QuickFIX C++/J/Go source above already read.
 
 - Q: Should an overlay be allowed on top of the FIX Latest dictionary, which fixpp loads from FIX
   Orchestra rather than from QuickFIX XML? → A: **Yes, in 098** (owner): a second merge path for an
-  Orchestra base, with its own equivalence witness. The overlay keeps one grammar, a QuickFIX-XML
-  fragment, for both kinds of base (orchestrator reading, for plan and Gate A to confirm); for an
-  Orchestra base the equivalent edited reference is a hand-edited copy of the Orchestra repository
-  carrying the same additions.
+  Orchestra base, with its own equivalence witness. ~~The overlay keeps one grammar, a QuickFIX-XML
+  fragment, for both kinds of base (orchestrator reading, for plan and Gate A to confirm).~~
+  **Superseded at `/speckit-plan` (orchestrator, 2026-10-31): the overlay is written in its base's
+  format** — a QuickFIX-XML fragment for a QuickFIX-XML base, a FIX Orchestra (`fixr:repository`)
+  fragment for an Orchestra base. Measured reasons (plan research R-2): the Orchestra loader has its
+  own state and grammar and silently ignores non-`fixr:` elements; it references fields, components
+  and groups by numeric id with no name index; several Orchestra group definitions share one
+  NumInGroup tag, so "extend group NoXxx" has no single target; the header is component 1024
+  (StandardHeader), not a `<header>` element; and fixpp's QuickFIX-XML version table has no FIX
+  Latest row. A same-format fragment spliced into the base document needs none of that translation.
+  The equivalent edited reference is the base file hand-edited in its own format.
 - Q: May an overlay add allowed values to an existing standard field's enumeration (e.g. a venue
   OrdType(40) value)? → A: **Yes** (owner). Values the overlay lists are added to the base field's;
   a value already present is a no-op; a base value cannot be removed or renamed (FR-003, US1 AS-6).
@@ -219,7 +233,10 @@ each session's configured dictionary and its inbound behaviour on a custom tag.
 3. **Given** a `dialect_overlay` path that does not exist or an overlay that fails to merge, **When** the
    file is loaded, **Then** the load reports a diagnostic at that session's `dialect_overlay` key path.
 4. **Given** `dialect_overlay` at root scope, **When** the file is loaded, **Then** it is refused with a
-   diagnostic saying the key is session-scoped.
+   diagnostic saying the key is a session key.
+5. **Given** `dialect_overlay` in `[default]` and two sessions, one of which sets its own
+   `dialect_overlay`, **When** the file is loaded, **Then** the first session gets the default's merged
+   dictionary and the second its own.
 
 ---
 
@@ -301,9 +318,18 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **FIXT.1.1 session**: the overlay applies to the session's own dictionary. The engine registry is
   engine-wide (one dictionary per application version), so a per-session overlay is not visible through
   it; today the registry only answers serviceability (FR-021).
-- **Orchestra base** (FIX Latest): supported (FR-001). The merged dictionary's session version stays
-  `vlatest`, and it is indistinguishable from the dictionary loaded from a hand-edited copy of the
-  Orchestra repository carrying the same additions (FR-002).
+- **Orchestra base** (FIX Latest): supported with an Orchestra-format overlay (FR-001). The merged
+  dictionary's session version stays `vlatest`, and it is indistinguishable from the dictionary loaded
+  from a hand-edited copy of the Orchestra repository carrying the same additions (FR-002).
+- **Orchestra code sets are shared.** Orchestra attaches enum values to a code set, and one code set can
+  serve several fields. An overlay that adds a value to a code set adds it for every field that uses
+  that code set, as a hand edit would. To add a value for one field only, the base would need its own
+  code set for that field, which is a type change and is refused (FR-005). Disclosed as a `B-098-*` row.
+- **Orchestra groups are shared definitions.** An Orchestra group is defined once and referenced by id,
+  so a member added to it appears in every message that references that group. In QuickFIX XML the same
+  edit lands on the one `<group>` element the overlay names, which may be inline in a single message or
+  inside a shared component.
+- **Overlay in the other format** (e.g. a `<fix>` fragment on an Orchestra base): refused (FR-001).
 - **Base of neither format**: refused with the error `load_any` gives for an unrecognised root.
 - **Typed (codegen'd) tier**: generated `fixpp::vXX` classes, builders and `validate_<Msg>` functions
   reflect the base dictionary only. Overlay fields are read and written by tag number. The session's
@@ -318,7 +344,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **FR-001 (C++ load with overlay)**: The dictionary library MUST offer a load that takes a base
   dictionary and one overlay, each as a file path, and a string form of the same for in-process use, and
   returns an ordinary `dict::Dictionary`. The base MAY be QuickFIX XML or a FIX Orchestra repository
-  (the two formats `dict::load_any` recognises today); the overlay is QuickFIX XML in both cases. The
+  (the two formats `dict::load_any` recognises today); the overlay MUST be in its base's format, and an
+  overlay in the other format is a load error. The
   existing `load` / `load_from_string` / `load_any` signatures and behaviour, and `OrchestraLoader`'s,
   MUST NOT change.
 - **FR-002 (equivalence)**: For every overlay the grammar admits, the merged dictionary MUST be
@@ -337,9 +364,9 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **FR-005 (grammar: may not)**: An overlay MUST NOT change a base field's number, name or type, rename an
   existing MsgType, relax a Required child to Optional, or remove anything (including a base enum value);
   each attempt is a load error (FR-007).
-- **FR-006 (version match)**: The overlay's `<fix>` element MUST identify the same version as the base;
-  a mismatch is a load error. For an Orchestra (FIX Latest) base, plan fixes the `<fix>` attribute form
-  that identifies FIX Latest.
+- **FR-006 (version match)**: The overlay's root MUST identify the same version as the base: the
+  `<fix>` type/major/minor/servicepack attributes for QuickFIX XML, the `fixr:repository` `version`
+  attribute for Orchestra. A mismatch is a load error.
 - **FR-007 (conflict = refusal)**: Every conflict between the overlay and the base MUST fail the whole
   load with an error that names the conflicting element (tag, name or MsgType). There is no conflict
   policy knob.
@@ -374,10 +401,12 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   `SessionConfig::dictionary`: to the `[dictionary]` dictionary for a session without an overlay, and to
   the merged dictionary for a session with one. `EngineConfig::dictionaries` keeps holding the base
   dictionary as today.
-- **FR-016 (TOML key)**: `dialect_overlay` MUST be accepted at `[[session]]` scope as a path, resolved
-  relative to the configuration file as `[dictionary]`'s path is. It MUST stay refused at root scope,
-  with a diagnostic that names it as session-scoped. A load or merge failure is a diagnostic at that
-  session's `dialect_overlay` key path.
+- **FR-016 (TOML key)**: `dialect_overlay` MUST be accepted as a path at `[[session]]` scope and in
+  `[default]` (which every session inherits unless it sets its own, as QuickFIX's `[DEFAULT]` does),
+  resolved relative to the configuration file as `[dictionary]`'s path is. It MUST stay refused at root
+  scope, with a diagnostic that names it as a session key. A load or merge failure is a diagnostic at the
+  key path where the value was written (`default.dialect_overlay` or `session[N].dialect_overlay`).
+  The other deferred TOML keys stay deferred.
 
 **Witnesses and records**
 
