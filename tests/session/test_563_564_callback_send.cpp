@@ -2944,8 +2944,7 @@ void expect_one_recovered_setup_miss(const Fixture& f, const FileGate& gate, boo
     const auto it = std::find_if(f.window_misses.begin(), f.window_misses.end(), at_site);
     ASSERT_TRUE(held && it != f.window_misses.end()) << "the path was not exercised: " << context;
     const Fixture::WindowMiss& m = *it;
-    EXPECT_EQ(std::count_if(f.window_misses.begin(), f.window_misses.end(), at_site), 1)
-        << context;
+    EXPECT_EQ(std::count_if(f.window_misses.begin(), f.window_misses.end(), at_site), 1) << context;
     for (const auto& other : f.window_misses) {
         if (other.site != site) {
             EXPECT_TRUE(other.recovered)
