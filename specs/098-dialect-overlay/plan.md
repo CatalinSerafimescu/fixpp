@@ -30,6 +30,18 @@
     base whose side tables fit; a base that already does not fit stays out of scope (probed, filed if
     shown). N-2 and N-11 are unchanged.
 - Codex fixer applied 2026-10-31 after round 3 (Step F, owner choice): Opus round-3 post-judging P1=0 P2=2 P3=3; fixes G098-R3-002, N-1, G098-R3-001, N-2, N-3. Reviews: research/reviews/codex_098-dialect-overlay_gate_a_3_review.md, research/reviews/opus_098-dialect-overlay_gate_a_3_adversarial_review.md.
+- Loop 2 round 1 applied 2026-10-31: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=2 P3=5; rewrite addresses root causes H (US4's observables written at the C++ session's level) and I (run-order text stating results instead of recipes), and G098-L2R1-001, G098-L2R1-002, G098-L2R1-003, N-1, N-2, N-3, N-4. Reviews: research/reviews/codex_098-dialect-overlay_gate_a_4_review.md, research/reviews/opus_098-dialect-overlay_gate_a_4_adversarial_review.md.
+  - **H (C ABI and Python):** W-9 is split into pure rows in `capi_pure_tests` and a standalone live
+    arm `capi_098_dict_overlay_live_test` (`capi;098`). The live arm and W-10's Python arm read one
+    frame's custom Length+Data value with an SOH inside, which only the merged dictionary reads intact;
+    mutant M-19 (the thunk returns the base) turns both RED. Python option (a) was taken: US4's promise
+    is kept, not narrowed (contracts W-9, W-10; spec Clarifications, Gate A loop 2 round 1).
+  - **I (recipes):** the bomb rows assert the budget origin instead of a time ratio, and the step
+    counter is armed at the smaller of the prediction and the base's total plus the budget, so M-12's
+    RED is bounded (research R-5); quickstart §1 configures the Python bindings, runs the import-surface
+    test against the built `lib/` and states what counts as its RED; §3 adds `field-order` and checks
+    each selection with `ctest -N`.
+  - **N-4:** W-5 asserts each accepted scenario's read, not only accept/reject.
 
 ### Round 1 — disagreements
 
@@ -78,6 +90,23 @@ These Codex counter-proposals were applied in a different shape, following the O
   would change the loader contract. A lookup that hits a repeated base key is refused instead, for every
   key kind (research R-3).
 
+### Loop 2 round 1 — disagreements
+
+None: Opus marked no Codex finding **Disagree**. G098-L2R1-001 was downgraded P2→P3. These Codex
+counter-proposals were applied in a different shape, following the Opus judgement:
+
+- **G098-L2R1-001.** Codex offered putting the live arm in an existing live C-ABI loopback executable.
+  Not applied: `[const §VII.8]` keeps a live, engine-starting test standalone, and adding 098's file to
+  another feature's live executable would mix ownership of that binary. The live arm is a new standalone
+  executable (contracts W-9).
+- **G098-L2R1-002.** Codex offered delivering "a frame containing the overlay-only tag". Not applied as
+  stated: a scalar overlay-only tag reads the same on a base-only handle, because C-ABI and Python
+  sessions do not validate and `fixpp_msg_get_string` reads any top-level tag. The frame carries the
+  overlay's custom Length+Data pair with an SOH inside the Data value (contracts W-9, W-10).
+- **G098-L2R1-003.** Codex offered operation counters plus a generous absolute test timeout. Applied as
+  the budget-origin assertion; the bound on M-12's run is the counter's arming at the smaller of the
+  prediction and the base's total plus the budget (research R-5), not a timeout.
+
 ## Summary
 
 A user loads a base dictionary with one overlay and gets an ordinary `dict::Dictionary`, which they put in
@@ -91,7 +120,8 @@ Orchestra) holding only additions.
   fitting side table past its 16-bit index; then the conflict checks (R-4). It then splices the overlay
   into the base document by "an edit lands on the definition it names" (R-3), compares the spliced
   document's Length+Data relation with the base's using the loader's own detection, and runs its
-  existing `build_handle_from_doc` with a step counter armed at the walk's prediction. The spliced
+  existing `build_handle_from_doc` with a step counter armed at the walk's prediction (capped at the
+  base's total plus the budget, research R-5). The spliced
   document *is* the equivalent edited file (each addition appended to its container, in overlay order),
   so the result equals that file's load by construction, store for store.
 - **Two formats (R-2).** The Orchestra overlay is an Orchestra fragment, because translating a
@@ -143,7 +173,7 @@ and parser are not changed. Mutants never run in the PR's tree (contracts preamb
 | `[const §VI.4]`, `§VI.5` | D-009 gains a coverage-index supplemental note in D-007's `[impl]` form; spec Normative References use `[DocAbbrev §X] Title`. |
 | `[const §VII.3]`, `§VII.4` | TDD: every witness RED (unfixed tree or named mutant) before GREEN; the **U** arms run before any production edit (phase 1). |
 | `[const §VII.7]` | Applies: the overlay loader parses untrusted XML. New harness `tests/fuzz/fuzz_dict_overlay.cpp` with seeds; CI replays them on `linux-clang-asan`; the ten-minute run is verify's fuzz step (research R-11). |
-| `[const §VII.8]` | Per-witness dispositions are in contracts W-0–W-13. W-7's shipped-dictionary census is standalone `dictionary_098_header_census_test`, labelled `dictionary;098;census`; its session half and W-5/W-6 join `session_pure_tests`. W-0 remains in `dictionary_pure_tests` because it is a self-test of test-local data with no isolation hazard. Other pure gtests join their named dictionary, config and capi buckets; W-10–W-13 are Python, fuzz, measurement or scripts rather than grouped gtests. All CTest selection is by label. |
+| `[const §VII.8]` | Per-witness dispositions are in contracts W-0–W-13. W-7's shipped-dictionary census is standalone `dictionary_098_header_census_test`, labelled `dictionary;098;census`; its session half and W-5/W-6 join `session_pure_tests`. W-9's pure rows join `capi_pure_tests`; its live arm, which starts C-ABI engines with their worker threads, is standalone `capi_098_dict_overlay_live_test`, labelled `capi;098`, with an explicit `TIMEOUT`. W-0 remains in `dictionary_pure_tests` because it is a self-test of test-local data with no isolation hazard. Other pure gtests join their named dictionary, config and capi buckets; W-10–W-13 are Python, fuzz, measurement or scripts rather than grouped gtests. All CTest selection is by label. |
 | `[const §VIII.2]` | The send-path change is measured by the paired bench at verify (W-12). |
 | `[const §IX.1]` | Touched modules ≥ 95/85 or a per-line assessment, at verify. |
 | `[const §IX.4]` | clang-tidy / clang-format / cppcheck on changed files, at verify. |
@@ -188,16 +218,16 @@ specs/098-dialect-overlay/
 | Session | `src/session/session.cpp` (the send classification line); a new private header `src/session/send_header_tags.hpp` (`kSendHeaderTags` and `is_send_header_tag`, moved out of `session.cpp`, research R-7); `include/fixpp/session/session_config.hpp` (field and forward declaration removed) |
 | Config | `src/config/toml_config_loader.cpp` (scope-aware `dialect_overlay`), `src/config/selector_resolver.cpp` (per-session dictionary step), `src/config/loader_internal.hpp` (doc) |
 | C ABI | `include/fix/c_api/dict.h`, `include/fix/c_api/version.h`, `src/capi/dictionary.cpp`, `src/capi/capi_internal.hpp` (the exception-to-code mapping function, research R-6), `tests/abi/golden/fixpp_capi_symbols.txt`, `tools/capi_freeze.sha256` |
-| Python | `bindings/python/fixpp.i` (GIL audit table), `bindings/python/tests/test_098_dialect_overlay.py`, `bindings/python/tests/wheel/test_import_surface.py` |
-| Tests | `tests/dictionary/{dictionary_equivalence.hpp,dictionary_equivalence_test.cpp,overlay_equivalence_test.cpp,overlay_refusal_test.cpp,header_tags_test.cpp}` (`header_tags_test.cpp` is standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`; W-0–W-4 join `dictionary_pure_tests`), `tests/dictionary/fixtures/098/**`, `tests/session/{test_098_dialect_overlay_inbound,test_098_header_send}.cpp` (join `session_pure_tests`), `tests/config/test_098_dialect_overlay.cpp`, `tests/config/fixtures/098/**`, the rewritten T018/T020/T028 cells and their fixtures, `tests/capi/{dict_overlay_capi_test,version_test}.cpp`, `tests/session/test_resend_answer_field_order.cpp` (stale comment only), `tests/session/engine_establishment_timeout_test.cpp` (relies on the filled bundle), the CMakeLists of each bucket and standalone executable |
+| Python | `bindings/python/fixpp.i` (GIL audit table), `bindings/python/tests/test_098_dialect_overlay.py` (in-tree only, no wheel twin, so `bindings/python/tests/wheel/README.md` is unchanged), `bindings/python/tests/wheel/test_import_surface.py` |
+| Tests | `tests/dictionary/{dictionary_equivalence.hpp,dictionary_equivalence_test.cpp,overlay_equivalence_test.cpp,overlay_refusal_test.cpp,header_tags_test.cpp}` (`header_tags_test.cpp` is standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`; W-0–W-4 join `dictionary_pure_tests`), `tests/dictionary/fixtures/098/**`, `tests/session/{test_098_dialect_overlay_inbound,test_098_header_send}.cpp` (join `session_pure_tests`), `tests/config/test_098_dialect_overlay.cpp`, `tests/config/fixtures/098/**`, the rewritten T018/T020/T028 cells and their fixtures, `tests/capi/{dict_overlay_capi_test,dict_overlay_capi_live_test,version_test}.cpp` (the live arm is standalone `capi_098_dict_overlay_live_test`; `capi_pure_tests` gains `FIXPP_098_FIXTURE_DIR` and label `098` by `APPEND`), `tests/session/test_resend_answer_field_order.cpp` (stale comment only), `tests/session/engine_establishment_timeout_test.cpp` (relies on the filled bundle), the CMakeLists of each bucket and standalone executable |
 | Fuzz | `tests/fuzz/fuzz_dict_overlay.cpp`, `tests/fuzz/corpus/dict_overlay/`, `tests/fuzz/CMakeLists.txt` |
 | Records | `spec/{feature-catalogue,coverage-index,behaviors-and-limitations,behaviors-and-limitations-closed}.md`; every hit of data-model §G's inventory recipe (including `.specify/2c-codegen.md`, other design docs such as `.specify/2d-threading.md` and `.specify/2m-pybind.md`, and the brain pages whose `refs` name a changed file, such as `brain/components/{dictionary,session,c-api}.md`; `config.md` and `python-api.md` assessed); `CLAUDE.md` / `CLAUDE-history.md` at close-out |
 
 ## Phases
 
 1. **Unmodified-code witnesses first** (quickstart §1): exactly the rows of the contracts arm table whose
-   unfixed outcome is **fails** (W-6's edited-dictionary and replay arms, W-8's rows, W-10's import
-   surface). Negative controls and characterization pins are not in this list. Build and run in
+   unfixed outcome is **fails** (W-6's edited-dictionary and replay arms, W-8's rows, W-9's version pin
+   and symbol golden, W-10's import surface). Negative controls and characterization pins are not in this list. Build and run in
    `build/linux-clang-debug` after the §XVII.7 ask; that run is the RED record. **Stop rule:** a listed
    arm that passes on the unfixed tree means its premise is false; stop and decide, never adjust the
    test.
@@ -225,7 +255,8 @@ specs/098-dialect-overlay/
    M-9. Full suite: the existing header-order witnesses unchanged.
 6. **Config, C ABI, Python**: TOML scope and resolver step, the T018/T020/T028 rewrites; the C-ABI
    function and its mapping function, 1.13 pins, symbol golden, freeze hash; the SWIG audit row and
-   Python test. W-8, W-9, W-10. Mutants M-10, M-11, M-15.
+   Python test. W-8, W-9 (pure rows and the standalone live arm), W-10 (run by pytest; no ctest label
+   reaches it). Mutants M-10, M-11, M-15, M-19 (M-11 and M-19 also against W-10).
 7. **Removal, fuzz, comments**: delete `SessionConfig::dialect_overlay` and the forward declaration;
    the fuzz harness and seeds (W-11, M-7 and M-12 re-run against it per format, M-17 for the counter
    origin); the comment fixes (research R-14). A
@@ -273,9 +304,11 @@ specs/098-dialect-overlay/
 - **The send-path change moves an existing frame.** Measured not to for any vendored dictionary
   (research R-7, with a seeded probe); W-7 pins the measurement and W-6 keeps the existing header-order
   witnesses byte-identical.
-- **A cycle or budget mutant crashes the binary.** M-7's and M-12's RED may be a stack overflow or an
-  allocation failure, run under ASan where the report names it; the refusal rows themselves never recurse
-  or expand once the walk exists, because it runs before every recursive step.
+- **A cycle or budget mutant crashes or hangs the binary.** M-7's RED may be a stack overflow, run under
+  ASan where the report names it. M-12's run is bounded by the counter's arming at the smaller of the
+  prediction and the base's total plus the budget (research R-5): the counter refuses with its own
+  origin, and the bomb rows report that origin. The refusal rows themselves never recurse or expand once
+  the walk exists, because it runs before every recursive step.
 
 ## Complexity Tracking
 

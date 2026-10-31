@@ -1,7 +1,10 @@
 # Contract: 098 witnesses and their RED arms
 
 Every witness names its file, what it asserts, and how it is shown RED **for its stated reason**. Every
-CTest bucket carries label `098`; the standalone census also carries `dictionary` and `census`.
+CTest entry a 098 witness runs in carries label `098`. A bucket that already has labels gains it with
+`set_property(TEST … APPEND PROPERTY LABELS 098)` after that entry's last LABELS setter, so its existing
+labels survive. The standalone census also carries `dictionary` and `census`; the standalone live C-ABI
+arm also carries `capi`.
 
 **Test-binary disposition (`[const §VII.8]`).**
 
@@ -16,8 +19,8 @@ CTest bucket carries label `098`; the standalone census also carries `dictionary
 | W-6 | `session_pure_tests` | Pure session send tests with no isolation hazard. |
 | W-7 | dictionary half: standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`; session half: `session_pure_tests` | The dictionary half is an exact census over shipped dictionaries; the session half is a pure test and its bucket supplies `src` and `FIXPP_DICT_DATA_DIR`. |
 | W-8 | `config_045_tests` | Pure configuration parsing and resolution tests. |
-| W-9 | `capi_pure_tests` | Pure C-ABI mapping and load tests. |
-| W-10 | Python source and wheel suites | Not a gtest executable. |
+| W-9 | pure rows: `capi_pure_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. |
+| W-10 | in-tree Python suite (`bindings/python/tests/`); the import-surface row in the wheel suite | Not a gtest executable. The new test has no wheel twin: its overlay fixtures are not in the wheel. |
 | W-11 | `fuzz_dict_overlay` and its replay | Fuzz target outside §VII.8, built only under `FIXPP_BUILD_FUZZ`. |
 | W-12 | verify measurement | Not a test executable. |
 | W-13 | record-check scripts | Not a gtest executable. |
@@ -44,7 +47,8 @@ git -C ~/Work/Programming/fixpp-parallel worktree add --detach /mnt/wsl/fixppbui
 export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache
 cd /mnt/wsl/fixppbuild/fixpp-098-mutants
 conan install . -pr conan/profiles/linux-clang-debug --build=missing -of build/linux-clang-debug
-cmake --preset linux-clang-debug && cmake --build --preset linux-clang-debug -j2
+cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON     # bindings for W-10's M-11 / M-19 runs
+cmake --build --preset linux-clang-debug -j2
 # per mutant: apply, rebuild (rc must be 0), run the named binary unfiltered, record, `git checkout -- .`
 ```
 
@@ -63,8 +67,8 @@ as a RED arm before production code.
 | W-2 wrap probe (FIX50SP2) | yes | records `component_fields` of the first component past the wrap point against its raw members | either | probe, recorded in the verify record (research R-10); not a RED arm |
 | W-3 rows | no | the named exception, its message naming the key, cap, table or counter origin as applicable | — | M-4, M-5, M-6, M-7, M-12, M-13, M-14, M-16, M-17, M-18 (per row and format, below) |
 | W-4 rows | no | dispatch matches the direct loader | — | M-8 |
-| W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame | — | M-8 |
-| W-5 edited session | yes | accepts or refuses each frame as the edited dictionary dictates | passes | characterization pin (a complete edited file already works today) |
+| W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame; each accepted frame's scenario read holds | — | M-8 |
+| W-5 edited session | yes | accepts or refuses each frame as the edited dictionary dictates; each accepted frame's scenario read holds | passes | characterization pin (a complete edited file already works today) |
 | W-5 base session | yes | today's outcome on each frame | passes | negative control |
 | W-6 edited dictionary, scalar 5020 | yes | 5020 before the first body field | **fails** (5020 sent in the body) | **U**; M-9 after the fix |
 | W-6 edited dictionary, custom counted pair in the header | yes | Length and Data both before the first body field, adjacent | **fails** (pair sent in the body) | **U**; M-9 after the fix |
@@ -78,9 +82,14 @@ as a RED arm before production code.
 | W-8 AS-3, AS-4, value checks, two origins, no `[dictionary]` | yes | the stated reason class at the stated key path | **fails** (`recognized_not_yet_supported_step2` instead) | **U** |
 | W-8 rewritten T018 / T020 / T028 cells, `T020_DeferredSetExactCoverage` over the remaining keys | yes | the new outcomes | **fails** (the old outcomes) | **U** |
 | W-8 `T020_MissingRequired_Dictionary` | yes | unchanged | passes | negative control (N-3) |
-| W-9 rows | no | codes per research R-6 | — | M-11, M-15 |
-| W-10 import surface | yes | the exact set includes `dict_load_from_xml_with_overlay` | **fails** (name absent) | **U** |
-| W-10 other rows | no (the function is absent) | as W-9 | — | M-11 for the cap row |
+| W-9 pure rows (cap, conflict, NULL arguments, the mapping function) | no | codes per research R-6 | — | M-11 (cap rows), M-15 (bad-alloc rows) |
+| W-9 pure handle row (the handle is accepted by `fixpp_session_config_set_dictionary` and `fixpp_session_open` on an unstarted engine) | no | both calls return `FIXPP_ERR_OK` | — | control: a base-only handle passes it too; the live arm is the discriminating row |
+| W-9 version pin (`version_test.cpp`) | yes | the version is 1.13 | **fails** (MINOR is 12) | **U** |
+| W-9 symbol golden (`fixpp_capi_symbols.txt` gains the symbol) | yes | the library's exported set equals the golden | **fails** (the symbol is absent from the library) | **U** |
+| W-9 live arm | no | the counted 5011 value read intact through `fixpp_msg_get_bytes` | — | **M-19** |
+| W-10 import surface | yes | the exact set includes `dict_load_from_xml_with_overlay` | **fails**: the exact-set assertion, with that name as its only difference | **U** |
+| W-10 inbound read | no (the function is absent) | `msg_get_string(5011)` equals the full counted value | — | **M-19** |
+| W-10 cap row | no | `ValidatorError` with `.code == 201` | — | M-11 |
 | W-11 fuzz | no | only `dict::` errors escape (Orchestra by derived type); abort on a counter-origin refusal; counter = prediction on every load | — | M-7, M-12 and M-17 against the harness |
 
 ## Comparator self-test (runs first; a zero is trusted only after it)
@@ -183,9 +192,10 @@ counter origin.
   allow, rooted at the base's `Instrument`; Orchestra, `C_n = { componentRef C_{n-1}; groupRef G_n }` with
   `G_n = { numInGroup; fieldRef F_n; componentRef C_{n-1} }`. Both referenced by no message. A third row
   per format: two empty-bodied component chains, each level referencing both chains' previous level,
-  which emit nothing (research R-5). Each MUST fail with `overlay_limit_error` naming the budget, and
-  the call MUST return within ten times the same binary's load of the base alone, timed in the same test
-  (the bound is derived from the competing work, not fixed).
+  which emit nothing (research R-5). Each MUST fail with `overlay_limit_error` whose origin, read
+  through research R-5's seam, is the pre-walk budget, with the budget's message. That origin shows the
+  pre-walk refused before the build started (SC-003). No wall-clock bound is asserted: timing is W-12's
+  controlled measurement, not a correctness bound.
 - **Header expansion (G098-R2-003; XML only, Orchestra N/A: its header is component 1024, charged
   standalone):** a base with an empty `<messages>`, whose overlay puts nested groups under `<header>`
   that each reference one large component. It MUST load, with no counter-origin refusal, step counter = prediction and the
@@ -204,9 +214,10 @@ two fresh base loads differ. **RED**, each mutant run once per format where its 
 (conflict checks removed: the conflict rows load), **M-5** (byte cap removed), **M-6** (`parse_doctype`
 dropped: the DOCTYPE row loads), **M-7** (cycle check removed: the cycle row no longer fails with the
 cycle error; it loops, overflows, or fails differently; run under `linux-clang-asan`, whose report is
-the recorded RED), **M-12** (the step 6 budget comparison removed: the bomb rows exceed their time bound
-or exhaust memory, since the counter's limit is then the bomb's own saturated prediction; run under
-`linux-clang-asan`), **M-13** (guard steps 6 and 7 swapped: the guard-order row reports the redeclare
+the recorded RED), **M-12** (the step 6 budget comparison removed: the build is reached, and the counter,
+armed at the smaller of the prediction and the base's total plus the budget (research R-5), refuses
+once the build passes the base's total plus the budget; each bomb row goes RED with "counter origin,
+expected budget origin", in bounded time, in the Debug tree), **M-13** (guard steps 6 and 7 swapped: the guard-order row reports the redeclare
 conflict, or crashes, instead of the cycle error), **M-14** (step 5's entry and reference caps removed:
 those rows load), **M-16** (step 8a replaced by the previous draft's adjacency rule: the interposed,
 paired-later and new-Length refuse rows and the Orchestra rows go RED, and the load rows stay GREEN,
@@ -231,7 +242,13 @@ overlay fixture and its own pair of sessions (overlay and edited), so that closi
 reach the other frames: that overlay lists a first value on Text(58), which FIX44.xml declares with no
 `<value>` (re-check with a grep before relying on it), and a frame carrying a Text value it does not
 list is refused there and accepted on the base session. Assert: overlay session and edited session agree on every frame (accept,
-or the same Reject 373 and 371); the base session's outcome is the one recorded as today's. **RED**:
+or the same Reject 373 and 371); the base session's outcome is the one recorded as today's. On every
+accepted frame, the overlay and edited sessions also assert, from the application callback, the read
+the scenario names: AS-1, the value of 5001 by tag; AS-2, 5002 read inside the Parties entry through the
+group view (the group read is the assertion, not a top-level read); AS-3, `U1` reaches the callback;
+AS-4, the 5011 value equals the full counted bytes, SOH included; AS-6, 40 reads `Z`. Accept/reject
+alone does not show these: the validator's `table_view` and the layout the callback reads are two
+consumers, and a defect in the second would leave both sessions agreeing (FR-018). **RED**:
 **M-8** for the overlay arm. The base-session arm is a **negative control** and the edited-session arm a
 **characterization pin**: both pass on the unfixed tree and after the fix (arm table).
 
@@ -284,24 +301,76 @@ rewritten to the new outcomes, and `T020_DeferredSetExactCoverage` keeps every o
 
 ## C ABI and Python
 
-**W-9 C ABI.** `tests/capi/dict_overlay_capi_test.cpp` (joins `capi_pure_tests`): happy path → handle usable
-with `fixpp_session_config_set_dictionary`, a session opens and reads a custom tag; cap → 201 and NULL;
-conflict → 200 and NULL; NULL arguments → `FIXPP_ERR_NULL_HANDLE`. The exception-to-code mapping
-function (research R-6, declared in `src/capi/capi_internal.hpp`) is fed each type directly:
-`overlay_limit_error` → 201; `xml_oom_error` and a bare `std::bad_alloc` → 202; `xml_parse_error`,
-`overlay_conflict_error` and a `std::runtime_error` → 200; a non-`std::exception` → 200. In the
-`dictionary_pure_tests`, research R-5 step 2's status mapping, the one function both parses of an overlay
-call use (N-10), is fed `status_out_of_memory` (→ `xml_oom_error`) and one other failed status (→ the
-format's parse error); that both parses call it is structural, since no allocation-failure seam is added.
-`tests/capi/version_test.cpp` pins 1.13; `tests/abi/golden/fixpp_capi_symbols.txt` gains the symbol;
-`tools/capi_freeze.sha256` refreshed; `tools/check_capi_reentrancy.sh` passes. **RED**: **M-11** (the
-limit branch maps to 200) turns the cap rows RED; **M-15** (`std::exception` caught before
-`std::bad_alloc`) turns the bad-alloc rows RED.
+**W-9 C ABI.** Two executables.
+- **Pure rows**, `tests/capi/dict_overlay_capi_test.cpp` (joins `capi_pure_tests` in plan phase 6; it
+  starts no engine): cap → 201 and NULL; conflict → 200 and NULL; NULL arguments →
+  `FIXPP_ERR_NULL_HANDLE`; a control that the returned handle is accepted by
+  `fixpp_session_config_set_dictionary` and by `fixpp_session_open` on an engine that is never started
+  (a base-only handle passes it too). The cap row uses an entry-cap overlay (new messages = cap + 1),
+  not a byte-cap file. The bucket gains a compile definition, `FIXPP_098_FIXTURE_DIR`
+  (= `tests/dictionary/fixtures/098`), because none of its data-directory definitions reaches those
+  fixtures. The exception-to-code mapping function (research R-6, declared in
+  `src/capi/capi_internal.hpp`) is fed each type directly: `overlay_limit_error` → 201; `xml_oom_error`
+  and a bare `std::bad_alloc` → 202; `xml_parse_error`, `overlay_conflict_error` and a
+  `std::runtime_error` → 200; a non-`std::exception` → 200. In the `dictionary_pure_tests`, research R-5
+  step 2's status mapping, the one function both parses of an overlay call use (N-10), is fed
+  `status_out_of_memory` (→ `xml_oom_error`) and one other failed status (→ the format's parse error);
+  that both parses call it is structural, since no allocation-failure seam is added.
+  `tests/capi/version_test.cpp` pins 1.13; `tests/abi/golden/fixpp_capi_symbols.txt` gains the symbol;
+  `tools/capi_freeze.sha256` refreshed; `tools/check_capi_reentrancy.sh` passes.
+- **Live arm**, `tests/capi/dict_overlay_capi_live_test.cpp`, the standalone
+  `capi_098_dict_overlay_live_test` (labels `capi;098`; compile definitions `FIXPP_DICT_DATA_DIR` and
+  `FIXPP_098_FIXTURE_DIR`; a `TIMEOUT` sized by the module's recipe for live tests, the slowest lane's
+  time with headroom, as the comment on `capi_inbound_frame_dispositions` states it). Built on
+  `capi_dict066_loopback_support.hpp`, as `dict066_group_membership_red_test.cpp` is: two C-ABI engines
+  over plaintext loopback. Each session's dictionary is a handle that
+  `fixpp_dict_load_from_xml_with_overlay(FIX44.xml, the W-2 FIX44 overlay)` returns, set with
+  `fixpp_session_config_set_dictionary`, not the support header's base-dictionary seam. The sender
+  sends a hand-built application payload carrying the overlay's custom pair 5010 (LENGTH) / 5011 (DATA).
+  The Data value holds an SOH followed by text shaped as a field, for example `AB<SOH>58=CD`, with 58 not
+  otherwise in the frame. The registered callback reads 5011 with `fixpp_msg_get_bytes`, the reader
+  091's `length_data_send_recv_test.cpp` uses for an inbound Data value; the test asserts that it equals
+  the full counted value.
+  - *Why this observable.* A C-ABI session never validates inbound
+    (`SessionConfig::validate_inbound_messages` defaults to `false`, and nothing in `src/capi/` sets it),
+    and `fixpp_msg_get_string` / `fixpp_msg_get_bytes` read any top-level tag whatever the dictionary
+    declares (both return `view->get(tag)`, `src/capi/message_read.cpp`). So a custom
+    scalar tag reads the same on a base-only handle. Pairing follows the session's dictionary
+    (`Session::parse_and_dispatch_` parses with a `Parser` built over `inbound_tv_`, fixpp#426), so on a
+    base-only handle 5011 reads `AB`. The field-shaped tail keeps that frame well formed, so the RED is a
+    value mismatch, not a garbled frame whose callback never fires.
 
-**W-10 Python.** `bindings/python/tests/test_098_dialect_overlay.py` (and its wheel mirror where the
-suite mirrors): load with overlay, open a session config, typed error on a cap overlay;
-`test_import_surface.py`'s exact set includes `dict_load_from_xml_with_overlay`. **RED**: **U** for the
-import-surface row (the name is absent on the unfixed tree).
+**RED**: **M-11** (the limit branch maps to 200) turns the cap rows RED; **M-15** (`std::exception`
+caught before `std::bad_alloc`) turns the bad-alloc rows RED; **U** for the version pin and the symbol
+golden, which compile on the unfixed tree and fail there; **M-19** (`fixpp_dict_load_from_xml_with_overlay`
+calls `load_any(base)` and drops the overlay) turns the live arm RED with the value mismatch, and the W-10
+inbound row too. The pure handle row is a control, not a RED arm.
+
+**W-10 Python.** `bindings/python/tests/test_098_dialect_overlay.py`, in-tree only (run with
+`PYTHONPATH=<build>/lib`, as `test_093_inbound_frame_dispositions.py` is). It has no wheel twin: the
+overlay fixtures are not in the wheel. The wheel README's enforced allowlist names wheel files, and
+`ci/assert-wheel-test-parity.py` derives its twins from the wheel side, so an in-tree file without a twin
+needs no row (as `test_error_coverage.py` and `test_gil_release_canary.py` have none). Rows:
+- **Inbound read:** `fixpp.dict_load_from_xml_with_overlay(FIX44.xml, the W-2 FIX44 overlay)`, set on an
+  initiator session config. A raw TCP peer written in the test (the `test_093` pattern: it accepts the
+  connection, reads the Logon and answers it) writes W-9's live-arm frame: the 5010/5011 pair, with the
+  SOH and the field-shaped tail in the Data value. The callback registered with
+  `session_register_callback` copies `msg_get_string(5011)` out, and the test asserts that it equals the
+  full counted value. `msg_get_string` reads the same field as the C arm's `fixpp_msg_get_bytes` (both
+  return `view->get(tag)`), and the value is ASCII, so the binding's UTF-8 decode keeps it. Python wraps no group reader (`fixpp.i` re-declares only the in-scope read
+  functions of `message.h`), so this Length+Data value is the dictionary-only observable both surfaces
+  can read. It is the same frame as W-9's live arm, so US4 AS-3 ("matches the C ABI") is witnessed on the
+  inbound behaviour, not only on reachability.
+- **Cap row:** an entry-cap overlay raises `ValidatorError` with `.code == 201`. The class alone is not
+  the assertion: `ValidatorError` covers every code from 200 to 299, so it stays green when the limit
+  branch maps to 200.
+- **Import surface:** `bindings/python/tests/wheel/test_import_surface.py`'s exact set includes
+  `dict_load_from_xml_with_overlay` (a suite-native row, already on the allowlist).
+
+**RED**: **U** for the import-surface row. The recorded failure MUST be the exact-set assertion whose only
+difference is the missing `dict_load_from_xml_with_overlay`; an ImportError, a `fixpp` imported from
+outside the build's `lib/`, or any other difference is RED for the wrong reason (stop rule). **M-19** for
+the inbound read (the value reads `AB`); **M-11** for the cap row (`.code` is 200).
 
 ## Fuzz, performance, records
 
@@ -314,7 +383,7 @@ R-11). The harness aborts on a counter-origin refusal even though its public typ
 6's prediction. The seeds include the expansion bombs and the empty-component chain of both formats and an
 Orchestra cycle. CI replays the seeds (`linux-clang-asan`); the ten-minute run is `/speckit-verify`'s
 fuzz step. **RED**: **M-7** re-run against the harness with each format's cycle seed, **M-12** with
-each bomb seed (the harness must crash or exhaust its limits), and **M-17** with a valid overlay (the
+each bomb seed (the harness aborts on the counter origin), and **M-17** with a valid overlay (the
 harness aborts on the counter origin).
 
 **W-12 Performance (SC-005, `[const §VIII.2]`).** Measured in the verify record, not a ctest:

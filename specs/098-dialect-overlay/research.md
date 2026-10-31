@@ -247,7 +247,7 @@ The guards run in this order. Each step is non-recursive or iterative, and none 
 | 7 | Conflicts | R-4's remaining checks. Every reachability question R-4 asks is answered from step 6's level sets; there is no second recursive walk. Level sets are built only for the parents the overlay extends and the definitions they reach at their own level (for a QuickFIX-XML header or trailer addition, every message), as sorted tag vectors memoized per definition. Each is no larger than the base's declared field count, which bounds the memory: the code comment states that recipe. SC-005's fixture does not measure this cost. |
 | 8 | Splice | R-3. |
 | 8a | Length+Data relation | the factored pair detection (R-3) on the base document, run before step 8 changes it, and on the spliced document; refused with `overlay_conflict_error` when a pair touching a base tag differs. It reads `<fields>` and walks containers in document order (XML) or reads `lengthId` attributes (Orchestra), following no references. Errors it raises on the spliced document other than a collision (for example an unknown field type) are the loader's own, as the build would raise them. |
-| 9 | Build | the loader's `build_handle_from_doc`, with the step counter armed at step 6's merged total (below). |
+| 9 | Build | the loader's `build_handle_from_doc`, with the step counter armed at the smaller of step 6's merged total and the base's total plus the budget (below). |
 
 **The step counter: the bound holds by construction (Gate A round 2, Root cause B).** Step 6 is a model
 of `finalize`'s expansion. A model can miss an expansion site that a later change adds (round 2 found
@@ -257,7 +257,13 @@ one: a header-store walk). So the build does not trust it:
   passes its limit, `expand_field_list` throws `overlay_limit_error` with the distinct counter origin
   and message "expansion step count exceeded the pre-walk prediction (internal model drift)". Step 6's
   legitimate budget refusal retains its budget origin and message.
-- The overlay path arms it with step 6's merged total. The `load` path leaves it unarmed (a null limit),
+- The overlay path arms it with the smaller of step 6's merged total and the base's own total plus the
+  budget. Wherever the build is reached, step 6's budget comparison has already admitted only a merged
+  total at most the base's total plus the budget, so the armed value is the prediction and the equality
+  W-1 and W-2 assert is unchanged. The second term is for a build reached without that comparison
+  (mutant M-12): the counter then refuses with the counter origin once the build passes the base's
+  total plus the budget, so M-12's RED is bounded and loud, not a hang or an exponential allocation
+  (Gate A loop 2 round 1, G098-L2R1-003). The `load` path leaves the counter unarmed (a null limit),
   so `load`'s behaviour is unchanged by construction.
 - An `expand_field_list` call step 6 does not model can therefore cause a loud refusal, never unbounded
   work. The counter does not see other recursive walks; none is added (the header store is a
@@ -624,8 +630,9 @@ built under `FIXPP_BUILD_FUZZ`). The ten-minute run is `/speckit-verify`'s fuzz 
   `tools/capi_freeze.sha256`. `src/capi/fixpp_capi.map` exports `fixpp_*` by glob and needs no edit.
 - Python: SWIG wraps all of dict.h and the `fixpp_dict_t**` out-param by type, so the function is
   exported as `fixpp.dict_load_from_xml_with_overlay`. Update the exact-set import test
-  (`bindings/python/tests/wheel/test_import_surface.py`) and the GIL audit table in `fixpp.i`; add a
-  Python test. The OO wrapper `fixpp_oo.Dictionary` is not extended (not asked for).
+  (`bindings/python/tests/wheel/test_import_surface.py`) and the GIL audit table in `fixpp.i`; add an
+  in-tree Python test that reads an inbound Length+Data value only the merged dictionary reads intact,
+  as the C-ABI live arm does (contracts W-9, W-10). The OO wrapper `fixpp_oo.Dictionary` is not extended (not asked for).
 
 ## R-13 — Mutation runs
 

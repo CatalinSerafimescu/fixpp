@@ -207,6 +207,25 @@ orchestrator default on product behaviour, marked; the owner confirms it at Gate
   pre-existing: probed, filed if shown, and excluded from the census check. The alternative, widening the
   index, changes the pinned 12-byte `ComponentRef` / `GroupRef` layout (research R-10).
 
+### Session 2026-10-31 (Gate A loop 2 round 1)
+
+Technical answers, each integrated into the user story, FR or witness it affects. None is an owner
+matter: the shipped surfaces (C++, C ABI, Python through SWIG, TOML) are unchanged.
+
+- Q: What does US4's inbound read observe at the C ABI and in Python? → A: A custom Length+Data value
+  with an SOH inside, read intact by its count. C-ABI and Python sessions do not validate inbound
+  (`SessionConfig::validate_inbound_messages` defaults to `false`, and neither surface sets it), and
+  `fixpp_msg_get_string` reads any top-level tag, so a custom scalar tag reads the same on the base
+  alone. Python has no group reader. Pairing follows the session's dictionary (fixpp#426), so only the
+  merged dictionary reads the value intact. The C and Python tests read the same frame (US4, FR-013,
+  FR-014; contracts W-9, W-10).
+- Q: What bounds the build when the pre-walk's budget comparison is missing? → A: The step counter is
+  armed at the smaller of the pre-walk's prediction and the base's total plus the budget. Wherever the
+  comparison ran, the armed value is the prediction, so behaviour is unchanged; without it, the counter
+  refuses with its own origin in bounded time (FR-009, research R-5).
+- Q: Is a wall-clock bound part of the expansion-budget refusal? → A: No. The refusal's budget origin
+  shows that the pre-walk refused before the build started (SC-003). Timing is measured only by W-12.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — A session understands a venue's dialect without an edited vendored file (Priority: P1)
@@ -319,13 +338,17 @@ config, as it does today with a plain dictionary.
 **Why this priority**: The C ABI is a supported surface (Article X) and Python sits on it. The entry point
 is additive.
 
-**Independent Test**: A C-ABI test and a Python test each load base + overlay, open a session and read a
-custom tag from an inbound message.
+**Independent Test**: A C-ABI test and a Python test each load base + overlay, open a session and read,
+from an inbound message, a value only the merged dictionary produces: the overlay's custom Length+Data
+value with an SOH inside, read intact by its count. A custom scalar tag would not show it, because C-ABI
+and Python sessions do not validate inbound and read any top-level tag whatever the dictionary declares
+(Clarifications, Gate A loop 2 round 1).
 
 **Acceptance Scenarios**:
 
 1. **Given** a base path and an overlay path, **When** the C-ABI load-with-overlay function is called,
-   **Then** it returns a dictionary handle usable with `fixpp_session_config_set_dictionary`.
+   **Then** it returns a dictionary handle usable with `fixpp_session_config_set_dictionary`, and a
+   session using it reads the overlay's custom Length+Data value from an inbound message intact.
 2. **Given** an overlay that exceeds a cap, **When** loaded through the C ABI, **Then** the call returns
    `FIXPP_ERR_DICT_LIMIT_EXCEEDED` and no handle; a conflicting or malformed overlay returns a documented
    non-OK code and no handle.
@@ -514,9 +537,11 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **FR-013 (C ABI)**: The C ABI MUST gain an additive function that loads a base and an overlay by path
   and returns a dictionary handle with the same ownership as `fixpp_dict_load_from_xml`. A cap failure
   returns `FIXPP_ERR_DICT_LIMIT_EXCEEDED`; every other failure returns a documented non-OK code; no
-  handle is returned on failure. The C-ABI MINOR version is bumped.
+  handle is returned on failure. A session given the returned handle parses with the merged dictionary
+  (US4 AS-1). The C-ABI MINOR version is bumped.
 - **FR-014 (Python)**: The new C-ABI function MUST be reachable from the Python bindings through SWIG and
-  covered by a Python test.
+  covered by a Python test that reads the same inbound Length+Data value as the C-ABI test (US4) and
+  checks the cap error's code.
 - **FR-015 (TOML session dictionary)**: Loading a TOML configuration MUST set each `[[session]]`'s
   `SessionConfig::dictionary`: to the `[dictionary]` dictionary for a session without an overlay, and to
   the merged dictionary for a session with one. `EngineConfig::dictionaries` keeps holding the base
@@ -607,7 +632,7 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   each; AS-7 is measured by SC-008.
 - **SC-003**: Each US2 refusal is produced with its named error (one table-driven witness, every row
   named, in both formats where the refusal applies), and the expansion-budget refusal completes before
-  the expansion exceeds the budget.
+  the expansion exceeds the budget, shown by its origin: the pre-walk refuses before the build starts.
 - **SC-004**: A TOML file whose sessions name no host-side dictionary opens every session (US3 AS-1),
   where the unmodified tree fails `open()` with `invalid_session_config`.
 - **SC-005**: Loading FIX50SP2 with the named at-cap fixture overlay (the cap's maximum count of new

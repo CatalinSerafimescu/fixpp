@@ -81,7 +81,7 @@ Signatures: research R-8. `DialectExtension` stays a reserved enumerator.
 | Errors | research R-6 |
 | Version | C-ABI 1.12 → **1.13** (additive) |
 | Pins to update | `include/fix/c_api/version.h`, `tests/capi/version_test.cpp`, `tests/abi/golden/fixpp_capi_symbols.txt`, `tools/capi_freeze.sha256` |
-| Python | `fixpp.dict_load_from_xml_with_overlay` (SWIG, automatic); `bindings/python/tests/wheel/test_import_surface.py`; the GIL audit table in `bindings/python/fixpp.i` |
+| Python | `fixpp.dict_load_from_xml_with_overlay` (SWIG, automatic); `bindings/python/tests/wheel/test_import_surface.py`; the GIL audit table in `bindings/python/fixpp.i`. The new Python test is in-tree only, with no wheel twin, so the wheel README's allowlist is unchanged (contracts W-10) |
 
 ## §D — B&L delta (`spec/behaviors-and-limitations.md`)
 
