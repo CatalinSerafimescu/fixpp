@@ -1,0 +1,528 @@
+---
+description: "Task list for 098-dialect-overlay"
+---
+
+# Tasks: Dialect overlay — venue additions layered on a base dictionary (D-009)
+
+**Input**: `specs/098-dialect-overlay/` — spec.md, plan.md, research.md (R-1..R-15), data-model.md (§A–§G),
+contracts/surface.md, contracts/witnesses.md, quickstart.md. Gate A converged at loop 2 round 2 and the
+owner signed it off (plan.md `## Gate A`; spec Clarifications "Gate A sign-off, owner"); the bundle is at
+library commit `8e101e41` on branch `098-dialect-overlay`.
+**Tests**: requested. TDD throughout (`[const §VII.3]`, `[const §VII.4]`): every witness W-0..W-11 is shown
+RED for its stated reason, on the unfixed tree (**U**) or against its named mutant (contracts/witnesses.md,
+arm table), before it is trusted GREEN. W-12 is a measurement and W-13 the record checks.
+
+## Execution rules (apply to every task)
+
+- **Executor (`[const §XVI.6]`).** Every task names one:
+  - `(implementer)` is the `phase-implementer` agent. It makes EVERY change to `src/**`, `include/**`,
+    `tests/**` (sources, fixtures, CMake, the fuzz harness and its seed corpus), `bindings/**`,
+    `tools/capi_freeze.sha256`, and every mutant. The orchestrator never writes those files by any tool,
+    python and sed included.
+  - `(orchestrator)` writes documentation and governance text only: `spec/feature-catalogue.md`,
+    `spec/coverage-index.md`, `spec/behaviors-and-limitations{,-closed}.md`, `.specify/2c-codegen.md` and
+    the other design docs §G's recipe reaches, `brain/**`, the library `CLAUDE.md` / `CLAUDE-history.md`,
+    decision records, bundle corrections and filed issues. It runs builds, tests, read-only instruments and
+    the quickstart blocks, and adjudicates stop rules.
+- **The tree.** The PR's tree is `~/Work/Programming/fixpp-parallel`, branch `098-dialect-overlay`. The main
+  checkout is not used: no build, no edit, never switched. Check the branch with
+  `git -C ~/Work/Programming/fixpp-parallel rev-parse --abbrev-ref HEAD` before each commit batch. Commits
+  are serial. Never `git stash` (every worktree shares it). An implementer makes NEW commits only (no
+  `--amend`); check the reflog after an implementer commit.
+- **Where mutants run (contracts preamble, `[const §XVI.6]`).** Only in the third worktree
+  `/mnt/wsl/fixppbuild/fixpp-098-mutants` (`$M` below), detached at the head under test. Never in
+  `fixpp-parallel`, never in the main checkout, never committed to the branch. Its trees:
+  `$M/build/linux-clang-debug` (configured with `-DFIXPP_BUILD_PYTHON=ON`, for W-10's rows) and
+  `$M/build/linux-clang-asan` (configured with `-DFIXPP_BUILD_FUZZ=ON`, for M-7 and W-11's rows; the
+  contracts preamble configures no ASan tree, T029 adds it).
+- **Mutant protocol (contracts preamble, quickstart §4).** For each row:
+  1. `git -C "$M" rev-parse HEAD` equals that phase's `H` and `git -C "$M" status --porcelain` is empty;
+  2. the implementer applies the mutant;
+  3. rebuild the named binaries (`cmake --build --preset linux-clang-debug --target <t> -j"$J"`, or the
+     ASan preset for an ASan row); a row whose rebuild failed proves nothing, so the row is gated on build
+     rc 0;
+  4. run each named binary UNFILTERED (`--gtest_filter` only narrows the report);
+  5. record witness | mutant | build rc | test rc | the failing assertion's message | collateral (every
+     other test the unfiltered run reports failing) | `H`;
+  6. revert with `git -C "$M" checkout -- .` (contracts preamble) and confirm a clean status.
+
+  Collateral is read against that phase's unmutated baseline: until Phase 8, the committed Phase 2 arms
+  fail in every baseline that builds their binaries, so a test already failing there is listed as
+  pre-existing, not as collateral.
+
+  A Python row (M-11, M-19 against W-10) first checks that `$M/build/linux-clang-debug/lib/_fixpp.so` was
+  relinked after the mutant's edit (its timestamp is newer than the edited file), since it links
+  `fixpp_capi` statically; a GREEN on a stale `_fixpp.so` is not "the mutant survived". A row whose `H`
+  is not its phase's `H` is void and re-runs.
+- **Evidence file.** Until `/speckit-verify` runs, every "record" goes to
+  `.specify/decisions/098-dialect-overlay-evidence.md` (the symlink resolves to the parent's tracked
+  `decisions/speckit/`). The orchestrator writes it; an implementer task's report carries the entry. Each
+  entry: task ID, command, output or the message that fired, `git rev-parse HEAD` with
+  `git status --porcelain` empty (or the mutant named and `$M`'s `H`).
+- **Builds (`[const §XVII.7]`).** The owner pre-approved every local build of this feature (T002 records it),
+  so the quickstart's per-build `AskUserQuestion` is satisfied; a build outside T002's scope is asked first.
+  `export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`. Parallelism `-j"$J"`, with `J` set at each build from the
+  owner's current rule: `-j8` while the owner is away, `-j2` otherwise (the `-j2` in quickstart and
+  contracts is the "otherwise" case). One build owner per build directory. Never a Windows and a Linux
+  build at once. `df -h /mnt/wsl/fixppbuild` before each build (every `fixpp-parallel` build directory is a
+  symlink onto it, and `$M` lives on it). Long builds run detached
+  (`setsid nohup <build> > <log> 2>&1; touch <marker>.done`) with ONE background waiter on the marker (a PID
+  or `.done` file, never `pgrep -f`), never a foreground poll loop. Before any full `ctest` and before any
+  MSVC run, `cat /mnt/c/temp/fixpp/.sandbox-lock`; an MSVC run takes that lock first (Step 0 of PARENT
+  `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`) and releases it at close-out; a lock held
+  by someone else means ask the owner.
+- **Records rules.** No line-number citation in any added line (cite a symbol, a heading or a quoted
+  phrase); no shipped comment records a count, an enumerated value range or a pasted result (a comment
+  records a procedure, not a result). `python3 tools/check_line_citations.py --range origin/main..HEAD`
+  after every commit batch.
+- **What does not change** (plan Constraints, spec FR-001, FR-021, research R-6): the validator and the
+  parser (`include/fixpp/wire/`); the engine registry (`include/fixpp/dict/version_registry.hpp`,
+  `src/dictionary/version_registry.cpp`); the behaviour of `load`, `load_from_string`, `load_any` and
+  `OrchestraLoader::load`; the C ABI's `fixpp_dict_load_from_xml`. Nothing is committed that changes them.
+
+## Format: `[ID] [P?] [Story] Description`
+
+`[P]`: parallel-safe (different files, no dependency on an incomplete task). `[US1]`…`[US5]`: spec.md user
+stories. Paths are relative to the library root (`~/Work/Programming/fixpp-parallel`) unless marked PARENT
+(`/home/catalin/Work/Programming/Antreprenoriat/`).
+
+## Before Phase 1 (pipeline, not tasks)
+
+`/speckit-analyze` (pipeline step 6) runs on this tasks.md with the explicit plan↔spec drift pass over every
+Clarifications answer, including the `/speckit-plan` supersession of the clarify-time Orchestra-format
+reading (`[const §XVI.4]`, plan Constitution Check). It also dispositions these bundle gaps, which this file
+resolves as stated in the task named:
+(i) W-5 sits in no plan phase (T042 places it with plan phase 4, whose mutant M-8 is its RED);
+(ii) contracts names `config_045_tests` for W-8, but `T018_Step2DialectOverlay` and
+`T028_DialectOverlayDeferred` are in `config_044_tests` (T003 labels both buckets);
+(iii) quickstart §7 and contracts W-13 give `check_bl_delta.py --root <tree>` without its `gate --feature`
+subcommand (T089 uses the real form);
+(iv) quickstart and contracts hard-code `-j2` (Execution rules);
+(v) the contracts preamble configures no ASan tree in `$M` (T029);
+(vi) M-1 and M-2 are named for the XML splice only (T052 note);
+(vii) W-3's header-expansion row asserts a header store that only exists from plan phase 5 (T019, T055);
+(viii) `T028_DialectOverlayDeferred`'s name states the superseded outcome; 097's naming rule renames such a
+test, and analyze rules on it (T007).
+Then `/speckit-checklist` (step 7) and the checklist audit (step 9, `/speckit-checklist-audit`), which
+blocks Phase 1. Then `python3 tools/check_line_citations.py --range origin/main..HEAD` charges this bundle
+(research.md's preamble says it carries line leads for the implementer).
+
+---
+
+## Phase 1: Setup (ctest wiring, build approval, baseline)
+
+- [ ] T001 (orchestrator) Pre-flight: in `fixpp-parallel`, the branch is `098-dialect-overlay`, `git merge-base --is-ancestor 8e101e41 HEAD` holds and `git status --porcelain` is empty; `readlink -f .specify/decisions` resolves under PARENT `research/G19-fix-fpml-iso20022/decisions/speckit`. Create `.specify/decisions/098-dialect-overlay-evidence.md` with a header naming the feature, the branch, the tree and this file's role (Execution rules, Evidence file).
+- [ ] T002 (orchestrator) Record in the evidence file the owner's pre-approval of every local build (`[const §XVII.7]` resource gate) and its scope: (a) incremental and full `linux-clang-debug` builds in `fixpp-parallel`, configured with `-DFIXPP_BUILD_PYTHON=ON`; (b) `$M`'s Debug (Python ON) and ASan (fuzz ON) trees; (c) `fixpp-parallel`'s `linux-clang-asan` with `-DFIXPP_BUILD_FUZZ=ON` (W-11); (d) `linux-clang-release` for W-12; (e) the final full configure + build + `ctest` and the full `pytest bindings/python/tests/` (T096); (f) `/speckit-verify`'s preset matrix, any MSVC run under the sandbox lock. Record the parallelism rule as Execution rules states it.
+- [ ] T003 (implementer) ctest label wiring (`[const §VII.8]`; no new executable here): append label `098` with `set_property(TEST <entry> APPEND PROPERTY LABELS 098)`, placed after that entry's last LABELS setter, to `session_pure_tests` (`tests/session/CMakeLists.txt`), `config_044_tests` and `config_045_tests` (`tests/config/CMakeLists.txt`), `capi_pure_tests` (`tests/capi/CMakeLists.txt`; its `abi_symbol_golden_test.cpp` reads `FIXPP_CAPI_GOLDEN`, so W-9's golden arm runs under `-L 098`) and `dictionary_pure_tests` (`tests/dictionary/CMakeLists.txt`). Reconfigure `build/linux-clang-debug` with `-DFIXPP_BUILD_PYTHON=ON` (rc 0, else stop); `ctest --preset linux-clang-debug -N -L 098` lists exactly those entries; record the `ctest --preset linux-clang-debug -N` total as the SC-006 baseline. Commit: `098 P1: ctest label 098 on the buckets hosting 098 witnesses`.
+- [ ] T004 (implementer) Baseline at T003's head (code identical to `origin/main`): build every `-L 098` binary plus `session_resend_answer_field_order` and `session_091_data_send` (W-6's byte-identity witnesses) and run each whole; `PYTHONPATH="$PWD/build/linux-clang-debug/lib" python3 -c 'import fixpp; print(fixpp.__file__)'` prints a path under that `lib/` (SWIG at or above 4.5.1 first on `PATH`). Report pass counts for the evidence file.
+
+### Expected ctest list (derived, not counted)
+
+- **Label `098`** (`ctest --preset linux-clang-debug -N -L 098` at any head): the buckets T003 labels, plus
+  the standalone `dictionary_098_header_census_test` (from T054) and `capi_098_dict_overlay_live_test` (from
+  T067). In the ASan tree, the fuzz replay entry of `fuzz_dict_overlay` carries label `fuzz` (T081).
+- **Module selection** (quickstart §3): `ctest --preset linux-clang-debug -N -L "dictionary|config|capi|session|091|field-order"`
+  must list the entries that run every file W-6's byte identity names
+  (`tests/session/test_resend_answer_field_order.cpp`, `tests/session/test_091_data_send.cpp`). An entry
+  missing from a list gets the label, or joins the regex, before the run is trusted.
+- **New entries**: `ctest -N`'s total at the final head equals T003's total plus the two standalone entries
+  above, and nothing else.
+- **Tests this contract names as rewritten** (SC-006's only allowed differences from `origin/main`):
+  `T018_Step2DialectOverlay` (`tests/config/test_load_negative_battery.cpp`), `T028_DialectOverlayDeferred`
+  (`tests/config/test_load_selectors.cpp`), the T020 cells of `tests/config/test_load_deferred_surface.cpp`
+  with `T020_DeferredSetExactCoverage`'s key set, the pin in `tests/capi/version_test.cpp`,
+  `tests/abi/golden/fixpp_capi_symbols.txt`, the exact set of
+  `bindings/python/tests/wheel/test_import_surface.py`, every test naming `SessionConfig::dialect_overlay`
+  (derived by T078's grep), `tests/session/engine_establishment_timeout_test.cpp` (relies on the filled
+  bundle) and the comment of `tests/session/test_resend_answer_field_order.cpp` (comment only).
+
+**Checkpoint**: `ctest -N -L 098` matches the list; the baseline is recorded.
+
+---
+
+## Phase 2: Foundational — unmodified-code witnesses (plan phase 1, quickstart §1)
+
+**⚠️ Blocks every later phase.** Write exactly the arms the contracts arm table marks **fails** on the
+unfixed tree, and nothing else (negative controls and characterization pins are not in this list): W-6's two
+edited-dictionary arms and the replay arm's 5020 half, W-8's rows (all but
+`T020_MissingRequired_Dictionary`), W-9's version pin and symbol golden, W-10's import-surface row. W-5 and
+W-7 have no arm here. The run is the RED record.
+
+- [ ] T005 [P] (implementer) W-6 U arms in the new `tests/session/test_098_header_send.cpp`, added to `session_pure_tests`'s sources in `tests/session/CMakeLists.txt`: (1) a session whose dictionary is a complete edited FIX44 declaring header tag 5020, loaded with the existing `XmlLoader::load_from_string`, sends a message with 5020 placed after a body field → 5020 sits before the first body field; (2) an edited dictionary declaring the custom pair 5030 (LENGTH) / 5031 (DATA), both in `<header>`, sent after a body field → both tags in the header, adjacent, the Data value following its Length's class (A-008); (3) the replay arm: the 5020 message replayed through ResendRequest → 5020, 43 and 122 all sit inside the header (the 5020 half is U; the 43/122 half is a pin; `kReplayHeaderTags` unchanged, research R-7). The edited dictionaries are hand-written edits of `FIXPP_DICT_DATA_DIR "/FIX44.xml"`, never produced by overlay code: a checked-in fixture under `tests/dictionary/fixtures/098/`, or an in-test edit whose anchor must match exactly once; the report states which. The overlay arm waits for T054.
+- [ ] T006 [P] (implementer) W-8 U rows in the new `tests/config/test_098_dialect_overlay.cpp`, added to `config_045_tests`'s sources in `tests/config/CMakeLists.txt`, with fixtures under `tests/config/fixtures/098/` (the TOML files and the QuickFIX-XML overlays they name, by paths relative to the configuration file): AS-1, a session without an overlay gets `engine.dictionaries.front()` as `config.dictionary` and opens with no host code (SC-004); AS-2, a session with an overlay gets the merged dictionary (pointer differs from the base, a custom tag is valid in its `table_view`); two sessions naming one path share one pointer; AS-5, `[default]` inheritance and override; AS-3, a missing file and a conflicting overlay each report at the key path where the value was written; AS-4, root scope refused with "dialect_overlay is a session key; set it in [default] or [[session]]"; a non-string value → `malformed_value`; an empty string → `empty_required`; `[default]` and `session[1]` naming one failing file → two diagnostics, one at each key path; a `[[session]]` with `dialect_overlay` and no `[dictionary]` → "dialect_overlay requires [dictionary]" at that key path, and no crash.
+- [ ] T007 [P] (implementer) W-8 rewritten cells (U): `T018_Step2DialectOverlay` (`tests/config/test_load_negative_battery.cpp`, `config_044_tests`), `T028_DialectOverlayDeferred` (`tests/config/test_load_selectors.cpp`, `config_044_tests`) and the T020 cells of `tests/config/test_load_deferred_surface.cpp` (`config_045_tests`), each rewritten to its new outcome; `T020_DeferredSetExactCoverage` keeps guarding every other deferred key, its set re-derived from `kDeferred` (research R-9). `LoadNegativeBattery.T020_MissingRequired_Dictionary` is not touched (negative control, N-3). A rename of `T028_DialectOverlayDeferred` follows analyze's ruling (gap viii).
+- [ ] T008 [P] (implementer) W-9 U arms: `tests/capi/version_test.cpp` pins C-ABI 1.13; `tests/abi/golden/fixpp_capi_symbols.txt` gains `fixpp_dict_load_from_xml_with_overlay` in its sorted place. `include/fix/c_api/version.h` is not touched here.
+- [ ] T009 [P] (implementer) W-10 U arm: `bindings/python/tests/wheel/test_import_surface.py`'s exact set gains `dict_load_from_xml_with_overlay` (a suite-native row, already on the allowlist).
+- [ ] T010 (implementer) Run quickstart §1's block exactly, with `-j"$J"`: `cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON` (a failed configure stops here), build, `ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure`, every binary UNFILTERED, the `fixpp.__file__` check, and the import-surface test from a copy (`W=$(mktemp -d)`). Report every arm against quickstart §1's Expected: W-6, 5020 or the 5030/5031 pair found after the first body field; W-8 AS-1, `open()` returns `invalid_session_config`; the other W-8 rows, `recognized_not_yet_supported_step2` instead of the stated outcome; W-9, the version reads 1.12 and the golden reports `fixpp_dict_load_from_xml_with_overlay` missing from the library; W-10, the exact-set assertion with that name as its only difference. Also report the controls: `T020_MissingRequired_Dictionary` GREEN, and `SendPayloadTagTest.*`, `ResendAnswer*`, `HeaderPairSend091.*`, `DataSend091.*` GREEN. Do not adjust any arm.
+- [ ] T011 (orchestrator) Adjudicate T010 under plan phase 1's stop rule, quoted verbatim: "**Stop rule:** a listed arm that passes on the unfixed tree means its premise is false; stop and decide, never adjust the test." and quickstart §1's wrong-reason rule, verbatim: "An ImportError, a `fixpp` imported from outside `$L`, or any other set difference is RED for the wrong reason: stop." A fixture or setup fault (an arm failing for another reason) goes back to T005–T009 and T010 re-runs; a passing arm stops the feature for a decision. Record.
+- [ ] T012 (implementer) Commit T005–T009 after T011 clears: `098 P2: unmodified-code witnesses (RED record)`. Run the line-citation check; report the hash.
+
+**Checkpoint**: the RED record is in the evidence file; no production file changed. These arms stay RED until
+their phase: W-6 until Phase 6, W-8 until Phase 7, W-9's pin and golden and W-10 until Phase 8. No later
+checkpoint before Phase 8 claims `ctest -L 098` GREEN.
+
+---
+
+## Phase 3: Foundational — the comparator (plan phase 2, quickstart §2)
+
+**⚠️ Nothing reads W-1/W-2 before W-0 is GREEN.** Test-only; compiled against unmodified code.
+
+- [ ] T013 (implementer) `tests/dictionary/dictionary_equivalence.hpp` (research R-10 §1–§3): compares two `Dictionary` values and their `table_view`s and returns a list of differences, each keyed by an entry of a store list it declares as data. R-10 §3, verbatim: "The list has:
+  - one entry per `table_view` data member, and per sub-member of a member that holds several stores (for example `group_ctx_entry`'s `members` and `required_members`, and `enum_domain`'s `codes` and `multi_value`), with the two pair directions as two entries;
+  - one entry per `Dictionary` query field, including `FieldRef::component_index` and `group_no_tag`, and `ComponentRef::component_id` and `parent_component_id`;
+  - the census entries (`component_fields` and `group_fields` against the raw document, below)."
+
+  The header comment carries the recipe that re-derives the list ("read `table_view.hpp`'s `private:` block and the `Dictionary` query and `*Ref` field declarations"), never the list. An entry a version-matched overlay cannot change carries a stated reason instead of a seed (for example `fixt_framing_*`, a function of `which_session_version()`, which FR-006 fixes). Keys come from the union of a raw-document census of both sides, a test-only read of the handle's indexes through `src/dictionary/dictionary_internal.hpp`, and the public API. Bare, exact and context group stores are compared separately. `component_fields` / `group_fields` are also compared with the raw census for each component and group whose start and count, computed from the census sizes in `finalize`'s order, fit in 16 bits; any other is listed as a wrap case, not compared. No `is_header_tag` entry yet (T055).
+- [ ] T014 (implementer) W-0 in the new `tests/dictionary/dictionary_equivalence_test.cpp`, added to `dictionary_pure_tests` (`tests/dictionary/CMakeLists.txt`), with its small valid dictionaries in-test or under `tests/dictionary/fixtures/098/`: each seeded pair declares its expected reported set and the comparator reports exactly that set; the union of the expected sets plus the reason-only entries equals the declared list (asserted); a separable entry has a separating seed; the context `required_members` seed keeps the bare `group_required_members` equal; the three key-source seeds (an unused extra component on one side; a context record that differs only where the bare value would mask it; a census mismatch) each report a difference; a pair of identical loads reports none.
+- [ ] T015 (implementer) Build `dictionary_pure_tests`, run it UNFILTERED: W-0 GREEN on every row. Commit T013–T014: `098 P3: dictionary comparator and its self-test (W-0)`. Run the line-citation check; report the hash. (M-0 runs with plan phase 3's mutants, T030.)
+
+**Checkpoint**: W-0 GREEN; the Phase 2 arms are still RED as listed.
+
+---
+
+## Phase 4: User Stories 1 and 2 — QuickFIX-XML overlay (plan phase 3) (Priority: P1) 🎯 MVP
+
+**Goal**: a QuickFIX-XML base loads with a `<fix>` overlay into a dictionary equal to the equivalent edited
+XML (US1), and every refusal of the XML column is produced with its named error (US2).
+**Serves**: US1 (W-1 qf, W-2 FIX44 and FIX50SP2) and US2 (W-3, XML column).
+**Independent test**: `dictionary_pure_tests` GREEN (W-0, W-1 qf, W-2 XML rows, W-3 XML column); the mutant
+rows T030–T038 recorded.
+
+### Tests (write first; they call new symbols, so they compile only after T027; their RED arms are the mutants)
+
+- [ ] T016 [P] [US1] (implementer) Small QuickFIX-XML fixtures `tests/dictionary/fixtures/098/qf/{base,overlay,edited}.xml`, hand-written (FR-017 (a)), `FIX.4.4` version attributes. `edited.xml` is the base with each overlay addition appended at the end of its matched container, in overlay document order (spec Terminology), never produced from the merge. The overlay covers every FR-003/FR-004 kind contracts W-1 lists: new field; enum value on an existing field; new component; new message (with a required field, a new group, a new component); field added to an existing message; member added to an existing group (inline and inside a component); field and group added to the header; Required promotion on a message, component and group child; custom Length+Data pair; an enum value on a base field with no values (N-2); a new container the base lacks; a member appended to a group whose existing members emit nothing; a new DATA after a base LENGTH whose base pair forms earlier in `detect_length_pairs`'s visit order.
+- [ ] T017 [P] [US1] (implementer) Vendored-base fixtures under `tests/dictionary/fixtures/098/real/` for FIX44 and FIX50SP2 (FR-017 (b), research R-10): an overlay and a hand-written insertion patch each; each hunk has a multi-line context block copied from the base that must match exactly once, and lines inserted before the block's last line. Each covers a header field, an enum value on an existing field, a member added to an existing group, a new message with a required field, a field added to existing messages and a custom Length+Data pair; the FIX44 overlay extends more than 64 existing messages (N-7). The FIX44 overlay is also W-5's, W-9's and W-10's. Also the W-12 fixture: an at-cap FIX50SP2 overlay holding the maximum count of new definitions each cap allows (T023's caps), its file name recorded in the evidence file as SC-005's named fixture.
+- [ ] T018 [US1] (implementer) `tests/dictionary/overlay_equivalence_test.cpp`, added to `dictionary_pure_tests`: the line-based patch helper (no `patch` binary, so it runs on MSVC), with its own rows: a context block that matches zero places and one that matches two each fail the cell before any comparison (W-2 RED (a)); W-1 qf row, `XmlLoader::load_with_overlay_from_string(base, overlay)` vs `XmlLoader::load_from_string(edited)` → zero differences; W-2 FIX44 and FIX50SP2 rows, `XmlLoader::load_with_overlay(base, overlay)` vs `load_from_string(patched base)` → zero differences side against side and, for `component_fields` / `group_fields`, against the raw census under T013's wrap condition. Every row loads through research R-5's read seam and asserts no counter-origin refusal and that the step counter equals step 6's prediction. Also the at-cap FIX50SP2 overlay of T017 loads with no refusal. The FIX50SP2 wrap probe (research R-10): a gtest that compares `component_fields` of the first component past the wrap point with its raw members and reports the result without failing the bucket; where the base table does not fit, the overlay's definitions past the wrap point are compared side against side only, and the report says so.
+- [ ] T019 [US2] (implementer) `tests/dictionary/overlay_refusal_test.cpp`, added to `dictionary_pure_tests`, table-driven over the product of contracts W-3's refusal kinds × {QuickFIX XML, Orchestra}: this task writes every XML cell and every N/A cell of either column with its reason in the table (for example "`<fields>` adjacency: Orchestra has none"); the Orchestra cells come in T041. Each row asserts the exact exception type for its format and that its message names the key, cap, table or counter origin as applicable. Rows (contracts W-3): the R-4 conflicts (including `required="y"`, `required="false"`, two root containers of one name, version mismatch, overlay of the other format, a root child outside data-model §A.1's list); one tag twice at one level (including through a two-level component chain, a new component reference reaching a declared tag, and a header addition whose tag a message body already has); one repeated-base-key row per match-key kind the base loader admits repeated, asserting both base occurrences in the message, N/A for a kind the loader refuses repeated, and the control that the same base with an empty overlay loads; the Length+Data relation table's XML rows, each "refuse", "load" or N/A as contracts W-3's table states; the R-5 guards (bytes at cap + 1 through the path and the string form, depth 33, each entry cap + 1 counting new definitions, the reference cap + 1, a DOCTYPE, an unknown reference, a cycle that closes through a base component → `xml_parse_error`); the doubling bomb over 63 levels rooted at the base's `Instrument` and the two-empty-chains row → `overlay_limit_error` with the pre-walk budget origin read through the seam and the budget's message, no wall-clock assertion (SC-003); the header-expansion row → loads, no counter-origin refusal, counter = prediction (its header-store assertion joins in T055); the three side-table rows → `overlay_limit_error` naming the table, plus the just-inside control that loads; the guard-order row → the cycle error, not the redeclare conflict.
+
+### Implementation
+
+- [ ] T020 [US2] (implementer) `include/fixpp/dict/error.hpp`, verbatim from contracts/surface.md: `class overlay_conflict_error : public xml_parse_error { using xml_parse_error::xml_parse_error; };` and `class overlay_limit_error    : public xml_parse_error { using xml_parse_error::xml_parse_error; };`.
+- [ ] T021 [US1] (implementer) Factor `LoaderState::detect_length_pairs` (`src/dictionary/xml_loader.cpp`) into a function of a parsed document that the loader's own pairing and step 8a both call (research R-3): it returns the forward Length → Data map as `mark_pair` keeps it and the reverse direction with every Length kept, and reports a collision instead of throwing. `load`'s results are unchanged (the existing dictionary tests stay GREEN).
+- [ ] T022 [US1] (implementer) The step counter in `LoaderState` and its `expand_field_list` (`src/dictionary/xml_loader.cpp`), research R-5 verbatim: "`expand_field_list` increments it once at the head of its child loop, for every child node, which is the unit step 6 counts. When the counter is armed and passes its limit, `expand_field_list` throws `overlay_limit_error` with the distinct counter origin and message "expansion step count exceeded the pre-walk prediction (internal model drift)"." Arming rule, verbatim: "The overlay path arms it with the smaller of step 6's merged total and the base's own total plus the budget." and "The `load` path leaves the counter unarmed (a null limit), so `load`'s behaviour is unchanged by construction."
+- [ ] T023 [US2] (implementer) New `src/dictionary/overlay_merge.{hpp,cpp}`, `overlay_merge.cpp` added to `fixpp_dictionary`'s explicit source list in `src/dictionary/CMakeLists.txt`. Shape guards, research R-5 steps 1–5, in that order, verbatim:
+  - step 1, byte cap: "**4 MiB**. Read at most cap + 1 bytes into a buffer (path form) or check `size()` (string form); refuse when more were available. Never trust a `stat` size (a FIFO or `/proc` file reports a wrong size). Before parse.";
+  - step 2, parse: "The overlay uses `pugi::parse_default \| pugi::parse_doctype`." and the shared status mapping: "A result of `xml_parse_status::status_out_of_memory` … becomes `xml_oom_error`, never `xml_parse_error` (A-006). Any other failed status is `xml_parse_error` (`orchestra_parse_error` for Orchestra) as today. One status-mapping function serves both parses of an overlay call";
+  - step 3, DOCTYPE: "refuse any `node_doctype` child of the document";
+  - step 4, depth: "**32** element levels; an iterative (explicit stack) walk of the overlay document";
+  - step 4a, root: the format matches the base's, the version matches (FR-006), the root children are in data-model §A.1's "May contain" column (QuickFIX XML: "`<header>`, `<trailer>`, `<messages>`, `<components>`, `<fields>` (any subset, any order)"; Orchestra: "`fixr:codeSets`, `fixr:fields`, `fixr:components`, `fixr:groups`, `fixr:messages`"), and no container name repeats;
+  - step 5, entry and reference caps: "one flat pass over the overlay document. **New** definitions only (N-7): fields **1024**; components **64**; messages **64**; Orchestra groups **64**; Orchestra code sets **256**. Enum values / codes added **4096**. References added (QuickFIX `<field>` / `<component>` / `<group>` refs, Orchestra `fixr:fieldRef` / `componentRef` / `groupRef`) **8192** in total, to new and existing definitions alike."
+
+  Fixed constants in `src/dictionary/`, no configuration knob; every cap failure throws `overlay_limit_error` naming the cap and its value. Also the match-index helper (research R-3): it records a duplicated base key instead of refusing it; a lookup that hits one is `overlay_conflict_error` naming the key and both base occurrences.
+- [ ] T024 [US2] (implementer) In `src/dictionary/overlay_merge.{hpp,cpp}`, research R-5 step 6 for the XML edges: one iterative walk (explicit stack) over the base's definitions plus the unspliced overlay; the classifier steps 6, 7 and 8 share; three-colour cycle detection returning a structured cycle result naming the definitions on the cycle (the loader throws `xml_parse_error`); the post-order saturating memo (steps, entries, level sets); first-seen groups per NumInGroup tag in `finalize`'s order; the budget, compared against the overlay's increase over the base's total; the side-table fit (a table fits when every start index and entry count is at most 65535; refused only when the base's table fits and the merged one does not; the budget is checked first). Structured results; each loader throws its own type. The budget constant is derived by research R-5's recipe with this step-6 code over `dictionaries/*.xml` and `dictionaries/orchestra/OrchestraFIXLatest.xml` ("take the largest total, and set the budget to the next power of two at or above twice it"; starting estimate 2^20; "where the two differ, the recipe wins"); the code comment records the recipe, not the value; the value goes in the evidence file. The level-set memory bound is stated in a code comment as its recipe.
+- [ ] T025 [US1] (implementer) In `src/dictionary/overlay_merge.{hpp,cpp}`: step 7, research R-4's conflict checks answered from step 6's level sets (no second recursive walk), the presence vocabulary (`required` is `Y`, `N` or absent; anything else `overlay_conflict_error`); step 8, the XML splice by research R-3's QuickFIX table (the base's first container of each name, created when absent; each new child appended after the existing ones in overlay document order; on a matched child the attribute is written only for a promotion); step 8a, the pair relation of the base document (taken before the splice) against the spliced document through T021's function, refused with `overlay_conflict_error` when a pair touching a base tag is gained, lost or given a second partner; the test-facing read seam (research R-5: "loads with an overlay and also returns the counter's final value and step 6's predicted total, and reports which of three origins a refusal came from: the pre-walk budget, the pre-walk side-table fit, or the build counter").
+- [ ] T026 [US1] (implementer) `include/fixpp/dict/xml_loader.hpp`, `src/dictionary/xml_loader.cpp`: `XmlLoader::load_with_overlay` and `XmlLoader::load_with_overlay_from_string` with contracts/surface.md's signatures and documented throws. The base is read and parsed exactly as `load` does (no overlay byte cap, `load`'s parse flags; only the status mapping is shared); then the guards in R-5's order, the splice, step 8a, and `build_handle_from_doc` with the counter armed by T022's rule.
+- [ ] T027 [US1] (implementer) Build `dictionary_pure_tests`, run it UNFILTERED: W-0, W-1 qf, W-2 FIX44 and FIX50SP2, W-3's XML column GREEN; the patch helper's zero- and two-match rows fail their cells as asserted; report the wrap probe's result. Full suite (quickstart §3, end of plan phase 3), after the sandbox-lock check: build all, `ctest --preset linux-clang-debug --output-on-failure`; the only failing entries are those hosting the Phase 2 arms (`session_pure_tests`, `config_044_tests`, `config_045_tests`, `capi_pure_tests`), and inside each only those arms fail (read from the unfiltered output); run quickstart §3's two selections with their `-N` checks. Commit T016–T026: `098 US1/US2: QuickFIX-XML overlay (guards, splice, pair relation, step counter)`. Report the hash (`H` for T029).
+
+### RED arms (Mutant protocol; `$M` only; record each)
+
+- [ ] T028 [US2] (orchestrator) Record T024's re-derived budget value and the wrap probe's result in the evidence file. If the probe shows the wrap, R-15 item (5) and L-098-4 become due (T084, T086); if not, record that the model was wrong and neither is due.
+- [ ] T029 [US1] (implementer) Create `$M` exactly per the contracts preamble with `H` = T027's hash (`df -h /mnt/wsl/fixppbuild`; `git -C ~/Work/Programming/fixpp-parallel worktree add --detach /mnt/wsl/fixppbuild/fixpp-098-mutants "$H"`; `conan install . -pr conan/profiles/linux-clang-debug --build=missing -of build/linux-clang-debug`; `cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON`; build with `-j"$J"`). Add the ASan tree the preamble lacks (gap v): `conan install . -pr conan/profiles/linux-clang-asan --build=missing -of build/linux-clang-asan`, `cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON`, build `dictionary_pure_tests` there. Run `dictionary_pure_tests` unmutated in both trees: GREEN, the baseline each row is read against.
+- [ ] T030 [US1] (implementer) M-0 (the comparison of the context `required_members` entry removed while the entry stays listed) → W-0's context `required_members` row RED.
+- [ ] T031 [US1] (implementer) M-1 (the splice prepends a new group member instead of appending) → W-1's qf row RED, the comparator naming the store.
+- [ ] T032 [US1] (implementer) M-2 (the splice skips enum-value additions) → W-1's qf row RED, the comparator naming the store.
+- [ ] T033 [US1] (implementer) M-17 (one extra `expand_field_list` call in `finalize`, `src/dictionary/xml_loader.cpp`) → every XML W-1 and W-2 row RED through the counter origin; W-3's header-expansion row refused with the counter origin.
+- [ ] T034 [US1] (implementer) M-3 (header/trailer additions dropped, XML splice) → W-2's FIX44 row RED.
+- [ ] T035 [US2] (implementer) M-4 (conflict checks removed) → the XML conflict rows load; M-5 (byte cap removed) → the byte-cap rows load; M-6 (`parse_doctype` dropped) → the DOCTYPE row loads. One row each, each its own rebuild.
+- [ ] T036 [US2] (implementer) M-7 (cycle check removed), in `$M/build/linux-clang-asan` so that an overflow is reported → the XML cycle row's cycle-error assertion RED; record how the run ended (a loop, an overflow, or another failure such as a counter-origin refusal).
+- [ ] T037 [US2] (implementer) M-12 (step 6's budget comparison removed; the side-table fit stays), Debug tree → per bomb row: the doubling row RED with "side-table origin, expected budget origin" and the table's message; the empty-chain row RED with "counter origin, expected budget origin"; both in bounded time. The message column names which check fired on each row.
+- [ ] T038 [US2] (implementer) XML rows, one each with its own rebuild: M-13 (guard steps 6 and 7 swapped) → the guard-order row reports the redeclare conflict or crashes; M-14 (step 5's entry and reference caps removed) → those rows load; M-16 (step 8a replaced by the previous draft's adjacency rule) → the interposed, paired-later and new-Length refuse rows RED while the load rows stay GREEN; M-18 (side-table fit removed) → the side-table rows load.
+
+**Checkpoint**: `dictionary_pure_tests` GREEN at T027's head; every XML row above recorded with build rc 0 and
+its expected message. The Phase 2 arms are still RED as listed.
+
+---
+
+## Phase 5: User Stories 1 and 2 — Orchestra overlay, `load_any_with_overlay`, inbound witness (plan phase 4) (Priority: P1)
+
+**Goal**: an Orchestra base loads with a `fixr:repository` overlay (US1), its refusals are named (US2), and
+`dict::load_any_with_overlay` dispatches by format; a validating session on the merged dictionary behaves as
+on the edited one (US1 AS-1..AS-6, SC-002).
+**Serves**: US1 (W-1 orch, W-2 Orchestra, W-4, W-5) and US2 (W-3, Orchestra column).
+**Independent test**: `dictionary_pure_tests` and W-5 in `session_pure_tests` GREEN; M-8 and the Orchestra
+mutant rows recorded.
+
+### Tests (write first)
+
+- [ ] T039 [P] [US1] (implementer) Small Orchestra fixtures `tests/dictionary/fixtures/098/orch/{base,overlay,edited}.xml`, hand-written (`FIX.Latest_EP303`, components 1024/1025), covering every FR-003/FR-004 kind of T016 in Orchestra form, including a code added to an existing code set; and under `tests/dictionary/fixtures/098/real/` the Orchestra overlay and its insertion patch of `dictionaries/orchestra/OrchestraFIXLatest.xml` (a header field through component 1024, a code on an existing code set, a member added to an existing group, a new message with a required field, a field added to existing messages).
+- [ ] T040 [US1] (implementer) In `tests/dictionary/overlay_equivalence_test.cpp`: W-1's orch row (`OrchestraLoader::load_with_overlay_from_string` vs `load_from_string(edited)`), W-2's Orchestra row (patched base), both with the seam assertions of T018; W-4, `dict::load_any_with_overlay` on each format matches the loader called directly, and a mixed-format pair is refused (`overlay_conflict_error`).
+- [ ] T041 [US2] (implementer) In `tests/dictionary/overlay_refusal_test.cpp`, every Orchestra cell that is not N/A: an Orchestra schema error is asserted as `orchestra_parse_error`, caught by the derived type and not by `xml_parse_error`; the conflict rows including code-set `id` / `type` changed, an Orchestra code set with a new `id` and an existing name (N-6), `presence="require"`, the `fixr:numInGroup` rows (N-9); the `lengthId` row as `overlay_conflict_error` (not the loader's `orchestra_parse_error`); the R-5 guard rows with the cycle as `orchestra_parse_error`; the doubling bomb `C_n = { componentRef C_{n-1}; groupRef G_n }`, `G_n = { numInGroup; fieldRef F_n; componentRef C_{n-1} }`, and the empty-chain row, both with the budget origin; the side-table and guard-order rows.
+- [ ] T042 [US1] (implementer) W-5 in the new `tests/session/test_098_dialect_overlay_inbound.cpp`, added to `session_pure_tests` (bundle gap i: W-5 sits in no plan phase; it is placed here because it calls `dict::load_any_with_overlay` and its RED is M-8). Three sessions with `validate_inbound_messages = true`: the FIX44 base alone, FIX44 + T017's FIX44 overlay through `dict::load_any_with_overlay`, and FIX44 patched (the edited reference). One frame per scenario: custom field 5001 on 35=D; custom member 5002 inside Parties; private MsgType `U1` with and without its required field; custom Length+Data 5010/5011 with an SOH in the value; the Optional→Required promotion missing; OrdType `Z`. Assert the overlay and edited sessions agree on every frame (accept, or the same Reject 373 and 371) and the base session gives today's recorded outcome (negative control). On every accepted frame both sessions assert from the application callback: AS-1 5001 by tag; AS-2 5002 read inside the Parties entry through the group view; AS-3 `U1` reaches the callback; AS-4 the 5011 value equals the full counted bytes, SOH included; AS-6 40 reads `Z`. The enum-closure frame (N-2, B-098-7) uses its own small overlay fixture under `tests/dictionary/fixtures/098/` listing a first value on Text(58), and its own overlay/edited session pair: first confirm with `grep -n -A4 'name="Text"' dictionaries/FIX44.xml` that FIX44.xml declares Text with no `<value>` and record the output; a frame carrying a Text value the overlay does not list is refused there and accepted on the base session.
+
+### Implementation
+
+- [ ] T043 [US1] (implementer) Factor `OrchestraLoaderState::resolve_length_pairs` (`src/dictionary/orchestra_loader.cpp`) into a function of a parsed document returning the relation and recording a Length named by two Data fields' `lengthId` as a collision (research R-3). On the base document the loader still throws its own `orchestra_parse_error`, as `load` does; its other refusals stay the loader's.
+- [ ] T044 [US1] (implementer) The step counter in `OrchestraLoaderState` and its `expand_field_list` (`src/dictionary/orchestra_loader.cpp`), with T022's rule, message and arming verbatim.
+- [ ] T045 [US2] (implementer) In `src/dictionary/overlay_merge.{hpp,cpp}`, the Orchestra path: step 6's Orchestra edges (`component` / `group` → `componentRef` / `groupRef` ids; the cycle thrown as `orchestra_parse_error`); step 7's checks; the Orchestra splice by research R-3's Orchestra table (code set matched by `name`, its `id` and `type` equal; field, component and group by `id`; message by `msgType` with `id` and `name` equal; a matched group's `fixr:numInGroup` must carry the base's `id` and is not spliced, a new group has exactly one; `fixr:annotation` / `fixr:documentation` dropped; header and trailer additions extend component 1024 / 1025 by `id`; `presence` is `required`, `optional` or absent); step 8a through T043's function, a collision touching a base tag refused with `overlay_conflict_error`.
+- [ ] T046 [US1] (implementer) `include/fixpp/dict/orchestra_loader.hpp`, `src/dictionary/orchestra_loader.cpp`: `OrchestraLoader::load_with_overlay` and `load_with_overlay_from_string` (contracts/surface.md); `include/fixpp/dict/load_any.hpp`, `src/dictionary/load_any.cpp`: `dict::load_any_with_overlay`, which "Sniffs the base root as load_any does; the overlay root MUST be the same format, else overlay_conflict_error. Dispatches to the matching loader's load_with_overlay." (contracts/surface.md, verbatim).
+- [ ] T047 [US1] (implementer) Build `dictionary_pure_tests` and `session_pure_tests`, run each UNFILTERED; report W-1 orch, W-2 Orchestra, W-3's Orchestra column, W-4 and W-5 against their assertions (W-6's Phase 2 arms in `session_pure_tests` still RED as expected).
+- [ ] T048 [US1] (orchestrator) Adjudicate T047 under plan phase 4's stop rule, quoted verbatim: "**Stop rule:** if the Orchestra W-2 row shows a difference that comes from the loader's own order-dependent rules rather than the splice, record it and decide before continuing." A difference from the splice goes back to T045; one from the loader's own rules stops for a decision. Record.
+- [ ] T049 [US1] (implementer) After T048 clears, commit T039–T046: `098 US1/US2: Orchestra overlay, load_any_with_overlay, inbound witness (W-5)`. Run the line-citation check; report the hash (`H` for T050).
+
+### RED arms (Mutant protocol; record each)
+
+- [ ] T050 [US1] (implementer) `git -C "$M" reset --hard "$H"` (T049's hash, clean status first); rebuild both `$M` trees unmutated: `dictionary_pure_tests` and `session_pure_tests` read as at T047 (the baseline).
+- [ ] T051 [US1] (implementer) M-8 (`load_any_with_overlay` ignores the overlay) → W-4's match rows RED and W-5's overlay arm RED (`dictionary_pure_tests`, `session_pure_tests`).
+- [ ] T052 [US1] (implementer) M-3 on the Orchestra splice (component 1024/1025 additions dropped) → W-2's Orchestra row RED; M-17 in `OrchestraLoaderState`'s `finalize` → W-1's orch row and W-2's Orchestra row RED through the counter origin. (Gap vi: contracts names M-1 and M-2 for the XML splice only; the Orchestra W-1 row's RED arms are M-3, M-17 and M-8.)
+- [ ] T053 [US2] (implementer) The Orchestra rows of M-4, M-5, M-6, M-7 (ASan tree; record how the run ended), M-12 (per bomb row as T037), M-13, M-14, M-16 (the Orchestra `lengthId` rows RED) and M-18, one row per mutant, each its own rebuild.
+
+**Checkpoint**: W-0..W-5 GREEN at T049's head; the Orchestra rows recorded. The Phase 2 arms are still RED.
+
+---
+
+## Phase 6: User Story 1 — header on send (plan phase 5) (Priority: P1)
+
+**Goal**: a dictionary's declared header tags are sent in the header (US1 AS-7, FR-022, SC-008); every
+vendored dictionary's frames stay byte-identical.
+**Independent test**: W-6 (all arms) and W-7 GREEN; the existing header-order witnesses unchanged; M-9 RED.
+
+### Tests (write first)
+
+- [ ] T054 [US1] (implementer) W-6's overlay arm (base + overlay through the new API) in `tests/session/test_098_header_send.cpp`; W-7's session half in the same file: an independent raw-XML header walk's tags (QuickFIX `<header>` expansion; Orchestra component 1024), unioned with the production fixed set read by including `src/session/send_header_tags.hpp`, equal the fixed set for every vendored dictionary, and a seeded FIX44 copy with 5020 in `<header>` MUST make that union assertion fail (asserted, proving the instrument); W-7's dictionary half in the new `tests/dictionary/header_tags_test.cpp`, the standalone `dictionary_098_header_census_test` (`tests/dictionary/CMakeLists.txt`, labels `dictionary;098;census`): over the vendored QuickFIX XML files plus the vendored Orchestra file, enumerated by the existing dictionary-census recipe, `is_header_tag` answers true exactly for the raw walk's tags and false for 5020.
+- [ ] T055 [US1] (implementer) The comparator gains the `is_header_tag` entry in `tests/dictionary/dictionary_equivalence.hpp`'s declared list and its seeded W-0 row in `tests/dictionary/dictionary_equivalence_test.cpp`; W-3's header-expansion row in `tests/dictionary/overlay_refusal_test.cpp` gains its assertion that the declared header store holds the component's tags (gap vii).
+
+### Implementation
+
+- [ ] T056 [US1] (implementer) The declared header store, data-model §A.3 verbatim: "a sorted, de-duplicated `std::pmr::vector<std::uint16_t>` of the header tags the dictionary declares, computed at finalize by an iterative visited-set walk from the header (fields, component members, NumInGroup tags and group members; each definition walked once): QuickFIX XML from `<header>`, Orchestra from component 1024. It is a set walk, not an `expand_field_list` call, so the overlay path's step counter does not charge it". Files: `src/dictionary/dictionary_internal.hpp`, `src/dictionary/xml_loader.cpp`, `src/dictionary/orchestra_loader.cpp`, `src/dictionary/dictionary.cpp`, `include/fixpp/dict/dictionary.hpp`; `include/fixpp/dict/table_view.hpp`: "`header_bits_`, a `std::vector<std::uint64_t>` bit store in the `group_bits_` shape, filled by `as_table_view()` through a `table_view_builder` forwarder; public query `[[nodiscard]] bool is_header_tag(std::uint16_t tag) const noexcept`. No allocation at query time."
+- [ ] T057 [US1] (implementer) `kSendHeaderTags` and `is_send_header_tag` move unchanged in content from `src/session/session.cpp` into the new private header `src/session/send_header_tags.hpp`; `Session::build_send_frame_`'s classification becomes `is_send_header_tag(tag) || (inbound_tv_ && inbound_tv_->is_header_tag(tag))`, evaluated only on a fixed-set miss; the counted-Data rule `field->counted ? prev_header : …` is unchanged, so a counted Data value follows its Length's class (research R-7). `kReplayHeaderTags` is not changed. No allocation on the send path (`[const §XV.1]`).
+- [ ] T058 [US1] (implementer) Build and run UNFILTERED `session_pure_tests`, `dictionary_pure_tests`, `dictionary_098_header_census_test`, `session_resend_answer_field_order`, `session_091_data_send`: W-6 (every arm), W-7 (both halves), W-0's header row, W-1/W-2 re-run with `is_header_tag`, W-3's header-expansion row GREEN; `SendPayloadTagTest.*`, `ResendAnswer*`, `HeaderPairSend091.*`, `DataSend091.*` GREEN with unchanged expected bytes (SC-008). Full suite (end of plan phase 5): the only failing entries are `config_044_tests`, `config_045_tests` and `capi_pure_tests`, on their Phase 2 arms only; `ctest -N -L 098` now lists the census. Commit T054–T057: `098 US1: declared header tags on send (FR-022)`. Report the hash (`H` for T059).
+
+### RED arms (Mutant protocol)
+
+- [ ] T059 [US1] (implementer) `git -C "$M" reset --hard "$H"` (T058's hash); rebuild and run the T058 binaries unmutated in `$M`: the baseline.
+- [ ] T060 [US1] (implementer) M-9 (`as_table_view` skips the header store) → every W-6 arm RED and W-7's dictionary half RED; record the collateral (W-0's header row, the W-1/W-2 header comparisons).
+
+**Checkpoint**: W-0..W-7 GREEN; W-8, W-9's pin and golden and W-10 still RED as listed.
+
+---
+
+## Phase 7: User Story 3 — a TOML session names its overlay (plan phase 6, configuration half) (Priority: P2)
+
+**Goal**: every TOML session arrives with `SessionConfig::dictionary` set; `dialect_overlay` works in
+`[default]` and `[[session]]` (FR-015, FR-016, SC-004).
+**Independent test**: `config_044_tests`, `config_045_tests` GREEN (W-8 and the rewritten cells); M-10 RED.
+
+- [ ] T061 [US3] (implementer) `tests/session/engine_establishment_timeout_test.cpp`: relies on the filled bundle instead of copying `engine.dictionaries.front()` into each session (plan Risks; B-098-3).
+- [ ] T062 [US3] (implementer) `src/config/toml_config_loader.cpp`: `recognize_keys` scope-aware for `dialect_overlay` only (it leaves `kDeferred`); `src/config/selector_resolver.cpp`: a new step after `resolve_engine_dictionary` in `resolve_selectors`, guarded on `bundle.engine.dictionaries.empty()` (research R-9: never `front()` on the empty vector); one load per distinct resolved overlay path through `dict::load_any_with_overlay(base path, overlay path, opts.resource)`, cached by that path (a success or a failure), the merged dictionary shared by every session naming it; origins read from `root_tbl`'s raw `[default]` table and `session` array; `EngineConfig::dictionaries` unchanged; `src/config/loader_internal.hpp`: `trap_throw_to_expected`'s doc states the rule, not a count of throwing sites. Data-model §A.4, verbatim:
+
+  | Scope | `dialect_overlay` | Session dictionary |
+  |---|---|---|
+  | root | refused, `invalid_or_contradictory_selector`, "dialect_overlay is a session key; set it in [default] or [[session]]" | n/a |
+  | `[default]` | path, inherited by every session that does not set its own | merged dictionary for that path |
+  | `[[session]]` | path, overrides `[default]` | merged dictionary for that path |
+  | neither | — | `engine.dictionaries.front()` (the `[dictionary]` dictionary) |
+  | any, with `engine.dictionaries` empty (`[dictionary]` absent or failed) | `invalid_or_contradictory_selector` at each origin's key path, "dialect_overlay requires [dictionary]" | none assigned |
+  | `[default]` or `[[session]]`, non-string value | `malformed_value` at that key path | none assigned |
+  | `[default]` or `[[session]]`, empty string | `empty_required` at that key path | none assigned |
+
+  and: "A failure is reported once per authoring origin (`default.dialect_overlay`, or `session[N].dialect_overlay` when that session's raw table sets the key), read from `root_tbl`'s raw tables (research R-9). There is no value meaning "no overlay", so a `[default]` value cannot be cleared for one session (B-098-3)." Every overlay load failure maps to `invalid_or_contradictory_selector` (research R-6's TOML column).
+- [ ] T063 [US3] (implementer) Build and run UNFILTERED `config_044_tests`, `config_045_tests`, `session_engine_establishment_timeout`: every W-8 row and rewritten cell GREEN; `T020_MissingRequired_Dictionary` GREEN unchanged. Commit T061–T062: `098 US3: TOML sessions get their dictionary; dialect_overlay in [default] and [[session]]`. Run the line-citation check; report the hash (`H` for T064).
+- [ ] T064 [US3] (implementer) `git -C "$M" reset --hard "$H"`; rebuild and run the T063 binaries unmutated (baseline); then M-10 (the resolver assigns the base to every session) → W-8's AS-2 and AS-5 rows RED for the reason those rows state.
+
+**Checkpoint**: W-0..W-8 GREEN; W-9's pin and golden and W-10 still RED.
+
+---
+
+## Phase 8: User Story 4 — C ABI and Python (plan phase 6, ABI half) (Priority: P2)
+
+**Goal**: `fixpp_dict_load_from_xml_with_overlay` (C-ABI 1.13) and `fixpp.dict_load_from_xml_with_overlay`
+return a handle whose session reads the overlay's custom Length+Data value intact (FR-013, FR-014).
+**Independent test**: `capi_pure_tests`, `capi_098_dict_overlay_live_test`, the W-9 status-mapping rows and
+W-10's pytest runs GREEN; M-11, M-15, M-19, M-20, M-21 RED.
+
+### Tests (write first)
+
+- [ ] T065 [P] [US4] (implementer) W-9 pure rows in the new `tests/capi/dict_overlay_capi_test.cpp`, added to `capi_pure_tests` (`tests/capi/CMakeLists.txt`), which gains the compile definition `FIXPP_098_FIXTURE_DIR` (= `tests/dictionary/fixtures/098`): an entry-cap overlay (new messages = cap + 1, a fixture under `tests/dictionary/fixtures/098/`, not a byte-cap file) → 201 and `*out_dict == NULL`; a conflicting overlay → 200 and NULL; NULL arguments → `FIXPP_ERR_NULL_HANDLE` (control); the returned handle accepted by `fixpp_session_config_set_dictionary` and by `fixpp_session_open` on an engine never started (control); the exception-to-code mapping function of `src/capi/capi_internal.hpp` fed each type directly: `overlay_limit_error` → 201; `xml_oom_error` and a bare `std::bad_alloc` → 202; `xml_parse_error`, `overlay_conflict_error`, a `std::runtime_error` and a non-`std::exception` → 200.
+- [ ] T066 [P] [US4] (implementer) W-9's status-mapping rows in `tests/dictionary/overlay_refusal_test.cpp` (`dictionary_pure_tests`; the Files-changed list names no other dictionary test file for them): research R-5 step 2's status mapping fed `status_out_of_memory` → `xml_oom_error`, and one other failed status → the format's parse error.
+- [ ] T067 [US4] (implementer) W-9's live arm in the new `tests/capi/dict_overlay_capi_live_test.cpp`, the standalone `capi_098_dict_overlay_live_test` (`tests/capi/CMakeLists.txt`; labels `capi;098`; compile definitions `FIXPP_DICT_DATA_DIR` and `FIXPP_098_FIXTURE_DIR`; a `TIMEOUT` sized by the recipe the comment on `capi_inbound_frame_dispositions` states, never a bare number without it), built on `capi_dict066_loopback_support.hpp` as `dict066_group_membership_red_test.cpp` is: two C-ABI engines over plaintext loopback, each session's dictionary the handle `fixpp_dict_load_from_xml_with_overlay(FIX44.xml, T017's FIX44 overlay)` returns, set with `fixpp_session_config_set_dictionary`. The sender passes a raw application payload to `fixpp_session_send` (bytes written in the test, leading with `35=<application MsgType><SOH>`, no session framing tag, carrying 5010 = the byte count of the 5011 value and 5011 = `AB<SOH>58=CD`, 58 not otherwise in the frame), not built with `fixpp_msg_set_data`; the callback reads 5011 with `fixpp_msg_get_bytes` and the test asserts it equals the full counted value.
+- [ ] T068 [US4] (implementer) W-10 in the new `bindings/python/tests/test_098_dialect_overlay.py` (in-tree only, no wheel twin): the inbound read, `fixpp.dict_load_from_xml_with_overlay(FIX44.xml, T017's FIX44 overlay)` set on an initiator session config, a raw TCP peer written in the test on `test_093_inbound_frame_dispositions.py`'s pattern (accepts, reads the Logon, answers it) writing T067's frame, the callback registered with `session_register_callback` copying `msg_get_string(5011)` out, asserted equal to the full counted value; the cap row, T065's entry-cap overlay raising `ValidatorError` with `.code == 201` (the class alone is not the assertion).
+
+### Implementation
+
+- [ ] T069 [US4] (implementer) `include/fix/c_api/dict.h`: the declaration and doc block of contracts/surface.md verbatim (one reentrancy token, `Reentrancy: single-thread.`); `src/capi/dictionary.cpp`: the thunk next to `fixpp_dict_load_from_xml`, wrapping `dict::load_any_with_overlay(base_path, overlay_path, std::pmr::new_delete_resource())`, its `try` covering the whole body, its catch calling the mapping function declared in `src/capi/capi_internal.hpp`, research R-6 verbatim:
+
+  | C++ (catch order) | C ABI (new function) |
+  |---|---|
+  | 1. `overlay_limit_error` | `FIXPP_ERR_DICT_LIMIT_EXCEEDED` (201; its first producer) |
+  | 2. `std::bad_alloc` (covers `xml_oom_error`, which derives from it) | `FIXPP_ERR_DICT_OOM` (202) |
+  | 3. any other `std::exception` (`xml_parse_error`, `overlay_conflict_error`, `unknown_version_error`, …) | `FIXPP_ERR_DICT_CONFIG` (200) |
+  | 4. `...` | `FIXPP_ERR_DICT_CONFIG` (200) |
+  | null argument | `FIXPP_ERR_NULL_HANDLE` |
+
+  `fixpp_dict_load_from_xml` is not changed. `include/fix/c_api/version.h`: a `1.13` block ending "Added: fixpp_dict_load_from_xml_with_overlay (header)." and `FIXPP_C_ABI_VERSION_MINOR 13`; `tools/capi_freeze.sha256` refreshed by its own recipe; `src/capi/fixpp_capi.map` needs no edit (its glob).
+- [ ] T070 [US4] (implementer) `bindings/python/fixpp.i`: the GIL audit table's row for `fixpp_dict_load_from_xml_with_overlay` (SWIG wraps the function and its `fixpp_dict_t**` out-parameter by type).
+- [ ] T071 [US4] (implementer) Build and run UNFILTERED `capi_pure_tests`, `capi_098_dict_overlay_live_test`, `dictionary_pure_tests`; `tools/check_capi_reentrancy.sh` passes; quickstart §3's W-10 block (`PYTHONPATH="$L" python3 -m pytest bindings/python/tests/test_098_dialect_overlay.py -v` and the import-surface copy). W-9 and W-10 GREEN, including Phase 2's version pin, golden and import surface; `ctest -N -L 098` now lists the live arm; `ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure` GREEN for the first time. Commit T065–T070: `098 US4: C-ABI 1.13 fixpp_dict_load_from_xml_with_overlay; Python`. Run the line-citation check; report the hash (`H` for T072).
+
+### RED arms (Mutant protocol; the Python rows check the relink first)
+
+- [ ] T072 [US4] (implementer) `git -C "$M" reset --hard "$H"`; rebuild `$M`'s Debug tree with the bindings; the T071 binaries and both pytest runs (against `$M/build/linux-clang-debug/lib`) unmutated: the baseline.
+- [ ] T073 [US4] (implementer) M-11 (the limit branch maps to 200) → W-9's cap rows RED; W-10's cap row RED with `.code` 200.
+- [ ] T074 [US4] (implementer) M-15 (`std::exception` caught before `std::bad_alloc`) → the bad-alloc rows RED.
+- [ ] T075 [US4] (implementer) M-19 (`fixpp_dict_load_from_xml_with_overlay` calls `load_any(base)` and drops the overlay) → W-9's live arm RED on the value mismatch (5011 reads `AB`, not a sender failure); W-10's inbound row RED the same way.
+- [ ] T076 [US4] (implementer) M-20 (the mapping function's `std::exception` and `...` branches return `FIXPP_ERR_CAPI_CONFIG_INVALID`) → the thunk's conflict row and the mapping function's `xml_parse_error`, `overlay_conflict_error`, `std::runtime_error` and non-`std::exception` rows RED.
+- [ ] T077 [US4] (implementer) M-21 (step 2's status mapping with its two branches swapped) → both status-mapping rows RED.
+
+**Checkpoint**: every gtest and pytest witness GREEN; the Phase 2 RED record closed.
+
+---
+
+## Phase 9: Removal, fuzz, comments (plan phase 7) — User Stories 1, 2 and 5
+
+**Goal**: the dead field is gone (FR-012, US1); the overlay loader has a fuzz harness (`[const §VII.7]`,
+W-11, US2); comments state the shipped rule (research R-14, US5).
+
+- [ ] T078 [US1] (implementer) Remove `class DialectOverlay;` and `std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;` from `include/fixpp/session/session_config.hpp` (data-model §B). First list every user with `git grep -n -e 'dialect_overlay' -e 'DialectOverlay' -- src include tests bindings examples` and every `SessionConfig` size or layout pin with `git grep -n -E 'sizeof\(.*SessionConfig|offsetof\(.*SessionConfig|static_assert.*SessionConfig' -- src include tests`; each test that names the field is rewritten (SC-006's allowed set) and each pin is updated; report both lists. Build with `-k 0` across all targets.
+- [ ] T079 [P] [US2] (implementer) W-11: the new `tests/fuzz/fuzz_dict_overlay.cpp` (research R-11): a fixed small base per format chosen by the first input byte, the rest of the input as the overlay, both C++ entry points, loading through research R-5's read seam; every escaping exception must be a `dict::` error type, the Orchestra half catching `orchestra_parse_error` by its derived type before the base, as `tests/fuzz/fuzz_orchestra_loader.cpp` does; it aborts on a counter-origin refusal, and on every input that loads it aborts if the step counter differs from step 6's prediction (a pre-walk budget or side-table refusal is an accepted `dict::` error). Registered in `tests/fuzz/CMakeLists.txt` like `fuzz_dict_xml_loader` / `fuzz_orchestra_loader` (built under `FIXPP_BUILD_FUZZ`), with `target_include_directories` for `src/dictionary` and a comment naming 098 and `[const §VII.7]`, no count. Seed corpus `tests/fuzz/corpus/dict_overlay/`, each seed the format byte followed by an overlay, written byte-exact: the W-1 overlays, the W-3 refusal and cap overlays, a DOCTYPE overlay, the doubling bomb and the empty-component chain of both formats, an Orchestra cycle, and a valid overlay for M-17.
+- [ ] T080 [P] [US5] (implementer) Comment fixes (research R-14, data-model §B): `FieldType::DialectExtension`'s "re-enabled when D-009 ships" in `include/fixpp/dict/field_ref.hpp` becomes the rule that overlays use the base type vocabulary and the enumerator stays reserved (FR-012); the deferred `load_overlay` / `with_overlay` notes in `include/fixpp/dict/dictionary.hpp` and `include/fixpp/dict/xml_loader.hpp` become a pointer to the shipped calls; the `kWitnessHeaderTags` comment in `tests/session/test_resend_answer_field_order.cpp` that calls `kReplayHeaderTags` the production header set is corrected. Each states the rule and its derivation, names 098, and records no count.
+- [ ] T081 [US2] (implementer) Full Debug suite (end of plan phase 7, after the sandbox-lock check): build all, `ctest --preset linux-clang-debug --output-on-failure` GREEN. Fuzz (quickstart §5) in `fixpp-parallel`: `cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON && cmake --build --preset linux-clang-asan -j"$J"`; `ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure` passes, including the new replay; `build/linux-clang-asan/bin/fuzz_dict_overlay -artifact_prefix=<scratch dir>/ tests/fuzz/corpus/dict_overlay/*` exits 0 and names every seed in an `Executed` line (non-vacuity). Commit T078–T080: `098: remove SessionConfig::dialect_overlay; overlay fuzz harness; comments state the shipped rule`. Run the line-citation check; report the hash (`H` for T082).
+- [ ] T082 [US2] (implementer) `git -C "$M" reset --hard "$H"`; reconfigure `$M/build/linux-clang-asan` (the corpus glob registers the replay) and build `fuzz_dict_overlay` unmutated: over its seeds it exits 0, every seed named in an `Executed` line.
+- [ ] T083 [US2] (implementer) W-11's RED rows in `$M`'s ASan tree, each its own rebuild of `fuzz_dict_overlay` gated on build rc 0: M-7 with each format's cycle seed; M-12 with each format's empty-chain seed (the harness aborts on the counter origin); M-17 with the valid overlay seed (aborts on the counter origin). Per row: the harness run on the seed exits non-zero with `deadly signal`; record the seed that fired.
+
+**Checkpoint**: the full suite and the fuzz replay GREEN at T081's head; the mutation table holds every row
+M-0..M-21 with W-11's re-runs.
+
+---
+
+## Phase 10: User Story 5 — the records say what is true (plan phase 8) (Priority: P3)
+
+**Goal**: the B&L, closed B&L, 2c and other design docs and the brain describe the shipped overlay; every hit
+of data-model §G's recipe is dispositioned (FR-019, FR-020; W-13). The catalogue and coverage-index rows are
+T099's.
+**Independent test**: W-13's checks pass, each with its seeded positive or negative.
+
+- [ ] T084 [US5] (orchestrator) File the issues of research R-15 with fixpp labels taken from `gh label list` at filing time, each body through `--body-file`: (1) the base loaders have no XML caps or component-cycle guard; (2) the dictionary-axis engine fallback in `session_config.hpp`'s header comment is not implemented; (3) `redact_tag554` has no production caller; (4) one `wire_unexpected_tag` for both QuickFIX 373=0 and 373=2 cases; (5) only if T028 recorded the wrap: the `std::uint16_t` `first_field_index` wraps, and `field_count` clamps, past 65535 side-table entries on a base whose table does not fit. Record each number in the evidence file.
+- [ ] T085 [US5] (orchestrator) Data-model §G's inventory, from the `fixpp-parallel` root. Prove the recipe can report first: part 1 must report each known positive §G names (2c §1's goal 4, §2's Non-goals bullet, §4.1's `FieldRef` comment, §4.3, §7.1, the D-009 rows, `.specify/2d-threading.md`'s `SessionConfig` listing, `.specify/2m-pybind.md`'s Python key); a miss widens the recipe, never the list. Part 2 run against a diff that names a file in a brain page's `refs` reports that page. Then run both parts at the head and record the commands and each hit's disposition (an "Updated (098-dialect-overlay)" note, a fix in place, or the reason it is history or still true), never a count.
+- [ ] T086 [P] [US5] (orchestrator) `spec/behaviors-and-limitations.md`: a new 098 section with the rows of data-model §D marked "new" (B-098-1..B-098-7, L-098-1, L-098-2, L-098-3 citing T084's issue (1); L-098-4 with issue (5) only if T028 recorded the wrap), each with the content §D's Content column states; L-426-1 and L-426-2 reworded as §D states; L-426-3 left unchanged (reason recorded); B-066-1 and its release note updated so the extension story points at the shipped overlay, by an in-place amendment that keeps the 066 text as history (the file's AMENDED / SUPERSEDED convention); and a `**Release note (098):**` paragraph in the shape of the file's 066 release note, which plan Risks and research R-9 call for and data-model §D does not list: at least the filled TOML bundle (a host that overwrites `config.dictionary` discards a session's overlay, B-098-3) and the removed `SessionConfig::dialect_overlay` (B-098-4). `spec/behaviors-and-limitations-closed.md`: L-002-2 (the overlay ships), L-422-1 (FR-022) and L-004-1 (stale: `field_iterator` takes a `dict_hooks` value with no default and pairs through it, `include/fixpp/wire/parser.hpp`, since fixpp#426) moved verbatim, each preceded by a closing comment naming 098 and its reason.
+- [ ] T087 [P] [US5] (orchestrator) `.specify/2c-codegen.md`: an in-place "Updated (098-dialect-overlay): …" note naming what 098 shipped instead, for every 2c hit of T085 (data-model §F's floor: §1.2's merge-cost line, §2's Non-goals bullet "No mid-session overlay grammar extension", §4.1's `FieldRef` listing comment naming `dict_overlay_unsupported_length_pair`, §4.3 `with_overlay` / `was_dialect_promoted`, §4.4's `DialectOverlay` value type, §4.4.1's restricted grammar, §4.4.2's caps (the values kept, the `FIXPP_DICT_*` knobs not), §6.4's merge contract and conflict policy), each on a line of its own or at the end of its own paragraph, the text before it kept; the same for every other design-doc hit of T085 (`.specify/2d-threading.md`, `.specify/2m-pybind.md` and any further hit).
+- [ ] T088 [P] [US5] (orchestrator) Brain: `brain/components/dictionary.md` gains a flagged entry for each 2c note of T087 (FR-020); every page T085's part 2 lists (such as `brain/components/{dictionary,session,c-api}.md`; `config.md` and `python-api.md` assessed) is read for a statement 098 makes false (a "not taken" or "deferred" claim, a C-ABI history that ends before 1.13) and fixed in place.
+- [ ] T089 [US5] (orchestrator) Commit T086–T088 (library `spec/`, `.specify/`, `brain/`): `098 US5: records — B&L, closed B&L, design-doc notes, brain`. Then W-13, from PARENT with `T=/home/catalin/Work/Programming/fixpp-parallel`: `python3 .claude/scripts/check_bl_delta.py --self-test` (the known positive), then `python3 .claude/scripts/check_bl_delta.py gate --feature 098-dialect-overlay --root "$T" --base origin/main` (gap iii; the default `--root` is the main checkout, the wrong tree), rc 0; the steps of `$T/.github/workflows/brain-freshness.yml`, derived from the workflow and run locally; `research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh` (the wrapper; report the execution count); the presence check for each "Updated (098-dialect-overlay)" note T085's dispositions call for, with its seeded negative (the check fails on a copy with one note removed). Record each command and rc.
+
+**Checkpoint**: W-13's record rows pass with their seeded checks; every §G hit dispositioned.
+
+---
+
+## Phase 11: Polish, final head, verify and close-out (plan phase 9)
+
+- [ ] T090 [P] (orchestrator) PARENT `.claude/scripts/check-comment-claims.py --root /home/catalin/Work/Programming/fixpp-parallel --base origin/main`: clean, or each hit adjudicated; known positive first (a seeded result comment in a throwaway `git worktree add --detach <scratchpad>/<name> HEAD`, removed afterwards, is reported). It is lexical: read any claim inside a runtime string or an inventory by eye. Record.
+- [ ] T091 [P] (orchestrator) `python3 tools/check_line_citations.py --self-test`, then `--range origin/main..HEAD` → OK and `--shift-audit origin/main..HEAD` → OK; known positive first (a commit adding a resolvable `file:NNN` citation in a throwaway worktree is reported). Record.
+
+**Pipeline step 11 — `/simplify`** (`[const §XVI.7]`; not a task) runs here on the branch diff: three
+review agents, orchestrator triage, the implementer applies the in-scope findings in new commits, deferred
+items go to the verify record as tracked follow-ups. T090, T091 and T092 re-run on any source or comment
+change it causes.
+
+- [ ] T092 (orchestrator) Mutant freshness: for each phase head `H` (T027, T049, T058, T063, T071, T081), `git diff "$H"..HEAD -- src include tests bindings tools`; any non-comment change to a file a mutant row edits, or to a binary a row runs, re-runs those rows in `$M` reset to the new head before the verify record trusts them. This check re-runs after every later source change: the `/simplify` fixes, T093's fixes and every Gate B fix round. Record.
+- [ ] T093 (orchestrator) Run every tier-1 source-audit job locally, the list derived from `.github/workflows/tier1.yml` at this head (not a judged subset), plus clang-format, clang-tidy and cppcheck on the changed files (`[const §IX.4]`); keep a job → rc table in the evidence file. Fixes go to the implementer, then T092 and this task re-run.
+- [ ] T094 (implementer) W-12's timing driver (SC-005, quickstart §6), written in the session scratchpad and never committed: it links the `linux-clang-release` tree's `fixpp_dictionary`, times `XmlLoader::load(FIX50SP2.xml)` and `XmlLoader::load_with_overlay(FIX50SP2.xml, T017's at-cap overlay)`, and prints each run's time and the fixture's expansion count (step 6, read through the seam). Report its path and build command.
+- [ ] T095 (orchestrator) W-12: `df -h /mnt/wsl/fixppbuild`; configure and build `linux-clang-release` in `fixpp-parallel`; run T094's driver, median of at least five runs each; ratio ≤ 1.5; record the machine, the commit, both medians, the ratio and the expansion count. The send path's paired bench (base vs candidate) runs under `/speckit-verify`'s bench step.
+- [ ] T096 (orchestrator) `[const §XVII.7]` at the final code head, after the sandbox-lock check and `df -h /mnt/wsl/fixppbuild`: `conan install` (if the profile's packages are absent) + `cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON` (rc 0) + full build (`-j"$J"`) + full `ctest --preset linux-clang-debug` at the preset's default parallelism (not widened, fixpp#229), run detached with one marker waiter; then quickstart §3's W-10 runs and the full in-tree suite `PYTHONPATH=build/linux-clang-debug/lib python3 -m pytest bindings/python/tests/` (098 touches `bindings/python/`), plus the wheel import-surface copy. SC-006: zero failures, every difference from `origin/main` inside the rewritten-tests list (Phase 1); `ctest -N` total equals T003's plus the two standalone entries. Record the SHA and pass counts (the PR body's `local build:` line cites them).
+- [ ] T097 (orchestrator) `codegraph sync` in `/home/catalin/Work/Programming/fixpp-parallel` (its own `.codegraph/`); `codegraph status --json` shows that `projectPath` and a nonzero `fileCount`. Record.
+
+**Pipeline step 12 — `/speckit-verify 098-dialect-overlay --fuzz-duration=600`** (`[const §XVII.8]`; not a
+task) runs here: its fuzz step runs `fuzz_dict_overlay` for 600 seconds (pass = exit 0 and no `crash-`,
+`leak-` or `oom-` artifact); its bench step runs W-12's paired send-path bench (`[const §VIII.2]`);
+coverage of the touched modules ≥ 95/85 or a per-line assessment (`[const §IX.1]`); presets build serially;
+an MSVC preset runs under the sandbox lock and never alongside a Linux build. It writes
+`.specify/decisions/098-dialect-overlay-verify.md`; its verdict must be non-RED.
+
+- [ ] T098 (orchestrator) Complete `.specify/decisions/098-dialect-overlay-verify.md` from the evidence file: the RED record (T010/T011); the mutation table (witness | mutant or U | build rc | test rc | message | collateral, with each phase's `H`); W-3's N/A cells with their reasons; the wrap probe's result and its disposition (T028); the re-derived budget value; how each M-7 run ended; W-12's numbers (T095); T093's job → rc table; T096's results; T085's inventory commands and every hit's disposition; T089's W-13 results, including the B&L functional delta (L-002-2, L-422-1, L-004-1 closed; L-426-1, L-426-2 reworded; B-066-1 updated; B-098-1..7 and L-098-1..3, and L-098-4 if due) and `check_bl_delta.py gate --feature 098-dialect-overlay --root /home/catalin/Work/Programming/fixpp-parallel --base origin/main` with its rc; and, under `## Pre-existing leads`, anything found during implement that 098 reports and does not fix, each with its evidence recipe (the owner decides whether it becomes an issue).
+
+### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
+
+- [ ] T099 (orchestrator) **Catalogue close-out** (data-model §E): `spec/feature-catalogue.md` D-009 and COM-011 → `done`, feature `098-dialect-overlay`, the witnesses (contracts W-0..W-11 by file); D-009's Spec ref `[FIX50SP2 §3.2] Repeating groups` → `[impl] implementation`; both rows' `Applies to` cell `4.0–5.0SP2` → `4.0–5.0SP2, FIXT.1.1, FIX Latest`; no new row. The PR cell stays `—` until the PR exists, then is filled with its number in a commit on the branch; when that commit is pushed relative to the PR body and the gate labels follows the owner's final sign-off order, not this file (disposition `Open at the audit — filled when the PR opens`; `.specify/close-out.md` row 1 checks the row against the diff). `spec/coverage-index.md`: the D-009 supplemental note in D-007's `[impl]` form (a design choice, not a FIX spec section; cites `[FIX44 Vol1] User Defined Fields` for the tag ranges; notes that FIX Latest goes through the Orchestra path) and COM-011's row. Commit `098: catalogue — D-009 and COM-011 done; coverage-index D-009 note`; run the line-citation check. Confirm against the head: `git show origin/main:spec/feature-catalogue.md` (extracted by Python, size-checked) shows both rows `backlog`, the head shows `done` with the cells above, and the coverage-index entries are present at the head and absent at base. Record in the verify record.
+- [ ] T100 (orchestrator) **FINAL — Feature-completeness audit.** Assert that (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale; (ii) every spec FR and SC maps to a landed test AND a landed implementation:
+  - FR-001 W-1, W-2, W-4 / T026, T046; the existing load paths unchanged, T096's full suite;
+  - FR-002 W-0, W-1, W-2 / T023–T026, T045–T046;
+  - FR-003 W-1's addition kinds (T016, T039) / T025, T045;
+  - FR-004 W-1's custom-pair rows, W-3's Length+Data rows, W-5 AS-4 / T021, T025, T043, T045;
+  - FR-005 W-3's R-4 and pair-relation rows / T025, T045;
+  - FR-006 W-3's version-mismatch rows / T023 (step 4a);
+  - FR-007 W-3 (each conflict row asserts the named element) / T025, T045;
+  - FR-008 no test, by the spec's own statement: structural, since the overlay entry points take paths or strings and no `Dictionary` is an input (contracts/surface.md; signatures landed in T026, T046); disposition "structural", with that rationale;
+  - FR-009 W-3's cap, bomb and side-table rows, W-1/W-2's counter = prediction, W-11 / T022–T024, T044;
+  - FR-010 W-3's cycle and guard-order rows, M-7, M-13 / T024, T045;
+  - FR-011 the existing base-load tests unchanged in T096, L-098-3 and T084's issue (1) / `load` keeps its flags and an unarmed counter (T022, T026);
+  - FR-012 the build with the field removed and SC-006's rewritten tests / T078, T080; B-098-4;
+  - FR-013 W-9 / T069;
+  - FR-014 W-10 / T068, T070;
+  - FR-015 W-8 AS-1, AS-2 / T062;
+  - FR-016 W-8's rows / T062;
+  - FR-017 W-1/W-2's hand-written references (T016, T017, T039), the patch helper's zero- and two-match rows, W-0's seeded rows;
+  - FR-018 W-5 / the shipped receive path (no receive-path change; `git diff origin/main..HEAD -- include/fixpp/wire` empty);
+  - FR-019 T086, T099 / W-13;
+  - FR-020 T085, T087, T088 / W-13's note-presence check;
+  - FR-021 `git diff origin/main..HEAD -- include/fixpp/dict/version_registry.hpp src/dictionary/version_registry.cpp` empty, and L-098-1 (T086);
+  - FR-022 W-6, W-7 / T056, T057; M-9;
+  - SC-001 W-0, W-1, W-2; SC-002 W-5; SC-003 W-3's bomb rows (budget origin); SC-004 W-8 AS-1; SC-005 W-12 (T095); SC-006 T096; SC-007 T086, T099; SC-008 W-6 and the byte-identity witnesses (T058);
+  - `[const §VII.7]` W-11 (T079, T083 and verify's 600-second run); `[const §VIII.2]` verify's paired bench; the mutation table M-0..M-21 with W-11's re-runs;
+
+  (iii) catalogue ↔ diff: D-009, COM-011 and their coverage-index entries match T099's record; every path in `git diff --name-only origin/main...HEAD` is in plan's "Files changed" or carries a recorded reason. Record the verdict (100 % or fully-waived) in `.specify/decisions/098-dialect-overlay-verify.md` under `## Completeness`. It is first written before `/gate-b` (its pre-flight 4d precondition), with the steps that follow dispositioned `Open at the audit — <reason>`: Gate B; the PR cell of T099; the merge; `.specify/close-out.md`'s rows (pipeline step 19), including the post-merge reset of `fixpp-parallel` (detached at `origin/main`, never retired) and the removal of `$M` with `git -C ~/Work/Programming/fixpp-parallel worktree remove /mnt/wsl/fixppbuild/fixpp-098-mutants` and its build trees (after the last Gate B fix round, which may re-run mutant rows); release of the sandbox lock if taken; the library `CLAUDE.md` / `CLAUDE-history.md` edits plan's Files changed schedules at close-out. It is re-confirmed after merge.
+
+---
+
+## Dependencies and execution order
+
+- **Phase 1**: T001 → T002 → T003 → T004.
+- **Phase 2** (blocks everything after): T005 ∥ T006 ∥ T007 ∥ T008 ∥ T009 → T010 → T011 (stop rule) → T012.
+- **Phase 3** (blocks the story phases): T013 → T014 → T015.
+- **Phase 4** (after T015): T016 ∥ T017, then T018, T019 → T020 → T021 → T022 → T023 → T024 → T025 → T026 →
+  T027 (commit, `H`) → T028; T029 → T030–T038 serial (one `$M`).
+- **Phase 5** (after T027): T039 → T040 ∥ T041 ∥ T042 → T043 → T044 → T045 → T046 → T047 → T048 (stop rule)
+  → T049 (commit, `H`) → T050 → T051–T053 serial.
+- **Phase 6** (after T049): T054 ∥ T055 → T056 → T057 → T058 (commit, `H`) → T059 → T060.
+- **Phase 7** (after T058): T061 ∥ T062 → T063 (commit, `H`) → T064.
+- **Phase 8** (after T063): T065 ∥ T066 ∥ T067 ∥ T068 → T069 → T070 → T071 (commit, `H`) → T072 → T073–T077
+  serial.
+- **Phase 9** (after T071): T078 ∥ T079 ∥ T080 → T081 (commit, `H`) → T082 → T083.
+- **Phase 10**: T084 needs T028; T085 needs the code of Phases 4–9 (part 2 reads the diff); T086 ∥ T087 ∥
+  T088 after T084 and T085 → T089. It touches no file a code task touches, so it may run alongside Phase 9's
+  mutant rows.
+- **Polish**: T090 ∥ T091 → `/simplify` (step 11) → T092 → T093 → T094 → T095 → T096 → T097 → `/speckit-verify`
+  (step 12) → T098 → T099 → T100 (its first write, before `/gate-b`).
+- After T100's first write: `/gate-b` (step 14), the brain pass and push (step 15), the PR (step 16, its body
+  linking the verify, Gate A and Gate B records and carrying the `local build:` line), the PR cell of T099
+  and the gate labels (step 17), in the owner's final sign-off order, the merge (step 18, owner), `.specify/close-out.md`'s rows (step 19); T100 is
+  re-confirmed after merge.
+- Mutant rows of a phase run serially in the one `$M`; the next phase may proceed in `fixpp-parallel`
+  meanwhile (another tree and other build directories), under the build rules.
+
+### Parallel opportunities
+
+- **Phase 2**: T005 (`tests/session/`) ∥ T006 (`tests/config/test_098_dialect_overlay.cpp`) ∥ T007 (the three
+  rewritten config files) ∥ T008 (`tests/capi/`, `tests/abi/`) ∥ T009 (`bindings/python/tests/wheel/`); the
+  CMake lines of T005 and T006 are in different files.
+- **Phase 4**: T016 ∥ T017 (fixture directories). T018 and T019 share the bucket's source list, so their CMake
+  lines go in one edit.
+- **Phase 5**: T040 ∥ T041 ∥ T042 (three test files).
+- **Phase 6**: T054 (`tests/session/test_098_header_send.cpp`, `tests/dictionary/header_tags_test.cpp`) ∥ T055
+  (the comparator and refusal files).
+- **Phase 7**: T061 ∥ T062.
+- **Phase 8**: T065 ∥ T066 ∥ T067 ∥ T068 (four test files; T065 and T067 both edit `tests/capi/CMakeLists.txt`,
+  so one of them makes both CMake edits).
+- **Phase 9**: T078 ∥ T079 ∥ T080.
+- **Phase 10**: T086 ∥ T087 ∥ T088 (three record areas).
+- **Polish**: T090 ∥ T091.
+
+## Implementation strategy
+
+- **MVP = Phases 1–4**: a QuickFIX-XML base loads with an overlay into a dictionary proven equal to the
+  hand-written edited reference (W-0, W-1, W-2), and every XML refusal is named (W-3). STOP and validate:
+  `dictionary_pure_tests` GREEN and the Phase 4 mutant rows recorded.
+- **Increment 2 = Phase 5**: Orchestra bases, `load_any_with_overlay`, and a validating session on the merged
+  dictionary (W-5, SC-002).
+- **Increment 3 = Phase 6**: custom header tags go in the header on send (W-6, W-7, SC-008).
+- **Increment 4 = Phases 7–8**: TOML, C ABI and Python reach the overlay.
+- **Increment 5 = Phases 9–11**: removal, fuzz, records, the final head, verify, close-out.
+
+## Notes (hard rules)
+
+- The orchestrator writes no library code, test, CMake line, fixture, fuzz seed or mutant by any tool (python
+  and sed included); `phase-implementer` does (`[const §XVI.6]`).
+- Mutants run only in `/mnt/wsl/fixppbuild/fixpp-098-mutants`, detached; never in `fixpp-parallel`, never in
+  the main checkout, never committed to the branch.
+- No `git stash`; no `git checkout` / `git switch` in the main checkout; new commits only, no `--amend`.
+- Commit after each task group (T003, T012, T015, T027, T049, T058, T063, T071, T081, T089, T099, plus any
+  fix commit), and run `python3 tools/check_line_citations.py --range origin/main..HEAD` after each.
+- No line-number citations; no counts, enumerated ranges or pasted results in shipped comments; a rewritten
+  comment states the rule and its derivation, and names 098.
+- No constitution amendment (research R-14); fixpp#642 goes to a separate docs PR, not this one.
