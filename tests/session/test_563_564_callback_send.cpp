@@ -3113,6 +3113,16 @@ int setup_miss_that_must_fail(SetupMiss what) {
     }
     delay->arm();
     const bool active = f.open_to_active(sess);
+    // A forced miss (FIXPP_FORCE_WINDOW_MISS) does not run the window, so the job's stop()
+    // can land in the drain instead and end it with the open still waiting on the held job.
+    // The held job and what it completes run here before the fixture goes.
+    if (early) {
+        (void)fixpp::test_support::pump_until(
+            f.ioc, [&] { return delay->delayed_job_ended.load(); },
+            fixpp::test_support::kPumpBudget, fixpp::test_support::kPumpSlice);
+        f.ioc.restart();
+        f.ioc.run_for(Fixture::kRunWindow);
+    }
     const bool reported = ::testing::Test::HasNonfatalFailure();
     echo_failures_to_stderr();
     const std::string context = std::string(early ? "window_returns_early" : "past_the_budget") +
