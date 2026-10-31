@@ -2970,8 +2970,8 @@ std::string describe(const std::vector<Fixture::WindowMiss>& misses) {
 
 // Asserts what a setup cell asserts of the one miss it causes at `site`, where `held` says
 // the cell's hold-up ran once: the window ran its whole length, the call became ready within
-// the setup wait, and from the window's start to ready took at least kSetupJobDelay and less
-// than a window more.
+// the setup wait, from the window's start to ready took at least kSetupJobDelay and less
+// than a window more, and run() went on to take the fixture's guard again.
 void expect_one_recovered_setup_miss(const Fixture& f, bool held, const char* site, bool active,
                                      const std::string& context) {
     ASSERT_TRUE(held && !f.window_misses.empty() && f.window_misses.front().site == site)
@@ -2984,6 +2984,8 @@ void expect_one_recovered_setup_miss(const Fixture& f, bool held, const char* si
     EXPECT_GE(m.window_ms + m.ready_ms, kSetupJobDelay.count()) << context;
     EXPECT_LT(m.window_ms + m.ready_ms, (kSetupJobDelay + Fixture::kRunWindow).count()) << context;
     EXPECT_TRUE(active) << "setup: session did not reach Active. " << context;
+    EXPECT_TRUE(f.keep.has_value())
+        << "run() did not take the fixture's guard again after the setup wait. " << context;
 }
 
 }  // namespace
