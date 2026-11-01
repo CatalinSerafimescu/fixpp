@@ -152,9 +152,8 @@ public:
     // The guard routine each overlay entry point calls before the splice: research
     // R-5's steps from the DOCTYPE check through the conflict checks, in R-5's order.
     // Writes the step totals into `trace`, and the origin before a budget or
-    // side-table refusal. Returns the step counter's
-    // arm value.
-    [[nodiscard]] std::uint64_t guard(unresolved_group_policy policy, overlay_trace& trace);
+    // side-table refusal. Returns the step counter's arm value.
+    [[nodiscard]] std::uint64_t guard(overlay_trace& trace);
 
     // Step 8 (research R-3). Call only after `guard` returned.
     void splice();
@@ -178,7 +177,7 @@ public:
     orchestra_overlay_merge& operator=(orchestra_overlay_merge&&) = delete;
 
     // As `xml_overlay_merge::guard`; a cycle throws `orchestra_parse_error`.
-    [[nodiscard]] std::uint64_t guard(unresolved_group_policy policy, overlay_trace& trace);
+    [[nodiscard]] std::uint64_t guard(overlay_trace& trace);
 
     // Step 8 (research R-3). Call only after `guard` returned.
     void splice();

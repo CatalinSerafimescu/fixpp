@@ -1346,10 +1346,9 @@ xml_overlay_merge::xml_overlay_merge(pugi::xml_document& base, pugi::xml_documen
 
 xml_overlay_merge::~xml_overlay_merge() = default;
 
-std::uint64_t xml_overlay_merge::guard(unresolved_group_policy policy, overlay_trace& trace) {
-    // `policy` reaches the walk's model of `finalize`; see the file header for
-    // why the counts it models do not depend on it.
-    static_cast<void>(policy);
+std::uint64_t xml_overlay_merge::guard(overlay_trace& trace) {
+    // No policy parameter: the counts step 6 models do not depend on
+    // `unresolved_group_policy` (see the file header).
     impl& m = *impl_;
     check_no_doctype(m.overlay_doc);  // step 3
     check_depth(m.overlay_doc);       // step 4
@@ -2259,10 +2258,9 @@ orchestra_overlay_merge::orchestra_overlay_merge(pugi::xml_document& base,
 
 orchestra_overlay_merge::~orchestra_overlay_merge() = default;
 
-std::uint64_t orchestra_overlay_merge::guard(unresolved_group_policy policy, overlay_trace& trace) {
-    // `policy` reaches the walk's model of `finalize`; see the Orchestra section's
-    // header for why the counts it models do not depend on it.
-    static_cast<void>(policy);
+std::uint64_t orchestra_overlay_merge::guard(overlay_trace& trace) {
+    // No policy parameter: the counts step 6 models do not depend on
+    // `unresolved_group_policy` (see the Orchestra section's header).
     impl& m = *impl_;
     check_no_doctype(m.overlay_doc);  // step 3
     check_depth(m.overlay_doc);       // step 4

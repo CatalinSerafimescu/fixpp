@@ -88,10 +88,10 @@ public:
     // xml_oom_error (pugixml's status_out_of_memory on the base or the overlay parse). A base or
     // overlay path that cannot be opened or read (missing, unreadable, a directory) throws
     // xml_parse_error, as `load` does for its path (research R-6). `policy` is applied to the build
-    // of the spliced document as `load` applies it to a file, and step 6's walk models it (research
-    // R-5). The string form keeps no view into `base_xml` or `overlay_xml` after it returns, as
-    // `load_from_string` keeps none. Preconditions as `load`: `mr != nullptr`. Thread safety as
-    // `load`.
+    // of the spliced document as `load` applies it to a file; step 6's counts do not depend on it
+    // (research R-5). The string form keeps no view into `base_xml` or `overlay_xml` after it
+    // returns, as `load_from_string` keeps none. Preconditions as `load`: `mr != nullptr`. Thread
+    // safety as `load`.
     [[nodiscard]] Dictionary load_with_overlay(
         std::filesystem::path const& base, std::filesystem::path const& overlay,
         std::pmr::memory_resource* mr,

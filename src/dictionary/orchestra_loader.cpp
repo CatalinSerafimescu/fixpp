@@ -1415,7 +1415,7 @@ void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path)
     unresolved_group_policy policy, ov::overlay_trace& trace) {
     OrchestraLoaderState{mr}.check_root_and_version(base);
     ov::orchestra_overlay_merge merge{base, overlay};
-    std::uint64_t const arm = merge.guard(policy, trace);  // steps 3 to 7
+    std::uint64_t const arm = merge.guard(trace);  // steps 3 to 7
     auto const base_pairs = OrchestraLoaderState{mr}.pair_relation_of(
         base, ov::collision_mode::refuse);  // step 8a, before the splice
     merge.splice();                         // step 8

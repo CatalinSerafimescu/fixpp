@@ -1578,7 +1578,7 @@ void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path)
     unresolved_group_policy policy, ov::overlay_trace& trace) {
     LoaderState{mr}.check_root_and_version(base);
     ov::xml_overlay_merge merge{base, overlay};
-    std::uint64_t const arm = merge.guard(policy, trace);        // steps 3 to 7
+    std::uint64_t const arm = merge.guard(trace);                // steps 3 to 7
     auto const base_pairs = ov::xml_length_pair_relation(base);  // step 8a, before the splice
     merge.splice();                                              // step 8
     ov::check_pair_relation(base_pairs, ov::xml_length_pair_relation(base));  // step 8a
