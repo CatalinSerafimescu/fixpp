@@ -850,6 +850,15 @@ Each is shown to produce a reported difference before the clean comparisons are 
   - **Positive row.** The helper also has a row where it must apply: a small hand-written text and hunk,
     and a hand-written expected text. The helper's output must equal the expected text, with the lines
     inserted exactly before the block's last line.
+  - **Two in-place rewrites (implement, T016/T017, 2026-11-01).** An insertion cannot express a Required
+    promotion (an existing reference line's `required` attribute becomes `Y`) or an addition to a
+    self-closing container (FIX50SP2.xml's `<header />` and `<trailer />`). A hunk may therefore also
+    replace one context line, written as a `-` line followed at once by its `+` line, in exactly the two
+    shapes contracts W-1 allows: the promotion (the line differs only in the `required` attribute's value,
+    set to `Y`, or in that attribute added as `required='Y'` in the line's own quote style) and the
+    self-closing opener (`<x …/>` becomes `<x …>`, its children follow as inserted lines, and `</x>` is an
+    inserted line). The helper checks the shape of every `-`/`+` pair and fails the cell on any other
+    shape, before any comparison. Context still matches exactly once.
   - **Line endings.** The Windows runners check out with `core.autocrlf=true`. `FIX44.xml` and the
     Orchestra file are `-text` in `.gitattributes`, but `FIX50SP2.xml`, `FIXT11.xml` and the new patch
     fixtures carry no attribute, so they arrive with CRLF there.

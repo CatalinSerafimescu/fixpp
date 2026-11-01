@@ -236,9 +236,16 @@ loader's own code after the splice, so the splice has no per-type path.
 T017a, T039a),
 `git diff --no-index --unified=1 base.xml edited.xml` is recorded in the evidence file, per format and
 for the `tolerant` triple. Every hunk adds lines only, and each added run ends immediately before a
-closing-tag line of its container. The one other change allowed is a self-closing base element opened to
-hold appended children: `<x …/>` becomes `<x …>` plus an added `</x>`. A hunk of any other shape is fixed
-before the commit.
+closing-tag line of its container. Two other changes are allowed, each one line rewritten in place and
+nothing else on it changing (implement, T016/T017, 2026-11-01: a Required promotion and an addition to a
+self-closing container cannot be written as an append):
+- a self-closing base element opened to hold appended children: `<x …/>` becomes `<x …>` plus an added
+  `</x>`;
+- a Required promotion: one existing reference line (`<field>`, `<component>` or `<group>`) whose only
+  change is its `required` attribute set to `Y`, from `N` or from absent, every other byte of the line
+  kept.
+
+A hunk of any other shape is fixed before the commit.
 A `tolerant` row per format: a small base holding one group the loader leaves unregistered under
 `unresolved_group_policy::tolerant` and refuses under `fail_closed`, its overlay and its edited file;
 `load_with_overlay_from_string(base, overlay, mr, tolerant)` vs `load_from_string(edited, mr, tolerant)`
