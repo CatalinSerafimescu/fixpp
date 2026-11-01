@@ -244,14 +244,15 @@ specs/098-dialect-overlay/
    pair-relation check over the factored `detect_length_pairs`, the step counter and its read seam;
    `XmlLoader::load_with_overlay[_from_string]`. W-1 and W-2: every row T018 writes, each with its
    seeded mismatch, and the wrap probe; W-3 (XML column). Mutants M-0..M-7, M-12..M-14,
-   M-16..M-18, M-22 (step 4's depth walk removed), M-23 (step 4a's root checks removed) and M-24
-   (`XmlLoader`'s overlay entry points do not forward `policy`). Full suite.
+   M-16..M-18, M-22 (step 4's depth walk removed), M-23 (step 4a's root checks removed) M-24
+   (`XmlLoader`'s overlay entry points do not forward `policy`) and M-25 (step 5's reference count
+   skips merged-in-place references). Full suite.
 4. **Orchestra overlay**: the Orchestra splice and checks, the factored `resolve_length_pairs`, the
    Orchestra step counter; `OrchestraLoader::load_with_overlay[_from_string]`;
    `dict::load_any_with_overlay`. W-1 (orch), W-2 (Orchestra), W-3 (Orchestra column: every cell of the
    product that is not N/A), W-4, W-5 (its RED is M-8). Mutants M-8, M-1o and M-2o (the Orchestra
    splice's position and `fixr:code` mutants), M-24 at `OrchestraLoader`'s overlay entry points and at
-   `dict::load_any_with_overlay`, and M-3..M-7, M-12..M-14, M-16..M-18, M-22, M-23 once
+   `dict::load_any_with_overlay`, and M-3..M-7, M-12..M-14, M-16..M-18, M-22, M-23, M-25 once
    more for the Orchestra rows.
    **Stop rule:** if the Orchestra W-2 row shows a difference that comes from the loader's own
    order-dependent rules rather than the splice, record it and decide before continuing.

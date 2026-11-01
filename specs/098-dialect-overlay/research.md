@@ -736,8 +736,11 @@ store), and whenever T092 finds `table_view.hpp`, `dictionary.hpp` or a `*Ref` h
 
 The same census re-reads each reason-only or coupled entry's reason against the source at the head. Where
 the reason is an invariant between two stores the comparator reads (the reverse pair map as the inverse
-of the forward map, a bit cache against its map), the comparator also asserts that invariant on each
-side, so a broken invariant is reported. An entry a version-matched overlay cannot change carries a stated reason instead of a seed.
+of the forward map; each bit cache against the stores it filters: `group_bits_` against `group_first_`,
+`group_members_` and `group_ctx_`, `enum_bits_` against `enums_`, and from plan Phase 5 `header_bits_`
+against the declared header store), the comparator also asserts that invariant on each side, so a broken
+invariant is reported. Each invariant check has its own seed in W-0, hand-built store values that break
+that invariant only (contracts W-0). An entry a version-matched overlay cannot change carries a stated reason instead of a seed.
 For example the `fixt_framing_*` members are a function of `which_session_version()`
 (`Dictionary::as_table_view`), and FR-006 fixes the version. The entries cover:
 - **Dictionary API**: `messages()`, per message `message_fields` / `field_ref` / `required_fields`,

@@ -81,12 +81,13 @@ as a RED arm before production code.
 |---|---|---|---|---|
 | W-0 seeded rows | no (test-only, but written in plan Phase 2 against Phase 2's code; the header-store row joins in Phase 5) | reported set equals the seed's declared expected set | — | the seeded rows themselves; M-0 |
 | W-0 identical pair | no (as above) | zero differences | — | control |
-| W-0 invariant seed | no (as above) | the comparator's invariant check, fed hand-built store values that break one invariant, reports that invariant | — | the seed itself; outside the expected-set union rule |
+| W-0 invariant seeds (each invariant check has its own seed; the `header_bits_` one joins in Phase 5) | no (as above) | each invariant check, fed hand-built store values that break its invariant only, reports that invariant | — | each seed itself; outside the expected-set union rule |
 | W-1 rows (including the `tolerant` policy rows) | no | zero differences vs the complete reference; no counter-origin refusal; step counter = prediction | — | qf: M-1, M-2, M-3; orch: M-1o, M-2o, M-3; both: M-17, M-24 at each loader (the `tolerant` rows refuse); each row's in-test seeded mismatch |
 | W-2 rows, side against side and against the census | no | zero differences vs the patched base; no counter-origin refusal; step counter = prediction | — | M-3; M-17; a zero- or two-match hunk fails the cell; each row's in-test seeded mismatch; W-0's census row |
 | W-2 empty-overlay rows (every base) | no | zero differences vs `load(base)`; no refusal; step counter = prediction | — | M-17; each row's seeded mismatch: `load(base)` vs the in-test base copy with one unreferenced field definition removed gives at least one difference naming its store (a zero- or two-match anchor, or a copy that does not load, fails the cell) |
 | W-2 wrap probe (FIX50SP2) | yes | records `component_fields` of the first component past the wrap point against its raw members | either | probe, recorded in the verify record (research R-10); not a RED arm |
 | W-3 rows | no | the named exception, its message naming the key, cap, table or counter origin as applicable | — | M-4, M-5, M-6, M-7, M-12 (by the side-table fit on the doubling rows, by the counter on the empty-chain rows), M-13, M-14, M-16, M-17, M-18, M-22, M-23 (per row and format, below) |
+| W-3 merged-in-place reference-cap row and its at-cap control | no | cap + 1: `overlay_limit_error` naming the reference cap; the control at the cap loads | — | M-14, M-25 |
 | W-3 unknown-reference, unknown-field-type and group-delimiter-collision rows | no | the base loader's own exception type for its format | — | characterization pin: the refusal is the loader's own, after the splice; no 098 mutant removes it |
 | W-4 rows (including the `tolerant` policy row) | no | dispatch matches the direct loader | — | M-8; M-24 at `load_any_with_overlay` (the `tolerant` row refuses on the `load_any` side) |
 | W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame; each accepted frame's scenario read holds | — | M-8 |
@@ -169,6 +170,7 @@ diff $N $I
 | M-22 | step 4's depth walk removed | per format / Debug | W-3 depth-33 row | it loads, or its refusal no longer names the depth cap | step 4 |
 | M-23 | step 4a's root checks removed | per format / Debug | W-3 version-mismatch, other-format, root-child-outside-the-list, repeated-root-container and step-4a-against-step-5 order rows | the type or the named key is wrong | step 4a |
 | M-24 | `policy` not forwarded to the build | per loader and at `load_any_with_overlay` / Debug | W-1 `tolerant` rows (the overlay side refuses); W-4 `tolerant` row (the `load_any` side refuses) | `xml_parse_error` / `orchestra_parse_error` where a load was expected | entry point → `build_handle_from_doc` with `fail_closed` → the group that declares no first member is refused |
+| M-25 | step 5's reference count skips the reference elements the splice merges in place (appended ones still count) | per format / Debug | W-3 merged-in-place reference-cap row | it loads | step 5 |
 
 ## Comparator self-test (runs first; a zero is trusted only after it)
 
@@ -184,14 +186,23 @@ example the context `required_members` seed has equal bare `group_required_membe
 the key sources: an unused extra component on one side; a
 context record that differs only where the bare value would mask it; and a census mismatch (the census
 of a document that differs from the loaded one in one component member). A pair of identical loads MUST
-report none. Where a coupled entry's reason is an invariant between two stores the comparator reads (the
-reverse pair map as the inverse of the forward map, a bit cache against its map), the comparator asserts
-that invariant on each side (research R-10 §3). That check is a function of the store values it reads,
-not of a `table_view`: no loader or `table_view_builder` call can build a dictionary whose pair
-directions disagree (`set_length_pair_data_tag` keeps them inverse), so a dictionary seed cannot reach the
-check. Its seed is therefore not a pair of
-valid dictionaries: it feeds the check hand-built store values that break one invariant (for example a
-reverse pair map missing one inverse entry), and the check MUST report that invariant. It sits outside the
+report none. Where a coupled entry's reason is an invariant between two stores the comparator reads, the
+comparator asserts that invariant on each side (research R-10 §3). The invariants are:
+- the reverse pair map is the inverse of the forward map;
+- every key that `group_first_`, `group_members_` or `group_ctx_` holds has its `group_bits_` bit set (a
+  clear bit means every one of those stores misses, the source's own statement of the filter);
+- every key that `enums_` holds has its `enum_bits_` bit set;
+- from plan Phase 5 (tasks T055): every tag of the declared header store has its `header_bits_` bit set,
+  and no other tag has.
+
+Each check is a function of the store values it reads, not of a `table_view`. No loader or
+`table_view_builder` call can build a dictionary that breaks one: `set_length_pair_data_tag` keeps the
+pair directions inverse; every population path of the group stores calls `set_group_bit`, and both of
+`enums_`'s (`add_enum`, `set_multi_value`) call `set_enum_bit`; `as_table_view` fills `header_bits_` from
+the header store. So a dictionary seed cannot reach a check. **Each invariant check has its own seed**,
+and none is a pair of valid dictionaries: it feeds that check hand-built store values that break its
+invariant only (for example a reverse pair map missing one inverse entry, or a `group_bits_` value with
+one held key's bit cleared), and the check MUST report that invariant. The seeds sit outside the
 expected-set union rule above. **RED**: the seeded rows are the RED arms; mutant **M-0** (the comparison of one declared
 entry, the context `required_members` one, removed while the entry stays listed) turns that entry's row
 RED.
@@ -258,8 +269,11 @@ definitions). The FIX44 overlay is also W-5's, W-9's and W-10's, so, among its o
 declares each constant `tests/session/test_098_inbound_frames.hpp` names, with exactly that header's values: 5001 on 35=D, 5002 in Parties, MsgType
 `U1` with its required field, the pair 5010/5011 on the MsgType that header names, enum value `Z` on
 OrdType(40), and an Optional→Required promotion of a field that stays Optional on a second FIX44 MsgType
-(AS-5). The promoted field's MsgType differs from every other frame's, or every frame on that MsgType
-carries the field, so each frame is valid on the edited dictionary but for its one scenario defect. A FIXT11 row, beyond FR-017's three vendored bases and backing FR-019's FIXT.1.1 scope:
+(AS-5). Every Required addition the overlay makes on a frame's MsgType is carried by that frame, except
+the one the frame's own scenario omits (one way to hold it: the additions W-5's frames meet are
+Optional, except each scenario's own). That covers the promoted field, U1's required field and any other
+Required addition; a Required addition to the header or the trailer is on every MsgType, so every frame
+carries it. So each frame is valid on the edited dictionary but for its one scenario defect. A FIXT11 row, beyond FR-017's three vendored bases and backing FR-019's FIXT.1.1 scope:
 a header-field overlay of `FIXT11.xml` and its insertion patch, under the same rules. Header-only is
 enough for FR-019's FIXT.1.1 claim. FIXT11.xml holds the transport header and the session messages, and
 every other kind goes through the same splice code on the other bases. The FIXT-specific part, the
@@ -348,6 +362,15 @@ counter origin.
   1 counting new definitions (new messages = cap + 1, N-7), the reference cap + 1 and a DOCTYPE, each
   `overlay_limit_error` naming its cap (or DOCTYPE); a cycle that closes through a base component (XML
   `xml_parse_error`; Orchestra `orchestra_parse_error`).
+  - **Merged-in-place references count (research R-5 step 5).** One more reference-cap row per format,
+    whose count reaches cap + 1 only if the reference elements the splice merges in place count: (cap −
+    k) reference elements the splice appends, plus (k + 1) that it merges in place, each a Required
+    promotion or an identical redeclaration of a reference the base already has at that place (a
+    `<field>` / `<component>` / `<group>` reference element, Orchestra `fixr:fieldRef` / `componentRef` /
+    `groupRef`; a `<fields>` definition is not a reference). It MUST fail with `overlay_limit_error`
+    naming the reference cap. Its control is the same mix at exactly the cap ((cap − k) appended plus k
+    merged in place), which loads. Both overlays stay inside every other cap, the expansion budget and the
+    side-table fit, so the reference cap is the only limit the cap + 1 row can meet.
   - **At-cap controls.** Each cap + 1 row has a control at the cap that loads: exactly 4 MiB through both
     the path and the string form, depth 32, and each entry cap and the reference cap at its value.
   - **Budget recipe row.** Through the read seam, the row computes step 6's total over every vendored
@@ -425,7 +448,9 @@ paired-later and new-Length refuse rows and the Orchestra rows go RED, and the l
 since that rule never refused a paired base Length), **M-17**
 (one extra `expand_field_list` call in `finalize`: the header-expansion row is refused with the counter
 origin),
-**M-18** (the side-table fit check removed: those rows load).
+**M-18** (the side-table fit check removed: those rows load), **M-25** (step 5's reference count skips
+the reference elements merged in place: the merged-in-place cap + 1 row loads, while the appended-only
+reference-cap row stays RED).
 
 **W-4 Load-any dispatch.** Same file as W-1. `load_any_with_overlay` on each format matches the loader
 called directly; a mixed-format pair is refused. A `tolerant` row: W-1's `tolerant` triple through
@@ -574,8 +599,10 @@ the evidence file:
 Comments that state the superseded outcome are rewritten as rules, not results: the header comments of
 `tests/config/fixtures/neg_step2_dialect_overlay.toml` and `tests/config/fixtures/neg_deferred_toplevel.toml`,
 and every comment in `tests/config/test_load_negative_battery.cpp`, `tests/config/test_load_selectors.cpp`
-and `tests/config/test_load_deferred_surface.cpp` that calls `dialect_overlay` deferred or step-2 (found
-with `git grep -n dialect_overlay -- tests/config`).
+and `tests/config/test_load_deferred_surface.cpp` that calls `dialect_overlay` deferred or step-2 or
+counts the deferred keys (found with `git grep -n -e dialect_overlay -e kDeferred -- tests/config`). A
+comment that counts the deferred keys loses the count and states the rule (the fixture carries every key
+of `kDeferred`).
 **RED**: **U** for every row except the negative controls `T020_MissingRequired_Dictionary`,
 `T020_DeferredSetExactCoverage` and the session-scope deferred-key row (arm table: on the unfixed tree
 `config.dictionary` is null, so AS-1's `open()` fails with `invalid_session_config`, and every
@@ -717,8 +744,10 @@ everything below.
 - **Send path (`[const §VIII.2]`).** `bench/session/session_send_bench.cpp`, paired base-vs-candidate
   on one machine.
   - The base is the merge-base with `origin/main` and the candidate is the head, both Release. The base
-    tree's root path has the head root's length, and its `.text` check runs before any paired run
-    (tasks Execution rules, Builds): a source-root literal of another length shifts code layout.
+    tree's root path has the head root's length, and its `strings` and `.text` checks run before any
+    paired run (tasks Execution rules, Builds): a source-root literal of another length shifts code
+    layout. The `.text` check compares a linked target, never an object file: an object's `.text` keeps
+    its relocations unresolved, so a root-length difference cannot change it.
   - Runs are A-B-A-B, compared min per tree.
   - Pass: a slowdown of no more than +5%. A larger slowdown needs `[const §VIII.2]`'s recorded
     measurement, a rationale and approval by someone other than the author. CI's provisional band is not

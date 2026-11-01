@@ -52,7 +52,8 @@ import-surface run's summary must show zero skipped: a skip is not the RED (cont
 Expected: each listed arm RED for its stated reason (W-6: 5020, or the 5030/5031 pair, found after the
 first body field; W-8 AS-1: `open()` returns `invalid_session_config`; the other W-8 rows:
 `recognized_not_yet_supported_step2` instead of the stated outcome, so the engine-dictionaries cell gets
-no bundle and the location cell meets the right location with that reason class; W-9: the version reads 1.12, and the
+no bundle, the location cell meets the right location with that reason class, and the message cell carries
+the deferred-key text "dialect_overlay is recognized but not yet supported"; W-9: the version reads 1.12, and the
 golden reports `fixpp_dict_load_from_xml_with_overlay` missing from the library as its only difference;
 W-10: the exact-set
 assertion, whose only difference is the missing `dict_load_from_xml_with_overlay`). An ImportError, a
@@ -130,7 +131,7 @@ R-11, Corpus directories). `/speckit-verify` Step 7
 
 ## 6. Performance (W-12)
 
-Contracts W-12 is the protocol: tasks T094 and T095 run it. In the Release build (`linux-clang-release`),
+Contracts W-12 is the protocol: tasks T094, T094a and T095 run it. In the Release build (`linux-clang-release`),
 time `XmlLoader::load(FIX50SP2.xml)` and `load_with_overlay(FIX50SP2.xml, <the named at-cap fixture
 overlay>)`. Take one discarded warm-up run of each, then at least five runs each, interleaved; the ratio of
 medians must be ≤ 1.5. Record the machine, the commit, both medians and minima, and the fixture's
