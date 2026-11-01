@@ -239,7 +239,7 @@ The guards run in this order. Each step is non-recursive or iterative, and none 
 |---|---|---|
 | 1 | Byte cap | **4 MiB**. Read at most cap + 1 bytes into a buffer (path form) or check `size()` (string form); refuse when more were available. Never trust a `stat` size (a FIFO or `/proc` file reports a wrong size). Before parse. |
 | 2 | Parse | The overlay uses `pugi::parse_default \| pugi::parse_doctype`. A result of `xml_parse_status::status_out_of_memory` (pugixml reports allocation failure as a parse status, not a throw) becomes `xml_oom_error`, never `xml_parse_error` (A-006). Any other failed status is `xml_parse_error` (`orchestra_parse_error` for Orchestra) as today. One status-mapping function serves both parses of an overlay call, so a base-parse allocation failure inside `load_with_overlay[_from_string]` is also `xml_oom_error` (N-10). The base is read without a byte cap and parsed with the same flags as `load`; only the status mapping is shared. Steps 1, 3, 4 and 5 apply only to the overlay document. `load` and `load_from_string` keep their own mapping (FR-001). |
-| 3 | DOCTYPE | refuse any `node_doctype` child of the document. pugixml 1.15 never loads external entities and expands only the five predefined entities and character references (its `parse_default` discards a DOCTYPE without a node, which is why the flag is set: to see it). Defence in depth: no DTD is ever loaded. |
+| 3 | DOCTYPE | refuse any `node_doctype` child of the document with `overlay_limit_error` naming DOCTYPE (spec US2 AS-3: a limit error, 201 at the C ABI). pugixml 1.15 never loads external entities and expands only the five predefined entities and character references (its `parse_default` discards a DOCTYPE without a node, which is why the flag is set: to see it). Defence in depth: no DTD is ever loaded. |
 | 4 | Depth | **32** element levels; an iterative (explicit stack) walk of the overlay document. |
 | 4a | Root | R-4's root checks: the overlay's format matches the base's, its version matches (FR-006), its root children are in data-model §A.1's list, and no container name repeats. Steps 5 and 6 count and walk by element name, so they presume a checked format. |
 | 5 | Entry and reference caps | one flat pass over the overlay document. **New** definitions only (N-7): fields **1024**; components **64**; messages **64**; Orchestra groups **64**; Orchestra code sets **256**. Enum values / codes added **4096**. References added (QuickFIX `<field>` / `<component>` / `<group>` refs, Orchestra `fixr:fieldRef` / `componentRef` / `groupRef`) **8192** in total, to new and existing definitions alike. An existing definition the overlay extends is not a "new" definition; how many are touched is bounded by the base's own count, the reference cap and step 6. |
@@ -295,8 +295,8 @@ FIX50SP2), with its expansion count recorded, not every overlay the caps admit.
 The values in step 5 are 2c §4.4.2's for fields, components and messages, plus the two Orchestra
 containers 2c did not know about, an enum-value cap the byte cap would otherwise bound only loosely, and
 the reference cap Gate A round 1 added. Fixed constants in `src/dictionary/`, no configuration knob (2c's
-`FIXPP_DICT_*` names were never implemented). A cap, budget, side-table or step-counter failure throws
-`overlay_limit_error`.
+`FIXPP_DICT_*` names were never implemented). A cap, DOCTYPE, budget, side-table or step-counter failure
+throws `overlay_limit_error`.
 
 The base path is not hardened (spec FR-011): the caps apply to the overlay document; the cycle check and
 the budget cover the merged graph, and so cover the base's own graph only on the overlay path.
@@ -386,9 +386,10 @@ declaring a header tag outside the fixed set changes anything. Re-derive with a 
 - **The fixed set becomes testable.** `kSendHeaderTags` is a function-local `static constexpr` inside
   the file-static `is_send_header_tag` in `src/session/session.cpp`, so no test can read it. It moves,
   with `is_send_header_tag`, into a new private header `src/session/send_header_tags.hpp`, as
-  `scan_frame_header.hpp` was moved out of `session.cpp` for its tests. W-7's union assertion includes
-  that header from `session_pure_tests`, so a drift between the production set and the test is
-  impossible (N-9).
+  `scan_frame_header.hpp` was moved out of `session.cpp` for its tests. The header is self-contained
+  (standard headers only). W-7's union assertion includes it from the standalone census executable
+  `dictionary_098_header_census_test` (contracts W-7), so a drift between the production set and the
+  test is impossible (N-9).
 
 **`kReplayHeaderTags` needs no change.** It is local to `build_replay_frame` (ResendRequest replay of
 stored frames) and only finds where to insert PossDupFlag(43) / OrigSendingTime(122). Its comment requires

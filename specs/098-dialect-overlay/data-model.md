@@ -94,6 +94,7 @@ Signatures: research R-8. `DialectExtension` stays a reserved enumerator.
 | L-426-2 | reword | applies to overlays |
 | L-426-3 | unchanged | — |
 | B-066-1 + its release note | update | the extension story points at the shipped overlay |
+| Release note (098) | new | the filled TOML bundle (a host that overwrites `config.dictionary` discards a session's overlay, B-098-3); the removed `SessionConfig::dialect_overlay` (B-098-4) |
 | B-098-1 | new | load with overlay: same-format fragment, splice semantics, conflicts refused, caps |
 | B-098-2 | new | Orchestra code sets and groups are shared definitions: an edit reaches every user |
 | B-098-3 | new | TOML sessions arrive with `SessionConfig::dictionary` filled; a host that overwrites it discards the overlay; a `[default]` `dialect_overlay` cannot be cleared for one session (no "none" value; QuickFIX's `[DEFAULT]` behaves the same) |

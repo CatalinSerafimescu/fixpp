@@ -18,11 +18,12 @@ public:
     // the spliced document's Length+Data relation against the base's (R-5 step 8a) and builds the
     // Dictionary from the spliced document as `load` builds one from a file, with the expansion
     // step counter armed. Throws: xml_parse_error (base or overlay malformed, unknown reference,
-    // cycle), unknown_version_error (base), overlay_conflict_error, overlay_limit_error (a cap, the
-    // expansion budget, the step counter, or a side table that would stop fitting 16 bits). A step-
-    // counter refusal keeps this public type but has a distinct internal origin and model-drift
-    // message exposed by R-5's test read seam; it is not a budget refusal. Also throws xml_oom_error
-    // (pugixml's status_out_of_memory on the base or the overlay parse).
+    // cycle), unknown_version_error (base), overlay_conflict_error, overlay_limit_error (a cap, a
+    // DOCTYPE, the expansion budget, the step counter, or a side table that would stop fitting 16
+    // bits). A step-counter refusal keeps this public type but has a distinct internal origin and
+    // model-drift message exposed by R-5's test read seam; it is not a budget refusal. Also throws
+    // xml_oom_error (pugixml's status_out_of_memory on the base or the overlay parse). `policy` is
+    // applied to the build of the spliced document as `load` applies it to a file.
     [[nodiscard]] Dictionary load_with_overlay(
         std::filesystem::path const& base, std::filesystem::path const& overlay,
         std::pmr::memory_resource* mr,
@@ -84,8 +85,9 @@ Overlay attribute vocabulary: `required` is `Y`, `N` or absent (QuickFIX XML); `
  *
  *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
  *  @return FIXPP_ERR_NULL_HANDLE          a NULL argument; *out_dict = NULL when out_dict is not NULL
- *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the overlay exceeds a cap or the expansion budget, or
- *                                         would push a side table past 16 bits; *out_dict = NULL
+ *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the overlay exceeds a cap or the expansion budget, carries
+ *                                         a DOCTYPE, or would push a side table past 16 bits;
+ *                                         *out_dict = NULL
  *  @return FIXPP_ERR_DICT_OOM             allocation failed anywhere in the call, including the
  *                                         handle's own allocation; *out_dict = NULL
  *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure; *out_dict = NULL

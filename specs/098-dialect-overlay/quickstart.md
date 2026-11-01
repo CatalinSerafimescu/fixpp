@@ -10,11 +10,15 @@ The witnesses and their RED arms are in `contracts/witnesses.md`; this file is t
 | `/mnt/wsl/fixppbuild/fixpp-098-mutants` | mutants only, detached at the head under test (contracts preamble) | its own `build/` on F: |
 | main checkout | **not used**; never switched | — |
 
-One build owner per build directory; `-j2` at most; never a Windows and a Linux build at once. Take
+One build owner per build directory; never a Windows and a Linux build at once. Take
 `/mnt/c/temp/fixpp/.sandbox-lock` before any MSVC rsync and release it at close-out.
 
-**Resource gate (`[const §XVII.7]`).** Every build or `ctest` below (§1, §3, §4, §5, §6, §8) is a local
-build. An agent surfaces an `AskUserQuestion` before it and runs it only once the user approves.
+**Parallelism.** Every build below uses `-j"$J"`, with `J=${J:-2}` at the top of its block: `J` is `2`
+unless the owner has granted more for the current window; a grant is recorded in the evidence file with
+its window, and lapses with it. An empty `J` would give a bare `-j`, which is unbounded.
+
+**Build approval.** The owner's standing instruction (tasks T002) approves the builds below; the
+pre-PR build gate of `[const §XVII.7]` is §8.
 
 ## 1. Before any production edit — witnesses that compile on the unfixed tree
 
@@ -27,8 +31,9 @@ both W-7 halves need code that lands in plan phase 5.
 
 ```
 cd ~/Work/Programming/fixpp-parallel
+J=${J:-2}                                                       # never empty: a bare -j is unbounded
 cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON &&    # the preset leaves the bindings OFF
-  cmake --build --preset linux-clang-debug -j2                  # a failed configure must stop here
+  cmake --build --preset linux-clang-debug -j"$J"               # a failed configure must stop here
 ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure
 L="$PWD/build/linux-clang-debug/lib"
 PYTHONPATH="$L" python3 -c 'import fixpp; print(fixpp.__file__)'  # must print a path under $L
@@ -58,7 +63,8 @@ before W-1/W-2 are read.
 ## 3. After each implementation phase
 
 ```
-cmake --build --preset linux-clang-debug -j2
+J=${J:-2}
+cmake --build --preset linux-clang-debug -j"$J"
 ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure
 ctest --preset linux-clang-debug -L "dictionary|config|capi|session|091|field-order" --no-tests=error --output-on-failure
 ```
@@ -100,7 +106,8 @@ mutant's edit) before a GREEN is read as "the mutant survived".
 ## 5. Fuzz
 
 ```
-cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON && cmake --build --preset linux-clang-asan -j2
+J=${J:-2}
+cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON && cmake --build --preset linux-clang-asan -j"$J"
 ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure
 ```
 
@@ -118,7 +125,8 @@ Release build (`linux-clang-release`): time `XmlLoader::load(FIX50SP2.xml)` and
 From the parent repo, with `T=~/Work/Programming/fixpp-parallel`:
 
 ```
-python3 .claude/scripts/check_bl_delta.py --root "$T"
+python3 .claude/scripts/check_bl_delta.py --self-test             # the known positive first
+python3 .claude/scripts/check_bl_delta.py gate --feature 098-dialect-overlay --root "$T" --base origin/main
 python3 .claude/scripts/check-comment-claims.py --root "$T" --base origin/main
 research/G19-fix-fpml-iso20022/tools/brain-external-sweep.sh     # report the execution count
 ```
@@ -129,5 +137,7 @@ its seeded positive and every hit dispositioned, and the note presence check wit
 
 ## 8. Final head
 
-After the §XVII.7 ask: one full configure (with `-DFIXPP_BUILD_PYTHON=ON`) + build + `ctest` of
-`linux-clang-debug`, plus §3's W-10 pytest runs; `/speckit-verify`; then `/gate-b`.
+`[const §XVII.7]`'s pre-PR build gate: one Conan install + full configure (with
+`-DFIXPP_BUILD_PYTHON=ON`) + build + `ctest` of `linux-clang-debug`, plus §3's W-10 pytest runs and
+`pytest bindings/python/tests/` (098 touches `bindings/python/`); the PR body carries
+`local build: green on linux-clang-debug @ <sha>` from this run. Then `/speckit-verify`; then `/gate-b`.

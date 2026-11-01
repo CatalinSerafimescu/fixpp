@@ -598,8 +598,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 **Send-side header membership (L-422-1)**
 
 - **FR-022 (header set from the dictionary)**: The set of tags the send path treats as header-class MUST
-  be the union of today's fixed set and every field the session dictionary declares in its `<header>`
-  (base or overlay; QuickFIX-XML or Orchestra), except that a counted Data value keeps following its
+  be the union of today's fixed set and every field the session dictionary declares in its header
+  (QuickFIX `<header>`; Orchestra component 1024; base or overlay), except that a counted Data value keeps following its
   Length's class, as today, so the pair stays adjacent. The dictionary MUST expose that header membership, which
   today is lost because the loader folds header fields into every message's field list. A tag in the
   fixed set MUST keep its position rule unchanged. Plan MUST also assess the second fixed header set the
@@ -644,7 +644,11 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   measured comparison, recorded in the verify record with the fixture's expansion count). It is not a
   claim for every overlay the caps and budget admit. This replaces 2c §1.2's "merge ≤ 1 ms", which assumed a separate merge step.
 - **SC-006**: The full existing test suite passes unchanged, apart from the tests that name
-  `SessionConfig::dialect_overlay` or the TOML deferred key, which are rewritten.
+  `SessionConfig::dialect_overlay` or the TOML deferred key, which are rewritten; the C-ABI version pin
+  (`tests/capi/version_test.cpp`), the exported-symbol golden (`tests/abi/golden/fixpp_capi_symbols.txt`)
+  and the Python import-surface exact set (`bindings/python/tests/wheel/test_import_surface.py`), which
+  the new C-ABI function changes; and the stale comment in
+  `tests/session/test_resend_answer_field_order.cpp` (comment only).
 - **SC-007**: D-009 and COM-011 are `done`; L-002-2 and L-422-1 are in the closed B&L file.
 - **SC-008**: For every header field a witness dictionary declares beyond the fixed set, a message whose
   caller places that field after a body field is sent with it in the header (US1 AS-7), RED on the

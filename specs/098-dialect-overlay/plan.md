@@ -174,7 +174,7 @@ and parser are not changed. Mutants never run in the PR's tree (contracts preamb
 | `[const §VI.4]`, `§VI.5` | D-009 gains a coverage-index supplemental note in D-007's `[impl]` form; spec Normative References use `[DocAbbrev §X] Title`. |
 | `[const §VII.3]`, `§VII.4` | TDD: every witness RED (unfixed tree or named mutant) before GREEN; the **U** arms run before any production edit (phase 1). |
 | `[const §VII.7]` | Applies: the overlay loader parses untrusted XML. New harness `tests/fuzz/fuzz_dict_overlay.cpp` with seeds; CI replays them on `linux-clang-asan`; the ten-minute run is verify's fuzz step (research R-11). |
-| `[const §VII.8]` | Per-witness dispositions are in contracts W-0–W-13. W-7's shipped-dictionary census is standalone `dictionary_098_header_census_test`, labelled `dictionary;098;census`; its session half and W-5/W-6 join `session_pure_tests`. W-9's pure rows join `capi_pure_tests`; its live arm, which starts C-ABI engines with their worker threads, is standalone `capi_098_dict_overlay_live_test`, labelled `capi;098`, with an explicit `TIMEOUT`. W-0 remains in `dictionary_pure_tests` because it is a self-test of test-local data with no isolation hazard. Other pure gtests join their named dictionary, config and capi buckets; W-10–W-13 are Python, fuzz, measurement or scripts rather than grouped gtests. All CTest selection is by label. |
+| `[const §VII.8]` | Per-witness dispositions are in contracts W-0–W-13. Both halves of W-7, exact censuses over the shipped dictionaries, are in the standalone `dictionary_098_header_census_test`, labelled `dictionary;098;census`, with `src/session` on its include directories for the self-contained `send_header_tags.hpp`; W-5/W-6 join `session_pure_tests`. W-9's pure rows join `capi_pure_tests`; its live arm, which starts C-ABI engines with their worker threads, is standalone `capi_098_dict_overlay_live_test`, labelled `capi;098`, with an explicit `TIMEOUT`. W-0 remains in `dictionary_pure_tests` because it is a self-test of test-local data with no isolation hazard. Other pure gtests join their named dictionary, config and capi buckets; W-10–W-13 are Python, fuzz, measurement or scripts rather than grouped gtests. All CTest selection is by label. |
 | `[const §VIII.2]` | The send-path change is measured by the paired bench at verify (W-12). |
 | `[const §IX.1]` | Touched modules ≥ 95/85 or a per-line assessment, at verify. |
 | `[const §IX.4]` | clang-tidy / clang-format / cppcheck on changed files, at verify. |
@@ -185,8 +185,8 @@ and parser are not changed. Mutants never run in the PR's tree (contracts preamb
 | `[const §XVI.4]` | `/speckit-analyze` after `/speckit-tasks`, with an explicit plan↔spec drift pass over every Clarifications answer, including the `/speckit-plan` supersession of the clarify-time Orchestra-format reading. |
 | `[const §XVI.6]` | Mutants in a third worktree on `/mnt/wsl/fixppbuild`, detached (contracts preamble). |
 | `[const §XVII.1]` | Gate A runs: public C++ API change (new members, a removed field), C-ABI addition, config surface. |
-| `[const §X.6]`, Appendix A | Triggered ("ABI surface change", "Codegen layout: dictionary loader"): all four controls. `/clarify` done; Codex Gate A running; `/analyze` after `/speckit-tasks`; **user `/plan` sign-off: given 2026-11-01** (pre-authorised by the owner 2026-10-31 on Gate A convergence; Gate A converged at loop 2 round 2). |
-| `[const §XVII.7]` | Local full build + ctest of `linux-clang-debug` at the final head. Resource gate: every local build (quickstart §1, §3, §4, §5, §6, §8) is preceded by an `AskUserQuestion`, and runs only once the user approves. |
+| `[const §X.6]`, Appendix A | Triggered ("ABI surface change", "Codegen layout: dictionary loader"): all four controls. `/clarify` done; Codex Gate A converged loop 2 round 2; `/analyze` after `/speckit-tasks`; **user `/plan` sign-off: given 2026-11-01** (pre-authorised by the owner 2026-10-31 on Gate A convergence; Gate A converged at loop 2 round 2). |
+| `[const §XVII.7]` | Local pre-PR build gate: before the PR opens, a Conan install + configure + build + `ctest` of `linux-clang-debug`, and `pytest bindings/python/tests/` because 098 touches `bindings/python/`, at the final head (tasks T096); the PR body carries `local build: green on linux-clang-debug @ <sha>` from that run. The clause's Resource-gate approval is the owner's standing instruction of 2026-10-31, quoted in tasks T002. |
 | `[const §XVII.8]` | `/speckit-verify` before Gate B. |
 | `[const §XX]` | No amendment (research R-14); fixpp#642 goes to a docs PR. |
 
@@ -216,11 +216,11 @@ specs/098-dialect-overlay/
 |---|---|
 | Dictionary API | `include/fixpp/dict/{xml_loader,orchestra_loader,load_any,error,table_view,dictionary,field_ref}.hpp` |
 | Dictionary impl | `src/dictionary/{xml_loader,orchestra_loader,load_any,dictionary}.cpp` (the factored pair detection, the step counter, the header-store walk), `src/dictionary/dictionary_internal.hpp`; a new `src/dictionary/overlay_merge.{hpp,cpp}` for the guards, the conflict checks and the two splice walks (shared helpers: overlay-only bounded read, shared parse-status mapping, depth walk, the match-index helper, the merged-graph cycle, budget and side-table walk, and the test-facing read seam for the step counter and refusal origin); `src/dictionary/CMakeLists.txt` (lists `fixpp_dictionary`'s sources explicitly, so `overlay_merge.cpp` is added there) |
-| Session | `src/session/session.cpp` (the send classification line); a new private header `src/session/send_header_tags.hpp` (`kSendHeaderTags` and `is_send_header_tag`, moved out of `session.cpp`, research R-7); `include/fixpp/session/session_config.hpp` (field and forward declaration removed) |
+| Session | `src/session/session.cpp` (the send classification line); a new private header `src/session/send_header_tags.hpp` (`kSendHeaderTags` and `is_send_header_tag`, moved out of `session.cpp`, research R-7; self-contained, standard headers only, so W-7's census executable includes it without linking `fixpp_session`); `include/fixpp/session/session_config.hpp` (field and forward declaration removed) |
 | Config | `src/config/toml_config_loader.cpp` (scope-aware `dialect_overlay`), `src/config/selector_resolver.cpp` (per-session dictionary step), `src/config/loader_internal.hpp` (doc) |
 | C ABI | `include/fix/c_api/dict.h`, `include/fix/c_api/version.h`, `src/capi/dictionary.cpp`, `src/capi/capi_internal.hpp` (the exception-to-code mapping function, research R-6), `tests/abi/golden/fixpp_capi_symbols.txt`, `tools/capi_freeze.sha256` |
 | Python | `bindings/python/fixpp.i` (GIL audit table), `bindings/python/tests/test_098_dialect_overlay.py` (in-tree only, no wheel twin, so `bindings/python/tests/wheel/README.md` is unchanged), `bindings/python/tests/wheel/test_import_surface.py` |
-| Tests | `tests/dictionary/{dictionary_equivalence.hpp,dictionary_equivalence_test.cpp,overlay_equivalence_test.cpp,overlay_refusal_test.cpp,header_tags_test.cpp}` (`header_tags_test.cpp` is standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`; W-0–W-4 join `dictionary_pure_tests`), `tests/dictionary/fixtures/098/**`, `tests/session/{test_098_dialect_overlay_inbound,test_098_header_send}.cpp` (join `session_pure_tests`), `tests/config/test_098_dialect_overlay.cpp`, `tests/config/fixtures/098/**`, the rewritten T018/T020/T028 cells and their fixtures, `tests/capi/{dict_overlay_capi_test,dict_overlay_capi_live_test,version_test}.cpp` (the live arm is standalone `capi_098_dict_overlay_live_test`; `capi_pure_tests` gains `FIXPP_098_FIXTURE_DIR` and label `098` by `APPEND`), `tests/session/test_resend_answer_field_order.cpp` (stale comment only), `tests/session/engine_establishment_timeout_test.cpp` (relies on the filled bundle), the CMakeLists of each bucket and standalone executable |
+| Tests | `tests/dictionary/{dictionary_equivalence.hpp,dictionary_equivalence_test.cpp,overlay_equivalence_test.cpp,overlay_refusal_test.cpp,header_tags_test.cpp}` (`header_tags_test.cpp` is standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`, holding both W-7 halves, with `src/session` on its include directories; W-0–W-4 join `dictionary_pure_tests`), `tests/dictionary/fixtures/098/**`, `tests/session/{test_098_dialect_overlay_inbound,test_098_header_send}.cpp` (join `session_pure_tests`), `tests/config/test_098_dialect_overlay.cpp`, `tests/config/fixtures/098/**`, the three renamed and rewritten cells (`T018_SessionDialectOverlayFileMissing`, `T028_DialectOverlayFileMissing`, `T020_RootDialectOverlayRefused`, contracts W-8) in `tests/config/{test_load_negative_battery,test_load_selectors,test_load_deferred_surface}.cpp`, with `T020_DeferredSetExactCoverage`'s key set, and the header comments of their fixtures `tests/config/fixtures/{neg_step2_dialect_overlay,neg_deferred_toplevel}.toml`, `tests/capi/{dict_overlay_capi_test,dict_overlay_capi_live_test,version_test}.cpp` (the live arm is standalone `capi_098_dict_overlay_live_test`; `capi_pure_tests` gains `FIXPP_098_FIXTURE_DIR` and label `098` by `APPEND`), `tests/session/test_resend_answer_field_order.cpp` (stale comment only), `tests/session/engine_establishment_timeout_test.cpp` (only if its unedited run fails, or it relies on the host copy in a way research R-9's change makes wrong; tasks T061), the CMakeLists of each bucket and standalone executable |
 | Fuzz | `tests/fuzz/fuzz_dict_overlay.cpp`, `tests/fuzz/corpus/dict_overlay/`, `tests/fuzz/CMakeLists.txt` |
 | Records | `spec/{feature-catalogue,coverage-index,behaviors-and-limitations,behaviors-and-limitations-closed}.md`; every hit of data-model §G's inventory recipe (including `.specify/2c-codegen.md`, other design docs such as `.specify/2d-threading.md` and `.specify/2m-pybind.md`, and the brain pages whose `refs` name a changed file, such as `brain/components/{dictionary,session,c-api}.md`; `config.md` and `python-api.md` assessed); `CLAUDE.md` / `CLAUDE-history.md` at close-out |
 
@@ -229,7 +229,7 @@ specs/098-dialect-overlay/
 1. **Unmodified-code witnesses first** (quickstart §1): exactly the rows of the contracts arm table whose
    unfixed outcome is **fails** (W-6's edited-dictionary and replay arms, W-8's rows, W-9's version pin
    and symbol golden, W-10's import surface). Negative controls and characterization pins are not in this list. Build and run in
-   `build/linux-clang-debug` after the §XVII.7 ask; that run is the RED record. **Stop rule:** a listed
+   `build/linux-clang-debug`; that run is the RED record. **Stop rule:** a listed
    arm that passes on the unfixed tree means its premise is false; stop and decide, never adjust the
    test.
 2. **Comparator** (test-only): `dictionary_equivalence.hpp` and W-0, every seeded row reports exactly
@@ -241,20 +241,23 @@ specs/098-dialect-overlay/
    cycle, budget and side-table walk, then the conflict checks of R-4), the XML splice (R-3), the step 8a
    pair-relation check over the factored `detect_length_pairs`, the step counter and its read seam;
    `XmlLoader::load_with_overlay[_from_string]`. W-1 (qf), W-2 (FIX44, FIX50SP2, with the wrap probe),
-   W-3 (XML column). Mutants M-0..M-7, M-12..M-14, M-16..M-18. Full suite.
+   W-3 (XML column). Mutants M-0..M-7, M-12..M-14, M-16..M-18, M-22 (step 4's depth walk removed) and
+   M-23 (step 4a's root checks removed). Full suite.
 4. **Orchestra overlay**: the Orchestra splice and checks, the factored `resolve_length_pairs`, the
    Orchestra step counter; `OrchestraLoader::load_with_overlay[_from_string]`;
    `dict::load_any_with_overlay`. W-1 (orch), W-2 (Orchestra), W-3 (Orchestra column: every cell of the
-   product that is not N/A), W-4. Mutant M-8, and M-4..M-7, M-12..M-14, M-16..M-18 once more for the
-   Orchestra rows.
+   product that is not N/A), W-4, W-5 (its RED is M-8). Mutants M-8, M-1o and M-2o (the Orchestra
+   splice's position and `fixr:code` mutants), and M-3..M-7, M-12..M-14, M-16..M-18, M-22, M-23 once
+   more for the Orchestra rows.
    **Stop rule:** if the Orchestra W-2 row shows a difference that comes from the loader's own
    order-dependent rules rather than the splice, record it and decide before continuing.
 5. **Header on send**: handle member filled by the visited-set header walk (research R-7, not an
    `expand_field_list` call), `table_view::header_bits_` + `is_header_tag`, builder forwarder,
    `as_table_view` fill, `src/session/send_header_tags.hpp`, the send classification; the comparator's
-   `is_header_tag` comparison and its W-0 seeded row, then W-1/W-2 re-run with it. W-6, W-7. Mutant
-   M-9. Full suite: the existing header-order witnesses unchanged.
-6. **Config, C ABI, Python**: TOML scope and resolver step, the T018/T020/T028 rewrites; the C-ABI
+   `is_header_tag` comparison and its W-0 seeded row, then W-1/W-2 re-run with it; W-3's header-expansion
+   row gains its header-store assertion. W-6, W-7. Mutant M-9. Full suite: the existing header-order
+   witnesses unchanged.
+6. **Config, C ABI, Python**: TOML scope and resolver step, the three renamed T018/T020/T028 cells; the C-ABI
    function and its mapping function, 1.13 pins, symbol golden, freeze hash; the SWIG audit row and
    Python test. W-8, W-9 (pure rows and the standalone live arm), W-10 (run by pytest; no ctest label
    reaches it). Mutants M-10, M-11, M-15, M-19, M-20, M-21 (M-11 and M-19 also against W-10).
@@ -274,7 +277,8 @@ specs/098-dialect-overlay/
   declaration-order rules (component indices, `parent_of_`, the first-seen group node, enum order), so
   an addition placed elsewhere than a hand edit would put it yields a different dictionary. Mitigation:
   the splice only appends to the matched container; W-1/W-2 compare against hand-written references
-  with the comparator proven on every store (W-0); M-1 proves a position change is caught.
+  with the comparator proven on every store (W-0); M-1 (XML) and M-1o (Orchestra) prove a position
+  change is caught.
 - **A comparator that cannot see a store.** Mitigation: the compared stores are a declared list; every
   valid seed declares the exact set invariants allow it to change, the comparator must report exactly
   that set, and the union of expected sets plus reason-only unchangeable entries must equal the list
@@ -301,7 +305,9 @@ specs/098-dialect-overlay/
 - **TOML hosts that overwrite `config.dictionary`.** After 098 a host that still copies
   `engine.dictionaries.front()` into every session discards that session's overlay silently. Disclosed in
   B-098-3 and the release note; the one in-tree example
-  (`tests/session/engine_establishment_timeout_test.cpp`) is updated to rely on the filled bundle.
+  (`tests/session/engine_establishment_timeout_test.cpp`) is run unedited first: it copies the same
+  pointer the bundle now holds for a session without an overlay (research R-9), so it is edited only if
+  that run fails or it relies on the host copy in a way R-9's change makes wrong (tasks T061).
 - **The send-path change moves an existing frame.** Measured not to for any vendored dictionary
   (research R-7, with a seeded probe); W-7 pins the measurement and W-6 keeps the existing header-order
   witnesses byte-identical.
