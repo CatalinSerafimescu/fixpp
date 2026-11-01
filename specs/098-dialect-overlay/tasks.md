@@ -165,7 +165,9 @@ blocks Phase 1. Then `python3 tools/check_line_citations.py --range origin/main.
   `bindings/python/tests/wheel/test_import_surface.py` (the ABI addition); every test naming
   `SessionConfig::dialect_overlay` (derived by T078's grep); `tests/session/engine_establishment_timeout_test.cpp`
   only if T061 edits it; the comment of `tests/session/test_resend_answer_field_order.cpp` (comment
-  only); the forwarder's probe pair added to `tests/dictionary/table_view_seal_compile_test.cpp` (T056);
+  only); the comments of `tests/dictionary/table_view_seal_compile_test.cpp` and
+  `tests/dictionary/table_view_builder_differential_test.cpp` that counted `table_view`'s mutators (the
+  count deleted, T056, 2026-11-01); the forwarder's probe pair added to `tests/dictionary/table_view_seal_compile_test.cpp` (T056);
   and, as wiring rather than a rewritten test (no existing test's behaviour changes through them), the
   CMakeLists of each bucket and standalone executable 098 wires
   (`tests/{session,config,capi,dictionary,fuzz}/CMakeLists.txt`, plan Files changed).
