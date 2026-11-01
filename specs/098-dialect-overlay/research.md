@@ -348,6 +348,12 @@ one: a header-store walk). So the build does not trust it:
 - The counter is a member of the per-call `LoaderState` / `OrchestraLoaderState`, each a local of
   `build_handle_from_doc`. The read seam returns its result by value. The loaders therefore stay
   stateless, and FR-008's argument and the contract's "Thread safety as `load`" line hold unchanged.
+  **Correction (implement, T026, 2026-11-01).** Only the loaders (and a read-only test friend) can build a
+  `Dictionary`, so the seam cannot be a free function returning one. The probe calls the public loader
+  member and receives the trace through a `thread_local` pointer in `src/dictionary/xml_loader.cpp`, null
+  except inside an RAII `probe_scope` that saves and restores it; every other call writes a local trace.
+  The pointer is per-thread and per-call scoped, so thread safety is still `load`'s. The probe's
+  declarations sit in the internal `src/dictionary/overlay_merge.hpp`, which is never installed.
 - An `expand_field_list` call step 6 does not model can therefore cause a loud refusal, never unbounded
   work. The counter does not see other recursive walks; none is added (the header store is a
   visited-set walk, R-7).
