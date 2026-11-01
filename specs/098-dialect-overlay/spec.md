@@ -444,7 +444,9 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   `[default]` into the sessions that want it (B-098-3). Orchestrator default, owner confirmed 2026-11-01.
 - **FIXT.1.1 session**: the overlay applies to the session's own dictionary. The engine registry is
   engine-wide (one dictionary per application version), so a per-session overlay is not visible through
-  it; today the registry only answers serviceability (FR-021).
+  it; today the registry only answers serviceability (FR-021). Through TOML, the one `[dictionary]` file
+  is both the engine's dictionary and every session's base (L-097-1), so a FIXT.1.1 TOML session's overlay
+  applies to that file, whichever of FIXT11.xml or the Orchestra FIX Latest file it names (L-098-1).
 - **Orchestra base** (FIX Latest): supported with an Orchestra-format overlay (FR-001). The merged
   dictionary's session version stays `vlatest`, and it is indistinguishable from the dictionary loaded
   from a hand-edited copy of the Orchestra repository carrying the same additions (FR-002).
@@ -473,8 +475,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 **Loading and merging**
 
 - **FR-001 (C++ load with overlay)**: The dictionary library MUST offer a load that takes a base
-  dictionary and one overlay, each as a file path, and a string form of the same for in-process use, and
-  returns an ordinary `dict::Dictionary`. The base MAY be QuickFIX XML or a FIX Orchestra repository
+  dictionary and one overlay, each as a file path, and a string form of the same for in-process use (on `XmlLoader` and `OrchestraLoader`, as
+  `load_from_string` is today; research R-8), and returns an ordinary `dict::Dictionary`. The base MAY be QuickFIX XML or a FIX Orchestra repository
   (the two formats `dict::load_any` recognises today); the overlay MUST be in its base's format, and an
   overlay in the other format is a load error. The
   existing `load` / `load_from_string` / `load_any` signatures and behaviour, and `OrchestraLoader`'s,
@@ -487,7 +489,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   types, enum values, group bare, exact and context stores, group delimiters, Length+Data pair tables and
   `has_nonstandard_pair`), MUST answer the same.
 - **FR-003 (grammar: may add)**: An overlay MUST be able to add: new fields with any type the base loader
-  accepts; enum values to new or existing fields; new components; new MsgTypes; fields, components and
+  accepts (the overlay uses the base loader's type vocabulary, parsed by the loader's own code after the
+  splice, so the witness needs no row per type; contracts W-1); enum values to new or existing fields; new components; new MsgTypes; fields, components and
   groups to existing MsgTypes, components and groups; fields to the header and trailer; and Required
   status to an Optional child of an existing MsgType, component or group.
 - **FR-004 (grammar: Length+Data)**: An overlay MUST be able to declare a custom Length+Data pair. It is
@@ -506,7 +509,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   attribute for Orchestra. A mismatch is a load error.
 - **FR-007 (conflict = refusal)**: Every conflict between the overlay and the base MUST fail the whole
   load with an error that names the conflicting element (tag, name or MsgType). There is no conflict
-  policy knob.
+  policy knob. The name is carried by the C++ exception's `what()` and by a TOML diagnostic's message;
+  the C ABI and Python report a code only (FR-013, B-098-6).
 - **FR-008 (base unchanged)**: Loading with an overlay MUST NOT change any other `Dictionary`; a failed
   load returns no dictionary and leaves no partial state visible. This holds by construction: the overlay
   entry points take paths or strings, never a `Dictionary`, and the loaders are stateless, so no
@@ -536,8 +540,10 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 
 - **FR-012 (remove the dead field)**: `SessionConfig::dialect_overlay` and the forward declaration of
   `dict::DialectOverlay` MUST be removed, and the removal disclosed as a pre-release breaking change to
-  the public C++ API. `FieldType::DialectExtension`'s comment that it is "re-enabled when D-009 ships"
-  MUST be corrected: overlays use the base type vocabulary, and the enumerator stays reserved.
+  the public C++ API. `field_data_type::DialectExtension`'s comment (`include/fixpp/dict/field_ref.hpp`) that
+  it is "re-enabled when D-009 ships" MUST be corrected: overlays use the base type vocabulary, and the
+  enumerator stays reserved: its position in `field_data_type` is unchanged and nothing in `src/` produces
+  it (re-derive: `git grep -n DialectExtension -- src` prints nothing).
 - **FR-013 (C ABI)**: The C ABI MUST gain an additive function that loads a base and an overlay by path
   and returns a dictionary handle with the same ownership as `fixpp_dict_load_from_xml`. A cap failure
   returns `FIXPP_ERR_DICT_LIMIT_EXCEEDED`; every other failure returns a documented non-OK code; no
@@ -546,10 +552,11 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **FR-014 (Python)**: The new C-ABI function MUST be reachable from the Python bindings through SWIG and
   covered by a Python test that reads the same inbound Length+Data value as the C-ABI test (US4) and
   checks the cap error's code.
-- **FR-015 (TOML session dictionary)**: Loading a TOML configuration MUST set each `[[session]]`'s
-  `SessionConfig::dictionary`: to the `[dictionary]` dictionary for a session without an overlay, and to
-  the merged dictionary for a session with one. `EngineConfig::dictionaries` keeps holding the base
-  dictionary as today.
+- **FR-015 (TOML session dictionary)**: A TOML load that succeeds (reports no diagnostic) MUST set each
+  `[[session]]`'s `SessionConfig::dictionary`: to the `[dictionary]` dictionary for a session without an
+  overlay, and to the merged dictionary for a session with one. `EngineConfig::dictionaries` keeps holding
+  the base dictionary as today. A load that reports any diagnostic returns the diagnostics and no bundle,
+  as today, so no partly filled bundle is observable.
 - **FR-016 (TOML key)**: `dialect_overlay` MUST be accepted as a path at `[[session]]` scope and in
   `[default]` (which every session inherits unless it sets its own, as QuickFIX's `[DEFAULT]` does),
   resolved relative to the configuration file as `[dictionary]`'s path is. It MUST stay refused at root
@@ -578,7 +585,8 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   fail its cell.
 - **FR-018 (wire witnesses)**: Inbound session witnesses MUST show each US1 acceptance scenario on the
   shipped receive path, each behaving as it does today on the unmodified base (refused, or for AS-2 read
-  as a field after the group), and each matching the equivalent edited XML. The unmodified-base arm is a
+  as a field after the group; AS-5's two frames are accepted there, because the promoted field is Optional
+  in the base; contracts W-5 states each frame's outcome), and each matching the equivalent edited XML. The unmodified-base arm is a
   negative control, not a RED arm: its assertion holds before and after 098.
 - **FR-019 (records)**: D-009 and COM-011 flip to `done` with their witnesses; D-009 gains a
   coverage-index entry. L-002-2 and L-422-1 retire. B-066-1's extension story is updated to the shipped
@@ -613,6 +621,11 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   `SessionConfig::dictionary`: when row 6 starts validating FIXT application messages with a
   per-application-version dictionary, it must keep using the session's own dictionary for the session's
   own version, or the overlay is lost. This is recorded as an `L-098-*` row until row 6 settles it.
+  The premise that the registry today only answers serviceability is re-derived by
+  `git grep -n -e app_version_registry_ -e build_version_registry -e '\.dictionaries' -- src include`:
+  every hit builds the registry or tests `get(…).has_value()` (the open-time serviceability gate and the
+  FIXT Logon check of DefaultApplVerID(1137) in `src/session/session.cpp`); none parses or validates a
+  message with a registry dictionary.
 
 ### Key Entities
 
@@ -640,7 +653,9 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 - **SC-004**: A TOML file whose sessions name no host-side dictionary opens every session (US3 AS-1),
   where the unmodified tree fails `open()` with `invalid_session_config`.
 - **SC-005**: Loading FIX50SP2 with the named at-cap fixture overlay (the cap's maximum count of new
-  definitions) takes no more than 1.5× the time of loading the base alone, on the same machine (one
+  definitions) takes no more than 1.5× the time of loading the base alone with the same build (both timed
+  at the 098 head; the plain load's own change is measured by the paired `xml_loader_bench`, contracts
+  W-12), on the same machine (one
   measured comparison, recorded in the verify record with the fixture's expansion count). It is not a
   claim for every overlay the caps and budget admit. This replaces 2c §1.2's "merge ≤ 1 ms", which assumed a separate merge step.
 - **SC-006**: The full existing test suite passes unchanged, apart from the tests that name
@@ -648,7 +663,9 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   (`tests/capi/version_test.cpp`), the exported-symbol golden (`tests/abi/golden/fixpp_capi_symbols.txt`)
   and the Python import-surface exact set (`bindings/python/tests/wheel/test_import_surface.py`), which
   the new C-ABI function changes; and the stale comment in
-  `tests/session/test_resend_answer_field_order.cpp` (comment only).
+  `tests/session/test_resend_answer_field_order.cpp` (comment only); and the probe pair
+  `tests/dictionary/table_view_seal_compile_test.cpp` gains for the new `table_view_builder` forwarder
+  (an addition).
 - **SC-007**: D-009 and COM-011 are `done`; L-002-2 and L-422-1 are in the closed B&L file.
 - **SC-008**: For every header field a witness dictionary declares beyond the fixed set, a message whose
   caller places that field after a body field is sent with it in the header (US1 AS-7), RED on the
@@ -707,6 +724,6 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   (superseded in part, FR-020); `.specify/426-428-length-data-pairs.md` §3 (pair precedence); `.specify/215-dictionary-view.md`
   (the snapshot identity check that motivates merge-in-loader).
 - **B&L**: L-002-2, L-422-1 (retire); B-066-1 (update); L-004-1, L-426-1, L-426-2, L-426-3 (assess);
-  L-097-1 (TOML / C ABI single engine dictionary, read and unchanged).
+  L-097-1 (TOML / C ABI single engine dictionary, read and unchanged; data-model §D gives the reason).
 - **Precedent**: `specs/002-dictionary-xml-loader/` (the loader, F2 deferral of `load_overlay`);
   `specs/091-data-field-bytes/` (R-2 / FR-009); `specs/066-dict-backed-inbound-parse/` (B-066-1).

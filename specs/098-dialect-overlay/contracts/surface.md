@@ -22,8 +22,11 @@ public:
     // DOCTYPE, the expansion budget, the step counter, or a side table that would stop fitting 16
     // bits). A step-counter refusal keeps this public type but has a distinct internal origin and
     // model-drift message exposed by R-5's test read seam; it is not a budget refusal. Also throws
-    // xml_oom_error (pugixml's status_out_of_memory on the base or the overlay parse). `policy` is
-    // applied to the build of the spliced document as `load` applies it to a file.
+    // xml_oom_error (pugixml's status_out_of_memory on the base or the overlay parse). A base or overlay
+    // path that cannot be opened or read (missing, unreadable, a directory) throws xml_parse_error, as
+    // `load` does for its path (research R-6). `policy` is applied to the build of the spliced document
+    // as `load` applies it to a file, and step 6's walk models it (research R-5). The string form keeps
+    // no view into `base_xml` or `overlay_xml` after it returns, as `load_from_string` keeps none.
     [[nodiscard]] Dictionary load_with_overlay(
         std::filesystem::path const& base, std::filesystem::path const& overlay,
         std::pmr::memory_resource* mr,
@@ -38,6 +41,9 @@ public:
 // overlay schema errors, a cycle included, throw orchestra_parse_error (a subclass of
 // xml_parse_error), as `load` does. A Length a new Data's lengthId would give a second partner is
 // overlay_conflict_error, not the loader's "already paired" orchestra_parse_error (research R-3).
+// A path that cannot be opened or read throws orchestra_parse_error, as `load` does. Neither overlay
+// error derives from orchestra_parse_error, so `catch (orchestra_parse_error const&)` misses an overlay
+// conflict or limit; catch xml_parse_error to catch all three (B-098-1).
 //
 // xml_oom_error derives from std::bad_alloc, not from xml_parse_error. The C ABI catches, in order:
 // overlay_limit_error, then std::bad_alloc (which covers xml_oom_error and every bare bad_alloc the
@@ -56,8 +62,10 @@ class overlay_conflict_error : public xml_parse_error { using xml_parse_error::x
 class overlay_limit_error    : public xml_parse_error { using xml_parse_error::xml_parse_error; };
 
 // include/fixpp/dict/table_view.hpp
-// True when the dictionary declares `tag` in its header (QuickFIX <header> expansion, Orchestra
-// component 1024 expansion). No allocation.
+// True when the dictionary declares `tag` in its header: the tags data-model §A.3's visited-set walk
+// collects from QuickFIX `<header>` or Orchestra component 1024 (fields, component members, NumInGroup
+// tags and group members). False for every tag when the header is empty (the FIX 5.0 QuickFIX-XML
+// files). No allocation.
 [[nodiscard]] bool table_view::is_header_tag(std::uint16_t tag) const noexcept;
 ```
 
@@ -83,14 +91,19 @@ Overlay attribute vocabulary: `required` is `Y`, `N` or absent (QuickFIX XML); `
  *  THUNK: construction-time; never on a hot path.
  *  Reentrancy: single-thread.
  *
+ *  Returns a code only: fixpp_strerror gives the code's fixed text. The conflicting element or the cap
+ *  is named in the C++ exception, not here. Unlike fixpp_dict_load_from_xml, which maps every failure
+ *  to FIXPP_ERR_CAPI_CONFIG_INVALID, this function returns the DICT codes below.
+ *
  *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
- *  @return FIXPP_ERR_NULL_HANDLE          a NULL argument; *out_dict = NULL when out_dict is not NULL
- *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the overlay exceeds a cap or the expansion budget, carries
- *                                         a DOCTYPE, or would push a side table past 16 bits;
- *                                         *out_dict = NULL
+ *  @return FIXPP_ERR_NULL_HANDLE          base_path, overlay_path or out_dict is NULL; *out_dict = NULL
+ *                                         when out_dict is not NULL
+ *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the load threw fixpp::dict::overlay_limit_error (its causes
+ *                                         are listed once, in xml_loader.hpp); *out_dict = NULL
  *  @return FIXPP_ERR_DICT_OOM             allocation failed anywhere in the call, including the
  *                                         handle's own allocation; *out_dict = NULL
- *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure; *out_dict = NULL
+ *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure, an empty or unreadable
+ *                                         path included; *out_dict = NULL
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml_with_overlay(
     const char* base_path, const char* overlay_path, fixpp_dict_t** out_dict);
@@ -100,6 +113,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml_with_overlay(
 `FIXPP_C_ABI_VERSION_MINOR 13`. Python: `fixpp.dict_load_from_xml_with_overlay(base_path, overlay_path)`
 returning a dictionary proxy, raising the typed error for a non-OK code (the existing
 `%FIXPP_HANDLE_OUT(fixpp_dict_t)` typemap).
+- 200, 201 and 202 all raise `ValidatorError`, `fixpp.i`'s class for 200–299, and are told apart by
+  `.code`. An allocation failure (202) is not a `MemoryError`, and it has no Python witness: no
+  allocation-failure seam is added (research R-6).
+- The arguments are `str`, converted by SWIG's default `char *` typemap, as `dict_load_from_xml`'s `path`
+  is. An `os.PathLike` is not accepted.
+- The OO wrapper `fixpp_oo.Dictionary` is not extended (B-098-6).
 
 ## TOML
 
@@ -120,13 +139,15 @@ dialect_overlay = "venue-b.xml"           # overrides [default]
 ```
 
 Relative paths resolve against the configuration file's directory (`resolve_path`, as
-`dictionary.path`). Root-scope `dialect_overlay` is refused (data-model §A.4). Every session in the
-returned bundle has `config.dictionary` set when the load succeeds (data-model §A.4).
+`dictionary.path`; research R-9 gives every case). Root-scope `dialect_overlay` is refused (data-model
+§A.4). Every session in the returned bundle has `config.dictionary` set when the load succeeds; a load
+that reports any diagnostic returns no bundle (FR-015).
 
 - A non-string value is `malformed_value`; an empty string is `empty_required`; a `dialect_overlay`
   with no usable `[dictionary]` is `invalid_or_contradictory_selector`, "dialect_overlay requires
   [dictionary]". Each is reported at the key path where the value was written.
 - A failing overlay is reported once per authoring origin: `[default]` and `session[1]` naming one
-  failing file give two diagnostics.
+  failing file give two diagnostics. Research R-9 defines every combination, each diagnostic's location
+  and its message (the loader's `what()`).
 - There is no value meaning "no overlay": a `[default]` `dialect_overlay` cannot be cleared for one
   session (B-098-3). Move the key into the sessions that want it.

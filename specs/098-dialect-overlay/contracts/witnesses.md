@@ -14,13 +14,13 @@ by `tests/fuzz/CMakeLists.txt`'s corpus glob with label `fuzz` and exists only i
 |---|---|---|
 | W-0 | `dictionary_pure_tests` | Self-test of test-local declared data, with no isolation hazard, like `T020_DeferredSetExactCoverage`. |
 | W-1 | `dictionary_pure_tests` | Pure, single-threaded dictionary read/parse/compare tests. |
-| W-2 | `dictionary_pure_tests` | Pure, single-threaded vendored-base comparisons. |
+| W-2 | `dictionary_pure_tests` | Pure, single-threaded vendored-base comparisons. Its census is the comparator's key source for two dictionaries built in-process, not a completeness gate over a population: no W-2 row asserts that a closed list of shipped files or tags equals a fixed set, which is what makes W-7 isolation-sensitive. |
 | W-3 | `dictionary_pure_tests` | Pure, single-threaded refusal tests. |
 | W-4 | `dictionary_pure_tests` | Pure, single-threaded dispatch tests. |
 | W-5 | `session_pure_tests` | Pure session test; this bucket supplies `src` and `FIXPP_DICT_DATA_DIR`. |
 | W-6 | `session_pure_tests` | Pure session send tests with no isolation hazard. |
 | W-7 | both halves: standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`, with `src/session` on its include directories | Both halves are exact-set censuses over the shipped dictionaries, standalone as the module's other census gates are (the `dictionary_dict_enum_census_test` block's comment: "an exact-set completeness gate is isolation-sensitive"). The session half reads the production fixed set from `src/session/send_header_tags.hpp`, a self-contained header, so the executable includes it without linking `fixpp_session`. |
-| W-8 | `config_045_tests` (the new `test_098_dialect_overlay.cpp` and the T020 cells of `test_load_deferred_surface.cpp`); `config_044_tests` (the rewritten T018 cell of `test_load_negative_battery.cpp` and T028 cell of `test_load_selectors.cpp`) | Pure configuration parsing and resolution tests. |
+| W-8 | `config_045_tests` (the new `test_098_dialect_overlay.cpp` and the T020 cells of `test_load_deferred_surface.cpp`); `config_044_tests` (the rewritten T018 cell of `test_load_negative_battery.cpp` and T028 cell of `test_load_selectors.cpp`) | Pure configuration parsing and resolution tests. AS-1's cell runs `Session::open()` on a local `asio::io_context` driven by `run()` on the test's own thread: no worker thread, no global allocation hook, so it stays in the bucket. |
 | W-9 | pure rows: `capi_pure_tests`; status-mapping rows: `dictionary_pure_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The status-mapping rows are pure, single-threaded calls of a dictionary-library function. The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. |
 | W-10 | in-tree Python suite (`bindings/python/tests/`); the import-surface row in the wheel suite | Not a gtest executable. The new test has no wheel twin: its overlay fixtures are not in the wheel. |
 | W-11 | `fuzz_dict_overlay` and its replay | Fuzz target outside §VII.8, built only under `FIXPP_BUILD_FUZZ`. |
@@ -57,8 +57,16 @@ cmake --build --preset linux-clang-debug -j"$J"
 conan install . -pr conan/profiles/linux-clang-asan --build=missing -of build/linux-clang-asan
 cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON        # M-7's overflow report and W-11's rows
 cmake --build --preset linux-clang-asan --target dictionary_pure_tests -j"$J"
-# per mutant: apply, rebuild (rc must be 0), run the named binary unfiltered, record, `git checkout -- .`
+# per mutant: apply, rebuild (rc must be 0), run the named binary unfiltered under `timeout`, record,
+# then `git checkout -- . && git clean -fd` (no -x: build trees are ignored) and a clean `git status --porcelain`
 ```
+
+**Bounded runs.** Each unfiltered mutant run is wrapped in `timeout <T>`, where T is ten times that
+binary's unmutated baseline run time and at least 60 s. T is recorded with the row. Exit code 124 is
+recorded as "loops (timed out)". For a row whose stated RED allows a loop, an overflow or a crash (M-7,
+M-13), a timeout or a sanitizer report counts as RED, but only together with the assertion the row names
+failing or not being reached. A hang in an entry with no `TIMEOUT` is therefore always a recorded,
+bounded outcome.
 
 `J` is `8` for every 098 build (owner, 2026-11-01: "yes, you can run skip asking me before each build, and you can use -j8 for all of them"; tasks T002). `J` is set before the first build (`J=${J:-8}`
 above), since an empty `J` gives a bare `-j`, which is unbounded.
@@ -81,8 +89,8 @@ as a RED arm before production code.
 | W-3 unknown-reference, unknown-field-type and group-delimiter-collision rows | no | the base loader's own exception type for its format | — | characterization pin: the refusal is the loader's own, after the splice; no 098 mutant removes it |
 | W-4 rows (including the `tolerant` policy row) | no | dispatch matches the direct loader | — | M-8; M-24 at `load_any_with_overlay` (the `tolerant` row refuses on the `load_any` side) |
 | W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame; each accepted frame's scenario read holds | — | M-8 |
-| W-5 edited session | yes | accepts or refuses each frame as the edited dictionary dictates; each accepted frame's scenario read holds | passes | characterization pin (a complete edited file already works today) |
-| W-5 base session | yes | today's outcome on each frame | passes | negative control |
+| W-5 edited session | no (it shares `test_098_dialect_overlay_inbound.cpp`, which calls `load_any_with_overlay`) | accepts or refuses each frame as the edited dictionary dictates; each accepted frame's scenario read holds | — | characterization pin of a complete edited file, observed after the fix only |
+| W-5 base session | yes (its own file, `test_098_dialect_overlay_inbound_base.cpp`) | the outcome W-5 states for each frame | passes | negative control: run at the baseline (tasks T004a) and in every later suite run |
 | W-6 edited dictionary, scalar 5020 | yes | 5020 before the first body field | **fails** (5020 sent in the body) | **U**; M-9 after the fix |
 | W-6 edited dictionary, custom counted pair in the header | yes | Length and Data both before the first body field, adjacent | **fails** (pair sent in the body) | **U**; M-9 after the fix |
 | W-6 replay of the 5020 message | yes | 5020, 43 and 122 all inside the header | **fails** (5020 in the body) | **U** for the 5020 half; the 43/122 half is a pin |
@@ -93,7 +101,9 @@ as a RED arm before production code.
 | W-8 AS-1 (no overlay: dictionary filled, `open()` succeeds) | yes | `config.dictionary` set, session opens | **fails** (null; `invalid_session_config`) | **U** |
 | W-8 AS-2, shared pointer, AS-5 | yes | merged dictionary per session as stated | **fails** (the key is refused as deferred) | **U**; M-10 for the stated reason |
 | W-8 AS-3, AS-4, value checks, two origins, no `[dictionary]` | yes | the stated reason class at the stated key path | **fails** (`recognized_not_yet_supported_step2` instead) | **U** |
-| W-8 rewritten cells (`T018_SessionDialectOverlayFileMissing`, `T028_DialectOverlayFileMissing`, `T020_RootDialectOverlayRefused`), `T020_DeferredSetExactCoverage` over the remaining keys | yes | the new outcomes (W-8 below) | **fails** (the old outcomes) | **U** |
+| W-8 rewritten cells (`T018_SessionDialectOverlayFileMissing`, `T028_DialectOverlayFileMissing`, `T020_RootDialectOverlayRefused`) | yes | the new outcomes (W-8 below) | **fails** (the old outcomes) | **U** |
+| W-8 `T020_DeferredSetExactCoverage` over the remaining keys | yes | every remaining key deferred | passes (the remaining keys are deferred on the unfixed tree too) | negative control: it guards the remaining keys before and after |
+| W-8 deferred keys at session scopes (a remaining deferred key in `[default]` and in `[[session]]`) | yes | `recognized_not_yet_supported_step2` at `default.<key>` and `session[0].<key>` | passes | negative control: the scope-aware change touches `dialect_overlay` only |
 | W-8 `T020_MissingRequired_Dictionary` | yes | unchanged | passes | negative control (N-3) |
 | W-9 cap rows (the thunk's entry-cap and DOCTYPE rows; the mapping function fed `overlay_limit_error`) | no | 201 (and NULL from the thunk) | — | M-11 |
 | W-9 bad-alloc rows (the mapping function fed `xml_oom_error` and a bare `std::bad_alloc`) | no | 202 | — | M-15 |
@@ -102,12 +112,59 @@ as a RED arm before production code.
 | W-9 status-mapping rows (`dictionary_pure_tests`) | no (the shared status-mapping function is new) | `status_out_of_memory` → `xml_oom_error`; another failed status → the format's parse error | — | M-21 |
 | W-9 pure handle row (the handle is accepted by `fixpp_session_config_set_dictionary` and `fixpp_session_open` on an unstarted engine) | no | both calls return `FIXPP_ERR_OK` | — | control: a base-only handle passes it too; the live arm is the discriminating row |
 | W-9 version pin (`version_test.cpp`) | yes | the version is 1.13 | **fails** (MINOR is 12) | **U** |
-| W-9 symbol golden (`fixpp_capi_symbols.txt` gains the symbol) | yes | the library's exported set equals the golden | **fails** (the symbol is absent from the library) | **U** |
+| W-9 symbol golden (`fixpp_capi_symbols.txt` gains the symbol) | yes | the library's exported set equals the golden | **fails**: exactly one `MISSING exported symbol` line, naming `fixpp_dict_load_from_xml_with_overlay`, and no `UNEXPECTED exported symbol` line (`abi_symbol_golden_test.cpp` prints one line per difference); any other difference is RED for the wrong reason (stop rule) | **U** |
 | W-9 live arm (raw `fixpp_session_send` payload) | no | the counted 5011 value read intact through `fixpp_msg_get_bytes` | — | **M-19** |
 | W-10 import surface | yes | the exact set includes `dict_load_from_xml_with_overlay` | **fails**: the exact-set assertion, with that name as its only difference | **U** |
 | W-10 inbound read | no (the function is absent) | `msg_get_string(5011)` equals the full counted value | — | **M-19** |
 | W-10 cap row | no | `ValidatorError` with `.code == 201` | — | M-11 |
 | W-11 fuzz | no | only `dict::` errors escape (Orchestra by derived type); abort on a counter-origin refusal; counter = prediction on every load | — | M-7 (cycle seeds), M-12 (empty-chain seeds) and M-17 against the harness |
+
+## Mutant index (closed)
+
+This is every mutant the bundle names, once each. A mutant named elsewhere and missing here is a defect
+in this table. Check it by collecting the IDs named everywhere except this table, and diffing them with
+the table's ID column. The diff must print nothing. Removing one row from a scratch copy of this file
+makes it print that ID, and that seeded run is how the check is proven able to report.
+
+```
+B=specs/098-dialect-overlay W=$B/contracts/witnesses.md N=$(mktemp) I=$(mktemp)
+{ cat $B/tasks.md $B/research.md $B/plan.md $B/quickstart.md
+  awk '/^## Mutant index/{s=1;next} /^## /{s=0} !s' $W; } | grep -o -E '\bM-[0-9]+o?\b' | sort -u -V > $N
+awk '/^## Mutant index/{s=1;next} /^## /{s=0} s && /^\| M-/{print $2}' $W | sort -u -V > $I
+diff $N $I
+```
+
+"Per format" means one row per format where the witness rows exist.
+
+| ID | Change | Format / tree | Witness rows (binary) | Stated RED | How the mutated site reaches the assertion |
+|---|---|---|---|---|---|
+| M-0 | the comparison of the context `required_members` entry removed, the entry still listed | test-only / Debug | W-0 context `required_members` seed (`dictionary_pure_tests`) | that row's reported set misses its expected entry | the comparator is the code under test |
+| M-1 | XML splice prepends a new group member | XML / Debug | W-1 qf row | a difference naming the store | splice → spliced document → `build_handle_from_doc` → comparator |
+| M-1o | Orchestra splice prepends a new group member | Orchestra / Debug | W-1 orch row | as M-1 | as M-1 |
+| M-2 | XML splice skips enum-value additions | XML / Debug | W-1 qf row | a difference naming the enum store | as M-1 |
+| M-2o | Orchestra splice skips `fixr:code` additions | Orchestra / Debug | W-1 orch row | as M-2 | as M-1 |
+| M-3 | header/trailer additions dropped | per format / Debug | W-1 rows (the trailer entry in the reported set); W-2 FIX44, FIX50SP2, FIXT11, Orchestra | a difference naming the store | as M-1 |
+| M-4 | step 7's conflict checks removed | per format / Debug | W-3 step-7 conflict rows | each loads | guard routine → no refusal |
+| M-5 | byte cap removed | per format / Debug | W-3 byte-cap rows | they load | step 1 |
+| M-6 | `parse_doctype` dropped | per format / Debug | W-3 DOCTYPE row | it loads | step 2 → step 3 sees no node |
+| M-7 | cycle check removed | per format / ASan | W-3 cycle row; W-11 cycle seeds | the cycle-error assertion fails (loop, overflow or another error; bounded by `timeout`) | step 6 → the build recurses on the cycle |
+| M-8 | `load_any_with_overlay` ignores the overlay | both / Debug | W-4 match rows (`dictionary_pure_tests`); W-5 overlay arm (`session_pure_tests`) | difference; the overlay session disagrees with the edited one | `load_any_with_overlay` → session's `config.dictionary` |
+| M-9 | `as_table_view` skips the header store | both / Debug | every W-6 arm (`session_pure_tests`); W-7 dictionary half (`dictionary_098_header_census_test`) | the custom header tags are sent in the body; `is_header_tag` false | `load` and `load_from_string` fill the handle's store at finalize (W-6's edited arms load that way); `as_table_view` copies it into `header_bits_`; `open()` builds `inbound_tv_` from `as_table_view()`; the classification reads `inbound_tv_` |
+| M-10 | the resolver assigns the base to every session | — / Debug | W-8 AS-2, AS-5 (`config_045_tests`) | the overlay session's pointer equals the base's | resolver → `bundle.sessions[i].config.dictionary` |
+| M-11 | the limit branch maps to 200 | — / Debug (Python ON) | W-9 cap rows (`capi_pure_tests`); W-10 cap row (pytest) | 200, `.code` 200 | thunk catch → mapping function → return code → SWIG out-typemap |
+| M-12 | step 6's budget comparison removed (the side-table fit stays) | per format / Debug; ASan for W-11 | W-3 bomb rows; W-11 empty-chain seeds | doubling rows: side-table origin, not budget; empty-chain rows: counter origin | step 6 → arming at base total + budget → counter (research R-5) |
+| M-13 | guard steps 6 and 7 swapped | per format / Debug | W-3 guard-order row | the redeclare conflict, or a crash or timeout | guard routine order |
+| M-14 | step 5's entry and reference caps removed | per format / Debug | W-3 entry and reference cap rows | they load | step 5 |
+| M-15 | `std::exception` caught before `std::bad_alloc` | — / Debug | W-9 bad-alloc rows | 200, not 202 | mapping function |
+| M-16 | step 8a replaced by the previous draft's adjacency rule | per format / Debug | W-3 Length+Data refuse rows and Orchestra `lengthId` rows; load rows stay GREEN | refuse rows load | step 8a |
+| M-17 | one extra `expand_field_list` call in `finalize` | per loader / Debug; ASan for W-11 | every W-1 and W-2 row; W-3 header-expansion row; W-11 valid seed | counter-origin refusal | the build's counter, armed at the prediction |
+| M-18 | the side-table fit check removed | per format / Debug | W-3 side-table rows | they load | step 6 |
+| M-19 | the thunk calls `load_any(base)` and drops the overlay | — / Debug (Python ON) | W-9 live arm (`capi_098_dict_overlay_live_test`); W-10 inbound row (pytest) | 5011 reads `AB` | handle → `fixpp_session_config_set_dictionary` → `Session::open()` builds `inbound_tv_` → the `Parser` pairs through `session_hooks(inbound_tv_)`; the Python function is the same C function through SWIG |
+| M-20 | the mapping function's `std::exception` and `...` branches return `FIXPP_ERR_CAPI_CONFIG_INVALID` | — / Debug | W-9 code-200 rows | 10, not 200 | mapping function |
+| M-21 | step 2's status mapping with its branches swapped | both / Debug | W-9 status-mapping rows (`dictionary_pure_tests`) | the wrong type | the shared mapping function |
+| M-22 | step 4's depth walk removed | per format / Debug | W-3 depth-33 row | it loads, or its refusal no longer names the depth cap | step 4 |
+| M-23 | step 4a's root checks removed | per format / Debug | W-3 version-mismatch, other-format, root-child-outside-the-list, repeated-root-container and step-4a-against-step-5 order rows | the type or the named key is wrong | step 4a |
+| M-24 | `policy` not forwarded to the build | per loader and at `load_any_with_overlay` / Debug | W-1 `tolerant` rows (the overlay side refuses); W-4 `tolerant` row (the `load_any` side refuses) | `xml_parse_error` / `orchestra_parse_error` where a load was expected | entry point → `build_handle_from_doc` with `fail_closed` → the group that declares no first member is refused |
 
 ## Comparator self-test (runs first; a zero is trusted only after it)
 
@@ -133,11 +190,13 @@ RED.
 fixtures `tests/dictionary/fixtures/098/{qf,orch}/{base,overlay,edited}.xml` and the `tolerant` triple
 beside them (hand-written). For each
 format: `load_with_overlay_from_string(base, overlay)` vs `load_from_string(edited)` → zero differences.
-The overlays cover every FR-003/FR-004 kind: new field, enum value on an existing field (and on an
+The overlays cover every FR-003/FR-004 kind: new field (one of a non-string type), a new field with enum
+values (a new Orchestra code set for Orchestra), enum value on an existing field (and on an
 existing Orchestra code set), new component, new message (with a required field, a new group, a new
 component), field added to an existing message, a group and a component reference added to an existing
 message (the new group's first child is its delimiter), a field, a group and a component reference
-added to an existing component, a group nested in an existing group, member added to an existing group
+added to an existing component, a group nested in an existing group, a component reference added to an
+existing group, member added to an existing group
 (inline and inside a component), field and group added to the header, field added to the trailer (XML
 `<trailer>`; Orchestra component 1025), Required promotion on a message, component and group child,
 custom Length+Data pair, an identical redeclaration (a base field with its number, name and type; an
@@ -145,7 +204,16 @@ existing enum value; for Orchestra an existing code), which is a no-op, an enum 
 `enum_valid` refuses a value not listed), a new container the base lacks (R-3), a member appended to a
 group whose existing members emit nothing (an empty component), which becomes the delimiter as in the
 edited file (spec Edge Cases), and a new DATA after a base LENGTH whose base pair forms earlier in
-`detect_length_pairs`'s visit order (loads, R-3).
+`detect_length_pairs`'s visit order (loads, R-3). The list is closed against FR-003 and FR-004 clause by
+clause, and T016 and T039 copy it. One type per new field is enough: the type string is parsed by the
+loader's own code after the splice, so the splice has no per-type path.
+**Each complete reference is mechanically an append-only edit.** Before the references' own commit (tasks
+T017a, T039a),
+`git diff --no-index --unified=1 base.xml edited.xml` is recorded in the evidence file, per format and
+for the `tolerant` triple. Every hunk adds lines only, and each added run ends immediately before a
+closing-tag line of its container. The one other change allowed is a self-closing base element opened to
+hold appended children: `<x …/>` becomes `<x …>` plus an added `</x>`. A hunk of any other shape is fixed
+before the commit.
 A `tolerant` row per format: a small base holding one group the loader leaves unregistered under
 `unresolved_group_policy::tolerant` and refuses under `fail_closed`, its overlay and its edited file;
 `load_with_overlay_from_string(base, overlay, mr, tolerant)` vs `load_from_string(edited, mr, tolerant)`
@@ -154,7 +222,8 @@ Every row loads through research R-5's read seam and asserts no counter-origin r
 step counter equals step 6's prediction. Each row also has an in-test seeded mismatch: the reference
 with one non-no-op addition removed (never an identical redeclaration, which is a no-op) MUST give at
 least one difference naming its store (SC-001's seeded
-mismatch). **RED**: **M-1** (the XML splice prepends a new group member instead of appending) and
+mismatch). The test names, in advance, the addition it removes and the store or stores it expects; the
+reported set must include each (research R-10). **RED**: **M-1** (the XML splice prepends a new group member instead of appending) and
 **M-2** (the XML splice skips enum-value additions), and for the Orchestra splice **M-1o** (it
 prepends a new group member) and **M-2o** (it skips `fixr:code` additions); each turns its format's row
 RED with the comparator naming the store. **M-3** (header/trailer additions dropped, per format) turns
@@ -174,17 +243,29 @@ line), applied by a line-based test helper. `load_with_overlay(base, overlay)` v
 `group_fields`, against the raw census under R-10's wrap condition. Kind coverage per FR-017; the FIX44
 overlay also extends more than 64 existing messages (N-7: accepted, since the entry caps count new
 definitions). A FIXT11 row, beyond FR-017's three vendored bases and backing FR-019's FIXT.1.1 scope:
-a header-field overlay of `FIXT11.xml` and its insertion patch, under the same rules. Each row also asserts no counter-origin refusal and step counter = prediction (research
+a header-field overlay of `FIXT11.xml` and its insertion patch, under the same rules. Header-only is
+enough for FR-019's FIXT.1.1 claim. FIXT11.xml holds the transport header and the session messages, and
+every other kind goes through the same splice code on the other bases. The FIXT-specific part, the
+transport header, is what the row covers.
+Each row also asserts no counter-origin refusal and step counter = prediction (research
 R-5), and has an in-test seeded mismatch: the patch with one hunk dropped MUST give at least one
-difference naming its store. **Empty overlay** (spec Edge Cases): for each base in `reused_tag_census.hpp`'s
+difference naming its store, the hunk and the expected store named in the test in advance. **Empty overlay** (spec Edge Cases): for each base in `reused_tag_census.hpp`'s
 `kRuntimeDicts` plus the Orchestra file, `load_with_overlay(base, an empty overlay of the base's format
 and version)` vs `load(base)` → zero differences, no refusal, step counter = prediction. Each
 empty-overlay row has its own seeded mismatch, since it has no patch: `load(base)` vs an in-test copy of
 the base with one field definition removed MUST give at least one difference naming its store. The
 removed definition is one that no message, component, group, header or trailer references, so the copy
-loads; it is located by an anchor line that MUST match exactly once, and its whole element (for
+loads. The test finds it by recipe before relying on it: the first `<field>` definition in document
+order whose `name` (QuickFIX XML) or `id` (Orchestra) occurs in no reference element of the base's raw
+census. A base with none fails the cell; there is no fallback. It is located by an anchor line that MUST
+match exactly once, and its whole element (for
 Orchestra a possibly multi-line `fixr:field` element) is removed. A zero- or two-match anchor, or a copy
-that does not load, fails the cell before any comparison. The FIX50SP2 wrap probe
+that does not load, fails the cell before any comparison. That seeded mismatch proves only that the
+comparator can report a difference at that base's scale. That the row's overlay side went through the
+overlay path rests on the seam's counter equalling the prediction and on M-17. Anchors and hunks match
+lines with one trailing CR stripped (research R-10, line endings). The helper's positive row (a hunk that
+applies once inserts exactly its lines before the block's last line, against a hand-written expected
+text) runs beside its zero- and two-match rows. The FIX50SP2 wrap probe
 (research R-10) runs here and is recorded, not asserted; where a base side table does not fit, the
 overlay's appended definitions past the wrap point are compared side against side only, and the verify
 record says so.
@@ -201,6 +282,18 @@ lists the N/A cells. Each row asserts the exception's exact type for its format 
 error is `orchestra_parse_error`, caught by the derived type, not by `xml_parse_error`) and that its
 message names the key, cap or table as applicable. M-17's counter refusal instead names the distinct
 counter origin.
+- **Exact type** means equal dynamic type: the row catches `std::exception const&` and asserts
+  `typeid(e) == typeid(<expected>)`. This holds for every row, the characterization pins included. A
+  catch-based assertion is not used, because both overlay errors are `xml_parse_error`s and would pass a
+  pin row expecting `xml_parse_error`.
+- **Each step-7 row's message names its own check**: the rule and the element (for example "required
+  relaxed" and the field and MsgType). A row refused by a different step-7 check therefore fails its
+  message assertion.
+- **The kinds below are closed.** Each R-4 bullet maps to one kind, and T019 asserts that the table
+  holds a row or an N/A for every cell of the product.
+- **"The loader itself refuses repeated" is established by running.** A test row loads a base carrying
+  the repeated key with the base loader alone and asserts the loader's own error. It is not established
+  by reading the code.
 - **R-4 conflicts:** identifying attribute changed (type; name; msgtype name; Orchestra message `id`,
   code-set `id` / `type`); field name already used by another number; an Orchestra code set with a new
   `id` and an existing name (N-6; XML N/A, no code sets); required relaxed; redescribed enum value or
@@ -220,7 +313,10 @@ counter origin.
   the overlay names the key, and the row asserts both base occurrences in the message. A control: the
   same base with an empty overlay loads.
 - **Length+Data relation (research R-3, step 8a).** One row per cell; "load" rows assert the load
-  succeeds and the relation is unchanged. "Earlier" and "later" are `detect_length_pairs`'s visit order
+  succeeds and the relation is unchanged. The relation is read through the dictionary in both
+  directions: `Dictionary::length_pair_data_tag` for every Length tag, and both `table_view` pair
+  directions for every base tag, compared between `load(base)` and the merged load. The factored
+  detection function is not the instrument, because it is what is under test. "Earlier" and "later" are `detect_length_pairs`'s visit order
   (`<fields>`, header, trailer, messages, components, groups):
 
   | Site | new Data → unpaired base Length | new Data → base Length paired earlier | new Data → base Length paired later | new Length → base Data |
@@ -235,12 +331,25 @@ counter origin.
   1 counting new definitions (new messages = cap + 1, N-7), the reference cap + 1 and a DOCTYPE, each
   `overlay_limit_error` naming its cap (or DOCTYPE); a cycle that closes through a base component (XML
   `xml_parse_error`; Orchestra `orchestra_parse_error`).
+  - **At-cap controls.** Each cap + 1 row has a control at the cap that loads: exactly 4 MiB through both
+    the path and the string form, depth 32, and each entry cap and the reference cap at its value.
+  - **Budget recipe row.** Through the read seam, the row computes step 6's total over every vendored
+    base with an empty overlay and applies research R-5's recipe to the largest. It asserts that the
+    budget constant equals the result.
+  - **Longest-chain row.** On a small base: the deepest chain the caps and the budget jointly admit. Its
+    shape is chosen in-test through the seam's prediction: new components linked one to the next, each
+    link through one new group, with the depth cap's nesting spent in one component. The field cap bounds
+    the NumInGroup fields such a chain needs. It MUST load with counter = prediction. It runs under ASan
+    in tier 1's `linux-clang-asan` lane, whose matrix job runs `ctest --preset <preset> -LE packaging`
+    (research R-5, recursion depth).
 - **The loader's own refusals (characterization pins, arm table):** an unknown reference (a leaf in
   step 6; the loader refuses it after the splice), an overlay field with an unknown type string, and a
   group-delimiter collision the merge creates (spec Edge Cases); each asserts the type the base loader
   throws for the equivalent edited file (`xml_parse_error` or `orchestra_parse_error`;
   `group_delimiter_collision_error`).
-- **Expansion bomb (A-001):** XML, the doubling overlay
+- **Expansion bomb (A-001):** the doubling rows' base is a small base whose side tables fit. Each row
+  asserts that fit first, through the seam, so that a base change cannot silently move M-12's RED.
+  XML, the doubling overlay
   `C_n = { component C_{n-1}; group NoG_n { field F_n; component C_{n-1} } }` over the 63 levels the caps
   allow, rooted at the base's `Instrument`; Orchestra, `C_n = { componentRef C_{n-1}; groupRef G_n }` with
   `G_n = { numInGroup; fieldRef F_n; componentRef C_{n-1} }`. Both referenced by no message. A third row
@@ -261,7 +370,13 @@ counter origin.
   inside the fit loads.
 - **Guard order (N-1):** an overlay that closes a cycle through a base component **and** redeclares a
   child that the parent reaches through that component. It MUST fail with the cycle error of its format,
-  not with the redeclare conflict and not by recursion.
+  not with the redeclare conflict and not by recursion. Why this row shows FR-010's order: the cycle check
+  (step 6) runs before the conflict checks (step 7), so an overlay that fails both must report the cycle.
+  Two more order rows:
+  - an overlay with a version mismatch and new messages = cap + 1 MUST fail with the version-mismatch
+    conflict (step 4a), not the entry cap (step 5);
+  - an overlay that fails both the budget and the side-table fit MUST fail with the budget origin
+    (research R-5 step 6: "an overlay that fails both is reported as over the budget").
 
 FR-008 has no row: it holds by construction (spec FR-008), and no mutant short of global state can make
 two fresh base loads differ. **RED**, each mutant run once per format where its rows exist: **M-4**
@@ -306,9 +421,29 @@ direct loader called with `tolerant` loads.
 ## Wire behaviour
 
 **W-5 Inbound (US1 AS-1..AS-6, SC-002).** `tests/session/test_098_dialect_overlay_inbound.cpp` (joins
-`session_pure_tests`). Three sessions with `validate_inbound_messages = true`: FIX44 base alone, FIX44 base +
-the W-2 overlay loaded through `dict::load_any_with_overlay` (so M-8 reaches it), FIX44 patched (the
-edited reference). One frame per scenario: custom field on 35=D; custom member inside Parties; private
+`session_pure_tests`) holds the overlay and edited sessions.
+
+The base-session arm is in its own file, `tests/session/test_098_dialect_overlay_inbound_base.cpp`
+(joins `session_pure_tests`). It uses only the existing API, so it compiles on the unfixed tree.
+- The frames both files send come from a shared header, `tests/session/test_098_inbound_frames.hpp`.
+- It is written and run at the baseline (tasks T004a), which is the "before" that FR-018's negative
+  control needs, and it runs in every later suite run, the "after".
+- Its expected outcome for each frame is stated here, before any run:
+  - AS-1, AS-2, AS-3, AS-4 and AS-6 are refused;
+  - AS-5's two frames are accepted, because the promoted field is Optional in the base;
+  - the enum-closure frame is accepted.
+- Each refused frame's refusal is derived from source before the cell is written: the message type that
+  answers it and the fields it carries. For a 35=3 Reject that is 373 and 371, derived from the
+  validator's rule for the frame and `include/fixpp/wire/reject_reason_map.hpp`'s mapping. An unknown
+  MsgType (AS-3) may instead take the session's unsupported-MsgType path or a BusinessMessageReject
+  (35=j). The derivation is recorded in the evidence file, and the values are written into the test as
+  literals.
+- A run that disagrees with the derivation stops for a decision. The expected values are never
+  re-recorded from the run.
+
+Three sessions with `validate_inbound_messages = true` in all: FIX44 base alone (the file above), and in
+the overlay file FIX44 base + the W-2 overlay loaded through `dict::load_any_with_overlay` (so M-8
+reaches it) and FIX44 patched (the edited reference). One frame per scenario: custom field on 35=D; custom member inside Parties; private
 MsgType `U1` with and without its required field; custom Length+Data value containing SOH;
 Optional→Required promotion missing; the promoted field missing on another MsgType that carries it
 Optional (accepted on all three sessions: AS-5's "other MsgTypes are unaffected"); OrdType `Z`. The enum-closure frame (N-2) uses its own small
@@ -316,15 +451,16 @@ overlay fixture and its own pair of sessions (overlay and edited), so that closi
 reach the other frames: that overlay lists a first value on Text(58), which FIX44.xml declares with no
 `<value>` (re-check with a grep before relying on it), and a frame carrying a Text value it does not
 list is refused there and accepted on the base session. Assert: overlay session and edited session agree on every frame (accept,
-or the same Reject 373 and 371); the base session's outcome is the one recorded as today's. On every
+or the same refusal message and fields); the base session's outcome is the one stated above. On every
 accepted frame, the overlay and edited sessions also assert, from the application callback, the read
 the scenario names: AS-1, the value of 5001 by tag; AS-2, 5002 read inside the Parties entry through the
 group view (the group read is the assertion, not a top-level read); AS-3, `U1` reaches the callback;
 AS-4, the 5011 value equals the full counted bytes, SOH included; AS-6, 40 reads `Z`. Accept/reject
 alone does not show these: the validator's `table_view` and the layout the callback reads are two
 consumers, and a defect in the second would leave both sessions agreeing (FR-018). **RED**:
-**M-8** for the overlay arm. The base-session arm is a **negative control** and the edited-session arm a
-**characterization pin**: both pass on the unfixed tree and after the fix (arm table).
+**M-8** for the overlay arm. The base-session arm is a **negative control**, observed before (T004a) and
+after. The edited-session arm is a **characterization pin** of a complete edited file, observed after the
+fix only, because it shares the overlay arm's file (arm table).
 
 **W-6 Send (US1 AS-7, FR-022, SC-008).** `tests/session/test_098_header_send.cpp` in
 `session_pure_tests`. A session whose
@@ -338,6 +474,9 @@ pair enters as a raw application payload passed to `Session::send` (bytes writte
 `bench/session/session_send_bench.cpp` sends, because `body_builder::field_data` refuses a custom Data
 tag (spec Edge Cases). A third arm uses base + overlay (new API). A fourth arm replays the 5020 message through ResendRequest
 and asserts 5020, 43 and 122 all sit inside the header (`kReplayHeaderTags` unchanged, research R-7).
+Its 43/122 assertions are non-fatal (`EXPECT_*`) and do not depend on the 5020 assertion. On the unfixed
+tree the run therefore reports both the 5020 failure (U) and the pin's result, and the RED record lists
+both.
 **Byte identity:** the existing header-order witnesses (`tests/session/test_resend_answer_field_order.cpp`
 `SendPayloadTagTest.*`, `ResendAnswer*`; `tests/session/test_091_data_send.cpp` `HeaderPairSend091.*`,
 `DataSend091.*`) pass unchanged. **Allocation (`[const §XV.1]`):** no test cell (a counting resource
@@ -371,8 +510,18 @@ each report at the key path where the value was written (AS-3); root scope is re
 origin rows (A-005, N-3): a non-string value (`malformed_value`); an empty string (`empty_required`);
 `[default]` and `session[1]` naming one failing file give two diagnostics, one at each key path; a
 `[[session]]` with `dialect_overlay` and no `[dictionary]` gives "dialect_overlay requires [dictionary]"
-at that key path, and does not crash. `LoadNegativeBattery.T020_MissingRequired_Dictionary` stays green
-unchanged. Three existing cells state the superseded outcome in their names; each is renamed (suite
+at that key path, and does not crash; that row asserts `missing_required` at `dictionary` too (research R-9).
+More rows:
+- **Engine dictionaries.** On the AS-2 bundle, `engine.dictionaries` holds exactly one entry. That entry
+  is the pointer of the session without an overlay, and each overlay session's pointer differs from it.
+  This shows FR-015's "keeps holding the base" and FR-021's unchanged registry input.
+- **Deferred keys at session scopes** (negative control). A remaining deferred key (`tracer`) in
+  `[default]` and in a `[[session]]` gives `recognized_not_yet_supported_step2` at `default.tracer` and
+  `session[0].tracer`. The scope-aware change touches `dialect_overlay` only.
+- **No Orchestra TOML row.** The resolver step is format-agnostic: it passes paths to
+  `load_any_with_overlay`, and W-4 witnesses that function's format dispatch.
+
+`LoadNegativeBattery.T020_MissingRequired_Dictionary` stays green unchanged. Three existing cells state the superseded outcome in their names; each is renamed (suite
 name and T0xx prefix kept, 097's rule) and rewritten to its new outcome, old → new names recorded in
 the evidence file:
 - `LoadNegativeBattery.T018_Step2DialectOverlay` → `T018_SessionDialectOverlayFileMissing`
@@ -389,14 +538,17 @@ the evidence file:
   `dialect_overlay` at root. New outcome: AS-4's root refusal, `invalid_or_contradictory_selector` at key
   path `dialect_overlay` with "dialect_overlay is a session key; set it in [default] or [[session]]",
   and no `recognized_not_yet_supported_step2` or `unknown_key` for it.
-- `T020_DeferredSetExactCoverage` keeps every other deferred key, its set re-derived from `kDeferred`.
+- `T020_DeferredSetExactCoverage` keeps every other deferred key. Its literal `kAllDeferredKeys` list
+  loses `dialect_overlay` and nothing else, re-derived by reading `kDeferred` (research R-9). It passes on
+  the unfixed tree too, so it is a negative control, not a U arm.
 
 Comments that state the superseded outcome are rewritten as rules, not results: the header comments of
 `tests/config/fixtures/neg_step2_dialect_overlay.toml` and `tests/config/fixtures/neg_deferred_toplevel.toml`,
 and every comment in `tests/config/test_load_negative_battery.cpp`, `tests/config/test_load_selectors.cpp`
 and `tests/config/test_load_deferred_surface.cpp` that calls `dialect_overlay` deferred or step-2 (found
 with `git grep -n dialect_overlay -- tests/config`).
-**RED**: **U** for every row except `T020_MissingRequired_Dictionary` (arm table: on the unfixed tree
+**RED**: **U** for every row except the negative controls `T020_MissingRequired_Dictionary`,
+`T020_DeferredSetExactCoverage` and the session-scope deferred-key row (arm table: on the unfixed tree
 `config.dictionary` is null, so AS-1's `open()` fails with `invalid_session_config`, and every
 `dialect_overlay` row gets `recognized_not_yet_supported_step2` instead of its stated outcome);
 **M-10** (the resolver assigns the base to every session) for AS-2/AS-5, the reason those rows state.
@@ -486,6 +638,10 @@ needs no row (as `test_error_coverage.py` and `test_gil_release_canary.py` have 
 - **Import surface:** `bindings/python/tests/wheel/test_import_surface.py`'s exact set includes
   `dict_load_from_xml_with_overlay` (a suite-native row, already on the allowlist).
 
+**A skip is not a pass.** The test file never calls `pytest.skip` or `importorskip`: a missing extension,
+fixture or bind fails the row. Every W-10 run is recorded with `-rs`, and a skipped count other than zero
+is a failed run, in the RED record and at the final head alike.
+
 **RED**: **U** for the import-surface row. The recorded failure MUST be the exact-set assertion whose only
 difference is the missing `dict_load_from_xml_with_overlay`; an ImportError, a `fixpp` imported from
 outside the build's `lib/`, or any other difference is RED for the wrong reason (stop rule). **M-19** for
@@ -501,20 +657,63 @@ R-11). The harness aborts on a counter-origin refusal even though its public typ
 `overlay_limit_error`; on every input that loads, it also aborts if the step counter differs from step
 6's prediction. The seeds include the expansion bombs and the empty-component chain of both formats and an
 Orchestra cycle. CI replays the seeds (`linux-clang-asan`, the entry `fuzz_replay_dict_overlay`, label
-`fuzz`, preamble exemption); the ten-minute run is `/speckit-verify`'s
-fuzz step. **RED**: **M-7** re-run against the harness with each format's cycle seed, **M-12** with
+`fuzz`, preamble exemption); the ten-minute campaign is tasks T095a, with research R-11's flags and
+pass condition. The accepted exception set is research R-11's. **RED**: **M-7** re-run against the harness with each format's cycle seed, **M-12** with
 each format's empty-chain seed (the harness aborts on the counter origin; under M-12 a doubling seed is
 refused by step 6's side-table fit, an accepted `dict::` error, so it never reaches the counter), and
 **M-17** with a valid overlay (the
 harness aborts on the counter origin).
 
-**W-12 Performance (SC-005, `[const §VIII.2]`).** Measured in the verify record, not a ctest:
-`load_with_overlay(FIX50SP2, the named at-cap fixture overlay)` vs `load(FIX50SP2)`, ratio ≤ 1.5, same
-machine, median of ≥ 5 runs, with the fixture's expansion count (research R-5 step 6) recorded; the send path's paired bench (base vs candidate) shows no regression past the
-provisional band for a session on a vendored dictionary. That bench is `bench/session/session_send_bench.cpp`:
-it sends a 35=D payload whose body fields are outside the fixed header set on a session whose dictionary
-is FIX44, so every such field takes the new lookup after a fixed-set miss (confirm against the source at
-verify time).
+**W-12 Performance (SC-005, `[const §VIII.2]`, `[const §VIII.3]`).** Measured in the verify record, not
+a ctest. `/speckit-verify`'s bench step is not this measurement. It compares a run against a stored
+baseline, which `[const §VIII.2]` says does not gate, and it is N/A without one. So tasks T094/T095 run
+everything below.
+- **Load-time ratio (SC-005).** `load_with_overlay(FIX50SP2, the named at-cap fixture overlay)` against
+  `load(FIX50SP2)`, both in the 098 head's Release build.
+  - Both are path forms, so the file read is inside the timed region.
+  - One discarded warm-up run of each is taken first, so the page cache is warm.
+  - At least five runs each are made, interleaved A-B-A-B.
+  - The ratio of medians must be ≤ 1.5 (SC-005's statistic). The minima are recorded too.
+  - The record holds the machine, the commit and the fixture's expansion count (research R-5 step 6).
+  - The fixture holds exactly the field, component and message caps' counts of new definitions and
+    extends no existing definition. Its references and enum values are as many as those definitions
+    need, below their caps, and their counts are recorded. Its expansion is within the budget, since it
+    loads.
+- **Characterisations, recorded, not bounded:**
+  - `load_with_overlay(FIX44, W-2's FIX44 overlay)` against `load(FIX44)`. That overlay adds a header
+    field, so step 7 builds a level set for every message (research R-5 step 7).
+  - An at-budget overlay on FIX50SP2: an empty-component chain as deep as the budget admits, its depth
+    found through the seam's prediction. This answers how long an admitted overlay can take (US2).
+- **Send path (`[const §VIII.2]`).** `bench/session/session_send_bench.cpp`, paired base-vs-candidate
+  on one machine.
+  - The base is the merge-base with `origin/main` and the candidate is the head, both Release.
+  - Runs are A-B-A-B, compared min per tree.
+  - Pass: a slowdown of no more than +5%. A larger slowdown needs `[const §VIII.2]`'s recorded
+    measurement, a rationale and approval by someone other than the author. CI's provisional band is not
+    this condition.
+  - The bench sends a 35=D payload whose body fields are outside the fixed header set, on a FIX44
+    session, so every such field takes the new lookup after a fixed-set miss. Confirm this against the
+    source at T095.
+  - The hit case (a dictionary header tag beyond the fixed set) costs the same as the miss: both read one
+    `header_bits_` word after the same bounds check. Only the branch outcome differs, as for a fixed-set
+    hit.
+  - CI cannot see this cost. `bench/ci-suite.txt` has no `session_send_bench` row, and its paired
+    `engine_send_bench` refuses its payload before `build_send_frame_`'s partition (that bench's header
+    comment). This run is therefore the only evidence. Whether to add a CI row is recorded under the
+    verify record's `## Pre-existing leads` for the owner, because paired status is irreversible
+    (`[const §VIII.2]` 2a).
+  - `[const §VIII.3]` ("a benchmark in the same PR") is met by this existing bench, run paired and
+    reported in the verify record and the PR body.
+- **Plain load (`[const §VIII.2]`).** 098 changes code `XmlLoader::load` runs: the factored pair
+  detection, the unarmed counter test and the header-store walk.
+  - `bench/dictionary/xml_loader_bench` is a `paired` row in `bench/ci-suite.txt`, so CI's paired gate
+    runs it at its provisional threshold.
+  - T095 also runs it paired locally under the send path's protocol, with a pass of ≤ +5%.
+  - `OrchestraLoader::load` has no bench. The T094 driver times `load(OrchestraFIXLatest.xml)` at base
+    and head, recorded, not gated.
+- **Footprint.** `bench/dictionary/table_view_footprint_bench` is run at base and head. The record holds
+  `sizeof(table_view)` and the `header_bits_` heap words per copy for FIX44 and FIX50SP2, as its
+  `group_bits_` note records that store. Recorded, not gated (a `no` row).
 
 **W-13 Records.** The parent repo's `python3 .claude/scripts/check_bl_delta.py --self-test` (its known
 positive), then `python3 .claude/scripts/check_bl_delta.py gate --feature 098-dialect-overlay --root <tree>

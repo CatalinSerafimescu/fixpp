@@ -22,11 +22,12 @@ pre-PR build gate of `[const §XVII.7]` is §8.
 ## 1. Before any production edit — witnesses that compile on the unfixed tree
 
 Write and run first exactly the arms the contracts arm table marks **fails** on the unfixed tree: W-6's
-two edited-dictionary arms and the replay arm's 5020 half, W-8's rows (all but
-`T020_MissingRequired_Dictionary`), W-9's version pin and symbol golden (phase 1 appends `098` to
+two edited-dictionary arms and the replay arm's 5020 half, W-8's rows (all but the negative controls
+`T020_MissingRequired_Dictionary`, `T020_DeferredSetExactCoverage` and the session-scope deferred-key row), W-9's version pin and symbol golden (phase 1 appends `098` to
 `capi_pure_tests`'s labels, so `-L 098` runs them), and W-10's import-surface row. W-5 and W-7 have no
-arm here: W-5's base and edited sessions pass on the unfixed tree (a negative control and a pin), and
-both W-7 halves need code that lands in plan phase 5.
+arm here: W-5's base session is a negative control, written and run at the baseline (tasks T004a), and
+its edited session is a pin that shares the overlay file; both W-7 halves need code that lands in plan
+phase 5.
 
 ```
 cd ~/Work/Programming/fixpp-parallel
@@ -45,10 +46,13 @@ ignores `wheel/*`, and the wheel suite shares basenames with the in-tree one. Th
 0: if it fails (SWIG not on `PATH`, say), a `lib/` left by an earlier Python build still imports from
 `$L`, and the `__file__` check cannot tell that it is stale.
 
+W-8's two negative controls run in the same binaries and must be GREEN here (tasks Phase 2).
+
 Expected: each listed arm RED for its stated reason (W-6: 5020, or the 5030/5031 pair, found after the
 first body field; W-8 AS-1: `open()` returns `invalid_session_config`; the other W-8 rows:
 `recognized_not_yet_supported_step2` instead of the stated outcome; W-9: the version reads 1.12, and the
-golden reports `fixpp_dict_load_from_xml_with_overlay` missing from the library; W-10: the exact-set
+golden reports `fixpp_dict_load_from_xml_with_overlay` missing from the library as its only difference;
+W-10: the exact-set
 assertion, whose only difference is the missing `dict_load_from_xml_with_overlay`). An ImportError, a
 `fixpp` imported from outside `$L`, or any other set difference is RED for the wrong reason: stop.
 **Stop rule:** if a listed arm passes on the unfixed tree, its premise is false. Stop and decide; do not
@@ -74,11 +78,12 @@ arm. `ctest --preset linux-clang-debug -N -L "<module regex>"` must list the ent
 W-6's byte identity names. An entry missing from a list gets the label, or joins the regex, before the
 run is trusted.
 
-From phase 6 on, also run W-10, which no ctest label reaches:
+From phase 6 on, also run W-10, which no ctest label reaches. A skipped row is a failed run: the
+summary must show zero skipped (contracts W-10).
 
 ```
 L="$PWD/build/linux-clang-debug/lib"
-PYTHONPATH="$L" python3 -m pytest bindings/python/tests/test_098_dialect_overlay.py -v
+PYTHONPATH="$L" python3 -m pytest bindings/python/tests/test_098_dialect_overlay.py -v -rs
 W=$(mktemp -d) && cp bindings/python/tests/wheel/test_import_surface.py "$W"/
 PYTHONPATH="$L" python3 -m pytest "$W/test_import_surface.py"
 ```
@@ -89,7 +94,9 @@ W-6 must stay green with unchanged expected bytes.
 ## 4. Mutants
 
 In the mutants tree, per contracts: apply one mutant, rebuild (rc 0 or the row proves nothing), run the
-named binary **unfiltered**, record witness | mutant | build rc | test rc | message | collateral, revert.
+named binary **unfiltered** under `timeout` (contracts preamble, bounded runs), record witness | mutant |
+build rc | test rc | message | collateral, then revert with `git checkout -- . && git clean -fd` and
+confirm `git status --porcelain` is empty.
 A mutant whose W-3 rows exist in both formats runs once per format (contracts W-3). M-7 runs in
 `build/linux-clang-asan` so that an overflow is reported; its RED is the cycle row's cycle-error
 assertion, and the record states how the run ended (contracts W-3). M-12 runs in the Debug tree: its RED
@@ -110,14 +117,19 @@ cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON && cmake --build --preset 
 ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure
 ```
 
-The ten-minute campaign is `/speckit-verify` Step 7 (`--fuzz-duration=600`).
+The ten-minute campaign is tasks T095a, with research R-11's flags (`-max_len`, `-timeout`,
+`-rss_limit_mb`) and its pass condition, which includes no `timeout-` artifact. `/speckit-verify` Step 7
+(`--fuzz-duration=600`) runs its generic command as well.
 
 ## 6. Performance (W-12)
 
-Release build (`linux-clang-release`): time `XmlLoader::load(FIX50SP2.xml)` and
-`load_with_overlay(FIX50SP2.xml, <the named at-cap fixture overlay>)`, median of ≥ 5 runs each, ratio
-≤ 1.5, recorded in the verify record with the machine, the commit and the fixture's expansion count. The send path's paired bench runs under
-`/speckit-verify`'s bench step.
+Contracts W-12 is the protocol: tasks T094 and T095 run it. In the Release build (`linux-clang-release`),
+time `XmlLoader::load(FIX50SP2.xml)` and `load_with_overlay(FIX50SP2.xml, <the named at-cap fixture
+overlay>)`. Take one discarded warm-up run of each, then at least five runs each, interleaved; the ratio of
+medians must be ≤ 1.5. Record the machine, the commit, both medians and minima, and the fixture's
+expansion count. Then run the characterisations, and the paired base-vs-candidate runs of
+`session_send_bench` and `xml_loader_bench` (A-B-A-B, min per tree, ≤ +5%) with the footprint bench, as
+W-12 lists. `/speckit-verify`'s bench step is not the paired run.
 
 ## 7. Records (W-13)
 

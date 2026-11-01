@@ -73,6 +73,10 @@ hand-edited in its own format.
 The rule for both formats: each overlay element is matched to the base definition it names; if there is
 none, it is new and is appended to its container. A matched element's children are merged by the same
 rule, recursively. Appending puts each new child after the existing ones, in overlay document order.
+"At the end" means after the container's last existing child element of any kind: a `<header>` field
+lands after the header's last field, component or group element, a `<value>` after the field's last
+value, a `fixr:code` after the code set's last child, and a container the base lacks after the root's
+last child.
 That is the definition of the equivalent edited XML (spec Terminology), and the hand-written references
 (R-10) are written to it.
 
@@ -249,6 +253,76 @@ The guards run in this order. Each step is non-recursive or iterative, and none 
 | 8a | Length+Data relation | the factored pair detection (R-3) on the base document, run before step 8 changes it, and on the spliced document; refused with `overlay_conflict_error` when a pair touching a base tag differs. It reads `<fields>` and walks containers in document order (XML) or reads `lengthId` attributes (Orchestra), following no references. Errors it raises on the spliced document other than a collision (for example an unknown field type) are the loader's own, as the build would raise them. |
 | 9 | Build | the loader's `build_handle_from_doc`, with the step counter armed at the smaller of step 6's merged total and the base's total plus the budget (below). |
 
+**Guard details** (each binds the step it names; checklist audit, pipeline step 9):
+- **Boundaries.** Each cap admits its value and refuses its value + 1: an overlay of exactly 4 MiB loads
+  (the reader asks for cap + 1 bytes and refuses only when the last of them exists), depth 32 loads and
+  33 refuses, and a count equal to its cap loads. W-3 pairs each cap + 1 row with an at-cap control.
+- **Depth unit (step 4).** The overlay's root element is level 1; only element nodes count (text, CDATA,
+  comment, PI and the doctype node do not).
+- **New or existing (step 5).** Step 5 decides whether an overlay definition is new by looking up its
+  match key in R-3's match index for its container, a flat lookup that follows no references. Step 6's
+  classifier uses the same index, so steps 5 and 6 cannot disagree on which definitions are new.
+- **Reference count (step 5).** Every reference element in the overlay document counts towards the
+  reference cap, whether the splice appends it or merges it in place (a Required promotion, an identical
+  redeclaration). The count is of overlay elements, so step 5 needs no classifier.
+- **pugixml does not recurse.** pugixml 1.15's parse (`parse_tree`, a cursor loop), its document
+  teardown (`xml_document::_destroy`, a loop over memory pages) and its subtree copy (`node_copy_tree`,
+  a loop) are iterative (read in pugixml 1.15's `pugixml.cpp`), so nesting within 4 MiB costs no stack
+  before step 4's walk. Re-read them when the pugixml pin moves.
+- **Entities (step 3).** Any DOCTYPE is refused, with or without an internal subset, and an entity can
+  only be declared inside one, so no declared entity is ever expanded. The five predefined entities and
+  character references are expanded by the parse (`parse_escapes`, in `parse_default`). An undeclared
+  reference such as `&x;` is neither expanded nor an error: pugixml keeps it as literal text, so it can
+  reach a value only as those characters.
+- **`policy` (step 6).** The walk takes the call's `unresolved_group_policy` and models every `finalize`
+  rule that depends on it: under `tolerant`, a group the loader leaves unregistered is treated by the
+  walk exactly as `finalize` treats it, including whether it is expanded standalone. W-1's and W-4's
+  `tolerant` rows (counter = prediction) witness it.
+- **Child nodes (steps 6 and the counter).** Both count the node kinds `expand_field_list`'s loop visits
+  in the spliced document: the base's children as `load`'s flags parse them, and the overlay's appended
+  element children only. The classifier drops non-element overlay nodes, so none is spliced or counted.
+  The overlay's `parse_doctype` flag adds only a document-level doctype node, which step 3 refuses and
+  which is never a definition's child.
+- **Arithmetic.** Every step and entry count is a `std::uint64_t` that saturates: the memo, the merged
+  total, the base's total plus the budget, and their minimum. A saturated total exceeds the budget, so
+  it is refused, never wrapped.
+- **Side-table fit, exactly (step 6).** A definition fits when the start `finalize` passes to
+  `static_cast<std::uint16_t>` is at most 65535 and the count it passes to
+  `std::min<std::size_t>(…, 65535U)` is at most 65535. A start of exactly 65535 with a non-zero count
+  fits (`component_fields` adds start and count in `int`). A zero-count definition whose start is 65536
+  or more does not fit: its wrapped start is never read, but the rule takes no exception.
+- **Cycle roots and edges (step 6).** The walk starts from every root `finalize` expands (each message's
+  header, body and trailer, every component, every first-seen group), so a cycle reachable only from a
+  header or trailer is found. A header or trailer is a root and never a target, so it cannot lie on a
+  cycle. In Orchestra, a group that reaches itself through a component (group → `componentRef` →
+  component → `groupRef` → group) is a cycle made of the two edge kinds above.
+- **Cost of the guard steps.** Steps 1–5 and 8a are linear in the two documents. Step 6 visits each
+  definition and each reference edge once (the memo). Step 8 matches among direct children through the
+  match index. Step 7's level sets are the one superlinear part: at most one per definition the walk
+  reaches from an extended parent, each a sorted vector of at most the base's declared field count, and
+  each built by merging the sets of its references. The work is therefore at most (the base's reference
+  count + the overlay's) × the base's declared field count. That bound is in the base's size and the
+  reference cap, never in the overlay's size alone. The code comment states this recipe.
+- **Memory.** It is the sum of four terms: the two pugixml DOMs (the base's in proportion to its file,
+  the overlay's in proportion to at most 4 MiB), step 6's memo (one entry per definition), step 7's
+  level sets (the bound above), and the merged dictionary (its entries are bounded by the base's total
+  plus the budget). It is a recipe, not a measured number; memory is not measured.
+- **Recursion depth of the build (step 9).** `expand_field_list` recurses once per reference it follows,
+  so its depth is the longest reference chain in the spliced document. An acyclic chain visits each
+  component and group definition at most once, so the depth is at most the spliced document's number of
+  component and group definitions, times the inline group nesting the depth cap allows inside one
+  definition. The new-field cap (each linking group needs a NumInGroup field) and the budget bound it
+  further. W-3's longest-chain row builds the deepest chain the caps and the budget jointly admit on a
+  small base, its shape chosen in-test through the seam's prediction, and loads it under ASan in tier 1's
+  `linux-clang-asan` lane, to show that part fits the stack. A chain an overlay threads through a vendored base's own definitions is not exercised. The
+  verify record lists that as an unmeasured residual.
+- **The path-form reader never stats.** It opens an `std::ifstream` and reads at most cap + 1 bytes. It
+  never calls `std::filesystem::file_size` or `stat`, so a source whose size query lies (a FIFO, a
+  `/proc` file) is read like a regular file. Review checks this with
+  `git grep -n -e file_size -e 'stat(' -- src/dictionary/overlay_merge.cpp`, which must print nothing.
+  No FIFO row exists: a FIFO needs a concurrent writer, which the pure bucket forbids
+  (`[const §VII.8]`). W-3's path-form cap + 1 and at-cap rows witness the reader.
+
 **The step counter: the bound holds by construction (Gate A round 2, Root cause B).** Step 6 is a model
 of `finalize`'s expansion. A model can miss an expansion site that a later change adds (round 2 found
 one: a header-store walk). So the build does not trust it:
@@ -265,6 +339,15 @@ one: a header-store walk). So the build does not trust it:
   total plus the budget, so M-12's RED is bounded and loud, not a hang or an exponential allocation
   (Gate A loop 2 round 1, G098-L2R1-003). The `load` path leaves the counter unarmed (a null limit),
   so `load`'s behaviour is unchanged by construction.
+- "Passes its limit" means count > limit. A load that ends with count == limit is admitted, which is
+  the equality W-1 and W-2 assert. Likewise the budget comparison refuses only when the merged total
+  minus the base's total is strictly greater than the budget.
+- The budget comparison and the arming sit in the one guard routine that every overlay entry point
+  calls before the build: both members of both loaders, with `load_any_with_overlay` dispatching to
+  them. So on every entry point the armed value equals the prediction.
+- The counter is a member of the per-call `LoaderState` / `OrchestraLoaderState`, each a local of
+  `build_handle_from_doc`. The read seam returns its result by value. The loaders therefore stay
+  stateless, and FR-008's argument and the contract's "Thread safety as `load`" line hold unchanged.
 - An `expand_field_list` call step 6 does not model can therefore cause a loud refusal, never unbounded
   work. The counter does not see other recursive walks; none is added (the header store is a
   visited-set walk, R-7).
@@ -288,13 +371,22 @@ next power of two at or above twice it. An overlay may then add at most about th
 largest vendored base. Starting estimate: **2^20** steps, from the Gate A round-1 review's Python model
 of `expand_field_list` over FIX50SP2, which counted emitted entries; the Orchestra file was not
 modelled, and steps are at least entries. The implementer re-derives the value with the step 6 code
-itself and records it in the verify record; where the two differ, the recipe wins. The budget is a safety bound, not a performance target: an overlay near it
+itself and records it in the verify record; where the two differ, the recipe wins. W-3's budget recipe row recomputes the recipe on every run,
+over every vendored base through the read seam, and asserts that the constant equals its result. Adding
+or updating a vendored dictionary in a way that moves the result therefore fails that row. The budget is a safety bound, not a performance target: an overlay near it
 can make a small base load many times slower. SC-005 measures one named fixture (W-12's at-cap overlay on
 FIX50SP2), with its expansion count recorded, not every overlay the caps admit.
 
-The values in step 5 are 2c §4.4.2's for fields, components and messages, plus the two Orchestra
-containers 2c did not know about, an enum-value cap the byte cap would otherwise bound only loosely, and
-the reference cap Gate A round 1 added. Fixed constants in `src/dictionary/`, no configuration knob (2c's
+Source of each value:
+- Taken from 2c §4.4.2: 4 MiB, depth 32, and fields 1024, messages 64 and components 64.
+- Orchestra groups 64: the components cap, because an Orchestra group is a shared definition by id,
+  as a component is.
+- Chosen, not derived: Orchestra code sets 256, enum values and codes 4096 (a cap the byte cap would
+  otherwise bound only loosely), and references 8192 (the cap Gate A round 1 added). They are recorded
+  here as chosen values.
+
+Each constant's code comment names its source (2c §4.4.2, or this section for a chosen value), not a
+derivation it does not have. Fixed constants in `src/dictionary/`, no configuration knob (2c's
 `FIXPP_DICT_*` names were never implemented). A cap, DOCTYPE, budget, side-table or step-counter failure
 throws `overlay_limit_error`.
 
@@ -331,6 +423,31 @@ The existing `fixpp_dict_load_from_xml` keeps mapping everything to `FIXPP_ERR_C
 not changed (spec FR-001). The new function uses the DICT family because those codes say what failed;
 `FIXPP_ERR_DICT_LIMIT_EXCEEDED` is defined in `include/fix/c_api/error.h` and nothing returns it today
 (re-derive: `git grep -n FIXPP_ERR_DICT_LIMIT_EXCEEDED -- src`).
+
+**098 mints no error code.** Codes 200, 201 and 202 are already defined in `include/fix/c_api/error.h` and
+listed in `tools/abi_history/error_codes_v1.txt`, at their introducing minor. `error.h`,
+`error_codes_v1.txt` and `tools/check_capi_occupancy.sh` are therefore unchanged. "First producer of 201"
+is a behaviour change, a defined code that is now returned, not an occupancy change.
+
+**What each error carries.** A message is free text except for these parts, which are a contract and are
+asserted by the witnesses:
+- a conflict names the element kind and its key (tag, name or MsgType), and for a repeated base key it
+  also names both base occurrences;
+- a limit names what it hit (the cap, DOCTYPE, the budget, the table, or the counter origin), and for a
+  numeric cap it also gives the cap's value.
+
+Nothing else about the text is stable.
+
+The step counter's model-drift refusal keeps the public type `overlay_limit_error`. It is therefore
+reported as a limit on every surface but the C++ read seam: 201 at the C ABI, `ValidatorError` with
+`.code == 201` in Python, and `invalid_or_contradictory_selector` in TOML. Its `what()` ("…internal model
+drift") reaches C++ callers and the TOML diagnostic's message, but not C or Python. B-098-1 discloses
+this.
+
+**Paths that cannot be read.** A base or overlay path that cannot be opened or read (missing,
+unreadable, a directory) throws the format's parse error (`xml_parse_error`, or `orchestra_parse_error`
+for Orchestra), as `load` does for its own path. At the C ABI that is 200 (row 3), and in TOML it is a
+load failure at the key path.
 
 ## R-7 — Send-side header membership (FR-022, L-422-1)
 
@@ -373,9 +490,15 @@ declaring a header tag outside the fixed set changes anything. Re-derive with a 
   a `table_view_builder` forwarder, and a public `bool is_header_tag(std::uint16_t) const noexcept`.
 - `build_send_frame_`'s classification becomes
   `is_send_header_tag(tag) || (inbound_tv_ && inbound_tv_->is_header_tag(tag))`, evaluated only on a
-  fixed-set miss. No allocation, O(1) (a bounds check and a bit test), no suspension; the fixed set and
-  its position rule are unchanged. For every vendored dictionary the union equals the fixed set (table
+  fixed-set miss. No allocation and no suspension. The added branch is O(1): a bounds check and a bit
+  test. The fixed-set test before it stays a linear find over the fixed array, as today. The fixed set
+  and its position rule are unchanged. For every vendored dictionary the union equals the fixed set (table
   above), so the result is unchanged.
+- **Tag width.** No narrowing can occur. The tag reaching the classification is `PayloadField::tag`, a
+  `std::uint16_t` that `parse_outbound_tag` returns. That function refuses any tag above 65535, because
+  `wire::accumulate_tag_digit` bounds the accumulator to `0xFFFF` and the field then fails as malformed.
+  So `is_send_header_tag`'s `std::uint32_t` parameter and `is_header_tag`'s `std::uint16_t` parameter
+  receive the same value.
 - The dictionary tags take the same position rule as the fixed set's: moved into the header in the
   caller's order (the existing two-pass partition).
 - **Counted Data values.** The partition classifies with
@@ -419,7 +542,12 @@ Dictionary load_any_with_overlay(path const& base, path const& overlay, pmr::mem
 ```
 
 New members on existing classes are source-compatible. `load`, `load_from_string` and `load_any` are
-unchanged. The `XmlLoader` and `Dictionary` header comments that say `load_overlay` / `with_overlay` are
+unchanged. The string form is offered on the two loader classes only, as `load_from_string` is today.
+`load_any_with_overlay` takes paths because `load_any` has no string overload: its root sniff reads a
+file. The C ABI takes paths, as `fixpp_dict_load_from_xml` does. FR-001's string form is met by the
+loader members. A caller of either string form keeps no view into `base_xml` or `overlay_xml` after the
+call: as with `load_from_string`, pugixml copies the buffer, and the `Dictionary` owns its storage in
+`mr`. The `XmlLoader` and `Dictionary` header comments that say `load_overlay` / `with_overlay` are
 deferred are replaced by a pointer to the shipped calls (a comment states the procedure, not a count).
 
 ## R-9 — TOML
@@ -429,6 +557,23 @@ deferred are replaced by a pointer to the shipped calls (a comment states the pr
   `[[session]]`, and at root produces `invalid_or_contradictory_selector` with "dialect_overlay is a
   session key; set it in [default] or [[session]]". `T020_DeferredSetExactCoverage` keeps guarding
   every other deferred key (re-derive the set from `kDeferred`).
+  - Its expected set stays a literal list in the test, `kAllDeferredKeys`. `kDeferred` is file-scoped in
+    the `.cpp` and the test cannot reach it, so a key dropped from `kDeferred` by mistake still fails
+    the cell.
+  - The literal loses `dialect_overlay` and nothing else. The reviewer re-derives it by reading
+    `kDeferred` at the head.
+  - With `dialect_overlay` gone from it, the cell passes on the unfixed tree too. It is a negative
+    control, not a U arm (contracts arm table).
+  - **Why root refuses this key when root tolerates other session keys.** `recognize_keys` applies one
+    recognised set at every scope, "slightly permissive (e.g. a session-scalar name at root is
+    tolerated)" by its own comment. `dialect_overlay` is refused at root instead because it was already
+    refused there before 098 (as deferred), and tolerating it would turn a refusal into a silent
+    no-op. Its class, `invalid_or_contradictory_selector`, is the one the resolver uses for a selector
+    that cannot take effect where it is written.
+  - **Other tables.** `recognize_keys` walks only the top-level keys of root, `[default]` and each raw
+    `[[session]]`. So `dialect_overlay` written inside another table (`[dictionary]`,
+    `[session.transport]`, `[default.logger]`, …) is not read. Each sub-table's mapper reads its own
+    keys and ignores the rest, as it does for every unread key today. 098 does not change that.
 - A new resolver step runs after `resolve_engine_dictionary` in `resolve_selectors`
   (`src/config/selector_resolver.cpp`). Its guard is `bundle.engine.dictionaries.empty()`, not "the
   `[dictionary]` step failed": an absent `[dictionary]` makes `resolve_engine_dictionary` return with no
@@ -439,36 +584,98 @@ deferred are replaced by a pointer to the shipped calls (a comment states the pr
   `LoadNegativeBattery.T020_MissingRequired_Dictionary`, reaches exactly this case (N-3).
   - **Empty:** assign nothing. For each authoring origin of `dialect_overlay` (below), add
     `invalid_or_contradictory_selector` at that key path: "dialect_overlay requires [dictionary]".
+    - With `[dictionary]` absent, one file therefore reports two kinds of diagnostic:
+      `load_toml_config`'s `missing_required` at `dictionary`, and this one at each origin. W-8's
+      no-`[dictionary]` row asserts both.
+    - `T020_MissingRequired_Dictionary` still holds unchanged. It asserts containment (`has_diag`), and
+      its fixture sets no `dialect_overlay`.
+    - `[dictionary] kind = "version"` (recognised, deferred) also leaves `engine.dictionaries` empty, so
+      it gets the same diagnostic.
+    - The step needs `[dictionary]`'s resolved `path` as its base path, so it depends on
+      `kind = "path"`. When `kind = "version"` ships, this step needs a base source for it. That is a
+      recorded dependency, not 098's work.
   - **Not empty:** for each session `i`, read `dialect_overlay` from the merged session table; with
     none, set `bundle.sessions[i].config.dictionary = bundle.engine.dictionaries.front()`; with one,
     `resolve_path(base_dir, …)` and load `load_any_with_overlay(base path, overlay path,
     opts.resource)`.
+    - The base path is `[dictionary]`'s `path`, resolved as `resolve_engine_dictionary` resolves it.
+    - **Paths** resolve exactly as `dictionary.path` does, through `resolve_path(base_dir, value)` with
+      `base_dir = path.parent_path()`, captured once in `load_toml_config`:
+      - a relative value is joined to the configuration file's directory and `weakly_canonical`-ised;
+      - when the configuration path is a bare file name, `base_dir` is empty, so the join resolves
+        against the working directory;
+      - an absolute value is used verbatim;
+      - `~` is not expanded (the loader does no shell expansion).
+    - The merged dictionary is allocated from `opts.resource`, as `[dictionary]`'s is. It has the same
+      lifetime requirement relative to the returned bundle.
   - One load per distinct resolved overlay path, cached by that path (a success or a failure), and the
     merged dictionary shared by the sessions naming it; sessions do not each re-parse the base.
     `EngineConfig::dictionaries` is unchanged.
+    - **The cache key** is `resolve_path`'s result, compared as a `std::filesystem::path`. Relative values
+      are `weakly_canonical`-ised, so `venue.xml`, `./venue.xml` and a symlink to an existing file share
+      one key. An absolute value is used verbatim, so an absolute and a relative spelling of one file, or
+      two absolute spellings, are two keys. They give two loads and two pointers, each correct. A failure
+      is reported per origin either way.
+    - **Base reads.** `load_any_with_overlay` reads and parses the base file again, separately from
+      `[dictionary]`'s own load. So N distinct overlays cost N + 1 base parses at start-up. If the base
+      file changes between the reads, a merged dictionary's base differs from
+      `engine.dictionaries.front()`. Both are disclosed in B-098-3. Sharing the parsed base would need an
+      entry point that takes a parsed base, which FR-008's "no `Dictionary` is an input" rules out.
 - **Value checks**, at the key path where the value was written: a non-string value is
   `malformed_value` ("dialect_overlay must be a string path"); an empty string is `empty_required`
-  ("dialect_overlay must not be empty"), mirroring `dictionary.path`'s arms in
-  `resolve_engine_dictionary`.
+  ("dialect_overlay must not be empty").
+  - The empty arm mirrors `dictionary.path`'s arm in `resolve_engine_dictionary`. The non-string arm does
+    not: that function reports a non-string `dictionary.path` as `missing_required`. A value that is
+    present but not a string is malformed, not missing.
+  - A TOML array of paths is a non-string value, so it is `malformed_value` (one overlay per load).
+  - A whitespace-only string, or a path naming a directory, is passed to `resolve_path` and the loader
+    as written, so it is a load failure, as for `dictionary.path`.
 - **Diagnostics are per authoring origin, not per path (A-005).** `merge_defaults` loses origins, but
   `resolve_selectors` also receives `root_tbl`, which still holds the raw `[default]` table and the raw
   `session` array. The origin of each session's value is read there: `session[N].dialect_overlay` when
   the session's raw table sets the key, else `default.dialect_overlay`. A failing load is reported once
   per distinct origin: when `[default]` and `session[1]` both name one failing file, that is two
   diagnostics, one at each key path; when several sessions inherit one failing `[default]` value, that
-  is one diagnostic at `default.dialect_overlay`.
+  is one diagnostic at `default.dialect_overlay`. This is the one place the per-origin rule is defined,
+  for every combination:
+  - `[default]` alone, inherited by several sessions: one diagnostic.
+  - `[default]` and `session[N]` naming one failing file: two.
+  - Two sessions each setting one failing file in their own tables: two, one at each session's key path.
+  - **Location.** Each `dialect_overlay` diagnostic's `location` is the value's position in the raw table
+    where it was written: the raw `[default]` table, or the raw session table. It is read with
+    `loc_from_region(node.source())`, as `recognize_keys` reads it, because merged tables lose their
+    source regions. For a load failure the resolver sets that location after `trap_throw_to_expected`
+    returns, because that wrapper leaves `{0,0}`.
+  - **Message.** A load failure's `message` is the loader's `what()` (`trap_throw_to_expected` copies it).
+    A limit, a conflict and a missing file therefore read differently, though all share one reason
+    class.
 - **No "none" value (N-11).** TOML has no null, and 098 defines no reserved value meaning "no
   overlay". A `[default]` overlay therefore cannot be cleared for one session; the operator moves the
   key out of `[default]` into each session that wants it. QuickFIX's `[DEFAULT]` `DataDictionary` has
   the same property. Disclosed in B-098-3 and the TOML contract (orchestrator default, owner confirmed 2026-11-01;
   a reserved value would be new surface).
 - `trap_throw_to_expected`'s doc (`src/config/loader_internal.hpp`) lists "ONLY these three throwing
-  sites"; the overlay load is a fourth and the doc changes to the rule, not a count.
+  sites"; the overlay load is a fourth and the doc changes to the rule, not a count. The rule: every
+  throwing call of a resolver step runs inside one `trap_throw_to_expected` lambda at the key path it
+  reports, which catches `std::exception` and so covers `std::bad_alloc` and `xml_oom_error`.
+  - For this step, the lambda at the origin's key path holds every throwing call: the path join, the
+    load, the `make_shared`, and the cache insertion.
+  - So an allocation failure is `invalid_or_contradictory_selector` at that key path, carrying the
+    exception's `what()`. It never escapes to `load_toml_config`'s outer catch, which would report it at
+    `logger`.
+  - Copying the shared pointer into a session is `noexcept`.
 - The session dictionary fill is a behaviour change for every TOML user (B-098 row): today a host must
   copy `engine.dictionaries.front()` into each session (the one in-tree example is
   `tests/session/engine_establishment_timeout_test.cpp`); after 098 the bundle arrives filled. A host
   that still copies it gets the same pointer for a session without an overlay, and **overwrites the
   merged dictionary** for a session with one — disclosed in the B&L row and the release note.
+- **No `[[session]]`.** `load_toml_config` returns at its structural guard (`missing_required` at
+  `session`) before key recognition and resolution. So a `[default]` `dialect_overlay` is neither read
+  nor loaded, and a failing file is not reported. Every key behaves this way today.
+- **Reach.** The key reaches C++ hosts only. No C-ABI or Python entry point loads a TOML file
+  (`git grep -n load_toml_config -- src/capi bindings` prints nothing), and `src/capi/config.cpp` sets
+  `SessionConfig::dictionary` from a handle. C and Python hosts use
+  `fixpp_dict_load_from_xml_with_overlay` (US4). B-098-3 says so.
 
 ## R-10 — The equivalence oracle (FR-017, SC-001)
 
@@ -499,6 +706,14 @@ union of three sources, over both sides:
 An extra message, field, component (including one no message uses), group or context on either side is
 therefore reported, not hidden.
 
+**The census copies the loaders' document rules that decide what exists, and nothing else.**
+- It copies: the first container of each name counts; a second `<field>` of one name is dropped
+  (`by_name_.emplace`); a repeated msgtype gives repeated message entries; Orchestra definitions are
+  keyed by `id`.
+- It does not copy expansion, pairing or registration; those are what the comparison checks.
+- A duplicate key the census meets is written to the row's report, so a disagreement with the loader
+  shows rather than hides.
+
 **3. What it compares: a declared store list.** The comparator declares the stores it compares as
 data, one entry each, and every comparison and every diagnostic is keyed by an entry. The list has:
 - one entry per `table_view` data member, and per sub-member of a member that holds several stores
@@ -510,7 +725,19 @@ data, one entry each, and every comparison and every diagnostic is keyed by an e
 
 The comparator's header comment carries the recipe that re-derives the list: read `table_view.hpp`'s
 `private:` block and the `Dictionary` query and `*Ref` field declarations. The comment holds the recipe,
-not the list. An entry a version-matched overlay cannot change carries a stated reason instead of a seed.
+not the list. W-0's union check compares the list with itself, so the list's completeness is checked
+separately, by a census recorded in the evidence file:
+- the access-label census of `table_view.hpp`'s private block, which `table_view_seal_compile_test.cpp`'s
+  header already asks for at each surface change;
+- the `Dictionary` query declarations and the `*Ref` fields.
+
+Each item maps to a list entry, or the list is fixed. The census runs at T015, again at T058 (the header
+store), and whenever T092 finds `table_view.hpp`, `dictionary.hpp` or a `*Ref` header changed.
+
+The same census re-reads each reason-only or coupled entry's reason against the source at the head. Where
+the reason is an invariant between two stores the comparator reads (the reverse pair map as the inverse
+of the forward map, a bit cache against its map), the comparator also asserts that invariant on each
+side, so a broken invariant is reported. An entry a version-matched overlay cannot change carries a stated reason instead of a seed.
 For example the `fixt_framing_*` members are a function of `which_session_version()`
 (`Dictionary::as_table_view`), and FR-006 fixes the version. The entries cover:
 - **Dictionary API**: `messages()`, per message `message_fields` / `field_ref` / `required_fields`,
@@ -546,14 +773,20 @@ So the round-1 rationale ("pre-existing and not caused by an overlay") was false
 - **Out of scope where the base does not fit.** The base already returns wrong `component_fields` /
   `group_fields` for its later definitions, and the overlay is admitted. The result still equals the
   equivalent edited XML (FR-002), whose load has the same wrong answers. Widening the index is a layout
-  change to `ComponentRef` / `GroupRef`, whose 12-byte size is pinned (2c §4.2 AC-F2,
-  `tests/dictionary/ref_shape_test.cpp`); it is left to the owner.
+  change to `ComponentRef` / `GroupRef`, whose 12-byte size is pinned (2c §4.2's `static_assert`s;
+  `tests/dictionary/ref_shape_test.cpp`'s AC-F2 and AC-F3 blocks); it is left to the owner.
 - The census comparison covers each component and group whose start and count, computed by the test from
   the census sizes in the order `finalize` assigns them (re-derive the order from the two `finalize` loops
   that set `first_idx`), fit in 16 bits. A definition that does not fit is listed in the verify record as
   a wrap case, not compared. This is a condition, re-evaluated on every run, not a count. Where the base
   table does not fit, every definition the overlay appends after the wrap point is compared side against
   side only, and the verify record says so.
+  - **The filter's order model is itself checked.** For every compared definition, the test also reads
+    the loader's `first_field_index` (through `dictionary_internal.hpp`) and asserts that it equals the
+    start the test computed. A wrong order model therefore shows as a failure, not as a silent exclusion.
+  - Every row records, in its report (never in a comment), how many definitions it compared and how many
+    it excluded.
+  - On the small bases and the FIXT11 row, the excluded count MUST be zero (asserted).
 - A probe (a gtest in the dictionary binary, not a 098 witness that must go GREEN) compares
   `component_fields` of the first component past the wrap point on FIX50SP2 with its raw members. Its
   result goes in the verify record. If it shows the wrap, the defect is filed with R-15's issues and
@@ -598,6 +831,23 @@ Each is shown to produce a reported difference before the clean comparisons are 
   first emission, `detail::capture_first_emission`). The helper is line-based, not XML-aware: a
   structural patcher would share the splice's blind spots. A context block that matches zero or two
   places fails the cell before any comparison.
+  - **Positive row.** The helper also has a row where it must apply: a small hand-written text and hunk,
+    and a hand-written expected text. The helper's output must equal the expected text, with the lines
+    inserted exactly before the block's last line.
+  - **Line endings.** The Windows runners check out with `core.autocrlf=true`. `FIX44.xml` and the
+    Orchestra file are `-text` in `.gitattributes`, but `FIX50SP2.xml`, `FIXT11.xml` and the new patch
+    fixtures carry no attribute, so they arrive with CRLF there.
+    - The helper strips one trailing `\r` from each line of the base and of every hunk before matching,
+      and compares every other character, trailing whitespace included, exactly.
+    - It writes the patched text with LF.
+    - The same rule applies to the empty-overlay rows' anchor and to any in-test edit anchor (W-6's).
+    - pugixml normalises line endings when it parses, so the loaded dictionaries do not depend on them.
+- **Seeded mismatches name their target in advance.** Each W-1 and W-2 row's seeded mismatch states, in
+  the test:
+  - which addition (W-1) or hunk (W-2) it removes;
+  - the store or stores it expects to be reported.
+
+  The assertion is that the reported set includes each named store.
 - **Kind coverage on the vendored bases.** Each vendored overlay covers at least: a header field, an enum
   value on an existing field (an Orchestra code set for the Orchestra file), a member added to an
   existing group, a new message with a required field, and a field added to existing messages. The two
@@ -608,8 +858,17 @@ Each is shown to produce a reported difference before the clean comparisons are 
 
 The overlay loader is new parser-touching code over untrusted XML. Add
 `tests/fuzz/fuzz_dict_overlay.cpp`: a fixed small base (one per format, chosen by the first input byte),
-the rest of the input as the overlay, both C++ entry points; every throw must be one of the `dict::`
-error types. The Orchestra half catches `orchestra_parse_error` by its derived type before the base, as
+the rest of the input as the overlay, both C++ entry points (`XmlLoader::load_with_overlay_from_string`
+and `OrchestraLoader::load_with_overlay_from_string`, through the read seam). The path forms' bounded
+reader is not fuzzed; W-3's path-form rows witness it (R-5, "The path-form reader never stats"). Every
+throw must be in the accepted set, after `tests/fuzz/fuzz_orchestra_loader.cpp`'s:
+- the XML half accepts `overlay_limit_error` (any origin but the counter), `overlay_conflict_error`,
+  `group_delimiter_collision_error`, `xml_parse_error`, `unknown_version_error` and `xml_oom_error`;
+- the Orchestra half accepts the same, with `orchestra_parse_error` in place of the bare
+  `xml_parse_error`;
+- a bare `std::bad_alloc` that is not `xml_oom_error`, and any other `std::exception`, is rethrown.
+
+The dictionary is built on a bounded arena, as in that harness, so the `xml_oom_error` path is reached. The Orchestra half catches `orchestra_parse_error` by its derived type before the base, as
 `tests/fuzz/fuzz_orchestra_loader.cpp` does, so an Orchestra schema error thrown as a bare
 `xml_parse_error` falls through to the terminal rethrow (Gate A round 2, Root cause D). The harness loads
 through R-5's read seam and aborts on any counter-origin refusal; when an input loads, it also aborts
@@ -618,7 +877,26 @@ if the step counter differs from step 6's prediction. A pre-walk budget or side-
 target adds it with `target_include_directories`, as `fuzz_decimal_compare` adds `tests`. Seeds: the hand-written overlays (R-10), the conflict and cap overlays, a DOCTYPE
 overlay, the expansion-doubling overlay of R-5 (A-001) in both formats, the empty-component chain
 (R-5), and an Orchestra cycle. Registered like `fuzz_dict_xml_loader` / `fuzz_orchestra_loader` (`tests/fuzz/CMakeLists.txt`,
-built under `FIXPP_BUILD_FUZZ`). The ten-minute run is `/speckit-verify`'s fuzz step.
+built under `FIXPP_BUILD_FUZZ`). `/speckit-verify`'s fuzz step also runs the target for 600 s, with its
+generic command.
+
+**What the ten minutes are.** `[const §VII.7]` asks for "≥10 minutes on every PR". This PR's ten minutes
+are one local 600-second campaign at the final head, tasks T095a. CI only replays the seeds
+(`fixpp_add_fuzz_replay`, `-runs=0`); no workflow runs a timed campaign. That CI gap predates 098 and is
+reported, not fixed: the verify record's `## Pre-existing leads` and the PR body carry it, as 097 did.
+
+**Campaign flags** (T095a; `/speckit-verify` Step 7's generic command sets none of them):
+- `-max_len` is the byte size of the largest seed, re-derived from the corpus at run time, so mutation
+  can reach every cap a seed reaches. The byte-cap rows' inputs are not seeds. W-3 witnesses both forms
+  deterministically, and a 4 MiB seed would set `-max_len` far past every other cap's input.
+- `-timeout` is ceil(10 × the load time of an at-budget overlay on the harness's own small base,
+  measured through the seam), with a floor of 1 s, because libFuzzer takes whole seconds and 0 turns the
+  timeout off. An at-budget input is the slowest input the budget admits. Ten times the slowest seed would
+  not do: the seeds hold no near-budget admitted input. libFuzzer's default per-input timeout is longer
+  than the whole run, so without the flag a slow admitted input would use up the campaign without
+  failing it.
+- `-rss_limit_mb=2048` is stated explicitly (libFuzzer's default).
+- Pass: exit 0, and no `crash-`, `leak-`, `oom-` or `timeout-` artifact.
 
 ## R-12 — C ABI and Python
 
@@ -627,14 +905,38 @@ built under `FIXPP_BUILD_FUZZ`). The ten-minute run is `/speckit-verify`'s fuzz 
   `fixpp_dict_load_from_xml` in `src/capi/dictionary.cpp`, on `std::pmr::new_delete_resource()` as the
   existing function is (fixpp#495 D-5); errors per R-6; doc block in dict.h's style with one reentrancy
   token (`Reentrancy: single-thread.`).
+  - **The token** is the sibling's. A construction-time call needs no stronger promise. `thread-safe`
+    would need its own witness, because the call reaches `load_any_with_overlay`, `make_shared` and
+    `new`, though it holds no shared state. `[const §X.5]` requires a token, and
+    `tools/check_capi_reentrancy.sh` checks that every exported declaration's doc block carries exactly
+    one.
+  - **Not offered at the C ABI**, each as on `fixpp_dict_load_from_xml`. `load_any.hpp`'s "GA-frozen at
+    1.5.0" reason does not cover a function added at 1.13, so these are the reasons. Adding any of them
+    later is an additive function.
+    - `unresolved_group_policy`: the C ABI has no type for it, and `tolerant` yields a dictionary that
+      leaves a group unregistered, which a C host cannot inspect.
+    - The string form: C hosts load from files, as with the sibling.
+    - The memory resource: the handle owns its storage on `new_delete_resource()` (fixpp#495 D-5).
+  - **Paths.** Each argument goes to `std::filesystem::path{const char*}`, as in the sibling, so the bytes
+    are read in the native narrow encoding: as given on Linux, the active ANSI code page on MSVC.
+    Relative paths resolve against the process working directory. Both behave as in the sibling and are
+    unchanged.
+  - **Ownership on entry.** A handle the caller left in `*out_dict` is overwritten, not released, as by
+    the sibling, whose thunk sets `*out_dict = nullptr` first.
 - C-ABI **1.13**, additive: `version.h` block ending "Added: fixpp_dict_load_from_xml_with_overlay
   (header).", `tests/capi/version_test.cpp`'s exact-version pin, `tests/abi/golden/fixpp_capi_symbols.txt`,
   `tools/capi_freeze.sha256`. `src/capi/fixpp_capi.map` exports `fixpp_*` by glob and needs no edit.
 - Python: SWIG wraps all of dict.h and the `fixpp_dict_t**` out-param by type, so the function is
   exported as `fixpp.dict_load_from_xml_with_overlay`. Update the exact-set import test
-  (`bindings/python/tests/wheel/test_import_surface.py`) and the GIL audit table in `fixpp.i`; add an
+  (`bindings/python/tests/wheel/test_import_surface.py`) and the GIL audit table in `fixpp.i` (row
+  `hold`, the sibling `dict_load_from_xml` row's reason: a synchronous construction-time parse with no
+  engine round trip, so no worker-deadlock class; the expansion budget bounds its work, which the
+  sibling's lacks); add an
   in-tree Python test that reads an inbound Length+Data value only the merged dictionary reads intact,
-  as the C-ABI live arm does (contracts W-9, W-10). The OO wrapper `fixpp_oo.Dictionary` is not extended (not asked for).
+  as the C-ABI live arm does (contracts W-9, W-10). The OO wrapper `fixpp_oo.Dictionary` is not extended (not asked for): US4's Python host uses the
+  module-level function, and B-098-6 discloses the omission. The arguments are Python `str`, converted by
+  SWIG's default `char *` typemap (UTF-8), as `dict_load_from_xml`'s `path` is (the `FIXPP_CONFIG_STR`
+  `%apply` list does not name them). An `os.PathLike` is not accepted; pass `str(p)`.
 
 ## R-13 — Mutation runs
 
@@ -679,7 +981,7 @@ removed at close-out.
   and the brain pages whose `refs` name a file 098 changes.
 - **Constitution:** no amendment. `[const §XV.13]` is satisfied as written; no article names the
   overlay's grammar, attachment point or the dead field. fixpp#642 therefore goes to a docs PR.
-- **Comments that would rot:** `FieldType::DialectExtension`'s "re-enabled when D-009 ships"
+- **Comments that would rot:** `field_data_type::DialectExtension`'s "re-enabled when D-009 ships"
   (`include/fixpp/dict/field_ref.hpp`), the deferred notes in `dictionary.hpp` and `xml_loader.hpp`, the
   `kWitnessHeaderTags` comment in `tests/session/test_resend_answer_field_order.cpp` that calls
   `kReplayHeaderTags` the production header set (stale since #422; fixed because 098 touches that area).
