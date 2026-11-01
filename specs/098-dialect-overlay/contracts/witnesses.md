@@ -760,11 +760,12 @@ everything below.
   - The hit case (a dictionary header tag beyond the fixed set) costs the same as the miss: both read one
     `header_bits_` word after the same bounds check. Only the branch outcome differs, as for a fixed-set
     hit.
-  - CI cannot see this cost. `bench/ci-suite.txt` has no `session_send_bench` row, and its paired
-    `engine_send_bench` refuses its payload before `build_send_frame_`'s partition (that bench's header
-    comment). This run is therefore the only evidence. Whether to add a CI row is recorded under the
-    verify record's `## Pre-existing leads` for the owner, because paired status is irreversible
-    (`[const §VIII.2]` 2a).
+  - CI's paired gate covers this path from 098 on (owner ruling, 2026-11-01: "yes, add it to CI
+    time'd list"). T094b adds `bin/session_send_bench` as a `paired` row to `bench/ci-suite.txt`. Before
+    098 there was no such row, and the paired `engine_send_bench` refuses its payload before
+    `build_send_frame_`'s partition (that bench's header comment), so CI never timed this branch. The
+    row is irreversible (`[const §VIII.2]` 2a). CI's provisional band is not the ≤ +5% condition; the
+    local paired run above stays the evidence for it.
   - `[const §VIII.3]` ("a benchmark in the same PR") is met by this existing bench, run paired and
     reported in the verify record and the PR body.
 - **Plain load (`[const §VIII.2]`).** 098 changes code `XmlLoader::load` runs: the factored pair
