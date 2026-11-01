@@ -54,6 +54,8 @@ namespace fixpp_capi::detail {
 // `xml_oom_error` from `std::bad_alloc`, so each handler must precede the broader one.
 fixpp_error_t dict_overlay_error_code(std::exception_ptr const& ep) noexcept {
     try {
+        // Every path returns: `rethrow_exception` is [[noreturn]] and every handler returns.
+        // cppcheck-suppress missingReturn
         std::rethrow_exception(ep);
     } catch (fixpp::dict::overlay_limit_error const&) {
         return FIXPP_ERR_DICT_LIMIT_EXCEEDED;

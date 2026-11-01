@@ -999,6 +999,8 @@ void LoaderState::collect_header_tags(detail::dict_metadata_handle& h) const {
         }
     }
     std::ranges::sort(tags);
+    // `unique`'s subrange iterates `tags` itself, so both iterators are into one container.
+    // cppcheck-suppress mismatchingContainerExpression
     tags.erase(std::ranges::unique(tags).begin(), tags.end());
     h.header_tags_.assign(tags.begin(), tags.end());
 }
@@ -1536,6 +1538,8 @@ namespace ov = detail::overlay;
 // and receives their trace through this pointer, which only `probe_scope` sets,
 // for one call on its own thread. Every other call writes a local trace. Both
 // loaders' overlay members read it through `detail::overlay::trace_for_call`.
+// Mutable by design: `probe_scope` sets and restores it.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local ov::overlay_trace* t_probe_trace = nullptr;
 
 class probe_scope {
@@ -1610,6 +1614,8 @@ void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path)
 
 namespace detail::overlay {
 
+// `local` is not const: the reference returned for it is written by the caller.
+// cppcheck-suppress constParameterReference
 overlay_trace& trace_for_call(overlay_trace& local) noexcept {
     return t_probe_trace != nullptr ? *t_probe_trace : local;
 }

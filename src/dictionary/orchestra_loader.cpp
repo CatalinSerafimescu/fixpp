@@ -911,6 +911,8 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
         }
     }
     std::ranges::sort(tags);
+    // `unique`'s subrange iterates `tags` itself, so both iterators are into one container.
+    // cppcheck-suppress mismatchingContainerExpression
     tags.erase(std::ranges::unique(tags).begin(), tags.end());
     h.header_tags_.assign(tags.begin(), tags.end());
 }

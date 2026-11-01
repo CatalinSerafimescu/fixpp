@@ -308,7 +308,7 @@ void check_no_doctype(pugi::xml_document const& overlay) {
 void check_depth(pugi::xml_document const& overlay) {
     struct item {
         pugi::xml_node node;
-        std::size_t level;
+        std::size_t level = 0;
     };
     std::vector<item> stack;
     for (pugi::xml_node n = overlay.first_child(); n; n = n.next_sibling()) {
@@ -386,6 +386,9 @@ void check_pair_relation(length_pair_relation const& base, length_pair_relation 
 // ── The merge ────────────────────────────────────────────────────────────────
 
 struct xml_overlay_merge::impl {
+    // A reference member: impl lives inside a merge that deletes copy and move and must
+    // not outlive the overlay document it reads.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     pugi::xml_document const& overlay_doc;
     pugi::xml_node base_root;
     pugi::xml_node overlay_root;
@@ -660,9 +663,9 @@ void xml_overlay_merge::impl::check_caps() const {
     std::size_t references = 0;
 
     auto const appended_children_of = [&](pugi::xml_node container) {
-        std::vector<pugi::xml_node> out;
         if (created.contains(std::string{name_of(container)}) &&
             created.at(std::string{name_of(container)}) == container) {
+            std::vector<pugi::xml_node> out;
             for (pugi::xml_node c = container.first_child(); c; c = c.next_sibling()) {
                 if (c.type() == pugi::node_element) {
                     out.push_back(c);
@@ -704,9 +707,8 @@ void xml_overlay_merge::impl::check_caps() const {
         } else if (cname == "messages" || cname == "components") {
             std::string_view const def = cname == "messages" ? "message" : "component";
             std::size_t& count = cname == "messages" ? messages : components;
-            for (pugi::xml_node const c : appended_children_of(oc)) {
-                count += name_of(c) == def ? 1 : 0;
-            }
+            count += static_cast<std::size_t>(std::ranges::count_if(
+                appended_children_of(oc), [&](pugi::xml_node c) { return name_of(c) == def; }));
             for (pugi::xml_node c = oc.first_child(); c; c = c.next_sibling()) {
                 count_references(c);
             }
@@ -717,9 +719,8 @@ void xml_overlay_merge::impl::check_caps() const {
                 }
             }
             for (auto const& [o, b] : matched_field_defs) {
-                for (pugi::xml_node const v : appended_of(o)) {
-                    values += name_of(v) == "value" ? 1 : 0;
-                }
+                values += static_cast<std::size_t>(std::ranges::count_if(
+                    appended_of(o), [](pugi::xml_node v) { return name_of(v) == "value"; }));
             }
         }
     }
@@ -994,11 +995,12 @@ void close_upward(child_map const& children, std::unordered_set<node_ptr>& chang
     }
     std::vector<node_ptr> work(changed.begin(), changed.end());
     while (!work.empty()) {
-        node_ptr const d = work.back();
+        pugi::xml_node_struct* const d = work.back();
         work.pop_back();
         if (auto const it = inlined_by.find(d); it != inlined_by.end()) {
-            for (node_ptr const p : it->second) {
+            for (pugi::xml_node_struct* const p : it->second) {
                 if (changed.insert(p).second) {
+                    // cppcheck-suppress useStlAlgorithm  // the insert's result decides the push
                     work.push_back(p);
                 }
             }
@@ -1237,7 +1239,7 @@ void xml_overlay_merge::impl::check_conflicts(walk_result const& merged,
     for (auto const& [o, b] : matched_children) {
         if (attr_of(o, "required") == "N" && attr_of(b, "required") == "Y") {
             conflict("required relaxed: the overlay's " + describe(o) + " under " +
-                     describe(b.parent()) + " has required=\"N\" where the base has \"Y\"");
+                     describe(b.parent()) + R"( has required="N" where the base has "Y")");
         }
     }
 
@@ -1550,6 +1552,8 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
 }  // namespace
 
 struct orchestra_overlay_merge::impl {
+    // A reference member, as in xml_overlay_merge::impl.
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     pugi::xml_document const& overlay_doc;
     pugi::xml_node base_root;
     pugi::xml_node overlay_root;
@@ -1836,9 +1840,8 @@ void orchestra_overlay_merge::impl::check_caps() const {
         }
     }
     for (auto const& [o, b] : matched_codesets) {
-        for (pugi::xml_node const v : appended_of(o)) {
-            codes += name_of(v) == "fixr:code" ? 1 : 0;
-        }
+        codes += static_cast<std::size_t>(std::ranges::count_if(
+            appended_of(o), [](pugi::xml_node v) { return name_of(v) == "fixr:code"; }));
     }
     // Every reference element of the overlay, whether the splice appends it or
     // merges it in place.
@@ -2172,7 +2175,7 @@ void orchestra_overlay_merge::impl::check_conflicts(walk_result const& merged,
                      orch_describe(b.parent().name() == std::string_view{"fixr:structure"}
                                        ? b.parent().parent()
                                        : b.parent()) +
-                     " has presence=\"optional\" where the base has \"required\"");
+                     R"( has presence="optional" where the base has "required")");
         }
     }
 
