@@ -195,6 +195,9 @@ For each module: the public-facing types/functions, the design-doc that owns the
 - `fixpp::dict::Dictionary` — runtime, owns field metadata for one FIX version + dialect overlays.
 - `fixpp::dict::XmlLoader` — QuickFIX-XML compatible loader (`FIX42.xml`, `FIX44.xml`, …).
 - `fixpp::dict::DialectOverlay` — per-session overrides on top of a base dictionary `[SYN §3.3 Q13]`.
+
+  Updated (098-dialect-overlay): there is no `DialectOverlay` type (Z-6). An overlay is applied when the dictionary is loaded (`XmlLoader::load_with_overlay`, `OrchestraLoader::load_with_overlay`, `dict::load_any_with_overlay`) and yields an ordinary `Dictionary` (`.specify/2c-codegen.md`, the note at the end of §4.4).
+
 - `fixpp::v42::*`, `fixpp::v44::*`, `fixpp::v50sp2::*`, `fixpp::vt11::*` — generated typed messages.
 - `fixpp::dict::ComponentRef`, `fixpp::dict::FieldRef`, `fixpp::dict::GroupRef` — metadata accessors used by typed messages and validator.
 
@@ -244,6 +247,9 @@ For each module: the public-facing types/functions, the design-doc that owns the
 - `fixpp::session::MessageStore` — interface; writes return `asio::awaitable<void>` `[SYN §3.2 Q7]`.
 - `fixpp::session::MemoryStore`, `fixpp::session::FileStore` — default impls.
 - `fixpp::session::SessionConfig` — frozen config struct: `SecurityProfile`, dictionary, `MessageStore` factory, executor opt-out, lock policy, recovery thresholds, dialect overlay, tap consumer, log/otel hooks.
+
+  Updated (098-dialect-overlay): `SessionConfig` has no dialect-overlay member; a session's overlay is part of its `dictionary` (Z-6).
+
 - `fixpp::session::SecurityProfile` — enum: `mtls_ca` / `mtls_pinned` / `one_way_ca [[deprecated]]` `[const §XII.5]`.
 - `fixpp::session::RejectPolicy`, `fixpp::session::LockPolicy` — enums per `[SYN §3.2 Q8, Q9]`.
 - `fixpp::session::Listener` — multi-session acceptor.
@@ -849,6 +855,8 @@ advertises a capability that cannot be constructed.
 ⚠️ **Do not repeat the sharper-sounding claim that it has "zero hits"** — it has several. The precise
 statement is *declared and referenced, never defined*. **Re-derive:**
 `grep -rn "class DialectOverlay {\|struct DialectOverlay {" include/ src/` — empty means still undefined.
+
+Updated (098-dialect-overlay): resolved by removal. 098 removed the `SessionConfig::dialect_overlay` field and the forward declaration, and shipped the overlay as a load-time call that returns an ordinary `Dictionary` (`.specify/2c-codegen.md`, the note at the end of §4.4). Re-derive: `git grep -n DialectOverlay -- include src` prints nothing.
 
 ### Z-7 — §4.9 / §6 describe a tap subsystem that is not implemented
 

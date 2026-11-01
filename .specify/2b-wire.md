@@ -17,6 +17,9 @@
 3. Lock the **hybrid offset-table** access model `[SYN §3.1 Q1]`: eager when consumer goes through the typed dictionary surface (random-access intent); lazy on the raw iterator path (streaming intent); choice templated by access mode — *no runtime branch on the hot path*.
 4. Lock the **repeating-group representation** `[SYN §3.1 Q3]`: typed `group_view<T>` is the default; `.iter()` opt-out skips group-index construction for streaming callers.
 5. Lock the **custom-field handling** `[SYN §3.1 Q4]`: opaque round-trip preservation by default; `unknown_fields()` filtered view over the offset table; no vector materialization; per-session dialect overlays (COM-011, owned by **2c**) promote known-unknowns into the typed surface.
+
+   Updated (098-dialect-overlay): an overlay does not promote a tag into the typed surface. 098's overlay is applied when the dictionary is loaded and yields one merged dictionary; a field the overlay adds is declared there, so it is not an unknown field, and it is read by tag, because the typed tier reflects the base dictionary (L-098-2 in `spec/behaviors-and-limitations.md`).
+
 6. Specify the **framing** discipline: multi-message TCP reads, partial-read carry-over, BodyLength + CheckSum verification *before* the parser sees a frame.
 7. Specify the **error surface** for wire failures (parse errors, validator errors, framer errors), routed through `[arch §5.3]`'s `expected_t<T>` and the `fixpp::core::error` enum.
 8. Stay zero-allocation between parse and `fromApp` `[const §VIII.5]` and exception-free across the same window `[arch §5.3]`.
@@ -305,6 +308,8 @@ public:
 The two modes share `MessageView<>` via `requires`-constrained members; codegen instantiates `Parser<Index>` for typed access, the tap and logger instantiate `Parser<Iter>`. Each translation unit picks one — there is no runtime dispatch.
 
 **`field_iterator` Length+Data handling.** The iterator must skip SOH bytes inside `data`-typed fields per `[FIX50SP2 §3]` Length+Data semantics. Because Iter mode is dict-free by design (§6.3 — the tap consumer never looks up tags), `field_iterator` cannot consult the runtime dictionary. v0.2 resolves this by using a **static `constexpr` table of FIX-standard Length+Data tag pairs** (`RawDataLength`/`RawData`, `XmlDataLen`/`XmlData`, `EncodedTextLen`/`EncodedText`, etc., enumerated from `[FIX50SP2 §3.3]`'s field-pair list) baked into `field_iterator`'s implementation. The table is exhaustive against the standard FIX 5.0 SP2 dictionary; dialect overlays that introduce *new* Length+Data pairs (rare; mostly venue-specific binary BLOB fields) need either Index mode (which has the runtime dict) or a 2c-supplied static-table specialization. This trade is logged as §10 Q5.
+
+Updated (098-dialect-overlay): this paragraph predates fixpp#426. Since #426 `field_iterator` takes a `dict_hooks` value with no default and pairs Length+Data through it (`include/fixpp/wire/parser.hpp`), so Iter mode given a dictionary's hooks is not limited to the static table; 098 retired L-004-1, which still said it was. A pair an overlay adds between its own fields reaches Iter mode through those hooks; a site with no dictionary uses the standard table (L-426-1).
 
 ### 4.4 `OffsetTable` — `(tag, offset, length)` index
 
@@ -780,6 +785,8 @@ Per `[arch §10]` requirement (4): every design doc ends with the test seams it 
 | 4 | Per-message arena reset cadence — is "reset between every message" right (lowest peak memory, may thrash mimalloc on a hot session) or "reset between batches of N" (higher peak, fewer resets)? Wire's design (§6.6, §8) **assumes per-message reset**; if 2d picks differently, §6.6 needs an update. | Confirm at **2d** threading contract. | 2b + 2d |
 | 5 | `field_iterator` Length+Data table — in Iter mode the iterator uses a static `constexpr` table of FIX-standard Length+Data tag pairs (§4.3). Dialect overlays that introduce *new* binary BLOB fields cannot be served by Iter mode under the current design. Is that acceptable for v1.0, or does a dialect overlay need to inject its own static table? | Confirm at **2c**; expected disposition: acceptable for v1.0 (Iter consumers are tap/logger which don't read BLOB fields anyway), revisit if a real dialect needs it. | 2b + 2c |
 | 6 | Confirm with **2e** that MessageStore's canonical persistence model is **raw FIX frames** (not parsed/typed payloads). 2a §7.1 v0.3 and 2b §7.4 both depend on this; if 2e elects a typed-payload variant alongside, the §6.7 / §7.4 framing must be revised so the lossy-traits `static_assert` lands at the right call site. | Confirm at **2e**. | 2b + 2e |
+
+Updated (098-dialect-overlay): row 5 is answered. An overlay may add a Length+Data pair between fields it adds, and Iter mode pairs through `dict_hooks` since fixpp#426 (the §4.3 note).
 
 ## 11. Hand-off
 

@@ -1373,6 +1373,8 @@ fixpp::tap::TapConfig       tap_config {};
 
 **Rationale:** 2l owns the tap consumer API; `SessionConfig` is the injection point. `TapConfig` is the per-session configuration companion to `TapConsumer`. Keeping them separate (rather than embedding `TapConfig` inside each variant type) follows the existing `SessionConfig` pattern of carrying cross-cutting configuration fields alongside the primary type field (see `clock_override`-related fields, `dialect_overlay`, etc.). The `NoTap` sentinel ensures default-constructed `SessionConfig` incurs zero tap overhead without requiring a special "capacity = 0" constructor on `RingBufferTap`.
 
+Updated (098-dialect-overlay): `SessionConfig` no longer has a `dialect_overlay` field (098 removed it; B-098-4 in `spec/behaviors-and-limitations.md`), so that example of the pattern is gone. The rationale does not depend on it.
+
 ---
 
 ### §D.2 Note — `Session::get_trace_context()` is NOT a 2l amendment

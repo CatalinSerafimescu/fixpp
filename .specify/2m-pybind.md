@@ -951,6 +951,8 @@ class LogConfig:
     json_format: bool = False
 ```
 
+Updated (098-dialect-overlay): no `dialect_overlay_path` key shipped. Python loads a merged dictionary with `fixpp.dict_load_from_xml_with_overlay(base_path, overlay_path)` (over C-ABI 1.13's `fixpp_dict_load_from_xml_with_overlay`) and sets it as the session's dictionary. The TOML `dialect_overlay` key reaches C++ hosts only (B-098-3 and B-098-6 in `spec/behaviors-and-limitations.md`).
+
 **Validation.** Configuration is validated at construction (Python dataclass `__post_init__`) AND at `fixpp_engine_create` / `fixpp_session_open` time (engine-side). Python-side validation catches type errors and obvious shape errors (a `pinset_paths` empty list when `security_profile == MTLS_PINNED` raises `ValueError`); engine-side validation per `[2j §3.10]` / `[2i §6.5]` row 8 catches deeper config errors (TLS file readability, dictionary parse failure) and surfaces them as `FixppError` subclasses.
 
 **TOML loader.** `SessionConfig.from_toml(path)` uses the stdlib `tomllib` (added in 3.11; the wheel's ABI floor is 3.12, so it is always present and needs no extra dep). The TOML schema is documented in the user-facing docs; lives outside this design doc.
