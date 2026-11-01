@@ -925,11 +925,9 @@ void LoaderState::parse_document(pugi::xml_document const& doc) {
     parse_global_fields(root);
     for (auto const& [length_tag, data_tag] :
          detect_length_pair_relation(root, by_name_, by_tag_).forward) {
-        if (auto const lit = by_tag_.find(length_tag); lit != by_tag_.end()) {
-            if (auto const nit = by_name_.find(lit->second); nit != by_name_.end()) {
-                nit->second.length_pair_data_tag = data_tag;
-            }
-        }
+        // `forward`'s key is the tag of a `by_name_` entry `mark_pair` found
+        // through `by_tag_`, so neither lookup can miss.
+        by_name_.at(by_tag_.at(length_tag)).length_pair_data_tag = data_tag;
     }
     collect_components(root);
     collect_messages(root);
