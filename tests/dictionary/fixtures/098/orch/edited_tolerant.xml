@@ -1,0 +1,51 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-1, the tolerant row: the small
+  Orchestra triple base_tolerant.xml, overlay_tolerant.xml and
+  edited_tolerant.xml. Group Legs, referenced from NewOrderSingle, has a
+  fixr:numInGroup and no member: the loader refuses such a group under
+  unresolved_group_policy::fail_closed and leaves it unregistered under
+  unresolved_group_policy::tolerant. The overlay leaves Legs untouched, so the
+  same holds for edited_tolerant.xml. The base has no fixr:codeSets, so the
+  overlay's code set lands in a container the base lacks, appended after the
+  root's last child (research R-3); the small Orchestra triple cannot hold
+  that kind, since every container is needed there by another kind.
+  edited_tolerant.xml is base_tolerant.xml with each overlay_tolerant.xml
+  addition appended at the end of its matched container, in overlay document
+  order (spec.md Terminology), written by hand (FR-017 (a)).
+-->
+<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
+  <fixr:fields>
+    <fixr:field id="8" name="BeginString" type="String" />
+    <fixr:field id="9" name="BodyLength" type="Length" />
+    <fixr:field id="10" name="CheckSum" type="String" />
+    <fixr:field id="11" name="ClOrdID" type="String" />
+    <fixr:field id="35" name="MsgType" type="String" />
+    <fixr:field id="54" name="Side" type="char" />
+    <fixr:field id="555" name="NoLegs" type="NumInGroup" />
+    <fixr:field id="9101" name="VenueTag" type="VenueTagCodeSet" />
+  </fixr:fields>
+  <fixr:groups>
+    <fixr:group id="2030" name="Legs">
+      <fixr:numInGroup id="555" />
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:fieldRef id="8" presence="required" />
+        <fixr:fieldRef id="9" presence="required" />
+        <fixr:fieldRef id="35" presence="required" />
+        <fixr:fieldRef id="11" presence="required" />
+        <fixr:groupRef id="2030" />
+        <fixr:fieldRef id="54" presence="required" />
+        <fixr:fieldRef id="10" presence="required" />
+        <fixr:fieldRef id="9101" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+  <fixr:codeSets>
+    <fixr:codeSet id="9101" name="VenueTagCodeSet" type="String">
+      <fixr:code id="91011" name="VenueCross" value="Z" />
+    </fixr:codeSet>
+  </fixr:codeSets>
+</fixr:repository>

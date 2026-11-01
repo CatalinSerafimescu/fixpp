@@ -1,0 +1,26 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-1, the tolerant row: the overlay
+  of base_tolerant.xml. It adds a field to the message that holds the
+  unregistered group, after that group, typed by a new code set in a container
+  the base lacks, and does not touch the group itself.
+-->
+<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
+  <fixr:fields>
+    <!-- a new field with enum values -->
+    <fixr:field id="9101" name="VenueTag" type="VenueTagCodeSet" />
+  </fixr:fields>
+  <fixr:messages>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <!-- field added to an existing message -->
+        <fixr:fieldRef id="9101" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+  <!-- a container the base lacks, holding a new code set -->
+  <fixr:codeSets>
+    <fixr:codeSet id="9101" name="VenueTagCodeSet" type="String">
+      <fixr:code id="91011" name="VenueCross" value="Z" />
+    </fixr:codeSet>
+  </fixr:codeSets>
+</fixr:repository>

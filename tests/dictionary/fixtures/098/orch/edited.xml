@@ -1,0 +1,225 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-1: the small Orchestra triple
+  base.xml, overlay.xml and edited.xml. edited.xml is base.xml with each
+  overlay.xml addition appended at the end of its matched container, after
+  that container's last child element, in overlay document order (spec.md
+  Terminology, "Equivalent edited XML"; research R-3's Orchestra table),
+  written by hand and never produced by the merge (FR-017 (a)). Re-check it
+  with a no-index unified diff of base.xml against edited.xml: every hunk has
+  one of the shapes contracts W-1 allows, the Required promotion in its
+  Orchestra form being a presence attribute set to required. The header and
+  trailer are components 1024 and 1025, referenced from each message's
+  structure. TextCodeSet lists no code, so Text has no enum domain until the
+  overlay lists one (N-2). Group Events holds only the empty component
+  EmptyBlock, a group whose members emit nothing, which the loader refuses
+  under the default unresolved_group_policy; so base.xml is never loaded on
+  its own, and the member the overlay appends to Events is its first
+  emission, its delimiter (spec.md Edge Cases).
+-->
+<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
+  <fixr:codeSets>
+    <fixr:codeSet id="40" name="OrdTypeCodeSet" type="char">
+      <fixr:code id="40001" name="Market" value="1" />
+      <fixr:code id="40002" name="Limit" value="2" />
+    </fixr:codeSet>
+    <fixr:codeSet id="54" name="SideCodeSet" type="char">
+      <fixr:code id="54001" name="Buy" value="1" />
+      <fixr:code id="54002" name="Sell" value="2" />
+      <fixr:code id="54003" name="VenueCross" value="Z" />
+    </fixr:codeSet>
+    <fixr:codeSet id="58" name="TextCodeSet" type="String">
+      <fixr:code id="58001" name="VenueText" value="VENUE" />
+    </fixr:codeSet>
+    <fixr:codeSet id="9002" name="VenueLegCapacityCodeSet" type="char">
+      <fixr:code id="90021" name="Agency" value="A" />
+      <fixr:code id="90022" name="Principal" value="P" />
+    </fixr:codeSet>
+  </fixr:codeSets>
+  <fixr:fields>
+    <fixr:field id="1" name="Account" type="String" />
+    <fixr:field id="8" name="BeginString" type="String" />
+    <fixr:field id="9" name="BodyLength" type="Length" />
+    <fixr:field id="10" name="CheckSum" type="String" />
+    <fixr:field id="11" name="ClOrdID" type="String" />
+    <fixr:field id="17" name="ExecID" type="String" />
+    <fixr:field id="34" name="MsgSeqNum" type="SeqNum" />
+    <fixr:field id="35" name="MsgType" type="String" />
+    <fixr:field id="37" name="OrderID" type="String" />
+    <fixr:field id="40" name="OrdType" type="OrdTypeCodeSet" />
+    <fixr:field id="48" name="SecurityID" type="String" />
+    <fixr:field id="49" name="SenderCompID" type="String" />
+    <fixr:field id="52" name="SendingTime" type="UTCTimestamp" />
+    <fixr:field id="54" name="Side" type="SideCodeSet" />
+    <fixr:field id="55" name="Symbol" type="String" />
+    <fixr:field id="56" name="TargetCompID" type="String" />
+    <fixr:field id="58" name="Text" type="TextCodeSet" />
+    <fixr:field id="78" name="NoAllocs" type="NumInGroup" />
+    <fixr:field id="79" name="AllocAccount" type="String" />
+    <fixr:field id="80" name="AllocQty" type="Qty" />
+    <fixr:field id="112" name="TestReqID" type="String" />
+    <fixr:field id="448" name="PartyID" type="String" />
+    <fixr:field id="452" name="PartyRole" type="int" />
+    <fixr:field id="453" name="NoPartyIDs" type="NumInGroup" />
+    <fixr:field id="864" name="NoEvents" type="NumInGroup" />
+    <fixr:field id="7010" name="BaseBlobLen" type="Length" />
+    <fixr:field id="7011" name="BaseBlob" type="data" lengthId="7010" />
+    <fixr:field id="9001" name="VenueQty" type="Qty" />
+    <fixr:field id="9002" name="VenueLegCapacity" type="VenueLegCapacityCodeSet" />
+    <fixr:field id="9003" name="VenueBlockA" type="String" />
+    <fixr:field id="9004" name="VenueBlockB" type="int" />
+    <fixr:field id="9005" name="VenueRef" type="String" />
+    <fixr:field id="9006" name="NoVenueLegs" type="NumInGroup" />
+    <fixr:field id="9007" name="VenueLegID" type="String" />
+    <fixr:field id="9008" name="NoVenueFills" type="NumInGroup" />
+    <fixr:field id="9009" name="VenueFillID" type="String" />
+    <fixr:field id="9010" name="VenueFillQty" type="Qty" />
+    <fixr:field id="9011" name="VenueSymbolSfx" type="String" />
+    <fixr:field id="9012" name="NoVenueAltIDs" type="NumInGroup" />
+    <fixr:field id="9013" name="VenueAltID" type="String" />
+    <fixr:field id="9014" name="VenueSubTag" type="String" />
+    <fixr:field id="9015" name="VenueAllocNote" type="String" />
+    <fixr:field id="9016" name="NoVenueAllocTags" type="NumInGroup" />
+    <fixr:field id="9017" name="VenueAllocTag" type="String" />
+    <fixr:field id="9018" name="VenueAllocBlockTag" type="String" />
+    <fixr:field id="9019" name="VenuePartyNote" type="String" />
+    <fixr:field id="9020" name="VenueLen" type="Length" />
+    <fixr:field id="9021" name="VenueData" type="data" lengthId="9020" />
+    <fixr:field id="9022" name="VenueBlob" type="data" />
+    <fixr:field id="9023" name="VenueEventTag" type="String" />
+    <fixr:field id="9024" name="VenueHdrTag" type="String" />
+    <fixr:field id="9025" name="NoVenueHops" type="NumInGroup" />
+    <fixr:field id="9026" name="VenueHopID" type="String" />
+    <fixr:field id="9027" name="VenueTrailerTag" type="String" />
+  </fixr:fields>
+  <fixr:components>
+    <fixr:component id="1024" name="StandardHeader">
+      <fixr:fieldRef id="8" presence="required" />
+      <fixr:fieldRef id="9" presence="required" />
+      <fixr:fieldRef id="35" presence="required" />
+      <fixr:fieldRef id="49" presence="required" />
+      <fixr:fieldRef id="56" presence="required" />
+      <fixr:fieldRef id="34" presence="required" />
+      <fixr:fieldRef id="52" presence="required" />
+      <fixr:fieldRef id="9024" />
+      <fixr:groupRef id="2020" />
+    </fixr:component>
+    <fixr:component id="1025" name="StandardTrailer">
+      <fixr:fieldRef id="10" presence="required" />
+      <fixr:fieldRef id="9027" />
+    </fixr:component>
+    <fixr:component id="1003" name="Instrument">
+      <fixr:fieldRef id="55" presence="required" />
+      <fixr:fieldRef id="48" presence="required" />
+      <fixr:fieldRef id="9011" />
+      <fixr:groupRef id="2023" />
+      <fixr:componentRef id="2004" />
+    </fixr:component>
+    <fixr:component id="2001" name="PartiesBlock">
+      <fixr:groupRef id="1012" />
+    </fixr:component>
+    <fixr:component id="2002" name="EmptyBlock">
+    </fixr:component>
+    <fixr:component id="2003" name="VenueBlock">
+      <fixr:fieldRef id="9003" />
+      <fixr:fieldRef id="9004" />
+    </fixr:component>
+    <fixr:component id="2004" name="VenueSubBlock">
+      <fixr:fieldRef id="9014" />
+    </fixr:component>
+    <fixr:component id="2005" name="VenueAllocBlock">
+      <fixr:fieldRef id="9018" />
+    </fixr:component>
+  </fixr:components>
+  <fixr:groups>
+    <fixr:group id="1012" name="Parties">
+      <fixr:numInGroup id="453" />
+      <fixr:fieldRef id="448" />
+      <fixr:fieldRef id="452" />
+      <fixr:fieldRef id="9019" />
+    </fixr:group>
+    <fixr:group id="2010" name="Allocs">
+      <fixr:numInGroup id="78" />
+      <fixr:fieldRef id="79" />
+      <fixr:fieldRef id="80" presence="required" />
+      <fixr:fieldRef id="9015" />
+      <fixr:groupRef id="2024" />
+      <fixr:componentRef id="2005" />
+    </fixr:group>
+    <fixr:group id="2011" name="Events">
+      <fixr:numInGroup id="864" />
+      <fixr:componentRef id="2002" />
+      <fixr:fieldRef id="9023" />
+    </fixr:group>
+    <fixr:group id="2020" name="VenueHops">
+      <fixr:numInGroup id="9025" />
+      <fixr:fieldRef id="9026" />
+    </fixr:group>
+    <fixr:group id="2021" name="VenueFills">
+      <fixr:numInGroup id="9008" />
+      <fixr:fieldRef id="9009" />
+      <fixr:fieldRef id="9010" />
+    </fixr:group>
+    <fixr:group id="2022" name="VenueLegs">
+      <fixr:numInGroup id="9006" />
+      <fixr:fieldRef id="9007" />
+      <fixr:fieldRef id="9002" />
+    </fixr:group>
+    <fixr:group id="2023" name="VenueAltIDs">
+      <fixr:numInGroup id="9012" />
+      <fixr:fieldRef id="9013" />
+    </fixr:group>
+    <fixr:group id="2024" name="VenueAllocTags">
+      <fixr:numInGroup id="9016" />
+      <fixr:fieldRef id="9017" />
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="112" />
+        <fixr:componentRef id="1025" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="11" presence="required" />
+        <fixr:fieldRef id="1" presence="required" />
+        <fixr:componentRef id="2001" />
+        <fixr:componentRef id="1003" presence="required" />
+        <fixr:fieldRef id="54" presence="required" />
+        <fixr:fieldRef id="40" presence="required" />
+        <fixr:groupRef id="2010" />
+        <fixr:fieldRef id="58" />
+        <fixr:componentRef id="1025" presence="required" />
+        <fixr:fieldRef id="9001" />
+        <fixr:groupRef id="2021" />
+        <fixr:fieldRef id="9020" />
+        <fixr:fieldRef id="9021" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="9" name="ExecutionReport" msgType="8">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="37" presence="required" />
+        <fixr:fieldRef id="17" presence="required" />
+        <fixr:componentRef id="1003" presence="required" />
+        <fixr:groupRef id="2011" />
+        <fixr:fieldRef id="7010" />
+        <fixr:componentRef id="1025" presence="required" />
+        <fixr:fieldRef id="9022" />
+        <fixr:componentRef id="2003" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="9100" name="VenuePrivate" msgType="U1">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="9005" presence="required" />
+        <fixr:groupRef id="2022" />
+        <fixr:componentRef id="2003" />
+        <fixr:componentRef id="1025" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
