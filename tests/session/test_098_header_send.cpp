@@ -18,12 +18,12 @@
 // Arms:
 //   - the scalar 5020, placed after a body field, sits before the first body
 //     field;
-//   - the pair 5030/5031, placed after a body field in a raw payload passed to
+//   - the pair 5030 and 5031, placed after a body field in a raw payload passed to
 //     `Session::send` (`body_builder::field_data` refuses a custom Data tag), is
 //     in the header, adjacent, Length first, its Data value (holding SOH) read
 //     back verbatim by its count;
 //   - the 5020 message replayed through ResendRequest carries 5020, 43 and 122
-//     inside the header. Its 43/122 assertions are non-fatal and independent of
+//     inside the header. Its 43 and 122 assertions are non-fatal and independent of
 //     the 5020 assertion, so a run reports both halves.
 // Each frame is read back through a dictionary-aware `Parser<Index>` over the
 // edited dictionary, so the counted Data value is one field.
@@ -201,7 +201,8 @@ protected:
 
     void SetUp() override {
         using namespace std::chrono;
-        auto utc = system_clock::time_point{} + seconds{1704067200};  // 2024-01-01
+        // The epoch second of the fixture's start date; recompute with `date -u -d @<n>`.
+        auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
         engine.clock = clock;
@@ -378,7 +379,7 @@ TEST_F(HeaderSend098, EditedDictionary_ReplayOfTheScalarMessage_Keeps5020And43An
     EXPECT_EQ(rp.count(kHeaderScalarTag), 1U) << "wire order: " << rp.order();
     EXPECT_LT(rp.index_of(kHeaderScalarTag), rp.index_of(kFirstBodyTag))
         << "replay: 5020 must sit before the first body field (11); wire order: " << rp.order();
-    // The 43/122 half, independent of the 5020 half.
+    // The 43 and 122 half, independent of the 5020 half.
     EXPECT_EQ(rp.count(43), 1U) << "wire order: " << rp.order();
     EXPECT_EQ(rp.count(122), 1U) << "wire order: " << rp.order();
     EXPECT_LT(rp.index_of(43), rp.index_of(kFirstBodyTag))

@@ -52,7 +52,7 @@
 // Re-derivation recipe for the structural half (§6 seam 2) — the counts are
 // deliberately NOT written here, because nothing re-runs a comment:
 // clang-format off
-//   grep -nE '^[[:space:]]*friend[[:space:]]+class[[:space:]]+(table_view|table_view_builder);' include/fixpp/dict/table_view.hpp
+//   grep -nE '^[[:space:]]*friend[[:space:]]+(class[[:space:]]+(table_view|table_view_builder)|struct[[:space:]]+table_view_test_access);' include/fixpp/dict/table_view.hpp
 //   awk '/^class table_view \{/{f=1} f&&/^(public|private|protected):/{print NR": "$0} f&&/^\};/{exit}' include/fixpp/dict/table_view.hpp
 // clang-format on
 //
