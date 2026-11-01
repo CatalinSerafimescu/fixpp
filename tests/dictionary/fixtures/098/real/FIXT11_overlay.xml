@@ -1,0 +1,16 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-2, the FIXT11 row (FR-019's
+  FIXT.1.1 scope): a header-field overlay of dictionaries/FIXT11.xml. Its
+  reference is FIXT11.patch beside it, written from the base file and never
+  derived from the merge: an insertion patch that
+  appends the field at the end of <header> and its definition at the end of
+  <fields> (spec.md Terminology).
+-->
+<fix type='FIXT' major='1' minor='1' servicepack='0'>
+ <header>
+  <field name='Custom098HeaderTag' required='N' />
+ </header>
+ <fields>
+  <field number='5020' name='Custom098HeaderTag' type='STRING' />
+ </fields>
+</fix>

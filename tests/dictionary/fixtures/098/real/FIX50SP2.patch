@@ -1,0 +1,48 @@
+@@ header: self-closing, opened for Custom098HeaderTag (5020)
+ <fix type='FIX' major='5' minor='0' servicepack='2'>
+- <header />
++ <header>
++  <field name='Custom098HeaderTag' required='N' />
++ </header>
+  <messages>
+@@ message NewOrderSingle (35=D): Custom098Field (5001) and the 5010/5011 pair
+    <field name='AuctionAllocationPct' required='N' />
++   <field name='Custom098Field' required='N' />
++   <field name='Custom098DataLen' required='N' />
++   <field name='Custom098Data' required='N' />
+   </message>
+@@ message ExecutionReport (35=8): Custom098VenueTag (5004)
+    <field name='ReleaseQty' required='N' />
+    <field name='RelatedHighPrice' required='N' />
+    <field name='RelatedLowPrice' required='N' />
+    <field name='RelatedPriceSource' required='N' />
++   <field name='Custom098VenueTag' required='N' />
+   </message>
+@@ messages: new message Custom098Private (35=U1) appended
+   </message>
++  <message name='Custom098Private' msgtype='U1' msgcat='app'>
++   <field name='Custom098PrivateRef' required='Y' />
++  </message>
+  </messages>
+@@ component Parties, group NoPartyIDs: Custom098PartyTag (5002) appended
+     <component name='PtysSubGrp' required='N' />
++    <field name='Custom098PartyTag' required='N' />
+    </group>
+@@ field 35: value U1 appended
+    <value enum='DZ' description='PAY_MANAGEMENT_REQUEST_ACK' />
++   <value enum='U1' description='CUSTOM098_PRIVATE' />
+   </field>
+@@ field 40: value Z appended
+    <value enum='S' description='STOP_LIMIT_ON_BID_OR_OFFER' />
++   <value enum='Z' description='CUSTOM098_ORDTYPE' />
+   </field>
+@@ fields: new fields 5001-5004, 5010, 5011, 5020 appended
+   </field>
++  <field number='5001' name='Custom098Field' type='STRING' />
++  <field number='5002' name='Custom098PartyTag' type='STRING' />
++  <field number='5003' name='Custom098PrivateRef' type='STRING' />
++  <field number='5004' name='Custom098VenueTag' type='STRING' />
++  <field number='5010' name='Custom098DataLen' type='LENGTH' />
++  <field number='5011' name='Custom098Data' type='DATA' />
++  <field number='5020' name='Custom098HeaderTag' type='STRING' />
+  </fields>

@@ -1,0 +1,44 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-1, the tolerant row: the small
+  QuickFIX-XML triple base_tolerant.xml, overlay_tolerant.xml and
+  edited_tolerant.xml. Group NoLegs in NewOrderSingle has no members: the
+  loader refuses such a group under unresolved_group_policy::fail_closed and
+  leaves it unregistered under unresolved_group_policy::tolerant. The overlay
+  leaves NoLegs untouched, so the same holds for edited_tolerant.xml.
+  edited_tolerant.xml is base_tolerant.xml with each
+  overlay_tolerant.xml addition appended at the end of its matched container, in
+  overlay document order (spec.md Terminology), written by hand (FR-017 (a)).
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <field name='BeginString' required='Y' />
+  <field name='BodyLength' required='Y' />
+  <field name='MsgType' required='Y' />
+ </header>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='ClOrdID' required='Y' />
+   <group name='NoLegs' required='N'>
+   </group>
+   <field name='Side' required='Y' />
+   <field name='VenueTag' required='N' />
+  </message>
+ </messages>
+ <trailer>
+  <field name='CheckSum' required='Y' />
+ </trailer>
+ <fields>
+  <field number='8' name='BeginString' type='STRING' />
+  <field number='9' name='BodyLength' type='LENGTH' />
+  <field number='10' name='CheckSum' type='STRING' />
+  <field number='11' name='ClOrdID' type='STRING' />
+  <field number='35' name='MsgType' type='STRING' />
+  <field number='54' name='Side' type='CHAR'>
+   <value enum='1' description='BUY' />
+   <value enum='2' description='SELL' />
+   <value enum='Z' description='VENUE_CROSS' />
+  </field>
+  <field number='555' name='NoLegs' type='NUMINGROUP' />
+  <field number='9101' name='VenueTag' type='STRING' />
+ </fields>
+</fix>

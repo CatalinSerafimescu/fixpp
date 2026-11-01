@@ -1,0 +1,179 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-1: the small QuickFIX-XML triple
+  base.xml, overlay.xml and edited.xml. edited.xml is base.xml with each
+  overlay.xml addition appended at the end of its matched container, in overlay
+  document order (spec.md Terminology, "Equivalent edited XML"), written by hand
+  and never produced by the merge (FR-017 (a)). Re-check it with a no-index
+  unified diff of base.xml against edited.xml: every hunk has one of the shapes
+  contracts W-1 allows. The base has no trailer, so the overlay's trailer is a
+  container the base lacks (research R-3). Group NoEvents holds only the empty
+  component EmptyBlock, a group whose members emit nothing, which the loader
+  refuses under the default unresolved_group_policy; so base.xml is never loaded
+  on its own, and the member the overlay appends to NoEvents is its first
+  emission, its delimiter (spec.md Edge Cases).
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <field name='BeginString' required='Y' />
+  <field name='BodyLength' required='Y' />
+  <field name='MsgType' required='Y' />
+  <field name='SenderCompID' required='Y' />
+  <field name='TargetCompID' required='Y' />
+  <field name='MsgSeqNum' required='Y' />
+  <field name='SendingTime' required='Y' />
+  <field name='VenueHdrTag' required='N' />
+  <group name='NoVenueHops' required='N'>
+   <field name='VenueHopID' required='N' />
+  </group>
+ </header>
+ <messages>
+  <message name='Heartbeat' msgtype='0' msgcat='admin'>
+   <field name='TestReqID' required='N' />
+  </message>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='ClOrdID' required='Y' />
+   <field name='Account' required='Y' />
+   <component name='Parties' required='N' />
+   <component name='Instrument' required='Y' />
+   <field name='Side' required='Y' />
+   <field name='OrdType' required='Y' />
+   <group name='NoAllocs' required='N'>
+    <field name='AllocAccount' required='N' />
+    <field name='AllocQty' required='Y' />
+    <field name='VenueAllocNote' required='N' />
+    <group name='NoVenueAllocTags' required='N'>
+     <field name='VenueAllocTag' required='N' />
+    </group>
+    <component name='VenueAllocBlock' required='N' />
+   </group>
+   <field name='Text' required='N' />
+   <field name='VenueQty' required='N' />
+   <group name='NoVenueFills' required='N'>
+    <field name='VenueFillID' required='N' />
+    <field name='VenueFillQty' required='N' />
+   </group>
+   <field name='VenueLen' required='N' />
+   <field name='VenueData' required='N' />
+  </message>
+  <message name='ExecutionReport' msgtype='8' msgcat='app'>
+   <field name='OrderID' required='Y' />
+   <field name='ExecID' required='Y' />
+   <component name='Instrument' required='Y' />
+   <group name='NoEvents' required='N'>
+    <component name='EmptyBlock' required='N' />
+    <field name='VenueEventTag' required='N' />
+   </group>
+   <field name='BaseBlobLen' required='N' />
+   <field name='VenueBlob' required='N' />
+   <component name='VenueBlock' required='N' />
+  </message>
+  <message name='VenuePrivate' msgtype='U1' msgcat='app'>
+   <field name='VenueRef' required='Y' />
+   <group name='NoVenueLegs' required='N'>
+    <field name='VenueLegID' required='N' />
+    <field name='VenueLegCapacity' required='N' />
+   </group>
+   <component name='VenueBlock' required='N' />
+  </message>
+ </messages>
+ <components>
+  <component name='Instrument'>
+   <field name='Symbol' required='Y' />
+   <field name='SecurityID' required='Y' />
+   <field name='VenueSymbolSfx' required='N' />
+   <group name='NoVenueAltIDs' required='N'>
+    <field name='VenueAltID' required='N' />
+   </group>
+   <component name='VenueSubBlock' required='N' />
+  </component>
+  <component name='Parties'>
+   <group name='NoPartyIDs' required='N'>
+    <field name='PartyID' required='N' />
+    <field name='PartyRole' required='N' />
+    <field name='VenuePartyNote' required='N' />
+   </group>
+  </component>
+  <component name='EmptyBlock'>
+  </component>
+  <component name='VenueBlock'>
+   <field name='VenueBlockA' required='N' />
+   <field name='VenueBlockB' required='N' />
+  </component>
+  <component name='VenueSubBlock'>
+   <field name='VenueSubTag' required='N' />
+  </component>
+  <component name='VenueAllocBlock'>
+   <field name='VenueAllocBlockTag' required='N' />
+  </component>
+ </components>
+ <fields>
+  <field number='1' name='Account' type='STRING' />
+  <field number='8' name='BeginString' type='STRING' />
+  <field number='9' name='BodyLength' type='LENGTH' />
+  <field number='11' name='ClOrdID' type='STRING' />
+  <field number='17' name='ExecID' type='STRING' />
+  <field number='34' name='MsgSeqNum' type='SEQNUM' />
+  <field number='35' name='MsgType' type='STRING' />
+  <field number='37' name='OrderID' type='STRING' />
+  <field number='40' name='OrdType' type='CHAR'>
+   <value enum='1' description='MARKET' />
+   <value enum='2' description='LIMIT' />
+  </field>
+  <field number='48' name='SecurityID' type='STRING' />
+  <field number='49' name='SenderCompID' type='STRING' />
+  <field number='52' name='SendingTime' type='UTCTIMESTAMP' />
+  <field number='54' name='Side' type='CHAR'>
+   <value enum='1' description='BUY' />
+   <value enum='2' description='SELL' />
+   <value enum='Z' description='VENUE_CROSS' />
+  </field>
+  <field number='55' name='Symbol' type='STRING' />
+  <field number='56' name='TargetCompID' type='STRING' />
+  <field number='58' name='Text' type='STRING'>
+   <value enum='VENUE' description='VENUE_TEXT' />
+  </field>
+  <field number='78' name='NoAllocs' type='NUMINGROUP' />
+  <field number='79' name='AllocAccount' type='STRING' />
+  <field number='80' name='AllocQty' type='QTY' />
+  <field number='112' name='TestReqID' type='STRING' />
+  <field number='448' name='PartyID' type='STRING' />
+  <field number='452' name='PartyRole' type='INT' />
+  <field number='453' name='NoPartyIDs' type='NUMINGROUP' />
+  <field number='864' name='NoEvents' type='NUMINGROUP' />
+  <field number='7010' name='BaseBlobLen' type='LENGTH' />
+  <field number='7011' name='BaseBlob' type='DATA' />
+  <field number='9001' name='VenueQty' type='QTY' />
+  <field number='9002' name='VenueLegCapacity' type='CHAR'>
+   <value enum='A' description='AGENCY' />
+   <value enum='P' description='PRINCIPAL' />
+  </field>
+  <field number='9003' name='VenueBlockA' type='STRING' />
+  <field number='9004' name='VenueBlockB' type='INT' />
+  <field number='9005' name='VenueRef' type='STRING' />
+  <field number='9006' name='NoVenueLegs' type='NUMINGROUP' />
+  <field number='9007' name='VenueLegID' type='STRING' />
+  <field number='9008' name='NoVenueFills' type='NUMINGROUP' />
+  <field number='9009' name='VenueFillID' type='STRING' />
+  <field number='9010' name='VenueFillQty' type='QTY' />
+  <field number='9011' name='VenueSymbolSfx' type='STRING' />
+  <field number='9012' name='NoVenueAltIDs' type='NUMINGROUP' />
+  <field number='9013' name='VenueAltID' type='STRING' />
+  <field number='9014' name='VenueSubTag' type='STRING' />
+  <field number='9015' name='VenueAllocNote' type='STRING' />
+  <field number='9016' name='NoVenueAllocTags' type='NUMINGROUP' />
+  <field number='9017' name='VenueAllocTag' type='STRING' />
+  <field number='9018' name='VenueAllocBlockTag' type='STRING' />
+  <field number='9019' name='VenuePartyNote' type='STRING' />
+  <field number='9020' name='VenueLen' type='LENGTH' />
+  <field number='9021' name='VenueData' type='DATA' />
+  <field number='9022' name='VenueBlob' type='DATA' />
+  <field number='9023' name='VenueEventTag' type='STRING' />
+  <field number='9024' name='VenueHdrTag' type='STRING' />
+  <field number='9025' name='NoVenueHops' type='NUMINGROUP' />
+  <field number='9026' name='VenueHopID' type='STRING' />
+  <field number='9027' name='VenueTrailerTag' type='STRING' />
+ </fields>
+ <trailer>
+  <field name='VenueTrailerTag' required='N' />
+ </trailer>
+</fix>
