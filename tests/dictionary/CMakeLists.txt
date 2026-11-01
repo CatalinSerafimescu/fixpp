@@ -86,6 +86,9 @@ set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083
 # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 097)
+# 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
