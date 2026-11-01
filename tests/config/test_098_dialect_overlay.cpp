@@ -342,6 +342,31 @@ TEST(DialectOverlay098, Message_LoadFailureCarriesTheLoadersText) {
         << "message: " << at.front().message;
 }
 
+// ── Raw session index: a non-table element before the session ────────────────
+//
+// inline_session_array.toml's `session` array holds a non-table element and then
+// the one session, so that session is the first merged session table but the
+// second raw element. Its overlay diagnostic is reported at the raw index, as
+// the loader's other session diagnostics are, and is located at the value in
+// that raw element. The literals are the value's line and column (1-based):
+// re-derive them with `grep -n dialect_overlay
+// tests/config/fixtures/098/inline_session_array.toml` and the column of the
+// value's opening quote on that line.
+
+TEST(DialectOverlay098, RawSessionIndex_NonTableElementBeforeTheSession) {
+    Loaded l{"inline_session_array.toml"};
+    ASSERT_FALSE(l.result.has_value());
+    auto const& diags = l.result.error();
+    auto const at = diags_at(diags, "session[1].dialect_overlay");
+    ASSERT_EQ(at.size(), 1U) << diag_string(diags);
+    EXPECT_EQ(at.front().reason, RC::invalid_or_contradictory_selector) << diag_string(diags);
+    EXPECT_EQ(at.front().location.line, 9U) << diag_string(diags);
+    EXPECT_EQ(at.front().location.col, 153U) << diag_string(diags);
+    EXPECT_TRUE(diags_at(diags, "session[0].dialect_overlay").empty())
+        << "the overlay is written in raw element 1, not 0\n"
+        << diag_string(diags);
+}
+
 // ── Negative control: another deferred key at the session scopes ─────────────
 
 TEST(DialectOverlay098, DeferredKeyAtSessionScopes_StaysDeferred) {

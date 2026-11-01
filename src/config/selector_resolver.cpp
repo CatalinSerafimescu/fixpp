@@ -393,6 +393,12 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
 // nothing is assigned and each origin reports "dialect_overlay requires
 // [dictionary]".
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// raw_value_loc's two empty returns are unreachable from
+// resolve_session_dictionaries, which passes the raw [[session]] table when that
+// table sets the key and the raw [default] table otherwise. In the second case the
+// merged table holds the key only because merge_defaults copied it from [default],
+// so the raw [default] table exists and holds it. The returns keep the helper total.
 static SourceLoc raw_value_loc(const toml::table* raw, std::string_view key) noexcept {
     if (raw == nullptr) {
         return {};
@@ -414,13 +420,11 @@ static void resolve_session_dictionaries(
     if (const auto* n = root_tbl.get("default"); n && n->is_table()) {
         raw_default = n->as_table();
     }
-    const toml::array* raw_sessions = nullptr;
-    if (const auto* n = root_tbl.get("session"); n && n->is_array()) {
-        raw_sessions = n->as_array();
-    }
-    if (raw_sessions == nullptr) {
-        return;
-    }
+    // load_toml_config's structural guard returns before resolve_selectors is
+    // called unless root `session` is a non-empty array, so the array exists here.
+    // A new caller of resolve_selectors must keep that precondition (find callers
+    // with `git grep -n 'resolve_selectors(' -- src`).
+    const toml::array& raw_sessions = *root_tbl.get("session")->as_array();
 
     struct cache_entry {
         std::shared_ptr<const dict::Dictionary> dict;
@@ -437,9 +441,9 @@ static void resolve_session_dictionaries(
     // merged_session_tables[i] and bundle.sessions[i] are the i-th TABLE element
     // of the raw session array: the loader pushes neither for a non-table element.
     std::size_t i = 0;
-    for (std::size_t raw_idx = 0;
-         raw_idx < raw_sessions->size() && i < merged_session_tables.size(); ++raw_idx) {
-        const toml::table* raw_session = raw_sessions->get(raw_idx)->as_table();
+    for (std::size_t raw_idx = 0; raw_idx < raw_sessions.size() && i < merged_session_tables.size();
+         ++raw_idx) {
+        const toml::table* raw_session = raw_sessions.get(raw_idx)->as_table();
         if (raw_session == nullptr) {
             continue;
         }

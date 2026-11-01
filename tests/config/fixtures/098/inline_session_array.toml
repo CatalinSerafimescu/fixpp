@@ -1,0 +1,20 @@
+# inline_session_array.toml
+# 098-dialect-overlay, contracts/witnesses.md W-8 (tasks T080a): the session
+# array is written inline and its first element is not a table, so the second
+# element is the first session. That session names an overlay file that does not
+# exist beside this file. The key is written at root, before any table header,
+# so that it is a root key.
+session = [
+  5,
+  { sender_comp_id = "CLIENT1", target_comp_id = "SERVER1", begin_string = "FIX.4.4", role = "initiator", heartbeat_interval = "30s", dialect_overlay = "missing_098.xml", transport = { kind = "plaintext", host = "127.0.0.1", port = 1 }, security_profile = { kind = "insecure_plain_tcp" } },
+]
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "../FIX44.xml"
