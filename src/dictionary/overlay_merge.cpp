@@ -397,7 +397,6 @@ void check_pair_relation(length_pair_relation const& base, length_pair_relation 
 // ── The merge ────────────────────────────────────────────────────────────────
 
 struct xml_overlay_merge::impl {
-    pugi::xml_document& base_doc;
     pugi::xml_document const& overlay_doc;
     pugi::xml_node base_root;
     pugi::xml_node overlay_root;
@@ -427,10 +426,7 @@ struct xml_overlay_merge::impl {
     match_index base_fields_by_name;
 
     impl(pugi::xml_document& b, pugi::xml_document const& o)
-        : base_doc(b),
-          overlay_doc(o),
-          base_root(b.child("fix")),
-          overlay_root(o.document_element()) {}
+        : overlay_doc(o), base_root(b.child("fix")), overlay_root(o.document_element()) {}
 
     // ---- step 4a ----
     void check_root() const;
@@ -1550,7 +1546,6 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
 }  // namespace
 
 struct orchestra_overlay_merge::impl {
-    pugi::xml_document& base_doc;
     pugi::xml_document const& overlay_doc;
     pugi::xml_node base_root;
     pugi::xml_node overlay_root;
@@ -1580,10 +1575,7 @@ struct orchestra_overlay_merge::impl {
     match_index base_fields_by_name;
 
     impl(pugi::xml_document& b, pugi::xml_document const& o)
-        : base_doc(b),
-          overlay_doc(o),
-          base_root(b.first_child()),
-          overlay_root(o.document_element()) {}
+        : overlay_doc(o), base_root(b.first_child()), overlay_root(o.document_element()) {}
 
     void match(pugi::xml_node o, pugi::xml_node b) {
         match_of.emplace(key_of(o), b);
