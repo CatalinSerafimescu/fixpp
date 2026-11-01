@@ -41,6 +41,7 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -304,6 +305,10 @@ private:
 
     [[nodiscard]] std::uint32_t intern_name_in_pool(detail::dict_metadata_handle& h,
                                                     std::string_view name);
+
+    // 098-dialect-overlay (FR-022, data-model §A.3): fills `h.header_tags_` from
+    // component 1024 (StandardHeader). Defined beside `finalize`, which calls it.
+    void collect_header_tags(detail::dict_metadata_handle& h) const;
 
     // Expand a list of <fixr:fieldRef>/<fixr:componentRef>/<fixr:groupRef>
     // child rows into a flat FieldRef vector. componentRefs are resolved
@@ -858,6 +863,71 @@ std::uint32_t OrchestraLoaderState::intern_name_in_pool(detail::dict_metadata_ha
     return offset;
 }
 
+// 098-dialect-overlay (FR-022, data-model §A.3, research R-7): the declared header
+// store, the Orchestra twin of xml_loader.cpp's `LoaderState::collect_header_tags`.
+// An iterative walk from component 1024 (StandardHeader) with an explicit stack: a
+// `fixr:fieldRef` adds its tag, a `fixr:componentRef` is walked the first time its
+// component is met, and a `fixr:groupRef` adds its group's `fixr:numInGroup` tag and
+// walks that group the first time its definition (keyed by the group's id) is met.
+// It never calls `expand_field_list`, so the step counter (`steps_`) does not see it.
+//
+// An id the loader's maps cannot resolve, or cannot parse, adds nothing and throws
+// nothing. A message that references component 1024 expands it first and throws on
+// such an id before this runs; when no message references it, no expansion reads the
+// header, and skipping keeps that document loadable, so `load` accepts the same
+// documents.
+void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) const {
+    auto const header = component_index_by_xml_id_.find(1024);
+    if (header == component_index_by_xml_id_.end()) {
+        return;
+    }
+    auto const id_of = [](pugi::xml_node const& n, std::uint16_t& out) {
+        return try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
+    };
+    std::vector<std::uint16_t> tags;
+    std::vector<bool> walked(components_.size(), false);
+    std::unordered_set<std::uint16_t> walked_groups;
+    walked[header->second] = true;
+    std::vector<pugi::xml_node> stack{components_[header->second].node};
+    while (!stack.empty()) {
+        pugi::xml_node const node = stack.back();
+        stack.pop_back();
+        for (auto const& child : node.children()) {
+            std::string_view const kind{child.name()};
+            std::uint16_t id = 0;
+            if (!id_of(child, id)) {
+                continue;
+            }
+            if (kind == "fixr:fieldRef") {
+                if (fields_by_tag_.contains(id)) {
+                    tags.push_back(id);
+                }
+            } else if (kind == "fixr:componentRef") {
+                auto const it = component_index_by_xml_id_.find(id);
+                if (it == component_index_by_xml_id_.end() || walked[it->second]) {
+                    continue;
+                }
+                walked[it->second] = true;
+                stack.push_back(components_[it->second].node);
+            } else if (kind == "fixr:groupRef") {
+                auto const it = group_by_xml_id_.find(id);
+                if (it == group_by_xml_id_.end() || !walked_groups.insert(id).second) {
+                    continue;
+                }
+                std::uint16_t no_tag = 0;
+                if (id_of(it->second.child("fixr:numInGroup"), no_tag) &&
+                    fields_by_tag_.contains(no_tag)) {
+                    tags.push_back(no_tag);
+                }
+                stack.push_back(it->second);
+            }
+        }
+    }
+    std::ranges::sort(tags);
+    tags.erase(std::ranges::unique(tags).begin(), tags.end());
+    h.header_tags_.assign(tags.begin(), tags.end());
+}
+
 detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
     using pmr_alloc = std::pmr::polymorphic_allocator<detail::dict_metadata_handle>;
     auto handle = std::allocate_shared<detail::dict_metadata_handle>(pmr_alloc{mr_}, mr_);
@@ -1286,6 +1356,8 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         h.enum_runs_.push_back(run);
     }
     std::ranges::sort(h.enum_runs_, {}, &detail::EnumRun::tag);
+
+    collect_header_tags(h);  // 098 FR-022: after the message loop (see its comment)
 
     return handle;
 }

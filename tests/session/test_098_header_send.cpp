@@ -12,8 +12,11 @@
 // one trailing CR stripped (research R-10, line endings). The edit declares, in
 // `<header>`, the scalar 5020 and the custom Length+Data pair 5030 (LENGTH) /
 // 5031 (DATA), adjacent so that XmlLoader pairs them, and defines the three
-// fields. It is loaded with the existing `XmlLoader::load_from_string`, so this
-// file compiles without the overlay API.
+// fields. It is loaded with the existing `XmlLoader::load_from_string`.
+//
+// The overlay arm's dictionary is FIX44.xml with W-2's FIX44 overlay
+// (`tests/dictionary/fixtures/098/real/FIX44_overlay.xml`, which declares 5020 in
+// `<header>`), loaded through `dict::load_any_with_overlay`.
 //
 // Arms:
 //   - the scalar 5020, placed after a body field, sits before the first body
@@ -25,6 +28,8 @@
 //   - the 5020 message replayed through ResendRequest carries 5020, 43 and 122
 //     inside the header. Its 43 and 122 assertions are non-fatal and independent of
 //     the 5020 assertion, so a run reports both halves.
+//   - on the overlay dictionary, the scalar 5020, placed after a body field, sits
+//     before the first body field, as on the edited dictionary.
 // Each frame is read back through a dictionary-aware `Parser<Index>` over the
 // edited dictionary, so the counted Data value is one field.
 
@@ -37,11 +42,13 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/load_any.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/memory_store.hpp>
@@ -386,6 +393,26 @@ TEST_F(HeaderSend098, EditedDictionary_ReplayOfTheScalarMessage_Keeps5020And43An
         << "replay: 43 must sit before the first body field (11); wire order: " << rp.order();
     EXPECT_LT(rp.index_of(122), rp.index_of(kFirstBodyTag))
         << "replay: 122 must sit before the first body field (11); wire order: " << rp.order();
+}
+
+// Arm 4: the overlay dictionary (base + overlay through the new API).
+TEST_F(HeaderSend098, OverlayDictionary_ScalarHeaderTagAfterBody_SentBeforeTheFirstBodyField) {
+    dict = std::make_shared<const fixpp::dict::Dictionary>(fixpp::dict::load_any_with_overlay(
+        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml",
+        std::filesystem::path{FIXPP_098_FIXTURE_DIR} / "real" / "FIX44_overlay.xml",
+        std::pmr::new_delete_resource()));
+    tv = std::make_shared<const fixpp::dict::table_view>(dict->as_table_view());
+    Session sess(engine, make_cfg());
+    drive_to_active(sess);
+    if (HasFatalFailure()) return;
+
+    auto const frame = send_one(sess, kScalarPayload, "HeaderSend098/overlay");
+    ASSERT_FALSE(frame.empty());
+    Reparsed const rp = reparse(frame, *tv);
+    ASSERT_EQ(rp.count(kHeaderScalarTag), 1U) << "wire order: " << rp.order();
+    ASSERT_EQ(rp.count(kFirstBodyTag), 1U) << "wire order: " << rp.order();
+    EXPECT_LT(rp.index_of(kHeaderScalarTag), rp.index_of(kFirstBodyTag))
+        << "overlay: 5020 must sit before the first body field (11); wire order: " << rp.order();
 }
 
 }  // namespace

@@ -286,6 +286,10 @@ private:
     [[nodiscard]] std::uint32_t intern_name_in_pool(detail::dict_metadata_handle& h,
                                                     std::string_view name);
 
+    // 098-dialect-overlay (FR-022, data-model §A.3): fills `h.header_tags_` from
+    // `header_node_`. Defined beside `finalize`, which calls it.
+    void collect_header_tags(detail::dict_metadata_handle& h) const;
+
     [[nodiscard]] static pugi::xml_node fix_root(pugi::xml_document const& doc);
     void parse_version(pugi::xml_node const& root);
     void parse_global_fields(pugi::xml_node const& root);
@@ -962,6 +966,55 @@ std::uint32_t LoaderState::intern_name_in_pool(detail::dict_metadata_handle& h,
     return offset;
 }
 
+// 098-dialect-overlay (FR-022, data-model §A.3, research R-7): the declared header
+// store. An iterative walk over `header_node_` with an explicit stack: a `<field>`
+// adds its tag, a `<group>` adds its NumInGroup tag and is walked, a `<component>`
+// is walked the first time it is met (`walked` holds its index). Each `<group>`
+// node is pushed only by the walk of its parent node, and each parent node is
+// walked once, so each definition is walked once. It never calls
+// `expand_field_list`, so the step counter (`steps_`) does not see it.
+//
+// A name the loader's maps cannot resolve adds nothing and throws nothing. With a
+// non-empty `<messages>`, each message's expansion walks the header first and throws
+// on such a name before this runs; with an empty one, no expansion reads the header,
+// and skipping keeps that document loadable, so `load` accepts the same documents.
+void LoaderState::collect_header_tags(detail::dict_metadata_handle& h) const {
+    if (header_node_ == nullptr) {
+        return;
+    }
+    std::vector<std::uint16_t> tags;
+    std::vector<bool> walked(components_.size(), false);
+    std::vector<pugi::xml_node> stack{header_node_};
+    while (!stack.empty()) {
+        pugi::xml_node const node = stack.back();
+        stack.pop_back();
+        for (auto const& child : node.children()) {
+            std::string_view const kind{child.name()};
+            if (kind == "field" || kind == "group") {
+                auto const it = by_name_.find(std::string{child.attribute("name").as_string("")});
+                if (it == by_name_.end()) {
+                    continue;
+                }
+                tags.push_back(it->second.tag);
+                if (kind == "group") {
+                    stack.push_back(child);
+                }
+            } else if (kind == "component") {
+                auto const it = component_index_by_name_.find(
+                    std::string{child.attribute("name").as_string("")});
+                if (it == component_index_by_name_.end() || walked[it->second]) {
+                    continue;
+                }
+                walked[it->second] = true;
+                stack.push_back(components_[it->second].node);
+            }
+        }
+    }
+    std::ranges::sort(tags);
+    tags.erase(std::ranges::unique(tags).begin(), tags.end());
+    h.header_tags_.assign(tags.begin(), tags.end());
+}
+
 detail::dict_metadata_handle_ptr LoaderState::finalize() {
     using pmr_alloc = std::pmr::polymorphic_allocator<detail::dict_metadata_handle>;
     auto handle = std::allocate_shared<detail::dict_metadata_handle>(pmr_alloc{mr_}, mr_);
@@ -1445,6 +1498,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         h.enum_runs_.push_back(run);
     }
     std::ranges::sort(h.enum_runs_, {}, &detail::EnumRun::tag);
+
+    collect_header_tags(h);  // 098 FR-022: after the message loop (see its comment)
 
     return handle;
 }

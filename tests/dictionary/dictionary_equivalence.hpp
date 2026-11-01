@@ -189,6 +189,7 @@ inline constexpr std::string_view kFramingTypes = "table_view::fixt_framing_type
 inline constexpr std::string_view kPairForward = "table_view::length_pair_data_tag_";
 inline constexpr std::string_view kPairReverse = "table_view::data_pair_length_tag_";
 inline constexpr std::string_view kNonstandardPair = "table_view::has_nonstandard_pair_";
+inline constexpr std::string_view kHeaderBits = "table_view::header_bits_";
 
 // members of table_view.hpp that hold no store
 inline constexpr std::string_view kValidTagSetViewSet = "valid_tag_set_view::set_";
@@ -213,6 +214,8 @@ inline constexpr std::string_view kInvGroupBits =
     "group_ctx_ has its group_bits_ bit";
 inline constexpr std::string_view kInvEnumBits =
     "invariant: every key of enums_ has its enum_bits_ bit";
+inline constexpr std::string_view kInvHeaderBits =
+    "invariant: header_bits_ has exactly the bits of the handle's declared header store";
 }  // namespace id
 
 inline constexpr std::string_view kNeverAssignedReason =
@@ -315,6 +318,7 @@ inline constexpr std::array kStoreList{
     store_entry{id::kPairForward, entry_kind::seeded, ""},
     store_entry{id::kPairReverse, entry_kind::seeded, ""},
     store_entry{id::kNonstandardPair, entry_kind::seeded, ""},
+    store_entry{id::kHeaderBits, entry_kind::seeded, ""},
     store_entry{id::kValidTagSetViewSet, entry_kind::not_a_store,
                 "a pointer into `table_view::valid_` that `valid_tags_for` hands out; it holds "
                 "no store of its own, and `table_view::valid_` is compared"},
@@ -740,6 +744,32 @@ using tva = table_view_test_access;
     return out;
 }
 
+// `header_bits_` against the handle's declared header store, both directions: every
+// store tag has its bit, and every set bit is a store tag.
+[[nodiscard]] inline std::vector<std::string> check_header_bits(
+    tva::bit_store const& bits, std::span<std::uint16_t const> header_store) {
+    std::vector<std::string> out;
+    std::set<std::uint16_t> const store(header_store.begin(), header_store.end());
+    for (auto const tag : store) {
+        if (!bit_set(bits, tag)) {
+            out.push_back("header store tag " + std::to_string(tag) + " has a clear bit");
+        }
+    }
+    for (std::size_t w = 0; w < bits.size(); ++w) {
+        for (std::size_t b = 0; b < 64U; ++b) {
+            if (((bits[w] >> b) & 1U) == 0U) {
+                continue;
+            }
+            auto const tag = static_cast<std::uint16_t>((w << 6U) | b);
+            if (!store.contains(tag)) {
+                out.push_back("header_bits_ bit " + std::to_string(tag) +
+                              " is set but not in the header store");
+            }
+        }
+    }
+    return out;
+}
+
 // ── the comparison ───────────────────────────────────────────────────────────
 
 struct side {
@@ -931,9 +961,14 @@ inline void compare_table_views(comparison_report& r, table_view const& a, table
         r.add(id::kNonstandardPair, std::string{tva::has_nonstandard_pair(a) ? "true" : "false"} +
                                         " vs " + (tva::has_nonstandard_pair(b) ? "true" : "false"));
     }
+    if (bits_of(tva::header_bits(a)) != bits_of(tva::header_bits(b))) {
+        r.add(id::kHeaderBits, "set bits differ");
+    }
 }
 
-inline void run_invariants(comparison_report& r, char const* side_name, table_view const& tv) {
+// `header_store` is the handle's declared header store (empty for a null handle).
+inline void run_invariants(comparison_report& r, char const* side_name, table_view const& tv,
+                           std::span<std::uint16_t const> header_store) {
     for (auto& v :
          check_pair_inverse(tva::length_pair_data_tag(tv), tva::data_pair_length_tag(tv))) {
         r.invariant_violations.push_back({id::kInvPairInverse, std::string{side_name} + ": " + v});
@@ -945,6 +980,9 @@ inline void run_invariants(comparison_report& r, char const* side_name, table_vi
     }
     for (auto& v : check_enum_bits(tva::enum_bits(tv), tva::enums(tv))) {
         r.invariant_violations.push_back({id::kInvEnumBits, std::string{side_name} + ": " + v});
+    }
+    for (auto& v : check_header_bits(tva::header_bits(tv), header_store)) {
+        r.invariant_violations.push_back({id::kInvHeaderBits, std::string{side_name} + ": " + v});
     }
 }
 
@@ -1218,8 +1256,12 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
     table_view const tva_view = a.dict.as_table_view();
     table_view const tvb_view = b.dict.as_table_view();
     compare_table_views(r, tva_view, tvb_view);
-    run_invariants(r, "side A", tva_view);
-    run_invariants(r, "side B", tvb_view);
+    auto const header_store_of = [](detail::dict_metadata_handle const* h) {
+        return h == nullptr ? std::span<std::uint16_t const>{}
+                            : std::span<std::uint16_t const>{h->header_tags_};
+    };
+    run_invariants(r, "side A", tva_view, header_store_of(ha));
+    run_invariants(r, "side B", tvb_view, header_store_of(hb));
 
     // ---- each side against its census ----
     compare_with_census(r, "side A", a.dict, a.census);

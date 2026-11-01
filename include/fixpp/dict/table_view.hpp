@@ -23,7 +23,7 @@
 // Owns its tables using std::vector / std::unordered_map. Constructed ONCE at
 // session/validator setup time by `Dictionary::as_table_view()` ([const §XV.1]
 // — config-time, not per-message). Its POPULATION SURFACE is sealed as of
-// fixpp#456 (`.specify/456-table-view-seal.md`): `table_view`'s sixteen
+// fixpp#456 (`.specify/456-table-view-seal.md`): `table_view`'s
 // population members are `private`; its only `friend` is
 // `table_view_builder`, which holds its own `table_view` by value and yields
 // it from `build() &&`; both `operator=` overloads are `= delete`.
@@ -576,6 +576,21 @@ public:
     // no scanner pays a lookup per field.
     [[nodiscard]] bool has_nonstandard_pair() const noexcept { return has_nonstandard_pair_; }
 
+    // 098-dialect-overlay (FR-022, data-model §A.3): true when the dictionary declares
+    // `tag` in its header: the tags data-model §A.3's visited-set walk collects from
+    // QuickFIX `<header>` or Orchestra component 1024 (fields, component members,
+    // NumInGroup tags and group members). False for every tag when the header is
+    // empty (the FIX 5.0 QuickFIX-XML files). Reads `header_bits_` only: a bounds
+    // check and one bit test, no allocation. `Session::build_send_frame_` asks it
+    // after a miss on the session's fixed header set.
+    [[nodiscard]] bool is_header_tag(std::uint16_t tag) const noexcept {
+        std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
+        if (w >= header_bits_.size()) {
+            return false;  // beyond the populated range: not a declared header tag
+        }
+        return ((header_bits_[w] >> (static_cast<std::size_t>(tag) & 63U)) & 1U) != 0U;
+    }
+
     // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
     // (research.md D-1/D-2, data-model.md E-2). Populated by
     // Dictionary::as_table_view() ONLY for v50/v50sp1/v50sp2 (empty
@@ -844,6 +859,18 @@ private:
         fixt_framing_types_[tag] = ft;
     }
 
+    // 098-dialect-overlay (FR-022): registers `tag` as a header tag the dictionary
+    // declares. Used EXCLUSIVELY by Dictionary::as_table_view(), once per tag of the
+    // metadata handle's declared header store. Grows `header_bits_` to the word
+    // holding `tag`, at config time only.
+    void add_header_tag(std::uint16_t tag) {
+        std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
+        if (w >= header_bits_.size()) {
+            header_bits_.resize(w + 1, 0);
+        }
+        header_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(tag) & 63U));
+    }
+
     // fixpp#426: registers `length_tag`'s dictionary-declared Data partner.
     // Used EXCLUSIVELY by Dictionary::as_table_view(). A zero `data_tag` is a
     // no-op (`length_pair_data_tag` already answers 0 for an unregistered
@@ -1052,6 +1079,13 @@ private:
     std::unordered_map<std::uint16_t, std::uint16_t> data_pair_length_tag_;
     // See has_nonstandard_pair(): set by set_length_pair_data_tag, never cleared.
     bool has_nonstandard_pair_ = false;
+
+    // 098-dialect-overlay (FR-022, data-model §A.3): bit `tag` is set exactly for the
+    // tags of the metadata handle's declared header store, by add_header_tag
+    // (Dictionary::as_table_view()). The `group_bits_` shape: sized to the word of the
+    // highest set tag, so a FIX 5.0 QuickFIX-XML view (empty header) holds no words.
+    // is_header_tag() is its only reader.
+    std::vector<std::uint64_t> header_bits_;
 };
 
 // Move CONSTRUCTION is the property that became load-bearing when fixpp#456 deleted
@@ -1081,7 +1115,7 @@ private:
 //       std::unordered_map<std::uint16_t, std::uint16_t>>);
 
 // ── fixpp#456: the mutation surface, as a distinct owning type ───────────────
-// `table_view`'s sixteen mutators are private; this is the only way to reach them.
+// `table_view`'s mutators are private; this is the only way to reach them.
 // It holds a `table_view` BY VALUE — a stack-local scaffold with no reference to
 // anything — and `build() &&` moves that view out. No back-pointer, no lifetime
 // edge, nothing to dangle.
@@ -1109,7 +1143,7 @@ private:
 // is `return std::move(tv_);` and checks nothing.
 class table_view_builder {
 public:
-    // ── the sixteen forwarders, each returning *this for chaining ───────────
+    // ── the forwarders, each returning *this for chaining ───────────────────
     table_view_builder& add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
         tv_.add_valid_tag(msg_type, tag);
         return *this;
@@ -1189,6 +1223,11 @@ public:
 
     table_view_builder& add_fixt_framing_tag(std::uint16_t tag, field_type ft) {
         tv_.add_fixt_framing_tag(tag, ft);
+        return *this;
+    }
+
+    table_view_builder& add_header_tag(std::uint16_t tag) {
+        tv_.add_header_tag(tag);
         return *this;
     }
 

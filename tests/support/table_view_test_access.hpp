@@ -76,6 +76,9 @@ struct table_view_test_access {
     [[nodiscard]] static bool has_nonstandard_pair(table_view const& tv) noexcept {
         return tv.has_nonstandard_pair_;
     }
+    [[nodiscard]] static bit_store const& header_bits(table_view const& tv) noexcept {
+        return tv.header_bits_;
+    }
 };
 
 }  // namespace fixpp::dict

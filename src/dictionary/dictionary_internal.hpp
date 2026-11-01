@@ -409,7 +409,8 @@ public:
           enum_values_(mr),
           enum_runs_(mr),
           messages_(mr),
-          field_by_name_(mr) {}
+          field_by_name_(mr),
+          header_tags_(mr) {}
 
     // Resolve a NameSlice against the (now-stable) name_pool_ data pointer.
     [[nodiscard]] std::string_view name_at(NameSlice ns) const noexcept {
@@ -584,6 +585,15 @@ public:
 
     // Field-name → tag (sorted by name bytewise).
     std::pmr::vector<FieldNameEntry> field_by_name_;
+
+    // 098-dialect-overlay (FR-022, data-model §A.3, research R-7): the header tags the
+    // dictionary declares, sorted and de-duplicated. Filled at finalize by each
+    // loader's visited-set walk from its header (QuickFIX XML `<header>`, Orchestra
+    // component 1024): fields, component members, NumInGroup tags and group members,
+    // each definition walked once. A set walk, not an `expand_field_list` call, so
+    // the overlay path's step counter does not charge it. `Dictionary::as_table_view`
+    // copies it into `table_view::header_bits_`. Empty when the header is.
+    std::pmr::vector<std::uint16_t> header_tags_;
 
     session_version version_{session_version::Unknown};
 };

@@ -279,6 +279,27 @@ target_compile_definitions(dictionary_dict_enum_census_test PRIVATE
 add_test(NAME dictionary_dict_enum_census_test COMMAND dictionary_dict_enum_census_test)
 set_tests_properties(dictionary_dict_enum_census_test PROPERTIES LABELS "075;dictionary;census")
 
+# ── 098-dialect-overlay W-7 (contracts/witnesses.md): the declared header store per
+# vendored dictionary — STANDALONE (const §VII.8), both halves are exact-set
+# censuses over the shipped dictionaries. Enumerates them as the 075 block above does
+# (kRuntimeDicts + FIXPP_ORCHESTRA_DATA_DIR). `src/session` is on the include path for
+# the self-contained `send_header_tags.hpp`, read without linking fixpp_session.
+add_executable(dictionary_098_header_census_test header_tags_test.cpp)
+target_link_libraries(dictionary_098_header_census_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_098_header_census_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/session")
+target_compile_definitions(dictionary_098_header_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
+add_test(NAME dictionary_098_header_census_test COMMAND dictionary_098_header_census_test)
+set_tests_properties(dictionary_098_header_census_test PROPERTIES LABELS "dictionary;098;census")
+
 # ── 079-required-presence-scope T015-T017: required-set census (Contract 1 +
 # 1a) — STANDALONE (const §VII.8) exact-set completeness gate, selected via
 # `-R required_scope_census` (Article VII §8 carve-out). Links the codegen

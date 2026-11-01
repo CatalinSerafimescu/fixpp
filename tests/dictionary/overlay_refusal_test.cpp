@@ -37,6 +37,7 @@
 
 #include "overlay_test_support.hpp"
 #include "reused_tag_census.hpp"
+#include "support/dictionary_test_access.hpp"
 
 namespace {
 
@@ -1002,7 +1003,9 @@ TEST(OverlayRefusalW3XmlWalk, TwoEmptyChainsRefusedByTheBudget) {
 }
 
 // Header expansion: a base with an empty <messages>, an overlay whose
-// header holds nested groups that each reference one large component.
+// header holds nested groups that each reference one large component. The
+// declared header store then holds BeginString, both NumInGroup tags and every
+// field of the component (the visited-set walk, research R-7).
 TEST(OverlayRefusalW3XmlWalk, HeaderExpansionLoadsAtThePrediction) {
     std::string const base = std::string{kOpen} +
                              " <header>\n  <field name='BeginString' required='Y' />\n"
@@ -1027,7 +1030,18 @@ TEST(OverlayRefusalW3XmlWalk, HeaderExpansionLoadsAtThePrediction) {
         "  </group>\n"
         " </header>\n <components>\n" +
         big + " </components>\n" + fields);
-    ot::expect_loaded_at_prediction(probe(base, overlay), "header expansion");
+    auto const p = probe(base, overlay);
+    ot::expect_loaded_at_prediction(p, "header expansion");
+    ASSERT_TRUE(p.dictionary.has_value());
+    auto const* h = fixpp::dict::dictionary_test_access::handle(*p.dictionary);
+    ASSERT_NE(h, nullptr);
+    std::vector<std::uint16_t> expected{8, 21001, 21002};
+    for (int i = 0; i < 256; ++i) {
+        expected.push_back(static_cast<std::uint16_t>(20000 + i));
+    }
+    std::ranges::sort(expected);
+    std::vector<std::uint16_t> const got(h->header_tags_.begin(), h->header_tags_.end());
+    EXPECT_EQ(got, expected) << "header expansion: the declared header store";
 }
 
 // ── side-table fit (N-3) ─────────────────────────────────────────────────────

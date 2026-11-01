@@ -4,7 +4,7 @@
 // THE RED. `fixpp::dict::table_view` documented itself as immutable after
 // construction; until fixpp#456 it enforced none of it, and #456's own witness
 // mutated a default-constructed view that never came from a `Dictionary`. This TU
-// asserts, at compile time, that the sixteen population members and both
+// asserts, at compile time, that the population members and both
 // assignment operators are unreachable through the view and reachable (the
 // mutators) through `table_view_builder`.
 //
@@ -23,11 +23,11 @@
 // member exactly as it is for a PRIVATE one, so `!can_X<table_view>` alone would stay
 // green forever if the mutator were renamed or if the concept's argument list drifted.
 // An unpaired negative is a probe with no proof that it is not blind. Keep them
-// adjacent: sixteen negatives in one block followed by sixteen positives in another
+// adjacent: all the negatives in one block followed by all the positives in another
 // hides a positive that instantiates the wrong concept twice.
 //
 // ⚠️ WHAT THESE ASSERTIONS ARE NOT: a completeness proof for the mutation boundary.
-// All sixteen probes are NAME-KEYED, so they cannot see a newly added `clear()`, a
+// All the probes are NAME-KEYED, so they cannot see a newly added `clear()`, a
 // differently spelled mutator, a public data member or a mutable-returning accessor.
 // There is no automated completeness check over `table_view`'s public surface, by
 // decision (§6 seam 1 declines an AST gate as disproportionate); the standing
@@ -57,7 +57,7 @@
 // clang-format on
 //
 // Mutation procedure — PROVE THESE PROBES CAN REPORT NON-ZERO before trusting a green
-// build, because a green build is also the signature of sixteen blind probes:
+// build, because a green build is also the signature of blind probes:
 //   (a) move one mutator back above the `private:` in table_view.hpp — that mutator's
 //       NEGATIVE must fire, naming it;
 //   (b) misspell one member inside one concept's requires-expression — that concept's
@@ -79,7 +79,7 @@ using fixpp::dict::field_type;
 using fixpp::dict::table_view;
 using fixpp::dict::table_view_builder;
 
-// ── one concept per mutator, all sixteen ────────────────────────────────────
+// ── one concept per mutator ─────────────────────────────────────────────────
 // Spelled against a non-const lvalue, which is what a caller holding a view has.
 // The four context-scoped mutators take a span, so it is a second requires-parameter
 // rather than a braced temporary (a `std::span` from an initializer list would bind
@@ -152,11 +152,14 @@ concept can_add_fixt_framing_tag = requires(T& t) {
 };
 
 template <class T>
+concept can_add_header_tag = requires(T& t) { t.add_header_tag(std::uint16_t{5020}); };
+
+template <class T>
 concept can_set_length_pair_data_tag = requires(T& t) {
     t.set_length_pair_data_tag(std::uint16_t{5001}, std::uint16_t{5002});
 };
 
-// ── the seal: sixteen NEGATIVE/POSITIVE pairs, adjacent ─────────────────────
+// ── the seal: one NEGATIVE/POSITIVE pair per mutator, adjacent ──────────────
 // Read each pair together. The negative says that one named mutator is not
 // callable on a `table_view&`; the positive directly beneath says the concept is
 // capable of matching at all.
@@ -211,6 +214,9 @@ static_assert(!can_add_fixt_framing_tag<table_view>, "SEAL LEAK: add_fixt_framin
 static_assert(can_add_fixt_framing_tag<table_view_builder>,
               "PROBE BLIND: can_add_fixt_framing_tag");
 
+static_assert(!can_add_header_tag<table_view>, "SEAL LEAK: add_header_tag");
+static_assert(can_add_header_tag<table_view_builder>, "PROBE BLIND: can_add_header_tag");
+
 static_assert(!can_set_length_pair_data_tag<table_view>, "SEAL LEAK: set_length_pair_data_tag");
 static_assert(can_set_length_pair_data_tag<table_view_builder>,
               "PROBE BLIND: can_set_length_pair_data_tag");
@@ -249,7 +255,7 @@ static_assert(std::is_move_constructible_v<table_view>,
 // concrete type. A requires-expression only absorbs an ill-formed expression while it
 // is DEPENDENT; over a concrete type clang rejects the ref-qualifier mismatch as a
 // hard error and the TU does not compile at all. That applies to every probe in this
-// file, which is why all sixteen above are concepts too.
+// file, which is why every probe above is a concept too.
 template <class T>
 concept can_build_from_lvalue = requires(T& b) { b.build(); };
 template <class T>

@@ -520,6 +520,18 @@ std::vector<seed> const& seeds() {
          true,
          {ids::kMessageFields.component_index, ids::kFieldRef, ids::kField,
           ids::kGroupFields.component_index}},
+        // MsgType moves from <header> to <trailer>: every message run keeps the same
+        // FieldRef for 35 (the header and trailer both expand at the message's top
+        // level, `LoaderState::finalize`), so only the declared header store moves.
+        {"header_tag",
+         {},
+         {{"<field name='MsgType' required='Y'/>\n</header>", "</header>"},
+          {"<field name='CheckSum' required='Y'/>\n</trailer>",
+           "<field name='CheckSum' required='Y'/>\n<field name='MsgType' "
+           "required='Y'/>\n</trailer>"}},
+         {},
+         true,
+         {ids::kHeaderBits}},
     };
     return s;
 }
@@ -757,6 +769,30 @@ TEST(ComparatorW0Invariant, GroupBits) {
         ASSERT_EQ(v.size(), 1U) << "key " << key;
         EXPECT_TRUE(any_names(v, names)) << v.front();
     }
+}
+
+// Both clauses of the header invariant, each broken alone: a store tag's bit
+// cleared, and a bit set for a tag the store does not hold.
+TEST(ComparatorW0Invariant, HeaderBits) {
+    std::vector<std::uint16_t> const store{8, 9, 35};
+    tva_t::bit_store bits;
+    set_bit(bits, 8);
+    set_bit(bits, 9);
+    set_bit(bits, 35);
+    EXPECT_TRUE(eq::check_header_bits(bits, store).empty()) << "control";
+
+    auto cleared = bits;
+    clear_bit(cleared, 35);
+    auto const v1 = eq::check_header_bits(cleared, store);
+    ASSERT_EQ(v1.size(), 1U);
+    EXPECT_TRUE(any_names(v1, "header store tag 35 has a clear bit")) << v1.front();
+
+    auto extra = bits;
+    set_bit(extra, 34);
+    auto const v2 = eq::check_header_bits(extra, store);
+    ASSERT_EQ(v2.size(), 1U);
+    EXPECT_TRUE(any_names(v2, "header_bits_ bit 34 is set but not in the header store"))
+        << v2.front();
 }
 
 TEST(ComparatorW0Invariant, EnumBits) {
