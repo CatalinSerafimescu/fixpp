@@ -31,7 +31,8 @@
 // at two. One is built per definition the check reaches, by merging the sets of
 // the components it inlines, so each holds at most the document's declared field
 // count. The bound is therefore (the base's reference count plus the overlay's) ×
-// the base's declared field count.
+// the merged document's declared field count (the base's fields plus the
+// overlay's new fields).
 
 #include "overlay_merge.hpp"
 
@@ -157,7 +158,7 @@ template <class KeyFn>
     return std::string{name_of(c)} + "|" + attr_of(c, "name");
 }
 
-// "<message msgtype="D">", "<field name="X">" and the like, for messages.
+// "<message msgtype="D">", "<field name="X">" and the like, for error messages.
 [[nodiscard]] std::string describe(pugi::xml_node n) {
     std::string const kind{name_of(n)};
     if (kind == "message") {

@@ -6137,7 +6137,8 @@ fixpp::core::expected_t<Session::send_frame_built> Session::build_send_frame_(
                     // 098-dialect-overlay (FR-022, research R-7): a tag the fixed set
                     // misses is header-class when the session's dictionary declares it
                     // in its header. Asked only after that miss; a `noexcept` read of
-                    // `header_bits_`, filled at open(), so no allocation
+                    // `header_bits_`, built by `Dictionary::as_table_view()` and
+                    // adopted by open(), so no allocation
                     // ([const §XV.1]). A counted Data value still follows its
                     // Length's class.
                     const bool header =
