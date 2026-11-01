@@ -189,8 +189,10 @@ of a document that differs from the loaded one in one component member). A pair 
 report none. Where a coupled entry's reason is an invariant between two stores the comparator reads, the
 comparator asserts that invariant on each side (research R-10 §3). The invariants are:
 - the reverse pair map is the inverse of the forward map;
-- every key that `group_first_`, `group_members_` or `group_ctx_` holds has its `group_bits_` bit set (a
-  clear bit means every one of those stores misses, the source's own statement of the filter);
+- every key that `group_first_`, `group_members_`, `group_required_members_` or `group_ctx_` holds has its
+  `group_bits_` bit set (a clear bit means every one of those stores misses, the source's own statement of
+  the filter; `add_group_required_member` sets the bit too, and the 3-argument `group_required_members`
+  pre-filters on it, so that store is in the check: implement, T013, 2026-11-01);
 - every key that `enums_` holds has its `enum_bits_` bit set;
 - from plan Phase 5 (tasks T055): every tag of the declared header store has its `header_bits_` bit set,
   and no other tag has.
