@@ -267,7 +267,9 @@ line), applied by a line-based test helper. `load_with_overlay(base, overlay)` v
 overlay also extends more than 64 existing messages (N-7: accepted, since the entry caps count new
 definitions). The FIX44 overlay is also W-5's, W-9's and W-10's, so, among its other additions, it
 declares each constant `tests/session/test_098_inbound_frames.hpp` names, with exactly that header's values: 5001 on 35=D, 5002 in Parties, MsgType
-`U1` with its required field, the pair 5010/5011 on the MsgType that header names, enum value `Z` on
+`U1` with its required field, and `U1` as a value of MsgType(35) (FIX44.xml lists a closed set of values on
+field 35, so without that value a `U1` frame is refused at the enum check before its required fields are read;
+a QuickFIX user adding a message adds its value to field 35 in the same way), the pair 5010/5011 on the MsgType that header names, enum value `Z` on
 OrdType(40), and an Optional→Required promotion of a field that stays Optional on a second FIX44 MsgType
 (AS-5). Every Required addition the overlay makes on a frame's MsgType is carried by that frame, except
 the one the frame's own scenario omits (one way to hold it: the additions W-5's frames meet are
