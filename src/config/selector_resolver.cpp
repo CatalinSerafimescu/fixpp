@@ -32,6 +32,7 @@
 #include <string>
 #include <string_view>
 
+#include "loader_internal.hpp"
 #include "mappers.hpp"
 
 namespace fixpp::config::detail {
@@ -459,8 +460,8 @@ static void resolve_session_dictionaries(
 
         const bool session_sets_it = raw_session->contains(kKey);
         std::string key_path = session_sets_it
-                                   ? "session[" + std::to_string(raw_idx) + "]." + std::string{kKey}
-                                   : "default." + std::string{kKey};
+                                   ? kp("session[" + std::to_string(raw_idx) + "]", kKey)
+                                   : kp("default", kKey);
         const SourceLoc loc = raw_value_loc(session_sets_it ? raw_session : raw_default, kKey);
 
         if (bundle.engine.dictionaries.empty()) {
