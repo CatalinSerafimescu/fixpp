@@ -507,10 +507,12 @@ TEST(EstablishmentTimeoutQ35, DefaultIsTenSecondsAndASilentPeerIsClosedAtTenSeco
 //
 // A TOML document sets logon_timeout_ms, and the SessionConfig load_toml_config
 // returns for it drives the initiator. It is completed only with what the loader
-// leaves to the host (include/fixpp/config/config_bundle.hpp: the executor, and the
-// session's dictionary, taken from the bundle's [dictionary]) and with the rig's
-// plumbing (the endpoint it listens on and the initial transport_send). Still open
-// at T - 1 ms; closed at T.
+// leaves to the host (include/fixpp/config/config_bundle.hpp: the executor) and with
+// the rig's plumbing (the endpoint it listens on and the initial transport_send).
+// The loader fills config.dictionary from [dictionary] (or, for a session naming an
+// overlay, from the merged dictionary); this document names none, so the test's
+// own copy of engine.dictionaries.front() assigns that same pointer. Still open at
+// T - 1 ms; closed at T.
 TEST(EstablishmentTimeoutQ16, TomlLoadedSession_ClosedAtTheLoadedTNotBefore) {
     constexpr auto kT = 1500ms;
     auto const path =

@@ -11,10 +11,10 @@
 //
 // Calling convention for factory construction (D-3 / validation rule 9):
 //   - Noexcept expected_t factories: check-the-expected pattern (no try/catch).
-//   - Throwing ctors (system_clock_source, dict::load_any): wrap in
-//     trap_throw_to_expected from loader_internal.hpp.
-// See loader_internal.hpp comment block for the closed list of trap_throw sites.
+//   - Throwing calls: wrap in trap_throw_to_expected from loader_internal.hpp,
+//     whose comment block states the rule.
 
+#include <exception>
 #include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
@@ -26,7 +26,9 @@
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -275,11 +277,14 @@ static void resolve_engine_cert_source(const toml::table& root_tbl,
 //
 // step-1 accepted kind: "path"
 // dict::load_any throws — use trap_throw_to_expected.
+// On success, `base_path` receives the resolved `dictionary.path` (the base of
+// every session overlay, resolve_session_dictionaries).
 // ─────────────────────────────────────────────────────────────────────────────
 static void resolve_engine_dictionary(const toml::table& root_tbl,
                                       const std::filesystem::path& base_dir,
                                       const LoadOptions& opts, ConfigBundle& bundle,
-                                      DiagnosticAccumulator& acc) {
+                                      DiagnosticAccumulator& acc,
+                                      std::filesystem::path& base_path) {
     const toml::table* dict_tbl = nullptr;
     if (const auto* n = root_tbl.get("dictionary"); n && n->is_table()) {
         dict_tbl = n->as_table();
@@ -368,6 +373,155 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
         return;
     }
     bundle.engine.dictionaries.push_back(std::move(*load_result));
+    base_path = std::move(xml_path);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resolve_session_dictionaries — fill each session's SessionConfig::dictionary
+// (098-dialect-overlay, research R-9, data-model §A.4).
+//
+// A session whose merged table has no `dialect_overlay` gets
+// engine.dictionaries.front(). A session with one gets the dictionary
+// dict::load_any_with_overlay(base_path, <overlay>) returns; the load runs once
+// per distinct resolve_path result, success or failure, and its dictionary is
+// shared by every session naming that path. engine.dictionaries is not changed.
+//
+// Origins: the value's authoring origin is session[N].dialect_overlay when the
+// raw [[session]] table N sets the key, else default.dialect_overlay. Each
+// diagnostic is reported once per origin, at the value's position in that raw
+// table (merged tables carry no source regions). With engine.dictionaries empty
+// nothing is assigned and each origin reports "dialect_overlay requires
+// [dictionary]".
+// ─────────────────────────────────────────────────────────────────────────────
+static SourceLoc raw_value_loc(const toml::table* raw, std::string_view key) noexcept {
+    if (raw == nullptr) {
+        return {};
+    }
+    const toml::node* n = raw->get(key);
+    if (n == nullptr) {
+        return {};
+    }
+    return SourceLoc{.line = n->source().begin.line, .col = n->source().begin.column};
+}
+
+static void resolve_session_dictionaries(
+    const toml::table& root_tbl, const std::vector<const toml::table*>& merged_session_tables,
+    const std::filesystem::path& base_dir, const std::filesystem::path& base_path,
+    const LoadOptions& opts, ConfigBundle& bundle, DiagnosticAccumulator& acc) {
+    constexpr std::string_view kKey = "dialect_overlay";
+
+    const toml::table* raw_default = nullptr;
+    if (const auto* n = root_tbl.get("default"); n && n->is_table()) {
+        raw_default = n->as_table();
+    }
+    const toml::array* raw_sessions = nullptr;
+    if (const auto* n = root_tbl.get("session"); n && n->is_array()) {
+        raw_sessions = n->as_array();
+    }
+    if (raw_sessions == nullptr) {
+        return;
+    }
+
+    struct cache_entry {
+        std::shared_ptr<const dict::Dictionary> dict;
+        std::exception_ptr failure;
+    };
+    std::map<std::filesystem::path, cache_entry> cache;
+    std::set<std::string> reported_origins;
+    auto report_once = [&](LoadDiagnostic diag) {
+        if (reported_origins.insert(diag.key_path).second) {
+            acc.add(std::move(diag));
+        }
+    };
+
+    // merged_session_tables[i] and bundle.sessions[i] are the i-th TABLE element
+    // of the raw session array: the loader pushes neither for a non-table element.
+    std::size_t i = 0;
+    for (std::size_t raw_idx = 0;
+         raw_idx < raw_sessions->size() && i < merged_session_tables.size(); ++raw_idx) {
+        const toml::table* raw_session = raw_sessions->get(raw_idx)->as_table();
+        if (raw_session == nullptr) {
+            continue;
+        }
+        const std::size_t s = i++;
+        const toml::node* value = merged_session_tables[s]->get(kKey);
+
+        if (value == nullptr) {
+            if (!bundle.engine.dictionaries.empty()) {
+                bundle.sessions[s].config.dictionary = bundle.engine.dictionaries.front();
+            }
+            continue;
+        }
+
+        const bool session_sets_it = raw_session->contains(kKey);
+        std::string key_path = session_sets_it
+                                   ? "session[" + std::to_string(raw_idx) + "]." + std::string{kKey}
+                                   : "default." + std::string{kKey};
+        const SourceLoc loc = raw_value_loc(session_sets_it ? raw_session : raw_default, kKey);
+
+        if (bundle.engine.dictionaries.empty()) {
+            report_once(LoadDiagnostic{
+                .key_path = std::move(key_path),
+                .reason = reason_class::invalid_or_contradictory_selector,
+                .location = loc,
+                .message = "dialect_overlay requires [dictionary]",
+            });
+            continue;
+        }
+
+        const auto* str = value->as_string();
+        if (str == nullptr) {
+            report_once(LoadDiagnostic{
+                .key_path = std::move(key_path),
+                .reason = reason_class::malformed_value,
+                .location = loc,
+                .message = "dialect_overlay must be a string path",
+            });
+            continue;
+        }
+        const std::string_view overlay_value = str->get();
+        if (overlay_value.empty()) {
+            report_once(LoadDiagnostic{
+                .key_path = std::move(key_path),
+                .reason = reason_class::empty_required,
+                .location = loc,
+                .message = "dialect_overlay must not be empty",
+            });
+            continue;
+        }
+
+        // Every throwing call of this step (the path join, the cache insertion,
+        // the load, make_shared) runs inside this one wrapper, at the origin's key
+        // path. A cached failure is rethrown, so every origin naming the path
+        // reports the loader's what().
+        auto loaded =
+            trap_throw_to_expected(key_path, reason_class::invalid_or_contradictory_selector, [&] {
+                std::filesystem::path overlay_path =
+                    resolve_path(base_dir, std::filesystem::path{overlay_value});
+                auto [it, fresh] = cache.try_emplace(std::move(overlay_path));
+                cache_entry& entry = it->second;
+                if (fresh) {
+                    try {
+                        entry.dict = std::make_shared<const dict::Dictionary>(
+                            dict::load_any_with_overlay(base_path, it->first, opts.resource));
+                    } catch (...) {
+                        entry.failure = std::current_exception();
+                        throw;
+                    }
+                } else if (entry.failure) {
+                    std::rethrow_exception(entry.failure);
+                }
+                return entry.dict;
+            });
+
+        if (!loaded) {
+            LoadDiagnostic diag = std::move(loaded).error();
+            diag.location = loc;  // the wrapper leaves {0,0}
+            report_once(std::move(diag));
+            continue;
+        }
+        bundle.sessions[s].config.dictionary = std::move(*loaded);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -826,8 +980,9 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 // ─────────────────────────────────────────────────────────────────────────────
 // resolve_selectors — public entry point (declared in mappers.hpp).
 //
-// Resolves engine-scope selectors (clock, store, cert_source, dictionary) then
-// the per-session transport selector to build engine.default_transport_factory.
+// Resolves engine-scope selectors (clock, store, cert_source, dictionary), then
+// each session's dictionary (resolve_session_dictionaries), then the
+// per-session transport selector to build engine.default_transport_factory.
 //
 // `merged_session_tables` is the vector of MERGED TOML tables (one per session,
 // post [default]-merge) produced by the session loop in toml_config_loader.cpp.
@@ -840,7 +995,10 @@ void resolve_selectors(const toml::table& root_tbl,
     resolve_engine_clock(root_tbl, opts, bundle, acc);
     resolve_engine_store(root_tbl, base_dir, bundle, acc);
     resolve_engine_cert_source(root_tbl, base_dir, opts, bundle, acc);
-    resolve_engine_dictionary(root_tbl, base_dir, opts, bundle, acc);
+    std::filesystem::path dictionary_path;
+    resolve_engine_dictionary(root_tbl, base_dir, opts, bundle, acc, dictionary_path);
+    resolve_session_dictionaries(root_tbl, merged_session_tables, base_dir, dictionary_path, opts,
+                                 bundle, acc);
 
     // Transport factory: synthesised from engine cert_source + clock + session profile.
     // base_dir + opts are forwarded for per-session cert_source resolution (D-6a).

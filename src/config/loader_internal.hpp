@@ -85,8 +85,8 @@ namespace fixpp::config::detail {
 //
 // Wraps a callable that may throw and converts ANY escaping exception into a
 // LoadDiagnostic, returning std::expected<T, LoadDiagnostic>. This is the
-// adapter Phase 3 (selector_resolver.cpp) uses for the three live throwing
-// construction sites.
+// adapter the resolver steps (selector_resolver.cpp) use for their throwing
+// calls.
 //
 // IMPORTANT (Phase 3 rule — prefer noexcept factories, no trap_throw):
 //   The following factories already return expected_t (noexcept) and MUST be
@@ -95,13 +95,13 @@ namespace fixpp::config::detail {
 //     make_asio_tls_transport_factory(...)   — returns expected_t
 //     make_asio_plain_transport_factory(...) — returns expected_t
 //     make_ssl_ctx_config(...)               — returns expected_t
-//   Use trap_throw_to_expected ONLY for these three throwing sites (D-3):
-//     (1) system_clock_source(opts.engine_executor)  — ctor NOT noexcept
-//     (2) XmlLoader::load(path, mr)                  — throws xml_parse_error /
-//                                                       unknown_version_error /
-//                                                       xml_oom_error
-//     (3) file_cert_source direct ctor               — throws (use make_file_cert_source
-//                                                       instead whenever possible)
+//   The rule for everything else (D-3): every throwing call of a resolver step
+//   (a constructor that is not noexcept, a dictionary load, the allocations and
+//   container insertions around it) runs inside one trap_throw_to_expected
+//   lambda at the key path that step reports, so an exception, std::bad_alloc
+//   included, becomes a diagnostic at that key path and never reaches
+//   load_toml_config's outer catch. Find the call sites with
+//   `git grep -n trap_throw_to_expected -- src/config`.
 //
 // Exception coverage: std::exception captures xml_parse_error and
 // unknown_version_error (both : std::runtime_error) and xml_oom_error
