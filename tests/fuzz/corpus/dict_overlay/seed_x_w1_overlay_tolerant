@@ -1,0 +1,19 @@
+X<!--
+  098-dialect-overlay, contracts/witnesses.md W-1, the tolerant row: the overlay
+  of base_tolerant.xml. It adds a field to the message that holds the
+  unregistered group, after that group, and an enum value, and does not touch
+  the group itself.
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='VenueTag' required='N' />
+  </message>
+ </messages>
+ <fields>
+  <field number='54' name='Side' type='CHAR'>
+   <value enum='Z' description='VENUE_CROSS' />
+  </field>
+  <field number='9101' name='VenueTag' type='STRING' />
+ </fields>
+</fix>

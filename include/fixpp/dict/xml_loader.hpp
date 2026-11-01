@@ -10,8 +10,9 @@
 // Scope of this PR (per spec.md /clarify Session 2026-05-14):
 //   - Q1 → B: ships XML data for FIX 4.2 / 4.4 / 5.0 SP2 / FIXT.1.1; the
 //     loader code path accepts all nine v1.0-supported versions per AC-L4.
-//   - Q2 → A: `load_overlay` / `load_overlay_from_string` are **absent**
-//     from the public surface in this PR. F2 (spec.md §10) tracks the add.
+//   - Q2 → A: overlays. The calls are `load_with_overlay` /
+//     `load_with_overlay_from_string` (below), `OrchestraLoader`'s pair and
+//     `dict::load_any_with_overlay` (098-dialect-overlay).
 //   - Q3 → A: third-party XML parser selection is **pugixml** per
 //     research.md D-1; the parser is consumed only from
 //     `src/dictionary/xml_loader.cpp` and is **not** transitively visible
@@ -99,9 +100,9 @@ public:
         std::string_view base_xml, std::string_view overlay_xml, std::pmr::memory_resource* mr,
         unresolved_group_policy policy = unresolved_group_policy::fail_closed);
 
-    // load_overlay / load_overlay_from_string — DEFERRED to F2 per /clarify
-    // Q2 → A (spec.md §10). Adding them later is source-compatible by C++
-    // language rule and stays within `[arch §9.3]` "Stable from v1.0".
+    // The overlay calls are the two `load_with_overlay` members above
+    // (098-dialect-overlay); the `load_overlay` names /clarify Q2 → A used are
+    // not part of the surface.
 };
 
 }  // namespace fixpp::dict

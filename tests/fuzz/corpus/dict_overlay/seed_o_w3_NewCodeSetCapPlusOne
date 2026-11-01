@@ -1,0 +1,518 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:codeSets>
+  <fixr:codeSet id='5000' name='VenueCS0' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5001' name='VenueCS1' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5002' name='VenueCS2' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5003' name='VenueCS3' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5004' name='VenueCS4' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5005' name='VenueCS5' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5006' name='VenueCS6' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5007' name='VenueCS7' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5008' name='VenueCS8' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5009' name='VenueCS9' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5010' name='VenueCS10' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5011' name='VenueCS11' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5012' name='VenueCS12' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5013' name='VenueCS13' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5014' name='VenueCS14' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5015' name='VenueCS15' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5016' name='VenueCS16' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5017' name='VenueCS17' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5018' name='VenueCS18' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5019' name='VenueCS19' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5020' name='VenueCS20' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5021' name='VenueCS21' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5022' name='VenueCS22' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5023' name='VenueCS23' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5024' name='VenueCS24' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5025' name='VenueCS25' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5026' name='VenueCS26' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5027' name='VenueCS27' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5028' name='VenueCS28' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5029' name='VenueCS29' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5030' name='VenueCS30' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5031' name='VenueCS31' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5032' name='VenueCS32' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5033' name='VenueCS33' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5034' name='VenueCS34' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5035' name='VenueCS35' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5036' name='VenueCS36' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5037' name='VenueCS37' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5038' name='VenueCS38' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5039' name='VenueCS39' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5040' name='VenueCS40' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5041' name='VenueCS41' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5042' name='VenueCS42' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5043' name='VenueCS43' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5044' name='VenueCS44' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5045' name='VenueCS45' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5046' name='VenueCS46' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5047' name='VenueCS47' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5048' name='VenueCS48' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5049' name='VenueCS49' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5050' name='VenueCS50' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5051' name='VenueCS51' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5052' name='VenueCS52' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5053' name='VenueCS53' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5054' name='VenueCS54' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5055' name='VenueCS55' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5056' name='VenueCS56' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5057' name='VenueCS57' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5058' name='VenueCS58' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5059' name='VenueCS59' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5060' name='VenueCS60' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5061' name='VenueCS61' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5062' name='VenueCS62' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5063' name='VenueCS63' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5064' name='VenueCS64' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5065' name='VenueCS65' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5066' name='VenueCS66' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5067' name='VenueCS67' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5068' name='VenueCS68' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5069' name='VenueCS69' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5070' name='VenueCS70' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5071' name='VenueCS71' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5072' name='VenueCS72' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5073' name='VenueCS73' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5074' name='VenueCS74' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5075' name='VenueCS75' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5076' name='VenueCS76' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5077' name='VenueCS77' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5078' name='VenueCS78' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5079' name='VenueCS79' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5080' name='VenueCS80' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5081' name='VenueCS81' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5082' name='VenueCS82' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5083' name='VenueCS83' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5084' name='VenueCS84' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5085' name='VenueCS85' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5086' name='VenueCS86' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5087' name='VenueCS87' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5088' name='VenueCS88' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5089' name='VenueCS89' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5090' name='VenueCS90' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5091' name='VenueCS91' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5092' name='VenueCS92' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5093' name='VenueCS93' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5094' name='VenueCS94' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5095' name='VenueCS95' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5096' name='VenueCS96' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5097' name='VenueCS97' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5098' name='VenueCS98' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5099' name='VenueCS99' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5100' name='VenueCS100' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5101' name='VenueCS101' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5102' name='VenueCS102' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5103' name='VenueCS103' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5104' name='VenueCS104' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5105' name='VenueCS105' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5106' name='VenueCS106' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5107' name='VenueCS107' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5108' name='VenueCS108' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5109' name='VenueCS109' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5110' name='VenueCS110' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5111' name='VenueCS111' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5112' name='VenueCS112' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5113' name='VenueCS113' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5114' name='VenueCS114' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5115' name='VenueCS115' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5116' name='VenueCS116' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5117' name='VenueCS117' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5118' name='VenueCS118' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5119' name='VenueCS119' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5120' name='VenueCS120' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5121' name='VenueCS121' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5122' name='VenueCS122' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5123' name='VenueCS123' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5124' name='VenueCS124' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5125' name='VenueCS125' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5126' name='VenueCS126' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5127' name='VenueCS127' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5128' name='VenueCS128' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5129' name='VenueCS129' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5130' name='VenueCS130' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5131' name='VenueCS131' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5132' name='VenueCS132' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5133' name='VenueCS133' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5134' name='VenueCS134' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5135' name='VenueCS135' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5136' name='VenueCS136' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5137' name='VenueCS137' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5138' name='VenueCS138' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5139' name='VenueCS139' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5140' name='VenueCS140' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5141' name='VenueCS141' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5142' name='VenueCS142' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5143' name='VenueCS143' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5144' name='VenueCS144' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5145' name='VenueCS145' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5146' name='VenueCS146' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5147' name='VenueCS147' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5148' name='VenueCS148' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5149' name='VenueCS149' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5150' name='VenueCS150' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5151' name='VenueCS151' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5152' name='VenueCS152' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5153' name='VenueCS153' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5154' name='VenueCS154' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5155' name='VenueCS155' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5156' name='VenueCS156' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5157' name='VenueCS157' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5158' name='VenueCS158' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5159' name='VenueCS159' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5160' name='VenueCS160' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5161' name='VenueCS161' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5162' name='VenueCS162' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5163' name='VenueCS163' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5164' name='VenueCS164' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5165' name='VenueCS165' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5166' name='VenueCS166' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5167' name='VenueCS167' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5168' name='VenueCS168' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5169' name='VenueCS169' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5170' name='VenueCS170' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5171' name='VenueCS171' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5172' name='VenueCS172' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5173' name='VenueCS173' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5174' name='VenueCS174' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5175' name='VenueCS175' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5176' name='VenueCS176' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5177' name='VenueCS177' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5178' name='VenueCS178' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5179' name='VenueCS179' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5180' name='VenueCS180' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5181' name='VenueCS181' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5182' name='VenueCS182' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5183' name='VenueCS183' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5184' name='VenueCS184' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5185' name='VenueCS185' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5186' name='VenueCS186' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5187' name='VenueCS187' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5188' name='VenueCS188' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5189' name='VenueCS189' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5190' name='VenueCS190' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5191' name='VenueCS191' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5192' name='VenueCS192' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5193' name='VenueCS193' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5194' name='VenueCS194' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5195' name='VenueCS195' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5196' name='VenueCS196' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5197' name='VenueCS197' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5198' name='VenueCS198' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5199' name='VenueCS199' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5200' name='VenueCS200' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5201' name='VenueCS201' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5202' name='VenueCS202' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5203' name='VenueCS203' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5204' name='VenueCS204' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5205' name='VenueCS205' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5206' name='VenueCS206' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5207' name='VenueCS207' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5208' name='VenueCS208' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5209' name='VenueCS209' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5210' name='VenueCS210' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5211' name='VenueCS211' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5212' name='VenueCS212' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5213' name='VenueCS213' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5214' name='VenueCS214' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5215' name='VenueCS215' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5216' name='VenueCS216' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5217' name='VenueCS217' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5218' name='VenueCS218' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5219' name='VenueCS219' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5220' name='VenueCS220' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5221' name='VenueCS221' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5222' name='VenueCS222' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5223' name='VenueCS223' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5224' name='VenueCS224' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5225' name='VenueCS225' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5226' name='VenueCS226' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5227' name='VenueCS227' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5228' name='VenueCS228' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5229' name='VenueCS229' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5230' name='VenueCS230' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5231' name='VenueCS231' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5232' name='VenueCS232' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5233' name='VenueCS233' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5234' name='VenueCS234' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5235' name='VenueCS235' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5236' name='VenueCS236' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5237' name='VenueCS237' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5238' name='VenueCS238' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5239' name='VenueCS239' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5240' name='VenueCS240' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5241' name='VenueCS241' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5242' name='VenueCS242' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5243' name='VenueCS243' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5244' name='VenueCS244' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5245' name='VenueCS245' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5246' name='VenueCS246' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5247' name='VenueCS247' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5248' name='VenueCS248' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5249' name='VenueCS249' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5250' name='VenueCS250' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5251' name='VenueCS251' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5252' name='VenueCS252' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5253' name='VenueCS253' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5254' name='VenueCS254' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5255' name='VenueCS255' type='String'>
+  </fixr:codeSet>
+  <fixr:codeSet id='5256' name='VenueCS256' type='String'>
+  </fixr:codeSet>
+ </fixr:codeSets>
+</fixr:repository>

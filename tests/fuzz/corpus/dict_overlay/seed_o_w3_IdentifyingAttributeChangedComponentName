@@ -1,0 +1,6 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:components>
+  <fixr:component id='1003' name='Instrument2'>
+  </fixr:component>
+ </fixr:components>
+</fixr:repository>

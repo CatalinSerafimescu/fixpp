@@ -1,0 +1,183 @@
+O<!--
+  098-dialect-overlay, contracts/witnesses.md W-1: the overlay of the small
+  Orchestra triple (see base.xml). It must cover every addition kind of W-1's
+  closed list in its Orchestra form; each is named in the comment beside it;
+  edited.xml is its hand-written complete reference. A matched group carries
+  its fixr:numInGroup with the base's id, which the splice does not copy
+  (research R-3's Orchestra table).
+-->
+<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
+  <fixr:codeSets>
+    <fixr:codeSet id="54" name="SideCodeSet" type="char">
+      <!-- identical redeclaration of an existing code: a no-op -->
+      <fixr:code id="54001" name="Buy" value="1" />
+      <!-- code added to an existing code set (enum value on an existing field) -->
+      <fixr:code id="54003" name="VenueCross" value="Z" />
+    </fixr:codeSet>
+    <!-- code on a base code set that lists none, the Orchestra form of an enum
+         value on a base field with no values (N-2: the domain of Text closes) -->
+    <fixr:codeSet id="58" name="TextCodeSet" type="String">
+      <fixr:code id="58001" name="VenueText" value="VENUE" />
+    </fixr:codeSet>
+    <!-- a new code set, typing a new field with enum values -->
+    <fixr:codeSet id="9002" name="VenueLegCapacityCodeSet" type="char">
+      <fixr:code id="90021" name="Agency" value="A" />
+      <fixr:code id="90022" name="Principal" value="P" />
+    </fixr:codeSet>
+  </fixr:codeSets>
+  <fixr:fields>
+    <!-- identical redeclaration of a base field: a no-op -->
+    <fixr:field id="11" name="ClOrdID" type="String" />
+    <!-- new fields -->
+    <!-- a new field of a non-string type -->
+    <fixr:field id="9001" name="VenueQty" type="Qty" />
+    <!-- a new field with enum values -->
+    <fixr:field id="9002" name="VenueLegCapacity" type="VenueLegCapacityCodeSet" />
+    <fixr:field id="9003" name="VenueBlockA" type="String" />
+    <fixr:field id="9004" name="VenueBlockB" type="int" />
+    <fixr:field id="9005" name="VenueRef" type="String" />
+    <fixr:field id="9006" name="NoVenueLegs" type="NumInGroup" />
+    <fixr:field id="9007" name="VenueLegID" type="String" />
+    <fixr:field id="9008" name="NoVenueFills" type="NumInGroup" />
+    <fixr:field id="9009" name="VenueFillID" type="String" />
+    <fixr:field id="9010" name="VenueFillQty" type="Qty" />
+    <fixr:field id="9011" name="VenueSymbolSfx" type="String" />
+    <fixr:field id="9012" name="NoVenueAltIDs" type="NumInGroup" />
+    <fixr:field id="9013" name="VenueAltID" type="String" />
+    <fixr:field id="9014" name="VenueSubTag" type="String" />
+    <fixr:field id="9015" name="VenueAllocNote" type="String" />
+    <fixr:field id="9016" name="NoVenueAllocTags" type="NumInGroup" />
+    <fixr:field id="9017" name="VenueAllocTag" type="String" />
+    <fixr:field id="9018" name="VenueAllocBlockTag" type="String" />
+    <fixr:field id="9019" name="VenuePartyNote" type="String" />
+    <!-- custom Length+Data pair: the Data names its Length by lengthId -->
+    <fixr:field id="9020" name="VenueLen" type="Length" />
+    <fixr:field id="9021" name="VenueData" type="data" lengthId="9020" />
+    <!-- a new data field with no lengthId, referenced after the base Length
+         BaseBlobLen that BaseBlob's lengthId already pairs: the Orchestra form
+         of a new DATA after a paired base LENGTH (pairing is by lengthId only,
+         so the relation is unchanged and the overlay loads) -->
+    <fixr:field id="9022" name="VenueBlob" type="data" />
+    <fixr:field id="9023" name="VenueEventTag" type="String" />
+    <fixr:field id="9024" name="VenueHdrTag" type="String" />
+    <fixr:field id="9025" name="NoVenueHops" type="NumInGroup" />
+    <fixr:field id="9026" name="VenueHopID" type="String" />
+    <fixr:field id="9027" name="VenueTrailerTag" type="String" />
+  </fixr:fields>
+  <fixr:components>
+    <fixr:component id="1024" name="StandardHeader">
+      <!-- field added to the header (component 1024) -->
+      <fixr:fieldRef id="9024" />
+      <!-- group added to the header -->
+      <fixr:groupRef id="2020" />
+    </fixr:component>
+    <fixr:component id="1025" name="StandardTrailer">
+      <!-- field added to the trailer (component 1025) -->
+      <fixr:fieldRef id="9027" />
+    </fixr:component>
+    <fixr:component id="1003" name="Instrument">
+      <!-- Required promotion on a component child (presence absent in the base) -->
+      <fixr:fieldRef id="48" presence="required" />
+      <!-- field added to an existing component -->
+      <fixr:fieldRef id="9011" />
+      <!-- group added to an existing component -->
+      <fixr:groupRef id="2023" />
+      <!-- component reference added to an existing component -->
+      <fixr:componentRef id="2004" />
+    </fixr:component>
+    <!-- new components -->
+    <fixr:component id="2003" name="VenueBlock">
+      <fixr:fieldRef id="9003" />
+      <fixr:fieldRef id="9004" />
+    </fixr:component>
+    <fixr:component id="2004" name="VenueSubBlock">
+      <fixr:fieldRef id="9014" />
+    </fixr:component>
+    <fixr:component id="2005" name="VenueAllocBlock">
+      <fixr:fieldRef id="9018" />
+    </fixr:component>
+  </fixr:components>
+  <fixr:groups>
+    <!-- an existing group referenced from a message (NewOrderSingle), extended -->
+    <fixr:group id="2010" name="Allocs">
+      <fixr:numInGroup id="78" />
+      <!-- Required promotion on a group child (presence absent in the base) -->
+      <fixr:fieldRef id="80" presence="required" />
+      <!-- member added to an existing group referenced from a message -->
+      <fixr:fieldRef id="9015" />
+      <!-- group nested in an existing group -->
+      <fixr:groupRef id="2024" />
+      <!-- component reference added to an existing group -->
+      <fixr:componentRef id="2005" />
+    </fixr:group>
+    <!-- an existing group referenced from a component (PartiesBlock), extended -->
+    <fixr:group id="1012" name="Parties">
+      <fixr:numInGroup id="453" />
+      <!-- member added to an existing group referenced from a component -->
+      <fixr:fieldRef id="9019" />
+    </fixr:group>
+    <fixr:group id="2011" name="Events">
+      <fixr:numInGroup id="864" />
+      <!-- member appended to a group whose existing members emit nothing -->
+      <fixr:fieldRef id="9023" />
+    </fixr:group>
+    <!-- new groups; each one's first member after its fixr:numInGroup is its
+         delimiter -->
+    <fixr:group id="2020" name="VenueHops">
+      <fixr:numInGroup id="9025" />
+      <fixr:fieldRef id="9026" />
+    </fixr:group>
+    <fixr:group id="2021" name="VenueFills">
+      <fixr:numInGroup id="9008" />
+      <fixr:fieldRef id="9009" />
+      <fixr:fieldRef id="9010" />
+    </fixr:group>
+    <fixr:group id="2022" name="VenueLegs">
+      <fixr:numInGroup id="9006" />
+      <fixr:fieldRef id="9007" />
+      <fixr:fieldRef id="9002" />
+    </fixr:group>
+    <fixr:group id="2023" name="VenueAltIDs">
+      <fixr:numInGroup id="9012" />
+      <fixr:fieldRef id="9013" />
+    </fixr:group>
+    <fixr:group id="2024" name="VenueAllocTags">
+      <fixr:numInGroup id="9016" />
+      <fixr:fieldRef id="9017" />
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <!-- Required promotion on a message child (presence optional in the base) -->
+        <fixr:fieldRef id="1" presence="required" />
+        <!-- field added to an existing message (a new field of a non-string type) -->
+        <fixr:fieldRef id="9001" />
+        <!-- group added to an existing message; its first child is its delimiter -->
+        <fixr:groupRef id="2021" />
+        <!-- custom Length+Data pair -->
+        <fixr:fieldRef id="9020" />
+        <fixr:fieldRef id="9021" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="9" name="ExecutionReport" msgType="8">
+      <fixr:structure>
+        <!-- a new data field after the paired base Length BaseBlobLen (see
+             VenueBlob's definition) -->
+        <fixr:fieldRef id="9022" />
+        <!-- component reference added to an existing message -->
+        <fixr:componentRef id="2003" />
+      </fixr:structure>
+    </fixr:message>
+    <!-- new message, with a required field, a new group and a new component -->
+    <fixr:message id="9100" name="VenuePrivate" msgType="U1">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="9005" presence="required" />
+        <fixr:groupRef id="2022" />
+        <fixr:componentRef id="2003" />
+        <fixr:componentRef id="1025" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>

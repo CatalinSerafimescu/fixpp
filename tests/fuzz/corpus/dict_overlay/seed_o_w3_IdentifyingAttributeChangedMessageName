@@ -1,0 +1,8 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:messages>
+  <fixr:message id='14' name='Order' msgType='D'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+ </fixr:messages>
+</fixr:repository>

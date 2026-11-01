@@ -24,9 +24,14 @@
 // session/validator setup time by `Dictionary::as_table_view()` ([const §XV.1]
 // — config-time, not per-message). Its POPULATION SURFACE is sealed as of
 // fixpp#456 (`.specify/456-table-view-seal.md`): `table_view`'s
-// population members are `private`; its only `friend` is
-// `table_view_builder`, which holds its own `table_view` by value and yields
-// it from `build() &&`; both `operator=` overloads are `= delete`.
+// population members are `private`, and both `operator=` overloads are
+// `= delete`. The rule for its friends: population goes through
+// `table_view_builder` alone, which holds its own `table_view` by value and
+// yields it from `build() &&`; read-only test access goes through one named
+// friend, `table_view_test_access` (098-dialect-overlay,
+// tests/support/table_view_test_access.hpp, never installed), which is given
+// read accessors only. List the friends with
+// `grep -n friend include/fixpp/dict/table_view.hpp`.
 // ⚠️ This does not make the object unwritable. The `std::uint16_t` elements
 // behind `required_fields`, `group_member_tags` and `group_required_members`
 // are allocated by the member vectors and are not `const` objects, so
@@ -716,8 +721,8 @@ private:
 
     // ── Build-time population surface ────────────────────────────────────────
     // PRIVATE since fixpp#456: every caller reaches these through
-    // `table_view_builder` (below), which is the type's only friend that points
-    // inward. `Dictionary::as_table_view()` is deliberately NOT a friend — it
+    // `table_view_builder` (below), which is the type's only friend that
+    // populates it. `Dictionary::as_table_view()` is deliberately NOT a friend — it
     // populates a builder like every other caller. Not part of the
     // validator-facing contract.
     //

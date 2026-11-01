@@ -86,8 +86,17 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
 // T015/T016 — selector resolver
 // ---------------------------------------------------------------------------
 //
-// Resolves engine-scope selectors (clock, store, cert_source, dictionary) and
-// the per-session transport selector (transport.kind → TransportFactory).
+// Resolves engine-scope selectors (clock, store, cert_source, dictionary), then
+// fills each session's SessionConfig::dictionary, then resolves the per-session
+// transport selector (transport.kind → TransportFactory).
+//
+// The dictionary rule (098-dialect-overlay, research R-9): a session whose merged
+// table has no `dialect_overlay` gets engine.dictionaries.front(); a session that
+// names one gets the dictionary dict::load_any_with_overlay loads from the
+// engine's [dictionary] base and that overlay, loaded once per resolved overlay
+// path and shared by the sessions naming it. engine.dictionaries is not changed. The full
+// rule, its origins and its diagnostics are stated at
+// resolve_session_dictionaries in selector_resolver.cpp.
 //
 // `root_tbl`             — the parsed root TOML table (contains [clock], [store],
 //                          [cert_source], [dictionary] at the top level).

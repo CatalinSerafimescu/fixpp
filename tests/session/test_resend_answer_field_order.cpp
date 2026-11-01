@@ -107,9 +107,12 @@ constexpr auto kWindow = 200ms;
 // disassembling `quickfixj-base-3.0.1.jar` with `javap -p -c`
 // (~/.m2/repository/org/quickfixj/quickfixj-base/3.0.1/) — this worktree has
 // no quickfixj source tree to cite by file:line. Defined independently of
-// fixpp's own production header-tag set (`kReplayHeaderTags`,
-// src/session/session.cpp): see that constant's comment for why fixpp's set
-// is deliberately narrower and still correct.
+// fixpp's production send-side header classification, so a change there cannot
+// move this witness: `kSendHeaderTags` (src/session/send_header_tags.hpp),
+// unioned since 098-dialect-overlay (FR-022) with the tags the session's
+// dictionary declares in its header. `kReplayHeaderTags` (build_replay_frame,
+// src/session/session.cpp) is not that set: it only has to be a subset of the
+// header, to find where a replayed frame's header ends.
 constexpr std::array<std::uint32_t, 30> kWitnessHeaderTags = {
     8,   9,   34,  35,  43,  49,  50,  52,  56,  57,  90,  97,  115,  116,  122,
     128, 129, 142, 143, 144, 145, 212, 213, 347, 369, 370, 627, 1128, 1129, 1156};

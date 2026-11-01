@@ -1,0 +1,134 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:components>
+  <fixr:component id='3000' name='VenueC0'>
+  </fixr:component>
+  <fixr:component id='3001' name='VenueC1'>
+  </fixr:component>
+  <fixr:component id='3002' name='VenueC2'>
+  </fixr:component>
+  <fixr:component id='3003' name='VenueC3'>
+  </fixr:component>
+  <fixr:component id='3004' name='VenueC4'>
+  </fixr:component>
+  <fixr:component id='3005' name='VenueC5'>
+  </fixr:component>
+  <fixr:component id='3006' name='VenueC6'>
+  </fixr:component>
+  <fixr:component id='3007' name='VenueC7'>
+  </fixr:component>
+  <fixr:component id='3008' name='VenueC8'>
+  </fixr:component>
+  <fixr:component id='3009' name='VenueC9'>
+  </fixr:component>
+  <fixr:component id='3010' name='VenueC10'>
+  </fixr:component>
+  <fixr:component id='3011' name='VenueC11'>
+  </fixr:component>
+  <fixr:component id='3012' name='VenueC12'>
+  </fixr:component>
+  <fixr:component id='3013' name='VenueC13'>
+  </fixr:component>
+  <fixr:component id='3014' name='VenueC14'>
+  </fixr:component>
+  <fixr:component id='3015' name='VenueC15'>
+  </fixr:component>
+  <fixr:component id='3016' name='VenueC16'>
+  </fixr:component>
+  <fixr:component id='3017' name='VenueC17'>
+  </fixr:component>
+  <fixr:component id='3018' name='VenueC18'>
+  </fixr:component>
+  <fixr:component id='3019' name='VenueC19'>
+  </fixr:component>
+  <fixr:component id='3020' name='VenueC20'>
+  </fixr:component>
+  <fixr:component id='3021' name='VenueC21'>
+  </fixr:component>
+  <fixr:component id='3022' name='VenueC22'>
+  </fixr:component>
+  <fixr:component id='3023' name='VenueC23'>
+  </fixr:component>
+  <fixr:component id='3024' name='VenueC24'>
+  </fixr:component>
+  <fixr:component id='3025' name='VenueC25'>
+  </fixr:component>
+  <fixr:component id='3026' name='VenueC26'>
+  </fixr:component>
+  <fixr:component id='3027' name='VenueC27'>
+  </fixr:component>
+  <fixr:component id='3028' name='VenueC28'>
+  </fixr:component>
+  <fixr:component id='3029' name='VenueC29'>
+  </fixr:component>
+  <fixr:component id='3030' name='VenueC30'>
+  </fixr:component>
+  <fixr:component id='3031' name='VenueC31'>
+  </fixr:component>
+  <fixr:component id='3032' name='VenueC32'>
+  </fixr:component>
+  <fixr:component id='3033' name='VenueC33'>
+  </fixr:component>
+  <fixr:component id='3034' name='VenueC34'>
+  </fixr:component>
+  <fixr:component id='3035' name='VenueC35'>
+  </fixr:component>
+  <fixr:component id='3036' name='VenueC36'>
+  </fixr:component>
+  <fixr:component id='3037' name='VenueC37'>
+  </fixr:component>
+  <fixr:component id='3038' name='VenueC38'>
+  </fixr:component>
+  <fixr:component id='3039' name='VenueC39'>
+  </fixr:component>
+  <fixr:component id='3040' name='VenueC40'>
+  </fixr:component>
+  <fixr:component id='3041' name='VenueC41'>
+  </fixr:component>
+  <fixr:component id='3042' name='VenueC42'>
+  </fixr:component>
+  <fixr:component id='3043' name='VenueC43'>
+  </fixr:component>
+  <fixr:component id='3044' name='VenueC44'>
+  </fixr:component>
+  <fixr:component id='3045' name='VenueC45'>
+  </fixr:component>
+  <fixr:component id='3046' name='VenueC46'>
+  </fixr:component>
+  <fixr:component id='3047' name='VenueC47'>
+  </fixr:component>
+  <fixr:component id='3048' name='VenueC48'>
+  </fixr:component>
+  <fixr:component id='3049' name='VenueC49'>
+  </fixr:component>
+  <fixr:component id='3050' name='VenueC50'>
+  </fixr:component>
+  <fixr:component id='3051' name='VenueC51'>
+  </fixr:component>
+  <fixr:component id='3052' name='VenueC52'>
+  </fixr:component>
+  <fixr:component id='3053' name='VenueC53'>
+  </fixr:component>
+  <fixr:component id='3054' name='VenueC54'>
+  </fixr:component>
+  <fixr:component id='3055' name='VenueC55'>
+  </fixr:component>
+  <fixr:component id='3056' name='VenueC56'>
+  </fixr:component>
+  <fixr:component id='3057' name='VenueC57'>
+  </fixr:component>
+  <fixr:component id='3058' name='VenueC58'>
+  </fixr:component>
+  <fixr:component id='3059' name='VenueC59'>
+  </fixr:component>
+  <fixr:component id='3060' name='VenueC60'>
+  </fixr:component>
+  <fixr:component id='3061' name='VenueC61'>
+  </fixr:component>
+  <fixr:component id='3062' name='VenueC62'>
+  </fixr:component>
+  <fixr:component id='3063' name='VenueC63'>
+  </fixr:component>
+  <fixr:component id='3064' name='VenueC64'>
+  </fixr:component>
+ </fixr:components>
+</fixr:repository>

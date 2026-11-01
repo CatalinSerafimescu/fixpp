@@ -1,0 +1,5 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:fields>
+  <fixr:field id='9001' name='VenueX' type='Bogus' />
+ </fixr:fields>
+</fixr:repository>

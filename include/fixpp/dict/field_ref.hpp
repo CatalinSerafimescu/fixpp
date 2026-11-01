@@ -56,10 +56,11 @@ enum class field_data_type : std::uint8_t {
     Language,
     Data,
     XmlData,
-    // Sentinel for dialect-introduced types not in the standard set. In this
-    // PR (002-dictionary-xml-loader, /clarify Q2 → A) overlays are out of
-    // scope, so `DialectExtension` is reserved but never emitted by
-    // `XmlLoader::load*`. Re-enabled when D-009 ships (spec.md §10 F2).
+    // Reserved; no loader produces it. A dialect overlay (098-dialect-overlay,
+    // FR-012) declares its fields in the base format's type vocabulary, so an
+    // overlay field maps to one of the enumerators above, as a base field does.
+    // The enumerator keeps its position in this enum. Re-check that nothing
+    // produces it: `git grep -n DialectExtension -- src` must print nothing.
     DialectExtension,
 };
 

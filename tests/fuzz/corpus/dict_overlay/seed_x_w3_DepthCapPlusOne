@@ -1,0 +1,97 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='VenueDeep' msgtype='U9' msgcat='app'>
+<group name='NoDeep0' required='N'>
+<group name='NoDeep1' required='N'>
+<group name='NoDeep2' required='N'>
+<group name='NoDeep3' required='N'>
+<group name='NoDeep4' required='N'>
+<group name='NoDeep5' required='N'>
+<group name='NoDeep6' required='N'>
+<group name='NoDeep7' required='N'>
+<group name='NoDeep8' required='N'>
+<group name='NoDeep9' required='N'>
+<group name='NoDeep10' required='N'>
+<group name='NoDeep11' required='N'>
+<group name='NoDeep12' required='N'>
+<group name='NoDeep13' required='N'>
+<group name='NoDeep14' required='N'>
+<group name='NoDeep15' required='N'>
+<group name='NoDeep16' required='N'>
+<group name='NoDeep17' required='N'>
+<group name='NoDeep18' required='N'>
+<group name='NoDeep19' required='N'>
+<group name='NoDeep20' required='N'>
+<group name='NoDeep21' required='N'>
+<group name='NoDeep22' required='N'>
+<group name='NoDeep23' required='N'>
+<group name='NoDeep24' required='N'>
+<group name='NoDeep25' required='N'>
+<group name='NoDeep26' required='N'>
+<group name='NoDeep27' required='N'>
+<group name='NoDeep28' required='N'>
+<field name='VenueTag' required='N' />
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+</group>
+  </message>
+ </messages>
+ <fields>
+  <field number='20000' name='NoDeep0' type='NUMINGROUP' />
+  <field number='20001' name='NoDeep1' type='NUMINGROUP' />
+  <field number='20002' name='NoDeep2' type='NUMINGROUP' />
+  <field number='20003' name='NoDeep3' type='NUMINGROUP' />
+  <field number='20004' name='NoDeep4' type='NUMINGROUP' />
+  <field number='20005' name='NoDeep5' type='NUMINGROUP' />
+  <field number='20006' name='NoDeep6' type='NUMINGROUP' />
+  <field number='20007' name='NoDeep7' type='NUMINGROUP' />
+  <field number='20008' name='NoDeep8' type='NUMINGROUP' />
+  <field number='20009' name='NoDeep9' type='NUMINGROUP' />
+  <field number='20010' name='NoDeep10' type='NUMINGROUP' />
+  <field number='20011' name='NoDeep11' type='NUMINGROUP' />
+  <field number='20012' name='NoDeep12' type='NUMINGROUP' />
+  <field number='20013' name='NoDeep13' type='NUMINGROUP' />
+  <field number='20014' name='NoDeep14' type='NUMINGROUP' />
+  <field number='20015' name='NoDeep15' type='NUMINGROUP' />
+  <field number='20016' name='NoDeep16' type='NUMINGROUP' />
+  <field number='20017' name='NoDeep17' type='NUMINGROUP' />
+  <field number='20018' name='NoDeep18' type='NUMINGROUP' />
+  <field number='20019' name='NoDeep19' type='NUMINGROUP' />
+  <field number='20020' name='NoDeep20' type='NUMINGROUP' />
+  <field number='20021' name='NoDeep21' type='NUMINGROUP' />
+  <field number='20022' name='NoDeep22' type='NUMINGROUP' />
+  <field number='20023' name='NoDeep23' type='NUMINGROUP' />
+  <field number='20024' name='NoDeep24' type='NUMINGROUP' />
+  <field number='20025' name='NoDeep25' type='NUMINGROUP' />
+  <field number='20026' name='NoDeep26' type='NUMINGROUP' />
+  <field number='20027' name='NoDeep27' type='NUMINGROUP' />
+  <field number='20028' name='NoDeep28' type='NUMINGROUP' />
+  <field number='9102' name='VenueTag' type='STRING' />
+ </fields>
+</fix>

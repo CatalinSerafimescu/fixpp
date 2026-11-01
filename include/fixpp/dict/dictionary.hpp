@@ -15,8 +15,11 @@
 //     `component`, `group`, `messages`).
 //   - Move-only value semantics with heap-pinned metadata handle.
 //
-// OUT of scope this PR: `with_overlay`,
-// `resolve_application_version`, `was_dialect_promoted` — deferred.
+// Deferred: `was_dialect_promoted`. `resolve_application_version` is the free
+// function `dict::resolve_application_version` in <fixpp/dict/version_profile.hpp>.
+// There is no `with_overlay` member: an overlay is applied at load time, by
+// `XmlLoader::load_with_overlay[_from_string]`, `OrchestraLoader::load_with_overlay[_from_string]`
+// and `dict::load_any_with_overlay` (098-dialect-overlay).
 // `as_table_view()` implemented in 041-validation-gate-wiring (T008).
 
 #pragma once
