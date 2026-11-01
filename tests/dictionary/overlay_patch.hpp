@@ -73,7 +73,8 @@ struct parsed_patch {
 
 // The Required promotion shape (research R-10, Two in-place rewrites): a reference
 // line whose only change is its `required` value set to Y, or `required` added as
-// required='Y' in the line's own quote style right after one of its attributes.
+// required='Y' in the line's own quote style right after one of its attributes,
+// that is right after a closing quote of that style.
 inline bool is_promotion(std::string const& old_line, std::string const& new_line) {
     std::size_t lead = old_line.find_first_not_of(' ');
     if (lead == std::string::npos) {
@@ -103,9 +104,13 @@ inline bool is_promotion(std::string const& old_line, std::string const& new_lin
     }
     char const q = old_line[q_at];
     std::string const added = std::string{" required="} + q + "Y" + q;
+    bool in_value = false;  // between an opening quote of style `q` and its closing one
     for (std::size_t p = 1; p <= old_line.size(); ++p) {
-        if (old_line[p - 1] == q &&
-            new_line == old_line.substr(0, p) + added + old_line.substr(p)) {
+        if (old_line[p - 1] != q) {
+            continue;
+        }
+        in_value = !in_value;
+        if (!in_value && new_line == old_line.substr(0, p) + added + old_line.substr(p)) {
             return true;
         }
     }
@@ -144,7 +149,7 @@ inline parsed_patch parse_patch(std::string_view text) {
         }
         std::string const rest = l.substr(1);
         if (l[0] == ' ') {
-            if (after_insert && !h->inserted.empty()) {
+            if (after_insert) {
                 // Only the hunk's last row may follow the inserted run.
                 if (i + 1 < lines.size() && !lines[i + 1].starts_with("@@")) {
                     out.error = "hunk '" + h->label +

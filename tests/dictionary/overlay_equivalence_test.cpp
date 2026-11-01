@@ -363,6 +363,19 @@ TEST(OverlayPatchHelper, AddsARequiredAttributeInTheLinesQuoteStyle) {
     EXPECT_EQ(a.text, "<m>\n <field name=\"A\" required=\"Y\" />\n</m>\n");
 }
 
+TEST(OverlayPatchHelper, ARequiredAttributeAddedInsideAQuotedValueFailsTheCell) {
+    // Inserted right after the opening quote of name="A", so it lands in the value.
+    auto const p = ot::parse_patch(
+        "@@ promote A\n"
+        " <m>\n"
+        "- <field name=\"A\" />\n"
+        "+ <field name=\" required=\"Y\"A\" />\n"
+        " </m>\n");
+    EXPECT_NE(p.error.find("neither a Required promotion nor a self-closing opener"),
+              std::string::npos)
+        << p.error;
+}
+
 TEST(OverlayPatchHelper, OpensASelfClosingElement) {
     constexpr std::string_view base = "<fix>\n <header />\n <messages>\n</fix>\n";
     auto const p = ot::parse_patch(
