@@ -30,7 +30,10 @@ document (R-1). Its `which_session_version()` is the base's. It is placed by the
   dictionary declares, computed at finalize by an iterative visited-set walk from the header (fields,
   component members, NumInGroup tags and group members; each definition walked once): QuickFIX XML from
   `<header>`, Orchestra from component 1024. It is a set walk, not an `expand_field_list` call, so the
-  overlay path's step counter does not charge it (research R-5, R-7). Empty for
+  overlay path's step counter does not charge it (research R-5, R-7). It runs after the message loop and
+  skips a reference the loader cannot resolve, adding no tag and throwing nothing, so a base whose
+  `<messages>` is empty and whose header names an unknown definition still loads, as `load` does today
+  (implement, T056, 2026-11-01). Empty for
   FIX50/FIX50SP1/FIX50SP2, whose `<header>` is empty (research R-7 table).
 - **`table_view`:** `header_bits_`, a `std::vector<std::uint64_t>` bit store in the `group_bits_` shape,
   filled by `as_table_view()` through a `table_view_builder` forwarder; public query
