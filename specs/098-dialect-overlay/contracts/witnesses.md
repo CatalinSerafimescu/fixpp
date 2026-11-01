@@ -84,7 +84,7 @@ as a RED arm before production code.
 | W-0 invariant seeds (each invariant check has its own seed; the `header_bits_` one joins in Phase 5) | no (as above) | each invariant check, fed hand-built store values that break its invariant only, reports that invariant | — | each seed itself; outside the expected-set union rule |
 | W-1 rows (including the `tolerant` policy rows) | no | zero differences vs the complete reference; no counter-origin refusal; step counter = prediction | — | qf: M-1, M-2, M-3; orch: M-1o, M-2o, M-3; both: M-17, M-24 at each loader (the `tolerant` rows refuse); each row's in-test seeded mismatch |
 | W-2 rows, side against side and against the census | no | zero differences vs the patched base; no counter-origin refusal; step counter = prediction | — | M-3; M-17; a zero- or two-match hunk fails the cell; each row's in-test seeded mismatch; W-0's census row |
-| W-2 empty-overlay rows (every base) | no | zero differences vs `load(base)`; no refusal; step counter = prediction | — | M-17; each row's seeded mismatch: `load(base)` vs the in-test base copy with one unreferenced field definition removed gives at least one difference naming its store (a zero- or two-match anchor, or a copy that does not load, fails the cell) |
+| W-2 empty-overlay rows (every base) | no | zero differences vs `load(base)`; no refusal; step counter = prediction | — | M-17; each row's seeded mismatch: `load(base)` vs the in-test base copy with one enum value removed (recipe below) gives at least one difference naming its store (a zero- or two-match anchor, or a copy that does not load, fails the cell) |
 | W-2 wrap probe (FIX50SP2) | yes | records `component_fields` of the first component past the wrap point against its raw members | either | probe, recorded in the verify record (research R-10); not a RED arm |
 | W-3 rows | no | the named exception, its message naming the key, cap, table or counter origin as applicable | — | M-4, M-5, M-6, M-7, M-12 (by the side-table fit on the doubling rows, by the counter on the empty-chain rows), M-13, M-14, M-16, M-17, M-18, M-22, M-23 (per row and format, below) |
 | W-3 merged-in-place reference-cap row and its at-cap control | no | cap + 1: `overlay_limit_error` naming the reference cap; the control at the cap loads | — | M-14, M-25 |
@@ -295,14 +295,16 @@ difference naming its store, the hunk and the expected store named in the test i
 `kRuntimeDicts` plus the Orchestra file, `load_with_overlay(base, an empty overlay of the base's format
 and version)` vs `load(base)` → zero differences, no refusal, step counter = prediction. Each
 empty-overlay row has its own seeded mismatch, since it has no patch: `load(base)` vs an in-test copy of
-the base with one field definition removed MUST give at least one difference naming its store. The
-removed definition is one that no message, component, group, header or trailer references, so the copy
-loads. The test finds it by recipe before relying on it: the first `<field>` definition in document
-order whose `name` (QuickFIX XML) or `id` (Orchestra) occurs in no reference element of the base's raw
-census. A base with none fails the cell; there is no fallback. It is located by an anchor line that MUST
-match exactly once, and its whole element (for
-Orchestra a possibly multi-line `fixr:field` element) is removed. A zero- or two-match anchor, or a copy
-that does not load, fails the cell before any comparison. That seeded mismatch proves only that the
+the base with one enum value removed MUST give at least one difference naming its store. The
+recipe is one for every base (implement, T018, 2026-11-01: the earlier recipe, an unreferenced field
+definition removed, has no such field on FIX40, FIX41, FIX43, FIX44 and FIXT11, measured): the first field
+definition in document order that lists two or more values (`<value>`; Orchestra, the first code set with two
+or more `fixr:code`), located by its opening line (QuickFIX XML, the `<field number='N'` line; Orchestra, the
+`fixr:codeSet` line), which MUST match exactly once; the copy drops that definition's last value element
+(a possibly multi-line `fixr:code` element on Orchestra). Removing a value never makes a base fail to load.
+The expected stores include `Dictionary::enum_values` (`EnumValueRef::value`) and `table_view::enums_`
+(`enum_domain::codes`). A base with no such definition fails the cell; there is no fallback. A zero- or
+two-match anchor, or a copy that does not load, fails the cell before any comparison. That seeded mismatch proves only that the
 comparator can report a difference at that base's scale. That the row's overlay side went through the
 overlay path rests on the seam's counter equalling the prediction and on M-17. Anchors and hunks match
 lines with one trailing CR stripped (research R-10, line endings). The helper's positive row (a hunk that
@@ -314,7 +316,7 @@ record says so.
 **RED**: (a) a deliberately non-applying patch (a context block that matches zero places, and one that
 matches two) MUST fail the cell before any comparison; (b) **M-3** (header/trailer additions are
 dropped) turns the FIX44, FIX50SP2, FIXT11 and Orchestra rows RED; (c) each row's seeded mismatch, the
-empty-overlay rows' base copy with one field definition removed included;
+empty-overlay rows' base copy with one enum value removed included;
 (d) **M-17** turns every row, the empty-overlay rows included, RED through the counter origin.
 
 **W-3 Refusals.** `tests/dictionary/overlay_refusal_test.cpp`, table-driven. The table is the
