@@ -52,7 +52,7 @@ export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache
 cd /mnt/wsl/fixppbuild/fixpp-098-mutants
 conan install . -pr conan/profiles/linux-clang-debug --build=missing -of build/linux-clang-debug
 cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON     # bindings for W-10's M-11 / M-19 runs
-J=${J:-2}                                                   # never empty: a bare -j is unbounded
+J=${J:-8}                                                   # never empty: a bare -j is unbounded
 cmake --build --preset linux-clang-debug -j"$J"
 conan install . -pr conan/profiles/linux-clang-asan --build=missing -of build/linux-clang-asan
 cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON        # M-7's overflow report and W-11's rows
@@ -60,9 +60,8 @@ cmake --build --preset linux-clang-asan --target dictionary_pure_tests -j"$J"
 # per mutant: apply, rebuild (rc must be 0), run the named binary unfiltered, record, `git checkout -- .`
 ```
 
-`J` is `2` unless the owner has granted more for the current window; a grant is recorded in the evidence
-file with its window, and lapses with it. `J` is set before the first build (`J=${J:-2}` above), since an
-empty `J` gives a bare `-j`, which is unbounded.
+`J` is `8` for every 098 build (owner, 2026-11-01: "yes, you can run skip asking me before each build, and you can use -j8 for all of them"; tasks T002). `J` is set before the first build (`J=${J:-8}`
+above), since an empty `J` gives a bare `-j`, which is unbounded.
 
 ## Arm table (plan Phase 1 and quickstart §1 are derived from it)
 
@@ -74,13 +73,13 @@ as a RED arm before production code.
 |---|---|---|---|---|
 | W-0 seeded rows | no (test-only, but written in plan Phase 2 against Phase 2's code; the header-store row joins in Phase 5) | reported set equals the seed's declared expected set | — | the seeded rows themselves; M-0 |
 | W-0 identical pair | no (as above) | zero differences | — | control |
-| W-1 rows (including the `tolerant` policy rows) | no | zero differences vs the complete reference; no counter-origin refusal; step counter = prediction | — | qf: M-1, M-2, M-3; orch: M-1o, M-2o, M-3; both: M-17; each row's in-test seeded mismatch |
+| W-1 rows (including the `tolerant` policy rows) | no | zero differences vs the complete reference; no counter-origin refusal; step counter = prediction | — | qf: M-1, M-2, M-3; orch: M-1o, M-2o, M-3; both: M-17, M-24 at each loader (the `tolerant` rows refuse); each row's in-test seeded mismatch |
 | W-2 rows, side against side and against the census | no | zero differences vs the patched base; no counter-origin refusal; step counter = prediction | — | M-3; M-17; a zero- or two-match hunk fails the cell; each row's in-test seeded mismatch; W-0's census row |
-| W-2 empty-overlay rows (every base) | no | zero differences vs `load(base)`; no refusal; step counter = prediction | — | M-17 |
+| W-2 empty-overlay rows (every base) | no | zero differences vs `load(base)`; no refusal; step counter = prediction | — | M-17; each row's seeded mismatch: `load(base)` vs the in-test base copy with one unreferenced field definition removed gives at least one difference naming its store (a zero- or two-match anchor, or a copy that does not load, fails the cell) |
 | W-2 wrap probe (FIX50SP2) | yes | records `component_fields` of the first component past the wrap point against its raw members | either | probe, recorded in the verify record (research R-10); not a RED arm |
 | W-3 rows | no | the named exception, its message naming the key, cap, table or counter origin as applicable | — | M-4, M-5, M-6, M-7, M-12 (by the side-table fit on the doubling rows, by the counter on the empty-chain rows), M-13, M-14, M-16, M-17, M-18, M-22, M-23 (per row and format, below) |
 | W-3 unknown-reference, unknown-field-type and group-delimiter-collision rows | no | the base loader's own exception type for its format | — | characterization pin: the refusal is the loader's own, after the splice; no 098 mutant removes it |
-| W-4 rows (including the `tolerant` policy row) | no | dispatch matches the direct loader | — | M-8 |
+| W-4 rows (including the `tolerant` policy row) | no | dispatch matches the direct loader | — | M-8; M-24 at `load_any_with_overlay` (the `tolerant` row refuses on the `load_any` side) |
 | W-5 overlay session | no (`load_any_with_overlay`) | agrees with the edited session on every frame; each accepted frame's scenario read holds | — | M-8 |
 | W-5 edited session | yes | accepts or refuses each frame as the edited dictionary dictates; each accepted frame's scenario read holds | passes | characterization pin (a complete edited file already works today) |
 | W-5 base session | yes | today's outcome on each frame | passes | negative control |
@@ -153,14 +152,19 @@ A `tolerant` row per format: a small base holding one group the loader leaves un
 → zero differences, and with the default policy both sides refuse (the policy reaches the build).
 Every row loads through research R-5's read seam and asserts no counter-origin refusal and that the
 step counter equals step 6's prediction. Each row also has an in-test seeded mismatch: the reference
-with one addition removed MUST give at least one difference naming its store (SC-001's seeded
+with one non-no-op addition removed (never an identical redeclaration, which is a no-op) MUST give at
+least one difference naming its store (SC-001's seeded
 mismatch). **RED**: **M-1** (the XML splice prepends a new group member instead of appending) and
 **M-2** (the XML splice skips enum-value additions), and for the Orchestra splice **M-1o** (it
 prepends a new group member) and **M-2o** (it skips `fixr:code` additions); each turns its format's row
 RED with the comparator naming the store. **M-3** (header/trailer additions dropped, per format) turns
 each format's row RED, the comparator naming the store; the header kind and the trailer kind each show the
-drop. **M-17** (one extra `expand_field_list` call in
-`finalize`) turns every row RED through the distinct counter origin.
+drop: the reported difference set MUST include the trailer addition's entry, so the trailer half is
+shown separately from the header half. **M-17** (one extra `expand_field_list` call in
+`finalize`) turns every row RED through the distinct counter origin. **M-24** (the `policy` argument
+is not forwarded where `load_with_overlay` / `load_with_overlay_from_string` hand it to the build, both
+overloads covered, so the build uses the default; once per loader) turns that format's `tolerant` row
+RED: the overlay side refuses.
 
 **W-2 Equivalence on the vendored bases.** Same file. FIX44, FIX50SP2 and the Orchestra file, each with an
 overlay under `tests/dictionary/fixtures/098/real/` and a hand-written insertion patch (research R-10:
@@ -174,13 +178,20 @@ a header-field overlay of `FIXT11.xml` and its insertion patch, under the same r
 R-5), and has an in-test seeded mismatch: the patch with one hunk dropped MUST give at least one
 difference naming its store. **Empty overlay** (spec Edge Cases): for each base in `reused_tag_census.hpp`'s
 `kRuntimeDicts` plus the Orchestra file, `load_with_overlay(base, an empty overlay of the base's format
-and version)` vs `load(base)` → zero differences, no refusal, step counter = prediction. The FIX50SP2 wrap probe
+and version)` vs `load(base)` → zero differences, no refusal, step counter = prediction. Each
+empty-overlay row has its own seeded mismatch, since it has no patch: `load(base)` vs an in-test copy of
+the base with one field definition removed MUST give at least one difference naming its store. The
+removed definition is one that no message, component, group, header or trailer references, so the copy
+loads; it is located by an anchor line that MUST match exactly once, and its whole element (for
+Orchestra a possibly multi-line `fixr:field` element) is removed. A zero- or two-match anchor, or a copy
+that does not load, fails the cell before any comparison. The FIX50SP2 wrap probe
 (research R-10) runs here and is recorded, not asserted; where a base side table does not fit, the
 overlay's appended definitions past the wrap point are compared side against side only, and the verify
 record says so.
 **RED**: (a) a deliberately non-applying patch (a context block that matches zero places, and one that
 matches two) MUST fail the cell before any comparison; (b) **M-3** (header/trailer additions are
-dropped) turns the FIX44, FIX50SP2, FIXT11 and Orchestra rows RED; (c) each row's seeded mismatch;
+dropped) turns the FIX44, FIX50SP2, FIXT11 and Orchestra rows RED; (c) each row's seeded mismatch, the
+empty-overlay rows' base copy with one field definition removed included;
 (d) **M-17** turns every row, the empty-overlay rows included, RED through the counter origin.
 
 **W-3 Refusals.** `tests/dictionary/overlay_refusal_test.cpp`, table-driven. The table is the
@@ -256,8 +267,9 @@ FR-008 has no row: it holds by construction (spec FR-008), and no mutant short o
 two fresh base loads differ. **RED**, each mutant run once per format where its rows exist: **M-4**
 (step 7's conflict checks removed: the step-7 conflict rows load; it does not touch step 4a),
 **M-23** (step 4a's root checks removed: the version-mismatch, other-format, root-child-outside-the-list
-and repeated-root-container rows no longer fail with `overlay_conflict_error`; they load or fail with
-another type), **M-5** (byte cap removed), **M-22** (step 4's depth walk removed: the depth-33 row's
+and repeated-root-container rows' assertion (type and named key) fails; each loads, fails with another
+type, or no longer names the key), **M-5** (byte cap removed), **M-22** (step 4's depth walk removed:
+the depth-33 row's
 assertion fails; it loads, or its refusal no longer names the depth cap), **M-6** (`parse_doctype`
 dropped: the DOCTYPE row loads), **M-7** (cycle check removed: the cycle row no longer fails with the
 cycle error; it loops, overflows, or fails differently, for example with a counter-origin refusal where
@@ -287,7 +299,9 @@ origin),
 called directly; a mixed-format pair is refused. A `tolerant` row: W-1's `tolerant` triple through
 `load_any_with_overlay(base, overlay, mr, unresolved_group_policy::tolerant)` matches the direct loader
 called with `tolerant`. **RED**: **M-8** (`load_any_with_overlay` ignores the overlay) turns the match
-rows RED.
+rows RED. **M-24** at `load_any_with_overlay` (the `policy` argument is not forwarded to the loader,
+which builds with the default) turns the `tolerant` row RED: the `load_any` side refuses while the
+direct loader called with `tolerant` loads.
 
 ## Wire behaviour
 

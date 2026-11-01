@@ -13,9 +13,8 @@ The witnesses and their RED arms are in `contracts/witnesses.md`; this file is t
 One build owner per build directory; never a Windows and a Linux build at once. Take
 `/mnt/c/temp/fixpp/.sandbox-lock` before any MSVC rsync and release it at close-out.
 
-**Parallelism.** Every build below uses `-j"$J"`, with `J=${J:-2}` at the top of its block: `J` is `2`
-unless the owner has granted more for the current window; a grant is recorded in the evidence file with
-its window, and lapses with it. An empty `J` would give a bare `-j`, which is unbounded.
+**Parallelism.** Every build below uses `-j"$J"`, with `J=${J:-8}` at the top of its block: `J` is `8` for
+every 098 build (owner, 2026-11-01: "yes, you can run skip asking me before each build, and you can use -j8 for all of them"; tasks T002). An empty `J` would give a bare `-j`, which is unbounded.
 
 **Build approval.** The owner's standing instruction (tasks T002) approves the builds below; the
 pre-PR build gate of `[const §XVII.7]` is §8.
@@ -31,7 +30,7 @@ both W-7 halves need code that lands in plan phase 5.
 
 ```
 cd ~/Work/Programming/fixpp-parallel
-J=${J:-2}                                                       # never empty: a bare -j is unbounded
+J=${J:-8}                                                       # never empty: a bare -j is unbounded
 cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON &&    # the preset leaves the bindings OFF
   cmake --build --preset linux-clang-debug -j"$J"               # a failed configure must stop here
 ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure
@@ -63,7 +62,7 @@ before W-1/W-2 are read.
 ## 3. After each implementation phase
 
 ```
-J=${J:-2}
+J=${J:-8}
 cmake --build --preset linux-clang-debug -j"$J"
 ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure
 ctest --preset linux-clang-debug -L "dictionary|config|capi|session|091|field-order" --no-tests=error --output-on-failure
@@ -106,7 +105,7 @@ mutant's edit) before a GREEN is read as "the mutant survived".
 ## 5. Fuzz
 
 ```
-J=${J:-2}
+J=${J:-8}
 cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON && cmake --build --preset linux-clang-asan -j"$J"
 ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure
 ```
