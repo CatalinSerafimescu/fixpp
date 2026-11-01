@@ -350,8 +350,9 @@ counter origin.
   the repeated key with the base loader alone and asserts the loader's own error. It is not established
   by reading the code.
 - **R-4 conflicts:** identifying attribute changed (type; name; msgtype name; Orchestra message `id`,
-  code-set `id` / `type`); field name already used by another number; an Orchestra code set with a new
-  `id` and an existing name (N-6; XML N/A, no code sets); required relaxed; redescribed enum value or
+  code-set `type`); field name already used by another number; an Orchestra code set with a new
+  `id` and an existing name (N-6; XML N/A, no code sets; R-3 matches a code set by name, so a changed
+  code-set `id` is this input and this row covers it, implement, T041, 2026-11-01); required relaxed; redescribed enum value or
   code; `required="y"`, `required="false"` and `presence="require"` (A-013); duplicate within the
   overlay; two root containers of one name; version mismatch; overlay of the other format; a root child
   outside data-model §A.1's list, such as `fixr:datatypes` (N-10); an Orchestra group whose
