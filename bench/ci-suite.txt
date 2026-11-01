@@ -143,3 +143,11 @@ bin/on_inbound_frame_bench                  none:no-gb-baseline-recorded        
 # (Article VIII §2a: the row can be neither removed nor downgraded); the erratum
 # at the end of `.specify/ci209-bench-gate.md` records what that skipped.
 bin/engine_send_bench                       none:no-gb-baseline-recorded                     paired
+# session_send_bench (098-dialect-overlay, contracts/witnesses.md W-12): sequential
+# Session::send calls on one Active session over a bounded MemoryStore, on a mock
+# clock, with no socket and no file (the source's header). `paired` because it
+# reaches the send path's header partition in Session::build_send_frame_, which
+# engine_send_bench does not: that bench's payload is refused inside
+# build_send_frame_ before the partition runs (its header comment). Article VIII §2a:
+# the row can be neither removed nor downgraded.
+bin/session_send_bench                      none:no-gb-baseline-recorded                     paired
