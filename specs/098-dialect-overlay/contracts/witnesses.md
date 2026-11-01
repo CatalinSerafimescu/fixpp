@@ -243,7 +243,18 @@ self-closing container cannot be written as an append):
   `</x>`;
 - a Required promotion: one existing reference line (`<field>`, `<component>` or `<group>`) whose only
   change is its `required` attribute set to `Y`, from `N` or from absent, every other byte of the line
-  kept.
+  kept. The Orchestra form is a `fixr:fieldRef` / `fixr:componentRef` / `fixr:groupRef` line whose only
+  change is `presence` set to `required`, from `optional` or from absent (implement, T039, 2026-11-01). The
+  vendored Orchestra patch carries no promotion, so the patch helper's promotion shape stays QuickFIX-XML
+  only; extend it, with a positive row, before any Orchestra patch rewrites a line.
+
+Orchestra forms of kinds worded for QuickFIX XML (implement, T039, 2026-11-01): N-2 is a code added to a
+base code set that lists none (a field's `type` change is refused); "a new DATA after a base LENGTH whose
+pair forms earlier" is a new `data` field with no `lengthId` referenced after a paired base Length
+(Orchestra pairs by `lengthId` only); "a member added to an existing group, inline and inside a component"
+is a group referenced from a message and one referenced from a component (Orchestra has no inline group);
+and "a new container the base lacks" sits in the Orchestra `tolerant` triple, since every Orchestra
+container is required by the loader or by another kind in the main triple.
 
 A hunk of any other shape is fixed before the commit.
 A `tolerant` row per format: a small base holding one group the loader leaves unregistered under
