@@ -1,0 +1,30 @@
+# as3_conflict.toml
+# 098-dialect-overlay, contracts/witnesses.md W-8 AS-3 and the message row:
+# session[0] names an overlay that redeclares SolicitedFlag(377) with a type
+# other than the base's.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "../FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT0"
+target_comp_id = "SERVER0"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+dialect_overlay = "conflict_overlay.xml"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

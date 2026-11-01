@@ -164,6 +164,7 @@ add_executable(session_pure_tests
   wait_until_clamp_test.cpp                                             # gate-b/r2 P1-1 (Art. VII §8)
   scan_frame_header_fault_test.cpp                                      # 092 T009/T013 (E-1)
   test_098_dialect_overlay_inbound_base.cpp                             # 098 T004a (W-5 base)
+  test_098_header_send.cpp                                              # 098 T005 (W-6)
   $<TARGET_OBJECTS:session_test_support>
 )
 target_link_libraries(session_pure_tests PRIVATE

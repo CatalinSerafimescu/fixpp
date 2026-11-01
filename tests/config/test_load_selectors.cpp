@@ -10,7 +10,7 @@
 //
 // T028 [US3] — deferred-selection + FR-011 guard:
 //   - dictionary.kind="version"  → recognized_not_yet_supported_step2
-//   - dialect_overlay            → recognized_not_yet_supported_step2
+//   - dialect_overlay naming an absent file → invalid_or_contradictory_selector
 //   - security_profile.kind="mtls_pinned" → recognized_not_yet_supported_step2
 //   - mode="direct_executor" without already_serialized_executor=true
 //                                → invalid_or_contradictory_selector (FR-011 / US3 AC-4)
@@ -230,24 +230,28 @@ TEST(LoadSelectors, T028_DictionaryVersionDeferred) {
            "for dictionary.kind=\"version\"";
 }
 
-// ── T028-B: dialect_overlay → recognized_not_yet_supported_step2 ──────────────
+// ── T028-B: dialect_overlay naming an absent file → invalid_or_contradictory_selector
 //
-// Fixture: neg_step2_dialect_overlay.toml (dialect_overlay key in [[session]]).
+// Fixture: neg_step2_dialect_overlay.toml ([[session]] sets dialect_overlay =
+// "my_overlay"; no file of that name is beside it).
 // Assert: load fails; diagnostic at "session[0].dialect_overlay" with
-//   reason=recognized_not_yet_supported_step2.
-// NOTE: Phase 4b implements this scan; this test may FAIL (RED) until 4b.
+//   reason=invalid_or_contradictory_selector, and no deferred-key diagnostic
+//   (098-dialect-overlay, contracts W-8). LoadNegativeBattery's
+//   T018_SessionDialectOverlayFileMissing asserts the same outcome for its battery.
 
-TEST(LoadSelectors, T028_DialectOverlayDeferred) {
+TEST(LoadSelectors, T028_DialectOverlayFileMissing) {
     auto result = load(fixture("neg_step2_dialect_overlay.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for dialect_overlay (step-2 deferred); "
-           "Phase 4b step-2 detection not yet implemented — RED expected";
+    ASSERT_FALSE(result.has_value()) << "an absent dialect_overlay file must fail the load";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
                          "session[0].dialect_overlay"))
-        << "expected recognized_not_yet_supported_step2 at \"session[0].dialect_overlay\"";
+        << "expected invalid_or_contradictory_selector at \"session[0].dialect_overlay\"";
+    for (const auto& d : result.error()) {
+        EXPECT_NE(d.reason, RC::recognized_not_yet_supported_step2)
+            << "no key in this fixture is deferred; got one at " << d.key_path << ": " << d.message;
+    }
 }
 
 // ── T028-C: security_profile.kind="mtls_pinned" → recognized_not_yet_supported_step2

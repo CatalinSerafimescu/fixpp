@@ -1,0 +1,61 @@
+# as2_overlay.toml
+# 098-dialect-overlay, contracts/witnesses.md W-8 AS-2: session[0] names no
+# dialect_overlay; session[1] and session[2] name the same overlay path, which
+# declares the custom field 5001 on NewOrderSingle.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "../FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT0"
+target_comp_id = "SERVER0"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+dialect_overlay = "venue_overlay.xml"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[[session]]
+sender_comp_id = "CLIENT2"
+target_comp_id = "SERVER2"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+dialect_overlay = "venue_overlay.xml"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

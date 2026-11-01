@@ -1,0 +1,10 @@
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='Custom098FieldB' required='N' />
+  </message>
+ </messages>
+ <fields>
+  <field number='5101' name='Custom098FieldB' type='STRING' />
+ </fields>
+</fix>

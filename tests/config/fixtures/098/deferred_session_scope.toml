@@ -1,0 +1,36 @@
+# deferred_session_scope.toml
+# 098-dialect-overlay, contracts/witnesses.md W-8 negative control: the
+# deferred key tracer written in [default] and in a [[session]] table.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "../FIX44.xml"
+
+[default]
+heartbeat_interval = "30s"
+
+[default.tracer]
+endpoint = "http://collector:4317"
+
+[[session]]
+sender_comp_id = "CLIENT0"
+target_comp_id = "SERVER0"
+begin_string = "FIX.4.4"
+role = "initiator"
+
+[session.tracer]
+endpoint = "http://collector:4317"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

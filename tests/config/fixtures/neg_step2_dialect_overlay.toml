@@ -1,7 +1,10 @@
 # neg_step2_dialect_overlay.toml
-# copy of happy_full.toml with dialect_overlay key — triggers
-# recognized_not_yet_supported_step2 (dialect_overlay is a step-2 feature; E-4 / FR-007a).
-# NOTE: Phase 4b will implement this; RED until then.
+# copy of happy_full.toml whose [[session]] sets dialect_overlay = "my_overlay", a
+# file that must not exist beside this file. The load fails with
+# invalid_or_contradictory_selector at session[0].dialect_overlay
+# (098-dialect-overlay, contracts W-8: LoadNegativeBattery's
+# T018_SessionDialectOverlayFileMissing and LoadSelectors'
+# T028_DialectOverlayFileMissing).
 
 [clock]
 kind = "system"

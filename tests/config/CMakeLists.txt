@@ -101,6 +101,7 @@ add_executable(config_045_tests
     test_load_logger_negative.cpp
     test_load_logger_overrides.cpp
     test_load_deferred_surface.cpp
+    test_098_dialect_overlay.cpp  # 098 T006 (W-8)
 )
 target_compile_definitions(config_045_tests PRIVATE
     FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"

@@ -1,0 +1,48 @@
+# as5_default.toml
+# 098-dialect-overlay, contracts/witnesses.md W-8 AS-5: [default] names
+# venue_overlay.xml (field 5001); session[0] inherits it and session[1]
+# overrides it with venue_overlay_b.xml (field 5101).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "../FIX44.xml"
+
+[default]
+dialect_overlay = "venue_overlay.xml"
+
+[[session]]
+sender_comp_id = "CLIENT0"
+target_comp_id = "SERVER0"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+dialect_overlay = "venue_overlay_b.xml"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

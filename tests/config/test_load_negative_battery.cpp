@@ -22,8 +22,6 @@
 //   NOT YET IMPLEMENTED (RED until Phase 4b):
 //   - unknown_key: Phase 4b will add key-schema enumeration.
 //   - missing_required / empty_required for session-scalar fields (sender_comp_id).
-//   - recognized_not_yet_supported_step2 for dialect_overlay keys
-//     (logger flipped to supported in 045 FR-022).
 //   - invalid_or_contradictory_selector for:
 //       * plaintext transport with cert material present
 //       * mode=direct_executor + locks=spin
@@ -160,24 +158,27 @@ TEST(LoadNegativeBattery, T018_Step2Logger) {
         << "expected missing_required at \"logger.sinks\"";
 }
 
-// ── recognized_not_yet_supported_step2 — sub-cell (b): dialect_overlay key ──
+// ── invalid_or_contradictory_selector: a session's dialect_overlay file is absent ──
 
-// neg_step2_dialect_overlay.toml has dialect_overlay in [[session]].
-// NOT YET IMPLEMENTED — Phase 4b will detect this session-level step-2 key.
-// RED until 4b.
+// neg_step2_dialect_overlay.toml's [[session]] sets dialect_overlay = "my_overlay",
+// and no file of that name is beside the configuration file. A load failure is
+// reported at the key path where the value was written, and dialect_overlay is
+// not a deferred key (098-dialect-overlay, contracts W-8). LoadSelectors'
+// T028_DialectOverlayFileMissing asserts the same outcome for its own battery.
 
-TEST(LoadNegativeBattery, T018_Step2DialectOverlay) {
+TEST(LoadNegativeBattery, T018_SessionDialectOverlayFileMissing) {
     auto result = load(neg_fixture("neg_step2_dialect_overlay.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for dialect_overlay (step-2 deferred); "
-           "Phase 4b step-2 detection not yet implemented — RED expected";
+    ASSERT_FALSE(result.has_value()) << "an absent dialect_overlay file must fail the load";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
                          "session[0].dialect_overlay"))
-        << "expected recognized_not_yet_supported_step2 at "
-           "\"session[0].dialect_overlay\"";
+        << "expected invalid_or_contradictory_selector at \"session[0].dialect_overlay\"";
+    for (const auto& d : result.error()) {
+        EXPECT_NE(d.reason, RC::recognized_not_yet_supported_step2)
+            << "no key in this fixture is deferred; got one at " << d.key_path << ": " << d.message;
+    }
 }
 
 // ── recognized_not_yet_supported_step2 — sub-cell (c): dictionary.kind="version"
