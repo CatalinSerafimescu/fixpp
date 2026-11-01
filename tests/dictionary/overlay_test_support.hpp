@@ -6,7 +6,6 @@
 // research R-5's read seam (src/dictionary/overlay_merge.hpp).
 
 #include <gtest/gtest.h>
-#include <unistd.h>
 
 #include <atomic>
 #include <cstdint>
@@ -29,6 +28,7 @@
 
 #include "overlay_merge.hpp"
 #include "overlay_patch.hpp"
+#include "support/temp_dir.hpp"
 
 namespace overlay_test {
 
@@ -50,7 +50,7 @@ public:
     explicit temp_file(std::string_view contents) {
         static std::atomic<unsigned> seq{0};
         path_ = std::filesystem::temp_directory_path() /
-                ("fixpp_098_overlay_" + std::to_string(::getpid()) + "_" +
+                ("fixpp_098_overlay_" + std::to_string(fixpp::test_support::current_pid()) + "_" +
                  std::to_string(seq.fetch_add(1)) + ".xml");
         std::ofstream out(path_, std::ios::binary | std::ios::trunc);
         out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
