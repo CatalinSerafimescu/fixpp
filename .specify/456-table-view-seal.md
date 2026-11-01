@@ -1431,6 +1431,16 @@ must return exactly those two lines and nothing else, and a bare `friend` matche
 that pattern is itself a failure (it is either a third friendship or a spelling the gate cannot
 read).
 
+> **Updated (098-dialect-overlay, 2026-11-01).** A third friendship is deliberate:
+> `friend struct table_view_test_access;` inside `table_view`. It gives read-only test access to the
+> stores, for 098's dictionary comparator (`specs/098-dialect-overlay/research.md` R-10 §2, Correction).
+> It is defined only in `tests/support/table_view_test_access.hpp`, which is never installed. It follows
+> the repo's named-friend test-access pattern (`framer_test_access`, `dict_hooks_test_access`) and adds
+> no population path: population stays `table_view_builder`'s. The census is therefore three
+> declarations, and the recipe becomes
+> `grep -nE '^[[:space:]]*friend[[:space:]]+(class[[:space:]]+(table_view|table_view_builder)|struct[[:space:]]+table_view_test_access);' include/fixpp/dict/table_view.hpp`,
+> which must return exactly those three lines. A `friend` outside that pattern is still a failure.
+
 *The single `public:` band — a LAYOUT guard, not a completeness proof.* `class table_view` has
 **exactly one `public:` label** today, and exactly one `private:`, at the data members; the seal adds
 a second `private:` before the *"Build-time population surface"* banner, so the `public:` count stays
