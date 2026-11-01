@@ -34,6 +34,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <typeinfo>
 #include <utility>
 #include <vector>
@@ -331,6 +332,50 @@ TEST(OverlayRefusalW3Xml, AdditionToAnInlinedComponentReachingATagTheParentDecla
                                                  " </components>\n"));
     expect_refused<overlay_conflict_error>(
         p, {"tag occurs twice at one level", "tag 58", "msgtype=\"D\""}, "upward closure");
+}
+
+// Step 7's level sets: a new component `Wide` holding Symbol(55) and `n` new fields,
+// inlined by all three messages. NewOrderSingle then reaches Symbol through
+// Instrument and Wide, and through Inst2 when the base has it. These rows pin the
+// coalesced counts the check reads, not the check's complexity.
+constexpr std::string_view kInst2 =
+    "  <component name='Inst2'>\n"
+    "   <field name='Symbol' required='N' />\n"
+    "  </component>\n";
+
+std::string wide_overlay(int n) {
+    std::string fields;
+    std::string refs = "   <field name='Symbol' required='N' />\n";
+    for (int i = 0; i < n; ++i) {
+        std::string const name = "Wide" + std::to_string(i);
+        fields += field_def(9000 + i, name, "STRING");
+        refs += "   <field name='" + name + "' required='N' />\n";
+    }
+    std::string messages;
+    for (auto const& [name, type, cat] :
+         {std::tuple{"Heartbeat", "0", "admin"}, std::tuple{"NewOrderSingle", "D", "app"},
+          std::tuple{"ExecutionReport", "8", "app"}}) {
+        messages += std::string{"  <message name='"} + name + "' msgtype='" + type + "' msgcat='" +
+                    cat +
+                    "'>\n"
+                    "   <component name='Wide' required='N' />\n"
+                    "  </message>\n";
+    }
+    return overlay_doc(" <messages>\n" + messages + " </messages>\n <components>\n" +
+                       "  <component name='Wide'>\n" + refs + "  </component>\n" +
+                       " </components>\n <fields>\n" + fields + " </fields>\n");
+}
+
+TEST(OverlayRefusalW3Xml, ATagReachedThreeTimesWhereTheBaseHasItTwiceLoads) {
+    auto const p = probe(base_doc({}, kInst2, {}, "   <component name='Inst2' required='N' />\n"),
+                         wide_overlay(300));
+    ot::expect_loaded_at_prediction(p, "three times, base twice");
+}
+
+TEST(OverlayRefusalW3Xml, ATagAWideComponentAddsToAMessageLevelIsRefused) {
+    auto const p = probe(base_doc(), wide_overlay(300));
+    expect_refused<overlay_conflict_error>(
+        p, {"tag occurs twice at one level", "tag 55", "msgtype=\"D\""}, "wide component");
 }
 
 // ── repeated base keys ───────────────────────────────────────────────────────

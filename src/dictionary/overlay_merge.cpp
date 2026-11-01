@@ -762,23 +762,48 @@ struct def_info {
     std::uint64_t entries = 0;
 };
 
-// The tags a definition emits at its own level, each counted to at most two.
+// The tags a definition emits at its own level, sorted by tag, each counted to at
+// most two.
 using level_set = std::vector<std::pair<std::uint16_t, std::uint8_t>>;
 
-void level_add(level_set& s, std::uint16_t tag, std::uint8_t n) {
-    auto const it =
-        std::ranges::lower_bound(s, tag, {}, &std::pair<std::uint16_t, std::uint8_t>::first);
-    if (it != s.end() && it->first == tag) {
-        it->second = static_cast<std::uint8_t>(std::min(2, it->second + n));
-    } else {
-        s.insert(it, {tag, std::min<std::uint8_t>(2, n)});
-    }
+// Two occurrence counts summed, saturated at two.
+[[nodiscard]] std::uint8_t level_count_add(std::uint8_t a, std::uint8_t b) noexcept {
+    return static_cast<std::uint8_t>(std::min(2, int{a} + int{b}));
 }
 
-void level_merge(level_set& into, level_set const& from) {
-    for (auto const& [t, n] : from) {
-        level_add(into, t, n);
+// Makes a level set of `s`, which holds (tag, count) pairs in any order with any
+// repeats: one sort, then each run of one tag coalesced into one entry.
+void level_coalesce(level_set& s) {
+    std::ranges::sort(s, {}, &std::pair<std::uint16_t, std::uint8_t>::first);
+    std::size_t w = 0;
+    for (auto const& [t, n] : s) {
+        if (w > 0 && s[w - 1].first == t) {
+            s[w - 1].second = level_count_add(s[w - 1].second, n);
+        } else {
+            s[w++] = {t, level_count_add(0, n)};
+        }
     }
+    s.resize(w);
+}
+
+// The level set of both inputs' occurrences, by a two-pointer merge.
+[[nodiscard]] level_set level_merge(level_set const& a, level_set const& b) {
+    level_set out;
+    out.reserve(a.size() + b.size());
+    auto ia = a.begin();
+    auto ib = b.begin();
+    while (ia != a.end() || ib != b.end()) {
+        if (ib == b.end() || (ia != a.end() && ia->first < ib->first)) {
+            out.push_back(*ia++);
+        } else if (ia == a.end() || ib->first < ia->first) {
+            out.push_back(*ib++);
+        } else {
+            out.emplace_back(ia->first, level_count_add(ia->second, ib->second));
+            ++ia;
+            ++ib;
+        }
+    }
+    return out;
 }
 
 using child_map = std::unordered_map<node_ptr, std::vector<child_rec>>;
@@ -923,13 +948,14 @@ level_set const& level_of(child_map const& children, std::unordered_map<node_ptr
         level_set s;
         for (child_rec const& c : children.at(d)) {
             if ((c.k == child_rec::kind::field || c.k == child_rec::kind::group) && c.tag != 0) {
-                level_add(s, c.tag, 1);
+                s.emplace_back(c.tag, 1);
             } else if (c.k == child_rec::kind::component && c.target) {
                 if (auto const it = memo.find(c.target.key()); it != memo.end()) {
-                    level_merge(s, it->second);
+                    s.insert(s.end(), it->second.begin(), it->second.end());
                 }
             }
         }
+        level_coalesce(s);
         open.erase(d);
         memo[d] = std::move(s);
         stack.pop_back();
@@ -1256,13 +1282,13 @@ void xml_overlay_merge::impl::check_conflicts(walk_result const& merged,
         level_set bl;
         for (vnode const part : {merged.header, m, merged.trailer}) {
             if (part) {
-                level_merge(ml, level_of(merged.children, merged_levels, part.key()));
+                ml = level_merge(ml, level_of(merged.children, merged_levels, part.key()));
             }
         }
         if (m.base) {
             for (vnode const part : {base.header, m, base.trailer}) {
                 if (part) {
-                    level_merge(bl, level_of(base.children, base_levels, part.key()));
+                    bl = level_merge(bl, level_of(base.children, base_levels, part.key()));
                 }
             }
         }
@@ -1271,13 +1297,14 @@ void xml_overlay_merge::impl::check_conflicts(walk_result const& merged,
         }
     }
     // Components and groups: their own level.
+    static level_set const kNoBaseLevel;
     for (vnode const v : merged.visit_order) {
         std::string_view const k = name_of(v.node());
         if ((k != "component" && k != "group") || !changed.contains(v.key())) {
             continue;
         }
         level_set const& ml = level_of(merged.children, merged_levels, v.key());
-        level_set const bl = v.base ? level_of(base.children, base_levels, v.key()) : level_set{};
+        level_set const& bl = v.base ? level_of(base.children, base_levels, v.key()) : kNoBaseLevel;
         if (auto const t = twice(ml, bl)) {
             refuse_twice(*t, describe(v.node()));
         }
@@ -2170,13 +2197,14 @@ void orchestra_overlay_merge::impl::check_conflicts(walk_result const& merged,
         conflict("tag occurs twice at one level: tag " + std::to_string(tag) +
                  " occurs twice at the level of " + where + ", where the base has it at most once");
     };
+    static level_set const kNoBaseLevel;
     for (vnode const v : merged.visit_order) {
         if (!changed.contains(v.key())) {
             continue;
         }
         pugi::xml_node const n = v.node();
         level_set const& ml = level_of(merged.children, merged_levels, v.key());
-        level_set const bl = v.base ? level_of(base.children, base_levels, v.key()) : level_set{};
+        level_set const& bl = v.base ? level_of(base.children, base_levels, v.key()) : kNoBaseLevel;
         if (auto const t = twice(ml, bl)) {
             refuse_twice(*t, orch_describe(name_of(n) == "fixr:structure" ? n.parent() : n));
         }
