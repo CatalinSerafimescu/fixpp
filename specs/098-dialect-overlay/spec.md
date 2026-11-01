@@ -293,7 +293,7 @@ error.
 2. **Given** an overlay that marks a base-Required field as not required, **When** it is loaded, **Then**
    the load fails with a conflict error naming the field and the MsgType.
 3. **Given** an overlay larger than the byte cap, deeper than the depth cap, carrying a DOCTYPE or entity
-   declaration, adding more entries or references than a cap allows, or whose references would make the
+   declaration, adding more entries or more reference elements than a cap allows, or whose references would make the
    loader's expansion take more steps than the expansion budget allows, **When** it is loaded, **Then** the load
    fails with a limit error naming the cap, before the expansion exceeds the budget, and through the C
    ABI it returns `FIXPP_ERR_DICT_LIMIT_EXCEEDED`.
@@ -521,14 +521,17 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
 
 - **FR-009 (caps)**: The overlay load MUST enforce a cap on the overlay's size in bytes (before parse), its
   element nesting depth, its count of **new** field, message and component definitions (2c §4.4.2 gives
-  starting values; plan fixes them), and its count of added references, and MUST refuse a DOCTYPE or
+  starting values; plan fixes them), and its count of overlay reference elements (each counts whether the
+  splice appends it or merges it in place: a Required promotion, an identical redeclaration), and MUST refuse a DOCTYPE or
   entity declaration. It MUST also bound the **work** the overlay causes: before any check that follows
   references, the splice and the dictionary build, it MUST compute, without recursion, how many steps
   (child nodes visited, references included) the loader's expansion of the merged messages, components
   and groups will take, and refuse when the overlay's increase over the base exceeds a fixed budget. The
   build MUST refuse as soon as its own step count passes that prediction, so every refusal happens
   before the expansion exceeds the budget, even if the prediction misses an expansion. Any base the base loader accepts is admitted with an
-  empty overlay. Exceeding any cap or the budget fails the load with a limit error naming it.
+  empty overlay. Exceeding any cap or the budget fails the load with a limit error naming it. The name
+  is carried by the C++ exception's `what()` and by a TOML diagnostic's message; the C ABI and Python
+  report a code only (`FIXPP_ERR_DICT_LIMIT_EXCEEDED`, FR-013, B-098-6).
 - **FR-010 (cycles)**: The merged component graph MUST be checked for reference cycles, including cycles
   that pass through base components; a cycle fails the load with a schema error instead of unbounded
   recursion. The check runs in the same non-recursive walk as FR-009's budget, before any other step
@@ -584,9 +587,11 @@ lead a later reader to "fix" the code back to it (issue #334's failure mode).
   against a seeded mismatch before it is trusted, and a patch hunk that matches zero or two places MUST
   fail its cell.
 - **FR-018 (wire witnesses)**: Inbound session witnesses MUST show each US1 acceptance scenario on the
-  shipped receive path, each behaving as it does today on the unmodified base (refused, or for AS-2 read
-  as a field after the group; AS-5's two frames are accepted there, because the promoted field is Optional
-  in the base; contracts W-5 states each frame's outcome), and each matching the equivalent edited XML. The unmodified-base arm is a
+  shipped receive path, each behaving as it does today on the unmodified base (refused, AS-2's frame
+  included: the validator's field walk is flat, so it meets 5002, which the base does not declare for that
+  MsgType; AS-5's two frames are accepted there, because the promoted field is
+  Optional in the base; contracts W-5 states each frame's outcome, and T004a derives each refusal from
+  source), and each matching the equivalent edited XML. The unmodified-base arm is a
   negative control, not a RED arm: its assertion holds before and after 098.
 - **FR-019 (records)**: D-009 and COM-011 flip to `done` with their witnesses; D-009 gains a
   coverage-index entry. L-002-2 and L-422-1 retire. B-066-1's extension story is updated to the shipped

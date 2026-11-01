@@ -15,7 +15,7 @@ by `tests/fuzz/CMakeLists.txt`'s corpus glob with label `fuzz` and exists only i
 | W-0 | `dictionary_pure_tests` | Self-test of test-local declared data, with no isolation hazard, like `T020_DeferredSetExactCoverage`. |
 | W-1 | `dictionary_pure_tests` | Pure, single-threaded dictionary read/parse/compare tests. |
 | W-2 | `dictionary_pure_tests` | Pure, single-threaded vendored-base comparisons. Its census is the comparator's key source for two dictionaries built in-process, not a completeness gate over a population: no W-2 row asserts that a closed list of shipped files or tags equals a fixed set, which is what makes W-7 isolation-sensitive. |
-| W-3 | `dictionary_pure_tests` | Pure, single-threaded refusal tests. |
+| W-3 | `dictionary_pure_tests` | Pure, single-threaded refusal tests. Its budget recipe row reads every vendored base, but it asserts that one constant equals the recipe's result over them, not that a closed list of shipped files or tags equals a fixed set, which is what makes W-7 isolation-sensitive (the `dictionary_dict_enum_census_test` block's comment: "an exact-set completeness gate is isolation-sensitive"). |
 | W-4 | `dictionary_pure_tests` | Pure, single-threaded dispatch tests. |
 | W-5 | `session_pure_tests` | Pure session test; this bucket supplies `src` and `FIXPP_DICT_DATA_DIR`. |
 | W-6 | `session_pure_tests` | Pure session send tests with no isolation hazard. |
@@ -81,6 +81,7 @@ as a RED arm before production code.
 |---|---|---|---|---|
 | W-0 seeded rows | no (test-only, but written in plan Phase 2 against Phase 2's code; the header-store row joins in Phase 5) | reported set equals the seed's declared expected set | — | the seeded rows themselves; M-0 |
 | W-0 identical pair | no (as above) | zero differences | — | control |
+| W-0 invariant seed | no (as above) | the comparator's invariant check, fed hand-built store values that break one invariant, reports that invariant | — | the seed itself; outside the expected-set union rule |
 | W-1 rows (including the `tolerant` policy rows) | no | zero differences vs the complete reference; no counter-origin refusal; step counter = prediction | — | qf: M-1, M-2, M-3; orch: M-1o, M-2o, M-3; both: M-17, M-24 at each loader (the `tolerant` rows refuse); each row's in-test seeded mismatch |
 | W-2 rows, side against side and against the census | no | zero differences vs the patched base; no counter-origin refusal; step counter = prediction | — | M-3; M-17; a zero- or two-match hunk fails the cell; each row's in-test seeded mismatch; W-0's census row |
 | W-2 empty-overlay rows (every base) | no | zero differences vs `load(base)`; no refusal; step counter = prediction | — | M-17; each row's seeded mismatch: `load(base)` vs the in-test base copy with one unreferenced field definition removed gives at least one difference naming its store (a zero- or two-match anchor, or a copy that does not load, fails the cell) |
@@ -101,6 +102,9 @@ as a RED arm before production code.
 | W-8 AS-1 (no overlay: dictionary filled, `open()` succeeds) | yes | `config.dictionary` set, session opens | **fails** (null; `invalid_session_config`) | **U** |
 | W-8 AS-2, shared pointer, AS-5 | yes | merged dictionary per session as stated | **fails** (the key is refused as deferred) | **U**; M-10 for the stated reason |
 | W-8 AS-3, AS-4, value checks, two origins, no `[dictionary]` | yes | the stated reason class at the stated key path | **fails** (`recognized_not_yet_supported_step2` instead) | **U** |
+| W-8 engine dictionaries (on the AS-2 bundle, exactly one entry, the no-overlay session's pointer) | yes | `engine.dictionaries` as stated | **fails** (the AS-2 file reports the deferred key, so no bundle is returned) | **U** |
+| W-8 location (each diagnostic's `location`, asserted together with its stated reason class) | yes | the value's position in its raw table, with the stated reason class | **fails** (the reason class is `recognized_not_yet_supported_step2`; the location alone would pass, because the deferred-key diagnostic is located at the same value) | **U** |
+| W-8 failure message (a load failure's `message` carries the loader's `what()`) | yes | the loader's text | **fails** (the message is the deferred-key text "dialect_overlay is recognized but not yet supported") | **U** |
 | W-8 rewritten cells (`T018_SessionDialectOverlayFileMissing`, `T028_DialectOverlayFileMissing`, `T020_RootDialectOverlayRefused`) | yes | the new outcomes (W-8 below) | **fails** (the old outcomes) | **U** |
 | W-8 `T020_DeferredSetExactCoverage` over the remaining keys | yes | every remaining key deferred | passes (the remaining keys are deferred on the unfixed tree too) | negative control: it guards the remaining keys before and after |
 | W-8 deferred keys at session scopes (a remaining deferred key in `[default]` and in `[[session]]`) | yes | `recognized_not_yet_supported_step2` at `default.<key>` and `session[0].<key>` | passes | negative control: the scope-aware change touches `dialect_overlay` only |
@@ -180,7 +184,15 @@ example the context `required_members` seed has equal bare `group_required_membe
 the key sources: an unused extra component on one side; a
 context record that differs only where the bare value would mask it; and a census mismatch (the census
 of a document that differs from the loaded one in one component member). A pair of identical loads MUST
-report none. **RED**: the seeded rows are the RED arms; mutant **M-0** (the comparison of one declared
+report none. Where a coupled entry's reason is an invariant between two stores the comparator reads (the
+reverse pair map as the inverse of the forward map, a bit cache against its map), the comparator asserts
+that invariant on each side (research R-10 §3). That check is a function of the store values it reads,
+not of a `table_view`: no loader or `table_view_builder` call can build a dictionary whose pair
+directions disagree (`set_length_pair_data_tag` keeps them inverse), so a dictionary seed cannot reach the
+check. Its seed is therefore not a pair of
+valid dictionaries: it feeds the check hand-built store values that break one invariant (for example a
+reverse pair map missing one inverse entry), and the check MUST report that invariant. It sits outside the
+expected-set union rule above. **RED**: the seeded rows are the RED arms; mutant **M-0** (the comparison of one declared
 entry, the context `required_members` one, removed while the entry stays listed) turns that entry's row
 RED.
 
@@ -242,7 +254,12 @@ line), applied by a line-based test helper. `load_with_overlay(base, overlay)` v
 `load_from_string(patched base)` → zero differences, side against side and, for `component_fields` /
 `group_fields`, against the raw census under R-10's wrap condition. Kind coverage per FR-017; the FIX44
 overlay also extends more than 64 existing messages (N-7: accepted, since the entry caps count new
-definitions). A FIXT11 row, beyond FR-017's three vendored bases and backing FR-019's FIXT.1.1 scope:
+definitions). The FIX44 overlay is also W-5's, W-9's and W-10's, so, among its other additions, it
+declares each constant `tests/session/test_098_inbound_frames.hpp` names, with exactly that header's values: 5001 on 35=D, 5002 in Parties, MsgType
+`U1` with its required field, the pair 5010/5011 on the MsgType that header names, enum value `Z` on
+OrdType(40), and an Optional→Required promotion of a field that stays Optional on a second FIX44 MsgType
+(AS-5). The promoted field's MsgType differs from every other frame's, or every frame on that MsgType
+carries the field, so each frame is valid on the edited dictionary but for its one scenario defect. A FIXT11 row, beyond FR-017's three vendored bases and backing FR-019's FIXT.1.1 scope:
 a header-field overlay of `FIXT11.xml` and its insertion patch, under the same rules. Header-only is
 enough for FR-019's FIXT.1.1 claim. FIXT11.xml holds the transport header and the session messages, and
 every other kind goes through the same splice code on the other bases. The FIXT-specific part, the
@@ -425,11 +442,17 @@ direct loader called with `tolerant` loads.
 
 The base-session arm is in its own file, `tests/session/test_098_dialect_overlay_inbound_base.cpp`
 (joins `session_pure_tests`). It uses only the existing API, so it compiles on the unfixed tree.
-- The frames both files send come from a shared header, `tests/session/test_098_inbound_frames.hpp`.
+- The frames both files send come from a shared header, `tests/session/test_098_inbound_frames.hpp`. It
+  names as constants the scenario tags (5001, 5002, U1's required field, 5010/5011, OrdType's `Z`), the
+  MsgTypes each frame uses and the promoted field with its two MsgTypes, and W-2's FIX44 overlay declares
+  each of them with exactly those values (W-2).
 - It is written and run at the baseline (tasks T004a), which is the "before" that FR-018's negative
   control needs, and it runs in every later suite run, the "after".
 - Its expected outcome for each frame is stated here, before any run:
-  - AS-1, AS-2, AS-3, AS-4 and AS-6 are refused;
+  - AS-1, AS-2, AS-3, AS-4 and AS-6 are refused. AS-2 is refused too, not read as a field after the
+    group: `dictionary_driven_validator::validate`'s field walk (its step 1) is flat, so it meets 5002,
+    which the base does not declare for that MsgType (spec FR-018). T004a confirms from source that the
+    gate's parse does not fail the frame first;
   - AS-5's two frames are accepted, because the promoted field is Optional in the base;
   - the enum-closure frame is accepted.
 - Each refused frame's refusal is derived from source before the cell is written: the message type that
@@ -515,6 +538,12 @@ More rows:
 - **Engine dictionaries.** On the AS-2 bundle, `engine.dictionaries` holds exactly one entry. That entry
   is the pointer of the session without an overlay, and each overlay session's pointer differs from it.
   This shows FR-015's "keeps holding the base" and FR-021's unchanged registry input.
+- **Location.** Each diagnostic's `location` is the value's position in the raw table where it was
+  written (research R-9). The cell asserts it together with that diagnostic's stated reason class, so it
+  is a U arm: on the unfixed tree the deferred-key diagnostic sits at the same location, with
+  `recognized_not_yet_supported_step2`.
+- **Message.** A load failure's `message` carries the loader's `what()` (research R-9). On the unfixed
+  tree it is the deferred-key text.
 - **Deferred keys at session scopes** (negative control). A remaining deferred key (`tracer`) in
   `[default]` and in a `[[session]]` gives `recognized_not_yet_supported_step2` at `default.tracer` and
   `session[0].tracer`. The scope-aware change touches `dialect_overlay` only.
@@ -550,7 +579,8 @@ with `git grep -n dialect_overlay -- tests/config`).
 **RED**: **U** for every row except the negative controls `T020_MissingRequired_Dictionary`,
 `T020_DeferredSetExactCoverage` and the session-scope deferred-key row (arm table: on the unfixed tree
 `config.dictionary` is null, so AS-1's `open()` fails with `invalid_session_config`, and every
-`dialect_overlay` row gets `recognized_not_yet_supported_step2` instead of its stated outcome);
+`dialect_overlay` row gets `recognized_not_yet_supported_step2` instead of its stated outcome, so the
+engine-dictionaries row gets no bundle);
 **M-10** (the resolver assigns the base to every session) for AS-2/AS-5, the reason those rows state.
 
 ## C ABI and Python
@@ -666,7 +696,7 @@ harness aborts on the counter origin).
 
 **W-12 Performance (SC-005, `[const §VIII.2]`, `[const §VIII.3]`).** Measured in the verify record, not
 a ctest. `/speckit-verify`'s bench step is not this measurement. It compares a run against a stored
-baseline, which `[const §VIII.2]` says does not gate, and it is N/A without one. So tasks T094/T095 run
+baseline, which `[const §VIII.2]` says does not gate, and it is N/A without one. So tasks T094, T094a and T095 run
 everything below.
 - **Load-time ratio (SC-005).** `load_with_overlay(FIX50SP2, the named at-cap fixture overlay)` against
   `load(FIX50SP2)`, both in the 098 head's Release build.
@@ -686,7 +716,9 @@ everything below.
     found through the seam's prediction. This answers how long an admitted overlay can take (US2).
 - **Send path (`[const §VIII.2]`).** `bench/session/session_send_bench.cpp`, paired base-vs-candidate
   on one machine.
-  - The base is the merge-base with `origin/main` and the candidate is the head, both Release.
+  - The base is the merge-base with `origin/main` and the candidate is the head, both Release. The base
+    tree's root path has the head root's length, and its `.text` check runs before any paired run
+    (tasks Execution rules, Builds): a source-root literal of another length shifts code layout.
   - Runs are A-B-A-B, compared min per tree.
   - Pass: a slowdown of no more than +5%. A larger slowdown needs `[const §VIII.2]`'s recorded
     measurement, a rationale and approval by someone other than the author. CI's provisional band is not
@@ -709,8 +741,12 @@ everything below.
   - `bench/dictionary/xml_loader_bench` is a `paired` row in `bench/ci-suite.txt`, so CI's paired gate
     runs it at its provisional threshold.
   - T095 also runs it paired locally under the send path's protocol, with a pass of ≤ +5%.
-  - `OrchestraLoader::load` has no bench. The T094 driver times `load(OrchestraFIXLatest.xml)` at base
-    and head, recorded, not gated.
+  - `OrchestraLoader::load` runs the same three changes and has no bench. A seam-free scratch driver
+    (tasks T094a), which calls only `OrchestraLoader::load`, an API both trees have, is built against the
+    merge-base's and the head's Release `fixpp_dictionary` and times `load(OrchestraFIXLatest.xml)`.
+    T095 runs it under the send path's protocol: A-B-A-B, min per tree, pass ≤ +5%; a larger slowdown
+    needs `[const §VIII.2]`'s recorded measurement, a rationale and approval by someone other than the
+    author.
 - **Footprint.** `bench/dictionary/table_view_footprint_bench` is run at base and head. The record holds
   `sizeof(table_view)` and the `header_bits_` heap words per copy for FIX44 and FIX50SP2, as its
   `group_bits_` note records that store. Recorded, not gated (a `no` row).

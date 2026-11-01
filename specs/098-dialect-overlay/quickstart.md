@@ -38,7 +38,7 @@ ctest --preset linux-clang-debug -L 098 --no-tests=error --output-on-failure
 L="$PWD/build/linux-clang-debug/lib"
 PYTHONPATH="$L" python3 -c 'import fixpp; print(fixpp.__file__)'  # must print a path under $L
 W=$(mktemp -d) && cp bindings/python/tests/wheel/test_import_surface.py "$W"/
-PYTHONPATH="$L" python3 -m pytest "$W/test_import_surface.py"    # W-10 import surface
+PYTHONPATH="$L" python3 -m pytest "$W/test_import_surface.py" -rs  # W-10 import surface; zero skipped
 ```
 
 The wheel test is run from a copy, as CI's wheel job runs the wheel suite: the in-tree `conftest.py`
@@ -46,11 +46,13 @@ ignores `wheel/*`, and the wheel suite shares basenames with the in-tree one. Th
 0: if it fails (SWIG not on `PATH`, say), a `lib/` left by an earlier Python build still imports from
 `$L`, and the `__file__` check cannot tell that it is stale.
 
-W-8's two negative controls run in the same binaries and must be GREEN here (tasks Phase 2).
+W-8's two negative controls run in the same binaries and must be GREEN here (tasks Phase 2). The
+import-surface run's summary must show zero skipped: a skip is not the RED (contracts W-10).
 
 Expected: each listed arm RED for its stated reason (W-6: 5020, or the 5030/5031 pair, found after the
 first body field; W-8 AS-1: `open()` returns `invalid_session_config`; the other W-8 rows:
-`recognized_not_yet_supported_step2` instead of the stated outcome; W-9: the version reads 1.12, and the
+`recognized_not_yet_supported_step2` instead of the stated outcome, so the engine-dictionaries cell gets
+no bundle and the location cell meets the right location with that reason class; W-9: the version reads 1.12, and the
 golden reports `fixpp_dict_load_from_xml_with_overlay` missing from the library as its only difference;
 W-10: the exact-set
 assertion, whose only difference is the missing `dict_load_from_xml_with_overlay`). An ImportError, a
@@ -85,8 +87,10 @@ summary must show zero skipped (contracts W-10).
 L="$PWD/build/linux-clang-debug/lib"
 PYTHONPATH="$L" python3 -m pytest bindings/python/tests/test_098_dialect_overlay.py -v -rs
 W=$(mktemp -d) && cp bindings/python/tests/wheel/test_import_surface.py "$W"/
-PYTHONPATH="$L" python3 -m pytest "$W/test_import_surface.py"
+PYTHONPATH="$L" python3 -m pytest "$W/test_import_surface.py" -rs
 ```
+
+Both summaries must show zero skipped.
 
 Run the full suite at the end of phases 3, 5 and 7 (plan). The existing header-order witnesses named in
 W-6 must stay green with unchanged expected bytes.
@@ -118,7 +122,10 @@ ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure
 ```
 
 The ten-minute campaign is tasks T095a, with research R-11's flags (`-max_len`, `-timeout`,
-`-rss_limit_mb`) and its pass condition, which includes no `timeout-` artifact. `/speckit-verify` Step 7
+`-rss_limit_mb`) and its pass condition, which includes no `timeout-` artifact. libFuzzer writes new
+inputs into the first corpus directory, so the campaign names an empty scratch directory first and
+`tests/fuzz/corpus/dict_overlay` second, and `git status --porcelain` must be empty after it (research
+R-11, Corpus directories). `/speckit-verify` Step 7
 (`--fuzz-duration=600`) runs its generic command as well.
 
 ## 6. Performance (W-12)
@@ -128,8 +135,9 @@ time `XmlLoader::load(FIX50SP2.xml)` and `load_with_overlay(FIX50SP2.xml, <the n
 overlay>)`. Take one discarded warm-up run of each, then at least five runs each, interleaved; the ratio of
 medians must be ≤ 1.5. Record the machine, the commit, both medians and minima, and the fixture's
 expansion count. Then run the characterisations, and the paired base-vs-candidate runs of
-`session_send_bench` and `xml_loader_bench` (A-B-A-B, min per tree, ≤ +5%) with the footprint bench, as
-W-12 lists. `/speckit-verify`'s bench step is not the paired run.
+`session_send_bench`, `xml_loader_bench` and the seam-free `OrchestraLoader::load` driver (A-B-A-B, min
+per tree, ≤ +5%; tasks T094a) with the footprint bench, as W-12 lists. The merge-base tree's root has the
+head root's length, checked first (tasks Execution rules, Builds). `/speckit-verify`'s bench step is not the paired run.
 
 ## 7. Records (W-13)
 
