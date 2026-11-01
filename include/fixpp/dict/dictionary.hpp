@@ -219,6 +219,13 @@ private:
     friend class XmlLoader;
     friend class OrchestraLoader;  // 074: native Orchestra reader shares the private handle-ctor
 
+    // 098 (D-009 dialect overlay): test-only read access to the metadata handle goes
+    // through ONE named friend, defined in tests/support/dictionary_test_access.hpp
+    // (never installed). Give it read accessors only. Unconditional on purpose: a
+    // member gated behind a test macro would make a test TU's Dictionary a different
+    // class from the library's, an ODR violation (ill-formed, no diagnostic required).
+    friend struct dictionary_test_access;
+
     // Constructed from inside XmlLoader::load*; ctor body lives in the .cpp.
     Dictionary() noexcept = default;
     explicit Dictionary(detail::dict_metadata_handle_ptr handle) noexcept;

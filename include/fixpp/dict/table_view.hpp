@@ -691,6 +691,14 @@ public:
 private:
     friend class table_view_builder;
 
+    // 098 (D-009 dialect overlay): test-only read access to the stores below goes
+    // through ONE named friend, defined in tests/support/table_view_test_access.hpp
+    // (never installed). Give it read accessors only; population stays
+    // `table_view_builder`'s. Unconditional on purpose: a member gated behind a test
+    // macro would make a test TU's table_view a different class from the library's,
+    // an ODR violation (ill-formed, no diagnostic required).
+    friend struct table_view_test_access;
+
     // ── Build-time population surface ────────────────────────────────────────
     // PRIVATE since fixpp#456: every caller reaches these through
     // `table_view_builder` (below), which is the type's only friend that points
