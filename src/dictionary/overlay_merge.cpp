@@ -36,7 +36,6 @@
 #include "overlay_merge.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/error.hpp>
@@ -50,7 +49,6 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -88,16 +86,6 @@ using node_ptr = pugi::xml_node_struct*;
 
 [[noreturn]] void limit(std::string const& what) {
     throw overlay_limit_error("dict::overlay_limit_error: " + what);
-}
-
-// A `<field number>` as the loader parses it: the whole string, 1..65535.
-[[nodiscard]] std::optional<std::uint16_t> parse_tag(std::string_view s) noexcept {
-    int v = 0;
-    auto const r = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || v <= 0 || v > 65535) {
-        return std::nullopt;
-    }
-    return static_cast<std::uint16_t>(v);
 }
 
 [[nodiscard]] bool is_ref_kind(std::string_view k) noexcept {
@@ -141,7 +129,7 @@ template <class KeyFn>
     if (name_of(c) != "field") {
         return std::nullopt;
     }
-    auto const tag = parse_tag(c.attribute("number").as_string(""));
+    auto const tag = parse_field_number(c.attribute("number").as_string(""));
     if (!tag) {
         return std::nullopt;
     }
@@ -484,8 +472,7 @@ void xml_overlay_merge::impl::check_root() const {
                 return;
             }
             int x = 0;
-            auto const res = std::from_chars(s.data(), s.data() + s.size(), x);
-            if (res.ec != std::errc{} || res.ptr != s.data() + s.size() || x < 0) {
+            if (!parse_nonneg_int(s, x)) {
                 v.well_formed = false;
                 return;
             }
@@ -1054,7 +1041,7 @@ xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) 
             if (n.type() != pugi::node_element || name_of(n) != "field") {
                 return;
             }
-            if (auto const tag = parse_tag(n.attribute("number").as_string(""))) {
+            if (auto const tag = parse_field_number(n.attribute("number").as_string(""))) {
                 tag_by_name.emplace(attr_of(n, "name"), *tag);
             }
         });
@@ -1426,26 +1413,15 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
     return k == "fixr:fieldRef" || k == "fixr:componentRef" || k == "fixr:groupRef";
 }
 
-// An Orchestra `id` as the loader's `try_parse_uint16` reads it: the whole string,
-// 0..65535.
-[[nodiscard]] std::optional<std::uint16_t> parse_orch_id(std::string_view s) noexcept {
-    int v = 0;
-    auto const r = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || v < 0 || v > 65535) {
-        return std::nullopt;
-    }
-    return static_cast<std::uint16_t>(v);
-}
-
 [[nodiscard]] std::optional<std::string> orch_id_key_of(pugi::xml_node c, std::string_view kind) {
     if (name_of(c) != kind) {
         return std::nullopt;
     }
-    auto const id = parse_orch_id(c.attribute("id").as_string(""));
-    if (!id) {
+    std::uint16_t id = 0;
+    if (!try_parse_uint16(c.attribute("id").as_string(""), id)) {
         return std::nullopt;
     }
-    return std::to_string(*id);
+    return std::to_string(id);
 }
 
 [[nodiscard]] std::optional<std::string> orch_attr_key_of(pugi::xml_node c, std::string_view kind,
@@ -1494,11 +1470,11 @@ constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", 
     if (!is_orch_ref(name_of(c))) {
         return std::nullopt;
     }
-    auto const id = parse_orch_id(c.attribute("id").as_string(""));
-    if (!id) {
+    std::uint16_t id = 0;
+    if (!try_parse_uint16(c.attribute("id").as_string(""), id)) {
         return std::nullopt;
     }
-    return std::string{name_of(c)} + "|" + std::to_string(*id);
+    return std::string{name_of(c)} + "|" + std::to_string(id);
 }
 
 [[nodiscard]] std::optional<std::string> orch_code_key(pugi::xml_node c) {
@@ -1939,19 +1915,19 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
         }
     };
     each_def("fixr:fields", "fixr:field", [&](vnode, pugi::xml_node n) {
-        if (auto const id = parse_orch_id(n.attribute("id").as_string(""))) {
-            declared.insert(*id);
+        if (std::uint16_t id = 0; try_parse_uint16(n.attribute("id").as_string(""), id)) {
+            declared.insert(id);
         }
     });
     each_def("fixr:components", "fixr:component", [&](vnode d, pugi::xml_node n) {
         r.components.push_back(d);
-        if (auto const id = parse_orch_id(n.attribute("id").as_string(""))) {
-            component_by_id.emplace(*id, d);
+        if (std::uint16_t id = 0; try_parse_uint16(n.attribute("id").as_string(""), id)) {
+            component_by_id.emplace(id, d);
         }
     });
     each_def("fixr:groups", "fixr:group", [&](vnode d, pugi::xml_node n) {
-        if (auto const id = parse_orch_id(n.attribute("id").as_string(""))) {
-            group_by_id.emplace(*id, d);
+        if (std::uint16_t id = 0; try_parse_uint16(n.attribute("id").as_string(""), id)) {
+            group_by_id.emplace(id, d);
         }
     });
     each_def("fixr:messages", "fixr:message", [&](vnode d, pugi::xml_node n) {
@@ -1971,8 +1947,11 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
         if (!nig) {
             return 0;
         }
-        auto const id = parse_orch_id(nig.node().attribute("id").as_string(""));
-        return id && declared.contains(*id) ? *id : 0;
+        std::uint16_t id = 0;
+        return try_parse_uint16(nig.node().attribute("id").as_string(""), id) &&
+                       declared.contains(id)
+                   ? id
+                   : 0;
     };
     auto const records_of = [&](vnode v) {
         std::vector<child_rec> out;
@@ -1980,14 +1959,15 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
             pugi::xml_node const n = c.node();
             child_rec rec;
             std::string_view const k = n.type() == pugi::node_element ? name_of(n) : "";
-            auto const id = parse_orch_id(n.attribute("id").as_string(""));
+            std::uint16_t id = 0;
+            bool const has_id = try_parse_uint16(n.attribute("id").as_string(""), id);
             if (k == "fixr:fieldRef") {
                 rec.k = child_rec::kind::field;
-                rec.tag = id && declared.contains(*id) ? *id : 0;
+                rec.tag = has_id && declared.contains(id) ? id : 0;
             } else if (k == "fixr:groupRef") {
                 rec.k = child_rec::kind::group;
-                if (id) {
-                    if (auto const it = group_by_id.find(*id); it != group_by_id.end()) {
+                if (has_id) {
+                    if (auto const it = group_by_id.find(id); it != group_by_id.end()) {
                         rec.tag = group_tag(it->second);
                         if (rec.tag != 0) {
                             rec.target = it->second;
@@ -1996,8 +1976,8 @@ orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(b
                 }
             } else if (k == "fixr:componentRef") {
                 rec.k = child_rec::kind::component;
-                if (id) {
-                    if (auto const it = component_by_id.find(*id); it != component_by_id.end()) {
+                if (has_id) {
+                    if (auto const it = component_by_id.find(id); it != component_by_id.end()) {
                         rec.target = it->second;
                     }
                 }

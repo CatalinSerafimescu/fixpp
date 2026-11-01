@@ -22,7 +22,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -39,7 +38,6 @@
 #include <ranges>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -150,29 +148,18 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
 }
 
 // ----------------------------------------------------------------------------
-// Non-throwing uint16 id parse — tolerant "skip on lookup miss" style, used
-// by the id-attribute reads below. (It previously also served the
-// `first_member_tag` delimiter scan, which 083 T030 removed.)
-// Skip-on-malformed here is not a correctness path, unlike
+// The non-throwing uint16 id parse is `detail::try_parse_uint16`
+// (dictionary_internal.hpp), used by the tolerant id-attribute reads below.
+// Skip-on-malformed there is not a correctness path, unlike
 // fieldRef/componentRef/groupRef resolution below.
 // ----------------------------------------------------------------------------
-
-[[nodiscard]] bool try_parse_uint16(std::string_view s, std::uint16_t& out) noexcept {
-    int val = 0;
-    auto const r = std::from_chars(s.data(), s.data() + s.size(), val);
-    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || val < 0 || val > 65535) {
-        return false;
-    }
-    out = static_cast<std::uint16_t>(val);
-    return true;
-}
 
 // Strict/throwing id parse for real reference resolution (T013/T014/T016
 // fail-closed contract: a malformed/missing `id=` on a structural element is
 // a malformed dictionary).
 [[nodiscard]] std::uint16_t parse_orchestra_id(pugi::xml_attribute const& attr, char const* what) {
     std::uint16_t out = 0;
-    if (!attr || !try_parse_uint16(std::string_view{attr.as_string("")}, out)) {
+    if (!attr || !detail::try_parse_uint16(std::string_view{attr.as_string("")}, out)) {
         throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: missing/invalid "} +
                                     what + " id attribute");
     }
@@ -344,8 +331,8 @@ private:
     // order during `expand_field_list` (Entity 2), with the global repopulated
     // afterwards as a first-seen projection. Leaving the function defined but
     // uncalled is the orphan a `/simplify` pass is supposed to clean up, and
-    // cppcheck flagged it as `unusedPrivateFunction`. `try_parse_uint16` is
-    // NOT removed — it has other callers.
+    // cppcheck flagged it as `unusedPrivateFunction`. `try_parse_uint16`
+    // (dictionary_internal.hpp) is NOT removed — it has other callers.
 
     std::pmr::memory_resource* mr_;
 
@@ -582,8 +569,8 @@ void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
         auto const parent_1based = static_cast<std::uint16_t>(i + 1);
         for (auto const& child : components_[i].node.children("fixr:componentRef")) {
             std::uint16_t child_xml_id = 0;
-            if (!try_parse_uint16(std::string_view{child.attribute("id").as_string("")},
-                                  child_xml_id)) {
+            if (!detail::try_parse_uint16(std::string_view{child.attribute("id").as_string("")},
+                                          child_xml_id)) {
                 continue;  // resolved (or rejected) properly at expand-time below
             }
             auto const cit = component_index_by_xml_id_.find(child_xml_id);
@@ -882,7 +869,7 @@ void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) 
         return;
     }
     auto const id_of = [](pugi::xml_node const& n, std::uint16_t& out) {
-        return try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
+        return detail::try_parse_uint16(std::string_view{n.attribute("id").as_string("")}, out);
     };
     std::vector<std::uint16_t> tags;
     std::vector<bool> walked(components_.size(), false);

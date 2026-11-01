@@ -21,7 +21,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -40,7 +39,6 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -195,13 +193,6 @@ constexpr VersionEntry kVersionTable[] = {
 // in dictionary_internal.hpp — shared with dictionary.cpp so the build-time
 // sort key and the query-time lookup key are byte-identical.
 // ----------------------------------------------------------------------------
-
-// Helper for parse_version: parse a non-negative decimal int from `s`,
-// requiring the whole span to be consumed. Returns false on any failure.
-[[nodiscard]] bool parse_nonneg_int(std::string_view s, int& out) noexcept {
-    auto const r = std::from_chars(s.data(), s.data() + s.size(), out);
-    return r.ec == std::errc{} && r.ptr == s.data() + s.size() && out >= 0;
-}
 
 // ----------------------------------------------------------------------------
 // Build-time scaffolding (NOT PMR — uses default allocators because pugixml
@@ -395,14 +386,15 @@ void LoaderState::parse_version(pugi::xml_node const& root) {
     int major = 0;
     int minor = 0;
     int sp = 0;
-    if (std::string const s{major_attr.as_string("")}; !parse_nonneg_int(s, major)) {
+    if (std::string const s{major_attr.as_string("")}; !detail::parse_nonneg_int(s, major)) {
         throw unknown_version_error("dict::unknown_version_error: non-numeric or negative major");
     }
-    if (std::string const s{minor_attr.as_string("")}; !parse_nonneg_int(s, minor)) {
+    if (std::string const s{minor_attr.as_string("")}; !detail::parse_nonneg_int(s, minor)) {
         throw unknown_version_error("dict::unknown_version_error: non-numeric or negative minor");
     }
     if (sp_attr != nullptr) {
-        if (std::string const s{sp_attr.as_string("")}; !s.empty() && !parse_nonneg_int(s, sp)) {
+        if (std::string const s{sp_attr.as_string("")};
+            !s.empty() && !detail::parse_nonneg_int(s, sp)) {
             throw unknown_version_error("dict::unknown_version_error: non-numeric servicepack");
         }
     }
@@ -439,20 +431,18 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
             throw xml_parse_error("dict::xml_parse_error: <field> missing number attribute");
         }
         std::string const num_s{number_attr.as_string("")};
-        int tag_i = 0;
-        auto const r = std::from_chars(num_s.data(), num_s.data() + num_s.size(), tag_i);
+        std::optional<std::uint16_t> const parsed = detail::parse_field_number(num_s);
         // fixpp#457: the valid tag range is 1..65535, not 0..65535. Zero is the
         // "absent" answer of several dict/table_view accessors
         // (`length_pair_data_tag`, `data_pair_length_tag`, `group_first_field`),
         // so a zero-numbered field reads as present or absent depending on which
         // direction is asked. Refused with the out-of-range error shape, so a
         // caller already handling <field number="70000"> needs no new arm.
-        if (r.ec != std::errc{} || r.ptr != num_s.data() + num_s.size() || tag_i <= 0 ||
-            tag_i > 65535) {
+        if (!parsed) {
             throw xml_parse_error("dict::xml_parse_error: <field number=\"" + num_s +
                                   "\"> non-numeric or out-of-range");
         }
-        auto const tag = static_cast<std::uint16_t>(tag_i);
+        std::uint16_t const tag = *parsed;
         auto const name = std::string{f.attribute("name").as_string("")};
         auto const type_s = std::string{f.attribute("type").as_string("")};
         if (name.empty()) {
