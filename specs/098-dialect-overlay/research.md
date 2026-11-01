@@ -696,11 +696,24 @@ bare group stores) sees the same document order. The references below are writte
 union of three sources, over both sides:
 - a **raw-document census** of both sides' XML, walked by the test: field numbers and names, message
   types, component names, group nodes, and the (MsgType, parent path, NumInGroup) contexts;
-- a **test-only read of the handle's indexes** through `src/dictionary/dictionary_internal.hpp`
-  (`components_by_name_`, `components_`, `groups_`, `group_ctx_delim_pool_` and the per-message runs).
-  `tests/dictionary/CMakeLists.txt` already puts `src/dictionary` on the include path, and existing tests
-  (`delimiter_census_test.cpp`, `loader_disposition_test.cpp`) include that header, so no public API is
-  added;
+- a **test-only read of the handle's indexes** (`components_by_name_`, `components_`, `groups_`,
+  `group_ctx_delim_pool_` and the per-message runs), whose types `src/dictionary/dictionary_internal.hpp`
+  declares (`tests/dictionary/CMakeLists.txt` already puts `src/dictionary` on the include path).
+  **Correction (implement, T013, 2026-11-01).** No route to a loaded `Dictionary`'s handle existed:
+  `Dictionary::handle_` is private, its only friends are the two loaders, and the existing tests that
+  include the header build a `dict_metadata_handle` by hand. The same holds for `table_view`'s stores,
+  whose only friend is `table_view_builder`. The read goes through the repo's named-friend test-access
+  pattern (`framer_test_access`, `dict_hooks_test_access`): `include/fixpp/dict/dictionary.hpp` declares
+  `friend struct dictionary_test_access;` and `include/fixpp/dict/table_view.hpp` declares
+  `friend struct table_view_test_access;`, each unconditional (a member gated behind a test macro would
+  make a test TU's class differ from the library's, an ODR violation, as `framer.hpp`'s note says) and
+  each defined only in `tests/support/{dictionary,table_view}_test_access.hpp`, never installed. A friend
+  declaration adds no member, changes no layout and no behaviour, so data-model §B's "`Dictionary` gains
+  no public member" still holds. The comparator reads every `table_view` store directly through it, so no
+  store is reconstructed from public probes. A test-side access bypass (the explicit-instantiation
+  member-pointer idiom) and a public-probe-only comparator were rejected: the first defeats the seal
+  unsanctioned, the second cannot observe `enum_bits_` over an empty code set nor a component the census
+  also misses;
 - the **public API** (`messages()`, `field_by_name` and the like).
 
 An extra message, field, component (including one no message uses), group or context on either side is

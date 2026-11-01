@@ -214,7 +214,7 @@ specs/098-dialect-overlay/
 
 | Area | Files |
 |---|---|
-| Dictionary API | `include/fixpp/dict/{xml_loader,orchestra_loader,load_any,error,table_view,dictionary,field_ref}.hpp` |
+| Dictionary API | `include/fixpp/dict/{xml_loader,orchestra_loader,load_any,error,table_view,dictionary,field_ref}.hpp` (`table_view.hpp` and `dictionary.hpp` also gain one named test-access friend each in plan phase 2: research R-10 §2, Correction) |
 | Dictionary impl | `src/dictionary/{xml_loader,orchestra_loader,load_any,dictionary}.cpp` (the factored pair detection, the step counter, the header-store walk), `src/dictionary/dictionary_internal.hpp`; a new `src/dictionary/overlay_merge.{hpp,cpp}` for the guards, the conflict checks and the two splice walks (shared helpers: overlay-only bounded read, shared parse-status mapping, depth walk, the match-index helper, the merged-graph cycle, budget and side-table walk, and the test-facing read seam for the step counter and refusal origin); `src/dictionary/CMakeLists.txt` (lists `fixpp_dictionary`'s sources explicitly, so `overlay_merge.cpp` is added there) |
 | Session | `src/session/session.cpp` (the send classification line); a new private header `src/session/send_header_tags.hpp` (`kSendHeaderTags` and `is_send_header_tag`, moved out of `session.cpp`, research R-7; self-contained, standard headers only, so W-7's census executable includes it without linking `fixpp_session`); `include/fixpp/session/session_config.hpp` (field and forward declaration removed) |
 | Config | `src/config/toml_config_loader.cpp` (scope-aware `dialect_overlay`), `src/config/selector_resolver.cpp` (per-session dictionary step), `src/config/loader_internal.hpp` (doc) |
