@@ -733,13 +733,15 @@ TEST(ComparatorW0Invariant, GroupBits) {
     tva_t::bit_store bits;
     set_bit(bits, 78);
     set_bit(bits, 453);
+    set_bit(bits, 9200);
     set_bit(bits, 9300);
     tva_t::group_first_store const first{{78, 79}};
     tva_t::group_members_store const members{{453, {448, 447}}};
+    tva_t::group_required_store const required{{9200, {9201}}};
     tva_t::group_ctx_store ctx;
     ctx[fixpp::dict::make_group_ctx_key("E", {}, 9300)] = fixpp::dict::group_ctx_entry{
         .group_first = 9301, .members = {9301}, .required_members = {}};
-    EXPECT_TRUE(eq::check_group_bits(bits, first, members, ctx).empty()) << "control";
+    EXPECT_TRUE(eq::check_group_bits(bits, first, members, required, ctx).empty()) << "control";
 
     struct arm {
         std::uint16_t key;
@@ -747,10 +749,11 @@ TEST(ComparatorW0Invariant, GroupBits) {
     };
     for (auto const& [key, names] :
          {arm{78, "group_first_ key 78"}, arm{453, "group_members_ key 453"},
+          arm{9200, "group_required_members_ key 9200"},
           arm{9300, "group_ctx_ key (E, no_tag 9300)"}}) {
         auto broken = bits;
         clear_bit(broken, key);
-        auto const v = eq::check_group_bits(broken, first, members, ctx);
+        auto const v = eq::check_group_bits(broken, first, members, required, ctx);
         ASSERT_EQ(v.size(), 1U) << "key " << key;
         EXPECT_TRUE(any_names(v, names)) << v.front();
     }

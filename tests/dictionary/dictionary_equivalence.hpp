@@ -203,7 +203,8 @@ inline constexpr std::string_view kCensusGroupStart = "census: GroupRef::first_f
 inline constexpr std::string_view kInvPairInverse =
     "invariant: data_pair_length_tag_ is the inverse of length_pair_data_tag_";
 inline constexpr std::string_view kInvGroupBits =
-    "invariant: every key of group_first_, group_members_ and group_ctx_ has its group_bits_ bit";
+    "invariant: every key of group_first_, group_members_, group_required_members_ and "
+    "group_ctx_ has its group_bits_ bit";
 inline constexpr std::string_view kInvEnumBits =
     "invariant: every key of enums_ has its enum_bits_ bit";
 }  // namespace id
@@ -546,10 +547,12 @@ using tva = table_view_test_access;
     return out;
 }
 
-// The group stores contracts W-0 names: group_first_, group_members_, group_ctx_.
+// The group stores contracts W-0 names: group_first_, group_members_,
+// group_required_members_, group_ctx_.
 [[nodiscard]] inline std::vector<std::string> check_group_bits(
     tva::bit_store const& bits, tva::group_first_store const& group_first,
-    tva::group_members_store const& group_members, tva::group_ctx_store const& group_ctx) {
+    tva::group_members_store const& group_members, tva::group_required_store const& group_required,
+    tva::group_ctx_store const& group_ctx) {
     std::vector<std::string> out;
     for (auto const& [no_tag, first] : group_first) {
         if (!bit_set(bits, no_tag)) {
@@ -559,6 +562,12 @@ using tva = table_view_test_access;
     for (auto const& [no_tag, members] : group_members) {
         if (!bit_set(bits, no_tag)) {
             out.push_back("group_members_ key " + std::to_string(no_tag) + " has a clear bit");
+        }
+    }
+    for (auto const& [no_tag, required] : group_required) {
+        if (!bit_set(bits, no_tag)) {
+            out.push_back("group_required_members_ key " + std::to_string(no_tag) +
+                          " has a clear bit");
         }
     }
     for (auto const& [key, entry] : group_ctx) {
@@ -779,8 +788,9 @@ inline void run_invariants(comparison_report& r, char const* side_name, table_vi
          check_pair_inverse(tva::length_pair_data_tag(tv), tva::data_pair_length_tag(tv))) {
         r.invariant_violations.push_back({id::kInvPairInverse, std::string{side_name} + ": " + v});
     }
-    for (auto& v : check_group_bits(tva::group_bits(tv), tva::group_first(tv),
-                                    tva::group_members(tv), tva::group_ctx(tv))) {
+    for (auto& v :
+         check_group_bits(tva::group_bits(tv), tva::group_first(tv), tva::group_members(tv),
+                          tva::group_required_members(tv), tva::group_ctx(tv))) {
         r.invariant_violations.push_back({id::kInvGroupBits, std::string{side_name} + ": " + v});
     }
     for (auto& v : check_enum_bits(tva::enum_bits(tv), tva::enums(tv))) {
