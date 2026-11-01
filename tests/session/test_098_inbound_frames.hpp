@@ -23,8 +23,9 @@
 //     edit of FIX44.xml would; otherwise both U1 frames meet 35's enum check.
 //
 // Every frame is a peer-to-us application message on a FIX.4.4 session whose
-// own SenderCompID is kOurCompId, with SendingTime kSendingTime (the fixtures
-// set their mock clock to that instant). Each D frame starts from the same
+// own SenderCompID is kOurCompId, with SendingTime kSendingTime, so a session
+// fed them keeps its clock within its SendingTime tolerance of that instant, or
+// its SendingTime check refuses them. Each D frame starts from the same
 // required NewOrderSingle body, so the D frame the base session accepts shows
 // that body complete for every other D frame.
 

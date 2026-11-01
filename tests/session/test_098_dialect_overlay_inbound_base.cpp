@@ -5,15 +5,15 @@
 // 098-dialect-overlay, contracts/witnesses.md W-5, the base-session arm: a
 // negative control (spec FR-018). A FIX.4.4 session over the unmodified
 // dictionaries/FIX44.xml, with validate_inbound_messages = true, is fed each
-// W-5 frame (test_098_inbound_frames.hpp) and answers as it does without 098.
-// It uses only the API that exists without 098, so it compiles and holds both
-// before and after the feature.
+// W-5 frame (test_098_inbound_frames.hpp) and must answer as it does without
+// 098, both before and after the feature. It uses only the API that exists
+// without 098, so it compiles on either tree.
 //
-// Each refused frame's expected Reject was derived from source before the cell
-// was written (tasks.md T004a), and its fields are written below as literals,
-// never taken from a run or from the frame header's constants. A run that
-// disagrees with a literal stops for a decision. To re-derive a row, follow the
-// frame through `Session::on_inbound_active_` on an Active session:
+// Each refused frame's expected Reject fields are written below as literals,
+// independent of the frame header's constants (tasks.md T004a). A run that
+// disagrees with a literal stops for a decision; the literal is not re-recorded
+// from the run. To re-derive a row, follow the frame through
+// `Session::on_inbound_active_` on an Active session:
 //   - `scan_frame_header` with the session's dictionary hooks: a field it cannot
 //     read sends the frame to `Session::dispose_unparseable_`, whose
 //     any-other-type row consumes the number and sends Reject 373=0 with no 371
