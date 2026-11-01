@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // src/dictionary/overlay_merge.cpp
 //
-// 098-dialect-overlay: the QuickFIX-XML overlay's guard stage, splice and
-// Length+Data relation check (research R-3, R-4, R-5). See overlay_merge.hpp for
-// the order of the steps; xml_loader.cpp calls them.
+// 098-dialect-overlay: each format's overlay guard stage, splice and Length+Data
+// relation check (research R-3, R-4, R-5). See overlay_merge.hpp for the order of
+// the steps; xml_loader.cpp and orchestra_loader.cpp call them. The QuickFIX-XML
+// merge comes first; the Orchestra merge, at the end of the file, has its own
+// header.
 //
 // The classifier. One pass over the overlay matches each overlay element to the
 // base definition it names (research R-3's QuickFIX table) or marks it appended;
@@ -211,9 +213,11 @@ template <class KeyFn>
 
 // Deep copy of an overlay element into `parent`, appended after its last child:
 // element children and attributes only (the classifier drops non-element overlay
-// nodes). Iterative. A failed pugixml allocation is `std::bad_alloc`, which the
-// entry point turns into `xml_oom_error`.
-void copy_element(pugi::xml_node parent, pugi::xml_node src) {
+// nodes), and of those only the ones `keep` admits, each with its subtree.
+// Iterative. A failed pugixml allocation is `std::bad_alloc`, which the entry
+// point turns into `xml_oom_error`.
+template <class Keep>
+void copy_element_if(pugi::xml_node parent, pugi::xml_node src, Keep const& keep) {
     struct item {
         pugi::xml_node dst_parent;
         pugi::xml_node src;
@@ -234,11 +238,15 @@ void copy_element(pugi::xml_node parent, pugi::xml_node src) {
         }
         // Pushed in reverse, so each parent receives its children in order.
         for (pugi::xml_node c = it.src.last_child(); c; c = c.previous_sibling()) {
-            if (c.type() == pugi::node_element) {
+            if (c.type() == pugi::node_element && keep(c)) {
                 stack.push_back({.dst_parent = d, .src = c});
             }
         }
     }
+}
+
+void copy_element(pugi::xml_node parent, pugi::xml_node src) {
+    copy_element_if(parent, src, [](pugi::xml_node) noexcept { return true; });
 }
 
 // The root containers an overlay `<fix>` may hold (data-model §A.1).
@@ -352,6 +360,20 @@ void check_pair_relation(length_pair_relation const& base, length_pair_relation 
         }
         return s + "]";
     };
+    auto const is_base_tag = [&](std::uint16_t t) {
+        return std::ranges::binary_search(base.declared_tags, t);
+    };
+    // Orchestra: a Length two Data fields name, one of the three tags the base's.
+    for (auto const& [length, datas] : spliced.collisions) {
+        if (is_base_tag(length) || std::ranges::any_of(datas, is_base_tag)) {
+            conflict("Length+Data pair relation of base tag " +
+                     std::to_string(
+                         is_base_tag(length) ? length : *std::ranges::find_if(datas, is_base_tag)) +
+                     " changes: Length " + std::to_string(length) +
+                     " is named by the lengthId of Data fields " + list(datas) +
+                     " (a pair touching a base tag is given a second partner)");
+        }
+    }
     for (std::uint16_t const t : base.declared_tags) {
         if (fwd(base, t) != fwd(spliced, t)) {
             conflict("Length+Data pair relation of base tag " + std::to_string(t) +
@@ -776,18 +798,211 @@ void level_merge(level_set& into, level_set const& from) {
     }
 }
 
+using child_map = std::unordered_map<node_ptr, std::vector<child_rec>>;
+
+enum class colour : std::uint8_t { grey, black };
+
+// The part of step 6's walk both formats share: the definitions visited, their
+// child records and post-order memo, the first-seen group of each NumInGroup tag,
+// and the first cycle met.
+struct graph_walk {
+    std::unordered_map<node_ptr, def_info> memo;
+    child_map children;              // per definition visited
+    std::vector<vnode> visit_order;  // definitions in the order the walk first met them
+    std::map<std::uint16_t, vnode> first_seen_groups;
+    std::optional<std::string> cycle;  // the first cycle met, its definitions named
+    std::unordered_map<node_ptr, colour> colours;
+};
+
+// Iterative depth-first walk from `root` with three colours and a post-order memo.
+// `records_of(v)` gives a definition's children as the build visits them, and
+// `label(v)` names a definition in a cycle message. A definition already visited
+// is not walked again, which keeps the order of first encounters.
+template <class RecordsOf, class Label>
+def_info visit_definition(graph_walk& r, vnode root, RecordsOf const& records_of,
+                          Label const& label) {
+    if (auto const it = r.memo.find(root.key()); it != r.memo.end()) {
+        return it->second;
+    }
+    struct frame {
+        vnode v;
+        std::size_t next = 0;
+        def_info acc;
+    };
+    std::vector<frame> stack;
+    auto const open = [&](vnode v) {
+        r.colours[v.key()] = colour::grey;
+        r.children.emplace(v.key(), records_of(v));
+        r.visit_order.push_back(v);
+        stack.push_back({.v = v, .next = 0, .acc = {}});
+    };
+    open(root);
+    while (!stack.empty()) {
+        frame& f = stack.back();
+        auto const& kids = r.children.at(f.v.key());
+        if (f.next == kids.size()) {
+            def_info const done = f.acc;
+            r.memo[f.v.key()] = done;
+            r.colours[f.v.key()] = colour::black;
+            stack.pop_back();
+            if (!stack.empty()) {
+                frame& p = stack.back();
+                p.acc.steps = sat_add(p.acc.steps, done.steps);
+                p.acc.entries = sat_add(p.acc.entries, done.entries);
+            }
+            continue;
+        }
+        child_rec const& c = kids[f.next++];
+        f.acc.steps = sat_add(f.acc.steps, 1);
+        if (c.k == child_rec::kind::field) {
+            f.acc.entries = sat_add(f.acc.entries, 1);
+            continue;
+        }
+        if (c.k == child_rec::kind::group && c.tag != 0) {
+            f.acc.entries = sat_add(f.acc.entries, 1);
+            r.first_seen_groups.emplace(c.tag, c.target);
+        }
+        if (!c.target) {
+            continue;
+        }
+        auto const col = r.colours.find(c.target.key());
+        if (col == r.colours.end()) {
+            open(c.target);
+            continue;
+        }
+        if (col->second == colour::grey) {
+            // A back edge: record the cycle, and treat the edge as a leaf so the
+            // walk still ends and the memo is complete.
+            if (!r.cycle) {
+                std::string s;
+                bool on = false;
+                for (frame const& g : stack) {
+                    on = on || g.v.key() == c.target.key();
+                    if (on) {
+                        s += label(g.v) + " -> ";
+                    }
+                }
+                r.cycle = s + label(c.target);
+            }
+            continue;
+        }
+        def_info const& m = r.memo.at(c.target.key());
+        f.acc.steps = sat_add(f.acc.steps, m.steps);
+        f.acc.entries = sat_add(f.acc.entries, m.entries);
+    }
+    return r.memo.at(root.key());
+}
+
+// Side-table fit (research R-5 step 6): every start `finalize` passes to its
+// `std::uint16_t` cast, and every count it clamps, is at most 65535. `counts` are
+// the definitions' entry counts in the order `finalize` assigns their starts.
+[[nodiscard]] bool side_table_fits(std::vector<std::uint64_t> const& counts) noexcept {
+    std::uint64_t start = 0;
+    for (std::uint64_t const n : counts) {
+        if (start > kSideTableMax || n > kSideTableMax) {
+            return false;
+        }
+        start = sat_add(start, n);
+    }
+    return true;
+}
+
+// Step 7's level set of definition `root` in a walk's records, memoized per
+// definition; iterative over component edges, a back edge read as a leaf.
+level_set const& level_of(child_map const& children, std::unordered_map<node_ptr, level_set>& memo,
+                          node_ptr root) {
+    static level_set const kEmpty;
+    if (!children.contains(root)) {
+        return kEmpty;
+    }
+    std::unordered_set<node_ptr> open;
+    std::vector<std::pair<node_ptr, std::size_t>> stack{{root, 0}};
+    open.insert(root);
+    while (!stack.empty()) {
+        auto& [d, i] = stack.back();
+        auto const& kids = children.at(d);
+        bool descended = false;
+        while (i < kids.size()) {
+            child_rec const& c = kids[i];
+            if (c.k == child_rec::kind::component && c.target &&
+                children.contains(c.target.key()) && !memo.contains(c.target.key()) &&
+                !open.contains(c.target.key())) {
+                open.insert(c.target.key());
+                stack.emplace_back(c.target.key(), 0);
+                descended = true;
+                break;
+            }
+            ++i;
+        }
+        if (descended) {
+            continue;
+        }
+        level_set s;
+        for (child_rec const& c : children.at(d)) {
+            if ((c.k == child_rec::kind::field || c.k == child_rec::kind::group) && c.tag != 0) {
+                level_add(s, c.tag, 1);
+            } else if (c.k == child_rec::kind::component && c.target) {
+                if (auto const it = memo.find(c.target.key()); it != memo.end()) {
+                    level_merge(s, it->second);
+                }
+            }
+        }
+        open.erase(d);
+        memo[d] = std::move(s);
+        stack.pop_back();
+    }
+    return memo.at(root);
+}
+
+// A tag the merged level `m` holds twice where the base level `b` holds it at most
+// once.
+[[nodiscard]] std::optional<std::uint16_t> twice(level_set const& m, level_set const& b) {
+    for (auto const& [t, n] : m) {
+        if (n < 2) {
+            continue;
+        }
+        auto const it =
+            std::ranges::lower_bound(b, t, {}, &std::pair<std::uint16_t, std::uint8_t>::first);
+        if (it == b.end() || it->first != t || it->second < 2) {
+            return t;
+        }
+    }
+    return std::nullopt;
+}
+
+// Step 7's set of definitions whose own level the overlay changes (research R-3):
+// `changed` holds the ones the overlay extends or appends on entry, and gains every
+// definition that inlines one of them through component references in `children`.
+void close_upward(child_map const& children, std::unordered_set<node_ptr>& changed) {
+    std::unordered_map<node_ptr, std::vector<node_ptr>> inlined_by;
+    for (auto const& [d, kids] : children) {
+        for (child_rec const& c : kids) {
+            if (c.k == child_rec::kind::component && c.target) {
+                inlined_by[c.target.key()].push_back(d);
+            }
+        }
+    }
+    std::vector<node_ptr> work(changed.begin(), changed.end());
+    while (!work.empty()) {
+        node_ptr const d = work.back();
+        work.pop_back();
+        if (auto const it = inlined_by.find(d); it != inlined_by.end()) {
+            for (node_ptr const p : it->second) {
+                if (changed.insert(p).second) {
+                    work.push_back(p);
+                }
+            }
+        }
+    }
+}
+
 }  // namespace
 
-struct xml_overlay_merge::impl::walk_result {
-    std::unordered_map<node_ptr, def_info> memo;
-    std::unordered_map<node_ptr, std::vector<child_rec>> children;  // per definition visited
-    std::vector<vnode> visit_order;  // definitions in the order the walk first met them
+struct xml_overlay_merge::impl::walk_result : graph_walk {
     std::vector<std::pair<std::string, vnode>> messages;  // finalize's sorted order
     vnode header;
     vnode trailer;
     std::vector<vnode> components;  // declaration order
-    std::map<std::uint16_t, vnode> first_seen_groups;
-    std::optional<std::string> cycle;  // the first cycle met, its definitions named
     std::uint64_t total = 0;
     bool components_fit = true;
     bool groups_fit = true;
@@ -903,81 +1118,7 @@ xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) 
         return std::string{name_of(n)} + " " + attr_of(n, "name");
     };
 
-    // Iterative depth-first walk with three colours; post-order memo.
-    enum class colour : std::uint8_t { grey, black };
-    std::unordered_map<node_ptr, colour> colours;
-    struct frame {
-        vnode v;
-        std::size_t next = 0;
-        def_info acc;
-    };
-    auto const visit = [&](vnode root) -> def_info {
-        if (auto const it = r.memo.find(root.key()); it != r.memo.end()) {
-            return it->second;
-        }
-        std::vector<frame> stack;
-        auto const open = [&](vnode v) {
-            colours[v.key()] = colour::grey;
-            r.children.emplace(v.key(), records_of(v));
-            r.visit_order.push_back(v);
-            stack.push_back({.v = v, .next = 0, .acc = {}});
-        };
-        open(root);
-        while (!stack.empty()) {
-            frame& f = stack.back();
-            auto const& kids = r.children.at(f.v.key());
-            if (f.next == kids.size()) {
-                def_info const done = f.acc;
-                r.memo[f.v.key()] = done;
-                colours[f.v.key()] = colour::black;
-                stack.pop_back();
-                if (!stack.empty()) {
-                    frame& p = stack.back();
-                    p.acc.steps = sat_add(p.acc.steps, done.steps);
-                    p.acc.entries = sat_add(p.acc.entries, done.entries);
-                }
-                continue;
-            }
-            child_rec const& c = kids[f.next++];
-            f.acc.steps = sat_add(f.acc.steps, 1);
-            if (c.k == child_rec::kind::field) {
-                f.acc.entries = sat_add(f.acc.entries, 1);
-                continue;
-            }
-            if (c.k == child_rec::kind::group && c.tag != 0) {
-                f.acc.entries = sat_add(f.acc.entries, 1);
-                r.first_seen_groups.emplace(c.tag, c.target);
-            }
-            if (!c.target) {
-                continue;
-            }
-            auto const col = colours.find(c.target.key());
-            if (col == colours.end()) {
-                open(c.target);
-                continue;
-            }
-            if (col->second == colour::grey) {
-                // A back edge: record the cycle, and treat the edge as a leaf so the
-                // walk still ends and the memo is complete.
-                if (!r.cycle) {
-                    std::string s;
-                    bool on = false;
-                    for (frame const& g : stack) {
-                        on = on || g.v.key() == c.target.key();
-                        if (on) {
-                            s += label(g.v) + " -> ";
-                        }
-                    }
-                    r.cycle = s + label(c.target);
-                }
-                continue;
-            }
-            def_info const& m = r.memo.at(c.target.key());
-            f.acc.steps = sat_add(f.acc.steps, m.steps);
-            f.acc.entries = sat_add(f.acc.entries, m.entries);
-        }
-        return r.memo.at(root.key());
-    };
+    auto const visit = [&](vnode root) { return visit_definition(r, root, records_of, label); };
 
     std::uint64_t total = 0;
     for (auto const& [mt, m] : r.messages) {
@@ -1002,20 +1143,8 @@ xml_overlay_merge::impl::walk_result xml_overlay_merge::impl::walk(bool merged) 
         group_counts.push_back(d.entries);
     }
     r.total = total;
-    // Side-table fit (research R-5 step 6): every start `finalize` passes to its
-    // `std::uint16_t` cast, and every count it clamps, is at most 65535.
-    auto const fits = [](std::vector<std::uint64_t> const& counts) {
-        std::uint64_t start = 0;
-        for (std::uint64_t const n : counts) {
-            if (start > kSideTableMax || n > kSideTableMax) {
-                return false;
-            }
-            start = sat_add(start, n);
-        }
-        return true;
-    };
-    r.components_fit = fits(comp_counts);
-    r.groups_fit = fits(group_counts);
+    r.components_fit = side_table_fits(comp_counts);
+    r.groups_fit = side_table_fits(group_counts);
     return r;
 }
 
@@ -1120,93 +1249,13 @@ void xml_overlay_merge::impl::check_conflicts(walk_result const& merged,
             changed.insert(v.key());
         }
     }
-    {  // upward through component references
-        std::unordered_map<node_ptr, std::vector<node_ptr>> inlined_by;
-        for (auto const& [d, kids] : merged.children) {
-            for (child_rec const& c : kids) {
-                if (c.k == child_rec::kind::component && c.target) {
-                    inlined_by[c.target.key()].push_back(d);
-                }
-            }
-        }
-        std::vector<node_ptr> work(changed.begin(), changed.end());
-        while (!work.empty()) {
-            node_ptr const d = work.back();
-            work.pop_back();
-            if (auto const it = inlined_by.find(d); it != inlined_by.end()) {
-                for (node_ptr const p : it->second) {
-                    if (changed.insert(p).second) {
-                        work.push_back(p);
-                    }
-                }
-            }
-        }
-    }
+    close_upward(merged.children, changed);  // upward through component references
     bool const frame_changed = (merged.header && changed.contains(merged.header.key())) ||
                                (merged.trailer && changed.contains(merged.trailer.key()));
 
-    // Level sets, memoized per definition and per walk; iterative over component
-    // edges, a back edge read as a leaf.
+    // Level sets, memoized per definition and per walk.
     std::unordered_map<node_ptr, level_set> merged_levels;
     std::unordered_map<node_ptr, level_set> base_levels;
-    auto const level_of = [](walk_result const& w, std::unordered_map<node_ptr, level_set>& memo,
-                             node_ptr root) -> level_set const& {
-        static level_set const kEmpty;
-        if (!w.children.contains(root)) {
-            return kEmpty;
-        }
-        std::unordered_set<node_ptr> open;
-        std::vector<std::pair<node_ptr, std::size_t>> stack{{root, 0}};
-        open.insert(root);
-        while (!stack.empty()) {
-            auto& [d, i] = stack.back();
-            auto const& kids = w.children.at(d);
-            bool descended = false;
-            while (i < kids.size()) {
-                child_rec const& c = kids[i];
-                if (c.k == child_rec::kind::component && c.target &&
-                    w.children.contains(c.target.key()) && !memo.contains(c.target.key()) &&
-                    !open.contains(c.target.key())) {
-                    open.insert(c.target.key());
-                    stack.emplace_back(c.target.key(), 0);
-                    descended = true;
-                    break;
-                }
-                ++i;
-            }
-            if (descended) {
-                continue;
-            }
-            level_set s;
-            for (child_rec const& c : w.children.at(d)) {
-                if ((c.k == child_rec::kind::field || c.k == child_rec::kind::group) &&
-                    c.tag != 0) {
-                    level_add(s, c.tag, 1);
-                } else if (c.k == child_rec::kind::component && c.target) {
-                    if (auto const it = memo.find(c.target.key()); it != memo.end()) {
-                        level_merge(s, it->second);
-                    }
-                }
-            }
-            open.erase(d);
-            memo[d] = std::move(s);
-            stack.pop_back();
-        }
-        return memo.at(root);
-    };
-    auto const twice = [](level_set const& m, level_set const& b) -> std::optional<std::uint16_t> {
-        for (auto const& [t, n] : m) {
-            if (n < 2) {
-                continue;
-            }
-            auto const it =
-                std::ranges::lower_bound(b, t, {}, &std::pair<std::uint16_t, std::uint8_t>::first);
-            if (it == b.end() || it->first != t || it->second < 2) {
-                return t;
-            }
-        }
-        return std::nullopt;
-    };
     auto const refuse_twice = [](std::uint16_t tag, std::string const& where) {
         conflict("tag occurs twice at one level: tag " + std::to_string(tag) +
                  " occurs twice at "
@@ -1224,13 +1273,13 @@ void xml_overlay_merge::impl::check_conflicts(walk_result const& merged,
         level_set bl;
         for (vnode const part : {merged.header, m, merged.trailer}) {
             if (part) {
-                level_merge(ml, level_of(merged, merged_levels, part.key()));
+                level_merge(ml, level_of(merged.children, merged_levels, part.key()));
             }
         }
         if (m.base) {
             for (vnode const part : {base.header, m, base.trailer}) {
                 if (part) {
-                    level_merge(bl, level_of(base, base_levels, part.key()));
+                    level_merge(bl, level_of(base.children, base_levels, part.key()));
                 }
             }
         }
@@ -1244,8 +1293,8 @@ void xml_overlay_merge::impl::check_conflicts(walk_result const& merged,
         if ((k != "component" && k != "group") || !changed.contains(v.key())) {
             continue;
         }
-        level_set const& ml = level_of(merged, merged_levels, v.key());
-        level_set const bl = v.base ? level_of(base, base_levels, v.key()) : level_set{};
+        level_set const& ml = level_of(merged.children, merged_levels, v.key());
+        level_set const bl = v.base ? level_of(base.children, base_levels, v.key()) : level_set{};
         if (auto const t = twice(ml, bl)) {
             refuse_twice(*t, describe(v.node()));
         }
@@ -1346,5 +1395,919 @@ std::uint64_t xml_overlay_merge::guard(unresolved_group_policy policy, overlay_t
 }
 
 void xml_overlay_merge::splice() { impl_->splice(); }
+
+// ══ The Orchestra merge (research R-3's Orchestra table) ═════════════════════
+//
+// The same shape as the QuickFIX-XML merge above: one classifier that steps 5, 6,
+// 7 and 8 read, step 6 over the virtual merged document, step 7 from step 6's
+// records. What differs is the model of `OrchestraLoaderState::finalize`
+// (re-derive it by reading `finalize`): messages are expanded sorted bytewise by
+// msgType, each as its `fixr:structure` only (the header and trailer are the
+// ordinary component references 1024 and 1025 inside it); then every component in
+// declaration order; then the first-seen group definition of each NumInGroup tag,
+// registered when an expansion first meets a `fixr:groupRef` to a definition of
+// that tag, standalone in NumInGroup tag order. Every child node of a structure,
+// component or group definition is one step (`fixr:numInGroup` and
+// `fixr:annotation` included); a `fixr:componentRef` or `fixr:groupRef` adds the
+// steps of the definition its `id` names. A group is registered before its
+// members are expanded under either `unresolved_group_policy`, so the counts do
+// not depend on the policy. The splice drops `fixr:annotation` and
+// `fixr:documentation` at any depth and a matched group's `fixr:numInGroup`
+// (`orch_dropped`, and the classifier's group rule); step 6 counts what it keeps.
+
+namespace {
+
+// The root containers an overlay `fixr:repository` may hold (data-model §A.1).
+constexpr std::string_view kOrchContainers[] = {"fixr:codeSets", "fixr:fields", "fixr:components",
+                                                "fixr:groups", "fixr:messages"};
+
+// Dropped by the splice wherever they appear inside an overlay definition.
+[[nodiscard]] bool orch_dropped(pugi::xml_node n) noexcept {
+    std::string_view const k = name_of(n);
+    return k == "fixr:annotation" || k == "fixr:documentation";
+}
+
+[[nodiscard]] bool is_orch_ref(std::string_view k) noexcept {
+    return k == "fixr:fieldRef" || k == "fixr:componentRef" || k == "fixr:groupRef";
+}
+
+// An Orchestra `id` as the loader's `try_parse_uint16` reads it: the whole string,
+// 0..65535.
+[[nodiscard]] std::optional<std::uint16_t> parse_orch_id(std::string_view s) noexcept {
+    int v = 0;
+    auto const r = std::from_chars(s.data(), s.data() + s.size(), v);
+    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || v < 0 || v > 65535) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint16_t>(v);
+}
+
+[[nodiscard]] std::optional<std::string> orch_id_key_of(pugi::xml_node c, std::string_view kind) {
+    if (name_of(c) != kind) {
+        return std::nullopt;
+    }
+    auto const id = parse_orch_id(c.attribute("id").as_string(""));
+    if (!id) {
+        return std::nullopt;
+    }
+    return std::to_string(*id);
+}
+
+[[nodiscard]] std::optional<std::string> orch_attr_key_of(pugi::xml_node c, std::string_view kind,
+                                                          char const* attr) {
+    if (name_of(c) != kind) {
+        return std::nullopt;
+    }
+    return attr_of(c, attr);
+}
+
+[[nodiscard]] std::optional<std::string> orch_def_key(std::string_view container,
+                                                      pugi::xml_node c) {
+    if (container == "fixr:codeSets") {
+        return orch_attr_key_of(c, "fixr:codeSet", "name");
+    }
+    if (container == "fixr:fields") {
+        return orch_id_key_of(c, "fixr:field");
+    }
+    if (container == "fixr:components") {
+        return orch_id_key_of(c, "fixr:component");
+    }
+    if (container == "fixr:groups") {
+        return orch_id_key_of(c, "fixr:group");
+    }
+    return orch_attr_key_of(c, "fixr:message", "msgType");
+}
+
+// The definition element each root container holds.
+[[nodiscard]] std::string_view orch_def_kind(std::string_view container) noexcept {
+    if (container == "fixr:codeSets") {
+        return "fixr:codeSet";
+    }
+    if (container == "fixr:fields") {
+        return "fixr:field";
+    }
+    if (container == "fixr:components") {
+        return "fixr:component";
+    }
+    if (container == "fixr:groups") {
+        return "fixr:group";
+    }
+    return "fixr:message";
+}
+
+[[nodiscard]] std::optional<std::string> orch_child_key(pugi::xml_node c) {
+    if (!is_orch_ref(name_of(c))) {
+        return std::nullopt;
+    }
+    auto const id = parse_orch_id(c.attribute("id").as_string(""));
+    if (!id) {
+        return std::nullopt;
+    }
+    return std::string{name_of(c)} + "|" + std::to_string(*id);
+}
+
+[[nodiscard]] std::optional<std::string> orch_code_key(pugi::xml_node c) {
+    return orch_attr_key_of(c, "fixr:code", "value");
+}
+
+[[nodiscard]] std::optional<std::string> orch_field_name_key(pugi::xml_node c) {
+    return orch_attr_key_of(c, "fixr:field", "name");
+}
+
+// `<fixr:field id="11" name="ClOrdID">`, `<fixr:message msgType="D">` and the like.
+[[nodiscard]] std::string orch_describe(pugi::xml_node n) {
+    std::string const kind{name_of(n)};
+    if (kind == "fixr:message") {
+        return "<fixr:message msgType=\"" + attr_of(n, "msgType") + "\">";
+    }
+    if (kind == "fixr:codeSet") {
+        return "<fixr:codeSet name=\"" + attr_of(n, "name") + "\">";
+    }
+    if (kind == "fixr:code") {
+        return "<fixr:code value=\"" + attr_of(n, "value") + "\">";
+    }
+    if (n.attribute("id")) {
+        return "<" + kind + " id=\"" + attr_of(n, "id") + "\"" +
+               (n.attribute("name") ? " name=\"" + attr_of(n, "name") + "\"" : std::string{}) + ">";
+    }
+    return "<" + kind + ">";
+}
+
+[[nodiscard]] std::string orch_where_of(pugi::xml_node parent) {
+    return name_of(parent) == "fixr:repository" ? std::string{"<fixr:repository>"}
+                                                : orch_describe(parent);
+}
+
+[[nodiscard]] std::string orch_occurrences(std::vector<pugi::xml_node> const& hits) {
+    std::string s;
+    for (std::size_t i = 0; i < hits.size(); ++i) {
+        s += (i == 0 ? "" : " and ") + orch_describe(hits[i]) + " (occurrence " +
+             std::to_string(ordinal_of(hits[i])) + " of <" + std::string{name_of(hits[i])} +
+             "> under " + orch_where_of(hits[i].parent()) + ")";
+    }
+    return s;
+}
+
+}  // namespace
+
+struct orchestra_overlay_merge::impl {
+    pugi::xml_document& base_doc;
+    pugi::xml_document const& overlay_doc;
+    pugi::xml_node base_root;
+    pugi::xml_node overlay_root;
+
+    // ---- the classifier's output ----
+    std::unordered_map<node_ptr, pugi::xml_node> match_of;
+    std::unordered_map<node_ptr, std::vector<pugi::xml_node>> merged_into;
+    std::unordered_map<node_ptr, std::vector<pugi::xml_node>> appended;
+    std::map<std::string, pugi::xml_node, std::less<>> created;
+    std::vector<std::string> deferred_conflicts;
+    std::vector<std::pair<pugi::xml_node, pugi::xml_node>> matched_codesets;
+    std::vector<std::pair<pugi::xml_node, pugi::xml_node>> matched_codes;
+    std::vector<std::pair<pugi::xml_node, pugi::xml_node>> matched_fields;
+    std::vector<std::pair<pugi::xml_node, pugi::xml_node>> matched_components;
+    std::vector<std::pair<pugi::xml_node, pugi::xml_node>> matched_groups;
+    std::vector<std::pair<pugi::xml_node, pugi::xml_node>> matched_messages;
+    std::vector<std::pair<pugi::xml_node, pugi::xml_node>> matched_children;  // references
+    // a matched overlay group → its `fixr:numInGroup` children, which are not spliced
+    std::unordered_map<node_ptr, std::vector<pugi::xml_node>> group_numingroups;
+    // new definitions, by kind, in overlay order
+    std::vector<pugi::xml_node> new_codesets;
+    std::vector<pugi::xml_node> new_fields;
+    std::vector<pugi::xml_node> new_components;
+    std::vector<pugi::xml_node> new_groups;
+    std::vector<pugi::xml_node> new_messages;
+
+    match_index base_fields_by_name;
+
+    impl(pugi::xml_document& b, pugi::xml_document const& o)
+        : base_doc(b),
+          overlay_doc(o),
+          base_root(b.first_child()),
+          overlay_root(o.document_element()) {}
+
+    void match(pugi::xml_node o, pugi::xml_node b) {
+        match_of.emplace(key_of(o), b);
+        merged_into[key_of(b)].push_back(o);
+    }
+
+    [[nodiscard]] std::vector<pugi::xml_node> const& appended_of(pugi::xml_node o) const {
+        static std::vector<pugi::xml_node> const kNone;
+        auto const it = appended.find(key_of(o));
+        return it == appended.end() ? kNone : it->second;
+    }
+
+    void note_new(std::string_view container, pugi::xml_node c);
+    void check_root() const;
+    void classify();
+    void classify_definition_children(pugi::xml_node o, pugi::xml_node b, bool is_group);
+    void classify_codes(pugi::xml_node o, pugi::xml_node b);
+    void classify_message(pugi::xml_node o, pugi::xml_node b);
+    void check_caps() const;
+
+    struct walk_result;
+    [[nodiscard]] walk_result walk(bool merged) const;
+
+    void check_conflicts(walk_result const& merged, walk_result const& base) const;
+    void splice();
+};
+
+// ---- step 4a ----------------------------------------------------------------
+
+void orchestra_overlay_merge::impl::check_root() const {
+    if (!overlay_root || name_of(overlay_root) != "fixr:repository") {
+        conflict("overlay root <" + std::string{overlay_root ? overlay_root.name() : ""} +
+                 "> is not <fixr:repository>: an Orchestra base takes an overlay in its own "
+                 "format");
+    }
+    if (attr_of(overlay_root, "version") != attr_of(base_root, "version")) {
+        conflict("version mismatch: the overlay's <fixr:repository version=\"" +
+                 attr_of(overlay_root, "version") + "\"> does not name the base's version \"" +
+                 attr_of(base_root, "version") + "\"");
+    }
+    std::set<std::string_view> seen;
+    for (pugi::xml_node c = overlay_root.first_child(); c; c = c.next_sibling()) {
+        if (c.type() != pugi::node_element) {
+            continue;
+        }
+        std::string_view const n = name_of(c);
+        if (std::ranges::find(kOrchContainers, n) == std::end(kOrchContainers)) {
+            conflict("root child <" + std::string{n} +
+                     "> is not allowed in an overlay <fixr:repository> (it may hold "
+                     "fixr:codeSets, fixr:fields, fixr:components, fixr:groups and "
+                     "fixr:messages)");
+        }
+        if (!seen.insert(n).second) {
+            conflict("two root containers <" + std::string{n} +
+                     "> in the overlay; each container name may appear once");
+        }
+    }
+}
+
+// ---- the classifier ---------------------------------------------------------
+
+void orchestra_overlay_merge::impl::note_new(std::string_view container, pugi::xml_node c) {
+    if (name_of(c) != orch_def_kind(container)) {
+        return;
+    }
+    if (container == "fixr:codeSets") {
+        new_codesets.push_back(c);
+    } else if (container == "fixr:fields") {
+        new_fields.push_back(c);
+    } else if (container == "fixr:components") {
+        new_components.push_back(c);
+    } else if (container == "fixr:groups") {
+        new_groups.push_back(c);
+    } else {
+        new_messages.push_back(c);
+    }
+}
+
+void orchestra_overlay_merge::impl::classify_definition_children(pugi::xml_node o, pugi::xml_node b,
+                                                                 bool is_group) {
+    // A structure, component or group: its references match by kind and `id` among
+    // the base definition's direct children. A matched group's `fixr:numInGroup` is
+    // checked at step 7 and never spliced.
+    match_index const idx = build_index(b, orch_child_key);
+    std::set<std::string> seen;
+    for (pugi::xml_node c = o.first_child(); c; c = c.next_sibling()) {
+        if (c.type() != pugi::node_element || orch_dropped(c)) {
+            continue;
+        }
+        if (is_group && name_of(c) == "fixr:numInGroup") {
+            group_numingroups[key_of(o)].push_back(c);
+            continue;
+        }
+        std::optional<std::string> const k = orch_child_key(c);
+        if (!k) {
+            appended[key_of(o)].push_back(c);
+            continue;
+        }
+        if (!seen.insert(*k).second) {
+            deferred_conflicts.push_back("duplicate within the overlay: " + orch_describe(c) +
+                                         " appears twice under the overlay's " + orch_describe(o));
+        }
+        auto const hit = idx.find(*k);
+        if (hit == idx.end()) {
+            appended[key_of(o)].push_back(c);
+            continue;
+        }
+        if (hit->second.size() > 1) {
+            deferred_conflicts.push_back("repeated base key: the overlay's " + orch_describe(c) +
+                                         " under " + orch_describe(o) + " matches " +
+                                         orch_occurrences(hit->second) +
+                                         "; the overlay cannot say which one it extends");
+        }
+        match(c, hit->second.front());
+        matched_children.emplace_back(c, hit->second.front());
+        for (pugi::xml_node rc = c.first_child(); rc; rc = rc.next_sibling()) {
+            if (rc.type() == pugi::node_element && !orch_dropped(rc)) {
+                appended[key_of(c)].push_back(rc);
+            }
+        }
+    }
+}
+
+void orchestra_overlay_merge::impl::classify_codes(pugi::xml_node o, pugi::xml_node b) {
+    match_index const idx = build_index(b, orch_code_key);
+    std::set<std::string> seen;
+    for (pugi::xml_node v = o.first_child(); v; v = v.next_sibling()) {
+        if (v.type() != pugi::node_element || orch_dropped(v)) {
+            continue;
+        }
+        std::optional<std::string> const k = orch_code_key(v);
+        if (k && !seen.insert(*k).second) {
+            deferred_conflicts.push_back("duplicate within the overlay: " + orch_describe(v) +
+                                         " appears twice under " + orch_describe(o));
+        }
+        auto const hit = k ? idx.find(*k) : idx.end();
+        if (hit == idx.end()) {
+            appended[key_of(o)].push_back(v);
+            continue;
+        }
+        if (hit->second.size() > 1) {
+            deferred_conflicts.push_back("repeated base key: the overlay's " + orch_describe(v) +
+                                         " under " + orch_describe(o) + " matches " +
+                                         orch_occurrences(hit->second) +
+                                         "; the overlay cannot say which one it extends");
+        }
+        match(v, hit->second.front());
+        matched_codes.emplace_back(v, hit->second.front());
+    }
+}
+
+void orchestra_overlay_merge::impl::classify_message(pugi::xml_node o, pugi::xml_node b) {
+    // A message's `fixr:structure` merges with the base's (the loader reads the
+    // first); any other kept child is appended.
+    pugi::xml_node const bs = b.child("fixr:structure");
+    bool structure_seen = false;
+    for (pugi::xml_node c = o.first_child(); c; c = c.next_sibling()) {
+        if (c.type() != pugi::node_element || orch_dropped(c)) {
+            continue;
+        }
+        if (name_of(c) == "fixr:structure") {
+            if (structure_seen) {
+                deferred_conflicts.push_back(
+                    "duplicate within the overlay: <fixr:structure> "
+                    "appears twice under the overlay's " +
+                    orch_describe(o));
+            }
+            structure_seen = true;
+            if (bs) {
+                match(c, bs);
+                classify_definition_children(c, bs, /*is_group=*/false);
+                continue;
+            }
+        }
+        appended[key_of(o)].push_back(c);
+    }
+}
+
+void orchestra_overlay_merge::impl::classify() {
+    base_fields_by_name = build_index(base_root.child("fixr:fields"), orch_field_name_key);
+    for (pugi::xml_node oc = overlay_root.first_child(); oc; oc = oc.next_sibling()) {
+        if (oc.type() != pugi::node_element) {
+            continue;
+        }
+        std::string const cname{name_of(oc)};
+        pugi::xml_node const bc = base_root.child(cname.c_str());
+        if (!bc) {
+            created.emplace(cname, oc);
+            for (pugi::xml_node c = oc.first_child(); c; c = c.next_sibling()) {
+                if (c.type() == pugi::node_element && !orch_dropped(c)) {
+                    note_new(cname, c);
+                }
+            }
+            continue;
+        }
+        match(oc, bc);
+        match_index const idx =
+            build_index(bc, [&](pugi::xml_node c) { return orch_def_key(cname, c); });
+        std::set<std::string> seen;
+        for (pugi::xml_node c = oc.first_child(); c; c = c.next_sibling()) {
+            if (c.type() != pugi::node_element || orch_dropped(c)) {
+                continue;
+            }
+            std::optional<std::string> const k = orch_def_key(cname, c);
+            if (k && !seen.insert(*k).second) {
+                deferred_conflicts.push_back("duplicate within the overlay: " + orch_describe(c) +
+                                             " appears twice under the overlay's <" + cname + ">");
+            }
+            auto const hit = k ? idx.find(*k) : idx.end();
+            if (hit == idx.end()) {
+                appended[key_of(oc)].push_back(c);
+                note_new(cname, c);
+                continue;
+            }
+            if (hit->second.size() > 1) {
+                deferred_conflicts.push_back("repeated base key: the overlay's " +
+                                             orch_describe(c) + " matches " +
+                                             orch_occurrences(hit->second) +
+                                             "; the overlay cannot say which one it extends");
+            }
+            pugi::xml_node const b = hit->second.front();
+            match(c, b);
+            if (cname == "fixr:codeSets") {
+                matched_codesets.emplace_back(c, b);
+                classify_codes(c, b);
+            } else if (cname == "fixr:fields") {
+                matched_fields.emplace_back(c, b);
+                for (pugi::xml_node fc = c.first_child(); fc; fc = fc.next_sibling()) {
+                    if (fc.type() == pugi::node_element && !orch_dropped(fc)) {
+                        appended[key_of(c)].push_back(fc);
+                    }
+                }
+            } else if (cname == "fixr:components") {
+                matched_components.emplace_back(c, b);
+                classify_definition_children(c, b, /*is_group=*/false);
+            } else if (cname == "fixr:groups") {
+                matched_groups.emplace_back(c, b);
+                classify_definition_children(c, b, /*is_group=*/true);
+            } else {
+                matched_messages.emplace_back(c, b);
+                classify_message(c, b);
+            }
+        }
+    }
+}
+
+// ---- step 5 -----------------------------------------------------------------
+
+void orchestra_overlay_merge::impl::check_caps() const {
+    std::size_t codes = 0;
+    for (pugi::xml_node const cs : new_codesets) {
+        for (pugi::xml_node v = cs.child("fixr:code"); v; v = v.next_sibling("fixr:code")) {
+            ++codes;
+        }
+    }
+    for (auto const& [o, b] : matched_codesets) {
+        for (pugi::xml_node const v : appended_of(o)) {
+            codes += name_of(v) == "fixr:code" ? 1 : 0;
+        }
+    }
+    // Every reference element of the overlay, whether the splice appends it or
+    // merges it in place.
+    std::size_t references = 0;
+    std::vector<pugi::xml_node> stack{overlay_root};
+    while (!stack.empty()) {
+        pugi::xml_node const e = stack.back();
+        stack.pop_back();
+        for (pugi::xml_node c = e.first_child(); c; c = c.next_sibling()) {
+            if (c.type() == pugi::node_element) {
+                references += is_orch_ref(name_of(c)) ? 1 : 0;
+                stack.push_back(c);
+            }
+        }
+    }
+    auto const check = [](std::size_t n, std::size_t cap, char const* what) {
+        if (n > cap) {
+            limit("overlay " + std::string{what} + " exceed the " + std::string{what} + " cap of " +
+                  std::to_string(cap));
+        }
+    };
+    check(new_fields.size(), kMaxNewFields, "new field definitions");
+    check(new_components.size(), kMaxNewComponents, "new component definitions");
+    check(new_messages.size(), kMaxNewMessages, "new message definitions");
+    check(new_groups.size(), kMaxNewGroups, "new group definitions");
+    check(new_codesets.size(), kMaxNewCodeSets, "new code set definitions");
+    check(codes, kMaxNewEnumValues, "added codes");
+    check(references, kMaxReferences, "reference elements");
+}
+
+// ---- step 6 -----------------------------------------------------------------
+
+struct orchestra_overlay_merge::impl::walk_result : graph_walk {
+    std::vector<std::pair<std::string, vnode>> messages;  // msgType, structure; sorted
+    std::vector<vnode> components;                        // declaration order
+    std::uint64_t total = 0;
+    bool components_fit = true;
+    bool groups_fit = true;
+};
+
+orchestra_overlay_merge::impl::walk_result orchestra_overlay_merge::impl::walk(bool merged) const {
+    walk_result r;
+
+    auto const container = [&](char const* name) -> vnode {
+        if (pugi::xml_node const b = base_root.child(name)) {
+            return vnode{.base = b, .fresh = {}};
+        }
+        if (merged) {
+            if (auto const it = created.find(name); it != created.end()) {
+                return vnode{.base = {}, .fresh = it->second};
+            }
+        }
+        return {};
+    };
+    // A virtual node's children, in the order `expand_field_list` visits them.
+    auto const children_of = [&](vnode v, auto&& fn) {
+        if (v.base) {
+            for (pugi::xml_node c = v.base.first_child(); c; c = c.next_sibling()) {
+                fn(vnode{.base = c, .fresh = {}});
+            }
+            if (!merged) {
+                return;
+            }
+            if (auto const it = merged_into.find(key_of(v.base)); it != merged_into.end()) {
+                for (pugi::xml_node const o : it->second) {
+                    for (pugi::xml_node const c : appended_of(o)) {
+                        fn(vnode{.base = {}, .fresh = c});
+                    }
+                }
+            }
+            return;
+        }
+        for (pugi::xml_node c = v.fresh.first_child(); c; c = c.next_sibling()) {
+            if (c.type() == pugi::node_element && !orch_dropped(c)) {
+                fn(vnode{.base = {}, .fresh = c});
+            }
+        }
+    };
+    auto const first_child_named = [&](vnode v, std::string_view name) -> vnode {
+        vnode out;
+        children_of(v, [&](vnode c) {
+            if (!out && c.node().type() == pugi::node_element && name_of(c.node()) == name) {
+                out = c;
+            }
+        });
+        return out;
+    };
+
+    // Declared field ids; component and group definitions by id, the first of an id
+    // winning (the loader refuses a repeated one).
+    std::unordered_set<std::uint16_t> declared;
+    std::unordered_map<std::uint16_t, vnode> component_by_id;
+    std::unordered_map<std::uint16_t, vnode> group_by_id;
+    auto const each_def = [&](char const* cname, std::string_view kind, auto&& fn) {
+        if (vnode const cont = container(cname)) {
+            children_of(cont, [&](vnode d) {
+                pugi::xml_node const n = d.node();
+                if (n.type() == pugi::node_element && name_of(n) == kind) {
+                    fn(d, n);
+                }
+            });
+        }
+    };
+    each_def("fixr:fields", "fixr:field", [&](vnode, pugi::xml_node n) {
+        if (auto const id = parse_orch_id(n.attribute("id").as_string(""))) {
+            declared.insert(*id);
+        }
+    });
+    each_def("fixr:components", "fixr:component", [&](vnode d, pugi::xml_node n) {
+        r.components.push_back(d);
+        if (auto const id = parse_orch_id(n.attribute("id").as_string(""))) {
+            component_by_id.emplace(*id, d);
+        }
+    });
+    each_def("fixr:groups", "fixr:group", [&](vnode d, pugi::xml_node n) {
+        if (auto const id = parse_orch_id(n.attribute("id").as_string(""))) {
+            group_by_id.emplace(*id, d);
+        }
+    });
+    each_def("fixr:messages", "fixr:message", [&](vnode d, pugi::xml_node n) {
+        r.messages.emplace_back(attr_of(n, "msgType"), first_child_named(d, "fixr:structure"));
+    });
+    // `finalize` sorts its messages with this call and comparator; the same
+    // algorithm over the same key sequence gives the same order, ties included.
+    std::ranges::sort(r.messages, [](auto const& a, auto const& b) noexcept {
+        return detail::bytewise_compare(a.first, b.first) < 0;
+    });
+
+    // A group definition's NumInGroup tag: its first `fixr:numInGroup`'s id, when
+    // that names a declared field; 0 otherwise (the loader refuses such a group
+    // when it is referenced).
+    auto const group_tag = [&](vnode g) -> std::uint16_t {
+        vnode const nig = first_child_named(g, "fixr:numInGroup");
+        if (!nig) {
+            return 0;
+        }
+        auto const id = parse_orch_id(nig.node().attribute("id").as_string(""));
+        return id && declared.contains(*id) ? *id : 0;
+    };
+    auto const records_of = [&](vnode v) {
+        std::vector<child_rec> out;
+        children_of(v, [&](vnode c) {
+            pugi::xml_node const n = c.node();
+            child_rec rec;
+            std::string_view const k = n.type() == pugi::node_element ? name_of(n) : "";
+            auto const id = parse_orch_id(n.attribute("id").as_string(""));
+            if (k == "fixr:fieldRef") {
+                rec.k = child_rec::kind::field;
+                rec.tag = id && declared.contains(*id) ? *id : 0;
+            } else if (k == "fixr:groupRef") {
+                rec.k = child_rec::kind::group;
+                if (id) {
+                    if (auto const it = group_by_id.find(*id); it != group_by_id.end()) {
+                        rec.tag = group_tag(it->second);
+                        if (rec.tag != 0) {
+                            rec.target = it->second;
+                        }
+                    }
+                }
+            } else if (k == "fixr:componentRef") {
+                rec.k = child_rec::kind::component;
+                if (id) {
+                    if (auto const it = component_by_id.find(*id); it != component_by_id.end()) {
+                        rec.target = it->second;
+                    }
+                }
+            }
+            out.push_back(rec);
+        });
+        return out;
+    };
+    auto const label = [](vnode v) {
+        pugi::xml_node const n = v.node();
+        std::string_view const k = name_of(n);
+        return std::string{k == "fixr:group" ? "group " : "component "} + attr_of(n, "id") + " " +
+               attr_of(n, "name");
+    };
+    auto const visit = [&](vnode root) { return visit_definition(r, root, records_of, label); };
+
+    std::uint64_t total = 0;
+    for (auto const& [mt, s] : r.messages) {
+        if (s) {
+            total = sat_add(total, visit(s).steps);
+        }
+    }
+    std::vector<std::uint64_t> comp_counts;
+    for (vnode const c : r.components) {
+        def_info const d = visit(c);
+        total = sat_add(total, d.steps);
+        comp_counts.push_back(d.entries);
+    }
+    std::vector<std::uint64_t> group_counts;
+    for (auto const& [tag, g] : r.first_seen_groups) {
+        def_info const d = visit(g);
+        total = sat_add(total, d.steps);
+        group_counts.push_back(d.entries);
+    }
+    r.total = total;
+    r.components_fit = side_table_fits(comp_counts);
+    r.groups_fit = side_table_fits(group_counts);
+    return r;
+}
+
+// ---- step 7 -----------------------------------------------------------------
+
+void orchestra_overlay_merge::impl::check_conflicts(walk_result const& merged,
+                                                    walk_result const& base) const {
+    // Vocabulary: `presence` is required, optional or absent on every overlay element.
+    {
+        std::vector<pugi::xml_node> stack{overlay_root};
+        while (!stack.empty()) {
+            pugi::xml_node const e = stack.back();
+            stack.pop_back();
+            if (pugi::xml_attribute const a = e.attribute("presence")) {
+                std::string_view const v = a.value();
+                if (v != "required" && v != "optional") {
+                    conflict("invalid presence value: " + orch_describe(e) + " has presence=\"" +
+                             std::string{v} +
+                             "\"; an overlay's presence is required, optional or absent");
+                }
+            }
+            for (pugi::xml_node c = e.first_child(); c; c = c.next_sibling()) {
+                if (c.type() == pugi::node_element) {
+                    stack.push_back(c);
+                }
+            }
+        }
+    }
+    // Repeated base keys and keys repeated within the overlay.
+    if (!deferred_conflicts.empty()) {
+        conflict(deferred_conflicts.front());
+    }
+    auto const changed_attr = [](pugi::xml_node o, pugi::xml_node b, char const* a,
+                                 std::string const& base_desc) {
+        if (attr_of(o, a) != attr_of(b, a)) {
+            conflict("identifying attribute changed: the overlay's " + orch_describe(o) + " has " +
+                     a + "=\"" + attr_of(o, a) + "\" where " + base_desc + " has \"" +
+                     attr_of(b, a) + "\"");
+        }
+    };
+    // A matched code set keeps the base's id (N-6: the name is the match key) and
+    // type; a matched code keeps its name.
+    for (auto const& [o, b] : matched_codesets) {
+        if (attr_of(o, "id") != attr_of(b, "id")) {
+            conflict(
+                "code-set name already used by another id: the overlay's <fixr:codeSet "
+                "name=\"" +
+                attr_of(o, "name") + "\" id=\"" + attr_of(o, "id") +
+                "\"> names the base's code set of id \"" + attr_of(b, "id") + "\"");
+        }
+        changed_attr(o, b, "type", "the base's code set");
+    }
+    for (auto const& [o, b] : matched_codes) {
+        if (attr_of(o, "name") != attr_of(b, "name")) {
+            conflict("redescribed code: the overlay's " + orch_describe(o) + " under code set " +
+                     attr_of(b.parent(), "name") + " has name=\"" + attr_of(o, "name") +
+                     "\" where the base has \"" + attr_of(b, "name") + "\"");
+        }
+    }
+    // A matched field keeps the base's name, type and lengthId.
+    for (auto const& [o, b] : matched_fields) {
+        for (char const* a : {"name", "type", "lengthId"}) {
+            changed_attr(o, b, a, "the base's field " + attr_of(b, "id"));
+        }
+    }
+    // Refused: a new field whose name a base field or another new field already uses.
+    {
+        std::set<std::string> new_names;
+        for (pugi::xml_node const f : new_fields) {
+            std::string const n = attr_of(f, "name");
+            if (auto const it = base_fields_by_name.find(n); it != base_fields_by_name.end()) {
+                if (it->second.size() > 1) {
+                    conflict("repeated base key: the overlay's " + orch_describe(f) + " names " +
+                             orch_occurrences(it->second) +
+                             "; the overlay cannot say which one it extends");
+                }
+                conflict("field name already used by another number: the overlay's " +
+                         orch_describe(f) + " reuses the name of the base's " +
+                         orch_describe(it->second.front()));
+            }
+            if (!new_names.insert(n).second) {
+                conflict("two new fields with one name: the overlay declares name \"" + n +
+                         "\" twice");
+            }
+        }
+    }
+    for (auto const& [o, b] : matched_components) {
+        changed_attr(o, b, "name", "the base's component " + attr_of(b, "id"));
+    }
+    // A matched group keeps its name and its NumInGroup; a new group has exactly one.
+    for (auto const& [o, b] : matched_groups) {
+        changed_attr(o, b, "name", "the base's group " + attr_of(b, "id"));
+        std::string const base_nig = attr_of(b.child("fixr:numInGroup"), "id");
+        auto const it = group_numingroups.find(key_of(o));
+        std::vector<pugi::xml_node> const none;
+        auto const& nigs = it == group_numingroups.end() ? none : it->second;
+        if (nigs.size() != 1 || attr_of(nigs.front(), "id") != base_nig) {
+            conflict("group numInGroup differs: the overlay's " + orch_describe(o) + " carries " +
+                     (nigs.empty()
+                          ? std::string{"no <fixr:numInGroup>"}
+                          : std::to_string(nigs.size()) + " <fixr:numInGroup>, the first id=\"" +
+                                attr_of(nigs.front(), "id") + "\"") +
+                     " where the base's has id=\"" + base_nig + "\"");
+        }
+    }
+    for (pugi::xml_node const g : new_groups) {
+        std::size_t n = 0;
+        for (pugi::xml_node c = g.child("fixr:numInGroup"); c;
+             c = c.next_sibling("fixr:numInGroup")) {
+            ++n;
+        }
+        if (n != 1) {
+            conflict("new group without exactly one numInGroup: the overlay's " + orch_describe(g) +
+                     " has " + std::to_string(n) + " <fixr:numInGroup>");
+        }
+    }
+    // A matched message keeps its id and name.
+    for (auto const& [o, b] : matched_messages) {
+        for (char const* a : {"id", "name"}) {
+            changed_attr(o, b, a, "the base's");
+        }
+    }
+    // The overlay cannot relax a Required child.
+    for (auto const& [o, b] : matched_children) {
+        if (attr_of(o, "presence") == "optional" && attr_of(b, "presence") == "required") {
+            conflict("required relaxed: the overlay's " + orch_describe(o) + " under " +
+                     orch_describe(b.parent().name() == std::string_view{"fixr:structure"}
+                                       ? b.parent().parent()
+                                       : b.parent()) +
+                     " has presence=\"optional\" where the base has \"required\"");
+        }
+    }
+
+    // One tag twice at one level (research R-3), as in the QuickFIX-XML check; a
+    // message's level is its structure's.
+    std::unordered_set<node_ptr> changed;
+    for (auto const& [b, os] : merged_into) {
+        for (pugi::xml_node const o : os) {
+            if (!appended_of(o).empty()) {
+                changed.insert(b);
+            }
+        }
+    }
+    for (vnode const v : merged.visit_order) {
+        if (!v.base) {
+            changed.insert(v.key());
+        }
+    }
+    close_upward(merged.children, changed);
+    std::unordered_map<node_ptr, level_set> merged_levels;
+    std::unordered_map<node_ptr, level_set> base_levels;
+    auto const refuse_twice = [](std::uint16_t tag, std::string const& where) {
+        conflict("tag occurs twice at one level: tag " + std::to_string(tag) +
+                 " occurs twice at the level of " + where + ", where the base has it at most once");
+    };
+    for (vnode const v : merged.visit_order) {
+        if (!changed.contains(v.key())) {
+            continue;
+        }
+        pugi::xml_node const n = v.node();
+        level_set const& ml = level_of(merged.children, merged_levels, v.key());
+        level_set const bl = v.base ? level_of(base.children, base_levels, v.key()) : level_set{};
+        if (auto const t = twice(ml, bl)) {
+            refuse_twice(*t, orch_describe(name_of(n) == "fixr:structure" ? n.parent() : n));
+        }
+    }
+}
+
+// ---- step 8 -----------------------------------------------------------------
+
+void orchestra_overlay_merge::impl::splice() {
+    auto const keep = [](pugi::xml_node c) { return !orch_dropped(c); };
+    for (pugi::xml_node oc = overlay_root.first_child(); oc; oc = oc.next_sibling()) {
+        if (oc.type() != pugi::node_element) {
+            continue;
+        }
+        pugi::xml_node const bc = base_root.child(oc.name());
+        if (!bc) {
+            copy_element_if(base_root, oc, keep);  // a container the base lacks
+            continue;
+        }
+        // Each matched element: its promotion, then its appended children.
+        std::vector<std::pair<pugi::xml_node, pugi::xml_node>> stack{{oc, bc}};
+        while (!stack.empty()) {
+            auto [o, b] = stack.back();
+            stack.pop_back();
+            if (attr_of(o, "presence") == "required" && attr_of(b, "presence") != "required") {
+                pugi::xml_attribute a = b.attribute("presence");
+                if (!a) {
+                    a = b.append_attribute("presence");
+                }
+                if (!a || !a.set_value("required")) {
+                    throw std::bad_alloc();
+                }
+            }
+            for (pugi::xml_node const c : appended_of(o)) {
+                copy_element_if(b, c, keep);
+            }
+            for (pugi::xml_node c = o.last_child(); c; c = c.previous_sibling()) {
+                if (auto const it = match_of.find(key_of(c)); it != match_of.end()) {
+                    stack.emplace_back(c, it->second);
+                }
+            }
+        }
+    }
+}
+
+// ── The public half ──────────────────────────────────────────────────────────
+
+orchestra_overlay_merge::orchestra_overlay_merge(pugi::xml_document& base,
+                                                 pugi::xml_document const& overlay)
+    : impl_(std::make_unique<impl>(base, overlay)) {}
+
+orchestra_overlay_merge::~orchestra_overlay_merge() = default;
+
+std::uint64_t orchestra_overlay_merge::guard(unresolved_group_policy policy, overlay_trace& trace) {
+    // `policy` reaches the walk's model of `finalize`; see the Orchestra section's
+    // header for why the counts it models do not depend on it.
+    static_cast<void>(policy);
+    impl& m = *impl_;
+    check_no_doctype(m.overlay_doc);  // step 3
+    check_depth(m.overlay_doc);       // step 4
+    m.check_root();                   // step 4a
+    m.classify();
+    m.check_caps();  // step 5
+
+    // Step 6: the merged-graph walk, then the base's own, then its refusals.
+    auto const merged = m.walk(/*merged=*/true);
+    auto const base = m.walk(/*merged=*/false);
+    guard_outcome g;
+    g.base_total = base.total;
+    g.merged_total = merged.total;
+    g.arm_limit = std::min(merged.total, sat_add(base.total, kExpansionBudget));
+    g.base_components_fit = base.components_fit;
+    g.base_groups_fit = base.groups_fit;
+    g.merged_components_fit = merged.components_fit;
+    g.merged_groups_fit = merged.groups_fit;
+    trace.guards = g;
+    if (merged.cycle) {
+        throw orchestra_parse_error("dict::orchestra_parse_error: component reference cycle: " +
+                                    *merged.cycle);
+    }
+    if (sat_sub(merged.total, base.total) > kExpansionBudget) {
+        trace.origin = refusal_origin::budget;
+        limit("the overlay adds more expansion steps than the expansion budget of " +
+              std::to_string(kExpansionBudget));
+    }
+    if (base.components_fit && !merged.components_fit) {
+        trace.origin = refusal_origin::side_table;
+        limit(
+            "the components side table would stop fitting 16 bits (a start or a count "
+            "above 65535)");
+    }
+    if (base.groups_fit && !merged.groups_fit) {
+        trace.origin = refusal_origin::side_table;
+        limit(
+            "the groups side table would stop fitting 16 bits (a start or a count above "
+            "65535)");
+    }
+
+    m.check_conflicts(merged, base);  // step 7
+    return g.arm_limit;
+}
+
+void orchestra_overlay_merge::splice() { impl_->splice(); }
 
 }  // namespace fixpp::dict::detail::overlay

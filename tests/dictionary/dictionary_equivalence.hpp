@@ -31,8 +31,14 @@
 // counts; the first `<field>` of a name wins; messages are walked sorted bytewise
 // by msgtype, each as header, body, trailer, then components in declaration order,
 // and a group's definition is the first `<group>` node met on that walk. A
-// duplicate key the census meets is written to `raw_census::notes`. The census is
-// QuickFIX XML only.
+// duplicate key the census meets is written to `raw_census::notes`.
+// `census_from_orchestra` is the same census of an Orchestra document, read from
+// `OrchestraLoaderState`'s `collect_*` members and `finalize` in
+// src/dictionary/orchestra_loader.cpp: fields, components and groups are keyed by
+// `id`; messages are walked sorted bytewise by msgType, each as its
+// `fixr:structure`; then components in declaration order; a group's definition is
+// the definition the first `fixr:groupRef` to its NumInGroup tag names on that walk,
+// and its `fixr:numInGroup` emits nothing.
 //
 // The side-table wrap condition (research R-10 §3): a component or group is
 // compared with its census expansion only when its start and its count, computed
@@ -329,7 +335,7 @@ inline constexpr std::array kStoreList{
     store_entry{id::kCensusGroupStart, entry_kind::seeded, ""},
 };
 
-// ── the raw census (QuickFIX XML) ────────────────────────────────────────────
+// ── the raw census ────────────────────────────────────────────────────────────
 
 struct raw_census {
     std::vector<std::string> msg_types;                         // document order
@@ -454,6 +460,150 @@ struct walker {
         w.walk(header, scratch, /*register_groups=*/true, 0);
         w.walk(node, scratch, /*register_groups=*/true, 0);
         w.walk(trailer, scratch, /*register_groups=*/true, 0);
+    }
+    for (auto const& [name, node] : comp_order) {
+        std::vector<std::uint16_t> members;
+        w.walk(node, members, /*register_groups=*/true, 0);
+        c.components.emplace_back(name, std::move(members));
+    }
+    for (auto const& [no_tag, node] : w.group_nodes) {
+        std::vector<std::uint16_t> members;
+        w.walk(node, members, /*register_groups=*/false, 0);
+        c.groups.emplace(no_tag, std::move(members));
+    }
+    return c;
+}
+
+namespace detail_census {
+
+struct orchestra_walker {
+    std::set<std::uint16_t> fields;
+    std::unordered_map<std::uint16_t, pugi::xml_node> components;
+    std::unordered_map<std::uint16_t, pugi::xml_node> groups;
+    std::map<std::uint16_t, pugi::xml_node> group_nodes;
+    std::vector<std::string>* notes = nullptr;
+
+    void walk(pugi::xml_node const& parent, std::vector<std::uint16_t>& out, bool register_groups,
+              int depth) {
+        if (depth > kMaxDepth) {
+            notes->push_back("census: walk deeper than kMaxDepth at <" +
+                             std::string{parent.name()} + ">; stopped");
+            return;
+        }
+        for (auto const& child : parent.children()) {
+            std::string_view const kind{child.name()};
+            auto const id = static_cast<std::uint16_t>(child.attribute("id").as_uint(0));
+            if (kind == "fixr:fieldRef") {
+                if (!fields.contains(id)) {
+                    notes->push_back("census: <fixr:fieldRef id=\"" + std::to_string(id) +
+                                     "\"> is not declared");
+                    continue;
+                }
+                out.push_back(id);
+            } else if (kind == "fixr:componentRef") {
+                auto const it = components.find(id);
+                if (it == components.end()) {
+                    notes->push_back("census: <fixr:componentRef id=\"" + std::to_string(id) +
+                                     "\"> is not defined");
+                    continue;
+                }
+                walk(it->second, out, register_groups, depth + 1);
+            } else if (kind == "fixr:groupRef") {
+                auto const it = groups.find(id);
+                if (it == groups.end()) {
+                    notes->push_back("census: <fixr:groupRef id=\"" + std::to_string(id) +
+                                     "\"> is not defined");
+                    continue;
+                }
+                auto const no_tag = static_cast<std::uint16_t>(
+                    it->second.child("fixr:numInGroup").attribute("id").as_uint(0));
+                if (!fields.contains(no_tag)) {
+                    notes->push_back("census: <fixr:group id=\"" + std::to_string(id) +
+                                     "\"> has no declared fixr:numInGroup");
+                    continue;
+                }
+                out.push_back(no_tag);
+                if (register_groups) {
+                    group_nodes.emplace(no_tag, it->second);  // first-seen wins
+                }
+                walk(it->second, out, register_groups, depth + 1);
+            }
+        }
+    }
+};
+
+}  // namespace detail_census
+
+// Census of an Orchestra document. An unparseable document gives an empty census
+// with a note.
+[[nodiscard]] inline raw_census census_from_orchestra(std::string_view xml) {
+    raw_census c;
+    pugi::xml_document doc;
+    if (!doc.load_buffer(xml.data(), xml.size())) {
+        c.notes.emplace_back("census: the document does not parse");
+        return c;
+    }
+    auto const root = doc.child("fixr:repository");
+    detail_census::orchestra_walker w;
+    w.notes = &c.notes;
+
+    std::set<std::string> names;
+    for (auto const& f : root.child("fixr:fields").children("fixr:field")) {
+        std::string const name{f.attribute("name").as_string("")};
+        auto const id = static_cast<std::uint16_t>(f.attribute("id").as_uint(0));
+        if (!w.fields.insert(id).second) {
+            c.notes.push_back("census: duplicate <fixr:field id=\"" + std::to_string(id) + "\">");
+            continue;
+        }
+        if (!names.insert(name).second) {
+            c.notes.push_back("census: duplicate <fixr:field name=\"" + name +
+                              "\">; the first is kept");
+            continue;
+        }
+        c.fields.emplace_back(name, id);
+    }
+
+    std::vector<std::pair<std::string, pugi::xml_node>> comp_order;
+    std::set<std::string> comp_names;
+    for (auto const& comp : root.child("fixr:components").children("fixr:component")) {
+        std::string const name{comp.attribute("name").as_string("")};
+        auto const id = static_cast<std::uint16_t>(comp.attribute("id").as_uint(0));
+        if (!w.components.emplace(id, comp).second) {
+            c.notes.push_back("census: duplicate <fixr:component id=\"" + std::to_string(id) +
+                              "\">; the first is kept");
+            continue;
+        }
+        if (!comp_names.insert(name).second) {
+            c.notes.push_back("census: duplicate <fixr:component name=\"" + name + "\">");
+        }
+        comp_order.emplace_back(name, comp);
+    }
+    for (auto const& g : root.child("fixr:groups").children("fixr:group")) {
+        auto const id = static_cast<std::uint16_t>(g.attribute("id").as_uint(0));
+        if (!w.groups.emplace(id, g).second) {
+            c.notes.push_back("census: duplicate <fixr:group id=\"" + std::to_string(id) +
+                              "\">; the first is kept");
+        }
+    }
+
+    std::vector<std::pair<std::string, pugi::xml_node>> messages;
+    std::set<std::string> seen_types;
+    for (auto const& m : root.child("fixr:messages").children("fixr:message")) {
+        std::string const mt{m.attribute("msgType").as_string("")};
+        if (!seen_types.insert(mt).second) {
+            c.notes.push_back("census: msgType \"" + mt +
+                              "\" appears more than once; the loader's sort is not stable, so "
+                              "which of them registers a shared group first is unspecified");
+        }
+        c.msg_types.push_back(mt);
+        messages.emplace_back(mt, m.child("fixr:structure"));
+    }
+
+    // The message walk registers groups first, in finalize's order.
+    std::ranges::stable_sort(messages, {}, &std::pair<std::string, pugi::xml_node>::first);
+    for (auto const& [mt, structure] : messages) {
+        std::vector<std::uint16_t> scratch;
+        w.walk(structure, scratch, /*register_groups=*/true, 0);
     }
     for (auto const& [name, node] : comp_order) {
         std::vector<std::uint16_t> members;

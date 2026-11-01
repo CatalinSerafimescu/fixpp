@@ -49,6 +49,7 @@
 #include "fixpp/dict/field_ref.hpp"
 #include "fixpp/dict/group_ref.hpp"
 #include "fixpp/dict/version_profile.hpp"
+#include "overlay_merge.hpp"
 
 namespace fixpp::dict {
 
@@ -264,15 +265,33 @@ struct OrchestraMessageDef {
 
 class OrchestraLoaderState {
 public:
+    // 098-dialect-overlay (research R-5, the step counter): `step_limit` arms the
+    // expansion step counter; the `load` path passes none, so it is never armed there.
     explicit OrchestraLoaderState(
         std::pmr::memory_resource* mr,
-        unresolved_group_policy policy = unresolved_group_policy::fail_closed) noexcept
-        : mr_(mr), unresolved_policy_(policy) {}
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed,
+        std::optional<std::uint64_t> step_limit = std::nullopt) noexcept
+        : mr_(mr), unresolved_policy_(policy), step_limit_(step_limit) {}
 
     void parse_document(pugi::xml_document const& doc);
 
     // Returns a finished metadata handle (ownership transferred to caller).
     [[nodiscard]] detail::dict_metadata_handle_ptr finalize();
+
+    // 098 (research R-3, R-5 step 8a): the document's Length+Data pair relation,
+    // computed by the loader's own root, code-set and field collection and the same
+    // pair resolution `parse_document` uses.
+    [[nodiscard]] detail::overlay::length_pair_relation pair_relation_of(
+        pugi::xml_document const& doc, detail::overlay::collision_mode mode);
+
+    // 098: the base check `parse_document` makes first (its root and version), so
+    // an overlay load refuses a bad base with the error `load` gives it.
+    void check_root_and_version(pugi::xml_document const& doc) {
+        parse_root_and_version(doc.first_child());
+    }
+
+    // The expansion step counter's value (research R-5).
+    [[nodiscard]] std::uint64_t steps() const noexcept { return steps_; }
 
 private:
     void parse_root_and_version(pugi::xml_node const& root);
@@ -328,6 +347,11 @@ private:
     // 083 T036/T037 (FR-006 / FR-006a): load-time only (C-6.5). SAME option
     // and SAME semantics as XmlLoader's (C-6.4) -- shared enum, not a twin.
     unresolved_group_policy unresolved_policy_ = unresolved_group_policy::fail_closed;
+
+    // 098 (research R-5): the expansion step counter, incremented by
+    // `expand_field_list` once per child node; refuses only when armed.
+    std::uint64_t steps_ = 0;
+    std::optional<std::uint64_t> step_limit_;
 
     std::unordered_map<std::string, OrchestraCodeSet> codesets_by_name_;
     std::unordered_map<std::uint16_t, OrchestraFieldInfo> fields_by_tag_;
@@ -439,8 +463,18 @@ void OrchestraLoaderState::collect_fields(pugi::xml_node const& root) {
 // point forward (Signature(89) names SignatureLength(93)). Fails closed on a
 // reference that cannot be a Length+Data pair, like every other dangling or
 // malformed reference in this loader.
-void OrchestraLoaderState::resolve_length_pairs() {
-    for (auto const& [data_tag, info] : fields_by_tag_) {
+//
+// 098-dialect-overlay (research R-3): a function of the collected fields, so the
+// loader's own pairing (`resolve_length_pairs`, `collision_mode::refuse`) and the
+// overlay path's step 8a (`pair_relation_of`) read one definition of which tags
+// pair. Under `collision_mode::record` a Length that two Data fields name is
+// recorded in `collisions` instead of thrown; every other refusal throws in both
+// modes.
+[[nodiscard]] detail::overlay::length_pair_relation resolve_length_pair_relation(
+    std::unordered_map<std::uint16_t, OrchestraFieldInfo> const& fields_by_tag,
+    detail::overlay::collision_mode mode) {
+    detail::overlay::length_pair_relation rel;
+    for (auto const& [data_tag, info] : fields_by_tag) {
         if (!info.length_id) {
             continue;
         }
@@ -471,16 +505,50 @@ void OrchestraLoaderState::resolve_length_pairs() {
             throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " is not a data or XMLData field");
         }
-        auto const lit = fields_by_tag_.find(length_tag);
-        if (lit == fields_by_tag_.end() || lit->second.type != field_data_type::Length) {
+        auto const lit = fields_by_tag.find(length_tag);
+        if (lit == fields_by_tag.end() || lit->second.type != field_data_type::Length) {
             throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " does not name a declared Length field");
         }
-        if (!data_by_length_.emplace(length_tag, data_tag).second) {
-            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
-                                        " names a Length field already paired with another field");
+        if (auto const [fit, fresh] = rel.forward.emplace(length_tag, data_tag); !fresh) {
+            if (mode == detail::overlay::collision_mode::refuse) {
+                throw orchestra_parse_error(
+                    "dict::orchestra_parse_error: " + where() +
+                    " names a Length field already paired with another field");
+            }
+            auto& datas = rel.collisions[length_tag];
+            if (datas.empty()) {
+                datas.push_back(fit->second);
+            }
+            datas.push_back(data_tag);
         }
+        rel.reverse[data_tag].push_back(length_tag);
     }
+    for (auto& [length_tag, datas] : rel.collisions) {
+        std::ranges::sort(datas);
+    }
+    for (auto const& [tag, info] : fields_by_tag) {
+        rel.declared_tags.push_back(tag);
+    }
+    std::ranges::sort(rel.declared_tags);
+    return rel;
+}
+
+void OrchestraLoaderState::resolve_length_pairs() {
+    for (auto const& [length_tag, data_tag] :
+         resolve_length_pair_relation(fields_by_tag_, detail::overlay::collision_mode::refuse)
+             .forward) {
+        data_by_length_.emplace(length_tag, data_tag);
+    }
+}
+
+detail::overlay::length_pair_relation OrchestraLoaderState::pair_relation_of(
+    pugi::xml_document const& doc, detail::overlay::collision_mode mode) {
+    auto const root = doc.first_child();
+    parse_root_and_version(root);
+    collect_codesets(root);
+    collect_fields(root);
+    return resolve_length_pair_relation(fields_by_tag_, mode);
 }
 
 void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
@@ -573,6 +641,15 @@ void OrchestraLoaderState::expand_field_list(
     detail::DelimCapture* delim_cap, bool in_group, bool component_required,
     bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
+        // 098 (research R-5): one step per child node, the unit the overlay path's
+        // pre-walk predicts. Armed only on that path; there, a count past the limit
+        // means the pre-walk's model of this expansion is wrong.
+        ++steps_;
+        if (step_limit_.has_value() && steps_ > *step_limit_) {
+            throw overlay_limit_error(
+                "dict::overlay_limit_error: expansion step count exceeded the pre-walk "
+                "prediction (internal model drift)");
+        }
         std::string_view const tag_name{child.name()};
         if (tag_name == "fixr:fieldRef") {
             auto const tag = parse_orchestra_id(child.attribute("id"), "<fixr:fieldRef>");
@@ -1220,14 +1297,122 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 // becomes `dict::xml_oom_error`, mirroring `xml_loader.cpp`.
 // ----------------------------------------------------------------------------
 
+// 098 (research R-5): `step_limit` arms the step counter (the overlay path only),
+// and `steps_out` receives the counter's final value whether the build returns or
+// throws.
 [[nodiscard]] detail::dict_metadata_handle_ptr build_handle_from_doc(
-    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy) {
-    OrchestraLoaderState st{mr, policy};
+    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy,
+    std::optional<std::uint64_t> step_limit = std::nullopt, std::uint64_t* steps_out = nullptr) {
+    OrchestraLoaderState st{mr, policy, step_limit};
+    struct report_steps {
+        OrchestraLoaderState const& st;
+        std::uint64_t* out;
+        report_steps(OrchestraLoaderState const& s, std::uint64_t* o) noexcept : st(s), out(o) {}
+        report_steps(report_steps const&) = delete;
+        report_steps& operator=(report_steps const&) = delete;
+        report_steps(report_steps&&) = delete;
+        report_steps& operator=(report_steps&&) = delete;
+        ~report_steps() {
+            if (out != nullptr) {
+                *out = st.steps();
+            }
+        }
+    } const report{st, steps_out};
     st.parse_document(doc);
     return st.finalize();
 }
 
+// ── 098-dialect-overlay: the Orchestra overlay load (research R-1, R-5) ──────
+// Both `OrchestraLoader::load_with_overlay*` members go through
+// `load_with_overlay_docs`, so the guard routine, the splice, step 8a and the armed
+// build run in one place and in research R-5's order, as in xml_loader.cpp. The
+// read seam's channel is xml_loader.cpp's (`detail::overlay::trace_for_call`).
+
+namespace ov = detail::overlay;
+
+void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw orchestra_parse_error("dict::orchestra_parse_error: cannot open " + path.string());
+    }
+    ov::throw_on_parse_failure(doc.load(in), ov::source_format::orchestra);
+}
+
+[[nodiscard]] detail::dict_metadata_handle_ptr load_with_overlay_docs(
+    pugi::xml_document& base, pugi::xml_document const& overlay, std::pmr::memory_resource* mr,
+    unresolved_group_policy policy, ov::overlay_trace& trace) {
+    OrchestraLoaderState{mr}.check_root_and_version(base);
+    ov::orchestra_overlay_merge merge{base, overlay};
+    std::uint64_t const arm = merge.guard(policy, trace);  // steps 3 to 7
+    auto const base_pairs = OrchestraLoaderState{mr}.pair_relation_of(
+        base, ov::collision_mode::refuse);  // step 8a, before the splice
+    merge.splice();                         // step 8
+    ov::check_pair_relation(base_pairs, OrchestraLoaderState{mr}.pair_relation_of(
+                                            base, ov::collision_mode::record));  // step 8a
+    try {
+        return build_handle_from_doc(base, mr, policy, arm, &trace.counter);  // step 9
+    } catch (overlay_limit_error const&) {
+        trace.origin = ov::refusal_origin::counter;  // the only limit the build raises
+        throw;
+    }
+}
+
+[[nodiscard]] detail::dict_metadata_handle_ptr load_with_overlay_paths(
+    std::filesystem::path const& base, std::filesystem::path const& overlay,
+    std::pmr::memory_resource* mr, unresolved_group_policy policy, ov::overlay_trace& trace) {
+    std::string const overlay_text =
+        ov::read_overlay_file(overlay, ov::source_format::orchestra);  // step 1
+    pugi::xml_document base_doc;
+    parse_base_file(base_doc, base);
+    pugi::xml_document overlay_doc;
+    ov::throw_on_parse_failure(
+        overlay_doc.load_buffer(overlay_text.data(), overlay_text.size(), ov::kOverlayParseFlags),
+        ov::source_format::orchestra);  // step 2
+    return load_with_overlay_docs(base_doc, overlay_doc, mr, policy, trace);
+}
+
+[[nodiscard]] detail::dict_metadata_handle_ptr load_with_overlay_strings(
+    std::string_view base, std::string_view overlay, std::pmr::memory_resource* mr,
+    unresolved_group_policy policy, ov::overlay_trace& trace) {
+    ov::check_overlay_size(overlay.size());  // step 1
+    pugi::xml_document base_doc;
+    ov::throw_on_parse_failure(base_doc.load_buffer(base.data(), base.size()),
+                               ov::source_format::orchestra);
+    pugi::xml_document overlay_doc;
+    ov::throw_on_parse_failure(
+        overlay_doc.load_buffer(overlay.data(), overlay.size(), ov::kOverlayParseFlags),
+        ov::source_format::orchestra);  // step 2
+    return load_with_overlay_docs(base_doc, overlay_doc, mr, policy, trace);
+}
+
 }  // namespace
+
+namespace detail::overlay {
+
+length_pair_relation orchestra_length_pair_relation(pugi::xml_document const& doc,
+                                                    collision_mode mode) {
+    OrchestraLoaderState st{std::pmr::new_delete_resource()};
+    return st.pair_relation_of(doc, mode);
+}
+
+xml_overlay_probe probe_orchestra_overlay_from_string(std::string_view base_xml,
+                                                      std::string_view overlay_xml,
+                                                      std::pmr::memory_resource* mr,
+                                                      unresolved_group_policy policy) {
+    return probe_with([&] {
+        return OrchestraLoader{}.load_with_overlay_from_string(base_xml, overlay_xml, mr, policy);
+    });
+}
+
+xml_overlay_probe probe_orchestra_overlay(std::filesystem::path const& base,
+                                          std::filesystem::path const& overlay,
+                                          std::pmr::memory_resource* mr,
+                                          unresolved_group_policy policy) {
+    return probe_with(
+        [&] { return OrchestraLoader{}.load_with_overlay(base, overlay, mr, policy); });
+}
+
+}  // namespace detail::overlay
 
 Dictionary OrchestraLoader::load(std::filesystem::path const& path, std::pmr::memory_resource* mr,
                                  unresolved_group_policy policy) {
@@ -1259,6 +1444,32 @@ Dictionary OrchestraLoader::load_from_string(std::string_view xml, std::pmr::mem
                                         result.description());
         }
         return Dictionary{build_handle_from_doc(doc, mr, policy)};
+    });
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+Dictionary OrchestraLoader::load_with_overlay(std::filesystem::path const& base,
+                                              std::filesystem::path const& overlay,
+                                              std::pmr::memory_resource* mr,
+                                              unresolved_group_policy policy) {
+    assert(mr != nullptr && "OrchestraLoader::load_with_overlay: mr must not be null");
+    return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
+        ov::overlay_trace local;
+        return Dictionary{
+            load_with_overlay_paths(base, overlay, mr, policy, ov::trace_for_call(local))};
+    });
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+Dictionary OrchestraLoader::load_with_overlay_from_string(std::string_view base_xml,
+                                                          std::string_view overlay_xml,
+                                                          std::pmr::memory_resource* mr,
+                                                          unresolved_group_policy policy) {
+    assert(mr != nullptr && "OrchestraLoader::load_with_overlay_from_string: mr must not be null");
+    return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
+        ov::overlay_trace local;
+        return Dictionary{load_with_overlay_strings(base_xml, overlay_xml, mr, policy,
+                                                    ov::trace_for_call(local))};
     });
 }
 

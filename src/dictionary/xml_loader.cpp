@@ -30,6 +30,7 @@
 #include <fixpp/dict/error.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
+#include <functional>
 #include <ios>
 #include <memory>
 #include <memory_resource>
@@ -1490,7 +1491,8 @@ namespace ov = detail::overlay;
 // The read seam's channel (research R-5, read seam). `Dictionary`'s handle
 // constructor is open to the loaders only, so the seam calls the public members
 // and receives their trace through this pointer, which only `probe_scope` sets,
-// for one call on its own thread. Every other call writes a local trace.
+// for one call on its own thread. Every other call writes a local trace. Both
+// loaders' overlay members read it through `detail::overlay::trace_for_call`.
 thread_local ov::overlay_trace* t_probe_trace = nullptr;
 
 class probe_scope {
@@ -1507,10 +1509,6 @@ public:
 private:
     ov::overlay_trace* saved_;
 };
-
-[[nodiscard]] ov::overlay_trace& trace_for_call(ov::overlay_trace& local) noexcept {
-    return t_probe_trace != nullptr ? *t_probe_trace : local;
-}
 
 void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path) {
     std::ifstream in(path, std::ios::binary);
@@ -1565,13 +1563,20 @@ void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path)
     return load_with_overlay_docs(base_doc, overlay_doc, mr, policy, trace);
 }
 
-template <class F>
-[[nodiscard]] ov::xml_overlay_probe probe_with(F&& load) {
-    ov::xml_overlay_probe p;
-    ov::overlay_trace trace;
+}  // namespace
+
+namespace detail::overlay {
+
+overlay_trace& trace_for_call(overlay_trace& local) noexcept {
+    return t_probe_trace != nullptr ? *t_probe_trace : local;
+}
+
+xml_overlay_probe probe_with(std::function<Dictionary()> const& load) {
+    xml_overlay_probe p;
+    overlay_trace trace;
     try {
         probe_scope const scope{&trace};
-        p.dictionary.emplace(std::forward<F>(load)());
+        p.dictionary.emplace(load());
     } catch (...) {
         p.error = std::current_exception();
     }
@@ -1580,10 +1585,6 @@ template <class F>
     p.counter = trace.counter;
     return p;
 }
-
-}  // namespace
-
-namespace detail::overlay {
 
 length_pair_relation xml_length_pair_relation(pugi::xml_document const& doc) {
     LoaderState st{std::pmr::new_delete_resource()};
@@ -1648,7 +1649,7 @@ Dictionary XmlLoader::load_with_overlay(std::filesystem::path const& base,
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         ov::overlay_trace local;
         return Dictionary{
-            load_with_overlay_paths(base, overlay, mr, policy, trace_for_call(local))};
+            load_with_overlay_paths(base, overlay, mr, policy, ov::trace_for_call(local))};
     });
 }
 
@@ -1660,8 +1661,8 @@ Dictionary XmlLoader::load_with_overlay_from_string(std::string_view base_xml,
     assert(mr != nullptr && "XmlLoader::load_with_overlay_from_string: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         ov::overlay_trace local;
-        return Dictionary{
-            load_with_overlay_strings(base_xml, overlay_xml, mr, policy, trace_for_call(local))};
+        return Dictionary{load_with_overlay_strings(base_xml, overlay_xml, mr, policy,
+                                                    ov::trace_for_call(local))};
     });
 }
 

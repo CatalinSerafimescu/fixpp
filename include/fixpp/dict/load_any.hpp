@@ -34,4 +34,16 @@ namespace fixpp::dict {
     std::filesystem::path const& path, std::pmr::memory_resource* mr,
     unresolved_group_policy policy = unresolved_group_policy::fail_closed);
 
+// 098-dialect-overlay (contracts/surface.md): sniffs the base root as load_any
+// does; the overlay root MUST be the same format, else overlay_conflict_error.
+// Dispatches to the matching loader's load_with_overlay, forwarding `policy`. The
+// overlay's format is checked by that loader's own root check (research R-5 step
+// 4a), after its byte cap, so the overlay is read once and capped before any parse.
+// Throws what the dispatched loader throws, and for the base what load_any throws
+// for its path. Preconditions as load_any: mr != nullptr.
+[[nodiscard]] Dictionary load_any_with_overlay(
+    std::filesystem::path const& base, std::filesystem::path const& overlay,
+    std::pmr::memory_resource* mr,
+    unresolved_group_policy policy = unresolved_group_policy::fail_closed);
+
 }  // namespace fixpp::dict

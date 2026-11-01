@@ -2,10 +2,12 @@
 // src/dictionary/overlay_merge.hpp
 //
 // 098-dialect-overlay, internal to `src/dictionary/` (and the dictionary tests,
-// whose include path already has this directory). The QuickFIX-XML half of the
-// overlay load: research R-5's guard stage (steps 1 to 7), R-3's splice (step 8)
-// and the Length+Data relation check (step 8a). `xml_loader.cpp` owns the build
-// (step 9), the step counter and R-5's read seam declared at the end of this file.
+// whose include path already has this directory). Both formats' overlay merge:
+// research R-5's guard stage (steps 1 to 7), R-3's splice (step 8) and the
+// Length+Data relation check (step 8a), for a QuickFIX-XML base
+// (`xml_overlay_merge`) and for an Orchestra base (`orchestra_overlay_merge`).
+// Each loader's TU owns its build (step 9) and its step counter; `xml_loader.cpp`
+// owns R-5's read seam channel, declared at the end of this file.
 //
 // Order of the guard stage (research R-5): byte cap, parse, DOCTYPE, depth, root,
 // entry and reference caps, the merged-graph walk (cycles, expansion budget,
@@ -21,6 +23,7 @@
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/loader_policy.hpp>
+#include <functional>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -41,6 +44,10 @@ inline constexpr std::size_t kMaxNewComponents = 64;    // 2c §4.4.2
 inline constexpr std::size_t kMaxNewMessages = 64;      // 2c §4.4.2
 inline constexpr std::size_t kMaxNewEnumValues = 4096;  // research R-5, a chosen value
 inline constexpr std::size_t kMaxReferences = 8192;     // research R-5, a chosen value
+// Orchestra only. Groups: research R-5, the components cap (a group is a shared
+// definition by id, as a component is). Code sets: research R-5, a chosen value.
+inline constexpr std::size_t kMaxNewGroups = 64;
+inline constexpr std::size_t kMaxNewCodeSets = 256;
 
 // The expansion budget (research R-5, "The expansion budget"): run step 6's count
 // over every vendored base with an empty overlay, take the largest total, and set
@@ -101,13 +108,17 @@ struct overlay_trace {
     std::uint64_t counter = 0;  // the build's step counter, once the build ran
 };
 
-// The Length+Data pair relation of a QuickFIX-XML document (research R-3):
+// The Length+Data pair relation of a document (research R-3). QuickFIX XML:
 // `forward` is `LoaderState::detect_length_pairs`'s Length → Data map with its
-// first-writer rule; `reverse` is its inverse with every Length kept; and
-// `declared_tags` is every field number the document declares, sorted.
+// first-writer rule, and `reverse` its inverse with every Length kept. Orchestra:
+// `forward` maps each Length a Data field's `lengthId` names to that Data (the
+// first met, where two name it), `reverse` maps each such Data to its Length, and
+// `collisions` holds every Length that two or more Data fields name, with all of
+// them. `declared_tags` is every field number the document declares, sorted.
 struct length_pair_relation {
     std::map<std::uint16_t, std::uint16_t> forward;
     std::map<std::uint16_t, std::vector<std::uint16_t>> reverse;
+    std::map<std::uint16_t, std::vector<std::uint16_t>> collisions;
     std::vector<std::uint16_t> declared_tags;
 };
 
@@ -115,6 +126,16 @@ struct length_pair_relation {
 // on `doc` and then the pair detection `LoaderState` itself uses, so this and the
 // loader's pairing cannot drift. Throws whatever those loader steps throw.
 [[nodiscard]] length_pair_relation xml_length_pair_relation(pugi::xml_document const& doc);
+
+// Defined in orchestra_loader.cpp: runs the loader's own root, code-set and field
+// collection on `doc` and then the pair resolution `OrchestraLoaderState` itself
+// uses, so this and the loader's pairing cannot drift. With
+// `collision_mode::refuse` a Length two Data fields name throws the loader's own
+// `orchestra_parse_error`, as `load` does; with `collision_mode::record` it is
+// recorded in `collisions`. Every other refusal is the loader's, in either mode.
+enum class collision_mode : std::uint8_t { refuse, record };
+[[nodiscard]] length_pair_relation orchestra_length_pair_relation(pugi::xml_document const& doc,
+                                                                  collision_mode mode);
 
 // Step 8a: refuses with `overlay_conflict_error` when a pair touching a field
 // number the base declares is gained, lost or given a second partner.
@@ -147,11 +168,34 @@ private:
     std::unique_ptr<impl> impl_;
 };
 
-// ── R-5's read seam (defined in xml_loader.cpp; tests only). Calls
-// `XmlLoader::load_with_overlay[_from_string]` itself and also returns the
-// counter's final value, step 6's predicted total and the origin of a refusal,
-// which those members report through a thread-local channel only the seam sets.
-// A refusal is returned in `error`, never thrown.
+// The Orchestra merge of one overlay into one base document, with the same shape
+// and the same order of steps as `xml_overlay_merge`, by research R-3's Orchestra
+// table.
+class orchestra_overlay_merge {
+public:
+    // Both documents must outlive this object. `base` is changed only by `splice`.
+    orchestra_overlay_merge(pugi::xml_document& base, pugi::xml_document const& overlay);
+    ~orchestra_overlay_merge();
+    orchestra_overlay_merge(orchestra_overlay_merge const&) = delete;
+    orchestra_overlay_merge& operator=(orchestra_overlay_merge const&) = delete;
+    orchestra_overlay_merge(orchestra_overlay_merge&&) = delete;
+    orchestra_overlay_merge& operator=(orchestra_overlay_merge&&) = delete;
+
+    // As `xml_overlay_merge::guard`; a cycle throws `orchestra_parse_error`.
+    [[nodiscard]] std::uint64_t guard(unresolved_group_policy policy, overlay_trace& trace);
+
+    // Step 8 (research R-3). Call only after `guard` returned.
+    void splice();
+
+private:
+    struct impl;
+    std::unique_ptr<impl> impl_;
+};
+
+// ── R-5's read seam (tests only). Calls a loader's `load_with_overlay[_from_string]`
+// itself and also returns the counter's final value, step 6's predicted total and
+// the origin of a refusal, which those members report through a thread-local
+// channel only the seam sets. A refusal is returned in `error`, never thrown.
 struct xml_overlay_probe {
     std::optional<Dictionary> dictionary;
     std::exception_ptr error;
@@ -168,5 +212,22 @@ struct xml_overlay_probe {
     std::filesystem::path const& base, std::filesystem::path const& overlay,
     std::pmr::memory_resource* mr,
     unresolved_group_policy policy = unresolved_group_policy::fail_closed);
+
+// Defined in orchestra_loader.cpp: the same seam over `OrchestraLoader`.
+[[nodiscard]] xml_overlay_probe probe_orchestra_overlay_from_string(
+    std::string_view base_xml, std::string_view overlay_xml, std::pmr::memory_resource* mr,
+    unresolved_group_policy policy = unresolved_group_policy::fail_closed);
+
+[[nodiscard]] xml_overlay_probe probe_orchestra_overlay(
+    std::filesystem::path const& base, std::filesystem::path const& overlay,
+    std::pmr::memory_resource* mr,
+    unresolved_group_policy policy = unresolved_group_policy::fail_closed);
+
+// The seam's channel (defined in xml_loader.cpp). An overlay entry point writes
+// its trace to the probe's trace while `probe_with` runs it on this thread, and to
+// `local` otherwise. `probe_with` runs `load` inside the probe's scope and
+// collects the result, the refusal and the trace.
+[[nodiscard]] overlay_trace& trace_for_call(overlay_trace& local) noexcept;
+[[nodiscard]] xml_overlay_probe probe_with(std::function<Dictionary()> const& load);
 
 }  // namespace fixpp::dict::detail::overlay

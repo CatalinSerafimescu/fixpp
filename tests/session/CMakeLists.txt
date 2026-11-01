@@ -164,6 +164,7 @@ add_executable(session_pure_tests
   wait_until_clamp_test.cpp                                             # gate-b/r2 P1-1 (Art. VII §8)
   scan_frame_header_fault_test.cpp                                      # 092 T009/T013 (E-1)
   test_098_dialect_overlay_inbound_base.cpp                             # 098 T004a (W-5 base)
+  test_098_dialect_overlay_inbound.cpp                                  # 098 T042 (W-5)
   test_098_header_send.cpp                                              # 098 T005 (W-6)
   $<TARGET_OBJECTS:session_test_support>
 )
@@ -187,6 +188,8 @@ target_compile_definitions(session_pure_tests PRIVATE
   FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"   # session_layering nm/grep probe
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"  # invariant_counter_witness
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""  # test_enum_validation_logon (075 T030)
+  # 098 W-5: the overlay and patch fixtures under tests/dictionary/fixtures/098.
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
 )
 add_test(NAME session_pure_tests COMMAND session_pure_tests)
 set_tests_properties(session_pure_tests PROPERTIES

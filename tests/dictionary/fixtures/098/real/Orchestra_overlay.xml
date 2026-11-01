@@ -5,9 +5,10 @@
   the merge (FR-017 (b)): an insertion patch that appends each addition at the
   end of its matched container, after that container's last child element (a
   trailing fixr:annotation included), in overlay document order (spec.md
-  Terminology; research R-3's Orchestra table). Every addition is Optional
-  except Custom098Private's Custom098PrivateRef, so the patch holds no
-  in-place rewrite.
+  Terminology; research R-3's Orchestra table). The patch rewrites a line in
+  place only for a Required promotion of an existing reference (contracts
+  W-1); every addition here is Optional except Custom098Private's
+  Custom098PrivateRef, which sits in a new message.
 -->
 <fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
   <fixr:codeSets>

@@ -1,0 +1,6 @@
+@@ field 58 (Text): value LISTED, the self-closing line opened
+-  <field number='58' name='Text' type='STRING' />
++  <field number='58' name='Text' type='STRING'>
++   <value enum='LISTED' description='LISTED' />
++  </field>
+   <field number='59' name='TimeInForce' type='CHAR'>

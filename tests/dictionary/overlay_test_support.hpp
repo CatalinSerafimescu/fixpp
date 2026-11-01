@@ -17,6 +17,7 @@
 #include <fixpp/dict/loader_policy.hpp>
 #include <fstream>
 #include <ios>
+#include <iostream>
 #include <iterator>
 #include <memory_resource>
 #include <sstream>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include "overlay_merge.hpp"
+#include "overlay_patch.hpp"
 
 namespace overlay_test {
 
@@ -127,46 +129,10 @@ inline void expect_loaded_at_prediction(ov::xml_overlay_probe const& p, std::str
     EXPECT_TRUE(p.dictionary.has_value()) << row << ": " << describe(p);
     EXPECT_NE(p.origin, ov::refusal_origin::counter) << row << ": " << describe(p);
     ASSERT_TRUE(p.guards.has_value()) << row << ": " << describe(p);
+    std::cout << "[098 " << row << "] step counter " << p.counter << ", step 6's prediction "
+              << p.guards->merged_total << ", base total " << p.guards->base_total << '\n';
     EXPECT_EQ(p.counter, p.guards->merged_total)
         << row << ": the step counter differs from step 6's prediction; " << describe(p);
-}
-
-// Lines of a text, one trailing CR stripped from each (research R-10, line endings).
-[[nodiscard]] inline std::vector<std::string> lines_of(std::string_view text) {
-    std::vector<std::string> out;
-    std::size_t pos = 0;
-    while (pos < text.size()) {
-        std::size_t const nl = text.find('\n', pos);
-        std::size_t const end = nl == std::string_view::npos ? text.size() : nl;
-        std::string line{text.substr(pos, end - pos)};
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        out.push_back(std::move(line));
-        pos = nl == std::string_view::npos ? text.size() : nl + 1;
-    }
-    return out;
-}
-
-[[nodiscard]] inline std::string join_lines(std::vector<std::string> const& lines) {
-    std::string out;
-    for (auto const& l : lines) {
-        out += l;
-        out += '\n';
-    }
-    return out;
-}
-
-// The indices of every line equal to `anchor`.
-[[nodiscard]] inline std::vector<std::size_t> find_line(std::vector<std::string> const& lines,
-                                                        std::string_view anchor) {
-    std::vector<std::size_t> hits;
-    for (std::size_t i = 0; i < lines.size(); ++i) {
-        if (lines[i] == anchor) {
-            hits.push_back(i);
-        }
-    }
-    return hits;
 }
 
 }  // namespace overlay_test

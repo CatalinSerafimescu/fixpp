@@ -18,6 +18,8 @@
 #include <string>
 #include <string_view>
 
+#include "overlay_merge.hpp"
+
 namespace fixpp::dict {
 
 Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource* mr,
@@ -51,6 +53,36 @@ Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource
         }
         if (name == "fixr:repository") {
             return OrchestraLoader{}.load(path, mr, policy);
+        }
+        throw dict::xml_parse_error(
+            std::string{"dict::xml_parse_error: unrecognized dictionary root "
+                        "element <"} +
+            std::string{name} + "> (expected <fix> or <fixr:repository>)");
+    });
+}
+
+Dictionary load_any_with_overlay(std::filesystem::path const& base,
+                                 std::filesystem::path const& overlay,
+                                 std::pmr::memory_resource* mr, unresolved_group_policy policy) {
+    assert(mr != nullptr && "load_any_with_overlay: mr must not be null");
+
+    return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
+        std::ifstream in(base, std::ios::binary);
+        if (!in) {
+            throw dict::xml_parse_error("dict::xml_parse_error: cannot open " + base.string());
+        }
+        pugi::xml_document doc;
+        // The overlay path's one status mapping (research R-5 step 2): an allocation
+        // failure is xml_oom_error, any other failure load_any's xml_parse_error.
+        detail::overlay::throw_on_parse_failure(doc.load(in),
+                                                detail::overlay::source_format::quickfix_xml);
+        std::string_view const name{doc.document_element().name()};
+
+        if (name == "fix") {
+            return XmlLoader{}.load_with_overlay(base, overlay, mr, policy);
+        }
+        if (name == "fixr:repository") {
+            return OrchestraLoader{}.load_with_overlay(base, overlay, mr, policy);
         }
         throw dict::xml_parse_error(
             std::string{"dict::xml_parse_error: unrecognized dictionary root "

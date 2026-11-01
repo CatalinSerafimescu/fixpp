@@ -54,6 +54,27 @@ public:
     [[nodiscard]] Dictionary load_from_string(
         std::string_view xml, std::pmr::memory_resource* mr,
         unresolved_group_policy policy = unresolved_group_policy::fail_closed);
+
+    // 098-dialect-overlay (contracts/surface.md, research R-1..R-6): the same two
+    // members as `XmlLoader::load_with_overlay` / `load_with_overlay_from_string`,
+    // for an Orchestra base and a `fixr:repository` overlay. Base and overlay
+    // schema errors, a cycle included, throw orchestra_parse_error (a subclass of
+    // xml_parse_error), as `load` does. A Length a new Data's lengthId would give a
+    // second partner is overlay_conflict_error, not the loader's "already paired"
+    // orchestra_parse_error (research R-3). A path that cannot be opened or read
+    // throws orchestra_parse_error, as `load` does. Neither overlay error derives
+    // from orchestra_parse_error, so `catch (orchestra_parse_error const&)` misses
+    // an overlay conflict or limit; catch xml_parse_error to catch all three
+    // (B-098-1). Also throws unknown_version_error (base), overlay_limit_error and
+    // xml_oom_error as `XmlLoader::load_with_overlay` documents. Preconditions as
+    // `load`: `mr != nullptr`. Thread safety as `load`.
+    [[nodiscard]] Dictionary load_with_overlay(
+        std::filesystem::path const& base, std::filesystem::path const& overlay,
+        std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed);
+    [[nodiscard]] Dictionary load_with_overlay_from_string(
+        std::string_view base_xml, std::string_view overlay_xml, std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed);
 };
 
 }  // namespace fixpp::dict
