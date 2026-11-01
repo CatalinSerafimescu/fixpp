@@ -53,6 +53,8 @@ add_executable(dictionary_pure_tests
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
   dictionary_equivalence_test.cpp  # 098 W-0: the dictionary comparator's self-test
+  overlay_equivalence_test.cpp     # 098 W-1/W-2: overlay vs the equivalent edited XML
+  overlay_refusal_test.cpp         # 098 W-3: the overlay's refusals, QuickFIX-XML column
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary
@@ -69,6 +71,8 @@ target_include_directories(dictionary_pure_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/src/dictionary")
 target_compile_definitions(dictionary_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  # 098-dialect-overlay: the hand-written overlay fixtures and references.
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\""
   # 083 T035 (W-6): loader_disposition_test.cpp loads all TEN shipped
   # dictionaries under the fail-closed default, Orchestra included. Spelled out
   # rather than reusing FIXPP_ORCHESTRA_DATA_DIR, which this file sets further

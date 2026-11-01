@@ -33,6 +33,7 @@
 #include <ios>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <pugixml.hpp>
 #include <ranges>
 #include <sstream>
@@ -49,6 +50,7 @@
 #include "fixpp/dict/field_ref.hpp"
 #include "fixpp/dict/group_ref.hpp"
 #include "fixpp/dict/version_profile.hpp"
+#include "overlay_merge.hpp"
 
 namespace fixpp::dict {
 
@@ -254,20 +256,36 @@ struct MessageDef {
 
 class LoaderState {
 public:
-    explicit LoaderState(
-        std::pmr::memory_resource* mr,
-        unresolved_group_policy policy = unresolved_group_policy::fail_closed) noexcept
-        : mr_(mr), unresolved_policy_(policy) {}
+    // 098-dialect-overlay (research R-5, the step counter): `step_limit` arms the
+    // expansion step counter; the `load` path passes none, so it is never armed there.
+    explicit LoaderState(std::pmr::memory_resource* mr,
+                         unresolved_group_policy policy = unresolved_group_policy::fail_closed,
+                         std::optional<std::uint64_t> step_limit = std::nullopt) noexcept
+        : mr_(mr), unresolved_policy_(policy), step_limit_(step_limit) {}
 
     void parse_document(pugi::xml_document const& doc);
 
     // Returns a finished metadata handle (ownership transferred to caller).
     [[nodiscard]] detail::dict_metadata_handle_ptr finalize();
 
+    // 098 (research R-3, R-5 step 8a): the document's Length+Data pair relation,
+    // computed by the loader's own version and `<fields>` parse and the same pair
+    // detection `parse_document` uses.
+    [[nodiscard]] detail::overlay::length_pair_relation pair_relation_of(
+        pugi::xml_document const& doc);
+
+    // 098: the base checks `parse_document` makes first (its root and version), so
+    // an overlay load refuses a bad base with the error `load` gives it.
+    void check_root_and_version(pugi::xml_document const& doc);
+
+    // The expansion step counter's value (research R-5).
+    [[nodiscard]] std::uint64_t steps() const noexcept { return steps_; }
+
 private:
     [[nodiscard]] std::uint32_t intern_name_in_pool(detail::dict_metadata_handle& h,
                                                     std::string_view name);
 
+    [[nodiscard]] static pugi::xml_node fix_root(pugi::xml_document const& doc);
     void parse_version(pugi::xml_node const& root);
     void parse_global_fields(pugi::xml_node const& root);
     void collect_components(pugi::xml_node const& root);
@@ -323,12 +341,15 @@ private:
         detail::DelimCapture* delim_cap = nullptr, bool in_group = false,
         bool component_required = true, bool group_scope_component_required = true);
 
-    void detect_length_pairs(pugi::xml_node const& root);
-
     std::pmr::memory_resource* mr_;
 
     // 083 T036/T037 (FR-006 / FR-006a): load-time only (C-6.5).
     unresolved_group_policy unresolved_policy_ = unresolved_group_policy::fail_closed;
+
+    // 098 (research R-5): the expansion step counter, incremented by
+    // `expand_field_list` once per child node; refuses only when armed.
+    std::uint64_t steps_ = 0;
+    std::optional<std::uint64_t> step_limit_;
 
     pugi::xml_node header_node_;
     pugi::xml_node trailer_node_;
@@ -545,6 +566,15 @@ void LoaderState::expand_field_list(
     detail::DelimCapture* delim_cap, bool in_group, bool component_required,
     bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
+        // 098 (research R-5): one step per child node, the unit the overlay path's
+        // pre-walk predicts. Armed only on that path; there, a count past the limit
+        // means the pre-walk's model of this expansion is wrong.
+        ++steps_;
+        if (step_limit_.has_value() && steps_ > *step_limit_) {
+            throw overlay_limit_error(
+                "dict::overlay_limit_error: expansion step count exceeded the pre-walk "
+                "prediction (internal model drift)");
+        }
         std::string_view const tag_name{child.name()};
         if (tag_name == "field") {
             auto const fname = std::string{child.attribute("name").as_string("")};
@@ -738,7 +768,19 @@ void LoaderState::expand_field_list(
 }
 // NOLINTEND(misc-no-recursion,bugprone-easily-swappable-parameters)
 
-void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
+// 098-dialect-overlay (research R-3): the loader's Length+Data pair detection, as a
+// function of a parsed document and its `<fields>` tables. `parse_document` applies
+// its `forward` map; the overlay path's step 8a compares the relation of the base
+// document with that of the spliced one, so the two cannot drift. `mark_pair`
+// resolves a Length tag to the `GlobalFieldInfo` that would carry the pair (tag →
+// `by_tag` name → `by_name` entry) and keeps that entry's first Data, as the
+// loader's own field does; the reverse map is the inverse with every Length kept.
+// It throws nothing of its own.
+[[nodiscard]] detail::overlay::length_pair_relation detect_length_pair_relation(
+    pugi::xml_node const& root, std::unordered_map<std::string, GlobalFieldInfo> const& by_name_,
+    std::unordered_map<std::uint16_t, std::string> const& by_tag_) {
+    detail::overlay::length_pair_relation rel;
+    std::unordered_set<std::string> paired;  // the `by_name_` entries that carry a pair
     // Primary detection path (Option B per triage §R2): walk the global
     // <fields> block in declaration order. Whenever a LENGTH-typed entry is
     // immediately followed by a DATA- or XMLDATA-typed entry, record the pair.
@@ -768,8 +810,8 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
         auto const lit = by_tag_.find(length_tag);
         if (lit != by_tag_.end()) {
             auto const nit = by_name_.find(lit->second);
-            if (nit != by_name_.end() && nit->second.length_pair_data_tag == 0) {
-                nit->second.length_pair_data_tag = data_tag;
+            if (nit != by_name_.end() && paired.insert(nit->first).second) {
+                rel.forward.emplace(nit->second.tag, data_tag);
             }
         }
     };
@@ -863,20 +905,52 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
         }
         n = n.next_sibling();
     }
+
+    for (auto const& [length_tag, data_tag] : rel.forward) {
+        rel.reverse[data_tag].push_back(length_tag);
+    }
+    for (auto const& [tag, name] : by_tag_) {
+        rel.declared_tags.push_back(tag);
+    }
+    std::ranges::sort(rel.declared_tags);
+    return rel;
 }
 
-void LoaderState::parse_document(pugi::xml_document const& doc) {
+pugi::xml_node LoaderState::fix_root(pugi::xml_document const& doc) {
     auto const root = doc.child("fix");
     if (!root) {
         throw xml_parse_error("dict::xml_parse_error: root <fix> element missing");
     }
+    return root;
+}
+
+void LoaderState::parse_document(pugi::xml_document const& doc) {
+    auto const root = fix_root(doc);
     parse_version(root);
     parse_global_fields(root);
-    detect_length_pairs(root);
+    for (auto const& [length_tag, data_tag] :
+         detect_length_pair_relation(root, by_name_, by_tag_).forward) {
+        if (auto const lit = by_tag_.find(length_tag); lit != by_tag_.end()) {
+            if (auto const nit = by_name_.find(lit->second); nit != by_name_.end()) {
+                nit->second.length_pair_data_tag = data_tag;
+            }
+        }
+    }
     collect_components(root);
     collect_messages(root);
     header_node_ = root.child("header");
     trailer_node_ = root.child("trailer");
+}
+
+detail::overlay::length_pair_relation LoaderState::pair_relation_of(pugi::xml_document const& doc) {
+    auto const root = fix_root(doc);
+    parse_version(root);
+    parse_global_fields(root);
+    return detect_length_pair_relation(root, by_name_, by_tag_);
+}
+
+void LoaderState::check_root_and_version(pugi::xml_document const& doc) {
+    parse_version(fix_root(doc));
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
@@ -1381,14 +1455,157 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 // becomes `dict::xml_oom_error` (AC-L9 / research.md D-3).
 // ----------------------------------------------------------------------------
 
+// 098 (research R-5): `step_limit` arms the step counter (the overlay path only),
+// and `steps_out` receives the counter's final value whether the build returns or
+// throws.
 [[nodiscard]] detail::dict_metadata_handle_ptr build_handle_from_doc(
-    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy) {
-    LoaderState st{mr, policy};
+    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy,
+    std::optional<std::uint64_t> step_limit = std::nullopt, std::uint64_t* steps_out = nullptr) {
+    LoaderState st{mr, policy, step_limit};
+    struct report_steps {
+        LoaderState const& st;
+        std::uint64_t* out;
+        report_steps(LoaderState const& s, std::uint64_t* o) noexcept : st(s), out(o) {}
+        report_steps(report_steps const&) = delete;
+        report_steps& operator=(report_steps const&) = delete;
+        report_steps(report_steps&&) = delete;
+        report_steps& operator=(report_steps&&) = delete;
+        ~report_steps() {
+            if (out != nullptr) {
+                *out = st.steps();
+            }
+        }
+    } const report{st, steps_out};
     st.parse_document(doc);
     return st.finalize();
 }
 
+// ── 098-dialect-overlay: the QuickFIX-XML overlay load (research R-1, R-5) ───
+// Both `XmlLoader::load_with_overlay*` members go through `load_with_overlay_docs`,
+// so the guard routine, the splice, step 8a and the armed build run in one place
+// and in research R-5's order. The read seam calls those members themselves.
+
+namespace ov = detail::overlay;
+
+// The read seam's channel (research R-5, read seam). `Dictionary`'s handle
+// constructor is open to the loaders only, so the seam calls the public members
+// and receives their trace through this pointer, which only `probe_scope` sets,
+// for one call on its own thread. Every other call writes a local trace.
+thread_local ov::overlay_trace* t_probe_trace = nullptr;
+
+class probe_scope {
+public:
+    explicit probe_scope(ov::overlay_trace* t) noexcept : saved_(t_probe_trace) {
+        t_probe_trace = t;
+    }
+    ~probe_scope() { t_probe_trace = saved_; }
+    probe_scope(probe_scope const&) = delete;
+    probe_scope& operator=(probe_scope const&) = delete;
+    probe_scope(probe_scope&&) = delete;
+    probe_scope& operator=(probe_scope&&) = delete;
+
+private:
+    ov::overlay_trace* saved_;
+};
+
+[[nodiscard]] ov::overlay_trace& trace_for_call(ov::overlay_trace& local) noexcept {
+    return t_probe_trace != nullptr ? *t_probe_trace : local;
+}
+
+void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw xml_parse_error("dict::xml_parse_error: cannot open " + path.string());
+    }
+    ov::throw_on_parse_failure(doc.load(in), ov::source_format::quickfix_xml);
+}
+
+[[nodiscard]] detail::dict_metadata_handle_ptr load_with_overlay_docs(
+    pugi::xml_document& base, pugi::xml_document const& overlay, std::pmr::memory_resource* mr,
+    unresolved_group_policy policy, ov::overlay_trace& trace) {
+    LoaderState{mr}.check_root_and_version(base);
+    ov::xml_overlay_merge merge{base, overlay};
+    std::uint64_t const arm = merge.guard(policy, trace);        // steps 3 to 7
+    auto const base_pairs = ov::xml_length_pair_relation(base);  // step 8a, before the splice
+    merge.splice();                                              // step 8
+    ov::check_pair_relation(base_pairs, ov::xml_length_pair_relation(base));  // step 8a
+    try {
+        return build_handle_from_doc(base, mr, policy, arm, &trace.counter);  // step 9
+    } catch (overlay_limit_error const&) {
+        trace.origin = ov::refusal_origin::counter;  // the only limit the build raises
+        throw;
+    }
+}
+
+[[nodiscard]] detail::dict_metadata_handle_ptr load_with_overlay_paths(
+    std::filesystem::path const& base, std::filesystem::path const& overlay,
+    std::pmr::memory_resource* mr, unresolved_group_policy policy, ov::overlay_trace& trace) {
+    std::string const overlay_text =
+        ov::read_overlay_file(overlay, ov::source_format::quickfix_xml);  // step 1
+    pugi::xml_document base_doc;
+    parse_base_file(base_doc, base);
+    pugi::xml_document overlay_doc;
+    ov::throw_on_parse_failure(
+        overlay_doc.load_buffer(overlay_text.data(), overlay_text.size(), ov::kOverlayParseFlags),
+        ov::source_format::quickfix_xml);  // step 2
+    return load_with_overlay_docs(base_doc, overlay_doc, mr, policy, trace);
+}
+
+[[nodiscard]] detail::dict_metadata_handle_ptr load_with_overlay_strings(
+    std::string_view base, std::string_view overlay, std::pmr::memory_resource* mr,
+    unresolved_group_policy policy, ov::overlay_trace& trace) {
+    ov::check_overlay_size(overlay.size());  // step 1
+    pugi::xml_document base_doc;
+    ov::throw_on_parse_failure(base_doc.load_buffer(base.data(), base.size()),
+                               ov::source_format::quickfix_xml);
+    pugi::xml_document overlay_doc;
+    ov::throw_on_parse_failure(
+        overlay_doc.load_buffer(overlay.data(), overlay.size(), ov::kOverlayParseFlags),
+        ov::source_format::quickfix_xml);  // step 2
+    return load_with_overlay_docs(base_doc, overlay_doc, mr, policy, trace);
+}
+
+template <class F>
+[[nodiscard]] ov::xml_overlay_probe probe_with(F&& load) {
+    ov::xml_overlay_probe p;
+    ov::overlay_trace trace;
+    try {
+        probe_scope const scope{&trace};
+        p.dictionary.emplace(std::forward<F>(load)());
+    } catch (...) {
+        p.error = std::current_exception();
+    }
+    p.origin = trace.origin;
+    p.guards = trace.guards;
+    p.counter = trace.counter;
+    return p;
+}
+
 }  // namespace
+
+namespace detail::overlay {
+
+length_pair_relation xml_length_pair_relation(pugi::xml_document const& doc) {
+    LoaderState st{std::pmr::new_delete_resource()};
+    return st.pair_relation_of(doc);
+}
+
+xml_overlay_probe probe_xml_overlay_from_string(std::string_view base_xml,
+                                                std::string_view overlay_xml,
+                                                std::pmr::memory_resource* mr,
+                                                unresolved_group_policy policy) {
+    return probe_with([&] {
+        return XmlLoader{}.load_with_overlay_from_string(base_xml, overlay_xml, mr, policy);
+    });
+}
+
+xml_overlay_probe probe_xml_overlay(std::filesystem::path const& base,
+                                    std::filesystem::path const& overlay,
+                                    std::pmr::memory_resource* mr, unresolved_group_policy policy) {
+    return probe_with([&] { return XmlLoader{}.load_with_overlay(base, overlay, mr, policy); });
+}
+
+}  // namespace detail::overlay
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memory_resource* mr,
@@ -1419,6 +1636,32 @@ Dictionary XmlLoader::load_from_string(std::string_view xml_text, std::pmr::memo
             throw xml_parse_error(std::string{"dict::xml_parse_error: "} + result.description());
         }
         return Dictionary{build_handle_from_doc(doc, mr, policy)};
+    });
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+Dictionary XmlLoader::load_with_overlay(std::filesystem::path const& base,
+                                        std::filesystem::path const& overlay,
+                                        std::pmr::memory_resource* mr,
+                                        unresolved_group_policy policy) {
+    assert(mr != nullptr && "XmlLoader::load_with_overlay: mr must not be null");
+    return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
+        ov::overlay_trace local;
+        return Dictionary{
+            load_with_overlay_paths(base, overlay, mr, policy, trace_for_call(local))};
+    });
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+Dictionary XmlLoader::load_with_overlay_from_string(std::string_view base_xml,
+                                                    std::string_view overlay_xml,
+                                                    std::pmr::memory_resource* mr,
+                                                    unresolved_group_policy policy) {
+    assert(mr != nullptr && "XmlLoader::load_with_overlay_from_string: mr must not be null");
+    return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
+        ov::overlay_trace local;
+        return Dictionary{
+            load_with_overlay_strings(base_xml, overlay_xml, mr, policy, trace_for_call(local))};
     });
 }
 

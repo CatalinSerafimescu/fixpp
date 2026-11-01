@@ -100,6 +100,26 @@ public:
     using xml_parse_error::xml_parse_error;
 };
 
+// 098-dialect-overlay (research R-6). Thrown by the `load_with_overlay*` entry
+// points when the overlay conflicts with its base or with itself (research R-4):
+// the message names the element kind and its key, and for a repeated base key both
+// base occurrences. Derives from `xml_parse_error` and reuses its `code()` (the
+// `group_delimiter_collision_error` precedent), so every existing
+// `catch (xml_parse_error&)` site still catches it. It does not derive from
+// `orchestra_parse_error`.
+class overlay_conflict_error : public xml_parse_error {
+    using xml_parse_error::xml_parse_error;
+};
+
+// 098-dialect-overlay (research R-6). Thrown by the `load_with_overlay*` entry
+// points when the overlay hits a cap, carries a DOCTYPE, exceeds the expansion
+// budget, would make a side table stop fitting 16 bits, or trips the build's step
+// counter (research R-5): the message names what it hit, and for a numeric cap its
+// value. Same derivation rule as `overlay_conflict_error`.
+class overlay_limit_error : public xml_parse_error {
+    using xml_parse_error::xml_parse_error;
+};
+
 // Thrown by `XmlLoader::load*` when the XML's
 // `<fix major="..." minor="..." [servicepack="..."]>` header does not resolve
 // to one of the nine v1.0-supported FIX versions per `[2c §1.3]` (AC-L4).
