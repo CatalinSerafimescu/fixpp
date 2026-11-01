@@ -109,7 +109,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml_with_overlay(
     const char* base_path, const char* overlay_path, fixpp_dict_t** out_dict);
 ```
 
-`version.h`: a `1.13` block ("Added: fixpp_dict_load_from_xml_with_overlay (header).") and
+`version.h`: a `1.13` block ("Added: fixpp_dict_load_from_xml_with_overlay (dict.h).") and
 `FIXPP_C_ABI_VERSION_MINOR 13`. Python: `fixpp.dict_load_from_xml_with_overlay(base_path, overlay_path)`
 returning a dictionary proxy, raising the typed error for a non-OK code (the existing
 `%FIXPP_HANDLE_OUT(fixpp_dict_t)` typemap).

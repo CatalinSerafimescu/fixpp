@@ -962,7 +962,7 @@ reported, not fixed: the verify record's `## Pre-existing leads` and the PR body
   - **Ownership on entry.** A handle the caller left in `*out_dict` is overwritten, not released, as by
     the sibling, whose thunk sets `*out_dict = nullptr` first.
 - C-ABI **1.13**, additive: `version.h` block ending "Added: fixpp_dict_load_from_xml_with_overlay
-  (header).", `tests/capi/version_test.cpp`'s exact-version pin, `tests/abi/golden/fixpp_capi_symbols.txt`,
+  (dict.h).", `tests/capi/version_test.cpp`'s exact-version pin, `tests/abi/golden/fixpp_capi_symbols.txt`,
   `tools/capi_freeze.sha256`. `src/capi/fixpp_capi.map` exports `fixpp_*` by glob and needs no edit.
 - Python: SWIG wraps all of dict.h and the `fixpp_dict_t**` out-param by type, so the function is
   exported as `fixpp.dict_load_from_xml_with_overlay`. Update the exact-set import test
