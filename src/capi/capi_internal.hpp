@@ -14,6 +14,7 @@
 #include <asio/io_context.hpp>
 #include <atomic>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -39,6 +40,11 @@ namespace fixpp_capi::detail {
 // Engine-internal error coalescing (defined in src/capi/error.cpp — Feature A).
 fixpp_error_t translate(fixpp::core::error e) noexcept;
 fixpp_error_t translate_for_consumer(fixpp_error_t code, std::uint16_t consumer_minor) noexcept;
+
+// 098-dialect-overlay (research R-6): the code fixpp_dict_load_from_xml_with_overlay
+// returns for the exception `ep` holds, chosen by catching in R-6's order. `ep` is not
+// null. Defined in src/capi/dictionary.cpp, whose thunk calls it from its catch.
+fixpp_error_t dict_overlay_error_code(std::exception_ptr const& ep) noexcept;
 
 #ifdef FIXPP_TEST_HOOKS
 // SC-006 steady-state-abort seam: arms fixpp_session_send to throw inside its try

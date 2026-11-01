@@ -54,6 +54,32 @@ extern "C" {
 FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml(const char*     path,
                                                          fixpp_dict_t** out_dict);
 
+/** fixpp_dict_load_from_xml_with_overlay — load a base dictionary with one dialect overlay.
+ *
+ *  Wraps `fixpp::dict::load_any_with_overlay(base_path, overlay_path,
+ *  std::pmr::new_delete_resource())`. The overlay is in the base's format (QuickFIX XML or FIX
+ *  Orchestra).
+ *
+ *  THUNK: construction-time; never on a hot path.
+ *  Reentrancy: single-thread.
+ *
+ *  Returns a code only: fixpp_strerror gives the code's fixed text. The conflicting element or the cap
+ *  is named in the C++ exception, not here. Unlike fixpp_dict_load_from_xml, which maps every failure
+ *  to FIXPP_ERR_CAPI_CONFIG_INVALID, this function returns the DICT codes below.
+ *
+ *  @return FIXPP_ERR_OK                   *out_dict owns a new handle (destroy with fixpp_dict_destroy)
+ *  @return FIXPP_ERR_NULL_HANDLE          base_path, overlay_path or out_dict is NULL; *out_dict = NULL
+ *                                         when out_dict is not NULL
+ *  @return FIXPP_ERR_DICT_LIMIT_EXCEEDED  the load threw fixpp::dict::overlay_limit_error (its causes
+ *                                         are listed once, in xml_loader.hpp); *out_dict = NULL
+ *  @return FIXPP_ERR_DICT_OOM             allocation failed anywhere in the call, including the
+ *                                         handle's own allocation; *out_dict = NULL
+ *  @return FIXPP_ERR_DICT_CONFIG          any other load or merge failure, an empty or unreadable
+ *                                         path included; *out_dict = NULL
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml_with_overlay(
+    const char* base_path, const char* overlay_path, fixpp_dict_t** out_dict);
+
 /**
  * fixpp_dict_destroy — release the consumer's reference to a dictionary handle.
  *

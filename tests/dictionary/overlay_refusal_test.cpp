@@ -11,6 +11,9 @@
 // `std::exception`, and asserts its exact dynamic type (`typeid` equality) and that
 // its message names the rule, key, cap, table or counter origin. Rows that load
 // assert counter = step 6's prediction.
+//
+// The file also holds W-9's status-mapping rows (`OverlayStatusMappingW9`), which are
+// not a refusal kind and have no cell.
 
 #include <gtest/gtest.h>
 
@@ -2290,6 +2293,36 @@ TEST(OverlayRefusalW3OrchBudget, LongestChainLoadsAtThePrediction) {
     std::cout << "[098 Orchestra longest chain] links " << links << '\n';
     ot::expect_loaded_at_prediction(oprobe(orch_base_doc(), orch_chain_overlay(links)),
                                     "Orchestra longest chain");
+}
+
+// ── W-9's status-mapping rows (research R-5 step 2) ──────────────────────────
+//
+// The one status mapping both parses of an overlay call use (`throw_on_parse_failure`),
+// fed a failed parse result directly: no allocation-failure seam exists to make pugixml
+// report `status_out_of_memory` from a real parse. Each row asserts the exact dynamic
+// type, since `orchestra_parse_error` and both overlay errors derive from
+// `xml_parse_error`.
+
+// Runs the mapping on a result carrying `status`; the name of the type it threw.
+std::string thrown_type(pugi::xml_parse_status status, ov::source_format format) {
+    pugi::xml_parse_result result;
+    result.status = status;
+    try {
+        ov::throw_on_parse_failure(result, format);
+    } catch (std::exception const& e) {
+        return typeid(e).name();
+    }
+    return "nothing thrown";
+}
+
+TEST(OverlayStatusMappingW9, OutOfMemoryIsXmlOomError) {
+    EXPECT_EQ(thrown_type(pugi::status_out_of_memory, ov::source_format::quickfix_xml),
+              typeid(fixpp::dict::xml_oom_error).name());
+}
+
+TEST(OverlayStatusMappingW9, AnotherFailedStatusIsTheFormatsParseError) {
+    EXPECT_EQ(thrown_type(pugi::status_bad_pi, ov::source_format::quickfix_xml),
+              typeid(xml_parse_error).name());
 }
 
 // ── the cell table ───────────────────────────────────────────────────────────

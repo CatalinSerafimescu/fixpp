@@ -84,6 +84,8 @@ set(FIXPP_CAPI_FEATURE_B_INCLUDES
 #   - abi_symbol_golden_test: a read-only `nm`-vs-golden-file + error-enum-
 #     boundary completeness check — no global mutable state, no LABEL-scoped
 #     `-L` selector to break.
+#   - dict_overlay_capi_test (098 W-9 pure rows): dictionary loads, the mapping
+#     function, and a session opened on an engine that is never started.
 add_executable(capi_pure_tests
   capi_group_delimiter_ctx_test.cpp   # 083 T049/T053: W-11/11a/11b/12/13
   capi_smoke_test.cpp
@@ -92,6 +94,7 @@ add_executable(capi_pure_tests
   config_builders_test.cpp
   thunk_split_test.cpp
   abi_symbol_golden_test.cpp
+  dict_overlay_capi_test.cpp          # 098 W-9: the pure rows
 )
 target_link_libraries(capi_pure_tests PRIVATE
   fixpp_capi
@@ -107,6 +110,9 @@ target_compile_definitions(capi_pure_tests PRIVATE
   FIXPP_TEST_HOOKS
   "FIXPP_CAPI_LIB=\"$<TARGET_FILE:fixpp_capi>\""
   "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
+  # 098-dialect-overlay W-9: the overlay fixtures, which no data-directory
+  # definition above reaches.
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
 )
 add_test(NAME capi_pure_tests COMMAND capi_pure_tests)
 # 083 T062: this bucket carried NO labels, so `ctest -L capi` — the C-ABI gate
@@ -644,6 +650,27 @@ add_test(NAME capi_inbound_frame_dispositions COMMAND capi_inbound_frame_disposi
 # lane /speckit-verify runs and on MSVC debug and msvc-asan (re-measure on msvc-asan,
 # under the same -j the lane uses), and size from the slowest.
 set_tests_properties(capi_inbound_frame_dispositions PROPERTIES LABELS "capi;093" TIMEOUT 1200)
+
+# 098-dialect-overlay W-9, the live arm: two C-ABI engines, each with its worker
+# thread, over loopback; standalone ([const §VII.8]). Each session's dictionary is
+# the overlay handle fixpp_dict_load_from_xml_with_overlay returns.
+add_executable(capi_098_dict_overlay_live_test dict_overlay_capi_live_test.cpp)
+target_link_libraries(capi_098_dict_overlay_live_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_098_dict_overlay_live_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_098_dict_overlay_live_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\"")
+add_test(NAME capi_098_dict_overlay_live_test COMMAND capi_098_dict_overlay_live_test)
+# TIMEOUT is explicit and sized by capi_inbound_frame_dispositions' recipe above:
+# roughly 6x the slowest lane. Re-derive by timing
+# `ctest --test-dir build/<preset> -R '^capi_098_dict_overlay_live_test$'` on every
+# lane /speckit-verify runs and on MSVC debug and msvc-asan, and size from the slowest.
+set_tests_properties(capi_098_dict_overlay_live_test PROPERTIES LABELS "capi;098" TIMEOUT 120)
 
 # fixpp#536, fixpp#537, fixpp#538 (.specify/536-537-538-recovery-liveness.md §6.2, owner
 # ruling R-8): the C-ABI witnesses of the 1.12 clause, one cell per witness of that

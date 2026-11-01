@@ -224,8 +224,14 @@
  *      stored is not transmitted and fails. No reach through the C ABI as
  *      shipped.
  *  No symbol, signature or error code is added. */
+
+/*  1.13 (additive; 098-dialect-overlay): a base dictionary loaded with one
+ *  dialect overlay. The new function returns the DICT codes
+ *  (FIXPP_ERR_DICT_CONFIG, FIXPP_ERR_DICT_LIMIT_EXCEEDED, FIXPP_ERR_DICT_OOM);
+ *  fixpp_dict_load_from_xml is unchanged. No error code is added.
+ *  Added: fixpp_dict_load_from_xml_with_overlay (dict.h). */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 12 /* 1.12: recovery and liveness (#536, #537, #538) */
+#define FIXPP_C_ABI_VERSION_MINOR 13 /* 1.13: dictionary overlay (098) */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */
