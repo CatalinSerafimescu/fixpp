@@ -158,7 +158,7 @@ diff $N $I
 | M-10 | the resolver assigns the base to every session | — / Debug | W-8 AS-2, AS-5 (`config_045_tests`) | the overlay session's pointer equals the base's | resolver → `bundle.sessions[i].config.dictionary` |
 | M-11 | the limit branch maps to 200 | — / Debug (Python ON) | W-9 cap rows (`capi_pure_tests`); W-10 cap row (pytest) | 200, `.code` 200 | thunk catch → mapping function → return code → SWIG out-typemap |
 | M-12 | step 6's budget comparison removed (the side-table fit stays) | per format / Debug; ASan for W-11 | W-3 bomb rows; W-11 empty-chain seeds | doubling rows: side-table origin, not budget; empty-chain rows: counter origin | step 6 → arming at base total + budget → counter (research R-5) |
-| M-13 | guard steps 6 and 7 swapped | per format / Debug | W-3 guard-order row | the redeclare conflict, or a crash or timeout | guard routine order |
+| M-13 | guard steps 6 and 7 swapped (the step-6 refusal block and the step-7 call change places; step 6's walk always finishes its memo, research R-5) | per format / Debug | W-3 guard-order row | the redeclare conflict, or a crash or timeout | guard routine order |
 | M-14 | step 5's entry and reference caps removed | per format / Debug | W-3 entry and reference cap rows | they load | step 5 |
 | M-15 | `std::exception` caught before `std::bad_alloc` | — / Debug | W-9 bad-alloc rows | 200, not 202 | mapping function |
 | M-16 | step 8a replaced by the previous draft's adjacency rule | per format / Debug | W-3 Length+Data refuse rows and Orchestra `lengthId` rows; load rows stay GREEN | refuse rows load | step 8a |
