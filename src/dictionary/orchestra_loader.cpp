@@ -1461,12 +1461,6 @@ void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path)
 
 namespace detail::overlay {
 
-length_pair_relation orchestra_length_pair_relation(pugi::xml_document const& doc,
-                                                    collision_mode mode) {
-    OrchestraLoaderState st{std::pmr::new_delete_resource()};
-    return st.pair_relation_of(doc, mode);
-}
-
 xml_overlay_probe probe_orchestra_overlay_from_string(std::string_view base_xml,
                                                       std::string_view overlay_xml,
                                                       std::pmr::memory_resource* mr,

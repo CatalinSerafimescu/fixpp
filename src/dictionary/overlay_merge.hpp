@@ -127,15 +127,11 @@ struct length_pair_relation {
 // loader's pairing cannot drift. Throws whatever those loader steps throw.
 [[nodiscard]] length_pair_relation xml_length_pair_relation(pugi::xml_document const& doc);
 
-// Defined in orchestra_loader.cpp: runs the loader's own root, code-set and field
-// collection on `doc` and then the pair resolution `OrchestraLoaderState` itself
-// uses, so this and the loader's pairing cannot drift. With
-// `collision_mode::refuse` a Length two Data fields name throws the loader's own
-// `orchestra_parse_error`, as `load` does; with `collision_mode::record` it is
-// recorded in `collisions`. Every other refusal is the loader's, in either mode.
+// How orchestra_loader.cpp's pair resolution treats a Length that two Data fields
+// name: `refuse` throws the loader's own `orchestra_parse_error`, as `load` does;
+// `record` records it in `collisions`. Every other refusal is the loader's, in
+// either mode.
 enum class collision_mode : std::uint8_t { refuse, record };
-[[nodiscard]] length_pair_relation orchestra_length_pair_relation(pugi::xml_document const& doc,
-                                                                  collision_mode mode);
 
 // Step 8a: refuses with `overlay_conflict_error` when a pair touching a field
 // number the base declares is gained, lost or given a second partner.
