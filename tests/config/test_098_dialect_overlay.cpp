@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
@@ -36,6 +37,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -82,34 +84,24 @@ std::string diag_string(fixpp::config::LoadResult const& r) {
 }
 
 bool has_diag(std::vector<LoadDiagnostic> const& diags, RC reason, std::string_view key_path) {
-    for (auto const& d : diags) {
-        if (d.reason == reason && d.key_path == key_path) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(diags, [&](LoadDiagnostic const& d) {
+        return d.reason == reason && d.key_path == key_path;
+    });
 }
 
 std::size_t count_diag(std::vector<LoadDiagnostic> const& diags, RC reason,
                        std::string_view key_path) {
-    std::size_t n = 0;
-    for (auto const& d : diags) {
-        if (d.reason == reason && d.key_path == key_path) {
-            ++n;
-        }
-    }
-    return n;
+    return static_cast<std::size_t>(std::ranges::count_if(diags, [&](LoadDiagnostic const& d) {
+        return d.reason == reason && d.key_path == key_path;
+    }));
 }
 
 // The diagnostics written at `key_path`, whatever their reason class.
 std::vector<LoadDiagnostic> diags_at(std::vector<LoadDiagnostic> const& diags,
                                      std::string_view key_path) {
     std::vector<LoadDiagnostic> out;
-    for (auto const& d : diags) {
-        if (d.key_path == key_path) {
-            out.push_back(d);
-        }
-    }
+    std::ranges::copy_if(diags, std::back_inserter(out),
+                         [&](LoadDiagnostic const& d) { return d.key_path == key_path; });
     return out;
 }
 

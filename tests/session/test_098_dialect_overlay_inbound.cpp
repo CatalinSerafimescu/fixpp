@@ -33,6 +33,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
@@ -114,14 +115,14 @@ struct dictionaries {
 };
 
 dictionaries const& main_pair() {
-    static dictionaries const d{overlay_dictionary("FIX44_overlay.xml"),
-                                edited_dictionary("FIX44.patch")};
+    static dictionaries const d{.overlay = overlay_dictionary("FIX44_overlay.xml"),
+                                .edited = edited_dictionary("FIX44.patch")};
     return d;
 }
 
 dictionaries const& enum_closure_pair() {
-    static dictionaries const d{overlay_dictionary("FIX44_enum_closure_overlay.xml"),
-                                edited_dictionary("FIX44_enum_closure.patch")};
+    static dictionaries const d{.overlay = overlay_dictionary("FIX44_enum_closure_overlay.xml"),
+                                .edited = edited_dictionary("FIX44_enum_closure.patch")};
     return d;
 }
 
@@ -343,15 +344,15 @@ std::string describe_reads(Run const& run) {
             return v ? "\"" + *v + "\"" : std::string{"absent"};
         };
         std::string data = r.data_value.value_or("");
-        for (char& c : data) {
-            c = c == '\x01' ? '|' : c;
-        }
+        std::ranges::replace(data, '\x01', '|');
         s += " [35=" + r.msg_type + " 5001=" + opt(r.custom_field) + " 40=" + opt(r.ord_type) +
              " 5011=" +
+             // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ternary tests it first
              (r.data_value ? "\"" + data + "\" (" + std::to_string(r.data_value->size()) +
                                  " bytes, SOH shown as |)"
                            : std::string{"absent"}) +
              " Parties instances=" +
+             // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ternary tests it first
              (r.parties_entries ? std::to_string(*r.parties_entries) : std::string{"absent"}) +
              " 5002 in the instance=" + opt(r.parties_member) + "]";
     }

@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
@@ -175,13 +176,9 @@ struct BaseFixture {
 };
 
 std::size_t count_msg_type(BaseRun const& run, std::string_view msg_type) {
-    std::size_t n = 0;
-    for (auto const& f : run.sent) {
-        if (fixpp::test_support::extract_tag(f, 35) == msg_type) {
-            ++n;
-        }
-    }
-    return n;
+    return static_cast<std::size_t>(std::ranges::count_if(run.sent, [&](auto const& f) {
+        return fixpp::test_support::extract_tag(f, 35) == msg_type;
+    }));
 }
 
 // The frame drew exactly one Reject(35=3) with these fields and nothing reached

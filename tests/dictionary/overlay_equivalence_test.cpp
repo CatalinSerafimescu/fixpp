@@ -32,6 +32,7 @@
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <iostream>
+#include <iterator>
 #include <memory_resource>
 #include <optional>
 #include <pugixml.hpp>
@@ -79,10 +80,8 @@ eq::comparison_report compare_against(Dictionary const& a, Dictionary const& b,
 void report_counts(std::string const& row, eq::comparison_report const& r) {
     std::cout << "[098 " << row << "] census compared " << r.census_compared << ", excluded "
               << r.census_excluded << '\n';
-    std::size_t wraps = 0;
-    for (auto const& n : r.notes) {
-        wraps += n.find("wrap case") != std::string::npos ? 1 : 0;
-    }
+    auto const wraps = std::ranges::count_if(
+        r.notes, [](std::string const& n) { return n.contains("wrap case"); });
     if (wraps != 0) {
         std::cout << "[098 " << row << "] wrap-case notes " << wraps
                   << " (definitions past the wrap point compared side against side only)\n";
@@ -151,6 +150,7 @@ TEST(OverlayEquivalenceW1Qf, EveryAdditionKindEqualsTheEditedReference) {
     ot::expect_loaded_at_prediction(p, "W-1 qf");
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_text(edited);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-1 qf", compare_against(*p.dictionary, reference, edited),
                       /*assert_no_exclusions=*/true);
 }
@@ -166,6 +166,7 @@ TEST(OverlayEquivalenceW1Qf, SeededMismatchWithoutAnEnumAdditionIsReported) {
     std::string const seeded =
         without_line(edited, "   <value enum='Z' description='VENUE_CROSS' />");
     Dictionary const reference = load_text(seeded);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_reports("W-1 qf", compare_against(*p.dictionary, reference, seeded),
                    {ids::kEnumValue, ids::kEnumCodes});
 }
@@ -179,6 +180,7 @@ TEST(OverlayEquivalenceW1Qf, TolerantTripleEqualsItsReferenceUnderTolerant) {
     ot::expect_loaded_at_prediction(p, "W-1 qf tolerant");
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_text(edited, unresolved_group_policy::tolerant);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-1 qf tolerant", compare_against(*p.dictionary, reference, edited),
                       /*assert_no_exclusions=*/true);
 }
@@ -194,6 +196,7 @@ TEST(OverlayEquivalenceW1Qf, TolerantSeededMismatchWithoutTheMessageAdditionIsRe
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     std::string const seeded = without_line(edited, "   <field name='VenueTag' required='N' />");
     Dictionary const reference = load_text(seeded, unresolved_group_policy::tolerant);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_reports("W-1 qf tolerant", compare_against(*p.dictionary, reference, seeded),
                    {ids::kMessageFields.tag, ids::kValid});
 }
@@ -223,6 +226,7 @@ TEST(OverlayEquivalenceW1Orch, EveryAdditionKindEqualsTheEditedReference) {
     ot::expect_loaded_at_prediction(p, "W-1 orch");
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_orch_text(edited);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-1 orch", compare_against(*p.dictionary, reference, edited, fmt::orchestra),
                       /*assert_no_exclusions=*/true);
 }
@@ -236,8 +240,9 @@ TEST(OverlayEquivalenceW1Orch, SeededMismatchWithoutACodeAdditionIsReported) {
     auto const p = ov::probe_orchestra_overlay_from_string(base, overlay, mr());
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     std::string const seeded =
-        without_line(edited, "      <fixr:code id=\"54003\" name=\"VenueCross\" value=\"Z\" />");
+        without_line(edited, R"(      <fixr:code id="54003" name="VenueCross" value="Z" />)");
     Dictionary const reference = load_orch_text(seeded);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_reports("W-1 orch", compare_against(*p.dictionary, reference, seeded, fmt::orchestra),
                    {ids::kEnumValue, ids::kEnumCodes});
 }
@@ -251,9 +256,11 @@ TEST(OverlayEquivalenceW1Orch, TolerantTripleEqualsItsReferenceUnderTolerant) {
     ot::expect_loaded_at_prediction(p, "W-1 orch tolerant");
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_orch_text(edited, unresolved_group_policy::tolerant);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-1 orch tolerant",
                       compare_against(*p.dictionary, reference, edited, fmt::orchestra),
                       /*assert_no_exclusions=*/true);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // Seeded mismatch: the reference without the field VenueTag the overlay appends to
@@ -268,9 +275,11 @@ TEST(OverlayEquivalenceW1Orch, TolerantSeededMismatchWithoutTheMessageAdditionIs
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     std::string const seeded = without_line(edited, "        <fixr:fieldRef id=\"9101\" />");
     Dictionary const reference = load_orch_text(seeded, unresolved_group_policy::tolerant);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_reports("W-1 orch tolerant",
                    compare_against(*p.dictionary, reference, seeded, fmt::orchestra),
                    {ids::kMessageFields.tag, ids::kValid});
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // The policy reaches the build: with the default policy both sides refuse.
@@ -463,12 +472,12 @@ TEST(OverlayPatchHelper, TwoHunksInsertingAtOnePositionFailTheCell) {
 // ── W-2, the vendored bases ──────────────────────────────────────────────────
 
 struct vendored_row {
-    char const* name;
-    char const* base;           // under dictionaries/
-    char const* overlay;        // under fixtures/098/real/
-    char const* patch;          // under fixtures/098/real/
-    bool assert_no_exclusions;  // the small bases and FIXT11
-    char const* seeded_hunk;    // the hunk the seeded mismatch drops (its label)
+    char const* name = nullptr;
+    char const* base = nullptr;         // under dictionaries/
+    char const* overlay = nullptr;      // under fixtures/098/real/
+    char const* patch = nullptr;        // under fixtures/098/real/
+    bool assert_no_exclusions = false;  // the small bases and FIXT11
+    char const* seeded_hunk = nullptr;  // the hunk the seeded mismatch drops (its label)
     std::set<std::string_view> seeded_expect;
     fmt format = fmt::quickfix_xml;
 };
@@ -540,9 +549,11 @@ TEST_P(OverlayEquivalenceW2, OverlayEqualsThePatchedBase) {
     ot::expect_loaded_at_prediction(p, std::string{"W-2 "} + row.name);
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_text_as(row.format, patched);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent(std::string{"W-2 "} + row.name,
                       compare_against(*p.dictionary, reference, patched, row.format),
                       row.assert_no_exclusions);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST_P(OverlayEquivalenceW2, SeededMismatchWithOneHunkDroppedIsReported) {
@@ -552,9 +563,11 @@ TEST_P(OverlayEquivalenceW2, SeededMismatchWithOneHunkDroppedIsReported) {
     auto const p = probe_vendored(row);
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = load_text_as(row.format, seeded);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_reports(std::string{"W-2 "} + row.name,
                    compare_against(*p.dictionary, reference, seeded, row.format),
                    row.seeded_expect);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 INSTANTIATE_TEST_SUITE_P(Vendored, OverlayEquivalenceW2, ::testing::Values(0U, 1U, 2U, 3U),
@@ -655,6 +668,7 @@ TEST_P(OverlayEquivalenceW2Empty, EmptyOverlayEqualsTheBase) {
     ot::expect_loaded_at_prediction(p, row);
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = XmlLoader{}.load(base_path, mr());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent(row, compare_against(*p.dictionary, reference, base_text),
                       GetParam() == "FIXT11.xml");
 }
@@ -674,8 +688,10 @@ TEST_P(OverlayEquivalenceW2Empty, SeededMismatchWithoutOneEnumValueIsReported) {
         << "the copy without one value of field " << number << " must load";
     eq::raw_census const census_base = eq::census_from_quickfix_xml(base_text);
     eq::raw_census const census_copy = eq::census_from_quickfix_xml(copy);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): ASSERT_NO_THROW above set it
     auto const r = eq::compare(eq::side{.dict = base, .census = census_base},
                                eq::side{.dict = *seeded, .census = census_copy});
+    // NOLINTEND(bugprone-unchecked-optional-access)
     std::cout << "[098 W-2 empty " << GetParam() << "] seeded removal: the last value of field "
               << number << '\n';
     expect_reports("W-2 empty " + std::string{GetParam()}, r, {ids::kEnumValue, ids::kEnumCodes});
@@ -735,7 +751,7 @@ std::string without_last_code(std::string_view base_text, std::string const& nam
     std::vector<std::size_t> hits;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         std::string_view const t = trimmed(lines[i]);
-        if (t.starts_with("<fixr:codeSet ") && t.find(named) != std::string_view::npos) {
+        if (t.starts_with("<fixr:codeSet ") && t.contains(named)) {
             hits.push_back(i);
         }
     }
@@ -778,9 +794,11 @@ TEST(OverlayEquivalenceW2EmptyOrchestra, EmptyOverlayEqualsTheBase) {
     ot::expect_loaded_at_prediction(p, "W-2 empty Orchestra");
     ASSERT_TRUE(p.dictionary.has_value()) << ot::describe(p);
     Dictionary const reference = OrchestraLoader{}.load(orchestra_base(), mr());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     expect_equivalent("W-2 empty Orchestra",
                       compare_against(*p.dictionary, reference, base_text, fmt::orchestra),
                       /*assert_no_exclusions=*/false);
+    // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // Seeded mismatch: `load(base)` against a copy of the base without one code (the
@@ -797,8 +815,10 @@ TEST(OverlayEquivalenceW2EmptyOrchestra, SeededMismatchWithoutOneCodeIsReported)
         << "the copy without one code of code set " << name << " must load";
     eq::raw_census const census_base = eq::census_from_orchestra(base_text);
     eq::raw_census const census_copy = eq::census_from_orchestra(copy);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): ASSERT_NO_THROW above set it
     auto const r = eq::compare(eq::side{.dict = base, .census = census_base},
                                eq::side{.dict = *seeded, .census = census_copy});
+    // NOLINTEND(bugprone-unchecked-optional-access)
     std::cout << "[098 W-2 empty Orchestra] seeded removal: the last code of code set " << name
               << '\n';
     expect_reports("W-2 empty Orchestra", r, {ids::kEnumValue, ids::kEnumCodes});
@@ -810,7 +830,7 @@ struct triple_paths {
     std::filesystem::path base;
     std::filesystem::path overlay;
     std::filesystem::path edited;  // its census keys both sides
-    fmt format;
+    fmt format{};
 };
 
 Dictionary direct_load(triple_paths const& t, unresolved_group_policy policy) {
@@ -828,25 +848,33 @@ void expect_dispatch_matches(triple_paths const& t, unresolved_group_policy poli
 }
 
 TEST(OverlayLoadAnyW4, QuickFixXmlMatchesTheDirectLoader) {
-    expect_dispatch_matches(
-        {qf("base.xml"), qf("overlay.xml"), qf("edited.xml"), fmt::quickfix_xml},
-        unresolved_group_policy::fail_closed, "W-4 qf");
+    expect_dispatch_matches({.base = qf("base.xml"),
+                             .overlay = qf("overlay.xml"),
+                             .edited = qf("edited.xml"),
+                             .format = fmt::quickfix_xml},
+                            unresolved_group_policy::fail_closed, "W-4 qf");
 }
 
 TEST(OverlayLoadAnyW4, OrchestraMatchesTheDirectLoader) {
-    expect_dispatch_matches(
-        {orch("base.xml"), orch("overlay.xml"), orch("edited.xml"), fmt::orchestra},
-        unresolved_group_policy::fail_closed, "W-4 orch");
+    expect_dispatch_matches({.base = orch("base.xml"),
+                             .overlay = orch("overlay.xml"),
+                             .edited = orch("edited.xml"),
+                             .format = fmt::orchestra},
+                            unresolved_group_policy::fail_closed, "W-4 orch");
 }
 
 // W-1's tolerant triples, dispatched with `tolerant`, against the direct loader
 // called with `tolerant`.
 TEST(OverlayLoadAnyW4, TolerantMatchesTheDirectLoaderCalledWithTolerant) {
-    expect_dispatch_matches({qf("base_tolerant.xml"), qf("overlay_tolerant.xml"),
-                             qf("edited_tolerant.xml"), fmt::quickfix_xml},
+    expect_dispatch_matches({.base = qf("base_tolerant.xml"),
+                             .overlay = qf("overlay_tolerant.xml"),
+                             .edited = qf("edited_tolerant.xml"),
+                             .format = fmt::quickfix_xml},
                             unresolved_group_policy::tolerant, "W-4 qf tolerant");
-    expect_dispatch_matches({orch("base_tolerant.xml"), orch("overlay_tolerant.xml"),
-                             orch("edited_tolerant.xml"), fmt::orchestra},
+    expect_dispatch_matches({.base = orch("base_tolerant.xml"),
+                             .overlay = orch("overlay_tolerant.xml"),
+                             .edited = orch("edited_tolerant.xml"),
+                             .format = fmt::orchestra},
                             unresolved_group_policy::tolerant, "W-4 orch tolerant");
 }
 
@@ -879,9 +907,8 @@ TEST(OverlayWrapProbe, Fix50Sp2FirstComponentPastTheWrapPoint) {
     for (auto const& [name, members] : census.components) {
         if (start > 0xFFFFU || members.size() > 0xFFFFU) {
             std::vector<std::uint16_t> got;
-            for (auto const& f : d.component_fields(name)) {
-                got.push_back(f.tag);
-            }
+            std::ranges::transform(d.component_fields(name), std::back_inserter(got),
+                                   [](auto const& f) { return f.tag; });
             auto const cr = d.component(name);
             std::cout << "[098 wrap probe] FIX50SP2 component \"" << name << "\": census start "
                       << start << ", count " << members.size() << "; loader first_field_index "

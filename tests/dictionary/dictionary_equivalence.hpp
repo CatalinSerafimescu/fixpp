@@ -57,6 +57,7 @@
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/table_view.hpp>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <pugixml.hpp>
@@ -84,7 +85,7 @@ enum class entry_kind : std::uint8_t {
 
 struct store_entry {
     std::string_view id;
-    entry_kind kind;
+    entry_kind kind{};
     std::string_view reason;  // empty for `seeded`
 };
 
@@ -643,9 +644,8 @@ struct comparison_report {
 
     [[nodiscard]] std::set<std::string_view> reported_entries() const {
         std::set<std::string_view> out;
-        for (auto const& d : differences) {
-            out.insert(d.entry);
-        }
+        std::ranges::transform(differences, std::inserter(out, out.end()),
+                               [](auto const& d) { return d.entry; });
         return out;
     }
 
@@ -790,9 +790,7 @@ inline std::string join(std::span<std::uint16_t const> tags) {
 inline std::vector<std::uint16_t> tags_of(std::span<FieldRef const> run) {
     std::vector<std::uint16_t> out;
     out.reserve(run.size());
-    for (auto const& f : run) {
-        out.push_back(f.tag);
-    }
+    std::ranges::transform(run, std::back_inserter(out), &FieldRef::tag);
     return out;
 }
 
@@ -969,19 +967,19 @@ inline void compare_table_views(comparison_report& r, table_view const& a, table
 // `header_store` is the handle's declared header store (empty for a null handle).
 inline void run_invariants(comparison_report& r, char const* side_name, table_view const& tv,
                            std::span<std::uint16_t const> header_store) {
-    for (auto& v :
+    for (auto const& v :
          check_pair_inverse(tva::length_pair_data_tag(tv), tva::data_pair_length_tag(tv))) {
         r.invariant_violations.push_back({id::kInvPairInverse, std::string{side_name} + ": " + v});
     }
-    for (auto& v :
+    for (auto const& v :
          check_group_bits(tva::group_bits(tv), tva::group_first(tv), tva::group_members(tv),
                           tva::group_required_members(tv), tva::group_ctx(tv))) {
         r.invariant_violations.push_back({id::kInvGroupBits, std::string{side_name} + ": " + v});
     }
-    for (auto& v : check_enum_bits(tva::enum_bits(tv), tva::enums(tv))) {
+    for (auto const& v : check_enum_bits(tva::enum_bits(tv), tva::enums(tv))) {
         r.invariant_violations.push_back({id::kInvEnumBits, std::string{side_name} + ": " + v});
     }
-    for (auto& v : check_header_bits(tva::header_bits(tv), header_store)) {
+    for (auto const& v : check_header_bits(tva::header_bits(tv), header_store)) {
         r.invariant_violations.push_back({id::kInvHeaderBits, std::string{side_name} + ": " + v});
     }
 }
@@ -1089,6 +1087,7 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
             continue;
         }
         for (auto const& m : h->messages_) {
+            // cppcheck-suppress useStlAlgorithm  // kept parallel with the census walk above
             msg_types.emplace(m.msg_type);
         }
         for (auto const& e : h->field_by_name_) {
@@ -1096,12 +1095,15 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
             tags.insert(e.tag);
         }
         for (auto const& ni : h->components_by_name_) {
+            // cppcheck-suppress useStlAlgorithm  // kept parallel with the census walk above
             comp_names.emplace(h->name_at(ni.name));
         }
         for (auto const& g : h->groups_) {
+            // cppcheck-suppress useStlAlgorithm  // kept parallel with the census walk above
             tags.insert(g.no_tag);
         }
         for (auto const& run : h->enum_runs_) {
+            // cppcheck-suppress useStlAlgorithm  // kept parallel with the census walk above
             tags.insert(run.tag);
         }
         for (auto const& f : h->fields_) {
@@ -1181,12 +1183,9 @@ inline void compare_with_census(comparison_report& r, char const* side_name, Dic
         auto const vb = b.dict.enum_values(tag);
         std::vector<std::string_view> vals_a;
         std::vector<std::string_view> vals_b;
-        for (auto const& e : va) {
-            vals_a.push_back(e.value);
-        }
-        for (auto const& e : vb) {
-            vals_b.push_back(e.value);
-        }
+        auto const value_of = [](auto const& e) { return std::string_view{e.value}; };
+        std::ranges::transform(va, std::back_inserter(vals_a), value_of);
+        std::ranges::transform(vb, std::back_inserter(vals_b), value_of);
         if (vals_a != vals_b) {
             r.add(id::kEnumValue, at);
         }

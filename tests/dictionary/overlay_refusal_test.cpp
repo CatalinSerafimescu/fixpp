@@ -509,12 +509,13 @@ std::string ld_doc(ld_base const& b) {
            field_def(58, "Text", "STRING") + b.fields + " </fields>\n</fix>\n";
 }
 
-std::string const kNewData = field_def(9100, "VenueData", "DATA");
-std::string const kNewLen = field_def(9101, "VenueLen", "LENGTH");
-std::string const kVenueComp =
-    " <components>\n  <component name='VenueComp'>\n   <field name='VenueTag' required='N' "
-    "/>\n  </component>\n </components>\n";
-std::string const kVenueTag = field_def(9102, "VenueTag", "STRING");
+std::string kNewData() { return field_def(9100, "VenueData", "DATA"); }
+std::string kNewLen() { return field_def(9101, "VenueLen", "LENGTH"); }
+std::string kVenueComp() {
+    return " <components>\n  <component name='VenueComp'>\n   <field name='VenueTag' required='N' "
+           "/>\n  </component>\n </components>\n";
+}
+std::string kVenueTag() { return field_def(9102, "VenueTag", "STRING"); }
 
 std::string msg_d(std::string_view body) {
     return "  <message name='NewOrderSingle' msgtype='D' msgcat='app'>\n"
@@ -542,11 +543,13 @@ void expect_relation_unchanged(std::string const& base, ov::xml_overlay_probe co
     ASSERT_TRUE(p.dictionary.has_value());
     Dictionary const b = XmlLoader{}.load_from_string(base, mr());
     auto const tb = b.as_table_view();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     auto const tm = p.dictionary->as_table_view();
     pugi::xml_document doc;
     ASSERT_TRUE(doc.load_buffer(base.data(), base.size()));
     ov::length_pair_relation const rel = ov::xml_length_pair_relation(doc);
     for (std::uint16_t const t : rel.declared_tags) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
         EXPECT_EQ(b.length_pair_data_tag(t), p.dictionary->length_pair_data_tag(t))
             << row << ": Dictionary::length_pair_data_tag(" << t << ")";
         EXPECT_EQ(tb.length_pair_data_tag(t), tm.length_pair_data_tag(t))
@@ -567,7 +570,7 @@ TEST(OverlayRefusalW3XmlLengthData, FieldsNewDataAfterAnUnpairedBaseLength) {
     std::string const base = ld_doc({.messages = msg_d(fref("BaseLen")),
                                      .components = {},
                                      .fields = field_def(7010, "BaseLen", "LENGTH")});
-    auto const p = probe(base, overlay_doc(" <fields>\n" + kNewData + " </fields>\n"));
+    auto const p = probe(base, overlay_doc(" <fields>\n" + kNewData() + " </fields>\n"));
     expect_pair_refused(p, "7010", "fields / unpaired");
 }
 
@@ -578,7 +581,7 @@ TEST(OverlayRefusalW3XmlLengthData, FieldsNewDataTakesALengthTheBasePairsLater) 
         {.messages = msg_d(fref("BaseLen") + fref("BaseData")),
          .components = {},
          .fields = field_def(7011, "BaseData", "DATA") + field_def(7010, "BaseLen", "LENGTH")});
-    auto const p = probe(base, overlay_doc(" <fields>\n" + kNewData + " </fields>\n"));
+    auto const p = probe(base, overlay_doc(" <fields>\n" + kNewData() + " </fields>\n"));
     expect_pair_refused(p, "7010", "fields / paired later");
 }
 
@@ -588,8 +591,8 @@ TEST(OverlayRefusalW3XmlLengthData, ComponentNewDataAfterAnUnpairedBaseLength) {
         {.messages = msg_d("   <component name='C' />\n"),
          .components = "  <component name='C'>\n" + fref("BaseLen") + "  </component>\n",
          .fields = field_def(7010, "BaseLen", "LENGTH") + field_def(7020, "Tail", "STRING")});
-    auto const p = probe(
-        base, overlay_doc(extend_c(fref("VenueData"), " <fields>\n" + kNewData + " </fields>\n")));
+    auto const p = probe(base, overlay_doc(extend_c(fref("VenueData"),
+                                                    " <fields>\n" + kNewData() + " </fields>\n")));
     expect_pair_refused(p, "7010", "component / unpaired");
 }
 
@@ -599,8 +602,8 @@ TEST(OverlayRefusalW3XmlLengthData, ComponentNewDataAfterALengthTheBasePairsEarl
                 .components = "  <component name='C'>\n" + fref("BaseLen") + "  </component>\n",
                 .fields = field_def(7010, "BaseLen", "LENGTH") +
                           field_def(7011, "BaseData", "DATA") + field_def(7020, "Tail", "STRING")});
-    auto const p = probe(
-        base, overlay_doc(extend_c(fref("VenueData"), " <fields>\n" + kNewData + " </fields>\n")));
+    auto const p = probe(base, overlay_doc(extend_c(fref("VenueData"),
+                                                    " <fields>\n" + kNewData() + " </fields>\n")));
     expect_relation_unchanged(base, p, "component / paired earlier");
 }
 
@@ -612,8 +615,8 @@ TEST(OverlayRefusalW3XmlLengthData, ComponentNewDataTakesALengthTheBasePairsLate
          .components = "  <component name='C'>\n" + fref("BaseLen") + "  </component>\n",
          .fields = field_def(7010, "BaseLen", "LENGTH") + field_def(7020, "Tail", "STRING") +
                    field_def(7011, "BaseData", "DATA") + field_def(7100, "NoBase", "NUMINGROUP")});
-    auto const p = probe(
-        base, overlay_doc(extend_c(fref("VenueData"), " <fields>\n" + kNewData + " </fields>\n")));
+    auto const p = probe(base, overlay_doc(extend_c(fref("VenueData"),
+                                                    " <fields>\n" + kNewData() + " </fields>\n")));
     expect_pair_refused(p, "7010", "component / paired later");
 }
 
@@ -623,52 +626,56 @@ TEST(OverlayRefusalW3XmlLengthData, ComponentNewLengthBeforeABaseData) {
                 .components = "  <component name='C'>\n" + fref("Text") + "  </component>\n",
                 .fields = field_def(7011, "BaseData", "DATA") + field_def(7020, "Tail", "STRING")});
     auto const p = probe(base, overlay_doc(extend_c(fref("VenueLen") + fref("BaseData"),
-                                                    " <fields>\n" + kNewLen + " </fields>\n")));
+                                                    " <fields>\n" + kNewLen() + " </fields>\n")));
     expect_pair_refused(p, "7011", "component / new Length");
 }
 
 // non-strict container (message), a group between
-std::string const kNoBaseGroup =
-    "   <group name='NoBase' required='N'>\n" + fref("BaseTag") + "   </group>\n";
-std::string const kNoBaseFields =
-    field_def(7100, "NoBase", "NUMINGROUP") + field_def(7101, "BaseTag", "STRING");
+std::string kNoBaseGroup() {
+    return "   <group name='NoBase' required='N'>\n" + fref("BaseTag") + "   </group>\n";
+}
+std::string kNoBaseFields() {
+    return field_def(7100, "NoBase", "NUMINGROUP") + field_def(7101, "BaseTag", "STRING");
+}
 
 TEST(OverlayRefusalW3XmlLengthData, MessageGroupBetweenNewDataAfterAnUnpairedBaseLength) {
     std::string const base =
-        ld_doc({.messages = msg_d(fref("BaseLen") + kNoBaseGroup),
+        ld_doc({.messages = msg_d(fref("BaseLen") + kNoBaseGroup()),
                 .components = {},
-                .fields = field_def(7010, "BaseLen", "LENGTH") + kNoBaseFields});
-    auto const p = probe(
-        base, overlay_doc(extend_d(fref("VenueData"), " <fields>\n" + kNewData + " </fields>\n")));
+                .fields = field_def(7010, "BaseLen", "LENGTH") + kNoBaseFields()});
+    auto const p = probe(base, overlay_doc(extend_d(fref("VenueData"),
+                                                    " <fields>\n" + kNewData() + " </fields>\n")));
     expect_pair_refused(p, "7010", "message, group between / unpaired");
 }
 
 TEST(OverlayRefusalW3XmlLengthData, MessageGroupBetweenNewDataAfterALengthPairedEarlierLoads) {
     std::string const base =
-        ld_doc({.messages = msg_d(fref("BaseLen") + kNoBaseGroup),
+        ld_doc({.messages = msg_d(fref("BaseLen") + kNoBaseGroup()),
                 .components = {},
                 .fields = field_def(7010, "BaseLen", "LENGTH") +
-                          field_def(7011, "BaseData", "DATA") + kNoBaseFields});
-    auto const p = probe(
-        base, overlay_doc(extend_d(fref("VenueData"), " <fields>\n" + kNewData + " </fields>\n")));
+                          field_def(7011, "BaseData", "DATA") + kNoBaseFields()});
+    auto const p = probe(base, overlay_doc(extend_d(fref("VenueData"),
+                                                    " <fields>\n" + kNewData() + " </fields>\n")));
     expect_relation_unchanged(base, p, "message, group between / paired earlier");
 }
 
-std::string const kLaterPair =
-    "  <message name='ExecutionReport' msgtype='8' msgcat='app'>\n"
-    "   <component name='C2' />\n"
-    "  </message>\n";
-std::string const kLaterPairComp =
-    "  <component name='C2'>\n" + fref("BaseLen") + fref("BaseData") + "  </component>\n";
+std::string kLaterPair() {
+    return "  <message name='ExecutionReport' msgtype='8' msgcat='app'>\n"
+           "   <component name='C2' />\n"
+           "  </message>\n";
+}
+std::string kLaterPairComp() {
+    return "  <component name='C2'>\n" + fref("BaseLen") + fref("BaseData") + "  </component>\n";
+}
 
 TEST(OverlayRefusalW3XmlLengthData, MessageGroupBetweenNewDataTakesALengthPairedLater) {
     std::string const base =
-        ld_doc({.messages = msg_d(fref("BaseLen") + kNoBaseGroup) + kLaterPair,
-                .components = kLaterPairComp,
+        ld_doc({.messages = msg_d(fref("BaseLen") + kNoBaseGroup()) + kLaterPair(),
+                .components = kLaterPairComp(),
                 .fields = field_def(7010, "BaseLen", "LENGTH") + field_def(7020, "Tail", "STRING") +
-                          field_def(7011, "BaseData", "DATA") + kNoBaseFields});
-    auto const p = probe(
-        base, overlay_doc(extend_d(fref("VenueData"), " <fields>\n" + kNewData + " </fields>\n")));
+                          field_def(7011, "BaseData", "DATA") + kNoBaseFields()});
+    auto const p = probe(base, overlay_doc(extend_d(fref("VenueData"),
+                                                    " <fields>\n" + kNewData() + " </fields>\n")));
     expect_pair_refused(p, "7010", "message, group between / paired later");
 }
 
@@ -678,10 +685,10 @@ TEST(OverlayRefusalW3XmlLengthData, MessageGroupBetweenNewLengthBeforeABaseData)
     std::string const base =
         ld_doc({.messages = msg_d(fref("Text")),
                 .components = {},
-                .fields = field_def(7011, "BaseData", "DATA") + kNoBaseFields});
+                .fields = field_def(7011, "BaseData", "DATA") + kNoBaseFields()});
     auto const p =
-        probe(base, overlay_doc(extend_d(fref("VenueLen") + kNoBaseGroup + fref("BaseData"),
-                                         " <fields>\n" + kNewLen + " </fields>\n")));
+        probe(base, overlay_doc(extend_d(fref("VenueLen") + kNoBaseGroup() + fref("BaseData"),
+                                         " <fields>\n" + kNewLen() + " </fields>\n")));
     expect_pair_refused(p, "7011", "message, group between / new Length");
 }
 
@@ -691,10 +698,10 @@ TEST(OverlayRefusalW3XmlLengthData, MessageComponentBetweenNewDataAfterAnUnpaire
         {.messages = msg_d(fref("BaseLen")),
          .components = {},
          .fields = field_def(7010, "BaseLen", "LENGTH") + field_def(7020, "Tail", "STRING")});
-    auto const p = probe(
-        base,
-        overlay_doc(extend_d("   <component name='VenueComp' />\n" + fref("VenueData"),
-                             kVenueComp + " <fields>\n" + kNewData + kVenueTag + " </fields>\n")));
+    auto const p =
+        probe(base, overlay_doc(extend_d(
+                        "   <component name='VenueComp' />\n" + fref("VenueData"),
+                        kVenueComp() + " <fields>\n" + kNewData() + kVenueTag() + " </fields>\n")));
     expect_pair_refused(p, "7010", "message, component between / unpaired");
 }
 
@@ -704,23 +711,23 @@ TEST(OverlayRefusalW3XmlLengthData, MessageComponentBetweenNewDataAfterALengthPa
                 .components = {},
                 .fields = field_def(7010, "BaseLen", "LENGTH") +
                           field_def(7011, "BaseData", "DATA") + field_def(7020, "Tail", "STRING")});
-    auto const p = probe(
-        base,
-        overlay_doc(extend_d("   <component name='VenueComp' />\n" + fref("VenueData"),
-                             kVenueComp + " <fields>\n" + kNewData + kVenueTag + " </fields>\n")));
+    auto const p =
+        probe(base, overlay_doc(extend_d(
+                        "   <component name='VenueComp' />\n" + fref("VenueData"),
+                        kVenueComp() + " <fields>\n" + kNewData() + kVenueTag() + " </fields>\n")));
     expect_relation_unchanged(base, p, "message, component between / paired earlier");
 }
 
 TEST(OverlayRefusalW3XmlLengthData, MessageComponentBetweenNewDataTakesALengthPairedLater) {
     std::string const base = ld_doc(
-        {.messages = msg_d(fref("BaseLen")) + kLaterPair,
-         .components = kLaterPairComp,
+        {.messages = msg_d(fref("BaseLen")) + kLaterPair(),
+         .components = kLaterPairComp(),
          .fields = field_def(7010, "BaseLen", "LENGTH") + field_def(7020, "Tail", "STRING") +
                    field_def(7011, "BaseData", "DATA") + field_def(7021, "Tail2", "STRING")});
-    auto const p = probe(
-        base,
-        overlay_doc(extend_d("   <component name='VenueComp' />\n" + fref("VenueData"),
-                             kVenueComp + " <fields>\n" + kNewData + kVenueTag + " </fields>\n")));
+    auto const p =
+        probe(base, overlay_doc(extend_d(
+                        "   <component name='VenueComp' />\n" + fref("VenueData"),
+                        kVenueComp() + " <fields>\n" + kNewData() + kVenueTag() + " </fields>\n")));
     expect_pair_refused(p, "7010", "message, component between / paired later");
 }
 
@@ -732,7 +739,7 @@ TEST(OverlayRefusalW3XmlLengthData, MessageComponentBetweenNewLengthBeforeABaseD
     auto const p =
         probe(base, overlay_doc(extend_d(
                         fref("VenueLen") + "   <component name='VenueComp' />\n" + fref("BaseData"),
-                        kVenueComp + " <fields>\n" + kNewLen + kVenueTag + " </fields>\n")));
+                        kVenueComp() + " <fields>\n" + kNewLen() + kVenueTag() + " </fields>\n")));
     expect_pair_refused(p, "7011", "message, component between / new Length");
 }
 
@@ -936,18 +943,19 @@ TEST(OverlayRefusalW3XmlCaps, Doctype) {
 
 // ── R-5 guards: the merged-graph walk ────────────────────────────────────────
 
-std::string const kCycleOverlay =
-    " <components>\n"
-    "  <component name='Instrument'>\n"
-    "   <component name='VenueLoop' required='N' />\n"
-    "  </component>\n"
-    "  <component name='VenueLoop'>\n"
-    "   <component name='Instrument' required='N' />\n"
-    "  </component>\n"
-    " </components>\n";
+std::string kCycleOverlay() {
+    return " <components>\n"
+           "  <component name='Instrument'>\n"
+           "   <component name='VenueLoop' required='N' />\n"
+           "  </component>\n"
+           "  <component name='VenueLoop'>\n"
+           "   <component name='Instrument' required='N' />\n"
+           "  </component>\n"
+           " </components>\n";
+}
 
 TEST(OverlayRefusalW3XmlWalk, CycleClosingThroughABaseComponent) {
-    auto const p = probe(base_doc(), overlay_doc(kCycleOverlay));
+    auto const p = probe(base_doc(), overlay_doc(kCycleOverlay()));
     expect_refused<xml_parse_error>(
         p, {"component reference cycle", "component Instrument", "component VenueLoop"}, "cycle");
 }
@@ -986,25 +994,20 @@ std::string doubling_overlay() {
     std::string fields = " <fields>\n";
     for (std::size_t n = 1; n < ov::kMaxNewComponents; ++n) {
         std::string const prev = n == 1 ? "Instrument" : "VenueC" + std::to_string(n - 1);
-        comps += "  <component name='VenueC" + std::to_string(n) +
-                 "'>\n"
-                 "   <component name='" +
-                 prev +
-                 "' required='N' />\n"
-                 "   <group name='NoVenueG" +
-                 std::to_string(n) +
-                 "' required='N'>\n"
-                 "    <field name='VenueF" +
-                 std::to_string(n) +
-                 "' required='N' />\n"
-                 "    <component name='" +
-                 prev +
-                 "' required='N' />\n"
-                 "   </group>\n"
-                 "  </component>\n";
+        comps += "  <component name='VenueC";
+        comps += std::to_string(n);
+        comps += "'>\n   <component name='";
+        comps += prev;
+        comps += "' required='N' />\n   <group name='NoVenueG";
+        comps += std::to_string(n);
+        comps += "' required='N'>\n    <field name='VenueF";
+        comps += std::to_string(n);
+        comps += "' required='N' />\n    <component name='";
+        comps += prev;
+        comps += "' required='N' />\n   </group>\n  </component>\n";
         fields +=
-            field_def(20000 + static_cast<int>(n), "NoVenueG" + std::to_string(n), "NUMINGROUP") +
-            field_def(21000 + static_cast<int>(n), "VenueF" + std::to_string(n), "STRING");
+            field_def(20000 + static_cast<int>(n), "NoVenueG" + std::to_string(n), "NUMINGROUP");
+        fields += field_def(21000 + static_cast<int>(n), "VenueF" + std::to_string(n), "STRING");
     }
     return overlay_doc(comps + " </components>\n" + fields + " </fields>\n");
 }
@@ -1032,6 +1035,7 @@ std::string empty_chains_overlay() {
 
 void expect_base_fits(ov::xml_overlay_probe const& p, std::string const& row) {
     ASSERT_TRUE(p.guards.has_value()) << row << ": " << ot::describe(p);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     EXPECT_TRUE(p.guards->base_components_fit && p.guards->base_groups_fit)
         << row << ": the doubling rows need a base whose side tables fit";
 }
@@ -1081,6 +1085,7 @@ TEST(OverlayRefusalW3XmlWalk, HeaderExpansionLoadsAtThePrediction) {
     auto const p = probe(base, overlay);
     ot::expect_loaded_at_prediction(p, "header expansion");
     ASSERT_TRUE(p.dictionary.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     auto const* h = fixpp::dict::dictionary_test_access::handle(*p.dictionary);
     ASSERT_NE(h, nullptr);
     std::vector<std::uint16_t> expected{8, 21001, 21002};
@@ -1177,7 +1182,7 @@ std::string grow_e0_e1(int each) {
 
 TEST(OverlayRefusalW3XmlSideTable, EarlyComponentsPushALaterBaseStartPastTheTable) {
     // E0 and E1 each stay within a count of 65535; Late's start passes it.
-    int const each = (65536 / 2) / kPerGroup + 1;
+    int const each = ((65536 / 2) / kPerGroup) + 1;
     auto const p = probe(side_table_base(), side_overlay(grow_e0_e1(each)));
     expect_refused<overlay_limit_error>(p, {"components side table"}, "components start");
     expect_origin(p, ov::refusal_origin::side_table, "components start");
@@ -1191,7 +1196,7 @@ TEST(OverlayRefusalW3XmlSideTable, EarlyComponentsJustInsideTheTableLoad) {
 }
 
 TEST(OverlayRefusalW3XmlSideTable, ANewComponentWhoseCountPassesTheTable) {
-    int const n = 65536 / kPerGroup + 1;
+    int const n = (65536 / kPerGroup) + 1;
     auto const p = probe(side_table_base(), side_overlay("  <component name='VenueHuge'>\n" +
                                                          big_groups(0, n) + "  </component>\n"));
     expect_refused<overlay_limit_error>(p, {"components side table"}, "component count");
@@ -1217,7 +1222,7 @@ std::string low_group_overlay(int n) {
 }
 
 TEST(OverlayRefusalW3XmlSideTable, ALowTaggedGroupPushesBaseGroupsPastTheTable) {
-    int const n = (65535 - kGroups / 2) / kPerGroup;  // its own count fits; later starts do not
+    int const n = (65535 - (kGroups / 2)) / kPerGroup;  // its own count fits; later starts do not
     auto const p = probe(side_table_base(), low_group_overlay(n));
     expect_refused<overlay_limit_error>(p, {"groups side table"}, "groups start");
     expect_origin(p, ov::refusal_origin::side_table, "groups start");
@@ -1234,7 +1239,7 @@ TEST(OverlayRefusalW3XmlSideTable, ALowTaggedGroupJustInsideTheTableLoads) {
 TEST(OverlayRefusalW3XmlOrder, CycleIsReportedBeforeARedeclareConflict) {
     // The cycle closes through Instrument, and NewOrderSingle redeclares Symbol, which
     // it reaches through Instrument.
-    auto const p = probe(base_doc(), overlay_doc(extend_d(fref("Symbol")) + kCycleOverlay));
+    auto const p = probe(base_doc(), overlay_doc(extend_d(fref("Symbol")) + kCycleOverlay()));
     expect_refused<xml_parse_error>(p, {"component reference cycle"}, "order: cycle");
 }
 
@@ -1248,6 +1253,7 @@ TEST(OverlayRefusalW3XmlOrder, VersionMismatchIsReportedBeforeTheMessageCap) {
 TEST(OverlayRefusalW3XmlOrder, BudgetIsReportedBeforeTheSideTableFit) {
     auto const p = probe(base_doc(), doubling_overlay());
     ASSERT_TRUE(p.guards.has_value()) << ot::describe(p);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     EXPECT_FALSE(p.guards->merged_components_fit) << "the row needs both checks to fail";
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "order: budget");
     expect_origin(p, ov::refusal_origin::budget, "order: budget");
@@ -1272,8 +1278,10 @@ TEST(OverlayRefusalW3Budget, ConstantEqualsTheRecipeOverTheVendoredBases) {
             "' servicepack='" + r.attribute("servicepack").as_string("0") + "'/>\n"};
         auto const p = ov::probe_xml_overlay(base, empty.path(), mr());
         ASSERT_TRUE(p.guards.has_value()) << name << ": " << ot::describe(p);
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
         std::cout << "[098 budget recipe] " << name << " step-6 total " << p.guards->merged_total
                   << '\n';
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
         largest = std::max(largest, p.guards->merged_total);
     }
     {
@@ -1287,8 +1295,11 @@ TEST(OverlayRefusalW3Budget, ConstantEqualsTheRecipeOverTheVendoredBases) {
             d.child("fixr:repository").attribute("version").as_string("") + "'/>\n"};
         auto const p = ov::probe_orchestra_overlay(base, empty.path(), mr());
         ASSERT_TRUE(p.guards.has_value()) << "OrchestraFIXLatest.xml: " << ot::describe(p);
+        // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
         std::cout << "[098 budget recipe] OrchestraFIXLatest.xml step-6 total "
                   << p.guards->merged_total << '\n';
+        // NOLINTEND(bugprone-unchecked-optional-access)
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
         largest = std::max(largest, p.guards->merged_total);
     }
     std::uint64_t const recipe = std::bit_ceil(2 * largest);
@@ -1387,6 +1398,9 @@ std::string omsg(int id, std::string_view name, std::string_view msg_type, std::
            "   </fixr:structure>\n  </fixr:message>\n";
 }
 
+// The `{}` initializers let a designated initializer omit a member without
+// -Wmissing-designated-field-initializers, so they are not redundant here.
+// NOLINTBEGIN(readability-redundant-member-init)
 struct orch_extra {
     std::string messages{};
     std::string components{};
@@ -1395,6 +1409,7 @@ struct orch_extra {
     std::string groups{};
     std::string side_codes{};  // appended to SideCodeSet
 };
+// NOLINTEND(readability-redundant-member-init)
 
 // The general small Orchestra base of the W-3 rows, the shape of `base_doc`:
 // NewOrderSingle reaches NoPartyIDs(453) through component Parties(2001),
@@ -1678,14 +1693,17 @@ TEST(OverlayRefusalW3Orch, AdditionToAnInlinedComponentReachingATagTheParentDecl
 
 // ── repeated base keys (Orchestra) ───────────────────────────────────────────
 
-std::string const kOrchSecondD = omsg(99, "NewOrderSingle", "D", oref("fieldRef", 11, "required"));
-std::string const kOrchDupNames =
-    ofield(9500, "VenueDup", "String") + ofield(9501, "VenueDup", "String");
-std::string const kOrchDupChild = oref("fieldRef", 58);
-std::string const kOrchDupCode = "   <fixr:code id='54009' name='Buy' value='1' />\n";
+std::string kOrchSecondD() {
+    return omsg(99, "NewOrderSingle", "D", oref("fieldRef", 11, "required"));
+}
+std::string kOrchDupNames() {
+    return ofield(9500, "VenueDup", "String") + ofield(9501, "VenueDup", "String");
+}
+std::string kOrchDupChild() { return oref("fieldRef", 58); }
+std::string kOrchDupCode() { return "   <fixr:code id='54009' name='Buy' value='1' />\n"; }
 
 TEST(OverlayRefusalW3Orch, RepeatedBaseMsgTypeNamesBothOccurrences) {
-    auto const p = oprobe(orch_base_doc({.messages = kOrchSecondD}),
+    auto const p = oprobe(orch_base_doc({.messages = kOrchSecondD()}),
                           orch_overlay(" <fixr:messages>\n" + omsg(14, "NewOrderSingle", "D", "") +
                                        " </fixr:messages>\n"));
     expect_refused<overlay_conflict_error>(
@@ -1698,7 +1716,7 @@ TEST(OverlayRefusalW3Orch, RepeatedBaseMsgTypeNamesBothOccurrences) {
 // The loader admits two fields of one name (it keys fields by id), so a new field of
 // that name is a lookup that hits a repeated base key.
 TEST(OverlayRefusalW3Orch, RepeatedBaseFieldNameNamesBothOccurrences) {
-    auto const p = oprobe(orch_base_doc({.fields = kOrchDupNames}),
+    auto const p = oprobe(orch_base_doc({.fields = kOrchDupNames()}),
                           orch_overlay(ofields(ofield(9001, "VenueDup", "String"))));
     expect_refused<overlay_conflict_error>(
         p, {"repeated base key", "<fixr:field id=\"9500\"", "<fixr:field id=\"9501\""},
@@ -1706,7 +1724,7 @@ TEST(OverlayRefusalW3Orch, RepeatedBaseFieldNameNamesBothOccurrences) {
 }
 
 TEST(OverlayRefusalW3Orch, RepeatedBaseDirectChildNamesBothOccurrences) {
-    auto const p = oprobe(orch_base_doc({.d_extra = kOrchDupChild}),
+    auto const p = oprobe(orch_base_doc({.d_extra = kOrchDupChild()}),
                           orch_overlay(extend_od(oref("fieldRef", 58, "required"))));
     expect_refused<overlay_conflict_error>(
         p,
@@ -1716,7 +1734,7 @@ TEST(OverlayRefusalW3Orch, RepeatedBaseDirectChildNamesBothOccurrences) {
 }
 
 TEST(OverlayRefusalW3Orch, RepeatedBaseCodeValueNamesBothOccurrences) {
-    auto const p = oprobe(orch_base_doc({.side_codes = kOrchDupCode}),
+    auto const p = oprobe(orch_base_doc({.side_codes = kOrchDupCode()}),
                           orch_overlay(" <fixr:codeSets>\n"
                                        "  <fixr:codeSet id='54' name='SideCodeSet' type='char'>\n"
                                        "   <fixr:code id='54001' name='Buy' value='1' />\n"
@@ -1733,8 +1751,9 @@ TEST(OverlayRefusalW3Orch, RepeatedBaseCodeValueNamesBothOccurrences) {
 TEST(OverlayRefusalW3Orch, RepeatedKeyBasesLoadWithAnEmptyOverlay) {
     std::string const empty = orch_overlay({});
     for (std::string const& b :
-         {orch_base_doc({.messages = kOrchSecondD}), orch_base_doc({.fields = kOrchDupNames}),
-          orch_base_doc({.d_extra = kOrchDupChild}), orch_base_doc({.side_codes = kOrchDupCode})}) {
+         {orch_base_doc({.messages = kOrchSecondD()}), orch_base_doc({.fields = kOrchDupNames()}),
+          orch_base_doc({.d_extra = kOrchDupChild()}),
+          orch_base_doc({.side_codes = kOrchDupCode()})}) {
         ot::expect_loaded_at_prediction(oprobe(b, empty), "Orchestra repeated-key control");
     }
 }
@@ -2036,11 +2055,13 @@ TEST(OverlayRefusalW3OrchCaps, Doctype) {
 
 // ── R-5 guards: the merged-graph walk (Orchestra) ────────────────────────────
 
-std::string const kOrchCycleOverlay = ocomps(ocomp(1003, "Instrument", oref("componentRef", 2099)) +
-                                             ocomp(2099, "VenueLoop", oref("componentRef", 1003)));
+std::string kOrchCycleOverlay() {
+    return ocomps(ocomp(1003, "Instrument", oref("componentRef", 2099)) +
+                  ocomp(2099, "VenueLoop", oref("componentRef", 1003)));
+}
 
 TEST(OverlayRefusalW3OrchWalk, CycleClosingThroughABaseComponent) {
-    auto const p = oprobe(orch_base_doc(), orch_overlay(kOrchCycleOverlay));
+    auto const p = oprobe(orch_base_doc(), orch_overlay(kOrchCycleOverlay()));
     expect_refused<orchestra_parse_error>(
         p, {"component reference cycle", "component 1003 Instrument", "component 2099 VenueLoop"},
         "cycle");
@@ -2076,7 +2097,7 @@ std::string orch_doubling_overlay() {
     std::string comps;
     std::string groups;
     std::string fields;
-    for (int n = 1; n < static_cast<int>(std::min(ov::kMaxNewComponents, ov::kMaxNewGroups)); ++n) {
+    for (int n = 1; std::cmp_less(n, std::min(ov::kMaxNewComponents, ov::kMaxNewGroups)); ++n) {
         int const prev = n == 1 ? 1003 : 3000 + n - 1;
         comps += ocomp(3000 + n, "VenueC" + std::to_string(n),
                        oref("componentRef", prev) + oref("groupRef", 4000 + n));
@@ -2202,7 +2223,7 @@ std::string g_refs(int first, int count) {
     return s;
 }
 
-constexpr int orch_g_entries(int n) { return 1 + n * kOrchPerH; }
+constexpr int orch_g_entries(int n) { return 1 + (n * kOrchPerH); }
 
 std::string orch_grow_e0_e1() {
     return ocomp(1, "E0", oref("fieldRef", 8) + g_refs(0, 2)) +
@@ -2212,7 +2233,7 @@ std::string orch_grow_e0_e1() {
 TEST(OverlayRefusalW3OrchSideTable, EarlyComponentsPushALaterBaseStartPastTheTable) {
     // E0 and E1 each stay within a count of 65535; Late's start passes it.
     constexpr int n = kOrchHGroups;
-    static_assert(1 + 2 * orch_g_entries(n) <= 65535 && 2 + 3 * orch_g_entries(n) > 65535);
+    static_assert(1 + (2 * orch_g_entries(n)) <= 65535 && 2 + (3 * orch_g_entries(n)) > 65535);
     auto const p =
         oprobe(orch_side_table_base(), orch_side_overlay(orch_grow_e0_e1(), {{n, n, n}}));
     expect_refused<overlay_limit_error>(p, {"components side table"}, "components start");
@@ -2222,7 +2243,7 @@ TEST(OverlayRefusalW3OrchSideTable, EarlyComponentsPushALaterBaseStartPastTheTab
 TEST(OverlayRefusalW3OrchSideTable, EarlyComponentsJustInsideTheTableLoad) {
     // Every start, VenueBig's after Late included, stays within 65535.
     constexpr int n = kOrchHGroups - 1;
-    static_assert(3 + 3 * orch_g_entries(n) <= 65535);
+    static_assert(3 + (3 * orch_g_entries(n)) <= 65535);
     ot::expect_loaded_at_prediction(
         oprobe(orch_side_table_base(), orch_side_overlay(orch_grow_e0_e1(), {{n, n, n}})),
         "components start control");
@@ -2239,7 +2260,7 @@ TEST(OverlayRefusalW3OrchSideTable, ANewComponentWhoseCountPassesTheTable) {
 
 TEST(OverlayRefusalW3OrchSideTable, ANewComponentJustInsideTheTableLoads) {
     constexpr int n = kOrchHGroups - 1;
-    static_assert(3 + 3 * orch_g_entries(n) <= 65535);
+    static_assert(3 + (3 * orch_g_entries(n)) <= 65535);
     ot::expect_loaded_at_prediction(
         oprobe(orch_side_table_base(),
                orch_side_overlay(ocomp(3998, "VenueHuge", g_refs(0, 3)), {{n, n, n}})),
@@ -2263,7 +2284,7 @@ std::string orch_low_group_overlay(std::vector<int> const& g_sizes) {
 
 TEST(OverlayRefusalW3OrchSideTable, ALowTaggedGroupPushesBaseGroupsPastTheTable) {
     // Its own count fits; a later base group's start does not.
-    constexpr int count = 2 * orch_g_entries(kOrchHGroups) + orch_g_entries(kOrchHGroups - 1);
+    constexpr int count = (2 * orch_g_entries(kOrchHGroups)) + orch_g_entries(kOrchHGroups - 1);
     static_assert(count <= 65535 && count + kGroups > 65535);
     auto const p = oprobe(orch_side_table_base(),
                           orch_low_group_overlay({kOrchHGroups, kOrchHGroups, kOrchHGroups - 1}));
@@ -2285,8 +2306,8 @@ TEST(OverlayRefusalW3OrchSideTable, ALowTaggedGroupJustInsideTheTableLoads) {
 TEST(OverlayRefusalW3OrchOrder, CycleIsReportedBeforeARedeclareConflict) {
     // The cycle closes through Instrument, and NewOrderSingle redeclares Symbol, which
     // it reaches through Instrument.
-    auto const p =
-        oprobe(orch_base_doc(), orch_overlay(extend_od(oref("fieldRef", 55)) + kOrchCycleOverlay));
+    auto const p = oprobe(orch_base_doc(),
+                          orch_overlay(extend_od(oref("fieldRef", 55)) + kOrchCycleOverlay()));
     expect_refused<orchestra_parse_error>(p, {"component reference cycle"}, "order: cycle");
 }
 
@@ -2301,6 +2322,7 @@ TEST(OverlayRefusalW3OrchOrder, VersionMismatchIsReportedBeforeTheMessageCap) {
 TEST(OverlayRefusalW3OrchOrder, BudgetIsReportedBeforeTheSideTableFit) {
     auto const p = oprobe(orch_base_doc(), orch_doubling_overlay());
     ASSERT_TRUE(p.guards.has_value()) << ot::describe(p);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
     EXPECT_FALSE(p.guards->merged_components_fit) << "the row needs both checks to fail";
     expect_refused<overlay_limit_error>(p, {"expansion budget"}, "order: budget");
     expect_origin(p, ov::refusal_origin::budget, "order: budget");
@@ -2375,14 +2397,14 @@ TEST(OverlayStatusMappingW9, AnotherFailedStatusIsTheFormatsParseError) {
 enum class cell_state : std::uint8_t { row, not_applicable };
 
 struct cell {
-    cell_state state;
+    cell_state state{};
     std::string_view detail;  // row: the test names; N/A: the reason
 };
 
 struct kind {
     std::string_view name;
-    cell xml;
-    cell orchestra;
+    cell xml{};
+    cell orchestra{};
 };
 
 constexpr cell row(std::string_view tests) { return {.state = cell_state::row, .detail = tests}; }
@@ -2393,255 +2415,290 @@ constexpr cell na(std::string_view reason) {
 // One entry per refusal kind of contracts W-3 (each R-4 bullet, the level, repeated-key,
 // Length+Data and R-5 kinds).
 constexpr kind kCells[] = {
-    {"identifying attribute changed",
-     row("OverlayRefusalW3Xml.IdentifyingAttributeChangedFieldType "
-         "OverlayRefusalW3Xml.IdentifyingAttributeChangedFieldName "
-         "OverlayRefusalW3Xml.IdentifyingAttributeChangedMessageName"),
-     row("OverlayRefusalW3Orch.IdentifyingAttributeChangedFieldType "
-         "OverlayRefusalW3Orch.IdentifyingAttributeChangedFieldName "
-         "OverlayRefusalW3Orch.IdentifyingAttributeChangedFieldLengthId "
-         "OverlayRefusalW3Orch.IdentifyingAttributeChangedMessageId "
-         "OverlayRefusalW3Orch.IdentifyingAttributeChangedMessageName "
-         "OverlayRefusalW3Orch.IdentifyingAttributeChangedCodeSetType "
-         "OverlayRefusalW3Orch.IdentifyingAttributeChangedComponentName "
-         "OverlayRefusalW3Orch.IdentifyingAttributeChangedGroupName")},
-    {"field name already used by another number",
-     row("OverlayRefusalW3Xml.FieldNameAlreadyUsedByAnotherNumber"),
-     row("OverlayRefusalW3Orch.FieldNameAlreadyUsedByAnotherNumber")},
-    {"code set with a new id and an existing name (N-6)", na("QuickFIX XML has no code sets"),
-     row("OverlayRefusalW3Orch.CodeSetWithANewIdAndAnExistingName")},
-    {"required relaxed", row("OverlayRefusalW3Xml.RequiredRelaxed"),
-     row("OverlayRefusalW3Orch.RequiredRelaxed")},
-    {"redescribed enum value or code", row("OverlayRefusalW3Xml.RedescribedEnumValue"),
-     row("OverlayRefusalW3Orch.RedescribedCode")},
-    {"presence vocabulary (A-013)",
-     row("OverlayRefusalW3Xml.PresenceVocabularyLowercaseY "
-         "OverlayRefusalW3Xml.PresenceVocabularyFalse"),
-     row("OverlayRefusalW3Orch.PresenceVocabularyRequire")},
-    {"duplicate within the overlay", row("OverlayRefusalW3Xml.DuplicateWithinTheOverlay"),
-     row("OverlayRefusalW3Orch.DuplicateWithinTheOverlay")},
-    {"two root containers of one name", row("OverlayRefusalW3Xml.TwoRootContainersOfOneName"),
-     row("OverlayRefusalW3Orch.TwoRootContainersOfOneName")},
-    {"version mismatch", row("OverlayRefusalW3Xml.VersionMismatch"),
-     row("OverlayRefusalW3Orch.VersionMismatch")},
-    {"overlay of the other format", row("OverlayRefusalW3Xml.OverlayOfTheOtherFormat"),
-     row("OverlayRefusalW3Orch.OverlayOfTheOtherFormat")},
-    {"root child outside data-model A.1's list", row("OverlayRefusalW3Xml.RootChildOutsideTheList"),
-     row("OverlayRefusalW3Orch.RootChildOutsideTheList")},
-    {"group numInGroup id differs, or a new group with none or two (N-9)",
-     na("a QuickFIX-XML group's NumInGroup is its name"),
-     row("OverlayRefusalW3Orch.MatchedGroupWhoseNumInGroupDiffers "
-         "OverlayRefusalW3Orch.NewGroupWithoutANumInGroup "
-         "OverlayRefusalW3Orch.NewGroupWithTwoNumInGroups")},
-    {"child redeclared that the parent reaches through a component",
-     row("OverlayRefusalW3Xml.ChildRedeclaredThatTheParentReachesThroughAComponent"),
-     row("OverlayRefusalW3Orch.ChildRedeclaredThatTheParentReachesThroughAComponent")},
-    {"child redeclared through a two-level component chain (N-2)",
-     row("OverlayRefusalW3Xml.ChildRedeclaredThroughATwoLevelComponentChain"),
-     row("OverlayRefusalW3Orch.ChildRedeclaredThroughATwoLevelComponentChain")},
-    {"new component reference reaching a declared tag (N-7)",
-     row("OverlayRefusalW3Xml.NewComponentReferenceReachingADeclaredTag"),
-     row("OverlayRefusalW3Orch.NewComponentReferenceReachingADeclaredTag")},
-    {"addition to an inlined component reaching a tag the parent declares (upward closure)",
-     row("OverlayRefusalW3Xml.AdditionToAnInlinedComponentReachingATagTheParentDeclares"),
-     row("OverlayRefusalW3Orch.AdditionToAnInlinedComponentReachingATagTheParentDeclares")},
-    {"header addition whose tag a message body has",
-     row("OverlayRefusalW3Xml.HeaderAdditionWhoseTagAMessageBodyHas"),
-     na("contracts W-3 names it for XML; Orchestra's header is component 1024, extended as "
-        "any component")},
-    {"repeated base key: MsgType",
-     row("OverlayRefusalW3Xml.RepeatedBaseMsgTypeNamesBothOccurrences "
-         "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
-     row("OverlayRefusalW3Orch.RepeatedBaseMsgTypeNamesBothOccurrences "
-         "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
-    {"repeated base key: field name",
-     row("OverlayRefusalW3Xml.RepeatedBaseFieldNameNamesBothOccurrences "
-         "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
-     row("OverlayRefusalW3Orch.RepeatedBaseFieldNameNamesBothOccurrences "
-         "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
-    {"repeated base key: direct child",
-     row("OverlayRefusalW3Xml.RepeatedBaseDirectChildNamesBothOccurrences "
-         "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
-     row("OverlayRefusalW3Orch.RepeatedBaseDirectChildNamesBothOccurrences "
-         "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
-    {"repeated base key: enum value",
-     row("OverlayRefusalW3Xml.RepeatedBaseEnumValueNamesBothOccurrences "
-         "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
-     row("OverlayRefusalW3Orch.RepeatedBaseCodeValueNamesBothOccurrences "
-         "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
-    {"repeated base key: field number",
-     na("the loader refuses a repeated field number: OverlayRefusalW3Xml."
-        "LoaderRefusesARepeatedFieldNumber"),
-     na("Orchestra keys fields by id, not number")},
-    {"repeated base key: component name",
-     na("the loader refuses a repeated component name: OverlayRefusalW3Xml."
-        "LoaderRefusesARepeatedComponentName"),
-     na("Orchestra keys components by id, not name")},
-    {"repeated base key: field id",
-     na("QuickFIX XML has no field ids; its fields are keyed by number and name"),
-     na("the loader refuses a repeated field id: "
-        "OverlayRefusalW3Orch.LoaderRefusesARepeatedFieldId")},
-    {"repeated base key: component id",
-     na("QuickFIX XML has no component ids; its components are keyed by name"),
-     na("the loader refuses a repeated component id: "
-        "OverlayRefusalW3Orch.LoaderRefusesARepeatedComponentId")},
-    {"repeated base key: group id", na("QuickFIX XML has no group definitions"),
-     na("the loader refuses a repeated group id: "
-        "OverlayRefusalW3Orch.LoaderRefusesARepeatedGroupId")},
-    {"repeated base key: code-set name", na("QuickFIX XML has no code sets"),
-     na("the loader refuses a repeated code-set name: "
-        "OverlayRefusalW3Orch.LoaderRefusesARepeatedCodeSetName")},
-    {"Length+Data, <fields>, new Data after an unpaired base Length",
-     row("OverlayRefusalW3XmlLengthData.FieldsNewDataAfterAnUnpairedBaseLength"),
-     na("<fields> adjacency: Orchestra has none")},
-    {"Length+Data, <fields>, new Data after a base Length paired earlier",
-     na("a Length <fields> pairs is followed by its Data, so it is never last"),
-     na("<fields> adjacency: Orchestra has none")},
-    {"Length+Data, <fields>, new Data after a base Length paired later",
-     row("OverlayRefusalW3XmlLengthData.FieldsNewDataTakesALengthTheBasePairsLater"),
-     na("<fields> adjacency: Orchestra has none")},
-    {"Length+Data, <fields>, new Length before a base Data",
-     na("a redeclared base Data is a match, not an append"),
-     na("<fields> adjacency: Orchestra has none")},
-    {"Length+Data, strict container, new Data after an unpaired base Length",
-     row("OverlayRefusalW3XmlLengthData.ComponentNewDataAfterAnUnpairedBaseLength"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, strict container, new Data after a base Length paired earlier",
-     row("OverlayRefusalW3XmlLengthData.ComponentNewDataAfterALengthTheBasePairsEarlierLoads"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, strict container, new Data after a base Length paired later",
-     row("OverlayRefusalW3XmlLengthData.ComponentNewDataTakesALengthTheBasePairsLater"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, strict container, new Length before a base Data",
-     row("OverlayRefusalW3XmlLengthData.ComponentNewLengthBeforeABaseData"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with a group between, new Data after an unpaired "
-     "base Length",
-     row("OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewDataAfterAnUnpairedBaseLength"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with a group between, new Data after a base Length "
-     "paired earlier",
-     row("OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewDataAfterALengthPairedEarlierLoads"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with a group between, new Data after a base Length "
-     "paired later",
-     row("OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewDataTakesALengthPairedLater"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with a group between, new Length before a base Data",
-     row("OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewLengthBeforeABaseData"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with an overlay component between, new Data after "
-     "an unpaired base Length",
-     row("OverlayRefusalW3XmlLengthData.MessageComponentBetweenNewDataAfterAnUnpairedBaseLength"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with an overlay component between, new Data after a "
-     "base Length paired earlier",
-     row("OverlayRefusalW3XmlLengthData."
-         "MessageComponentBetweenNewDataAfterALengthPairedEarlierLoads"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with an overlay component between, new Data after a "
-     "base Length paired later",
-     row("OverlayRefusalW3XmlLengthData.MessageComponentBetweenNewDataTakesALengthPairedLater"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, non-strict container with an overlay component between, new Length "
-     "before a base Data",
-     row("OverlayRefusalW3XmlLengthData.MessageComponentBetweenNewLengthBeforeABaseData"),
-     na("container adjacency: Orchestra pairs by lengthId")},
-    {"Length+Data, lengthId, new Data naming an unpaired base Length",
-     na("QuickFIX XML has no lengthId"),
-     row("OverlayRefusalW3OrchLengthData.NewDataNamingAnUnpairedBaseLength")},
-    {"Length+Data, lengthId, new Data naming a paired base Length",
-     na("QuickFIX XML has no lengthId"),
-     row("OverlayRefusalW3OrchLengthData.NewDataNamingAPairedBaseLength")},
-    {"Length+Data, lengthId, new Length before a base Data", na("QuickFIX XML has no lengthId"),
-     na("a base Data's lengthId is fixed by research R-3's equal-lengthId rule")},
-    {"byte cap",
-     row("OverlayRefusalW3XmlCaps.ByteCapPlusOneStringForm OverlayRefusalW3XmlCaps."
-         "ByteCapPlusOnePathForm OverlayRefusalW3XmlCaps.ByteCapAtCapLoadsThroughBothForms"),
-     row("OverlayRefusalW3OrchCaps.ByteCapPlusOneStringForm "
-         "OverlayRefusalW3OrchCaps.ByteCapPlusOnePathForm "
-         "OverlayRefusalW3OrchCaps.ByteCapAtCapLoadsThroughBothForms")},
-    {"depth cap",
-     row("OverlayRefusalW3XmlCaps.DepthCapPlusOne OverlayRefusalW3XmlCaps.DepthAtCapLoads"),
-     row("OverlayRefusalW3OrchCaps.DepthCapPlusOne "
-         "OverlayRefusalW3OrchCaps.DepthAtCapLoads")},
-    {"new field cap",
-     row("OverlayRefusalW3XmlCaps.NewFieldCapPlusOne OverlayRefusalW3XmlCaps.NewFieldAtCapLoads"),
-     row("OverlayRefusalW3OrchCaps.NewFieldCapPlusOne "
-         "OverlayRefusalW3OrchCaps.NewFieldAtCapLoads")},
-    {"new component cap",
-     row("OverlayRefusalW3XmlCaps.NewComponentCapPlusOne "
-         "OverlayRefusalW3XmlCaps.NewComponentAtCapLoads"),
-     row("OverlayRefusalW3OrchCaps.NewComponentCapPlusOne "
-         "OverlayRefusalW3OrchCaps.NewComponentAtCapLoads")},
-    {"new message cap",
-     row("OverlayRefusalW3XmlCaps.NewMessageCapPlusOne "
-         "OverlayRefusalW3XmlCaps.NewMessageAtCapLoads"),
-     row("OverlayRefusalW3OrchCaps.NewMessageCapPlusOne "
-         "OverlayRefusalW3OrchCaps.NewMessageAtCapLoads")},
-    {"new Orchestra group cap", na("QuickFIX XML has no group definitions"),
-     row("OverlayRefusalW3OrchCaps.NewGroupCapPlusOne "
-         "OverlayRefusalW3OrchCaps.NewGroupAtCapLoads")},
-    {"new Orchestra code set cap", na("QuickFIX XML has no code sets"),
-     row("OverlayRefusalW3OrchCaps.NewCodeSetCapPlusOne "
-         "OverlayRefusalW3OrchCaps.NewCodeSetAtCapLoads")},
-    {"enum value cap",
-     row("OverlayRefusalW3XmlCaps.EnumValueCapPlusOne OverlayRefusalW3XmlCaps.EnumValueAtCapLoads"),
-     row("OverlayRefusalW3OrchCaps.CodeCapPlusOne "
-         "OverlayRefusalW3OrchCaps.CodeAtCapLoads")},
-    {"reference cap",
-     row("OverlayRefusalW3XmlCaps.ReferenceCapPlusOne OverlayRefusalW3XmlCaps.ReferenceAtCapLoads"),
-     row("OverlayRefusalW3OrchCaps.ReferenceCapPlusOne "
-         "OverlayRefusalW3OrchCaps.ReferenceAtCapLoads")},
-    {"reference cap, merged-in-place references",
-     row("OverlayRefusalW3XmlCaps.MergedInPlaceReferencesCountTowardsTheCap "
-         "OverlayRefusalW3XmlCaps.MergedInPlaceMixAtTheCapLoads"),
-     row("OverlayRefusalW3OrchCaps.MergedInPlaceReferencesCountTowardsTheCap "
-         "OverlayRefusalW3OrchCaps.MergedInPlaceMixAtTheCapLoads")},
-    {"DOCTYPE", row("OverlayRefusalW3XmlCaps.Doctype"), row("OverlayRefusalW3OrchCaps.Doctype")},
-    {"cycle closing through a base component",
-     row("OverlayRefusalW3XmlWalk.CycleClosingThroughABaseComponent"),
-     row("OverlayRefusalW3OrchWalk.CycleClosingThroughABaseComponent")},
-    {"unknown reference (pin)", row("OverlayRefusalW3XmlPins.UnknownReferenceIsTheLoadersError"),
-     row("OverlayRefusalW3OrchPins.UnknownReferenceIsTheLoadersError")},
-    {"unknown field type (pin)", row("OverlayRefusalW3XmlPins.UnknownFieldTypeIsTheLoadersError"),
-     row("OverlayRefusalW3OrchPins.UnknownFieldTypeIsTheLoadersError")},
-    {"group-delimiter collision the merge creates (pin)",
-     row("OverlayRefusalW3XmlPins.GroupDelimiterCollisionTheMergeCreates"),
-     row("OverlayRefusalW3OrchPins.GroupDelimiterCollisionTheMergeCreates")},
-    {"expansion bomb, doubling", row("OverlayRefusalW3XmlWalk.DoublingBombRefusedByTheBudget"),
-     row("OverlayRefusalW3OrchWalk.DoublingBombRefusedByTheBudget")},
-    {"expansion bomb, two empty chains",
-     row("OverlayRefusalW3XmlWalk.TwoEmptyChainsRefusedByTheBudget"),
-     row("OverlayRefusalW3OrchWalk.TwoEmptyChainsRefusedByTheBudget")},
-    {"header expansion", row("OverlayRefusalW3XmlWalk.HeaderExpansionLoadsAtThePrediction"),
-     na("Orchestra's header is component 1024, charged standalone")},
-    {"side-table fit",
-     row("OverlayRefusalW3XmlSideTable.EarlyComponentsPushALaterBaseStartPastTheTable "
-         "OverlayRefusalW3XmlSideTable.EarlyComponentsJustInsideTheTableLoad "
-         "OverlayRefusalW3XmlSideTable.ANewComponentWhoseCountPassesTheTable "
-         "OverlayRefusalW3XmlSideTable.ANewComponentJustInsideTheTableLoads "
-         "OverlayRefusalW3XmlSideTable.ALowTaggedGroupPushesBaseGroupsPastTheTable "
-         "OverlayRefusalW3XmlSideTable.ALowTaggedGroupJustInsideTheTableLoads"),
-     row("OverlayRefusalW3OrchSideTable.EarlyComponentsPushALaterBaseStartPastTheTable "
-         "OverlayRefusalW3OrchSideTable.EarlyComponentsJustInsideTheTableLoad "
-         "OverlayRefusalW3OrchSideTable.ANewComponentWhoseCountPassesTheTable "
-         "OverlayRefusalW3OrchSideTable.ANewComponentJustInsideTheTableLoads "
-         "OverlayRefusalW3OrchSideTable.ALowTaggedGroupPushesBaseGroupsPastTheTable "
-         "OverlayRefusalW3OrchSideTable.ALowTaggedGroupJustInsideTheTableLoads")},
-    {"guard order: cycle before redeclare",
-     row("OverlayRefusalW3XmlOrder.CycleIsReportedBeforeARedeclareConflict"),
-     row("OverlayRefusalW3OrchOrder.CycleIsReportedBeforeARedeclareConflict")},
-    {"guard order: version before the entry cap",
-     row("OverlayRefusalW3XmlOrder.VersionMismatchIsReportedBeforeTheMessageCap"),
-     row("OverlayRefusalW3OrchOrder.VersionMismatchIsReportedBeforeTheMessageCap")},
-    {"guard order: budget before the side-table fit",
-     row("OverlayRefusalW3XmlOrder.BudgetIsReportedBeforeTheSideTableFit"),
-     row("OverlayRefusalW3OrchOrder.BudgetIsReportedBeforeTheSideTableFit")},
-    {"budget recipe", row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases"),
-     row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases")},
-    {"longest chain", row("OverlayRefusalW3XmlBudget.LongestChainLoadsAtThePrediction"),
-     row("OverlayRefusalW3OrchBudget.LongestChainLoadsAtThePrediction")},
+    {.name = "identifying attribute changed",
+     .xml = row("OverlayRefusalW3Xml.IdentifyingAttributeChangedFieldType "
+                "OverlayRefusalW3Xml.IdentifyingAttributeChangedFieldName "
+                "OverlayRefusalW3Xml.IdentifyingAttributeChangedMessageName"),
+     .orchestra = row("OverlayRefusalW3Orch.IdentifyingAttributeChangedFieldType "
+                      "OverlayRefusalW3Orch.IdentifyingAttributeChangedFieldName "
+                      "OverlayRefusalW3Orch.IdentifyingAttributeChangedFieldLengthId "
+                      "OverlayRefusalW3Orch.IdentifyingAttributeChangedMessageId "
+                      "OverlayRefusalW3Orch.IdentifyingAttributeChangedMessageName "
+                      "OverlayRefusalW3Orch.IdentifyingAttributeChangedCodeSetType "
+                      "OverlayRefusalW3Orch.IdentifyingAttributeChangedComponentName "
+                      "OverlayRefusalW3Orch.IdentifyingAttributeChangedGroupName")},
+    {.name = "field name already used by another number",
+     .xml = row("OverlayRefusalW3Xml.FieldNameAlreadyUsedByAnotherNumber"),
+     .orchestra = row("OverlayRefusalW3Orch.FieldNameAlreadyUsedByAnotherNumber")},
+    {.name = "code set with a new id and an existing name (N-6)",
+     .xml = na("QuickFIX XML has no code sets"),
+     .orchestra = row("OverlayRefusalW3Orch.CodeSetWithANewIdAndAnExistingName")},
+    {.name = "required relaxed",
+     .xml = row("OverlayRefusalW3Xml.RequiredRelaxed"),
+     .orchestra = row("OverlayRefusalW3Orch.RequiredRelaxed")},
+    {.name = "redescribed enum value or code",
+     .xml = row("OverlayRefusalW3Xml.RedescribedEnumValue"),
+     .orchestra = row("OverlayRefusalW3Orch.RedescribedCode")},
+    {.name = "presence vocabulary (A-013)",
+     .xml = row("OverlayRefusalW3Xml.PresenceVocabularyLowercaseY "
+                "OverlayRefusalW3Xml.PresenceVocabularyFalse"),
+     .orchestra = row("OverlayRefusalW3Orch.PresenceVocabularyRequire")},
+    {.name = "duplicate within the overlay",
+     .xml = row("OverlayRefusalW3Xml.DuplicateWithinTheOverlay"),
+     .orchestra = row("OverlayRefusalW3Orch.DuplicateWithinTheOverlay")},
+    {.name = "two root containers of one name",
+     .xml = row("OverlayRefusalW3Xml.TwoRootContainersOfOneName"),
+     .orchestra = row("OverlayRefusalW3Orch.TwoRootContainersOfOneName")},
+    {.name = "version mismatch",
+     .xml = row("OverlayRefusalW3Xml.VersionMismatch"),
+     .orchestra = row("OverlayRefusalW3Orch.VersionMismatch")},
+    {.name = "overlay of the other format",
+     .xml = row("OverlayRefusalW3Xml.OverlayOfTheOtherFormat"),
+     .orchestra = row("OverlayRefusalW3Orch.OverlayOfTheOtherFormat")},
+    {.name = "root child outside data-model A.1's list",
+     .xml = row("OverlayRefusalW3Xml.RootChildOutsideTheList"),
+     .orchestra = row("OverlayRefusalW3Orch.RootChildOutsideTheList")},
+    {.name = "group numInGroup id differs, or a new group with none or two (N-9)",
+     .xml = na("a QuickFIX-XML group's NumInGroup is its name"),
+     .orchestra = row("OverlayRefusalW3Orch.MatchedGroupWhoseNumInGroupDiffers "
+                      "OverlayRefusalW3Orch.NewGroupWithoutANumInGroup "
+                      "OverlayRefusalW3Orch.NewGroupWithTwoNumInGroups")},
+    {.name = "child redeclared that the parent reaches through a component",
+     .xml = row("OverlayRefusalW3Xml.ChildRedeclaredThatTheParentReachesThroughAComponent"),
+     .orchestra = row("OverlayRefusalW3Orch.ChildRedeclaredThatTheParentReachesThroughAComponent")},
+    {.name = "child redeclared through a two-level component chain (N-2)",
+     .xml = row("OverlayRefusalW3Xml.ChildRedeclaredThroughATwoLevelComponentChain"),
+     .orchestra = row("OverlayRefusalW3Orch.ChildRedeclaredThroughATwoLevelComponentChain")},
+    {.name = "new component reference reaching a declared tag (N-7)",
+     .xml = row("OverlayRefusalW3Xml.NewComponentReferenceReachingADeclaredTag"),
+     .orchestra = row("OverlayRefusalW3Orch.NewComponentReferenceReachingADeclaredTag")},
+    {.name = "addition to an inlined component reaching a tag the parent declares (upward closure)",
+     .xml = row("OverlayRefusalW3Xml.AdditionToAnInlinedComponentReachingATagTheParentDeclares"),
+     .orchestra =
+         row("OverlayRefusalW3Orch.AdditionToAnInlinedComponentReachingATagTheParentDeclares")},
+    {.name = "header addition whose tag a message body has",
+     .xml = row("OverlayRefusalW3Xml.HeaderAdditionWhoseTagAMessageBodyHas"),
+     .orchestra =
+         na("contracts W-3 names it for XML; Orchestra's header is component 1024, extended as "
+            "any component")},
+    {.name = "repeated base key: MsgType",
+     .xml = row("OverlayRefusalW3Xml.RepeatedBaseMsgTypeNamesBothOccurrences "
+                "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
+     .orchestra = row("OverlayRefusalW3Orch.RepeatedBaseMsgTypeNamesBothOccurrences "
+                      "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
+    {.name = "repeated base key: field name",
+     .xml = row("OverlayRefusalW3Xml.RepeatedBaseFieldNameNamesBothOccurrences "
+                "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
+     .orchestra = row("OverlayRefusalW3Orch.RepeatedBaseFieldNameNamesBothOccurrences "
+                      "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
+    {.name = "repeated base key: direct child",
+     .xml = row("OverlayRefusalW3Xml.RepeatedBaseDirectChildNamesBothOccurrences "
+                "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
+     .orchestra = row("OverlayRefusalW3Orch.RepeatedBaseDirectChildNamesBothOccurrences "
+                      "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
+    {.name = "repeated base key: enum value",
+     .xml = row("OverlayRefusalW3Xml.RepeatedBaseEnumValueNamesBothOccurrences "
+                "OverlayRefusalW3Xml.RepeatedKeyBasesLoadWithAnEmptyOverlay"),
+     .orchestra = row("OverlayRefusalW3Orch.RepeatedBaseCodeValueNamesBothOccurrences "
+                      "OverlayRefusalW3Orch.RepeatedKeyBasesLoadWithAnEmptyOverlay")},
+    {.name = "repeated base key: field number",
+     .xml = na("the loader refuses a repeated field number: OverlayRefusalW3Xml."
+               "LoaderRefusesARepeatedFieldNumber"),
+     .orchestra = na("Orchestra keys fields by id, not number")},
+    {.name = "repeated base key: component name",
+     .xml = na("the loader refuses a repeated component name: OverlayRefusalW3Xml."
+               "LoaderRefusesARepeatedComponentName"),
+     .orchestra = na("Orchestra keys components by id, not name")},
+    {.name = "repeated base key: field id",
+     .xml = na("QuickFIX XML has no field ids; its fields are keyed by number and name"),
+     .orchestra = na("the loader refuses a repeated field id: "
+                     "OverlayRefusalW3Orch.LoaderRefusesARepeatedFieldId")},
+    {.name = "repeated base key: component id",
+     .xml = na("QuickFIX XML has no component ids; its components are keyed by name"),
+     .orchestra = na("the loader refuses a repeated component id: "
+                     "OverlayRefusalW3Orch.LoaderRefusesARepeatedComponentId")},
+    {.name = "repeated base key: group id",
+     .xml = na("QuickFIX XML has no group definitions"),
+     .orchestra = na("the loader refuses a repeated group id: "
+                     "OverlayRefusalW3Orch.LoaderRefusesARepeatedGroupId")},
+    {.name = "repeated base key: code-set name",
+     .xml = na("QuickFIX XML has no code sets"),
+     .orchestra = na("the loader refuses a repeated code-set name: "
+                     "OverlayRefusalW3Orch.LoaderRefusesARepeatedCodeSetName")},
+    {.name = "Length+Data, <fields>, new Data after an unpaired base Length",
+     .xml = row("OverlayRefusalW3XmlLengthData.FieldsNewDataAfterAnUnpairedBaseLength"),
+     .orchestra = na("<fields> adjacency: Orchestra has none")},
+    {.name = "Length+Data, <fields>, new Data after a base Length paired earlier",
+     .xml = na("a Length <fields> pairs is followed by its Data, so it is never last"),
+     .orchestra = na("<fields> adjacency: Orchestra has none")},
+    {.name = "Length+Data, <fields>, new Data after a base Length paired later",
+     .xml = row("OverlayRefusalW3XmlLengthData.FieldsNewDataTakesALengthTheBasePairsLater"),
+     .orchestra = na("<fields> adjacency: Orchestra has none")},
+    {.name = "Length+Data, <fields>, new Length before a base Data",
+     .xml = na("a redeclared base Data is a match, not an append"),
+     .orchestra = na("<fields> adjacency: Orchestra has none")},
+    {.name = "Length+Data, strict container, new Data after an unpaired base Length",
+     .xml = row("OverlayRefusalW3XmlLengthData.ComponentNewDataAfterAnUnpairedBaseLength"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, strict container, new Data after a base Length paired earlier",
+     .xml =
+         row("OverlayRefusalW3XmlLengthData.ComponentNewDataAfterALengthTheBasePairsEarlierLoads"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, strict container, new Data after a base Length paired later",
+     .xml = row("OverlayRefusalW3XmlLengthData.ComponentNewDataTakesALengthTheBasePairsLater"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, strict container, new Length before a base Data",
+     .xml = row("OverlayRefusalW3XmlLengthData.ComponentNewLengthBeforeABaseData"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, non-strict container with a group between, new Data after an unpaired "
+             "base Length",
+     .xml =
+         row("OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewDataAfterAnUnpairedBaseLength"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, non-strict container with a group between, new Data after a base Length "
+             "paired earlier",
+     .xml = row(
+         "OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewDataAfterALengthPairedEarlierLoads"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, non-strict container with a group between, new Data after a base Length "
+             "paired later",
+     .xml = row("OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewDataTakesALengthPairedLater"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name =
+         "Length+Data, non-strict container with a group between, new Length before a base Data",
+     .xml = row("OverlayRefusalW3XmlLengthData.MessageGroupBetweenNewLengthBeforeABaseData"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, non-strict container with an overlay component between, new Data after "
+             "an unpaired base Length",
+     .xml = row(
+         "OverlayRefusalW3XmlLengthData.MessageComponentBetweenNewDataAfterAnUnpairedBaseLength"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name =
+         "Length+Data, non-strict container with an overlay component between, new Data after a "
+         "base Length paired earlier",
+     .xml = row("OverlayRefusalW3XmlLengthData."
+                "MessageComponentBetweenNewDataAfterALengthPairedEarlierLoads"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name =
+         "Length+Data, non-strict container with an overlay component between, new Data after a "
+         "base Length paired later",
+     .xml =
+         row("OverlayRefusalW3XmlLengthData.MessageComponentBetweenNewDataTakesALengthPairedLater"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, non-strict container with an overlay component between, new Length "
+             "before a base Data",
+     .xml = row("OverlayRefusalW3XmlLengthData.MessageComponentBetweenNewLengthBeforeABaseData"),
+     .orchestra = na("container adjacency: Orchestra pairs by lengthId")},
+    {.name = "Length+Data, lengthId, new Data naming an unpaired base Length",
+     .xml = na("QuickFIX XML has no lengthId"),
+     .orchestra = row("OverlayRefusalW3OrchLengthData.NewDataNamingAnUnpairedBaseLength")},
+    {.name = "Length+Data, lengthId, new Data naming a paired base Length",
+     .xml = na("QuickFIX XML has no lengthId"),
+     .orchestra = row("OverlayRefusalW3OrchLengthData.NewDataNamingAPairedBaseLength")},
+    {.name = "Length+Data, lengthId, new Length before a base Data",
+     .xml = na("QuickFIX XML has no lengthId"),
+     .orchestra = na("a base Data's lengthId is fixed by research R-3's equal-lengthId rule")},
+    {.name = "byte cap",
+     .xml = row("OverlayRefusalW3XmlCaps.ByteCapPlusOneStringForm OverlayRefusalW3XmlCaps."
+                "ByteCapPlusOnePathForm OverlayRefusalW3XmlCaps.ByteCapAtCapLoadsThroughBothForms"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.ByteCapPlusOneStringForm "
+                      "OverlayRefusalW3OrchCaps.ByteCapPlusOnePathForm "
+                      "OverlayRefusalW3OrchCaps.ByteCapAtCapLoadsThroughBothForms")},
+    {.name = "depth cap",
+     .xml = row("OverlayRefusalW3XmlCaps.DepthCapPlusOne OverlayRefusalW3XmlCaps.DepthAtCapLoads"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.DepthCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.DepthAtCapLoads")},
+    {.name = "new field cap",
+     .xml = row(
+         "OverlayRefusalW3XmlCaps.NewFieldCapPlusOne OverlayRefusalW3XmlCaps.NewFieldAtCapLoads"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.NewFieldCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.NewFieldAtCapLoads")},
+    {.name = "new component cap",
+     .xml = row("OverlayRefusalW3XmlCaps.NewComponentCapPlusOne "
+                "OverlayRefusalW3XmlCaps.NewComponentAtCapLoads"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.NewComponentCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.NewComponentAtCapLoads")},
+    {.name = "new message cap",
+     .xml = row("OverlayRefusalW3XmlCaps.NewMessageCapPlusOne "
+                "OverlayRefusalW3XmlCaps.NewMessageAtCapLoads"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.NewMessageCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.NewMessageAtCapLoads")},
+    {.name = "new Orchestra group cap",
+     .xml = na("QuickFIX XML has no group definitions"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.NewGroupCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.NewGroupAtCapLoads")},
+    {.name = "new Orchestra code set cap",
+     .xml = na("QuickFIX XML has no code sets"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.NewCodeSetCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.NewCodeSetAtCapLoads")},
+    {.name = "enum value cap",
+     .xml = row(
+         "OverlayRefusalW3XmlCaps.EnumValueCapPlusOne OverlayRefusalW3XmlCaps.EnumValueAtCapLoads"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.CodeCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.CodeAtCapLoads")},
+    {.name = "reference cap",
+     .xml = row(
+         "OverlayRefusalW3XmlCaps.ReferenceCapPlusOne OverlayRefusalW3XmlCaps.ReferenceAtCapLoads"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.ReferenceCapPlusOne "
+                      "OverlayRefusalW3OrchCaps.ReferenceAtCapLoads")},
+    {.name = "reference cap, merged-in-place references",
+     .xml = row("OverlayRefusalW3XmlCaps.MergedInPlaceReferencesCountTowardsTheCap "
+                "OverlayRefusalW3XmlCaps.MergedInPlaceMixAtTheCapLoads"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.MergedInPlaceReferencesCountTowardsTheCap "
+                      "OverlayRefusalW3OrchCaps.MergedInPlaceMixAtTheCapLoads")},
+    {.name = "DOCTYPE",
+     .xml = row("OverlayRefusalW3XmlCaps.Doctype"),
+     .orchestra = row("OverlayRefusalW3OrchCaps.Doctype")},
+    {.name = "cycle closing through a base component",
+     .xml = row("OverlayRefusalW3XmlWalk.CycleClosingThroughABaseComponent"),
+     .orchestra = row("OverlayRefusalW3OrchWalk.CycleClosingThroughABaseComponent")},
+    {.name = "unknown reference (pin)",
+     .xml = row("OverlayRefusalW3XmlPins.UnknownReferenceIsTheLoadersError"),
+     .orchestra = row("OverlayRefusalW3OrchPins.UnknownReferenceIsTheLoadersError")},
+    {.name = "unknown field type (pin)",
+     .xml = row("OverlayRefusalW3XmlPins.UnknownFieldTypeIsTheLoadersError"),
+     .orchestra = row("OverlayRefusalW3OrchPins.UnknownFieldTypeIsTheLoadersError")},
+    {.name = "group-delimiter collision the merge creates (pin)",
+     .xml = row("OverlayRefusalW3XmlPins.GroupDelimiterCollisionTheMergeCreates"),
+     .orchestra = row("OverlayRefusalW3OrchPins.GroupDelimiterCollisionTheMergeCreates")},
+    {.name = "expansion bomb, doubling",
+     .xml = row("OverlayRefusalW3XmlWalk.DoublingBombRefusedByTheBudget"),
+     .orchestra = row("OverlayRefusalW3OrchWalk.DoublingBombRefusedByTheBudget")},
+    {.name = "expansion bomb, two empty chains",
+     .xml = row("OverlayRefusalW3XmlWalk.TwoEmptyChainsRefusedByTheBudget"),
+     .orchestra = row("OverlayRefusalW3OrchWalk.TwoEmptyChainsRefusedByTheBudget")},
+    {.name = "header expansion",
+     .xml = row("OverlayRefusalW3XmlWalk.HeaderExpansionLoadsAtThePrediction"),
+     .orchestra = na("Orchestra's header is component 1024, charged standalone")},
+    {.name = "side-table fit",
+     .xml = row("OverlayRefusalW3XmlSideTable.EarlyComponentsPushALaterBaseStartPastTheTable "
+                "OverlayRefusalW3XmlSideTable.EarlyComponentsJustInsideTheTableLoad "
+                "OverlayRefusalW3XmlSideTable.ANewComponentWhoseCountPassesTheTable "
+                "OverlayRefusalW3XmlSideTable.ANewComponentJustInsideTheTableLoads "
+                "OverlayRefusalW3XmlSideTable.ALowTaggedGroupPushesBaseGroupsPastTheTable "
+                "OverlayRefusalW3XmlSideTable.ALowTaggedGroupJustInsideTheTableLoads"),
+     .orchestra =
+         row("OverlayRefusalW3OrchSideTable.EarlyComponentsPushALaterBaseStartPastTheTable "
+             "OverlayRefusalW3OrchSideTable.EarlyComponentsJustInsideTheTableLoad "
+             "OverlayRefusalW3OrchSideTable.ANewComponentWhoseCountPassesTheTable "
+             "OverlayRefusalW3OrchSideTable.ANewComponentJustInsideTheTableLoads "
+             "OverlayRefusalW3OrchSideTable.ALowTaggedGroupPushesBaseGroupsPastTheTable "
+             "OverlayRefusalW3OrchSideTable.ALowTaggedGroupJustInsideTheTableLoads")},
+    {.name = "guard order: cycle before redeclare",
+     .xml = row("OverlayRefusalW3XmlOrder.CycleIsReportedBeforeARedeclareConflict"),
+     .orchestra = row("OverlayRefusalW3OrchOrder.CycleIsReportedBeforeARedeclareConflict")},
+    {.name = "guard order: version before the entry cap",
+     .xml = row("OverlayRefusalW3XmlOrder.VersionMismatchIsReportedBeforeTheMessageCap"),
+     .orchestra = row("OverlayRefusalW3OrchOrder.VersionMismatchIsReportedBeforeTheMessageCap")},
+    {.name = "guard order: budget before the side-table fit",
+     .xml = row("OverlayRefusalW3XmlOrder.BudgetIsReportedBeforeTheSideTableFit"),
+     .orchestra = row("OverlayRefusalW3OrchOrder.BudgetIsReportedBeforeTheSideTableFit")},
+    {.name = "budget recipe",
+     .xml = row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases"),
+     .orchestra = row("OverlayRefusalW3Budget.ConstantEqualsTheRecipeOverTheVendoredBases")},
+    {.name = "longest chain",
+     .xml = row("OverlayRefusalW3XmlBudget.LongestChainLoadsAtThePrediction"),
+     .orchestra = row("OverlayRefusalW3OrchBudget.LongestChainLoadsAtThePrediction")},
 };
 
 TEST(CellTable, HoldsEveryKindForEveryFormat) {

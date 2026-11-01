@@ -212,6 +212,7 @@ constexpr std::string_view kOrchBase =
 )B";
 
 [[noreturn]] void fail(char const* why, ov::xml_overlay_probe const& p) {
+    // NOLINTNEXTLINE(modernize-use-std-print): libstdc++ 13 has no <print>
     std::fprintf(stderr,
                  "fuzz_dict_overlay: %s (origin %d, counter %llu, predicted %llu, loaded %d)\n",
                  why, static_cast<int>(p.origin), static_cast<unsigned long long>(p.counter),
@@ -276,6 +277,8 @@ void accept_orchestra_refusal(std::exception_ptr const& e) {
 
 // The arena's backing store. Static rather than on the stack, so the stack is
 // left to the loader's recursion; each input gets a fresh resource over it.
+// Mutable by design: the arena writes into it.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 alignas(std::max_align_t) std::byte g_scratch[std::size_t{1} << 20U];
 
 }  // namespace

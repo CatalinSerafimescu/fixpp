@@ -12,6 +12,7 @@
 // last line. Lines compare with one trailing CR stripped; the output is written
 // with LF.
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -53,6 +54,7 @@ namespace overlay_test {
     std::vector<std::size_t> hits;
     for (std::size_t i = 0; i < lines.size(); ++i) {
         if (lines[i] == anchor) {
+            // cppcheck-suppress useStlAlgorithm  // collects indices, not elements
             hits.push_back(i);
         }
     }
@@ -182,11 +184,10 @@ inline parsed_patch parse_patch(std::string_view text) {
             return out;
         }
     }
-    for (auto const& hk : out.hunks) {
-        if (hk.context.empty()) {
-            out.error = "hunk '" + hk.label + "' has no context";
-            return out;
-        }
+    if (auto const it =
+            std::ranges::find_if(out.hunks, [](hunk const& hk) { return hk.context.empty(); });
+        it != out.hunks.end()) {
+        out.error = "hunk '" + it->label + "' has no context";
     }
     return out;
 }

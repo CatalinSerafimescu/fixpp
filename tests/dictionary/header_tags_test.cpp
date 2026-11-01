@@ -77,11 +77,13 @@ tag_set quickfix_header_walk(std::string const& xml, std::vector<std::string>& u
     auto const root = doc.child("fix");
     std::map<std::string, std::uint16_t> numbers;
     for (auto const& f : root.child("fields").children("field")) {
+        // cppcheck-suppress useStlAlgorithm  // the key and the value are each read from the node
         numbers.emplace(f.attribute("name").as_string(),
                         static_cast<std::uint16_t>(f.attribute("number").as_uint()));
     }
     std::map<std::string, pugi::xml_node> components;
     for (auto const& c : root.child("components").children("component")) {
+        // cppcheck-suppress useStlAlgorithm  // the key and the value are each read from the node
         components.emplace(c.attribute("name").as_string(), c);
     }
     tag_set out;
@@ -126,14 +128,17 @@ tag_set orchestra_header_walk(std::string const& xml, std::vector<std::string>& 
     auto const root = doc.child("fixr:repository");
     std::set<unsigned> field_ids;
     for (auto const& f : root.child("fixr:fields").children("fixr:field")) {
+        // cppcheck-suppress useStlAlgorithm  // one attribute read per node of a pugixml range
         field_ids.insert(f.attribute("id").as_uint());
     }
     std::map<unsigned, pugi::xml_node> components;
     for (auto const& c : root.child("fixr:components").children("fixr:component")) {
+        // cppcheck-suppress useStlAlgorithm  // the key and the value are each read from the node
         components.emplace(c.attribute("id").as_uint(), c);
     }
     std::map<unsigned, pugi::xml_node> groups;
     for (auto const& g : root.child("fixr:groups").children("fixr:group")) {
+        // cppcheck-suppress useStlAlgorithm  // the key and the value are each read from the node
         groups.emplace(g.attribute("id").as_uint(), g);
     }
     tag_set out;
@@ -146,7 +151,7 @@ tag_set orchestra_header_walk(std::string const& xml, std::vector<std::string>& 
     };
     auto const header = components.find(1024U);
     if (header == components.end()) {
-        unresolved.push_back("component 1024");
+        unresolved.emplace_back("component 1024");
         return out;
     }
     std::set<unsigned> walked_components{1024U};
