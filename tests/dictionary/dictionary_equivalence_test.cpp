@@ -37,7 +37,8 @@ using fixpp::dict::table_view_test_access;
 // The base every seed edits. Its pieces each serve a seed: message `E` reuses
 // NoAllocs(78) with a component inside (a context record the first-seen bare store
 // does not describe); `Unused` is reachable from no message (component and group
-// side tables only); 5010/5011 are a non-standard Length+Data pair.
+// side tables only); CustLen(5010) and CustData(5011) form a non-standard
+// Length+Data pair.
 constexpr std::string_view kBase = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
 <header>
 <field name='BeginString' required='Y'/>
@@ -325,7 +326,7 @@ std::vector<seed> const& seeds() {
          true,
          {ids::kMessageFields.type, ids::kMessageFields.length_pair_data_tag, ids::kFieldRef,
           ids::kField, ids::kLengthPairDataTag, ids::kTypes, ids::kPairForward, ids::kPairReverse}},
-        // The 5010/5011 pair reaches a message: both directions and the flag.
+        // The CustLen-CustData pair reaches a message: both directions and the flag.
         {"nonstandard_pair",
          {},
          {{"msgtype='E' msgcat='app'>\n<field name='ClOrdID' required='Y'/>",
@@ -336,7 +337,8 @@ std::vector<seed> const& seeds() {
          {ids::kMessageFields.tag, ids::kFieldRef, ids::kField, ids::kFieldValidFor, ids::kValid,
           ids::kTypes, ids::kLengthPairDataTag, ids::kPairForward, ids::kPairReverse,
           ids::kNonstandardPair}},
-        // Key source: a component no message uses, last, so no other offset moves.
+        // Key source: a component no message uses, declared after the others so it
+        // moves none of their name pool offsets.
         {"unused_extra_component",
          {},
          {{"</component>\n</components>",
@@ -721,7 +723,7 @@ TEST(ComparatorW0Invariant, PairInverse) {
     tva_t::pair_store const forward{{95, 96}, {5010, 5011}};
     tva_t::pair_store const reverse{{96, 95}, {5011, 5010}};
     EXPECT_TRUE(eq::check_pair_inverse(forward, reverse).empty()) << "control";
-    tva_t::pair_store const broken{{96, 95}};  // 5011 -> 5010 missing
+    tva_t::pair_store const broken{{96, 95}};  // lacks the CustLen pair's reverse
     auto const v = eq::check_pair_inverse(forward, broken);
     ASSERT_EQ(v.size(), 1U);
     EXPECT_TRUE(any_names(v, "forward 5010 -> 5011")) << v.front();
