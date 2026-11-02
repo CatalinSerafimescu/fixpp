@@ -859,10 +859,11 @@ std::uint32_t OrchestraLoaderState::intern_name_in_pool(detail::dict_metadata_ha
 // It never calls `expand_field_list`, so the step counter (`steps_`) does not see it.
 //
 // An id the loader's maps cannot resolve, or cannot parse, adds nothing and throws
-// nothing. A message that references component 1024 expands it first and throws on
-// such an id before this runs; when no message references it, no expansion reads the
-// header, and skipping keeps that document loadable, so `load` accepts the same
-// documents.
+// nothing. `finalize`'s "Emit components" pass expands every component, 1024
+// included and whatever references it, before this runs, and throws on such an id;
+// so in a document that reaches this walk, every fieldRef, componentRef and groupRef
+// it reads resolves, and the skips keep the walk total. A child with no id (a
+// fixr:annotation, text) is skipped.
 void OrchestraLoaderState::collect_header_tags(detail::dict_metadata_handle& h) const {
     auto const header = component_index_by_xml_id_.find(1024);
     if (header == component_index_by_xml_id_.end()) {
