@@ -589,6 +589,23 @@ TEST(OverlayEquivalenceW1Qf, NewMessageOnABaseWithoutHeaderOrTrailer) {
                        "no header or trailer");
 }
 
+// A base without <fields>; the overlay supplies it, a container the base lacks.
+TEST(OverlayEquivalenceW1Qf, FieldsSuppliedToABaseWithoutFields) {
+    std::string const base =
+        without_line(without_line(without_line(kQfBareBase, " <fields>"),
+                                  "  <field number='112' name='TestReqID' type='STRING' />"),
+                     " </fields>");
+    std::string const overlay = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <fields>
+  <field number='112' name='TestReqID' type='STRING' />
+ </fields>
+</fix>
+)";
+    expect_overlay_row(fmt::quickfix_xml, base, overlay, kQfBareBase,
+                       "   <field name='TestReqID' required='N' />", {ids::kMessageFields.tag},
+                       "created <fields>");
+}
+
 // A base whose <messages> is empty and whose header holds a group. The overlay adds
 // a message, so the merged walk visits the header and its group, and appends a
 // member to that group, which the base walk never visits.
@@ -700,6 +717,30 @@ TEST(OverlayEquivalenceW1Orch, CreatedComponentsContainer) {
     expect_overlay_row(fmt::orchestra, base, overlay, edited,
                        R"(        <fixr:componentRef id="2003" />)", {ids::kMessageFields.tag},
                        "created fixr:components");
+}
+
+// A base without fixr:fields; the overlay supplies it, a container the base lacks.
+TEST(OverlayEquivalenceW1Orch, FieldsSuppliedToABaseWithoutFields) {
+    std::string const edited = orch_small_base();
+    std::string const base = without_line(
+        without_line(
+            without_line(
+                without_line(without_line(edited, "  <fixr:fields>"),
+                             R"(    <fixr:field id="8" name="BeginString" type="String" />)"),
+                R"(    <fixr:field id="11" name="ClOrdID" type="String" />)"),
+            R"(    <fixr:field id="112" name="TestReqID" type="String" />)"),
+        "  </fixr:fields>");
+    std::string const overlay = std::string{kOrchOpen} + R"(
+  <fixr:fields>
+    <fixr:field id="8" name="BeginString" type="String" />
+    <fixr:field id="11" name="ClOrdID" type="String" />
+    <fixr:field id="112" name="TestReqID" type="String" />
+  </fixr:fields>
+</fixr:repository>
+)";
+    expect_overlay_row(fmt::orchestra, base, overlay, edited,
+                       R"(        <fixr:fieldRef id="11" presence="required" />)",
+                       {ids::kMessageFields.tag}, "created fixr:fields");
 }
 
 // The overlay creates fixr:groups, with a group a message refers to.

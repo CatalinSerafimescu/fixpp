@@ -2217,6 +2217,15 @@ TEST(OverlayRefusalW3OrchWalk, CycleThroughAGroup) {
 
 // ── loader pins at the merge's other sites (Orchestra) ───────────────────────
 
+// A base without fixr:fields and an overlay that does not supply one: the loader's
+// own refusal.
+TEST(OverlayRefusalW3OrchPins, BaseWithoutFieldsIsTheLoadersError) {
+    std::string const base =
+        std::string{kOrchOpen} + " <fixr:messages>\n </fixr:messages>\n" + "</fixr:repository>\n";
+    expect_refused_no_origin<orchestra_parse_error>(
+        oprobe(base, orch_overlay({})), {"missing <fixr:fields> block"}, "no fixr:fields");
+}
+
 // An unparsable id gives the definition no match key, so it is appended as new; the
 // loader then refuses the spliced document.
 TEST(OverlayRefusalW3OrchPins, UnparsableDefinitionIdIsTheLoadersError) {

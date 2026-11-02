@@ -1405,9 +1405,13 @@ void parse_base_file(pugi::xml_document& doc, std::filesystem::path const& path)
     OrchestraLoaderState{mr}.check_root_and_version(base);
     ov::orchestra_overlay_merge merge{base, overlay};
     std::uint64_t const arm = merge.guard(trace);  // steps 3 to 7
-    auto const base_pairs = OrchestraLoaderState{mr}.pair_relation_of(
-        base, ov::collision_mode::refuse);  // step 8a, before the splice
-    merge.splice();                         // step 8
+    // Step 8a, before the splice. A base without fixr:fields declares no field, so its
+    // relation is empty: the overlay may supply the container (research R-3).
+    auto const base_pairs =
+        base.first_child().child("fixr:fields")
+            ? OrchestraLoaderState{mr}.pair_relation_of(base, ov::collision_mode::refuse)
+            : ov::length_pair_relation{};
+    merge.splice();  // step 8
     ov::check_pair_relation(base_pairs, OrchestraLoaderState{mr}.pair_relation_of(
                                             base, ov::collision_mode::record));  // step 8a
     try {
