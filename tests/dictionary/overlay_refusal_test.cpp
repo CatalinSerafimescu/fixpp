@@ -774,7 +774,7 @@ TEST(OverlayRefusalW3Xml, DuplicateValueUnderAMatchedField) {
     expect_refused_no_origin<overlay_conflict_error>(
         p,
         {"duplicate within the overlay", "<value enum=\"Z\">",
-         "<field number=\"54\" name=\"Side\">"},
+         R"(<field number="54" name="Side">)"},
         "duplicate value");
 }
 
@@ -2112,7 +2112,7 @@ TEST(OverlayRefusalW3Orch, DuplicateReferenceUnderAMatchedComponent) {
     expect_refused_no_origin<overlay_conflict_error>(
         p,
         {"duplicate within the overlay", "<fixr:fieldRef id=\"48\">",
-         "<fixr:component id=\"1003\" name=\"Instrument\">"},
+         R"(<fixr:component id="1003" name="Instrument">)"},
         "duplicate ref, component");
 }
 
@@ -2162,7 +2162,7 @@ TEST(OverlayRefusalW3Orch, MatchedGroupWithoutANumInGroup) {
                                                      oref("fieldRef", 1) + "  </fixr:group>\n")));
     expect_refused_no_origin<overlay_conflict_error>(
         p,
-        {"group numInGroup differs", "<fixr:group id=\"2010\" name=\"Allocs\">",
+        {"group numInGroup differs", R"(<fixr:group id="2010" name="Allocs">)",
          "carries no <fixr:numInGroup>", "id=\"78\""},
         "numInGroup omitted");
 }
@@ -2175,7 +2175,7 @@ TEST(OverlayRefusalW3Orch, RequiredRelaxedUnderAComponent) {
     expect_refused_no_origin<overlay_conflict_error>(
         p,
         {"required relaxed", "<fixr:fieldRef id=\"55\">",
-         "under <fixr:component id=\"1003\" name=\"Instrument\">"},
+         R"(under <fixr:component id="1003" name="Instrument">)"},
         "required relaxed, component");
 }
 
@@ -2186,7 +2186,7 @@ TEST(OverlayRefusalW3Orch, TagTwiceAtAComponentLevel) {
                orch_overlay(ocomps(ocomp(2050, "Lonely", oref("fieldRef", 55)))));
     expect_refused_no_origin<overlay_conflict_error>(
         p,
-        {"tag occurs twice at one level", "tag 55", "<fixr:component id=\"2050\" name=\"Lonely\">"},
+        {"tag occurs twice at one level", "tag 55", R"(<fixr:component id="2050" name="Lonely">)"},
         "component level");
 }
 
@@ -2197,7 +2197,7 @@ TEST(OverlayRefusalW3Orch, TagTwiceAtAGroupLevel) {
                orch_overlay(ocomps(ocomp(2060, "VenueAllocComp", oref("fieldRef", 79))) +
                             ogroups(ogroup(2010, "Allocs", 78, oref("componentRef", 2060)))));
     expect_refused_no_origin<overlay_conflict_error>(
-        p, {"tag occurs twice at one level", "tag 79", "<fixr:group id=\"2010\" name=\"Allocs\">"},
+        p, {"tag occurs twice at one level", "tag 79", R"(<fixr:group id="2010" name="Allocs">)"},
         "group level");
 }
 
@@ -2879,7 +2879,7 @@ TEST(OverlayFilesW3, ADirectoryAsTheOverlayIsTheFormatsParseError) {
     ot::temp_file const ob{orch_base_doc()};
     std::filesystem::path const dir = ot::dict_dir();
     ASSERT_TRUE(std::filesystem::is_directory(dir)) << dir;
-#if defined(__GLIBCXX__)
+#ifdef __GLIBCXX__
     std::string const want = "cannot read overlay " + dir.string();
 #else
     std::string const want = "_parse_error: ";
