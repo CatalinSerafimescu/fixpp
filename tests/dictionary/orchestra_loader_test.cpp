@@ -1213,3 +1213,19 @@ TEST(OrchestraFailClosed, ZeroStructuralXmlIdsAreStillAccepted) {
         EXPECT_TRUE(saw_group_count) << "<fixr:group id='0'> must still expand";
     });
 }
+
+// The range guards of the shared id parse (`try_parse_uint16`): a negative id and an
+// id above 65535 on a structural definition are refused like a non-numeric one.
+TEST(OrchestraFailClosed, StructuralIdOutsideTheUint16RangeThrows) {
+    for (std::string_view const id : {"-1", "65536"}) {
+        std::string const xml =
+            std::string{R"xml(<fixr:repository version="FIX.Latest_EP303"><fixr:fields>)xml"} +
+            R"xml(<fixr:field id="1" name="Account" type="String"/></fixr:fields>)xml" +
+            R"xml(<fixr:components><fixr:component id=")xml" + std::string{id} +
+            R"xml(" name="Bad"><fixr:fieldRef id="1"/></fixr:component></fixr:components>)xml" +
+            R"xml(<fixr:messages/></fixr:repository>)xml";
+        auto const msg = orchestra_load_error_message(xml);
+        EXPECT_NE(msg.find("missing/invalid <fixr:component> id attribute"), std::string::npos)
+            << "id=" << id << ": refused for the wrong reason, or loaded. Message: " << msg;
+    }
+}
