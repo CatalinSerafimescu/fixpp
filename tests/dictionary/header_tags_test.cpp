@@ -297,6 +297,82 @@ TEST(HeaderTagsW7Dictionary, SeededFix44CopyDeclares5020) {
     EXPECT_TRUE(tv.is_header_tag(kCustomTag));
 }
 
+// ── the store's walk on small documents ──────────────────────────────────────
+
+// Component 1024 refers to component 3001 twice and to group 3100 twice, and holds a
+// fixr:annotation and text: each definition is walked once, and a child without an
+// id adds nothing. The expected set is written out, and the raw walk agrees with it.
+TEST(HeaderTagsW7Dictionary, OrchestraHeaderFollowsComponentAndGroupReferencesOnce) {
+    std::string const xml =
+        R"(<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
+  <fixr:fields>
+    <fixr:field id="8" name="BeginString" type="String" />
+    <fixr:field id="11" name="ClOrdID" type="String" />
+    <fixr:field id="5001" name="VenueHdrA" type="String" />
+    <fixr:field id="5002" name="NoVenueHdr" type="NumInGroup" />
+    <fixr:field id="5003" name="VenueHdrB" type="String" />
+  </fixr:fields>
+  <fixr:components>
+    <fixr:component id="1024" name="StandardHeader">
+      venue text
+      <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
+      <fixr:fieldRef id="8" presence="required" />
+      <fixr:componentRef id="3001" />
+      <fixr:groupRef id="3100" />
+      <fixr:componentRef id="3001" />
+      <fixr:groupRef id="3100" />
+    </fixr:component>
+    <fixr:component id="3001" name="VenueHdrBlock">
+      <fixr:fieldRef id="5001" />
+    </fixr:component>
+  </fixr:components>
+  <fixr:groups>
+    <fixr:group id="3100" name="VenueHdrGroup">
+      <fixr:numInGroup id="5002" />
+      <fixr:fieldRef id="5003" />
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:fieldRef id="11" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)";
+    tag_set const expected{8, 5001, 5002, 5003};
+    std::vector<std::string> unresolved;
+    EXPECT_EQ(orchestra_header_walk(xml, unresolved), expected);
+    EXPECT_TRUE(unresolved.empty());
+    std::pmr::monotonic_buffer_resource mr{kArenaBytes};
+    Dictionary const d = fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr);
+    EXPECT_EQ(disagreements(d.as_table_view(), expected), tag_set{})
+        << "expected " << render(expected);
+}
+
+// A QuickFIX-XML header naming an undeclared field, with an empty <messages>: no
+// expansion reads the header, the document loads, and the name adds nothing.
+TEST(HeaderTagsW7Dictionary, QuickFixHeaderNameTheLoaderCannotResolveAddsNothing) {
+    std::string const xml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <field name='BeginString' required='Y' />
+  <field name='VenueUndeclared' required='N' />
+ </header>
+ <messages>
+ </messages>
+ <fields>
+  <field number='8' name='BeginString' type='STRING' />
+ </fields>
+</fix>
+)";
+    std::pmr::monotonic_buffer_resource mr{kArenaBytes};
+    Dictionary const d = fixpp::dict::XmlLoader{}.load_from_string(xml, &mr);
+    tag_set const expected{8};
+    EXPECT_EQ(disagreements(d.as_table_view(), expected), tag_set{})
+        << "expected " << render(expected);
+}
+
 // ── session half ─────────────────────────────────────────────────────────────
 
 TEST(HeaderTagsW7Session, QuickFixWalkUnionFixedSetIsTheFixedSet) {
