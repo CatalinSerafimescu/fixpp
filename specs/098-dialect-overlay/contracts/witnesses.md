@@ -166,6 +166,7 @@ diff $N $I
 | M-15 | `std::exception` caught before `std::bad_alloc` | — / Debug | W-9 bad-alloc rows | 200, not 202 | mapping function |
 | M-16 | step 8a replaced by the previous draft's adjacency rule | per format / Debug | W-3 Length+Data refuse rows and Orchestra `lengthId` rows; load rows stay GREEN | refuse rows load | step 8a |
 | M-17 | one extra `expand_field_list` call in `finalize` | per loader / Debug; ASan for W-11 | every W-1 and W-2 row; W-3 header-expansion row; W-11 valid seed | counter-origin refusal | the build's counter, armed at the prediction |
+| M-17o | one extra `expand_field_list` call in `OrchestraLoaderState`'s `finalize` | Orchestra / Debug; ASan for W-11 | W-1 orch row; W-2 Orchestra rows, the empty-overlay row included; W-11 Orchestra valid seed | as M-17 | as M-17 |
 | M-18 | the side-table fit check removed | per format / Debug | W-3 side-table rows | they load | step 6 |
 | M-19 | the thunk calls `load_any(base)` and drops the overlay | — / Debug (Python ON) | W-9 live arm (`capi_098_dict_overlay_live_test`); W-10 inbound row (pytest) | 5011 reads `AB` | handle → `fixpp_session_config_set_dictionary` → `Session::open()` builds `inbound_tv_` → the `Parser` pairs through `session_hooks(inbound_tv_)`; the Python function is the same C function through SWIG |
 | M-20 | the mapping function's `std::exception` and `...` branches return `FIXPP_ERR_CAPI_CONFIG_INVALID` | — / Debug | W-9 code-200 rows | 10, not 200 | mapping function |
