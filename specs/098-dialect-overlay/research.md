@@ -423,7 +423,10 @@ which the new function copies, `std::filesystem::path{path}`, `std::make_shared<
 `src/capi/dictionary.cpp`. The thunk's catch calls it, and a witness feeds it each exception type
 directly (W-9). A real
 allocation-failure seam is not added: global OOM injection is isolation-sensitive under
-`[const §VII.8]`, and would need its own executable.
+`[const §VII.8]`, and would need its own executable. The splice's own pugixml allocations have that
+executable, `dictionary_overlay_pugi_oom_test` (contracts W-9): it installs pugixml's allocation hook,
+and each failed splice allocation must reach the caller as `xml_oom_error`. The decision above, for the
+C ABI's own allocations, stands.
 
 The existing `fixpp_dict_load_from_xml` keeps mapping everything to `FIXPP_ERR_CAPI_CONFIG_INVALID`; it is
 not changed (spec FR-001). The new function uses the DICT family because those codes say what failed;

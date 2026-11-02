@@ -115,7 +115,7 @@ returning a dictionary proxy, raising the typed error for a non-OK code (the exi
 `%FIXPP_HANDLE_OUT(fixpp_dict_t)` typemap).
 - 200, 201 and 202 all raise `ValidatorError`, `fixpp.i`'s class for 200–299, and are told apart by
   `.code`. An allocation failure (202) is not a `MemoryError`, and it has no Python witness: no
-  allocation-failure seam is added (research R-6).
+  allocation-failure seam reaches the binding (research R-6).
 - The arguments are `str`, converted by SWIG's default `char *` typemap, as `dict_load_from_xml`'s `path`
   is. An `os.PathLike` is not accepted.
 - The OO wrapper `fixpp_oo.Dictionary` is not extended (B-098-6).

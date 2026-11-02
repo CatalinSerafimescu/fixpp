@@ -21,7 +21,7 @@ by `tests/fuzz/CMakeLists.txt`'s corpus glob with label `fuzz` and exists only i
 | W-6 | `session_pure_tests` | Pure session send tests with no isolation hazard. |
 | W-7 | both halves: standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`, with `src/session` on its include directories | Both halves are exact-set censuses over the shipped dictionaries, standalone as the module's other census gates are (the `dictionary_dict_enum_census_test` block's comment: "an exact-set completeness gate is isolation-sensitive"). The session half reads the production fixed set from `src/session/send_header_tags.hpp`, a self-contained header, so the executable includes it without linking `fixpp_session`. |
 | W-8 | `config_045_tests` (the new `test_098_dialect_overlay.cpp` and the T020 cells of `test_load_deferred_surface.cpp`); `config_044_tests` (the rewritten T018 cell of `test_load_negative_battery.cpp` and T028 cell of `test_load_selectors.cpp`) | Pure configuration parsing and resolution tests. AS-1's cell runs `Session::open()` on a local `asio::io_context` driven by `run()` on the test's own thread: no worker thread, no global allocation hook, so it stays in the bucket. |
-| W-9 | pure rows: `capi_pure_tests`; status-mapping rows: `dictionary_pure_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The status-mapping rows are pure, single-threaded calls of a dictionary-library function. The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. |
+| W-9 | pure rows: `capi_pure_tests`; status-mapping rows: `dictionary_pure_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT`; splice allocation-failure rows: standalone `dictionary_overlay_pugi_oom_test`, labels `098;dictionary` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The status-mapping rows are pure, single-threaded calls of a dictionary-library function. The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. The splice rows install pugixml's process-global allocation hook from the executable's own `main`, before any pugixml object exists, so `[const §VII.8]` keeps them standalone, as `dictionary_table_view_pair_oom_test` is. |
 | W-10 | in-tree Python suite (`bindings/python/tests/`); the import-surface row in the wheel suite | Not a gtest executable. The new test has no wheel twin: its overlay fixtures are not in the wheel. |
 | W-11 | `fuzz_dict_overlay` and its replay | Fuzz target outside §VII.8, built only under `FIXPP_BUILD_FUZZ`. |
 | W-12 | verify measurement | Not a test executable. |
@@ -119,6 +119,9 @@ as a RED arm before production code.
 | W-9 version pin (`version_test.cpp`) | yes | the version is 1.13 | **fails** (MINOR is 12) | **U** |
 | W-9 symbol golden (`fixpp_capi_symbols.txt` gains the symbol) | yes | the library's exported set equals the golden | **fails**: exactly one `MISSING exported symbol` line, naming `fixpp_dict_load_from_xml_with_overlay`, and no `UNEXPECTED exported symbol` line (`abi_symbol_golden_test.cpp` prints one line per difference); any other difference is RED for the wrong reason (stop rule) | **U** |
 | W-9 live arm (raw `fixpp_session_send` payload) | no | the counted 5011 value read intact through `fixpp_msg_get_bytes` | — | **M-19** |
+| W-9 splice allocation failure, persistent and transient sweeps (`dictionary_overlay_pugi_oom_test`) | no (the merge classes are new) | over every remainder of the base's page, and in the transient sweep for every failing page request of the splice: a splice that met a failed allocation throws `std::bad_alloc`; a splice that returns serializes byte-equal to the splice without failure; in the persistent sweep, both outcomes occur | — | MO-1 to MO-8 |
+| W-9 splice positive control | no | a clean overlay load calls the hook; with every page failing, an overlay load throws exactly `xml_oom_error` | — | control: the hook reaches the library's pugixml |
+| W-9 splice composition (`load_with_overlay_from_string`, the n-th allocation failing) | no | exactly `xml_oom_error` for every n over a clean call; one past it, equal to the edited reference | — | control: a parse failure satisfies it too |
 | W-10 import surface | yes | the exact set includes `dict_load_from_xml_with_overlay` | **fails**: the exact-set assertion, with that name as its only difference | **U** |
 | W-10 inbound read | no (the function is absent) | `msg_get_string(5011)` equals the full counted value | — | **M-19** |
 | W-10 cap row | no | `ValidatorError` with `.code == 201` | — | M-11 |
@@ -171,6 +174,15 @@ diff $N $I
 | M-23 | step 4a's root checks removed | per format / Debug | W-3 version-mismatch, other-format, root-child-outside-the-list, repeated-root-container and step-4a-against-step-5 order rows | the type or the named key is wrong | step 4a |
 | M-24 | `policy` not forwarded to the build | per loader and at `load_any_with_overlay` / Debug | W-1 `tolerant` rows (the overlay side refuses); W-4 `tolerant` row (the `load_any` side refuses) | `xml_parse_error` / `orchestra_parse_error` where a load was expected | entry point → `build_handle_from_doc` with `fail_closed` → the group that declares no first member is refused |
 | M-25 | step 5's reference count skips the reference elements the splice merges in place (appended ones still count) | per format / Debug | W-3 merged-in-place reference-cap row | it loads | step 5 |
+| MO-1 | `copy_element_if` appends with `append_child(name)` and checks only the handle | both / Debug | W-9 transient sweep, the copy fixtures (`dictionary_overlay_pugi_oom_test`) | a divergent success: a nameless element | `copy_element_if` → the base document → the oracle's serialization |
+| MO-2 | `copy_element_if` appends each attribute with `append_attribute(name)` and checks the handle and `set_value` | both / Debug | W-9 persistent sweep, the QuickFIX copy fixtures; W-9 transient sweep, the copy fixtures (`dictionary_overlay_pugi_oom_test`) | a divergent success: a nameless attribute | as MO-1 |
+| MO-3 | the QuickFIX promotion in its pre-helper form: `append_attribute("required")`, then the handle and `set_value` checked | QuickFIX / Debug | W-9 persistent and transient sweeps, `QfPromotion` (`dictionary_overlay_pugi_oom_test`) | a divergent success: a nameless attribute holding `Y` | `xml_overlay_merge::impl::splice`'s promotion → the base document → the oracle |
+| MO-3o | the Orchestra promotion in its pre-helper form | Orchestra / Debug | W-9 transient sweep, `OrchPromotion` (`dictionary_overlay_pugi_oom_test`) | as MO-3, holding `required` | as MO-3, Orchestra |
+| MO-4 | `append_element` ignores `set_name`'s result | both / Debug | W-9 transient sweep, the copy fixtures (`dictionary_overlay_pugi_oom_test`) | a divergent success: a nameless element | as MO-1 |
+| MO-5 | `append_named_attribute` ignores `set_name`'s and `set_value`'s results | both / Debug | W-9 persistent and transient sweeps, every fixture but `QfPromotionOverAnEmptyAttribute` (`dictionary_overlay_pugi_oom_test`) | a splice that returned after a failed allocation, with a divergent document | the copy and both promotions |
+| MO-6 | the QuickFIX promotion swallows `std::bad_alloc` | QuickFIX / Debug | W-9 persistent and transient sweeps, `QfPromotion` and `QfPromotionOverAnEmptyAttribute` (`dictionary_overlay_pugi_oom_test`) | a splice that returned after a failed allocation, `required` not `Y` | as MO-3 |
+| MO-7 | the Orchestra promotion swallows `std::bad_alloc` | Orchestra / Debug | W-9 persistent and transient sweeps, `OrchPromotion` (`dictionary_overlay_pugi_oom_test`) | as MO-6, `presence` not `required` | as MO-3o |
+| MO-8 | `set_attribute` ignores `set_value`'s result on an attribute the base already has | both / Debug | W-9 persistent and transient sweeps, `QfPromotionOverAnEmptyAttribute` (`dictionary_overlay_pugi_oom_test`) | as MO-6, `required` left empty | as MO-3 |
 
 ## Comparator self-test (runs first; a zero is trusted only after it)
 
@@ -652,7 +664,8 @@ engine-dictionaries row gets no bundle);
   `std::runtime_error` → 200; a non-`std::exception` → 200. In the `dictionary_pure_tests`, research R-5
   step 2's status mapping, the one function both parses of an overlay call use (N-10), is fed
   `status_out_of_memory` (→ `xml_oom_error`) and one other failed status (→ the format's parse error);
-  that both parses call it is structural, since no allocation-failure seam is added.
+  that both parses call it is structural. A real parse that runs out of memory is the splice
+  executable's (below).
   `tests/capi/version_test.cpp` pins 1.13; `tests/abi/golden/fixpp_capi_symbols.txt` gains the symbol;
   `tools/capi_freeze.sha256` refreshed; `tools/check_capi_reentrancy.sh` passes.
 - **Live arm**, `tests/capi/dict_overlay_capi_live_test.cpp`, the standalone
@@ -698,6 +711,42 @@ thunk's conflict row and the mapping function's `xml_parse_error`, `overlay_conf
 its two branches swapped: `status_out_of_memory` → the format's parse error, any other failed status →
 `xml_oom_error`) turns both status-mapping rows RED. The pure handle row and the NULL-argument rows are
 controls, not RED arms.
+
+**W-9 splice allocation failure.** `tests/dictionary/overlay_pugi_oom_test.cpp`, the standalone
+`dictionary_overlay_pugi_oom_test` (labels `098;dictionary`; compile definitions `FIXPP_DICT_DATA_DIR`
+and `FIXPP_098_FIXTURE_DIR`; its own `main`). pugixml reports a failed allocation by a null handle or
+`false`, never by throwing, and its named mutators (`append_child(name)`, `append_attribute(name)`)
+discard `set_name`'s result, so a name that does not fit leaves a live, nameless node or attribute that
+both loaders skip. The splice therefore adds to the base only through `append_element`,
+`append_named_attribute` and `set_attribute` (`src/dictionary/overlay_merge.cpp`), each of which checks
+every step and throws `std::bad_alloc`. The executable installs `pugi::set_memory_management_functions`
+once, before any pugixml object exists, and never removes it; the hook forwards to `std::malloc` and
+`std::free`, and a mode flag makes it return null. pugixml calls the hook only for a new page, so each
+splice cell first consumes the base document's current page, through a scratch node outside the root,
+down to an exact remainder, swept in 8-byte steps from 0 past the splice's whole size. Fixtures, inline:
+QuickFIX, a promotion with `required` absent in the base, the same over an empty `required`, one
+appended reference whose last allocation is `required="Y"`, and a root container the base lacks;
+Orchestra, a `presence="required"` promotion, a copied `fixr:field` with its reference, and a root
+container the base lacks.
+- **Persistent sweep** (`OverlayPugiOomSpliceUnderPersistentFailure`): every new page fails from the
+  splice on. A run whose splice met a failed allocation throws `std::bad_alloc`; a run that returns
+  leaves the base's root serialized byte-equal to the splice without failure; across the sweep both
+  outcomes occur (the straddle check).
+- **Transient sweep** (`OverlayPugiOomSpliceUnderTransientFailure`): exactly the n-th new page of the
+  splice fails and later ones succeed, for every n up to one past the splice's own count, from every
+  remainder. Same oracle; a nameless node or attribute then stays in the tree instead of being masked
+  by a later failure.
+- **Positive control**: a clean overlay load calls the hook, and with every page failing an overlay
+  load throws exactly `xml_oom_error`. Without both, every other row would read green.
+- **Composition** (`OverlayPugiOomPublicEntryComposition`): `XmlLoader` and `OrchestraLoader`'s
+  `load_with_overlay_from_string` over the W-1 triples, with the n-th allocation failing for every n
+  over a clean call, each throw exactly `xml_oom_error`; one past the count, the load equals the edited
+  reference. A failure in either parse satisfies it too, so it is a control for the composition, not
+  a witness of the splice checks.
+
+**RED**: MO-1 to MO-8 (mutant index), each turning the sweep rows it names RED with a divergent
+success or a splice that returned after a failed allocation. The positive control and the composition
+rows are controls.
 
 **W-10 Python.** `bindings/python/tests/test_098_dialect_overlay.py`, in-tree only (run with
 `PYTHONPATH=<build>/lib`, as `test_093_inbound_frame_dispositions.py` is). It has no wheel twin: the
