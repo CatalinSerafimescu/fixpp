@@ -42,6 +42,7 @@
 #include "overlay_test_support.hpp"
 #include "reused_tag_census.hpp"
 #include "support/dictionary_test_access.hpp"
+#include "support/temp_dir.hpp"
 
 namespace {
 
@@ -158,6 +159,16 @@ void expect_origin(ov::xml_overlay_probe const& p, ov::refusal_origin want,
                    std::string const& row) {
     EXPECT_EQ(p.origin, want) << row << ": origin " << ot::origin_name(p.origin) << ", expected "
                               << ot::origin_name(want) << "; " << ot::describe(p);
+}
+
+// A conflict, a cycle or a loader refusal: exact type, message parts, and no limit
+// origin recorded by the seam.
+template <class E>
+void expect_refused_no_origin(ov::xml_overlay_probe const& p,
+                              std::initializer_list<std::string_view> parts,
+                              std::string const& row) {
+    expect_refused<E>(p, parts, row);
+    expect_origin(p, ov::refusal_origin::none, row);
 }
 
 // ── R-4 conflicts ────────────────────────────────────────────────────────────
@@ -743,6 +754,189 @@ TEST(OverlayRefusalW3XmlLengthData, MessageComponentBetweenNewLengthBeforeABaseD
     expect_pair_refused(p, "7011", "message, component between / new Length");
 }
 
+// ── R-4 and R-3 kinds at their other sites ───────────────────────────────────
+// The rows above reach each kind at one site; these reach the kind's other sites.
+
+TEST(OverlayRefusalW3Xml, DuplicateChildUnderAMatchedDefinition) {
+    auto const p = probe(base_doc(), overlay_doc(extend_d(fref("Account") + fref("Account"))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"duplicate within the overlay", "<field name=\"Account\">", "<message msgtype=\"D\">"},
+        "duplicate child");
+}
+
+TEST(OverlayRefusalW3Xml, DuplicateValueUnderAMatchedField) {
+    auto const p = probe(base_doc(), overlay_doc(" <fields>\n"
+                                                 "  <field number='54' name='Side' type='CHAR'>\n"
+                                                 "   <value enum='Z' description='VENUE_CROSS' />\n"
+                                                 "   <value enum='Z' description='VENUE_CROSS' />\n"
+                                                 "  </field>\n"
+                                                 " </fields>\n"));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"duplicate within the overlay", "<value enum=\"Z\">",
+         "<field number=\"54\" name=\"Side\">"},
+        "duplicate value");
+}
+
+TEST(OverlayRefusalW3Xml, TwoNewFieldsWithOneName) {
+    auto const p =
+        probe(base_doc(), overlay_doc(" <fields>\n" + field_def(9001, "VenueX", "STRING") +
+                                      field_def(9002, "VenueX", "STRING") + " </fields>\n"));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"two new fields with one name", "name \"VenueX\" twice"}, "two new fields, one name");
+}
+
+// `open` is the overlay's root start tag; `shown` is how the message renders the
+// attribute that differs.
+void version_row(std::string_view open, std::string_view shown, std::string const& row) {
+    auto const p = probe(base_doc(), std::string{open} + "</fix>\n");
+    expect_refused_no_origin<overlay_conflict_error>(p, {"version mismatch", shown}, row);
+}
+
+TEST(OverlayRefusalW3Xml, VersionMismatchOnTypeMajorOrServicepack) {
+    version_row("<fix type='FIXT' major='4' minor='4' servicepack='0'>\n", "type=\"FIXT\"", "type");
+    version_row("<fix type='FIX' major='5' minor='4' servicepack='0'>\n", "major=\"5\"", "major");
+    version_row("<fix type='FIX' major='4' minor='4' servicepack='1'>\n", "servicepack=\"1\"",
+                "servicepack");
+}
+
+TEST(OverlayRefusalW3Xml, VersionMismatchOnAnAbsentEmptyOrMalformedNumber) {
+    version_row("<fix type='FIX' minor='4' servicepack='0'>\n", "major=\"\"", "absent major");
+    version_row("<fix type='FIX' major='4' minor='' servicepack='0'>\n", "minor=\"\"",
+                "empty minor");
+    version_row("<fix type='FIX' major='4x' minor='4' servicepack='0'>\n", "major=\"4x\"",
+                "trailing junk");
+    version_row("<fix type='FIX' major='-4' minor='4' servicepack='0'>\n", "major=\"-4\"",
+                "negative major");
+}
+
+// Control: `servicepack` is optional and reads as 0, the base's value.
+TEST(OverlayRefusalW3Xml, AnOverlayWithoutServicepackLoads) {
+    ot::expect_loaded_at_prediction(
+        probe(base_doc(), "<fix type='FIX' major='4' minor='4'>\n</fix>\n"), "no servicepack");
+}
+
+// A component no message inlines, reaching Symbol(55) through Instrument: only its
+// own level changes when the overlay extends it.
+constexpr std::string_view kLonely =
+    "  <component name='Lonely'>\n"
+    "   <component name='Instrument' required='N' />\n"
+    "  </component>\n";
+
+TEST(OverlayRefusalW3Xml, TagTwiceAtAComponentLevel) {
+    auto const p = probe(base_doc({}, kLonely),
+                         overlay_doc(" <components>\n  <component name='Lonely'>\n" +
+                                     fref("Symbol") + "  </component>\n </components>\n"));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"tag occurs twice at one level", "tag 55", "<component name=\"Lonely\">"},
+        "component level");
+}
+
+// The matched group NoAllocs gains a new component that reaches AllocAccount(79),
+// which the group declares; NewOrderSingle's own level is unchanged.
+TEST(OverlayRefusalW3Xml, TagTwiceAtAGroupLevel) {
+    auto const p =
+        probe(base_doc(),
+              overlay_doc(extend_d("   <group name='NoAllocs' required='N'>\n"
+                                   "    <component name='VenueAllocComp' required='N' />\n"
+                                   "   </group>\n",
+                                   " <components>\n  <component name='VenueAllocComp'>\n" +
+                                       fref("AllocAccount") + "  </component>\n </components>\n")));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"tag occurs twice at one level", "tag 79", "<group name=\"NoAllocs\">"}, "group level");
+}
+
+// TestReqID(112) twice at NewOrderSingle's level, which in the base lacks it and
+// holds larger tags.
+TEST(OverlayRefusalW3Xml, TagTwiceWhereTheBaseLevelLacksTheTag) {
+    auto const p = probe(
+        base_doc(), overlay_doc(extend_d(
+                        fref("TestReqID") + "   <component name='VenueTRComp' required='N' />\n",
+                        " <components>\n  <component name='VenueTRComp'>\n" + fref("TestReqID") +
+                            "  </component>\n </components>\n")));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"tag occurs twice at one level", "tag 112", "msgtype=\"D\""},
+        "tag absent from the base level");
+}
+
+// The base has a <trailer>: the overlay's trailer merges into it, and every message
+// is checked.
+TEST(OverlayRefusalW3Xml, TrailerAdditionWhoseTagAMessageBodyHas) {
+    auto const p = probe(base_doc(), overlay_doc(" <trailer>\n"
+                                                 "  <field name='Text' required='N' />\n"
+                                                 " </trailer>\n"));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"tag occurs twice at one level", "tag 58", "msgtype=\"D\""}, "trailer addition");
+}
+
+// A base whose <messages> is empty and whose header holds a group: the merged walk
+// visits the header group, the base walk does not.
+std::string header_group_base() {
+    return std::string{kOpen} +
+           " <header>\n"
+           "  <field name='BeginString' required='Y' />\n"
+           "  <group name='NoHops' required='N'>\n"
+           "   <field name='HopCompID' required='N' />\n"
+           "  </group>\n"
+           " </header>\n"
+           " <messages>\n"
+           " </messages>\n"
+           " <fields>\n" +
+           field_def(8, "BeginString", "STRING") + field_def(11, "ClOrdID", "STRING") +
+           field_def(627, "NoHops", "NUMINGROUP") + field_def(628, "HopCompID", "STRING") +
+           " </fields>\n</fix>\n";
+}
+
+TEST(OverlayRefusalW3Xml, TagTwiceInAHeaderGroupTheBaseNeverWalks) {
+    auto const p = probe(header_group_base(),
+                         overlay_doc(" <header>\n"
+                                     "  <group name='NoHops' required='N'>\n"
+                                     "   <component name='VenueHopComp' required='N' />\n"
+                                     "  </group>\n"
+                                     " </header>\n"
+                                     " <messages>\n"
+                                     "  <message name='NewOrderSingle' msgtype='D' msgcat='app'>\n"
+                                     "   <field name='ClOrdID' required='Y' />\n"
+                                     "  </message>\n"
+                                     " </messages>\n"
+                                     " <components>\n"
+                                     "  <component name='VenueHopComp'>\n"
+                                     "   <field name='HopCompID' required='N' />\n"
+                                     "  </component>\n"
+                                     " </components>\n"));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"tag occurs twice at one level", "tag 628", "<group name=\"NoHops\">"}, "header group");
+}
+
+// ── loader pins at the merge's other sites ───────────────────────────────────
+
+// An unparsable `number` gives the field no match key, so it is appended as new; the
+// loader then refuses the spliced document.
+TEST(OverlayRefusalW3XmlPins, UnparsableFieldNumberIsTheLoadersError) {
+    for (std::string const number : {"abc", "0"}) {
+        std::string const def =
+            "  <field number='" + number + "' name='VenueBad' type='STRING' />\n";
+        std::string const want = "<field number=\"" + number + "\"> non-numeric or out-of-range";
+        auto const p = probe(base_doc(), overlay_doc(" <fields>\n" + def + " </fields>\n"));
+        expect_refused_no_origin<xml_parse_error>(p, {want}, "number=" + number);
+    }
+}
+
+TEST(OverlayRefusalW3XmlPins, UnknownComponentReferenceIsTheLoadersError) {
+    auto const p =
+        probe(base_doc(), overlay_doc(extend_d("   <component name='Nope' required='N' />\n")));
+    expect_refused_no_origin<xml_parse_error>(
+        p, {"<component name=\"Nope\"> not defined in <components> block"}, "unknown component");
+}
+
+TEST(OverlayRefusalW3XmlPins, UnknownGroupReferenceIsTheLoadersError) {
+    auto const p =
+        probe(base_doc(), overlay_doc(extend_d("   <group name='NoNope' required='N'>\n" +
+                                               fref("Account") + "   </group>\n")));
+    expect_refused_no_origin<xml_parse_error>(
+        p, {"<group name=\"NoNope\"> has no matching <field> declaration"}, "unknown group");
+}
+
 // ── R-5 guards: caps (each cap + 1 refused, each cap admitted) ───────────────
 
 std::string padded_overlay(std::size_t total) {
@@ -852,6 +1046,15 @@ TEST(OverlayRefusalW3XmlCaps, NewFieldAtCapLoads) {
     ot::expect_loaded_at_prediction(probe(base_doc(), new_fields_overlay(ov::kMaxNewFields)),
                                     "fields at cap");
 }
+// A base with no <header> and no <fields>: the overlay's <fields> is a container the
+// base lacks, and its fields count toward the new field cap.
+std::string fieldless_base() { return std::string{kOpen} + " <messages>\n </messages>\n</fix>\n"; }
+
+TEST(OverlayRefusalW3XmlCaps, NewFieldCapPlusOneInACreatedFields) {
+    expect_refused_no_origin<overlay_limit_error>(
+        probe(fieldless_base(), new_fields_overlay(ov::kMaxNewFields + 1)),
+        {"new field definitions cap", "1024"}, "created <fields> cap+1");
+}
 TEST(OverlayRefusalW3XmlCaps, NewComponentCapPlusOne) {
     expect_refused<overlay_limit_error>(
         probe(base_doc(), new_components_overlay(ov::kMaxNewComponents + 1)),
@@ -960,7 +1163,46 @@ TEST(OverlayRefusalW3XmlWalk, CycleClosingThroughABaseComponent) {
         p, {"component reference cycle", "component Instrument", "component VenueLoop"}, "cycle");
 }
 
+// Two cycles: the first in walk order closes under ExecutionReport (through Outer),
+// the second under NewOrderSingle. The message names the first only.
+TEST(OverlayRefusalW3XmlWalk, TwoCyclesNameTheFirstInWalkOrder) {
+    auto const p = probe(base_doc(), overlay_doc(" <components>\n"
+                                                 "  <component name='Parties'>\n"
+                                                 "   <component name='VenueRing' required='N' />\n"
+                                                 "  </component>\n"
+                                                 "  <component name='VenueRing'>\n"
+                                                 "   <component name='Parties' required='N' />\n"
+                                                 "  </component>\n"
+                                                 "  <component name='Instrument'>\n"
+                                                 "   <component name='VenueLoop' required='N' />\n"
+                                                 "  </component>\n"
+                                                 "  <component name='VenueLoop'>\n"
+                                                 "   <component name='Instrument' required='N' />\n"
+                                                 "  </component>\n"
+                                                 " </components>\n"));
+    expect_refused_no_origin<xml_parse_error>(
+        p,
+        {"component reference cycle",
+         "component Parties -> component VenueRing -> component Parties"},
+        "two cycles");
+    EXPECT_EQ(ot::refusal_of(p).what.find("VenueLoop"), std::string::npos)
+        << "two cycles: the message must not name the second cycle: " << ot::refusal_of(p).what;
+}
+
 // The loader's own refusals after the splice: characterization pins.
+TEST(OverlayRefusalW3XmlPins, BaseWithoutMessagesIsTheLoadersError) {
+    std::string const base = std::string{kOpen} + " <fields>\n" +
+                             field_def(8, "BeginString", "STRING") + " </fields>\n</fix>\n";
+    expect_refused_no_origin<xml_parse_error>(
+        probe(base, overlay_doc({})), {"missing <messages> block under <fix>"}, "no <messages>");
+}
+
+TEST(OverlayRefusalW3XmlPins, BaseWithoutFieldsIsTheLoadersError) {
+    expect_refused_no_origin<xml_parse_error>(probe(fieldless_base(), overlay_doc({})),
+                                              {"missing <fields> block under <fix>"},
+                                              "no <fields>");
+}
+
 TEST(OverlayRefusalW3XmlPins, UnknownReferenceIsTheLoadersError) {
     auto const p = probe(base_doc(), overlay_doc(extend_d(fref("Nope"))));
     expect_refused<xml_parse_error>(p, {"<field name=\"Nope\"> not declared"}, "unknown ref");
@@ -1821,6 +2063,218 @@ TEST(OverlayRefusalW3OrchLengthData, NewDataNamingAPairedBaseLength) {
         "lengthId / paired");
 }
 
+// A Length that two new Data fields name, no base tag among the three: step 8a
+// passes it, and the loader's own pairing refuses it.
+TEST(OverlayRefusalW3OrchLengthData, TwoNewDataNamingANewLengthIsTheLoadersError) {
+    auto const p =
+        oprobe(orch_base_doc(),
+               orch_overlay(ofields(ofield(9101, "VenueLen", "Length") +
+                                    ofield(9100, "VenueData", "data", " lengthId='9101'") +
+                                    ofield(9102, "VenueData2", "data", " lengthId='9101'"))));
+    expect_refused_no_origin<orchestra_parse_error>(
+        p, {"lengthId=\"9101\"", "names a Length field already paired with another field"},
+        "lengthId / two new Data, new Length");
+}
+
+// A paired base Length named by two new Data fields: the collision list holds all
+// three Data tags.
+TEST(OverlayRefusalW3OrchLengthData, TwoNewDataNamingAPairedBaseLength) {
+    std::string const base =
+        orch_base_doc({.fields = ofield(7010, "BaseLen", "Length") +
+                                 ofield(7011, "BaseData", "data", " lengthId='7010'"),
+                       .d_extra = oref("fieldRef", 7010) + oref("fieldRef", 7011)});
+    auto const p =
+        oprobe(base, orch_overlay(ofields(ofield(9100, "VenueData", "data", " lengthId='7010'") +
+                                          ofield(9102, "VenueData2", "data", " lengthId='7010'"))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"Length+Data pair relation of base tag 7010",
+         "is named by the lengthId of Data fields [7011,9100,9102]"},
+        "lengthId / paired, two new Data");
+}
+
+// ── R-4 and R-3 kinds at their other sites (Orchestra) ───────────────────────
+
+TEST(OverlayRefusalW3Orch, DuplicateReferenceUnderAMatchedStructure) {
+    auto const p =
+        oprobe(orch_base_doc(), orch_overlay(extend_od(oref("fieldRef", 1) + oref("fieldRef", 1))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"duplicate within the overlay", "<fixr:fieldRef id=\"1\">",
+         "under the overlay's <fixr:structure>"},
+        "duplicate ref, structure");
+}
+
+TEST(OverlayRefusalW3Orch, DuplicateReferenceUnderAMatchedComponent) {
+    auto const p = oprobe(orch_base_doc(),
+                          orch_overlay(ocomps(ocomp(1003, "Instrument",
+                                                    oref("fieldRef", 48) + oref("fieldRef", 48)))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"duplicate within the overlay", "<fixr:fieldRef id=\"48\">",
+         "<fixr:component id=\"1003\" name=\"Instrument\">"},
+        "duplicate ref, component");
+}
+
+TEST(OverlayRefusalW3Orch, DuplicateCodeUnderAMatchedCodeSet) {
+    auto const p = oprobe(orch_base_doc(),
+                          orch_overlay(" <fixr:codeSets>\n"
+                                       "  <fixr:codeSet id='54' name='SideCodeSet' type='char'>\n"
+                                       "   <fixr:code id='54003' name='VenueCross' value='Z' />\n"
+                                       "   <fixr:code id='54003' name='VenueCross' value='Z' />\n"
+                                       "  </fixr:codeSet>\n"
+                                       " </fixr:codeSets>\n"));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"duplicate within the overlay", "<fixr:code value=\"Z\">",
+         "<fixr:codeSet name=\"SideCodeSet\">"},
+        "duplicate code");
+}
+
+TEST(OverlayRefusalW3Orch, TwoStructuresInAMatchedMessage) {
+    auto const p = oprobe(
+        orch_base_doc(), orch_overlay(" <fixr:messages>\n"
+                                      "  <fixr:message id='14' name='NewOrderSingle' msgType='D'>\n"
+                                      "   <fixr:structure>\n"
+                                      "   </fixr:structure>\n"
+                                      "   <fixr:structure>\n"
+                                      "   </fixr:structure>\n"
+                                      "  </fixr:message>\n"
+                                      " </fixr:messages>\n"));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"duplicate within the overlay", "<fixr:structure> appears twice",
+         "<fixr:message msgType=\"D\">"},
+        "two structures");
+}
+
+TEST(OverlayRefusalW3Orch, TwoNewFieldsWithOneName) {
+    auto const p = oprobe(orch_base_doc(), orch_overlay(ofields(ofield(9001, "VenueX", "String") +
+                                                                ofield(9002, "VenueX", "String"))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"two new fields with one name", "name \"VenueX\" twice"}, "two new fields, one name");
+}
+
+// N-9: a matched group whose overlay copy omits its fixr:numInGroup.
+TEST(OverlayRefusalW3Orch, MatchedGroupWithoutANumInGroup) {
+    auto const p =
+        oprobe(orch_base_doc(), orch_overlay(ogroups("  <fixr:group id='2010' name='Allocs'>\n" +
+                                                     oref("fieldRef", 1) + "  </fixr:group>\n")));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"group numInGroup differs", "<fixr:group id=\"2010\" name=\"Allocs\">",
+         "carries no <fixr:numInGroup>", "id=\"78\""},
+        "numInGroup omitted");
+}
+
+// The relax refusal under a component names that component.
+TEST(OverlayRefusalW3Orch, RequiredRelaxedUnderAComponent) {
+    auto const p =
+        oprobe(orch_base_doc(),
+               orch_overlay(ocomps(ocomp(1003, "Instrument", oref("fieldRef", 55, "optional")))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"required relaxed", "<fixr:fieldRef id=\"55\">",
+         "under <fixr:component id=\"1003\" name=\"Instrument\">"},
+        "required relaxed, component");
+}
+
+// A component no message references, reaching Symbol(55) through Instrument.
+TEST(OverlayRefusalW3Orch, TagTwiceAtAComponentLevel) {
+    auto const p =
+        oprobe(orch_base_doc({.components = ocomp(2050, "Lonely", oref("componentRef", 1003))}),
+               orch_overlay(ocomps(ocomp(2050, "Lonely", oref("fieldRef", 55)))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p,
+        {"tag occurs twice at one level", "tag 55", "<fixr:component id=\"2050\" name=\"Lonely\">"},
+        "component level");
+}
+
+// The matched group Allocs gains a new component that reaches AllocAccount(79).
+TEST(OverlayRefusalW3Orch, TagTwiceAtAGroupLevel) {
+    auto const p =
+        oprobe(orch_base_doc(),
+               orch_overlay(ocomps(ocomp(2060, "VenueAllocComp", oref("fieldRef", 79))) +
+                            ogroups(ogroup(2010, "Allocs", 78, oref("componentRef", 2060)))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"tag occurs twice at one level", "tag 79", "<fixr:group id=\"2010\" name=\"Allocs\">"},
+        "group level");
+}
+
+// A cycle through a group: a new component whose group refers back to it.
+TEST(OverlayRefusalW3OrchWalk, CycleThroughAGroup) {
+    auto const p =
+        oprobe(orch_base_doc(),
+               orch_overlay(ofields(ofield(9300, "NoVenueRing", "NumInGroup")) +
+                            ocomps(ocomp(2070, "VenueC1", oref("groupRef", 2071))) +
+                            ogroups(ogroup(2071, "VenueG1", 9300, oref("componentRef", 2070)))));
+    expect_refused_no_origin<orchestra_parse_error>(
+        p,
+        {"component reference cycle",
+         "component 2070 VenueC1 -> group 2071 VenueG1 -> component 2070 VenueC1"},
+        "cycle through a group");
+}
+
+// ── loader pins at the merge's other sites (Orchestra) ───────────────────────
+
+// An unparsable id gives the definition no match key, so it is appended as new; the
+// loader then refuses the spliced document.
+TEST(OverlayRefusalW3OrchPins, UnparsableDefinitionIdIsTheLoadersError) {
+    auto const field =
+        oprobe(orch_base_doc(), orch_overlay(ofields("  <fixr:field id='x' name='VenueBad' "
+                                                     "type='String' />\n")));
+    expect_refused_no_origin<orchestra_parse_error>(
+        field, {"missing/invalid <fixr:field> id attribute"}, "field id='x'");
+    auto const comp =
+        oprobe(orch_base_doc(), orch_overlay(ocomps("  <fixr:component id='x' name='VenueBad'>\n"
+                                                    "  </fixr:component>\n")));
+    expect_refused_no_origin<orchestra_parse_error>(
+        comp, {"missing/invalid <fixr:component> id attribute"}, "component id='x'");
+    auto const group =
+        oprobe(orch_base_doc(),
+               orch_overlay(ogroups("  <fixr:group id='x' name='VenueBad'>\n"
+                                    "    <fixr:numInGroup id='78' />\n  </fixr:group>\n")));
+    expect_refused_no_origin<orchestra_parse_error>(
+        group, {"missing/invalid <fixr:group> id attribute"}, "group id='x'");
+}
+
+TEST(OverlayRefusalW3OrchPins, UnknownComponentAndGroupReferencesAreTheLoadersError) {
+    expect_refused_no_origin<orchestra_parse_error>(
+        oprobe(orch_base_doc(), orch_overlay(extend_od(oref("componentRef", 9999)))),
+        {"<fixr:componentRef id=\"9999\"> not defined in <fixr:components>"}, "unknown component");
+    expect_refused_no_origin<orchestra_parse_error>(
+        oprobe(orch_base_doc(), orch_overlay(extend_od(oref("groupRef", 9999)))),
+        {"<fixr:groupRef id=\"9999\"> not defined in <fixr:groups>"}, "unknown group");
+    expect_refused_no_origin<orchestra_parse_error>(
+        oprobe(orch_base_doc(), orch_overlay(extend_od("    <fixr:fieldRef id='x' />\n"))),
+        {"missing/invalid <fixr:fieldRef> id attribute"}, "fieldRef id='x'");
+}
+
+// A new group whose fixr:numInGroup names an undeclared field: the walk gives it no
+// tag and does not follow it; the loader refuses it.
+TEST(OverlayRefusalW3OrchPins, NewGroupWithAnUndeclaredNumInGroupIsTheLoadersError) {
+    auto const p = oprobe(
+        orch_base_doc(),
+        orch_overlay(extend_od(oref("groupRef", 2099),
+                               ogroups(ogroup(2099, "VenueG", 9399, oref("fieldRef", 79))))));
+    expect_refused_no_origin<orchestra_parse_error>(
+        p, {"<fixr:numInGroup id=\"9399\"> not declared in <fixr:fields>"},
+        "undeclared numInGroup");
+}
+
+// A referenced new group with no fixr:numInGroup: the walk gives it no tag, and step
+// 7 refuses it.
+TEST(OverlayRefusalW3Orch, ReferencedNewGroupWithoutANumInGroup) {
+    auto const p =
+        oprobe(orch_base_doc(),
+               orch_overlay(extend_od(oref("groupRef", 2099),
+                                      ogroups("  <fixr:group id='2099' name='VenueG'>\n" +
+                                              oref("fieldRef", 79) + "  </fixr:group>\n"))));
+    expect_refused_no_origin<overlay_conflict_error>(
+        p, {"new group without exactly one numInGroup", "<fixr:group id=\"2099\"", "has 0"},
+        "referenced new group, none");
+}
+
 // ── R-5 guards: caps (Orchestra) ─────────────────────────────────────────────
 
 std::string orch_padded_overlay(std::size_t total) {
@@ -2390,6 +2844,63 @@ TEST(OverlayStatusMappingW9, OutOfMemoryIsXmlOomError) {
 TEST(OverlayStatusMappingW9, AnotherFailedStatusIsTheFormatsParseError) {
     EXPECT_EQ(thrown_type(pugi::status_bad_pi, ov::source_format::quickfix_xml),
               typeid(xml_parse_error).name());
+    EXPECT_EQ(thrown_type(pugi::status_bad_pi, ov::source_format::orchestra),
+              typeid(orchestra_parse_error).name());
+}
+
+// A real failed parse of an Orchestra overlay, through the seam.
+TEST(OverlayStatusMappingW9, AMalformedOrchestraOverlayIsOrchestraParseError) {
+    expect_refused_no_origin<orchestra_parse_error>(oprobe(orch_base_doc(), "<fixr:repository"),
+                                                    {"dict::orchestra_parse_error: "},
+                                                    "malformed Orchestra overlay");
+}
+
+// ── the files of a path-form call (research R-5 step 1) ──────────────────────
+
+// A path in the temporary directory that no file has: unique to this process.
+std::filesystem::path absent_path() {
+    return std::filesystem::temp_directory_path() /
+           ("fixpp_098_absent_" + std::to_string(fixpp::test_support::current_pid()) + ".xml");
+}
+
+TEST(OverlayFilesW3, AMissingOrchestraOverlayIsOrchestraParseError) {
+    ot::temp_file const b{orch_base_doc()};
+    std::filesystem::path const missing = absent_path();
+    ASSERT_FALSE(std::filesystem::exists(missing)) << missing;
+    std::string const want = "cannot open overlay " + missing.string();
+    expect_refused_no_origin<orchestra_parse_error>(
+        ov::probe_orchestra_overlay(b.path(), missing, mr()), {want}, "missing Orchestra overlay");
+}
+
+// A directory as the overlay path: each format's parse error. Under libstdc++ the
+// directory opens and the read fails, so the message is the read failure's.
+TEST(OverlayFilesW3, ADirectoryAsTheOverlayIsTheFormatsParseError) {
+    ot::temp_file const xb{base_doc()};
+    ot::temp_file const ob{orch_base_doc()};
+    std::filesystem::path const dir = ot::dict_dir();
+    ASSERT_TRUE(std::filesystem::is_directory(dir)) << dir;
+#if defined(__GLIBCXX__)
+    std::string const want = "cannot read overlay " + dir.string();
+#else
+    std::string const want = "_parse_error: ";
+#endif
+    expect_refused_no_origin<xml_parse_error>(ov::probe_xml_overlay(xb.path(), dir, mr()), {want},
+                                              "directory overlay, QuickFIX XML");
+    expect_refused_no_origin<orchestra_parse_error>(
+        ov::probe_orchestra_overlay(ob.path(), dir, mr()), {want}, "directory overlay, Orchestra");
+}
+
+// The overlay is read first, so a missing base needs a readable overlay.
+TEST(OverlayFilesW3, AMissingBaseIsTheFormatsParseError) {
+    ot::temp_file const xo{overlay_doc({})};
+    ot::temp_file const oo{orch_overlay({})};
+    std::filesystem::path const missing = absent_path();
+    ASSERT_FALSE(std::filesystem::exists(missing)) << missing;
+    std::string const want = "cannot open " + missing.string();
+    expect_refused_no_origin<xml_parse_error>(ov::probe_xml_overlay(missing, xo.path(), mr()),
+                                              {want}, "missing QuickFIX-XML base");
+    expect_refused_no_origin<orchestra_parse_error>(
+        ov::probe_orchestra_overlay(missing, oo.path(), mr()), {want}, "missing Orchestra base");
 }
 
 // ── the cell table ───────────────────────────────────────────────────────────
@@ -2428,14 +2939,17 @@ constexpr kind kCells[] = {
                       "OverlayRefusalW3Orch.IdentifyingAttributeChangedComponentName "
                       "OverlayRefusalW3Orch.IdentifyingAttributeChangedGroupName")},
     {.name = "field name already used by another number",
-     .xml = row("OverlayRefusalW3Xml.FieldNameAlreadyUsedByAnotherNumber"),
-     .orchestra = row("OverlayRefusalW3Orch.FieldNameAlreadyUsedByAnotherNumber")},
+     .xml = row("OverlayRefusalW3Xml.FieldNameAlreadyUsedByAnotherNumber "
+                "OverlayRefusalW3Xml.TwoNewFieldsWithOneName"),
+     .orchestra = row("OverlayRefusalW3Orch.FieldNameAlreadyUsedByAnotherNumber "
+                      "OverlayRefusalW3Orch.TwoNewFieldsWithOneName")},
     {.name = "code set with a new id and an existing name (N-6)",
      .xml = na("QuickFIX XML has no code sets"),
      .orchestra = row("OverlayRefusalW3Orch.CodeSetWithANewIdAndAnExistingName")},
     {.name = "required relaxed",
      .xml = row("OverlayRefusalW3Xml.RequiredRelaxed"),
-     .orchestra = row("OverlayRefusalW3Orch.RequiredRelaxed")},
+     .orchestra = row("OverlayRefusalW3Orch.RequiredRelaxed "
+                      "OverlayRefusalW3Orch.RequiredRelaxedUnderAComponent")},
     {.name = "redescribed enum value or code",
      .xml = row("OverlayRefusalW3Xml.RedescribedEnumValue"),
      .orchestra = row("OverlayRefusalW3Orch.RedescribedCode")},
@@ -2444,13 +2958,22 @@ constexpr kind kCells[] = {
                 "OverlayRefusalW3Xml.PresenceVocabularyFalse"),
      .orchestra = row("OverlayRefusalW3Orch.PresenceVocabularyRequire")},
     {.name = "duplicate within the overlay",
-     .xml = row("OverlayRefusalW3Xml.DuplicateWithinTheOverlay"),
-     .orchestra = row("OverlayRefusalW3Orch.DuplicateWithinTheOverlay")},
+     .xml = row("OverlayRefusalW3Xml.DuplicateWithinTheOverlay "
+                "OverlayRefusalW3Xml.DuplicateChildUnderAMatchedDefinition "
+                "OverlayRefusalW3Xml.DuplicateValueUnderAMatchedField"),
+     .orchestra = row("OverlayRefusalW3Orch.DuplicateWithinTheOverlay "
+                      "OverlayRefusalW3Orch.DuplicateReferenceUnderAMatchedStructure "
+                      "OverlayRefusalW3Orch.DuplicateReferenceUnderAMatchedComponent "
+                      "OverlayRefusalW3Orch.DuplicateCodeUnderAMatchedCodeSet "
+                      "OverlayRefusalW3Orch.TwoStructuresInAMatchedMessage")},
     {.name = "two root containers of one name",
      .xml = row("OverlayRefusalW3Xml.TwoRootContainersOfOneName"),
      .orchestra = row("OverlayRefusalW3Orch.TwoRootContainersOfOneName")},
     {.name = "version mismatch",
-     .xml = row("OverlayRefusalW3Xml.VersionMismatch"),
+     .xml = row("OverlayRefusalW3Xml.VersionMismatch "
+                "OverlayRefusalW3Xml.VersionMismatchOnTypeMajorOrServicepack "
+                "OverlayRefusalW3Xml.VersionMismatchOnAnAbsentEmptyOrMalformedNumber "
+                "OverlayRefusalW3Xml.AnOverlayWithoutServicepackLoads"),
      .orchestra = row("OverlayRefusalW3Orch.VersionMismatch")},
     {.name = "overlay of the other format",
      .xml = row("OverlayRefusalW3Xml.OverlayOfTheOtherFormat"),
@@ -2462,22 +2985,31 @@ constexpr kind kCells[] = {
      .xml = na("a QuickFIX-XML group's NumInGroup is its name"),
      .orchestra = row("OverlayRefusalW3Orch.MatchedGroupWhoseNumInGroupDiffers "
                       "OverlayRefusalW3Orch.NewGroupWithoutANumInGroup "
-                      "OverlayRefusalW3Orch.NewGroupWithTwoNumInGroups")},
+                      "OverlayRefusalW3Orch.NewGroupWithTwoNumInGroups "
+                      "OverlayRefusalW3Orch.MatchedGroupWithoutANumInGroup "
+                      "OverlayRefusalW3Orch.ReferencedNewGroupWithoutANumInGroup")},
     {.name = "child redeclared that the parent reaches through a component",
-     .xml = row("OverlayRefusalW3Xml.ChildRedeclaredThatTheParentReachesThroughAComponent"),
-     .orchestra = row("OverlayRefusalW3Orch.ChildRedeclaredThatTheParentReachesThroughAComponent")},
+     .xml = row("OverlayRefusalW3Xml.ChildRedeclaredThatTheParentReachesThroughAComponent "
+                "OverlayRefusalW3Xml.TagTwiceAtAComponentLevel"),
+     .orchestra = row("OverlayRefusalW3Orch.ChildRedeclaredThatTheParentReachesThroughAComponent "
+                      "OverlayRefusalW3Orch.TagTwiceAtAComponentLevel")},
     {.name = "child redeclared through a two-level component chain (N-2)",
      .xml = row("OverlayRefusalW3Xml.ChildRedeclaredThroughATwoLevelComponentChain"),
      .orchestra = row("OverlayRefusalW3Orch.ChildRedeclaredThroughATwoLevelComponentChain")},
     {.name = "new component reference reaching a declared tag (N-7)",
-     .xml = row("OverlayRefusalW3Xml.NewComponentReferenceReachingADeclaredTag"),
-     .orchestra = row("OverlayRefusalW3Orch.NewComponentReferenceReachingADeclaredTag")},
+     .xml = row("OverlayRefusalW3Xml.NewComponentReferenceReachingADeclaredTag "
+                "OverlayRefusalW3Xml.TagTwiceAtAGroupLevel "
+                "OverlayRefusalW3Xml.TagTwiceWhereTheBaseLevelLacksTheTag "
+                "OverlayRefusalW3Xml.TagTwiceInAHeaderGroupTheBaseNeverWalks"),
+     .orchestra = row("OverlayRefusalW3Orch.NewComponentReferenceReachingADeclaredTag "
+                      "OverlayRefusalW3Orch.TagTwiceAtAGroupLevel")},
     {.name = "addition to an inlined component reaching a tag the parent declares (upward closure)",
      .xml = row("OverlayRefusalW3Xml.AdditionToAnInlinedComponentReachingATagTheParentDeclares"),
      .orchestra =
          row("OverlayRefusalW3Orch.AdditionToAnInlinedComponentReachingATagTheParentDeclares")},
     {.name = "header addition whose tag a message body has",
-     .xml = row("OverlayRefusalW3Xml.HeaderAdditionWhoseTagAMessageBodyHas"),
+     .xml = row("OverlayRefusalW3Xml.HeaderAdditionWhoseTagAMessageBodyHas "
+                "OverlayRefusalW3Xml.TrailerAdditionWhoseTagAMessageBodyHas"),
      .orchestra =
          na("contracts W-3 names it for XML; Orchestra's header is component 1024, extended as "
             "any component")},
@@ -2594,7 +3126,10 @@ constexpr kind kCells[] = {
      .orchestra = row("OverlayRefusalW3OrchLengthData.NewDataNamingAnUnpairedBaseLength")},
     {.name = "Length+Data, lengthId, new Data naming a paired base Length",
      .xml = na("QuickFIX XML has no lengthId"),
-     .orchestra = row("OverlayRefusalW3OrchLengthData.NewDataNamingAPairedBaseLength")},
+     .orchestra =
+         row("OverlayRefusalW3OrchLengthData.NewDataNamingAPairedBaseLength "
+             "OverlayRefusalW3OrchLengthData.TwoNewDataNamingAPairedBaseLength "
+             "OverlayRefusalW3OrchLengthData.TwoNewDataNamingANewLengthIsTheLoadersError")},
     {.name = "Length+Data, lengthId, new Length before a base Data",
      .xml = na("QuickFIX XML has no lengthId"),
      .orchestra = na("a base Data's lengthId is fixed by research R-3's equal-lengthId rule")},
@@ -2610,7 +3145,8 @@ constexpr kind kCells[] = {
                       "OverlayRefusalW3OrchCaps.DepthAtCapLoads")},
     {.name = "new field cap",
      .xml = row(
-         "OverlayRefusalW3XmlCaps.NewFieldCapPlusOne OverlayRefusalW3XmlCaps.NewFieldAtCapLoads"),
+         "OverlayRefusalW3XmlCaps.NewFieldCapPlusOne OverlayRefusalW3XmlCaps.NewFieldAtCapLoads "
+         "OverlayRefusalW3XmlCaps.NewFieldCapPlusOneInACreatedFields"),
      .orchestra = row("OverlayRefusalW3OrchCaps.NewFieldCapPlusOne "
                       "OverlayRefusalW3OrchCaps.NewFieldAtCapLoads")},
     {.name = "new component cap",
@@ -2650,11 +3186,18 @@ constexpr kind kCells[] = {
      .xml = row("OverlayRefusalW3XmlCaps.Doctype"),
      .orchestra = row("OverlayRefusalW3OrchCaps.Doctype")},
     {.name = "cycle closing through a base component",
-     .xml = row("OverlayRefusalW3XmlWalk.CycleClosingThroughABaseComponent"),
-     .orchestra = row("OverlayRefusalW3OrchWalk.CycleClosingThroughABaseComponent")},
+     .xml = row("OverlayRefusalW3XmlWalk.CycleClosingThroughABaseComponent "
+                "OverlayRefusalW3XmlWalk.TwoCyclesNameTheFirstInWalkOrder"),
+     .orchestra = row("OverlayRefusalW3OrchWalk.CycleClosingThroughABaseComponent "
+                      "OverlayRefusalW3OrchWalk.CycleThroughAGroup")},
     {.name = "unknown reference (pin)",
-     .xml = row("OverlayRefusalW3XmlPins.UnknownReferenceIsTheLoadersError"),
-     .orchestra = row("OverlayRefusalW3OrchPins.UnknownReferenceIsTheLoadersError")},
+     .xml = row("OverlayRefusalW3XmlPins.UnknownReferenceIsTheLoadersError "
+                "OverlayRefusalW3XmlPins.UnknownComponentReferenceIsTheLoadersError "
+                "OverlayRefusalW3XmlPins.UnknownGroupReferenceIsTheLoadersError"),
+     .orchestra =
+         row("OverlayRefusalW3OrchPins.UnknownReferenceIsTheLoadersError "
+             "OverlayRefusalW3OrchPins.UnknownComponentAndGroupReferencesAreTheLoadersError "
+             "OverlayRefusalW3OrchPins.NewGroupWithAnUndeclaredNumInGroupIsTheLoadersError")},
     {.name = "unknown field type (pin)",
      .xml = row("OverlayRefusalW3XmlPins.UnknownFieldTypeIsTheLoadersError"),
      .orchestra = row("OverlayRefusalW3OrchPins.UnknownFieldTypeIsTheLoadersError")},
