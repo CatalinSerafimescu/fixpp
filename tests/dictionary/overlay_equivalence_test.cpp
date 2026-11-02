@@ -46,6 +46,7 @@
 #include "dictionary_equivalence.hpp"
 #include "overlay_test_support.hpp"
 #include "reused_tag_census.hpp"
+#include "support/temp_dir.hpp"
 
 namespace {
 
@@ -293,6 +294,488 @@ TEST(OverlayEquivalenceW1Orch, TolerantTripleRefusesOnBothSidesUnderTheDefaultPo
     EXPECT_EQ(r.type, typeid(fixpp::dict::orchestra_parse_error).name()) << ot::describe(p);
     EXPECT_NE(r.what.find("declares no first member"), std::string::npos) << r.what;
     EXPECT_THROW(static_cast<void>(load_orch_text(edited)), fixpp::dict::orchestra_parse_error);
+}
+
+// ── W-1, inputs step 6 models that the base loaders ignore or tolerate ───────
+//
+// Each row loads through the seam and asserts no counter-origin refusal and step
+// counter = step 6's prediction, compares against its edited reference, and has a
+// seeded mismatch: the reference without one named line, which the comparator must
+// report.
+
+ov::xml_overlay_probe probe_as(fmt format, std::string_view base, std::string_view overlay) {
+    return format == fmt::orchestra ? ov::probe_orchestra_overlay_from_string(base, overlay, mr())
+                                    : ov::probe_xml_overlay_from_string(base, overlay, mr());
+}
+
+void expect_overlay_row(fmt format, std::string_view base, std::string_view overlay,
+                        std::string_view edited, std::string_view seeded_anchor,
+                        std::set<std::string_view> const& seeded, std::string const& row) {
+    auto const p = probe_as(format, base, overlay);
+    ot::expect_loaded_at_prediction(p, row);
+    ASSERT_TRUE(p.dictionary.has_value()) << row << ": " << ot::describe(p);
+    Dictionary const reference = load_text_as(format, edited);
+    std::string const without = without_line(edited, seeded_anchor);
+    Dictionary const seeded_reference = load_text_as(format, without);
+    // NOLINTBEGIN(bugprone-unchecked-optional-access): the ASSERT_TRUE above checks it
+    expect_equivalent(row, compare_against(*p.dictionary, reference, edited, format),
+                      /*assert_no_exclusions=*/true);
+    expect_reports(row, compare_against(*p.dictionary, seeded_reference, without, format), seeded);
+    // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
+// `text` with `lines` inserted before its one line equal to `anchor`.
+std::string insert_before(std::string_view text, std::string_view anchor,
+                          std::vector<std::string> const& lines) {
+    auto all = ot::lines_of(text);
+    auto const hits = ot::find_line(all, anchor);
+    EXPECT_EQ(hits.size(), 1U) << "anchor '" << anchor << "' must match exactly once";
+    if (hits.size() == 1) {
+        all.insert(all.begin() + static_cast<std::ptrdiff_t>(hits.front()), lines.begin(),
+                   lines.end());
+    }
+    return ot::join_lines(all);
+}
+
+// `text` with its one occurrence of `from` replaced by `to`.
+std::string replace_once(std::string_view text, std::string_view from, std::string_view to) {
+    std::string out{text};
+    std::size_t const at = out.find(from);
+    EXPECT_NE(at, std::string::npos) << "'" << from << "' must occur";
+    EXPECT_EQ(out.find(from, at + 1), std::string::npos) << "'" << from << "' must occur once";
+    if (at != std::string::npos) {
+        out.replace(at, from.size(), to);
+    }
+    return out;
+}
+
+// ── noise: text, CDATA and elements no match table names ──
+//
+// `noisy` inserts a run after each opening line, or before each closing line, of a
+// document, outside comments. The noise must change no store, so a noisy row
+// compares against the pristine edited reference; the edited text made noisy the
+// same way as the base, loaded alone, must equal it too, which shows the base loader
+// accepts and ignores the noise.
+
+enum class noise_at : std::uint8_t { after_open, before_close };
+
+bool is_root_line(std::string_view t) {
+    return t.starts_with("<fix ") || t.starts_with("<fixr:repository") || t == "</fix>" ||
+           t == "</fixr:repository>";
+}
+
+// `run(t)` gives the noise for the line `t` (its leading spaces removed); the root's
+// own lines get noise only when `root` is set.
+template <class Run>
+std::string noisy(std::string_view text, noise_at where, bool root, Run const& run) {
+    std::vector<std::string> out;
+    bool in_comment = false;
+    for (std::string const& line : ot::lines_of(text)) {
+        std::size_t const lead = line.find_first_not_of(' ');
+        std::string_view const t =
+            lead == std::string::npos ? std::string_view{} : std::string_view{line}.substr(lead);
+        if (in_comment || t.starts_with("<!--")) {
+            in_comment = !line.contains("-->");
+            out.push_back(line);
+            continue;
+        }
+        bool const closing = t.starts_with("</");
+        bool const opening = !closing && t.starts_with('<') && !t.starts_with("<?") &&
+                             t.ends_with('>') && !t.ends_with("/>");
+        bool const here =
+            (root || !is_root_line(t)) && (where == noise_at::after_open ? opening : closing);
+        if (here && where == noise_at::before_close) {
+            out.push_back(run(t));
+        }
+        out.push_back(line);
+        if (here && where == noise_at::after_open) {
+            out.push_back(run(t));
+        }
+    }
+    return ot::join_lines(out);
+}
+
+void expect_noise_ignored(fmt format, std::string_view noisy_edited, std::string_view edited,
+                          std::string const& row) {
+    Dictionary const with_noise = load_text_as(format, noisy_edited);
+    Dictionary const without_noise = load_text_as(format, edited);
+    expect_equivalent(row + " (the base loader over the noisy edited text)",
+                      compare_against(with_noise, without_noise, edited, format),
+                      /*assert_no_exclusions=*/true);
+}
+
+constexpr std::string_view kTextRun = "  venue text<![CDATA[venue cdata]]>";
+constexpr std::string_view kQfSeedLine = "   <value enum='Z' description='VENUE_CROSS' />";
+constexpr std::string_view kOrchSeedLine =
+    R"(      <fixr:code id="54003" name="VenueCross" value="Z" />)";
+
+// Text and CDATA at every level of the base and the overlay, the root included: the
+// classifier and the splice drop the overlay's; the base walk counts the base's as
+// steps, as `expand_field_list` does.
+TEST(OverlayEquivalenceW1Noise, QfTextAndCdataAtEveryLevel) {
+    auto const text = [](std::string_view) { return std::string{kTextRun}; };
+    std::string const edited = ot::read_file(qf("edited.xml"));
+    expect_noise_ignored(fmt::quickfix_xml, noisy(edited, noise_at::after_open, true, text), edited,
+                         "W-1 qf text");
+    expect_overlay_row(fmt::quickfix_xml,
+                       noisy(ot::read_file(qf("base.xml")), noise_at::after_open, true, text),
+                       noisy(ot::read_file(qf("overlay.xml")), noise_at::after_open, true, text),
+                       edited, kQfSeedLine, {ids::kEnumValue, ids::kEnumCodes}, "W-1 qf text");
+}
+
+// The same for Orchestra, with a fixr:annotation in every overlay definition and
+// container below the root as well, which the splice drops.
+TEST(OverlayEquivalenceW1Noise, OrchTextCdataAndAnnotationsAtEveryLevel) {
+    auto const text = [](std::string_view) { return std::string{kTextRun}; };
+    auto const text_and_annotation = [](std::string_view t) {
+        return is_root_line(t) ? std::string{kTextRun}
+                               : std::string{kTextRun} +
+                                     "\n  <fixr:annotation><fixr:documentation>venue "
+                                     "note</fixr:documentation></fixr:annotation>";
+    };
+    std::string const edited = ot::read_file(orch("edited.xml"));
+    expect_noise_ignored(fmt::orchestra, noisy(edited, noise_at::after_open, true, text), edited,
+                         "W-1 orch text");
+    expect_overlay_row(
+        fmt::orchestra, noisy(ot::read_file(orch("base.xml")), noise_at::after_open, true, text),
+        noisy(ot::read_file(orch("overlay.xml")), noise_at::after_open, true, text_and_annotation),
+        edited, kOrchSeedLine, {ids::kEnumValue, ids::kEnumCodes}, "W-1 orch text");
+}
+
+// An element no match table names, below the root of the base (first in each
+// element) and of the overlay (last in each element): it gets no match key, is
+// appended, and the walk counts it as one `other` step.
+TEST(OverlayEquivalenceW1Noise, QfUnknownElementsInEveryDefinition) {
+    auto const ext = [](std::string_view) { return std::string{"  <venue_ext />"}; };
+    std::string const edited = ot::read_file(qf("edited.xml"));
+    expect_noise_ignored(fmt::quickfix_xml, noisy(edited, noise_at::after_open, false, ext), edited,
+                         "W-1 qf unknown elements");
+    expect_overlay_row(
+        fmt::quickfix_xml, noisy(ot::read_file(qf("base.xml")), noise_at::after_open, false, ext),
+        noisy(ot::read_file(qf("overlay.xml")), noise_at::before_close, false, ext), edited,
+        kQfSeedLine, {ids::kEnumValue, ids::kEnumCodes}, "W-1 qf unknown elements");
+}
+
+// The Orchestra form: fixr:responses in each message, fixr:numInGroup in each
+// component, and an unknown element elsewhere.
+TEST(OverlayEquivalenceW1Noise, OrchUnknownElementsInEveryDefinition) {
+    auto const ext = [](std::string_view t) {
+        if (t.starts_with("<fixr:message ") || t == "</fixr:message>") {
+            return std::string{"  <fixr:responses />"};
+        }
+        if (t.starts_with("<fixr:component ") || t == "</fixr:component>") {
+            return std::string{R"(  <fixr:numInGroup id="9999" />)"};
+        }
+        return std::string{"  <fixr:venueExt />"};
+    };
+    std::string const edited = ot::read_file(orch("edited.xml"));
+    expect_noise_ignored(fmt::orchestra, noisy(edited, noise_at::after_open, false, ext), edited,
+                         "W-1 orch unknown elements");
+    expect_overlay_row(
+        fmt::orchestra, noisy(ot::read_file(orch("base.xml")), noise_at::after_open, false, ext),
+        noisy(ot::read_file(orch("overlay.xml")), noise_at::before_close, false, ext), edited,
+        kOrchSeedLine, {ids::kEnumValue, ids::kEnumCodes}, "W-1 orch unknown elements");
+}
+
+// The W-1 Orchestra triple with a matched fixr:field and a matched fixr:fieldRef
+// that carry children: a fixr:annotation and a bare fixr:documentation, which the
+// splice drops, and one other element, which it appends into the base element. A
+// matched reference with an explicit presence="optional" over a base reference with
+// none is a no-op.
+TEST(OverlayEquivalenceW1Orch, MatchedFieldAndReferenceWithChildren) {
+    std::string overlay = ot::read_file(orch("overlay.xml"));
+    overlay = replace_once(overlay, R"(    <fixr:field id="11" name="ClOrdID" type="String" />)",
+                           R"(    <fixr:field id="11" name="ClOrdID" type="String">
+      <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
+      <fixr:documentation>venue note</fixr:documentation>
+      <fixr:venueExt />
+    </fixr:field>)");
+    overlay = replace_once(overlay, R"(        <fixr:fieldRef id="1" presence="required" />)",
+                           R"(        <fixr:fieldRef id="1" presence="required">
+          <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
+          <fixr:venueExt />
+        </fixr:fieldRef>)");
+    overlay = replace_once(overlay, R"(        <fixr:fieldRef id="9021" />)",
+                           R"(        <fixr:fieldRef id="9021" />
+        <fixr:fieldRef id="58" presence="optional" />)");
+    std::string edited = ot::read_file(orch("edited.xml"));
+    edited = replace_once(edited, R"(    <fixr:field id="11" name="ClOrdID" type="String" />)",
+                          R"(    <fixr:field id="11" name="ClOrdID" type="String">
+      <fixr:venueExt />
+    </fixr:field>)");
+    edited = replace_once(edited, R"(        <fixr:fieldRef id="1" presence="required" />)",
+                          R"(        <fixr:fieldRef id="1" presence="required">
+          <fixr:venueExt />
+        </fixr:fieldRef>)");
+    expect_overlay_row(fmt::orchestra, ot::read_file(orch("base.xml")), overlay, edited,
+                       kOrchSeedLine, {ids::kEnumValue, ids::kEnumCodes},
+                       "W-1 orch matched children");
+}
+
+// ── small triples: bases with an optional part absent ──
+
+constexpr std::string_view kQfFrameBase = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <field name='BeginString' required='Y' />
+ </header>
+ <trailer>
+  <field name='CheckSum' required='Y' />
+ </trailer>
+ <messages>
+  <message name='Heartbeat' msgtype='0' msgcat='admin'>
+   <field name='TestReqID' required='N' />
+  </message>
+ </messages>
+ <fields>
+  <field number='8' name='BeginString' type='STRING' />
+  <field number='10' name='CheckSum' type='STRING' />
+  <field number='112' name='TestReqID' type='STRING' />
+ </fields>
+</fix>
+)";
+
+// The base has a <trailer>, so the overlay's trailer merges into it.
+TEST(OverlayEquivalenceW1Qf, TrailerAdditionMergedIntoABaseTrailer) {
+    std::string const overlay = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <trailer>
+  <field name='VenueTrailerTag' required='N' />
+ </trailer>
+ <fields>
+  <field number='9027' name='VenueTrailerTag' type='STRING' />
+ </fields>
+</fix>
+)";
+    std::string const edited = insert_before(
+        insert_before(kQfFrameBase, " </trailer>",
+                      {"  <field name='VenueTrailerTag' required='N' />"}),
+        " </fields>", {"  <field number='9027' name='VenueTrailerTag' type='STRING' />"});
+    expect_overlay_row(fmt::quickfix_xml, kQfFrameBase, overlay, edited,
+                       "  <field name='VenueTrailerTag' required='N' />", {ids::kMessageFields.tag},
+                       "trailer merge");
+}
+
+constexpr std::string_view kQfBareBase = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='Heartbeat' msgtype='0' msgcat='admin'>
+   <field name='TestReqID' required='N' />
+  </message>
+ </messages>
+ <fields>
+  <field number='112' name='TestReqID' type='STRING' />
+ </fields>
+</fix>
+)";
+
+// No <header> and no <trailer>: neither is charged to a message.
+TEST(OverlayEquivalenceW1Qf, NewMessageOnABaseWithoutHeaderOrTrailer) {
+    std::string const overlay = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='VenueM' msgtype='U1' msgcat='app'>
+   <field name='VenueTag' required='N' />
+  </message>
+ </messages>
+ <fields>
+  <field number='9001' name='VenueTag' type='STRING' />
+ </fields>
+</fix>
+)";
+    std::string const edited =
+        insert_before(insert_before(kQfBareBase, " </messages>",
+                                    {"  <message name='VenueM' msgtype='U1' msgcat='app'>",
+                                     "   <field name='VenueTag' required='N' />", "  </message>"}),
+                      " </fields>", {"  <field number='9001' name='VenueTag' type='STRING' />"});
+    expect_overlay_row(fmt::quickfix_xml, kQfBareBase, overlay, edited,
+                       "   <field name='VenueTag' required='N' />", {ids::kMessageFields.tag},
+                       "no header or trailer");
+}
+
+// A base whose <messages> is empty and whose header holds a group. The overlay adds
+// a message, so the merged walk visits the header and its group, and appends a
+// member to that group, which the base walk never visits.
+TEST(OverlayEquivalenceW1Qf, HeaderGroupTheBaseWalkNeverVisits) {
+    std::string const base = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <field name='BeginString' required='Y' />
+  <group name='NoHops' required='N'>
+   <field name='HopCompID' required='N' />
+  </group>
+ </header>
+ <messages>
+ </messages>
+ <fields>
+  <field number='8' name='BeginString' type='STRING' />
+  <field number='11' name='ClOrdID' type='STRING' />
+  <field number='627' name='NoHops' type='NUMINGROUP' />
+  <field number='628' name='HopCompID' type='STRING' />
+ </fields>
+</fix>
+)";
+    std::string const overlay = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <group name='NoHops' required='N'>
+   <field name='HopSendingTime' required='N' />
+  </group>
+ </header>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='ClOrdID' required='Y' />
+  </message>
+ </messages>
+ <fields>
+  <field number='629' name='HopSendingTime' type='STRING' />
+ </fields>
+</fix>
+)";
+    std::string const edited = insert_before(
+        insert_before(
+            insert_before(base, "  </group>", {"   <field name='HopSendingTime' required='N' />"}),
+            " </messages>",
+            {"  <message name='NewOrderSingle' msgtype='D' msgcat='app'>",
+             "   <field name='ClOrdID' required='Y' />", "  </message>"}),
+        " </fields>", {"  <field number='629' name='HopSendingTime' type='STRING' />"});
+    expect_overlay_row(fmt::quickfix_xml, base, overlay, edited,
+                       "   <field name='HopSendingTime' required='N' />", {ids::kMessageFields.tag},
+                       "header group");
+}
+
+constexpr std::string_view kOrchOpen =
+    R"(<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">)";
+
+// A small Orchestra base with no fixr:components and no fixr:groups: fields 8, 11 and
+// 112, and NewOrderSingle(D) referring to 8 and 11. `heartbeat` is inserted into
+// fixr:messages before D.
+std::string orch_small_base(std::string_view heartbeat = {}) {
+    return std::string{kOrchOpen} + R"(
+  <fixr:fields>
+    <fixr:field id="8" name="BeginString" type="String" />
+    <fixr:field id="11" name="ClOrdID" type="String" />
+    <fixr:field id="112" name="TestReqID" type="String" />
+  </fixr:fields>
+  <fixr:messages>
+)" + std::string{heartbeat} +
+           R"(    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:fieldRef id="8" presence="required" />
+        <fixr:fieldRef id="11" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)";
+}
+
+// The overlay creates fixr:components, which step 6 walks as a created container;
+// an annotation in it and in its new component is dropped.
+TEST(OverlayEquivalenceW1Orch, CreatedComponentsContainer) {
+    std::string const base = orch_small_base();
+    std::string const overlay = std::string{kOrchOpen} + R"(
+  <fixr:fields>
+    <fixr:field id="9003" name="VenueBlockA" type="String" />
+  </fixr:fields>
+  <fixr:components>
+    <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
+    <fixr:component id="2003" name="VenueBlock">
+      <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
+      <fixr:fieldRef id="9003" />
+    </fixr:component>
+  </fixr:components>
+  <fixr:messages>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:componentRef id="2003" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)";
+    std::string edited =
+        insert_before(base, "  </fixr:fields>",
+                      {R"(    <fixr:field id="9003" name="VenueBlockA" type="String" />)"});
+    edited = insert_before(edited, "      </fixr:structure>",
+                           {R"(        <fixr:componentRef id="2003" />)"});
+    edited = insert_before(
+        edited, "</fixr:repository>",
+        {"  <fixr:components>", R"(    <fixr:component id="2003" name="VenueBlock">)",
+         R"(      <fixr:fieldRef id="9003" />)", "    </fixr:component>", "  </fixr:components>"});
+    expect_overlay_row(fmt::orchestra, base, overlay, edited,
+                       R"(        <fixr:componentRef id="2003" />)", {ids::kMessageFields.tag},
+                       "created fixr:components");
+}
+
+// The overlay creates fixr:groups, with a group a message refers to.
+TEST(OverlayEquivalenceW1Orch, CreatedGroupsContainer) {
+    std::string const base = orch_small_base();
+    std::string const overlay = std::string{kOrchOpen} + R"(
+  <fixr:fields>
+    <fixr:field id="9006" name="NoVenueLegs" type="NumInGroup" />
+    <fixr:field id="9007" name="VenueLegID" type="String" />
+  </fixr:fields>
+  <fixr:groups>
+    <fixr:group id="2022" name="VenueLegs">
+      <fixr:numInGroup id="9006" />
+      <fixr:fieldRef id="9007" />
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:groupRef id="2022" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)";
+    std::string edited =
+        insert_before(base, "  </fixr:fields>",
+                      {R"(    <fixr:field id="9006" name="NoVenueLegs" type="NumInGroup" />)",
+                       R"(    <fixr:field id="9007" name="VenueLegID" type="String" />)"});
+    edited = insert_before(edited, "      </fixr:structure>",
+                           {R"(        <fixr:groupRef id="2022" />)"});
+    edited = insert_before(
+        edited, "</fixr:repository>",
+        {"  <fixr:groups>", R"(    <fixr:group id="2022" name="VenueLegs">)",
+         R"(      <fixr:numInGroup id="9006" />)", R"(      <fixr:fieldRef id="9007" />)",
+         "    </fixr:group>", "  </fixr:groups>"});
+    expect_overlay_row(fmt::orchestra, base, overlay, edited,
+                       R"(        <fixr:groupRef id="2022" />)", {ids::kMessageFields.tag},
+                       "created fixr:groups");
+}
+
+constexpr std::string_view kStructurelessHeartbeat =
+    "    <fixr:message id=\"1\" name=\"Heartbeat\" msgType=\"0\">\n"
+    "    </fixr:message>\n";
+
+// A base message with no fixr:structure: the walk skips it, and an empty overlay
+// leaves it so.
+TEST(OverlayEquivalenceW1Orch, BaseMessageWithoutAStructureAndAnEmptyOverlay) {
+    std::string const base = orch_small_base(kStructurelessHeartbeat);
+    expect_overlay_row(fmt::orchestra, base, std::string{kOrchOpen} + "\n</fixr:repository>\n",
+                       base, R"(        <fixr:fieldRef id="11" presence="required" />)",
+                       {ids::kMessageFields.tag}, "structureless message, empty overlay");
+}
+
+// The overlay's fixr:structure for that message is appended, not merged.
+TEST(OverlayEquivalenceW1Orch, StructureAddedToABaseMessageWithoutOne) {
+    std::string const base = orch_small_base(kStructurelessHeartbeat);
+    std::string const overlay = std::string{kOrchOpen} + R"(
+  <fixr:messages>
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure>
+        <fixr:fieldRef id="112" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)";
+    std::string const edited = orch_small_base(
+        "    <fixr:message id=\"1\" name=\"Heartbeat\" msgType=\"0\">\n"
+        "      <fixr:structure>\n"
+        "        <fixr:fieldRef id=\"112\" />\n"
+        "      </fixr:structure>\n"
+        "    </fixr:message>\n");
+    expect_overlay_row(fmt::orchestra, base, overlay, edited,
+                       R"(        <fixr:fieldRef id="112" />)", {ids::kMessageFields.tag},
+                       "structure added");
 }
 
 // ── the patch helper's own rows ──────────────────────────────────────────────
@@ -895,6 +1378,33 @@ TEST(OverlayLoadAnyW4, AMixedFormatPairIsRefused) {
     expect_mixed_refused(qf("base.xml"), orch("overlay.xml"), "<fixr:repository>",
                          "W-4 qf base, orch overlay");
     expect_mixed_refused(orch("base.xml"), qf("overlay.xml"), "<fix>", "W-4 orch base, qf overlay");
+}
+
+// A base the dispatch cannot read or recognize: `xml_parse_error` naming the cause.
+void expect_base_refused(std::filesystem::path const& base, std::string const& part,
+                         std::string const& row) {
+    try {
+        static_cast<void>(fixpp::dict::load_any_with_overlay(base, qf("overlay.xml"), mr()));
+        ADD_FAILURE() << row << ": the base was admitted";
+    } catch (std::exception const& e) {
+        EXPECT_EQ(typeid(e), typeid(fixpp::dict::xml_parse_error)) << row << ": " << e.what();
+        EXPECT_NE(std::string_view{e.what()}.find(part), std::string_view::npos)
+            << row << ": the message must name '" << part << "': " << e.what();
+    }
+}
+
+TEST(OverlayLoadAnyW4, AMissingBaseIsRefused) {
+    std::filesystem::path const missing =
+        std::filesystem::temp_directory_path() /
+        ("fixpp_098_absent_" + std::to_string(fixpp::test_support::current_pid()) + ".xml");
+    ASSERT_FALSE(std::filesystem::exists(missing)) << missing;
+    expect_base_refused(missing, "cannot open " + missing.string(), "W-4 missing base");
+}
+
+TEST(OverlayLoadAnyW4, ABaseOfAnotherRootIsRefused) {
+    ot::temp_file const base{"<foo/>\n"};
+    expect_base_refused(base.path(), "unrecognized dictionary root element <foo>",
+                        "W-4 unrecognized root");
 }
 
 // ── the FIX50SP2 wrap probe (research R-10): reported, never asserted ─────────
