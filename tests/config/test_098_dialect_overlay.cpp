@@ -276,6 +276,28 @@ TEST(DialectOverlay098, TwoOrigins_OneFailingFile_OneDiagnosticAtEach) {
         << diag_string(diags);
 }
 
+// Two sessions inherit one failing [default] value: one diagnostic, at the place it
+// was written, and none at either session.
+void expect_one_inherited_diagnostic(std::string_view fixture_name, RC reason) {
+    Loaded l{fixture_name};
+    ASSERT_FALSE(l.result.has_value()) << fixture_name;
+    auto const& diags = l.result.error();
+    auto const at = diags_at(diags, "default.dialect_overlay");
+    ASSERT_EQ(at.size(), 1U) << fixture_name << "\n" << diag_string(diags);
+    EXPECT_EQ(at.front().reason, reason) << fixture_name << "\n" << diag_string(diags);
+    for (std::string_view const s : {"session[0].dialect_overlay", "session[1].dialect_overlay"}) {
+        EXPECT_TRUE(diags_at(diags, s).empty()) << fixture_name << ": " << s << "\n"
+                                                << diag_string(diags);
+    }
+}
+
+TEST(DialectOverlay098, TwoSessionsInheritingOneFailingDefault_OneDiagnostic) {
+    expect_one_inherited_diagnostic("inherited_missing.toml",
+                                    RC::invalid_or_contradictory_selector);
+    expect_one_inherited_diagnostic("inherited_not_string.toml", RC::malformed_value);
+    expect_one_inherited_diagnostic("inherited_empty.toml", RC::empty_required);
+}
+
 // ── No [dictionary] ──────────────────────────────────────────────────────────
 
 TEST(DialectOverlay098, NoDictionary_OverlayReportsRequiresDictionary) {
