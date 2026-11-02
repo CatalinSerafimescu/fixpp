@@ -783,12 +783,17 @@ everything below.
   - The hit case (a dictionary header tag beyond the fixed set) costs the same as the miss: both read one
     `header_bits_` word after the same bounds check. Only the branch outcome differs, as for a fixed-set
     hit.
-  - CI's paired gate covers this path from 098 on (owner ruling, 2026-11-01: "yes, add it to CI
-    time'd list"). T094b adds `bin/session_send_bench` as a `paired` row to `bench/ci-suite.txt`. Before
-    098 there was no such row, and the paired `engine_send_bench` refuses its payload before
-    `build_send_frame_`'s partition (that bench's header comment), so CI never timed this branch. The
-    row is irreversible (`[const §VIII.2]` 2a). CI's provisional band is not the ≤ +5% condition; the
-    local paired run above stays the evidence for it.
+  - CI does not time this path in 098. The owner ruled on 2026-11-01 ("yes, add it to CI time'd list")
+    that T094b add `bin/session_send_bench` as a `paired` row to `bench/ci-suite.txt`. On 2026-11-02 the
+    row was withdrawn pending a re-ruling: open fixpp#592 says the bench runs at one of two levels for a
+    whole process, set by the file's bytes and the invocation, and "must not get a `paired` row in this
+    state". The question the owner answered did not cite #592. A paired row is irreversible
+    (`[const §VIII.2]` 2a). Before 098 there was no such row, and the paired `engine_send_bench` refuses
+    its payload before `build_send_frame_`'s partition (that bench's header comment), so CI never timed
+    this branch. The local paired run above is the evidence for the ≤ +5% condition. Because of the two
+    levels, T095 measures it by B41's method (PARENT `research/probes/b41_563_564/ph7f_method.md`):
+    instance copies, string-variant cells and the level recorded per start. A difference below the gap
+    between the levels is reported as not resolved.
   - `[const §VIII.3]` ("a benchmark in the same PR") is met by this existing bench, run paired and
     reported in the verify record and the PR body.
 - **Plain load (`[const §VIII.2]`).** 098 changes code `XmlLoader::load` runs: the factored pair
