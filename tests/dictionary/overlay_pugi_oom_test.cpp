@@ -88,28 +88,36 @@ using fixpp::dict::XmlLoader;
 
 enum class fail_mode : std::uint8_t { off, every_call, nth_call };
 
-// Read only by the hook; the executable is single-threaded.
-fail_mode g_mode = fail_mode::off;
-std::size_t g_calls = 0;    // hook calls since the last `arm`
-std::size_t g_fail_at = 0;  // nth_call: the 1-based call that fails
+// Read by the hook; the executable is single-threaded.
+struct hook_state {
+    fail_mode mode = fail_mode::off;
+    std::size_t calls = 0;    // hook calls since the last `arm`
+    std::size_t fail_at = 0;  // nth_call: the 1-based call that fails
+};
+
+hook_state& hook() {
+    static hook_state s;
+    return s;
+}
 
 void* hook_allocate(std::size_t size) {
-    ++g_calls;
-    if (g_mode == fail_mode::every_call ||
-        (g_mode == fail_mode::nth_call && g_calls == g_fail_at)) {
+    hook_state& h = hook();
+    ++h.calls;
+    if (h.mode == fail_mode::every_call ||
+        (h.mode == fail_mode::nth_call && h.calls == h.fail_at)) {
         return nullptr;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc): pugixml's hook contract is malloc/free
+    // pugixml's hook contract is malloc and free.
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,hicpp-no-malloc,cppcoreguidelines-owning-memory)
     return std::malloc(size);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-no-malloc): pugixml's hook contract is malloc/free
+// pugixml's hook contract is malloc and free.
+// NOLINTNEXTLINE(cppcoreguidelines-no-malloc,hicpp-no-malloc,cppcoreguidelines-owning-memory)
 void hook_deallocate(void* p) { std::free(p); }
 
 void arm(fail_mode m, std::size_t nth = 0) {
-    g_mode = m;
-    g_calls = 0;
-    g_fail_at = nth;
+    hook() = hook_state{.mode = m, .calls = 0, .fail_at = nth};
 }
 
 std::pmr::memory_resource* mr() { return std::pmr::new_delete_resource(); }
@@ -207,8 +215,8 @@ std::string orch_extend_d(std::string_view refs) {
 enum class fmt : std::uint8_t { quickfix_xml, orchestra };
 
 struct fixture {
-    char const* name;
-    fmt format;
+    char const* name = "";
+    fmt format = fmt::quickfix_xml;
     std::string base;
     std::string overlay;
 };
@@ -354,7 +362,7 @@ splice_result splice_with(fixture const& f, std::size_t remainder, std::size_t f
         return r;
     }
     if (remainder != kNoFill) {
-        std::size_t const want = full - remainder / kBlock;
+        std::size_t const want = full - (remainder / kBlock);
         EXPECT_EQ(consume_blocks(slot, want), want) << f.name << " remainder " << remainder;
     }
     arm(m, nth);
@@ -363,8 +371,8 @@ splice_result splice_with(fixture const& f, std::size_t remainder, std::size_t f
     } catch (std::bad_alloc const&) {
         r.threw = true;
     }
-    r.injected =
-        m == fail_mode::every_call ? g_calls > 0 : (m == fail_mode::nth_call && g_calls >= nth);
+    r.injected = m == fail_mode::every_call ? hook().calls > 0
+                                            : (m == fail_mode::nth_call && hook().calls >= nth);
     arm(fail_mode::off);
     base.remove_child(scratch);
     if (!r.threw) {
@@ -515,7 +523,7 @@ TEST(OverlayPugiOomPositiveControl, TheHookSeesTheLibrarysPugixml) {
     arm(fail_mode::off);
     Dictionary const d = XmlLoader{}.load_with_overlay_from_string(base, overlay, mr());
     (void)d;
-    EXPECT_GT(g_calls, 0U) << "a clean overlay load never called the hook";
+    EXPECT_GT(hook().calls, 0U) << "a clean overlay load never called the hook";
 }
 
 TEST(OverlayPugiOomPositiveControl, AFailingHookMakesAnOverlayLoadThrowXmlOomError) {
@@ -584,7 +592,7 @@ void composition_sweep(fmt format) {
     };
     arm(fail_mode::off);
     (void)load();
-    std::size_t const clean = g_calls;
+    std::size_t const clean = hook().calls;
     ASSERT_GT(clean, 0U);
     for (std::size_t n = 1; n <= clean; ++n) {
         std::string thrown = "nothing thrown";
