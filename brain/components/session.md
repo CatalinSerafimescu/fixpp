@@ -52,6 +52,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/b41-563-564-measurement.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-verify.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
