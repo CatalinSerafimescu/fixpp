@@ -68,7 +68,9 @@ void expect_cause(std::filesystem::path const& overlay, std::string_view cause) 
 // The thunk's code for `overlay` over FIX44.xml; `*out` holds what it left.
 fixpp_error_t load(std::filesystem::path const& overlay, fixpp_dict_t** out) {
     *out = sentinel();
-    return fixpp_dict_load_from_xml_with_overlay(base_path().c_str(), overlay.c_str(), out);
+    auto const base_str = base_path().string();
+    auto const overlay_str = overlay.string();
+    return fixpp_dict_load_from_xml_with_overlay(base_str.c_str(), overlay_str.c_str(), out);
 }
 
 // ── The thunk ────────────────────────────────────────────────────────────────

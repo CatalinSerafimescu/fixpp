@@ -95,9 +95,10 @@ TEST(DictOverlayCapiW9Live, CustomDataValueReadsIntact) {
     ASSERT_TRUE(std::filesystem::exists(base_path())) << base_path();
     ASSERT_TRUE(std::filesystem::exists(overlay_path())) << overlay_path();
     fixpp_dict_t* dict = nullptr;
-    ASSERT_EQ(
-        fixpp_dict_load_from_xml_with_overlay(base_path().c_str(), overlay_path().c_str(), &dict),
-        FIXPP_ERR_OK);
+    auto const base = base_path().string();
+    auto const overlay = overlay_path().string();
+    ASSERT_EQ(fixpp_dict_load_from_xml_with_overlay(base.c_str(), overlay.c_str(), &dict),
+              FIXPP_ERR_OK);
     ASSERT_NE(dict, nullptr);
 
     fixpp_engine_t* acceptor_engine = nullptr;
