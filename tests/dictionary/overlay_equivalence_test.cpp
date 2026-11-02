@@ -486,12 +486,14 @@ TEST(OverlayEquivalenceW1Orch, MatchedFieldAndReferenceWithChildren) {
     std::string overlay = ot::read_file(orch("overlay.xml"));
     overlay = replace_once(overlay, R"(    <fixr:field id="11" name="ClOrdID" type="String" />)",
                            R"(    <fixr:field id="11" name="ClOrdID" type="String">
+      venue text
       <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
       <fixr:documentation>venue note</fixr:documentation>
       <fixr:venueExt />
     </fixr:field>)");
     overlay = replace_once(overlay, R"(        <fixr:fieldRef id="1" presence="required" />)",
                            R"(        <fixr:fieldRef id="1" presence="required">
+          venue text
           <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
           <fixr:venueExt />
         </fixr:fieldRef>)");
@@ -606,6 +608,39 @@ TEST(OverlayEquivalenceW1Qf, FieldsSuppliedToABaseWithoutFields) {
                        "created <fields>");
 }
 
+// The overlay creates <components>, with text in it, and a message refers to the
+// new component; the text is dropped.
+TEST(OverlayEquivalenceW1Qf, CreatedComponentsWithText) {
+    std::string const overlay = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='Heartbeat' msgtype='0' msgcat='admin'>
+   <component name='VenueBlock' required='N' />
+  </message>
+ </messages>
+ <components>
+  venue text<![CDATA[venue cdata]]>
+  <component name='VenueBlock'>
+   <field name='VenueTag' required='N' />
+  </component>
+ </components>
+ <fields>
+  <field number='9001' name='VenueTag' type='STRING' />
+ </fields>
+</fix>
+)";
+    std::string edited = insert_before(kQfBareBase, "  </message>",
+                                       {"   <component name='VenueBlock' required='N' />"});
+    edited = insert_before(edited, " </fields>",
+                           {"  <field number='9001' name='VenueTag' type='STRING' />"});
+    edited = insert_before(
+        edited, "</fix>",
+        {" <components>", "  <component name='VenueBlock'>",
+         "   <field name='VenueTag' required='N' />", "  </component>", " </components>"});
+    expect_overlay_row(fmt::quickfix_xml, kQfBareBase, overlay, edited,
+                       "   <component name='VenueBlock' required='N' />", {ids::kMessageFields.tag},
+                       "created <components> with text");
+}
+
 // A base whose <messages> is empty and whose header holds a group. The overlay adds
 // a message, so the merged walk visits the header and its group, and appends a
 // member to that group, which the base walk never visits.
@@ -690,6 +725,7 @@ TEST(OverlayEquivalenceW1Orch, CreatedComponentsContainer) {
     <fixr:field id="9003" name="VenueBlockA" type="String" />
   </fixr:fields>
   <fixr:components>
+    venue text
     <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>
     <fixr:component id="2003" name="VenueBlock">
       <fixr:annotation><fixr:documentation>venue note</fixr:documentation></fixr:annotation>

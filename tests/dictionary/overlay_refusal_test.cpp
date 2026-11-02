@@ -808,6 +808,8 @@ TEST(OverlayRefusalW3Xml, VersionMismatchOnAnAbsentEmptyOrMalformedNumber) {
                 "trailing junk");
     version_row("<fix type='FIX' major='-4' minor='4' servicepack='0'>\n", "major=\"-4\"",
                 "negative major");
+    version_row("<fix type='FIX' major='4x' servicepack='0'>\n", "minor=\"\"",
+                "malformed major, absent minor");
 }
 
 // Control: `servicepack` is optional and reads as 0, the base's value.
@@ -2257,6 +2259,25 @@ TEST(OverlayRefusalW3OrchPins, UnknownComponentAndGroupReferencesAreTheLoadersEr
     expect_refused_no_origin<orchestra_parse_error>(
         oprobe(orch_base_doc(), orch_overlay(extend_od("    <fixr:fieldRef id='x' />\n"))),
         {"missing/invalid <fixr:fieldRef> id attribute"}, "fieldRef id='x'");
+    expect_refused_no_origin<orchestra_parse_error>(
+        oprobe(orch_base_doc(), orch_overlay(extend_od("    <fixr:componentRef id='x' />\n"))),
+        {"missing/invalid <fixr:componentRef> id attribute"}, "componentRef id='x'");
+    expect_refused_no_origin<orchestra_parse_error>(
+        oprobe(orch_base_doc(), orch_overlay(extend_od("    <fixr:groupRef id='x' />\n"))),
+        {"missing/invalid <fixr:groupRef> id attribute"}, "groupRef id='x'");
+}
+
+// A referenced new group whose fixr:numInGroup id does not parse: the walk gives it
+// no tag and does not follow it; the loader refuses it.
+TEST(OverlayRefusalW3OrchPins, NewGroupWithAnUnparsableNumInGroupIdIsTheLoadersError) {
+    auto const p =
+        oprobe(orch_base_doc(),
+               orch_overlay(extend_od(oref("groupRef", 2099),
+                                      ogroups("  <fixr:group id='2099' name='VenueG'>\n"
+                                              "    <fixr:numInGroup id='x' />\n" +
+                                              oref("fieldRef", 79) + "  </fixr:group>\n"))));
+    expect_refused_no_origin<orchestra_parse_error>(
+        p, {"missing/invalid <fixr:numInGroup> id attribute"}, "numInGroup id='x'");
 }
 
 // A new group whose fixr:numInGroup names an undeclared field: the walk gives it no
@@ -3206,7 +3227,8 @@ constexpr kind kCells[] = {
      .orchestra =
          row("OverlayRefusalW3OrchPins.UnknownReferenceIsTheLoadersError "
              "OverlayRefusalW3OrchPins.UnknownComponentAndGroupReferencesAreTheLoadersError "
-             "OverlayRefusalW3OrchPins.NewGroupWithAnUndeclaredNumInGroupIsTheLoadersError")},
+             "OverlayRefusalW3OrchPins.NewGroupWithAnUndeclaredNumInGroupIsTheLoadersError "
+             "OverlayRefusalW3OrchPins.NewGroupWithAnUnparsableNumInGroupIdIsTheLoadersError")},
     {.name = "unknown field type (pin)",
      .xml = row("OverlayRefusalW3XmlPins.UnknownFieldTypeIsTheLoadersError"),
      .orchestra = row("OverlayRefusalW3OrchPins.UnknownFieldTypeIsTheLoadersError")},
