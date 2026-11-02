@@ -2849,10 +2849,10 @@ TEST(OverlayRefusalW3OrchBudget, LongestChainLoadsAtThePrediction) {
 // ── W-9's status-mapping rows (research R-5 step 2) ──────────────────────────
 //
 // The one status mapping both parses of an overlay call use (`throw_on_parse_failure`),
-// fed a failed parse result directly: no allocation-failure seam exists to make pugixml
-// report `status_out_of_memory` from a real parse. Each row asserts the exact dynamic
-// type, since `orchestra_parse_error` and both overlay errors derive from
-// `xml_parse_error`.
+// fed a failed parse result directly. A real parse that runs out of memory is the
+// standalone `dictionary_overlay_pugi_oom_test`'s, which installs pugixml's allocation
+// hook. Each row asserts the exact dynamic type, since `orchestra_parse_error` and both
+// overlay errors derive from `xml_parse_error`.
 
 // Runs the mapping on a result carrying `status`; the name of the type it threw.
 std::string thrown_type(pugi::xml_parse_status status, ov::source_format format) {

@@ -182,6 +182,25 @@ target_link_libraries(dictionary_table_view_pair_oom_test PRIVATE
 add_test(NAME dictionary_table_view_pair_oom_test COMMAND dictionary_table_view_pair_oom_test)
 set_tests_properties(dictionary_table_view_pair_oom_test PROPERTIES LABELS "426;dictionary")
 
+# ── 098-dialect-overlay: the overlay splice under a failing pugixml allocator ──
+# Standalone, not in the pure bucket: it installs pugixml's process-global
+# allocation hook ([const §VII.8]'s isolation-sensitive carve-out), from its own
+# main(), before any pugixml object exists.
+add_executable(dictionary_overlay_pugi_oom_test overlay_pugi_oom_test.cpp)
+target_link_libraries(dictionary_overlay_pugi_oom_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+)
+target_include_directories(dictionary_overlay_pugi_oom_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
+target_compile_definitions(dictionary_overlay_pugi_oom_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\"")
+add_test(NAME dictionary_overlay_pugi_oom_test COMMAND dictionary_overlay_pugi_oom_test)
+set_tests_properties(dictionary_overlay_pugi_oom_test PROPERTIES LABELS "098;dictionary")
+
 # ── 074-orchestra-native-reader: native Orchestra reader test bucket ─────────
 # Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra";
 # selected by `ctest -L orchestra`. NO gtest_discover_tests. pugixml is unioned

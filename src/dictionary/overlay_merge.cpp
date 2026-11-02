@@ -200,6 +200,41 @@ template <class KeyFn>
     return s;
 }
 
+// The splice adds to the base document through these three, never through pugixml's
+// mutators directly. pugixml reports a failed allocation by a null handle or `false`,
+// and its named mutators (`append_child(name)`, `append_attribute(name)`) discard
+// `set_name`'s result, so a name that does not fit leaves a live, nameless node or
+// attribute in the tree, which both loaders, looking names up, skip. So each step is
+// checked here; `set_name` and `set_value` on a null handle return false. A failure is
+// `std::bad_alloc`, which the entry point turns into `xml_oom_error`; what was already
+// appended stays in `base`, the per-call document the throw discards. Witnessed by
+// tests/dictionary/overlay_pugi_oom_test.cpp.
+pugi::xml_node append_element(pugi::xml_node parent, char const* name) {
+    pugi::xml_node n = parent.append_child(pugi::node_element);
+    if (!n.set_name(name)) {
+        throw std::bad_alloc();
+    }
+    return n;
+}
+
+void append_named_attribute(pugi::xml_node n, char const* name, char const* value) {
+    pugi::xml_attribute a = n.append_attribute("");
+    if (!a.set_name(name) || !a.set_value(value)) {
+        throw std::bad_alloc();
+    }
+}
+
+// Sets `n`'s attribute `name` to `value`, appending the attribute when absent.
+void set_attribute(pugi::xml_node n, char const* name, char const* value) {
+    if (pugi::xml_attribute a = n.attribute(name)) {
+        if (!a.set_value(value)) {
+            throw std::bad_alloc();
+        }
+        return;
+    }
+    append_named_attribute(n, name, value);
+}
+
 // Deep copy of an overlay element into `parent`, appended after its last child:
 // element children and attributes only (the classifier drops non-element overlay
 // nodes), and of those only the ones `keep` admits, each with its subtree.
@@ -215,15 +250,9 @@ void copy_element_if(pugi::xml_node parent, pugi::xml_node src, Keep const& keep
     while (!stack.empty()) {
         item it = stack.back();
         stack.pop_back();
-        pugi::xml_node d = it.dst_parent.append_child(it.src.name());
-        if (!d) {
-            throw std::bad_alloc();
-        }
+        pugi::xml_node const d = append_element(it.dst_parent, it.src.name());
         for (pugi::xml_attribute a : it.src.attributes()) {
-            pugi::xml_attribute da = d.append_attribute(a.name());
-            if (!da || !da.set_value(a.value())) {
-                throw std::bad_alloc();
-            }
+            append_named_attribute(d, a.name(), a.value());
         }
         // Pushed in reverse, so each parent receives its children in order.
         for (pugi::xml_node c = it.src.last_child(); c; c = c.previous_sibling()) {
@@ -1332,13 +1361,7 @@ void xml_overlay_merge::impl::splice() {
             auto [o, b] = stack.back();
             stack.pop_back();
             if (attr_of(o, "required") == "Y" && attr_of(b, "required") != "Y") {
-                pugi::xml_attribute a = b.attribute("required");
-                if (!a) {
-                    a = b.append_attribute("required");
-                }
-                if (!a || !a.set_value("Y")) {
-                    throw std::bad_alloc();
-                }
+                set_attribute(b, "required", "Y");
             }
             for (pugi::xml_node const c : appended_of(o)) {
                 copy_element(b, c);
@@ -2234,13 +2257,7 @@ void orchestra_overlay_merge::impl::splice() {
             auto [o, b] = stack.back();
             stack.pop_back();
             if (attr_of(o, "presence") == "required" && attr_of(b, "presence") != "required") {
-                pugi::xml_attribute a = b.attribute("presence");
-                if (!a) {
-                    a = b.append_attribute("presence");
-                }
-                if (!a || !a.set_value("required")) {
-                    throw std::bad_alloc();
-                }
+                set_attribute(b, "presence", "required");
             }
             for (pugi::xml_node const c : appended_of(o)) {
                 copy_element_if(b, c, keep);
