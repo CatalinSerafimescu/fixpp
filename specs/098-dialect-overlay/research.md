@@ -397,7 +397,7 @@ derivation it does not have. Fixed constants in `src/dictionary/`, no configurat
 throws `overlay_limit_error`.
 
 The base path is not hardened (spec FR-011): the caps apply to the overlay document; the cycle check and
-the budget cover the merged graph, and so cover the base's own graph only on the overlay path.
+the budget cover the merged graph. The cycle check therefore covers the base's own graph too, but only on the overlay path; the budget bounds only the overlay's increase over the base's own expansion, never the base's own expansion.
 
 ## R-6 — Errors
 
