@@ -166,10 +166,26 @@ add_executable(session_pure_tests
   test_098_dialect_overlay_inbound_base.cpp                             # 098 T004a (W-5 base)
   test_098_dialect_overlay_inbound.cpp                                  # 098 T042 (W-5)
   test_098_header_send.cpp                                              # 098 T005 (W-6)
+  test_099_routing_shapes.cpp                                           # 099 T008 (W-1)
+  test_099_version_fields.cpp                                           # 099 T009 (W-2)
+  test_099_session_overlay.cpp                                          # 099 T010 (W-3)
+  test_099_active_refusals.cpp                                          # 099 T011 (W-4)
+  test_099_establishment.cpp                                            # 099 T012 (W-5)
+  test_099_validation_off.cpp                                           # 099 T013 (W-6)
+  test_099_dispatch_sites.cpp                                           # 099 T014 (W-7)
+  test_099_config_check.cpp                                             # 099 T015 (W-8)
+  test_099_establishment_admission.cpp                                  # 099 T016 (W-9)
+  test_099_scan_sites.cpp                                               # 099 T017 (W-19)
+  test_099_msg_type_default.cpp                                         # 099 T018 (W-25, first cell)
+  test_099_resolved_version.cpp                                         # 099 T019 (W-10, non-FIXT)
   $<TARGET_OBJECTS:session_test_support>
 )
+# 099 W-5's reconnect cells drive drive_reconnect() through MockReconnectFactory, in that TU only.
+set_source_files_properties(test_099_establishment.cpp PROPERTIES
+  COMPILE_DEFINITIONS FIXPP_ALLOW_MOCK_TRANSPORT)
 target_link_libraries(session_pure_tests PRIVATE
   fixpp_session
+  fixpp_capi   # 099 W-3 (f): a clone of a view a Session dispatched, through fixpp_msg_clone
   fixpp_mock_clock
   fixpp_transport
   fixpp_tls
