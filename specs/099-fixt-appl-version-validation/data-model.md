@@ -46,9 +46,11 @@ Registering a `vt11` dictionary no longer drops it. `get()` is unchanged: a `vt1
 
 ## E-3 `Dictionary::as_table_view(fixt_framing)` (public overload)
 
-Adds the framing surface for v40–v44. `v50`, `v50sp1` and `v50sp2` have it already. `vt11` and FIX Latest declare those tags themselves, and stay as `as_table_view()` builds them. `as_table_view()` is unchanged, so a non-FIXT session is unchanged.
+Adds the framing surface for v40–v44. `v50`, `v50sp1` and `v50sp2` have it already. `vt11` and FIX Latest declare those tags themselves, and get no framing surface. `as_table_view()` is unchanged, so a non-FIXT session is unchanged.
 
-**Preservation contract.** The result equals `as_table_view()`'s on every store but `fixt_framing_tags_` and `fixt_framing_types_`. Every form bumps `as_table_view_call_count`.
+**NoHops's structure (FR-007).** On a table whose own header does not declare NoHops (`is_header_tag(627)` false), the overload also registers its group metadata in the bare store: `set_group_first(627, 628)` and members 629 and 630, none required. No validator branch and no envelope: `validate_group_level` and `consume_group` ask `group_first_field`, `group_member_tags` and `group_required_members`, each of which falls to the bare store on a context miss, and `set_group_first` sets the bit their pre-filter tests (read from `table_view.hpp` and `validator.hpp`). So one ending on every route and shape: count high or missing delimiter `R 1/628 <third>` stays c, what T and L answer today where a table declares it (research R-4). `dict_hooks::for_table_view`'s group callbacks read the same accessors, so the delivered view's `group(627)` answers there too, with or without validation: read, not run. On shape A that is new with validation off (FR-011, B-row). `get(628)` reads the offset table and does not change. A header group an overlay adds to S is not composed (L-row).
+
+**Preservation contract.** The result equals `as_table_view()`'s on every store but `fixt_framing_tags_`, `fixt_framing_types_` and, where the paragraph above applies, 627's entries in `group_first_` and `group_members_` and its bit in `group_bits_`. Every form bumps `as_table_view_call_count`.
 
 **`as_table_view(fixt_framing, span<const length_data_pair> extra)`** also registers `extra` through `table_view_builder::set_length_pair_data_tag`, after the dictionary's own pairs and before the table is sealed. So S's pair wins a collision on that table, and its result differs from the plain overload only in the two pair stores and `has_nonstandard_pair()`. `dict::header_length_pairs(const Dictionary&)` answers S's header pairs, at configuration time only.
 
@@ -76,13 +78,14 @@ Still holds its table by value, with the same constructor and `noexcept` specifi
 
 **Readers.**
 
-- `dict::reify`: takes the byte when it is set, and only then reads 1128 and the profile, as today. A view no session wrote is `Unknown`, so a non-session caller and a non-FIXT session are unchanged. `version_profile` stays 4 bytes and carries no per-MsgType default.
+- `dict::reify`: when the byte is set, returns `{application, vt11, byte}` and reads neither 1128 nor the profile. Otherwise it reads 1128 and the profile, as today. A view no session wrote is `Unknown`, so a non-session caller and a non-FIXT session are unchanged. `version_profile` stays 4 bytes and carries no per-MsgType default.
 - C: `fixpp_msg_version`, E-8. Python: `msg_version`, returning the three values.
 
-**Against `dict::reify`'s own answer.** Equal whenever the byte is set, by the rule above. Two splits remain on a non-validating session, each with a W-6 cell and a B-row, because the byte is `Unknown` there and `reify` falls through to the profile:
+**Against `dict::reify`'s own answer.** Equal in all three bytes whenever the byte is set, by the rule above, whatever profile the caller passes. Three splits remain on a non-validating session, each with a W-6 cell and a B-row, because the byte is `Unknown` there and `reify` falls through:
 
 - an empty `1128=`: `reify` passes the empty value to the resolver, whose rule means "use the default";
-- an initiator's reconnect whose reply has no 1137 it can resolve: `route_negotiated_` is `Unknown`, while `negotiated_version_profile()` keeps the previous value, so a `reify` with that profile labels the frame with the previous connection's version. The split follows from ruling 1, which keeps that accessor's writes.
+- an initiator's reconnect whose reply has no 1137 it can resolve: `route_negotiated_` is `Unknown`, while `negotiated_version_profile()` keeps the previous value, so a `reify` with that profile labels the frame with the previous connection's version. The split follows from ruling 1, which keeps that accessor's writes;
+- an unknown 1128, such as `1128=99`: the accessor is `Unknown`, and `reify` returns `dict_unknown_appl_ver_id` and no handle.
 
 ## E-6 Session state (internal)
 
@@ -144,7 +147,7 @@ A refusal is acted on only by a validating session. A non-validating session use
 | Step | Arm | What it does |
 |---|---|---|
 | **S1** | NotConnected, LogonSent | `route.application \|\| hdr.msg_type != hdr.fault_ref_msg_type` → Disconnected, nothing sent. It reads the third field: `interpret_logon` reads the last 35, so it could not refuse `D…A` carrying Logon fields |
-| **S2** | same | Today's 3/5 exemption, then the gate on `transport_route_`. On a Logon (`hdr.msg_type == "A"`), a Reject whose `ref_tag_id` is 1137 or 1130 → emit it, then `disconnect_unless_superseded_`. Any other Reject stays in the arm, as today |
+| **S2** | same | Today's 3/5 exemption, then the gate on `transport_route_`. On a Logon (`hdr.msg_type == "A"`), a Reject whose `ref_tag_id` is 1137, 1130 or 372 → emit it, then `disconnect_unless_superseded_`. Any other Reject stays in the arm, as today |
 | **S3** | same | Today's `interpret_logon` with the transport route's hooks, then the arm's guards in today's order. The 1137 block: acceptor as today, after `check_inbound` and mTLS. **The initiator gains it right after `check_inbound`, ahead of the 141=Y reset unit and mTLS**: absent 373=1, empty, unparseable or `app_version_registry_->get` failing 373=5, Reject 371=1137, disconnect. The test is the acceptor's, the registry and not the slot, so one input has one ending by role. At today's record site a `141=Y` reply with a bad 1137 would durably reset both stores and then be refused. **Both blocks then read E-10's entries** and refuse as it says. Today's record stays where it is, and also writes `msg_type_defaults_`. A non-validating initiator records as today |
 | **A1** | LogonReceived, Active | `hdr.msg_type != hdr.fault_ref_msg_type` → Reject 371=35, 373=13 if the second 35 is in the header, else 14. Ahead of the 3/5 exemption |
 | **A2** | same | `route.refusal` → Reject 371=1128, 373=4 for `empty_value`, else 5 |
@@ -223,7 +226,7 @@ What moved, from the table above: T's and A's Reject-and-stay on an application 
 | A `toApp` view on FIXT | by 35 | `vt11` | `FIXPP_APPL_VER_UNKNOWN`: no session wrote it |
 | Tag 8 absent | all zero, `FIXPP_ERR_TAG_NOT_FOUND`, as today | | |
 
-Every row but the last two has a W-10 cell comparing with `dict::reify(...).version()`. Constant values are the enums' own, so the conversion is identity; static assertions pin it. Wire values do not coincide with them.
+**Against `dict::reify(...).version()`,** on the rows a delivered frame can reach, each with a W-10 cell. A FIXT application message with the byte set, and a clone or reify view of one: all three bytes equal, whatever the profile, because `reify` reads none there (E-5). A FIXT admin message and both non-FIXT rows, where the byte is `Unknown`: `session` from `reify` is still the caller's profile's, as today, so W-10 passes a profile naming the frame's own version. Given `{Unknown, Unknown}`, what `negotiated_version_profile()` returns before a version is negotiated, `reify` says `session` `Unknown` on an admin message where the getter says `vt11` (read from source). That differs in `session` alone, and no research R-16 condition rests on it. No comparison on the other rows: the unresolved row is E-5's splits, and W-10 asserts the literal on the rest. Constant values are the enums' own, so the conversion is identity; static assertions pin it. Wire values do not coincide with them.
 
 ## E-9 Check helper
 
@@ -233,30 +236,48 @@ Every row but the last two has a W-10 cell comparing with `dict::reify(...).vers
 
 ```text
 msg_type_default { char msg_type[8]; uint8_t len; application_version version; }
-msg_type_defaults_  std::vector<msg_type_default>, sorted by MsgType, at most 256
+msg_type_defaults_  std::vector<msg_type_default>, sorted by MsgType, at most 256, reserved in open()
 ```
 
-Empty on a non-FIXT session and on most FIXT ones, so step 6 costs a size test. A lookup is a binary search over bytes, no heap. Written at today's record site, in each role, on every Logon, cleared first. 256 exceeds every vendored dictionary's message count, which W-25 recomputes.
+Empty on a non-FIXT session and on most FIXT ones, so step 6 costs a size test. A lookup is a binary search over bytes, no heap. **Storage:** `open()`, on the FIXT branch beside the route adoption, calls `reserve(256)`, caught as the build is, so a failure is FR-028's `out_of_memory`. One block per FIXT session, the shape of B-544-3, and `clear()` keeps it, so no Logon grows it. On an Engine route `open()` runs in the role loop, whose failure branch logs it (research R-2). Written at today's record site, in each role, on every Logon that reaches it, cleared first. S3's block reads the group and stores nothing, so a Logon it refuses leaves the entries as they were: selection reads them only outside the establishment arms, and the next Logon that reaches the record site clears them. 256 exceeds every vendored dictionary's message count, which W-25 recomputes.
 
-**`scan_logon_msg_type_defaults(frame, hooks, out)`** in `src/session/logon_msg_type_defaults.hpp`, with the transport route's hooks, so a Data field is not read as a group member. `interpret_logon` is not changed. After 384 an entry starts at each 372 and ends at the next 372 or at the first tag outside 385, 1130, 1406, 1131, 1410. An entry counts when 385 is `S` and 1410 is `Y`. Its fields may come in any order. Admin RefMsgTypes are ignored, because admin frames take the transport route. 1406 and 1131 are ignored. 1130 absent: the entry sets no default.
+**`scan_logon_msg_type_defaults(frame, hooks, out)`** in `src/session/logon_msg_type_defaults.hpp`, with the transport route's hooks, so a Data field is not read as a group member. `interpret_logon` is not changed. **One rule, validating or not.** It reads 384. Absent or not a positive integer, there are no entries. Otherwise it consumes at most that many contiguous instances, each starting at a 372 and ending at the next 372 or at the first tag outside 385, 1130, 1406, 1131, 1410, and it stops at the first non-member. A later 372 is not an entry. An instance's other fields may come in any order. An entry **counts** when 385 is `S` and 1410 is `Y`. Admin RefMsgTypes are ignored, because admin frames take the transport route. 1406 and 1131 are ignored. 1130 absent: the entry sets no default. **The record site keeps** each counted entry whose 1130 parses and whose 372 fits and is an application message, within the first 256 counted; a later entry for one MsgType wins.
 
-**Endings, validating FIXT, either role, at S3's block unless named.** Cells are `MT-` plus a letter; W-25 walks them on T, A and L.
+**Endings, validating FIXT, either role.** S3's block, after 1137's, walks the entries the scan consumed, in frame order, and the first fault answers, one ending each, `R x/tag A` `Disc` c. Within an entry, in this order:
 
-| Cell | Entry, with 385=S and 1410=Y | T, A | L, whose ApplVerID code set is closed |
+1. no 385: `1/385`;
+2. a non-empty 1130 the resolver cannot parse, whatever its 385 and 1410: `5/1130`;
+3. a counted entry with an empty 1130, or one `app_version_registry_->get` fails, the test 1137 takes: `5/1130`;
+4. the entry is the 257th counted, before de-duplication: `5/384`;
+5. a counted 372 over eight bytes: `5/372`.
+
+The gate runs first, in dictionary order, as owner item 3 has it for a double fault. A gate Reject naming 1130 or 372 on a Logon disconnects through S2, with NextNumIn kept, and any other tag it names stays. So `5/1130` and `5/372` are k on a gate path and c on a block path, observable only on an initiator's reconnect: item 3's ruled split, which FR-031 reaches. W-25 pins both.
+
+Cells are `MT-` plus a letter; W-25 walks them on T, A and L.
+
+| Cell | Entry, with 385=S and 1410=Y unless it says otherwise | T, A | L, whose ApplVerID and MsgType code sets are closed |
 |---|---|---|---|
 | `MT-a` | `372=D\|1130=10` | Active; a NOS with no 1128 takes FIX Latest's slot | same |
 | `MT-b` | `1130=99`, `abc` | `R 5/1130 A` `Disc` c | gate: `R 5/1130 A` `Disc` k (S2) |
-| `MT-c` | `1130=4`, no dictionary; or empty | `R 5/1130 A` `Disc` c | `4`: as T. Empty: the validator's answer on a value with no content, literal from the first run |
+| `MT-c` | `1130=4`, no dictionary; or empty | `R 5/1130 A` `Disc` c | same |
 | `MT-d` | no 1130 | Active; 1137 answers | same |
-| `MT-e` | 257 entries | `R 5/384 A` `Disc` c | same |
-| `MT-f` | a 372 over 8 bytes | `R 5/372 A` `Disc` c | gate first if the code set refuses it: stays, as any other tag it names |
+| `MT-e` | 257 entries: 257 copies of `372=D`, and on T and A also 257 distinct MsgTypes | `R 5/384 A` `Disc` c | same |
+| `MT-f` | a 372 over 8 bytes | `R 5/372 A` `Disc` c | gate: `R 5/372 A` `Disc` k (S2) |
 | `MT-g` | `372=0` with a good 1130 | Active; ignored | same |
 | `MT-h` | two entries for `D` | Active; the later wins | same |
-| `MT-i` | 385=R or 1410=N, or no 1410, `1130=99` | Active; ignored | gate: `R 5/1130 A` `Disc` k, because L's dictionary judges every entry. Disclosed |
+| `MT-i` | 385=R or 1410=N, or no 1410, `1130=99` | `R 5/1130 A` `Disc` c | gate: `R 5/1130 A` `Disc` k (S2) |
+| `MT-j` | 385=R or 1410=N, or no 1410; `1130=10`, `4` or empty | Active; ignored | same |
+| `MT-k` | no 385 | `R 1/385 A` `Disc` c | same |
+| `MT-l` | `384=0`, `384=-1` or no 384, then an entry with `1130=10` | Active; no entries, 1137 answers | same |
+| `MT-m` | `384=1`, an entry for `D` with `1130=9`, `553=u`, an entry for `D` with `1130=10` | Active; the first answers | same |
+| `MT-n` | `384=2` with one entry; `384=1` with two | gate: `R 1/372 A` `Disc` k (S2) | same |
+| `MT-o` | 312 entries with no 1130 and no 1410 | Active; none counts | same |
 
-A group the gate faults, a count mismatch for one, draws the gate's Reject and stays, as any other tag it names. **Not validating:** the entry is kept if its 1130 parses, and step 6's slot miss uses S; otherwise it is ignored; beyond the cap, ignored; the session establishes.
+**What is measured.** The gate's answers, through a real `Session`, 2026-11-03 (the loop 2 round 1 review's `s dictionaries mtz`), with S the edited file and on L: it passes `MT-a`, `MT-c`'s empty value, `MT-e`, `MT-k`, `MT-l`, `MT-m`, `MT-o`, and on T `MT-f` and `MT-i`; it answers `MT-n` `R 1/372 A`, and on L `MT-f` `R 5/372 A` and `MT-i` `R 5/1130 A`, each staying today. A is T by its transport dictionary, not run. S2's disconnect on 1130 and 372, and every ending of the block, are design: no code exists. W-25 runs them first.
 
-**`FIXT11.xml`** gains, on Logon, `<group name='NoMsgTypes'>` with 372, 385, 1130, 1406, 1131 and 1410, and field definitions for 384, 385 and 1410. Nothing else. A dictionary an operator supplies without the group keeps refusing such a Logon on 384. FR-003's check does not require it.
+**Not validating:** the same scan, and nothing refuses, so the session establishes. An entry with no 385 does not count. Step 6's slot miss uses S.
+
+**`FIXT11.xml`** gains, on Logon, `<group name='NoMsgTypes'>` with 372, 385, 1130, 1406, 1131 and 1410, every member `required='N'` as Orchestra's are, and field definitions for 384, 385 and 1410: 384 and 385 after 383, and 1410 directly before 1409, so that 1409 stays the last field (research R-17). Nothing else. A dictionary an operator supplies without the group keeps refusing such a Logon on 384. FR-003's check does not require it.
 
 ## State transitions
 

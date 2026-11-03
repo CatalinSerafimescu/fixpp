@@ -10,6 +10,12 @@
 - Round 2 applied 2026-11-03: Codex P1=3 P2=3 P3=0; Opus post-judging P1=3 P2=1 P3=7. Reviews: research/G19-fix-fpml-iso20022/research/reviews/codex_099-fixt-appl-version-validation_gate_a_2_review.md, research/G19-fix-fpml-iso20022/research/reviews/opus_099-fixt-appl-version-validation_gate_a_2_adversarial_review.md.
 - Round 3 exhausted the first loop 2026-11-03: Codex P1=2 P2=3 P3=0; Opus post-judging P1=0 P2=2 P3=8. Reviews: research/G19-fix-fpml-iso20022/research/reviews/codex_099-fixt-appl-version-validation_gate_a_3_review.md, research/G19-fix-fpml-iso20022/research/reviews/opus_099-fixt-appl-version-validation_gate_a_3_adversarial_review.md.
 - The owner chose to re-run `/clarify` and `/plan`, ruled every sign-off item, and this plan applies round 3's residuals. Loop 2 starts from this commit.
+- Loop 2 round 1 applied 2026-11-03: Codex P1=2 P2=8 P3=2; Opus post-judging P1=0 P2=2 P3=7; rewrite addresses root causes RC#1, RC#2, RC#3, RC#4, RC#5. Reviews: research/G19-fix-fpml-iso20022/research/reviews/codex_099-fixt-appl-version-validation_gate_a_l2r1_review.md, research/G19-fix-fpml-iso20022/research/reviews/opus_099-fixt-appl-version-validation_gate_a_l2r1_adversarial_review.md.
+
+### Loop 2 round 1 — disagreements
+
+- **Codex 1's extension of W-16 to a first and a reconnect Logon: not applied.** The Logon arm allocates at `c0a828ef` for reasons unrelated to this feature, so that cell would be RED regardless. Measured (`s dictionaries alloc`, that round's review), one frame: a Heartbeat 3 `operator new` calls, an acceptor Logon 5, an initiator Logon 4, a Logon with a 40-byte 553 6; the extra is the harness's capture, the mock clock's sleeper node, and a `std::string` in `on_inbound_not_connected_`. The shipped scope starts at the first Active (L-093-13, B-544-1). Its other half, the false cost sentence in NFR-002, is applied: `reserve` in `open()`.
+- **Codex 7's repeated-35 point: not applied.** Not a defect. E-8's "the view's 35" can only mean `get`, which is first-wins, and `reify` reads `view.get<35>()`. On `0…D` both say admin with `Unknown`. A clone and a reify parse the same bytes the same way, so they agree too.
 
 ## Summary
 
@@ -31,7 +37,7 @@ Decisions and rejected alternatives: [research.md](./research.md). Shapes: [data
 
 **Project Type**: library.
 
-**Performance Goals**: non-FIXT inbound and validate within the paired band, by W-22. No per-message heap on FIXT, by W-16 and W-25.
+**Performance Goals**: non-FIXT inbound and validate within the paired band, by W-22. No per-message heap on FIXT, by W-16.
 
 **Constraints**: non-FIXT behaviour byte-identical. C ABI additive except `fixpp_msg_version`. M validators for N sessions on M distinct route tables, by W-15.
 
@@ -59,7 +65,7 @@ Derived from the articles a parser-touching change on the session path triggers,
 | **`[const §XII.9]`** | **Security-affecting.** Owner item 3 changes the initiator's 1137-vs-mTLS order on a direct-constructed session: a bad 1137 from an off-list identity draws a Reject and no authorization event. On an Engine route the reconnect step refuses the identity first. The same four controls | **Sign-off pending** |
 | `[const §XIII.3]` | the role loop's new log line is outside session scope, on a bare strand, so it reads `co_await fixpp::current_trace_context`, as that clause requires of such a path | Tasks |
 | `[const §XIV.2]` | `Validator` keeps five pure virtuals; the additions are non-virtual, on `dictionary_driven_validator` | Pass |
-| `[const §XV.1]`, `[const §XV.9]` | no per-message heap; no `std::mutex` and no lock anywhere | W-16, pass |
+| `[const §XV.1]`, `[const §XV.9]` | no per-message heap, in the scope L-093-13 and B-544-1 state: from the first Active, so a Logon is outside it and E-10's storage is reserved in `open()` regardless; no `std::mutex` and no lock anywhere | W-16, pass |
 | `[const §XV.13]` | hybrid dictionary model unchanged; S stays authoritative for its version | Pass |
 | `[const §XVI.3]`, `[const §XVI.4]` | `/clarify` ran before this plan; `/analyze` after tasks | Pass, tasks |
 | `[const §XVI.6]` | the orchestrator writes no library code; `phase-implementer` does. Mutants in a separate worktree | Tasks |
@@ -78,7 +84,7 @@ specs/099-fixt-appl-version-validation/
 └── checklists/requirements.md
 
 dictionaries/FIXT11.xml, dictionaries/README.md   (FR-032)
-include/fixpp/dict/{version_registry,version_profile,dictionary}.hpp
+include/fixpp/dict/{version_registry,version_profile,dictionary,reify}.hpp
 include/fixpp/wire/{validator,parser}.hpp
 include/fixpp/session/{session,session_config,engine}.hpp
 include/fix/c_api/{session,engine,message,dict,version}.h
@@ -92,7 +98,8 @@ tests/session/test_099_*.cpp, tests/capi/capi_099_*, tests/config/test_099_*
 tests/capi/message_read_test.cpp   (research R-17, the declared break)
 tests/support/session_test_access.hpp
 tests/session/{test_fixt_logon_establishment,unparseable_frame_disposition_test}.cpp   (research R-17)
-tests/codegen/read_tier_byte_diff_test.cmake   (research R-17, vt11 hashes)
+tests/codegen/{read_tier_byte_diff_test.cmake,test_082_class_xml_consistency_test.cpp}, specs/003-dictionary-codegen/contracts/golden/vt11_Messages.golden.hpp   (research R-17, FR-032's edit)
+tests/dictionary/{reused_tag_census_test,xml_enum_codeset_test,required_scope_census_test}.cpp, tools/quickfix_required_golden/{golden,golden_groups}.csv   (research R-17, FR-032's edit)
 tests/perf/   (W-16)  tests/dictionary/   (W-17, W-21)
 tests/abi/golden/fixpp_capi_symbols.txt, tests/capi/version_test.cpp, tools/capi_freeze.sha256   (research R-11's recipe)
 tests/fuzz/{fuzz_session_recovery_admin_parse,fuzz_wire_validator}.cpp, tests/fuzz/corpus/{session_recovery_admin_parse,wire_validator}/   (W-24)
@@ -104,13 +111,15 @@ spec/, brain/, parent trackers
 
 `src/capi/session.cpp` stays out: `register_session` is the change, and its existing `translate` returns the refusal. `src/session/admin_messages.cpp` stays out: `interpret_logon` already takes hooks, and the group has its own scan.
 
+Comments the design falsifies, corrected with the code: `include/fixpp/dict/reify.hpp`'s and `src/dictionary/reify.cpp`'s resolution order; `include/fix/c_api/message.h`'s paragraph naming `fixpp_msg_version`'s `appl_ver_id` member, and its declaration's "tag 8 + optional tag 1137".
+
 ## Phases
 
-1. **Dictionary and validator** (E-1a, E-2, E-3, E-4): FR-032's `FIXT11.xml` edit and README; the vt11 hashes; W-17, W-21's unit half; the existing validator tests stay green; W-3's unit half; `validator_bench`.
+1. **Dictionary and validator** (E-1a, E-2, E-3, E-4): FR-032's `FIXT11.xml` edit and README; research R-17's inventory for it; W-17, W-21's unit half; the existing validator tests stay green; W-3's unit half; `validator_bench`.
 2. **Route set and check** (E-1, E-9), the `{d, S}` tables, `Engine::start()` and its comments in `engine.hpp`, `src/session/engine.cpp` and `src/capi/engine.cpp`, `session_engine_access::adopt_routes`, `register_session`, `open()`, the role loops' log line and its `format_registry.cpp` entry: W-8, W-15, W-20.
 3. **Peek and selection** (E-6, E-7): W-21.
 4. **Arms**: scan; S1 to S3; A1 to A3; dispatch (R-7, E-7); the test changes of research R-17: W-1 to W-7, W-9, W-16, W-19. **W-24's two fuzz arms and their seeds.**
-5. **Message Type Default** (E-10), selection's step 6, the block, `reify` taking the byte: W-25.
+5. **Message Type Default** (E-10), `open()`'s reservation, selection's step 6, the block, S2's list, `reify` taking the byte: W-25.
 6. **Accessor** (E-5), including clone and reify: W-10. Outbound pin: W-11.
 7. **C ABI, Python, TOML** (E-8), research R-11's inventory and the break's four bullets, the `tools/capi_freeze.sha256` refresh: W-12, W-13, W-14. **Apply the `Updated (099-…)` notes of research R-11 to `.specify/2b-wire.md` and `2c-codegen.md`, and the three symbols, the constants and the break to `2i-capi.md` and `api-contract.md`.**
 8. **Live cell**: W-18. Bench: W-22.
@@ -126,20 +135,20 @@ Each item is ruled, on 2026-11-03, in spec.md's last Clarifications session. Wha
 |---|---|---|---|
 | 1 | Live cell | One peer-to-fixpp 35=BN, no republish first | A republish, if needed, returns to the owner |
 | 2 | Application or mismatched frame before Logon | Disconnect, nothing sent | FR-009, FR-025, FR-026's Rejects do not apply in the two establishment arms. Departs from C++'s Reject on an invalid frame, and from J's silent wait |
-| 3 | 1137 order | Gate first; a gate Reject naming it on a Logon disconnects; the initiator gains the block | A double fault follows dictionary order. An absent 1137 plus an undeclared tag draws a Reject naming that tag and stays until the Logon timeout. `99` and `abc` keep NextNumIn on L and consume it on T and A. On a direct-constructed initiator a bad 1137 from an off-list identity draws a Reject: `[const §XII.9]` |
+| 3 | 1137 order | Gate first; a gate Reject naming it on a Logon disconnects; the initiator gains the block | A double fault follows dictionary order. An absent 1137 plus an undeclared tag draws a Reject naming that tag and stays until the Logon timeout. `99` and `abc` keep NextNumIn on L and consume it on T and A. The same holds for 1130 and 372, through FR-031: a gate Reject naming either on a Logon disconnects and keeps NextNumIn, and the block's consumes it. On a direct-constructed initiator a bad 1137 from an off-list identity draws a Reject: `[const §XII.9]` |
 | 4 | Registration | `Engine::register_session` refuses a validating FIXT session failing the check, as `open()` does | Adds to ruling 2's wording |
 | 5 | Non-validating bad config | Refused at `open()` only, logged | An Engine host gets a log line, not a return value (L-row) |
 | 6 | `fixpp_msg_version` | `[2i §4.6]`'s three bytes, a declared break, no separate getter | Narrows ruling 3's "additive" for that symbol |
 | 7 | Overlay's header pair on another route | Honoured, as QuickFIX | A route table per (S with a header pair, other dictionary); S's pair wins a collision (B-row) |
 | 8 | Message Type Default | Implemented, inbound | Beyond every QuickFIX engine. No live cell can witness it. Not implemented: fixpp's own Logon declaring defaults, `385=R`, 1406, 1131 (L-row) |
-| 8a | `FIXT11.xml` | The group and three fields added, nothing else | "Verbatim" gets a stated exception; vt11 hashes republished |
+| 8a | `FIXT11.xml` | The group and three fields added, nothing else | "Verbatim" gets a stated exception. Measured by mutation (research R-17): six of 56 test binaries pin the file, a spec-owned golden and a QuickFIX-derived golden among them, five with the placement chosen there (expected, not run), plus the vt11 hashes. Each fails loudly on the first run, and adopting J's whole file would trip the same pins |
 | 9 | Repeated MsgType | Reject in LogonReceived and Active | A non-validating session keeps the split, and `D…A` with Logon fields still establishes it; LogoutSent takes `D…5` as the reply; a non-FIXT validating session keeps it (to file) |
 | 10 | 1128 past the header | Reject 373=14, 371=1128 | A dictionary declaring 1128 in a body would be false-rejected; none vendored does, and W-4 recomputes that |
 | 11 | Partial session dictionary | Refused unless `FIXT11.xml` is registered | Ruling 2's wording read strictly; research R-17's tests change |
 | 12 | Who judges a routed frame's header | S, every tag it declares except 35, 1128, 1129, 1156 | Matches QuickFIX on T |
 | 12a | A header tag S declares, past the body | Judged by S and passes | Departs from QuickFIX's 373=14 (B-row) |
 
-Choices made in the design and not put to the owner, each following a ruling or the standard's text: research R-19's list for Message Type Default, and research R-20's scope and collision rule for the pair.
+Choices made in the design and not put to the owner, each following a ruling or the standard's text: research R-19's list for Message Type Default, research R-20's scope and collision rule for the pair, and research R-4's NoHops metadata, which keeps today's answer on T and L.
 
 For the owner's information, consequences of the design, not choices:
 

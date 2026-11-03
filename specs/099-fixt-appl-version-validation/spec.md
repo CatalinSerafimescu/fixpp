@@ -355,15 +355,15 @@ A peer declares at Logon that it sends one MsgType in a version other than its s
 - **FR-006**: An application message MUST be validated against its application dictionary. All existing validator
   checks and the Reject mapping apply unchanged.
 - **FR-007**: On a FIXT session the FIXT standard header and trailer tags MUST be accepted and type-checked on an
-  application message whatever its application dictionary, FIX 4.0–4.4 included. A non-FIXT session's validation of the
+  application message whatever its application dictionary, FIX 4.0–4.4 included. NoHops's count and delimiter MUST be judged on every route (data-model E-3). A non-FIXT session's validation of the
   same dictionaries MUST NOT change.
-- **FR-008**: On a frame whose route has an envelope, a header tag the session dictionary declares, other than 35, 1128, 1129 and 1156, MUST be accepted and judged by the session dictionary, enum and type included, whatever the routed table declares for that tag. That holds on an application message and on an admin message when the transport dictionary is not the session dictionary. The four excepted tags depend on the route: `FIXT11.xml` closes 1128 at 9, so S judging it would refuse `1128=10`, and a FIX 4.x table closes 35. A later occurrence of such a tag past the body is judged the same way and passes, where QuickFIX answers 373=14 (B-row; W-3 pins it). **Limit:** the trailer equivalent is not honoured (research R-6, L-row). A Length+Data pair S declares in its header is honoured on every route (FR-012).
+- **FR-008**: On a frame whose route has an envelope, a header tag the session dictionary declares, other than 35, 1128, 1129 and 1156, MUST be accepted and judged by the session dictionary, enum and type included, whatever the routed table declares for that tag. That holds on an application message and on an admin message when the transport dictionary is not the session dictionary. The four excepted tags depend on the route: `FIXT11.xml` closes 1128 at 9, so S judging it would refuse `1128=10`, and a FIX 4.x table closes 35. A later occurrence of such a tag past the body is judged the same way and passes, where QuickFIX answers 373=14 (B-row; W-3 pins it). **Limit:** the trailer equivalent is not honoured (research R-6, L-row), and the structure of a header group an overlay adds to S is not judged on another table (data-model E-3, the same L-row). A Length+Data pair S declares in its header is honoured on every route (FR-012).
 - **FR-009**: A validating session in LogonReceived or Active MUST answer an unknown 1128 value, or a valid value with no application dictionary,
   with Reject 373=5, 371=1128, 45 the first 34, no `fromApp`, and the session stays up. Sequence numbers follow the existing validation
   Reject rule (fixpp#423). An establishment arm answers such a frame under FR-029.
 - **FR-010**: A validating FIXT session of either role, in an establishment arm, MUST answer a Logon whose 1137 is absent (373=1), empty, unparseable or has
   no dictionary (373=5) with Reject 371=1137 and a disconnect, on every shape. The validate gate answers first where the transport dictionary judges the value, and otherwise a block later in the arm answers: the acceptor's today's, after mTLS; the initiator's new one, right after `check_inbound` and so ahead of its 141=Y reset unit, so a refused Logon resets nothing (owner item 3). The negotiated version is still written where it is today. **Limits:** the ending is one per input for a single fault, on the wire. A double fault follows dictionary order: `1137=99` with a stale 52 is 373=10 on T and A and 373=5 on L, and an absent 1137 with an undeclared tag is 373=2 naming that tag, and stays in the arm. `1137=99` and `abc` keep NextNumIn on L and consume it on T and A (E-7 `NC-e`, `LS-e`). W-5 pins each. A Logon in LogonReceived or Active is outside this requirement (Edge Cases).
-- **FR-011**: A non-validating FIXT session MUST keep today's dispositions for FR-009 and FR-010's inputs (033 FR-004a, FR-010). The one thing its frames gain is the route's scan, which can give a malformed pair only that table declares a Reject where it was delivered (Edge Cases; W-6's `off-pair`).
+- **FR-011**: A non-validating FIXT session MUST keep today's dispositions for FR-009 and FR-010's inputs (033 FR-004a, FR-010). What its frames gain is the route's table: its scan, which can give a malformed pair only that table declares a Reject where it was delivered (Edge Cases; W-6's `off-pair`), and its group metadata, so on shape A the view's `group(627)` answers where it did not (data-model E-3; W-6's `off-hops`).
 
 **Parse and dispatch**
 
@@ -397,11 +397,11 @@ A peer declares at Logon that it sends one MsgType in a version other than its s
 - **FR-021**: B-095-1, B-097-1, B-097-3, B-097-4, L-098-1, L-033-5 and the coverage-index rows for §4.3.7 and §5.3.x MUST be re-read and
   corrected where they state or depend on the old behaviour.
 - **FR-022**: The QuickFIX C++ departure (ruling 1), and the dispositions FR-010, FR-025, FR-026 and FR-029 add, MUST be recorded as B-rows with their
-  reasons, along with every "Disclosed" of Edge Cases and the three splits in data-model E-5 (`quickstart.md` lists them).
+  reasons, along with every "Disclosed" of Edge Cases and the splits in data-model E-5 (`quickstart.md` lists them).
 - **FR-023**: `brain/components/session.md` and `brain/components/dictionary.md` MUST record the two-dictionary decision
   and what was rejected; `brain/components/config.md`, `python-api.md` and `c-api.md` MUST record the surfaces this adds. Any file whose
   decision this supersedes MUST name the new one in a header comment.
-- **FR-024**: Message Type Default (§5.3.4) is implemented by FR-030 to FR-032 and S-026 claims it. A live L-row MUST record what is not: fixpp never declares such defaults in its own Logon, a peer's `385=R` entries do not change what fixpp sends, and `RefApplExtID(1406)` and `RefCstmApplVerID(1131)` are ignored, as `ApplExtID` and `CstmApplVerID` are today. No live cell can witness it: no QuickFIX engine sends the group.
+- **FR-024**: Message Type Default (§5.3.4) is implemented by FR-030 to FR-032 and S-026 claims it. A live L-row MUST record what is not: fixpp never declares such defaults in its own Logon, a peer's `385=R` entries do not change what fixpp sends, and `RefApplExtID(1406)` and `RefCstmApplVerID(1131)` are ignored, as `ApplExtID` and `CstmApplVerID` are today. The eight-byte RefMsgType and the 256 counted entries of data-model E-10 are limits of this feature, not of FIX: a longer custom MsgType with a default is refused. No live cell can witness it: no QuickFIX engine sends the group.
 
 **Added at Gate A**
 
@@ -410,14 +410,14 @@ A peer declares at Logon that it sends one MsgType in a version other than its s
 - **FR-026**: A validating FIXT session in LogonReceived or Active MUST reject an application frame whose first 1128 is past the header with 373=14, 371=1128,
   whatever its value, ahead of the validator (owner item 10). An establishment arm answers under FR-029. **Limit:** a dictionary declaring 1128 in a message body would be false-rejected; none vendored does (W-4 recomputes it).
 - **FR-027**: Outside the establishment arms, table selection MUST read a per-connection value written on every Logon, `Unknown` when an initiator's reply carries nothing it can resolve, and in an establishment arm it MUST NOT read that value, so a table is never selected from a previous connection's value. A stale read there is observable on a validation-off reconnect (W-5). `negotiated_version_profile()` is unchanged.
-- **FR-028**: A table or validator build failure MUST surface as `out_of_memory` from `Engine::start()`, or from a directly constructed
-  session's `open()`, before any observable effect, distinct from a missing dictionary.
+- **FR-028**: A table or validator build failure, or the failure of `open()`'s reservation for Message Type Defaults (data-model E-10), MUST surface as `out_of_memory` from `Engine::start()`, or from a directly constructed
+  session's `open()`, before any observable effect, distinct from a missing dictionary. On an Engine route the reservation's failure takes the role loop's failure branch: logged, not returned (research R-2).
 - **FR-029**: In an establishment arm, a validating FIXT session MUST disconnect, sending nothing, on a frame whose third field's MsgType is not admin or whose last MsgType differs from its third field's, before the validate gate and without reaching `interpret_logon` (owner item 2).
 
 **Message Type Default (owner item 8)**
 
-- **FR-030**: On every FIXT session, validating or not, each Logon from the peer MUST replace the connection's Message Type Defaults with its MsgTypeGrp entries that have `MsgDirection(385)` `S`, `DefaultVerIndicator(1410)` `Y`, a `RefApplVerID(1130)` the resolver parses, and a `RefMsgType(372)` that is an application message. A later entry for one MsgType wins. Only a Logon writes them, and a connection whose Logon declares none has none (FR-027 applies to them).
-- **FR-031**: A validating FIXT session of either role, in an establishment arm, MUST answer a Logon entry with 385 `S` and 1410 `Y` whose 1130 is empty, unparseable or has no dictionary with Reject 373=5, 371=1130 and a disconnect, at the place and with the ending FR-010 gives a bad 1137; a Reject the gate raises naming 1130 disconnects too. More entries than the cap in data-model E-10, or a RefMsgType longer than it allows: the same ending, 371=384 or 371=372, because the peer controls the count. A non-validating session MUST keep the entries up to the cap that parse, and ignore the rest.
+- **FR-030**: On every FIXT session, validating or not, each Logon that reaches the record site MUST replace the connection's Message Type Defaults with the entries data-model E-10 keeps. Only a Logon writes them, and a connection whose Logon declares none has none (FR-027 applies to them).
+- **FR-031**: A validating FIXT session of either role, in an establishment arm, MUST answer each fault data-model E-10 lists in a Logon's MsgTypeGrp with E-10's Reject and a disconnect, at the place and with the ending FR-010 gives a bad 1137; a Reject the gate raises naming 1130 or 372 on a Logon disconnects too. A non-validating session MUST refuse nothing, and keeps what E-10 says.
 - **FR-032**: The vendored `FIXT11.xml` MUST declare MsgTypeGrp on Logon, as FIXT 1.1 and QuickFIX/J's copy do, with no other change, and `dictionaries/README.md` MUST state the exception and its refresh recipe MUST re-apply it.
 
 ### Non-functional Requirements
@@ -425,8 +425,8 @@ A peer declares at Logon that it sends one MsgType in a version other than its s
 - **NFR-001**: A non-FIXT session MUST gain no more than one branch on a non-validated inbound frame and two on a validated one (the FIXT
   check at arm entry; the check ahead of the gate), both on a value fixed at `open()`. Its inbound and validate paths MUST NOT regress beyond the
   paired-bench band (`[const §VIII.2]` as gated today). The bench is the witness; the branch count is a design statement checked at review.
-- **NFR-002**: No per-message heap allocation on a FIXT session's inbound path, validating or not. Reading a Logon's Message Type Defaults may allocate once per Logon; looking one up may not. A real-`Session` guard modelled on
-  `tests/perf/test_session_recovery_alloc_guard.cpp` MUST cover a message routed to a dictionary other than the session's.
+- **NFR-002**: No per-message heap allocation on a FIXT session's inbound path, validating or not, in the scope `plan.md`'s `[const §XV.1]` row cites. A real-`Session` guard modelled on
+  `tests/perf/test_session_recovery_alloc_guard.cpp` MUST cover a message routed to a dictionary other than the session's, and one routed by a Message Type Default.
 - **NFR-003**: On an Engine with a FIXT session, each distinct dictionary it uses (engine dictionaries and FIXT sessions' dictionaries) MUST be
   walked once, in `Engine::start()`, never per session, per message, or inside a coroutine. N sessions on M distinct route tables MUST hold M
   validators, each holding its one table, not N×M. A route table is a dictionary, plus S's header pairs when S declares any (FR-012). A witness MUST count walks and heap, and go RED under a per-session

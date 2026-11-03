@@ -35,7 +35,7 @@ fixpp_error_t fixpp_msg_version(const fixpp_msg_t* msg, fixpp_resolved_msg_versi
 | `set_default_appl_ver_id` | NULL cfg → `FIXPP_ERR_NULL_HANDLE`. NULL, empty or a value other than `"2"`…`"9"`, `"10"` → `FIXPP_ERR_CAPI_CONFIG_INVALID` | copied | single-thread |
 | `set_validate_inbound_messages` | NULL cfg → `FIXPP_ERR_NULL_HANDLE` | copied | single-thread |
 | `add_dictionary` | As `fixpp_session_config_set_dictionary`: NULL cfg → `FIXPP_ERR_NULL_HANDLE`; NULL dict or an empty wrapper → `FIXPP_ERR_CAPI_CONFIG_INVALID`; destroyed or wrong-type handle → `FIXPP_ERR_INVALID_HANDLE` | copies the shared pointer; several calls accumulate, in order; `fixpp_engine_create` copies the list | single-thread |
-| `fixpp_msg_version` | Unchanged: NULL out-pointer → `FIXPP_ERR_NULL_HANDLE`; then `check_inbound_msg`; tag 8 absent → `FIXPP_ERR_TAG_NOT_FOUND`, zeros. An unresolved version is `FIXPP_ERR_OK` with `FIXPP_APPL_VER_UNKNOWN` | by value, nothing aliases the wire | requires-session-lock, as today; callable from the receive callback, takes no lock |
+| `fixpp_msg_version` | Unchanged: NULL out-pointer → `FIXPP_ERR_NULL_HANDLE`; then `check_inbound_msg`; tag 8 absent → `FIXPP_ERR_TAG_NOT_FOUND`, zeros. An unresolved version is `FIXPP_ERR_OK` with `FIXPP_APPL_VER_UNKNOWN` | by value, nothing aliases the wire | thread-safe, `[2i §4.6]`'s token: on a const message it reads the view and writes only `version_out` (read from `check_inbound_msg` and `MessageView::get`); callable from the receive callback, takes no lock |
 
 Values per handle: data-model E-8. Each changed or new declaration carries one reentrancy token (`tools/check_capi_reentrancy.sh`). The five headers' hashes go into `tools/capi_freeze.sha256` (research R-11; W-12 shows the gate RED first). Constants are additive, in `c_api/dict.h`. **Migration:** a caller that read BeginString or raw 1137 reads `fixpp_msg_get_string(msg, 8, …)` or `(msg, 1137, …)`.
 
@@ -70,18 +70,22 @@ Non-FIXT session: none. FIXT session: **data-model E-7 is the one source**, per 
 
 ## Disclosed, not changed
 
-- A tag an overlay adds to S's trailer is not honoured on an application message answered by another table (L-row; narrows FR-008).
+- A tag an overlay adds to S's trailer is not honoured on an application message answered by another table, and the structure of a header group an overlay adds to S is not judged there (L-row; narrows FR-008).
+- A malformed NoHops draws 373=1, 371=628 on every route and shape, the validator's existing mapping, which B85 owns the wording of. QuickFIX C++ does not count header groups, and J and Go answer 373=16 (B-row, data-model E-3).
+- On shape A, whose S declares no header, the routed table judges a standard header field: with FIX44 registered, `1128=6|347=KOI8-R` draws 373=5, 371=347 on A and passes on T. All three QuickFIX engines judge it with the transport dictionary, so A departs and T does not (B-row, research R-6).
 - A body Length+Data pair of a routed dictionary sharing a tag with a pair S declares in its header is not honoured on that session: S's wins (B-row, research R-20).
 - A header tag S declares, past the body, is judged by S and passes. QuickFIX answers 373=14 (B-row, research R-6).
-- With validation off, `35=D … 98=0|108=30|1137=9|35=A` establishes a session of either role, because `interpret_logon` reads the last 35; the other repeated-35 splits of E-7's validation-off paragraph stay too (B-row, FR-025). LogoutSent takes a last MsgType of 5 as the reply, whatever the third field says, on a validating session too.
+- With validation off, `35=D … 98=0|108=30|1137=9|35=A` establishes a session of either role, because `interpret_logon` reads the last 35; the other repeated-35 splits of E-7's validation-off bullet stay too (B-row, FR-025). LogoutSent takes a last MsgType of 5 as the reply, whatever the third field says, on a validating session too.
 - `35=A` once Active is outside FR-010: on T it reaches `fromApp`, on L `1137=99` draws a Reject (B-row).
 - A malformed pair only the route's table declares takes a Reject on a non-validating session, where `c0a828ef` delivered the frame (B-row, FR-011).
+- On a non-validating shape A session the view's `group(627)` and `fixpp_msg_get_group` answer NoHops, where `c0a828ef`'s did not; `get(628)` does not change (B-row, FR-011).
 - 370 is a header tag on a FIXT session whatever the route, judged by the route's table. QuickFIX C++ refuses it (B-row).
 - A non-FIXT validating session keeps the first-wins, last-wins MsgType split (B-row; byte-identical; to file).
 - `toApp` views and resend replay use S's table (L-row).
-- Message Type Default goes beyond all three QuickFIX engines, which ignore the group (B-row). Not implemented: declaring such defaults in fixpp's own Logon, acting on a peer's `385=R` entries for what fixpp sends, and 1406 and 1131 (L-row, FR-024). On L, whose dictionary closes 1130, a bad 1130 on any entry disconnects; on T and A only an entry that counts does (data-model E-10, B-row).
+- Message Type Default goes beyond all three QuickFIX engines, which ignore the group (B-row). Not implemented: declaring such defaults in fixpp's own Logon, acting on a peer's `385=R` entries for what fixpp sends, and 1406 and 1131; the eight-byte RefMsgType and 256 counted entries are limits (L-row, FR-024; data-model E-10).
+- A 372 outside FIX Latest's closed MsgType domain, on any entry, counted or not, and a short custom `372=U1` among them, draws `R 5/372 A` `Disc` on L, because L's dictionary closes it. T's and A's domain is open by their own dictionary, so data-model E-10's rule decides there (B-row).
 - `dictionaries/FIXT11.xml` is the QuickFIX C++ file plus MsgTypeGrp on Logon, not verbatim (FR-032).
-- A non-validating FIXT session whose config fails the FIXT check is refused only at `open()` inside the role loop: logged when a logger is set, not returned (L-row, owner item 5). The line's format string is in `src/log/format_registry.cpp`.
+- A non-validating FIXT session whose config fails the FIXT check is refused only at `open()` inside the role loop: logged when a logger is set, not returned (L-row, owner item 5). `open()`'s reservation failing on an Engine route takes the same branch (FR-028). The line's format string is in `src/log/format_registry.cpp`.
 - `FIXT11.xml`'s 1128 enum stops at 9, so an admin frame carrying `1128=10` draws 373=5 from a FIXT11 transport dictionary (B-row). An
   application frame with `1128=10` routes to FIX Latest, as QuickFIX/J; QuickFIX C++ rejects `1128=10` on every message.
 - Header Required-ness is not enforced on an application message (B-081-1 stays).
