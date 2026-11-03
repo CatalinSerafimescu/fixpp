@@ -1,113 +1,89 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: FIXT application version, the validation half
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Branch**: `099-fixt-appl-version-validation` | **Date**: 2026-11-03 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
-
-**Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
+**Input**: Feature specification from `specs/099-fixt-appl-version-validation/spec.md`
 
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+A FIXT.1.1 session stops using one dictionary for everything. Per frame it selects the transport dictionary for an admin message and,
+for an application message, the dictionary of its resolved version (1128, else the negotiated 1137). The frame scan, the validator and
+the `fromApp` parse all use that one table. A validating session refuses a message no dictionary can answer. The session dictionary
+keeps answering its own version, so an overlay survives. The engine-held registry builds each table once. C, Python and TOML gain what a
+FIXT session needs.
+
+Decisions and rejected alternatives: [research.md](./research.md). Shapes: [data-model.md](./data-model.md). Surface:
+[contracts/surface.md](./contracts/surface.md). Witnesses: [contracts/witnesses.md](./contracts/witnesses.md).
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
+**Language/Version**: C++23; C for the ABI surface; Python through SWIG.
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
+**Primary Dependencies**: existing only (pugixml, asio, toml++). No new dependency, no pin.
 
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
+**Storage**: N/A.
 
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+**Testing**: GoogleTest, real `Session` over raw frames, `tests/capi`, `bindings/python/tests`, the parent's interop harness.
 
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+**Target Platform**: Linux (clang, gcc), MSVC.
 
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**Project Type**: library.
 
-**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]
+**Performance Goals**: non-FIXT inbound and validate within the paired band; one branch added per inbound frame. No per-message heap on FIXT.
 
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
+**Constraints**: non-FIXT behaviour byte-identical. C ABI additive. Tables built at most once per dictionary per engine.
 
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
-
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Scale/Scope**: one session-path change touching every inbound arm; four C symbols; one TOML key.
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+| Article | Check | Status |
+|---|---|---|
+| §I.1, §XVIII.1 | FIXT.1.1 session and application layers are v1.0 scope | Pass |
+| §VI | S-026 traceability; new rows carry witnesses | Pass, tasks |
+| §VIII.2, §VIII.5 | paired bench on the hot path; no per-message allocation | Pass, W-16, R-14 |
+| §IX | coverage assessed in verify | Pass, tasks |
+| §X.1, §X.6, §X.7 | C ABI additive MINOR; `/clarify`, `/analyze`, Gate A and the owner's `/plan` sign-off | **Sign-off pending** |
+| §XV.13 | hybrid dictionary model unchanged; S stays authoritative for its version | Pass |
+| §XVII | Gate A before tasks; verify; Gate B | Pass, pipeline |
+| Article XX | no article changes; no amendment | Pass |
 
-[Gates determined based on constitution file]
+No violation to justify.
 
 ## Project Structure
 
-### Documentation (this feature)
-
 ```text
-specs/[###-feature]/
-├── plan.md              # This file (/speckit-plan command output)
-├── research.md          # Phase 0 output (/speckit-plan command)
-├── data-model.md        # Phase 1 output (/speckit-plan command)
-├── quickstart.md        # Phase 1 output (/speckit-plan command)
-├── contracts/           # Phase 1 output (/speckit-plan command)
-└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
+specs/099-fixt-appl-version-validation/
+├── plan.md  research.md  data-model.md  quickstart.md  spec.md
+├── contracts/{surface,witnesses}.md
+└── checklists/requirements.md
+
+include/fixpp/dict/{version_registry,version_profile,dictionary,table_view}.hpp
+include/fixpp/wire/{validator,parser}.hpp
+include/fixpp/session/{session,session_config}.hpp
+include/fix/c_api/{session,engine,message,version}.h
+src/dictionary/{version_registry,dictionary}.cpp
+src/session/{session.cpp,peek_fixt_route.hpp}
+src/capi/{config,engine,message_read}.cpp, capi_internal.hpp
+src/config/selector_resolver.cpp
+bindings/python/{fixpp.i,tests/}
+tests/session/test_099_*.cpp, tests/capi/capi_099_*, tests/config/test_099_*
+spec/, brain/, parent trackers
 ```
 
-### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
+## Phases
 
-```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
+1. **Registry and tables** (E-1, E-2, E-3): W-15, W-17.
+2. **Validator** (E-4, envelope): existing validator tests stay green; W-3's unit half; paired `validator_bench`.
+3. **Peek and selection** (E-6, E-7), `open()` check (R-2): W-8.
+4. **Arms**: scan, validate gate, interpret, dispatch (R-7, R-8, R-9): W-1 to W-7, W-9, W-16.
+5. **Accessor** (E-5): W-10. Outbound pin: W-11.
+6. **C ABI, Python, TOML**: W-12, W-13, W-14.
+7. **Live cell**: W-18, per the owner's ruling.
+8. **#651 comments, records, brain**.
 
-tests/
-├── contract/
-├── integration/
-└── unit/
+Phases 1–3 precede 4; 5 and 6 are parallel after 4. Mutants run after each phase's witnesses, from a separate worktree.
 
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
+## Owner sign-off (`[const §X.6]`) — pending
 
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
-```
-
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
-
-## Complexity Tracking
-
-> **Fill ONLY if Constitution Check has violations that must be justified**
-
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+The `/plan` sign-off, including research R-13's live-cell option.
