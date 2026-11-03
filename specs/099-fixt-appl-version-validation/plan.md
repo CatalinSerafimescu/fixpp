@@ -59,8 +59,8 @@ Derived from the articles a parser-touching change on the session path triggers,
 | `[const §I.3]` | S-026 moves to `done` with its witnesses, under research R-16's condition | Tasks |
 | `[const §VI.4]`, `[const §VI.5]`, `[const §VI.6]` | Normative References in spec.md; §5.3.4 now delivered by S-026, so its mapping is true | Pass, tasks |
 | `[const §VII.3]`, `[const §VII.4]` | every witness RED first (on `c0a828ef`, or by its named mutant where that tree cannot compile it) | Tasks, W-1 to W-25 |
-| **`[const §VII.7]`** | **Applies.** `peek_fixt_route` and `scan_logon_msg_type_defaults` are new walks over untrusted bytes, and the validator gains an envelope branch. No existing harness drives a FIXT session. A FIXT arm in `tests/fuzz/fuzz_session_recovery_admin_parse.cpp` and an envelope arm in `tests/fuzz/fuzz_wire_validator.cpp`, seeded with R-9's, R-18's and E-10's inputs in the existing corpus directories, replayed by `ctest -L fuzz`, and a ten-minute campaign at verify | Tasks, W-24 |
-| **`[const §VII.8]`** | Isolation-sensitive, each its own executable and `add_test`: W-15 (heap count, TSan arm), W-16 (allocation interceptor), W-20 (fail-at-N global `operator new`). Everything else is isolation-safe: W-1 to W-11, W-19, W-21 and W-25 go in an existing grouped session or dictionary bucket, selected by a `099` label | Tasks |
+| **`[const §VII.7]`** | **Applies.** `peek_fixt_route` and `scan_logon_msg_type_defaults` are new walks over untrusted bytes, and the validator gains an envelope branch. No existing harness drives a FIXT session. A FIXT arm in `tests/fuzz/fuzz_session_recovery_admin_parse.cpp` and an envelope arm in `tests/fuzz/fuzz_wire_validator.cpp`, seeded with R-9's, R-18's and E-10's inputs in the existing corpus directories, replayed by `ctest -L fuzz`, and a ten-minute campaign from the feature's tree | Tasks, W-24 |
+| **`[const §VII.8]`** | Isolation-sensitive, each its own executable and `add_test`: W-15 (heap count, TSan arm), W-16 (allocation interceptor), W-20 (fail-at-N global `operator new`), W-14's TOML live cell (threads and a socket). The rest of W-14 stays in `config_045_tests`. Everything else is isolation-safe: W-1 to W-11, W-19, W-21 and W-25 go in an existing grouped session or dictionary bucket, selected by a `099` label | Tasks |
 | `[const §VIII.2]`, `[const §VIII.5]` | paired bench on the hot path; no per-message allocation | W-22, W-16 |
 | `[const §VIII.3]` | the same PR carries the benchmark: a new FIXT case in `on_inbound_frame_bench.cpp` | Tasks |
 | `[const §IX.1]`, `[const §IX.2]`, `[const §IX.4]` | touched modules at thresholds or a per-line assessment; ASan, UBSan, TSan; clang-tidy, clang-format, cppcheck | At verify |
@@ -75,7 +75,7 @@ Derived from the articles a parser-touching change on the session path triggers,
 | `[const §XV.13]` | hybrid dictionary model unchanged; S stays authoritative for its version | Pass |
 | `[const §XVI.3]`, `[const §XVI.4]` | `/clarify` ran before this plan; `/analyze` after tasks | Pass, tasks |
 | `[const §XVI.6]` | the orchestrator writes no library code; `phase-implementer` does. Mutants in a separate worktree | Tasks |
-| `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` | Gate A before tasks; the local pre-PR build; `/speckit-verify` before Gate B | Pass, pipeline |
+| `[const §XVII.1]`, `[const §XVII.7]`, `[const §XVII.8]` | Gate A before tasks; the local pre-PR build; `/speckit-verify`, with `$T` substituted for the main checkout its SKILL.md `cd`s to (tasks.md's Execution rules), before Gate B | Pass, pipeline |
 | `[const §XX]` | no article changes, so no amendment; the design-document notes are not governed by it (research R-11) | Pass |
 | `[arch §2.3]`, `[arch §2.4]` | the registry owns no validator; the route set is in `session`, which may include both; `reify.cpp` is already a bridge file | Pass |
 
@@ -100,7 +100,8 @@ src/log/format_registry.cpp   (the role loops' log line)
 src/capi/{config,engine,message_read,message_write}.cpp, capi_internal.hpp
 src/config/selector_resolver.cpp
 bindings/python/{fixpp.i,tests/,tests/wheel/test_import_surface.py}
-tests/session/test_099_*.cpp, tests/capi/capi_099_*, tests/config/test_099_*
+tests/session/test_099_*.cpp, tests/wire/test_099_*.cpp, tests/capi/capi_099_*, tests/config/test_099_*
+tests/{session,dictionary,wire,capi,config,perf}/CMakeLists.txt   (the `099` label and each new executable)
 tests/capi/message_read_test.cpp   (research R-17, the declared break)
 tests/support/session_test_access.hpp
 tests/session/{test_fixt_logon_establishment,unparseable_frame_disposition_test}.cpp   (research R-17)
@@ -110,8 +111,8 @@ tests/perf/   (W-16)  tests/dictionary/   (W-17, W-21)
 tests/abi/golden/fixpp_capi_symbols.txt, tests/capi/version_test.cpp, tools/capi_freeze.sha256   (research R-11's recipe)
 tests/fuzz/{fuzz_session_recovery_admin_parse,fuzz_wire_validator}.cpp, tests/fuzz/corpus/{session_recovery_admin_parse,wire_validator}/   (W-24)
 bench/session/on_inbound_frame_bench.cpp
-tests/interop/happy/, tests/interop/conversation/fixt_app_script.yaml, parent phase-9-harness/   (W-18)
-.specify/{2b-wire,2c-codegen,2i-capi,api-contract}.md
+tests/interop/happy/, tests/interop/conversation/fixt_app_script.yaml, tests/interop/cell_results.yaml, parent phase-9-harness/   (W-18)
+.specify/{2b-wire,2c-codegen,2i-capi,api-contract,architecture}.md
 spec/, brain/, parent trackers
 ```
 
@@ -135,11 +136,11 @@ Phases 1–3 precede 4; 5 follows 4; 6 and 7 are parallel after 5. Mutants run a
 
 ## Owner sign-off (`[const §X.6]`)
 
-Each item is ruled, on 2026-11-03, in spec.md's last Clarifications session. The owner confirmed every item on 2026-11-03, among them item 3, with 1130 and 372 under it, and item 8a, at the measured cost its row states.
+Each item is ruled, on 2026-11-03, in spec.md's last Clarifications session. The owner confirmed every item on 2026-11-03, among them item 3, with 1130 and 372 under it, and item 8a, at the measured cost its row states. Items 14 to 16 were ruled the same day, final, on `/speckit-analyze`'s open items, and are recorded here, not in spec.md.
 
 | # | Item | Ruling | What it relaxes or adds |
 |---|---|---|---|
-| 1 | Live cell | One peer-to-fixpp 35=BN, no republish first | A republish, if needed, returns to the owner |
+| 1 | Live cell | One peer-to-fixpp 35=BN, no republish first (item 16 says what "first" means) | A republish, if needed, returns to the owner |
 | 2 | Application or mismatched frame before Logon | Disconnect, nothing sent | FR-009, FR-025, FR-026's Rejects do not apply in the two establishment arms. Departs from C++'s Reject on an invalid frame, and from J's silent wait |
 | 3 | 1137 order | Gate first; a gate Reject naming it on a Logon disconnects; the initiator gains the block | A double fault follows dictionary order. An absent 1137 plus an undeclared tag draws a Reject naming that tag and stays until the Logon timeout. `99` and `abc` keep NextNumIn on L and consume it on T and A. The same holds for 1130 and 372, through FR-031: a gate Reject naming either on a Logon disconnects and keeps NextNumIn, and the block's consumes it. On a direct-constructed initiator any fault S3's block answers sits ahead of mTLS: `[const §XII.9]` |
 | 4 | Registration | `Engine::register_session` refuses a validating FIXT session failing the check, as `open()` does | Adds to ruling 2's wording |
@@ -154,6 +155,9 @@ Each item is ruled, on 2026-11-03, in spec.md's last Clarifications session. The
 | 12 | Who judges a routed frame's header | S, every tag it declares except 35, 1128, 1129, 1156 | Matches QuickFIX on T |
 | 12a | A header tag S declares, past the body | Judged by S and passes | Departs from QuickFIX's 373=14 (B-row) |
 | 13 | A malformed 384 or 385 on a Logon | Stays: `R 5/that tag A`, NextNumIn kept. S2's list stays 1137, 1130 and 372 | A single-field fault like `108=abc`, not one of FR-031's, so `R 5/384 A` has two endings: `MT-p`'s and `MT-e`'s (data-model E-10) |
+| 14 | Builds | "Any build, -j8": no asking before each build, `-j8` on all of them, this feature | tasks.md's T001 records it quoted, and `J=${J:-8}` follows the rule in its Execution rules. MSVC takes `.sandbox-lock` first; never a Windows and a Linux build at once. Overrides the `-j2` of the parent's `phases/phase-4/parallel-worktrees.md` for this feature only |
+| 15 | Harness landing | After merge, as 095: uncommitted in the parent working copy until the PR merges, a file copy kept, nobody staging a `phase-9-harness/` path before then; one post-merge parent commit with the gitlink, explicit-path staging and an `ls-tree` check; harness tests green, publish digest recorded, matrix re-dispatched | `interop-live` is expected red on the two cells during the PR; it is advisory. tasks.md ports 095's T099 and T100 and its file-copy rule, adapted |
+| 16 | Republish | "No republish first" means the pre-merge attempt only. The automatic publish the post-merge commit fires is fine, and its digest is recorded | Narrows item 1 |
 
 Choices made in the design and not put to the owner, each following a ruling or the standard's text: research R-19's list for Message Type Default, research R-20's scope and collision rule for the pair, and research R-4's NoHops metadata, which keeps today's answer on T and L.
 

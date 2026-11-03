@@ -351,7 +351,7 @@ trap as `path`, each failure a diagnostic at `dictionary.extra_paths`; a non-arr
 
 `HP-*-init-fixt11-fix50sp2-app-bn` sends one 35=BN from fixpp. The peer sends **no** application message: the logs show only its Logon reaching fixpp. Turning validation on alone would validate one Logon with FIXT11 and never reach the changed path.
 
-**Ruled by the owner:** add one peer-to-fixpp 35=BN to `fixt_app_script.yaml`. `send_conversation_message` builds from the script's intent in `quickfix-cpp/counterparty`, so a script-only step looks possible; QuickFIX/J's path is unverified end to end. It changes a digest-bound script and may need a counterparty image republish (`REMAINING-WORK.md` assumes one). Attempted without a republish first; back to the owner if one proves necessary.
+**Ruled by the owner:** add one peer-to-fixpp 35=BN to `fixt_app_script.yaml`. `send_conversation_message` builds from the script's intent in `quickfix-cpp/counterparty`, so a script-only step looks possible; QuickFIX/J's path is unverified end to end. It changes a digest-bound script and may need a counterparty image republish (`REMAINING-WORK.md` assumes one). Attempted without a republish first; back to the owner if one proves necessary. "First" means the pre-merge attempt only (plan.md, owner item 16).
 
 ## R-14 Performance gates (NFR-001, NFR-002, `[const §VIII.3]`)
 
@@ -411,6 +411,7 @@ A validating FIXT session on a partial S used to work in C++, for the messages t
 | `dictionary_required_scope_census_test`, `SixUnchangedDictionariesBareStoreExactSet` | `tests/dictionary/required_scope_census_test.cpp`, `expected_count = 1` | Update from the failing assertion |
 | `required_scope_parity_test`, `QuickFixGroupGoldenMatchesOracleAcrossNineDicts` | `tools/quickfix_required_golden/golden_groups.csv` | A new `FIXT11,A` context, regenerated through `tools/quickfix_required_golden` |
 | `ctest` `read-tier-byte-diff`, not one of the 55 | `tests/codegen/read_tier_byte_diff_test.cmake`: exactly `vt11/{Fields,Messages,Reify,Validator}.hpp`, the other twelve OK | Update the four hashes from the regenerated files |
+| `dictionary_pure_tests`, W-17's no-argument cell. Not part of the measurement above: this feature creates the test, so the 55 could not include it | `tests/dictionary/test_099_fixt_framing_table_view.cpp`, `FIXT11.xml`'s literal only | Update from the failing assertion, right after the edit: the hash seen failing first, as for the four `vt11` hashes, and `git diff c0a828ef -- src include` empty at the record. The other files' literals stay as first recorded, and SC-005 rests on them |
 
 `dictionary_overlay_tests` passes, 314 tests: the placement keeps `FIXT11.patch` applying (below). Not the edit: `config_045_tests`' two failures are the namespace, whose mapped root passes `access(W_OK)`, and `interop_golden_check` is a tool that exits 2 with no arguments. **The limit:** these binaries are compiled against the unedited generated `vt11` code, so a compile-time pin on the regenerated headers shows only in a real build. Not run against the edit: the `dictionary_sha1[FIXT11]` rows of `golden.csv` and `golden_groups.csv`, which `required_scope_parity_test`'s regeneration rewrites (read); the rest of the session and C-ABI suites, Python, packaging or interop.
 
