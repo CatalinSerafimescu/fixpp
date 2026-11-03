@@ -117,7 +117,7 @@ Measured answers are in research R-9. Items marked **owner** were ruled in the l
 
 Measured answers are in research R-18. Items marked **owner** were ruled in the last session below.
 
-- Q: What does each FSM state do with each input? → A: One table, data-model E-7. Its "today" half is measured through a real `Session` at `c0a828ef`; its "after" half is labelled design. It replaces the per-section endings.
+- Q: What does each FSM state do with each input? → A: One table, data-model E-7. Its "today" half is the keyed logs measured through a real `Session` at `c0a828ef`; its "after" half is labelled design. It replaces the per-section endings.
 - Q: Where does the 1137 check run? → A: The gate first. A gate Reject naming 1137 on a Logon in an establishment arm disconnects, and a validating initiator gains a block like the acceptor's, ahead of its 141=Y reset unit. The gate, posture and SendingTime keep today's order. **Owner** (FR-010).
 - Q: What does a repeated MsgType, a route refusal or a past-header 1128 do before Logon completes, since FR-009, FR-025 and FR-026 promise a Reject and R-8 a disconnect? → A: The disconnect, for any frame whose third field is not admin or whose last MsgType differs from its third field's. The test reads the third field: `interpret_logon` reads the last 35, and measured, `35=D … 35=A` carrying Logon fields establishes a session it reaches. **Owner** (FR-029).
 - Q: Does FR-025 reach LogoutSent, which has no gate? → A: No. The arm drains as today, and a frame whose last MsgType is 5 confirms the Logout. Disclosed (FR-025).
