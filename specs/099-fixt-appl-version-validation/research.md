@@ -51,7 +51,7 @@ Facts. `table_view` holds its stores by value, so a copy is deep. `as_table_view
 route stores the address of a `shared_ptr` object that must not move or be reassigned and must outlive every view
 ("The pointee table is not enough: views read `&owner`"). `dictionary_driven_validator` holds a table by value and has
 no other mutable state: `grep -n mutable` over `table_view.hpp`, `validator.hpp` and `dict_hooks.hpp` finds only the word in comments (read
-2026-11-03, the same grep over `parser.hpp` hits, so the instrument can report). Reading one validator from several strands is therefore safe by inspection,
+2026-11-03, the same grep over `parser.hpp` hits, so the instrument can report). Those hits, and `offset_table.hpp`'s group and nested caches, are per view, not per table, so sharing a table shares none of them. A grep for `static` and `thread_local` at line start over `validator.hpp`, `validator.cpp`, `table_view.hpp` and `dict_hooks.hpp` finds only `constexpr` constants (read 2026-11-03; the same grep over `view.hpp` hits). Reading one validator from several strands is therefore safe by inspection,
 and TSan checks it (W-15).
 
 The acceptor and connect loops build one `Session` per run, not per connection, and reconnect does not re-run `open()`. So the cost to bound
@@ -78,11 +78,12 @@ permitted archive cycle), which is why the lint is the fact that matters. `sessi
 registered slot, the transport dictionary, and each FIXT entry's S. The table lives inside the validator, and the parse route's owner is an aliasing `shared_ptr<const table_view>` onto it, so one
 dictionary has one table.
 
-- **When.** Built once in `Engine::start()`, before any loop is spawned, only when a registered entry is FIXT. `Engine::start()` is legal once, `register_session` runs before it (`engine.hpp`), and C's
+- **When.** Built once in `Engine::start()`, before any loop is spawned, only when a registered entry is FIXT. `Engine::start()` is legal once successfully, `register_session` runs before it (`engine.hpp`), and C's
   `fixpp_engine_start` runs it while nothing polls the `io_context`. So there is no concurrent build, no lock, no atomic. M concurrent opens read, and walk nothing.
-- **Cost moved.** `Engine::start()` now blocks for the walks: about 0.5 s (`-O3`) or 3.3 s (`-O0`) for FIX50SP2 and FIX Latest, on this machine, measured as above. Its precondition changes: the comments in `engine.hpp`, `src/session/engine.cpp` and `src/capi/engine.cpp` that say it does not block are corrected in the route-set phase, and W-23 greps for them, because a C++ host that calls `start()` from a handler on `exec`, for instance a second engine on one `io_context`, stalls every strand on that thread for the walks. C's `fixpp_engine_start` runs it with no worker polling this engine, so only another engine's threads can notice. Stated to the owner as a fact.
+- **Cost moved.** `Engine::start()` now blocks for the walks: about 0.5 s (`-O3`) or 3.3 s (`-O0`) for FIX50SP2 and FIX Latest, on this machine, measured as above. The call stays legal from a handler (`contracts/surface.md`); the comments in `engine.hpp`, `src/session/engine.cpp` and `src/capi/engine.cpp` that say it does not block are corrected in the route-set phase, and W-23 greps for them, because a C++ host that calls `start()` from a handler on `exec`, for instance a second engine on one `io_context`, stalls every strand on that thread for the walks. C's `fixpp_engine_start` runs it with no worker polling this engine, so only another engine's threads can notice. Stated to the owner as a fact.
 - **Ownership.** One `std::shared_ptr<const fixt_route_set> routes_` on `Session`, a null one on a non-FIXT session. The Engine holds the same pointer, set through `session_engine_access::adopt_routes` right after `make_shared<Session>` and before `open()`. There is no public signature for it: `Session`'s constructor is unchanged. The set dies when the last of the Engine and its sessions lets go, so no declaration order on the Engine matters, and nothing in `Session` dereferences the set from a destructor (`route_entry` holds raw pointers and has no destructor).
-- **Direct-constructed sessions.** A session with no adopted set builds a private one in `open()` from its registry and S, before the first observable mutation, and walks for itself, chiefly on test paths. It holds every registry slot, including one the slot rule never returns: T with registry `{FIX50SP2}` walks twice where it walked once, and R-17's `W7b` walks FIX Latest. `W7d` already walks FIX Latest inside `open()` under the same 200 ms `run_sync` window, and passes (run here at `-O0`, 2026-11-03): `run_for` cannot pre-empt a handler, and the walk happens inside one. Read from source; not run under a sanitizer here. Today's null-registry FIXT guard still refuses a session with no registry.
+- **Direct-constructed sessions.** A session with no adopted set builds a private one in `open()` from its registry and S, before the first observable mutation, and walks for itself, chiefly on test paths. It holds every registry slot, including one the slot rule never returns: T with registry `{FIX50SP2}` walks twice where it walked once, and R-17's `W7b` walks FIX Latest. `W7d` already walks FIX Latest inside `open()` under the same 200 ms `run_sync` window, and passes (run here at `-O0`, 2026-11-03): `run_for` cannot pre-empt a handler, and the walk happens inside one. Read from source; not run under a sanitizer here. Today's null-registry FIXT guard still refuses a session with no registry. NFR-003's "inside a coroutine" is about an Engine, and the rejection of `std::once_flag` below is of a lock that makes one strand wait on another's walk; this walk stays on its own session's thread, as `open()`'s walk of S does today.
+- **Cost to the witnesses.** Measured 2026-11-03 through `h.cpp` (R-18) at `c0a828ef`, `-O0`: T's 240 cells take 1.47 s, about 6 ms a cell with the dictionary loads included, and L's take 384 s, 1.6 s a cell, the walk of S. W-4, W-5, W-6 and W-9 walk six logs of 240 lines, and W-25 and the other rows add about 700 sessions, so a private build per cell, about 3.3 s, is about 2 h per run of `session_pure_tests`, more under a sanitizer, and again per mutant row. `FixtSetup`'s `run_sync` is a second cost: its `run_for` window takes 200 ms a call (`W7a` takes 202 ms). tasks.md T007 is the answer.
 - **S.** A FIXT session takes S's entry from the set, so N sessions on the same `Dictionary` object share it, and takes `inbound_tv_` as a copy of that owner, with no walk. A C-ABI session's `cfg_.dict_snapshot` keeps being adopted for `inbound_tv_`, as today; that
   snapshot is one walk and one table per C session, for its outbound commit path. It predates this feature, is unchanged, and W-15 reports it rather than asserting M on the C route. `validator_` stays null on a FIXT session.
 - **Non-FIXT.** No set is built; layout and hot path of the validator do not move (E-4).
@@ -125,6 +126,7 @@ be the thing that picks the table.
 
 - **Walk** with S's hooks, through `length_data_carry::read_value`, the primitive `scan_frame_header` uses. Not `dict_hooks::none()`: measured, with `none()` a 1128 inside an S header pair's Data is read as the header's 1128, and non-tag bytes in that Data
   make the frame unreadable; with S's hooks both read correctly.
+- **A non-standard header pair only a routed dictionary declares.** Its Length tag is neither S's header tag nor standard, so the walk stops there and a later header 1128 reads as past it. No vendored dictionary declares one.
 - **MsgType** is the third field's. Anything else there is unreadable. Whether a second 35 fell inside the header is not computed here: it is read only on a mismatch, so the cold path re-walks with the same stop rule (FR-025).
 - **1128** is the first one before the walk stops.
 - **Stop** at the first tag for which `s_table.is_header_tag(tag) || dict::is_fixt_standard_header_tag(tag)` is false. The second is new, a public function over `kFixtFramingTable` minus its three trailer tags, plus 370, because that table is private to
@@ -192,7 +194,7 @@ Inbound sites of `session.cpp`, from the graph and a grep over `inbound_tv_`, `s
 | Logon interpret | `on_inbound_not_connected_`, `on_inbound_logon_sent_` | transport route's hooks |
 | Dispatch | D-1 `on_inbound_active_` `fromAdmin`; D-2 `on_inbound_active_` `fromApp`; D-3 `on_inbound_active_sequence_reset_`; D-4 `on_inbound_active_out_of_sequence_` PossDup redelivery; D-5 `on_inbound_active_out_of_sequence_` with `validate_sequence_numbers` off; D-6 `on_inbound_active_gap_fill_`; D-7 `on_inbound_active_logout_` | `parse_and_dispatch_` takes the route, and writes the accessor byte from it |
 
-The route is passed by const reference down the arm's call tree. D-2, D-4 and D-5 deliver to `fromApp`, so each carries its own witness cell and mutant (W-7).
+The route is passed by const reference down the arm's call tree. It lives in the arm's coroutine frame, so it survives a suspension; it holds pointers fixed at `open()`, and nothing re-reads a per-connection value after selection. D-2, D-4 and D-5 deliver to `fromApp`, so each carries its own witness cell and mutant (W-7).
 
 Unchanged, all outbound or stored-outbound: `fire_to_admin_`, `inbound_business_reject_leaf_`, `build_send_frame_`,
 `send_impl`, `store_then_emit`, `replay_outbound_range_`. So a `toApp` view on a FIXT11 session still knows no application
@@ -274,6 +276,8 @@ Consequences at fixpp, each measured or read from source:
 
 **Why the initiator's block is where it is.** Read from source: the arm runs `check_inbound`, then the 141=Y reset unit, then mTLS, then today's 1137 record. At that record site a reply with `141=Y` and a bad 1137, a single fault, would durably reset both stores and then be refused. So the block goes right after `check_inbound`, which costs the mTLS order above on a double fault. The acceptor's received-141 reset is in its reply block, after its 1137 block, so it has no such problem; its `reset_on_logon` knob resets ahead of `check_inbound`, today and on a non-validating session, and that is unchanged. The negotiated version is still written only where it is today, so a refused Logon records nothing.
 
+**Why an empty 1137 or 1130 is 373=5 and an empty 1128 is 373=4.** The first two are answered by S3's block, whose test is today's acceptor's, past a gate that lets an empty value through (measured: `1128=` passes). The third is a new refusal, and takes the code all three engines give.
+
 **Reject fields.** Every arm passes `hdr.msg_type`, last-wins, to `emit_session_reject_`, and the Active arm also to `consume_rejected_seqnum_`. Measured: `D…4` and `D…A` are kept with 372 `4` and `A`; `4…D` is consumed. So `RejectDecision` gains the Reject's RefMsgType and RefSeqNum, filled for the FIXT refusals: RefMsgType, and the value that keys the consume, are the third field's; RefSeqNum is `fault_ref_seq_num`, the first 34, because S's hooks split a pair S does not know on a refused frame, and an embedded `34=7` would otherwise become `hdr.msg_seq_num`. A non-FIXT session leaves them empty and reads `hdr` as today, so SC-005 holds.
 
 **Stale negotiated version (FR-027).** `negotiated_appl_version_` has no reset: the acceptor overwrites it per Logon, the initiator only when the reply resolves. Before this feature that value only reached `negotiated_version_profile()`, and ruling 1 keeps validation-off sessions unchanged, so it keeps today's writes. Selection reads a new `route_negotiated_`, written at the same two sites on every Logon, and `Unknown` when the initiator's reply has nothing it can resolve. Selection reads it only outside the establishment arms: `install_reconnected_transport` re-enters LogonSent with the old value still there, and an application frame in LogonSent takes `session_route_` without looking at it. So nothing needs a reset at the connection boundary. **A stale read there would show.** Measured 2026-11-03, varying which table scans, as a proxy: a non-validating initiator in LogonSent given `35=D … 98=0|108=30|1137=9|5030=<n>|5031=x<SOH>34=7|35=A` ends Disconnected, NextNumIn kept, on a table without the pair, and Active on one declaring it. W-5 carries the cell and M-27b the mutant.
@@ -337,6 +341,12 @@ Beyond the recipe, by the same reading of 098's diff: `include/fix/c_api/{sessio
 > **At `[2c §4.9]`:** Updated (099-fixt-appl-version-validation): the registry keeps a FIXT.1.1 dictionary and answers `transport()`; `get()` is unchanged. Validators and tables shared across sessions live in the session library's route set, because `[arch §2.3]` keeps the registry from owning a validator.
 >
 > **At `[2b §6.5]`:** Updated (099-fixt-appl-version-validation): `dictionary_driven_validator` gains a non-virtual `validate` overload taking an envelope table and a `table()` accessor. `Validator` keeps its five pure virtuals (`[const §XIV.2]`), and the class adds no data member.
+>
+> **At `[2i §3.10]`, commitment 5:** Updated (099-fixt-appl-version-validation): `c_api/dict.h` also holds `FIXPP_APPL_VER_FIXLATEST`, `FIXPP_SESSION_VER_*` and `FIXPP_MSG_KIND_*`.
+>
+> **At `[2i §4.6]`:** Updated (099-fixt-appl-version-validation): shipped in C-ABI 1.14, a declared break under `[const §X.7]`, with the three added symbols of `specs/099-fixt-appl-version-validation/contracts/surface.md`. "Set at parse time" reads: the session writes the byte after the parse and before the callback, on its strand, so no reader sees it change. The headers spell the token `thread-safe`, which `tools/check_capi_reentrancy.sh` counts; this document's `FIXPP_THREAD_SAFE` is that token.
+>
+> **At `api-contract.md` §11:** Updated (099-fixt-appl-version-validation): `fixpp_msg_version`'s layout and result change, a breaking effect declared under `[const §X.7]`, and its migration line is in that feature's `contracts/surface.md`.
 
 ## R-12 TOML (FR-017)
 
@@ -345,7 +355,7 @@ trap as `path`, each failure a diagnostic at `dictionary.extra_paths`; a non-arr
 `path`, so `engine.dictionaries.front()` stays the session default.
 
 **Lead, not in scope:** `recognize_keys` walks top-level keys only, so a misspelt `[dictionary]` sub-key is silently ignored
-(read from the code, not run). A misspelt `extra_paths` then fails loud at `open()` or at Logon. To file as an issue.
+(read from the code, not run). A misspelt `extra_paths` then fails loud at registration, `open()` or Logon only where a dictionary it would have added is needed: a non-validating session whose default is the `path` file's version opens, and a `1128=10` frame takes S's view with no failure (FR-013). To file as an issue.
 
 ## R-13 Live cell (NFR-005)
 
@@ -357,7 +367,7 @@ trap as `path`, each failure a diagnostic at `dictionary.extra_paths`; a non-arr
 
 `bench/session/on_inbound_frame_bench.cpp` (`InSequence`, `InSequence_Validated`) and `scan_frame_header_bench.cpp` exist but are
 ungated in `bench/ci-suite.txt`. **Plan:** paired base-vs-candidate by B41's method for `on_inbound_frame` and `validator_bench` on
-a non-FIX session shape (FIX.4.4), and a new FIXT case in `on_inbound_frame_bench.cpp`, reported for information, so the peek's cost is on record in the same PR.
+a non-FIX session shape (FIX.4.4), and a new FIXT case in `on_inbound_frame_bench.cpp`, reported for information, so the peek's cost is on record in the same PR. It has no budget, by decision: the base has no routed frame to pair against, and this case reports what a budget would bound, the peek's walk and the envelope's per-field test.
 
 `tests/alloc_guard/test_validate_gate_alloc_guard.cpp`, which the spec named, never constructs a `Session`. The real-Session
 guard is `tests/perf/test_session_recovery_alloc_guard.cpp`, so NFR-002's witness is modelled on that file. Corrected in the spec.
@@ -376,7 +386,7 @@ These are tasks, in plan.md's records phase. A condition unmet means the row sta
 
 | Row | Condition | Honest under this plan? |
 |---|---|---|
-| S-026 → `done` | W-4, W-5 and W-9 green on {T, A, L}, since refusal correctness is part of what it promises; W-1, W-2, W-3, W-7, W-10 green; `[const §VI.6]`'s Gate A and Gate B | Yes, with W-25 for §5.3.4, which no live cell can witness: the row says so |
+| S-026 → `done` | W-4, W-5 and W-9 green on {T, A, L}, since refusal correctness is part of what it promises; W-1, W-2, W-3, W-7, W-10 green; W-18 green at T118, and a red at T143 goes to the owner under NFR-005; `[const §VI.6]`'s Gate A and Gate B | Yes, with W-25 for §5.3.4, which no live cell can witness: the row says so |
 | `coverage-index.md` §5.3.4 | Maps to S-026, and now S-026 delivers it. §5.3.2 and §5.3.5 stay on S-026; §5.3.3 stays on S-025. Correct §4.3.7's, §5.3's and the FIXT section's "S-026 tolerate-only" and "`backlog`" wording | Yes |
 | L-041-2 → closed | Its open claim is the two-dictionary resolution. W-1 and W-2 green. Its accept-only divergence stays as B-081-1, and R-6's residue gets new rows | Yes |
 | L-033-1 → closed | Its stated workaround is "implement routing at the `fromApp` level". Retiring it removes that advice, which is honest only if what replaces it works: W-10's clone and reify arms green, and W-12's C arm | Yes, given E-5 |
@@ -419,7 +429,7 @@ A validating FIXT session on a partial S used to work in C++, for the messages t
 
 **The patch fixture depends on where the fields go.** `overlay_patch.hpp` requires a hunk's context block to match exactly once, and `FIXT11.patch`'s `fields` hunk has `</field>` then `</fields>`, so a three-field append breaks it. Hence 384 and 385 after 383, and 1410 directly before 1409, out of numeric order by one, so that 1409's `</field>` stays directly above `</fields>`. Each of the two hunks' context blocks matches once, as in the base, and `dictionary_overlay_tests` passes on it.
 
-**Mirrors.** `tests/fuzz/corpus/dict_xml_loader/seed_fixt11_real_dictionary.xml` stays: `tests/fuzz/CMakeLists.txt` rules that a corpus seed is a frozen record. `tests/config/fixtures/FIXT11.xml` stays, because no W-14 cell sends the group.
+**Mirrors.** `tests/fuzz/corpus/dict_xml_loader/seed_fixt11_real_dictionary.xml` stays: `tests/fuzz/CMakeLists.txt` rules that a corpus seed is a frozen record. `tests/config/fixtures/FIXT11.xml` stays, because no W-14 cell sends the group. W-14's cells and the TOML live cell load that mirror, so a green TOML cell is no evidence for the edited file.
 
 ## R-18 What a real `Session` does today (the oracle data-model E-7 points at)
 
@@ -429,7 +439,7 @@ A validating FIXT session on a partial S used to work in C++, for the messages t
 
 **Configuration that decides the results.** Registry built from FIXT11, FIX50SP2 and FIX Latest, of which `version_registry` drops FIXT11 at this commit. `default_appl_ver_id` v50sp2. S is FIXT11 (T), FIX50SP2 (A) or FIX Latest (L). `one_way_ca` except column h. Column h: `mtls_ca`, a policy listing another principal, and `CN=STRANGER` delivered through `attach_accepted_transport`, with the capture on that transport because live writes go there. Column i: `session_posture::production`, frame with `464=Y`. Stale means `52` four years behind the clock. Peer sequence 1 in the establishment arms and 2 after.
 
-**Result.** The logs, one line per cell, keyed by shape, on or off, arm and input, are the oracle; data-model E-7 points at them. On 2026-11-03 the harness produced them with these checks:
+**Result.** The logs, one tab-separated line per cell, `shape`, `on|off`, `arm`, `input` and the ending, as `h.cpp` prints them and tasks.md T007's trace must spell them, are the oracle; data-model E-7 points at them. On 2026-11-03 the harness produced them with these checks:
 
 - **A known positive.** `off`, NotConnected, stale Logon with no 1137 answers 373=10, 371=52, Disconnected: what `W_StaleSendingTime_Beats1137Gate_Reject52_No1137` pins.
 - **A seeded row that must differ.** The same run with one input changed: an undefined tag 5999 in the body. The first placement, on `NOS` in Active on T, reported **no difference**, because T already rejects that frame on tag 8, so the seed could not move it; a zero from a seed needs a cell that can move. Placed on `Heartbeat` in Active on T, `diff` reports that row alone: delivered becomes Reject 373=2, 371=5999. In a second placement, `h dictionaries seedcheck` on L's `NOS` in Active, delivered becomes the same Reject, and the harness exits non-zero if the two match.
