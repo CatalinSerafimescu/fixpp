@@ -88,7 +88,7 @@ session cannot open as FIXT.1.1 at all. TOML loads one `[dictionary]`. (L-097-1.
 ### Session 2026-11-03
 
 - Q: On a FIXT session with validation off, is the view handed to `fromApp` parsed with the dictionary of the message's resolved version? → A: Yes, as QuickFIX/J: one rule whether validation is on or off, so turning validation on never changes how a message parses. A frame with no answering dictionary uses the session dictionary (owner).
-- Correction from the probe, no question asked: a FIX 4.4 table rejects a FIXT Logon on tag 1137, so "defines the admin messages" also requires that its Logon accepts 1137 (FR-003).
+- Corrections from research, no question asked: the C API also needs a `validate_inbound_messages` setter (FR-016); sessions are built per registered entry, not per connection (NFR-003, SC-007); FR-008 narrows to the header. From the probe: a FIX 4.4 table rejects a FIXT Logon on tag 1137, so "defines the admin messages" also requires that its Logon accepts 1137 (FR-003).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -217,19 +217,19 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **1128 on an admin message.** Ignored for dictionary selection, as in QuickFIX C++ and J; the transport dictionary
   judges the field. `FIXT11.xml`'s 1128 enum stops at 9, so `1128=10` on a Logon draws 373=5 from that dictionary, as in
   QuickFIX C++. Disclosed, not changed.
-- **1128 after the first body field, or repeated.** The resolver and `dict::reify` must read the same occurrence, so
-  validation and reify cannot disagree. Plan names the rule and a witness.
-- **Empty `1128=`.** Follows the frame-level empty-value rule first; it never silently selects the negotiated version.
+- **1128 past the header.** Routing reads 1128 from the header only. A validating session answers a frame whose first 1128 is past
+  the header with Reject 373=14, 371=1128, so a delivered validated message has one answer for routing and `dict::reify`. A
+  non-validating session routes it by the negotiated version and delivers it (research R-5).
+- **Empty `1128=`.** Present, never read as absent. Validating: Reject 373=4, 371=1128, as QuickFIX. Non-validating: the session dictionary.
 - **Validation off, no dictionary for the version, or an unknown 1128.** The view uses the session dictionary, as today.
 - **Resend and PossDup paths.** Every path that validates or dispatches an application frame uses the same selection.
-- **Message before Logon completes.** An application message in a state with no negotiated version is handled by the
-  existing state rules before any dictionary choice is observable.
+- **Application message before Logon completes.** On a FIXT session the establishment arms validate admin frames only, so the
+  frame disconnects whatever the session dictionary, one ending (research R-8).
 - **Session dictionary is FIX 4.4 on a FIXT session.** Its own version is 4.4. Its Logon does not accept 1137, so it is not
   a transport dictionary: a validating session needs `FIXT11.xml` in the engine dictionaries or `open()` refuses it. A
   non-validating session is not refused. An existing test shape (`tests/session/test_fixt_logon_establishment.cpp`) uses a
   minimal one with validation off; it must keep passing.
-- **The engine outlives every accepted connection.** An acceptor builds a new `Session` per connection; dictionary tables
-  must not be rebuilt per connection.
+- **Several sessions on one engine.** Dictionary tables are shared: the cost must not be sessions times dictionaries.
 - **Message Type Default.** Logon's 372/1130/1410 do not affect resolution. Disclosed (FR-024).
 
 ## Requirements *(mandatory)*
@@ -259,8 +259,8 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **FR-007**: On a FIXT session the FIXT standard header and trailer tags MUST be accepted and type-checked on an
   application message whatever its application dictionary, FIX 4.0–4.4 included. A non-FIXT session's validation of the
   same dictionaries MUST NOT change.
-- **FR-008**: A header or trailer tag the session dictionary declares beyond the standard ones MUST be accepted on an
-  application message and checked against the session dictionary.
+- **FR-008**: A header tag the session dictionary declares beyond the standard ones MUST be accepted on an application message and
+  checked against the session dictionary. The trailer equivalent is disclosed as a limitation (research R-6).
 - **FR-009**: A validating session MUST answer an unknown 1128 value, or a valid value with no application dictionary,
   with Reject 373=5, 371=1128, no `fromApp`, and the session stays up. Sequence numbers follow the existing validation
   Reject rule (fixpp#423).
@@ -274,15 +274,15 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   use one dictionary per frame, the one FR-002 or FR-003 selected, with or without validation.
 - **FR-013**: With validation off and a resolved version that is unknown or has no dictionary, the frame MUST be scanned and
   parsed with the session dictionary. Delivery is as today.
-- **FR-014**: An application MUST be able to obtain the resolved application version of a delivered message, in C++ and
-  through the C API (the "resolved-app-version accessor" in S-026's scope).
+- **FR-014**: An application MUST be able to obtain the resolved application version of a delivered message, in C++, through the C
+  API and from Python (the "resolved-app-version accessor" in S-026's scope). `fixpp_msg_version` is unchanged.
 - **FR-015**: An outbound application message whose header carries 1128 MUST keep it, and a witness MUST pin that, so S-026's
   "explicit application version per message" holds in both directions.
 
 **Surfaces**
 
-- **FR-016**: The C API MUST add a setter for `default_appl_ver_id` and a call that adds a dictionary to an engine config. Both
-  are additive, a C-ABI MINOR bump; a Python wrapper follows through SWIG.
+- **FR-016**: The C API MUST add setters for `default_appl_ver_id` and `validate_inbound_messages` (validation is unreachable from C
+  today) and a call that adds a dictionary to an engine config. All are additive, a C-ABI MINOR bump; Python follows through SWIG.
 - **FR-017**: TOML `[dictionary]` MUST accept an optional list of extra dictionary paths, resolved like `path`, added to the
   engine dictionaries after `path`, so the session dictionary default stays the `path` file. A load failure MUST be a
   diagnostic naming the key.
@@ -307,12 +307,12 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 
 ### Non-functional Requirements
 
-- **NFR-001**: A non-FIXT session MUST gain no per-message work, and its validate and send paths MUST NOT regress beyond
-  the paired-bench band (`[const §VIII.2]` as gated today).
-- **NFR-002**: No per-message heap allocation on a FIXT session's inbound path, validating or not: the alloc-guard gate
-  (`tests/alloc_guard/test_validate_gate_alloc_guard.cpp`) MUST cover a routed message.
-- **NFR-003**: Application-dictionary tables MUST be built at most once per engine per dictionary, not per accepted
-  connection and not on the message path. A witness MUST count the builds.
+- **NFR-001**: A non-FIXT session MUST gain no more than one branch per inbound frame, and its inbound and validate paths MUST NOT
+  regress beyond the paired-bench band (`[const §VIII.2]` as gated today).
+- **NFR-002**: No per-message heap allocation on a FIXT session's inbound path, validating or not. A real-`Session` guard modelled on
+  `tests/perf/test_session_recovery_alloc_guard.cpp` MUST cover a message routed to a dictionary other than the session's.
+- **NFR-003**: Engine dictionary tables MUST be built at most once per engine per dictionary, not per session and not on the message
+  path. A witness MUST count the builds.
 - **NFR-004**: C ABI changes MUST be additive: ABI golden and symbol map updated, version bumped, existing symbols
   unchanged.
 - **NFR-005**: A live FIXT.1.1 / FIX.5.0SP2 cell against QuickFIX-cpp and QuickFIX/J with fixpp's validation ON (B-095-1
@@ -336,7 +336,7 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **SC-004**: An overlay on the session dictionary behaves the same with and without other engine dictionaries registered.
 - **SC-005**: Non-FIXT behaviour is unchanged: the existing test suite passes unmodified on every non-FIXT session test.
 - **SC-006**: The same FIXT session reaches Active and routes `1128` from C++, C, Python and TOML.
-- **SC-007**: Opening a thousand connections on an acceptor builds each dictionary's tables once.
+- **SC-007**: Opening many FIXT sessions on one engine builds each engine dictionary's table once.
 
 ## Assumptions
 
