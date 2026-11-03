@@ -7,10 +7,11 @@
 | `transport() const noexcept` → `std::shared_ptr<const Dictionary>` | the FIXT.1.1 dictionary among the engine dictionaries, last writer wins as for every slot; null if none |
 | `fixt_table(application_version v) const` → `expected_t<std::shared_ptr<const table_view> const*>` | stable-address owner of `v`'s table with the FIXT framing surface; same miss error and same one-way fallback as `get(v)`; the fallback shares the FIX Latest slot's table |
 | `transport_table() const` → same type | the transport dictionary's table |
-| private `std::unique_ptr<table_cache>` | one `std::once_flag` + owner per slot, transport included |
+| private `std::unique_ptr<table_cache>` | one `std::atomic<std::shared_ptr<const table_view>*>` per slot, transport included |
 
-Invariants: a table is built at most once per slot. An owner's address never changes for the registry's lifetime. A build that
-throws leaves its flag unset. The registry stays movable and non-copyable. Registering a `vt11` dictionary no longer drops it.
+Invariants: one owner survives per slot; serially one walk, and a race can walk twice with the loser's discarded. An owner's address
+never changes for the registry's lifetime. A build that throws publishes nothing. No lock. The registry stays movable and non-copyable.
+Registering a `vt11` dictionary no longer drops it.
 
 ## E-2 `dict::session_to_application(session_version)` (public)
 
@@ -22,9 +23,9 @@ Adds the framing surface for every version but `vt11`. `as_table_view()` is unch
 
 ## E-4 `wire::dictionary_driven_validator`
 
-New constructor `(std::shared_ptr<const table_view> dict, std::shared_ptr<const table_view> envelope = {})`. All reads go through
-one `const table_view&`. The by-value constructor keeps its `noexcept` specification and its by-value ownership, with no envelope.
-Copy and move: whatever the current uses need, stated by the implementer; a reference member must not dangle after a copy.
+Still holds its table by value, and its constructor's `noexcept` specification is unchanged. Gains one member after it, `const table_view*
+envelope_` (default null), with a setter used once before first use. Read only on the failing branch of Step 1's tag check, so the accept
+path is unchanged. The envelope is S's table, which outlives the validator.
 
 ## E-5 `wire::MessageView`
 
@@ -41,7 +42,7 @@ app_routes_       array<route_entry, kApplicationVersionSlots>, indexed by appli
 transport_route_  route_entry
 session_route_    route_entry over inbound_tv_ and validator_
 own_fixt_tv_      shared_ptr<const table_view>: S with framing, built only for a v40–v44 S on a FIXT session
-fixt_validators_  array<unique_ptr<validator>, N+1>: only when validating
+fixt_validators_  array<unique_ptr<validator>, N+1>: only when validating; each a deep copy of its table
 ```
 
 Written once in `open()`; read on the session's strand with no lock. Non-FIXT: only `session_route_` is used.
@@ -59,7 +60,8 @@ inbound_route {
 Selection, computed once at arm entry:
 
 1. Not `fixt_routing_` → `session_route_`.
-2. `peek_fixt_route(frame)`. Admin MsgType → `transport_route_`.
+2. `peek_fixt_route(frame)`. Unreadable → `session_route_`, and the arm's fault and garble dispositions run as today. Admin MsgType →
+   `transport_route_`.
 3. 1128 present and empty → refusal `empty_value`, `session_route_`.
 4. 1128 present → resolve. A failure → refusal `unknown_value`, `session_route_`. A miss on the slot → refusal `no_dictionary`,
    `session_route_`, `resolved` set.

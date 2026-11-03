@@ -43,19 +43,24 @@ Correction to the spec's premise: an acceptor does not build a `Session` per con
 per registered entry; the accept loop returns after the first peer, and reconnect does not re-run `open()`. The cost to
 bound is sessions times dictionaries, not connections.
 
-**Decision.** The registry owns one table per dictionary, built once, on first request, under a `std::once_flag`.
+**Decision.** The registry owns one table per dictionary, built on first request and published lock-free.
 
 - Lazy, so a FIX.4.x engine that holds dictionaries pays nothing. Requested only from a FIXT session's `open()`.
-- The flags and owners live behind a `unique_ptr` so the registry stays movable, and the `shared_ptr` objects have
-  stable addresses for the engine's lifetime, which outlives every session.
-- The `dictionary_driven_validator` gains a constructor taking `std::shared_ptr<const table_view>`, so a session's N
-  validators share tables instead of N deep copies. The by-value constructor and its `noexcept` specification, pinned
-  by `tests/wire/validator_domain_test.cpp`, are unchanged. Reads go through a `const table_view&`, one indirection,
-  so `validator_bench` runs paired.
+- Each slot is an `std::atomic<std::shared_ptr<const table_view>*>`. A caller that finds it null builds a heap-held owner and
+  compare-exchanges it in; the loser of a race deletes its own and uses the winner's. No lock, so nothing blocks inside
+  `open()`'s coroutine (`[const §XV.9]` bans `std::mutex` in coroutine context; `std::call_once` would block a strand thread the
+  same way, and nothing in `src/` or `include/` uses it today). A race can walk twice, with one survivor; serially, one walk.
+- Owners have stable addresses for the registry's lifetime, which outlives every session. The slots live behind a `unique_ptr`
+  so the registry stays movable.
+- **`dictionary_driven_validator` stays by value, unchanged in its reads.** A validating FIXT session holds one validator per
+  answering dictionary, each a deep copy of its table, made at `open()`. Sessions are per registered entry, so copies are
+  bounded; NFR-003 bounds walks. Non-FIXT layout and hot path do not move, so NFR-001 needs no argument from a bench. The copy
+  cost is reported at implement.
 
-**Rejected.** Building in the Engine constructor (a walk for engines that never use it, and `version_registry`'s
-constructor is `noexcept`). Per-session tables (sessions × dictionaries walks). Engine-held validators (`dict` cannot
-depend on `wire`; direct-constructed test sessions have no engine).
+**Rejected.** A `shared_ptr`-holding validator: an indirection on every FIX 4.x validation to save open-time copies, where 098
+needed an owner ruling for a 24-byte layout change. Building in the Engine constructor (a walk for engines that never use it,
+and `version_registry`'s constructor is `noexcept`). A warm step in `register_session` (direct-constructed sessions have no
+engine, and a late registration would race). `std::once_flag` (above). Per-session tables (sessions × dictionaries walks).
 
 ## R-4 FIXT framing on FIX 4.x tables (FR-007)
 
@@ -77,16 +82,20 @@ custom pair's data cannot be mistaken for the header field. Then the arm scans w
 
 Cost: a handful of fields per frame, FIXT sessions only.
 
+A frame the peek cannot read routes to `session_route_`, and the arm's existing fault and garble dispositions run on it unchanged.
+
 **The occurrence rule (spec edge case).** Routing reads 1128 from the header only, as FIXT defines it. A frame whose first
 1128 is past the header:
-- validating: Reject 373=14, 371=1128 (`wire_header_out_of_order`'s reason), as QuickFIX C++, J and Go give for a header
-  field out of place. This is what makes validation and `dict::reify` unable to disagree on a delivered message: `reify`
-  reads the first occurrence, and a delivered validated frame has its first occurrence in the header.
+- validating: Reject 373=14, 371=1128 (`wire_header_out_of_order`'s reason). All three engines agree: C++ `Message::setString`
+  clears `m_validStructure` for a header field after the body starts and `validate` throws `TagOutOfOrder(field)`; J
+  `Message.parseBody` throws `TAG_SPECIFIED_OUT_OF_REQUIRED_ORDER`; Go `validateFieldContent` returns
+  `tagSpecifiedOutOfRequiredOrder`. It is also what makes validation and `dict::reify` unable to disagree on a delivered
+  message: `reify` reads the first occurrence, and a delivered validated frame has its first occurrence in the header.
 - non-validating: routed by the negotiated version and delivered, as today. `reify` can read the body value on that
   malformed frame. Disclosed as a B-row.
 
-**Empty `1128=`:** treated as present and unknown, never as absent. Validating: Reject 373=4, 371=1128, as QuickFIX's
-`checkHasValue`. Non-validating: S. `resolve_application_version` is not called with it, because its empty-input rule
+**Empty `1128=`:** treated as present and unknown, never as absent. Validating: Reject 373=4, 371=1128. All three engines agree
+(C++ and J `checkHasValue`, Go `TagSpecifiedWithoutAValue`). Non-validating: S. `resolve_application_version` is not called with it, because its empty-input rule
 means "use the default".
 
 ## R-6 Header tags the session dictionary adds (FR-008)
@@ -127,7 +136,15 @@ route's table.
 The two establishment arms validate before `interpret_logon`, with no negotiated version. Today's endings differ by
 dictionary: a `FIXT11` S draws a Reject and stays in the arm; a FIX Latest S, and validation off, disconnect.
 **Decision:** on a FIXT session those arms validate admin frames only. An application frame goes straight to
-`interpret_logon`'s refusal and disconnects: one condition, one ending, and the ending QuickFIX reaches through `verify`.
+`interpret_logon`'s refusal and disconnects: one condition, one ending.
+
+Engines. A frame valid for the dictionary consulted: all three disconnect (C++ and J `validLogonState` in `verify`; Go's
+pre-Logon state). A frame that is also invalid: they split. C++ validates first against its initial FIX50 default and answers a
+Reject; Go disconnects without validating; J reads a null target default first (its result there was not traced). fixpp cannot
+validate without a negotiated version, so it disconnects, as Go. **Flagged for the owner's sign-off.**
+
+No existing test sets a validating FIXT session: `grep -l 'FIXT.1.1'` over `tests/**/*.cpp` intersected with
+`validate_inbound_messages = true` returns nothing at `c0a828ef`. Re-run the recipe at implement; a hit is a test this decision changes.
 
 ## R-9 Refusals and their endings (ruling 1)
 

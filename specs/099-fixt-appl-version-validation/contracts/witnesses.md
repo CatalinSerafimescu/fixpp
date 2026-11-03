@@ -20,10 +20,11 @@ pick a FIX 4.4-only pair by a recomputed set difference over the vendored XML, i
 | W-12 | C ABI live | `capi_099_fixt_live_test`: setters, add-dictionary, real TCP peer, Active, routed Reject and accept; handle errors; `version_test` 1.14 |
 | W-13 | Python live | raw TCP peer as 098's `_Peer`, FIXT; same arms |
 | W-14 | TOML | `extra_paths` reaches the engine, front is `path`, session validates; bad path, non-array, non-string; absent key byte-identical |
-| W-15 | Build count | `as_table_view_call_count` across M sessions on one engine: once per dictionary used, plus S's; a TSan arm opens sessions concurrently |
+| W-15 | Build count | `as_table_view_call_count` across M sessions opened serially on one engine: once per engine dictionary, plus S's per session; a TSan arm opens sessions concurrently and asserts every session holds the same owner per slot |
 | W-16 | No heap on the routed path | modelled on `tests/perf/test_session_recovery_alloc_guard.cpp`; validated and not; a routed message to a non-own slot |
 | W-17 | Non-FIXT unchanged | FIX.4.4 strict validation still rejects 1128; existing suite unmodified; `as_table_view()` output for every vendored file byte-equal to a `c0a828ef` golden digest computed in the test's recipe |
 | W-18 | Live | per the owner's ruling on research R-13 |
+| W-19 | Fault and garble endings unchanged | {T, A, L}: garbled frame, malformed tag, Length/Data mismatch, third field not 35: the same ending, counters and sequence state as a `c0a828ef` run of the same frames; a frame the peek cannot read is among them |
 
 **Mutants** (each turns the named witness RED, whole binary, unfiltered, `strings`-checked fresh):
 
@@ -37,6 +38,7 @@ pick a FIX 4.4-only pair by a recomputed set difference over the vendored XML, i
 | M-6 | frame scan keeps `inbound_tv_`'s hooks | W-7 |
 | M-7 | `open()` check removed | W-8 |
 | M-8 | tables built per session | W-15 |
+| M-16 | a peek failure refuses instead of routing to `session_route_` | W-19 |
 | M-9 | admin frames use the application slot | W-1 |
 | M-10 | initiator disposition removed | W-5 |
 | M-11 | accessor never written | W-10 |

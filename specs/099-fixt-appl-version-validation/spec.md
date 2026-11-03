@@ -215,8 +215,9 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **Non-FIXT session.** Byte-identical to today, including that a FIX.4.4 session's strict validation rejects a frame
   carrying 1128.
 - **1128 on an admin message.** Ignored for dictionary selection, as in QuickFIX C++ and J; the transport dictionary
-  judges the field. `FIXT11.xml`'s 1128 enum stops at 9, so `1128=10` on a Logon draws 373=5 from that dictionary, as in
-  QuickFIX C++. Disclosed, not changed.
+  judges the field. `FIXT11.xml`'s 1128 enum stops at 9, so `1128=10` on a Logon draws 373=5 from that dictionary. An
+  application message with `1128=10` routes to FIX Latest, as QuickFIX/J (whose FIXT11.xml has 10); QuickFIX C++'s enum stops
+  at 9, so it rejects 10 on every message. Disclosed, not changed.
 - **1128 past the header.** Routing reads 1128 from the header only. A validating session answers a frame whose first 1128 is past
   the header with Reject 373=14, 371=1128, so a delivered validated message has one answer for routing and `dict::reify`. A
   non-validating session routes it by the negotiated version and delivers it (research R-5).
@@ -311,8 +312,8 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   regress beyond the paired-bench band (`[const §VIII.2]` as gated today).
 - **NFR-002**: No per-message heap allocation on a FIXT session's inbound path, validating or not. A real-`Session` guard modelled on
   `tests/perf/test_session_recovery_alloc_guard.cpp` MUST cover a message routed to a dictionary other than the session's.
-- **NFR-003**: Engine dictionary tables MUST be built at most once per engine per dictionary, not per session and not on the message
-  path. A witness MUST count the builds.
+- **NFR-003**: Engine dictionary tables MUST be walked once per engine per dictionary when sessions open serially, never per message
+  and never under a lock on the coroutine path. Concurrent opens can walk twice with one survivor. A witness MUST count the walks.
 - **NFR-004**: C ABI changes MUST be additive: ABI golden and symbol map updated, version bumped, existing symbols
   unchanged.
 - **NFR-005**: A live FIXT.1.1 / FIX.5.0SP2 cell against QuickFIX-cpp and QuickFIX/J with fixpp's validation ON (B-095-1
@@ -336,7 +337,7 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **SC-004**: An overlay on the session dictionary behaves the same with and without other engine dictionaries registered.
 - **SC-005**: Non-FIXT behaviour is unchanged: the existing test suite passes unmodified on every non-FIXT session test.
 - **SC-006**: The same FIXT session reaches Active and routes `1128` from C++, C, Python and TOML.
-- **SC-007**: Opening many FIXT sessions on one engine builds each engine dictionary's table once.
+- **SC-007**: Opening many FIXT sessions serially on one engine walks each engine dictionary once.
 
 ## Assumptions
 

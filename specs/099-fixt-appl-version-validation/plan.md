@@ -74,9 +74,9 @@ spec/, brain/, parent trackers
 ## Phases
 
 1. **Registry and tables** (E-1, E-2, E-3): W-15, W-17.
-2. **Validator** (E-4, envelope): existing validator tests stay green; W-3's unit half; paired `validator_bench`.
+2. **Validator** (E-4, envelope): existing validator tests stay green; W-3's unit half.
 3. **Peek and selection** (E-6, E-7), `open()` check (R-2): W-8.
-4. **Arms**: scan, validate gate, interpret, dispatch (R-7, R-8, R-9): W-1 to W-7, W-9, W-16.
+4. **Arms**: scan, validate gate, interpret, dispatch (R-7, R-8, R-9): W-1 to W-7, W-9, W-16, W-19.
 5. **Accessor** (E-5): W-10. Outbound pin: W-11.
 6. **C ABI, Python, TOML**: W-12, W-13, W-14.
 7. **Live cell**: W-18, per the owner's ruling.
@@ -86,4 +86,4 @@ Phases 1–3 precede 4; 5 and 6 are parallel after 4. Mutants run after each pha
 
 ## Owner sign-off (`[const §X.6]`) — pending
 
-The `/plan` sign-off, including research R-13's live-cell option.
+The `/plan` sign-off, including research R-13's live-cell option and research R-8's pre-Logon ending on a frame that is also invalid.

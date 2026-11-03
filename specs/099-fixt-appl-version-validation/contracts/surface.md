@@ -7,7 +7,7 @@
 | `version_registry::transport()`, `fixt_table()`, `transport_table()` | data-model E-1 |
 | `dict::session_to_application` | data-model E-2 |
 | `Dictionary::as_table_view(fixt_framing)` | data-model E-3 |
-| `dictionary_driven_validator(shared_ptr, shared_ptr)` | data-model E-4 |
+| `dictionary_driven_validator` envelope setter | data-model E-4 |
 | `MessageView::resolved_application_version()` | data-model E-5 |
 | `SessionConfig`, `Session::open()` comments | state that the dictionary has no engine anchor and is required on the session (#651); the phrase `value_or(engine_anchor)` stays only for the axes that have one |
 
@@ -67,5 +67,6 @@ Non-FIXT session: none.
   answered by another table (L-row).
 - `toApp` views and resend replay use S's table (L-row).
 - FIXT 1.1's Message Type Default level is not implemented, as in all three QuickFIX engines (L-row).
-- `FIXT11.xml`'s 1128 enum stops at 9, so an admin frame carrying `1128=10` draws 373=5 (B-row).
+- `FIXT11.xml`'s 1128 enum stops at 9, so an admin frame carrying `1128=10` draws 373=5 from a FIXT11 transport dictionary (B-row). An
+  application frame with `1128=10` routes to FIX Latest, as QuickFIX/J; QuickFIX C++ rejects `1128=10` on every message.
 - Header Required-ness is not enforced on an application message (B-081-1 stays).
