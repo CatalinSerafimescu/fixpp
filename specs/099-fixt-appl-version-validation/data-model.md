@@ -10,8 +10,9 @@ class fixt_route_set                   // not copyable, not movable
     shared_ptr<const wire::dictionary_driven_validator> validator;  // holds the one table by value
     shared_ptr<const dict::table_view> owner;                       // aliases validator->table(); the parse route's owner object
   };
+  template <std::ranges::forward_range Dictionaries>   // of const dict::Dictionary*
   static expected_t<shared_ptr<const fixt_route_set>>
-      build(const dict::version_registry&, span<const dict::Dictionary* const> session_dictionaries) noexcept;
+      build(const dict::version_registry&, Dictionaries&& session_dictionaries) noexcept;
   const entry* find(const dict::Dictionary* d, const dict::Dictionary* pair_source) const noexcept;  // null if absent
 ```
 
@@ -25,7 +26,7 @@ Invariants:
 - **Whole or nothing.** `build` catches `std::bad_alloc` and returns `out_of_memory`, publishing nothing.
 - **The fallback.** A FIX50SP2 lookup answered by the registry's one-way fallback gets FIX Latest's dictionary pointer, and so shares that entry.
 
-**Who builds it.** `Engine::start()`, after `validate_engine_config` and before its first allocation, when at least one registered entry is FIXT, passing each FIXT entry's `config.dictionary`. A failure returns from `start()` with nothing spawned. The role loops hand it to each session through `session_engine_access::adopt_routes`, right after `make_shared<Session>` and before `open()`. A FIXT session with no adopted set, which is a direct-constructed one, builds a private one in `open()` (E-6) over every registry slot.
+**Who builds it.** `Engine::start()`, after `validate_engine_config` and before its first allocation, when at least one registered entry is FIXT, passing a view over `registry_` filtered to FIXT entries, yielding each one's `config.dictionary.get()`, so no list is collected. A failure returns from `start()` with nothing spawned. The role loops hand it to each session through `session_engine_access::adopt_routes`, right after `make_shared<Session>` and before `open()`. A FIXT session with no adopted set, which is a direct-constructed one, builds a private one in `open()` (E-6) over every registry slot, passing `std::views::single` of its own dictionary.
 
 ## E-1a `dict::version_registry` (public, additive)
 
@@ -48,7 +49,7 @@ Registering a `vt11` dictionary no longer drops it. `get()` is unchanged: a `vt1
 
 Adds the framing surface for v40–v44. `v50`, `v50sp1` and `v50sp2` have it already. `vt11` and FIX Latest declare those tags themselves, and get no framing surface. `as_table_view()` is unchanged, so a non-FIXT session is unchanged.
 
-**NoHops's structure (FR-007).** On a table whose own header does not declare NoHops (`is_header_tag(627)` false), the overload also registers its group metadata in the bare store: `set_group_first(627, 628)` and members 629 and 630, none required. No validator branch and no envelope: `validate_group_level` and `consume_group` ask `group_first_field`, `group_member_tags` and `group_required_members`, each of which falls to the bare store on a context miss, and `set_group_first` sets the bit their pre-filter tests (read from `table_view.hpp` and `validator.hpp`). So one ending on every route and shape: count high or missing delimiter `R 1/628 <third>` stays c, what T and L answer today where a table declares it (research R-4). `dict_hooks::for_table_view`'s group callbacks read the same accessors, so the delivered view's `group(627)` answers there too, with or without validation: read, not run. On shape A that is new with validation off (FR-011, B-row). `get(628)` reads the offset table and does not change. A header group an overlay adds to S is not composed (L-row).
+**NoHops's structure (FR-007).** On a table whose own header does not declare NoHops (`is_header_tag(627)` false), the overload also registers its group metadata in the bare store: `set_group_first(627, 628)` and members 629 and 630, none required. No validator branch and no envelope: `validate_group_level` and `consume_group` ask `group_first_field`, `group_member_tags` and `group_required_members`, each of which falls to the bare store on a context miss, and `set_group_first` sets the bit their pre-filter tests (read from `table_view.hpp` and `validator.hpp`). So one ending on every route and shape: count high or missing delimiter `R 1/628 <third>` stays, c, and k on a Logon, what T and L answer today where a table declares it (research R-4). `dict_hooks::for_table_view`'s group callbacks read the same accessors, so the delivered view's `group(627)` answers there too, with or without validation. Measured on real tables with these calls applied, not through a `Session` (the parent's `research/probes/099_fixt_session_today/gate_a_l2r2/nh.log`): the validator's `1/628`, and one answer from the view, `fixpp_msg_get_group`, a clone and a `reify` handle. On shape A that is new with validation off (FR-011, B-row). `get(628)` reads the offset table and does not change. A header group an overlay adds to S is not composed (L-row).
 
 **Preservation contract.** The result equals `as_table_view()`'s on every store but `fixt_framing_tags_`, `fixt_framing_types_` and, where the paragraph above applies, 627's entries in `group_first_` and `group_members_` and its bit in `group_bits_`. Every form bumps `as_table_view_call_count`.
 
@@ -76,16 +77,19 @@ Still holds its table by value, with the same constructor and `noexcept` specifi
 - `fixpp_msg_clone` (`src/capi/message_write.cpp`), on the dict-backed and the dict-free branch.
 - `dict::detail::owning_message_handle_from_frame` (`src/dictionary/reify.cpp`), on both branches. So `dict::reify(...)`'s handle's `view()` answers as its source did. A bridge file under `[arch §2.4]`, which already reads `message_view_membership_access`.
 
+`dict::reify_as`'s typed owner is not one of them: its `view()` parses dict-free today (each generated `<version>/Reify.hpp`, read, not run), so `group(627)` declines there and `resolved_application_version()` is `Unknown`. It carries `version_v` instead.
+
 **Readers.**
 
 - `dict::reify`: when the byte is set, returns `{application, vt11, byte}` and reads neither 1128 nor the profile. Otherwise it reads 1128 and the profile, as today. A view no session wrote is `Unknown`, so a non-session caller and a non-FIXT session are unchanged. `version_profile` stays 4 bytes and carries no per-MsgType default.
 - C: `fixpp_msg_version`, E-8. Python: `msg_version`, returning the three values.
 
-**Against `dict::reify`'s own answer.** Equal in all three bytes whenever the byte is set, by the rule above, whatever profile the caller passes. Three splits remain on a non-validating session, each with a W-6 cell and a B-row, because the byte is `Unknown` there and `reify` falls through:
+**Against `dict::reify`'s own answer.** Equal in all three bytes whenever the byte is set, by the rule above, whatever profile the caller passes. On a non-validating session they split when the byte is `Unknown` and `reify`, falling through, finds a 1128 or a profile that answers otherwise (B-row; W-6 names the cases it pins):
 
 - an empty `1128=`: `reify` passes the empty value to the resolver, whose rule means "use the default";
 - an initiator's reconnect whose reply has no 1137 it can resolve: `route_negotiated_` is `Unknown`, while `negotiated_version_profile()` keeps the previous value, so a `reify` with that profile labels the frame with the previous connection's version. The split follows from ruling 1, which keeps that accessor's writes;
-- an unknown 1128, such as `1128=99`: the accessor is `Unknown`, and `reify` returns `dict_unknown_appl_ver_id` and no handle.
+- an unknown 1128, such as `1128=99`: the accessor is `Unknown`, and `reify` returns `dict_unknown_appl_ver_id` and no handle;
+- a past-header 1128, such as a body `1128=6`, on an initiator whose reply had no 1137: step 6 leaves the byte `Unknown`, and `reify` reads the first occurrence with no position test, so it answers that version (read, not run). No requirement rests on it: FR-014's equality is for a byte the session wrote.
 
 ## E-6 Session state (internal)
 
@@ -241,17 +245,17 @@ msg_type_defaults_  std::vector<msg_type_default>, sorted by MsgType, at most 25
 
 Empty on a non-FIXT session and on most FIXT ones, so step 6 costs a size test. A lookup is a binary search over bytes, no heap. **Storage:** `open()`, on the FIXT branch beside the route adoption, calls `reserve(256)`, caught as the build is, so a failure is FR-028's `out_of_memory`. One block per FIXT session, the shape of B-544-3, and `clear()` keeps it, so no Logon grows it. On an Engine route `open()` runs in the role loop, whose failure branch logs it (research R-2). Written at today's record site, in each role, on every Logon that reaches it, cleared first. S3's block reads the group and stores nothing, so a Logon it refuses leaves the entries as they were: selection reads them only outside the establishment arms, and the next Logon that reaches the record site clears them. 256 exceeds every vendored dictionary's message count, which W-25 recomputes.
 
-**`scan_logon_msg_type_defaults(frame, hooks, out)`** in `src/session/logon_msg_type_defaults.hpp`, with the transport route's hooks, so a Data field is not read as a group member. `interpret_logon` is not changed. **One rule, validating or not.** It reads 384. Absent or not a positive integer, there are no entries. Otherwise it consumes at most that many contiguous instances, each starting at a 372 and ending at the next 372 or at the first tag outside 385, 1130, 1406, 1131, 1410, and it stops at the first non-member. A later 372 is not an entry. An instance's other fields may come in any order. An entry **counts** when 385 is `S` and 1410 is `Y`. Admin RefMsgTypes are ignored, because admin frames take the transport route. 1406 and 1131 are ignored. 1130 absent: the entry sets no default. **The record site keeps** each counted entry whose 1130 parses and whose 372 fits and is an application message, within the first 256 counted; a later entry for one MsgType wins.
+**`scan_logon_msg_type_defaults(frame, hooks, out)`** in `src/session/logon_msg_type_defaults.hpp`, with the transport route's hooks, so a Data field is not read as a group member. `interpret_logon` is not changed. **One rule, validating or not.** It reads 384. Absent or not a positive integer, there are no entries. Otherwise it consumes at most that many contiguous instances, each starting at a 372 and ending at the next 372 or at the first tag outside 385, 1130, 1406, 1131, 1410, and it stops at the first non-member. A later 372 is not an entry. An instance's other fields may come in any order. An entry **counts** when 385 is `S` and 1410 is `Y`. 1406 and 1131 are ignored. 1130 absent: the entry sets no default. **The record site keeps** each counted entry whose 1130 parses and whose 372 fits and is an application message, within the first 256 counted; a later entry for one MsgType wins.
 
-**Endings, validating FIXT, either role.** S3's block, after 1137's, walks the entries the scan consumed, in frame order, and the first fault answers, one ending each, `R x/tag A` `Disc` c. Within an entry, in this order:
+**Endings, validating FIXT, either role.** S3's block, after 1137's, refuses a Logon with any of these among the entries the scan consumed, `R x/tag A` `Disc` c; with two, either Reject may answer, as FR-010's double faults:
 
-1. no 385: `1/385`;
-2. a non-empty 1130 the resolver cannot parse, whatever its 385 and 1410: `5/1130`;
-3. a counted entry with an empty 1130, or one `app_version_registry_->get` fails, the test 1137 takes: `5/1130`;
-4. the entry is the 257th counted, before de-duplication: `5/384`;
-5. a counted 372 over eight bytes: `5/372`.
+- no 385: `1/385`;
+- a non-empty 1130 the resolver cannot parse, whatever its 385 and 1410: `5/1130`;
+- a counted entry with an empty 1130, or one `app_version_registry_->get` fails, the test 1137 takes: `5/1130`;
+- the entry is the 257th counted, before de-duplication: `5/384`;
+- a counted 372 over eight bytes: `5/372`.
 
-The gate runs first, in dictionary order, as owner item 3 has it for a double fault. A gate Reject naming 1130 or 372 on a Logon disconnects through S2, with NextNumIn kept, and any other tag it names stays. So `5/1130` and `5/372` are k on a gate path and c on a block path, observable only on an initiator's reconnect: item 3's ruled split, which FR-031 reaches. W-25 pins both.
+The gate runs first, in dictionary order, as owner item 3 has it for a double fault. A gate Reject naming 1130 or 372 on a Logon disconnects through S2, with NextNumIn kept, and any other tag it names stays (owner item 13). So `5/1130` and `5/372` are k on a gate path and c on a block path, observable only on an initiator's reconnect: item 3's ruled split, which FR-031 reaches. W-25 pins both.
 
 Cells are `MT-` plus a letter; W-25 walks them on T, A and L.
 
@@ -262,8 +266,8 @@ Cells are `MT-` plus a letter; W-25 walks them on T, A and L.
 | `MT-c` | `1130=4`, no dictionary; or empty | `R 5/1130 A` `Disc` c | same |
 | `MT-d` | no 1130 | Active; 1137 answers | same |
 | `MT-e` | 257 entries: 257 copies of `372=D`, and on T and A also 257 distinct MsgTypes | `R 5/384 A` `Disc` c | same |
-| `MT-f` | a 372 over 8 bytes | `R 5/372 A` `Disc` c | gate: `R 5/372 A` `Disc` k (S2) |
-| `MT-g` | `372=0` with a good 1130 | Active; ignored | same |
+| `MT-f` | a 372 over 8 bytes. Boundary: `372=ABCDEFGH\|1130=10` | `R 5/372 A` `Disc` c. Boundary: Active; that MsgType with no 1128 takes FIX Latest's slot | gate: `R 5/372 A` `Disc` k (S2), the boundary too, by the domain |
+| `MT-g` | `372=0` with a good 1130; `372=0\|1130=99`; `372=0\|1130=4` | Good 1130: Active; not kept. `1130=99` as `MT-b`, `1130=4` as `MT-c` | same, by this column's `MT-b` and `MT-c` |
 | `MT-h` | two entries for `D` | Active; the later wins | same |
 | `MT-i` | 385=R or 1410=N, or no 1410, `1130=99` | `R 5/1130 A` `Disc` c | gate: `R 5/1130 A` `Disc` k (S2) |
 | `MT-j` | 385=R or 1410=N, or no 1410; `1130=10`, `4` or empty | Active; ignored | same |
@@ -272,12 +276,13 @@ Cells are `MT-` plus a letter; W-25 walks them on T, A and L.
 | `MT-m` | `384=1`, an entry for `D` with `1130=9`, `553=u`, an entry for `D` with `1130=10` | Active; the first answers | same |
 | `MT-n` | `384=2` with one entry; `384=1` with two | gate: `R 1/372 A` `Disc` k (S2) | same |
 | `MT-o` | 312 entries with no 1130 and no 1410 | Active; none counts | same |
+| `MT-p` | `384=abc`; `385=X`; `1410=X` | `384=abc`, `385=X`: `R 5/that tag A` stays k. `1410=X`: Active; not counted | same |
 
-**What is measured.** The gate's answers, through a real `Session`, 2026-11-03 (the loop 2 round 1 review's `s dictionaries mtz`), with S the edited file and on L: it passes `MT-a`, `MT-c`'s empty value, `MT-e`, `MT-k`, `MT-l`, `MT-m`, `MT-o`, and on T `MT-f` and `MT-i`; it answers `MT-n` `R 1/372 A`, and on L `MT-f` `R 5/372 A` and `MT-i` `R 5/1130 A`, each staying today. A is T by its transport dictionary, not run. S2's disconnect on 1130 and 372, and every ending of the block, are design: no code exists. W-25 runs them first.
+**What is measured.** The gate's answers, through a real `Session`, 2026-11-03 (the parent's `research/probes/099_fixt_session_today/gate_a_l2r2/mtz2.log`), with S the final file of the paragraph below and on L, both establishment arms: it passes `MT-a`, `MT-c`, `MT-d`, `MT-e`, `MT-g`'s good 1130 and `1130=4`, `MT-h`, `MT-j`, `MT-k`, `MT-l`, `MT-m`, `MT-o`, `MT-p`'s `1410=X`, and on T `MT-b`, `MT-f` and its boundary, `MT-g`'s `1130=99`, `MT-i`; it answers `MT-n` `R 1/372 A`, `MT-p`'s other two `R 5/that tag A`, and on L `MT-b`, `MT-g`'s `1130=99` and `MT-i` `R 5/1130 A`, and `MT-f` and its boundary `R 5/372 A`, each staying today. So `MT-p`'s stays are measured and nothing new acts on them. A is T by its transport dictionary, not run. S2's disconnect on 1130 and 372, and every ending of the block, are design: no code exists. W-25 runs them first.
 
 **Not validating:** the same scan, and nothing refuses, so the session establishes. An entry with no 385 does not count. Step 6's slot miss uses S.
 
-**`FIXT11.xml`** gains, on Logon, `<group name='NoMsgTypes'>` with 372, 385, 1130, 1406, 1131 and 1410, every member `required='N'` as Orchestra's are, and field definitions for 384, 385 and 1410: 384 and 385 after 383, and 1410 directly before 1409, so that 1409 stays the last field (research R-17). Nothing else. A dictionary an operator supplies without the group keeps refusing such a Logon on 384. FR-003's check does not require it.
+**`FIXT11.xml`** gains, on Logon, `<group name='NoMsgTypes'>` with 372, 385, 1130, 1406, 1131 and 1410, every member `required='N'` as Orchestra's are, and field definitions for 384, 385 and 1410, 385 closed at `R` and `S` and 1410 `BOOLEAN`, as QuickFIX/J's copy: 384 and 385 after 383, and 1410 directly before 1409, so that 1409 stays the last field (research R-17). Nothing else. A dictionary an operator supplies without the group keeps refusing such a Logon on 384. FR-003's check does not require it.
 
 ## State transitions
 

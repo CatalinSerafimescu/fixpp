@@ -145,6 +145,7 @@ The first four are clarify's questions. The rest are `[const §X.6]` sign-off it
 - Q: Does "defines admin messages" mean all seven and a Logon accepting 1137? → A: Yes; a partial session dictionary is refused without `FIXT11.xml` (owner; FR-003).
 - Q: How does `FIXT11.xml`, which has no NoMsgTypes on Logon, come to accept Message Type Default? → A: The group and its three missing fields are added to the vendored file, nothing else; `dictionaries/README.md` records the exception to "verbatim" (owner; FR-032).
 - Q: What answers a header tag S declares when it appears past the body? → A: It is judged by S and passes, as every fixpp route does today; QuickFIX answers 373=14. A B-row (owner; FR-008).
+- Q: Does a malformed 384 or 385 on a Logon disconnect, as a bad 1130 or 372 does? → A: No. It draws its Reject and stays, NextNumIn kept, so S2's list stays 1137, 1130 and 372 (owner, 2026-11-03; data-model E-10's `MT-p`).
 
 ## User Scenarios & Testing *(mandatory)*
 
