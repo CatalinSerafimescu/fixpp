@@ -161,6 +161,9 @@ set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire;091")
 # 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 092)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST wire_dict_tests APPEND PROPERTY LABELS 099)
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an

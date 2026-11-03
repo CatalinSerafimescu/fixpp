@@ -132,6 +132,9 @@ set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 093)
 # 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 098)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 099)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms

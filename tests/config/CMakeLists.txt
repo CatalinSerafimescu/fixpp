@@ -146,3 +146,6 @@ set_tests_properties(config_045_tests PROPERTIES LABELS "config;045")
 # 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST config_045_tests APPEND PROPERTY LABELS 098)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST config_045_tests APPEND PROPERTY LABELS 099)

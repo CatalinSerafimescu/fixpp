@@ -214,6 +214,9 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 095)
 # 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_pure_tests APPEND PROPERTY LABELS 098)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 099)
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry

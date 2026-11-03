@@ -90,6 +90,9 @@ set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 097)
 # LABELS setter for this entry, so the existing labels survive. negative_paths_test.cpp,
 # which stays in this bucket, holds a 098 coverage cell.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
+# 099-fixt-appl-version-validation: label 099 (tasks.md T003). APPEND, after the last LABELS
+# setter for this entry, so the existing labels survive.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 099)
 
 # ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
 # Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
