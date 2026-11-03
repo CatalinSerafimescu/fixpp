@@ -93,6 +93,14 @@
    <field name='Text' required='N' />
    <field name='EncodedTextLen' required='N' />
    <field name='EncodedText' required='N' />
+   <group name='NoMsgTypes' required='N'>
+    <field name='RefMsgType' required='N' />
+    <field name='MsgDirection' required='N' />
+    <field name='RefApplVerID' required='N' />
+    <field name='RefApplExtID' required='N' />
+    <field name='RefCstmApplVerID' required='N' />
+    <field name='DefaultVerIndicator' required='N' />
+   </group>
   </message>
   <message name='XMLnonFIX' msgtype='n' msgcat='admin' />
  </messages>
@@ -200,6 +208,11 @@
    <value enum='99' description='OTHER' />
   </field>
   <field number='383' name='MaxMessageSize' type='LENGTH' />
+  <field number='384' name='NoMsgTypes' type='NUMINGROUP' />
+  <field number='385' name='MsgDirection' type='CHAR'>
+   <value enum='R' description='RECEIVE' />
+   <value enum='S' description='SEND' />
+  </field>
   <field number='464' name='TestMessageIndicator' type='BOOLEAN'>
    <value enum='N' description='NO' />
    <value enum='Y' description='YES' />
@@ -237,6 +250,7 @@
   <field number='1406' name='RefApplExtID' type='INT' />
   <field number='1407' name='DefaultApplExtID' type='INT' />
   <field number='1408' name='DefaultCstmApplVerID' type='STRING' />
+  <field number='1410' name='DefaultVerIndicator' type='BOOLEAN' />
   <field number='1409' name='SessionStatus' type='INT'>
    <value enum='0' description='SESSION_ACTIVE' />
    <value enum='1' description='SESSION_PASSWORD_CHANGED' />

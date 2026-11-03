@@ -210,7 +210,7 @@ const VendoredHash kVendored[] = {
     {"FIX50.xml", 0xe6be16b585a12850ULL},
     {"FIX50SP1.xml", 0x33af764d534a765dULL},
     {"FIX50SP2.xml", 0x85e0014214253c0bULL},
-    {"FIXT11.xml", 0x001b896460eccf16ULL},
+    {"FIXT11.xml", 0x99a62ff60a54c244ULL},
     {"orchestra/OrchestraFIXLatest.xml", 0xd55ac82e9e1883baULL},
 };
 
