@@ -36,7 +36,7 @@ Non-validating session with no transport dictionary: admin frames use S, as toda
 `advertised_max_message_size_in_range`, holds `Session::open()`'s FIXT guards and this one.
 
 - `Session::open()` calls it for every FIXT session, with today's guards, as today.
-- `Engine::register_session` calls it for a **validating** FIXT session. Reason: on an Engine route `open()` runs later inside
+- `Engine::register_session` calls it when `cfg.validate_inbound_messages && cfg.begin_string == "FIXT.1.1"`. The predicate is not `cfg.is_fixt()`, which is false when `default_appl_ver_id` is absent, so it would miss the malformed config the check exists for; `open()`'s own guard tests `begin_string` for the same reason. Reason for the call: on an Engine route `open()` runs later inside
   `run_connect_loop` or `run_accept_loop`, whose failure branch ends the loop with no status to anyone (read from source). Without the
   registration call, a C, Python or TOML host gets `FIXPP_ERR_OK` and a session that never comes up. Precedent: 093's `logon_timeout_ms`
   and `advertised_max_message_size_in_range` guards, each in both places. Ruling 2 says "fails at `open()`"; this adds to its wording, so it is
@@ -75,15 +75,15 @@ One validator per slot per session would add about 28.7 MB (debug-tree figure) p
 `wire::dictionary_driven_validator` would need `wire/validator.hpp` in `version_registry.cpp`. The CMake targets do not stop it (`fixpp_dictionary` and `fixpp_wire` link each other as a
 permitted archive cycle), which is why the lint is the fact that matters. `session` may include both.
 
-**Decision.** A session-library `fixt_route_set` (data-model E-1), owned by the Engine, holds one heap-held `const dictionary_driven_validator` per distinct `Dictionary` object: every
+**Decision.** A session-library `fixt_route_set` (data-model E-1), held by the Engine and its sessions, holds one heap-held `const dictionary_driven_validator` per distinct `Dictionary` object: every
 registered slot, the transport dictionary, and each FIXT entry's S. The table lives inside the validator, and the parse route's owner is an aliasing `shared_ptr<const table_view>` onto it, so one
 dictionary has one table.
 
 - **When.** Built once in `Engine::start()`, before any loop is spawned, only when a registered entry is FIXT. `Engine::start()` is legal once, `register_session` runs before it (`engine.hpp`), and C's
   `fixpp_engine_start` runs it while nothing polls the `io_context`. So there is no concurrent build, no lock, no atomic. M concurrent opens read, and walk nothing.
-- **Cost moved.** `Engine::start()` now blocks for the walks: about 0.5 s (`-O3`) or 3.3 s (`-O0`) for FIX50SP2 and FIX Latest, on this machine, measured as above. It is a synchronous function, so nothing blocks inside a coroutine (`[const §XV.9]`). On the owner's list as a fact.
-- **Direct-constructed sessions.** The `Session` constructor gains a fourth defaulted parameter beside `app_version_registry`: a non-owning route set. Engine routes pass theirs. A direct-constructed session with a registry passes nothing and builds a private set
-  in `open()` from its registry and S, before the first observable mutation. It walks for itself, chiefly on test paths, since the constructor is public. Its private set omits a registry dictionary of S's `session_version`, which the slot rule never returns, so such a session walks no more than today. Today's null-registry FIXT guard still refuses a session with no registry.
+- **Cost moved.** `Engine::start()` now blocks for the walks: about 0.5 s (`-O3`) or 3.3 s (`-O0`) for FIX50SP2 and FIX Latest, on this machine, measured as above. Its precondition changes: the two comments in `engine.hpp` that say it does not block are corrected in Phase 2 and W-23 greps for them, because a C++ host that calls `start()` from a handler on `exec`, for instance a second engine on one `io_context`, stalls every strand on that thread for the walks. C's `fixpp_engine_start` runs it with no worker polling this engine, so only another engine's threads can notice. On the owner's list as a fact.
+- **Ownership.** One `std::shared_ptr<const fixt_route_set> routes_` on `Session`, a null one on a non-FIXT session. The Engine holds the same pointer, set through `session_engine_access::adopt_routes` right after `make_shared<Session>` and before `open()`. There is no public signature for it: `Session`'s constructor is unchanged. The set dies when the last of the Engine and its sessions lets go, so no declaration order on the Engine matters, and nothing in `Session` dereferences the set from a destructor (`route_entry` holds raw pointers and has no destructor).
+- **Direct-constructed sessions.** A session with no adopted set builds a private one in `open()` from its registry and S, before the first observable mutation, and walks for itself, chiefly on test paths. It holds every registry slot, including one the slot rule never returns: T with registry `{FIX50SP2}` walks twice where it walked once, and R-17's `W7b` walks FIX Latest. `W7d` already walks FIX Latest inside `open()` under the same 200 ms `run_sync` window, and passes (run here at `-O0`, 2026-11-03): `run_for` cannot pre-empt a handler, and the walk happens inside one. Read from source; not run under a sanitizer here. Today's null-registry FIXT guard still refuses a session with no registry.
 - **S.** A FIXT session takes S's entry from the set, so N sessions on the same `Dictionary` object share it, and takes `inbound_tv_` as a copy of that owner, with no walk. A C-ABI session's `cfg_.dict_snapshot` keeps being adopted for `inbound_tv_`, as today; that
   snapshot is one walk and one table per C session, for its outbound commit path. It predates this feature, is unchanged, and W-15 reports it rather than asserting M on the C route. `validator_` stays null on a FIXT session.
 - **Non-FIXT.** No set is built; layout and hot path of the validator do not move (E-4).
@@ -114,10 +114,10 @@ be the thing that picks the table.
 
 - **Walk** with S's hooks, through `length_data_carry::read_value`, the primitive `scan_frame_header` uses. Not `dict_hooks::none()`: measured, with `none()` a 1128 inside an S header pair's Data is read as the header's 1128, and non-tag bytes in that Data
   make the frame unreadable (Gate A Codex 1); with S's hooks both read correctly.
-- **MsgType** is the third field's. Anything else there is unreadable. A second 35 before the walk stops is recorded (FR-025).
+- **MsgType** is the third field's. Anything else there is unreadable. Whether a second 35 fell inside the header is not computed here: it is read only on a mismatch, so the cold path re-walks with the same stop rule (FR-025).
 - **1128** is the first one before the walk stops.
-- **Stop** at the first tag for which `s_table.is_header_tag(tag) || dict::is_fixt_standard_header_tag(tag)` is false. The second is new, a public function over `kFixtFramingTable` minus its three trailer tags, because that table is private to
-  `src/dictionary/` and contains 10, 89 and 93. One rule on every shape. Measured on the sampled tags: `is_header_tag` is false for 10, 89 and 93 on FIXT11, FIX44, FIX50SP2 and FIX Latest; true for 8, 9, 34, 35, 49, 91, 627 and 628 on FIXT11, FIX44 and FIX Latest; false for 1128, 1129 and 1156 on FIX44; and false for all of them on FIX50SP2. W-21 pins the standard set to `FIXT11.xml`'s `<header>`.
+- **Stop** at the first tag for which `s_table.is_header_tag(tag) || dict::is_fixt_standard_header_tag(tag)` is false. The second is new, a public function over `kFixtFramingTable` minus its three trailer tags, plus 370, because that table is private to
+  `src/dictionary/` and contains 10, 89 and 93. One rule on every shape. **Why 370.** OnBehalfOfSendingTime is in the FIX 4.2 and 4.3 StandardHeaders and in no other vendored one (recompute: the set difference of each vendored `<header>` against `FIXT11.xml`'s, read 2026-11-03). Without it, `…|370=…|1128=4` stops the peek at 370 and draws 373=14 while `…|1128=4|370=…` draws 373=5, one input with two endings by field order. With it, 370 is a header tag in every order: accepted on a FIX 4.2 or 4.3 route, 373=2 on any other. QuickFIX C++ refuses it on every route, because its session dictionary judges the header; that departure is a B-row. Measured on the sampled tags: `is_header_tag` is false for 10, 89 and 93 on FIXT11, FIX44, FIX50SP2 and FIX Latest; true for 8, 9, 34, 35, 49, 91, 627 and 628 on FIXT11, FIX44 and FIX Latest; false for 1128, 1129 and 1156 on FIX44; and false for all of them on FIX50SP2. W-21 pins the standard set to `FIXT11.xml`'s `<header>`.
 - **Admin** is `dict::is_fixt_admin_msgtype`, the seven-member set, made public from `reify.cpp`'s private `is_fixt_admin`. Not the session's `detail::is_admin_msgtype`, which excludes `A` on purpose.
 
 Cost: a handful of fields per frame, FIXT sessions only.
@@ -160,7 +160,7 @@ A route carries the envelope when its table is not S's: every application route 
 measured about +5.5 % on NewOrderSingle from a 24-byte member). A tag an overlay adds to the *trailer* is rejected on an
 application message. Disclosed as an L-row. The standard trailer tags are in the framing table and are unaffected.
 
-**A Length+Data pair an overlay adds to S's header.** On S's own route it is honoured. On a frame routed to another table it is not, and the failure is not only a Reject. Measured, an S header pair whose Data holds `SOH 1128=10 SOH 34=7`, scanned with a plain FIX50SP2 table's hooks: MsgSeqNum reads 7, not the header's 2. With non-tag bytes in the Data the scan reports a fault. The validator with the envelope would walk the Data's contents as fields. Disclosed as an L-row and on the owner's list; refusing such a config, or composing hooks, is the alternative.
+**A Length+Data pair an overlay adds to S's header.** On S's own route it is honoured. On a frame routed to another table it is not, and the failure is not only a Reject. Measured, an S header pair whose Data holds `SOH 1128=10 SOH 34=7`, scanned with a plain FIX50SP2 table's hooks: MsgSeqNum reads 7, not the header's 2. With non-tag bytes in the Data the scan reports a fault. The validator with the envelope would walk the Data's contents as fields. It narrows FR-008, FR-012 and SC-004, each of which says so, and W-3's cell (f) pins the literal ending. Disclosed as an L-row and on the owner's list. Refusing such a config is smaller than it sounds, since `table_view::has_nonstandard_pair()` already answers the "any non-standard pair" half; it would need a header-scoped form.
 
 ## R-7 Sites (FR-005, FR-012)
 
@@ -186,12 +186,11 @@ route's table; the third is by construction, since the route's table is the vali
 
 ## R-8 Application frame before Logon completes
 
-The two establishment arms validate before `interpret_logon`, with no negotiated version. Today's endings differ by
-dictionary: a `FIXT11` S draws a Reject and stays in the arm; a FIX Latest S, and validation off, disconnect.
-**Recommended:** on a FIXT session those arms validate admin frames only. An application frame goes straight to
-`interpret_logon`'s refusal and disconnects: one condition, one ending. **On the owner's list.**
+The two establishment arms validate before `interpret_logon`, with no negotiated version. Measured (R-18): today's endings differ by dictionary and by the frame's validity: T draws a Reject and stays on every application frame; L and validation off disconnect on a valid one; L draws a Reject and stays on an invalid one. **Recommended, on the owner's list:** on a validating FIXT session an establishment arm disconnects, sending nothing, on any frame whose third field is not admin or whose last MsgType differs from its third field's. One condition, one ending (data-model E-7, cells `NC-a` to `NC-d`, `LS-a` to `LS-d`).
 
-Engines, all three now traced:
+The test reads the third field, never what `interpret_logon` reads. Measured: `interpret_logon` takes the last 35, so `35=D … 98=0|108=30|1137=9|35=A` establishes a validation-off session of either role. Skipping the gate and leaving the refusal to `interpret_logon`, as this section used to recommend, would have established such a frame on a validating session too. Neither review caught that; the measurement did.
+
+Engines, read from source:
 
 | | Acceptor, before its Logon | Initiator, before the Logon reply, frame valid for the dictionary consulted | Initiator, frame also invalid |
 |---|---|---|---|
@@ -205,56 +204,66 @@ J's arm with no 1128, read at `9ac173b2a69ef2305258330d88685eccad80512d`. `targe
 So no engine gives one ending to all of it. fixpp cannot validate without a negotiated version, and the recommendation matches Go on every cell and the C++ and J disconnect on a valid frame. It departs from C++'s Reject on an invalid frame, and from J's silent wait.
 **Alternative:** C++'s form, validate against S and Reject in the arm: today's T ending, which keeps one condition with two endings by shape.
 
-**Correction at Gate A.** This section used to say no existing test sets a validating FIXT session, and the Gate A review relied on that. It is false. The recipe searched for `validate_inbound_messages = true`, and these tests assign a variable. See R-17, which lists them and what this feature does to them.
+## R-9 Refusals (ruling 1, FR-009, FR-010, FR-025, FR-026)
 
-## R-9 Refusals and their endings (ruling 1, FR-009, FR-010, FR-025, FR-026)
+**Why each refusal cannot be left to the validator.** Validator-level, through the real `Parser` and `dictionary_driven_validator`, the real `scan_frame_header` and `resolve_application_version`, and a scratch prototype of the peek, per shape.
 
-**Derived by measurement.** Every input below went through the real `Parser` and `dictionary_driven_validator`, the real `scan_frame_header` and `resolve_application_version`, and a scratch prototype of the peek, per shape.
-
-- Probe: `scratchpad/p099/probe3.cpp` in this session's scratch directory, never in the tree; W-4 and W-5 are its durable form. Built 2026-11-03 against `build/linux-clang-debug` at `68b9a5dd` (equal to `c0a828ef` outside this bundle): `ninja fixpp_wire fixpp_dictionary fixpp_dict_dispatch_bridge fixpp_core` reported no work, and `strings` on the binary shows `load_any_with_overlay`'s text, so 098's code is linked. Command: `clang++ -std=c++23 -stdlib=libstdc++ -g -Iinclude -Isrc probe3.cpp <those four archives, twice> libpugixml.a`, run as `probe3 dictionaries <dir of two overlay files>`. Re-run against the release tree: every cell identical.
+- Probe: `validator_level/probe3.cpp` under the parent repo's `research/G19-fix-fpml-iso20022/research/probes/099_fixt_session_today/`, never in the tree. Built 2026-11-03 against `build/linux-clang-debug` at `68b9a5dd` (equal to `c0a828ef` outside this bundle): `ninja fixpp_wire fixpp_dictionary fixpp_dict_dispatch_bridge fixpp_core` reported no work, and `strings` on the binary shows `load_any_with_overlay`'s text, so 098's code is linked. Command: `clang++ -std=c++23 -stdlib=libstdc++ -g -Iinclude -Isrc probe3.cpp <those four archives, twice> libpugixml.a`, run as `probe3 dictionaries <dir of two overlay files>`. Re-run against the release tree: every cell identical.
 - Engine dictionaries in each shape: FIXT11, FIX50SP2, FIX Latest; negotiated version 9. `1128=4` is therefore the resolvable value with no dictionary.
-- **All of this is validator-level. No result here was driven through a `Session`.** The "Ending" column is the design's arm order applied to those answers; the arm order itself is read from source. W-4 and W-5 are the first `Session`-level evidence. FIX 4.x tables with the framing surface are unmeasured (R-4).
+- This table is why, not what happens. What a session does is data-model E-7, from R-18's `Session` measurement. FIX 4.x tables with the framing surface are unmeasured (R-4).
 
-Application frames, validating. The middle columns are what the validator alone would answer, which is why each refusal cannot be left to it. `2/8` means 373=2, 371=8.
+Application frames, validating. `2/8` means 373=2, 371=8.
 
-| Input | Resolver | Validator on S: T / A / L | Validator on the negotiated slot | Ending, all shapes |
+| Input | Resolver | Validator on S: T / A / L | Validator on the negotiated slot | E-7 cell |
 |---|---|---|---|---|
-| no 1128, valid | — | 2/8 / pass / pass | pass | delivered |
-| header `1128=99`, `abc` | fails | 2/8 / 5/1128 / 5/1128 | not consulted | Reject 373=5, 371=1128 |
-| header `1128=0`, `1` | fails | 2/8 / pass / pass | not consulted | Reject 373=5, 371=1128 |
-| header `1128=4` | resolves, no dictionary | 2/8 / pass / pass | not consulted | Reject 373=5, 371=1128 |
-| header `1128=` | not called | 2/8 / pass / pass | not consulted | Reject 373=4, 371=1128 |
-| body `1128=6` | not called | 2/8 / pass / pass | pass, and `mv.get(1128)` is `6` | Reject 373=14, 371=1128 |
-| body `1128=abc` | not called | 2/8 / 5/1128 / 5/1128 | 5/1128 | Reject 373=14, 371=1128: the probe runs first |
-| body `1128=` | not called | 2/8 / pass / pass | pass | Reject 373=14, 371=1128 |
-| after the trailer's 93 and 89, `1128=6` | not called | peek stops at 93 | `mv.get(1128)` is `6` | Reject 373=14, 371=1128 |
-| third field `0`, later `35=D` | — | transport validator: pass, T / A / L | — | Reject 373=14, 371=35 |
-| third field `D`, later `35=0` or `35=3` | — | negotiated slot: pass | — | Reject 373=14, 371=35 |
-| third field `3`, later `35=D` | — | transport validator: pass | — | Reject 373=14, 371=35 |
-| `35=0`, `35=D` adjacent | — | transport validator: pass; peek records the second 35 | — | Reject 373=13, 371=35 |
-| `35=D`, `35=D` adjacent | — | negotiated slot: pass | — | delivered: no split, as today |
+| no 1128, valid | — | 2/8 / pass / pass | pass | `AC-d` |
+| header `1128=99`, `abc` | fails | 2/8 / 5/1128 / 5/1128 | not consulted | `AC-b` |
+| header `1128=0`, `1` | fails | 2/8 / pass / pass | not consulted | `AC-b` |
+| header `1128=4` | resolves, no dictionary | 2/8 / pass / pass | not consulted | `AC-b` |
+| header `1128=` | not called | 2/8 / pass / pass | not consulted | `AC-b` |
+| body `1128=6` | not called | 2/8 / pass / pass | pass, and `mv.get(1128)` is `6` | `AC-c` |
+| body `1128=abc` | not called | 2/8 / 5/1128 / 5/1128 | 5/1128 | `AC-c`: the probe runs first |
+| body `1128=` | not called | 2/8 / pass / pass | pass | `AC-c` |
+| after the trailer's 93 and 89, `1128=6` | not called | peek stops at 93 | `mv.get(1128)` is `6` | `AC-c` |
+| third field `0`, later `35=D` | — | transport validator: pass, T / A / L | — | `AC-a` |
+| third field `D`, later `35=0` or `35=3` | — | negotiated slot: pass | — | `AC-a` |
+| third field `3`, later `35=D` | — | transport validator: pass | — | `AC-a` |
+| `35=0`, `35=D` adjacent | — | transport validator: pass | — | `AC-a`, 373=13 |
+| `35=D`, `35=D` adjacent | — | negotiated slot: pass | — | `AC-d`: no split |
 | header `1128=9`, then `1128=10` | first resolves | — | slot 9: pass | delivered, read as 9 |
-
-Logon, validating, both roles. Today's gate answers first and does not disconnect, which is the defect.
-
-| Input | Transport validator: FIXT11 / FIX Latest | Today, validating (read from source; shape A cannot establish) | Ending, all shapes |
-|---|---|---|---|
-| no 1137 | 1/1137 / 1/1137 | Reject, stays in the arm | Reject 373=1, 371=1137, disconnect |
-| `1137=99`, `abc` | pass / 5/1137 | T acceptor: Reject, disconnect. T initiator: recorded, Active. L: Reject, stays | Reject 373=5, 371=1137, disconnect |
-| `1137=4`, no dictionary | pass / pass | Acceptor: Reject, disconnect. Initiator: recorded, Active | Reject 373=5, 371=1137, disconnect |
-| `1137=`, empty | pass / pass | Acceptor: Reject, disconnect (the resolver has no default, so not serviceable). Initiator: Active, nothing recorded | Reject 373=5, 371=1137, disconnect |
-| `1137=9`, `10` | pass / pass | proceeds | proceeds |
 
 Admin frames carry no refusal: the transport dictionary judges 1128 on them. Measured: Heartbeat with `1128=10` is 5/1128 on FIXT11, pass on FIX Latest; `1128=99` is 5/1128 on both; `1128=` passes on both.
 
-**Order in an arm, validating FIXT session.** 1) Today's garble, fault and supersede checks, from the scan. 2) MsgType mismatch (FR-025). 3) In an establishment arm: a Logon's 1137 disposition (FR-010); an application frame skips the gate and goes to `interpret_logon`'s refusal. 4) The route's refusal. 5) Today's 3/5 exemption. 6) The gate: parse, past-header probe (FR-026), validator with the route's envelope.
+**The 1137 check's order (FR-010, owner item 3).** The review's three options, against source and R-18.
 
-Every Reject but the 1137 one goes through `validate_outcome::reject`, so the Active arm's `consume_rejected_seqnum_` and each arm's existing emit apply unchanged. RefMsgType is the third field's value, which differs from `hdr.msg_type` only on FR-025's frames.
+What the engines do. Both read BeginString first and throw `UnsupportedVersion` on a mismatch (QuickFIX C++ `Session::next`, J `Session.next`). On a FIXT Logon both then read 1137 before they validate, but only its presence matters there. An absent one: C++ `FIELD_GET_REF` throws `FieldNotFound`, whose catch sends Reject 373=1 and disconnects; J's `getString` throws `FieldNotFound`, whose catch logs and disconnects, with no Reject. A present value is stored with no check in C++. J checks it in `nextLogon`, after validating, against the session dictionary's ApplVerID enum, and answers with a Logout and a disconnect (`RejectLogon`). So "C++ and J read 1137 first", which this section used to say, holds for presence only and neither engine has a value check ahead of validation. Both also keep the sequence number on a Reject of a Logon (`generateReject`'s `msgType != Logon && != SequenceReset` test in each).
 
-**The 1137 disposition (Gate A N-1).** One helper, both roles, on a validating FIXT session: read 1137 from the frame through `detail::scan_logon_default_appl_ver_id`, factored out of `interpret_logon`'s field walk so the two reads share one occurrence rule, with the transport route's hooks. Absent: 373=1. Unparseable, empty or registry miss: 373=5. Both 371=1137, then `disconnect_unless_superseded_`. The write to `negotiated_appl_version_` stays where it is, after `interpret_logon`, so a refused Logon records nothing. Non-validating sessions keep today's order: the acceptor's check after `interpret_logon`, and FR-004a on the initiator.
-Engines: C++ `next()` reads it with `FIELD_GET_REF` before `validate`, and its `FieldNotFound` catch disconnects on a Logon; J `next()` reads it before `DataDictionary.validate`. This reorders a validating session's Logon only. **On the owner's list**, with the alternative: gate first, where an absent 1137 stays in the arm until the Logon timeout, and `1137=99` disconnects on T and stays on L.
+Consequences at fixpp, each measured or read as `plan.md` item 3 states them:
 
-**Stale negotiated version (FR-027).** `negotiated_appl_version_` has no reset: the acceptor overwrites it per Logon, the initiator only when the reply resolves. Before this feature that value only reached `negotiated_version_profile()`, and ruling 1 keeps validation-off sessions unchanged, so it keeps today's writes. Selection reads a new `route_negotiated_`, written at the same two sites on every Logon, and `Unknown` when the initiator's reply has nothing it can resolve. A non-validating initiator on a later connection then uses S's view, where this feature would otherwise have used a table from the previous connection.
+| | Option 1: 1137 ahead of the gate | Option 2: gate first, nothing added | **Option 3: gate first, a gate Reject naming 1137 on a Logon disconnects, the initiator gains the acceptor's block** |
+|---|---|---|---|
+| Ruling 1's "a disconnect" | yes | **no**: absent, and L's `99`, stay in the arm (measured) | yes |
+| Single fault, wire | one ending per input | two by shape | one ending per input |
+| Single fault, NextNumIn | kept on every shape | as measured | kept for absent and L's `99`, `abc` (gate path); consumed for `4`, empty and T and A's `99`, `abc` (block path, after `check_inbound`). Observable only on an initiator's reconnect: an Engine acceptor's session ends with its first peer |
+| `99` + stale 52 | 5/1137 on T and L: overrules today's T | as today: T 10/52, L 5/1137 stays | T and A 10/52, L 5/1137 with a disconnect |
+| absent + stale 52 | 1/1137, disconnect | 1/1137, stays (today, measured) | 1/1137, disconnect |
+| absent + an undeclared tag | 1/1137, disconnect | 2/that tag, stays (today, measured) | **2/that tag, stays**, until the Logon timeout: the gate names the other tag, so ruling 1's disconnect does not fire for this double fault |
+| `99` + posture mismatch | 5/1137: overrules T's Logout | as today | T and A Logout, L 5/1137 with a disconnect |
+| `99` + off-list mTLS | Reject, no authorization event, on T too: a new Reject to an unauthorized peer | as today: T event, L Reject | acceptor: T and A event, nothing sent; L Reject, as today, with a disconnect. **Initiator: Reject, no event, on every shape**, since its block is ahead of mTLS |
+| wrong BeginString + `99` | Reject unless the step also gains a BeginString guard ahead of it | as today: T Disconnected, L Reject stays | T and A Disconnected, L Reject with a disconnect |
+| `W_StaleSendingTime_Beats1137Gate` | green: non-validating | green | green |
+| `141=Y` + `4`, initiator | no reset | Active, reset (today) | no reset: its block is ahead of the reset unit |
+| New code | a pre-gate step, the `scan_logon_default_appl_ver_id` factoring, its mutant | none | one branch in each establishment gate, one new block on the initiator |
+
+**That named pin does not say what its name suggests.** On a validating session, absent 1137 plus a stale 52 already answers 1/1137 at `c0a828ef`, on T and L, and stays: 52 does not win. The pin holds because it runs non-validating, so that input has two endings by validation setting today, under every option.
+
+**Recommended: Option 3.** It is simpler: no new step and no factoring. It meets ruling 1 for every single fault in both roles. It leaves the gate, posture, SendingTime and mTLS in today's order among themselves, and it matches the engines in having no value check ahead of validation. Its costs go on the owner's list: a double fault follows dictionary order, so `99` plus a stale 52 answers differently on T and L, and an absent 1137 plus an undeclared tag stays in the arm; the consume split above; and an initiator's block sits ahead of mTLS where the acceptor's sits behind it.
+
+**Why the initiator's block is where it is.** Read from source: the arm runs `check_inbound`, then the 141=Y reset unit, then mTLS, then today's 1137 record. At that record site a reply with `141=Y` and a bad 1137, a single fault, would durably reset both stores and then be refused. So the block goes right after `check_inbound`, which costs the mTLS order above on a double fault. The acceptor's received-141 reset is in its reply block, after its 1137 block, so it has no such problem; its `reset_on_logon` knob resets ahead of `check_inbound`, today and on a non-validating session, and that is unchanged. The negotiated version is still written only where it is today, so a refused Logon records nothing.
+
+**Reject fields (N-2, N-7).** Every arm passes `hdr.msg_type`, last-wins, to `emit_session_reject_`, and the Active arm also to `consume_rejected_seqnum_`. Measured: `D…4` and `D…A` are kept with 372 `4` and `A`; `4…D` is consumed. So `RejectDecision` gains the Reject's RefMsgType and RefSeqNum, filled for the FIXT refusals: RefMsgType, and the value that keys the consume, are the third field's; RefSeqNum is `fault_ref_seq_num`, the first 34, because S's hooks split a pair S does not know on a refused frame, and an embedded `34=7` would otherwise become `hdr.msg_seq_num`. A non-FIXT session leaves them empty and reads `hdr` as today, so SC-005 holds.
+
+**Stale negotiated version (FR-027).** `negotiated_appl_version_` has no reset: the acceptor overwrites it per Logon, the initiator only when the reply resolves. Before this feature that value only reached `negotiated_version_profile()`, and ruling 1 keeps validation-off sessions unchanged, so it keeps today's writes. Selection reads a new `route_negotiated_`, written at the same two sites on every Logon, and `Unknown` when the initiator's reply has nothing it can resolve. Selection reads it only outside the establishment arms: `install_reconnected_transport` re-enters LogonSent with the old value still there, and an application frame in LogonSent takes `session_route_` without looking at it. So nothing needs a reset at the connection boundary. Considered and declined, Codex 1's reset and reconnect witness: once an application frame in an establishment arm disconnects (E-7), a stale value there can change no ending, so the witness could not go RED.
 
 ## R-10 The accessor (FR-014)
 
@@ -289,10 +298,20 @@ Python today. `fixpp_session_config_set_validate_inbound_messages(cfg, bool)` is
 
 Without the registration check, none of the C, Python or TOML rows can happen.
 
-Registration surfaces, from 098's diff: `include/fix/c_api/{session,engine,message}.h`, `version.h` notes and MINOR,
-`tests/abi/golden/fixpp_capi_symbols.txt`, `tests/capi/version_test.cpp`, `.specify/2i-capi.md`, `.specify/api-contract.md`,
-`brain/components/c-api.md`, `bindings/python/fixpp.i` (GIL table; `engine_start`'s row says "returns immediately", which a FIXT engine now falsifies: it stays `hold`, since no worker is running and no callback can want the GIL, and the row says so), `bindings/python/tests/wheel/test_import_surface.py`. The
-symbol map is a wildcard. SWIG strips the prefix.
+**The inventory is a recipe, not a list** (098's, `specs/098-dialect-overlay/data-model.md` §C): `git grep -l -e 'include/fix/c_api' -- tools .github/workflows ci tests/abi`, each hit read for whether a header edit reaches it. Run again at implement. On 2026-11-03 it answers:
+
+| Hit | What 099 does |
+|---|---|
+| `tools/capi_freeze.sha256`, `tools/check_capi_freeze.sh` | **Changes.** Four frozen headers change, so the gate fails until the manifest is refreshed by the recipe in the script's header, in the same PR. W-12 shows RED first |
+| `tools/check_capi_reentrancy.sh` | Reads each new symbol's doc block: exactly one reentrancy token. The header text must carry it |
+| `tools/check_capi_occupancy.sh`, `tools/test_capi_occupancy_negative.sh`, `tools/abi_history/error_codes_v1.txt` | No new error code, so unchanged; run to confirm |
+| `.github/workflows/tier1.yml`, `ci/test-check-wheel-payload.sh`, `ci/test-tier1-python-policy.sh` | Name the path. No change |
+
+Beyond the recipe, by the same reading of 098's diff: `include/fix/c_api/{session,engine,message}.h`, `version.h` notes and MINOR, `tests/abi/golden/fixpp_capi_symbols.txt`, `tests/capi/version_test.cpp`, `.specify/2i-capi.md`, `.specify/api-contract.md`, `brain/components/c-api.md`, `bindings/python/tests/wheel/test_import_surface.py`, and `src/log/format_registry.cpp` for the role loops' new log line (the session's `FIXPP_SLOG` idiom registers each format string there). The symbol map is a wildcard. SWIG strips the prefix.
+
+`bindings/python/fixpp.i`'s GIL table: `engine_start`'s row says "returns immediately", which a FIXT engine now falsifies. It stays `hold`, under the reason `dict_load_from_xml`'s row already uses: CPU-bound, no worker-deadlock class, releasing for throughput deferred. Not "no callback can want the GIL", which is false in a process with a second engine, whose worker waits in `PyGILState_Ensure` for the walks.
+
+**The getter is "as `fixpp_msg_get_msg_type`".** Out-pointers first, `FIXPP_ERR_NULL_HANDLE`. Then `check_inbound_msg`, the one helper its siblings share: null message `FIXPP_ERR_NULL_HANDLE`; destroyed or wrong-type handle, or an outbound message with no view, `FIXPP_ERR_INVALID_HANDLE`. A clone passes it, because a clone sets `h->view`. Then `FIXPP_ERR_TAG_NOT_FOUND` when the byte is `Unknown`.
 
 **Design-document notes (Gate A root cause 3).** `[2c §5]` commitment 1 calls a three-byte `(kind, session, application)` tag "non-negotiable", and `[2i §3.10]` and `[2i §4.6]` ratify it; the shipped `fixpp_msg_version` returns BeginString and tag 1137. The divergence predates 099, which is the feature that finally carries a resolved version. Ruling 3 says additive, so the resolution is notes, not a break.
 
@@ -357,7 +376,7 @@ These are tasks, plan.md Phase 8. A condition unmet means the row stays open and
 
 | Row | Condition | Honest under this plan? |
 |---|---|---|
-| S-026 → `done` | W-4 and W-5 green on {T, A, L}, since refusal correctness is part of what it promises; W-1, W-2, W-3, W-7, W-10 green; `[const §VI.6]`'s Gate A and Gate B | Yes offline. Live: only under R-13 Option B does a real peer's frame reach selection. Under Option A the row MUST say its live evidence is Logon-only |
+| S-026 → `done` | W-4, W-5 and W-9 green on {T, A, L}, since refusal correctness is part of what it promises; W-1, W-2, W-3, W-7, W-10 green; `[const §VI.6]`'s Gate A and Gate B | Yes offline. Live: only under R-13 Option B does a real peer's frame reach selection. Under Option A the row MUST say its live evidence is Logon-only |
 | `coverage-index.md` §5.3.4 | Today it maps to S-026 only, so S-026 going `done` would claim it. Re-point to `—` with a disposition naming the new L-row, the form §5.3.6 uses. §5.3.2 and §5.3.5 stay on S-026; §5.3.3 stays on S-025. Also correct §4.3.7's, §5.3's and the FIXT section's "S-026 tolerate-only" and "`backlog`" wording | Yes |
 | L-041-2 → closed | Its open claim is the two-dictionary resolution. W-1 and W-2 green. Its accept-only divergence stays as B-081-1, and R-6's residue gets new rows | Yes |
 | L-033-1 → closed | Its stated workaround is "implement routing at the `fromApp` level". Retiring it removes that advice, which is honest only if what replaces it works: W-10's clone and reify arms green, and W-12's C arm | Yes, given E-5 |
@@ -370,11 +389,47 @@ Recipe, 2026-11-03: the files under `tests/` matching `FIXT.1.1` intersected wit
 
 | File, cells | Session | What 099 does |
 |---|---|---|
-| `tests/session/test_fixt_logon_establishment.cpp`, `FixtLogonEstablishment097.W7a`…`W7c0`, `W7v1` | validating, T, registry one application version | Stays green. A real-`Session` pin of a T Logon established, `1137=10` on a registry with no FIX Latest drawing 373=5, 371=1137 and a disconnect, and an undeclared Logon tag drawing the gate's Reject, not Active. The pre-gate gives the same answers |
+| `tests/session/test_fixt_logon_establishment.cpp`, `FixtLogonEstablishment097.W7a`…`W7c0`, `W7v1` | validating, T, registry one application version | Stays green. A real-`Session` pin of a T Logon established, `1137=10` on a registry with no FIX Latest drawing 373=5, 371=1137 and a disconnect, and an undeclared Logon tag drawing the gate's Reject, not Active. E-7 gives the same answers: the gate's Reject on 1407 names another tag, so it stays in the arm |
 | same file, `W7d`, `W7d0`, `W7v2` | validating, L, registry FIX Latest | Stays green: `1137=9` answers through the fallback, whose dictionary is S's version, so S answers |
 | same file, `W7e`, `W7e0`, `W7f`, `W7f0` | validating, S `fix44_dictionary_with_1137()`, registry one minimal FIX50SP2 | **Changes.** That dictionary defines Heartbeat and Logon as its only admin messages, so it fails FR-003, and with no FIXT11 registered `open()` now refuses (FR-004). They are named characterization pins of the old single-validator answer. Each needs a FIXT11 in the registry, and then, derived from the route rules (data-model E-6, E-7): **W7e0** stays established. **W7e** becomes established too, because FIXT11 accepts 1407 on a Logon (`W7a` shows it), so its purpose, a dictionary-decided Reject, is gone; drop it or restate it with a tag FIXT11 lacks. **W7f and W7f0** do not hold as written: `establish_then_feed` logs on with `1137=9` and the NOS has no 1128, so the NOS resolves to v50sp2, which the minimal FIX50SP2 answers, and it defines no NOS, so **the control W7f0 goes RED too**. Rewrite: put `1128=6` on the NOS. v44 is S's own version, so S answers with no registry slot. Then W7f0 is delivered, and W7f's 1156 passes through the framing surface (FR-007), so W7f is delivered too, where it used to be a Reject. Those literals go in the tests from this table. A run that disagrees stops for a decision; the literal is not re-recorded from the run |
-| same file, `W7b`, `W7b0` | validating, T, registry FIX Latest | Stays green by the route rules. A direct-constructed session now walks Orchestra FIX Latest in `open()` where it did not, about 1.7 s at `-O0` (R-3); check the test's pump budget at implement |
+| same file, `W7b`, `W7b0` | validating, T, registry FIX Latest | Stays green by the route rules. A direct-constructed session now walks Orchestra FIX Latest in `open()` where it did not, about 1.7 s at `-O0`. `W7d` shows that shape passes its pump budget at `-O0` (R-3); a sanitizer multiple is unchecked until it runs |
 | `tests/session/unparseable_frame_disposition_test.cpp`, `ProfileCell` with `Profile::fixt11` and validation on: `ProfileRoleMatrix`, `ValidatorLive`, `RowByValidation` | validating FIXT, S is the same partial test dictionary | **Changes.** `open()` refuses, as above. Fix the fixture: add a FIXT11 to the cell's registry, for the validating cells. Derived, **unverified until run**: their assertions then hold, because a Logon with `1137=6` is judged by FIXT11 and resolves to S's own version, faults are disposed of before the gate, and the missing ClOrdID is judged by S with the framing surface added, 373=1, 371=11 |
 | `tests/session/engine_reset_unit_stop_test.cpp` | its FIXT case and its validating cases are separate sessions | None |
+| `tests/session/test_fixt_logon_establishment.cpp`, `W_StaleSendingTime_Beats1137Gate_Reject52_No1137` | not validating, S `kMinimalFix44Xml` | None under any option of `plan.md` item 3. Its name reads wider than it is: R-9 |
 
 A validating FIXT session on a partial S used to work in C++, for the messages that S declares. It is now refused. That follows from FR-003's "all seven admin messages", and it goes in a B-row. SC-005 protects non-FIXT tests only, so these edits are allowed, but they are FIXT behaviour changing under existing tests and the PR says so.
+
+## R-18 What a real `Session` does today (the "today" half of data-model E-7)
+
+**Recipe.** `h.cpp` under the parent repo's `research/G19-fix-fpml-iso20022/research/probes/099_fixt_session_today/`, never in the tree; W-4, W-5 and W-9 are its durable form. Modelled on `tests/session/test_fixt_logon_establishment.cpp`'s `FixtSetup`: a direct-constructed `Session`, `mock_clock`, raw frames through `on_inbound_frame`, `transport_send` captured, `NextNumIn` read through `session_test_access::seqnum_mgr`, `fromApp` and `fromAdmin` counted, `recent_events()` read for `session_event_compid_authorization_failed`. Built by that directory's `compile.sh` and `link.sh`: the test's compile flags plus `-Isrc`, and `ninja -t commands session_fixt_logon_establishment`'s link line with `h.o` in place of the test object, against `build/linux-clang-debug`. Run 2026-11-03 as `h dictionaries {T|A|L} {on|off} > {T|A|L}_{on|off}.log` from that directory, one log per pair, all rc 0.
+
+**Commit.** `c0a828ef`. `git diff --stat c0a828ef fab0d94e -- . ':!specs/099-fixt-appl-version-validation'` shows only `.specify/feature.json`, so the tree at `fab0d94e` is that commit's library. `ninja fixpp_session fixpp_mock_clock` compiled nothing. A library file older than 098's merge date is not staleness: ninja compares source mtimes and dependencies, and the worktree's `session.cpp` predates the library. `strings` on the binary finds `load_any_with_overlay`'s text and the 093 format string, and `nm` finds `kSendHeaderTags` from 098's `send_header_tags.hpp`, so 098 is linked.
+
+**Configuration that decides the results.** Registry built from FIXT11, FIX50SP2 and FIX Latest, of which `version_registry` drops FIXT11 at this commit. `default_appl_ver_id` v50sp2. S is FIXT11 (T), FIX50SP2 (A) or FIX Latest (L). `one_way_ca` except column h. Column h: `mtls_ca`, a policy listing another principal, and `CN=STRANGER` delivered through `attach_accepted_transport`, with the capture on that transport because live writes go there. Column i: `session_posture::production`, frame with `464=Y`. Stale means `52` four years behind the clock. Peer sequence 1 in the establishment arms and 2 after.
+
+**Result.** The table in data-model E-7 is the result; the six logs have one line per cell. On 2026-11-03 the harness produced them with these checks:
+
+- **A known positive.** `off`, NotConnected, stale Logon with no 1137 answers 373=10, 371=52, Disconnected: what `W_StaleSendingTime_Beats1137Gate_Reject52_No1137` pins.
+- **A seeded row that must differ.** The same run with one input changed: an undefined tag 5999 in the body. The first placement, on `NOS` in Active on T, reported **no difference**, because T already rejects that frame on tag 8, so the seed could not move it; a zero from a seed needs a cell that can move. Placed on `Heartbeat` in Active on T, `diff` reports that row alone: delivered becomes Reject 373=2, 371=5999. In a second placement, `h dictionaries seedcheck` on L's `NOS` in Active, delivered becomes the same Reject, and the harness exits non-zero if the two match.
+- **Determinism.** Two runs of T differ in nothing. A full re-run of all six, made to add column i, left every other line identical.
+
+**Not reached. These cells are not measurements.**
+
+- A, validating, Active and LogoutSent: the session cannot establish. The log says so per row.
+- A, validating, every Logon in NotConnected and LogonSent: tag 98 is rejected first, so those cells measure the 98 fault, not the column's input.
+- LogonReceived: `on_inbound_active_`'s arm, the same code as Active, and not separately reachable with a frame: the Logon arm enters it and leaves it inside one call.
+- Columns h and i in Active and LogoutSent: authorization and the posture check run in the establishment arms only. Read from source; not driven.
+- An Engine's accept loop filters a first frame by `SessionId` before a session exists, so a wrong BeginString on an Engine acceptor's first frame does not reach `NC-f`. Read from source; the harness constructs the session directly.
+
+**What it changed.**
+
+- An establishment arm's "skip the gate, `interpret_logon` refuses" would have established `35=D … 35=A` carrying Logon fields, because `interpret_logon` reads the last 35 (R-8). Reviews and bundle both missed it.
+- Absent 1137 plus a stale 52 already answers 1/1137 on a validating session, so 52 does not win there (R-9). The review's "named pin" concern is narrower than stated: no option introduces that split.
+- Wrong BeginString plus a dictionary fault already draws a Reject ahead of `interpret_logon`, on T for an absent 1137 and on L for `99`. So the departure from C++ and J's BeginString-first order predates this feature for gate-faulted frames.
+- Off-list mTLS plus `99` on L already Rejects with no authorization event, so mTLS order already depends on shape.
+- The acceptor's 1137 block consumes the number (1→2); a gate Reject in an establishment arm keeps it. An mTLS refusal consumes it too.
+- `D…5` in Active logs the session out on T, L and validation off, and in LogoutSent `D…5` confirms the Logout, so E-7 must say what FR-025 does there.
+- `D…3` in Active is consumed in silence: no Reject, no callback.
+- A Logon with `384=1|372=D|1130=10` (`h dictionaries mtd`, `mtd.log`) is refused on T, validating, 373=2, 371=384, because `FIXT11.xml` declares no 384, and establishes on L and with validation off. So a peer using Message Type Default cannot establish on T at all; the review's "false Rejects" is L's case.
+- The validator answers an undeclared tag ahead of a missing or unknown 1137, in `mtd.log`, whichever field comes first: absent plus 5999 is 2/5999 on T and L, `99` plus 5999 is 2/5999 on T and 5/1137 on L. The review's account of Option 3 did not reach that double fault.
+- `141=Y` with `1137=4` goes Active on a validating initiator today. Whether its reset ran is read from source, not measured: a fresh session cannot show it through NextNumIn.

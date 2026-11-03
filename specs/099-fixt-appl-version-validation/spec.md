@@ -38,8 +38,9 @@ refuse at open; C++, C ABI, Python and TOML; #651 corrects both comments."
 - **Route** — for one frame, the table and validator it is scanned, validated and parsed with, or the refusal when no dictionary answers.
 - **Route set** — the session-library object holding one validator, and the table inside it, per distinct dictionary (data-model E-1).
 - **Peek** — the walk that reads MsgType and the header's 1128 before the frame scan, so the scan can use the route's table.
-- **Validate gate** — `Session::validate_inbound_`, as the three arms call it. **FIXT pre-gate** — the checks that run ahead of it on a validating
-  FIXT session (FR-010, FR-025).
+- **Validate gate** — `Session::validate_inbound_`, as the three arms call it.
+- **Establishment arm** — `on_inbound_not_connected_` or `on_inbound_logon_sent_`: the FSM has not reached LogonReceived.
+- **Third field's MsgType** — the value of the `35` that is the frame's third field, what `FrameHeader::fault_ref_msg_type` holds. **Last MsgType** — the last `35` in the frame, what `FrameHeader::msg_type` holds.
 
 ## Context: why this feature exists
 
@@ -103,15 +104,29 @@ session cannot open as FIXT.1.1 at all. TOML loads one `[dictionary]`. (L-097-1.
 
 Measured answers are in research R-9. Items marked **owner** are recommendations in `plan.md`'s Owner sign-off, not decisions.
 
-- Q: Where does a validating FIXT session's 1137 check run, given the validate gate answers a Logon first and does not disconnect? → A: Ahead of the gate, in both establishment arms, as QuickFIX C++ and J read 1137 before they validate; each input then has one ending on every shape and role. **Owner** (FR-010).
+- Q: Where does a validating FIXT session's 1137 check run, given the validate gate answers a Logon first and does not disconnect? → A: Ahead of the gate, in both establishment arms, as QuickFIX C++ and J read 1137 before they validate; each input then has one ending on every shape and role. **Owner** (FR-010). Superseded at round 2.
 - Q: What answers a 1128 past the header, when no validator step tests position (measured: it passes)? → A: A probe after the parse on an application route, ahead of the validator (FR-026).
-- Q: What happens when a frame's last MsgType differs from its third field's, since routing and the validator read the first and dispatch reads the last? → A: A validating FIXT session rejects it before any dispatch, 373=13 when the second 35 is in the header and 373=14 past it, as QuickFIX C++ and Go. A non-validating session stays as today, disclosed (FR-025).
+- Q: What happens when a frame's last MsgType differs from its third field's, since routing and the validator read the first and dispatch reads the last? → A: A validating FIXT session rejects it before any dispatch, 373=13 when the second 35 is in the header and 373=14 past it, as QuickFIX C++ and Go. A non-validating session stays as today, disclosed (FR-025). Scoped to LogonReceived and Active at round 2.
 - Q: Who owns the shared tables and validators? → A: A route set in the session library, built once per Engine in `Engine::start()`. `dict::version_registry` cannot own a validator (`[arch §2.3]`). This replaces the lock-free publish and restates NFR-003 and SC-007 in copies held, not only walks.
 - Q: Does a refused validating FIXT config surface at registration too, since the Engine's role loops discard an `open()` failure? → A: Yes: `Engine::register_session` and `Session::open()` share one check. This adds to ruling 2's wording. **Owner** (FR-004).
 - Q: Does an overlay header tag on S pass on admin messages in shape A, where the transport dictionary is not S? → A: Yes. S is the envelope on the transport route too, or a venue header tag stops the Logon (measured, R-6) (FR-008).
 - Q: May a stale negotiated version select a table after a reconnect? → A: No. Selection reads a routing value both arms write on every Logon, `Unknown` when the initiator's reply has nothing it can resolve. `negotiated_appl_version_` and `negotiated_version_profile()` keep today's writes, so validation-off observables do not move (FR-027).
 - Q: What does a table build failure do? → A: `out_of_memory`, from `Engine::start()` or a directly constructed session's `open()`, before any observable effect; never a route with a hole (FR-028).
 - Corrections, no question asked: NFR-001's branch count is restated with its witness; FR-024 misattributed Session Default, which is S-025; an A shape needs S's base in the engine dictionaries.
+
+### Session 2026-11-03 (Gate A round 2)
+
+Measured answers are in research R-18. **Owner** marks a recommendation in `plan.md`'s Owner sign-off, not a decision.
+
+- Q: What does each FSM state do with each input? → A: One table, data-model E-7. Its "today" half is measured through a real `Session` at `c0a828ef`; its "after" half is labelled design. It replaces the per-section endings.
+- Q: Where does the 1137 check run? → A: The gate first. A gate Reject naming 1137 on a Logon in an establishment arm disconnects, and a validating initiator gains a block like the acceptor's, ahead of its 141=Y reset unit. The gate, posture and SendingTime keep today's order. **Owner** (FR-010).
+- Q: What does a repeated MsgType, a route refusal or a past-header 1128 do before Logon completes, since FR-009, FR-025 and FR-026 promise a Reject and R-8 a disconnect? → A: The disconnect, for any frame whose third field is not admin or whose last MsgType differs from its third field's. The test reads the third field: `interpret_logon` reads the last 35, and measured, `35=D … 35=A` carrying Logon fields establishes a session it reaches. **Owner** (FR-029).
+- Q: Does FR-025 reach LogoutSent, which has no gate? → A: No. The arm drains as today, and a frame whose last MsgType is 5 confirms the Logout. Disclosed (FR-025).
+- Q: Which MsgType and sequence number does a FIXT refusal's Reject carry, since the arms pass the last-wins `hdr.msg_type`? → A: The third field's MsgType as 372 and as what keys the consume, and the first 34 as 45 (FR-025, data-model E-7).
+- Q: Is `35=A` in LogonReceived or Active a Logon under FR-010? → A: No: it is outside it, and stays as measured today: on T it reaches `fromApp`, and on L `1137=99` draws a Reject. Disclosed (FR-010).
+- Q: What ending has a header tag only some FIX 4.x tables declare (370)? → A: One, in every field order: it joins the peek's standard set, so a route's table judges it. QuickFIX C++ refuses it on every route. Disclosed (FR-012, research R-5).
+- Q: FR-027 said a table is never selected from a previous connection's value, but its only writes are at Logon. → A: Selection does not read the slot in an establishment arm, so the sentence holds without a reset at the connection boundary (FR-027).
+- Corrections, no question asked: QuickFIX C++ and J read BeginString first and check only 1137's presence ahead of validating (research R-9); a blocking `Engine::start()` has a precondition, and its comments change (research R-3).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -180,15 +195,15 @@ The operator asked for validation, so a message that cannot be validated does no
 
 **Why this priority**: Ruling 1. A silent fall-through is this repository's most recurring defect class.
 
-**Independent Test**: Frames with an unknown 1128, a known 1128 with no dictionary, a 1128 past the header, a repeated
-MsgType, and a Logon with an unserviceable 1137 in either role, on validating and non-validating sessions.
+**Independent Test**: Data-model E-7's table, walked: frames with an unknown 1128, a known 1128 with no dictionary, a 1128 past the header, a repeated
+MsgType, and a Logon with an unserviceable 1137 in either role, on validating and non-validating sessions, in each state.
 
 **Acceptance Scenarios**:
 
-1. **Given** a validating session, **When** a message carries `1128=99` or `1128=abc`, **Then** Reject 373=5, 371=1128,
+1. **Given** a validating session that is Active, **When** a message carries `1128=99` or `1128=abc`, **Then** Reject 373=5, 371=1128,
    not delivered, session up, and the sequence number is consumed as for any validation Reject.
-2. **Given** a validating session with no FIX 4.2 dictionary, **When** a message carries `1128=4`, **Then** the same.
-3. **Given** a validating FIXT session of either role, **When** the peer's Logon has a 1137 that is absent, empty, unparseable
+2. **Given** a validating session that is Active with no FIX 4.2 dictionary, **When** a message carries `1128=4`, **Then** the same.
+3. **Given** a validating FIXT session of either role, in an establishment arm, **When** the peer's Logon has a 1137 that is absent, empty, unparseable
    or names a version with no dictionary, **Then** Reject 371=1137 (373=1 when absent, 373=5 otherwise) and a disconnect,
    on every shape.
 4. **Given** a non-validating session, **When** any of those frames arrives, **Then** behaviour is as today: 1128 is
@@ -196,10 +211,11 @@ MsgType, and a Logon with an unserviceable 1137 in either role, on validating an
 5. **Given** a validating FIXT session with no transport dictionary available, **When** `Engine::register_session` or a
    directly constructed session's `open()` runs, **Then** it returns `invalid_session_config` before any observable effect,
    and the C and Python surfaces report it to the caller (`contracts/surface.md`).
-6. **Given** a validating session, **When** an application frame's first 1128 is past the header, **Then** Reject 373=14,
+6. **Given** a validating session that is Active, **When** an application frame's first 1128 is past the header, **Then** Reject 373=14,
    371=1128, not delivered, session up.
-7. **Given** a validating session, **When** a frame's last MsgType differs from its third field's, **Then** Reject 371=35
-   (373=13 with the second 35 in the header, 373=14 past it), not delivered under either type, session up.
+7. **Given** a validating session that is Active, **When** a frame's last MsgType differs from its third field's, **Then** Reject 371=35
+   (373=13 with the second 35 in the header, 373=14 past it), 372 the third field's, not delivered under either type, session up.
+8. **Given** a validating FIXT session in an establishment arm, **When** a frame's third field is not admin, or its last MsgType differs from its third field's, **Then** Disconnected and nothing sent, whatever else the frame carries, including Logon fields and a later `35=A`.
 
 ---
 
@@ -253,20 +269,23 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   judges the field. `FIXT11.xml`'s 1128 enum stops at 9, so `1128=10` on a Logon draws 373=5 from that dictionary. An
   application message with `1128=10` routes to FIX Latest, as QuickFIX/J (whose FIXT11.xml has 10); QuickFIX C++'s enum stops
   at 9, so it rejects 10 on every message. Disclosed, not changed.
-- **1128 past the header.** Routing reads 1128 from the header only. A validating session answers an application frame whose first
+- **1128 past the header.** Routing reads 1128 from the header only. A validating session that is Active answers an application frame whose first
   1128 is past the header with Reject 373=14, 371=1128, whatever its value, so a delivered validated message has one answer for routing
   and `dict::reify`. A non-validating session routes it by the negotiated version and delivers it (research R-5). On an admin frame the
   transport dictionary judges it, as any field.
 - **Two 1128s in the header.** Both routing and `dict::reify` read the first. The validator has no repeated-tag rule on any session, which
   QuickFIX does; this feature does not add one.
-- **MsgType repeated with a different value.** Validating FIXT: Reject before dispatch, including when the last value is `3` or `5`, which
-  the gate exempts. Non-validating: as today, routed by the third field, dispatched by the last, disclosed (FR-025). A repeat of the same
+- **MsgType repeated with a different value.** Validating FIXT, Active: Reject before dispatch, including when the last value is `3` or `5`, which
+  the gate exempts. Validating FIXT, establishment arm: disconnect (FR-029). LogoutSent: drained, and a last value of `5` confirms the Logout. Non-validating: as today, routed by the third field, dispatched by the last, disclosed (FR-025), including that a third-field `D` with a later `35=A` and Logon fields establishes. A non-FIXT validating session keeps the split: third field `0`, later `35=D`, validated as Heartbeat, delivered to `fromApp` (byte-identical, to file). A repeat of the same
   value splits nothing and stays as today.
 - **Empty `1128=`.** Present, never read as absent. Validating: Reject 373=4, 371=1128, as QuickFIX. Non-validating: the session dictionary.
 - **Validation off, no dictionary for the version, or an unknown 1128.** The view uses the session dictionary, as today.
+- **Validation off, a malformed pair only the route's dictionary declares.** It now takes `dispose_unparseable_`'s Reject in Active, where S's hooks read past it and delivered the frame at `c0a828ef`, because the route's table scans the frame (the clarification). Disclosed.
 - **Resend and PossDup paths.** Every path that validates or dispatches an application frame uses the same selection.
-- **Application message before Logon completes.** On a FIXT session the establishment arms validate admin frames only, so the
-  frame disconnects whatever the session dictionary, one ending (research R-8, owner sign-off).
+- **Application message before Logon completes.** On a validating FIXT session the establishment arms validate admin frames only, so the
+  frame disconnects whatever the session dictionary, one ending (FR-029, research R-8, owner sign-off).
+- **`35=A` once Active.** Outside FR-010. It stays as measured today: routed to the transport dictionary, and with a value that dictionary accepts it reaches `fromApp`, with `resolved_application_version()` `Unknown`. `1137=99` passes on T and draws 373=5, 371=1137 on L. Disclosed.
+- **A header tag only some FIX 4.x tables declare** (370, today). A header tag on a FIXT session in every field order, judged by the route's table: accepted on a FIX 4.2 or 4.3 route, 373=2 on any other. QuickFIX C++ refuses it on every route. Disclosed.
 - **Session dictionary is FIX 4.4 on a FIXT session.** Its own version is 4.4. Its Logon does not accept 1137, so it is not
   a transport dictionary: a validating session needs `FIXT11.xml` in the engine dictionaries or `open()` refuses it. A
   non-validating session is not refused. Existing test shapes use a partial FIX 4.4 dictionary with 1137 on its Logon: with validation off they
@@ -276,8 +295,8 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **Several sessions on one engine.** Dictionary tables and validators are shared: the cost must not be sessions times dictionaries
   (NFR-003).
 - **A header Length+Data pair an overlay adds to S, on a frame routed to another table.** That table does not know the pair: the scan and
-  the validator split inside the Data. Measured: a `34=7` inside the Data is read as MsgSeqNum. Disclosed as an L-row, on the owner's list.
-- **Message Type Default.** Logon's 372/1130/1410 do not affect resolution. Disclosed (FR-024).
+  the validator split inside the Data. Measured: a `34=7` inside the Data is read as MsgSeqNum. Limit on FR-008, FR-012 and SC-004, L-row, owner sign-off.
+- **Message Type Default.** Logon's 372/1130/1410 do not affect resolution. Validating, a Logon carrying it is rejected on 384 on T and A, whose `FIXT11.xml` has no such tag, and establishes on L. Disclosed (FR-024).
 
 ## Requirements *(mandatory)*
 
@@ -293,12 +312,12 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   fallback; and when that answer is a dictionary of the session dictionary's own version, the session dictionary instead.
 - **FR-003**: The transport dictionary MUST be the session dictionary if it defines all seven admin messages and its Logon
   accepts `DefaultApplVerID(1137)`, else `FIXT11.xml` from the engine dictionaries. The check MUST be made on the dictionary's
-  content, not its version label, so a partial dictionary or a FIX 4.x table fails it.
+  content, not its version label, so a partial dictionary or a FIX 4.x table fails it (owner item 11).
 - **FR-004**: A validating FIXT session with no transport dictionary MUST fail `open()` with `invalid_session_config`, and
-  `Engine::register_session` MUST refuse the same config through the same check (owner sign-off), so a host on an Engine route is
-  told. A non-validating session MUST NOT be refused for this.
+  `Engine::register_session` MUST refuse the same config through the same check (owner item 4), so a host on an Engine route is
+  told. A non-validating session MUST NOT be refused for this. **Limit (owner item 5):** a non-validating FIXT session failing today's guards is refused at `open()` only, so on an Engine route the host gets a log line and no return value.
 - **FR-005**: Admin messages MUST use the transport dictionary and application messages the application dictionary, on
-  every inbound path and FSM arm that validates or dispatches a frame.
+  every inbound path and FSM arm that validates or dispatches a frame. An application frame in an establishment arm is neither validated nor dispatched (FR-029).
 
 **Validation**
 
@@ -309,20 +328,19 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   same dictionaries MUST NOT change.
 - **FR-008**: A header tag the session dictionary declares beyond the standard ones MUST be accepted on an application message and
   checked against the session dictionary, enum and type included. The same holds on an admin message when the transport dictionary
-  is not the session dictionary. The trailer equivalent is disclosed as a limitation (research R-6).
-- **FR-009**: A validating session MUST answer an unknown 1128 value, or a valid value with no application dictionary,
-  with Reject 373=5, 371=1128, no `fromApp`, and the session stays up. Sequence numbers follow the existing validation
-  Reject rule (fixpp#423).
-- **FR-010**: A validating FIXT session of either role MUST answer a Logon whose 1137 is absent (373=1), empty, unparseable or has
-  no dictionary (373=5) with Reject 371=1137 and a disconnect. The check MUST run ahead of the validate gate, so the ending is the same
-  on every shape (owner sign-off). The negotiated version is still written where it is today, after `interpret_logon`.
-- **FR-011**: A non-validating FIXT session MUST keep today's dispositions for FR-009 and FR-010's inputs (033 FR-004a, FR-010).
+  is not the session dictionary. **Limits:** the trailer equivalent is not honoured (research R-6, L-row). A Length+Data pair S declares in its header is not honoured on a frame routed to another table: the table splits inside the Data, and an embedded `34=7` is read as MsgSeqNum (owner item 7; W-3 (f) pins the literal ending).
+- **FR-009**: A validating session in LogonReceived or Active MUST answer an unknown 1128 value, or a valid value with no application dictionary,
+  with Reject 373=5, 371=1128, 45 the first 34, no `fromApp`, and the session stays up. Sequence numbers follow the existing validation
+  Reject rule (fixpp#423). An establishment arm answers such a frame under FR-029.
+- **FR-010**: A validating FIXT session of either role, in an establishment arm, MUST answer a Logon whose 1137 is absent (373=1), empty, unparseable or has
+  no dictionary (373=5) with Reject 371=1137 and a disconnect, on every shape. The validate gate answers first where the transport dictionary judges the value, and otherwise a block later in the arm answers: the acceptor's today's, after mTLS; the initiator's new one, right after `check_inbound` and so ahead of its 141=Y reset unit, so a refused Logon resets nothing (owner item 3). The negotiated version is still written where it is today. **Limits, under that recommendation:** the ending is one per input for a single fault, on the wire. A double fault follows dictionary order: `1137=99` with a stale 52 is 373=10 on T and A and 373=5 on L, and an absent 1137 with an undeclared tag is 373=2 naming that tag, and stays in the arm. `1137=99` and `abc` keep NextNumIn on L and consume it on T and A (E-7 `NC-e`, `LS-e`). W-5 pins each. A Logon in LogonReceived or Active is outside this requirement (Edge Cases).
+- **FR-011**: A non-validating FIXT session MUST keep today's dispositions for FR-009 and FR-010's inputs (033 FR-004a, FR-010). The one thing its frames gain is the route's scan, which can give a malformed pair only that table declares a Reject where it was delivered (Edge Cases; W-6's `off-pair`).
 
 **Parse and dispatch**
 
 - **FR-012**: The frame scan, the validator's parse and walk, and the parse that builds the view handed to `fromApp` MUST
   use one dictionary per frame, the one FR-002 or FR-003 selected, with or without validation. The peek that selects it MUST walk with the
-  session dictionary's Length+Data pairs and stop at the first tag that is not a header tag; a trailer tag is not one.
+  session dictionary's Length+Data pairs and stop at the first tag that is not a header tag; a trailer tag is not one. The FIXT standard header's tags, and 370, count as header tags whatever the route (research R-5). **Limit:** FR-008's pair reads with S's hooks in the peek and the route's everywhere after, so that frame is not one dictionary's (owner item 7).
 - **FR-013**: With validation off and a resolved version that is unknown or has no dictionary, the frame MUST be scanned and
   parsed with the session dictionary. Delivery is as today.
 - **FR-014**: An application MUST be able to obtain the resolved application version of a delivered message, in C++, through the C
@@ -352,30 +370,31 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   its condition in research R-16 holds. S-026's row MUST state what the live cell proved, whichever way R-13 is ruled.
 - **FR-021**: B-095-1, B-097-1, B-097-3, B-097-4, L-098-1, L-033-5 and the coverage-index rows for §4.3.7 and §5.3.x MUST be re-read and
   corrected where they state or depend on the old behaviour.
-- **FR-022**: The QuickFIX C++ departure (ruling 1), and the dispositions FR-010, FR-025 and FR-026 add, MUST be recorded as B-rows with their
-  reasons.
+- **FR-022**: The QuickFIX C++ departure (ruling 1), and the dispositions FR-010, FR-025, FR-026 and FR-029 add, MUST be recorded as B-rows with their
+  reasons, along with every "Disclosed" of Edge Cases and the three splits in data-model E-5 (`quickstart.md` lists them).
 - **FR-023**: `brain/components/session.md` and `brain/components/dictionary.md` MUST record the two-dictionary decision
   and what was rejected; `brain/components/config.md`, `python-api.md` and `c-api.md` MUST record the surfaces this adds. Any file whose
   decision this supersedes MUST name the new one in a header comment.
 - **FR-024**: The Message Type Default level MUST be recorded as a live L-row: not implemented, as in all three QuickFIX
-  engines. `coverage-index.md` §5.3.4 MUST be re-pointed from S-026 to an explicit disposition naming that row, so it does not map to a `done`
+  engines (owner item 8). A peer that uses it on a validating session cannot establish where the transport dictionary is `FIXT11.xml` (Reject 373=2, 371=384), and on FIX Latest draws a Reject for a message valid in the version it meant. `coverage-index.md` §5.3.4 MUST be re-pointed from S-026 to an explicit disposition naming that row, so it does not map to a `done`
   row it is not part of. S-026 closes on Explicit (§5.3.5) and §5.3.2; Session Default (§5.3.3) is S-025, already `done`.
 
 **Added at Gate A**
 
-- **FR-025**: A validating FIXT session MUST reject a frame whose last MsgType differs from its third field's, before any dispatch and ahead of
-  the gate's 3/5 exemption: 371=35, 373=13 when the second 35 is in the header, 373=14 when past it, RefMsgType the third field's value.
-- **FR-026**: A validating FIXT session MUST reject an application frame whose first 1128 is past the header with 373=14, 371=1128,
-  whatever its value, ahead of the validator.
-- **FR-027**: Table selection MUST read a per-connection value written on every Logon, `Unknown` when an initiator's reply carries nothing it
-  can resolve, so a table is never selected from a previous connection's value. `negotiated_version_profile()` is unchanged.
+- **FR-025**: A validating FIXT session in LogonReceived or Active MUST reject a frame whose last MsgType differs from its third field's, before any dispatch and ahead of
+  the gate's 3/5 exemption: 371=35, 373=13 when the second 35 is in the header, 373=14 when past it, 45 the first 34. The third field's value MUST be both RefMsgType and what keys the consume, so `35=D … 35=4` is consumed and `35=4 … 35=D` is not (owner item 9). **Limits:** an establishment arm answers under FR-029. LogoutSent has no gate: it drains the frame, and a last MsgType of 5 confirms the Logout. A non-validating session and a non-FIXT session keep the split.
+- **FR-026**: A validating FIXT session in LogonReceived or Active MUST reject an application frame whose first 1128 is past the header with 373=14, 371=1128,
+  whatever its value, ahead of the validator (owner item 10). An establishment arm answers under FR-029. **Limit:** a dictionary declaring 1128 in a message body would be false-rejected; none vendored does (W-4 recomputes it).
+- **FR-027**: Outside the establishment arms, table selection MUST read a per-connection value written on every Logon, `Unknown` when an initiator's reply carries nothing it
+  can resolve, and in an establishment arm it MUST NOT read that value, so a table is never selected from a previous connection's value. `negotiated_version_profile()` is unchanged.
 - **FR-028**: A table or validator build failure MUST surface as `out_of_memory` from `Engine::start()`, or from a directly constructed
   session's `open()`, before any observable effect, distinct from a missing dictionary.
+- **FR-029**: In an establishment arm, a validating FIXT session MUST disconnect, sending nothing, on a frame whose third field's MsgType is not admin or whose last MsgType differs from its third field's, before the validate gate and without reaching `interpret_logon` (owner item 2).
 
 ### Non-functional Requirements
 
 - **NFR-001**: A non-FIXT session MUST gain no more than one branch on a non-validated inbound frame and two on a validated one (the FIXT
-  check at arm entry; the pre-gate check), both on a value fixed at `open()`. Its inbound and validate paths MUST NOT regress beyond the
+  check at arm entry; the check ahead of the gate), both on a value fixed at `open()`. Its inbound and validate paths MUST NOT regress beyond the
   paired-bench band (`[const §VIII.2]` as gated today). The bench is the witness; the branch count is a design statement checked at review.
 - **NFR-002**: No per-message heap allocation on a FIXT session's inbound path, validating or not. A real-`Session` guard modelled on
   `tests/perf/test_session_recovery_alloc_guard.cpp` MUST cover a message routed to a dictionary other than the session's.
@@ -400,13 +419,13 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   `c0a828ef` and by a mutant that restores the old selection.
 - **SC-002**: A message resolved to version A carrying a field only version B defines is rejected, and accepted when resolved
   to B, for at least FIX50SP2 / FIX Latest / FIX 4.4, in both session-dictionary shapes.
-- **SC-003**: No validating session delivers a message it could not validate: every refusal input in User Story 3, on every shape, reaches
+- **SC-003**: No validating session delivers a message it could not validate: every refusal input in User Story 3, in each state of data-model E-7, on every shape, reaches
   `fromApp` zero times, with a counted callback, and the arm is shown able to report non-zero.
-- **SC-004**: An overlay on the session dictionary behaves the same with and without other engine dictionaries registered.
+- **SC-004**: An overlay on the session dictionary behaves the same with and without other engine dictionaries registered, on every frame its dictionary answers, and on a scalar, enum or typed header field of a frame routed to another table. A Length+Data pair in S's header on such a frame is outside this (FR-008's limit; owner item 7).
 - **SC-005**: Non-FIXT behaviour is unchanged: the existing test suite passes unmodified on every non-FIXT session test.
 - **SC-006**: The same FIXT session reaches Active and routes `1128` from C++, C, Python and TOML.
-- **SC-007**: N FIXT sessions on one Engine over M distinct dictionaries walk M times and hold M validators; an added session adds, beyond what a
-  non-FIXT session with a minimal dictionary adds, less heap than one copy of the smallest application dictionary it routes to.
+- **SC-007**: N FIXT sessions on one C++ Engine route over M distinct dictionaries walk M times and hold M validators; an added session adds, beyond what a
+  non-FIXT session with a minimal dictionary adds, less heap than one copy of the smallest application dictionary it routes to. A C-ABI session is outside the second half: `fixpp_session_open` mints a per-session snapshot for its outbound path (NFR-003), one further walk and one full table.
 
 ## Assumptions
 
@@ -431,7 +450,7 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
   `9ac173b2a69ef2305258330d88685eccad80512d` (`Session`, `Message`, `DefaultDataDictionaryProvider`, `org.quickfixj.SimpleCache`, the MINA I/O
   handlers), QuickFIX/Go `eff945dd` (`validation.go`).
 - **Catalogue rows**: S-026 (closes); S-025 (the negotiated version it reads); D-009 (the overlay it must keep).
-- **Constitution**: `[const §VI.4]`–`[const §VI.6]`; `[const §VIII.2]`, `[const §VIII.3]`, `[const §VIII.5]`; `[const §X.1]`, `[const §X.5]`–`[const §X.7]`;
-  `[const §XI.7]`; `[const §XIV.2]`; `[const §XV.1]`, `[const §XV.9]`, `[const §XV.13]`.
+- **Constitution**: `[const §VI.4]`–`[const §VI.6]`; `[const §VII.3]`, `[const §VII.4]`, `[const §VII.7]`, `[const §VII.8]`; `[const §VIII.2]`, `[const §VIII.3]`, `[const §VIII.5]`; `[const §X.1]`, `[const §X.5]`–`[const §X.7]`;
+  `[const §XI.7]`; `[const §XIV.2]`; `[const §XV.1]`, `[const §XV.9]`, `[const §XV.13]`. The whole check is in `plan.md`.
 - **Design documents**: `[arch §2.3]`, `[arch §2.4]`; `[2b §6.5]`; `[2c §4.6]`, `[2c §4.9]`, `[2c §5]`; `[2i §3.10]`, `[2i §4.6]`. The notes they gain are in
   research R-11.
