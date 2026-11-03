@@ -83,6 +83,13 @@ session cannot open as FIXT.1.1 at all. TOML loads one `[dictionary]`. (L-097-1.
 3. **Surfaces.** C++, C ABI (additive MINOR), Python through SWIG, TOML (optional extra dictionaries).
 4. **#651.** Correct both comments. The session dictionary stays required; there is no engine fallback.
 
+## Clarifications
+
+### Session 2026-11-03
+
+- Q: On a FIXT session with validation off, is the view handed to `fromApp` parsed with the dictionary of the message's resolved version? → A: Yes, as QuickFIX/J: one rule whether validation is on or off, so turning validation on never changes how a message parses. A frame with no answering dictionary uses the session dictionary (owner).
+- Correction from the probe, no question asked: a FIX 4.4 table rejects a FIXT Logon on tag 1137, so "defines the admin messages" also requires that its Logon accepts 1137 (FR-003).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A validating FIXT session validates each message by its own version (Priority: P1)
@@ -213,13 +220,14 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **1128 after the first body field, or repeated.** The resolver and `dict::reify` must read the same occurrence, so
   validation and reify cannot disagree. Plan names the rule and a witness.
 - **Empty `1128=`.** Follows the frame-level empty-value rule first; it never silently selects the negotiated version.
-- **Validation off, no dictionary for the version.** The view uses the session dictionary, as today.
+- **Validation off, no dictionary for the version, or an unknown 1128.** The view uses the session dictionary, as today.
 - **Resend and PossDup paths.** Every path that validates or dispatches an application frame uses the same selection.
 - **Message before Logon completes.** An application message in a state with no negotiated version is handled by the
   existing state rules before any dictionary choice is observable.
-- **Session dictionary is FIX 4.4 on a FIXT session.** Its own version is 4.4; it defines admin messages, so it is also the
-  transport dictionary. An existing test shape (`tests/session/test_fixt_logon_establishment.cpp`) uses a minimal one; it
-  must keep passing.
+- **Session dictionary is FIX 4.4 on a FIXT session.** Its own version is 4.4. Its Logon does not accept 1137, so it is not
+  a transport dictionary: a validating session needs `FIXT11.xml` in the engine dictionaries or `open()` refuses it. A
+  non-validating session is not refused. An existing test shape (`tests/session/test_fixt_logon_establishment.cpp`) uses a
+  minimal one with validation off; it must keep passing.
 - **The engine outlives every accepted connection.** An acceptor builds a new `Session` per connection; dictionary tables
   must not be rebuilt per connection.
 - **Message Type Default.** Logon's 372/1130/1410 do not affect resolution. Disclosed (FR-024).
@@ -236,9 +244,9 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 - **FR-002**: The application dictionary for a resolved version MUST be the session dictionary when the version is its own
   version; otherwise the engine dictionary for that version, including the registry's one-way FIX50SP2 → FIX Latest
   fallback; and when that answer is a dictionary of the session dictionary's own version, the session dictionary instead.
-- **FR-003**: The transport dictionary MUST be the session dictionary if it defines the admin messages, else `FIXT11.xml`
-  from the engine dictionaries. FR-003's "defines" MUST be stated at plan as a check that cannot be fooled by a partial
-  dictionary.
+- **FR-003**: The transport dictionary MUST be the session dictionary if it defines all seven admin messages and its Logon
+  accepts `DefaultApplVerID(1137)`, else `FIXT11.xml` from the engine dictionaries. The check MUST be made on the dictionary's
+  content, not its version label, so a partial dictionary or a FIX 4.x table fails it.
 - **FR-004**: A validating FIXT session with no transport dictionary MUST fail `open()` with `invalid_session_config`.
   A non-validating session MUST NOT be refused for this.
 - **FR-005**: Admin messages MUST use the transport dictionary and application messages the application dictionary, on
@@ -264,8 +272,8 @@ A C or Python host, or a TOML-only host, opens a FIXT.1.1 session with several d
 
 - **FR-012**: The frame scan, the validator's parse and walk, and the parse that builds the view handed to `fromApp` MUST
   use one dictionary per frame, the one FR-002 or FR-003 selected, with or without validation.
-- **FR-013**: With validation off and no dictionary for the resolved version, the frame MUST be scanned and parsed with the
-  session dictionary.
+- **FR-013**: With validation off and a resolved version that is unknown or has no dictionary, the frame MUST be scanned and
+  parsed with the session dictionary. Delivery is as today.
 - **FR-014**: An application MUST be able to obtain the resolved application version of a delivered message, in C++ and
   through the C API (the "resolved-app-version accessor" in S-026's scope).
 - **FR-015**: An outbound application message whose header carries 1128 MUST keep it, and a witness MUST pin that, so S-026's
