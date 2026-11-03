@@ -1031,6 +1031,42 @@ synchronise it, which needs its own seams in turn.
   counts. A foreign constructor's first call is that window's opening edge. Class 15's cure is a
   structural barrier; this one removes the state the barrier would protect.
 
+### 22. A dependency's convenience overload discards a failure result its caller must see
+
+A third-party API reports failure on its primitive calls through a return value: a `bool`, a null
+handle, a status. Its convenience overload composes those calls and drops the result. Code that uses
+the overload gets a silent partial success: an object exists but is half-built, and the call path
+reports success. Nothing throws and nothing is logged, so the happy path and every test that never
+fails an allocation read clean.
+
+- **Trigger:** you call a library mutator or constructor in its convenience form (a named append, a
+  set-and-return-node, a fluent builder) where the library's primitive form returns `bool` or null on
+  allocation or validation failure; or you review code that does.
+- **Procedure:**
+  - Read the overload's source in the vendored or installed dependency, not its documentation, to
+    see whether it propagates the primitive's result.
+  - Route every mutation through one checked helper that calls the primitive form and fails closed
+    (throw, or return the error).
+  - Witness the helper with allocator or fault injection at the dependency's own allocation hook;
+    code reading is not a witness. Add a mutant that restores the convenience overload, and require
+    RED.
+  - Enumerate every call site of the overload in the change once (class 20), not one per review
+    round.
+- **Instance (098-dialect-overlay, PR #656, Gate B round 1, RC-1).** pugixml's named
+  `append_child(name)` and `append_attribute(name)` call `set_name` and ignore its result, so a failed
+  name allocation left a live, nameless node or attribute in the base document, which both loaders,
+  looking definitions up by name, skip; the overlay splice reported success. The splice now mutates
+  only through the checked helpers `append_element`, `append_named_attribute` and `set_attribute` in
+  `src/dictionary/overlay_merge.cpp`, which throw `std::bad_alloc` (the entry point maps it to
+  `xml_oom_error`). The witness is `tests/dictionary/overlay_pugi_oom_test.cpp` (ctest
+  `dictionary_overlay_pugi_oom_test`), which fails pugixml allocations through
+  `pugi::set_memory_management_functions`. The overlay's decisions are in the 098 section of
+  [components/dictionary](./components/dictionary.md).
+- **Sibling.** Class 1 (an instrument fails toward CLEAN): the same silent clean result, but here
+  the thing reporting success is a production call, not a check. Class 19's ⚠️ form: a flag or
+  observable placed at a step other than the one whose outcome it names, so a failed operation
+  looks complete. Here the convenience overload is that misplacement, built into the dependency.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:

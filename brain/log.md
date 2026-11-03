@@ -6,6 +6,11 @@ status: stable
 
 # Log
 
+- **2026-11-03 — 098-dialect-overlay close-out (PR #656): `failure-classes.md` gains class 22, a dependency's
+  convenience overload that discards a failure result.** pugixml's named mutators drop `set_name`'s result,
+  so a failed allocation left a nameless node and the splice reported success; the fix routes all splice
+  mutation through checked helpers, proven by pugixml allocator injection. Owner-approved 2026-11-03 from
+  the Gate B record's anti-pattern candidate.
 - **2026-10-31 — fixpp#602 + #640 (B61), Gate B close-out: `failure-classes.md` class 1 gains the two-timer
   pump-step witness form (PR #648).**
 - **2026-10-31 — fixpp#602 + #640 (B61), pre-push: FileStore setup waits are bounded by completion.**
