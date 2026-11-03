@@ -417,5 +417,5 @@ Records that describe the older design are flagged here and not rewritten. Each 
   fixpp#426: `field_iterator` takes a `dict_hooks` value and pairs through it). They sit in the closed
   B&L file.
 - **Open from 098:** L-098-3 (the base load paths have no caps and no cycle guard, fixpp#650) and
-  L-098-4 (the `std::uint16_t` side-table index wraps; the vendored FIX50SP2 group table already does,
+  L-098-4 (the `std::uint16_t` side-table index wraps; the vendored FIX50SP2 component table already does,
   fixpp#654).
