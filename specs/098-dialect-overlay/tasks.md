@@ -146,14 +146,19 @@ blocks Phase 1. Then `python3 tools/check_line_citations.py --range origin/main.
 
 - **Label `098`** (`ctest --preset linux-clang-debug -N -L 098` at any head): the buckets T003 labels, plus
   the standalone `dictionary_098_header_census_test` (from T054) and `capi_098_dict_overlay_live_test` (from
-  T067). In the ASan tree, the fuzz replay entry `fuzz_replay_dict_overlay` carries label `fuzz`, not `098`
+  T067), the standalone `dictionary_overlay_pugi_oom_test` (W-9's splice rows, from Gate B round 1), and the
+  grouped `dictionary_overlay_tests` (W-0–W-4 and W-9's status-mapping rows, moved out of
+  `dictionary_pure_tests` after Gate B so that one ctest entry stays under CI's per-test timeout under
+  msvc-asan; `dictionary_pure_tests` keeps label `098` for the coverage cell in `negative_paths_test.cpp`).
+  In the ASan tree, the fuzz replay entry `fuzz_replay_dict_overlay` carries label `fuzz`, not `098`
   (contracts preamble exemption; T081).
 - **Module selection** (quickstart §3): `ctest --preset linux-clang-debug -N -L "dictionary|config|capi|session|091|field-order"`
   must list the entries that run every file W-6's byte identity names
   (`tests/session/test_resend_answer_field_order.cpp`, `tests/session/test_091_data_send.cpp`). An entry
   missing from a list gets the label, or joins the regex, before the run is trusted.
-- **New entries**: `ctest -N`'s total at the final head equals T003's total plus the two standalone entries
-  above, and nothing else.
+- **New entries**: `ctest -N`'s total at the final head equals T003's total plus the four entries above
+  that T003 did not label (`dictionary_098_header_census_test`, `capi_098_dict_overlay_live_test`,
+  `dictionary_overlay_pugi_oom_test`, `dictionary_overlay_tests`), and nothing else.
 - **Tests this contract names as rewritten** (SC-006's only allowed differences from `origin/main`):
   `T018_Step2DialectOverlay`, renamed `T018_SessionDialectOverlayFileMissing`
   (`tests/config/test_load_negative_battery.cpp`); `T028_DialectOverlayDeferred`, renamed

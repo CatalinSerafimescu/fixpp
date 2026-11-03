@@ -12,20 +12,22 @@ by `tests/fuzz/CMakeLists.txt`'s corpus glob with label `fuzz` and exists only i
 
 | Witness | Bucket | Reason |
 |---|---|---|
-| W-0 | `dictionary_pure_tests` | Self-test of test-local declared data, with no isolation hazard, like `T020_DeferredSetExactCoverage`. |
-| W-1 | `dictionary_pure_tests` | Pure, single-threaded dictionary read/parse/compare tests. |
-| W-2 | `dictionary_pure_tests` | Pure, single-threaded vendored-base comparisons. Its census is the comparator's key source for two dictionaries built in-process, not a completeness gate over a population: no W-2 row asserts that a closed list of shipped files or tags equals a fixed set, which is what makes W-7 isolation-sensitive. |
-| W-3 | `dictionary_pure_tests` | Pure, single-threaded refusal tests. Its budget recipe row reads every vendored base, but it asserts that one constant equals the recipe's result over them, not that a closed list of shipped files or tags equals a fixed set, which is what makes W-7 isolation-sensitive (the `dictionary_dict_enum_census_test` block's comment: "an exact-set completeness gate is isolation-sensitive"). |
-| W-4 | `dictionary_pure_tests` | Pure, single-threaded dispatch tests. |
+| W-0 | `dictionary_overlay_tests`, labels `dictionary;098` | Self-test of test-local declared data, with no isolation hazard, like `T020_DeferredSetExactCoverage`. |
+| W-1 | `dictionary_overlay_tests`, labels `dictionary;098` | Pure, single-threaded dictionary read/parse/compare tests. |
+| W-2 | `dictionary_overlay_tests`, labels `dictionary;098` | Pure, single-threaded vendored-base comparisons. Its census is the comparator's key source for two dictionaries built in-process, not a completeness gate over a population: no W-2 row asserts that a closed list of shipped files or tags equals a fixed set, which is what makes W-7 isolation-sensitive. |
+| W-3 | `dictionary_overlay_tests`, labels `dictionary;098` | Pure, single-threaded refusal tests. Its budget recipe row reads every vendored base, but it asserts that one constant equals the recipe's result over them, not that a closed list of shipped files or tags equals a fixed set, which is what makes W-7 isolation-sensitive (the `dictionary_dict_enum_census_test` block's comment: "an exact-set completeness gate is isolation-sensitive"). |
+| W-4 | `dictionary_overlay_tests`, labels `dictionary;098` | Pure, single-threaded dispatch tests. |
 | W-5 | `session_pure_tests` | Pure session test; this bucket supplies `src` and `FIXPP_DICT_DATA_DIR`. |
 | W-6 | `session_pure_tests` | Pure session send tests with no isolation hazard. |
 | W-7 | both halves: standalone `dictionary_098_header_census_test`, labels `dictionary;098;census`, with `src/session` on its include directories | Both halves are exact-set censuses over the shipped dictionaries, standalone as the module's other census gates are (the `dictionary_dict_enum_census_test` block's comment: "an exact-set completeness gate is isolation-sensitive"). The session half reads the production fixed set from `src/session/send_header_tags.hpp`, a self-contained header, so the executable includes it without linking `fixpp_session`. |
 | W-8 | `config_045_tests` (the new `test_098_dialect_overlay.cpp` and the T020 cells of `test_load_deferred_surface.cpp`); `config_044_tests` (the rewritten T018 cell of `test_load_negative_battery.cpp` and T028 cell of `test_load_selectors.cpp`) | Pure configuration parsing and resolution tests. AS-1's cell runs `Session::open()` on a local `asio::io_context` driven by `run()` on the test's own thread: no worker thread, no global allocation hook, so it stays in the bucket. |
-| W-9 | pure rows: `capi_pure_tests`; status-mapping rows: `dictionary_pure_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT`; splice allocation-failure rows: standalone `dictionary_overlay_pugi_oom_test`, labels `098;dictionary` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The status-mapping rows are pure, single-threaded calls of a dictionary-library function. The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. The splice rows install pugixml's process-global allocation hook from the executable's own `main`, before any pugixml object exists, so `[const §VII.8]` keeps them standalone, as `dictionary_table_view_pair_oom_test` is. |
+| W-9 | pure rows: `capi_pure_tests`; status-mapping rows: `dictionary_overlay_tests`; live arm: standalone `capi_098_dict_overlay_live_test`, labels `capi;098`, with an explicit `TIMEOUT`; splice allocation-failure rows: standalone `dictionary_overlay_pugi_oom_test`, labels `098;dictionary` | The pure rows start no engine, which is the bucket's admission rule (no `fixpp_engine_start()`). The status-mapping rows are pure, single-threaded calls of a dictionary-library function. The live arm starts two C-ABI engines with their worker threads over loopback, so `[const §VII.8]` keeps it standalone, as `capi_dict066_group_membership_red_test` and `capi_inbound_frame_dispositions_test` are. The splice rows install pugixml's process-global allocation hook from the executable's own `main`, before any pugixml object exists, so `[const §VII.8]` keeps them standalone, as `dictionary_table_view_pair_oom_test` is. |
 | W-10 | in-tree Python suite (`bindings/python/tests/`); the import-surface row in the wheel suite | Not a gtest executable. The new test has no wheel twin: its overlay fixtures are not in the wheel. |
 | W-11 | `fuzz_dict_overlay` and its replay | Fuzz target outside §VII.8, built only under `FIXPP_BUILD_FUZZ`. |
 | W-12 | verify measurement | Not a test executable. |
 | W-13 | record-check scripts | Not a gtest executable. |
+
+`dictionary_overlay_tests` is a grouped bucket like `dictionary_pure_tests` (`tests/dictionary/CMakeLists.txt`), compiled with the same link libraries, include directories and definitions. It is a ctest entry of its own only because these cells are slow under msvc-asan, and one ctest entry must stay under CI's per-test timeout.
 
 **RED arms.** A witness that calls a new symbol does not compile on the unfixed tree, and a compile
 failure is RED for the wrong reason. Such a witness is shown RED by a **named mutant** applied to the
@@ -56,7 +58,7 @@ J=${J:-8}                                                   # never empty: a bar
 cmake --build --preset linux-clang-debug -j"$J"
 conan install . -pr conan/profiles/linux-clang-asan --build=missing -of build/linux-clang-asan
 cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON        # M-7's overflow report and W-11's rows
-cmake --build --preset linux-clang-asan --target dictionary_pure_tests -j"$J"
+cmake --build --preset linux-clang-asan --target dictionary_overlay_tests -j"$J"
 # per mutant: apply, rebuild (rc must be 0), run the named binary unfiltered under `timeout`, record,
 # then `git checkout -- . && git clean -fd` (no -x: build trees are ignored) and a clean `git status --porcelain`
 ```
@@ -114,7 +116,7 @@ as a RED arm before production code.
 | W-9 bad-alloc rows (the mapping function fed `xml_oom_error` and a bare `std::bad_alloc`) | no | 202 | — | M-15 |
 | W-9 code-200 rows (the thunk's conflict row; the mapping function fed `xml_parse_error`, `overlay_conflict_error`, a `std::runtime_error` and a non-`std::exception`) | no | 200 (and NULL from the thunk) | — | M-20 |
 | W-9 NULL-argument rows | no | `FIXPP_ERR_NULL_HANDLE` | — | control |
-| W-9 status-mapping rows (`dictionary_pure_tests`) | no (the shared status-mapping function is new) | `status_out_of_memory` → `xml_oom_error`; another failed status → the format's parse error | — | M-21 |
+| W-9 status-mapping rows (`dictionary_overlay_tests`) | no (the shared status-mapping function is new) | `status_out_of_memory` → `xml_oom_error`; another failed status → the format's parse error | — | M-21 |
 | W-9 pure handle row (the handle is accepted by `fixpp_session_config_set_dictionary` and `fixpp_session_open` on an unstarted engine) | no | both calls return `FIXPP_ERR_OK` | — | control: a base-only handle passes it too; the live arm is the discriminating row |
 | W-9 version pin (`version_test.cpp`) | yes | the version is 1.13 | **fails** (MINOR is 12) | **U** |
 | W-9 symbol golden (`fixpp_capi_symbols.txt` gains the symbol) | yes | the library's exported set equals the golden | **fails**: exactly one `MISSING exported symbol` line, naming `fixpp_dict_load_from_xml_with_overlay`, and no `UNEXPECTED exported symbol` line (`abi_symbol_golden_test.cpp` prints one line per difference); any other difference is RED for the wrong reason (stop rule) | **U** |
@@ -146,7 +148,7 @@ diff $N $I
 
 | ID | Change | Format / tree | Witness rows (binary) | Stated RED | How the mutated site reaches the assertion |
 |---|---|---|---|---|---|
-| M-0 | the comparison of the context `required_members` entry removed, the entry still listed | test-only / Debug | W-0 context `required_members` seed (`dictionary_pure_tests`) | that row's reported set misses its expected entry | the comparator is the code under test |
+| M-0 | the comparison of the context `required_members` entry removed, the entry still listed | test-only / Debug | W-0 context `required_members` seed (`dictionary_overlay_tests`) | that row's reported set misses its expected entry | the comparator is the code under test |
 | M-1 | XML splice prepends a new group member | XML / Debug | W-1 qf row | a difference naming the store | splice → spliced document → `build_handle_from_doc` → comparator |
 | M-1o | Orchestra splice prepends a new group member | Orchestra / Debug | W-1 orch row | as M-1 | as M-1 |
 | M-2 | XML splice skips enum-value additions | XML / Debug | W-1 qf row | a difference naming the enum store | as M-1 |
@@ -156,7 +158,7 @@ diff $N $I
 | M-5 | byte cap removed | per format / Debug | W-3 byte-cap rows | they load | step 1 |
 | M-6 | `parse_doctype` dropped | per format / Debug | W-3 DOCTYPE row | it loads | step 2 → step 3 sees no node |
 | M-7 | cycle check removed | per format / ASan | W-3 cycle row; W-11 cycle seeds | the cycle-error assertion fails (loop, overflow or another error; bounded by `timeout`) | step 6 → the build recurses on the cycle |
-| M-8 | `load_any_with_overlay` ignores the overlay | both / Debug | W-4 match rows (`dictionary_pure_tests`); W-5 overlay arm (`session_pure_tests`) | difference; the overlay session disagrees with the edited one | `load_any_with_overlay` → session's `config.dictionary` |
+| M-8 | `load_any_with_overlay` ignores the overlay | both / Debug | W-4 match rows (`dictionary_overlay_tests`); W-5 overlay arm (`session_pure_tests`) | difference; the overlay session disagrees with the edited one | `load_any_with_overlay` → session's `config.dictionary` |
 | M-9 | `as_table_view` skips the header store | both / Debug | every W-6 arm (`session_pure_tests`); W-7 dictionary half (`dictionary_098_header_census_test`) | the custom header tags are sent in the body; `is_header_tag` false | `load` and `load_from_string` fill the handle's store at finalize (W-6's edited arms load that way); `as_table_view` copies it into `header_bits_`; `open()` builds `inbound_tv_` from `as_table_view()`; the classification reads `inbound_tv_` |
 | M-10 | the resolver assigns the base to every session | — / Debug | W-8 AS-2, AS-5 (`config_045_tests`) | the overlay session's pointer equals the base's | resolver → `bundle.sessions[i].config.dictionary` |
 | M-11 | the limit branch maps to 200 | — / Debug (Python ON) | W-9 cap rows (`capi_pure_tests`); W-10 cap row (pytest) | 200, `.code` 200 | thunk catch → mapping function → return code → SWIG out-typemap |
@@ -170,7 +172,7 @@ diff $N $I
 | M-18 | the side-table fit check removed | per format / Debug | W-3 side-table rows | they load | step 6 |
 | M-19 | the thunk calls `load_any(base)` and drops the overlay | — / Debug (Python ON) | W-9 live arm (`capi_098_dict_overlay_live_test`); W-10 inbound row (pytest) | 5011 reads `AB` | handle → `fixpp_session_config_set_dictionary` → `Session::open()` builds `inbound_tv_` → the `Parser` pairs through `session_hooks(inbound_tv_)`; the Python function is the same C function through SWIG |
 | M-20 | the mapping function's `std::exception` and `...` branches return `FIXPP_ERR_CAPI_CONFIG_INVALID` | — / Debug | W-9 code-200 rows | 10, not 200 | mapping function |
-| M-21 | step 2's status mapping with its branches swapped | both / Debug | W-9 status-mapping rows (`dictionary_pure_tests`) | the wrong type | the shared mapping function |
+| M-21 | step 2's status mapping with its branches swapped | both / Debug | W-9 status-mapping rows (`dictionary_overlay_tests`) | the wrong type | the shared mapping function |
 | M-22 | step 4's depth walk removed | per format / Debug | W-3 depth-33 row | it loads, or its refusal no longer names the depth cap | step 4 |
 | M-23 | step 4a's root checks removed | per format / Debug | W-3 version-mismatch, other-format, root-child-outside-the-list, repeated-root-container and step-4a-against-step-5 order rows | the type or the named key is wrong | step 4a |
 | M-24 | `policy` not forwarded to the build | per loader and at `load_any_with_overlay` / Debug | W-1 `tolerant` rows (the overlay side refuses); W-4 `tolerant` row (the `load_any` side refuses) | `xml_parse_error` / `orchestra_parse_error` where a load was expected | entry point → `build_handle_from_doc` with `fail_closed` → the group that declares no first member is refused |
@@ -662,7 +664,7 @@ engine-dictionaries row gets no bundle);
   fixtures. The exception-to-code mapping function (research R-6, declared in
   `src/capi/capi_internal.hpp`) is fed each type directly: `overlay_limit_error` → 201; `xml_oom_error`
   and a bare `std::bad_alloc` → 202; `xml_parse_error`, `overlay_conflict_error` and a
-  `std::runtime_error` → 200; a non-`std::exception` → 200. In the `dictionary_pure_tests`, research R-5
+  `std::runtime_error` → 200; a non-`std::exception` → 200. In `dictionary_overlay_tests`, research R-5
   step 2's status mapping, the one function both parses of an overlay call use (N-10), is fed
   `status_out_of_memory` (→ `xml_oom_error`) and one other failed status (→ the format's parse error);
   that both parses call it is structural. A real parse that runs out of memory is the splice

@@ -52,9 +52,6 @@ add_executable(dictionary_pure_tests
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
   dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
-  dictionary_equivalence_test.cpp  # 098 W-0: the dictionary comparator's self-test
-  overlay_equivalence_test.cpp     # 098 W-1/W-2: overlay vs the equivalent edited XML
-  overlay_refusal_test.cpp         # 098 W-3: the overlay's refusals, QuickFIX-XML column
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary
@@ -71,8 +68,6 @@ target_include_directories(dictionary_pure_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/src/dictionary")
 target_compile_definitions(dictionary_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
-  # 098-dialect-overlay: the hand-written overlay fixtures and references.
-  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\""
   # 083 T035 (W-6): loader_disposition_test.cpp loads all TEN shipped
   # dictionaries under the fail-closed default, Orchestra included. Spelled out
   # rather than reusing FIXPP_ORCHESTRA_DATA_DIR, which this file sets further
@@ -92,8 +87,39 @@ set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 097)
 # 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
-# LABELS setter for this entry, so the existing labels survive.
+# LABELS setter for this entry, so the existing labels survive. negative_paths_test.cpp,
+# which stays in this bucket, holds a 098 coverage cell.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
+
+# ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
+# Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
+# their own only because their cells are slow under msvc-asan, and one ctest entry must stay
+# under CI's per-test timeout. Compiled as they were inside dictionary_pure_tests: the same
+# link libraries, include directories and definitions. FIXPP_ORCHESTRA_DATA_DIR is spelled
+# out for the reason given in the bucket above.
+add_executable(dictionary_overlay_tests
+  dictionary_equivalence_test.cpp  # 098 W-0: the dictionary comparator's self-test
+  overlay_equivalence_test.cpp     # 098 W-1/W-2/W-4: overlay vs the equivalent edited XML
+  overlay_refusal_test.cpp         # 098 W-3: the overlay's refusals; W-9's status-mapping rows
+)
+target_link_libraries(dictionary_overlay_tests PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_overlay_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  # tests/support/dictionary_test_access.hpp includes the private dictionary_internal.hpp.
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
+target_compile_definitions(dictionary_overlay_tests PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  # The hand-written overlay fixtures and references.
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+  FIXPP_TEST_HOOKS)
+add_test(NAME dictionary_overlay_tests COMMAND dictionary_overlay_tests)
+set_tests_properties(dictionary_overlay_tests PROPERTIES LABELS "dictionary;098")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
