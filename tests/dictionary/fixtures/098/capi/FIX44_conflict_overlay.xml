@@ -1,0 +1,11 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-9: the conflicting overlay of the
+  C-ABI conflict row, over dictionaries/FIX44.xml. Condition: it redeclares
+  ClOrdID(11), which FIX44.xml declares as a STRING, with another type, and
+  carries nothing else, so an identifying-attribute conflict is its only refusal.
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <fields>
+  <field number='11' name='ClOrdID' type='INT' />
+ </fields>
+</fix>

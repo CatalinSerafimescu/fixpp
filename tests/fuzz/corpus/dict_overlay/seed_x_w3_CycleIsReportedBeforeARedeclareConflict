@@ -1,0 +1,15 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='Symbol' required='N' />
+  </message>
+ </messages>
+ <components>
+  <component name='Instrument'>
+   <component name='VenueLoop' required='N' />
+  </component>
+  <component name='VenueLoop'>
+   <component name='Instrument' required='N' />
+  </component>
+ </components>
+</fix>

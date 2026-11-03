@@ -1,0 +1,134 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-1: the small Orchestra triple
+  base.xml, overlay.xml and edited.xml. edited.xml is base.xml with each
+  overlay.xml addition appended at the end of its matched container, after
+  that container's last child element, in overlay document order (spec.md
+  Terminology, "Equivalent edited XML"; research R-3's Orchestra table),
+  written by hand and never produced by the merge (FR-017 (a)). Re-check it
+  with a no-index unified diff of base.xml against edited.xml: every hunk has
+  one of the shapes contracts W-1 allows, the Required promotion in its
+  Orchestra form being a presence attribute set to required. The header and
+  trailer are components 1024 and 1025, referenced from each message's
+  structure. TextCodeSet lists no code, so Text has no enum domain until the
+  overlay lists one (N-2). Group Events holds only the empty component
+  EmptyBlock, a group whose members emit nothing, which the loader refuses
+  under the default unresolved_group_policy; so base.xml is never loaded on
+  its own, and the member the overlay appends to Events is its first
+  emission, its delimiter (spec.md Edge Cases).
+-->
+<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
+  <fixr:codeSets>
+    <fixr:codeSet id="40" name="OrdTypeCodeSet" type="char">
+      <fixr:code id="40001" name="Market" value="1" />
+      <fixr:code id="40002" name="Limit" value="2" />
+    </fixr:codeSet>
+    <fixr:codeSet id="54" name="SideCodeSet" type="char">
+      <fixr:code id="54001" name="Buy" value="1" />
+      <fixr:code id="54002" name="Sell" value="2" />
+    </fixr:codeSet>
+    <fixr:codeSet id="58" name="TextCodeSet" type="String">
+    </fixr:codeSet>
+  </fixr:codeSets>
+  <fixr:fields>
+    <fixr:field id="1" name="Account" type="String" />
+    <fixr:field id="8" name="BeginString" type="String" />
+    <fixr:field id="9" name="BodyLength" type="Length" />
+    <fixr:field id="10" name="CheckSum" type="String" />
+    <fixr:field id="11" name="ClOrdID" type="String" />
+    <fixr:field id="17" name="ExecID" type="String" />
+    <fixr:field id="34" name="MsgSeqNum" type="SeqNum" />
+    <fixr:field id="35" name="MsgType" type="String" />
+    <fixr:field id="37" name="OrderID" type="String" />
+    <fixr:field id="40" name="OrdType" type="OrdTypeCodeSet" />
+    <fixr:field id="48" name="SecurityID" type="String" />
+    <fixr:field id="49" name="SenderCompID" type="String" />
+    <fixr:field id="52" name="SendingTime" type="UTCTimestamp" />
+    <fixr:field id="54" name="Side" type="SideCodeSet" />
+    <fixr:field id="55" name="Symbol" type="String" />
+    <fixr:field id="56" name="TargetCompID" type="String" />
+    <fixr:field id="58" name="Text" type="TextCodeSet" />
+    <fixr:field id="78" name="NoAllocs" type="NumInGroup" />
+    <fixr:field id="79" name="AllocAccount" type="String" />
+    <fixr:field id="80" name="AllocQty" type="Qty" />
+    <fixr:field id="112" name="TestReqID" type="String" />
+    <fixr:field id="448" name="PartyID" type="String" />
+    <fixr:field id="452" name="PartyRole" type="int" />
+    <fixr:field id="453" name="NoPartyIDs" type="NumInGroup" />
+    <fixr:field id="864" name="NoEvents" type="NumInGroup" />
+    <fixr:field id="7010" name="BaseBlobLen" type="Length" />
+    <fixr:field id="7011" name="BaseBlob" type="data" lengthId="7010" />
+  </fixr:fields>
+  <fixr:components>
+    <fixr:component id="1024" name="StandardHeader">
+      <fixr:fieldRef id="8" presence="required" />
+      <fixr:fieldRef id="9" presence="required" />
+      <fixr:fieldRef id="35" presence="required" />
+      <fixr:fieldRef id="49" presence="required" />
+      <fixr:fieldRef id="56" presence="required" />
+      <fixr:fieldRef id="34" presence="required" />
+      <fixr:fieldRef id="52" presence="required" />
+    </fixr:component>
+    <fixr:component id="1025" name="StandardTrailer">
+      <fixr:fieldRef id="10" presence="required" />
+    </fixr:component>
+    <fixr:component id="1003" name="Instrument">
+      <fixr:fieldRef id="55" presence="required" />
+      <fixr:fieldRef id="48" />
+    </fixr:component>
+    <fixr:component id="2001" name="PartiesBlock">
+      <fixr:groupRef id="1012" />
+    </fixr:component>
+    <fixr:component id="2002" name="EmptyBlock">
+    </fixr:component>
+  </fixr:components>
+  <fixr:groups>
+    <fixr:group id="1012" name="Parties">
+      <fixr:numInGroup id="453" />
+      <fixr:fieldRef id="448" />
+      <fixr:fieldRef id="452" />
+    </fixr:group>
+    <fixr:group id="2010" name="Allocs">
+      <fixr:numInGroup id="78" />
+      <fixr:fieldRef id="79" />
+      <fixr:fieldRef id="80" />
+    </fixr:group>
+    <fixr:group id="2011" name="Events">
+      <fixr:numInGroup id="864" />
+      <fixr:componentRef id="2002" />
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="112" />
+        <fixr:componentRef id="1025" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="11" presence="required" />
+        <fixr:fieldRef id="1" presence="optional" />
+        <fixr:componentRef id="2001" />
+        <fixr:componentRef id="1003" presence="required" />
+        <fixr:fieldRef id="54" presence="required" />
+        <fixr:fieldRef id="40" presence="required" />
+        <fixr:groupRef id="2010" />
+        <fixr:fieldRef id="58" />
+        <fixr:componentRef id="1025" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="9" name="ExecutionReport" msgType="8">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="37" presence="required" />
+        <fixr:fieldRef id="17" presence="required" />
+        <fixr:componentRef id="1003" presence="required" />
+        <fixr:groupRef id="2011" />
+        <fixr:fieldRef id="7010" />
+        <fixr:componentRef id="1025" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>

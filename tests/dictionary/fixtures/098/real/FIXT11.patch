@@ -1,0 +1,8 @@
+@@ header: Custom098HeaderTag (5020) appended to <header>
+   </group>
++  <field name='Custom098HeaderTag' required='N' />
+  </header>
+@@ fields: new field 5020 appended
+   </field>
++  <field number='5020' name='Custom098HeaderTag' type='STRING' />
+  </fields>

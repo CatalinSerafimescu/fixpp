@@ -1,0 +1,17 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-5, the enum-closure frame (N-2,
+  B-098-7): an overlay of dictionaries/FIX44.xml that lists a first value on
+  Text(58), which FIX44.xml declares with no value, so the overlay closes
+  Text's domain. Its value is the one tests/session/test_098_inbound_frames.hpp
+  names kEnumClosureListedValue. Its reference is FIX44_enum_closure.patch
+  beside it, written from the base file and never derived from the merge
+  (FR-017 (b)): the self-closing Text line opened to hold the value (the
+  self-closing opener contracts W-1 allows).
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <fields>
+  <field number='58' name='Text' type='STRING'>
+   <value enum='LISTED' description='LISTED' />
+  </field>
+ </fields>
+</fix>

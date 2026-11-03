@@ -618,9 +618,14 @@ struct SessionConfig {
 }  // namespace fixpp::session
 ```
 
+Updated (098-dialect-overlay): `SessionConfig` has no `dialect_overlay` member. 098 removed it, with the forward declaration of `fixpp::dict::DialectOverlay`, a type that was never defined (B-098-4 in `spec/behaviors-and-limitations.md`). A session's overlay arrives inside `dictionary`, loaded by `dict::load_any_with_overlay` or a loader's `load_with_overlay`, and the TOML loader fills `dictionary` for each session (B-098-3).
+
 Notes:
 
 - **Frozen at session open.** Per `[arch §5.6]`, no mid-session reconfiguration of any of: `executor_override`, `mode`, `already_serialized_executor`, `locks`, `dictionary`, `dialect_overlay`, `security_profile`, `store_factory`, `clock_override`, `initial_trace_context`. The supported pattern is close-and-reopen.
+
+  Updated (098-dialect-overlay): `dialect_overlay` is no longer a member (the note under the listing); the rest of this list holds, and a session's overlay is frozen with its `dictionary`.
+
 - **Engine-anchor + session-override pattern (root cause #2).** The dictionary axis (`EngineConfig::dictionaries` + `SessionConfig::dictionary`), the executor axis (`EngineConfig::executor` + `SessionConfig::executor_override`), and the clock axis (`EngineConfig::clock` + `SessionConfig::clock_override`) all follow the same shape: engine-anchor required at `Engine::open`; session-override nullable / `std::optional`-typed; resolved value at `Session::open` is `override.value_or(engine_anchor)`. The §7.9 single-effective-clock rule generalises to single-effective-executor for the executor axis as well.
 - **`direct_executor` attestation (root cause #1 / C-P1-2).** When `mode == direct_executor`, `already_serialized_executor` MUST be `true`. The engine does not call `make_strand` on the resolved executor in this mode but continues to access engine-internal session state (FSM, transport completion bookkeeping, store-write coordination, heartbeat) as if it were running under a strand — the user contracts that the executor satisfies that property. Construction rejects with `error::executor_not_serialised` (§6.7) when `mode == direct_executor && !already_serialized_executor`. The combination `direct_executor + lock_policy::spin` is also rejected with `error::invalid_session_config` (§6.7 / §6.1) — spin assumes single-thread strand access for its bound; without `already_serialized_executor`, the bound assumption is unverified.
 - **Backpressure enum has only two values.** `drop_oldest` is **not** available on the app/session message path per `[const §XV.15]`. The enum is exhaustive on purpose so a user cannot construct an illegal value. Telemetry and tap paths use the `[const §XIII.2]` exception under their own configs (owned by 2k / 2l), not this enum.

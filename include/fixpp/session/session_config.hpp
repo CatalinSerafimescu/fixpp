@@ -41,7 +41,6 @@ class Clock;
 }
 namespace fixpp::dict {
 class Dictionary;
-class DialectOverlay;
 class dictionary_snapshot;  // fixpp#215 item 1 (Option C) — shared_ptr member ⇒ fwd-decl suffices
 }  // namespace fixpp::dict
 namespace fixpp::tls {
@@ -192,8 +191,7 @@ struct SessionConfig {
                            // (FR-018; lives in `session` per architecture.md's SecurityProfile enum
                            // row)
 
-    std::shared_ptr<const fixpp::dict::Dictionary> dictionary;           // required
-    std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
+    std::shared_ptr<const fixpp::dict::Dictionary> dictionary;  // required
 
     // fixpp#215 item 1 (Option C, `.specify/215-dictionary-view.md` §3/§5a) —
     // OPTIONAL pre-built snapshot of `dictionary`.

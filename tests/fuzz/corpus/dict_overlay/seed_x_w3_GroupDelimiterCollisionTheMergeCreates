@@ -1,0 +1,14 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <group name='NoAllocs' required='N'>
+    <group name='NoVenueNested' required='N'>
+     <field name='AllocAccount' required='N' />
+    </group>
+   </group>
+  </message>
+ </messages>
+ <fields>
+  <field number='9200' name='NoVenueNested' type='NUMINGROUP' />
+ </fields>
+</fix>

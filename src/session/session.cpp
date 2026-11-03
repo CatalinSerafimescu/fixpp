@@ -78,6 +78,7 @@
 #include "msgtype_classifier.hpp"        // 019 T006: is_admin_msgtype (session-internal)
 #include "read_first_frame_bounded.hpp"  // 093 C-6: await_deadline for close()'s wait
 #include "scan_frame_header.hpp"  // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
+#include "send_header_tags.hpp"   // 098: kSendHeaderTags + is_send_header_tag (moved from here)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
 // only) to avoid pulling wire/parser.hpp into the awaitable-corpus headers.
 // session → wire is ALLOWED per [arch §5.3] / check_layers.py.
@@ -5974,20 +5975,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_deferred_(
 //   value counted by its Length is one field (fixpp#426), so `<SOH>34=` inside
 //   EncodedText is neither a second field nor a MsgSeqNum.
 
-// fixpp#422: is `tag` a StandardHeader field? build_send_frame_ moves such a field ahead
-// of the payload's body fields; a strict peer (QuickFIX-J UseDataDictionary=Y)
-// rejects a header field that follows a body field (373=14). The set is the
-// <header> of dictionaries/FIXT11.xml (a superset of FIX44.xml's) plus
-// OnBehalfOfSendingTime(370), which QuickFIX-J's Message.isHeaderField counts.
-// Unlike build_replay_frame's kReplayHeaderTags, which only needs to be a SUBSET
-// of the real header, this set must be a SUPERSET: a header tag missing here
-// stays behind the body.
-static bool is_send_header_tag(std::uint32_t tag) noexcept {
-    static constexpr std::array<std::uint32_t, 34> kSendHeaderTags = {
-        8,   9,   34,  35,  43,  49,  50,  52,  56,  57,  90,  91,  97,  115, 116,  122,  128,
-        129, 142, 143, 144, 145, 212, 213, 347, 369, 370, 627, 628, 629, 630, 1128, 1129, 1156};
-    return std::ranges::find(kSendHeaderTags, tag) != kSendHeaderTags.end();
-}
+// fixpp#422's fixed send-side header set (`kSendHeaderTags`) and its predicate
+// `is_send_header_tag` live in send_header_tags.hpp (098-dialect-overlay, research
+// R-7), with the reason for their content.
+using fixpp::session::detail::is_send_header_tag;
 
 fixpp::core::expected_t<Session::send_frame_built> Session::build_send_frame_(
     std::span<const std::byte> app_payload, std::span<std::byte> out) {
@@ -6050,7 +6041,8 @@ fixpp::core::expected_t<Session::send_frame_built> Session::build_send_frame_(
     //
     // T009 — Excision + header partition (only over a fully-validated payload):
     //   copy the leading 35= field, then the header-class post-35= fields
-    //   (is_send_header_tag), then the remaining fields, each group in original
+    //   (is_send_header_tag, or since 098 a tag the session's dictionary declares in
+    //   its header), then the remaining fields, each group in original
     //   order, into strip_buf; rebind app_payload to that buffer (fixpp#422).
     //   A counted Data value goes to the same group as its Length, so the pair stays
     //   adjacent even when the two tags classify differently.
@@ -6142,8 +6134,17 @@ fixpp::core::expected_t<Session::send_frame_built> Session::build_send_frame_(
                     if (!field) {  // the scanner pass accepted every field
                         return std::unexpected(error::app_payload_malformed);
                     }
+                    // 098-dialect-overlay (FR-022, research R-7): a tag the fixed set
+                    // misses is header-class when the session's dictionary declares it
+                    // in its header. Asked only after that miss; a `noexcept` read of
+                    // `header_bits_`, built by `Dictionary::as_table_view()` and
+                    // adopted by open(), so no allocation
+                    // ([const §XV.1]). A counted Data value still follows its
+                    // Length's class.
                     const bool header =
-                        field->counted ? prev_header : is_send_header_tag(field->tag);
+                        field->counted ? prev_header
+                                       : (is_send_header_tag(field->tag) ||
+                                          (inbound_tv_ && inbound_tv_->is_header_tag(field->tag)));
                     // INV-2: excise ONLY a real 43 or 122 field.
                     const bool excised = !field->counted && !cfg_.allow_pos_dup &&
                                          (field->tag == 43 || field->tag == 122);

@@ -51,6 +51,23 @@ set_target_properties(fuzz_orchestra_loader PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+# 098-dialect-overlay W-11 — dialect overlay loader fuzzer per `[const §VII.7]`,
+# sibling to fuzz_dict_xml_loader / fuzz_orchestra_loader: the overlay over a
+# fixed base of the format its first byte chooses, through the read seam in
+# src/dictionary/overlay_merge.hpp (internal; it includes pugixml, so the target
+# links pugixml as the dictionary tests do). Seeds: corpus/dict_overlay/.
+find_package(pugixml CONFIG REQUIRED)
+add_executable(fuzz_dict_overlay fuzz_dict_overlay.cpp)
+target_link_libraries(fuzz_dict_overlay PRIVATE fixpp_dictionary fixpp_core pugixml::pugixml)
+target_compile_options(fuzz_dict_overlay PRIVATE -fsanitize=fuzzer,address)
+target_link_options(fuzz_dict_overlay PRIVATE -fsanitize=fuzzer,address)
+target_include_directories(fuzz_dict_overlay PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/dictionary"
+)
+set_target_properties(fuzz_dict_overlay PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 # 097-fix-latest-applverid-10 W-12 — ApplVerID parse fuzzer per `[const §VII.7]`:
 # dict::resolve_application_version over arbitrary bytes, an accepted value's rendering
 # checked against the input bytes; its seeds are corpus/appl_ver_id/.

@@ -86,6 +86,40 @@ set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083
 # 097-fix-latest-applverid-10: label 097 (contracts W-10 expected list). APPEND, after the last
 # LABELS setter for this entry, so the existing labels survive.
 set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 097)
+# 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive. negative_paths_test.cpp,
+# which stays in this bucket, holds a 098 coverage cell.
+set_property(TEST dictionary_pure_tests APPEND PROPERTY LABELS 098)
+
+# ── 098-dialect-overlay: the overlay witnesses W-0..W-4 and W-9's status-mapping rows ──
+# Pure, single-threaded cells like the bucket above, so grouped (const §VII.8); a bucket of
+# their own only because their cells are slow under msvc-asan, and one ctest entry must stay
+# under CI's per-test timeout. Compiled as they were inside dictionary_pure_tests: the same
+# link libraries, include directories and definitions. FIXPP_ORCHESTRA_DATA_DIR is spelled
+# out for the reason given in the bucket above.
+add_executable(dictionary_overlay_tests
+  dictionary_equivalence_test.cpp  # 098 W-0: the dictionary comparator's self-test
+  overlay_equivalence_test.cpp     # 098 W-1/W-2/W-4: overlay vs the equivalent edited XML
+  overlay_refusal_test.cpp         # 098 W-3: the overlay's refusals; W-9's status-mapping rows
+)
+target_link_libraries(dictionary_overlay_tests PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_overlay_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  # tests/support/dictionary_test_access.hpp includes the private dictionary_internal.hpp.
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
+target_compile_definitions(dictionary_overlay_tests PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  # The hand-written overlay fixtures and references.
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+  FIXPP_TEST_HOOKS)
+add_test(NAME dictionary_overlay_tests COMMAND dictionary_overlay_tests)
+set_tests_properties(dictionary_overlay_tests PROPERTIES LABELS "dictionary;098")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
@@ -173,6 +207,25 @@ target_link_libraries(dictionary_table_view_pair_oom_test PRIVATE
 )
 add_test(NAME dictionary_table_view_pair_oom_test COMMAND dictionary_table_view_pair_oom_test)
 set_tests_properties(dictionary_table_view_pair_oom_test PROPERTIES LABELS "426;dictionary")
+
+# ── 098-dialect-overlay: the overlay splice under a failing pugixml allocator ──
+# Standalone, not in the pure bucket: it installs pugixml's process-global
+# allocation hook ([const §VII.8]'s isolation-sensitive carve-out), from its own
+# main(), before any pugixml object exists.
+add_executable(dictionary_overlay_pugi_oom_test overlay_pugi_oom_test.cpp)
+target_link_libraries(dictionary_overlay_pugi_oom_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+)
+target_include_directories(dictionary_overlay_pugi_oom_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
+target_compile_definitions(dictionary_overlay_pugi_oom_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/098\"")
+add_test(NAME dictionary_overlay_pugi_oom_test COMMAND dictionary_overlay_pugi_oom_test)
+set_tests_properties(dictionary_overlay_pugi_oom_test PROPERTIES LABELS "098;dictionary")
 
 # ── 074-orchestra-native-reader: native Orchestra reader test bucket ─────────
 # Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra";
@@ -270,6 +323,27 @@ target_compile_definitions(dictionary_dict_enum_census_test PRIVATE
   "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
 add_test(NAME dictionary_dict_enum_census_test COMMAND dictionary_dict_enum_census_test)
 set_tests_properties(dictionary_dict_enum_census_test PROPERTIES LABELS "075;dictionary;census")
+
+# ── 098-dialect-overlay W-7 (contracts/witnesses.md): the declared header store per
+# vendored dictionary — STANDALONE (const §VII.8), both halves are exact-set
+# censuses over the shipped dictionaries. Enumerates them as the 075 block above does
+# (kRuntimeDicts + FIXPP_ORCHESTRA_DATA_DIR). `src/session` is on the include path for
+# the self-contained `send_header_tags.hpp`, read without linking fixpp_session.
+add_executable(dictionary_098_header_census_test header_tags_test.cpp)
+target_link_libraries(dictionary_098_header_census_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_098_header_census_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/session")
+target_compile_definitions(dictionary_098_header_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
+add_test(NAME dictionary_098_header_census_test COMMAND dictionary_098_header_census_test)
+set_tests_properties(dictionary_098_header_census_test PROPERTIES LABELS "dictionary;098;census")
 
 # ── 079-required-presence-scope T015-T017: required-set census (Contract 1 +
 # 1a) — STANDALONE (const §VII.8) exact-set completeness gate, selected via

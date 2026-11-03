@@ -1,0 +1,5 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <fields>
+  <field number='9001' name='ClOrdID' type='STRING' />
+ </fields>
+</fix>

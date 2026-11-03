@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/dictionary.hpp>
@@ -25,6 +26,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -49,6 +51,40 @@ namespace fixpp::dict::detail {
         return 0;
     }
     return a.size() < b.size() ? -1 : 1;
+}
+
+// Whole-string decimal parses, shared by both loaders and by the overlay merge
+// (overlay_merge.cpp), so the merge reads an attribute as the loader that builds
+// the spliced document reads it. Each requires the whole span to be consumed.
+
+// A non-negative int (the QuickFIX-XML `<fix>` version attributes). Writes `out`
+// before its sign test, so `out` is meaningful only when this returns true.
+[[nodiscard]] inline bool parse_nonneg_int(std::string_view s, int& out) noexcept {
+    auto const r = std::from_chars(s.data(), s.data() + s.size(), out);
+    return r.ec == std::errc{} && r.ptr == s.data() + s.size() && out >= 0;
+}
+
+// An Orchestra `id`, 0..65535. Non-throwing, for the tolerant "skip on a miss"
+// reads; `out` is written only when this returns true.
+[[nodiscard]] inline bool try_parse_uint16(std::string_view s, std::uint16_t& out) noexcept {
+    int val = 0;
+    auto const r = std::from_chars(s.data(), s.data() + s.size(), val);
+    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || val < 0 || val > 65535) {
+        return false;
+    }
+    out = static_cast<std::uint16_t>(val);
+    return true;
+}
+
+// A QuickFIX-XML `<field number>`, 1..65535 (fixpp#457: zero is the "absent"
+// answer of several accessors, so it is not a valid tag).
+[[nodiscard]] inline std::optional<std::uint16_t> parse_field_number(std::string_view s) noexcept {
+    int v = 0;
+    auto const r = std::from_chars(s.data(), s.data() + s.size(), v);
+    if (r.ec != std::errc{} || r.ptr != s.data() + s.size() || v <= 0 || v > 65535) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint16_t>(v);
 }
 
 // (offset, length) into the metadata-handle's name string pool. Indices are
@@ -409,7 +445,8 @@ public:
           enum_values_(mr),
           enum_runs_(mr),
           messages_(mr),
-          field_by_name_(mr) {}
+          field_by_name_(mr),
+          header_tags_(mr) {}
 
     // Resolve a NameSlice against the (now-stable) name_pool_ data pointer.
     [[nodiscard]] std::string_view name_at(NameSlice ns) const noexcept {
@@ -584,6 +621,15 @@ public:
 
     // Field-name → tag (sorted by name bytewise).
     std::pmr::vector<FieldNameEntry> field_by_name_;
+
+    // 098-dialect-overlay (FR-022, data-model §A.3, research R-7): the header tags the
+    // dictionary declares, sorted and de-duplicated. Filled at finalize by each
+    // loader's visited-set walk from its header (QuickFIX XML `<header>`, Orchestra
+    // component 1024): fields, component members, NumInGroup tags and group members,
+    // each definition walked once. A set walk, not an `expand_field_list` call, so
+    // the overlay path's step counter does not charge it. `Dictionary::as_table_view`
+    // copies it into `table_view::header_bits_`. Empty when the header is.
+    std::pmr::vector<std::uint16_t> header_tags_;
 
     session_version version_{session_version::Unknown};
 };

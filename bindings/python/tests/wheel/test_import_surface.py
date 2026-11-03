@@ -44,6 +44,7 @@ EXPECTED_PUBLIC_SURFACE = frozenset({
     "TOAPP_ERROR", "TOAPP_SEND", "TOAPP_VETO",
     # ── flat C-ABI functions ───────────────────────────────────────────────
     "dict_destroy", "dict_load_from_xml",
+    "dict_load_from_xml_with_overlay",  # 098 (contracts W-10)
     "engine_config_create", "engine_config_destroy",
     "engine_config_set_realtime_clock", "engine_config_set_worker_threads",
     "engine_create", "engine_destroy", "engine_start",

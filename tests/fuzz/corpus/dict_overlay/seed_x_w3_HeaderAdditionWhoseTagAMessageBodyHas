@@ -1,0 +1,5 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <field name='Text' required='N' />
+ </header>
+</fix>

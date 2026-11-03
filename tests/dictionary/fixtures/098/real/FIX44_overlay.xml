@@ -1,0 +1,331 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-2: the FIX44 overlay, also the
+  overlay of W-5, W-9 and W-10. Its reference is FIX44.patch beside it, written
+  from the base file and never derived from the merge (FR-017 (b)): an
+  insertion patch of dictionaries/FIX44.xml that appends each addition at the
+  end of its matched container, in overlay document order (spec.md
+  Terminology), plus the in-place rewrites contracts W-1 allows (the Required
+  promotion of Account on OrderCancelRequest, and the opening of the
+  self-closing XMLnonFIX message). Each addition that
+  tests/session/test_098_inbound_frames.hpp names carries exactly that
+  header's value. Custom098VenueTag (5004) is added to every message
+  FIX44.xml declares (N-7: the entry caps count new definitions only).
+  Condition (contracts W-2): every addition is Optional except U1's
+  Custom098PrivateRef and the Account promotion, and no header or trailer
+  addition is Required.
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <field name='Custom098HeaderTag' required='N' />
+ </header>
+ <messages>
+  <message name='Heartbeat' msgtype='0' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='TestRequest' msgtype='1' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ResendRequest' msgtype='2' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Reject' msgtype='3' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SequenceReset' msgtype='4' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Logout' msgtype='5' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='IOI' msgtype='6' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Advertisement' msgtype='7' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ExecutionReport' msgtype='8' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='OrderCancelReject' msgtype='9' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Logon' msgtype='A' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='News' msgtype='B' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Email' msgtype='C' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='Custom098Field' required='N' />
+   <field name='Custom098DataLen' required='N' />
+   <field name='Custom098Data' required='N' />
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='NewOrderList' msgtype='E' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='OrderCancelRequest' msgtype='F' msgcat='app'>
+   <field name='Account' required='Y' />
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='OrderCancelReplaceRequest' msgtype='G' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='OrderStatusRequest' msgtype='H' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='AllocationInstruction' msgtype='J' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ListCancelRequest' msgtype='K' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ListExecute' msgtype='L' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ListStatusRequest' msgtype='M' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ListStatus' msgtype='N' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='AllocationInstructionAck' msgtype='P' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='DontKnowTrade' msgtype='Q' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='QuoteRequest' msgtype='R' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Quote' msgtype='S' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SettlementInstructions' msgtype='T' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='MarketDataRequest' msgtype='V' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='MarketDataSnapshotFullRefresh' msgtype='W' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='MarketDataIncrementalRefresh' msgtype='X' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='MarketDataRequestReject' msgtype='Y' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='QuoteCancel' msgtype='Z' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='QuoteStatusRequest' msgtype='a' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='MassQuoteAcknowledgement' msgtype='b' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityDefinitionRequest' msgtype='c' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityDefinition' msgtype='d' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityStatusRequest' msgtype='e' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityStatus' msgtype='f' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='TradingSessionStatusRequest' msgtype='g' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='TradingSessionStatus' msgtype='h' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='MassQuote' msgtype='i' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='BusinessMessageReject' msgtype='j' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='BidRequest' msgtype='k' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='BidResponse' msgtype='l' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ListStrikePrice' msgtype='m' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='XMLnonFIX' msgtype='n' msgcat='admin'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='RegistrationInstructions' msgtype='o' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='RegistrationInstructionsResponse' msgtype='p' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='OrderMassCancelRequest' msgtype='q' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='OrderMassCancelReport' msgtype='r' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='NewOrderCross' msgtype='s' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CrossOrderCancelReplaceRequest' msgtype='t' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CrossOrderCancelRequest' msgtype='u' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityTypeRequest' msgtype='v' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityTypes' msgtype='w' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityListRequest' msgtype='x' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SecurityList' msgtype='y' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='DerivativeSecurityListRequest' msgtype='z' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='DerivativeSecurityList' msgtype='AA' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='NewOrderMultileg' msgtype='AB' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='MultilegOrderCancelReplace' msgtype='AC' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='TradeCaptureReportRequest' msgtype='AD' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='TradeCaptureReport' msgtype='AE' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='OrderMassStatusRequest' msgtype='AF' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='QuoteRequestReject' msgtype='AG' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='RFQRequest' msgtype='AH' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='QuoteStatusReport' msgtype='AI' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='QuoteResponse' msgtype='AJ' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Confirmation' msgtype='AK' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='PositionMaintenanceRequest' msgtype='AL' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='PositionMaintenanceReport' msgtype='AM' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='RequestForPositions' msgtype='AN' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='RequestForPositionsAck' msgtype='AO' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='PositionReport' msgtype='AP' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='TradeCaptureReportRequestAck' msgtype='AQ' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='TradeCaptureReportAck' msgtype='AR' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='AllocationReport' msgtype='AS' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='AllocationReportAck' msgtype='AT' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ConfirmationAck' msgtype='AU' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='SettlementInstructionRequest' msgtype='AV' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='AssignmentReport' msgtype='AW' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CollateralRequest' msgtype='AX' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CollateralAssignment' msgtype='AY' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CollateralResponse' msgtype='AZ' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CollateralReport' msgtype='BA' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CollateralInquiry' msgtype='BB' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='NetworkCounterpartySystemStatusRequest' msgtype='BC' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='NetworkCounterpartySystemStatusResponse' msgtype='BD' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='UserRequest' msgtype='BE' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='UserResponse' msgtype='BF' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='CollateralInquiryAck' msgtype='BG' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='ConfirmationRequest' msgtype='BH' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Custom098Private' msgtype='U1' msgcat='app'>
+   <field name='Custom098PrivateRef' required='Y' />
+  </message>
+ </messages>
+ <components>
+  <component name='Parties'>
+   <group name='NoPartyIDs' required='N'>
+    <field name='Custom098PartyTag' required='N' />
+   </group>
+  </component>
+ </components>
+ <fields>
+  <field number='35' name='MsgType' type='STRING'>
+   <value enum='U1' description='CUSTOM098_PRIVATE' />
+  </field>
+  <field number='40' name='OrdType' type='CHAR'>
+   <value enum='Z' description='CUSTOM098_ORDTYPE' />
+  </field>
+  <field number='5001' name='Custom098Field' type='STRING' />
+  <field number='5002' name='Custom098PartyTag' type='STRING' />
+  <field number='5003' name='Custom098PrivateRef' type='STRING' />
+  <field number='5004' name='Custom098VenueTag' type='STRING' />
+  <field number='5010' name='Custom098DataLen' type='LENGTH' />
+  <field number='5011' name='Custom098Data' type='DATA' />
+  <field number='5020' name='Custom098HeaderTag' type='STRING' />
+ </fields>
+</fix>

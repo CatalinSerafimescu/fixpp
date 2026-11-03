@@ -1,0 +1,199 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:groups>
+  <fixr:group id='4000' name='VenueG0'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4001' name='VenueG1'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4002' name='VenueG2'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4003' name='VenueG3'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4004' name='VenueG4'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4005' name='VenueG5'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4006' name='VenueG6'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4007' name='VenueG7'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4008' name='VenueG8'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4009' name='VenueG9'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4010' name='VenueG10'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4011' name='VenueG11'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4012' name='VenueG12'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4013' name='VenueG13'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4014' name='VenueG14'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4015' name='VenueG15'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4016' name='VenueG16'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4017' name='VenueG17'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4018' name='VenueG18'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4019' name='VenueG19'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4020' name='VenueG20'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4021' name='VenueG21'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4022' name='VenueG22'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4023' name='VenueG23'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4024' name='VenueG24'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4025' name='VenueG25'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4026' name='VenueG26'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4027' name='VenueG27'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4028' name='VenueG28'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4029' name='VenueG29'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4030' name='VenueG30'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4031' name='VenueG31'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4032' name='VenueG32'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4033' name='VenueG33'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4034' name='VenueG34'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4035' name='VenueG35'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4036' name='VenueG36'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4037' name='VenueG37'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4038' name='VenueG38'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4039' name='VenueG39'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4040' name='VenueG40'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4041' name='VenueG41'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4042' name='VenueG42'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4043' name='VenueG43'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4044' name='VenueG44'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4045' name='VenueG45'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4046' name='VenueG46'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4047' name='VenueG47'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4048' name='VenueG48'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4049' name='VenueG49'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4050' name='VenueG50'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4051' name='VenueG51'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4052' name='VenueG52'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4053' name='VenueG53'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4054' name='VenueG54'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4055' name='VenueG55'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4056' name='VenueG56'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4057' name='VenueG57'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4058' name='VenueG58'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4059' name='VenueG59'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4060' name='VenueG60'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4061' name='VenueG61'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4062' name='VenueG62'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4063' name='VenueG63'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+  <fixr:group id='4064' name='VenueG64'>
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+ </fixr:groups>
+</fixr:repository>

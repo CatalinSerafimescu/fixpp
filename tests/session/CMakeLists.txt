@@ -163,6 +163,9 @@ add_executable(session_pure_tests
   test_enum_validation_logon.cpp                                        # T030 (075)
   wait_until_clamp_test.cpp                                             # gate-b/r2 P1-1 (Art. VII §8)
   scan_frame_header_fault_test.cpp                                      # 092 T009/T013 (E-1)
+  test_098_dialect_overlay_inbound_base.cpp                             # 098 T004a (W-5 base)
+  test_098_dialect_overlay_inbound.cpp                                  # 098 T042 (W-5)
+  test_098_header_send.cpp                                              # 098 T005 (W-6)
   $<TARGET_OBJECTS:session_test_support>
 )
 target_link_libraries(session_pure_tests PRIVATE
@@ -185,6 +188,8 @@ target_compile_definitions(session_pure_tests PRIVATE
   FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"   # session_layering nm/grep probe
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"  # invariant_counter_witness
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""  # test_enum_validation_logon (075 T030)
+  # 098 W-5: the overlay and patch fixtures under tests/dictionary/fixtures/098.
+  "FIXPP_098_FIXTURE_DIR=\"${CMAKE_SOURCE_DIR}/tests/dictionary/fixtures/098\""
 )
 add_test(NAME session_pure_tests COMMAND session_pure_tests)
 set_tests_properties(session_pure_tests PROPERTIES
@@ -206,6 +211,9 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 093)
 # 095-tail-evidence-pass: label 095 (expected-ctest-095.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_pure_tests APPEND PROPERTY LABELS 095)
+# 098-dialect-overlay: label 098 (tasks.md, Expected ctest list). APPEND, after the last
+# LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 098)
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry

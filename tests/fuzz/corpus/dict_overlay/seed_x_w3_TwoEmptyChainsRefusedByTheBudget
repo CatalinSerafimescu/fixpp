@@ -1,0 +1,256 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <components>
+  <component name='VenueA0'>
+  </component>
+  <component name='VenueB0'>
+  </component>
+  <component name='VenueA1'>
+   <component name='VenueA0' required='N' />
+   <component name='VenueB0' required='N' />
+  </component>
+  <component name='VenueB1'>
+   <component name='VenueA0' required='N' />
+   <component name='VenueB0' required='N' />
+  </component>
+  <component name='VenueA2'>
+   <component name='VenueA1' required='N' />
+   <component name='VenueB1' required='N' />
+  </component>
+  <component name='VenueB2'>
+   <component name='VenueA1' required='N' />
+   <component name='VenueB1' required='N' />
+  </component>
+  <component name='VenueA3'>
+   <component name='VenueA2' required='N' />
+   <component name='VenueB2' required='N' />
+  </component>
+  <component name='VenueB3'>
+   <component name='VenueA2' required='N' />
+   <component name='VenueB2' required='N' />
+  </component>
+  <component name='VenueA4'>
+   <component name='VenueA3' required='N' />
+   <component name='VenueB3' required='N' />
+  </component>
+  <component name='VenueB4'>
+   <component name='VenueA3' required='N' />
+   <component name='VenueB3' required='N' />
+  </component>
+  <component name='VenueA5'>
+   <component name='VenueA4' required='N' />
+   <component name='VenueB4' required='N' />
+  </component>
+  <component name='VenueB5'>
+   <component name='VenueA4' required='N' />
+   <component name='VenueB4' required='N' />
+  </component>
+  <component name='VenueA6'>
+   <component name='VenueA5' required='N' />
+   <component name='VenueB5' required='N' />
+  </component>
+  <component name='VenueB6'>
+   <component name='VenueA5' required='N' />
+   <component name='VenueB5' required='N' />
+  </component>
+  <component name='VenueA7'>
+   <component name='VenueA6' required='N' />
+   <component name='VenueB6' required='N' />
+  </component>
+  <component name='VenueB7'>
+   <component name='VenueA6' required='N' />
+   <component name='VenueB6' required='N' />
+  </component>
+  <component name='VenueA8'>
+   <component name='VenueA7' required='N' />
+   <component name='VenueB7' required='N' />
+  </component>
+  <component name='VenueB8'>
+   <component name='VenueA7' required='N' />
+   <component name='VenueB7' required='N' />
+  </component>
+  <component name='VenueA9'>
+   <component name='VenueA8' required='N' />
+   <component name='VenueB8' required='N' />
+  </component>
+  <component name='VenueB9'>
+   <component name='VenueA8' required='N' />
+   <component name='VenueB8' required='N' />
+  </component>
+  <component name='VenueA10'>
+   <component name='VenueA9' required='N' />
+   <component name='VenueB9' required='N' />
+  </component>
+  <component name='VenueB10'>
+   <component name='VenueA9' required='N' />
+   <component name='VenueB9' required='N' />
+  </component>
+  <component name='VenueA11'>
+   <component name='VenueA10' required='N' />
+   <component name='VenueB10' required='N' />
+  </component>
+  <component name='VenueB11'>
+   <component name='VenueA10' required='N' />
+   <component name='VenueB10' required='N' />
+  </component>
+  <component name='VenueA12'>
+   <component name='VenueA11' required='N' />
+   <component name='VenueB11' required='N' />
+  </component>
+  <component name='VenueB12'>
+   <component name='VenueA11' required='N' />
+   <component name='VenueB11' required='N' />
+  </component>
+  <component name='VenueA13'>
+   <component name='VenueA12' required='N' />
+   <component name='VenueB12' required='N' />
+  </component>
+  <component name='VenueB13'>
+   <component name='VenueA12' required='N' />
+   <component name='VenueB12' required='N' />
+  </component>
+  <component name='VenueA14'>
+   <component name='VenueA13' required='N' />
+   <component name='VenueB13' required='N' />
+  </component>
+  <component name='VenueB14'>
+   <component name='VenueA13' required='N' />
+   <component name='VenueB13' required='N' />
+  </component>
+  <component name='VenueA15'>
+   <component name='VenueA14' required='N' />
+   <component name='VenueB14' required='N' />
+  </component>
+  <component name='VenueB15'>
+   <component name='VenueA14' required='N' />
+   <component name='VenueB14' required='N' />
+  </component>
+  <component name='VenueA16'>
+   <component name='VenueA15' required='N' />
+   <component name='VenueB15' required='N' />
+  </component>
+  <component name='VenueB16'>
+   <component name='VenueA15' required='N' />
+   <component name='VenueB15' required='N' />
+  </component>
+  <component name='VenueA17'>
+   <component name='VenueA16' required='N' />
+   <component name='VenueB16' required='N' />
+  </component>
+  <component name='VenueB17'>
+   <component name='VenueA16' required='N' />
+   <component name='VenueB16' required='N' />
+  </component>
+  <component name='VenueA18'>
+   <component name='VenueA17' required='N' />
+   <component name='VenueB17' required='N' />
+  </component>
+  <component name='VenueB18'>
+   <component name='VenueA17' required='N' />
+   <component name='VenueB17' required='N' />
+  </component>
+  <component name='VenueA19'>
+   <component name='VenueA18' required='N' />
+   <component name='VenueB18' required='N' />
+  </component>
+  <component name='VenueB19'>
+   <component name='VenueA18' required='N' />
+   <component name='VenueB18' required='N' />
+  </component>
+  <component name='VenueA20'>
+   <component name='VenueA19' required='N' />
+   <component name='VenueB19' required='N' />
+  </component>
+  <component name='VenueB20'>
+   <component name='VenueA19' required='N' />
+   <component name='VenueB19' required='N' />
+  </component>
+  <component name='VenueA21'>
+   <component name='VenueA20' required='N' />
+   <component name='VenueB20' required='N' />
+  </component>
+  <component name='VenueB21'>
+   <component name='VenueA20' required='N' />
+   <component name='VenueB20' required='N' />
+  </component>
+  <component name='VenueA22'>
+   <component name='VenueA21' required='N' />
+   <component name='VenueB21' required='N' />
+  </component>
+  <component name='VenueB22'>
+   <component name='VenueA21' required='N' />
+   <component name='VenueB21' required='N' />
+  </component>
+  <component name='VenueA23'>
+   <component name='VenueA22' required='N' />
+   <component name='VenueB22' required='N' />
+  </component>
+  <component name='VenueB23'>
+   <component name='VenueA22' required='N' />
+   <component name='VenueB22' required='N' />
+  </component>
+  <component name='VenueA24'>
+   <component name='VenueA23' required='N' />
+   <component name='VenueB23' required='N' />
+  </component>
+  <component name='VenueB24'>
+   <component name='VenueA23' required='N' />
+   <component name='VenueB23' required='N' />
+  </component>
+  <component name='VenueA25'>
+   <component name='VenueA24' required='N' />
+   <component name='VenueB24' required='N' />
+  </component>
+  <component name='VenueB25'>
+   <component name='VenueA24' required='N' />
+   <component name='VenueB24' required='N' />
+  </component>
+  <component name='VenueA26'>
+   <component name='VenueA25' required='N' />
+   <component name='VenueB25' required='N' />
+  </component>
+  <component name='VenueB26'>
+   <component name='VenueA25' required='N' />
+   <component name='VenueB25' required='N' />
+  </component>
+  <component name='VenueA27'>
+   <component name='VenueA26' required='N' />
+   <component name='VenueB26' required='N' />
+  </component>
+  <component name='VenueB27'>
+   <component name='VenueA26' required='N' />
+   <component name='VenueB26' required='N' />
+  </component>
+  <component name='VenueA28'>
+   <component name='VenueA27' required='N' />
+   <component name='VenueB27' required='N' />
+  </component>
+  <component name='VenueB28'>
+   <component name='VenueA27' required='N' />
+   <component name='VenueB27' required='N' />
+  </component>
+  <component name='VenueA29'>
+   <component name='VenueA28' required='N' />
+   <component name='VenueB28' required='N' />
+  </component>
+  <component name='VenueB29'>
+   <component name='VenueA28' required='N' />
+   <component name='VenueB28' required='N' />
+  </component>
+  <component name='VenueA30'>
+   <component name='VenueA29' required='N' />
+   <component name='VenueB29' required='N' />
+  </component>
+  <component name='VenueB30'>
+   <component name='VenueA29' required='N' />
+   <component name='VenueB29' required='N' />
+  </component>
+  <component name='VenueA31'>
+   <component name='VenueA30' required='N' />
+   <component name='VenueB30' required='N' />
+  </component>
+  <component name='VenueB31'>
+   <component name='VenueA30' required='N' />
+   <component name='VenueB30' required='N' />
+  </component>
+ </components>
+</fix>

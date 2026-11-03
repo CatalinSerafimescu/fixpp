@@ -8,6 +8,8 @@
 > **Catalogue rows owned (in part):** **Dictionary infrastructure (per §1.3 dispositions):** D-001 (FIX 4.2 dict — codegen + runtime XML), D-002 (FIX 4.4 dict — codegen + runtime XML), D-003 (FIX 5.0SP2 + FIXT.1.1 dict — codegen + runtime XML), D-004 (FIX 4.0/4.1 dict — runtime XML only), D-005 (FIX 4.3 dict — runtime XML only), D-006 (FIX 5.0/5.0SP1 dict — runtime XML only), D-007 (XML loader for all 9 versions), D-008 (codegen, four versions only — codegen-vs-runtime-XML disposition recorded as a coverage-index supplemental note per Appendix D §2) *(pre-094 scope; see spec/feature-catalogue.md row D-008)*, D-009 (custom dictionary extension via `DialectOverlay`), D-010 (component definition support), D-011 (FIX Latest / FIX Orchestra — **deferred post-v1.0** per `[const §XVIII.2]`). **OSS rows:** OSS-001 (QuickFIX-XML compatible loader), OSS-010 (header-only generated typed messages with `constexpr` field metadata). **Application-message generated typed-message classes + `constexpr` field metadata** (typed-message *classes only* — parse/serialize/validate behaviour is owned by **2b**): A-001..A-013 (order-management; codegen for v42/v44/v50sp2), A-014..A-034 (additional order-management variants; **runtime-XML-only in v1.0; codegen deferred to v1.x** per the proposed `[const §XVIII.7]` sub-clause and the `[arch §4.2]` row 2c amendment in Appendix D §3), M-001..M-012 (market data), P-001..P-008 (post-trade), C-001..C-003 (collateral / positions / account), R-001..R-005 (reg / IOI / news), N-001..N-003 (network counterparty / user request). FIX-Latest application-message rows A-035..A-065 are **post-v1.0** per `[const §XVIII]` and explicitly out of 2c scope.
 > **Convergence log:** see end-of-doc Appendix C — the v1.3 → v1.4 entry (prepended) records the post-sign-off targeted amendment per `[const §XX]` that fixes RC#2 (decimal decoding API incoherent with the merged 2a/001 PMR-mandatory surface); it is **not** a Gate A round. The v1.2 → v1.3 Gate A round 3 convergence pass entry (Codex round-3 review 1 P1 / 1 P2 / 1 P3 and Opus round-3 adversarial review 1 new P1 / 0 new P2 / 0 new P3, 1 root cluster) is preserved below, see Appendix C. The v1.1 → v1.2 Gate A round 2 entry (2 Codex P1 + 1 Codex P2 + 2 Codex P3 + 0 new Opus P1 + 1 new Opus P2 + 2 new Opus P3) and the v1.0 → v1.1 Gate A round 1 entry (5 Codex + 12 Opus findings, 3 root causes) are preserved below; v0.1 archived as `2c-codegen.draft-r1.md` (full rewrite triggered by Opus closing recommendation; user signed off Root cause #4 constitutional decision before reset re-spawn). Appendix D drafts the proposed constitutional amendment + architecture/coverage-index supplemental notes that the orchestrator applies on sign-off.
 
+Updated (098-dialect-overlay): the dialect-overlay design this document states (the `DialectOverlay` value type, `Dictionary::with_overlay`, `XmlLoader::load_overlay*`, `was_dialect_promoted`, the `dict_overlay_*` errors and the restricted grammar) did not ship. 098 shipped an overlay that is applied when the dictionary is loaded; the note at the end of §4.4 states what it is, and each section that states the old design carries its own note. The text before each note is history.
+
 ---
 
 ## 1. Goals
@@ -21,6 +23,8 @@
 7. Stay zero-allocation on the hot path between parse and `fromApp` per `[const §VIII.5]` and `[2b §6.6]`'s three-arena pinning. Codegen output is `constexpr` — static storage, no allocation. Typed-message accessors are flyweights — no allocation.
 8. Stay exception-free on the hot path per `[arch §5.3]`. Exceptions are reserved for **construction-time** `XmlLoader` failures (bad XML, unknown FIX version, malformed dialect overlay file) — the same ergonomic carve-out 2a/2b take. Every `noexcept` API in this doc that internally allocates from PMR routes the throw through `fixpp::core::detail::trap_throw` (per `[2a §4.2]`) and translates to a documented `dict::error` variant (§6.1.1, §6.7).
 
+Updated (098-dialect-overlay): goals 1 and 4. There is no `DialectOverlay` type. An overlay is applied when the dictionary is loaded (`XmlLoader::load_with_overlay`, `OrchestraLoader::load_with_overlay`, `dict::load_any_with_overlay`), and the result is an ordinary `Dictionary` that a session holds in `SessionConfig::dictionary`. It is built before the session opens, not at open, and is frozen for the session's lifetime as any dictionary is. Validation reads it as it reads any dictionary, within the grammar the §4.4.1 note states. Goal 8 holds for the overlay calls: they throw at construction time, as `load` does.
+
 ### 1.1 Scope boundary — what 2c owns vs what it doesn't
 
 2c owns the *typed-message classes themselves*, the *constexpr metadata* they consult, the *runtime dictionary* (`Dictionary` + `XmlLoader` + `DialectOverlay` + `table_view`), and the *reify bridge* (`dict::reify` + `dict::reify_as`); it does **not** own:
@@ -29,6 +33,8 @@
 - **Field representation types.** Decimal is `fixpp::decimal_t` from **2a** (per `[2a §4.4]`'s `FIXPP_DECIMAL_T` alias rule — one symbol set per build); integer/string/timestamp/UTCTimestamp/boolean/MultiCharValue/MultiStringValue/etc. are concrete representations selected by `dict::field_traits<DataType>` specializations (§4.1.3). 2c selects which trait specialization to substitute at each accessor; it does not re-implement field decoding.
 - **Session semantics.** Sequence numbers, gap fills, recovery, ResendRequest, the `ApplVerID(1128)` resolution algorithm at the *session-FSM* layer — owned by `session/` (Phase 4). 2c provides the typed-message *classes* the session FSM dispatches on, the `dict::reify` bridge it dispatches *through*, and the `version_profile` shape it consults; 2c does not interpret OrdStatus, ExecType, or any application semantics, and does not own the FSM state machine that walks header `ApplVerID` per `[FIXT §5.3]`.
 - **C ABI surface.** `fixpp_msg_t`, `fixpp_dict_t`, `fixpp_owning_msg_t`, the per-tag C-typed accessors (`fixpp_msg_field_int`, `fixpp_msg_field_decimal`, …), the runtime version tag's bit layout, and the opaque arena handle shape are owned by **2i**. 2c records the *contract* (§5) and the C++ surface 2i wraps; the C-typed shape itself is 2i's call.
+
+Updated (098-dialect-overlay): the runtime dictionary has no `DialectOverlay`. The overlay calls are members of `XmlLoader` and `OrchestraLoader`, plus the free function `dict::load_any_with_overlay`.
 
 ### 1.2 Magnitude domain — codegen footprint and scale boundaries
 
@@ -40,6 +46,9 @@ These caps are observed properties of the per-version dictionaries and a budget 
 - **Per-version `Messages.hpp` + `Reify.hpp` size (per N-P2-6).** `Messages.hpp` header text on the order of 200–400 KiB per version (one `class` per typed message; per-tag accessors are `inline noexcept` shells over `wire::MessageView::get<Tag>()`). The per-version `Reify.hpp` carries the per-message `owning_<Msg>` classes only (no dispatch switch) — about **~370 KiB per version**. The dispatch switch is dispatch-shared (one-shot, not per-version): `_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp` (the ~470-case application switch across the four codegen versions) plus `_codegen/include/fixpp/_dispatch/reify_dispatch_fixt.hpp` (the 7-case FIXT admin switch — see §4.8 / RC-1) total **~50 KiB**, included once per all-versions TU, not four times. Across all four codegen versions: per-version-replicated cost is ~370 KiB × 4 ≈ 1.5 MB; dispatch-shared cost is ~50 KiB once. All-versions TU compile-time math reflects this — single-version TUs do not pull in the dispatch headers unless they explicitly depend on the `fixpp::dict::dispatch` CMake target (§7.6).
 - **Compile-time cost ceiling.** A single TU including only one version's `Messages.hpp` + `Reify.hpp` compiles in **≤ 3 s** on Linux/Clang/x86_64 release at `-O2` (Tier 1 regression bar; §9 seam #2). The all-versions TU is **not supported by default** — a translator/gateway is expected to build one TU per direction, including only that direction's version. If a downstream consumer insists on the all-versions TU, the soft ceiling is **≤ 15 s**; above this, the §10 follow-up (modules/PCH adoption) is reopened. Per N-P2-3.
 - **Dialect-overlay merge cost.** A typical per-session `DialectOverlay` adds 5–50 fields and 0–5 messages. The merge into a base `Dictionary` runs once at session open and completes in **≤ 1 ms** on the same hardware (Tier 1 regression bar; §9 seam #4). Asymptotic complexity: **O(N_base + N_overlay log N_overlay)** where `N_base` is the merged-table-clone cost and the `log` factor comes from sorted-merge of overlay additions into the per-MsgType `FieldRef` arrays (per N-P3-3; §6.4). Above 1 ms with overlays at the §1.2 size budget: regression. Above the §4.4.2 entry-cap (1024 additions): `XmlLoader` rejects with `dict_overlay_too_large`.
+
+  Updated (098-dialect-overlay): the merge runs inside the load call, not at session open, and its cost bar is relative. Spec SC-005 of `specs/098-dialect-overlay/` sets it: a FIX50SP2 load with an at-cap overlay takes no more than 1.5 times the plain load. The 1 ms bar and the complexity formula above are not what shipped. A cap breach throws `dict::overlay_limit_error`; there is no `dict_overlay_too_large` (the §4.4.2 note).
+
 - **`owning_message_t<>` deep-copy cost.** A typed `dict::reify_as<Msg>(view, mr)` of a 20-tag `NewOrderSingle` into a fresh PMR arena completes in **≤ 1 µs** on the same hardware; a 200-tag Instrument-heavy message completes in **≤ 10 µs** (Tier 1 regression bar; §9 seam #6). The cost is dominated by the byte-copy of the underlying frame plus an offset-table rebuild.
 - **`owning_message_t<>` allocation count (re-derived against the §4.8 declaration per N-P2-4).** **≤ 4 PMR allocations** per `dict::reify_as<Msg>`, itemised against the L1063-1072-shape `owning_<Msg>` declaration:
   1. The `bytes_` `pmr::vector<std::byte>` storage allocation (one allocation, sized to the source `frame_view::bytes().size()`).
@@ -89,6 +98,9 @@ This is the load-bearing scope decision; it differs from the v0.1 draft, which s
 - D-007 (XML data dictionary format loader — parse FIX standard XML at runtime): **all 9 versions** above.
 - D-008 (Code-generated constexpr field metadata — zero-runtime-cost field lookup): **four codegen versions only** (v42, v44, v50sp2, vt11). The catalogue row title in `feature-catalogue.md` row D-008 covers the broader 4.0–5.0SP2 surface (left intact per the locked decision); the codegen-vs-runtime-XML disposition is recorded as a supplemental note attached to D-008 in `library/spec/coverage-index.md` (the orchestrator applies the supplemental-note edit on sign-off — Appendix D §2). Per RC#3 / C-P2-2. *(Superseded by feature 094: this bullet is the pre-094 record. The quoted Title, "four codegen versions only" and "covers the broader 4.0–5.0SP2 surface (left intact per the locked decision)" no longer describe the catalogue row; its current Title and FIX-version column are spec/feature-catalogue.md row D-008.)*
 - D-009 (Custom dictionary extension — user-defined fields and messages): `DialectOverlay` value type + additive merge (§4.4 / §6.4), within the v1.0 grammar closure (§4.4.1).
+
+  Updated (098-dialect-overlay): D-009 is delivered by 098's load-time overlay (the §4.4 note), on every QuickFIX-XML base and on the Orchestra FIX Latest base, not by a `DialectOverlay` value type. The "Runtime-XML scope" paragraph's D-009 entry reads the same way.
+
 - D-010 (Component definition support — reusable field groups, Instrument/Parties/etc.): `ComponentRef` (§4.2) + per-version generated component shells under each codegen namespace; runtime-XML versions reach components through the runtime `Dictionary` lookup.
 - D-011 (FIX Latest / FIX Orchestra repository format): **deferred post-v1.0** per `[const §XVIII.2]`.
 
@@ -105,6 +117,8 @@ This is the load-bearing scope decision; it differs from the v0.1 draft, which s
 - **No reflection-based field iteration.** Typed messages expose named per-tag accessors (`order.cl_ord_id()`, `order.symbol()`, …) generated from the dictionary; bulk iteration goes through the underlying `wire::MessageView::begin()/end()` (per `[2b §4.3]`), which is the iterator the user gets if they want to walk every field generically. No `magic_get`-style reflection over the typed class members.
 - **No `__attribute__((constructor))` global registry.** Each typed-message class is referenced by name when the user constructs one; there is no auto-registration of "every typed message in this version" into a global table. The runtime-dispatch switch in `Reify.hpp` is a *compile-time-emitted* `switch` over (resolved-version, MsgType), not a static-init-ordering-dependent registry.
 - **No mid-session overlay grammar extension.** The v1.0 overlay grammar (§4.4.1) is hard-restricted: additive fields/messages/components, simple types only; **no conditional-required rules, no Length+Data pair declarations**. Overlay XML that declares either is rejected with `dict_overlay_unsupported_rule` / `dict_overlay_unsupported_length_pair`. Per RC-6; §10 carries the v1.x extension question.
+
+Updated (098-dialect-overlay): three bullets above. "No runtime dictionary mutation after session open" still holds: there is no swap API, and a session's overlay arrives inside its `SessionConfig::dictionary`, frozen at open. "No codegen-as-a-runtime-service" still holds, but runtime additions go through a load with an overlay (the §4.4 note), not through `DialectOverlay`. "No mid-session overlay grammar extension" no longer describes the grammar: an overlay may declare a Length+Data pair between fields it adds, a conditional rule cannot be written because the `required` / `presence` vocabulary has no such value, and neither `dict_overlay_unsupported_rule` nor `dict_overlay_unsupported_length_pair` exists (the §4.4.1 note).
 
 ## 3. Inherited surface
 
@@ -152,6 +166,8 @@ From `[const §XV.13]` (banned patterns):
 > Eager codegen with no runtime dictionary path. Hybrid mandated: codegen for standard fields (D-008), runtime XML loader for custom (D-007 + D-009).
 
 This document **delivers the hybrid**: codegen emits the standard per-version fields/messages as `constexpr` arrays for the four codegen versions (§1.3); `XmlLoader` plus `DialectOverlay` cover D-007 (custom-field handling) and D-009 (runtime dictionary loading) at session open *for all nine v1.0-supported versions*.
+
+Updated (098-dialect-overlay): the quoted `[arch §4.2]` line naming `fixpp::dict::DialectOverlay` describes a type that was never defined; 098 removed its last references (`SessionConfig::dialect_overlay` and the forward declaration). D-009's runtime half is the load-time overlay (the §4.4 note), so the hybrid is the two loaders, each with `load_with_overlay`, alongside codegen.
 
 This document refines that surface; it does **not** diverge.
 
@@ -255,6 +271,8 @@ Notes:
 - **`condition_index` is an indirection**, not an embedded `std::function`. Conditional-Required rules per `[FIX50SP2 §3.4]` are codegen'd as a per-message `constexpr std::array<conditional_rule, N>` whose entries are simple structs (e.g., `{tag, predicate_id, payload}`); the `wire::Validator`'s default impl interprets them. No type-erased callable; no allocation. The full conditional-rule grammar is small (the FIX 5.0 SP2 spec defines ~15 distinct predicate shapes — "if tag X is present then tag Y must be present", "if tag Z = 'value' then tag W must be present", etc.) and is enumerated in `Validator.hpp` per codegen version. **Dialect overlays cannot introduce new conditional rules** in v1.0 (§4.4.1, RC-6).
 - **`length_pair_data_tag`** is the 2c-side commitment for `[2b §4.3]`'s `field_iterator` Length+Data static table. See §7.1 for the binding mechanism. **Dialect overlays cannot extend this table** in v1.0 (§4.4.1, RC-6); users with custom Length+Data pairs regenerate `fixpp-codegen` against a custom XML (§7.1 trailing paragraph).
 - **`_reserved` discipline.** Set to zero on emit; ignored on read in v1.0; reserved for future flags under `FIXPP_DICT_FIELDREF_RESERVED_USED`. Matches the same discipline `[2a §4.2]` and `ComponentRef` / `GroupRef` (§4.2) follow. Per C-P3-1.
+
+Updated (098-dialect-overlay): the `FieldRef` listing's comments and the `condition_index` / `length_pair_data_tag` bullets. An overlay cannot declare a conditional rule: a QuickFIX-XML `required` attribute must be `Y`, `N` or absent (Orchestra `presence`: `required`, `optional` or absent), and any other value is refused with `dict::overlay_conflict_error`. An overlay can declare a Length+Data pair between fields it adds, and that pair reaches every parse that pairs through the session dictionary; a pair that touches a field number the base declares cannot be gained, lost or re-paired (`overlay_conflict_error`). Neither `dict_overlay_unsupported_rule` nor `dict_overlay_unsupported_length_pair` exists.
 
 #### 4.1.3 `dict::field_traits<T>` — typed decoding over `wire::field_view`
 
@@ -366,6 +384,8 @@ The `_reserved` `uint16_t` in each table mirrors the 2a discipline: zero on emit
 `Dictionary` is the runtime handle a `Session` holds. It is constructed by `XmlLoader::load(...)` (§4.5), composed with an optional `DialectOverlay` (§4.4) at session open, and frozen for the session lifetime per `[arch §5.6]`.
 
 The v1.x design pins the *metadata block* (the merged FieldRef / ComponentRef / GroupRef tables and the dialect-overlay overrides) on the heap behind a single `dict::detail::dict_metadata_handle`. `Dictionary` carries a `dict::detail::dict_metadata_handle_ptr` — now a `std::shared_ptr<const dict_metadata_handle>` allocated via `std::allocate_shared` over a `std::pmr::polymorphic_allocator<dict_metadata_handle>` so the shared-control-block deallocator returns memory to the originating PMR resource (per RC#2 / N-P1-1; ownership shape consolidated to `shared_ptr` everywhere per C-R2-P1-1). The `with_overlay` sharing path stores a *copy* of the base's `handle_` inside the merged handle's `base_keepalive_` slot (the same `shared_ptr<const dict_metadata_handle>` — both the base's `Dictionary::handle_` and the merged handle's `base_keepalive_` share a single control block). The keepalive lives inside the merged handle, not on the `Dictionary` value. This makes `Dictionary` cheap to move (a `shared_ptr` move is no-throw — no allocation, no atomic ref-count change — preserving the same `noexcept` discipline `unique_ptr` move offered), makes the metadata block's address survive moves, and pins the lifetime root that `table_view` (§4.6) borrows from. Per RC-3 / RC#2 / C-R2-P1-1.
+
+Updated (098-dialect-overlay): a `Dictionary` is not composed with an overlay at session open. A dictionary loaded with an overlay is built from the spliced document as `load` builds one from a file and owns its own metadata handle; it holds no overlay overrides, no `base_keepalive_` slot and no reference to any base `Dictionary`.
 
 ```cpp
 // include/fixpp/dict/version_profile.hpp
@@ -767,6 +787,8 @@ private:
 
 The `table_view` value-typed handle (§4.6) borrows the metadata block by raw pointer (`detail::dict_metadata_handle const*`); its lifetime contract is **explicitly tied** to the heap-pinned `dict_metadata_handle` lifetime — as long as some `Dictionary` (base or merged) is alive, the metadata block is alive, and `table_view` is valid. `Dictionary` move into `SessionConfig` does not invalidate any outstanding `table_view` because the `dict_metadata_handle_ptr` move keeps the same heap pointer. Test seam #13 (move-into-`SessionConfig` + outstanding `table_view`) exercises this concrete contract.
 
+Updated (098-dialect-overlay): the listing above. `Dictionary::with_overlay` and `was_dialect_promoted` were not built (`include/fixpp/dict/dictionary.hpp`'s header comment lists `was_dialect_promoted` as deferred and names the overlay calls), and there is no `with_overlay` sharing path. The "after overlay merge" comments read as: the dictionary a session holds is already merged, so its lookups answer for the overlay's additions and promotions. `Dictionary` gains no public member for 098; the header membership FR-022 needs is `table_view::is_header_tag` (B-098-5).
+
 ### 4.4 `fixpp::dict::DialectOverlay` — additive-merge value type
 
 **v1.0 design decision: `DialectOverlay` is a value type, not a runtime virtual interface.** The catalogue row D-009 and `[SYN §3.3 Q13]` describe the *behaviour* (additive at runtime, per-session); they do not require pluggability. A runtime virtual interface would buy the ability to inject computed-on-the-fly overlay rules (e.g., a regulator-supplied OPRA-feed rules engine), but the v1.0 use cases — venue dialects, regulator-mandated tags, customer-overlay scenarios — are all *static data* known at session open and loaded from XML or built programmatically. A virtual interface would (a) pay vtable overhead on every per-tag lookup, (b) prevent the overlay-merge result from being a metadata-handle-owned table, and (c) require justification against the `[const §XIV.2]` ≤5-pure-virtual cap. Justification: none of the tested overlay scenarios need it. The decision is reversible — a future minor-version `DialectOverlayPlugin` virtual interface can be added without breaking the value-typed `DialectOverlay` API; tracked in §10.
@@ -854,6 +876,8 @@ Both paths pin the overlay's storage to a non-null PMR resource (per C-P2-5; §9
 
 The merge into a `Dictionary` runs in `Dictionary::with_overlay(...)` (§4.3) — **once at session open**, not per-message. The merge result is stored in the user-supplied PMR resource; subsequent per-message lookups consult the merged tables with no further allocation. Merge cost ≤ 1 ms per §1.2; complexity O(N_base + N_overlay log N_overlay) per N-P3-3.
 
+Updated (098-dialect-overlay): `DialectOverlay` was never defined, and 098 removed its last references (`SessionConfig::dialect_overlay` and the forward declaration). What shipped instead: an overlay is a document in the base's own format (a `<fix>` fragment for a QuickFIX-XML base, a `fixr:repository` fragment for an Orchestra base), applied when the dictionary is loaded by `XmlLoader::load_with_overlay` / `load_with_overlay_from_string`, `OrchestraLoader::load_with_overlay` / `load_with_overlay_from_string` or `dict::load_any_with_overlay`. The loader parses both documents, runs the overlay's guards, splices the overlay into the parsed base (each element is matched to the definition it names and merged into it, or appended when it is new), and builds the dictionary from the spliced document as `load` builds one from a file. The result is an ordinary `Dictionary`, the one the base file would load to if it had been hand-edited the same way. There is no overlay object, no programmatic construction path and no conflict policy. A session takes the result through `SessionConfig::dictionary`; TOML names the overlay with the session key `dialect_overlay`; C and Python reach it through `fixpp_dict_load_from_xml_with_overlay` (C-ABI 1.13). The design is `specs/098-dialect-overlay/research.md` R-1 to R-6; the user-facing rows are the 098 section of `spec/behaviors-and-limitations.md`.
+
 #### 4.4.1 Dialect-overlay grammar in v1.0
 
 The v1.0 overlay grammar is **hard-restricted** because the validator and the `field_iterator`'s static Length+Data table cannot enforce or skip the broader grammar at runtime without a recompile. Per RC-6, the overlay loader and `Dictionary::with_overlay` reject XML that exceeds the closure with documented errors rather than silently accept a grammar the engine cannot honour.
@@ -876,6 +900,8 @@ The v1.0 overlay grammar is **hard-restricted** because the validator and the `f
 
 The closure is enforced by `XmlLoader::load_overlay` at parse time (rejecting XML that exceeds the grammar) and by `Dictionary::with_overlay` at merge time (rejecting overlays constructed programmatically that violate the closure). §9 seams #11–#13 verify the reject paths.
 
+Updated (098-dialect-overlay): the shipped grammar is not this closure. An overlay may add fields (in any type the base's loader accepts), enum values or codes, components, groups (in new or existing messages and components) and messages; add fields to the header and trailer; promote an Optional field to Required; and declare a Length+Data pair between fields it adds. It is refused with `dict::overlay_conflict_error` when it relaxes a Required field, changes a matched definition's name, type or other identifying attribute, redescribes an existing value, makes a tag occur twice at one level of a message, component or group, gains, loses or re-pairs a pair touching a field number the base declares, uses a `required` / `presence` value outside the loader's vocabulary, or names another version or format. An overlay removes nothing. All checks run inside the load call, so there is no `load_overlay` / `with_overlay` split. The rules are research R-3 and R-4.
+
 #### 4.4.2 Entry caps
 
 Per §1.2 the overlay merge cost ceiling is ≤ 1 ms; to keep this enforceable the loader pins:
@@ -889,6 +915,8 @@ Per §1.2 the overlay merge cost ceiling is ≤ 1 ms; to keep this enforceable t
 - **Component-cycle detection:** the loader detects cyclical component references (a `<component name="X"><component-ref name="Y"/></component><component name="Y"><component-ref name="X"/></component>` pattern) at parse time and rejects with `dict_xml_schema_violation`.
 
 Above any cap: `dict_overlay_too_large` for overlay-side caps, `dict_xml_too_large`/`dict_xml_too_deep`/`dict_xml_schema_violation` for XML-shape caps.
+
+Updated (098-dialect-overlay): the values above for new fields, new messages, new components, XML bytes and nesting depth are kept, as fixed constants (`src/dictionary/overlay_merge.hpp`) with no `FIXPP_DICT_*` knob and no per-session setting. They bound the overlay document only; a base is read without caps (L-098-3). 098 also caps new enum values, references and the Orchestra groups and code sets an overlay adds, refuses any DOCTYPE, and bounds the expansion of the merged graph by a budget over the base's own. Cycle detection runs over the merged graph, base definitions included. A breach throws `dict::overlay_limit_error`, except a cycle, which throws the loader's schema-error type (`xml_parse_error`, or `orchestra_parse_error` for Orchestra). None of the error names above exists.
 
 ### 4.5 `fixpp::dict::XmlLoader` — QuickFIX-XML compatible loader
 
@@ -948,6 +976,8 @@ public:
 `XmlLoader` exists primarily for D-007 (XML loader, all 9 versions) and D-009 (custom dictionary extension). For the four codegen versions, the typical session uses the codegen'd `constexpr` tables and applies an overlay (loaded via `XmlLoader::load_overlay`) on top. For the five runtime-XML-only versions, `XmlLoader::load` is the only path to a working `Dictionary`.
 
 XML schema compatibility: `XmlLoader` accepts the QuickFIX XML schema (`fields`, `messages`, `components`, `header`, `trailer` top-level elements per OSS-001). Extensions for dialect overlays add a top-level `<overlay>` wrapper; outside that wrapper the overlay file's schema is identical to the base file's, restricted by §4.4.1's grammar closure.
+
+Updated (098-dialect-overlay): the listing's `load_overlay` / `load_overlay_from_string` members were not built. The overlay members are `load_with_overlay(base, overlay, mr, policy)` and `load_with_overlay_from_string(base_xml, overlay_xml, mr, policy)` (`include/fixpp/dict/xml_loader.hpp`), and `OrchestraLoader` has the same pair. A QuickFIX-XML overlay is a `<fix>` document with the base's version attributes and any subset of `<header>`, `<trailer>`, `<messages>`, `<components>` and `<fields>`; there is no `<overlay>` wrapper element.
 
 ### 4.6 `dict::table_view` — value-typed borrowed handle into a `Dictionary`
 
@@ -1012,6 +1042,8 @@ private:
 
 }  // namespace fixpp::dict
 ```
+
+Updated (098-dialect-overlay): there is no `with_overlay` sharing path and no `base_keepalive_`; a dictionary loaded with an overlay owns its own metadata handle (the §4.3 note). `table_view` gains a header store and `is_header_tag` (FR-022, B-098-5). Its friends are listed in `.specify/456-table-view-seal.md` §6 seam 2, whose 098 note adds read-only test access.
 
 `table_view` is **borrowed** (does not own), **trivially copyable** (sized to one pointer + small discriminator). Aliases the `Dictionary`'s heap-pinned metadata handle; the metadata handle's address is stable across `Dictionary` moves (§4.3 / RC-3 / N-P1-1) so the documented `Dictionary`-by-value-in-`SessionConfig` pattern works without lifetime hazards.
 
@@ -1184,6 +1216,8 @@ Per N-P1-2: when a `DialectOverlay` adds a custom tag (e.g., `9999=VenueRiskID`)
 2. **Regenerate codegen against the venue XML.** Users who want a fully typed `nos.venue_risk_id()` accessor regenerate `Messages.hpp`/`Fields.hpp` against their dialect's XML using `fixpp-codegen` (the build-time host tool per `[const §III.5]`). This is a recompile-against-dialect-XML path, not a runtime path; the resulting headers live under the user's own build target (typically a CMake target named `myorg::fixpp::dict::v50sp2_venuex` or similar — §7.X).
 
 The `Dictionary::was_dialect_promoted(custom_tag)` diagnostic returns `true` for tags reached this way, so observability tooling can flag overlay-promoted access.
+
+Updated (098-dialect-overlay): `was_dialect_promoted` was not built. A field an overlay adds is reached by tag, as L-098-2 records, because the typed classes are generated from the base: through the `field_value(uint16_t)` forwarder this section describes, `view.get(tag)`, `owning_message_handle::field_value`, or the C ABI's tag accessors.
 
 ### 4.8 `owning_message_t<>` and the `dict::reify` bridge
 
@@ -1604,6 +1638,8 @@ The C-ABI surface for the `dict_*` and `msg_*` symbol families is **delegated to
 
 6. **Dialect-overlay through C ABI** is symmetric with `XmlLoader::load_overlay`: `fixpp_dialect_overlay_load_from_xml(path, error_out) → fixpp_dialect_overlay_t*`, `fixpp_session_apply_overlay(session, overlay, error_out)` (session-create-time only; mid-session swap is rejected per §7.2 / `[arch §5.6]` / Appendix D §5). The session-create entry point (per **2i**'s session API) takes an optional overlay argument. **No PMR parameter on the C surface** — the engine-owned arena is keyed to the overlay's lifetime; release through `fixpp_dialect_overlay_destroy(overlay)`. 2i confirms the exact entry-point names.
 
+Updated (098-dialect-overlay): items 2 and 6. The C ABI has one overlay call, `fixpp_dict_load_from_xml_with_overlay(base_path, overlay_path, &out_dict)` (C-ABI 1.13, `include/fix/c_api/dict.h`). There is no `fixpp_dict_apply_overlay`, `fixpp_dialect_overlay_t`, `fixpp_dialect_overlay_load_from_xml` or `fixpp_session_apply_overlay`. A C session takes the merged handle through `fixpp_session_config_set_dictionary`, as it takes any dictionary (B-098-6).
+
 The *C-ABI does not expose `dict::FieldRef`/`ComponentRef`/`GroupRef` directly* — those are C++ struct types per `[const §X.2]` (no C++ leakage through C ABI). C-ABI consumers needing field-metadata introspection (e.g., a generic protocol-aware tool) go through 2i's introspection family (`fixpp_dict_field_type(dict, msg_type, tag, …)`) which is C-typed.
 
 ## 6. Behavioral contract
@@ -1619,6 +1655,8 @@ The *C-ABI does not expose `dict::FieldRef`/`ComponentRef`/`GroupRef` directly* 
   **`owning_<Msg>` instances are single-strand-only (per N-P1-2 / C-P1-4).** The lazy `view()` cache (the `mutable optional<frame_view>` / `optional<MessageView<Index>>` members of §4.8) materializes on first call and may NOT be accessed concurrently from multiple threads even on a `const owning_<Msg>&`. Documented use is reify-on-strand-A → post to queue → consume-on-strand-B; concurrent reads on the same instance are unsupported. The `dict::reify` path takes the cross-strand reset boundary; the `owning_<Msg>` value is the *handoff*, not a thread-shared object.
 - **`thread_local` is prohibited** per `[const §XV]` and `[arch §5.4]`. Codegen output never emits `thread_local`; `Dictionary`, `DialectOverlay`, `XmlLoader` never store `thread_local`; typed-message flyweights have no static state; the runtime-dispatch switch in `Reify.hpp` is a pure `switch` with no static state.
 
+Updated (098-dialect-overlay): there is no `XmlLoader::load_overlay`, no `Dictionary::with_overlay` and no `DialectOverlay`. The overlay calls are construction-time and throw `xml_parse_error`, `unknown_version_error`, `xml_oom_error`, `dict::overlay_conflict_error` or `dict::overlay_limit_error` (the last two derive from `xml_parse_error`), plus `orchestra_parse_error` on an Orchestra base. A load with an overlay has `load`'s thread safety.
+
 #### 6.1.1 PMR allocation discipline inside `noexcept` functions (`trap_throw`)
 
 Every PMR allocation inside a `noexcept` function in this doc is wrapped in `fixpp::core::detail::trap_throw` per `[2a §4.2]`'s pattern, and translated to a documented `dict::error` variant. Mirrors 2a verbatim. Per RC-5 / C-P2-3.
@@ -1630,6 +1668,8 @@ Every PMR allocation inside a `noexcept` function in this doc is wrapped in `fix
 | `dict::reify(view, profile, mr) noexcept` | bytes copy + offset-table rebuild + `owning_message_handle` storage | `dict_reify_oom` |
 | `owning_<Msg>::from_view(view, mr) noexcept` | bytes + offset table + member init (called from `reify_as`) | `dict_reify_oom` |
 | `XmlLoader::load*` (also `load_overlay*`) | DOM build, FieldRef array allocation, name string pool | `dict_xml_oom` (XmlLoader is exception-API by carve-out, but the internal allocator wrap traps `bad_alloc` and re-throws as `dict::xml_oom_error`; `noexcept`-API paths that route through `XmlLoader` internally — none in v1.0 — would translate to `dict_xml_oom`) |
+
+Updated (098-dialect-overlay): the `with_overlay` row has no implementation. A load with an overlay is exception-API like `load`, and reports allocation failure as `xml_oom_error`, including pugixml's out-of-memory parse status on the base or the overlay.
 
 Test seam #16 (per §9) injects PMR allocation failure (a bounded `monotonic_buffer_resource` with a tracking upstream that fails after N bytes) and verifies each entry returns its documented error rather than terminating. Cites `[2a §4.2]` for the pattern.
 
@@ -1653,6 +1693,8 @@ These are bench-harness regression bars (§9 seam #5); CI fails on >5% regressio
 | `dict::reify_as<Msg>` (typed) | 200-tag Instrument-heavy | ≤ 10 µs | dominated by byte-copy; §1.2 |
 | `dict::reify` (runtime-dispatch, typed payload) | 20-tag, fresh PMR | ≤ 1.2 µs | adds one switch dispatch (~5 ns) over `reify_as`; §9 seam #15 |
 | `XmlLoader::load` | FIX50SP2 standard XML, ~1700 fields | ≤ 100 ms | once per engine init; non-hot-path |
+
+Updated (098-dialect-overlay): the `with_overlay` row has no implementation; the shipped bar for a load with an overlay is relative to the plain load (the §1.2 note).
 
 ### 6.3 Multi-version coexistence
 
@@ -1700,6 +1742,8 @@ Per `[SYN §3.3 Q13]`:
 - **Conflict-policy granularity.** The conflict policy applies per-field, not per-overlay-as-a-whole. An overlay with five overrides under `OverlayWins` policy applies all five; a single conflicting override under `Reject` rejects the entire merge with `error::dict_overlay_conflict`. `BaseWins` silently drops the overlay's overrides while keeping its additions; useful for advisory overlays (telemetry-only dialect awareness).
 - **Asymptotic complexity:** O(N_base + N_overlay log N_overlay) where the `O(N_base)` term is the metadata-handle clone-or-share cost (constant if `shared_ptr` is taken to the base; linear otherwise) and the `log N_overlay` term comes from sorted-merge of overlay additions into per-MsgType `FieldRef` arrays. Per N-P3-3.
 
+Updated (098-dialect-overlay): the shipped merge contract. There is no conflict policy: every conflict is refused with `dict::overlay_conflict_error`, because a hand-edited file cannot hold two definitions of one thing, and the merge result must equal that file. A promotion is the overlay setting `required="Y"` (Orchestra `presence="required"`) on a field the base has as Optional; relaxing one is refused. The merge runs once, inside the load call; a base `Dictionary` the caller loaded separately is neither read nor shared, and nothing links the two. A field the overlay adds is valid where the overlay places it, and is reached by tag, since the typed tier reflects the base (L-098-2). Cost: the guard steps are linear in the two documents and the merged-graph walk visits each definition and reference once (research R-5); the measured bar is the §1.2 note's.
+
 ### 6.5 Lifetime contract on typed-message flyweights
 
 Inherited from `[2b §6.4]` and `[arch §5.5]`, plus the metadata-handle lifetime root (§4.3 / RC-3):
@@ -1709,6 +1753,8 @@ Inherited from `[2b §6.4]` and `[arch §5.5]`, plus the metadata-handle lifetim
 - The supported escape hatch is `dict::reify_as<Msg>(view, mr) → owning_message_t<Msg>` (§4.8); deep-copies the bytes plus offset table into caller-owned PMR storage, returns a value-typed owning copy that can be moved across thread/strand boundaries.
 - `[[clang::lifetimebound]]` is on every view-returning accessor; codegen emits the attribute unconditionally; per `[arch §5.5]`. GCC honours it on parameters; MSVC ignores (accepted gap per `[const §IX.4]`).
 - **Metadata-handle lifetime root (RC-3 / RC#2 / N-P1-1 / C-R2-P1-1).** The `Dictionary`'s metadata block lives on the heap behind `dict::detail::dict_metadata_handle_ptr` — a `shared_ptr<const dict_metadata_handle>` allocated via `std::allocate_shared` over a `std::pmr::polymorphic_allocator<dict_metadata_handle>` so the shared-control-block deallocator returns memory to the originating PMR resource. The metadata block's lifetime is the union of all `Dictionary::handle_` and `dict_metadata_handle::base_keepalive_` references that share the same control block. The merged-handle's `base_keepalive_` slot carries a *copy* of the base's `handle_` on the `with_overlay` sharing path (one `shared_ptr<const dict_metadata_handle>`, refcount = 2 after `with_overlay` returns; refcount → 1 after the user drops the base; refcount → 0 when the merged dict is finally destroyed). The block's address is stable across `Dictionary` moves; `table_view`s and `wire::dictionary_driven_validator` instances aliasing it remain valid after a `Dictionary` move into `SessionConfig`. The `with_overlay` sharing path keeps the base's metadata block alive for the merged `Dictionary`'s lifetime, so a user who constructs `auto base = XmlLoader::load(...); auto merged = base.with_overlay(...);` then drops `base` still has a working `merged`. Test seam #13 verifies the move + outstanding `table_view` invariant + the drop-base-keep-merged refcount path.
+
+Updated (098-dialect-overlay): the overlay half of this bullet (the `with_overlay` sharing path and `base_keepalive_`) was not built; a dictionary loaded with an overlay owns its own metadata handle.
 
 ### 6.6 `owning_message_t<>` + `dict::reify` bridge contract
 
@@ -1767,6 +1813,8 @@ Per `[2b §6.7]`'s pattern, 2c collects every new `fixpp::core::error` variant i
 
 (20 variants. The v0.1 `dict_table_view_stale` is **dropped** per RC-3 / C-P2-6 — stale `table_view` access is treated like stale `wire::View` per `[2b §6.4]`: debug trap via generation counter, release UB, NOT a recoverable error. The v1.0 `dict_reify_version_mismatch` is **dropped** per RC#1 / C-P2-3 — `reify_as<Msg>`'s caller named `Msg::version_v` explicitly; mismatch is caller bug, not engine validation; `wire::MessageView` carries no resolved-version inputs in any case. New variants in v1.1: `dict_unresolved_application_version` (per RC#1 / C-P1-5; replaces the v1.0 `Unknown` success sentinel). New variant in v1.2: `dict_no_dictionary_for_application_version` (per N2-P3-2; the registry's null-lookup case for `version_registry::get`, distinct from the parse-failure variant `dict_unknown_appl_ver_id`). Variants added in v1.0 per RC-1 / RC-2 / RC-5 / RC-6 retained: `dict_unknown_appl_ver_id`, `dict_xml_oom`, `dict_overlay_unsupported_rule`, `dict_overlay_unsupported_length_pair`, `dict_overlay_oom`, `dict_reify_msg_type_mismatch`, `dict_reify_unknown_msg_type`, `dict_xml_too_large`, `dict_xml_too_deep`. 2i confirms the C-ABI mapping. Following 2a/2b's coalescing pattern: configuration errors → `FIXPP_ERR_DICT_CONFIG`; capacity → `FIXPP_ERR_DICT_LIMIT_EXCEEDED`; runtime allocation → reuses `FIXPP_ERR_OOM`. Final coalescing is 2i's call.)
 
+Updated (098-dialect-overlay): the `dict_overlay_*` variants were not minted, and neither were `dict_field_not_in_version`, `dict_msg_type_not_in_version` or `dict_length_pair_collision` for overlays. A load with an overlay reports by exception: `dict::overlay_conflict_error`, `dict::overlay_limit_error`, `xml_parse_error` (or `orchestra_parse_error`), `unknown_version_error` and `xml_oom_error`. Its C-ABI codes are `FIXPP_ERR_DICT_CONFIG`, `FIXPP_ERR_DICT_LIMIT_EXCEEDED` and `FIXPP_ERR_DICT_OOM` (B-098-6).
+
 ## 7. Integration with adjacent modules
 
 ### 7.1 Wire (`[arch §4.3]`, owner **2b**)
@@ -1785,6 +1833,8 @@ Three integration points, plus a grammar-closure note for the Length+Data dialec
 
    **Reverse direction — codegen output of dialect-promoted Length+Data pairs.** Users who need typed access to dialect-private Length+Data pairs *and* Iter-mode skipping for those pairs regenerate `Messages.hpp`/`Fields.hpp` against their dialect's XML using `fixpp-codegen` (the build-time host tool per `[const §III.5]`). The regenerated `Fields.hpp` carries the dialect's pair table; downstream Iter-mode TUs `#include` the regenerated header instead of the standard one. This is a *recompile-against-dialect-XML path*, not a runtime-overlay path; it is the documented v1.0 escape hatch for users with pair-extension requirements. Tracked in §10 with the v1.x grammar-extension question.
 
+   Updated (098-dialect-overlay): an overlay may declare a Length+Data pair between fields it adds (the §4.4.1 note), so regenerating codegen is no longer the only way to have a custom pair read by count. The pair reaches every parse that pairs through the session dictionary's `dict_hooks`: Index mode, and Iter mode, which takes a `dict_hooks` value since fixpp#426 (L-004-1, closed). Sites with no dictionary use the standard table (L-426-1).
+
 ### 7.2 Session (2d, 2e — to be drafted)
 
 - **Per-session `Dictionary`.** `SessionConfig` carries one `dict::Dictionary` value (per `[arch §4.4]`); the session's `Parser`/`Writer`/`Validator` consume it through `Dictionary::as_table_view()`.
@@ -1797,6 +1847,9 @@ Summary of the §5 commitments (full text in §5):
 
 - `fixpp_msg_t` carries a runtime resolved-message-version tag (per `[FIXT §5.3]` resolution).
 - `fixpp_dict_t`, `fixpp_dialect_overlay_t`, `fixpp_owning_msg_t` are 2i-owned opaque handles wrapping the C++ types defined here.
+
+  Updated (098-dialect-overlay): there is no `fixpp_dialect_overlay_t`. The overlay's C-ABI surface is `fixpp_dict_load_from_xml_with_overlay`, which returns an ordinary `fixpp_dict_t` (the §5 note).
+
 - C-ABI accessor families wrap the typed-message accessor surface; 2i's choice between named (`fixpp_neworder_single_cl_ord_id`) and tag-keyed (`fixpp_msg_field_string(msg, 11, ...)`) shapes is independent of 2c.
 - C-ABI surface speaks in C-shape only — engine-owned default arenas (with explicit destroy semantics) instead of PMR resource parameters.
 
@@ -1804,12 +1857,16 @@ Summary of the §5 commitments (full text in §5):
 
 The control plane may **swap a session's dictionary at session-create time only** per `[arch §5.6]` and §6.3. Concretely: the gRPC `OpenSession` request (per `[arch §8.1]`) carries the FIX version and an optional `DialectOverlay` reference (a path or in-line XML); the service resolves them against engine-loaded `Dictionary` instances and constructs the per-session `Dictionary` before the session is exposed. The control plane does not expose a "change dictionary on a live session" RPC.
 
+Updated (098-dialect-overlay): there is no overlay object to carry. A control plane would hand a session a dictionary already loaded with its overlay (`dict::load_any_with_overlay`).
+
 ### 7.5 SWIG / Python (`[arch §4.12]`, owner **2m**)
 
 - **Typed-message exposure shape.** Per-message classes in `fixpp::vXX::*` (codegen versions only) are SWIG-wrapped one-to-one. The Python side sees `fixpp.v50sp2.NewOrderSingle`, `fixpp.v42.NewOrderSingle`, etc., as distinct classes under distinct submodules. The version namespace maps to a Python submodule. Runtime-XML-only versions (FIX 4.0/4.1/4.3/5.0/5.0SP1) are exposed only through the runtime `Dictionary` + tag-keyed accessor wrappers — no Python typed classes.
 - **Version tag.** `fixpp.v50sp2.NewOrderSingle.version` returns `dict.application_version.v50sp2` (Python enum); cross-version polymorphism in Python uses an `isinstance` dispatch on the typed class, with the version tag accessible for tooling.
 - **Owning-message `reify`.** SWIG wraps the C-ABI `fixpp_msg_reify` family per **2i**; the Python wrapper hides the engine-owned arena handling.
 - **Dialect overlay in Python.** SWIG wraps `XmlLoader::load_overlay` as `fixpp.dict.load_overlay(path)` returning a Python-side `DialectOverlay` object that flows into `fixpp.session.SessionConfig`.
+
+Updated (098-dialect-overlay): Python gains the module function `fixpp.dict_load_from_xml_with_overlay(base_path, overlay_path)`, generated by SWIG from the C-ABI call; it returns a dictionary handle that the session config takes as it takes any dictionary. There is no `fixpp.dict.load_overlay`, no Python `DialectOverlay` and no overlay key on a Python session config (B-098-6).
 
 ### 7.6 CMake target shape (per C-P3-3)
 
@@ -1824,6 +1881,8 @@ The codegen-version namespaces are independently linkable interface targets so a
 | `fixpp::dict::all_versions` | umbrella `INTERFACE` target depending on all four above; convenience for translator/gateway TUs |
 | `fixpp::dict::runtime` | the runtime dictionary surface (`Dictionary`, `XmlLoader`, `DialectOverlay`, `table_view`, `version_profile`, the `dict::reify` bridge); independent of any per-version codegen target; works with any of the 9 v1.0-supported versions for runtime XML loading |
 | `fixpp::dict::dispatch` | the runtime-dispatch switch headers (`_codegen/include/fixpp/_dispatch/reify_dispatch_fixt.hpp` for the 7 FIXT admin MsgTypes + `_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp` for the ~470 application (version, MsgType) pairs); depends on `fixpp::dict::all_versions` because the switch references all four codegen versions' `owning_<Msg>` types |
+
+Updated (098-dialect-overlay): the runtime surface has no `DialectOverlay`; the overlay calls are members of `XmlLoader` and `OrchestraLoader` and `dict::load_any_with_overlay`.
 
 A consumer that only wants FIX 4.4 typed messages depends on `fixpp::dict::v44` + `fixpp::dict::runtime`. A consumer that wants the runtime-dispatch `dict::reify` (e.g., a session FSM that handles cross-vocabulary FIXT.1.1) depends on `fixpp::dict::dispatch` (which transitively pulls in the four codegen versions). A consumer that wants only runtime-XML-loaded dictionaries (e.g., a tooling utility for FIX 4.0) depends only on `fixpp::dict::runtime`.
 
@@ -1842,6 +1901,9 @@ Three storage classes for 2c-owned data, all rooted in heap-pinned metadata-hand
 - **Codegen output is `constexpr`** → static storage, zero allocation, no `new`/`delete` ever (`[const §VIII.5]`).
 - **Metadata-handle ownership is the lifetime root (per RC-3 / RC#2 / N-P1-1 / C-R2-P1-1).** Constructed by `XmlLoader::load(...)` — allocates the `dict_metadata_handle` on the user-supplied `mr` via `std::allocate_shared<dict_metadata_handle>(std::pmr::polymorphic_allocator<dict_metadata_handle>{mr}, ...)` so the shared-control-block deallocator returns memory to the originating `mr`. Fills it with span references for codegen versions or PMR copies for runtime-XML versions. `with_overlay(...)` allocates a fresh `dict_metadata_handle` on the user-supplied `mr` (the merged dict's `mr`) via the same `std::allocate_shared` mechanism, and stores a *copy* of the base's `handle_` (the same `shared_ptr<const dict_metadata_handle>`, sharing the base's control block) in the merged handle's `base_keepalive_` slot. The base may go out of scope while the merged dict still holds the keepalive (the control block's refcount drops from 2 to 1, not to 0). Held by value in `SessionConfig` through the `Dictionary` owning the handle. The user supplies the `mr` at every construction step; the metadata block's address survives `Dictionary` moves so `table_view` and `dictionary_driven_validator` stay valid.
 - **`DialectOverlay` storage.** Pinned to a non-null PMR resource at construction (per C-P2-5; via `DialectOverlay::create(mr)` or `XmlLoader::load_overlay(path, mr)`); lifetime = `DialectOverlay` value's lifetime (typically constructed at session open, consumed by `Dictionary::with_overlay(...)`, then dropped if the merged dictionary is the only retained handle).
+
+  Updated (098-dialect-overlay): there is no `DialectOverlay` storage. A load with an overlay allocates the dictionary from the `mr` it is given, as `load` does; the overlay document and the spliced document are transient.
+
 - **`owning_message_t<>` storage.** Caller-supplied PMR per `dict::reify_as<Msg>(view, mr)`; the value carries `mr` and frees on move-end. ≤ 4 PMR allocations per N-P2-5. PMR allocation failure inside the `noexcept` reify path is wrapped in `trap_throw` and surfaces as `dict_reify_oom` per §6.1.1 / RC-5.
 - **Decimal typed-accessor PMR (RC#2 / `[const §XX]` v1.4).** The decimal typed accessor is the one accessor that is *not* unconditionally allocation-free: the merged 2a parse entry point `decimal_t::parse(span, mr)` (`[2a §4.3]`, over `decimal_traits<FIXPP_DECIMAL_T>::from_chars`, `[2a §4.2]`) is PMR-mandatory. The accessor takes an explicit `std::pmr::memory_resource* mr`; on the borrowed flyweight the caller passes the per-message arena `[arch §5.2]` (the same arena the underlying `MessageView` aliases per `[2b §6.4]`); on `owning_<Msg>` it defaults to the instance's owned `mr_` (the §4.8 caller-`mr`-lifetime storage class above). This `mr` is **not** a 2c-owned storage class — it is the wire/caller-owned per-message arena — so it adds no row to the table; it is recorded here so the recap is not read as claiming the decimal arm is zero-alloc. For the default `pod_decimal` trait the parse ignores `mr` and is allocation-free; an allocating substituted `FIXPP_DECIMAL_T` draws from `mr` per call. No raw `new`/`delete`; `[const §VIII.5]` / `[const §XV.1]` preserved (arena/PMR is the sanctioned mechanism for the rare materialise case, `[const §XV.1]`).
 - **Banned: `thread_local`.** Per `[const §XV]` and `[arch §5.4]`. Codegen never emits `thread_local`; runtime types never allocate via `thread_local`. Trace context (per `[const §XIII.3]`) is strand-stored, not `thread_local`; 2c is not involved.
@@ -1884,6 +1946,8 @@ Per `[arch §10]` requirement (4) and `[const §VII]`: every design doc ends wit
 19. **Length+Data static-table coverage test.** Verifies the codegen-emitted Length+Data pair table for each codegen version is exhaustive against the standard XML (every `<field type="LENGTH" />` paired with the documented `<field type="DATA" />` neighbour); cross-checks against `[FIX50SP2 §3.3]`'s field-pair list. Catches a codegen regression that drops a pair (which would make `wire::field_iterator` skip SOH incorrectly inside a `data`-typed field).
 20. **Overlay-promoted tag access via `field_value` forwarder.** Apply an overlay that promotes a custom tag `9999=VenueRiskID` on a venue-specific NewOrderSingle. Verify `nos.field_value(9999)` returns the promoted value; verify `view().get(9999)` returns the same value; verify `Dictionary::was_dialect_promoted(9999)` returns true. Per N-P1-2.
 
+Updated (098-dialect-overlay): the seams that name `DialectOverlay`, `with_overlay`, `load_overlay` or `was_dialect_promoted` test the design that did not ship. 098's witnesses are listed in `specs/098-dialect-overlay/contracts/witnesses.md`, and its overlay fuzzer feeds both loaders' overlay calls (research R-11).
+
 ## 10. Open questions
 
 Cross-doc handoffs and within-2c follow-ups. v1.0 drops v0.1's Q4 (deferred conditional support) and Q2 (Iter-mode Length+Data dialect extension) per RC-6 — both are now explicitly out-of-scope-for-v1 and rejected at the loader. Replaced with a single grammar-extension question.
@@ -1901,6 +1965,8 @@ Cross-doc handoffs and within-2c follow-ups. v1.0 drops v0.1's Q4 (deferred cond
 | 9 | `dict::reify` runtime-dispatch fall-through for runtime-XML-only versions — currently returns `dict_reify_unknown_msg_type`; users on those versions must use the runtime tag-keyed accessor (`view.get(uint16_t)`). Should v1.x add a "untyped owning message" variant (`untyped_owning_message_handle` — bytes + offset table + version_profile, no typed downcasts) for those versions? | DEFERRED post-v1; tracked alongside Q4. | post-v1 follow-up |
 | 10 | `dict::version_registry` ownership model (per N-P2-7 / §4.9) — engine-owned-by-value vs session-borrowed; how the FSM reaches the registry at dispatch time; whether `EngineConfig::dictionaries` is the construction shape; whether the registry is per-engine or per-session. v1.0 / v1.1 publishes the *shape* (`get(application_version) → expected_t<Dictionary const*>`) but defers the ownership story to 2d threading + EngineConfig design. | DEFERRED to 2d. | 2c + 2d |
 
+Updated (098-dialect-overlay): rows 2 and 3 are moot as worded. There is no `DialectOverlay` type to make virtual. The shipped grammar (the §4.4.1 note) already admits Length+Data pairs between new fields; a conditional rule is not expressible in the loaders' `required` / `presence` vocabulary.
+
 ## 11. Hand-off
 
 After Gate A and user sign-off, **2c** unblocks:
@@ -1910,6 +1976,9 @@ After Gate A and user sign-off, **2c** unblocks:
 - **2i** (C ABI message rep + error enum) — knows `fixpp_msg_t` carries a runtime resolved-message-version tag (§5), the `application_version` enum maps to a C-ABI constant set, the C-ABI accessor surface wraps the typed-message classes per the §5 commitments, and the C surface speaks in C-shape only (no PMR leakage). New `error::dict_*` variants from §6.7 enter the C-ABI mapping.
 - **2j** (control-plane interface) — knows that dictionary swap is session-create-time only (§6.3 / §7.4), the gRPC `OpenSession` carries version + optional overlay, no live-swap RPC. Mid-session swap is rejected categorically per §7.2 / Appendix D §5.
 - **2m** (SWIG / Python binding shape) — knows the per-version submodule shape (`fixpp.v42`, `fixpp.v44`, `fixpp.v50sp2`, `fixpp.vt11`), the typed-message exposure shape, the version-tag accessor, the dialect-overlay binding (per §7.5), and the runtime-XML-only versions' tag-keyed-only Python access.
+
+Updated (098-dialect-overlay): the 2j and 2m hand-offs' overlay items: the control plane would carry a dictionary already loaded with its overlay (the §7.4 note), and the Python binding is `fixpp.dict_load_from_xml_with_overlay` (the §7.5 note).
+
 - **Orchestrator** (parent session) applies the proposed constitutional amendment from Appendix D to `[const §I.1]`, `[const §VI]`-related clauses, `[const §XVIII]` (post-v1 roadmap note), and `[arch §5.6]` (mid-session swap wording) during the sign-off commit.
 
 **2c does not add new catalogue rows.** D-001..D-011, OSS-001, OSS-010 are already OFFICIAL; the per-message typed-class rows (A-001..A-013, M-/P-/C-/R-/N- families) are already OFFICIAL and already split between this doc (typed classes + metadata) and 2b (parse/serialize/validate). 2c's contribution to those rows is the *typed-class generation*; the rows themselves already exist. `feature-catalogue.md` is **not edited** from this rewrite.
@@ -1937,6 +2006,8 @@ For each owned row, this appendix records *what the catalogue row actually says*
 | **D-009** | "Custom dictionary extension — user-defined fields and messages" | `DialectOverlay` value type (§4.4) + `XmlLoader::load_overlay(...)` (§4.5) + `Dictionary::with_overlay(...)` (§4.3) + additive merge (§6.4), within the v1.0 grammar closure (§4.4.1). For overlay-promoted custom tags, `field_value(uint16_t)` forwarder on every typed message (§4.7.1) plus `Dictionary::was_dialect_promoted(...)` diagnostic. | **codegen + runtime XML, within v1.0 grammar closure.** |
 | **D-010** | "Component definition support — reusable field groups (Instrument, Parties, etc.)" | `dict::ComponentRef` (§4.2) for the metadata shape; per-codegen-version generated component shells in `Messages.hpp`; runtime-XML-only versions reach components through `Dictionary::field_ref(msg_type, tag)` which resolves component-membership via the `FieldRef::component_index` indirection (§4.1). | **all 9 v1.0 versions** for the runtime metadata; **codegen versions only** for typed component shells. |
 | **D-011** | "FIX Latest / FIX Orchestra repository format" | **Deferred post-v1.0** per `[const §XVIII.2]` (FIX-Latest is v1.2). v0.1's claim that this row was discharged by `DialectOverlay` is incorrect — Orchestra is a different XML schema and a different feature; `DialectOverlay` does not implement Orchestra-format ingest. v1.0 explicitly does not discharge D-011. | **deferred to v1.x** (`[deferred to v1.x]`). |
+
+Updated (098-dialect-overlay): the D-009 row is delivered by 098's load-time overlay (the §4.4 note), not by `DialectOverlay`, `XmlLoader::load_overlay` or `Dictionary::with_overlay`. The D-011 row's correction stands.
 
 ### OSS rows
 
@@ -2029,6 +2100,8 @@ Per `[const §VI.5]`, every `/specify` artifact lists the exact coverage-index r
 | Architectural inheritance | `[arch §1]`, `[arch §2]`, `[arch §3]`, `[arch §4.2]`, `[arch §5.2]`, `[arch §5.3]`, `[arch §5.4]`, `[arch §5.5]`, `[arch §5.6]`, `[arch §6]`, `[arch §7.3]`, `[arch §7.4]`, `[arch §9.1]`, `[arch §9.2]`, `[arch §10]` | §3 |
 | Codex Gate A trigger (codegen layout — Appendix A trigger row) | `[const §XVII.1]`, `[const Appendix A]` row "Codegen layout" | this doc requires Gate A before `/tasks` |
 | Normative-References completeness rule | `[const §VI.5]` | this Appendix B + the per-version generated `NormativeReferences.md` files |
+
+Updated (098-dialect-overlay): the rows that cite `DialectOverlay`, §4.4.1's closure or §6.4's merge contract point at the design that did not ship; read the notes in those sections for what 098 shipped. The rule each row cites is unchanged.
 
 Engineering-judgment decisions (16-byte `FieldRef`; `_reserved` discipline; `version_profile` 4-byte shape; `DialectOverlay` value-typed default vs virtual interface; per-version compile-cost ceilings; `owning_<Msg>` per-message-class generation choice; conflict-policy default `OverlayWins`; A-024 hard-error-on-codegen; lazy-view design on `owning_<Msg>`; `dict::reify` typed + runtime-dispatch split; v1.0 overlay grammar closure) cite `[SYN §3.3 Q11–Q13]`, `[const §XIV.2]`, `[FIXT §5]`, `[2a §4.2]` inline at point of use and are intentionally omitted from this appendix.
 

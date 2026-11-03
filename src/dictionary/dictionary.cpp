@@ -717,6 +717,13 @@ table_view Dictionary::as_table_view() const {
         }
     }
 
+    // ── 098-dialect-overlay (FR-022, data-model §A.3): the declared header
+    // store, copied from the handle (filled at the loaders' finalize) into
+    // `header_bits_`. Built once here, never per message ([const §XV.1]).
+    for (auto const tag : handle_->header_tags_) {
+        b.add_header_tag(tag);
+    }
+
     // ── 081 Concern A (D-1/D-2, T009): validator-private FIXT.1.1 framing
     // surface — v50/v50sp1/v50sp2 ONLY (empty `<header/>`). Baked constant,
     // census-pinned to dictionaries/FIXT11.xml (fixt_framing_table.hpp).

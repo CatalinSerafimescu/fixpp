@@ -1,0 +1,15 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:fields>
+  <fixr:field id='9200' name='NoVenueNested' type='NumInGroup' />
+ </fixr:fields>
+ <fixr:groups>
+  <fixr:group id='2010' name='Allocs'>
+    <fixr:numInGroup id='78' />
+    <fixr:groupRef id='2099' />
+  </fixr:group>
+  <fixr:group id='2099' name='VenueNested'>
+    <fixr:numInGroup id='9200' />
+    <fixr:fieldRef id='79' />
+  </fixr:group>
+ </fixr:groups>
+</fixr:repository>

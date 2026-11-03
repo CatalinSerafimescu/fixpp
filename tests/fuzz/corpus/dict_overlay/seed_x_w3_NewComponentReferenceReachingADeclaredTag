@@ -1,0 +1,12 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <component name='VenueBlock' required='N' />
+  </message>
+ </messages>
+ <components>
+  <component name='VenueBlock'>
+   <field name='ClOrdID' required='N' />
+  </component>
+ </components>
+</fix>

@@ -912,6 +912,8 @@ fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
 
 **Type-mismatch handling.** When the dictionary knows the tag's type (always true for codegen-known tags; not always true for dialect-overlay-promoted tags or unknown-fields), the accessor checks the type and returns `FIXPP_ERR_TYPE_MISMATCH` if the caller asked for the wrong shape. For unknown / dialect-overlay-promoted tags, the type is **unknown at the C-ABI boundary**; the accessor returns `FIXPP_ERR_OK` with the requested-type interpretation if the bytes parse, or `FIXPP_ERR_WIRE_INVALID_FRAME` if they don't. Documented per-accessor.
 
+Updated (098-dialect-overlay): a field a dialect overlay adds is an ordinary field of the merged dictionary, with the type the overlay declares in the base's type vocabulary, so for this rule it is a tag the dictionary knows; there is no separate "dialect-overlay-promoted" class. Unknown tags are as described above.
+
 ### §4.7 Field setters (CA-009)
 
 ```c

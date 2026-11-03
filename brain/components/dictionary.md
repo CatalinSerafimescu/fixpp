@@ -6,6 +6,7 @@ status: stable
 refs:
   - src/dictionary/xml_loader.cpp
   - src/dictionary/orchestra_loader.cpp
+  - src/dictionary/overlay_merge.cpp
   - src/dictionary/version_registry.cpp
   - src/dictionary/reify.cpp
   - include/fixpp/dict/reify.hpp
@@ -33,6 +34,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-implement-log.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/096-fix-latest-tail-evidence-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/097-fix-latest-applverid-10-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
 constitution: ["§I.1"]
 ---
@@ -62,7 +64,8 @@ coexistence, dialect overlay binding) and `215-dictionary-view.md`. ⚠️ 215's
 `shared_dictionary_view` forming an aliasing pointer, §5b's "third owner of the snapshot's control
 block", §6 seam 7's G2 count of one — is **superseded in part** by
 `.specify/495-493-486-dict-reify-copy.md` §6 (D-4): the snapshot owns its table in the table's own
-control block and G2 asserts zero matches. The passkey and the provenance check stand.
+control block and G2 asserts zero matches. The passkey and the provenance check stand. ⚠️ 2c's
+"dialect overlay binding" half is **superseded by 098**; see the 098 section at the end of this page.
 
 ⚠️ **Counts and file lists rot.** Derive the current surface from the graph index; the point above is
 the *shape* — two loader front-ends converging on one dictionary representation, with codegen on top.
@@ -342,7 +345,8 @@ direct C++ caller. The C-ABI twin is `fixpp_msg_clone`; see [`c-api.md`](./c-api
 
 ## Where the design decisions live
 
-`2c-codegen.md` is **v1.4 post-sign-off** and was scanned clean in the Step-R sweep. ⚠️ Beside it sits
+`2c-codegen.md` is **v1.4 post-sign-off** and was scanned clean in the Step-R sweep. ⚠️ Its
+dialect-overlay design did not ship; 098's in-place notes are listed in the 098 section below. ⚠️ Beside it sits
 `2c-codegen.draft-r1.md` — an archived **v0.1** holding a design that an adversarial review **rejected**
 as needing a full rewrite. It now carries a forward-pointing banner; before 2026-08-29 it did not.
 
@@ -361,3 +365,57 @@ verify against `capture_first_emission` in `orchestra_loader.cpp`. See [`test.md
 - ⚠️ **Superseded by 097 (`097-fix-latest-applverid-10`):** `specs/080-orchestra-runtime-load/` L-080-1 (a configuration listing both a FIX50SP2 and a FIX Latest dictionary aborts at `version_registry` construction); since 097 the two coexist in one registry, L-080-1 sits in the closed B&L file, and its config half continues as L-097-1.
 - `.specify/2c-codegen.md` (2c-codegen) carries in-place `Updated (097-fix-latest-applverid-10)` notes in §4.3 (the `application_version` enum sketch and the wire `ApplVerID(1128)` mapping table), §4.8 (the runtime-dispatch switch paragraph and the `reify_dispatch_application.hpp` sketch) and §6 (§6.3 step 3, §6.6 item 8); the text before each note is history.
 - C-ABI: 2c-codegen §5 item 5's application-version C-ABI constant set (`FIXPP_APPL_VER_*`) was never implemented, so 097 adds no FIX Latest C-ABI constant and does not change the C ABI (B-097-2). While that holds, `git grep -n FIXPP_APPL_VER -- include src bindings` prints nothing.
+
+## Dialect overlay (098) — superseded records, flagged in place
+
+`098-dialect-overlay` ships the overlay as a **load-time** call: a fragment in the base's own format is
+spliced into the parsed base document, and the loader builds one ordinary `Dictionary` from the result
+(`XmlLoader::load_with_overlay`, `OrchestraLoader::load_with_overlay`, `dict::load_any_with_overlay`;
+the merge and its guards are in `src/dictionary/overlay_merge.cpp`). There is no `DialectOverlay` type,
+no `Dictionary::with_overlay`, no `was_dialect_promoted` and no conflict policy: every conflict is
+refused. Verify against those headers, and read the 098 section of the live B&L file.
+
+**DECIDED — splice the overlay into the parsed base, then run the base's own build** (research R-1).
+The merged dictionary is then the hand-edited file by construction, so every downstream store is
+equivalent at once. **REJECTED — a merge at the handle level** (2c's `Dictionary::with_overlay`):
+every handle store would need its own merge, outside the finalize code that defines it, so
+equivalence would become a claim to test instead of a property of the construction; the owner also
+ruled the attachment point (spec Clarifications). **REJECTED — a merge into the loader state between
+parse and finalize**, for the same reason. **REJECTED — one
+overlay format for both bases** (research R-2): the Orchestra loader ignores unknown element names
+silently, so a QuickFIX-shaped node in an Orchestra overlay would vanish without an error.
+
+⚠️ **The send path's header set reads the dictionary since 098** (FR-022): `table_view::is_header_tag`,
+filled from the metadata handle's header store. See [`session.md`](./session.md), whose rejected
+alternative on this point (L-422-1) is superseded.
+
+Records that describe the older design are flagged here and not rewritten. Each carries an in-place
+`Updated (098-dialect-overlay)` note naming what shipped; the text before each note is history.
+
+- ⚠️ **Superseded by 098:** `.specify/2c-codegen.md`. Its status block carries a pointer note, and
+  each section that states the old design carries its own: §1 (goals 1 and 4), §1.1, §1.2 (the
+  merge-cost line), §1.3 (D-009), §2 (the overlay non-goals, "No mid-session overlay grammar extension"
+  included), §3, §4.1 (the `FieldRef` comments naming `dict_overlay_unsupported_length_pair`), §4.3
+  (`with_overlay`, `was_dialect_promoted`, the metadata-handle sharing path), §4.4 (`DialectOverlay`;
+  this note states what shipped), §4.4.1 (the grammar), §4.4.2 (the caps: the values kept, the
+  `FIXPP_DICT_*` knobs not), §4.5 (`load_overlay`), §4.6, §4.7.1, §5, §6.1, §6.1.1, §6.2, §6.4 (merge
+  contract, conflict policy), §6.5, §6.7, §7.1, §7.3, §7.4, §7.5, §7.6, §8, §9, §10, §11, Appendix A
+  (D-009) and Appendix B. Re-derive the set with
+  `grep -n 'Updated (098-dialect-overlay)' .specify/2c-codegen.md`.
+- `.specify/2c-codegen.draft-r1.md` is the archived v0.1 and is history; it carries no 098 note.
+- ⚠️ **Amended by 098:** `.specify/456-table-view-seal.md` §6 seam 2. The friendship census gains
+  `friend struct table_view_test_access;` (read-only test access, defined only in `tests/support/`,
+  never installed; research R-10 §2, Correction), and the census recipe's pattern gains that spelling.
+  Population stays `table_view_builder`'s.
+- ⚠️ **Superseded by 098:** the overlay statements of `.specify/2b-wire.md` (§1 goal 5, §4.3's
+  `field_iterator` paragraph, §10 row 5), `.specify/2d-threading.md` (§4.5's `SessionConfig` listing),
+  `.specify/2i-capi.md` (§4.6's type-mismatch rule), `.specify/2j-controlplane.md` (§4.7's
+  `dialect_overlay_id`), `.specify/2l-tap.md` (§D.1's rationale), `.specify/2m-pybind.md` (§4.7's
+  Python key), `.specify/api-contract.md` (the 2c surface row) and `.specify/architecture.md` (§4.2,
+  §4.4, Appendix Z-6). Each carries an in-place note.
+- ⚠️ **Retired by 098:** L-002-2 (the overlay ships), L-422-1 (FR-022) and L-004-1 (stale since
+  fixpp#426: `field_iterator` takes a `dict_hooks` value and pairs through it). They sit in the closed
+  B&L file.
+- **Open from 098:** L-098-3 (the base load paths have no caps and no cycle guard, fixpp#650) and
+  L-098-4 (the `std::uint16_t` side-table index wraps; the vendored FIX50SP2 group table already does,
+  fixpp#654).

@@ -1,0 +1,5 @@
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <fields>
+  <field number='377' name='SolicitedFlag' type='INT' />
+ </fields>
+</fix>

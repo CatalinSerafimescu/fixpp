@@ -9,10 +9,13 @@
 //     reason_class::recognized_not_yet_supported_step2
 //     key_path == "<key>" (no "session[N]." prefix)
 //
-//   Per data-model E-5 / research D-6 / FR-022, the still-deferred keys are:
-//     tracer, meter, message_arena, dialect_overlay, tap
-//   (Additional deferred keys in kDeferred are exercised indirectly via the
-//    existing session-scope cells in test_load_negative_battery.cpp.)
+//   Per data-model E-5 / research D-6 / FR-022, the per-key cells below cover:
+//     tracer, meter, message_arena, tap
+//   (T020_DeferredSetExactCoverage covers every key of kDeferred.)
+//
+//   dialect_overlay is a session key (098-dialect-overlay, contracts W-8): at
+//   the root scope it is refused with invalid_or_contradictory_selector
+//   (T020_RootDialectOverlayRefused), not deferred.
 //
 //   Typo-distinction cell (SC-007):
 //     A typo'd key "loggerr" (not in kDeferred, not in kRecognized) must
@@ -27,21 +30,22 @@
 //
 // T021 [US4] — Confirmed: the T006 recognize_keys() disposition in
 //   toml_config_loader.cpp already satisfies these tests (kDeferred has
-//   logger removed; all 5 keys above remain deferred).  T020 is the witness;
+//   logger removed; the keys above remain deferred).  T020 is the witness;
 //   no source change is needed.
 //
 // Edge note (session-scope deferred keys): recognize_keys() runs the same
 //   kDeferred/kRecognized logic for both root and per-session scopes —
 //   only the key_prefix changes ("" vs "session[N]").  Top-level coverage
-//   here is sufficient per E-5; existing cells in test_load_negative_battery
-//   cover the session-scope case for dialect_overlay and tracer.
+//   here is sufficient per E-5; tests/config/test_098_dialect_overlay.cpp's
+//   DeferredKeyAtSessionScopes_StaysDeferred covers a deferred key at the
+//   [default] and [[session]] scopes.
 //
 // Anti-hang: load_toml_config is synchronous (cold).  asio::io_context is
 //   created only to satisfy system_clock_source; ctx.run() is never called.
 //
 // Fixture sources:
-//   neg_deferred_toplevel.toml — multi-key fixture: tracer, meter, message_arena,
-//                                dialect_overlay, tap at root + valid [[session]]
+//   neg_deferred_toplevel.toml — every key of kDeferred at root, plus
+//                                dialect_overlay at root, + valid [[session]]
 //   neg_deferred_typo.toml    — single typo'd key "loggerr" at root + valid [[session]]
 //   logger_happy.toml         — [logger] with file sink; test pre-creates the dir
 //                               via temp_directory_path()
@@ -180,28 +184,35 @@ TEST(LoadDeferredSurface, T020_DeferredMessageArena) {
         << "message_arena must NOT produce unknown_key (SC-007)";
 }
 
-// ── T020_DeferredDialectOverlay — dialect_overlay at root scope ───────────────
+// ── T020_RootDialectOverlayRefused — dialect_overlay at root scope ────────────
 //
-// A top-level `dialect_overlay` scalar (deferred; data-model E-5 / D-6) must
-// yield:
-//   reason_class::recognized_not_yet_supported_step2 at key_path "dialect_overlay"
-//
-// NOTE: the existing T018_Step2DialectOverlay cell in test_load_negative_battery
-// exercises dialect_overlay at SESSION scope ("session[0].dialect_overlay").
-// This cell covers the ROOT scope (key_path == "dialect_overlay", no prefix).
+// `dialect_overlay` is a session key (098-dialect-overlay, contracts W-8, AS-4).
+// At the root scope it is refused with invalid_or_contradictory_selector at key
+// path "dialect_overlay" (no prefix) and the message below, and is neither a
+// deferred key nor an unknown key.
 
-TEST(LoadDeferredSurface, T020_DeferredDialectOverlay) {
+TEST(LoadDeferredSurface, T020_RootDialectOverlayRefused) {
     auto result = load(fixture_path("neg_deferred_toplevel.toml"));
 
     ASSERT_FALSE(result.has_value())
         << "neg_deferred_toplevel.toml must fail (deferred keys present)";
 
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags, RC::recognized_not_yet_supported_step2, "dialect_overlay"))
-        << "expected recognized_not_yet_supported_step2 at key_path \"dialect_overlay\"; "
-           "diagnostics:\n"
-        << diag_string(diags);
+    bool found = false;
+    for (const auto& d : diags) {
+        if (d.key_path == "dialect_overlay" && d.reason == RC::invalid_or_contradictory_selector) {
+            found = true;
+            EXPECT_EQ(d.message,
+                      "dialect_overlay is a session key; set it in [default] or [[session]]");
+        }
+    }
+    EXPECT_TRUE(found) << "expected invalid_or_contradictory_selector at key_path "
+                          "\"dialect_overlay\"; diagnostics:\n"
+                       << diag_string(diags);
 
+    EXPECT_FALSE(has_diag(diags, RC::recognized_not_yet_supported_step2, "dialect_overlay"))
+        << "dialect_overlay must NOT be a deferred key; diagnostics:\n"
+        << diag_string(diags);
     EXPECT_FALSE(has_diag(diags, RC::unknown_key, "dialect_overlay"))
         << "dialect_overlay must NOT produce unknown_key (SC-007)";
 }
@@ -234,12 +245,12 @@ TEST(LoadDeferredSurface, T020_DeferredTap) {
 // OTHER recognized-but-deferred key — including the spec-named observability
 // keys otlp / prometheus / exporter / log_sink — stays under
 // recognized_not_yet_supported_step2.  The per-key cells above witness only a
-// subset (tracer/meter/message_arena/dialect_overlay/tap); a subset-presence
+// subset (tracer/meter/message_arena/tap); a subset-presence
 // check passes even if a key is silently DEMOTED out of kDeferred (it would then
 // report unknown_key, which no above cell would catch for the un-listed keys).
 //
-// This cell pins the WHOLE deferred surface: the fixture carries all 13 kDeferred
-// keys, and we assert each one yields the deferred reason AND never unknown_key.
+// This cell pins the WHOLE deferred surface: the fixture carries every key of
+// kDeferred, and we assert each one yields the deferred reason AND never unknown_key.
 // Dropping any key from kDeferred (recognize_keys's kDeferred set, toml_config_loader.cpp) demotes
 // it to unknown_key → both assertions fail RED here.  This is the exact-coverage discipline of
 // [[feedback_completeness_gate_exact_set_not_subset]] applied at the public-API level (the
@@ -252,13 +263,13 @@ TEST(LoadDeferredSurface, T020_DeferredTap) {
 // it to neg_deferred_toplevel.toml and to kAllDeferredKeys below.
 
 TEST(LoadDeferredSurface, T020_DeferredSetExactCoverage) {
-    // The full kDeferred set (toml_config_loader.cpp), minus `logger` (flipped to
-    // supported in 045 FR-022).  Mirror of the fixture's keys.
+    // Every key of kDeferred (toml_config_loader.cpp's recognize_keys), written
+    // out as a literal. `logger` (supported since 045 FR-022) and
+    // `dialect_overlay` (a session key since 098-dialect-overlay) are not deferred.
+    // Re-derive the list by reading kDeferred.
     static constexpr std::string_view kAllDeferredKeys[] = {
-        "tracer",          "meter",    "tap",           "otlp",
-        "prometheus",      "exporter", "log_sink",      "message_arena",
-        "dialect_overlay", "arena",    "session_arena", "framer_carry_arena",
-        "tap_consumer",
+        "tracer",   "meter",         "tap",   "otlp",          "prometheus",         "exporter",
+        "log_sink", "message_arena", "arena", "session_arena", "framer_carry_arena", "tap_consumer",
     };
 
     auto result = load(fixture_path("neg_deferred_toplevel.toml"));

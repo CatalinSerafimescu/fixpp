@@ -1,0 +1,256 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:components>
+  <fixr:component id='3000' name='VenueA0'>
+  </fixr:component>
+  <fixr:component id='3500' name='VenueB0'>
+  </fixr:component>
+  <fixr:component id='3001' name='VenueA1'>
+    <fixr:componentRef id='3000' />
+    <fixr:componentRef id='3500' />
+  </fixr:component>
+  <fixr:component id='3501' name='VenueB1'>
+    <fixr:componentRef id='3000' />
+    <fixr:componentRef id='3500' />
+  </fixr:component>
+  <fixr:component id='3002' name='VenueA2'>
+    <fixr:componentRef id='3001' />
+    <fixr:componentRef id='3501' />
+  </fixr:component>
+  <fixr:component id='3502' name='VenueB2'>
+    <fixr:componentRef id='3001' />
+    <fixr:componentRef id='3501' />
+  </fixr:component>
+  <fixr:component id='3003' name='VenueA3'>
+    <fixr:componentRef id='3002' />
+    <fixr:componentRef id='3502' />
+  </fixr:component>
+  <fixr:component id='3503' name='VenueB3'>
+    <fixr:componentRef id='3002' />
+    <fixr:componentRef id='3502' />
+  </fixr:component>
+  <fixr:component id='3004' name='VenueA4'>
+    <fixr:componentRef id='3003' />
+    <fixr:componentRef id='3503' />
+  </fixr:component>
+  <fixr:component id='3504' name='VenueB4'>
+    <fixr:componentRef id='3003' />
+    <fixr:componentRef id='3503' />
+  </fixr:component>
+  <fixr:component id='3005' name='VenueA5'>
+    <fixr:componentRef id='3004' />
+    <fixr:componentRef id='3504' />
+  </fixr:component>
+  <fixr:component id='3505' name='VenueB5'>
+    <fixr:componentRef id='3004' />
+    <fixr:componentRef id='3504' />
+  </fixr:component>
+  <fixr:component id='3006' name='VenueA6'>
+    <fixr:componentRef id='3005' />
+    <fixr:componentRef id='3505' />
+  </fixr:component>
+  <fixr:component id='3506' name='VenueB6'>
+    <fixr:componentRef id='3005' />
+    <fixr:componentRef id='3505' />
+  </fixr:component>
+  <fixr:component id='3007' name='VenueA7'>
+    <fixr:componentRef id='3006' />
+    <fixr:componentRef id='3506' />
+  </fixr:component>
+  <fixr:component id='3507' name='VenueB7'>
+    <fixr:componentRef id='3006' />
+    <fixr:componentRef id='3506' />
+  </fixr:component>
+  <fixr:component id='3008' name='VenueA8'>
+    <fixr:componentRef id='3007' />
+    <fixr:componentRef id='3507' />
+  </fixr:component>
+  <fixr:component id='3508' name='VenueB8'>
+    <fixr:componentRef id='3007' />
+    <fixr:componentRef id='3507' />
+  </fixr:component>
+  <fixr:component id='3009' name='VenueA9'>
+    <fixr:componentRef id='3008' />
+    <fixr:componentRef id='3508' />
+  </fixr:component>
+  <fixr:component id='3509' name='VenueB9'>
+    <fixr:componentRef id='3008' />
+    <fixr:componentRef id='3508' />
+  </fixr:component>
+  <fixr:component id='3010' name='VenueA10'>
+    <fixr:componentRef id='3009' />
+    <fixr:componentRef id='3509' />
+  </fixr:component>
+  <fixr:component id='3510' name='VenueB10'>
+    <fixr:componentRef id='3009' />
+    <fixr:componentRef id='3509' />
+  </fixr:component>
+  <fixr:component id='3011' name='VenueA11'>
+    <fixr:componentRef id='3010' />
+    <fixr:componentRef id='3510' />
+  </fixr:component>
+  <fixr:component id='3511' name='VenueB11'>
+    <fixr:componentRef id='3010' />
+    <fixr:componentRef id='3510' />
+  </fixr:component>
+  <fixr:component id='3012' name='VenueA12'>
+    <fixr:componentRef id='3011' />
+    <fixr:componentRef id='3511' />
+  </fixr:component>
+  <fixr:component id='3512' name='VenueB12'>
+    <fixr:componentRef id='3011' />
+    <fixr:componentRef id='3511' />
+  </fixr:component>
+  <fixr:component id='3013' name='VenueA13'>
+    <fixr:componentRef id='3012' />
+    <fixr:componentRef id='3512' />
+  </fixr:component>
+  <fixr:component id='3513' name='VenueB13'>
+    <fixr:componentRef id='3012' />
+    <fixr:componentRef id='3512' />
+  </fixr:component>
+  <fixr:component id='3014' name='VenueA14'>
+    <fixr:componentRef id='3013' />
+    <fixr:componentRef id='3513' />
+  </fixr:component>
+  <fixr:component id='3514' name='VenueB14'>
+    <fixr:componentRef id='3013' />
+    <fixr:componentRef id='3513' />
+  </fixr:component>
+  <fixr:component id='3015' name='VenueA15'>
+    <fixr:componentRef id='3014' />
+    <fixr:componentRef id='3514' />
+  </fixr:component>
+  <fixr:component id='3515' name='VenueB15'>
+    <fixr:componentRef id='3014' />
+    <fixr:componentRef id='3514' />
+  </fixr:component>
+  <fixr:component id='3016' name='VenueA16'>
+    <fixr:componentRef id='3015' />
+    <fixr:componentRef id='3515' />
+  </fixr:component>
+  <fixr:component id='3516' name='VenueB16'>
+    <fixr:componentRef id='3015' />
+    <fixr:componentRef id='3515' />
+  </fixr:component>
+  <fixr:component id='3017' name='VenueA17'>
+    <fixr:componentRef id='3016' />
+    <fixr:componentRef id='3516' />
+  </fixr:component>
+  <fixr:component id='3517' name='VenueB17'>
+    <fixr:componentRef id='3016' />
+    <fixr:componentRef id='3516' />
+  </fixr:component>
+  <fixr:component id='3018' name='VenueA18'>
+    <fixr:componentRef id='3017' />
+    <fixr:componentRef id='3517' />
+  </fixr:component>
+  <fixr:component id='3518' name='VenueB18'>
+    <fixr:componentRef id='3017' />
+    <fixr:componentRef id='3517' />
+  </fixr:component>
+  <fixr:component id='3019' name='VenueA19'>
+    <fixr:componentRef id='3018' />
+    <fixr:componentRef id='3518' />
+  </fixr:component>
+  <fixr:component id='3519' name='VenueB19'>
+    <fixr:componentRef id='3018' />
+    <fixr:componentRef id='3518' />
+  </fixr:component>
+  <fixr:component id='3020' name='VenueA20'>
+    <fixr:componentRef id='3019' />
+    <fixr:componentRef id='3519' />
+  </fixr:component>
+  <fixr:component id='3520' name='VenueB20'>
+    <fixr:componentRef id='3019' />
+    <fixr:componentRef id='3519' />
+  </fixr:component>
+  <fixr:component id='3021' name='VenueA21'>
+    <fixr:componentRef id='3020' />
+    <fixr:componentRef id='3520' />
+  </fixr:component>
+  <fixr:component id='3521' name='VenueB21'>
+    <fixr:componentRef id='3020' />
+    <fixr:componentRef id='3520' />
+  </fixr:component>
+  <fixr:component id='3022' name='VenueA22'>
+    <fixr:componentRef id='3021' />
+    <fixr:componentRef id='3521' />
+  </fixr:component>
+  <fixr:component id='3522' name='VenueB22'>
+    <fixr:componentRef id='3021' />
+    <fixr:componentRef id='3521' />
+  </fixr:component>
+  <fixr:component id='3023' name='VenueA23'>
+    <fixr:componentRef id='3022' />
+    <fixr:componentRef id='3522' />
+  </fixr:component>
+  <fixr:component id='3523' name='VenueB23'>
+    <fixr:componentRef id='3022' />
+    <fixr:componentRef id='3522' />
+  </fixr:component>
+  <fixr:component id='3024' name='VenueA24'>
+    <fixr:componentRef id='3023' />
+    <fixr:componentRef id='3523' />
+  </fixr:component>
+  <fixr:component id='3524' name='VenueB24'>
+    <fixr:componentRef id='3023' />
+    <fixr:componentRef id='3523' />
+  </fixr:component>
+  <fixr:component id='3025' name='VenueA25'>
+    <fixr:componentRef id='3024' />
+    <fixr:componentRef id='3524' />
+  </fixr:component>
+  <fixr:component id='3525' name='VenueB25'>
+    <fixr:componentRef id='3024' />
+    <fixr:componentRef id='3524' />
+  </fixr:component>
+  <fixr:component id='3026' name='VenueA26'>
+    <fixr:componentRef id='3025' />
+    <fixr:componentRef id='3525' />
+  </fixr:component>
+  <fixr:component id='3526' name='VenueB26'>
+    <fixr:componentRef id='3025' />
+    <fixr:componentRef id='3525' />
+  </fixr:component>
+  <fixr:component id='3027' name='VenueA27'>
+    <fixr:componentRef id='3026' />
+    <fixr:componentRef id='3526' />
+  </fixr:component>
+  <fixr:component id='3527' name='VenueB27'>
+    <fixr:componentRef id='3026' />
+    <fixr:componentRef id='3526' />
+  </fixr:component>
+  <fixr:component id='3028' name='VenueA28'>
+    <fixr:componentRef id='3027' />
+    <fixr:componentRef id='3527' />
+  </fixr:component>
+  <fixr:component id='3528' name='VenueB28'>
+    <fixr:componentRef id='3027' />
+    <fixr:componentRef id='3527' />
+  </fixr:component>
+  <fixr:component id='3029' name='VenueA29'>
+    <fixr:componentRef id='3028' />
+    <fixr:componentRef id='3528' />
+  </fixr:component>
+  <fixr:component id='3529' name='VenueB29'>
+    <fixr:componentRef id='3028' />
+    <fixr:componentRef id='3528' />
+  </fixr:component>
+  <fixr:component id='3030' name='VenueA30'>
+    <fixr:componentRef id='3029' />
+    <fixr:componentRef id='3529' />
+  </fixr:component>
+  <fixr:component id='3530' name='VenueB30'>
+    <fixr:componentRef id='3029' />
+    <fixr:componentRef id='3529' />
+  </fixr:component>
+  <fixr:component id='3031' name='VenueA31'>
+    <fixr:componentRef id='3030' />
+    <fixr:componentRef id='3530' />
+  </fixr:component>
+  <fixr:component id='3531' name='VenueB31'>
+    <fixr:componentRef id='3030' />
+    <fixr:componentRef id='3530' />
+  </fixr:component>
+ </fixr:components>
+</fixr:repository>

@@ -716,6 +716,8 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
  *   all *_config_set_* setters      | hold    | in-memory
  *   dict_load_from_xml              | hold    | sync file/XML parse; CPU-bound, NO engine round-trip ->
  *                                   |         |   no worker-deadlock class (releasing for throughput = deferred nicety, not a gap)
+ *   dict_load_from_xml_with_overlay | hold    | dict_load_from_xml's reason (098 research R-12); the
+ *                                   |         |   expansion budget bounds its work
  *   dict_destroy                    | hold    | in-memory
  *   all msg_* (create/set/commit/   | hold    | in-memory arena ops
  *     get/destroy)                  |         |
@@ -786,7 +788,7 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
 %include "fix/c_api/error.h"    /* fixpp_error_t (int32) + codes */
 %include "fix/c_api/handles.h"  /* opaque handle typedefs */
 %include "fix/c_api/version.h"  /* FIXPP_C_ABI_VERSION_* macros */
-%include "fix/c_api/dict.h"     /* dict load / destroy (both in scope) */
+%include "fix/c_api/dict.h"     /* dict loads / destroy (all in scope) */
 %include "fix/c_api/engine.h"   /* engine + engine-config (all in scope) */
 %include "fix/c_api/session.h"  /* session lifecycle + session-config builder */
 

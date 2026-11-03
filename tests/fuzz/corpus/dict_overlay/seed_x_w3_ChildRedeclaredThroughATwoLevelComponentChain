@@ -1,0 +1,7 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='ExecutionReport' msgtype='8' msgcat='app'>
+   <field name='NoPartyIDs' required='N' />
+  </message>
+ </messages>
+</fix>

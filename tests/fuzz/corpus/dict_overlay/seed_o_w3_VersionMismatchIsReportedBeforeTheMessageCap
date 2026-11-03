@@ -1,0 +1,264 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP999'>
+ <fixr:messages>
+  <fixr:message id='9000' name='VenueM0' msgType='U100'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9001' name='VenueM1' msgType='U101'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9002' name='VenueM2' msgType='U102'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9003' name='VenueM3' msgType='U103'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9004' name='VenueM4' msgType='U104'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9005' name='VenueM5' msgType='U105'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9006' name='VenueM6' msgType='U106'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9007' name='VenueM7' msgType='U107'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9008' name='VenueM8' msgType='U108'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9009' name='VenueM9' msgType='U109'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9010' name='VenueM10' msgType='U110'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9011' name='VenueM11' msgType='U111'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9012' name='VenueM12' msgType='U112'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9013' name='VenueM13' msgType='U113'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9014' name='VenueM14' msgType='U114'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9015' name='VenueM15' msgType='U115'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9016' name='VenueM16' msgType='U116'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9017' name='VenueM17' msgType='U117'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9018' name='VenueM18' msgType='U118'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9019' name='VenueM19' msgType='U119'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9020' name='VenueM20' msgType='U120'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9021' name='VenueM21' msgType='U121'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9022' name='VenueM22' msgType='U122'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9023' name='VenueM23' msgType='U123'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9024' name='VenueM24' msgType='U124'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9025' name='VenueM25' msgType='U125'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9026' name='VenueM26' msgType='U126'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9027' name='VenueM27' msgType='U127'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9028' name='VenueM28' msgType='U128'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9029' name='VenueM29' msgType='U129'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9030' name='VenueM30' msgType='U130'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9031' name='VenueM31' msgType='U131'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9032' name='VenueM32' msgType='U132'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9033' name='VenueM33' msgType='U133'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9034' name='VenueM34' msgType='U134'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9035' name='VenueM35' msgType='U135'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9036' name='VenueM36' msgType='U136'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9037' name='VenueM37' msgType='U137'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9038' name='VenueM38' msgType='U138'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9039' name='VenueM39' msgType='U139'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9040' name='VenueM40' msgType='U140'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9041' name='VenueM41' msgType='U141'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9042' name='VenueM42' msgType='U142'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9043' name='VenueM43' msgType='U143'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9044' name='VenueM44' msgType='U144'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9045' name='VenueM45' msgType='U145'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9046' name='VenueM46' msgType='U146'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9047' name='VenueM47' msgType='U147'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9048' name='VenueM48' msgType='U148'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9049' name='VenueM49' msgType='U149'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9050' name='VenueM50' msgType='U150'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9051' name='VenueM51' msgType='U151'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9052' name='VenueM52' msgType='U152'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9053' name='VenueM53' msgType='U153'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9054' name='VenueM54' msgType='U154'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9055' name='VenueM55' msgType='U155'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9056' name='VenueM56' msgType='U156'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9057' name='VenueM57' msgType='U157'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9058' name='VenueM58' msgType='U158'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9059' name='VenueM59' msgType='U159'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9060' name='VenueM60' msgType='U160'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9061' name='VenueM61' msgType='U161'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9062' name='VenueM62' msgType='U162'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9063' name='VenueM63' msgType='U163'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+  <fixr:message id='9064' name='VenueM64' msgType='U164'>
+   <fixr:structure>
+   </fixr:structure>
+  </fixr:message>
+ </fixr:messages>
+</fixr:repository>

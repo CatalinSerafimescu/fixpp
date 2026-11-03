@@ -1,0 +1,8 @@
+O<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' version='FIX.Latest_EP303'>
+ <fixr:groups>
+  <fixr:group id='2099' name='VenueG'>
+    <fixr:numInGroup id='78' />
+    <fixr:numInGroup id='453' />
+  </fixr:group>
+ </fixr:groups>
+</fixr:repository>

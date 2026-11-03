@@ -1,0 +1,66 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-2, the Orchestra row: an
+  overlay of dictionaries/orchestra/OrchestraFIXLatest.xml. Its reference is
+  Orchestra.patch beside it, written from the base file and never derived from
+  the merge (FR-017 (b)): an insertion patch that appends each addition at the
+  end of its matched container, after that container's last child element (a
+  trailing fixr:annotation included), in overlay document order (spec.md
+  Terminology; research R-3's Orchestra table). The patch rewrites a line in
+  place only for a Required promotion of an existing reference (contracts
+  W-1); every addition here is Optional except Custom098Private's
+  Custom098PrivateRef, which sits in a new message.
+-->
+<fixr:repository xmlns:fixr="http://fixprotocol.io/2020/orchestra/repository" name="FIX.Latest" version="FIX.Latest_EP303">
+  <fixr:codeSets>
+    <fixr:codeSet id="35" name="MsgTypeCodeSet" type="String">
+      <!-- code added to an existing code set: the new message's MsgType -->
+      <fixr:code id="35900" name="Custom098Private" value="U1" />
+    </fixr:codeSet>
+  </fixr:codeSets>
+  <fixr:fields>
+    <!-- new fields -->
+    <fixr:field id="5002" name="Custom098PartyTag" type="String" />
+    <fixr:field id="5003" name="Custom098PrivateRef" type="String" />
+    <fixr:field id="5004" name="Custom098VenueTag" type="String" />
+    <fixr:field id="5020" name="Custom098HeaderTag" type="String" />
+  </fixr:fields>
+  <fixr:components>
+    <fixr:component id="1024" name="StandardHeader">
+      <!-- field added to the header (component 1024) -->
+      <fixr:fieldRef id="5020" />
+    </fixr:component>
+  </fixr:components>
+  <fixr:groups>
+    <fixr:group id="1012" name="Parties">
+      <fixr:numInGroup id="453" />
+      <!-- member added to an existing group -->
+      <fixr:fieldRef id="5002" />
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <!-- field added to existing messages -->
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure>
+        <fixr:fieldRef id="5004" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="9" name="ExecutionReport" msgType="8">
+      <fixr:structure>
+        <fixr:fieldRef id="5004" />
+      </fixr:structure>
+    </fixr:message>
+    <fixr:message id="14" name="NewOrderSingle" msgType="D">
+      <fixr:structure>
+        <fixr:fieldRef id="5004" />
+      </fixr:structure>
+    </fixr:message>
+    <!-- new message with a required field -->
+    <fixr:message id="9800" name="Custom098Private" msgType="U1">
+      <fixr:structure>
+        <fixr:componentRef id="1024" presence="required" />
+        <fixr:fieldRef id="5003" presence="required" />
+        <fixr:componentRef id="1025" presence="required" />
+      </fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>

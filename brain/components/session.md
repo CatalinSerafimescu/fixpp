@@ -11,6 +11,7 @@ refs:
   - include/fixpp/session/message_store.hpp
   - include/fixpp/session/engine.hpp
   - src/session/session.cpp
+  - src/session/send_header_tags.hpp
   - src/session/engine.cpp
   - src/session/session_strand.cpp
   - .specify/447-458-452-capi-refusals.md
@@ -51,6 +52,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/b41-563-564-measurement.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-tasks.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/563-564-callback-send-verify.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/098-dialect-overlay-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -164,6 +166,12 @@ The authority is therefore split three ways, and knowing the split is most of th
   They pull in opposite directions: the send table (`is_send_header_tag`) must be a SUPERSET of any
   real header, or a header field stays behind the body; the replay's `kReplayHeaderTags` only needs to
   be a SUBSET (B-419-1). Reading the set from the session's dictionary was not taken either (L-422-1).
+  ⚠️ **Superseded in part by 098 (`098-dialect-overlay`, FR-022):** the send path now also asks the
+  session dictionary. After a miss in the fixed set (`kSendHeaderTags` / `is_send_header_tag`, moved
+  unchanged into `src/session/send_header_tags.hpp`), a tag the dictionary declares in its header
+  (`table_view::is_header_tag`) is header-class too; a counted Data value still follows its Length.
+  The two-table split stands: `kReplayHeaderTags` is unchanged. L-422-1 sits in the closed B&L file;
+  the live row is B-098-5.
 - **Putting the canonical outbound-tag rule in `wire/tag_scan.hpp`** (fixpp#421). That header serves
   the inbound scanners, which accept zero padding by design; the outbound rule
   (`parse_outbound_tag`) stays in `session.cpp`.

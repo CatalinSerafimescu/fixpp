@@ -1,0 +1,7 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <components>
+  <component name='Instrument'>
+   <field name='Text' required='N' />
+  </component>
+ </components>
+</fix>

@@ -254,23 +254,27 @@ void check_required_keys(const toml::table& merged, std::string_view key_prefix,
 //   - in the step-2 DEFERRED set → recognized_not_yet_supported_step2
 //     (a deferral reads differently from a typo)
 //   - in the RECOGNIZED set      → handled by the mappers/resolvers (skip)
+//   - `dialect_overlay`          → a session key (098-dialect-overlay, research R-9):
+//     recognized in [default] and [[session]] (the selector resolver loads it),
+//     refused at root with invalid_or_contradictory_selector
 //   - otherwise                  → unknown_key
 //
 // Only top-level keys are walked; sub-table interiors (transport.host,
-// cert_source.cert_file, …) are validated by the mappers/resolvers. A single
+// cert_source.cert_file, …) are validated by the mappers/resolvers. Root scope
+// is the call with an empty `key_prefix`. Apart from `dialect_overlay`, a single
 // union recognized-set is applied at both engine (root) and per-session scope
 // — slightly permissive (e.g. a session-scalar name at root is tolerated) but
 // it never false-flags a legitimately-placed key, which would break US1 / the
-// positive cells. `reject_policy` is RECOGNIZED here (scalar_mappers already
+// positive cells. `dialect_overlay` is refused at root rather than tolerated
+// because tolerating it would turn a refusal into a silent no-op.
+// `reject_policy` is RECOGNIZED here (scalar_mappers already
 // emits its step-2 diagnostic — re-flagging would corrupt collect-ALL counts).
 void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                     detail::DiagnosticAccumulator& acc) {
     static const std::unordered_set<std::string_view> kDeferred = {
         // "logger" moved to kRecognized (045 FR-022 — logging leg now supported)
-        "log_sink",        "tracer",        "meter",         "otlp",
-        "prometheus",      "exporter",      "tap",           "tap_consumer",
-        "arena",           "message_arena", "session_arena", "framer_carry_arena",
-        "dialect_overlay",
+        "log_sink", "tracer",       "meter", "otlp",          "prometheus",    "exporter",
+        "tap",      "tap_consumer", "arena", "message_arena", "session_arena", "framer_carry_arena",
     };
     static const std::unordered_set<std::string_view> kRecognized = {
         // structural
@@ -325,7 +329,17 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
         const std::string_view k = key.str();
         std::string path =
             key_prefix.empty() ? std::string{k} : std::string{key_prefix} + "." + std::string{k};
-        if (kDeferred.contains(k)) {
+        if (k == "dialect_overlay") {
+            if (key_prefix.empty()) {
+                acc.add(LoadDiagnostic{
+                    .key_path = std::move(path),
+                    .reason = reason_class::invalid_or_contradictory_selector,
+                    .location = loc_from_region(node.source()),
+                    .message =
+                        "dialect_overlay is a session key; set it in [default] or [[session]]",
+                });
+            }
+        } else if (kDeferred.contains(k)) {
             acc.add(LoadDiagnostic{
                 .key_path = std::move(path),
                 .reason = reason_class::recognized_not_yet_supported_step2,
@@ -466,8 +480,9 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
             return std::unexpected(std::move(acc).release());
         }
 
-        // Key recognition (FR-018a / E-6) — flag step-2-deferred (e.g. [logger],
-        // dialect_overlay) + unknown keys at every authoring scope:
+        // Key recognition (FR-018a / E-6) — flag the keys of recognize_keys' kDeferred
+        // set + unknown keys at every authoring scope, and refuse the session key
+        // dialect_overlay at root (it is recognized in [default] and [[session]]):
         //   - engine/root scope (e.g. a root-level [logger]);
         //   - the [default] table (a typo/step-2 key authored ONLY in [default]
         //     would otherwise be silently inherited by every session, unchecked);
@@ -535,8 +550,9 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
             detail::map_structured_members(merged, def.config, acc, key_prefix, &session_raw);
             check_required_keys(merged, key_prefix, acc);
 
-            // Per-session key recognition: flag session-level step-2-deferred keys
-            // (e.g. dialect_overlay) and typo'd unknown keys (FR-018a / E-6).
+            // Per-session key recognition: flag the keys of recognize_keys' kDeferred
+            // set and typo'd unknown keys (FR-018a / E-6); dialect_overlay is
+            // recognized here and loaded by the selector resolver.
             // Walk the RAW session table (real source locations; no inherited-default
             // duplication) — NOT the merged copy.
             recognize_keys(session_raw, key_prefix, acc);

@@ -15,8 +15,11 @@
 //     `component`, `group`, `messages`).
 //   - Move-only value semantics with heap-pinned metadata handle.
 //
-// OUT of scope this PR: `with_overlay`,
-// `resolve_application_version`, `was_dialect_promoted` — deferred.
+// Deferred: `was_dialect_promoted`. `resolve_application_version` is the free
+// function `dict::resolve_application_version` in <fixpp/dict/version_profile.hpp>.
+// There is no `with_overlay` member: an overlay is applied at load time, by
+// `XmlLoader::load_with_overlay[_from_string]`, `OrchestraLoader::load_with_overlay[_from_string]`
+// and `dict::load_any_with_overlay` (098-dialect-overlay).
 // `as_table_view()` implemented in 041-validation-gate-wiring (T008).
 
 #pragma once
@@ -218,6 +221,13 @@ public:
 private:
     friend class XmlLoader;
     friend class OrchestraLoader;  // 074: native Orchestra reader shares the private handle-ctor
+
+    // 098 (D-009 dialect overlay): test-only read access to the metadata handle goes
+    // through ONE named friend, defined in tests/support/dictionary_test_access.hpp
+    // (never installed). Give it read accessors only. Unconditional on purpose: a
+    // member gated behind a test macro would make a test TU's Dictionary a different
+    // class from the library's, an ODR violation (ill-formed, no diagnostic required).
+    friend struct dictionary_test_access;
 
     // Constructed from inside XmlLoader::load*; ctor body lives in the .cpp.
     Dictionary() noexcept = default;

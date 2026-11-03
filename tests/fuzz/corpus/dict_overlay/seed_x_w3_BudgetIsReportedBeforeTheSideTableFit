@@ -1,0 +1,573 @@
+X<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <components>
+  <component name='VenueC1'>
+   <component name='Instrument' required='N' />
+   <group name='NoVenueG1' required='N'>
+    <field name='VenueF1' required='N' />
+    <component name='Instrument' required='N' />
+   </group>
+  </component>
+  <component name='VenueC2'>
+   <component name='VenueC1' required='N' />
+   <group name='NoVenueG2' required='N'>
+    <field name='VenueF2' required='N' />
+    <component name='VenueC1' required='N' />
+   </group>
+  </component>
+  <component name='VenueC3'>
+   <component name='VenueC2' required='N' />
+   <group name='NoVenueG3' required='N'>
+    <field name='VenueF3' required='N' />
+    <component name='VenueC2' required='N' />
+   </group>
+  </component>
+  <component name='VenueC4'>
+   <component name='VenueC3' required='N' />
+   <group name='NoVenueG4' required='N'>
+    <field name='VenueF4' required='N' />
+    <component name='VenueC3' required='N' />
+   </group>
+  </component>
+  <component name='VenueC5'>
+   <component name='VenueC4' required='N' />
+   <group name='NoVenueG5' required='N'>
+    <field name='VenueF5' required='N' />
+    <component name='VenueC4' required='N' />
+   </group>
+  </component>
+  <component name='VenueC6'>
+   <component name='VenueC5' required='N' />
+   <group name='NoVenueG6' required='N'>
+    <field name='VenueF6' required='N' />
+    <component name='VenueC5' required='N' />
+   </group>
+  </component>
+  <component name='VenueC7'>
+   <component name='VenueC6' required='N' />
+   <group name='NoVenueG7' required='N'>
+    <field name='VenueF7' required='N' />
+    <component name='VenueC6' required='N' />
+   </group>
+  </component>
+  <component name='VenueC8'>
+   <component name='VenueC7' required='N' />
+   <group name='NoVenueG8' required='N'>
+    <field name='VenueF8' required='N' />
+    <component name='VenueC7' required='N' />
+   </group>
+  </component>
+  <component name='VenueC9'>
+   <component name='VenueC8' required='N' />
+   <group name='NoVenueG9' required='N'>
+    <field name='VenueF9' required='N' />
+    <component name='VenueC8' required='N' />
+   </group>
+  </component>
+  <component name='VenueC10'>
+   <component name='VenueC9' required='N' />
+   <group name='NoVenueG10' required='N'>
+    <field name='VenueF10' required='N' />
+    <component name='VenueC9' required='N' />
+   </group>
+  </component>
+  <component name='VenueC11'>
+   <component name='VenueC10' required='N' />
+   <group name='NoVenueG11' required='N'>
+    <field name='VenueF11' required='N' />
+    <component name='VenueC10' required='N' />
+   </group>
+  </component>
+  <component name='VenueC12'>
+   <component name='VenueC11' required='N' />
+   <group name='NoVenueG12' required='N'>
+    <field name='VenueF12' required='N' />
+    <component name='VenueC11' required='N' />
+   </group>
+  </component>
+  <component name='VenueC13'>
+   <component name='VenueC12' required='N' />
+   <group name='NoVenueG13' required='N'>
+    <field name='VenueF13' required='N' />
+    <component name='VenueC12' required='N' />
+   </group>
+  </component>
+  <component name='VenueC14'>
+   <component name='VenueC13' required='N' />
+   <group name='NoVenueG14' required='N'>
+    <field name='VenueF14' required='N' />
+    <component name='VenueC13' required='N' />
+   </group>
+  </component>
+  <component name='VenueC15'>
+   <component name='VenueC14' required='N' />
+   <group name='NoVenueG15' required='N'>
+    <field name='VenueF15' required='N' />
+    <component name='VenueC14' required='N' />
+   </group>
+  </component>
+  <component name='VenueC16'>
+   <component name='VenueC15' required='N' />
+   <group name='NoVenueG16' required='N'>
+    <field name='VenueF16' required='N' />
+    <component name='VenueC15' required='N' />
+   </group>
+  </component>
+  <component name='VenueC17'>
+   <component name='VenueC16' required='N' />
+   <group name='NoVenueG17' required='N'>
+    <field name='VenueF17' required='N' />
+    <component name='VenueC16' required='N' />
+   </group>
+  </component>
+  <component name='VenueC18'>
+   <component name='VenueC17' required='N' />
+   <group name='NoVenueG18' required='N'>
+    <field name='VenueF18' required='N' />
+    <component name='VenueC17' required='N' />
+   </group>
+  </component>
+  <component name='VenueC19'>
+   <component name='VenueC18' required='N' />
+   <group name='NoVenueG19' required='N'>
+    <field name='VenueF19' required='N' />
+    <component name='VenueC18' required='N' />
+   </group>
+  </component>
+  <component name='VenueC20'>
+   <component name='VenueC19' required='N' />
+   <group name='NoVenueG20' required='N'>
+    <field name='VenueF20' required='N' />
+    <component name='VenueC19' required='N' />
+   </group>
+  </component>
+  <component name='VenueC21'>
+   <component name='VenueC20' required='N' />
+   <group name='NoVenueG21' required='N'>
+    <field name='VenueF21' required='N' />
+    <component name='VenueC20' required='N' />
+   </group>
+  </component>
+  <component name='VenueC22'>
+   <component name='VenueC21' required='N' />
+   <group name='NoVenueG22' required='N'>
+    <field name='VenueF22' required='N' />
+    <component name='VenueC21' required='N' />
+   </group>
+  </component>
+  <component name='VenueC23'>
+   <component name='VenueC22' required='N' />
+   <group name='NoVenueG23' required='N'>
+    <field name='VenueF23' required='N' />
+    <component name='VenueC22' required='N' />
+   </group>
+  </component>
+  <component name='VenueC24'>
+   <component name='VenueC23' required='N' />
+   <group name='NoVenueG24' required='N'>
+    <field name='VenueF24' required='N' />
+    <component name='VenueC23' required='N' />
+   </group>
+  </component>
+  <component name='VenueC25'>
+   <component name='VenueC24' required='N' />
+   <group name='NoVenueG25' required='N'>
+    <field name='VenueF25' required='N' />
+    <component name='VenueC24' required='N' />
+   </group>
+  </component>
+  <component name='VenueC26'>
+   <component name='VenueC25' required='N' />
+   <group name='NoVenueG26' required='N'>
+    <field name='VenueF26' required='N' />
+    <component name='VenueC25' required='N' />
+   </group>
+  </component>
+  <component name='VenueC27'>
+   <component name='VenueC26' required='N' />
+   <group name='NoVenueG27' required='N'>
+    <field name='VenueF27' required='N' />
+    <component name='VenueC26' required='N' />
+   </group>
+  </component>
+  <component name='VenueC28'>
+   <component name='VenueC27' required='N' />
+   <group name='NoVenueG28' required='N'>
+    <field name='VenueF28' required='N' />
+    <component name='VenueC27' required='N' />
+   </group>
+  </component>
+  <component name='VenueC29'>
+   <component name='VenueC28' required='N' />
+   <group name='NoVenueG29' required='N'>
+    <field name='VenueF29' required='N' />
+    <component name='VenueC28' required='N' />
+   </group>
+  </component>
+  <component name='VenueC30'>
+   <component name='VenueC29' required='N' />
+   <group name='NoVenueG30' required='N'>
+    <field name='VenueF30' required='N' />
+    <component name='VenueC29' required='N' />
+   </group>
+  </component>
+  <component name='VenueC31'>
+   <component name='VenueC30' required='N' />
+   <group name='NoVenueG31' required='N'>
+    <field name='VenueF31' required='N' />
+    <component name='VenueC30' required='N' />
+   </group>
+  </component>
+  <component name='VenueC32'>
+   <component name='VenueC31' required='N' />
+   <group name='NoVenueG32' required='N'>
+    <field name='VenueF32' required='N' />
+    <component name='VenueC31' required='N' />
+   </group>
+  </component>
+  <component name='VenueC33'>
+   <component name='VenueC32' required='N' />
+   <group name='NoVenueG33' required='N'>
+    <field name='VenueF33' required='N' />
+    <component name='VenueC32' required='N' />
+   </group>
+  </component>
+  <component name='VenueC34'>
+   <component name='VenueC33' required='N' />
+   <group name='NoVenueG34' required='N'>
+    <field name='VenueF34' required='N' />
+    <component name='VenueC33' required='N' />
+   </group>
+  </component>
+  <component name='VenueC35'>
+   <component name='VenueC34' required='N' />
+   <group name='NoVenueG35' required='N'>
+    <field name='VenueF35' required='N' />
+    <component name='VenueC34' required='N' />
+   </group>
+  </component>
+  <component name='VenueC36'>
+   <component name='VenueC35' required='N' />
+   <group name='NoVenueG36' required='N'>
+    <field name='VenueF36' required='N' />
+    <component name='VenueC35' required='N' />
+   </group>
+  </component>
+  <component name='VenueC37'>
+   <component name='VenueC36' required='N' />
+   <group name='NoVenueG37' required='N'>
+    <field name='VenueF37' required='N' />
+    <component name='VenueC36' required='N' />
+   </group>
+  </component>
+  <component name='VenueC38'>
+   <component name='VenueC37' required='N' />
+   <group name='NoVenueG38' required='N'>
+    <field name='VenueF38' required='N' />
+    <component name='VenueC37' required='N' />
+   </group>
+  </component>
+  <component name='VenueC39'>
+   <component name='VenueC38' required='N' />
+   <group name='NoVenueG39' required='N'>
+    <field name='VenueF39' required='N' />
+    <component name='VenueC38' required='N' />
+   </group>
+  </component>
+  <component name='VenueC40'>
+   <component name='VenueC39' required='N' />
+   <group name='NoVenueG40' required='N'>
+    <field name='VenueF40' required='N' />
+    <component name='VenueC39' required='N' />
+   </group>
+  </component>
+  <component name='VenueC41'>
+   <component name='VenueC40' required='N' />
+   <group name='NoVenueG41' required='N'>
+    <field name='VenueF41' required='N' />
+    <component name='VenueC40' required='N' />
+   </group>
+  </component>
+  <component name='VenueC42'>
+   <component name='VenueC41' required='N' />
+   <group name='NoVenueG42' required='N'>
+    <field name='VenueF42' required='N' />
+    <component name='VenueC41' required='N' />
+   </group>
+  </component>
+  <component name='VenueC43'>
+   <component name='VenueC42' required='N' />
+   <group name='NoVenueG43' required='N'>
+    <field name='VenueF43' required='N' />
+    <component name='VenueC42' required='N' />
+   </group>
+  </component>
+  <component name='VenueC44'>
+   <component name='VenueC43' required='N' />
+   <group name='NoVenueG44' required='N'>
+    <field name='VenueF44' required='N' />
+    <component name='VenueC43' required='N' />
+   </group>
+  </component>
+  <component name='VenueC45'>
+   <component name='VenueC44' required='N' />
+   <group name='NoVenueG45' required='N'>
+    <field name='VenueF45' required='N' />
+    <component name='VenueC44' required='N' />
+   </group>
+  </component>
+  <component name='VenueC46'>
+   <component name='VenueC45' required='N' />
+   <group name='NoVenueG46' required='N'>
+    <field name='VenueF46' required='N' />
+    <component name='VenueC45' required='N' />
+   </group>
+  </component>
+  <component name='VenueC47'>
+   <component name='VenueC46' required='N' />
+   <group name='NoVenueG47' required='N'>
+    <field name='VenueF47' required='N' />
+    <component name='VenueC46' required='N' />
+   </group>
+  </component>
+  <component name='VenueC48'>
+   <component name='VenueC47' required='N' />
+   <group name='NoVenueG48' required='N'>
+    <field name='VenueF48' required='N' />
+    <component name='VenueC47' required='N' />
+   </group>
+  </component>
+  <component name='VenueC49'>
+   <component name='VenueC48' required='N' />
+   <group name='NoVenueG49' required='N'>
+    <field name='VenueF49' required='N' />
+    <component name='VenueC48' required='N' />
+   </group>
+  </component>
+  <component name='VenueC50'>
+   <component name='VenueC49' required='N' />
+   <group name='NoVenueG50' required='N'>
+    <field name='VenueF50' required='N' />
+    <component name='VenueC49' required='N' />
+   </group>
+  </component>
+  <component name='VenueC51'>
+   <component name='VenueC50' required='N' />
+   <group name='NoVenueG51' required='N'>
+    <field name='VenueF51' required='N' />
+    <component name='VenueC50' required='N' />
+   </group>
+  </component>
+  <component name='VenueC52'>
+   <component name='VenueC51' required='N' />
+   <group name='NoVenueG52' required='N'>
+    <field name='VenueF52' required='N' />
+    <component name='VenueC51' required='N' />
+   </group>
+  </component>
+  <component name='VenueC53'>
+   <component name='VenueC52' required='N' />
+   <group name='NoVenueG53' required='N'>
+    <field name='VenueF53' required='N' />
+    <component name='VenueC52' required='N' />
+   </group>
+  </component>
+  <component name='VenueC54'>
+   <component name='VenueC53' required='N' />
+   <group name='NoVenueG54' required='N'>
+    <field name='VenueF54' required='N' />
+    <component name='VenueC53' required='N' />
+   </group>
+  </component>
+  <component name='VenueC55'>
+   <component name='VenueC54' required='N' />
+   <group name='NoVenueG55' required='N'>
+    <field name='VenueF55' required='N' />
+    <component name='VenueC54' required='N' />
+   </group>
+  </component>
+  <component name='VenueC56'>
+   <component name='VenueC55' required='N' />
+   <group name='NoVenueG56' required='N'>
+    <field name='VenueF56' required='N' />
+    <component name='VenueC55' required='N' />
+   </group>
+  </component>
+  <component name='VenueC57'>
+   <component name='VenueC56' required='N' />
+   <group name='NoVenueG57' required='N'>
+    <field name='VenueF57' required='N' />
+    <component name='VenueC56' required='N' />
+   </group>
+  </component>
+  <component name='VenueC58'>
+   <component name='VenueC57' required='N' />
+   <group name='NoVenueG58' required='N'>
+    <field name='VenueF58' required='N' />
+    <component name='VenueC57' required='N' />
+   </group>
+  </component>
+  <component name='VenueC59'>
+   <component name='VenueC58' required='N' />
+   <group name='NoVenueG59' required='N'>
+    <field name='VenueF59' required='N' />
+    <component name='VenueC58' required='N' />
+   </group>
+  </component>
+  <component name='VenueC60'>
+   <component name='VenueC59' required='N' />
+   <group name='NoVenueG60' required='N'>
+    <field name='VenueF60' required='N' />
+    <component name='VenueC59' required='N' />
+   </group>
+  </component>
+  <component name='VenueC61'>
+   <component name='VenueC60' required='N' />
+   <group name='NoVenueG61' required='N'>
+    <field name='VenueF61' required='N' />
+    <component name='VenueC60' required='N' />
+   </group>
+  </component>
+  <component name='VenueC62'>
+   <component name='VenueC61' required='N' />
+   <group name='NoVenueG62' required='N'>
+    <field name='VenueF62' required='N' />
+    <component name='VenueC61' required='N' />
+   </group>
+  </component>
+  <component name='VenueC63'>
+   <component name='VenueC62' required='N' />
+   <group name='NoVenueG63' required='N'>
+    <field name='VenueF63' required='N' />
+    <component name='VenueC62' required='N' />
+   </group>
+  </component>
+ </components>
+ <fields>
+  <field number='20001' name='NoVenueG1' type='NUMINGROUP' />
+  <field number='21001' name='VenueF1' type='STRING' />
+  <field number='20002' name='NoVenueG2' type='NUMINGROUP' />
+  <field number='21002' name='VenueF2' type='STRING' />
+  <field number='20003' name='NoVenueG3' type='NUMINGROUP' />
+  <field number='21003' name='VenueF3' type='STRING' />
+  <field number='20004' name='NoVenueG4' type='NUMINGROUP' />
+  <field number='21004' name='VenueF4' type='STRING' />
+  <field number='20005' name='NoVenueG5' type='NUMINGROUP' />
+  <field number='21005' name='VenueF5' type='STRING' />
+  <field number='20006' name='NoVenueG6' type='NUMINGROUP' />
+  <field number='21006' name='VenueF6' type='STRING' />
+  <field number='20007' name='NoVenueG7' type='NUMINGROUP' />
+  <field number='21007' name='VenueF7' type='STRING' />
+  <field number='20008' name='NoVenueG8' type='NUMINGROUP' />
+  <field number='21008' name='VenueF8' type='STRING' />
+  <field number='20009' name='NoVenueG9' type='NUMINGROUP' />
+  <field number='21009' name='VenueF9' type='STRING' />
+  <field number='20010' name='NoVenueG10' type='NUMINGROUP' />
+  <field number='21010' name='VenueF10' type='STRING' />
+  <field number='20011' name='NoVenueG11' type='NUMINGROUP' />
+  <field number='21011' name='VenueF11' type='STRING' />
+  <field number='20012' name='NoVenueG12' type='NUMINGROUP' />
+  <field number='21012' name='VenueF12' type='STRING' />
+  <field number='20013' name='NoVenueG13' type='NUMINGROUP' />
+  <field number='21013' name='VenueF13' type='STRING' />
+  <field number='20014' name='NoVenueG14' type='NUMINGROUP' />
+  <field number='21014' name='VenueF14' type='STRING' />
+  <field number='20015' name='NoVenueG15' type='NUMINGROUP' />
+  <field number='21015' name='VenueF15' type='STRING' />
+  <field number='20016' name='NoVenueG16' type='NUMINGROUP' />
+  <field number='21016' name='VenueF16' type='STRING' />
+  <field number='20017' name='NoVenueG17' type='NUMINGROUP' />
+  <field number='21017' name='VenueF17' type='STRING' />
+  <field number='20018' name='NoVenueG18' type='NUMINGROUP' />
+  <field number='21018' name='VenueF18' type='STRING' />
+  <field number='20019' name='NoVenueG19' type='NUMINGROUP' />
+  <field number='21019' name='VenueF19' type='STRING' />
+  <field number='20020' name='NoVenueG20' type='NUMINGROUP' />
+  <field number='21020' name='VenueF20' type='STRING' />
+  <field number='20021' name='NoVenueG21' type='NUMINGROUP' />
+  <field number='21021' name='VenueF21' type='STRING' />
+  <field number='20022' name='NoVenueG22' type='NUMINGROUP' />
+  <field number='21022' name='VenueF22' type='STRING' />
+  <field number='20023' name='NoVenueG23' type='NUMINGROUP' />
+  <field number='21023' name='VenueF23' type='STRING' />
+  <field number='20024' name='NoVenueG24' type='NUMINGROUP' />
+  <field number='21024' name='VenueF24' type='STRING' />
+  <field number='20025' name='NoVenueG25' type='NUMINGROUP' />
+  <field number='21025' name='VenueF25' type='STRING' />
+  <field number='20026' name='NoVenueG26' type='NUMINGROUP' />
+  <field number='21026' name='VenueF26' type='STRING' />
+  <field number='20027' name='NoVenueG27' type='NUMINGROUP' />
+  <field number='21027' name='VenueF27' type='STRING' />
+  <field number='20028' name='NoVenueG28' type='NUMINGROUP' />
+  <field number='21028' name='VenueF28' type='STRING' />
+  <field number='20029' name='NoVenueG29' type='NUMINGROUP' />
+  <field number='21029' name='VenueF29' type='STRING' />
+  <field number='20030' name='NoVenueG30' type='NUMINGROUP' />
+  <field number='21030' name='VenueF30' type='STRING' />
+  <field number='20031' name='NoVenueG31' type='NUMINGROUP' />
+  <field number='21031' name='VenueF31' type='STRING' />
+  <field number='20032' name='NoVenueG32' type='NUMINGROUP' />
+  <field number='21032' name='VenueF32' type='STRING' />
+  <field number='20033' name='NoVenueG33' type='NUMINGROUP' />
+  <field number='21033' name='VenueF33' type='STRING' />
+  <field number='20034' name='NoVenueG34' type='NUMINGROUP' />
+  <field number='21034' name='VenueF34' type='STRING' />
+  <field number='20035' name='NoVenueG35' type='NUMINGROUP' />
+  <field number='21035' name='VenueF35' type='STRING' />
+  <field number='20036' name='NoVenueG36' type='NUMINGROUP' />
+  <field number='21036' name='VenueF36' type='STRING' />
+  <field number='20037' name='NoVenueG37' type='NUMINGROUP' />
+  <field number='21037' name='VenueF37' type='STRING' />
+  <field number='20038' name='NoVenueG38' type='NUMINGROUP' />
+  <field number='21038' name='VenueF38' type='STRING' />
+  <field number='20039' name='NoVenueG39' type='NUMINGROUP' />
+  <field number='21039' name='VenueF39' type='STRING' />
+  <field number='20040' name='NoVenueG40' type='NUMINGROUP' />
+  <field number='21040' name='VenueF40' type='STRING' />
+  <field number='20041' name='NoVenueG41' type='NUMINGROUP' />
+  <field number='21041' name='VenueF41' type='STRING' />
+  <field number='20042' name='NoVenueG42' type='NUMINGROUP' />
+  <field number='21042' name='VenueF42' type='STRING' />
+  <field number='20043' name='NoVenueG43' type='NUMINGROUP' />
+  <field number='21043' name='VenueF43' type='STRING' />
+  <field number='20044' name='NoVenueG44' type='NUMINGROUP' />
+  <field number='21044' name='VenueF44' type='STRING' />
+  <field number='20045' name='NoVenueG45' type='NUMINGROUP' />
+  <field number='21045' name='VenueF45' type='STRING' />
+  <field number='20046' name='NoVenueG46' type='NUMINGROUP' />
+  <field number='21046' name='VenueF46' type='STRING' />
+  <field number='20047' name='NoVenueG47' type='NUMINGROUP' />
+  <field number='21047' name='VenueF47' type='STRING' />
+  <field number='20048' name='NoVenueG48' type='NUMINGROUP' />
+  <field number='21048' name='VenueF48' type='STRING' />
+  <field number='20049' name='NoVenueG49' type='NUMINGROUP' />
+  <field number='21049' name='VenueF49' type='STRING' />
+  <field number='20050' name='NoVenueG50' type='NUMINGROUP' />
+  <field number='21050' name='VenueF50' type='STRING' />
+  <field number='20051' name='NoVenueG51' type='NUMINGROUP' />
+  <field number='21051' name='VenueF51' type='STRING' />
+  <field number='20052' name='NoVenueG52' type='NUMINGROUP' />
+  <field number='21052' name='VenueF52' type='STRING' />
+  <field number='20053' name='NoVenueG53' type='NUMINGROUP' />
+  <field number='21053' name='VenueF53' type='STRING' />
+  <field number='20054' name='NoVenueG54' type='NUMINGROUP' />
+  <field number='21054' name='VenueF54' type='STRING' />
+  <field number='20055' name='NoVenueG55' type='NUMINGROUP' />
+  <field number='21055' name='VenueF55' type='STRING' />
+  <field number='20056' name='NoVenueG56' type='NUMINGROUP' />
+  <field number='21056' name='VenueF56' type='STRING' />
+  <field number='20057' name='NoVenueG57' type='NUMINGROUP' />
+  <field number='21057' name='VenueF57' type='STRING' />
+  <field number='20058' name='NoVenueG58' type='NUMINGROUP' />
+  <field number='21058' name='VenueF58' type='STRING' />
+  <field number='20059' name='NoVenueG59' type='NUMINGROUP' />
+  <field number='21059' name='VenueF59' type='STRING' />
+  <field number='20060' name='NoVenueG60' type='NUMINGROUP' />
+  <field number='21060' name='VenueF60' type='STRING' />
+  <field number='20061' name='NoVenueG61' type='NUMINGROUP' />
+  <field number='21061' name='VenueF61' type='STRING' />
+  <field number='20062' name='NoVenueG62' type='NUMINGROUP' />
+  <field number='21062' name='VenueF62' type='STRING' />
+  <field number='20063' name='NoVenueG63' type='NUMINGROUP' />
+  <field number='21063' name='VenueF63' type='STRING' />
+ </fields>
+</fix>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/table_view_builder_differential_test.cpp — fixpp#456, §6 seam 4.
 //
-// `build()` must produce the same table the old direct population did. Sixteen
+// `build()` must produce the same table the old direct population did. The
 // near-identical one-line forwarders are exactly the shape where an argument gets
 // forwarded in the wrong order or to the wrong sibling, and every one of those
 // mistakes COMPILES wherever the two parameters share a type.

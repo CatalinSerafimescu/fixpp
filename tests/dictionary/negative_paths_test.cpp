@@ -491,6 +491,20 @@ TEST(NegativePaths, ZeroFieldNumberThrowsXmlParseError) {
     expect_xml_parse_error_contains(kXml, R"(<field number="0"> non-numeric or out-of-range)");
 }
 
+// The other range guards of `parse_field_number`: a number above 65535 and one with
+// trailing junk get the same out-of-range error.
+TEST(NegativePaths, FieldNumberAboveTheTagRangeOrWithTrailingJunkThrows) {
+    for (std::string_view const number : {"70000", "12x"}) {
+        std::string const xml =
+            std::string{
+                "<fix type='FIX' major='4' minor='4' servicepack='0'>"
+                "<fields><field number='"} +
+            std::string{number} + "' name='Foo' type='STRING'/></fields><messages/></fix>";
+        expect_xml_parse_error_contains(
+            xml, "<field number=\"" + std::string{number} + "\"> non-numeric or out-of-range");
+    }
+}
+
 // Pins the two values a fixpp#457-shaped rule must NOT refuse: 0 where it is a
 // version number (`minor`/`servicepack`, parsed by `parse_nonneg_int` — a
 // different parser from the `<field number>` parse), and 1, the smallest valid

@@ -1,0 +1,146 @@
+X<!--
+  098-dialect-overlay, contracts/witnesses.md W-1: the overlay of the small
+  QuickFIX-XML triple (see base.xml). It must cover every addition kind of
+  W-1's closed list; each is named in the comment beside it; edited.xml is its
+  hand-written complete reference.
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <header>
+  <!-- field added to the header -->
+  <field name='VenueHdrTag' required='N' />
+  <!-- group added to the header -->
+  <group name='NoVenueHops' required='N'>
+   <field name='VenueHopID' required='N' />
+  </group>
+ </header>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <!-- Required promotion on a message child -->
+   <field name='Account' required='Y' />
+   <!-- field added to an existing message (a new field of a non-string type) -->
+   <field name='VenueQty' required='N' />
+   <!-- group added to an existing message; its first child is its delimiter -->
+   <group name='NoVenueFills' required='N'>
+    <field name='VenueFillID' required='N' />
+    <field name='VenueFillQty' required='N' />
+   </group>
+   <!-- custom Length+Data pair -->
+   <field name='VenueLen' required='N' />
+   <field name='VenueData' required='N' />
+   <!-- an existing inline group, extended -->
+   <group name='NoAllocs' required='N'>
+    <!-- Required promotion on a group child (attribute absent in the base) -->
+    <field name='AllocQty' required='Y' />
+    <!-- member added to an existing inline group -->
+    <field name='VenueAllocNote' required='N' />
+    <!-- group nested in an existing group -->
+    <group name='NoVenueAllocTags' required='N'>
+     <field name='VenueAllocTag' required='N' />
+    </group>
+    <!-- component reference added to an existing group -->
+    <component name='VenueAllocBlock' required='N' />
+   </group>
+  </message>
+  <message name='ExecutionReport' msgtype='8' msgcat='app'>
+   <!-- a new DATA after a base LENGTH (BaseBlobLen) that <fields> already
+        pairs with BaseBlob, earlier in detect_length_pairs's visit order -->
+   <field name='VenueBlob' required='N' />
+   <!-- component reference added to an existing message -->
+   <component name='VenueBlock' required='N' />
+   <!-- member appended to a group whose existing members emit nothing -->
+   <group name='NoEvents' required='N'>
+    <field name='VenueEventTag' required='N' />
+   </group>
+  </message>
+  <!-- new message, with a required field, a new group and a new component -->
+  <message name='VenuePrivate' msgtype='U1' msgcat='app'>
+   <field name='VenueRef' required='Y' />
+   <group name='NoVenueLegs' required='N'>
+    <field name='VenueLegID' required='N' />
+    <field name='VenueLegCapacity' required='N' />
+   </group>
+   <component name='VenueBlock' required='N' />
+  </message>
+ </messages>
+ <components>
+  <component name='Instrument'>
+   <!-- Required promotion on a component child -->
+   <field name='SecurityID' required='Y' />
+   <!-- field added to an existing component -->
+   <field name='VenueSymbolSfx' required='N' />
+   <!-- group added to an existing component -->
+   <group name='NoVenueAltIDs' required='N'>
+    <field name='VenueAltID' required='N' />
+   </group>
+   <!-- component reference added to an existing component -->
+   <component name='VenueSubBlock' required='N' />
+  </component>
+  <component name='Parties'>
+   <group name='NoPartyIDs' required='N'>
+    <!-- member added to an existing group inside a component -->
+    <field name='VenuePartyNote' required='N' />
+   </group>
+  </component>
+  <!-- new components -->
+  <component name='VenueBlock'>
+   <field name='VenueBlockA' required='N' />
+   <field name='VenueBlockB' required='N' />
+  </component>
+  <component name='VenueSubBlock'>
+   <field name='VenueSubTag' required='N' />
+  </component>
+  <component name='VenueAllocBlock'>
+   <field name='VenueAllocBlockTag' required='N' />
+  </component>
+ </components>
+ <fields>
+  <!-- identical redeclaration of a base field: a no-op -->
+  <field number='11' name='ClOrdID' type='STRING' />
+  <field number='54' name='Side' type='CHAR'>
+   <!-- identical redeclaration of an existing enum value: a no-op -->
+   <value enum='1' description='BUY' />
+   <!-- enum value on an existing field -->
+   <value enum='Z' description='VENUE_CROSS' />
+  </field>
+  <!-- enum value on a base field with no values (N-2: the domain closes) -->
+  <field number='58' name='Text' type='STRING'>
+   <value enum='VENUE' description='VENUE_TEXT' />
+  </field>
+  <!-- new fields -->
+  <field number='9001' name='VenueQty' type='QTY' />
+  <!-- a new field with enum values -->
+  <field number='9002' name='VenueLegCapacity' type='CHAR'>
+   <value enum='A' description='AGENCY' />
+   <value enum='P' description='PRINCIPAL' />
+  </field>
+  <field number='9003' name='VenueBlockA' type='STRING' />
+  <field number='9004' name='VenueBlockB' type='INT' />
+  <field number='9005' name='VenueRef' type='STRING' />
+  <field number='9006' name='NoVenueLegs' type='NUMINGROUP' />
+  <field number='9007' name='VenueLegID' type='STRING' />
+  <field number='9008' name='NoVenueFills' type='NUMINGROUP' />
+  <field number='9009' name='VenueFillID' type='STRING' />
+  <field number='9010' name='VenueFillQty' type='QTY' />
+  <field number='9011' name='VenueSymbolSfx' type='STRING' />
+  <field number='9012' name='NoVenueAltIDs' type='NUMINGROUP' />
+  <field number='9013' name='VenueAltID' type='STRING' />
+  <field number='9014' name='VenueSubTag' type='STRING' />
+  <field number='9015' name='VenueAllocNote' type='STRING' />
+  <field number='9016' name='NoVenueAllocTags' type='NUMINGROUP' />
+  <field number='9017' name='VenueAllocTag' type='STRING' />
+  <field number='9018' name='VenueAllocBlockTag' type='STRING' />
+  <field number='9019' name='VenuePartyNote' type='STRING' />
+  <field number='9020' name='VenueLen' type='LENGTH' />
+  <field number='9021' name='VenueData' type='DATA' />
+  <field number='9022' name='VenueBlob' type='DATA' />
+  <field number='9023' name='VenueEventTag' type='STRING' />
+  <field number='9024' name='VenueHdrTag' type='STRING' />
+  <field number='9025' name='NoVenueHops' type='NUMINGROUP' />
+  <field number='9026' name='VenueHopID' type='STRING' />
+  <field number='9027' name='VenueTrailerTag' type='STRING' />
+ </fields>
+ <!-- a container the base lacks, holding a field added to the trailer -->
+ <trailer>
+  <field name='VenueTrailerTag' required='N' />
+ </trailer>
+</fix>

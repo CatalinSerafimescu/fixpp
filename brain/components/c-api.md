@@ -6,6 +6,7 @@ status: stable
 refs:
   - include/fix/c_api.h
   - include/fix/c_api/version.h
+  - include/fix/c_api/dict.h
   - include/fix/c_api/handles.h
   - include/fix/c_api/session.h
   - src/capi/fixpp_capi.map
@@ -341,6 +342,33 @@ is B&L `B-537-5`. What follows is the half the headers do not state.
   whose wrapper was regenerated after the last C-ABI header change.
 
 Re-derive: `grep -n '1\.12' include/fix/c_api/*.h`.
+
+## C-ABI 1.13: a dictionary loaded with a dialect overlay (098)
+
+One MINOR bump, **additive**: one function, `fixpp_dict_load_from_xml_with_overlay(base_path,
+overlay_path, &out_dict)` in `include/fix/c_api/dict.h`, over `dict::load_any_with_overlay`. No error
+code is minted. The user-facing row is B&L `B-098-6`; what follows is the half the header does not
+state.
+
+- **Why its codes differ from its sibling's.** `fixpp_dict_load_from_xml` keeps mapping every failure
+  to `FIXPP_ERR_CAPI_CONFIG_INVALID`: spec FR-001 leaves the existing load paths unchanged. The new
+  call uses the DICT family because those codes say what failed. All three were already defined, so
+  no code is minted; the call is the first producer of `FIXPP_ERR_DICT_LIMIT_EXCEEDED` (research R-6).
+  The mapping is one function in R-6's catch order (`dict_overlay_error_code`,
+  `src/capi/dictionary.cpp`): limit, then `bad_alloc`, then any other exception.
+- **Code only, no detail (owner ruling, 2026-11-01).** The element or cap the C++ `what()` names does
+  not cross the ABI. **Rejected for 098:** an error-detail channel; it is the follow-up fixpp#649.
+- **Not offered:** `unresolved_group_policy`, the string form and a memory resource (research R-12).
+  The handle's ownership is the sibling's; a handle the caller left in `*out_dict` is overwritten, not
+  released.
+- **Python.** SWIG generates `fixpp.dict_load_from_xml_with_overlay`; its GIL row is `hold`, for
+  `dict_load_from_xml`'s reason. All three DICT codes raise `ValidatorError`, told apart by `.code`.
+  `fixpp_oo.Dictionary` is not extended.
+- **Gate files.** `tools/capi_freeze.sha256` is refreshed for the headers that moved (`dict.h`, `version.h`); the
+  occupancy and error-code history files are unchanged because no code is minted. Derive the set of
+  gate files with `git grep -l -e 'include/fix/c_api' -- tools .github/workflows ci tests/abi`.
+
+Re-derive: `grep -n '1\.13' include/fix/c_api/*.h`.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 

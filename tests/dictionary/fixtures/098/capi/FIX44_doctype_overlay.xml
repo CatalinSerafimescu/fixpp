@@ -1,0 +1,8 @@
+<!DOCTYPE fix>
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-9: the DOCTYPE overlay of the
+  C-ABI DOCTYPE row (spec US2 AS-3), over dictionaries/FIX44.xml. Condition: an
+  empty overlay but for its DOCTYPE, so the DOCTYPE is the only guard it fails.
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+</fix>

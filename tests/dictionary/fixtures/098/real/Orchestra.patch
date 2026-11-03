@@ -1,0 +1,49 @@
+@@ codeSet MsgTypeCodeSet (35): code U1 appended
+         <fixr:documentation purpose="SYNOPSIS">*** Note the use of lower case letters ***</fixr:documentation>
+       </fixr:annotation>
++      <fixr:code id="35900" name="Custom098Private" value="U1" />
+     </fixr:codeSet>
+@@ fields: new fields 5002-5004, 5020 appended
+     </fixr:field>
++    <fixr:field id="5002" name="Custom098PartyTag" type="String" />
++    <fixr:field id="5003" name="Custom098PrivateRef" type="String" />
++    <fixr:field id="5004" name="Custom098VenueTag" type="String" />
++    <fixr:field id="5020" name="Custom098HeaderTag" type="String" />
+   </fixr:fields>
+@@ component 1024 (StandardHeader): Custom098HeaderTag (5020) appended
+         <fixr:documentation purpose="SYNOPSIS">The standard FIX message header</fixr:documentation>
+       </fixr:annotation>
++      <fixr:fieldRef id="5020" />
+     </fixr:component>
+@@ group 1012 (Parties): Custom098PartyTag (5002) appended
+         <fixr:documentation purpose="SYNOPSIS">The Parties component block is used to identify and convey information on the entities both central and peripheral to the financial transaction represented by the FIX message containing the Parties Block. The Parties block allows many different types of entites to be expressed through use of the PartyRole field and identifies the source of the PartyID through the the PartyIDSource.</fixr:documentation>
+       </fixr:annotation>
++      <fixr:fieldRef id="5002" />
+     </fixr:group>
+@@ message Heartbeat (35=0): Custom098VenueTag (5004)
+                             Required when the heartbeat is the result of a Test Request message.</fixr:documentation>
+           </fixr:annotation>
+         </fixr:fieldRef>
+         <fixr:componentRef id="1025" presence="required" added="FIX.2.7" />
++        <fixr:fieldRef id="5004" />
+       </fixr:structure>
+@@ message ExecutionReport (35=8): Custom098VenueTag (5004)
+         <fixr:fieldRef id="1821" added="FIX.5.0SP2" addedEP="131" />
+         <fixr:componentRef id="1025" presence="required" added="FIX.2.7" />
++        <fixr:fieldRef id="5004" />
+       </fixr:structure>
+@@ message NewOrderSingle (35=D): Custom098VenueTag (5004)
+         <fixr:fieldRef id="1804" added="FIX.5.0SP2" addedEP="131" />
+         <fixr:componentRef id="1025" presence="required" added="FIX.2.7" />
++        <fixr:fieldRef id="5004" />
+       </fixr:structure>
+@@ messages: new message Custom098Private (35=U1) appended
+     </fixr:message>
++    <fixr:message id="9800" name="Custom098Private" msgType="U1">
++      <fixr:structure>
++        <fixr:componentRef id="1024" presence="required" />
++        <fixr:fieldRef id="5003" presence="required" />
++        <fixr:componentRef id="1025" presence="required" />
++      </fixr:structure>
++    </fixr:message>
+   </fixr:messages>

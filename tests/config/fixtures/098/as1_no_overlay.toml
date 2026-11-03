@@ -1,0 +1,28 @@
+# as1_no_overlay.toml
+# 098-dialect-overlay, contracts/witnesses.md W-8 AS-1: one session that names no
+# dialect_overlay; the loader gives it engine.dictionaries.front().
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "../FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT0"
+target_comp_id = "SERVER0"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

@@ -1,22 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // src/capi/dictionary.cpp — fixpp_dict_load_from_xml + fixpp_dict_destroy
-//                           (052 US1 / FR-001..003 / [2i §4.2.1])
+//                           (052 US1 / FR-001..003 / [2i §4.2.1]), and
+//                           fixpp_dict_load_from_xml_with_overlay (098, C-ABI 1.13)
 //
-// Two exported symbols:
+// Exported symbols:
 //   fixpp_dict_load_from_xml — construction-time thunk: catches XmlLoader
 //     exceptions → FIXPP_ERR_CAPI_CONFIG_INVALID; no exception crosses extern "C".
+//   fixpp_dict_load_from_xml_with_overlay — construction-time thunk over
+//     dict::load_any_with_overlay: catches every exception and maps it to a DICT
+//     code through dict_overlay_error_code (098 research R-6).
 //   fixpp_dict_destroy — THREAD_SAFE via a full-critical-section process-global
 //     mutex (FR-002): {tag_ check, dict.reset(), tag_=DEAD, dead-shell push}
 //     run atomically under the lock so concurrent same-pointer destroys serialise.
 
+#include <exception>
 #include <filesystem>
 #include <memory_resource>
 #include <mutex>
+#include <new>
 
 #include "capi_internal.hpp"
 #include "fix/c_api/dict.h"
 #include "fix/c_api/error.h"
+#include "fixpp/dict/error.hpp"
 #include "fixpp/dict/load_any.hpp"
 
 // ── Dead-shell registry (retained-shell tombstone, gate-b/r1 comment F4):
@@ -40,6 +47,28 @@ static fixpp_dict* s_dead_dict_head = nullptr;  // NOLINT(cert-err58-cpp)
 // the shared_ptr control block exposed to a concurrent read-then-write race.
 static std::mutex s_dict_destroy_mutex;  // NOLINT(cert-err58-cpp)
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
+
+namespace fixpp_capi::detail {
+
+// Research R-6's catch order. `overlay_limit_error` derives from `xml_parse_error`, and
+// `xml_oom_error` from `std::bad_alloc`, so each handler must precede the broader one.
+fixpp_error_t dict_overlay_error_code(std::exception_ptr const& ep) noexcept {
+    try {
+        // Every path returns: `rethrow_exception` is [[noreturn]] and every handler returns.
+        // cppcheck-suppress missingReturn
+        std::rethrow_exception(ep);
+    } catch (fixpp::dict::overlay_limit_error const&) {
+        return FIXPP_ERR_DICT_LIMIT_EXCEEDED;
+    } catch (std::bad_alloc const&) {
+        return FIXPP_ERR_DICT_OOM;
+    } catch (std::exception const&) {
+        return FIXPP_ERR_DICT_CONFIG;
+    } catch (...) {
+        return FIXPP_ERR_DICT_CONFIG;
+    }
+}
+
+}  // namespace fixpp_capi::detail
 
 extern "C" {
 
@@ -69,6 +98,34 @@ fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_dict_t** out_dict
     } catch (...) {
         *out_dict = nullptr;
         return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+}
+
+fixpp_error_t fixpp_dict_load_from_xml_with_overlay(const char* base_path, const char* overlay_path,
+                                                    fixpp_dict_t** out_dict) {
+    // The try covers the whole body (research R-6): the path conversions, make_shared
+    // and new throw a bare std::bad_alloc outside the loader, which maps to
+    // FIXPP_ERR_DICT_OOM like the loader's own xml_oom_error.
+    try {
+        if (out_dict == nullptr) {
+            return FIXPP_ERR_NULL_HANDLE;
+        }
+        *out_dict = nullptr;  // overwritten, not released (research R-12)
+        if (base_path == nullptr || overlay_path == nullptr) {
+            return FIXPP_ERR_NULL_HANDLE;
+        }
+        // new_delete_resource(), as fixpp_dict_load_from_xml (fixpp#495 D-5).
+        auto d = fixpp::dict::load_any_with_overlay(std::filesystem::path{base_path},
+                                                    std::filesystem::path{overlay_path},
+                                                    std::pmr::new_delete_resource());
+        auto* h = new fixpp_dict{std::make_shared<const fixpp::dict::Dictionary>(std::move(d))};
+        *out_dict = reinterpret_cast<fixpp_dict_t*>(h);
+        return FIXPP_ERR_OK;
+    } catch (...) {
+        if (out_dict != nullptr) {
+            *out_dict = nullptr;
+        }
+        return fixpp_capi::detail::dict_overlay_error_code(std::current_exception());
     }
 }
 

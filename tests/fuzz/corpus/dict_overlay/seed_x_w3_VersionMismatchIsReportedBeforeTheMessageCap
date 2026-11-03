@@ -1,0 +1,134 @@
+X<fix type='FIX' major='4' minor='2' servicepack='0'>
+ <messages>
+  <message name='VenueM0' msgtype='U100' msgcat='app'>
+  </message>
+  <message name='VenueM1' msgtype='U101' msgcat='app'>
+  </message>
+  <message name='VenueM2' msgtype='U102' msgcat='app'>
+  </message>
+  <message name='VenueM3' msgtype='U103' msgcat='app'>
+  </message>
+  <message name='VenueM4' msgtype='U104' msgcat='app'>
+  </message>
+  <message name='VenueM5' msgtype='U105' msgcat='app'>
+  </message>
+  <message name='VenueM6' msgtype='U106' msgcat='app'>
+  </message>
+  <message name='VenueM7' msgtype='U107' msgcat='app'>
+  </message>
+  <message name='VenueM8' msgtype='U108' msgcat='app'>
+  </message>
+  <message name='VenueM9' msgtype='U109' msgcat='app'>
+  </message>
+  <message name='VenueM10' msgtype='U110' msgcat='app'>
+  </message>
+  <message name='VenueM11' msgtype='U111' msgcat='app'>
+  </message>
+  <message name='VenueM12' msgtype='U112' msgcat='app'>
+  </message>
+  <message name='VenueM13' msgtype='U113' msgcat='app'>
+  </message>
+  <message name='VenueM14' msgtype='U114' msgcat='app'>
+  </message>
+  <message name='VenueM15' msgtype='U115' msgcat='app'>
+  </message>
+  <message name='VenueM16' msgtype='U116' msgcat='app'>
+  </message>
+  <message name='VenueM17' msgtype='U117' msgcat='app'>
+  </message>
+  <message name='VenueM18' msgtype='U118' msgcat='app'>
+  </message>
+  <message name='VenueM19' msgtype='U119' msgcat='app'>
+  </message>
+  <message name='VenueM20' msgtype='U120' msgcat='app'>
+  </message>
+  <message name='VenueM21' msgtype='U121' msgcat='app'>
+  </message>
+  <message name='VenueM22' msgtype='U122' msgcat='app'>
+  </message>
+  <message name='VenueM23' msgtype='U123' msgcat='app'>
+  </message>
+  <message name='VenueM24' msgtype='U124' msgcat='app'>
+  </message>
+  <message name='VenueM25' msgtype='U125' msgcat='app'>
+  </message>
+  <message name='VenueM26' msgtype='U126' msgcat='app'>
+  </message>
+  <message name='VenueM27' msgtype='U127' msgcat='app'>
+  </message>
+  <message name='VenueM28' msgtype='U128' msgcat='app'>
+  </message>
+  <message name='VenueM29' msgtype='U129' msgcat='app'>
+  </message>
+  <message name='VenueM30' msgtype='U130' msgcat='app'>
+  </message>
+  <message name='VenueM31' msgtype='U131' msgcat='app'>
+  </message>
+  <message name='VenueM32' msgtype='U132' msgcat='app'>
+  </message>
+  <message name='VenueM33' msgtype='U133' msgcat='app'>
+  </message>
+  <message name='VenueM34' msgtype='U134' msgcat='app'>
+  </message>
+  <message name='VenueM35' msgtype='U135' msgcat='app'>
+  </message>
+  <message name='VenueM36' msgtype='U136' msgcat='app'>
+  </message>
+  <message name='VenueM37' msgtype='U137' msgcat='app'>
+  </message>
+  <message name='VenueM38' msgtype='U138' msgcat='app'>
+  </message>
+  <message name='VenueM39' msgtype='U139' msgcat='app'>
+  </message>
+  <message name='VenueM40' msgtype='U140' msgcat='app'>
+  </message>
+  <message name='VenueM41' msgtype='U141' msgcat='app'>
+  </message>
+  <message name='VenueM42' msgtype='U142' msgcat='app'>
+  </message>
+  <message name='VenueM43' msgtype='U143' msgcat='app'>
+  </message>
+  <message name='VenueM44' msgtype='U144' msgcat='app'>
+  </message>
+  <message name='VenueM45' msgtype='U145' msgcat='app'>
+  </message>
+  <message name='VenueM46' msgtype='U146' msgcat='app'>
+  </message>
+  <message name='VenueM47' msgtype='U147' msgcat='app'>
+  </message>
+  <message name='VenueM48' msgtype='U148' msgcat='app'>
+  </message>
+  <message name='VenueM49' msgtype='U149' msgcat='app'>
+  </message>
+  <message name='VenueM50' msgtype='U150' msgcat='app'>
+  </message>
+  <message name='VenueM51' msgtype='U151' msgcat='app'>
+  </message>
+  <message name='VenueM52' msgtype='U152' msgcat='app'>
+  </message>
+  <message name='VenueM53' msgtype='U153' msgcat='app'>
+  </message>
+  <message name='VenueM54' msgtype='U154' msgcat='app'>
+  </message>
+  <message name='VenueM55' msgtype='U155' msgcat='app'>
+  </message>
+  <message name='VenueM56' msgtype='U156' msgcat='app'>
+  </message>
+  <message name='VenueM57' msgtype='U157' msgcat='app'>
+  </message>
+  <message name='VenueM58' msgtype='U158' msgcat='app'>
+  </message>
+  <message name='VenueM59' msgtype='U159' msgcat='app'>
+  </message>
+  <message name='VenueM60' msgtype='U160' msgcat='app'>
+  </message>
+  <message name='VenueM61' msgtype='U161' msgcat='app'>
+  </message>
+  <message name='VenueM62' msgtype='U162' msgcat='app'>
+  </message>
+  <message name='VenueM63' msgtype='U163' msgcat='app'>
+  </message>
+  <message name='VenueM64' msgtype='U164' msgcat='app'>
+  </message>
+ </messages>
+</fix>

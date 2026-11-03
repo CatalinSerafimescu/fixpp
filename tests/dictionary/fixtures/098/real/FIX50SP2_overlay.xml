@@ -1,0 +1,53 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-2: the FIX50SP2 overlay. Its
+  reference is FIX50SP2.patch beside it, written from the base file and never
+  derived from the merge: an insertion patch of
+  dictionaries/FIX50SP2.xml that appends each addition at the end of its matched
+  container, in overlay document order (spec.md Terminology), plus the in-place
+  rewrite contracts W-1 allows for FIX50SP2.xml's self-closing header (opened to
+  hold the header addition). It must cover a header field, enum values on existing
+  fields, a member added to an existing group, a new message with a required
+  field, fields added to existing messages and a custom Length+Data pair
+  (FR-017 (b)). Condition: every addition is Optional except U1's
+  Custom098PrivateRef.
+-->
+<fix type='FIX' major='5' minor='0' servicepack='2'>
+ <header>
+  <field name='Custom098HeaderTag' required='N' />
+ </header>
+ <messages>
+  <message name='NewOrderSingle' msgtype='D' msgcat='app'>
+   <field name='Custom098Field' required='N' />
+   <field name='Custom098DataLen' required='N' />
+   <field name='Custom098Data' required='N' />
+  </message>
+  <message name='ExecutionReport' msgtype='8' msgcat='app'>
+   <field name='Custom098VenueTag' required='N' />
+  </message>
+  <message name='Custom098Private' msgtype='U1' msgcat='app'>
+   <field name='Custom098PrivateRef' required='Y' />
+  </message>
+ </messages>
+ <components>
+  <component name='Parties'>
+   <group name='NoPartyIDs' required='N'>
+    <field name='Custom098PartyTag' required='N' />
+   </group>
+  </component>
+ </components>
+ <fields>
+  <field number='35' name='MsgType' type='STRING'>
+   <value enum='U1' description='CUSTOM098_PRIVATE' />
+  </field>
+  <field number='40' name='OrdType' type='CHAR'>
+   <value enum='Z' description='CUSTOM098_ORDTYPE' />
+  </field>
+  <field number='5001' name='Custom098Field' type='STRING' />
+  <field number='5002' name='Custom098PartyTag' type='STRING' />
+  <field number='5003' name='Custom098PrivateRef' type='STRING' />
+  <field number='5004' name='Custom098VenueTag' type='STRING' />
+  <field number='5010' name='Custom098DataLen' type='LENGTH' />
+  <field number='5011' name='Custom098Data' type='DATA' />
+  <field number='5020' name='Custom098HeaderTag' type='STRING' />
+ </fields>
+</fix>

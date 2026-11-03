@@ -1,0 +1,141 @@
+<!--
+  098-dialect-overlay, contracts/witnesses.md W-9 and W-10: the entry-cap overlay
+  of the C-ABI and Python cap rows, over dictionaries/FIX44.xml. Condition: it
+  declares kMaxNewMessages + 1 new messages (src/dictionary/overlay_merge.hpp)
+  and nothing else, so the new-message cap is the only guard it fails.
+  Re-derive: count this file's message elements.
+-->
+<fix type='FIX' major='4' minor='4' servicepack='0'>
+ <messages>
+  <message name='Custom098CapMessage0' msgtype='U9000' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage1' msgtype='U9001' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage2' msgtype='U9002' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage3' msgtype='U9003' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage4' msgtype='U9004' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage5' msgtype='U9005' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage6' msgtype='U9006' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage7' msgtype='U9007' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage8' msgtype='U9008' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage9' msgtype='U9009' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage10' msgtype='U9010' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage11' msgtype='U9011' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage12' msgtype='U9012' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage13' msgtype='U9013' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage14' msgtype='U9014' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage15' msgtype='U9015' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage16' msgtype='U9016' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage17' msgtype='U9017' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage18' msgtype='U9018' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage19' msgtype='U9019' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage20' msgtype='U9020' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage21' msgtype='U9021' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage22' msgtype='U9022' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage23' msgtype='U9023' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage24' msgtype='U9024' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage25' msgtype='U9025' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage26' msgtype='U9026' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage27' msgtype='U9027' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage28' msgtype='U9028' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage29' msgtype='U9029' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage30' msgtype='U9030' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage31' msgtype='U9031' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage32' msgtype='U9032' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage33' msgtype='U9033' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage34' msgtype='U9034' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage35' msgtype='U9035' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage36' msgtype='U9036' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage37' msgtype='U9037' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage38' msgtype='U9038' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage39' msgtype='U9039' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage40' msgtype='U9040' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage41' msgtype='U9041' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage42' msgtype='U9042' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage43' msgtype='U9043' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage44' msgtype='U9044' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage45' msgtype='U9045' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage46' msgtype='U9046' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage47' msgtype='U9047' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage48' msgtype='U9048' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage49' msgtype='U9049' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage50' msgtype='U9050' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage51' msgtype='U9051' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage52' msgtype='U9052' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage53' msgtype='U9053' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage54' msgtype='U9054' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage55' msgtype='U9055' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage56' msgtype='U9056' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage57' msgtype='U9057' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage58' msgtype='U9058' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage59' msgtype='U9059' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage60' msgtype='U9060' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage61' msgtype='U9061' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage62' msgtype='U9062' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage63' msgtype='U9063' msgcat='app'>
+  </message>
+  <message name='Custom098CapMessage64' msgtype='U9064' msgcat='app'>
+  </message>
+ </messages>
+</fix>

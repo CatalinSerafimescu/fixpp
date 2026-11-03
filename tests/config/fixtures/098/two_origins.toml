@@ -1,0 +1,49 @@
+# two_origins.toml
+# 098-dialect-overlay, contracts/witnesses.md W-8 origin and location rows:
+# [default] and session[1] each write the same failing (absent) overlay path;
+# session[0] inherits [default]'s. The location cell's literals are the line and
+# column of each value below; re-derive them from this file after any edit.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "../FIX44.xml"
+
+[default]
+dialect_overlay = "missing_098.xml"
+
+[[session]]
+sender_comp_id = "CLIENT0"
+target_comp_id = "SERVER0"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string = "FIX.4.4"
+role = "initiator"
+heartbeat_interval = "30s"
+dialect_overlay = "missing_098.xml"
+
+[session.transport]
+kind = "plaintext"
+host = "127.0.0.1"
+port = 1
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
