@@ -9,11 +9,11 @@ Root: `~/Work/Programming/fixpp-parallel`; build trees on `/mnt/wsl/fixppbuild` 
 2. C ABI and Python: `capi;099` and `bindings/python/tests/test_099_*`. TOML: `tests/config/test_099_*`.
 3. Mutants, per the mutant table, from one reused separate worktree on `/mnt/wsl/fixppbuild`, never this tree, batched by binary: each named cell turns RED on that mutant alone.
 4. Sanitizers: ASan, UBSan, TSan over `session` and `capi`. TSan includes W-15's multi-thread open arm, which reads one validator from several strands. C-ABI gates, each with its log: `bash tools/check_capi_freeze.sh` **RED after the header edits**, then green after the manifest refresh; `bash tools/check_capi_reentrancy.sh`; `bash tools/check_capi_occupancy.sh`.
-4a. Fuzz, W-24: `cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON`, build, `ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure`, then, from this root, `build/linux-clang-asan/bin/<target> -max_total_time=600`, ten minutes per target, with an empty scratch directory first on the command line so `git status --porcelain` stays empty. Not through `/speckit-verify`, whose SKILL.md `cd`s to the main checkout: wherever it runs for this feature, `$T` is substituted (tasks.md's Execution rules).
+4a. Fuzz, W-24: `cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON`, build, `ctest --preset linux-clang-asan -L fuzz --no-tests=error --output-on-failure`, then, from this root, `build/linux-clang-asan/bin/<target> -max_total_time=600`, ten minutes per target, with an empty scratch directory first on the command line so `git status --porcelain` stays empty, and `tests/fuzz/corpus/<target>/` second, whose `<target>` drops the `fuzz_` prefix. Not through `/speckit-verify`, whose SKILL.md `cd`s to the main checkout: wherever it runs for this feature, `$T` is substituted (tasks.md's Execution rules).
 5. Paired bench, W-22, non-FIXT shape, B41's method (`research/probes/b41_563_564/ph7f_method.md`): `on_inbound_frame_bench`, `validator_bench`, with the new FIXT case reported for information.
 6. Live: W-18, through a copy of the parent's `phase-9-harness`, in tasks.md's `**Harness layout**`.
 7. Records: W-23, each recipe run on the pre-edit tree first.
-8. MSVC: take `.sandbox-lock` first, then build the feature's own targets, the C and Python ones included, with `-k 0` before the first labelled push.
+8. MSVC: take `.sandbox-lock` first, then build the feature's own targets, the C and Python ones included, with `-k 0` before the first labelled push, and run `session_pure_tests` once.
 
 ## Expected end state
 

@@ -87,7 +87,7 @@ No violation to justify. `[const §X.7]` and `[const §XII.9]` are declared, wit
 specs/099-fixt-appl-version-validation/
 ├── plan.md  research.md  data-model.md  quickstart.md  spec.md
 ├── contracts/{surface,witnesses}.md
-└── checklists/requirements.md
+└── checklists/{api-abi,concurrency,config,nfr,requirements,test-integrity,wire-session}.md
 
 dictionaries/FIXT11.xml, dictionaries/README.md   (FR-032)
 include/fixpp/dict/{version_registry,version_profile,dictionary,reify}.hpp
