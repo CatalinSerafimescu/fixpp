@@ -279,6 +279,44 @@ TEST(W10AdminFix44S, Heartbeat_AccessorUnknown) {
     expect_admin(a);
 }
 
+TEST(W10AdminFix44S, TestRequest_AccessorUnknown) {
+    CellRun run = enter_arm(fix44_s_fixture(), Arm::Active, {});
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    ViewAnswers a;
+    watch(*run.rig, a, kVt11At50);
+    run.ending = run.rig->deliver(frame_35("1", run.rig->peer_ctx(2), "112=x\x01"));
+    expect_admin(a);
+}
+
+// ── W-1's cell that keeps open()'s own route build ──────────────────────────────────────
+
+class W10PrivateBuild : public testing::TestWithParam<Shape> {};
+
+TEST_P(W10PrivateBuild, AdminAndNosAnswerAsTheSharedCell) {
+    RigOptions o;
+    o.private_build = true;
+    CellRun run = enter_arm(shape_fixture(GetParam()), Arm::NotConnected, std::move(o));
+    ASSERT_TRUE(run.setup_failure.empty()) << run.setup_failure;
+    Rig& r = *run.rig;
+    (void)r.deliver(logon_frame(r.peer_ctx(1), "1137=9\x01"));
+    ASSERT_EQ(r.sess->state(), fsm_state::Active);
+
+    ViewAnswers admin;
+    watch(r, admin, kVt11At50);
+    (void)r.deliver(frame_35("0", r.peer_ctx(2)));
+    expect_admin(admin);
+
+    ViewAnswers application;
+    watch(r, application, kOtherProfile);
+    run.ending = r.deliver(frame_35("D", r.peer_ctx(3), kNos + "3115=1.5\x01", "1128=10\x01"));
+    expect_application(application, Version::vlatest);
+}
+
+INSTANTIATE_TEST_SUITE_P(W10, W10PrivateBuild, testing::Values(Shape::T, Shape::A, Shape::L),
+                         [](const testing::TestParamInfo<Shape>& i) {
+                             return shape_param_name(i.param);
+                         });
+
 // ── Message Type Default: `MT-a`, on T, A and L ─────────────────────────────────────────
 
 class W10MessageTypeDefault : public testing::TestWithParam<Shape> {};
