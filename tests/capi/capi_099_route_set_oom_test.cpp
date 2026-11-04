@@ -10,12 +10,17 @@
 // dictionary, because a real one's copy makes a sweep take hours (research R-3). Not
 // pugi::set_memory_management_functions: as_table_view() reads a finished handle, so pugixml never
 // runs and that hook would never fire. Each arm fails unless the hook fired and its sweep saw both
-// outcomes, since an unfired hook reads green. tasks.md T108 adds the C arm.
+// outcomes, since an unfired hook reads green. The C arm (tasks.md T108) sweeps fixpp_engine_create,
+// whose failure leaves the builder with the caller, and fixpp_engine_start, whose failure leaves
+// the engine not started; its mutants are M-52 and M-95.
 
 #include <gtest/gtest.h>
 
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
+#include <asio/detail/memory.hpp>
+#include <asio/detail/mutex.hpp>
+#include <asio/execution_context.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
@@ -42,7 +47,12 @@
 #include <span>
 #include <vector>
 
+#include "capi_internal.hpp"
 #include "dictionary_internal.hpp"  // as_table_view_call_count, read by the hook below
+#include "fix/c_api/dict.h"
+#include "fix/c_api/engine.h"
+#include "fix/c_api/session.h"
+#include "fix/c_api/version.h"
 #include "session/fixt_route_set.hpp"
 #include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -76,6 +86,12 @@ std::atomic<long> g_first_walk{0};  // the allocation at which the walk counter 
 std::atomic<std::uint64_t> g_walks_at_arm{0};
 std::atomic<long> g_watch_at{0};           // 0: none is watched
 std::atomic<std::size_t> g_watch_size{0};  // the size of the allocation at g_watch_at
+// asio's strand_executor_service::create_implementation allocates its pool mutex after it holds the
+// strand_impl and ahead of setting service_, whose destructor reads it, so a throw there is a null
+// dereference inside asio (asio/detail/impl/strand_executor_service.ipp). An Engine's construction
+// makes one. So the C arm's create sweep has the hook pass an allocation of this size over; 0 is
+// none. The size comes from asio_pool_mutex_allocation_size, which makes asio's own call.
+std::atomic<std::size_t> g_pass_over_size{0};
 
 void arm(long fail_at) {
     g_seen.store(0);
@@ -105,7 +121,9 @@ void* operator new(std::size_t size) {
         if (seen == g_watch_at.load()) {
             g_watch_size.store(size);
         }
-        if (seen == g_fail_at.load()) {
+        if (seen == g_fail_at.load() && size == g_pass_over_size.load()) {
+            g_fail_at.fetch_add(1);
+        } else if (seen == g_fail_at.load()) {
             g_fired.fetch_add(1);
             throw std::bad_alloc{};
         }
@@ -383,6 +401,161 @@ TEST(W20Direct, TheReservationFailsOpenThenARetryOpens) {
         << "a refused open() leaves never_opened";
     const auto retry = rig.run(rig.session->open());
     EXPECT_TRUE(retry.has_value());
+}
+
+// ── The C arm ───────────────────────────────────────────────────────────────────────────
+
+// A handle over each of the arm's two dictionaries, for the process.
+fixpp_dict_t* fixt11_handle() {
+    static fixpp_dict_t* const h = reinterpret_cast<fixpp_dict_t*>(new fixpp_dict{fixt11()});
+    return h;
+}
+
+fixpp_dict_t* application_handle() {
+    static fixpp_dict_t* const h =
+        reinterpret_cast<fixpp_dict_t*>(new fixpp_dict{minimal_application()});
+    return h;
+}
+
+// A builder with the two dictionaries.
+fixpp_engine_config_t* builder_with_two() {
+    fixpp_engine_config_t* ec = nullptr;
+    EXPECT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_engine_config_set_realtime_clock(ec), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_engine_config_add_dictionary(ec, fixt11_handle()), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_engine_config_add_dictionary(ec, application_handle()), FIXPP_ERR_OK);
+    return ec;
+}
+
+// A validating FIXT acceptor over those two, the Build arm's S: its registration needs both
+// dictionaries in the engine, the transport one and the slot of its default.
+fixpp_error_t open_fixt_session(fixpp_engine_t* engine) {
+    fixpp_session_config_t* sc = nullptr;
+    EXPECT_EQ(fixpp_session_config_create(&sc), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_comp_ids(sc, "ISLD", "TW"), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIXT.1.1"), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_role(sc, FIXPP_ROLE_ACCEPTOR), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
+        FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_tcp_endpoint(sc, "127.0.0.1", 0), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_dictionary(sc, fixt11_handle()), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_default_appl_ver_id(sc, "4"), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_session_config_set_validate_inbound_messages(sc, true), FIXPP_ERR_OK);
+    fixpp_session_t* h = nullptr;
+    const fixpp_error_t rc = fixpp_session_open(engine, sc, &h);
+    if (rc != FIXPP_ERR_OK) {
+        fixpp_session_config_destroy(sc);
+    }
+    return rc;
+}
+
+std::size_t asio_pool_mutex_allocation_size() {
+    asio::io_context context;
+    const asio::execution_context::allocator<void> alloc(context);
+    g_watch_at.store(1);
+    g_watch_size.store(0);
+    arm(0);
+    {
+        const auto made = asio::detail::allocate_shared<asio::detail::mutex>(alloc);
+    }
+    disarm();
+    g_watch_at.store(0);
+    return g_watch_size.load();
+}
+
+// A version-mismatch failure returns before the copy and could not tell a copy from a move, so the
+// sweep is over allocations, from the first until a call completes with the hook unfired.
+TEST(W20CArm, EachFiredAllocationOfCreate_ConfigInvalid_ThenTheSameBuilderOpensAFixtSession) {
+    long fired_runs = 0;
+    long retries_opened = 0;
+    bool completed = false;
+    const std::size_t pass_over = asio_pool_mutex_allocation_size();
+    ASSERT_GT(pass_over, 0U) << "the watch did not read asio's allocation";
+    for (long n = 1; !completed; ++n) {
+        fixpp_engine_config_t* ec = builder_with_two();
+        fixpp_engine_t* engine = nullptr;
+        g_pass_over_size.store(pass_over);
+        arm(n);
+        const fixpp_error_t first =
+            fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &engine);
+        disarm();
+        g_pass_over_size.store(0);
+        if (g_fired.load() == 0) {
+            completed = true;
+            ASSERT_EQ(first, FIXPP_ERR_OK) << "N " << n << ": no allocation failed";
+            EXPECT_EQ(open_fixt_session(engine), FIXPP_ERR_OK) << "N " << n;
+            fixpp_engine_destroy(engine);
+            break;
+        }
+        ++fired_runs;
+        EXPECT_EQ(first, FIXPP_ERR_CAPI_CONFIG_INVALID) << "N " << n;
+        EXPECT_EQ(engine, nullptr) << "N " << n;
+        if (first == FIXPP_ERR_OK) {
+            fixpp_engine_destroy(engine);
+            continue;  // the builder went with it
+        }
+        // The same builder, whose two dictionaries must still be in it.
+        const fixpp_error_t retry =
+            fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &engine);
+        EXPECT_EQ(retry, FIXPP_ERR_OK) << "N " << n;
+        if (retry != FIXPP_ERR_OK) {
+            fixpp_engine_config_destroy(ec);
+            continue;
+        }
+        const fixpp_error_t opened = open_fixt_session(engine);
+        retries_opened += opened == FIXPP_ERR_OK ? 1 : 0;
+        EXPECT_EQ(opened, FIXPP_ERR_OK) << "N " << n << ": the retry's session is refused";
+        fixpp_engine_destroy(engine);
+    }
+    EXPECT_GT(fired_runs, 0) << "an unfired hook reads green";
+    EXPECT_EQ(retries_opened, fired_runs) << "the sweep must see both outcomes";
+    EXPECT_TRUE(completed);
+}
+
+// A fresh engine with a FIXT session per N. N is bounded to this engine's own build, counted in a
+// dry run as the Direct arm counts, because past it the hook lands on the worker launch.
+TEST(W20CArm, EachFiredAllocationOfStart_Unknown_ThenARetrySucceeds) {
+    const auto started_engine_parts = [] {
+        fixpp_engine_t* engine = nullptr;
+        EXPECT_EQ(fixpp_engine_create(builder_with_two(), FIXPP_C_ABI_VERSION_MAJOR,
+                                      FIXPP_C_ABI_VERSION_MINOR, &engine),
+                  FIXPP_ERR_OK);
+        EXPECT_EQ(open_fixt_session(engine), FIXPP_ERR_OK);
+        return engine;
+    };
+    const BuildCount build = count_build();
+    ASSERT_GT(build.allocations, 0);
+    long ahead = 0;
+    {
+        fixpp_engine_t* engine = started_engine_parts();
+        arm(0);
+        const fixpp_error_t dry = fixpp_engine_start(engine);
+        disarm();
+        EXPECT_EQ(dry, FIXPP_ERR_OK);
+        ahead = g_first_walk.load() - build.first_walk;
+        fixpp_engine_destroy(engine);
+    }
+    ASSERT_GE(ahead, 0);
+
+    long fired_runs = 0;
+    long retries_started = 0;
+    for (long n = ahead + 1; n <= ahead + build.allocations; ++n) {
+        fixpp_engine_t* engine = started_engine_parts();
+        arm(n);
+        const fixpp_error_t first = fixpp_engine_start(engine);
+        disarm();
+        fired_runs += g_fired.load() != 0 ? 1 : 0;
+        EXPECT_EQ(g_fired.load(), 1) << "N " << n << " is past this start's build";
+        EXPECT_EQ(first, FIXPP_ERR_UNKNOWN) << "N " << n;
+        const fixpp_error_t retry = fixpp_engine_start(engine);
+        retries_started += retry == FIXPP_ERR_OK ? 1 : 0;
+        EXPECT_EQ(retry, FIXPP_ERR_OK) << "N " << n << ": the retry is not a first start";
+        fixpp_engine_destroy(engine);
+    }
+    EXPECT_EQ(fired_runs, build.allocations) << "an unfired hook reads green";
+    EXPECT_EQ(retries_started, build.allocations) << "the sweep must see both outcomes";
 }
 
 }  // namespace

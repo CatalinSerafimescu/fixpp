@@ -440,7 +440,8 @@ def _raise_for_code(code):
     }
 }
 %apply const char* FIXPP_CONFIG_STR {
-    const char* sender, const char* target, const char* begin_string, const char* host };
+    const char* sender, const char* target, const char* begin_string, const char* host,
+    const char* wire_value };
 %apply const char* FIXPP_CONFIG_STR_OR_NONE { const char* cert, const char* key };
 
 /* ── T010: message typemaps (str<->ptr+len, commit->bytes, send bytes) ───────
@@ -505,6 +506,17 @@ def _raise_for_code(code):
         FIXPP_PY_RAISE("msg_get_string: field value is not valid UTF-8");
     }
     $result = SWIG_AppendOutput($result, _str);
+}
+
+/* msg_version (099-fixt-appl-version-validation): the out-struct -> (kind, session, application),
+ * plain ints, the values of dict.h's constants. On a non-OK code the out-typemap has raised. */
+%typemap(in, numinputs=0) fixpp_resolved_msg_version_t* version_out
+        (fixpp_resolved_msg_version_t _v = {0, 0, 0, 0}) {
+    $1 = &_v;
+}
+%typemap(argout) fixpp_resolved_msg_version_t* version_out {
+    $result = SWIG_AppendOutput($result,
+        Py_BuildValue("(iii)", (int)$1->kind, (int)$1->session, (int)$1->application));
 }
 
 /* ── T011: inbound callback trampoline (GIL + Py_INCREF + borrowed msg) ──────
@@ -703,8 +715,12 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
  *                                   |         |   (mechanism: fixpp_session_send's co_spawn+fut.get() in src/capi/session.cpp; rule: session.h's Reentrancy note on fixpp_session_send)
  *   engine_destroy                  | release | stop_fut.get() + worker joins
  *   engine_create                   | hold    | construct + worker spawn; no round-trip
- *   engine_start                    | hold    | starts workers; returns immediately
+ *   engine_start                    | hold    | starts workers; on a FIXT engine, first the route tables'
+ *                                   |         |   walks: dict_load_from_xml's reason, CPU-bound, NO engine
+ *                                   |         |   round-trip -> no worker-deadlock class (releasing for
+ *                                   |         |   throughput = deferred nicety, not a gap)
  *   engine_config_create            | hold    | construction-time; returns fixpp_error_t, no engine round-trip
+ *   engine_config_add_dictionary    | hold    | in-memory (099); copies the shared pointer
  *   session_config_create           | hold    | construction-time; returns fixpp_error_t, no engine round-trip
  *   engine_config_destroy           | hold    | in-memory free; void-returning — never reaches the error bridge
  *   session_config_destroy          | hold    | in-memory free; void-returning — never reaches the error bridge
@@ -713,7 +729,8 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
  *   acceptor_bound_endpoint         | hold    | registry read
  *   session_garbled_frame_count     | hold    | scoped lookup lease + relaxed atomic load; no round-trip
  *   session_register_callback       | hold    | registry write + INCREF (fixpp_py_register_callback)
- *   all *_config_set_* setters      | hold    | in-memory
+ *   all *_config_set_* setters      | hold    | in-memory; 099's session_config_set_default_appl_ver_id and
+ *                                   |         |   session_config_set_validate_inbound_messages among them
  *   dict_load_from_xml              | hold    | sync file/XML parse; CPU-bound, NO engine round-trip ->
  *                                   |         |   no worker-deadlock class (releasing for throughput = deferred nicety, not a gap)
  *   dict_load_from_xml_with_overlay | hold    | dict_load_from_xml's reason (098 research R-12); the
@@ -721,6 +738,8 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
  *   dict_destroy                    | hold    | in-memory
  *   all msg_* (create/set/commit/   | hold    | in-memory arena ops
  *     get/destroy)                  |         |
+ *   msg_version                     | hold    | 099: reads the view, NO engine round-trip, so it may run on the
+ *                                   |         |   receive callback's thread
  *   version_string, strerror        | hold    | pure function
  *
  * BOUND C->Python TRAMPOLINE CENSUS (FR-003): exactly ONE —
@@ -784,7 +803,7 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
 
 /* ── Wrapped declarations (selective) ───────────────────────────────────────
  * %include only the headers whose entire (or all-but-ignored) surface is in
- * scope; message.h is wrapped by re-declaration (5 of ~30 functions). */
+ * scope; message.h is wrapped by re-declaration, one in-scope function at a time. */
 %include "fix/c_api/error.h"    /* fixpp_error_t (int32) + codes */
 %include "fix/c_api/handles.h"  /* opaque handle typedefs */
 %include "fix/c_api/version.h"  /* FIXPP_C_ABI_VERSION_* macros */
@@ -804,6 +823,8 @@ fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t** payload_out,
 fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);
 fixpp_error_t fixpp_msg_get_string(const fixpp_msg_t* msg, uint16_t tag,
                                    const char** value_out, size_t* len_out);
+fixpp_error_t fixpp_msg_version(const fixpp_msg_t* msg,
+                                fixpp_resolved_msg_version_t* version_out);
 
 /* The umbrella library-version string (existing smoke surface). */
 const char* fixpp_version_string(void);

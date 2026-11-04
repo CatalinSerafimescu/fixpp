@@ -42,17 +42,29 @@ EXPECTED_PUBLIC_SURFACE = frozenset({
     "RESET_SEQNUM_UNILATERAL", "ROLE_ACCEPTOR", "ROLE_INITIATOR",
     "SECURITY_INSECURE_PLAIN_TCP", "SECURITY_TLS",
     "TOAPP_ERROR", "TOAPP_SEND", "TOAPP_VETO",
+    # 099 (contracts/surface.md's closed list): fixpp_msg_version's bytes.
+    "APPL_VER_UNKNOWN", "APPL_VER_FIX40", "APPL_VER_FIX41", "APPL_VER_FIX42",
+    "APPL_VER_FIX43", "APPL_VER_FIX44", "APPL_VER_FIX50", "APPL_VER_FIX50SP1",
+    "APPL_VER_FIX50SP2", "APPL_VER_FIXLATEST",
+    "SESSION_VER_UNKNOWN", "SESSION_VER_FIX40", "SESSION_VER_FIX41", "SESSION_VER_FIX42",
+    "SESSION_VER_FIX43", "SESSION_VER_FIX44", "SESSION_VER_FIX50", "SESSION_VER_FIX50SP1",
+    "SESSION_VER_FIX50SP2", "SESSION_VER_FIXT11", "SESSION_VER_FIXLATEST",
+    "MSG_KIND_SESSION_ADMIN", "MSG_KIND_APPLICATION",
     # ── flat C-ABI functions ───────────────────────────────────────────────
     "dict_destroy", "dict_load_from_xml",
     "dict_load_from_xml_with_overlay",  # 098 (contracts W-10)
+    "engine_config_add_dictionary",  # 099 (contracts/surface.md)
     "engine_config_create", "engine_config_destroy",
     "engine_config_set_realtime_clock", "engine_config_set_worker_threads",
     "engine_create", "engine_destroy", "engine_start",
     "msg_commit", "msg_create_outbound", "msg_destroy",
     "msg_get_string", "msg_set_string",
+    "msg_version",  # 099 (contracts/surface.md)
     "session_acceptor_bound_endpoint", "session_close",
     "session_config_create", "session_config_destroy",
     "session_config_set_begin_string", "session_config_set_comp_ids",
+    "session_config_set_default_appl_ver_id",  # 099 (contracts/surface.md)
+    "session_config_set_validate_inbound_messages",  # 099 (contracts/surface.md)
     "session_config_set_dictionary", "session_config_set_heartbeat_seconds",
     "session_config_set_logon_timeout_ms",  # 093 (C-7 row 7; plan OD-27)
     "session_config_set_reset_on_logon",

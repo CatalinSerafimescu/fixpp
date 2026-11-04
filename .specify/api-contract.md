@@ -276,6 +276,8 @@ Each row links the design doc to its public-surface footprint. **Source of truth
 
 Updated (098-dialect-overlay): the 2c row's `DialectOverlay` does not exist. The overlay surface is `XmlLoader::load_with_overlay[_from_string]`, `OrchestraLoader::load_with_overlay[_from_string]` and `dict::load_any_with_overlay`, with the exception types `dict::overlay_conflict_error` and `dict::overlay_limit_error`, and C-ABI 1.13's `fixpp_dict_load_from_xml_with_overlay` (`.specify/2c-codegen.md`, the note at the end of §4.4).
 
+Updated (099-fixt-appl-version-validation): C-ABI 1.14 adds `fixpp_session_config_set_default_appl_ver_id`, `fixpp_session_config_set_validate_inbound_messages`, `fixpp_engine_config_add_dictionary`, and the constants `FIXPP_APPL_VER_*`, `FIXPP_SESSION_VER_*` and `FIXPP_MSG_KIND_*`; the C++ additions are in that feature's `contracts/surface.md`.
+
 ---
 
 ## 11. Frozen-until rule
@@ -291,6 +293,8 @@ A surface listed under §3.1 is **frozen** at v1.0 release. `[const §X.7]` also
 - Reordering, removing, or repurposing a CMake exported target listed in §8.
 - Tightening the include set of `<fix/c_api.h>` (anything beyond `<stddef.h>`, `<stdint.h>`, `<stdbool.h>` would already be a violation of `[arch §9.1]`).
 - Adding a pure-virtual method to any interface in §9 (would invalidate user implementations).
+
+Updated (099-fixt-appl-version-validation): `fixpp_msg_version`'s layout and result change, a breaking effect declared under `[const §X.7]`, and its migration line is in that feature's `contracts/surface.md`.
 
 Non-breaking changes that **do not** require an amendment:
 

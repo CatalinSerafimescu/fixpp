@@ -630,6 +630,8 @@ The Phase 2 measurement spike (§10 Q1) confirms the eager-mode footprint on a r
 - `Validator::validate_field(tag, value)` is allocation-free; it consults `dict::table_view`'s field-type rule and applies the type's validator directly to the byte span.
 - Validator failures produce one of: `wire_required_field_missing`, `wire_header_out_of_order`, `wire_invalid_field_format`, `wire_field_value_out_of_range`, `wire_unexpected_tag` (the v0.2 dict-known-but-invalid-for-msg-type case), and `wire_field_value_truncated` (raised by 2a's decimal traits and surfaced unchanged). See §6.7 for the canonical list of `fixpp::core::error` variants this design introduces.
 
+Updated (099-fixt-appl-version-validation): `dictionary_driven_validator` gains a non-virtual `validate` overload taking an envelope table and a `table()` accessor. `Validator` keeps its five pure virtuals (`[const §XIV.2]`), and the class adds no data member.
+
 ### 6.6 Allocation, exceptions, threading
 
 #### Arenas — three lifetime classes, pinned

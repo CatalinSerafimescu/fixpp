@@ -246,6 +246,7 @@ set_property(TEST session_pure_tests APPEND PROPERTY LABELS 099)
 # Re-derive by timing `ctest --test-dir build/<preset> -R '^session_099_route_set_cost_test$'`.
 add_executable(session_099_route_set_cost_test test_099_route_set_cost.cpp)
 target_link_libraries(session_099_route_set_cost_test PRIVATE
+  fixpp_capi   # the C route (tasks.md T107)
   fixpp_session
   fixpp_mock_clock
   fixpp_transport
@@ -258,6 +259,7 @@ target_link_libraries(session_099_route_set_cost_test PRIVATE
 )
 target_include_directories(session_099_route_set_cost_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/capi"         # capi_internal.hpp, a test's dictionary handle
   "${CMAKE_SOURCE_DIR}/src"              # session/fixt_route_set.hpp
   "${CMAKE_SOURCE_DIR}/src/dictionary"   # dictionary_internal.hpp, the walk counter
 )

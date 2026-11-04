@@ -155,9 +155,9 @@ set_property(TEST config_045_tests APPEND PROPERTY LABELS 098)
 set_property(TEST config_045_tests APPEND PROPERTY LABELS 099)
 
 # 099-fixt-appl-version-validation W-14's live cell (tasks.md T095). Standalone ([const §VII.8]):
-# it runs threads and a socket, so it stays out of config_045_tests. TIMEOUT is explicit: about
-# six times the slowest lane's run. Re-derive by timing
-# `ctest --test-dir build/<preset> -R '^config_099_toml_live_test$'`.
+# it runs threads and a socket, so it stays out of config_045_tests. TIMEOUT is explicit.
+# Re-derive by timing `ctest --test-dir build/<preset> -R '^config_099_toml_live_test$'` on every
+# lane.
 add_executable(config_099_toml_live_test test_099_toml_live.cpp)
 target_compile_definitions(config_099_toml_live_test PRIVATE
     FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"

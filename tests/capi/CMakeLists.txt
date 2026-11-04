@@ -734,3 +734,19 @@ target_compile_definitions(capi_099_route_set_oom_test PRIVATE
 add_test(NAME capi_099_route_set_oom_test COMMAND capi_099_route_set_oom_test)
 set_tests_properties(capi_099_route_set_oom_test PROPERTIES
   LABELS "capi;099" TIMEOUT 300)
+
+# 099-fixt-appl-version-validation W-12 (tasks.md T092). Standalone ([const §VII.8]): threads and a
+# socket. TIMEOUT is explicit. Re-derive by timing
+# `ctest --test-dir build/<preset> -R '^capi_099_fixt_live_test$'` on every lane.
+add_executable(capi_099_fixt_live_test capi_099_fixt_live_test.cpp)
+target_link_libraries(capi_099_fixt_live_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_099_fixt_live_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_099_fixt_live_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_099_fixt_live_test COMMAND capi_099_fixt_live_test)
+set_tests_properties(capi_099_fixt_live_test PROPERTIES
+  LABELS "capi;099" TIMEOUT 300)

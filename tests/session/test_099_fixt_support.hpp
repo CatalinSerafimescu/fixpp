@@ -572,6 +572,9 @@ struct Fixture {
 // One registry per list of dictionaries, for the process: a registry is immutable, and a set is
 // built per registry (`adopt_fixture_routes`), so a fixture a cell makes again costs no new walk.
 inline std::shared_ptr<dd::version_registry> make_registry(std::vector<DictPtr> dicts) {
+    // Ahead of `all`, so that it outlives the dictionaries a registry here holds, whichever a test
+    // asks for first. A static is destroyed in reverse order of construction.
+    (void)dict_resource();
     static std::map<std::vector<const dd::Dictionary*>, std::shared_ptr<dd::version_registry>> all;
     std::vector<const dd::Dictionary*> key;
     for (const DictPtr& d : dicts) {

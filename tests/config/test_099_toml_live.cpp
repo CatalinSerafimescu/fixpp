@@ -162,8 +162,10 @@ TEST(W14Live, ReachesActive_1128Routes) {
         EXPECT_TRUE(logon.has_value()) << "no Logon from the initiator";
         if (logon) {
             EXPECT_EQ(frame_field(*logon, 1137), "9");
+            // Answers 141 as the session's Logon asked, since the default policy wants both to.
+            const std::string reset = frame_field(*logon, 141) == "Y" ? "141=Y\x01" : "";
             EXPECT_TRUE(peer.write(fixt_frame("35=A\x01" + header(1) + "98=0\x01" +
-                                              "108=30\x01" + "1137=9\x01")));
+                                              "108=30\x01" + "1137=9\x01" + reset)));
             const auto end = std::chrono::steady_clock::now() + kStep;
             while (!app->active.load() && std::chrono::steady_clock::now() < end) {
                 std::this_thread::sleep_for(2ms);

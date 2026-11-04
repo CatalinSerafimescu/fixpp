@@ -76,7 +76,7 @@ def _peer_header(seq):
 
 def _logon_reply():
     return _frame(b"35=A\x01" + _peer_header(1) +
-                  _fields((98, "0"), (108, str(HEARTBEAT_S)), (1137, "9")))
+                  _fields((98, "0"), (108, str(HEARTBEAT_S)), (1137, "9"), (141, "Y")))
 
 
 NOS = _fields((11, "C"), (21, "1"), (55, "X"), (54, "1"), (60, "20240101-00:00:00"), (40, "1"),

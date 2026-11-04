@@ -30,6 +30,7 @@
 #include <vector>
 
 // C-ABI under test
+#include "fix/c_api/dict.h"
 #include "fix/c_api/error.h"
 #include "fix/c_api/message.h"
 
@@ -143,6 +144,8 @@ TEST(MessageRead, DestroyedHandleReturnsInvalidHandle) {
     const char* out = nullptr;
     size_t len = 0;
     EXPECT_EQ(fixpp_msg_get_string(p, 35, &out, &len), FIXPP_ERR_INVALID_HANDLE);
+    fixpp_resolved_msg_version_t ver{};
+    EXPECT_EQ(fixpp_msg_version(p, &ver), FIXPP_ERR_INVALID_HANDLE);
 }
 
 TEST(MessageRead, OutboundFlavorGetStringReturnsInvalidHandle) {
@@ -156,6 +159,8 @@ TEST(MessageRead, OutboundFlavorGetStringReturnsInvalidHandle) {
     size_t len = 0;
     // view==nullptr → INVALID_HANDLE (no view to read from)
     EXPECT_EQ(fixpp_msg_get_string(p, 35, &out, &len), FIXPP_ERR_INVALID_HANDLE);
+    fixpp_resolved_msg_version_t ver{};
+    EXPECT_EQ(fixpp_msg_version(p, &ver), FIXPP_ERR_INVALID_HANDLE);
 }
 
 // F2 gate-b/r1: positive tag check in check_inbound_msg (mirrors
@@ -186,6 +191,8 @@ TEST(MessageRead, TypeMismatchedHandleReturnsInvalidHandle) {
     size_t len = 0;
     EXPECT_EQ(fixpp_msg_get_string(p, 35, &out, &len), FIXPP_ERR_INVALID_HANDLE);
     EXPECT_EQ(fixpp_msg_get_msg_type(p, &out, &len), FIXPP_ERR_INVALID_HANDLE);
+    fixpp_resolved_msg_version_t ver{};
+    EXPECT_EQ(fixpp_msg_version(p, &ver), FIXPP_ERR_INVALID_HANDLE);
 }
 
 TEST(MessageRead, GetMsgType) {
@@ -450,12 +457,11 @@ TEST(MessageRead, Version) {
 
     fixpp_resolved_msg_version_t ver{};
     ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_OK);
-    // begin_string should be "FIX.4.4" (from the frame header)
-    ASSERT_NE(ver.begin_string, nullptr);
-    EXPECT_EQ(std::string_view(ver.begin_string, ver.begin_string_len), "FIX.4.4");
-    // No appl_ver_id (tag 1137) in this frame
-    EXPECT_EQ(ver.appl_ver_id, nullptr);
-    EXPECT_EQ(ver.appl_ver_id_len, 0U);
+    // 099-fixt-appl-version-validation, data-model E-8's non-FIXT application row: FIX.4.4 NOS.
+    EXPECT_EQ(ver.kind, FIXPP_MSG_KIND_APPLICATION);
+    EXPECT_EQ(ver.session, FIXPP_SESSION_VER_FIX44);
+    EXPECT_EQ(ver.application, FIXPP_APPL_VER_FIX44);
+    EXPECT_EQ(ver._reserved, 0);
 }
 
 // SC-003 alloc guard: the read path must not allocate on the global heap.
@@ -1276,7 +1282,8 @@ TEST(MessageRead, GroupNullHandleAllAccessors) {
               FIXPP_ERR_NULL_HANDLE);
 }
 
-// tag 1137 present in the frame → appl_ver_id filled.
+// 099-fixt-appl-version-validation, contracts/surface.md's migration line: a raw 1137 is a field
+// read, and it does not move the struct on a non-FIXT message.
 TEST(MessageRead, VersionWithApplVerId) {
     // Include tag 1137 (DefaultApplVerID) for FIXT
     auto buf = make_raw_frame(
@@ -1291,8 +1298,14 @@ TEST(MessageRead, VersionWithApplVerId) {
 
     fixpp_resolved_msg_version_t ver{};
     ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_OK);
-    ASSERT_NE(ver.appl_ver_id, nullptr);
-    EXPECT_EQ(std::string_view(ver.appl_ver_id, ver.appl_ver_id_len), "FIX.5.0SP2");
+    EXPECT_EQ(ver.kind, FIXPP_MSG_KIND_APPLICATION);
+    EXPECT_EQ(ver.session, FIXPP_SESSION_VER_FIX44);
+    EXPECT_EQ(ver.application, FIXPP_APPL_VER_FIX44);
+
+    const char* raw = nullptr;
+    size_t raw_len = 0;
+    ASSERT_EQ(fixpp_msg_get_string(h.ptr(), 1137, &raw, &raw_len), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(raw, raw_len), "FIX.5.0SP2");
 }
 
 // get_decimal with an invalid decimal string → FIXPP_ERR_DECIMAL_INVALID.
@@ -1485,13 +1498,13 @@ TEST(MessageRead, VersionNoTag8) {
     InboundHandle h;
     h.msg.view = &mv;
 
-    fixpp_resolved_msg_version_t ver{};
+    // Seeded non-zero, so that zeros can only be the call's.
+    fixpp_resolved_msg_version_t ver{0xAA, 0xAA, 0xAA, 0xAA};
     ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_TAG_NOT_FOUND);
-    // Output fields must be zero-initialized
-    EXPECT_EQ(ver.begin_string, nullptr);
-    EXPECT_EQ(ver.begin_string_len, 0U);
-    EXPECT_EQ(ver.appl_ver_id, nullptr);
-    EXPECT_EQ(ver.appl_ver_id_len, 0U);
+    EXPECT_EQ(ver.kind, 0);
+    EXPECT_EQ(ver.session, 0);
+    EXPECT_EQ(ver.application, 0);
+    EXPECT_EQ(ver._reserved, 0);
 }
 
 // fixpp_msg_get_group on a null msg: exercises the TRUE arm of the

@@ -9,7 +9,9 @@
 //
 // M is computed here from the distinct Dictionary*, plus one per (S with a header pair, other
 // dictionary). The non-FIXT twin's delta and one copy's bytes come from the same process. Its
-// mutants are M-8, M-8b, M-41 and M-84.
+// mutants are M-8, M-8b, M-41 and M-84. The C route (tasks.md T107) is the limit SC-007 carves:
+// fixpp_session_open takes one snapshot per session, so its delta is M plus one per C session, and
+// its heap is reported, not asserted.
 
 #include <gtest/gtest.h>
 
@@ -40,6 +42,7 @@
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <memory_resource>
 #include <new>
@@ -51,10 +54,16 @@
 #include <thread>
 #include <vector>
 
+#include "capi_internal.hpp"
 #include "dictionary_internal.hpp"  // as_table_view_call_count, the walk counter
+#include "fix/c_api/dict.h"
+#include "fix/c_api/engine.h"
+#include "fix/c_api/session.h"
+#include "fix/c_api/version.h"
 #include "session/fixt_route_set.hpp"
 #include "session/plain_engine_rig.hpp"
 #include "support/engine_test_access.hpp"
+#include "support/fixt_raw_peer.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
 #include "test_099_fixt_support.hpp"
@@ -610,6 +619,95 @@ void validate_on_threads(const detail::fixt_route_set::entry& route, const std::
 // Every session on a worker thread of its own strand, its gate running on whichever thread the
 // frame lands, all of them over one Dictionary*. A peer's Heartbeat answer to the last TestRequest
 // says that every frame ahead of it passed through the gate.
+// A C engine: its setters only, each session an initiator a raw peer accepts. A Logon on the wire
+// is the session's open() having run. After the first fixpp_engine_start nothing here is fatal, so
+// a failing check still reaches the destroys.
+TEST(W15CRoute, WalksMPlusOnePerCSession_HeapReported) {
+    const std::vector<DictPtr> dictionaries = fixt_engine_dictionaries();
+    const std::vector<Member> members = {
+        Member{"CT", fixt11(), session_role::initiator, true, kFT, AV::v44},
+        Member{"CF", fix44(), session_role::initiator, true, kFT, AV::v44},
+        Member{"CO", overlay_s(), session_role::initiator, true, kFT, AV::v44},
+    };
+    const std::uint64_t m = expected_walks(dictionaries, members);
+    const auto handle_of = [](const DictPtr& d) {
+        return reinterpret_cast<fixpp_dict_t*>(new fixpp_dict{d});
+    };
+
+    std::vector<std::unique_ptr<fixpp::test_support::FixtRawPeer>> peers;
+    fixpp_engine_config_t* ec = nullptr;
+    ASSERT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_config_set_realtime_clock(ec), FIXPP_ERR_OK);
+    std::vector<fixpp_dict_t*> handles;
+    for (const DictPtr& d : dictionaries) {
+        handles.push_back(handle_of(d));
+        ASSERT_EQ(fixpp_engine_config_add_dictionary(ec, handles.back()), FIXPP_ERR_OK);
+    }
+    fixpp_engine_t* engine = nullptr;
+    ASSERT_EQ(fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &engine),
+              FIXPP_ERR_OK);
+
+    reset_as_table_view_call_count();
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    g_bytes.store(0);
+    g_counting.store(true);
+#endif
+    for (const Member& member : members) {
+        peers.push_back(std::make_unique<fixpp::test_support::FixtRawPeer>());
+        fixpp_session_config_t* sc = nullptr;
+        EXPECT_EQ(fixpp_session_config_create(&sc), FIXPP_ERR_OK);
+        const std::string target = "TW" + member.sender;
+        EXPECT_EQ(fixpp_session_config_set_comp_ids(sc, member.sender.c_str(), target.c_str()),
+                  FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIXT.1.1"), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_role(sc, FIXPP_ROLE_INITIATOR), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
+                                                    nullptr),
+                  FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_tcp_endpoint(sc, "127.0.0.1", peers.back()->port()),
+                  FIXPP_ERR_OK);
+        fixpp_dict_t* s = handle_of(member.s);
+        handles.push_back(s);
+        EXPECT_EQ(fixpp_session_config_set_dictionary(sc, s), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_default_appl_ver_id(sc, "6"), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_validate_inbound_messages(sc, true), FIXPP_ERR_OK);
+        fixpp_session_t* h = nullptr;
+        const fixpp_error_t opened = fixpp_session_open(engine, sc, &h);
+        EXPECT_EQ(opened, FIXPP_ERR_OK) << member.sender;
+        if (opened != FIXPP_ERR_OK) {
+            fixpp_session_config_destroy(sc);
+        }
+    }
+    const std::uint64_t after_opens = as_table_view_call_count();
+    EXPECT_EQ(fixpp_engine_start(engine), FIXPP_ERR_OK);
+    const std::uint64_t after_start = as_table_view_call_count();
+
+    int logons = 0;
+    for (auto& peer : peers) {
+        if (peer->accept(std::chrono::seconds{30}) &&
+            peer->read_msg_type("A", std::chrono::seconds{30}).has_value()) {
+            ++logons;
+        }
+    }
+    const std::uint64_t after_logons = as_table_view_call_count();
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    g_counting.store(false);
+    testing::Test::RecordProperty("c_route_heap_bytes", std::to_string(g_bytes.load()));
+    std::cout << "W-15's C route, heap bytes around the opens and the walks: " << g_bytes.load()
+              << "\n";
+#endif
+    fixpp_engine_destroy(engine);
+    for (fixpp_dict_t* h : handles) {
+        delete reinterpret_cast<fixpp_dict*>(h);
+    }
+
+    EXPECT_EQ(logons, static_cast<int>(members.size())) << "not every session opened";
+    EXPECT_EQ(after_opens, members.size()) << "one snapshot per C session";
+    EXPECT_EQ(after_start, m + members.size()) << "start() walks each route table once";
+    EXPECT_EQ(after_logons, m + members.size()) << "an open walks nothing";
+}
+
 TEST(W15Threads, WorkerThreadsAboveOne) {
     asio::io_context ioc;
     auto clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());

@@ -190,6 +190,9 @@ fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg, uint16_t consumer_
             eng_cfg.clock = e->state_->clock_;  // null clock → Engine::start() rejects
         }
         eng_cfg.application = e->app_;  // the trampoline (NOT consumer-settable)
+        // 099-fixt-appl-version-validation (data-model E-8): a copy, since the failure below
+        // leaves the builder with the caller for a retry.
+        eng_cfg.dictionaries = cfg->dictionaries;
 
         // LAST fallible step. Workers are NOT launched here — Engine::start() is
         // called (in fixpp_engine_start) while nothing polls the io_context (the

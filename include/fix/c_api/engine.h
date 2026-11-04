@@ -9,11 +9,11 @@
  * The C-ABI engine owns an internal io_context + worker thread(s) (research D-2:
  * the C++ Engine "owns NO worker threads", engine.hpp:222 — a C consumer has no
  * asio executor to supply, so the boundary owns one). Lifecycle is register-then-
- * start-once (research D-1):
+ * start, which succeeds once (research D-1):
  *
  *   fixpp_engine_create                       (build EngineConfig; stand up the loop)
  *     → fixpp_session_open × N                (= Engine::register_session, BEFORE start)
- *     → fixpp_engine_start                    (= Engine::start(), once; spawns role loops)
+ *     → fixpp_engine_start                    (= Engine::start(), once successfully; spawns role loops)
  *     → drive (send / receive) ...
  *     → fixpp_session_close                   (per session)
  *     → fixpp_engine_destroy                  (co_await stop(); join workers; ~Engine)
@@ -61,6 +61,23 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_engine_config_set_worker_threads(
 FIXPP_API_EXPORT fixpp_error_t fixpp_engine_config_set_realtime_clock(
     fixpp_engine_config_t* cfg);
 
+/** fixpp_engine_config_add_dictionary — add a dictionary to the engine's list.
+ *
+ *  Copies the shared pointer, so the caller may destroy its handle afterwards. Several
+ *  calls accumulate, in order, so of two dictionaries of one version the later answers.
+ *  fixpp_engine_create copies the list. A validating FIXT session needs the FIXT.1.1
+ *  dictionary here, and one for its default: fixpp_session_open refuses it otherwise.
+ *  (099-fixt-appl-version-validation, C-ABI 1.14.)
+ *
+ *  Reentrancy: single-thread.
+ *  @return FIXPP_ERR_OK
+ *  @return FIXPP_ERR_NULL_HANDLE          cfg is NULL
+ *  @return FIXPP_ERR_CAPI_CONFIG_INVALID  dict is NULL or an empty wrapper
+ *  @return FIXPP_ERR_INVALID_HANDLE       dict is a destroyed or wrong-type handle
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_engine_config_add_dictionary(
+    fixpp_engine_config_t* cfg, fixpp_dict_t* dict);
+
 /** Destroy an engine-config builder. NULL-safe; never-throws. Do NOT call after
  *  the builder was consumed by a successful fixpp_engine_create.
  *  Reentrancy: single-thread. */
@@ -85,11 +102,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg,
                                                    fixpp_engine_t** out_engine);
 
 /**
- * fixpp_engine_start — start the engine once (= Engine::start()).
+ * fixpp_engine_start — start the engine (= Engine::start()); succeeds once.
  *
- * Spawns the role loops; sessions establish asynchronously. Call exactly once,
- * AFTER all fixpp_session_open calls. A second call returns a domain error; a
- * null clock returns a configuration error.
+ * Spawns the role loops; sessions establish asynchronously. Call AFTER all
+ * fixpp_session_open calls. A null clock returns a configuration error.
+ *
+ * On an engine with a FIXT session it blocks the calling thread for the walks that build
+ * the FIXT route tables, before any worker runs. A table build failure returns
+ * FIXPP_ERR_UNKNOWN and leaves the engine not started, so a later call may retry; a
+ * second call after a success returns a domain error. A refused config is reported by
+ * fixpp_session_open, not here. (099-fixt-appl-version-validation, C-ABI 1.14.)
  *
  * Reentrancy: single-thread. THUNK: construction-time.
  */

@@ -2,6 +2,9 @@
 /*
  * include/fix/c_api/message.h — C-ABI message handles (CA-008/CA-009/CA-010, Feature C)
  *
+ * 099-fixt-appl-version-validation: fixpp_msg_version returns the resolved version as four
+ * bytes, BREAKING in C-ABI 1.14.
+ *
  * [2i §4.6/§4.9/§4.10/§10] /
  * specs/051-c-abi-message-accessors/contracts/{message-read,message-write,toapp-callback}.md.
  * C-clean: no C++ symbols, no C++ syntax. Compiles as C11.
@@ -72,23 +75,22 @@ typedef struct fixpp_group_builder fixpp_group_builder_t;
  *  Lifetime: bounded by the enclosing group cursor / builder. */
 typedef struct fixpp_entry fixpp_entry_t;
 
-/* ── fixpp_resolved_msg_version_t — resolved wire message version (CA-008) ──
+/* ── fixpp_resolved_msg_version_t — resolved message version (CA-008) ──────
  *
- * Returned by fixpp_msg_version(). The pointers alias the wire buffer
- * (flyweight rule [2b §6.4]) — no copy, no free. Lifetime is handle-flavour
- * dependent — bounded by the parent fixpp_msg_t's inbound/toApp dispatch window,
- * or (for a detached clone) until fixpp_msg_destroy.
+ * Returned by value through fixpp_msg_version(); nothing aliases the wire. Its
+ * bytes are the constants of dict.h, which are not wire values (1137=9 is
+ * FIXPP_APPL_VER_FIX50SP2).
  *
- * begin_string: tag 8 (BeginString) value, e.g. "FIX.4.4" or "FIXT.1.1".
- *               Always present in a valid inbound message.
- * appl_ver_id:  tag 1137 (DefaultApplVerID) value, present only for FIXT sessions.
- *               NULL (and appl_ver_id_len == 0) if the field is absent.
+ * BREAKING (C-ABI 1.14, [const §X.7]): this struct held BeginString and raw
+ * DefaultApplVerID(1137) as pointers into the wire. A caller that read BeginString
+ * or raw 1137 reads fixpp_msg_get_string(msg, 8, ...) or
+ * fixpp_msg_get_string(msg, 1137, ...).
  */
 typedef struct fixpp_resolved_msg_version {
-    const char* begin_string;     /* aliased wire value of tag 8, NUL-terminated in wire */
-    size_t      begin_string_len; /* byte length (excluding any NUL) */
-    const char* appl_ver_id;      /* aliased wire value of tag 1137; NULL if absent */
-    size_t      appl_ver_id_len;  /* byte length; 0 if absent */
+    uint8_t kind;        /* FIXPP_MSG_KIND_SESSION_ADMIN = 0, FIXPP_MSG_KIND_APPLICATION = 1 */
+    uint8_t session;     /* FIXPP_SESSION_VER_*, values of dict::session_version */
+    uint8_t application; /* FIXPP_APPL_VER_*, values of dict::application_version; UNKNOWN = 0 */
+    uint8_t _reserved;   /* 0 */
 } fixpp_resolved_msg_version_t;
 
 /* ── CA-008 field read accessors ────────────────────────────────────────────
@@ -117,8 +119,8 @@ typedef struct fixpp_resolved_msg_version {
  * FIXPP_ERR_OK can now return FIXPP_ERR_TAG_NOT_FOUND, and fixpp_msg_get_group
  * can report a changed instance count; fixpp_msg_field_at can go out of range;
  * fixpp_msg_has_tag and fixpp_msg_field_count change value; fixpp_msg_version's
- * appl_ver_id member can become NULL (tag 8 is fixed first by the Framer and
- * cannot be absorbed); fixpp_msg_get_msg_type can return FIXPP_ERR_TAG_NOT_FOUND
+ * kind, read from 35, says application when 35 is absorbed (tag 8 is fixed first
+ * by the Framer and cannot be); fixpp_msg_get_msg_type can return FIXPP_ERR_TAG_NOT_FOUND
  * when such a pair precedes 35, which is reachable while the session's
  * validate_inbound_messages is unset, since that header-order check is the only
  * rule placing 35 third. To re-derive whether a C-ABI session can set it, grep
@@ -184,12 +186,28 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_decimal(const fixpp_msg_t* msg, uin
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_has_tag(const fixpp_msg_t* msg, uint16_t tag,
                                            bool* present_out);
 
-/** Return the resolved wire message version (tag 8 + optional tag 1137).
- *  All fields alias the wire buffer; lifetime per the handle-flavour note above
- *  (inbound/toApp dispatch window, or until fixpp_msg_destroy for a clone).
- *  Always succeeds for a valid inbound message (tag 8 is a required header field).
+/** Return the message's resolved version, by value: the session's route for a FIXT
+ *  application message, read from BeginString for a non-FIXT one.
  *
- *  Reentrancy: requires-session-lock
+ *  kind is read from the message's 35 on every message, session from its 8. On a FIXT
+ *  application message, application is what the session resolved, or
+ *  FIXPP_APPL_VER_UNKNOWN when nothing was, with FIXPP_ERR_OK; on a FIXT or non-FIXT
+ *  admin message it is FIXPP_APPL_VER_UNKNOWN; on a non-FIXT application message it
+ *  names BeginString's version. A BeginString no FIXPP_SESSION_VER_* names reads
+ *  FIXPP_SESSION_VER_UNKNOWN. A clone answers as its source did, and a toApp view reads
+ *  FIXPP_APPL_VER_UNKNOWN, since no session wrote it.
+ *
+ *  @return FIXPP_ERR_OK
+ *  @return FIXPP_ERR_NULL_HANDLE     version_out is NULL, or msg is
+ *  @return FIXPP_ERR_INVALID_HANDLE  destroyed or wrong-type handle, or an outbound one
+ *  @return FIXPP_ERR_TAG_NOT_FOUND   tag 8 is absent: *version_out is all zero
+ *
+ *  BREAKING (C-ABI 1.14, [const §X.7]): the result's meaning and the struct's layout
+ *  changed; the migration line is on fixpp_resolved_msg_version_t.
+ *
+ *  Reentrancy: thread-safe. On a const message it reads the view and writes only
+ *  version_out, and takes no lock. An inbound handle stays valid only until the callback
+ *  returns, which this does not extend.
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_version(const fixpp_msg_t* msg,
                                            fixpp_resolved_msg_version_t* version_out);

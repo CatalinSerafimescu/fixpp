@@ -125,6 +125,9 @@ private:
 struct fixpp_engine_config {
     std::uint32_t worker_threads = 1;
     bool want_realtime_clock = false;
+    // 099-fixt-appl-version-validation (data-model E-8): copied into EngineConfig by
+    // fixpp_engine_create, not moved, since a failed create leaves the builder with the caller.
+    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> dictionaries;
 };
 
 // Session-config builder (E-3): wraps a SessionConfig under construction.
