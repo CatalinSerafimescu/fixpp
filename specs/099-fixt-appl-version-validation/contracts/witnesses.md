@@ -51,7 +51,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-1 | selection (E-7): returns `session_route_` on every frame. SC-001 names this mutant | W-1, T, NOS: Reject 373=2, 371=8 |
 | M-2 | E-6's slot rule: the registry's dictionary answers before the own-version test | W-3 (a), Required promotion not enforced |
 | M-3 | A2 removed: a refusal falls through to `session_route_` | `AC-b`, `1128=4` on A and L, where S passes: delivered. T's `1128=99` draws 2/8 instead. A and L's S also answer 5/1128 on `1128=99`, so that input alone cannot kill it there |
-| M-4 | `fixt_route_set::build` calls plain `as_table_view()` | W-1, FIX44 S, `1128=6`: rejected on tag 8 |
+| M-4 | `fixt_route_set::build` calls plain `as_table_view()` | W-1, FIX44 S, `1128=6`: 373=2, 371=1128: FIX 4.4's plain table has no framing surface |
 | M-5a, 5b, 5c | `parse_and_dispatch_`'s owner at D-2; D-4; D-5 stays `inbound_tv_` | W-7's application cell at that site: Data split |
 | M-5d1 to M-5d5 | the same at D-1; D-3; D-5 for admin; D-6; D-7 | W-7's admin cell at that site, on A: S's table splits the pair. T cannot kill them |
 | M-6a | `on_inbound_active_`'s scan keeps `inbound_tv_`'s hooks | W-7, application cell: `MsgSeqNum` 7 |
