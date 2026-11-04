@@ -177,7 +177,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-118 | the cold path counts the third field as a repeat | `W21PeekColdPath.ASecond35InTheHeaderOnly`: `35=D\|49=S\|` repeated |
 | M-119 | the walk reads values with `dict_hooks::none()` | `W21Peek.SsHeaderPair_DataEmbeds1128_TheHeaders1128Reads`: 10, not 9; `W21Peek.SsHeaderPair_DataOfNonTagBytes_Readable`: not readable |
 | M-120 | the stop rule loses S's own header tags | `W21Peek.AHeaderTagOnlyS_DeclaresWalksOn_OnPlainSItStops`: no 1128 read |
-| M-121 | the arms do not disregard a frame on a FIXT session whose route block did not complete | `W8RefusedOpenFrames`, both paths: the Logon runs |
+| M-121 | the arms do not disregard a frame on a FIXT session whose route block did not complete, and `interpret_logon`'s hooks fall to `inbound_tv_` there, since the transport route's null owner would otherwise end the binary | `W8RefusedOpenFrames`, both paths: the NOS moves the state to Disconnected |
 
 Unused ids, none reused: M-12, M-18 to M-20, M-26, M-37.
 
