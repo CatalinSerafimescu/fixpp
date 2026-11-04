@@ -805,6 +805,7 @@ public:
     int admin = 0;
     std::function<void(const View&)> on_app;
     std::function<void(const View&)> on_admin;
+    std::function<void(const View&)> on_to_app;
 
     expected_t<void> fromApp(const View& v, const SessionId&) override {
         ++app;
@@ -817,6 +818,12 @@ public:
         ++admin;
         if (on_admin) {
             on_admin(v);
+        }
+        return {};
+    }
+    expected_t<void> toApp(const View& v, const SessionId&) override {
+        if (on_to_app) {
+            on_to_app(v);
         }
         return {};
     }
@@ -976,6 +983,26 @@ public:
             ioc.restart();
             ioc.poll();
         }
+    }
+
+    // Sends an application payload and pumps what it posted; `out` holds what the peer receives.
+    // Empty on success, else the failure's text.
+    [[nodiscard]] std::string send(const std::string& payload) {
+        out.clear();
+        auto bytes = std::as_bytes(std::span{payload.data(), payload.size()});
+        auto fut = asio::co_spawn(ioc, sess->send(bytes), asio::use_future);
+        if (!pump_ready(ioc, fut, std::chrono::seconds{60})) {
+            return "PUMP-MISS";
+        }
+        auto r = fut.get();
+        if (!r) {
+            return "err=" + std::to_string(static_cast<int>(r.error()));
+        }
+        for (int i = 0; i < 4; ++i) {
+            ioc.restart();
+            ioc.poll();
+        }
+        return {};
     }
 
     [[nodiscard]] unsigned next_in() {

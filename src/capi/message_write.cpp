@@ -421,6 +421,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg) {
 // Creates an inbound-flavoured clone of `src` with its own heap-allocated frame
 // buffer and a dict-free MessageView<Index> built over it.
 // The clone is session-independent (no liveness token) and reads THREAD_SAFE.
+// 099-fixt-appl-version-validation (data-model E-5, FR-014): both branches copy the source view's
+// resolved application version, so a clone answers as its source did.
 //
 // For inbound handles: copies the raw wire frame bytes from src->view->bytes().
 // For outbound handles: not supported yet (returns INVALID_HANDLE; the contract
@@ -551,6 +553,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
                     clone_view =
                         std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
                             std::move(*parsed));
+                    fixpp::wire::detail::message_view_resolved_access::set(
+                        *clone_view, h->view->resolved_application_version());
                 } else {
                     // fixpp#458 (090-capi-refusals) D-3: a dict-backed source whose
                     // re-parse of the copied frame fails now REFUSES instead of
@@ -576,6 +580,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
                 clone_view =
                     std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
                         fv, clone_mr, h->view->offsets().config(), fixpp::wire::dict_hooks::none());
+                fixpp::wire::detail::message_view_resolved_access::set(
+                    *clone_view, h->view->resolved_application_version());
             }
 
             clone->tag_ = FIXPP_HANDLE_TAG_MSG;

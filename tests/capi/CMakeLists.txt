@@ -86,6 +86,8 @@ set(FIXPP_CAPI_FEATURE_B_INCLUDES
 #     `-L` selector to break.
 #   - dict_overlay_capi_test (098 W-9 pure rows): dictionary loads, the mapping
 #     function, and a session opened on an engine that is never started.
+#   - capi_099_msg_version_test (099 W-10's clone cells): a Session on an io_context
+#     the test pumps, no engine and no worker thread.
 add_executable(capi_pure_tests
   capi_group_delimiter_ctx_test.cpp   # 083 T049/T053: W-11/11a/11b/12/13
   capi_smoke_test.cpp
@@ -95,13 +97,18 @@ add_executable(capi_pure_tests
   thunk_split_test.cpp
   abi_symbol_golden_test.cpp
   dict_overlay_capi_test.cpp          # 098 W-9: the pure rows
+  capi_099_msg_version_test.cpp       # 099 T085: W-10's clone cells
 )
 target_link_libraries(capi_pure_tests PRIVATE
   fixpp_capi
+  fixpp_mock_clock   # 099 W-10: a Session on a mock clock, pumped by the test
   GTest::gtest
   GTest::gtest_main
 )
-target_include_directories(capi_pure_tests PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_include_directories(capi_pure_tests PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+  "${CMAKE_SOURCE_DIR}/src"   # 099 W-10: session/fixt_route_set.hpp, through the session witnesses' rig
+)
 target_compile_definitions(capi_pure_tests PRIVATE
   FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"
   FIXPP_ORCHESTRA_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries/orchestra"

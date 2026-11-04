@@ -160,6 +160,8 @@ core::expected_t<wire::field_view> owning_message_handle::field_value(
 // and a dict-free OffsetTable degradation are all RETAINED, exactly as
 // view()'s former lazy re-frame behaved (data-model.md §2.2 B/C). The
 // resulting handle is independent of the source parse buffer (FR-005).
+// 099-fixt-appl-version-validation (data-model E-5, FR-014): both re-parse branches copy the source
+// view's resolved application version, so the handle's view() answers as its source did.
 namespace detail {
 core::expected_t<owning_message_handle> owning_message_handle_from_frame(
     resolved_message_version rmv, wire::MessageView<wire::access_mode::Index> const& view,
@@ -215,6 +217,8 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
                     return std::unexpected{parsed.error()};
                 }
                 handle.pimpl_->view_cache_.emplace(std::move(*parsed));
+                wire::detail::message_view_resolved_access::set(
+                    *handle.pimpl_->view_cache_, view.resolved_application_version());
             } else {
                 // Dict-free source (data-model.md §2.2 B, RETAINED): the
                 // dict-free constructor never refuses -- OffsetTable::build
@@ -225,6 +229,8 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
                 // the root group context as a Parser{}-parsed source has it.
                 handle.pimpl_->view_cache_.emplace((*framed)[0], mr, view.offsets().config(),
                                                    wire::dict_hooks::none());
+                wire::detail::message_view_resolved_access::set(
+                    *handle.pimpl_->view_cache_, view.resolved_application_version());
             }
         } else {
             // Span frames to nothing, including a zero-byte span

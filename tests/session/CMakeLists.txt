@@ -177,7 +177,8 @@ add_executable(session_pure_tests
   test_099_establishment_admission.cpp                                  # 099 T016 (W-9)
   test_099_scan_sites.cpp                                               # 099 T017 (W-19)
   test_099_msg_type_default.cpp                                         # 099 T018, T069 (W-25)
-  test_099_resolved_version.cpp                                         # 099 T019 (W-10, non-FIXT)
+  test_099_resolved_version.cpp                                         # 099 T019, T084 (W-10)
+  test_099_outbound_1128.cpp                                            # 099 T088 (W-11)
   test_099_peek_fixt_route.cpp                                          # 099 T043 (W-21, the peek)
   $<TARGET_OBJECTS:session_test_support>
 )
