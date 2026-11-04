@@ -16,8 +16,8 @@
 //   - v50sp2 (TradeCaptureReport/AE, NoSides(552)/Side(54)) and vlatest
 //     (PositionReport/AP): v50sp2 stays at the derivation tier, chosen while a
 //     standalone full-frame `validate()` rejected the framing tag 8 on the empty
-//     FIXT `<header/>` (L-041-2/#203); 081's framing surface lifted that (B-081-1)
-//     and this file was not widened. vlatest's
+//     FIXT `<header/>` (L-041-2/#203), which 081's framing surface lifted (B-081-1).
+//     vlatest's
 //     Orchestra PositionReport shape diverges substantially from v44's own
 //     (confirmed by direct inspection of the generated
 //     fixpp/vlatest/messages/PositionReport.validator.cpp: its top-level
