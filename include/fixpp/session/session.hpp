@@ -1090,7 +1090,8 @@ private:
         // S's table when this route's table is not S's, else null.
         fixpp::dict::table_view const* envelope = nullptr;
     };
-    // begin_string is FIXT.1.1; the FIXT check has guaranteed the registry and the default.
+    // begin_string is FIXT.1.1. Set ahead of open()'s FIXT check, so the registry and the default
+    // are guaranteed only behind a successful open().
     bool fixt_routing_ = false;
     // Adopted from the Engine through session_engine_access::adopt_routes, or built in open() on
     // a directly constructed session. Null on a non-FIXT session.

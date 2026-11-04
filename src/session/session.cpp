@@ -2821,8 +2821,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 }
 
 // 099-fixt-appl-version-validation (data-model E-7, FR-001, FR-013): the frame's route. The step
-// numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(). A FIXT session
-// whose open() failed holds no table, and takes it too.
+// numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(). So does a null
+// inbound_tv_: the peek has no table to read.
 Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
                                               bool establishment_arm) const noexcept {
     inbound_route route{.entry = session_route_};
