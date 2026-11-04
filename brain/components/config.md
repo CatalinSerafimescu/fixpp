@@ -9,6 +9,7 @@ refs:
   - include/fixpp/config/load_diagnostic.hpp
   - src/config/selector_resolver.cpp
   - src/config/logger_resolver.cpp
+  - specs/099-fixt-appl-version-validation/contracts/surface.md
 codegraph_entry: [toml_config_loader, config_bundle, load_diagnostic]
 ---
 
@@ -62,6 +63,15 @@ Failure flows through the loader's result type, and the header states the contra
 failure flows through LoadResult; never throws (noexcept)."* That is the engine-wide convention (see
 [`errors.md`](./errors.md)) applied at the config boundary — a caller is expected to inspect the
 result, because **there is no throwing path to catch.**
+
+## `[dictionary] extra_paths` (099)
+
+What it does is `specs/099-fixt-appl-version-validation/contracts/surface.md`'s `## TOML` and `src/config/selector_resolver.cpp`; behaviour a user must know is `B-099-28`. The half the code cannot tell you:
+
+- **Pushed after `path`, so `engine.dictionaries.front()` stays the session default** (research R-12), which is how a session with no `dictionary` of its own is filled. There is no engine fallback at run time: that default is filled by the loader (FR-019).
+- **No overlay applies to an extra** (FR-018): `dialect_overlay` still merges onto a session's base.
+- **The config loader runs no FIXT transport check.** `load_toml_config` builds no engine, so the refusal is the host's `Engine::register_session` (research R-11).
+- ⚠️ **A lead, not in scope:** `recognize_keys` walks top-level keys only, so a misspelt `[dictionary]` sub-key is silently ignored, a misspelt `extra_paths` included (fixpp#659). Read from source when 099 filed it; check the issue before relying on this.
 
 ## Re-derive
 

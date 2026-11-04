@@ -105,12 +105,16 @@ Cut rule (user decision 2026-07-08): move ONLY self-declared-resolved entries. `
   → `done`). *(Clarifications Q3; contract C7.1; catalogue S-018.)*
 
 <!-- L-033-5 — closed: RESOLVED 2026-06-17 by 042 (open-time serviceability guard) -->
-**L-033-5 — RESOLVED by 042 (2026-06-17).** A FIXT session (acceptor or initiator) whose configured
+**L-033-5 — RESOLVED by 042 (2026-06-17), corrected by 099.** A FIXT session (acceptor or initiator) whose configured
 `default_appl_ver_id` cannot be served by the engine `version_registry` now fails closed at
 `Session::open()`-time with `error::invalid_session_config` — before any observable state mutation or
 wire emission. The operator footgun (L-033-5's "silently rejects every inbound FIXT Logon") is
-eliminated: misconfiguration is reported immediately at config-load, like QuickFIX's
-`DataDictionary`-presence check.
+eliminated: misconfiguration fails at `open()`, like QuickFIX's `DataDictionary`-presence check.
+*Corrected by 099-fixt-appl-version-validation:* this row used to say "immediately at config-load", which
+holds for a directly constructed session and not on an Engine route, where `open()` runs inside the role
+loop, whose failure branch logs and returns nothing. A validating FIXT session is now refused at
+`Engine::register_session` too, through the same check (`fixt_session_config_valid`); a non-validating one
+is refused only at `open()`, the live L-099-4.
 
 **Implementation**: a third disjunct on the FQ-1 FIXT guard at `src/session/session.cpp` (guard block;
 `!app_version_registry_->get(*cfg_.default_appl_ver_id).has_value()`). Reuses the same serviceability
@@ -350,3 +354,16 @@ All in `tests/session/test_fixt_logon_establishment.cpp`.
 
 <!-- L-004-1 — closed: stale, retired by 098-dialect-overlay (since fixpp#426 `field_iterator` takes a `dict_hooks` value with no default and pairs Length+Data through it, `include/fixpp/wire/parser.hpp`, so Iter mode does not use the static pair table alone) -->
 - **L-004-1 — Dialect-introduced new `Length`+`Data` (BLOB) pairs are not handled on the streaming iterator path.** Index mode resolves all dialect BLOB pairs via the runtime dictionary, but Iter (streaming) mode uses a static `constexpr` table of FIX-5.0-SP2-standard pairs only. **Status: deferred.** *(FR-005; research D-11.)*
+
+<!-- L-033-1 — closed: resolved by 099-fixt-appl-version-validation (FR-020, research R-16): a FIXT session selects the dictionary per message; `MessageView::resolved_application_version()`, `fixpp_msg_version` and `dict::reify` report the version it resolved, so routing at the `fromApp` level is no longer the advice; witnesses W-10's clone and reify arms and W-12's C arm -->
+**L-033-1 — Per-message `ApplVerID(1128)` routing (S-026) deferred.** Inbound `ApplVerID(1128)` is
+tolerated (not rejected) when present on application messages (FR-010, witness W8). However, per-message
+routing — using `1128` to select a message-type-specific application-layer version and dispatch
+accordingly — is **not implemented** in this feature. It remains in `backlog` as a follow-on feature.
+Operators relying on per-message versioning via `1128` should implement routing at the `fromApp` level.
+
+<!-- L-041-2 — closed: resolved by 099-fixt-appl-version-validation (FR-020, research R-16): a FIXT session validates an application message with the dictionary of its resolved version and an admin message with the transport dictionary; witnesses W-1, W-2. The accept-only divergence stays live as B-081-1, and the residue is B-099-13, B-099-15 and L-099-1 -->
+**L-041-2 — FIXT application-message validation uses the session dictionary only; full two-dictionary resolution (application dictionary by `DefaultApplVerID`) is deferred.** QuickFIX validates a FIXT application message against BOTH the session (FIXT.1.1 transport/admin) dictionary AND a separate application dictionary resolved from `DefaultApplVerID` (QuickFIX C++ `DataDictionary::validate`). Phase-1 validates against the session-held `cfg.dictionary` only; for a FIXT session the session dictionary is FIXT.1.1, so validating an application message against it would over-reject. Therefore application-message validation parity for FIXT sessions is out of scope this feature. **Status: deferred — tracked as issue #203** (promoted 2026-07-18 during feature 079/fixpp#201, which re-surfaced this: the vendored FIX50SPx application dicts ship an empty `<header/>`, so a standalone full-frame `validate()` rejects a FIX50SPx application message on tag 8 before the required-field scan; 079 scopes its FIX50SP2 correctness to the header-independent derivation/census tier). **RESOLUTION — the #203 tag-8-reject sub-part is FIXED by 081-strict-validation-residuals (2026-07-19, Concern A):** on the opt-in strict path, `Dictionary::as_table_view()` populates a **validator-private FIXT framing surface** (the full vendored `FIXT11.xml` `<header>`+`<trailer>` tag→datatype set, incl. the nested `NoHops` hop tags 627/628/629/630) for the empty-`<header/>` versions {v50, v50sp1, v50sp2}, so `validate()` **accepts** the FIXT-owned header/trailer tags (no tag-8 reject) and type-checks them. **NAMED-INTENT divergence from QuickFIX (deliberate, not a latent surprise):** the resolution is **accept-only** — unlike QuickFIX (which validates the FIXT header's *required* fields against the session dict), fixpp's dictionary validator does **not** enforce header-field required-presence; the session-layer FSM owns SeqNum/CompID presence (the `/clarify` accept-only decision). The broader `L-041-2` claim (full two-dictionary resolution of a separate application dictionary by `DefaultApplVerID`, QuickFIX C++ `DataDictionary::validate`) remains deliberately **out of scope** — 081 delivers the observable acceptance via a merged validation view, not session/version resolution plumbing. A future per-release QuickFIX interop parity pass should treat the header-required divergence as recorded intent, not a re-filed bug. *(041 Clarifications 2026-06-16; Out-of-Scope; #203 cross-ref added 2026-07-18; #203 tag-8 sub-part resolved by 081 Concern A 2026-07-19.)*
+
+<!-- L-097-1 — closed: resolved by 099-fixt-appl-version-validation (FR-016, FR-017, FR-020, research R-16): TOML `[dictionary] extra_paths`, `fixpp_engine_config_add_dictionary`, `fixpp_session_config_set_default_appl_ver_id`; witnesses W-12, W-13, W-14. What remains is the live L-099-4 -->
+- **L-097-1 — Only direct C++ can register the FIX50SP2 and the FIX Latest dictionaries in one engine.** The TOML resolver loads one `[dictionary]`, and the C API does not fill `EngineConfig::dictionaries`. A TOML engine holding FIX Latest admits `1137=9` and `1137=10` through it (the one-way fallback, B-097-1); one holding FIX50SP2 refuses `1137=10`. The C API, and the Python bindings over it, have no `default_appl_ver_id` setter either, so a C-API session cannot open as FIXT.1.1 at all and negotiates no application version, FIX Latest included; this predates 097 and is unchanged. Status: documented. A multi-dictionary config grammar is not part of 097, and no feature schedules one. *(Successor to L-080-1's config half; FR-011.)*

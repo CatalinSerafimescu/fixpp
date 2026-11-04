@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/wire/fixt_header_validate_test.cpp
 //
+// L-041-2's two-dictionary half is closed by 099-fixt-appl-version-validation, which selects a
+// table per frame on a session (data-model E-7); this file validates one table directly.
+//
 // 081-strict-validation-residuals US1 (Concern A / #203 / L-041-2) T003/T004:
 // on the strict `validate_inbound_messages` path, a well-formed FIX50/
 // FIX50SP1/FIX50SP2 application frame carrying the FIXT.1.1-owned standard

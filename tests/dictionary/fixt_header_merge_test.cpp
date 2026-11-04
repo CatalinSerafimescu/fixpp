@@ -2,6 +2,8 @@
 // tests/dictionary/fixt_header_merge_test.cpp
 //
 // 081-strict-validation-residuals US1 (Concern A / #203 / L-041-2) T005/T006.
+// L-041-2's two-dictionary half is closed by 099-fixt-appl-version-validation, whose FIX 4.x
+// route tables take this same framing surface (data-model E-3).
 //
 // STANDALONE binary (own executable + `add_test`), per `[const §VII.8]`: an
 // exact-set completeness gate is isolation-sensitive

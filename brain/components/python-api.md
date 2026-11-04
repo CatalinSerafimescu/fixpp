@@ -5,6 +5,7 @@ description: The narrow SWIG surface is a false-green guard, not laziness. A bla
 status: stable
 refs:
   - .specify/2m-pybind.md
+  - specs/099-fixt-appl-version-validation/contracts/surface.md
   - bindings/python/fixpp.i
   - bindings/python/fixpp_oo.py
   - bindings/python/CMakeLists.txt
@@ -96,6 +97,15 @@ wheel *and* the `.tar.gz`/`.deb`/`.rpm`, which is why the licences are not wired
 wheel-specific setting. ⚠️ PEP 639 cannot do it here anyway — the licences sit two levels above the
 project dir, and of the three routes, `[project] license-files` errors while **`wheel.license-files`
 and `wheel.force-include` build clean and ship nothing**.
+
+## FIXT from Python (099)
+
+The flat SWIG functions gain the three C-ABI 1.14 setters and `msg_version`, which returns `(kind, session, application)`; the constants arrive through `dict.h`'s `%include` (`specs/099-fixt-appl-version-validation/contracts/surface.md`'s `## Python`; `B-099-26`, `B-099-28`).
+
+- **No OO method is added.** `Dictionary` in `fixpp_oo.py` is passed through, and the OO layer takes the same flat config handles, so a host on it calls the flat setters.
+- **Each new row of the GIL table is `hold`,** because none makes an engine round trip, so `msg_version` may run on the receive callback's thread.
+- **`engine_start` holds the GIL across a FIXT engine's walks** (research R-11), under the reason `dict_load_from_xml`'s row uses: CPU-bound, no worker-deadlock class, releasing for throughput deferred. ⚠️ **Not** "no callback can want the GIL", which is false in a process with a second engine, whose worker waits in `PyGILState_Ensure` for the walks (`B-099-21`). Its row used to say "returns immediately".
+- **A refused config raises `fixpp.SessionError` from `session_open`,** with `.name` `FIXPP_ERR_THREAD_CONFIG`, a misleading name kept because the mapping is frozen (research R-11).
 
 ## Re-derive (the packaging half)
 

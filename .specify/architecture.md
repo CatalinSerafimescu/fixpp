@@ -754,7 +754,7 @@ The remaining `SYNTHESIS §3` items are decided shape-wise at `[const]` and are 
 | Session reject | `[FIX-SL §4.7] Session-level reject` | §4.4 session; S-007, S-034 |
 | MsgType advertisement | `[FIX-SL §4.3.8] Specifying supported message types` | §4.4 session; S-037 |
 | System identification | `[FIX-SL §4.3.9] Identification of application system` | §4.4 session; S-038 |
-| Multi-version transport | `[FIXT §5] Application-version handling`, `[FIXT §5.1] DefaultApplVerID`, `[FIXT §5.3] ApplVerID per message` | §3 version namespaces (`fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vt11`; since 097 a FIXT session can also negotiate FIX Latest, `fixpp::vlatest` — ⚠️ **Z-12**); §4.2 dictionary multi-version coexistence; S-025, S-026 |
+| Multi-version transport | `[FIXT §5] Application-version handling`, `[FIXT §5.1] DefaultApplVerID`, `[FIXT §5.3] ApplVerID per message` | §3 version namespaces (`fixpp::v42`, `fixpp::v44`, `fixpp::v50sp2`, `fixpp::vt11`; since 097 a FIXT session can also negotiate FIX Latest, `fixpp::vlatest` — ⚠️ **Z-12**); §4.2 dictionary multi-version coexistence; S-025, S-026. Since 099 (`099-fixt-appl-version-validation`) a FIXT session validates, scans and parses each application message with the dictionary of its resolved version (1128, else the peer's Message Type Default, else 1137), and an admin message with the transport dictionary: read `Session::select_route_` |
 | TLS profile | `[FIXS §3] TLS profile` | §4.6 tls (`CipherPolicy`); T-006, T-007, T-013 |
 | Mutual authentication | `[FIXS §3.3] Authentication` | §4.6 tls (`SecurityProfile::mtls_*`); §4.4 session security profile arg; T-008 |
 | Certificate parameters | `[FIXS §3.4] Certificate parameters` | §4.6 tls (`cert_source` validation); T-039 |

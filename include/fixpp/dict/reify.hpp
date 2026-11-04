@@ -10,6 +10,10 @@
 // specs/003-dictionary-codegen/contracts/reify.hpp; data-model Entities 5/6;
 // spec §4.3/§4.4 AC-R1..AC-R8 / AC-D1..AC-D7 / AC-G7a.
 //
+// 099-fixt-appl-version-validation (data-model E-5, FR-001) supersedes [2c §4.8]'s
+// resolution for a view a session wrote: dict::reify then takes the view's byte and reads
+// neither 1128 nor the profile. Its declaration below lists the order.
+//
 // Bridge header (arch §2.4 v0.3 dual-compile carve-out, RC#3): #includes
 // message_view_contract.hpp which, post the 004 cutover (T028), re-exports
 // the REAL wire::MessageView/field_view surface, + the 003-owned

@@ -14,9 +14,10 @@
 //     real wire frame) and the typed tier (an equivalent PositionReportArgs)
 //     — asserting identical accept/reject verdicts.
 //   - v50sp2 (TradeCaptureReport/AE, NoSides(552)/Side(54)) and vlatest
-//     (PositionReport/AP): standalone full-frame `validate()` is BLOCKED for
-//     v50sp2 by the empty FIXT `<header/>` (L-041-2/#203 — validate() Step
-//     1(a) rejects the framing tag 8 before Step 2/3 ever run). vlatest's
+//     (PositionReport/AP): v50sp2 stays at the derivation tier it took while a
+//     standalone full-frame `validate()` rejected the framing tag 8 on the empty
+//     FIXT `<header/>` (L-041-2/#203); 081's framing surface lifted that (B-081-1)
+//     and this file was not widened. vlatest's
 //     Orchestra PositionReport shape diverges substantially from v44's own
 //     (confirmed by direct inspection of the generated
 //     fixpp/vlatest/messages/PositionReport.validator.cpp: its top-level
@@ -531,9 +532,10 @@ TEST(RequiredScopeTwoTier, V44PositionReport_AllGroupInstancesComplete_BothTiers
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// v50sp2 — derivation-tier agreement (TradeCaptureReport/AE): standalone
-// full-frame validate() is BLOCKED by the empty FIXT <header/> (L-041-2 /
-// #203). Compare the message-level required-tag SET directly.
+// v50sp2 — derivation-tier agreement (TradeCaptureReport/AE): the tier this
+// comparison took while a standalone full-frame validate() rejected tag 8 on the
+// empty FIXT <header/> (L-041-2 / #203), which 081's framing surface lifted.
+// Compare the message-level required-tag SET directly.
 // ══════════════════════════════════════════════════════════════════════════
 
 TEST(RequiredScopeTwoTier, V50sp2TradeCaptureReport_DerivationTierAgrees) {

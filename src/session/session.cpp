@@ -1466,9 +1466,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     }
 
     // T050 (US5): null dictionary → invalid_session_config (slot 53 / FR-016
-    // / FR-018 / I-13). dictionary is REQUIRED — the uniform resolved =
-    // override.value_or(engine_anchor) pattern for the dictionary axis: a
-    // null dictionary means neither session nor engine supplied one.
+    // / FR-018 / I-13). The dictionary has no engine anchor and is required on the
+    // session (099-fixt-appl-version-validation, FR-019, fixpp#651): no fallback, so a
+    // null one is refused here. The resolved = override.value_or(engine_anchor) pattern
+    // holds only for the executor and clock, above and below.
     if (!cfg_.dictionary) {
         co_return std::unexpected(error::invalid_session_config);
     }
@@ -1558,7 +1559,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // 099-fixt-appl-version-validation (data-model E-9, FR-003, FR-004): the FIXT check, one
     // shared with Engine::register_session. Tested against begin_string directly, NOT is_fixt(),
     // which encodes the default_appl_ver_id half and would MISS the begin_string-without-default
-    // case.
+    // case. On an Engine route this runs in the role loop, whose failure branch logs and returns
+    // nothing to the host. So only a validating session gets a config-load failure, from
+    // Engine::register_session; a non-validating one is refused here alone (L-099-4).
     if (fixt_routing_ && !fixt_session_config_valid(cfg_, app_version_registry_)) {
         co_return std::unexpected(error::invalid_session_config);
     }
