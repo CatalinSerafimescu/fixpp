@@ -9,8 +9,7 @@
 //
 // `build_send_frame_` keeps a tag in the header when `kSendHeaderTags` holds it or when S declares
 // it in its header. So only a session whose S does not declare 1128 shows what the set alone does;
-// that precondition is its own assertion below, and is what lets the mutant of tasks.md T090 go
-// RED.
+// that precondition is its own assertion below.
 //
 // The expected field order is spelled here rather than read from the send path's own set, so a
 // change there cannot move this witness.
