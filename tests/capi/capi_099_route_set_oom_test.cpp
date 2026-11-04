@@ -49,7 +49,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/session_test_access.hpp"
 
-// ASan, TSan and MSan own operator new. Under them every arm here skips.
+// ASan, TSan and MSan own operator new. Under them this file is one skipped cell.
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
     __has_feature(memory_sanitizer)
@@ -64,6 +64,7 @@
 #define FIXPP_SANITIZER_REPLACES_NEW 0
 #endif
 
+#if !FIXPP_SANITIZER_REPLACES_NEW
 namespace {
 
 // The whole of the test runs on one thread, the one that pumps its io_context; atomics only so
@@ -88,7 +89,11 @@ void disarm() { g_armed.store(false); }
 
 }  // namespace
 
-#if !FIXPP_SANITIZER_REPLACES_NEW
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new; these replace it.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void* operator new(std::size_t size) {
     if (g_armed.load()) {
         const long seen = g_seen.fetch_add(1) + 1;
@@ -112,6 +117,8 @@ void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
 #endif
 
 namespace fixpp::session {
@@ -170,9 +177,6 @@ BuildCount count_build() {
 }
 
 TEST(W20Build, EveryFiredAllocationIsOutOfMemoryAndTheLastIsAUsableSet) {
-#if FIXPP_SANITIZER_REPLACES_NEW
-    GTEST_SKIP() << "this sanitizer owns operator new";
-#else
     const dd::version_registry registry{engine_dictionaries()};
     long fired_runs = 0;
     long completed_runs = 0;
@@ -197,7 +201,6 @@ TEST(W20Build, EveryFiredAllocationIsOutOfMemoryAndTheLastIsAUsableSet) {
     }
     EXPECT_GT(fired_runs, 0) << "the hook never fired, so this arm proved nothing";
     EXPECT_EQ(completed_runs, 1);
-#endif
 }
 
 // An Engine with one FIXT session over the Build arm's registry and S, so that the build's own
@@ -237,9 +240,6 @@ public:
 };
 
 TEST(W20Engine, EachFiredAllocationFailsStartThenASecondStartSucceeds) {
-#if FIXPP_SANITIZER_REPLACES_NEW
-    GTEST_SKIP() << "this sanitizer owns operator new";
-#else
     const BuildCount build = count_build();
     ASSERT_GT(build.allocations, 0);
     long fired_runs = 0;
@@ -266,7 +266,6 @@ TEST(W20Engine, EachFiredAllocationFailsStartThenASecondStartSucceeds) {
     }
     EXPECT_EQ(fired_runs, build.allocations) << "an unfired hook reads green";
     EXPECT_EQ(retries_started, build.allocations) << "the sweep must see both outcomes";
-#endif
 }
 
 // A session opened with the hook armed only around the co_await: open() is a noexcept coroutine and
@@ -314,9 +313,6 @@ public:
 };
 
 TEST(W20Direct, EachFiredAllocationOfTheBuildFailsOpenThenARetryOpens) {
-#if FIXPP_SANITIZER_REPLACES_NEW
-    GTEST_SKIP() << "this sanitizer owns operator new";
-#else
     const BuildCount build = count_build();
     ASSERT_GT(build.allocations, 0);
 
@@ -350,8 +346,13 @@ TEST(W20Direct, EachFiredAllocationOfTheBuildFailsOpenThenARetryOpens) {
     }
     EXPECT_EQ(fired_runs, build.allocations) << "an unfired hook reads green";
     EXPECT_EQ(retries_opened, build.allocations) << "the sweep must see both outcomes";
-#endif
 }
 
 }  // namespace
 }  // namespace fixpp::session
+
+#else  // FIXPP_SANITIZER_REPLACES_NEW
+
+TEST(W20, ThisSanitizerOwnsOperatorNew) { GTEST_SKIP() << "the fail-at-N hook replaces it"; }
+
+#endif

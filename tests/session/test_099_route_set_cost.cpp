@@ -74,12 +74,17 @@
 #define FIXPP_SANITIZER_REPLACES_NEW 0
 #endif
 
+#if !FIXPP_SANITIZER_REPLACES_NEW
 namespace {
 std::atomic<bool> g_counting{false};
 std::atomic<std::uint64_t> g_bytes{0};
 }  // namespace
 
-#if !FIXPP_SANITIZER_REPLACES_NEW
+// GCC's -Wmismatched-new-delete pairs std::free with the STANDARD operator new; these replace it.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void* operator new(std::size_t size) {
     if (g_counting.load(std::memory_order_relaxed)) {
         g_bytes.fetch_add(size, std::memory_order_relaxed);
@@ -95,6 +100,9 @@ void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #endif
 
 namespace fixpp::session::test099 {
