@@ -251,7 +251,7 @@ void check_scan_agrees_with_build(std::span<const std::byte> buf) {
 
 namespace {
 
-constexpr std::uint8_t kFixtArmBit = 0x80;
+constexpr std::uint8_t kFixtArmBit = 0x40;
 constexpr std::uint8_t kFixtDriveLogonBit = 0x01;    // a Logon first, so the payload meets Active
 constexpr std::uint8_t kFixtApplicationSBit = 0x02;  // S is the application dictionary, not FIXT11
 
