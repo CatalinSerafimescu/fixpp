@@ -308,11 +308,13 @@ fixt_arm_fixture& fixt_arm() {
 // reads zero and fails the run, which `ctest -L fuzz` (`-runs=0`) grades by exit code.
 std::uint64_t g_fixt_peeked = 0;
 std::uint64_t g_fixt_active = 0;
+std::uint64_t g_fixt_seeded_logon_active = 0;  // the input itself established, on a first frame
 
 void report_fixt_arm() {
     std::cerr << "[099 fuzz FIXT arm] peek compared " << g_fixt_peeked << ", reached Active "
-              << g_fixt_active << '\n';
-    if (g_fixt_peeked == 0 || g_fixt_active == 0) {
+              << g_fixt_active << ", a seeded Logon reached Active " << g_fixt_seeded_logon_active
+              << '\n';
+    if (g_fixt_peeked == 0 || g_fixt_seeded_logon_active == 0) {
         std::cerr << "[099 fuzz FIXT arm] a counter read zero: the arm was bypassed\n";
         std::_Exit(1);
     }
@@ -422,6 +424,9 @@ void run_fixt_arm(std::uint8_t preamble, std::span<const std::byte> payload) {
                                              body_end + static_cast<std::size_t>(tail)));
     }
     feed_fixt(ioc, sess, payload);
+    if ((preamble & kFixtDriveLogonBit) == 0 && sess.state() == fixpp::session::fsm_state::Active) {
+        ++g_fixt_seeded_logon_active;
+    }
 }
 
 }  // namespace
