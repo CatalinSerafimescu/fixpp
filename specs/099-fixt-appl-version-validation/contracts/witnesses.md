@@ -49,7 +49,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | Id | Code it changes | Cell RED on that alone |
 |---|---|---|
 | M-1 | selection (E-7): returns `session_route_` on every frame. SC-001 names this mutant | W-1, T, NOS: Reject 373=2, 371=8 |
-| M-2 | E-6's slot rule: the registry's dictionary answers before the own-version test | W-3 (a), Required promotion not enforced |
+| M-2 | E-6's slot rule: the registry's dictionary answers before the own-version test | W-3 (a), Required promotion: the plain table answers first, 373=2, 371=5002, not `R 1/1 D` |
 | M-3 | A2 removed: a refusal falls through to `session_route_` | `AC-b`, `1128=4` on A and L, where S passes: delivered. T's `1128=99` draws 2/8 instead. A and L's S also answer 5/1128 on `1128=99`, so that input alone cannot kill it there |
 | M-4 | `fixt_route_set::build` calls plain `as_table_view()` | W-1, FIX44 S, `1128=6`: 373=2, 371=1128: FIX 4.4's plain table has no framing surface |
 | M-5a, 5b, 5c | `parse_and_dispatch_`'s owner at D-2; D-4; D-5 stays `inbound_tv_` | W-7's application cell at that site: Data split |
@@ -57,20 +57,20 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-6a | `on_inbound_active_`'s scan keeps `inbound_tv_`'s hooks | W-7, application cell: `MsgSeqNum` 7 |
 | M-6b | the scan in `on_inbound_not_connected_`; in `on_inbound_logon_sent_`, one edit per run, keeps S's hooks | W-5, Scan cell, that arm: NextNumIn from `34=7`, or a reset from `141=Y` |
 | M-6c | `on_inbound_logout_sent_`'s scan keeps `inbound_tv_`'s hooks | W-7, LogoutSent scan: taken as the reply |
-| M-6d | `interpret_logon`'s hooks at the acceptor; at the initiator, one edit per run | W-5, Interpret cell, that arm: negotiated reads 6 |
+| M-6d | `interpret_logon`'s hooks at the acceptor; at the initiator, one edit per run | W-5, Interpret cell, that arm: the Data's `1137=6` is read, so validating `R 5/1137 A` `Disc`, and not validating negotiated reads 6 |
 | M-7a | E-9: the no-default clause removed | W-8, no default, at each caller: opens or registers |
 | M-7b | E-9: the null-registry clause removed | W-8, null registry, direct `open()` |
 | M-7c | E-9: the slot-miss clause removed | W-8, slot miss, at each caller |
 | M-7d | E-9: the transport clause removed | W-8, A with no FIXT11 |
 | M-8 | a role loop does not call `adopt_routes`, one edit per loop per run | W-15, walks above M after the opens |
 | M-8b | a session copies the validators it reads | W-15, heap arm RED, walks unchanged: why it needs both |
-| M-9 | selection: admin takes an application slot | W-1, A, Heartbeat rejected |
+| M-9 | selection: admin takes an application slot | W-1, A, Heartbeat: the Logon ahead of it is judged by S, so the session does not establish and the cell reads its setup failure |
 | M-10 | S3: the initiator's block removed | `LS-e`, `4`: Active |
 | M-11 | `parse_and_dispatch_` does not write the accessor | W-10, 1128 present: `Unknown` |
 | M-12a, 12b, 12c | `validate(…, envelope)`: membership; enum; type answered by the routed table. Each alone | W-3 (c)'s scalar; closed-enum invalid; int invalid |
 | M-12d | the envelope check moved behind `valid_tags` | W-3 (c), Collision: `Y` passes, `X` refused |
 | M-12e | `is_route_answered_header_tag` loses 1128 | W-3 (c), `1128=10` on T: 373=5; W-21, the exact set: 1128 missing |
-| M-13 | the peek ignores its stop rule | W-7, `1128=<other>` inside a body pair's Data: routes away |
+| M-13 | the peek ignores its stop rule | W-7, `1128=<other>` inside a body pair's Data: read as the header's, so routed by it: `R 5/1128 D` on a value with no dictionary |
 | M-14 | `defines_fixt_admin` tests the version label | W-8, partial FIXT11: opens |
 | M-15 | S1's `application` clause removed | `NC-d`, T, NOS: Reject 2/8, stays |
 | M-16 | the Active arm's `refuse_active_frame_` read moves ahead of its garble and fault checks | `W19FaultPastTheStop`, a frame the peek reads and refuses and whose scan faults past the header: `R 5/1128 D`, not the fault's disposition `R 0/ D` |
