@@ -1,5 +1,5 @@
-# fixt_app_script.yaml — 095-tail-evidence-pass (US3): the one-step script of
-# the two FIXT.1.1 / FIX.5.0SP2 app-message cells
+# fixt_app_script.yaml — 095-tail-evidence-pass (US3), 099 (W-18): the two-step
+# script of the two FIXT.1.1 / FIX.5.0SP2 app-message cells
 # (HP-QFcpp-init-fixt11-fix50sp2-app-bn, HP-QFj-init-fixt11-fix50sp2-app-bn;
 # the live-cell contract's clauses L0 to L4, specs/095-tail-evidence-pass/contracts/).
 #
@@ -11,14 +11,24 @@
 # values, and the peer writes its generic per-field readback of what it
 # received. hp_fixt50sp2_app_message_test.cpp compares the two.
 #
+# 099-fixt-appl-version-validation (W-18, research R-13): step B-02 is one 35=BN
+# from the peer, so that a real application frame reaches fixpp's route selection,
+# with no 1128, resolved by the negotiated 1137=9. The peer's own builder reads
+# it from the intent file, and fixpp writes the readback hp_fixt50sp2_app_message_test.cpp
+# compares with the peer's `sent` record.
+#
 # `applicable_combos: [C1, C3]`: 089's fixpp-initiator combos, QuickFIX-cpp and
 # QuickFIX-J. Not in the census (census.yaml) and no conformance slot: the
 # cells' run_kind is "app-message-evidence", never promoted.
 #
 # step_id F-01 (not "A-*"/"B-0N"/"P-01"): no collision with the conversation's
-# or the probe's step ids. No admin_steps: Logon and Logout are session-layer,
-# and the peers' stage-0 lookup of B-02 finds no entry here, so they reply
-# with nothing.
+# or the probe's step ids. No admin_steps: Logon and Logout are session-layer.
+#
+# step_id B-02 is the id the peers already act on, and that is why it is this
+# id: both counterparties' stage-0 reply to their first inbound application
+# message looks up ("B-02", "peer") and sends it, so a script line reaches both
+# with no counterparty change. They mint OrderID(37) and ExecID(17) there, the
+# step's runtime_generated. P-01 is QuickFIX-cpp's alone.
 #
 # Field set: research R-7 (OrderID, ExecAckStatus, ExecID, Side, Symbol,
 # OrderQty, ClOrdID, CumQty, AvgPx). Values follow data-model §C's literal
@@ -50,3 +60,26 @@ business_steps:
       - { path: "6", value: "10.5" }
     typed_reads: []
     runtime_generated: []
+
+  - step_id: B-02
+    step: 2
+    phase: business
+    msg_type: "BN"       # ExecutionAck
+    originator: peer
+    direction: peer-to-fixpp
+    expects_witness: false   # app-message evidence, not a conformance witness
+    applicable_combos: [C1, C3]
+    occurrences:
+      C1: [0]
+      C3: [0]
+    depends_on: [F-01]
+    intent_fields:
+      - { path: "1036", value: "0" }    # ExecAckStatus = RECEIVED
+      - { path: "54", value: "1" }      # Side = BUY
+      - { path: "55", value: "B02_ExecutionAck_symbol" }
+      - { path: "38", value: "10.5" }
+      - { path: "11", value: "B02_ExecutionAck_cl_ord_id" }
+      - { path: "14", value: "10.5" }
+      - { path: "6", value: "10.5" }
+    typed_reads: []
+    runtime_generated: ["37", "17"]    # OrderID, ExecID: the peer's own counter

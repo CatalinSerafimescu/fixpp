@@ -1,29 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// tests/interop/happy/hp_fixt50sp2_app_message_test.cpp — 095-tail-evidence-pass US3 (live).
+// tests/interop/happy/hp_fixt50sp2_app_message_test.cpp — 095-tail-evidence-pass US3 (live),
+// 099-fixt-appl-version-validation W-18 (research R-13).
 //
-// One typed-built application message over FIXT.1.1 / FIX.5.0SP2: fixpp (initiator) logs on with
-// DefaultApplVerID(1137)=9, sends one 35=BN built by fixpp::v50sp2::build_ExecutionAck from step
-// F-01 of tests/interop/conversation/fixt_app_script.yaml, and logs out. The QuickFIX peer
-// (QuickFIX-cpp or QuickFIX-J, UseDataDictionary=Y over FIXT11.xml + FIX50SP2.xml) writes its
-// generic per-field readback of the BN it received; compare_streams compares it with fixpp's
-// `sent` record (the live-cell contract's clauses L1 to L4).
+// One typed-built application message each way over FIXT.1.1 / FIX.5.0SP2: fixpp (initiator) logs
+// on with DefaultApplVerID(1137)=9, sends one 35=BN built by fixpp::v50sp2::build_ExecutionAck from
+// step F-01 of tests/interop/conversation/fixt_app_script.yaml, takes the peer's one 35=BN of step
+// B-02, and logs out. The QuickFIX peer (QuickFIX-cpp or QuickFIX-J, UseDataDictionary=Y over
+// FIXT11.xml + FIX50SP2.xml) writes its generic per-field readback of the BN it received;
+// compare_streams compares it with fixpp's `sent` record (the live-cell contract's clauses L1 to
+// L4), and fixpp's own readback of B-02 with the peer's `sent` record.
 //
-// The cell's record (FR-013): fixpp's inbound validation is OFF on this cell
-// (SessionConfig::validate_inbound_messages = false; the hello carries arm "validation-off").
-// The reason is L-041-2: the session validator takes one dictionary, and a FIXT session needs
-// two (FIXT11.xml for the session layer, FIX50SP2.xml for the application layer). The cell's
-// evidence is the PEER's dictionary-backed parse of fixpp's message, which does not depend on
-// fixpp's inbound validation.
+// The cell's record: fixpp's inbound validation is ON (SessionConfig::validate_inbound_messages =
+// true; the hello carries arm "validation-on"), with FIXT11.xml as the session's dictionary and
+// FIX50SP2.xml as the engine's. B-02 carries no 1128, so it reaches fromApp only through route
+// selection on the negotiated 1137. What this cell cannot show: Message Type Default, which no
+// QuickFIX engine sends (W-25). 099 replaces the "validation off" record, whose reason was L-041-2.
 //
 // Second source of the 033 FIXT target interop_hp_fixt50sp2_logon_hb_logout_test; 033's
 // HappyFixtLogonHbLogout cells live in their own file. Gtest ids (contracts L0):
 // Fixt/HappyFixtAppMessage.TypedExecutionAck/{QFcpp,QFj}_init_fix50sp2; the parent harness's
 // gtest_filter and tests/interop/expected-skips-without-counterparty.txt must name them verbatim.
 //
-// Pass conditions, all evaluated whatever the others return: exactly one comparison row and it
-// passes; no Reject(35=3) from the peer; Engine::stop() completes (hp::expect_graceful_stop). The
-// harness adds the peer's trailing LOGOUT transcript line. After Engine start every check is
+// Pass conditions, all evaluated whatever the others return: one comparison row per `sent` record,
+// each passing, and each field of B-02 read back as the script declares it; fromApp ran once, on
+// the version 1137 negotiated, with no 1128 in the frame; no Reject(35=3) from the peer and none
+// from fixpp (the peer's `IN 3`); Engine::stop() completes (hp::expect_graceful_stop). The harness
+// adds the peer's trailing LOGOUT transcript line. After Engine start every check is
 // non-fatal until the engine has stopped, so a failure reports instead of aborting in ~Engine.
 // Peer Rejects are read from the peer's own transcript (`OUT 3` / `OUT j` lines), because fixpp
 // does not dispatch an inbound Reject to fromAdmin; tracked as fixpp#612.
@@ -54,6 +57,7 @@
 #include <fixpp/wire/parser.hpp>
 #include <fstream>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -62,6 +66,7 @@
 #include <utility>
 #include <vector>
 
+#include "conversation/support/conv_wire.hpp"
 #include "hp_support.hpp"
 #include "support/app_message_read_scaffold.hpp"
 #include "support/counterparty_probe.hpp"
@@ -114,6 +119,27 @@ public:
             PendingSent{.script_step_id = std::move(step_id), .fields = std::move(fields)};
     }
 
+    // What fromApp saw of the peer's application frames, on the one thread the fixture pumps.
+    int from_app_count = 0;
+    bool saw_1128 = false;
+    fixpp::dict::application_version resolved = fixpp::dict::application_version::Unknown;
+    std::vector<rb::FieldEntry> inbound_fields;
+
+    fixpp::core::expected_t<void> fromApp(MessageView<access_mode::Index> const& msg,
+                                          SessionId const& /*id*/) override {
+        ++from_app_count;
+        saw_1128 = saw_1128 || msg.get(1128).has_value();
+        resolved = msg.resolved_application_version();
+        inbound_fields = fixpp::interop::conversation::collect_body_fields(msg);
+        if (stream != nullptr) {
+            auto const poss_dup = msg.get(43);
+            stream->readback(
+                std::string(msg.msg_type()), msg.msg_seq_num(), rb::kDirectionPeerToFixpp, 0,
+                poss_dup.has_value() && poss_dup->as_string() == "Y", inbound_fields, {});
+        }
+        return {};
+    }
+
     fixpp::core::expected_t<void> toApp(MessageView<access_mode::Index> const& msg,
                                         SessionId const& /*id*/) override {
         if (stream != nullptr && pending_sent.has_value()) {
@@ -158,6 +184,17 @@ std::vector<std::string> peer_rejects_in(std::string const& transcript_path) {
     return out;
 }
 
+// Every Reject(35=3) fixpp sent, as the peer logs it: `IN 3 <frame>`.
+std::vector<std::string> fixpp_rejects_in(std::string const& transcript_path) {
+    std::vector<std::string> out;
+    std::ifstream f(transcript_path, std::ios::binary);
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.starts_with("IN 3 ")) out.push_back(line);
+    }
+    return out;
+}
+
 std::string join_lines(std::vector<std::string> const& lines) {
     std::string out;
     for (auto const& l : lines) out += (out.empty() ? "" : "; ") + l;
@@ -189,7 +226,7 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     ASSERT_FALSE(run_id.empty()) << "INTEROP_FIXPP_RUN_ID absent";
     ASSERT_FALSE(cell_id.empty()) << "INTEROP_FIXPP_CELL_ID absent";
     ASSERT_FALSE(config.empty()) << "INTEROP_FIXPP_CONFIG absent";
-    ASSERT_EQ(arm, "validation-off") << "this cell runs with fixpp's inbound validation off";
+    ASSERT_EQ(arm, "validation-on") << "this cell runs with fixpp's inbound validation on";
     ASSERT_EQ(combo, counterparty == Counterparty::quickfix_cpp ? "C1" : "C3")
         << "the registration's combo for this counterparty";
     ASSERT_FALSE(script_path.empty()) << "INTEROP_FIXPP_SCRIPT_PATH absent";
@@ -209,6 +246,12 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     }
     ASSERT_NE(f01, nullptr) << "no fixpp intent entry for step F-01 in " << intent_path;
     ASSERT_EQ(f01->msg_type, "BN") << "step F-01 is not a 35=BN";
+    intent::Message const* b02 = nullptr;
+    for (auto const& m : messages) {
+        if (m.step_id == "B-02" && m.originator == "peer") b02 = &m;
+    }
+    ASSERT_NE(b02, nullptr) << "no peer intent entry for step B-02 in " << intent_path;
+    ASSERT_EQ(b02->msg_type, "BN") << "step B-02 is not a 35=BN";
 
     // The `sent` record: the F-01 literals, fixed before the build (data-model §D).
     std::vector<rb::FieldEntry> sent_fields;
@@ -266,7 +309,7 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     // NOLINTEND(bugprone-unchecked-optional-access)
     cfg.default_appl_ver_id = fixpp::dict::application_version::v50sp2;
     cfg.dictionary = prod.session_dictionary;
-    cfg.validate_inbound_messages = false;
+    cfg.validate_inbound_messages = true;
     auto const id = SessionId::from_config(cfg);
 
     rb::Stream stream(readback_path);
@@ -285,7 +328,7 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     auto sess = fx.engine().lookup(id);
     bool const has_validator =
         sess != nullptr && fixpp::session::session_test_access::has_validator(*sess);
-    EXPECT_FALSE(has_validator) << "inbound validation must be off on this cell (FR-013)";
+    EXPECT_TRUE(has_validator) << "inbound validation must be on on this cell (W-18)";
     stream.hello(run_id, cell_id, config, actual_digest, arm, has_validator,
                  prod.app_dictionary_digest);
 
@@ -303,14 +346,16 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
             EXPECT_TRUE(r.has_value())
                 << "Engine::send of the 35=BN failed; error=" << static_cast<int>(r.error());
         }
-        // The peer's verdict on the BN: its readback, or a Reject.
+        // The peer's verdict on fixpp's BN, then fixpp's on the peer's: delivered, or a Reject.
         bool const settled = fx.run_until(
             [&] {
                 return !peer_rejects_in(cp_transcript).empty() ||
-                       peer_readback_landed(cp_path, "BN");
+                       !fixpp_rejects_in(cp_transcript).empty() ||
+                       (peer_readback_landed(cp_path, "BN") && app->from_app_count > 0);
             },
             5s);
-        EXPECT_TRUE(settled) << "within 5s the peer neither read back nor rejected the 35=BN";
+        EXPECT_TRUE(settled) << "within 5s the peer did not read back fixpp's 35=BN, or fixpp did "
+                                "not take the peer's, and neither rejected";
     }
 
     hp::expect_graceful_stop(fx);
@@ -323,6 +368,31 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
     std::vector<std::string> const peer_rejects = peer_rejects_in(cp_transcript);
     EXPECT_TRUE(peer_rejects.empty())
         << "the peer rejected fixpp's message: " << join_lines(peer_rejects);
+    std::vector<std::string> const fixpp_rejects = fixpp_rejects_in(cp_transcript);
+    EXPECT_TRUE(fixpp_rejects.empty())
+        << "fixpp rejected the peer's message: " << join_lines(fixpp_rejects);
+
+    // ── The peer's frame, through route selection on the negotiated 1137. ──
+    std::cout << "W-18 read: fromApp count " << app->from_app_count << ", 1128 in the frame "
+              << app->saw_1128 << ", resolved application version "
+              << static_cast<int>(app->resolved) << ", has_validator " << has_validator << "\n";
+    EXPECT_EQ(app->from_app_count, 1) << "the peer sends one application message";
+    EXPECT_FALSE(app->saw_1128) << "B-02 carries no 1128, so 1137 is what resolves it";
+    EXPECT_EQ(app->resolved, fixpp::dict::application_version::v50sp2);
+    // B-02's fields as fixpp read them, each against the script; 37 and 17 are the peer's own, so
+    // the comparison row below is what judges their values.
+    auto const read_of = [&](std::string const& path) -> std::optional<std::string> {
+        for (auto const& f : app->inbound_fields) {
+            if (f.path == path) return f.value;
+        }
+        return std::nullopt;
+    };
+    for (auto const& f : b02->fields) {
+        EXPECT_EQ(read_of(f.path), std::optional<std::string>(f.value))
+            << "step B-02, tag " << f.path;
+    }
+    EXPECT_TRUE(read_of("37").has_value()) << "step B-02, the peer's OrderID";
+    EXPECT_TRUE(read_of("17").has_value()) << "step B-02, the peer's ExecID";
 
     // ── The comparison (contracts L4). ──
     rb::WitnessIdentity wid;
@@ -338,8 +408,13 @@ TEST_P(HappyFixtAppMessage, TypedExecutionAck) {
                                           rb::parse_stream(cp_path), wid, is_decimal);
     EXPECT_TRUE(rb::write_witness_rows(run_dir_of(readback_path) + "/witnesses.jsonl", rows))
         << "failed to write witnesses.jsonl";
-    EXPECT_EQ(rows.size(), 1U) << "exactly one comparison row is required (the F-01 35=BN); got "
-                               << rows.size();
+    EXPECT_EQ(rows.size(), 2U)
+        << "one comparison row per sent record is required (F-01, B-02); got " << rows.size();
+    int b02_rows = 0;
+    for (auto const& row : rows) {
+        if (row.script_step_id == "B-02" && row.direction == rb::kDirectionPeerToFixpp) ++b02_rows;
+    }
+    EXPECT_EQ(b02_rows, 1) << "no comparison row for the peer's 35=BN";
     for (auto const& row : rows) {
         EXPECT_EQ(row.verdict, "pass")
             << "comparison row " << row.witness_id << " (" << row.msg_type << ") failed";
