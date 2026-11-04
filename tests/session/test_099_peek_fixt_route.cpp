@@ -251,6 +251,13 @@ TEST(W21Peek, AStopAheadOfTheThirdField_TheThirdFieldStillAnswers) {
     EXPECT_EQ(scan.fault_ref_msg_type, p.msg_type);
 }
 
+TEST(W21Peek, A1128AfterAStopAheadOfTheThirdField_IsNotTheHeaders) {
+    const fixt_route_peek p = peek_on(fixt11(), soh("11=x|1128=9|35=D|"));
+    EXPECT_TRUE(p.readable);
+    EXPECT_EQ(p.msg_type, "D");
+    EXPECT_FALSE(p.header_1128);
+}
+
 TEST(W21Peek, A1128PastTheStop_IsNotTheHeaders) {
     EXPECT_FALSE(peek_on(fixt11(), soh(kHead + "35=D|11=x|1128=6|")).header_1128);
 }
