@@ -477,8 +477,8 @@ INSTANTIATE_TEST_SUITE_P(W17, W17Overload, testing::ValuesIn(kVendored),
                              return std::filesystem::path{i.param.file}.stem().string();
                          });
 
-// M-48's message: the framing surface on vt11 or FIX Latest would be read ahead of the table's own
-// type. Every framing tag, plain against the overload, through the accessor the validator reads.
+// The overload leaves vt11 and FIX Latest as the plain form has them: every framing tag, plain
+// against the overload, through the two accessors the validator reads.
 TEST(W17Overload, FieldTypeWithFraming_UnchangedOnFilesThatDeclareTheirOwnHeader) {
     for (const char* file : {"FIXT11.xml", "orchestra/OrchestraFIXLatest.xml"}) {
         const dd::table_view plain = vendored(file).as_table_view();

@@ -225,8 +225,9 @@ inline constexpr std::string_view kNeverAssignedReason =
     "`OrchestraLoaderState::expand_field_list` (orchestra_loader.cpp), and neither "
     "assigns this field; a seed cannot differ it in a valid dictionary";
 inline constexpr std::string_view kVersionReason =
-    "a function of `which_session_version()`: `Dictionary::as_table_view` fills it only "
-    "for v50/v50sp1/v50sp2, from the fixed `detail::kFixtFramingTable`; FR-006 makes the "
+    "a function of `which_session_version()`: `Dictionary::as_table_view` fills it "
+    "for v50/v50sp1/v50sp2, and its `fixt_framing` forms for v40 to v44 as well, from the "
+    "fixed `detail::kFixtFramingTable`; FR-006 makes the "
     "two sides' versions equal";
 
 inline constexpr std::array kStoreList{

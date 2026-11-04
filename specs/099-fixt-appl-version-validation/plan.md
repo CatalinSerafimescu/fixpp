@@ -90,11 +90,12 @@ specs/099-fixt-appl-version-validation/
 └── checklists/{api-abi,concurrency,config,nfr,requirements,test-integrity,wire-session}.md
 
 dictionaries/FIXT11.xml, dictionaries/README.md   (FR-032)
-include/fixpp/dict/{version_registry,version_profile,dictionary,reify}.hpp
+include/fixpp/dict/{version_registry,version_profile,dictionary,reify,table_view}.hpp
+include/fixpp/core/engine_config.hpp   (a comment Phase 1 made false)
 include/fixpp/wire/{validator,parser}.hpp
 include/fixpp/session/{session,session_config,engine}.hpp
 include/fix/c_api/{session,engine,message,dict,version}.h
-src/dictionary/{version_registry,dictionary,reify}.cpp
+src/dictionary/{version_registry,dictionary,reify}.cpp, src/dictionary/fixt_framing_table.hpp
 src/session/{session,engine}.cpp, session_engine_access.hpp, fixt_route_set.{hpp,cpp}, peek_fixt_route.hpp, fixt_session_check.hpp, logon_msg_type_defaults.hpp
 src/log/format_registry.cpp   (the role loops' log line)
 src/capi/{config,engine,message_read,message_write}.cpp, capi_internal.hpp
@@ -108,6 +109,7 @@ tests/session/{test_fixt_logon_establishment,unparseable_frame_disposition_test}
 tests/codegen/{read_tier_byte_diff_test.cmake,test_082_class_xml_consistency_test.cpp}, specs/003-dictionary-codegen/contracts/golden/vt11_Messages.golden.hpp   (research R-17, FR-032's edit)
 tests/dictionary/{reused_tag_census_test,xml_enum_codeset_test,required_scope_census_test}.cpp, tools/quickfix_required_golden/{golden,golden_groups}.csv   (research R-17, FR-032's edit)
 tests/perf/   (W-16)  tests/dictionary/   (W-17, W-21)
+tests/codegen/vlatest_dispatch_exclusion_test.cpp, tests/integration/fixt_cross_vocabulary.cpp, tests/dictionary/dictionary_equivalence.hpp   (comments Phase 1 made false)
 tests/abi/golden/fixpp_capi_symbols.txt, tests/capi/version_test.cpp, tools/capi_freeze.sha256   (research R-11's recipe)
 tests/fuzz/{fuzz_session_recovery_admin_parse,fuzz_wire_validator}.cpp, tests/fuzz/corpus/{session_recovery_admin_parse,wire_validator}/   (W-24)
 bench/session/on_inbound_frame_bench.cpp

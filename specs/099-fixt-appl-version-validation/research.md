@@ -97,7 +97,7 @@ needed an owner ruling for a 24-byte layout change. Building in the Engine const
 
 `as_table_view()` adds the framing surface for v50/sp1/sp2 only. A non-FIXT session must keep rejecting 1128 on a FIX
 4.4 table. **Decision:** an overload, `as_table_view(fixt_framing)`, adds it for v40–v44 as well. The route set uses it. `vt11` and FIX Latest stay as `as_table_view()` builds them: measured, both declare 1128, 1129 and 1156 in their own header, and
-`field_type_of_with_framing` prefers the framing type, so adding the surface could only change their answers.
+so they need none. Measured by M-48 at the commit of `099 P1: dictionary, validator, FIXT11.xml`: on FIX Latest the surface changes `is_fixt_framing_tag` and no type answer, because for every tag of `kFixtFramingTable` that file's own type and the framing type collapse to one `field_type`.
 
 **Preservation contract.** The overload's result MUST equal `as_table_view()`'s on every store but the two validator-private framing stores (`dictionary.cpp`'s load-bearing invariant: framing population does not touch `valid_`, `required_`, `types_`) and NoHops's group metadata, below.
 W-17 compares every store `table_view_test_access` reads, on every vendored file.

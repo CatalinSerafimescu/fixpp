@@ -11,7 +11,7 @@
 //   5. Heartbeat (MsgType=0)   → FIXT admin → vt11 {session_admin, vt11, Unknown}
 //
 // What this test covers (057 — R6 lifted, live dispatch):
-//   - The resolution DECISIONS (step 1: is_fixt_admin → session_admin;
+//   - The resolution DECISIONS (step 1: dict::is_fixt_admin_msgtype → session_admin;
 //     step 2: resolve_application_version → correct application_version).
 //     These are PURE functions (no wire state dependency) and ARE runtime-testable.
 //   - The dispatch SWITCH entries: dispatch_fixt(mv, mt, profile) for FIXT
@@ -140,7 +140,7 @@ TEST(FixtCrossVocabulary, AcD4_OCR_NoApplVerID_UsesSessionDefault) {
 
 TEST(FixtCrossVocabulary, AcD4_Heartbeat_IsFixtAdmin) {
     // [2c §6.3] Frame 5: Heartbeat (MsgType=0) → FIXT admin.
-    // Resolution decision: is_fixt_admin('0') == true.
+    // Resolution decision: dict::is_fixt_admin_msgtype("0") == true.
     // Resolved: {session_admin, vt11, Unknown}.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;

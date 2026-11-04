@@ -102,7 +102,7 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-45 | the standard set keeps 10, 89, 93 | W-21, 93 then 1128: peek reads on |
 | M-46 | admin is `detail::is_admin_msgtype` | W-21, `A`; W-1, a Logon routed as application |
 | M-47 | a seeded delay on the non-FIXT path | W-22: proves the paired bench reports |
-| M-48 | the overload populates framing for FIX Latest | W-17: answers change through `field_type_of_with_framing` |
+| M-48 | the overload populates framing for FIX Latest | W-17, the framing stores are empty for `vt11` and FIX Latest in both forms: `FramingStores_ByVersion/OrchestraFIXLatest`, its framing store not empty |
 | M-49 | S2: a gate Reject naming 1137 does not disconnect | `NC-e`, `LS-e`, absent: stays |
 | M-50 | S1 reduced to `!is_fixt_admin_msgtype(hdr.msg_type)`, the last MsgType, with no mismatch clause | `NC-a`, `D…A` with Logon fields: a gate Reject, stays, not Disconnected |
 | M-51 | S1's mismatch clause removed | `NC-a`, `0…A` with Logon fields: Reject 2/98, stays |
@@ -151,6 +151,15 @@ Each row: the code it changes, and the cell that goes RED on that change alone. 
 | M-93 | the scan reads a member repeated within an instance last-wins | W-25, within an instance: 373=2, 371=3115 |
 | M-94 | E-9's slot-miss clause tests the exact slot, not `get`, so a default `get` answers from the FIX Latest slot misses | W-8, one-way fallback: refused, not opened, at each caller |
 | M-95 | `fixpp_engine_start` sets `engine_started_` ahead of its `Engine::start()` call, so a failed start is marked started | W-20, C arm, the `fixpp_engine_start` sweep: the retry draws the second-call domain error, not success |
+
+| M-96 | `version_registry`'s constructor keeps the first vt11 dictionary, not the last | `E1aTransport.TheFixtDictionaryLastWriterWins`: `transport()` answers the first load |
+| M-97 | `version_registry::transport()` answers a value with no vt11 dictionary, its null pointer | `E1aTransport.NoFixtDictionaryIsTheNoDictionaryError`: `transport().has_value()` true |
+| M-98 | `session_to_application` maps vt11 to v50sp2 | `W21SessionToApplication.EveryEnumerator`: the vt11 row answers v50sp2, not Unknown |
+| M-99 | `dict::header_length_pairs` loses its test that either tag is in the header | `W17HeaderLengthPairs.ABodyPairIsNotAHeaderPair`: not empty |
+| M-100 | `dict::header_length_pairs` always answers empty | `W17HeaderLengthPairs.AnOverlaysHeaderPairIsAnswered`: size 0, not 1 |
+| M-101 | `dict::header_length_pairs` loses its exclusion of the standard pairs | `W17Overload.VendoredFileDeclaresNoHeaderPair`: not empty, on a file whose header declares a standard pair |
+| M-102 | `as_table_view(fixt_framing, extra)` registers `extra` ahead of the dictionary's own pairs | `W17ExtraPairs.SPairWinsACollisionOnThatTable`: 5030 pairs with 5032, not 5031 |
+| M-103 | `as_table_view(fixt_framing, extra)` walks twice | `W17Overload.EveryFormIsOneWalk`: 4, not 3, on every vendored file |
 
 Unused ids, none reused: M-12, M-18 to M-20, M-26, M-37.
 

@@ -739,8 +739,7 @@ table_view Dictionary::build_table_view(
     // ── 081 Concern A (D-1/D-2, T009): validator-private FIXT.1.1 framing
     // surface — v50/v50sp1/v50sp2 (empty `<header/>`), and v40 to v44 on a route
     // table only (099-fixt-appl-version-validation, data-model E-3). vt11 and
-    // FIX Latest declare those tags themselves, and field_type_of_with_framing
-    // prefers the framing type, so the surface could only change their answers.
+    // FIX Latest declare those tags themselves, so they get none.
     // Baked constant, census-pinned to dictionaries/FIXT11.xml
     // (fixt_framing_table.hpp). Does NOT touch valid_/required_/types_ above
     // (D-1 load-bearing invariant: field_valid_for/valid_tags_for/field_type_of

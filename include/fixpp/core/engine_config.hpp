@@ -204,8 +204,9 @@ struct EngineConfig {
 //
 // Builds a dict::version_registry from cfg.dictionaries via the merged-003
 // [2c §4.9] API. Non-FIXT.1.1 dicts map session_version → application_version;
-// vt11 session-layer dicts are skipped (session-admin; app-version resolved
-// per-message via ApplVerID(1128)).
+// a vt11 session-layer dict has no application version (app-version resolved
+// per-message via ApplVerID(1128)), so get() never answers it and
+// version_registry::transport() does.
 //
 // A registry built from an EMPTY dictionaries list is valid — it holds no
 // entries; any subsequent get() returns dict_no_dictionary_for_application_version
