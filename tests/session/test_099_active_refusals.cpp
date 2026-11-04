@@ -5,7 +5,7 @@
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-4 (tasks.md T011): data-model
 // E-7's AC row, `AC-a` to `AC-g`, every input of each column, on T, A and L, each literal from
 // E-7's `#### After`. `AC-admin` is the other admin frames of the keyed logs, whose After is
-// "A answers as T" and otherwise today's line. A control frame in the same session delivers,
+// "A answers as T" and otherwise that log's line. A control frame in the same session delivers,
 // counted, wherever the session stays Active.
 //
 // Each cell's trace line compares with research R-18's logs. A cell with no log line, as the

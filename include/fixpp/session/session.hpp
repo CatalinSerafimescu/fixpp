@@ -1323,7 +1323,7 @@ private:
         int ref_tag_id = 0;
         // 099-fixt-appl-version-validation (data-model E-7, research R-9): a FIXT refusal's
         // RefMsgType, which also keys the consume, and RefSeqNum: the third field's value and the
-        // first 34. Default-constructed everywhere else, and the arm then reads hdr as it did.
+        // first 34. Default-constructed everywhere else, and the arm then reads hdr.
         std::string_view ref_msg_type{};
         std::string_view ref_seq_num{};
     };

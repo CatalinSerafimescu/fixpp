@@ -4,12 +4,13 @@
 //
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-19 (tasks.md T017): at every scan
 // site, on T, A and L, a garbled frame, a malformed tag, a Length/Data mismatch and a frame whose
-// third field is not 35 keep today's ending, counters and sequence state. Faults and garbles are
-// disposed of before the gate, so each shape is baselined with validation off, ahead of any
-// production change of this feature. That is why these literals come from a run, and M-16 is the
-// mutant. No input carries a pair only a route's table declares: that is W-6's `off-pair`. Each
-// literal is read against 093's dispositions (Session::dispose_unparseable_ and the arms' garble
-// branch), so it is a pin of the dispositions, not a design. No mutant of this feature moves these.
+// third field is not 35 keep the ending, counters and sequence state they had at `c0a828ef`. Faults
+// and garbles are disposed of before the gate, so each shape is baselined with validation off,
+// ahead of any production change of this feature. That is why these literals come from a run, and
+// M-16 is the mutant. No input carries a pair only a route's table declares: that is W-6's
+// `off-pair`. Each literal is read against 093's dispositions (Session::dispose_unparseable_ and
+// the arms' garble branch), so it is a pin of the dispositions, not a design. No mutant of this
+// feature moves these.
 //
 // M-16's cell is the one below them: validating, a frame the peek reads and refuses whose scan
 // faults past the header, so the two arm steps meet on one frame and the fault's comes first. Its

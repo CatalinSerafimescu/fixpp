@@ -5,7 +5,8 @@
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-3's unit half (tasks.md T026):
 // dictionary_driven_validator::validate(…, envelope) over real tables, in data-model E-4's terms.
 // S, the envelope, judges a header tag it declares, except the four tags the route answers. The
-// validator's table is the routed one. A plain table with a null envelope is today's walk.
+// validator's table is the routed one. A plain table with a null envelope is the virtual validate's
+// walk.
 //
 // The Session half of the same cells is tests/session/test_099_session_overlay.cpp. Their mutants
 // are M-12a to M-12e.

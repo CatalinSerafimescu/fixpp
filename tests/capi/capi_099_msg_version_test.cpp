@@ -4,13 +4,13 @@
 //
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-10's clone cells (tasks.md T085) and C
 // half (tasks.md T093). `fixpp_msg_clone`, and a clone of a clone, answer as their source did
-// (data-model E-5). Each handle is read through the view it holds, in capi_internal.hpp. The clone's
-// dict-backed branch is the one a Session's view reaches, so those cells clone inside the callback,
-// as the C engine's receive path wraps a view. Its dict-free branch takes a view parsed dict-free
-// whose byte the test writes through the detail key. The C half reads every row of data-model E-8's
-// table through `fixpp_msg_version`, each byte a literal from the frame the cell builds, on the
-// handle, a clone, a clone of a clone and a `dict::reify` view, against `dict::reify(...).version()`
-// on the rows E-8 compares.
+// (data-model E-5). Each handle is read through the view it holds, in capi_internal.hpp. The
+// clone's dict-backed branch is the one a Session's view reaches, so those cells clone inside the
+// callback, as the C engine's receive path wraps a view. Its dict-free branch takes a view parsed
+// dict-free whose byte the test writes through the detail key. The C half reads every row of
+// data-model E-8's table through `fixpp_msg_version`, each byte a literal from the frame the cell
+// builds, on the handle, a clone, a clone of a clone and a `dict::reify` view, against
+// `dict::reify(...).version()` on the rows E-8 compares.
 //
 // A real Session on an io_context the test pumps: no engine and no worker thread, which is
 // capi_pure_tests' rule.
@@ -466,7 +466,8 @@ TEST_P(W10COfShape, Unresolved_ReplyWithNo1137_NothingResolved) {
     expect_answers(a, Row{kApp, kVt11, kNone});
 }
 
-// A `toApp` view on FIXT: kind by 35, and no session wrote the byte, whatever 1128 the payload holds.
+// A `toApp` view on FIXT: kind by 35, and no session wrote the byte, whatever 1128 the payload
+// holds.
 TEST_P(W10COfShape, ToAppView_NoSessionWroteIt) {
     for (const char* header : {"", "1128=10\x01"}) {
         CellRun run = enter_arm(shape_fixture(GetParam()), Arm::Active, {});
@@ -606,8 +607,8 @@ class W10CBeginString : public testing::TestWithParam<BeginStringCase> {};
 
 TEST_P(W10CBeginString, ApplicationAndAdminRows) {
     const BeginStringCase& c = GetParam();
-    expect_row(read_built(raw_frame(c.begin_string, "35=D\x01")), Row{kApp, c.session, c.application},
-               "an application message");
+    expect_row(read_built(raw_frame(c.begin_string, "35=D\x01")),
+               Row{kApp, c.session, c.application}, "an application message");
     expect_row(read_built(raw_frame(c.begin_string, "35=0\x01")), Row{kAdmin, c.session, kNone},
                "an admin message");
 }
@@ -635,7 +636,7 @@ TEST(W10CBeginStringUnnamed, KindBy35_BothUnknown) {
                Row{kAdmin, FIXPP_SESSION_VER_UNKNOWN, kNone}, "an admin message");
 }
 
-// Tag 8 absent, as today: all zero, and the code.
+// Tag 8 absent, as at `c0a828ef`: all zero, and the code.
 TEST(W10CNoTag8, AllZero_TagNotFound) {
     const std::string body = "35=D\x01";
     const std::string text = "9=" + std::to_string(body.size()) + "\x01" + body + "10=000\x01";

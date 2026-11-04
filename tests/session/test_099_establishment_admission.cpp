@@ -5,8 +5,8 @@
 // 099-fixt-appl-version-validation, contracts/witnesses.md W-9 (tasks.md T016): data-model E-7's
 // `NC-a` to `NC-d`, `LS-a` to `LS-d` and `LO-a` to `LO-g`, every input on T, A and L. An
 // application or mismatched frame in an establishment arm disconnects, nothing sent (S1);
-// LogoutSent drains as today, and `D…5` confirms the Logout. `*-admin` is the other admin frames
-// the keyed logs hold: T's line on T and A (E-7's "A answers as T"), L's on L.
+// LogoutSent drains as at `c0a828ef`, and `D…5` confirms the Logout. `*-admin` is the other admin
+// frames the keyed logs hold: T's line on T and A (E-7's "A answers as T"), L's on L.
 //
 // Each cell's trace line compares with research R-18's `on` logs. The validation-off twin takes
 // the `off` logs' lines, which have the same ending but for `D…A` and `0…A` with Logon fields; its

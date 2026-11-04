@@ -2259,7 +2259,7 @@ TEST(FixtLogonEstablishment097, W7d0_OrchestraLatest_No1156_DeliveredToFromApp) 
     expect_delivered(a, from);
 }
 
-// 099-fixt-appl-version-validation (research R-17): the four cells below are on FIXT behaviour that
+// 099-fixt-appl-version-validation (research R-17): the cells below are on FIXT behaviour that
 // changed. That S defines Heartbeat and Logon as its only admin messages, so a validating session
 // on it needs a transport dictionary, and FIXT11 judges the Logon.
 //

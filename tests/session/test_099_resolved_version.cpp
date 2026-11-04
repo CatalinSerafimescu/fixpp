@@ -495,7 +495,8 @@ TEST(W10DictFree, ByteUnknown_ReifyReads1128_HandleAnswersUnknown) {
     with_dict_free_view([](IndexView& view) {
         const ViewAnswers a = read_view(view, kOtherProfile);
         ASSERT_TRUE(a.reified.has_value()) << "reify returned no handle";
-        EXPECT_EQ(a.reified->session, dd::session_version::v42) << "the profile's, as today";
+        EXPECT_EQ(a.reified->session, dd::session_version::v42)
+            << "the profile's, the byte being Unknown";
         EXPECT_EQ(a.reified->application, Version::v50sp2) << "the frame's 1128";
         EXPECT_FALSE(a.handle_dict_backed);
         EXPECT_EQ(a.handle_accessor, Version::Unknown);

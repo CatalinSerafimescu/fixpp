@@ -388,7 +388,7 @@ TEST(W5Reconnect, SecondReplyWithNo1137_NegotiatedReadsAsToday_FrameUsesS) {
     (void)r.deliver(logon_frame(r.peer_ctx(r.next_in()), ""));
     ASSERT_EQ(r.sess->state(), fsm_state::Active) << "the second reply must establish";
     EXPECT_EQ(r.sess->negotiated_version_profile().default_appl, dd::application_version::v50sp2)
-        << "negotiated_version_profile() keeps today's reading (FR-027)";
+        << "negotiated_version_profile() keeps the first reply's version (FR-027)";
     // On S, whose hooks lack the pair, the Data's 34 is the frame's last and is too high; on the
     // first connection's table the frame would be in sequence and delivered.
     const unsigned next = r.next_in();

@@ -736,8 +736,7 @@ Fixture eight_byte_fixture(Shape s) {
 
 const std::string kEightByteEntry = count("1") + E("ABCDEFGH", "6");
 
-// The gate's answer: 373 and 371, state and consume. A Reject's 372 is not asserted: E-10 says no
-// run has shown an eight-byte 372 on this path.
+// The gate's answer: 373 and 371, state and consume. A Reject's 372 is not asserted (E-10).
 void expect_refused_on_35(const Ending& e) {
     ASSERT_EQ(e.out.size(), 1U) << log_form(e);
     EXPECT_EQ(tag_value(e.out[0], 35), "3");
@@ -899,8 +898,8 @@ std::size_t count_occurrences(const std::string& text, const std::string& needle
     return n;
 }
 
-// E-10: 256 exceeds every vendored dictionary's message count. Recomputed from the raw XML, and the
-// count is shown able to read a real dictionary's.
+// E-10: kCapFromE10 exceeds every vendored dictionary's message count. Recomputed from the raw XML,
+// and the count is shown able to read a real dictionary's.
 TEST(W25Dictionary, CapExceedsTheLargestVendoredMessageCount) {
     std::size_t largest = 0;
     for (const auto& e : std::filesystem::recursive_directory_iterator{FIXPP_DICT_DATA_DIR}) {

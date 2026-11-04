@@ -2825,7 +2825,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 
 // 099-fixt-appl-version-validation (data-model E-7, FR-001, FR-013): the frame's route. The step
 // numbers are E-7's. A non-FIXT session takes step 1, on a value fixed at open(), and reads
-// inbound_tv_ and validator_ as it did, whatever open() did: their owner pointer is never null. So
+// inbound_tv_ and validator_, whatever open() did: their owner pointer is never null. So
 // does a FIXT session whose route block did not complete, which no arm lets go further.
 Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
                                               bool establishment_arm) const noexcept {
@@ -2836,7 +2836,7 @@ Session::inbound_route Session::select_route_(std::span<const std::byte> frame,
     fixpp::session::detail::fixt_route_peek const peek =
         fixpp::session::detail::peek_fixt_route(frame, session_hooks(inbound_tv_), *inbound_tv_);
     if (!peek.readable) {
-        return route;  // step 2: the arm's fault and garble dispositions run as today
+        return route;  // step 2: the arm's fault and garble dispositions run on S's route
     }
     route.application = !peek.admin;
     route.header_1128 = peek.header_1128;
@@ -3060,9 +3060,10 @@ std::optional<Session::logon_group_refusal> Session::refuse_msg_type_defaults_(
     return refusal;
 }
 
-// data-model E-10: "each counted entry whose 1130 parses and whose 372 fits and is an application
-// message, within the first 256 counted; a later entry for one MsgType wins". The kept entries
-// never pass the cap counted entries are held to, so this draws nothing past open()'s reservation.
+// data-model E-10: each counted entry whose 1130 parses and whose 372 fits and is an application
+// message, within the first kMaxMsgTypeDefaults counted; a later entry for one MsgType wins. The
+// kept entries never pass the cap counted entries are held to, so this draws nothing past open()'s
+// reservation.
 void Session::record_msg_type_defaults_(std::span<const std::byte> frame) noexcept {
     msg_type_defaults_.clear();
     std::size_t counted = 0;
